@@ -84,6 +84,22 @@ func TestExecuteExactFastCommandPriorityQueueGetStates(t *testing.T) {
 	}
 }
 
+func TestExecuteExactFastCommandPriorityQueueGetSmallPlainItemsAllocations(t *testing.T) {
+	ht := newTestTrie(t)
+	seedPriorityQueueReadFastPath(t, ht, 16)
+	request := CacheCommandRequest{Command: "GETPQ", Key: "queue"}
+
+	allocations := testing.AllocsPerRun(100, func() {
+		response, ok := ht.executeExactFastCommand(request)
+		if !ok || !response.OK {
+			t.Fatalf("executeExactFastCommand(GETPQ) = %#v/%v, want successful response", response, ok)
+		}
+	})
+	if allocations != 1 {
+		t.Fatalf("small plain priority queue GET allocations = %v, want final response allocation only", allocations)
+	}
+}
+
 func TestExecuteExactFastCommandPriorityQueueGetEncodesStructuredValues(t *testing.T) {
 	ht := newTestTrie(t)
 	if _, err := ht.PushPriorityQueueChecked("queue", 1, Map{"nested": Slice{"value"}}); err != nil {

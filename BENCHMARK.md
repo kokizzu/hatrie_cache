@@ -239,6 +239,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct scalar priority-queue pushes](#direct-scalar-priority-queue-pushes), established string/structured and new string queues | Variadic item path: 156.6/212.4/600.1 ns | Direct scalar item: 146.7/206.2/585.6 ns | 1.07x/1.03x/1.02x faster; memory unchanged | No measured tradeoff; established and new 2/16/128-value controls are 1.01x-1.07x faster with identical memory |
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |
+| Current pass | [Stack-backed small priority-queue snapshot](#compact-priority-queue-items), 16 exact plain-string `GETPQ` items | Heap snapshot plus response: 1,925 ns; 1,472 B; 2 allocs | Stack snapshot plus final response: 1,461 ns; 576 B; 1 alloc | 1.32x faster; 2.56x lower heap; 2x fewer allocations | At most 16 private item headers use the stack; the 100-item generic control is neutral within 0.4%, with identical heap and allocations |
 | Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
 | Current pass | [Typed priority-queue pop extraction](#compact-priority-queue-items), exact plain-string response | Interface round trip: 49.27 ns; 32 B; 1 alloc | Existing typed accessor: 45.88 ns; 32 B; 1 alloc | 1.07x faster response extraction; heap and allocations unchanged | Exact string `POPPQ` only; empty, escaped, structured, missing, cold-reference, wire, and storage behavior are unchanged |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
@@ -8685,6 +8686,33 @@ make run CMD='go test . -run=none -bench=BenchmarkPriorityQueueGetCommand -bench
 The response bytes, priority/sequence ordering, public `Items()` ownership,
 snapshot, journal, replication, and persistent formats are unchanged. The path
 adds no retained fields, configuration, background work, or fixed memory.
+
+The remaining 16-item allocation was the private heap copy used for destructive
+output ordering. A test-first allocation guard failed at two allocations, then
+requires only the final response allocation. Dedicated `GETPQ`/`GETPRIORITY`
+and exact generic `GET` now copy at most 16 queue-item headers into a
+caller-owned stack array while holding their existing lock, unlock, and pop
+only that detached snapshot through the unchanged JSON writer. Larger queues
+retain the former heap allocation and copy. The stack array contains the same
+value headers as the old copy and is not retained or exposed.
+
+The existing parity tests cover aliases, missing/wrong/empty states, escaped,
+HTML-sensitive, Unicode, invalid UTF-8, priority bounds, ordering, structured
+values, generic `GET`, and telemetry; focused tests were run before the change
+and under `-race` afterward. Fifteen alternating frozen-binary pairs on one
+CPU used 100,000 small reads and 10,000 large generic reads:
+
+```sh
+make run CMD='go test . -run="Test(ExecuteExactFastCommandPriorityQueueGet|ExecuteExactFastCommandGenericGetPriorityQueue|CommandFastPriorityQueueItemsJSONCapacity)" -count=20'
+make run CMD='go test -race . -run="Test(ExecuteExactFastCommandPriorityQueueGet|ExecuteExactFastCommandGenericGetPriorityQueue|CommandFastPriorityQueueItemsJSONCapacity)" -count=5'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-priority-stack-before.test /tmp/hatrie-priority-stack-after.test /tmp/hatrie-priority-stack-small-pairs.txt 20 15 100000x "BenchmarkPriorityQueueGetCommand/Items16/Exact$$"'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-priority-stack-before.test /tmp/hatrie-priority-stack-after.test /tmp/hatrie-priority-stack-large-pairs.txt 20 15 10000x "BenchmarkPriorityQueueGenericGetCommand/Items100/Exact$$"'
+```
+
+| Frozen paired median | Former heap snapshot | Final stack snapshot | Improvement |
+| --- | ---: | ---: | --- |
+| 16-item exact plain-string `GETPQ` | 1,925 ns; 1,472 B; 2 allocs | 1,461 ns; 576 B; 1 alloc | 1.32x faster; 2.56x lower heap; 2x fewer allocations |
+| 100-item generic `GET` control | 15,991 ns; 8,320 B; 2 allocs | 16,053 ns; 8,320 B; 2 allocs | CPU neutral within 0.4%; heap and allocations unchanged |
 
 The generic exact-uppercase `GET` dispatcher now uses the same encoder for an
 in-memory priority queue. It prepares the copied heap under the existing shared

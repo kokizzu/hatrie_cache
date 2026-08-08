@@ -2836,8 +2836,14 @@ func (ht *HatTrie) executeFastGetPriorityQueueCommand(key string) (CacheCommandR
 		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 	}
 
-	items := make([]priorityQueueItem, len(queue.items))
-	copy(items, queue.items)
+	var inline [commandPriorityQueueInlineSnapshotItems]priorityQueueItem
+	var items []priorityQueueItem
+	if len(queue.items) <= commandPriorityQueueInlineSnapshotItems {
+		items = commandPriorityQueueSmallSnapshot(queue.items, &inline)
+	} else {
+		items = make([]priorityQueueItem, len(queue.items))
+		copy(items, queue.items)
+	}
 	ht.recordReadLocked(true, key)
 	ht.mu.Unlock()
 	payload, err := commandPriorityQueueItemsJSON(items, capacity, stringsOnly)
@@ -2857,6 +2863,16 @@ func commandPriorityQueueItemsJSONLayout(items []priorityQueueItem) (int, bool) 
 		return 0, false
 	}
 	return len(`[]`) + len(items)*estimatedItemBytes, false
+}
+
+const commandPriorityQueueInlineSnapshotItems = 16
+
+// commandPriorityQueueSmallSnapshot detaches an in-lock queue snapshot for
+// destructive output ordering without retaining any queue backing.
+func commandPriorityQueueSmallSnapshot(items []priorityQueueItem, inline *[commandPriorityQueueInlineSnapshotItems]priorityQueueItem) []priorityQueueItem {
+	out := inline[:len(items)]
+	copy(out, items)
+	return out
 }
 
 func commandFastPriorityQueueItemsJSONCapacity(items []priorityQueueItem) (int, bool) {
@@ -3379,8 +3395,14 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 			}
 			return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 		}
-		items := make([]priorityQueueItem, len(queue.items))
-		copy(items, queue.items)
+		var inline [commandPriorityQueueInlineSnapshotItems]priorityQueueItem
+		var items []priorityQueueItem
+		if len(queue.items) <= commandPriorityQueueInlineSnapshotItems {
+			items = commandPriorityQueueSmallSnapshot(queue.items, &inline)
+		} else {
+			items = make([]priorityQueueItem, len(queue.items))
+			copy(items, queue.items)
+		}
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
 		payload, err := commandPriorityQueueItemsJSON(items, capacity, stringsOnly)
