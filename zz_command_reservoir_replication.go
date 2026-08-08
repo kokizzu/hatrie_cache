@@ -7,7 +7,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpReservoirSampleEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_RESERVOIR_SAMPLE {
-		return destination, false, nil
+		return ht.appendCommandDumpRadixTreeEntryBinaryLocked(destination, entry)
 	}
 	index := entry.Value.Index
 	if index < 0 || int(index) >= len(ht.reservoirSamples.array) || ht.reservoirSamples.reusables.Has(index) {

@@ -185,6 +185,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct live priority replication](#direct-live-priority-replication), 64 string items into reused DUMP capacity | Heap copy plus output snapshot: 12,365 ns; 10,136 B; 69 allocs | One sorted heap copy with direct strings: 3,339 ns; 3,224 B; 2 allocs | 3.703x faster; 3.14x lower heap; 34.5x fewer allocs | Exact 798 wire B, priority/sequence order, ties, nested values, TTL, and normalization fallback unchanged; Top-K control neutral within 0.3% |
 | Current pass | [Direct live Top-K replication](#direct-live-topk-replication), 64 ranked string items into reused DUMP capacity | Sorted copy plus snapshot copy: 7,586 ns; 6,496 B; 5 allocs | Existing sorted copy written directly: 5,553 ns; 3,224 B; 2 allocs | 1.366x faster; 2.02x lower heap; 2.50x fewer allocs | Exact 1,496 wire B, count/error/key order, nested values, TTL, and normalization fallback unchanged; reservoir control neutral within 0.4% |
 | Current pass | [Direct live reservoir replication](#direct-live-reservoir-replication), 64 sampled string items into reused DUMP capacity | Sorted copy plus snapshot copy: 7,580 ns; 4,704 B; 5 allocs | Existing sorted copy written directly: 5,871 ns; 2,328 B; 2 allocs | 1.291x faster; 2.02x lower heap; 2.50x fewer allocs | Exact 1,349 wire B, priority/sequence order, nested values, TTL, and normalization fallback unchanged; radix-tree control 1.001x |
+| Current pass | [Direct live radix-tree replication](#direct-live-radix-tree-replication), 64 string entries into reused DUMP capacity | Public item/path materialization: 4,913 ns; 2,928 B; 74 allocs | Two-pass trie traversal with stack path: 1,682 ns; 0 B; 0 allocs | 2.921x faster; temporary heap and allocations eliminated | Exact 1,242 wire B, root/shared/long keys, canonical order, nested values, TTL, and normalization fallback unchanged; staged-XOR control neutral within 0.3% |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2541,6 +2542,38 @@ added.
 make run CMD='go test ./... -run TestCommandDumpReservoirSampleEncodingMatchesSnapshot -count=10'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-reservoir-before.test /tmp/hatrie-direct-live-reservoir-after.test /tmp/hatrie-direct-live-reservoir-pairs.txt 20 31 50000x BenchmarkCommandDumpReservoirControlReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-reservoir-before.test /tmp/hatrie-direct-live-reservoir-after.test /tmp/hatrie-direct-live-reservoir-radix-control.txt 20 31 50000x BenchmarkCommandDumpRadixTreeControlReuse'
+```
+
+<a id="direct-live-radix-tree-replication"></a>
+### Direct Live Radix-Tree Replication
+
+Radix-tree DUMP previously materialized a public item slice, allocated every
+full path string, and recursively cloned values before sizing and writing the
+binary payload. The sender now traverses the locked trie twice: the first pass
+preflights values and computes the exact size, and the second writes nodes in
+their existing canonical child order. Both passes reuse a 256-byte stack path;
+longer keys spill normally and are covered by exact-byte tests.
+
+Unsupported concrete Go values decline to the established snapshot and JSON
+normalization path before output. Tests compare exact bytes for empty and root
+entries, shared prefixes, a key longer than the stack path, nested maps/slices,
+TTL, and the normalization fallback. Thirty-one alternating pairs use
+caller-owned output capacity.
+
+| Paired median | Materialized snapshot | Direct trie traversal | Result |
+| --- | ---: | ---: | ---: |
+| 64 string entries | 4,913 ns; 2,928 B; 74 allocs; 1,242 wire B | 1,682 ns; 0 B; 0 allocs; 1,242 wire B | 2.921x faster; temporary heap and allocations eliminated |
+| Staged-XOR fallback control | 9,175 ns; 3,560 B; 4 allocs | 9,198 ns; 3,560 B; 4 allocs | neutral within 0.3% |
+
+Wire format and size, lexical order, root/shared/long-key handling, nested
+values, TTL, receiver validation, routing, retries, batching, storage, journal,
+snapshots, backup, and restore remain unchanged. The measured 64-key workload
+fits the stack path and adds no retained memory.
+
+```sh
+make run CMD='go test ./... -run TestCommandDumpRadixTreeEncodingMatchesSnapshot -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-radix-before.test /tmp/hatrie-direct-live-radix-after.test /tmp/hatrie-direct-live-radix-pairs.txt 20 31 50000x BenchmarkCommandDumpRadixTreeControlReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-radix-before.test /tmp/hatrie-direct-live-radix-after.test /tmp/hatrie-direct-live-radix-xor-control.txt 20 31 50000x BenchmarkCommandDumpStagedXorControlReuse'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>

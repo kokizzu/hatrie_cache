@@ -249,6 +249,42 @@ func TestCommandDumpReservoirSampleEncodingMatchesSnapshot(t *testing.T) {
 	}
 }
 
+func TestCommandDumpRadixTreeEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	for _, key := range []string{"radix:empty", "radix:ordered", "radix:normalized-fallback"} {
+		if err := ht.UpsertRadixTreeChecked(key); err != nil {
+			t.Fatalf("UpsertRadixTreeChecked(%s) error = %v", key, err)
+		}
+	}
+	values := []struct {
+		subkey string
+		value  interface{}
+	}{
+		{subkey: "z-last", value: "last"},
+		{subkey: "", value: "root"},
+		{subkey: "shared/b", value: Map{"nested": "map"}},
+		{subkey: "shared/a", value: Slice{"nested", int64(4)}},
+		{subkey: fmt.Sprintf("long-%0300d", 1), value: "spilled-path"},
+	}
+	for _, item := range values {
+		if _, err := ht.PutRadixTreeChecked("radix:ordered", item.subkey, item.value); err != nil {
+			t.Fatalf("PutRadixTreeChecked(radix:ordered, %q) error = %v", item.subkey, err)
+		}
+	}
+	if _, err := ht.PutRadixTreeChecked("radix:normalized-fallback", "fallback", commandDumpMapJSONValue{Label: "fallback"}); err != nil {
+		t.Fatalf("PutRadixTreeChecked(radix:normalized-fallback) error = %v", err)
+	}
+	if !ht.Expire("radix:ordered", time.Hour) {
+		t.Fatal("Expire(radix:ordered) = false")
+	}
+
+	for _, key := range []string{"radix:empty", "radix:ordered", "radix:normalized-fallback"} {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 	benchmarkCommandDumpMapReuse(b, "map:packed", Map{
 		"z-last":  "last",
@@ -345,6 +381,20 @@ func BenchmarkCommandDumpRadixTreeControlReuse(b *testing.B) {
 		}
 	}
 	benchmarkCommandDumpReuse(b, ht, "radix:control")
+}
+
+func BenchmarkCommandDumpStagedXorControlReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertXorFilter("xor:control", 64); err != nil {
+		b.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	for index := 0; index < 64; index++ {
+		if _, err := ht.AddXorFilterChecked("xor:control", fmt.Sprintf("value-%02d", index)); err != nil {
+			b.Fatalf("AddXorFilterChecked() error = %v", err)
+		}
+	}
+	benchmarkCommandDumpReuse(b, ht, "xor:control")
 }
 
 func benchmarkCommandDumpMapReuse(b *testing.B, key string, value Map) {
