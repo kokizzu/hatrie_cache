@@ -195,6 +195,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
+| Current pass | [Direct incremental journal checkpoint](#direct-incremental-journal-checkpoint), one checkpoint record | Builder, string conversion, byte conversion | Direct marshaled record | JSON: 1.434x faster, 1.47x lower heap, 2x fewer allocations. Binary: 1.718x faster, 4.33x lower heap, 4x fewer allocations | Exact journal bytes, manifest checksum, backup object, restore sequence, and recovery behavior are unchanged |
 | Current pass | [Single-pass staged restore](#single-pass-staged-restore), checkpoint 10k x 256 B | Verify then extract: 69.346 ms; 13.18 MB heap; 2 payload passes | Stage, verify, fsync, publish: 56.057 ms; 12.78 MB heap; 1 payload pass | 1.24x faster, 1.03x lower heap, half the payload passes | Repository restore is 1.09x slower because the durable path fsyncs staged files |
 | Current pass | [Checkpoint replica bootstrap](#checkpoint-replica-bootstrap), 10k x 256 B | Snapshot: 146.369 ms; 36.66 MB heap; 172,569 allocs; 2,051,371 wire B | Pebble checkpoint: 84.246 ms; 13.50 MB heap; 62,423 allocs; 2,103,717 wire B | 1.74x faster, 2.72x lower heap, 2.76x fewer allocs | Fresh Pebble databases only; wire size is 2.55% larger |
 | Current pass | [Incremental existing-replica recovery](#incremental-existing-replica-recovery), 10k x 256 B, 1% changed | Full snapshot: 169.906 ms; 38.68 MB heap; 2,047,776 wire B | Cached repository: 104.739 ms; 36.70 MB heap; 36,313 wire B | 1.62x faster, 1.05x lower heap, 2.26x fewer allocs, 56.39x smaller wire | Pebble and a cached base are required; exact restore still performs a full local DB save |
@@ -514,6 +515,40 @@ The smaller reservation was removed. The existing 64-byte estimate keeps the
 boundary case to one allocation; output bytes, fallback behavior, locking,
 storage, wire format, and retained state are unchanged. The direct JSON test
 and the short, boundary, and long fixtures remain.
+
+<a id="direct-incremental-journal-checkpoint"></a>
+### Direct Incremental Journal Checkpoint
+
+Each incremental backup with a journal writes one checkpoint record into its
+content-addressed repository. The previous helper marshaled that record, copied
+it to a `strings.Builder`, converted it to a string, then copied it back to a
+byte slice. It now returns the original `marshalCommandJournalEntry` bytes.
+The returned slice is newly allocated by the marshaler and remains owned by the
+repository payload, exactly as before.
+
+Tests were added first for byte equality in JSON and binary formats, zero
+sequence behavior, and a complete journal-backed incremental backup followed by
+restore. The integration test reads the restored journal and requires one
+checkpoint with the manifest's sequence. The acceptance run alternated frozen
+binaries for 15 pairs, 1,000,000 records per block, on one CPU:
+
+```sh
+make run CMD='go test . -run=TestBackupRepositoryJournalCheckpointMatchesJournalEncoding -count=20'
+make run CMD='go test . -run=TestIncrementalBackupRepositoryRestoresJournalCheckpoint -count=5'
+make run CMD='go test -race . -run=TestIncrementalBackupRepositoryRestoresJournalCheckpoint -count=2'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-backup-checkpoint-before.test /tmp/hatrie-backup-checkpoint-direct.test /tmp/hatrie-backup-checkpoint-direct-json-pairs.txt 20 15 1000000x ^BenchmarkBackupRepositoryJournalCheckpoint/json$$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-backup-checkpoint-before.test /tmp/hatrie-backup-checkpoint-direct.test /tmp/hatrie-backup-checkpoint-direct-binary-pairs.txt 20 15 1000000x ^BenchmarkBackupRepositoryJournalCheckpoint/binary$$'
+```
+
+| Incremental journal checkpoint, paired median | Builder/string/byte copies | Direct marshaled bytes | Improvement |
+| --- | ---: | ---: | --- |
+| JSON | 511.3 ns; 704 B; 6 allocs | 356.5 ns; 479 B; 3 allocs | 1.434x faster; 1.47x lower heap; 2.00x fewer allocations |
+| Binary default | 267.3 ns; 104 B; 4 allocs | 155.6 ns; 24 B; 1 alloc | 1.718x faster; 4.33x lower heap; 4.00x fewer allocations |
+
+The journal record bytes, resulting repository object hash, manifest fields,
+disk footprint, journal sequence, restore contents, and recovery behavior are
+identical. There is no retained buffer, pooling, wire-format, configuration, or
+durability change.
 
 ## Rejected Optimization Index
 

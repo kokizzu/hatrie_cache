@@ -9,6 +9,23 @@ import (
 )
 
 var backupBenchmarkMutationSequence atomic.Uint64
+var backupRepositoryJournalCheckpointSink []byte
+
+func BenchmarkBackupRepositoryJournalCheckpoint(b *testing.B) {
+	for _, format := range []CommandJournalFormat{CommandJournalFormatJSON, CommandJournalFormatBinary} {
+		b.Run(string(format), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				data, err := backupRepositoryJournalCheckpoint(uint64(iteration+1), format)
+				if err != nil {
+					b.Fatal(err)
+				}
+				backupRepositoryJournalCheckpointSink = data
+			}
+		})
+	}
+}
 
 func BenchmarkIncrementalBackupRepository10k(b *testing.B) {
 	keyCount := benchmarkBackupKeys(10_000)

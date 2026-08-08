@@ -254,6 +254,66 @@ func TestIncrementalBackupRepositoryRequiresDirtyTracker(t *testing.T) {
 	}
 }
 
+func TestBackupRepositoryJournalCheckpointMatchesJournalEncoding(t *testing.T) {
+	if data, err := backupRepositoryJournalCheckpoint(0, CommandJournalFormatBinary); err != nil || data != nil {
+		t.Fatalf("backupRepositoryJournalCheckpoint(zero) = %q/%v, want nil/nil", data, err)
+	}
+	entry := commandJournalEntry{Version: commandJournalVersion, Sequence: 42, Checkpoint: true}
+	for _, format := range []CommandJournalFormat{CommandJournalFormatJSON, CommandJournalFormatBinary} {
+		got, err := backupRepositoryJournalCheckpoint(entry.Sequence, format)
+		if err != nil {
+			t.Fatalf("backupRepositoryJournalCheckpoint(%s) error = %v", format, err)
+		}
+		want, err := marshalCommandJournalEntry(entry, format)
+		if err != nil {
+			t.Fatalf("marshalCommandJournalEntry(%s) error = %v", format, err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("backupRepositoryJournalCheckpoint(%s) = %q, want %q", format, got, want)
+		}
+	}
+}
+
+func TestIncrementalBackupRepositoryRestoresJournalCheckpoint(t *testing.T) {
+	trie := newTestTrie(t)
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("journaled SETSTR response = %#v", response)
+	}
+	repository := filepath.Join(t.TempDir(), "repository")
+	manifest, err := CreateBackupBundle(repository, trie, journal, BackupBundleOptions{
+		Mode:            BackupModePebbleIncremental,
+		PersistentStore: store,
+		DirtyTracker:    NewLevelDBDirtyTracker(),
+	})
+	if err != nil {
+		t.Fatalf("CreateBackupBundle(incremental journal repository) error = %v", err)
+	}
+	if manifest.Journal != backupBundleJournalPath || manifest.JournalSequence == 0 {
+		t.Fatalf("incremental journal manifest = %#v", manifest)
+	}
+	report, err := RestoreBackupBundle(repository, filepath.Join(t.TempDir(), "restored"), BackupBundleRestoreOptions{})
+	if err != nil {
+		t.Fatalf("RestoreBackupBundle(incremental journal repository) error = %v", err)
+	}
+	entries, err := readCommandJournalEntries(report.Journal)
+	if err != nil {
+		t.Fatalf("read restored journal error = %v", err)
+	}
+	if len(entries) != 1 || !entries[0].Checkpoint || entries[0].Sequence != manifest.JournalSequence {
+		t.Fatalf("restored journal entries = %#v, want checkpoint sequence %d", entries, manifest.JournalSequence)
+	}
+}
+
 func TestRehearseRestoreRestoresIncrementalRepository(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("name", "ivi")

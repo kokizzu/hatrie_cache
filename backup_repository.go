@@ -232,11 +232,7 @@ func backupRepositoryJournalCheckpoint(sequence uint64, format CommandJournalFor
 	if sequence == 0 {
 		return nil, nil
 	}
-	var buffer strings.Builder
-	if err := writeCommandJournalEntry(&buffer, commandJournalEntry{Version: commandJournalVersion, Sequence: sequence, Checkpoint: true}, format); err != nil {
-		return nil, err
-	}
-	return []byte(buffer.String()), nil
+	return marshalCommandJournalEntry(commandJournalEntry{Version: commandJournalVersion, Sequence: sequence, Checkpoint: true}, format)
 }
 
 func backupRepositoryStoreIdentity(path string) (string, error) {
