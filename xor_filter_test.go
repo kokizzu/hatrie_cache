@@ -198,8 +198,14 @@ func TestXorFilterBuildDoesNotCopyStagedKeys(t *testing.T) {
 		}
 		benchmarkXorFilterFingerprintsSink = filter.fingerprints
 	})
-	if allocs != 3 {
-		t.Fatalf("Build() allocations = %.0f, want 3 builder arrays", allocs)
+	if allocs != 1 {
+		t.Fatalf("Build() allocations = %.0f, want final fingerprint array only", allocs)
+	}
+}
+
+func TestXorFilterInlineBuildWorkspaceCoversHashLimit(t *testing.T) {
+	if slots := int(xorFilterBlockLength(xorFilterInlineBuildHashes)) * 3; slots > xorFilterInlineBuildSlotCapacity {
+		t.Fatalf("inline build slots = %d, capacity = %d", slots, xorFilterInlineBuildSlotCapacity)
 	}
 }
 

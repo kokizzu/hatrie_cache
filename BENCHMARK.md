@@ -262,6 +262,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
 | Current pass | [Compact XOR-filter build hash index](#compact-xor-filter-build-hash-index), 64/4,096/65,536 staged items | String headers: 6,281/371,676/7,918,608 ns; 4,352/218,368/3,473,422 B | Base hashes: 5,675/367,143/7,820,713 ns; 3,200/185,600/2,949,129 B | 1.11x/1.01x/1.01x faster; 1.36x/1.18x/1.18x lower heap; one small-build allocation removed | Uses at most 512 transient stack bytes through 64 items; no retained state or format change; a forced retry is CPU-neutral within 0.4% |
+| Current pass | [Stack-backed small XOR peel workspace](#stack-backed-small-xor-peel-workspace), 64 staged base hashes | Heap slot/peel/fingerprint arrays: 4,733 ns; 3,200 B; 3 allocs | Stack slot/peel workspace plus final fingerprint array: 3,417 ns; 128 B; 1 alloc | 1.39x faster; 25x lower heap; 3x fewer allocations | Only up to 64 hashes take this path; the 4,096-item generic control is neutral within 0.3%, with identical heap and allocations |
 | Current pass | [Adaptive generic XOR batch deduplication](#adaptive-xor-batch-deduplication), one through eight requested values | Per-request map: 275.2/426.0/696.3/1,219 ns for 1/2/4/8 unique values | Direct scalar or pending-slice scan: 245.6/396.5/643.6/1,173.5 ns | 1.04x-1.12x faster; heap and allocations unchanged | Transactional validation and deduplication are unchanged; batches of nine or more retain the map path |
 | Current pass | [Direct large XOR command batches](#direct-large-xor-command-batches), 64 requested values | Generic-equivalent control: 12,997 ns; 12,800 heap B; 136 allocs | Direct command batch: 9,511 ns; 11,776 heap B; 72 allocs | 1.37x faster, 1.09x lower heap, 1.89x fewer allocations | Applies above the existing eight-value threshold; eight-value, scalar, invalid, built-filter, TTL replacement, snapshot, and mixed-value behavior are unchanged or faster |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
@@ -600,6 +601,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Late stack-workspace XOR dispatch | Stack slots and peel order reduced the 64-item builder to 128 B and one allocation | Computing generic block/slot sizes before checking the small path slowed the 4,096-item control from 363,010 to 376,953 ns, or 1.038x | Removed; the accepted [early stack-backed dispatch](#stack-backed-small-xor-peel-workspace) leaves the 4,096-item control neutral within 0.3% |
 | Function-local LevelDB batch key scratch | A sequential 2,048-key dirty-save run appeared 1.10x faster after reusing the prefix buffer | Fifteen alternating frozen-binary pairs measured 2.963 ms before versus 2.972 ms after, 1.003x slower; heap was unchanged at about 1.487 MB and allocations increased from 4,163 to 4,165 | Runtime candidate removed; `TestLevelDBBatchOwnsKeyInputs` remains to enforce the dependency's copied-input ownership contract |
 | 48-byte radix prefix JSON reservation | Eight-byte values became 1.044x faster with 1.33x lower heap; 128-byte values became 1.060x faster with 1.24x lower heap | Sixteen-byte values crossed the smaller buffer by one byte, becoming 1.195x slower with 1.875x higher heap and a second allocation | Removed; the 64-byte reservation preserves a single allocation at the boundary; see [the rollback](#radix-prefix-json-reservation-rollback) |
 | Bounded protobuf response-parent retention | A 64-entry cap would prevent large response pointer columns from staying in `sync.Pool` | A 256-child response regressed 1.128x, from 31,152 to 35,128 ns, and transient heap grew 42.27x, from 56 to 2,367 B/op | Removed; response pooling still clears all protobuf fields and child pointers before reuse; see [the rollback](#bounded-protobuf-response-retention-rollback) |
@@ -10302,6 +10304,45 @@ items and about 1.20x slower on the forced retry. It was removed and is listed
 in the rejected index. The retained design changes no filter header, staged or
 built state, selected seed, fingerprint bytes, false-positive behavior,
 snapshot, journal, replication, storage, or wire format.
+
+<a id="stack-backed-small-xor-peel-workspace"></a>
+#### Stack-Backed Small XOR Peel Workspace
+
+The 64-item base-hash path still allocated its slot table, peel order, and
+final fingerprint bytes. For at most 64 hashes, the slot table has at most 114
+entries at the fixed load factor, so the slot table and 64-entry peel order now
+live in an outlined stack-only helper. Only the final fingerprint array becomes
+part of the built filter. The generic path checks the small-item limit before
+calculating its block and slot sizes, leaving larger builds' allocation path
+unchanged.
+
+The existing first-success, forced-retry, order-independent, membership, and
+allocation tests were run before the change. The allocation test intentionally
+failed at the old three-array expectation, then requires the final fingerprint
+array as the sole allocation. A new guard proves that the 64-hash slot count
+fits the fixed workspace. Fifteen alternating frozen-binary pairs used 100,000
+64-item builds on one CPU; the 4,096-item generic control used eleven 1,000
+build pairs.
+
+```sh
+make run CMD='go test . -run="TestXorFilter(BuildMatchesFirstSuccessfulFingerprintAttempt|BuildRetriesWithoutChangingFingerprintResult|BuildDoesNotCopyStagedKeys|BuildAndContains|FingerprintBuildIsOrderIndependent|InlineBuildWorkspaceCoversHashLimit)" -count=20'
+make run CMD='go test -race . -run="TestXorFilter(BuildMatchesFirstSuccessfulFingerprintAttempt|BuildRetriesWithoutChangingFingerprintResult|BuildDoesNotCopyStagedKeys|BuildAndContains|FingerprintBuildIsOrderIndependent|InlineBuildWorkspaceCoversHashLimit)" -count=5'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-xor-stack-before.test /tmp/hatrie-xor-stack-after.test /tmp/hatrie-xor-stack-small-reordered-pairs.txt 20 15 100000x ^BenchmarkXorFilterHashedStagedBuildAllocations/64/Candidate$$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-xor-stack-before.test /tmp/hatrie-xor-stack-after.test /tmp/hatrie-xor-stack-large-reordered-pairs.txt 20 11 1000x ^BenchmarkXorFilterHashedStagedBuildAllocations/4096/Candidate$$'
+```
+
+| Base-hash XOR build, paired median | Heap workspace | Stack workspace | Improvement |
+| --- | ---: | ---: | --- |
+| 64 staged items | 4,733 ns; 3,200 B; 3 allocs | 3,417 ns; 128 B; 1 alloc | 1.39x faster; 25x lower heap; 3x fewer allocations |
+| 4,096-item generic control | 379,996 ns; 185,600 B; 4 allocs | 381,107 ns; 185,600 B; 4 allocs | CPU neutral within 0.3%; heap and allocations unchanged |
+
+An initial placement calculated the generic block and slot sizes before the
+small-workspace branch. It made the 4,096-item control 1.038x slower and was
+removed; the rejected index records it. The accepted helper keeps no data after
+`Build` returns except the final fingerprints already retained by the filter.
+Seed selection, retry behavior, slot aggregation, peel order, fingerprint
+bytes, false-positive rate, snapshots, storage, journals, replication, and
+wire formats are unchanged.
 
 <a id="xor-staging-marker-rollback"></a>
 #### XOR Staging Marker Rollback

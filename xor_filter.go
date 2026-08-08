@@ -19,7 +19,9 @@ const (
 	xorFilterMaxBuildAttempts     int     = 128
 	xorFilterSeedBase             uint64  = 0x9e3779b97f4a7c15
 	xorFilterInlineBuildHashes            = 64
-	xorFilterLinearBatchDedup             = 8
+	// 64 hashes require at most 114 slots with the current load factor.
+	xorFilterInlineBuildSlotCapacity = 114
+	xorFilterLinearBatchDedup        = 8
 )
 
 // XorFilterInfo reports the shape and compactness of a static XOR filter.
@@ -582,6 +584,9 @@ func buildXorFilterFingerprints(keys []string, seed uint64) ([]uint8, uint32, bo
 }
 
 func buildXorFilterFingerprintsFromBaseHashes(baseHashes []uint64, seed uint64) ([]uint8, uint32, bool) {
+	if len(baseHashes) <= xorFilterInlineBuildHashes {
+		return buildInlineXorFilterFingerprintsFromBaseHashes(baseHashes, seed)
+	}
 	blockLength := xorFilterBlockLength(uint64(len(baseHashes)))
 	if blockLength == 0 {
 		return nil, 0, true
@@ -595,6 +600,88 @@ func buildXorFilterFingerprintsFromBaseHashes(baseHashes []uint64, seed uint64) 
 		}
 	}
 	return peelXorFilterBuildSlots(slots, len(baseHashes), blockLength)
+}
+
+func buildInlineXorFilterFingerprintsFromBaseHashes(baseHashes []uint64, seed uint64) ([]uint8, uint32, bool) {
+	blockLength := xorFilterBlockLength(uint64(len(baseHashes)))
+	if blockLength == 0 {
+		return nil, 0, true
+	}
+	slotCount := int(blockLength) * 3
+	var slots [xorFilterInlineBuildSlotCapacity]xorFilterBuildSlot
+	for _, baseHash := range baseHashes {
+		hash := xorFilterSeededHash(baseHash, seed)
+		for _, index := range xorFilterIndexes(hash, blockLength) {
+			slots[index].count++
+			slots[index].xor ^= hash
+		}
+	}
+	var order [xorFilterInlineBuildHashes]xorFilterPeel
+	return peelInlineXorFilterBuildSlots(slots[:slotCount], len(baseHashes), blockLength, order[:0])
+}
+
+func peelInlineXorFilterBuildSlots(slots []xorFilterBuildSlot, items int, blockLength uint32, order []xorFilterPeel) ([]uint8, uint32, bool) {
+	var queueHead, queueTail uint32
+	queueCount := 0
+	for index, slot := range slots {
+		if slot.count == 1 {
+			queued := uint32(index)
+			if queueCount == 0 {
+				queueHead = queued
+			} else {
+				slots[queueTail].next = queued
+			}
+			queueTail = queued
+			queueCount++
+		}
+	}
+
+	for queueCount > 0 {
+		index := queueHead
+		queueCount--
+		if queueCount > 0 {
+			queueHead = slots[index].next
+		}
+		slot := slots[index]
+		if slot.count != 1 {
+			continue
+		}
+		hash := slot.xor
+		order = append(order, xorFilterPeel{hash: hash, index: index})
+		for _, other := range xorFilterIndexes(hash, blockLength) {
+			if slots[other].count == 0 {
+				continue
+			}
+			slots[other].count--
+			slots[other].xor ^= hash
+			if slots[other].count == 1 {
+				if queueCount == 0 {
+					queueHead = other
+				} else {
+					slots[queueTail].next = other
+				}
+				queueTail = other
+				queueCount++
+			}
+		}
+	}
+	if len(order) != items {
+		return nil, blockLength, false
+	}
+
+	fingerprints := make([]uint8, len(slots))
+	for pos := len(order) - 1; pos >= 0; pos-- {
+		item := order[pos]
+		fingerprint := xorFilterFingerprint(item.hash)
+		for _, index := range xorFilterIndexes(item.hash, blockLength) {
+			if index == item.index {
+				continue
+			}
+			fingerprint ^= fingerprints[index]
+		}
+		fingerprints[item.index] = fingerprint
+	}
+	return fingerprints, blockLength, true
 }
 
 func peelXorFilterBuildSlots(slots []xorFilterBuildSlot, items int, blockLength uint32) ([]uint8, uint32, bool) {
