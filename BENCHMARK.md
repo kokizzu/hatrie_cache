@@ -336,6 +336,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact single-chunk raw read columns](#exact-single-chunk-raw-string-read-columns), 64 distinct gRPC `GET`s | Geometric response buffers: 3,773 ns; 2,272 B; 16 allocs | Exact confirmed raw-string columns: 3,332 ns; 1,328 B; 5 allocs | 1.132x faster; 1.71x lower heap; 3.20x fewer allocations | One native chunk whose first read succeeds with an eligible raw value evaluates exact capacity; counters, structured/noneligible values, writes, and multi-chunk requests retain their prior output behavior |
 | Current pass | [Direct scalar raw-byte response append](#direct-scalar-raw-byte-response-append), 64 distinct in-memory byte `GET`s | Temporary string then response copy: 79 allocs | Direct response-owned byte append: 15 allocs | 5.27x fewer allocations; 64 temporary strings eliminated | Native and TTL fallback paths use it only for in-memory raw bytes; on-disk bytes and every other type retain materialization |
 | Current pass | [Exact native raw-byte read columns](#direct-scalar-raw-byte-response-append), 64 distinct in-memory byte `GET`s | Geometric direct-native columns: 3,335 ns; 1,760 B; 15 allocs | Exact raw-value columns: 3,209 ns; 1,264 B; 5 allocs | 1.039x faster; 1.39x lower heap; 3.00x fewer allocations | Direct native one-chunk all-`GET` requests only; TTL fallback and non-raw values keep their current allocation behavior |
+| Current pass | [Exact native increment output column](#exact-native-increment-output-column), 64 distinct scalar `INCREMENT`s | Geometric integer column: 3,892 ns; 1,768 B; 10 allocs | Exact non-overflow integer column: 3,657 ns; 1,264 B; 4 allocs | 1.064x faster; 1.40x lower heap; 2.50x fewer allocations | Direct native one-chunk all-`INCREMENT` requests only; overflowed operations reserve and emit no integer value, while raw-read/mixed controls are neutral or faster |
 | Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
@@ -4724,6 +4725,42 @@ The controlled baseline was the same benchmark and worktree with only the
 raw-byte eligibility branch temporarily absent. This remains a direct native,
 one-chunk all-`GET` reservation; TTL fallback, counters, structured values,
 on-disk bytes, writes, and multi-chunk requests retain their existing paths.
+
+<a id="exact-native-increment-output-column"></a>
+### Exact Native Increment Output Column
+
+Every successful direct native scalar `INCREMENT` appends one integer result,
+but the response previously grew its `IntegerValues` column geometrically. The
+C batch has already completed before Go emits the response, so a bounded
+one-chunk all-increment request can count non-overflow results exactly and
+allocate the required capacity. An all-overflow batch deliberately leaves the
+column nil, exactly as before.
+
+The success test was added first and failed at 10 allocations for 64 distinct
+increments. It now checks native routing, result ordering, exact capacity, and
+four allocations. A separate all-overflow test verifies that no integer output
+column is allocated or emitted. The helper is only invoked when the first
+operation is `INCREMENT` and returns unless every operation in the one native
+chunk is also an increment; all other scalar paths retain their existing
+control flow and response behavior.
+
+```sh
+make run CMD='go test . -run=Increment -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-increment-baseline.test /tmp/hatrie-increment-candidate.test /tmp/hatrie-increment-target-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Increment64'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-increment-baseline.test /tmp/hatrie-increment-candidate.test /tmp/hatrie-increment-read-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Read64'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-increment-baseline.test /tmp/hatrie-increment-candidate.test /tmp/hatrie-increment-mixed-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Mixed64'
+```
+
+| Native scalar workload, 15 alternating 10,000-batch blocks | Baseline | Exact increment column | Result |
+| --- | ---: | ---: | --- |
+| 64 distinct `INCREMENT`s | 3,892 ns; 1,768 B; 10 allocs | 3,657 ns; 1,264 B; 4 allocs | 1.064x faster; 1.40x lower heap; 2.50x fewer allocations |
+| 64 distinct raw-string `GET`s | 3,409 ns; 1,328 B; 5 allocs | 3,366 ns; 1,328 B; 5 allocs | 1.013x faster; memory unchanged |
+| 64 mixed scalar operations | 4,361 ns; 1,688 B; 33 allocs | 4,392 ns; 1,688 B; 33 allocs | 1.007x slower, within the established 1% neutrality band; memory unchanged |
+
+Frozen baseline/candidate binaries differed only by the increment-reservation
+call. Their alternating target and control blocks retain identical C command
+execution, key scratch, response ownership, result statuses, overflow rules,
+wire format, storage, and persistence behavior.
 
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys

@@ -125,6 +125,25 @@ func (ht *HatTrie) reserveNativeScalarRawReadResponseLocked(request *hatriecache
 	response.ValueEnds = make([]uint32, 0, valueCount)
 }
 
+func reserveNativeScalarIncrementResponse(request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, results []C.hc_batch_result_t) {
+	operations := request.GetOperations()
+	if len(operations) == 0 || len(operations) > nativeScalarDirectBatchChunkSize || len(results) != len(operations) || len(response.IntegerValues) != 0 {
+		return
+	}
+	valueCount := 0
+	for index, result := range results {
+		if operations[index] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT {
+			return
+		}
+		if uint8(result.status) != uint8(C.HC_BATCH_OVERFLOW) {
+			valueCount++
+		}
+	}
+	if valueCount != 0 {
+		response.IntegerValues = make([]int64, 0, valueCount)
+	}
+}
+
 func (ht *HatTrie) nativeScalarRawResponseValueSizeLocked(value HatValue) (int, bool) {
 	if value.IsStringAtRaws() {
 		return len(ht.strings.Get(value.Index)), true

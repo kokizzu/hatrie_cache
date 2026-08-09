@@ -25,6 +25,9 @@ func BenchmarkScalarNativeBatch(b *testing.B) {
 		b.Run(fmt.Sprintf("Exists%d", size), func(b *testing.B) {
 			benchmarkScalarNativeExistsBatch(b, size)
 		})
+		b.Run(fmt.Sprintf("Increment%d", size), func(b *testing.B) {
+			benchmarkScalarNativeIncrementBatch(b, size)
+		})
 		b.Run(fmt.Sprintf("Mixed%d", size), func(b *testing.B) {
 			benchmarkScalarNativeMixedBatch(b, size)
 		})
@@ -51,6 +54,23 @@ func benchmarkScalarNativeExistsBatch(b *testing.B, commands int) {
 	for index := range request.Operations {
 		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS
 		request.Keys[index] = fmt.Sprintf("native:exists:%04d", index)
+	}
+	benchmarkScalarNativeRequest(b, trie, request)
+}
+
+func benchmarkScalarNativeIncrementBatch(b *testing.B, commands int) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:       8,
+		Operations:    make([]hatriecachev1.ScalarCommand, commands),
+		Keys:          make([]string, commands),
+		IntegerValues: make([]int64, commands),
+	}
+	for index := range request.Operations {
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT
+		request.Keys[index] = fmt.Sprintf("native:increment:%04d", index)
+		request.IntegerValues[index] = 1
 	}
 	benchmarkScalarNativeRequest(b, trie, request)
 }

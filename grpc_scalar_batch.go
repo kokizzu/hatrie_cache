@@ -388,6 +388,9 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 		}
 		results, _, _ := ht.runNativeScalarRequestChunkLocked(request, 0, len(operations), maxChunkKeyBytes, stringIndex, integerIndex)
 		ht.reserveNativeScalarRawReadResponseLocked(request, response, results)
+		if operations[0] == hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT {
+			reserveNativeScalarIncrementResponse(request, response, results)
+		}
 		for index, result := range results {
 			item := nativeCommandBatchItem{
 				key:     request.Keys[index],

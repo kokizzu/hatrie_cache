@@ -267,6 +267,75 @@ func TestScalarBatchDirectNativePreallocatesExistsOutputColumn(t *testing.T) {
 	}
 }
 
+func TestScalarBatchDirectNativePreallocatesIncrementOutputColumn(t *testing.T) {
+	trie := newTestTrie(t)
+	const commands = nativeScalarDirectBatchChunkSize
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:       11,
+		Operations:    make([]hatriecachev1.ScalarCommand, commands),
+		Keys:          make([]string, commands),
+		IntegerValues: make([]int64, commands),
+	}
+	for index := range request.Operations {
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT
+		request.Keys[index] = fmt.Sprintf("increment:%d", index)
+		request.IntegerValues[index] = 1
+	}
+
+	beforeCalls := trie.nativeCommandBatchCalls
+	allocations := testing.AllocsPerRun(100, func() {
+		response := trie.executeScalarBatchDirect(context.Background(), request)
+		if !response.GetOk() || len(response.GetStatuses()) != commands || len(response.GetIntegerValues()) != commands {
+			t.Fatalf("executeScalarBatchDirect(increment) = %#v, want %d results", response, commands)
+		}
+		for index, value := range response.GetIntegerValues() {
+			if value < 1 || response.GetStatuses()[index] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+				t.Fatalf("increment result[%d] = %d/%s, want positive/OK", index, value, response.GetStatuses()[index])
+			}
+		}
+		if cap(response.GetIntegerValues()) != len(response.GetIntegerValues()) {
+			t.Fatalf("increment integer values capacity = %d, want exact %d", cap(response.GetIntegerValues()), len(response.GetIntegerValues()))
+		}
+	})
+	if got := trie.nativeCommandBatchCalls - beforeCalls; got != 101 {
+		t.Fatalf("native scalar increment calls = %d, want 101", got)
+	}
+	if allocations != 4 {
+		t.Fatalf("increment scalar batch allocations = %.0f, want 4 with exact integer capacity", allocations)
+	}
+}
+
+func TestScalarBatchDirectNativeIncrementOverflowLeavesIntegerColumnNil(t *testing.T) {
+	trie := newTestTrie(t)
+	const commands = nativeScalarDirectBatchChunkSize
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:       12,
+		Operations:    make([]hatriecachev1.ScalarCommand, commands),
+		Keys:          make([]string, commands),
+		IntegerValues: make([]int64, commands),
+	}
+	for index := range request.Operations {
+		key := fmt.Sprintf("increment-overflow:%d", index)
+		trie.UpsertCounter(key, maxCommandInt32)
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT
+		request.Keys[index] = key
+		request.IntegerValues[index] = 1
+	}
+
+	response := trie.executeScalarBatchDirect(context.Background(), request)
+	if !response.GetOk() || len(response.GetStatuses()) != commands {
+		t.Fatalf("executeScalarBatchDirect(increment overflow) = %#v, want %d results", response, commands)
+	}
+	for index, status := range response.GetStatuses() {
+		if status != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_COUNTER_OVERFLOW {
+			t.Fatalf("increment overflow status[%d] = %s, want COUNTER_OVERFLOW", index, status)
+		}
+	}
+	if response.IntegerValues != nil {
+		t.Fatalf("increment overflow integer values = %v, want nil", response.IntegerValues)
+	}
+}
+
 func TestScalarBatchDirectNativePreallocatesRawStringReadColumns(t *testing.T) {
 	trie := newTestTrie(t)
 	const commands = nativeScalarDirectBatchChunkSize
