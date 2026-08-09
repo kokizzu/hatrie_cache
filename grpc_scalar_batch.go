@@ -527,6 +527,7 @@ func scalarBatchResponseFromCommand(request *hatriecachev1.ScalarBatchRequest, r
 		response.ValueKinds = nil
 		return response
 	}
+	reserveScalarBatchCompatibilityGetResponse(request, result.Responses, response)
 	for index, item := range result.Responses {
 		operation := request.Operations[index]
 		if !item.OK {
@@ -565,6 +566,36 @@ func scalarBatchResponseFromCommand(request *hatriecachev1.ScalarBatchRequest, r
 		}
 	}
 	return response
+}
+
+func reserveScalarBatchCompatibilityGetResponse(request *hatriecachev1.ScalarBatchRequest, results []CacheCommandResponse, response *hatriecachev1.ScalarBatchResponse) {
+	operations := request.GetOperations()
+	if len(operations) < minNativeCommandBatchSize || len(results) != len(operations) || operations[0] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET || len(response.Values) != 0 || len(response.ValueEnds) != 0 {
+		return
+	}
+	valueBytes := 0
+	valueCount := 0
+	max := int(^uint(0) >> 1)
+	for index, item := range results {
+		if operations[index] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET {
+			return
+		}
+		if !item.OK || item.Message == "key not found" || item.Message == "key not found or no ttl" {
+			continue
+		}
+		if len(item.Value) > max-valueBytes {
+			return
+		}
+		valueBytes += len(item.Value)
+		valueCount++
+	}
+	if valueCount == 0 {
+		return
+	}
+	if valueBytes != 0 {
+		response.Values = make([]byte, 0, valueBytes)
+	}
+	response.ValueEnds = make([]uint32, 0, valueCount)
 }
 
 func scalarBatchCacheCommand(request *hatriecachev1.ScalarBatchRequest) CacheCommandRequest {
