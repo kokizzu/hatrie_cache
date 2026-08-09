@@ -12830,9 +12830,13 @@ and zero allocations: **11.11x faster**, with temporary heap and allocations
 eliminated. The ordinary `Get` control was 37.44 ns before and 36.15 ns after
 (1.04x faster), so no code-layout regression was observed.
 
+The standard command harness now includes `HASRT`; its seven-run median on the
+16-entry command fixture is 86.22 ns/op with 0 B/op and zero allocations.
+
 ```sh
 make run CMD='go test . -run=TestRadixTreeContainsReportsMembershipWithoutValueAccess -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkRadixTreeContains -benchtime=3s -count=7 -benchmem -cpu=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/RadixHas -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->

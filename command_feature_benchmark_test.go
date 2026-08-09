@@ -118,6 +118,9 @@ func BenchmarkCommandFeature(b *testing.B) {
 		{name: "RadixPut", setup: setupCommandFeatureRadix, run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUTRT", Key: "radix:key", Subkey: "session:active", Value: "value"})
 		}},
+		{name: "RadixHas", setup: setupCommandFeatureRadixWithValues, run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "HASRT", Key: "radix:key", Subkey: "session:1"})
+		}},
 		{name: "RadixPrefix", setup: setupCommandFeatureRadixWithValues, run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PREFIXRT", Key: "radix:key", Subkey: "session:"})
 		}},
