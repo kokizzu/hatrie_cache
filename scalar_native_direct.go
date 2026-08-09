@@ -102,7 +102,7 @@ func (ht *HatTrie) reserveNativeScalarRawStringReadResponseLocked(request *hatri
 		current := HatValue{}
 		current.fromValue(result.value)
 		if !current.IsStringAtRaws() {
-			continue
+			return
 		}
 		value := ht.strings.Get(current.Index)
 		if len(value) > max-valueBytes {
