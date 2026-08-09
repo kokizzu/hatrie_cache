@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -293,6 +294,35 @@ func TestScalarBatchDirectNativePreallocatesRawStringReadColumns(t *testing.T) {
 	}
 	if cap(response.GetValueEnds()) != len(response.GetValueEnds()) {
 		t.Fatalf("raw read value ends capacity = %d, want exact %d", cap(response.GetValueEnds()), len(response.GetValueEnds()))
+	}
+}
+
+func TestScalarBatchDirectNativeRawByteReadsAvoidTemporaryStrings(t *testing.T) {
+	trie := newTestTrie(t)
+	const commands = nativeScalarDirectBatchChunkSize
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    9,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	var wantValues bytes.Buffer
+	for index := range request.Operations {
+		key := fmt.Sprintf("bytes:%d", index)
+		value := []byte{byte(index), 0, 0xff, byte(index >> 1)}
+		trie.UpsertBytes(key, value)
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+		request.Keys[index] = key
+		wantValues.Write(value)
+	}
+
+	allocations := testing.AllocsPerRun(100, func() {
+		response := trie.executeScalarBatchDirect(context.Background(), request)
+		if !response.GetOk() || len(response.GetStatuses()) != commands || len(response.GetValueEnds()) != commands || !bytes.Equal(response.GetValues(), wantValues.Bytes()) {
+			t.Fatalf("executeScalarBatchDirect(raw bytes) = %#v, want %d byte results", response, commands)
+		}
+	})
+	if allocations != 15 {
+		t.Fatalf("raw byte scalar batch allocations = %.0f, want 15 without temporary strings", allocations)
 	}
 }
 

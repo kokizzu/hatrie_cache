@@ -334,6 +334,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
 | Current pass | [Exact single-chunk raw-string read columns](#exact-single-chunk-raw-string-read-columns), 64 distinct gRPC `GET`s | Geometric response buffers: 3,773 ns; 2,272 B; 16 allocs | Exact confirmed raw-string columns: 3,332 ns; 1,328 B; 5 allocs | 1.132x faster; 1.71x lower heap; 3.20x fewer allocations | Only one native 64-command chunk whose first successful read is a raw string evaluates exact capacity; mixed, misses, other types, and multi-chunk requests retain their prior output behavior |
+| Current pass | [Direct native raw-byte response append](#direct-native-raw-byte-response-append), 64 distinct in-memory byte `GET`s | Temporary string then response copy: 79 allocs | Direct response-owned byte append: 15 allocs | 5.27x fewer allocations; 64 temporary strings eliminated | In-memory raw bytes only; on-disk bytes and every other value type retain the established materialization path |
 | Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
@@ -4688,6 +4689,24 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-read-before.test
 The response remains request-owned and transient. There is no pool, retained
 backing, new wire field, configuration, persistence change, or changed
 cancellation/fallback behavior.
+
+<a id="direct-native-raw-byte-response-append"></a>
+### Direct Native Raw-Byte Response Append
+
+An in-memory raw-byte scalar `GET` previously converted every stored byte slice
+to a temporary Go string before appending the same bytes to the protobuf
+response column. Native scalar responses already own a byte column, so the
+raw-byte branch now appends directly to it. The append still copies bytes into
+the response, preserving response ownership after the trie lock is released.
+On-disk bytes and every other type retain `commandValueLocked` unchanged.
+
+The test was added first and failed at 79 allocations for 64 binary values. It
+now verifies byte-identical values including NUL and `0xff` bytes and requires
+15 allocations, eliminating all 64 temporary strings.
+
+```sh
+make run CMD='go test . -run=TestScalarBatchDirectNativeRawByteReadsAvoidTemporaryStrings -count=1'
+```
 
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys

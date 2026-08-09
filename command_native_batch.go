@@ -388,6 +388,8 @@ func (ht *HatTrie) applyNativeScalarBatchResultLocked(response *hatriecachev1.Sc
 		response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES
 		if current.IsCounter() {
 			response.Values = strconv.AppendInt(response.Values, int64(current.Index), 10)
+		} else if current.IsBytesAtRaws() && !current.OnDisk() {
+			response.Values = append(response.Values, ht.raws.array[current.Index]...)
 		} else {
 			value, err := ht.commandValueLocked(current)
 			if err != nil {
