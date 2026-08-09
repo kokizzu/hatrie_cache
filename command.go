@@ -3377,6 +3377,16 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
 		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
+	case hval.IsMap():
+		value, err := ht.maps.jsonString(hval.Index)
+		if err != nil {
+			ht.recordReadLocked(false, key)
+			ht.mu.RUnlock()
+			return commandError(err.Error()), true
+		}
+		ht.recordReadLocked(true, key)
+		ht.mu.RUnlock()
+		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
 	case hval.IsPriorityQueue():
 		queue := &ht.priorityQueues.array[hval.Index]
 		capacity, stringsOnly := commandPriorityQueueItemsJSONLayout(queue.items)

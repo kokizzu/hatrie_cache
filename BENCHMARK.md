@@ -12839,6 +12839,26 @@ make run CMD='go test . -run=NoSuchTest -bench=BenchmarkRadixTreeContains -bench
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/RadixHas -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+<a id="read-lock-map-get-command"></a>
+### Read-Lock Map GET Command
+
+Exact `GET` already served scalar and several structured values on the
+read-lock path, but in-memory maps fell through to the exclusive generic path.
+Map JSON encoding is read-only while the trie read lock is held, so `GET` now
+encodes a non-expired in-memory map directly before releasing that lock. Cold
+references and expiration cases keep the established exclusive fallback.
+
+The command round-trip test verifies nested map JSON. In alternating pinned-CPU
+five-million-operation pairs, the one-field `MapGet` median fell from 159.4 ns
+to 131.4 ns with the same 24 B and one response allocation: **1.21x faster**.
+`StringGet` moved from 99.05 ns to 96.68 ns and `TopKGet` from 138.6 ns to
+134.4 ns, so the larger fast-command switch had no observed control regression.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandGetMapReturnsCanonicalJSON -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/MapGet -benchtime=3s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

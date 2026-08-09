@@ -495,6 +495,32 @@ func TestExecuteCommandMapOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandGetMapReturnsCanonicalJSON(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs: Map{
+			"name":    "ivi",
+			"details": Map{"active": true},
+		},
+	}); !got.OK {
+		t.Fatalf("PUTMAP response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "profile"})
+	if !got.OK || got.Message != "ok" {
+		t.Fatalf("GET map response = %#v, want ok", got)
+	}
+	var value Map
+	if err := json.Unmarshal([]byte(got.Value), &value); err != nil {
+		t.Fatalf("GET map JSON = %q: %v", got.Value, err)
+	}
+	if want := (Map{"name": "ivi", "details": Map{"active": true}}); !reflect.DeepEqual(value, want) {
+		t.Fatalf("GET map value = %#v, want %#v", value, want)
+	}
+}
+
 func TestExecuteCommandPutMapExactPathReplacesNonMap(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "profile", Value: "old"}); !got.OK {
