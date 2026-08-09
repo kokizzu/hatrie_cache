@@ -4433,9 +4433,11 @@ unchanged.
 The exported C helper is also callable outside the Go cgo wrappers. It now
 returns before dereferencing a null result buffer, and initializes each
 provided result to `HC_BATCH_MISSING` before returning for a null trie or
-operation buffer. Invalid direct invocations cannot mutate the trie. The C
-regression starts with nonzero result fields, covers each invalid pointer case,
-and proves both the deterministic cleared result and an unchanged trie.
+operation buffer. Invalid direct invocations cannot mutate the trie. Valid
+batches initialize each result in their existing execution loop, avoiding a
+redundant whole-result-array sweep. The C regression starts with nonzero result
+fields, covers each invalid pointer case, and proves both the deterministic
+cleared result and an unchanged trie.
 
 Frozen pre-guard and guarded binaries ran twelve fixed five-iteration
 4,096-command native counter-`SET` samples. This boundary check is once per
@@ -4444,6 +4446,15 @@ batch; heap and allocation counts remain unchanged.
 | Native C path, median of 12 | Full arena bounds | Invalid-buffer guard | Result |
 | --- | ---: | ---: | --- |
 | Counter `SET` | 457,988 ns; 262,161 B; 1 alloc | 434,063 ns; 262,161 B; 1 alloc | 1.055x faster; treated as CPU-neutral control because both binaries vary with CPU frequency |
+
+The valid-path follow-up used frozen two-pass and one-pass binaries with fifteen
+4,096-command samples at `-benchtime=100x`; heap and allocation counts were
+unchanged.
+
+| Native C path, median of 15 | Two-pass result setup | One-pass valid setup | Result |
+| --- | ---: | ---: | --- |
+| Counter `SET` | 451,030 ns; 262,146 B; 1 alloc | 446,810 ns; 262,146 B; 1 alloc | 1.009x faster |
+| `GET` | 430,158 ns; 277,410 B; 3,997 allocs | 415,587 ns; 277,410 B; 3,997 allocs | 1.035x faster |
 
 <a id="exact-batch-telemetry-aggregation"></a>
 ### Exact Batch Telemetry Aggregation
