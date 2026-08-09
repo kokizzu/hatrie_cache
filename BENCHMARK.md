@@ -874,6 +874,51 @@ replay diagnostics in the raw output are emitted while verification opens the
 extracted checkpoint and are not benchmark failures.
 
 <a id="content-addressed-incremental-backups"></a>
+<a id="backup-restore-exhaustive-verification"></a>
+#### Backup And Restore Exhaustive Verification
+
+`TestBackupRestoreRoundTripsAllSnapshotValueTypes` is the end-to-end safety
+gate for backup and recovery. It writes and restores all 19 snapshot-supported
+value families: counter, string, bytes, map, slice, set, priority queue, Bloom
+filter, Count-Min Sketch, HyperLogLog, Top-K, Cuckoo filter, Roaring bitmap,
+quantile sketch, Fenwick tree, sparse bitset, reservoir sample, XOR filter, and
+nested radix tree. The corpus also includes nested values and an active TTL.
+
+The test compares the complete canonical snapshot entries after recovery. It
+covers all six configured snapshot encodings (`binary`, `gzip-binary`,
+`gzip-best-binary`, `json`, `gzip-json`, and `gzip-best-json`), a portable
+snapshot bundle, a `pebble-checkpoint` bundle, and a `pebble-incremental`
+repository. Thus every value type is proved through both the snapshot codec and
+the persistent Pebble storage codec, then through each supported restore path.
+
+```sh
+make run CMD='go test . -run=TestBackupRestoreRoundTripsAllSnapshotValueTypes -count=1'
+make run CMD='make bench-pebble-backup BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks'
+make run CMD='make bench-incremental-backup BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks'
+make run CMD='make bench-atomic-restore BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks'
+```
+
+The correctness corpus is intentionally small and type-complete; the following
+seven-run medians are the separate 10,000-key x 256-byte throughput fixture on
+the Ryzen 9 5950X host. Heap and allocations are cumulative per timed operation.
+
+| Operation | Median time | Heap | Allocations | Transfer/storage size | Result / tradeoff |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Create snapshot bundle | 71.255 ms | 5.72 MB | 30,257 | 198.7 B/key | Portable default; 1.28x faster and 1.15x lower heap than checkpoint creation |
+| Create Pebble checkpoint bundle | 90.903 ms | 6.60 MB | 22,884 | 210.5 B/key | 1.32x fewer allocations; requires Pebble |
+| Restore snapshot bundle, atomic | 30.824 ms | 6.91 MB | 40,589 | 198.7 B/key archive | Fastest portable restore in this fixture |
+| Restore checkpoint bundle, atomic | 48.281 ms | 9.19 MB | 41,770 | 210.5 B/key archive | Directly reusable Pebble directory; snapshot is 1.57x faster and 1.33x lower heap here |
+| Restore incremental repository, atomic | 29.000 ms | 9.07 MB | 41,554 | 3.08 MB logical checkpoint | Fastest measured restore; repository is multi-file rather than a portable archive |
+| Create full checkpoint after 1% change | 89.680 ms | 6.61 MB | 22,872 | 2,104,514 written B | Baseline for the next row |
+| Create incremental repository after 1% change | 13.616 ms | 0.91 MB | 1,375 | 35,069 written B | 6.59x faster, 7.28x lower heap, 16.63x fewer allocations, and 60.01x less written data |
+
+Raw output from this run is written to
+`build/benchmarks/pebble-checkpoint-backup.txt`,
+`build/benchmarks/incremental-backup-repository.txt`, and
+`build/benchmarks/single-pass-atomic-restore.txt`. Pebble WAL replay messages
+appear while an extracted store is opened for validation; they are expected
+verification diagnostics, not benchmark failures.
+
 #### Content-Addressed Incremental Backups
 
 The explicit `pebble-incremental` mode stores checkpoint files by SHA-256 and
