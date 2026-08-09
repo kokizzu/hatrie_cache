@@ -4427,6 +4427,24 @@ unchanged.
 | Counter `SET` | 446,380 ns; 262,146 B; 1 alloc | 440,503 ns; 262,146 B; 1 alloc | 1.013x faster; treated as CPU-neutral control |
 | `GET` | 415,036 ns; 277,410 B; 3,997 allocs | 414,099 ns; 277,410 B; 3,997 allocs | 1.002x faster; treated as CPU-neutral control |
 
+<a id="native-batch-invalid-buffer-guard"></a>
+### Native Batch Invalid-Buffer Guard
+
+The exported C helper is also callable outside the Go cgo wrappers. It now
+returns before dereferencing a null result buffer, and initializes each
+provided result to `HC_BATCH_MISSING` before returning for a null trie or
+operation buffer. Invalid direct invocations cannot mutate the trie. The C
+regression starts with nonzero result fields, covers each invalid pointer case,
+and proves both the deterministic cleared result and an unchanged trie.
+
+Frozen pre-guard and guarded binaries ran twelve fixed five-iteration
+4,096-command native counter-`SET` samples. This boundary check is once per
+batch; heap and allocation counts remain unchanged.
+
+| Native C path, median of 12 | Full arena bounds | Invalid-buffer guard | Result |
+| --- | ---: | ---: | --- |
+| Counter `SET` | 457,988 ns; 262,161 B; 1 alloc | 434,063 ns; 262,161 B; 1 alloc | 1.055x faster; treated as CPU-neutral control because both binaries vary with CPU frequency |
+
 <a id="exact-batch-telemetry-aggregation"></a>
 ### Exact Batch Telemetry Aggregation
 

@@ -12,14 +12,26 @@ void hc_hattrie_command_batch(hattrie_t *trie, const char *keys, size_t keys_siz
                               const hc_batch_operation_t *operations,
                               hc_batch_result_t *results, size_t count) {
     size_t index;
+
+    if (results == NULL) {
+        return;
+    }
     for (index = 0; index < count; index++) {
-        const hc_batch_operation_t *operation = &operations[index];
         hc_batch_result_t *result = &results[index];
-        value_t *location;
 
         result->previous = 0;
         result->value = 0;
         result->status = HC_BATCH_MISSING;
+    }
+
+    if (trie == NULL || operations == NULL) {
+        return;
+    }
+
+    for (index = 0; index < count; index++) {
+        const hc_batch_operation_t *operation = &operations[index];
+        hc_batch_result_t *result = &results[index];
+        value_t *location;
 
         // Go validates keys before this boundary; keep direct/future callers safe too.
         if (operation->key_length > ahtable_max_key_length ||

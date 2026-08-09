@@ -1065,6 +1065,46 @@ void test_native_batch_rejects_invalid_keys()
     fprintf(stderr, "done.\n");
 }
 
+void test_native_batch_rejects_invalid_buffers()
+{
+    fprintf(stderr, "checking native batch invalid-buffer rejection... ");
+
+    const char key[] = "x";
+    hc_batch_operation_t operation = {0};
+    hc_batch_result_t result = {7, 9, HC_BATCH_OK, {0}};
+    hattrie_t* trie = hattrie_create();
+    operation.key_length = 1;
+    operation.operation = HC_BATCH_SET;
+    operation.input = 7;
+
+    hc_hattrie_command_batch(NULL, key, 1, &operation, &result, 1);
+    if (result.status != HC_BATCH_MISSING || result.previous != 0 ||
+        result.value != 0 || hattrie_size(trie) != 0) {
+        fprintf(stderr, "[error] native batch accepted null trie\n");
+        have_error = 1;
+    }
+
+    result.previous = 7;
+    result.value = 9;
+    result.status = HC_BATCH_OK;
+    hc_hattrie_command_batch(trie, key, 1, NULL, &result, 1);
+    if (result.status != HC_BATCH_MISSING || result.previous != 0 ||
+        result.value != 0 || hattrie_size(trie) != 0) {
+        fprintf(stderr, "[error] native batch accepted null operations\n");
+        have_error = 1;
+    }
+
+    /* A null result buffer must be a no-op rather than an invalid write. */
+    hc_hattrie_command_batch(trie, key, 1, &operation, NULL, 1);
+    if (hattrie_size(trie) != 0) {
+        fprintf(stderr, "[error] native batch mutated with null results\n");
+        have_error = 1;
+    }
+
+    hattrie_free(trie);
+    fprintf(stderr, "done.\n");
+}
+
 
 
 int main()
@@ -1081,6 +1121,7 @@ int main()
     test_hattrie_batch_lookup();
     test_hattrie_tryget_split_boundaries();
     test_native_batch_rejects_invalid_keys();
+    test_native_batch_rejects_invalid_buffers();
 
     setup();
     test_hattrie_insert();
