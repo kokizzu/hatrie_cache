@@ -71,6 +71,56 @@ func TestStructuredBatchResponseFromCommandPreallocatesOnlyEmittedPeekMapValues(
 	}
 }
 
+func TestStructuredBatchResponseFromCommandPreallocatesHasSetIntegerColumn(t *testing.T) {
+	const commands = nativeScalarDirectBatchChunkSize
+	request := &hatriecachev1.StructuredBatchRequest{
+		BatchId:    97,
+		Operations: repeatedStructuredBatchOperation(hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET, commands),
+		Keys:       make([]string, commands),
+		Values:     make([][]byte, commands),
+	}
+	results := repeatedStructuredBatchCommandResponse(CacheCommandResponse{OK: true, Value: "1"}, commands)
+
+	allocations := testing.AllocsPerRun(100, func() {
+		response := structuredBatchResponseFromCommand(request, CacheCommandResponse{OK: true, Responses: results})
+		if !response.GetOk() || len(response.GetIntegerValues()) != commands || cap(response.GetIntegerValues()) != commands {
+			t.Fatalf("compatibility HAS_SET integer values = %d/%d, want exact %d", len(response.GetIntegerValues()), cap(response.GetIntegerValues()), commands)
+		}
+	})
+	if allocations != 4 {
+		t.Fatalf("compatibility HAS_SET allocations = %.0f, want 4 with exact integer output capacity", allocations)
+	}
+}
+
+func TestStructuredBatchResponseFromCommandPreallocatesOnlyEmittedHasSetIntegers(t *testing.T) {
+	const commands = minNativeCommandBatchSize
+	request := &hatriecachev1.StructuredBatchRequest{
+		BatchId:    98,
+		Operations: repeatedStructuredBatchOperation(hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET, commands),
+		Keys:       make([]string, commands),
+		Values:     make([][]byte, commands),
+	}
+	results := repeatedStructuredBatchCommandResponse(CacheCommandResponse{OK: true, Value: "1"}, commands)
+	results[0] = CacheCommandResponse{OK: true, Value: "1"}
+	results[1] = CacheCommandResponse{OK: true, Value: "0"}
+	results[2] = CacheCommandResponse{OK: true, Message: "key not found"}
+	results[3] = CacheCommandResponse{OK: false, Message: "read failed"}
+
+	response := structuredBatchResponseFromCommand(request, CacheCommandResponse{OK: false, Responses: results})
+	if got := response.GetIntegerValues(); len(got) != commands-2 || got[0] != 1 || got[1] != 0 {
+		t.Fatalf("compatibility HAS_SET integer values = %v, want 1, 0, and %d emitted results", got, commands-2)
+	}
+	if cap(response.GetIntegerValues()) != len(response.GetIntegerValues()) {
+		t.Fatalf("compatibility HAS_SET integer capacity = %d, want exact %d", cap(response.GetIntegerValues()), len(response.GetIntegerValues()))
+	}
+	if response.GetStatuses()[2] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND || response.GetStatuses()[3] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_INTERNAL_ERROR {
+		t.Fatalf("compatibility HAS_SET statuses = %v, want missing/internal error", response.GetStatuses()[:4])
+	}
+	if len(response.GetErrorIndexes()) != 1 || response.GetErrorIndexes()[0] != 3 || len(response.GetErrors()) != 1 || response.GetErrors()[0] != "read failed" {
+		t.Fatalf("compatibility HAS_SET errors = %v/%v, want index 3/read failed", response.GetErrorIndexes(), response.GetErrors())
+	}
+}
+
 func BenchmarkStructuredBatchCompatibilityResponse(b *testing.B) {
 	for _, benchmark := range []struct {
 		name       string
@@ -81,6 +131,11 @@ func BenchmarkStructuredBatchCompatibilityResponse(b *testing.B) {
 			name:       "PeekMap64",
 			operations: repeatedStructuredBatchOperation(hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP, nativeScalarDirectBatchChunkSize),
 			results:    repeatedStructuredBatchCommandResponse(CacheCommandResponse{OK: true, Value: "compatibility:value"}, nativeScalarDirectBatchChunkSize),
+		},
+		{
+			name:       "HasSet64",
+			operations: repeatedStructuredBatchOperation(hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET, nativeScalarDirectBatchChunkSize),
+			results:    repeatedStructuredBatchCommandResponse(CacheCommandResponse{OK: true, Value: "1"}, nativeScalarDirectBatchChunkSize),
 		},
 		{
 			name: "Mixed64",

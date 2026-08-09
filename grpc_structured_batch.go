@@ -362,10 +362,28 @@ func structuredBatchResponseFromCommand(request *hatriecachev1.StructuredBatchRe
 
 func reserveStructuredBatchCompatibilityByteResponse(request *hatriecachev1.StructuredBatchRequest, results []CacheCommandResponse, response *hatriecachev1.StructuredBatchResponse) {
 	operations := request.GetOperations()
-	if len(operations) < minNativeCommandBatchSize || len(results) != len(operations) || !structuredBatchOperationReturnsBytes(operations[0]) || len(response.Values) != 0 || len(response.ValueEnds) != 0 {
+	if len(operations) < minNativeCommandBatchSize || len(results) != len(operations) || len(response.Values) != 0 || len(response.ValueEnds) != 0 {
 		return
 	}
 	operation := operations[0]
+	if operation == hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET {
+		valueCount := 0
+		for index, item := range results {
+			if operations[index] != operation {
+				return
+			}
+			if item.OK && item.Message != "value not found" && item.Message != "key not found" {
+				valueCount++
+			}
+		}
+		if valueCount > 0 {
+			response.IntegerValues = make([]int64, 0, valueCount)
+		}
+		return
+	}
+	if !structuredBatchOperationReturnsBytes(operation) {
+		return
+	}
 	valueBytes := 0
 	valueCount := 0
 	max := int(^uint(0) >> 1)
