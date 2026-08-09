@@ -353,10 +353,60 @@ func structuredBatchResponseFromCommand(request *hatriecachev1.StructuredBatchRe
 		response.ValueKinds = nil
 		return response
 	}
+	reserveStructuredBatchCompatibilityByteResponse(request, result.Responses, response)
 	for index, item := range result.Responses {
 		appendStructuredBatchResult(response, index, request.Operations[index], item)
 	}
 	return response
+}
+
+func reserveStructuredBatchCompatibilityByteResponse(request *hatriecachev1.StructuredBatchRequest, results []CacheCommandResponse, response *hatriecachev1.StructuredBatchResponse) {
+	operations := request.GetOperations()
+	if len(operations) < minNativeCommandBatchSize || len(results) != len(operations) || !structuredBatchOperationReturnsBytes(operations[0]) || len(response.Values) != 0 || len(response.ValueEnds) != 0 {
+		return
+	}
+	operation := operations[0]
+	valueBytes := 0
+	valueCount := 0
+	max := int(^uint(0) >> 1)
+	for index, item := range results {
+		if operations[index] != operation {
+			return
+		}
+		if !item.OK || item.Message == "value not found" || item.Message == "key not found" {
+			continue
+		}
+		if len(item.Value) > max-valueBytes {
+			return
+		}
+		valueBytes += len(item.Value)
+		valueCount++
+	}
+	if valueCount == 0 {
+		return
+	}
+	if valueBytes != 0 {
+		response.Values = make([]byte, 0, valueBytes)
+	}
+	response.ValueEnds = make([]uint32, 0, valueCount)
+}
+
+func structuredBatchOperationReturnsBytes(operation hatriecachev1.StructuredCommand) bool {
+	switch operation {
+	case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_TAKE_MAP,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_SLICE,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_SHIFT_SLICE,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HEAD_SLICE,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_TAIL_SLICE,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_GET_SET,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_PRIORITY,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_PRIORITY,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_GET_PRIORITY:
+		return true
+	default:
+		return false
+	}
 }
 
 func newStructuredBatchResponse(batchID uint64, count int) *hatriecachev1.StructuredBatchResponse {

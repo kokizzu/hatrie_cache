@@ -338,6 +338,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact native raw-byte read columns](#direct-scalar-raw-byte-response-append), 64 distinct in-memory byte `GET`s | Geometric direct-native columns: 3,335 ns; 1,760 B; 15 allocs | Exact raw-value columns: 3,209 ns; 1,264 B; 5 allocs | 1.039x faster; 1.39x lower heap; 3.00x fewer allocations | Direct native one-chunk all-`GET` requests only; TTL fallback and non-raw values keep their current allocation behavior |
 | Current pass | [Exact native increment output column](#exact-native-increment-output-column), 64 distinct scalar `INCREMENT`s | Geometric integer column: 3,892 ns; 1,768 B; 10 allocs | Exact non-overflow integer column: 3,657 ns; 1,264 B; 4 allocs | 1.064x faster; 1.40x lower heap; 2.50x fewer allocations | Direct native one-chunk all-`INCREMENT` requests only; overflowed operations reserve and emit no integer value, while raw-read/mixed controls are neutral or faster |
 | Current pass | [Compatibility scalar GET output columns](#compatibility-scalar-get-output-columns), 64 completed `GET` results | Geometric response columns: 2,226 ns; 5,648 B; 17 allocs | Exact emitted-value columns: 1,384 ns; 2,288 B; 5 allocs | 1.608x faster; 2.47x lower heap; 3.40x fewer allocations | Only >=32 all-`GET` compatibility/partition conversion; misses and errors reserve no output, and mixed control is CPU-neutral with identical memory |
+| Current pass | [Compatibility structured byte output columns](#compatibility-structured-byte-output-columns), 64 completed `PEEK_MAP` results | Geometric response columns: 2,348 ns; 5,648 B; 17 allocs | Exact emitted-value columns: 1,501 ns; 2,288 B; 5 allocs | 1.564x faster; 2.47x lower heap; 3.40x fewer allocations | Only >=32 homogeneous byte-result compatibility conversion; misses and errors reserve no output, and mixed control is CPU-neutral with identical memory |
 | Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
@@ -4794,6 +4795,40 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-compat-get-baseline.tes
 | 64 mixed scalar results | 1,655 ns; 2,952 B; 20 allocs | 1,659 ns; 2,952 B; 20 allocs | 1.002x slower, within the established 1% neutrality band; memory unchanged |
 
 Frozen baseline/candidate binaries differed only by the compatibility
+reservation call. Request/result ownership, public command execution,
+durability, routing, value bytes, statuses, error reporting, wire format,
+storage, and persistence are unchanged.
+
+<a id="compatibility-structured-byte-output-columns"></a>
+### Compatibility Structured Byte Output Columns
+
+Structured compatibility conversion has the same completed public results as
+the scalar path, but its byte-producing commands include map peeks/takes,
+slice reads, set reads, and priority-queue reads. For batches of at least 32
+operations whose first command is one of those byte-result operations, the
+converter now requires that every operation is the same command, totals only
+successful non-missing values, and reserves exact `Values` and `ValueEnds`
+columns. Empty successful values retain their end offset; misses and errors
+retain their existing status/error behavior without reserving output.
+
+Tests were added first. The 64-item `PEEK_MAP` fixture failed because its
+448-byte result retained a 512-byte `Values` backing. It now verifies byte
+order, statuses, exact capacities, and five allocations. A separate 32-item
+matrix checks the success, missing-value, and internal-error cases together,
+including error indexes and the exact count of emitted value ends.
+
+```sh
+make run CMD='go test . -run=Preallocates.*PeekMap -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-structured-compat-baseline.test /tmp/hatrie-structured-compat-candidate.test /tmp/hatrie-structured-compat-target-pairs.txt 20 15 10000x BenchmarkStructuredBatchCompatibilityResponse/PeekMap64'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-structured-compat-baseline.test /tmp/hatrie-structured-compat-candidate.test /tmp/hatrie-structured-compat-mixed-pairs.txt 20 15 10000x BenchmarkStructuredBatchCompatibilityResponse/Mixed64'
+```
+
+| Compatibility structured response, 15 alternating 10,000-batch blocks | Baseline | Exact byte columns | Result |
+| --- | ---: | ---: | --- |
+| 64 completed `PEEK_MAP` results | 2,348 ns; 5,648 B; 17 allocs | 1,501 ns; 2,288 B; 5 allocs | 1.564x faster; 2.47x lower heap; 3.40x fewer allocations |
+| 64 mixed structured results | 1,764 ns; 2,952 B; 20 allocs | 1,776 ns; 2,952 B; 20 allocs | 1.007x slower, within the established 1% neutrality band; memory unchanged |
+
+Frozen baseline/candidate binaries differed only by the structured
 reservation call. Request/result ownership, public command execution,
 durability, routing, value bytes, statuses, error reporting, wire format,
 storage, and persistence are unchanged.
