@@ -12879,6 +12879,15 @@ faster), each retaining its 16 B, one-allocation response. The map `GET`
 control was 127.8 ns before and 128.7 ns after, a 0.7% difference within the
 1% neutral band.
 
+#### Rejected: Bloom GET Read-Lock Dispatch
+
+The same default-dispatch approach was evaluated for Bloom-filter `GET`.
+Baseline measurements were 4.097 us, 272 B, and three allocations per command,
+which are dominated by constructing the required information JSON rather than
+by the exclusive trie lock. No production branch was added: an extra dispatch
+path would add layout risk without a material CPU or memory win. Existing
+`INFOBF` remains the direct information command.
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
