@@ -34,7 +34,7 @@ typedef struct {
     uint8_t reserved[7];
 } hc_batch_result_t;
 
-void hc_hattrie_command_batch(hattrie_t *trie, const char *keys,
+void hc_hattrie_command_batch(hattrie_t *trie, const char *keys, size_t keys_size,
                               const hc_batch_operation_t *operations,
                               hc_batch_result_t *results, size_t count);
 

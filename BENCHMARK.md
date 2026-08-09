@@ -329,6 +329,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Native batch oversized-key guard](#native-batch-oversized-key-guard), 4,096 valid C operations | SET: 447,156 ns; GET: 418,473 ns | SET: 444,204 ns; GET: 414,628 ns | CPU neutral (1.007x/1.009x faster in this run); identical heap and allocations | Invalid direct C input returns `MISSING` rather than dereferencing a null native location |
+| Current pass | [Native batch arena bounds guard](#native-batch-arena-bounds-guard), 4,096 valid C operations | SET: 446,380 ns; GET: 415,036 ns | SET: 440,503 ns; GET: 414,099 ns | CPU neutral (1.013x/1.002x faster in this run); identical heap and allocations | Rejects direct C key offsets and lengths outside the supplied key arena before pointer arithmetic |
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
@@ -604,6 +605,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Empty compact-map constant JSON | Returning the literal `{}` removed the empty compact-map encoder's one 8-byte allocation | The added length branch regressed the ordinary one-field `MapGet` control from 139.6 to 142.4 ns, or 1.020x slower; it remained 24 B and one allocation | Removed; the empty state is uncommon and does not justify slowing nonempty compact-map reads |
 | Late stack-workspace XOR dispatch | Stack slots and peel order reduced the 64-item builder to 128 B and one allocation | Computing generic block/slot sizes before checking the small path slowed the 4,096-item control from 363,010 to 376,953 ns, or 1.038x | Removed; the accepted [early stack-backed dispatch](#stack-backed-small-xor-peel-workspace) leaves the 4,096-item control neutral within 0.3% |
 | Function-local LevelDB batch key scratch | A sequential 2,048-key dirty-save run appeared 1.10x faster after reusing the prefix buffer | Fifteen alternating frozen-binary pairs measured 2.963 ms before versus 2.972 ms after, 1.003x slower; heap was unchanged at about 1.487 MB and allocations increased from 4,163 to 4,165 | Runtime candidate removed; `TestLevelDBBatchOwnsKeyInputs` remains to enforce the dependency's copied-input ownership contract |
 | 48-byte radix prefix JSON reservation | Eight-byte values became 1.044x faster with 1.33x lower heap; 128-byte values became 1.060x faster with 1.24x lower heap | Sixteen-byte values crossed the smaller buffer by one byte, becoming 1.195x slower with 1.875x higher heap and a second allocation | Removed; the 64-byte reservation preserves a single allocation at the boundary; see [the rollback](#radix-prefix-json-reservation-rollback) |
@@ -4403,6 +4405,26 @@ mode at `-benchtime=100x`; heap and allocation counts were unchanged.
 | --- | ---: | ---: | --- |
 | Counter `SET` | 447,156 ns; 262,146 B; 1 alloc | 444,204 ns; 262,146 B; 1 alloc | 1.007x faster; treated as CPU-neutral control |
 | `GET` | 418,473 ns; 277,410 B; 3,997 allocs | 414,628 ns; 277,410 B; 3,997 allocs | 1.009x faster; treated as CPU-neutral control |
+
+<a id="native-batch-arena-bounds-guard"></a>
+### Native Batch Arena Bounds Guard
+
+The initial guard validates each key length but a direct C caller could still
+provide an out-of-range key offset. The batch ABI now receives the key-arena
+length and checks `offset <= arena`, `length <= arena - offset`, and the native
+key maximum before pointer arithmetic. Invalid direct operations retain the
+same `HC_BATCH_MISSING` result and do not mutate the trie. The native C
+regression exercises both an oversized logical key and an offset immediately
+past the supplied arena.
+
+Frozen length-guard and full-bounds test binaries ran fifteen 4,096-command
+samples per mode at `-benchtime=100x`; heap and allocation counts were
+unchanged.
+
+| Native C path, median of 15 | Length guard | Full arena bounds | Result |
+| --- | ---: | ---: | --- |
+| Counter `SET` | 446,380 ns; 262,146 B; 1 alloc | 440,503 ns; 262,146 B; 1 alloc | 1.013x faster; treated as CPU-neutral control |
+| `GET` | 415,036 ns; 277,410 B; 3,997 allocs | 414,099 ns; 277,410 B; 3,997 allocs | 1.002x faster; treated as CPU-neutral control |
 
 <a id="exact-batch-telemetry-aggregation"></a>
 ### Exact Batch Telemetry Aggregation

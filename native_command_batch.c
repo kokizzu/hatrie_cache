@@ -8,7 +8,7 @@
 #define HC_VALUE_TYPE_MASK 0x3fU
 #define HC_VALUE_TYPE_COUNTER 1U
 
-void hc_hattrie_command_batch(hattrie_t *trie, const char *keys,
+void hc_hattrie_command_batch(hattrie_t *trie, const char *keys, size_t keys_size,
                               const hc_batch_operation_t *operations,
                               hc_batch_result_t *results, size_t count) {
     size_t index;
@@ -22,11 +22,17 @@ void hc_hattrie_command_batch(hattrie_t *trie, const char *keys,
         result->status = HC_BATCH_MISSING;
 
         // Go validates keys before this boundary; keep direct/future callers safe too.
-        if (operation->key_length > ahtable_max_key_length) {
+        if (operation->key_length > ahtable_max_key_length ||
+            operation->key_offset > keys_size ||
+            operation->key_length > keys_size - operation->key_offset ||
+            (keys == NULL && operation->key_length != 0)) {
             continue;
         }
 
-        const char *key = keys + operation->key_offset;
+        const char *key = keys;
+        if (operation->key_offset != 0) {
+            key += operation->key_offset;
+        }
 
         switch (operation->operation) {
         case HC_BATCH_LOOKUP:

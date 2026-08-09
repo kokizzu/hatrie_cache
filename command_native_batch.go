@@ -339,6 +339,7 @@ func (ht *HatTrie) runNativeCommandBatchLocked(items []nativeCommandBatchItem) [
 	C.hc_hattrie_command_batch(
 		ht.root,
 		(*C.char)(unsafe.Pointer(unsafe.SliceData(keys))),
+		C.size_t(len(keys)),
 		(*C.hc_batch_operation_t)(unsafe.Pointer(unsafe.SliceData(operations))),
 		(*C.hc_batch_result_t)(unsafe.Pointer(unsafe.SliceData(results))),
 		C.size_t(len(items)),
