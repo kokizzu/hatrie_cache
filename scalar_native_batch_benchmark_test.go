@@ -16,6 +16,9 @@ func BenchmarkScalarNativeBatch(b *testing.B) {
 		b.Run(fmt.Sprintf("Read%d", size), func(b *testing.B) {
 			benchmarkScalarNativeReadBatch(b, size)
 		})
+		b.Run(fmt.Sprintf("ReadBytes%d", size), func(b *testing.B) {
+			benchmarkScalarNativeRawByteReadBatch(b, size)
+		})
 		b.Run(fmt.Sprintf("ReadSame%d", size), func(b *testing.B) {
 			benchmarkScalarNativeSameReadBatch(b, size)
 		})
@@ -114,6 +117,23 @@ func benchmarkScalarNativeReadBatch(b *testing.B, commands int) {
 	for index := range request.Operations {
 		key := fmt.Sprintf("native:read:%04d", index)
 		trie.UpsertString(key, "value")
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+		request.Keys[index] = key
+	}
+	benchmarkScalarNativeRequest(b, trie, request)
+}
+
+func benchmarkScalarNativeRawByteReadBatch(b *testing.B, commands int) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    7,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	for index := range request.Operations {
+		key := fmt.Sprintf("native:read:bytes:%04d", index)
+		trie.UpsertBytes(key, []byte{byte(index), 0, 0xff, byte(index >> 1)})
 		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
 		request.Keys[index] = key
 	}

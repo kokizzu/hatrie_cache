@@ -320,9 +320,15 @@ func TestScalarBatchDirectNativeRawByteReadsAvoidTemporaryStrings(t *testing.T) 
 		if !response.GetOk() || len(response.GetStatuses()) != commands || len(response.GetValueEnds()) != commands || !bytes.Equal(response.GetValues(), wantValues.Bytes()) {
 			t.Fatalf("executeScalarBatchDirect(raw bytes) = %#v, want %d byte results", response, commands)
 		}
+		if cap(response.GetValues()) != len(response.GetValues()) {
+			t.Fatalf("raw byte values capacity = %d, want exact %d", cap(response.GetValues()), len(response.GetValues()))
+		}
+		if cap(response.GetValueEnds()) != len(response.GetValueEnds()) {
+			t.Fatalf("raw byte value ends capacity = %d, want exact %d", cap(response.GetValueEnds()), len(response.GetValueEnds()))
+		}
 	})
-	if allocations != 15 {
-		t.Fatalf("raw byte scalar batch allocations = %.0f, want 15 without temporary strings", allocations)
+	if allocations != 5 {
+		t.Fatalf("raw byte scalar batch allocations = %.0f, want 5 with exact response capacity", allocations)
 	}
 }
 

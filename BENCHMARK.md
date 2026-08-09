@@ -333,8 +333,9 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
-| Current pass | [Exact single-chunk raw-string read columns](#exact-single-chunk-raw-string-read-columns), 64 distinct gRPC `GET`s | Geometric response buffers: 3,773 ns; 2,272 B; 16 allocs | Exact confirmed raw-string columns: 3,332 ns; 1,328 B; 5 allocs | 1.132x faster; 1.71x lower heap; 3.20x fewer allocations | Only one native 64-command chunk whose first successful read is a raw string evaluates exact capacity; mixed, misses, other types, and multi-chunk requests retain their prior output behavior |
+| Current pass | [Exact single-chunk raw read columns](#exact-single-chunk-raw-string-read-columns), 64 distinct gRPC `GET`s | Geometric response buffers: 3,773 ns; 2,272 B; 16 allocs | Exact confirmed raw-string columns: 3,332 ns; 1,328 B; 5 allocs | 1.132x faster; 1.71x lower heap; 3.20x fewer allocations | One native chunk whose first read succeeds with an eligible raw value evaluates exact capacity; counters, structured/noneligible values, writes, and multi-chunk requests retain their prior output behavior |
 | Current pass | [Direct scalar raw-byte response append](#direct-scalar-raw-byte-response-append), 64 distinct in-memory byte `GET`s | Temporary string then response copy: 79 allocs | Direct response-owned byte append: 15 allocs | 5.27x fewer allocations; 64 temporary strings eliminated | Native and TTL fallback paths use it only for in-memory raw bytes; on-disk bytes and every other type retain materialization |
+| Current pass | [Exact native raw-byte read columns](#direct-scalar-raw-byte-response-append), 64 distinct in-memory byte `GET`s | Geometric direct-native columns: 3,335 ns; 1,760 B; 15 allocs | Exact raw-value columns: 3,209 ns; 1,264 B; 5 allocs | 1.039x faster; 1.39x lower heap; 3.00x fewer allocations | Direct native one-chunk all-`GET` requests only; TTL fallback and non-raw values keep their current allocation behavior |
 | Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
@@ -4656,16 +4657,17 @@ a miss or overflow would reserve output that does not exist, trading a target
 win for worse sparse or error-path memory.
 
 <a id="exact-single-chunk-raw-string-read-columns"></a>
-### Exact Single-Chunk Raw-String Read Columns
+### Exact Single-Chunk Raw Read Columns
 
-Distinct raw-string reads in one native 64-command chunk already return the
-typed HAT-trie values before Go appends the packed protobuf response columns.
-The response formerly grew both `Values` and `ValueEnds` geometrically. The
-new bounded path first confirms that the first successful read is a raw string,
-then totals only successful raw-string results under the existing trie lock and
-allocates the exact output capacities. Empty raw strings retain the prior nil
-`Values` behavior. Misses, counters, bytes, structured values, mixed batches,
-and requests larger than one native chunk keep their existing output path.
+Distinct raw reads in one native 64-command chunk already return typed HAT-trie
+values before Go appends the packed protobuf response columns. The response
+formerly grew both `Values` and `ValueEnds` geometrically. The bounded path
+first confirms that the first read succeeded with an eligible raw response
+value, then totals only successful values of that same raw family under the
+existing trie lock and allocates exact output capacities. Empty raw values
+retain the prior nil `Values` behavior. Counters, structured or otherwise
+noneligible values, writes, and requests larger than one native chunk keep
+their existing output path.
 
 The focused test was added first and failed with a 502-byte `Values` payload
 retaining 512 bytes. It now checks ordered status/value columns and exact final
@@ -4701,14 +4703,27 @@ bytes into the response, preserving ownership after the trie lock is released.
 On-disk bytes and every other type retain `commandValueLocked` unchanged.
 
 Tests were added first for native and TTL-fallback paths; both failed at 79
-allocations for 64 binary values. They now verify byte-identical values
-including NUL and `0xff` bytes, native routing or fallback as appropriate, and
-15 allocations, eliminating all 64 temporary strings.
+allocations for 64 binary values. Direct response-owned appends reduced that to
+15 by eliminating all 64 temporary strings. A second test-first pass then
+required exact native output capacities and failed at 15 allocations; it now
+verifies byte-identical values including NUL and `0xff` bytes, native routing,
+exact capacities, and 5 allocations. The TTL-forced fallback preserves its
+15-allocation behavior because it does not use direct native results.
 
 ```sh
 make run CMD='go test . -run=TestScalarBatchDirectNativeRawByteReadsAvoidTemporaryStrings -count=1'
 make run CMD='go test . -run=TestScalarBatchDirectFallbackRawByteReadsAvoidTemporaryStrings -count=1'
+make run CMD='go test . -run=NONE -bench="BenchmarkScalarNativeBatch/ReadBytes64" -benchmem -count=10'
 ```
+
+| Native raw-byte workload | Geometric direct-native columns | Exact raw-value columns | Improvement |
+| --- | ---: | ---: | --- |
+| 64 distinct 4-byte `GET`s, median of 10 runs | 3,335 ns; 1,760 B; 15 allocs | 3,209 ns; 1,264 B; 5 allocs | 1.039x faster; 1.39x lower heap; 3.00x fewer allocations |
+
+The controlled baseline was the same benchmark and worktree with only the
+raw-byte eligibility branch temporarily absent. This remains a direct native,
+one-chunk all-`GET` reservation; TTL fallback, counters, structured values,
+on-disk bytes, writes, and multi-chunk requests retain their existing paths.
 
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys

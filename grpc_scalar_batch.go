@@ -387,7 +387,7 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 			return true
 		}
 		results, _, _ := ht.runNativeScalarRequestChunkLocked(request, 0, len(operations), maxChunkKeyBytes, stringIndex, integerIndex)
-		ht.reserveNativeScalarRawStringReadResponseLocked(request, response, results)
+		ht.reserveNativeScalarRawReadResponseLocked(request, response, results)
 		for index, result := range results {
 			item := nativeCommandBatchItem{
 				key:     request.Keys[index],

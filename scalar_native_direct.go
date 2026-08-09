@@ -75,7 +75,7 @@ func (ht *HatTrie) runNativeScalarRequestChunkLocked(request *hatriecachev1.Scal
 	return results, stringIndex, integerIndex
 }
 
-func (ht *HatTrie) reserveNativeScalarRawStringReadResponseLocked(request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, results []C.hc_batch_result_t) {
+func (ht *HatTrie) reserveNativeScalarRawReadResponseLocked(request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, results []C.hc_batch_result_t) {
 	operations := request.GetOperations()
 	if len(operations) == 0 || len(operations) > nativeScalarDirectBatchChunkSize || len(results) != len(operations) || len(response.Values) != 0 || len(response.ValueEnds) != 0 {
 		return
@@ -85,9 +85,11 @@ func (ht *HatTrie) reserveNativeScalarRawStringReadResponseLocked(request *hatri
 	}
 	first := HatValue{}
 	first.fromValue(results[0].value)
-	if !first.IsStringAtRaws() {
+	if _, ok := ht.nativeScalarRawResponseValueSizeLocked(first); !ok {
 		return
 	}
+	firstIsString := first.IsStringAtRaws()
+	firstIsBytes := first.IsBytesAtRaws() && !first.OnDisk()
 
 	valueBytes := 0
 	valueCount := 0
@@ -101,14 +103,17 @@ func (ht *HatTrie) reserveNativeScalarRawStringReadResponseLocked(request *hatri
 		}
 		current := HatValue{}
 		current.fromValue(result.value)
-		if !current.IsStringAtRaws() {
+		if (firstIsString && !current.IsStringAtRaws()) || (firstIsBytes && (!current.IsBytesAtRaws() || current.OnDisk())) {
 			return
 		}
-		value := ht.strings.Get(current.Index)
-		if len(value) > max-valueBytes {
+		valueSize, ok := ht.nativeScalarRawResponseValueSizeLocked(current)
+		if !ok {
 			return
 		}
-		valueBytes += len(value)
+		if valueSize > max-valueBytes {
+			return
+		}
+		valueBytes += valueSize
 		valueCount++
 	}
 	if valueCount == 0 {
@@ -118,6 +123,16 @@ func (ht *HatTrie) reserveNativeScalarRawStringReadResponseLocked(request *hatri
 		response.Values = make([]byte, 0, valueBytes)
 	}
 	response.ValueEnds = make([]uint32, 0, valueCount)
+}
+
+func (ht *HatTrie) nativeScalarRawResponseValueSizeLocked(value HatValue) (int, bool) {
+	if value.IsStringAtRaws() {
+		return len(ht.strings.Get(value.Index)), true
+	}
+	if value.IsBytesAtRaws() && !value.OnDisk() {
+		return len(ht.raws.array[value.Index]), true
+	}
+	return 0, false
 }
 
 func nativeScalarBatchOperationCode(operation hatriecachev1.ScalarCommand) C.uint8_t {
