@@ -144,7 +144,10 @@ func (tree *radixTreeData) Delete(key string) bool {
 }
 
 func (tree radixTreeData) Contains(key string) bool {
-	_, ok := tree.Get(key)
+	if tree.root == nil {
+		return false
+	}
+	_, ok := tree.root.get(key)
 	return ok
 }
 

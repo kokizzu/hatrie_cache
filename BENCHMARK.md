@@ -12815,6 +12815,26 @@ reservoir samples, and Fenwick trees.
 | Quantile sketch | `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ` |
 | Fenwick tree | `CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW` |
 
+<a id="radix-tree-membership-lookup"></a>
+### Radix-Tree Membership Lookup
+
+`HASRT` only needs a presence bit, but the old internal `Contains` route called
+`Get` and cloned the stored value before discarding it. `Contains` now performs
+the existing root lookup directly; `Get` remains unchanged and still returns a
+defensive clone.
+
+The test covers empty-root, empty-key, hit, and miss behavior. On a pinned CPU,
+the 128-entry nested-map hit benchmark used 10 million operations per sample.
+The median fell from 321.4 ns, 392 B, and four allocations to 28.94 ns, 0 B,
+and zero allocations: **11.11x faster**, with temporary heap and allocations
+eliminated. The ordinary `Get` control was 37.44 ns before and 36.15 ns after
+(1.04x faster), so no code-layout regression was observed.
+
+```sh
+make run CMD='go test . -run=TestRadixTreeContainsReportsMembershipWithoutValueAccess -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkRadixTreeContains -benchtime=3s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

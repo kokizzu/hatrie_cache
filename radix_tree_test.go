@@ -60,6 +60,26 @@ func TestRadixTreePutGetDeleteAndPrefix(t *testing.T) {
 	}
 }
 
+func TestRadixTreeContainsReportsMembershipWithoutValueAccess(t *testing.T) {
+	var empty radixTreeData
+	if empty.Contains("") || empty.Contains("missing") {
+		t.Fatal("empty tree Contains() = true, want false")
+	}
+
+	tree := newRadixTreeData()
+	if !tree.Put("", Map{"root": "value"}) || !tree.Put("user:100/profile", Map{"role": "admin"}) {
+		t.Fatal("Put() = false, want new entries")
+	}
+	for _, key := range []string{"", "user:100/profile"} {
+		if !tree.Contains(key) {
+			t.Fatalf("Contains(%q) = false, want true", key)
+		}
+	}
+	if tree.Contains("user:100/missing") {
+		t.Fatal("Contains(missing) = true, want false")
+	}
+}
+
 func TestRadixTreeInsertionOrderProducesCanonicalShape(t *testing.T) {
 	items := []RadixTreeItem{
 		{Key: "", Value: "root"},

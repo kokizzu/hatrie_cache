@@ -8,7 +8,23 @@ import (
 	"time"
 )
 
-var radixTreePrefixJSONSink string
+var (
+	radixTreePrefixJSONSink string
+	radixTreeContainsSink   bool
+)
+
+func BenchmarkRadixTreeContains(b *testing.B) {
+	tree := newRadixTreeData()
+	keys := radixTreeBenchmarkKeys(128)
+	for index, key := range keys {
+		tree.Put(key, Map{"id": index, "roles": Slice{"reader", "writer"}})
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		radixTreeContainsSink = tree.Contains(keys[iteration&(len(keys)-1)])
+	}
+}
 
 func BenchmarkRadixTreePlainPrefixJSON(b *testing.B) {
 	for _, valueSize := range []int{8, 16, 128} {
