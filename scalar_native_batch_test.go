@@ -267,6 +267,31 @@ func TestScalarBatchDirectNativePreallocatesExistsOutputColumn(t *testing.T) {
 	}
 }
 
+func TestScalarBatchDirectNativeExistsFallbackDoesNotRetainUnusedIntegerColumn(t *testing.T) {
+	trie := newTestTrie(t)
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    8,
+		Operations: make([]hatriecachev1.ScalarCommand, maxPublicCommandBatchSize),
+		Keys:       make([]string, maxPublicCommandBatchSize),
+	}
+	for index := range request.Operations {
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS
+	}
+
+	response := trie.executeScalarBatchDirect(context.Background(), request)
+	if !response.GetOk() || len(response.GetStatuses()) != len(request.Operations) || len(response.GetIntegerValues()) != 0 {
+		t.Fatalf("executeScalarBatchDirect(invalid exists) = %#v", response)
+	}
+	for index, status := range response.GetStatuses() {
+		if status != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_INVALID_KEY {
+			t.Fatalf("invalid EXISTS status[%d] = %v, want INVALID_KEY", index, status)
+		}
+	}
+	if cap(response.GetIntegerValues()) != 0 {
+		t.Fatalf("invalid EXISTS fallback integer capacity = %d, want 0", cap(response.GetIntegerValues()))
+	}
+}
+
 func TestScalarBatchDirectNativePreallocatesIncrementOutputColumn(t *testing.T) {
 	trie := newTestTrie(t)
 	const commands = nativeScalarDirectBatchChunkSize

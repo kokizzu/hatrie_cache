@@ -333,10 +333,7 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 	if len(operations) < minNativeScalarDirectBatchSize || len(ht.dbrefs.array) != 0 || ctx.Err() != nil {
 		return false
 	}
-	if operations[0] == hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS && scalarBatchAllExists(operations) {
-		// EXISTS always emits one boolean, so this exact capacity cannot over-reserve.
-		response.IntegerValues = make([]int64, 0, len(operations))
-	}
+	allExists := operations[0] == hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS && scalarBatchAllExists(operations)
 	integerIndex := 0
 	chunkKeyBytes := 0
 	maxChunkKeyBytes := 0
@@ -370,6 +367,10 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 	}
 	if chunkKeyBytes > maxChunkKeyBytes {
 		maxChunkKeyBytes = chunkKeyBytes
+	}
+	if allExists {
+		// Eligibility is confirmed and EXISTS always emits one boolean.
+		response.IntegerValues = make([]int64, 0, len(operations))
 	}
 	defer func() {
 		if cap(ht.nativeCommandBatchScratch.keys) > maxNativeScalarDirectRetainedKeyBytes {

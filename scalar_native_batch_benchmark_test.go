@@ -43,6 +43,28 @@ func BenchmarkScalarNativeBatch(b *testing.B) {
 	}
 }
 
+func BenchmarkScalarNativeExistsFallbackInvalid(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    9,
+		Operations: make([]hatriecachev1.ScalarCommand, maxPublicCommandBatchSize),
+		Keys:       make([]string, maxPublicCommandBatchSize),
+	}
+	for index := range request.Operations {
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		response := trie.executeScalarBatchDirect(context.Background(), request)
+		if !response.GetOk() || len(response.GetIntegerValues()) != 0 {
+			b.Fatalf("executeScalarBatchDirect(invalid exists) = %#v", response)
+		}
+		scalarNativeBatchResponseSink = response
+	}
+}
+
 func benchmarkScalarNativeExistsBatch(b *testing.B, commands int) {
 	trie := CreateHatTrie()
 	b.Cleanup(trie.Destroy)

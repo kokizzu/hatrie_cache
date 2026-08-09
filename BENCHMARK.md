@@ -330,6 +330,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Native batch oversized-key guard](#native-batch-oversized-key-guard), 4,096 valid C operations | SET: 447,156 ns; GET: 418,473 ns | SET: 444,204 ns; GET: 414,628 ns | CPU neutral (1.007x/1.009x faster in this run); identical heap and allocations | Invalid direct C input returns `MISSING` rather than dereferencing a null native location |
 | Current pass | [Native batch arena bounds guard](#native-batch-arena-bounds-guard), 4,096 valid C operations | SET: 446,380 ns; GET: 415,036 ns | SET: 440,503 ns; GET: 414,099 ns | CPU neutral (1.013x/1.002x faster in this run); identical heap and allocations | Rejects direct C key offsets and lengths outside the supplied key arena before pointer arithmetic |
+| Current pass | [Native EXISTS eligibility reservation](#native-exists-eligibility-reservation), 4,096 invalid `EXISTS` commands | Pre-validation unused response backing: 20,774 ns; 65,776 B; 4 allocs | Allocate only after native eligibility: 15,233 ns; 33,008 B; 3 allocs | 1.364x faster; 1.99x lower heap; one allocation removed | Valid native `EXISTS` and mixed controls are CPU-neutral or faster with identical memory; invalid requests retain no unused integer backing |
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
@@ -4626,8 +4627,8 @@ size, or fallback rule. It removes a private intermediate slice only.
 <a id="exact-native-exists-response-column"></a>
 ### Exact Native EXISTS Response Column
 
-Native scalar batches already validate every operation before they enter C, but
-an all-`EXISTS` batch still grew its one boolean result column geometrically.
+Native scalar batches validate every operation before they enter C, but an
+all-`EXISTS` batch still grew its one boolean result column geometrically.
 Every `EXISTS` operation produces exactly one `IntegerValues` entry, including
 misses, so this is the one result shape where the exact final capacity is known
 without predicting a read hit or an increment overflow. The native path now
@@ -4660,6 +4661,41 @@ backing, extra wire field, configuration, persistent state, or fallback-rule
 change. Preallocating `GET` or `INCREMENT` columns was deliberately not used:
 a miss or overflow would reserve output that does not exist, trading a target
 win for worse sparse or error-path memory.
+
+<a id="native-exists-eligibility-reservation"></a>
+### Native EXISTS Eligibility Reservation
+
+The exact native `EXISTS` output column is useful only after the direct-native
+eligibility scan accepts the request. Previously it was allocated before that
+scan, so an all-invalid maximum-size request fell back to normal validation
+while retaining an unused 4,096-element `IntegerValues` backing array. The
+reservation now occurs immediately after eligibility succeeds and before any C
+work begins. Valid native `EXISTS` behavior, exact capacity, response
+ownership, and wire semantics remain unchanged.
+
+The new test uses an all-invalid maximum-size `EXISTS` request and initially
+failed with 4,096 retained integer slots. It now checks successful fallback,
+all invalid-key statuses, no emitted integer values, and zero integer-column
+capacity. The original valid-native exact-capacity test remains part of the
+same focused suite.
+
+```sh
+make run CMD='go test . -run=TestScalarBatchDirectNative -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-native-exists-eligibility-baseline.test /tmp/hatrie-native-exists-eligibility-candidate.test /tmp/hatrie-native-exists-eligibility-invalid-pairs.txt 20 15 1000x BenchmarkScalarNativeExistsFallbackInvalid'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-native-exists-eligibility-baseline.test /tmp/hatrie-native-exists-eligibility-candidate.test /tmp/hatrie-native-exists-eligibility-valid-pairs.txt 20 15 100000x BenchmarkScalarNativeBatch/Exists64'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-native-exists-eligibility-baseline.test /tmp/hatrie-native-exists-eligibility-candidate.test /tmp/hatrie-native-exists-eligibility-mixed-pairs.txt 20 15 100000x BenchmarkScalarNativeBatch/Mixed64'
+```
+
+| Native scalar workload, 15 alternating CPU-pinned blocks | Baseline | Eligibility-ordered reservation | Result |
+| --- | ---: | ---: | --- |
+| 4,096 invalid `EXISTS` operations | 20,774 ns; 65,776 B; 4 allocs | 15,233 ns; 33,008 B; 3 allocs | 1.364x faster; 1.99x lower heap; one allocation removed |
+| 64 valid native `EXISTS` operations | 2,442 ns; 1,264 B; 4 allocs | 2,426 ns; 1,264 B; 4 allocs | 1.007x faster; memory unchanged |
+| 64 native mixed operations | 4,340 ns; 1,688 B; 33 allocs | 4,330 ns; 1,688 B; 33 allocs | 1.002x faster; memory unchanged |
+
+Frozen binaries differ only in reservation placement. The change eliminates an
+unneeded allocation from malformed-but-validated gRPC requests and does not
+alter request validation, native C access, execution ordering, persistence,
+storage, wire format, or cancellation behavior.
 
 <a id="exact-single-chunk-raw-string-read-columns"></a>
 ### Exact Single-Chunk Raw Read Columns
