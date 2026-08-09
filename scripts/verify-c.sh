@@ -44,7 +44,8 @@ build_c_check() {
 		"$ROOT/luikore__hat-trie/src/hat-trie.c" \
 		"$ROOT/luikore__hat-trie/src/ahtable.c" \
 		"$ROOT/luikore__hat-trie/src/misc.c" \
-		"$ROOT/luikore__hat-trie/src/murmurhash3.c"
+		"$ROOT/luikore__hat-trie/src/murmurhash3.c" \
+		"$ROOT/native_command_batch.c"
 }
 
 build_c_ahtable_check() {

@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "str_map.h"
+#include "../../native_command_batch.h"
 #include "../src/ahtable.h"
 #include "../src/hat-trie.h"
 #include "../src/misc.h"
@@ -1032,6 +1033,29 @@ void test_hattrie_tryget_split_boundaries()
     fprintf(stderr, "done.\n");
 }
 
+void test_native_batch_rejects_oversized_keys()
+{
+    fprintf(stderr, "checking native batch oversized-key rejection... ");
+
+    const char key[] = "x";
+    hc_batch_operation_t operation = {0};
+    hc_batch_result_t result = {0};
+    hattrie_t* trie = hattrie_create();
+    operation.key_length = (uint32_t) ahtable_max_key_length + 1;
+    operation.operation = HC_BATCH_SET;
+    operation.input = 7;
+
+    hc_hattrie_command_batch(trie, key, &operation, &result, 1);
+    if (result.status != HC_BATCH_MISSING || result.previous != 0 ||
+        result.value != 0 || hattrie_size(trie) != 0) {
+        fprintf(stderr, "[error] native batch accepted oversized key\n");
+        have_error = 1;
+    }
+
+    hattrie_free(trie);
+    fprintf(stderr, "done.\n");
+}
+
 
 
 int main()
@@ -1047,6 +1071,7 @@ int main()
     test_hattrie_batch_iteration();
     test_hattrie_batch_lookup();
     test_hattrie_tryget_split_boundaries();
+    test_native_batch_rejects_oversized_keys();
 
     setup();
     test_hattrie_insert();

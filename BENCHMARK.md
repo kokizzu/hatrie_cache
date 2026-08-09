@@ -328,6 +328,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
+| Current pass | [Native batch oversized-key guard](#native-batch-oversized-key-guard), 4,096 valid C operations | SET: 447,156 ns; GET: 418,473 ns | SET: 444,204 ns; GET: 414,628 ns | CPU neutral (1.007x/1.009x faster in this run); identical heap and allocations | Invalid direct C input returns `MISSING` rather than dereferencing a null native location |
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
@@ -4375,6 +4376,33 @@ increments, smaller batches, and journal executor interception retain the Go
 path. Ordered C results are reconciled in Go for backing-store cleanup,
 telemetry, mutation tracking, overflow errors, and response formatting. Raw
 output is in `build/benchmarks/native-c-command-batch.txt`.
+
+<a id="native-batch-oversized-key-guard"></a>
+### Native Batch Oversized-Key Guard
+
+Go validates every key before it crosses cgo, and the native HAT-trie also
+rejects keys longer than 32,767 bytes. The C batch helper previously assumed
+that Go-only invariant, then dereferenced the rejected `NULL` location for a
+direct oversized `SET` or `INCREMENT`. It now returns the established
+`HC_BATCH_MISSING` result before forming or dereferencing that location. The C
+regression invokes the batch helper directly with a 32,768-byte logical key
+and proves that the trie remains empty. `make verify-c` compiles and runs that
+test in the optimized suite and sanitizer variants.
+
+The report of a 15,392,894,357,504-byte allocation is also accounted for:
+with `vm.overcommit_memory=2`, AddressSanitizer's expected shadow-memory
+reservation has that exact size. `make verify-c` detects strict overcommit,
+skips ASan/UBSan instead of attempting that reservation, and runs its
+LeakSanitizer fallback. This is a verifier-environment reservation, not a
+HAT-trie key or slot allocation.
+
+Frozen `HEAD` and guarded test binaries ran fifteen 4,096-command samples per
+mode at `-benchtime=100x`; heap and allocation counts were unchanged.
+
+| Native C path, median of 15 | Before guard | Guarded | Result |
+| --- | ---: | ---: | --- |
+| Counter `SET` | 447,156 ns; 262,146 B; 1 alloc | 444,204 ns; 262,146 B; 1 alloc | 1.007x faster; treated as CPU-neutral control |
+| `GET` | 418,473 ns; 277,410 B; 3,997 allocs | 414,628 ns; 277,410 B; 3,997 allocs | 1.009x faster; treated as CPU-neutral control |
 
 <a id="exact-batch-telemetry-aggregation"></a>
 ### Exact Batch Telemetry Aggregation

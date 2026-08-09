@@ -1,4 +1,5 @@
 #include "native_command_batch.h"
+#include "luikore__hat-trie/src/ahtable.h"
 
 #include <limits.h>
 
@@ -14,12 +15,18 @@ void hc_hattrie_command_batch(hattrie_t *trie, const char *keys,
     for (index = 0; index < count; index++) {
         const hc_batch_operation_t *operation = &operations[index];
         hc_batch_result_t *result = &results[index];
-        const char *key = keys + operation->key_offset;
         value_t *location;
 
         result->previous = 0;
         result->value = 0;
         result->status = HC_BATCH_MISSING;
+
+        // Go validates keys before this boundary; keep direct/future callers safe too.
+        if (operation->key_length > ahtable_max_key_length) {
+            continue;
+        }
+
+        const char *key = keys + operation->key_offset;
 
         switch (operation->operation) {
         case HC_BATCH_LOOKUP:
