@@ -378,6 +378,25 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 	}()
 	stringIndex := 0
 	integerIndex = 0
+	if len(operations) <= nativeScalarDirectBatchChunkSize {
+		if err := ctx.Err(); err != nil {
+			response.Ok = false
+			response.Error = err.Error()
+			response.Statuses = response.Statuses[:0]
+			response.ValueKinds = response.ValueKinds[:0]
+			return true
+		}
+		results, _, _ := ht.runNativeScalarRequestChunkLocked(request, 0, len(operations), maxChunkKeyBytes, stringIndex, integerIndex)
+		ht.reserveNativeScalarRawStringReadResponseLocked(request, response, results)
+		for index, result := range results {
+			item := nativeCommandBatchItem{
+				key:     request.Keys[index],
+				command: scalarNativePublicCommand(operations[index]),
+			}
+			ht.applyNativeScalarBatchResultLocked(response, index, item, result, telemetry)
+		}
+		return true
+	}
 	for start := 0; start < len(operations); start += nativeScalarDirectBatchChunkSize {
 		if err := ctx.Err(); err != nil {
 			response.Ok = false

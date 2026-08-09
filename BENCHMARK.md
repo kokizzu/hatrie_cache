@@ -333,6 +333,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
+| Current pass | [Exact single-chunk raw-string read columns](#exact-single-chunk-raw-string-read-columns), 64 distinct gRPC `GET`s | Geometric response buffers: 3,773 ns; 2,272 B; 16 allocs | Exact confirmed raw-string columns: 3,332 ns; 1,328 B; 5 allocs | 1.132x faster; 1.71x lower heap; 3.20x fewer allocations | Only one native 64-command chunk whose first successful read is a raw string evaluates exact capacity; mixed, misses, other types, and multi-chunk requests retain their prior output behavior |
 | Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
@@ -4652,6 +4653,41 @@ backing, extra wire field, configuration, persistent state, or fallback-rule
 change. Preallocating `GET` or `INCREMENT` columns was deliberately not used:
 a miss or overflow would reserve output that does not exist, trading a target
 win for worse sparse or error-path memory.
+
+<a id="exact-single-chunk-raw-string-read-columns"></a>
+### Exact Single-Chunk Raw-String Read Columns
+
+Distinct raw-string reads in one native 64-command chunk already return the
+typed HAT-trie values before Go appends the packed protobuf response columns.
+The response formerly grew both `Values` and `ValueEnds` geometrically. The
+new bounded path first confirms that the first successful read is a raw string,
+then totals only successful raw-string results under the existing trie lock and
+allocates the exact output capacities. Empty raw strings retain the prior nil
+`Values` behavior. Misses, counters, bytes, structured values, mixed batches,
+and requests larger than one native chunk keep their existing output path.
+
+The focused test was added first and failed with a 502-byte `Values` payload
+retaining 512 bytes. It now checks ordered status/value columns and exact final
+capacities. Frozen before/after binaries ran fifteen alternating CPU-pinned
+10,000-batch blocks; the target and non-target controls keep the same request,
+wire representation, scratch capacity, and response ownership.
+
+```sh
+make run CMD='go test . -run=TestScalarBatchDirectNativePreallocatesRawStringReadColumns -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-read-before.test /tmp/hatrie-scalar-read-after.test /tmp/hatrie-scalar-read64-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Read64'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-read-before.test /tmp/hatrie-scalar-read-after.test /tmp/hatrie-scalar-read256-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Read256'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-read-before.test /tmp/hatrie-scalar-read-after.test /tmp/hatrie-scalar-mixed64-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Mixed64'
+```
+
+| Native scalar workload | Geometric result columns | Exact raw-string columns | Improvement |
+| --- | ---: | ---: | --- |
+| 64 distinct raw-string `GET`s | 3,773 ns; 2,272 B; 16 allocs | 3,332 ns; 1,328 B; 5 allocs | 1.132x faster; 1.71x lower heap; 3.20x fewer allocations |
+| 256 distinct raw-string `GET`s | 13,088 ns; 7,648 B; 20 allocs | 12,957 ns; 7,648 B; 20 allocs | 1.010x faster; memory unchanged because multi-chunk requests retain their prior path |
+| 64 mixed scalar operations | 4,740 ns; 1,688 B; 33 allocs | 4,686 ns; 1,688 B; 33 allocs | 1.012x faster; memory unchanged |
+
+The response remains request-owned and transient. There is no pool, retained
+backing, new wire field, configuration, persistence change, or changed
+cancellation/fallback behavior.
 
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys

@@ -75,6 +75,51 @@ func (ht *HatTrie) runNativeScalarRequestChunkLocked(request *hatriecachev1.Scal
 	return results, stringIndex, integerIndex
 }
 
+func (ht *HatTrie) reserveNativeScalarRawStringReadResponseLocked(request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, results []C.hc_batch_result_t) {
+	operations := request.GetOperations()
+	if len(operations) == 0 || len(operations) > nativeScalarDirectBatchChunkSize || len(results) != len(operations) || len(response.Values) != 0 || len(response.ValueEnds) != 0 {
+		return
+	}
+	if operations[0] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET || uint8(results[0].status) != uint8(C.HC_BATCH_OK) {
+		return
+	}
+	first := HatValue{}
+	first.fromValue(results[0].value)
+	if !first.IsStringAtRaws() {
+		return
+	}
+
+	valueBytes := 0
+	valueCount := 0
+	max := int(^uint(0) >> 1)
+	for index, result := range results {
+		if operations[index] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET {
+			return
+		}
+		if uint8(result.status) != uint8(C.HC_BATCH_OK) {
+			continue
+		}
+		current := HatValue{}
+		current.fromValue(result.value)
+		if !current.IsStringAtRaws() {
+			continue
+		}
+		value := ht.strings.Get(current.Index)
+		if len(value) > max-valueBytes {
+			return
+		}
+		valueBytes += len(value)
+		valueCount++
+	}
+	if valueCount == 0 {
+		return
+	}
+	if valueBytes != 0 {
+		response.Values = make([]byte, 0, valueBytes)
+	}
+	response.ValueEnds = make([]uint32, 0, valueCount)
+}
+
 func nativeScalarBatchOperationCode(operation hatriecachev1.ScalarCommand) C.uint8_t {
 	switch operation {
 	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING,

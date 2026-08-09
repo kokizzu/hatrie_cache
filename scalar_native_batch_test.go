@@ -266,6 +266,36 @@ func TestScalarBatchDirectNativePreallocatesExistsOutputColumn(t *testing.T) {
 	}
 }
 
+func TestScalarBatchDirectNativePreallocatesRawStringReadColumns(t *testing.T) {
+	trie := newTestTrie(t)
+	const commands = nativeScalarDirectBatchChunkSize
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    8,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	var wantValues strings.Builder
+	for index := range request.Operations {
+		key := fmt.Sprintf("read:%d", index)
+		value := fmt.Sprintf("value:%d", index)
+		trie.UpsertString(key, value)
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+		request.Keys[index] = key
+		wantValues.WriteString(value)
+	}
+
+	response := trie.executeScalarBatchDirect(context.Background(), request)
+	if !response.GetOk() || len(response.GetStatuses()) != commands || len(response.GetValueEnds()) != commands || string(response.GetValues()) != wantValues.String() {
+		t.Fatalf("executeScalarBatchDirect(raw reads) = %#v, want %d byte results", response, commands)
+	}
+	if cap(response.GetValues()) != len(response.GetValues()) {
+		t.Fatalf("raw read values capacity = %d, want exact %d", cap(response.GetValues()), len(response.GetValues()))
+	}
+	if cap(response.GetValueEnds()) != len(response.GetValueEnds()) {
+		t.Fatalf("raw read value ends capacity = %d, want exact %d", cap(response.GetValueEnds()), len(response.GetValueEnds()))
+	}
+}
+
 func TestScalarBatchDirectDoesNotRetainOversizedNativeKeys(t *testing.T) {
 	trie := newTestTrie(t)
 	operations := make([]hatriecachev1.ScalarCommand, minNativeScalarDirectBatchSize)
