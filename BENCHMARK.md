@@ -342,6 +342,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compatibility structured byte output columns](#compatibility-structured-byte-output-columns), 64 completed `PEEK_MAP` results | Geometric response columns: 2,348 ns; 5,648 B; 17 allocs | Exact emitted-value columns: 1,501 ns; 2,288 B; 5 allocs | 1.564x faster; 2.47x lower heap; 3.40x fewer allocations | Only >=32 homogeneous byte-result compatibility conversion; misses and errors reserve no output, and mixed control is CPU-neutral with identical memory |
 | Rejected | [Separate-call structured boolean output preallocation](#rejected-compatibility-structured-boolean-output-preallocation), 64 completed `HAS_SET` results | Geometric integer column: 1,038 ns; 1,768 B; 10 allocs | Candidate exact column: 933 ns; 1,264 B; 4 allocs | Target 1.11x faster; 1.40x lower heap; 2.50x fewer allocations | Reverted: an extra compatibility conversion call regressed mixed structured work 1.077x (1,653 to 1,780 ns) |
 | Current pass | [Compatibility structured boolean output column](#compatibility-structured-boolean-output-column), 64 completed `HAS_SET` results | Geometric integer column: 1,048 ns; 1,768 B; 10 allocs | Exact emitted integer column: 916 ns; 1,264 B; 4 allocs | 1.144x faster; 1.40x lower heap; 2.50x fewer allocations | Only >=32 all-`HAS_SET` compatibility conversion; it reuses the existing reservation call, while the mixed control is CPU-neutral with identical memory |
+| Rejected | [Direct per-value `HAS_SET` preallocation](#rejected-direct-per-value-hasset-preallocation), 64 all-nonempty values | Geometric integer column: 6,534 ns; 2,520 B; 75 allocs | Candidate exact column: 6,340 ns; 2,016 B; 69 allocs | Target 1.031x faster; 1.25x lower heap; 1.09x fewer allocations | Reverted: a single empty value regressed from 6,630 to 6,844 ns (1.032x slower) with identical memory |
 | Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
@@ -4920,6 +4921,23 @@ Frozen baseline/candidate binaries differ only in the integrated `HAS_SET`
 branch. Request/result ownership, public command execution, routing,
 durability, value/status/error semantics, wire format, storage, and
 persistence are unchanged.
+
+<a id="rejected-direct-per-value-hasset-preallocation"></a>
+### Rejected Direct Per-Value HAS_SET Preallocation
+
+The direct structured path already reserves integer output for homogeneous
+`HAS_SET` batches with one non-empty shared value. A trial extended that rule
+to one non-empty value per operation by scanning every value during validation.
+The focused validation and direct-response tests were added first and confirmed
+that the all-nonempty 64-command case reduced the response from 2,520 B / 75
+allocations to 2,016 B / 69 allocations, with CPU improving from 6,534 ns to
+6,340 ns median.
+
+The implementation was removed because a 64-command request with one empty
+value needs no integer reservation but still pays the validation scan. Its
+paired median regressed from 6,630 ns to 6,844 ns (1.032x slower), with the
+same 2,536 B and 76 allocations. No runtime code, tests, or benchmarks from
+this candidate are retained.
 
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys
