@@ -3479,9 +3479,36 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 	default:
+		if hval.IsSlice() || hval.IsSet() {
+			return ht.executeFastGetSliceOrSetCommandRLocked(key, hval)
+		}
 		ht.mu.RUnlock()
 		return CacheCommandResponse{}, false
 	}
+}
+
+func (ht *HatTrie) executeFastGetSliceOrSetCommandRLocked(key string, hval HatValue) (CacheCommandResponse, bool) {
+	var (
+		value string
+		err   error
+	)
+	if hval.IsSlice() {
+		if hval.Index >= 0 {
+			value, err = ht.slices.array[hval.Index].jsonString()
+		} else {
+			value, err = ht.slices.packedJSONString(hval.Index)
+		}
+	} else {
+		value, err = ht.sets.jsonString(hval.Index)
+	}
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		ht.mu.RUnlock()
+		return commandError(err.Error()), true
+	}
+	ht.recordReadLocked(true, key)
+	ht.mu.RUnlock()
+	return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
 }
 
 func (ht *HatTrie) executeFastPeekMapCommand(key string, subkey string) (CacheCommandResponse, bool) {
