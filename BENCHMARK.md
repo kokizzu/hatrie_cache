@@ -12859,6 +12859,17 @@ make run CMD='go test . -run=TestExecuteCommandGetMapReturnsCanonicalJSON -count
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/MapGet -benchtime=3s -count=7 -benchmem -cpu=1'
 ```
 
+#### Rejected: Inline Slice And Set GET Cases
+
+The same read-lock treatment was measured for slices and sets. Their targeted
+medians improved from 133.6 to 113.7 ns (1.18x) and from 129.7 to 109.7 ns
+(1.18x), respectively, with unchanged response allocations. However, placing
+both cases inline enlarged the shared exact-GET switch enough to move the map
+control from 125.0 to 130.7 ns (1.046x slower), also with unchanged allocations.
+The slice/set production cases were removed. Their canonical JSON tests and
+benchmarks remain so a future layout-neutral design can be evaluated against
+the same controls.
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

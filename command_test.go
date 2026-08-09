@@ -521,6 +521,34 @@ func TestExecuteCommandGetMapReturnsCanonicalJSON(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandGetSliceAndSetReturnCanonicalJSON(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertSlice("events", Slice{"start", Map{"active": true}})
+	ht.UpsertSet("tags", Set{"zeta", "alpha"})
+
+	for _, test := range []struct {
+		key  string
+		want interface{}
+	}{
+		{key: "events", want: []interface{}{"start", map[string]interface{}{"active": true}}},
+		{key: "tags", want: []interface{}{"alpha", "zeta"}},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: test.key})
+			if !got.OK || got.Message != "ok" {
+				t.Fatalf("GET response = %#v, want ok", got)
+			}
+			var value interface{}
+			if err := json.Unmarshal([]byte(got.Value), &value); err != nil {
+				t.Fatalf("GET JSON = %q: %v", got.Value, err)
+			}
+			if !reflect.DeepEqual(value, test.want) {
+				t.Fatalf("GET value = %#v, want %#v", value, test.want)
+			}
+		})
+	}
+}
+
 func TestExecuteCommandPutMapExactPathReplacesNonMap(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "profile", Value: "old"}); !got.OK {

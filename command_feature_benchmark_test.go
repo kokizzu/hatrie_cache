@@ -71,9 +71,19 @@ func BenchmarkCommandFeature(b *testing.B) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUSHSLICE", Key: "slice:key", Value: "value"})
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "POPSLICE", Key: "slice:key"})
 		}},
+		{name: "SliceGet", setup: func(b *testing.B, ht *HatTrie) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUSHSLICE", Key: "slice:key", Value: "value"})
+		}, run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "GET", Key: "slice:key"})
+		}},
 		{name: "SetAddHas", run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "ADDSET", Key: "set:key", Value: "value"})
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "HASSET", Key: "set:key", Value: "value"})
+		}},
+		{name: "SetGet", setup: func(b *testing.B, ht *HatTrie) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "ADDSET", Key: "set:key", Value: "value"})
+		}, run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "GET", Key: "set:key"})
 		}},
 		{name: "PriorityQueuePushPop", run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUSHPQ", Key: "priority:key", Value: "value", Priority: &priority})
