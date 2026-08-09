@@ -326,6 +326,43 @@ func TestScalarBatchDirectNativeRawByteReadsAvoidTemporaryStrings(t *testing.T) 
 	}
 }
 
+func TestScalarBatchDirectFallbackRawByteReadsAvoidTemporaryStrings(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.now = func() time.Time { return time.Unix(1700000000, 0) }
+	const commands = nativeScalarDirectBatchChunkSize
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    10,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	var wantValues bytes.Buffer
+	for index := range request.Operations {
+		key := fmt.Sprintf("ttl-bytes:%d", index)
+		value := []byte{byte(index), 0, 0xff, byte(index >> 1)}
+		trie.UpsertBytes(key, value)
+		if !trie.ExpireAt(key, trie.now().Add(time.Hour)) {
+			t.Fatalf("ExpireAt(%q) = false", key)
+		}
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+		request.Keys[index] = key
+		wantValues.Write(value)
+	}
+
+	beforeCalls := trie.nativeCommandBatchCalls
+	allocations := testing.AllocsPerRun(100, func() {
+		response := trie.executeScalarBatchDirect(context.Background(), request)
+		if !response.GetOk() || len(response.GetStatuses()) != commands || len(response.GetValueEnds()) != commands || !bytes.Equal(response.GetValues(), wantValues.Bytes()) {
+			t.Fatalf("executeScalarBatchDirect(fallback raw bytes) = %#v, want %d byte results", response, commands)
+		}
+	})
+	if trie.nativeCommandBatchCalls != beforeCalls {
+		t.Fatal("TTL-backed raw byte reads used the native path")
+	}
+	if allocations != 15 {
+		t.Fatalf("fallback raw byte scalar batch allocations = %.0f, want 15 without temporary strings", allocations)
+	}
+}
+
 func TestScalarBatchDirectDoesNotRetainOversizedNativeKeys(t *testing.T) {
 	trie := newTestTrie(t)
 	operations := make([]hatriecachev1.ScalarCommand, minNativeScalarDirectBatchSize)

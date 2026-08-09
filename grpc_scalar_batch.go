@@ -468,6 +468,8 @@ func (ht *HatTrie) scalarBatchGetLocked(response *hatriecachev1.ScalarBatchRespo
 	response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES
 	if hval.IsCounter() {
 		response.Values = strconv.AppendInt(response.Values, int64(hval.Index), 10)
+	} else if hval.IsBytesAtRaws() && !hval.OnDisk() {
+		response.Values = append(response.Values, ht.raws.array[hval.Index]...)
 	} else {
 		value, valueErr := ht.commandValueLocked(hval)
 		if valueErr != nil {
