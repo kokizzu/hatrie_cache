@@ -2154,6 +2154,46 @@ func TestCommandFastTopKItemsJSONStructuredMatchesGeneric(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandTopKExactReadPreservesStoredHeap(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.UpsertTopK("top", 16); err != nil {
+		t.Fatalf("UpsertTopK() error = %v", err)
+	}
+	for count := uint64(1); count <= 16; count++ {
+		if estimate, err := ht.AddTopKChecked("top", "value-"+strconv.FormatUint(count, 10), count); err != nil || !estimate.Tracked {
+			t.Fatalf("AddTopKChecked(%d) = %#v/%v, want tracked/nil", count, estimate, err)
+		}
+	}
+
+	ht.mu.Lock()
+	hval, err := ht.getLockedChecked("top")
+	if err != nil {
+		ht.mu.Unlock()
+		t.Fatal(err)
+	}
+	before := append([]topKItem(nil), ht.topKs.array[hval.Index].items...)
+	ht.mu.Unlock()
+
+	response := ht.ExecuteCommand(CacheCommandRequest{Command: "GETTOPK", Key: "top"})
+	if !response.OK {
+		t.Fatalf("GETTOPK response = %#v, want ok", response)
+	}
+	var items []TopKItem
+	if err := json.Unmarshal([]byte(response.Value), &items); err != nil {
+		t.Fatalf("GETTOPK JSON error = %v", err)
+	}
+	if len(items) != 16 || items[0].Value != "value-16" || items[0].Count != 16 {
+		t.Fatalf("GETTOPK items = %#v, want descending 16-item result", items)
+	}
+
+	ht.mu.Lock()
+	after := ht.topKs.array[hval.Index].items
+	ht.mu.Unlock()
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("GETTOPK mutated stored heap\n got: %#v\nwant: %#v", after, before)
+	}
+}
+
 func TestExecuteCommandTopKRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "2"}); !got.OK {

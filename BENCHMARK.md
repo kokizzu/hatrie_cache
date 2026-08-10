@@ -12908,6 +12908,23 @@ make run CMD='go test . -run=TestRadixTreeReadOperationsRemainSafeDuringReplacem
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkHatTrieRadixTreeReads -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Rejected: Small Stack Snapshot For Exact GETTOPK
+
+The multi-item exact `GETTOPK` command copies its heap-backed candidates before
+sorting, so a bounded 16-item stack snapshot was evaluated to remove that
+copy's allocation. The generic `sort.Sort` interface made the stack array
+escape; replacing it with a concrete insertion sort retained the same three
+allocations and slowed the 16-string-item median from 1.548 us to 1.680 us
+(**1.09x slower**) at the same 1,624 B per operation. The production change
+was reverted. `TestExecuteCommandTopKExactReadPreservesStoredHeap` now verifies
+that the command's ordered JSON read does not mutate the stored Top-K heap, and
+the existing benchmark remains the comparison fixture.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandTopKExactReadPreservesStoredHeap -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkTopKGetPath/Strings16/Exact -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
