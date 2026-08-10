@@ -478,6 +478,39 @@ func TestCheckedRadixTreeOperationsReturnValuesAndCopies(t *testing.T) {
 	}
 }
 
+func TestRadixTreeReadOperationsRemainSafeDuringReplacement(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertRadixTree("index")
+	if !ht.PutRadixTree("index", "user:100/profile", Map{"status": "active"}) {
+		t.Fatal("PutRadixTree() = false, want insertion")
+	}
+
+	const iterations = 1_000
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for iteration := 0; iteration < iterations; iteration++ {
+			ht.PutRadixTree("index", "user:100/profile", Map{"status": "active", "version": iteration})
+		}
+	}()
+
+	for iteration := 0; iteration < iterations; iteration++ {
+		if _, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok {
+			t.Fatalf("GetRadixTreeChecked() = %v/%v, want value/true", err, ok)
+		}
+		if hit, err := ht.HasRadixTreeChecked("index", "user:100/profile"); err != nil || !hit {
+			t.Fatalf("HasRadixTreeChecked() = %v/%v, want true/nil", hit, err)
+		}
+		if items, ok, err := ht.ScanRadixTreeChecked("index", "user:"); err != nil || !ok || len(items) != 1 {
+			t.Fatalf("ScanRadixTreeChecked() = %d/%v/%v, want one item/true/nil", len(items), ok, err)
+		}
+		if info, ok, err := ht.RadixTreeInfoChecked("index"); err != nil || !ok || info.Items != 1 {
+			t.Fatalf("RadixTreeInfoChecked() = %#v/%v/%v, want one item/true/nil", info, ok, err)
+		}
+	}
+	<-done
+}
+
 func TestCheckedRadixTreeRejectsUnsupportedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	unsupported := func() {}

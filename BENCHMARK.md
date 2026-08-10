@@ -12888,6 +12888,26 @@ by the exclusive trie lock. No production branch was added: an extra dispatch
 path would add layout risk without a material CPU or memory win. Existing
 `INFOBF` remains the direct information command.
 
+#### Rejected: Public Radix-Tree Read-Lock Fallback
+
+The public radix-tree read APIs (`GETRT`, `HASRT`, `PREFIXRT`, and `INFORT`)
+were evaluated with the same read-lock-first path used by generic `GET`: normal
+in-memory values read under `RLock`, while expired values and lazy Pebble
+references retry under the exclusive lock. The concurrent replacement test and
+race detector both passed, but the extra fallback decision is a loss for the
+uncontended common case. Seven single-processor one-second samples regressed
+returned-value `GETRT` from a 212.3 ns median to 257.6 ns (**1.21x slower**) and
+membership `HASRT` from 34.54 ns to 68.65 ns (**1.99x slower**), with unchanged
+336 B/two allocations and zero allocations respectively. Scan samples were
+also slower with unchanged 368 B/three allocations. The production change was
+reverted; the targeted concurrency test and benchmarks remain to guard the
+existing behavior and make a future contention-specific design measurable.
+
+```sh
+make run CMD='go test . -run=TestRadixTreeReadOperationsRemainSafeDuringReplacement -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkHatTrieRadixTreeReads -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

@@ -26,6 +26,48 @@ func BenchmarkRadixTreeContains(b *testing.B) {
 	}
 }
 
+func BenchmarkHatTrieRadixTreeReads(b *testing.B) {
+	ht := CreateHatTrie()
+	b.Cleanup(ht.Destroy)
+	ht.UpsertRadixTree("index")
+	if !ht.PutRadixTree("index", "user:100/profile", Map{"status": "active"}) {
+		b.Fatal("PutRadixTree() = false, want insertion")
+	}
+
+	b.Run("get", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			if _, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok {
+				b.Fatalf("GetRadixTreeChecked() = %v/%v, want value/true", err, ok)
+			}
+		}
+	})
+	b.Run("has", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			if hit, err := ht.HasRadixTreeChecked("index", "user:100/profile"); err != nil || !hit {
+				b.Fatalf("HasRadixTreeChecked() = %v/%v, want true/nil", hit, err)
+			}
+		}
+	})
+	b.Run("scan", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			if items, ok, err := ht.ScanRadixTreeChecked("index", "user:"); err != nil || !ok || len(items) != 1 {
+				b.Fatalf("ScanRadixTreeChecked() = %d/%v/%v, want one item/true/nil", len(items), ok, err)
+			}
+		}
+	})
+	b.Run("info", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			if info, ok, err := ht.RadixTreeInfoChecked("index"); err != nil || !ok || info.Items != 1 {
+				b.Fatalf("RadixTreeInfoChecked() = %#v/%v/%v, want one item/true/nil", info, ok, err)
+			}
+		}
+	})
+}
+
 func BenchmarkRadixTreePlainPrefixJSON(b *testing.B) {
 	for _, valueSize := range []int{8, 16, 128} {
 		b.Run(fmt.Sprintf("Value%d", valueSize), func(b *testing.B) {
