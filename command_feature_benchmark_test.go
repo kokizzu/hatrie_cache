@@ -7,6 +7,7 @@ import (
 
 var benchmarkCommandResponseSink CacheCommandResponse
 var benchmarkCommandFastInt64Sink int64
+var benchmarkCommandFastFloat64Sink float64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -219,6 +220,19 @@ func BenchmarkCommandPrioritySubkey(b *testing.B) {
 			b.Fatal("commandPrioritySubkey() = false, want valid value")
 		}
 		benchmarkCommandFastInt64Sink = value
+	}
+}
+
+func BenchmarkCommandFastFloat64Field(b *testing.B) {
+	values := [...]string{"1", "-1.25", "+42.5", "1e-9", "3.141592653589793"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		value, ok := commandFastFloat64Field(values[iteration%len(values)])
+		if !ok {
+			b.Fatal("commandFastFloat64Field() = false, want valid value")
+		}
+		benchmarkCommandFastFloat64Sink = value
 	}
 }
 

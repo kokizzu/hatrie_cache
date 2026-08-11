@@ -48,6 +48,22 @@ func TestCommandPrioritySubkeyMatchesTrimmedParseIntSyntax(t *testing.T) {
 	}
 }
 
+func TestCommandFastFloat64FieldMatchesFiniteParseFloatSyntax(t *testing.T) {
+	for _, value := range []string{
+		"0", "-0", "+0", "001.25", "1e-9", ".5", "1.",
+		"", " 1", "1 ", "\t1\n", "+", "-", ".", "1.2.3", "NaN", "+Inf", "-Infinity", "1e9999",
+	} {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			want, err := strconv.ParseFloat(value, 64)
+			wantOK := value != "" && err == nil && !math.IsNaN(want) && !math.IsInf(want, 0)
+			got, gotOK := commandFastFloat64Field(value)
+			if gotOK != wantOK || gotOK && got != want {
+				t.Fatalf("commandFastFloat64Field(%q) = %v/%v, want %v/%v", value, got, gotOK, want, wantOK)
+			}
+		})
+	}
+}
+
 func TestCommandPairOnlyFieldsDoNotAllocate(t *testing.T) {
 	request := CacheCommandRequest{Pairs: Map{"name": "ivi", "age": 32}}
 	for _, test := range []struct {

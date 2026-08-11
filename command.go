@@ -3377,7 +3377,7 @@ func commandFastInt64Field(value string) (int64, bool) {
 }
 
 func commandFastFloat64Field(value string) (float64, bool) {
-	if value == "" || strings.TrimSpace(value) != value {
+	if value == "" {
 		return 0, false
 	}
 	parsed, err := strconv.ParseFloat(value, 64)

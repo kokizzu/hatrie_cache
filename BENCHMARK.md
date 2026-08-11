@@ -12952,6 +12952,26 @@ make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/FenwickTr
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandPrioritySubkey -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Exact Finite Floating-Point Parsing
+
+Exact quantile commands use a finite `float64` parser. The old fast path first
+called `strings.TrimSpace`, then `strconv.ParseFloat`; the latter already
+rejects whitespace, so the pre-scan was redundant. Empty, malformed,
+whitespace-padded, `NaN`, infinite, and overflowing values retain their prior
+fallback behavior.
+
+`TestCommandFastFloat64FieldMatchesFiniteParseFloatSyntax` checks this
+compatibility. Seven single-processor one-second samples reduced mixed finite
+float parsing from 31.43 ns to 26.63 ns at zero allocations: **1.18x faster**.
+Exact `ADDQ` fell from 490.7 ns to 462.5 ns: **1.06x faster**, retaining 64 B
+and one allocation per operation.
+
+```sh
+make run CMD='go test . -run=TestCommandFastFloat64FieldMatchesFiniteParseFloatSyntax -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastFloat64Field -benchtime=1s -count=7 -benchmem -cpu=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/QuantileSketchAdd -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
