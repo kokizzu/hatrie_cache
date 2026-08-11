@@ -31,6 +31,22 @@ func TestCommandFastInt64FieldMatchesStrictParseIntSyntax(t *testing.T) {
 	}
 }
 
+func TestCommandFastUint64FieldMatchesStrictParseUintSyntax(t *testing.T) {
+	for _, value := range []string{
+		"0", "001", "42", "18446744073709551615",
+		"", "+1", "-1", " 1", "1 ", "1.0", "abc", "18446744073709551616",
+	} {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			want, err := strconv.ParseUint(value, 10, 64)
+			wantOK := value != "" && err == nil
+			got, gotOK := commandFastUint64Field(value)
+			if gotOK != wantOK || gotOK && got != want {
+				t.Fatalf("commandFastUint64Field(%q) = %d/%v, want %d/%v", value, got, gotOK, want, wantOK)
+			}
+		})
+	}
+}
+
 func TestCommandPrioritySubkeyMatchesTrimmedParseIntSyntax(t *testing.T) {
 	for _, value := range []string{
 		"0", " -0 ", " +42\t", "-42", "9223372036854775807", "-9223372036854775808",

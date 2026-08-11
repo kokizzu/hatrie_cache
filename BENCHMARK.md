@@ -12972,6 +12972,25 @@ make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastFloat64Field 
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/QuantileSketchAdd -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Exact Unsigned Integer Overflow Check
+
+The shared exact unsigned-decimal parser validates overflow on every digit. Its
+previous test divided a dynamic value by ten per digit. It now compares against
+the constant `MaxUint64 / 10` quotient and remainder thresholds, preserving
+the complete accepted range and the same rejection point for overflow.
+
+`TestCommandFastUint64FieldMatchesStrictParseUintSyntax` covers empty, signed,
+whitespace-padded, malformed, maximum, and overflowing values. Seven
+single-processor one-second samples reduced a mixed valid unsigned fixture
+from 10.19 ns to 7.397 ns at zero allocations: **1.38x faster**. The parser is
+used by exact bitmap, bitset, Top-K, Fenwick, and related numeric command
+fields.
+
+```sh
+make run CMD='go test . -run=TestCommandFastUint64FieldMatchesStrictParseUintSyntax -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastUint64Field -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

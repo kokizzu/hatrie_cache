@@ -8,6 +8,7 @@ import (
 var benchmarkCommandResponseSink CacheCommandResponse
 var benchmarkCommandFastInt64Sink int64
 var benchmarkCommandFastFloat64Sink float64
+var benchmarkCommandFastUint64Sink uint64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -207,6 +208,19 @@ func BenchmarkCommandFastInt64Field(b *testing.B) {
 			b.Fatal("commandFastInt64Field() = false, want valid value")
 		}
 		benchmarkCommandFastInt64Sink = value
+	}
+}
+
+func BenchmarkCommandFastUint64Field(b *testing.B) {
+	values := [...]string{"1", "42", "001", "18446744073709551615", "1844674407370955161"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		value, ok := commandFastUint64Field(values[iteration%len(values)])
+		if !ok {
+			b.Fatal("commandFastUint64Field() = false, want valid value")
+		}
+		benchmarkCommandFastUint64Sink = value
 	}
 }
 
