@@ -12925,6 +12925,27 @@ make run CMD='go test . -run=TestExecuteCommandTopKExactReadPreservesStoredHeap 
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkTopKGetPath/Strings16/Exact -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Exact Signed Integer Parsing
+
+The exact `ADDFW` command needs a strict signed decimal parser for its delta.
+The previous path scanned for whitespace and then called `strconv.ParseInt`.
+It now performs the same strict decimal, sign, and int64-bound checks directly,
+including `+` values and `-9223372036854775808`; whitespace and malformed or
+overflowing values still fall back to the generic validation path.
+
+`TestCommandFastInt64FieldMatchesStrictParseIntSyntax` covers accepted signs,
+leading zeroes, both int64 bounds, whitespace, malformed signs, decimals, and
+overflow. On seven single-processor one-second samples, the mixed valid parser
+fixture fell from 20.79 ns to 9.756 ns with zero allocations: **2.13x faster**.
+The exact `ADDFW` command median fell from 295.8 ns to 280.3 ns: **1.06x
+faster**, retaining 95 B and one allocation per operation.
+
+```sh
+make run CMD='go test . -run=TestCommandFastInt64FieldMatchesStrictParseIntSyntax -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastInt64Field -benchtime=1s -count=7 -benchmem -cpu=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/FenwickTreeAdd -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

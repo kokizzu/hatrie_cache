@@ -3334,11 +3334,46 @@ func commandFastOptionalUint64Field(value string, defaultValue uint64) (uint64, 
 }
 
 func commandFastInt64Field(value string) (int64, bool) {
-	if value == "" || strings.TrimSpace(value) != value {
+	if value == "" {
 		return 0, false
 	}
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	return parsed, err == nil
+
+	index := 0
+	negative := false
+	switch value[0] {
+	case '-':
+		negative = true
+		index++
+	case '+':
+		index++
+	}
+	if index == len(value) {
+		return 0, false
+	}
+
+	limit := uint64(math.MaxInt64)
+	if negative {
+		limit++
+	}
+	var parsed uint64
+	for ; index < len(value); index++ {
+		character := value[index]
+		if character < '0' || character > '9' {
+			return 0, false
+		}
+		digit := uint64(character - '0')
+		if parsed > (limit-digit)/10 {
+			return 0, false
+		}
+		parsed = parsed*10 + digit
+	}
+	if !negative {
+		return int64(parsed), true
+	}
+	if parsed == limit {
+		return -1 << 63, true
+	}
+	return -int64(parsed), true
 }
 
 func commandFastFloat64Field(value string) (float64, bool) {

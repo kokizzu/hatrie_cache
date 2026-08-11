@@ -13,6 +13,24 @@ import (
 
 var commandFieldsTestSink Map
 
+func TestCommandFastInt64FieldMatchesStrictParseIntSyntax(t *testing.T) {
+	for _, value := range []string{
+		"0", "-0", "+0", "001", "+42", "-42",
+		"9223372036854775807", "-9223372036854775808",
+		"", "+", "-", " 1", "1 ", "1.0", "--1", "+-1",
+		"9223372036854775808", "-9223372036854775809",
+	} {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			want, err := strconv.ParseInt(value, 10, 64)
+			wantOK := value != "" && strings.TrimSpace(value) == value && err == nil
+			got, gotOK := commandFastInt64Field(value)
+			if gotOK != wantOK || gotOK && got != want {
+				t.Fatalf("commandFastInt64Field(%q) = %d/%v, want %d/%v", value, got, gotOK, want, wantOK)
+			}
+		})
+	}
+}
+
 func TestCommandPairOnlyFieldsDoNotAllocate(t *testing.T) {
 	request := CacheCommandRequest{Pairs: Map{"name": "ivi", "age": 32}}
 	for _, test := range []struct {

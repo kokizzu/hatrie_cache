@@ -6,6 +6,7 @@ import (
 )
 
 var benchmarkCommandResponseSink CacheCommandResponse
+var benchmarkCommandFastInt64Sink int64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -192,6 +193,19 @@ func BenchmarkCommandFeature(b *testing.B) {
 				benchmark.run(b, ht, i)
 			}
 		})
+	}
+}
+
+func BenchmarkCommandFastInt64Field(b *testing.B) {
+	values := [...]string{"1", "-1", "+42", "-9223372036854775808", "9223372036854775807"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		value, ok := commandFastInt64Field(values[iteration%len(values)])
+		if !ok {
+			b.Fatal("commandFastInt64Field() = false, want valid value")
+		}
+		benchmarkCommandFastInt64Sink = value
 	}
 }
 
