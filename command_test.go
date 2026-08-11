@@ -31,6 +31,23 @@ func TestCommandFastInt64FieldMatchesStrictParseIntSyntax(t *testing.T) {
 	}
 }
 
+func TestCommandPrioritySubkeyMatchesTrimmedParseIntSyntax(t *testing.T) {
+	for _, value := range []string{
+		"0", " -0 ", " +42\t", "-42", "9223372036854775807", "-9223372036854775808",
+		"", " \n", "+", "-", "1.0", "--1", "9223372036854775808", "-9223372036854775809",
+	} {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			trimmed := strings.TrimSpace(value)
+			want, err := strconv.ParseInt(trimmed, 10, 64)
+			wantOK := trimmed != "" && err == nil
+			got, gotOK := commandPrioritySubkey(value)
+			if gotOK != wantOK || gotOK && got != want {
+				t.Fatalf("commandPrioritySubkey(%q) = %d/%v, want %d/%v", value, got, gotOK, want, wantOK)
+			}
+		})
+	}
+}
+
 func TestCommandPairOnlyFieldsDoNotAllocate(t *testing.T) {
 	request := CacheCommandRequest{Pairs: Map{"name": "ivi", "age": 32}}
 	for _, test := range []struct {

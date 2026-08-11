@@ -4292,11 +4292,7 @@ func commandPrioritySubkey(subkey string) (int64, bool) {
 	if subkey == "" {
 		return 0, false
 	}
-	parsed, err := strconv.ParseInt(subkey, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return parsed, true
+	return commandFastInt64Field(subkey)
 }
 
 func commandBloomFilterConfig(request CacheCommandRequest) (uint64, float64, error) {

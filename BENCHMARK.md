@@ -12940,10 +12940,16 @@ fixture fell from 20.79 ns to 9.756 ns with zero allocations: **2.13x faster**.
 The exact `ADDFW` command median fell from 295.8 ns to 280.3 ns: **1.06x
 faster**, retaining 95 B and one allocation per operation.
 
+`PUSHPQ` priority subkeys intentionally accept surrounding whitespace. Its
+post-trim conversion now reuses the same parser rather than calling
+`strconv.ParseInt` again. The mixed signed-and-trimmed helper median fell from
+19.33 ns to 12.22 ns with zero allocations: **1.58x faster**.
+
 ```sh
 make run CMD='go test . -run=TestCommandFastInt64FieldMatchesStrictParseIntSyntax -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastInt64Field -benchtime=1s -count=7 -benchmem -cpu=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFeature/FenwickTreeAdd -benchtime=1s -count=7 -benchmem -cpu=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandPrioritySubkey -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->

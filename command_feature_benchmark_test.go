@@ -209,6 +209,19 @@ func BenchmarkCommandFastInt64Field(b *testing.B) {
 	}
 }
 
+func BenchmarkCommandPrioritySubkey(b *testing.B) {
+	values := [...]string{"1", "-1", " +42\t", "-9223372036854775808", "9223372036854775807"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		value, ok := commandPrioritySubkey(values[iteration%len(values)])
+		if !ok {
+			b.Fatal("commandPrioritySubkey() = false, want valid value")
+		}
+		benchmarkCommandFastInt64Sink = value
+	}
+}
+
 func BenchmarkXorCommandBuild64Path(b *testing.B) {
 	values := benchmarkXorCommandValues()
 	for _, benchmark := range []struct {
