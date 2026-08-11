@@ -12940,6 +12940,12 @@ fixture fell from 20.79 ns to 9.756 ns with zero allocations: **2.13x faster**.
 The exact `ADDFW` command median fell from 295.8 ns to 280.3 ns: **1.06x
 faster**, retaining 95 B and one allocation per operation.
 
+A follow-up removes the dynamic `/ 10` overflow calculation from the signed
+parser's digit loop as well. Positive and negative thresholds are now
+calculated once before scanning. A fresh seven-run direct-parser pair reduced
+the median from 9.561 ns to 7.664 ns, zero allocations in both cases:
+**1.25x faster**.
+
 `PUSHPQ` priority subkeys intentionally accept surrounding whitespace. Its
 post-trim conversion now reuses the same parser rather than calling
 `strconv.ParseInt` again. The mixed signed-and-trimmed helper median fell from

@@ -3353,9 +3353,15 @@ func commandFastInt64Field(value string) (int64, bool) {
 		return 0, false
 	}
 
+	const maxPositiveBeforeMultiply = uint64(math.MaxInt64) / 10
+	const maxPositiveFinalDigit = uint64(math.MaxInt64) % 10
 	limit := uint64(math.MaxInt64)
+	maxBeforeMultiply := maxPositiveBeforeMultiply
+	maxFinalDigit := maxPositiveFinalDigit
 	if negative {
 		limit++
+		maxBeforeMultiply = limit / 10
+		maxFinalDigit = limit % 10
 	}
 	var parsed uint64
 	for ; index < len(value); index++ {
@@ -3364,7 +3370,7 @@ func commandFastInt64Field(value string) (int64, bool) {
 			return 0, false
 		}
 		digit := uint64(character - '0')
-		if parsed > (limit-digit)/10 {
+		if parsed > maxBeforeMultiply || parsed == maxBeforeMultiply && digit > maxFinalDigit {
 			return 0, false
 		}
 		parsed = parsed*10 + digit
