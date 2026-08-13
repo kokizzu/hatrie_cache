@@ -13039,6 +13039,18 @@ remains for any future change that alters the generated code shape.
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandCuckooFilterConfig -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Rejected: Xor Configuration Field Reuse
+
+The single-field `CREATEXF` expected-item helper was also measured with a
+trim-once local value. Its populated fixture moved from a 24.38 ns median to
+24.78 ns, zero allocations in both cases. The difference is neutral-to-worse,
+so the production edit was reverted. `BenchmarkCommandXorFilterExpectedItems`
+remains as a focused fixture.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandXorFilterExpectedItems -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
