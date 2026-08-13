@@ -12997,6 +12997,19 @@ make run CMD='go test . -run=TestCommandFastUint64FieldMatchesStrictParseUintSyn
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastUint64Field -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Rejected: Separate Short Unsigned Parser Loop
+
+A follow-up evaluated a separate `<20`-digit parser loop, since such decimal
+values cannot overflow `uint64`. It duplicated the digit scan to omit overflow
+comparisons, but the larger function regressed the short-value benchmark from
+an 8.727 ns median to 9.899 ns (**1.13x slower**) with zero allocations in both
+versions. The split was reverted. `BenchmarkCommandFastUint64FieldShort`
+remains as the focused fixture for any future compiler-aware alternative.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastUint64FieldShort -benchtime=500ms -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

@@ -224,6 +224,19 @@ func BenchmarkCommandFastUint64Field(b *testing.B) {
 	}
 }
 
+func BenchmarkCommandFastUint64FieldShort(b *testing.B) {
+	values := [...]string{"1", "42", "001", "65543", "1844674407370955161"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		value, ok := commandFastUint64Field(values[iteration%len(values)])
+		if !ok {
+			b.Fatal("commandFastUint64Field() = false, want valid value")
+		}
+		benchmarkCommandFastUint64Sink = value
+	}
+}
+
 func BenchmarkCommandPrioritySubkey(b *testing.B) {
 	values := [...]string{"1", "-1", " +42\t", "-9223372036854775808", "9223372036854775807"}
 	b.ReportAllocs()
