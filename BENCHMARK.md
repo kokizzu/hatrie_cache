@@ -13010,6 +13010,23 @@ remains as the focused fixture for any future compiler-aware alternative.
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandFastUint64FieldShort -benchtime=500ms -count=7 -benchmem -cpu=1'
 ```
 
+#### Bloom Configuration Field Reuse
+
+`CREATEBF` accepts whitespace-padded numeric `Value` and `Subkey` fields. The
+configuration parser previously trimmed each populated field once to test it
+and a second time to parse it. Each field is now trimmed once and reused; the
+default values, parse errors, and pair-field precedence are unchanged.
+
+Existing Bloom command tests cover populated, pair-overridden, and invalid
+configuration values. On seven single-processor one-second samples, populated
+field configuration fell from 50.61 ns to 47.18 ns with zero allocations:
+**1.07x faster**.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandBloomFilter -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandBloomFilterConfig -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

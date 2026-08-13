@@ -4308,14 +4308,16 @@ func commandBloomFilterConfig(request CacheCommandRequest) (uint64, float64, err
 	falsePositiveRate := DefaultBloomFilterFalsePositiveRate
 	var err error
 
-	if strings.TrimSpace(request.Value) != "" {
-		expectedItems, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+	value := strings.TrimSpace(request.Value)
+	if value != "" {
+		expectedItems, err = strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return 0, 0, errors.New("bloom filter expected items must be an unsigned integer")
 		}
 	}
-	if strings.TrimSpace(request.Subkey) != "" {
-		falsePositiveRate, err = strconv.ParseFloat(strings.TrimSpace(request.Subkey), 64)
+	subkey := strings.TrimSpace(request.Subkey)
+	if subkey != "" {
+		falsePositiveRate, err = strconv.ParseFloat(subkey, 64)
 		if err != nil {
 			return 0, 0, errors.New("bloom filter false positive rate must be a number")
 		}

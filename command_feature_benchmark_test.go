@@ -9,6 +9,7 @@ var benchmarkCommandResponseSink CacheCommandResponse
 var benchmarkCommandFastInt64Sink int64
 var benchmarkCommandFastFloat64Sink float64
 var benchmarkCommandFastUint64Sink uint64
+var benchmarkBloomConfigSink uint64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -234,6 +235,19 @@ func BenchmarkCommandFastUint64FieldShort(b *testing.B) {
 			b.Fatal("commandFastUint64Field() = false, want valid value")
 		}
 		benchmarkCommandFastUint64Sink = value
+	}
+}
+
+func BenchmarkCommandBloomFilterConfig(b *testing.B) {
+	request := CacheCommandRequest{Value: "32768", Subkey: "0.001"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		expected, rate, err := commandBloomFilterConfig(request)
+		if err != nil || expected != 32768 || rate != 0.001 {
+			b.Fatalf("commandBloomFilterConfig() = %d/%v/%v, want 32768/0.001/nil", expected, rate, err)
+		}
+		benchmarkBloomConfigSink = expected
 	}
 }
 
