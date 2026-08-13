@@ -13027,6 +13027,18 @@ make run CMD='go test . -run=TestExecuteCommandBloomFilter -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandBloomFilterConfig -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Rejected: Cuckoo Configuration Field Reuse
+
+The equivalent trim-once refactor was measured independently for `CREATECF`.
+Unlike Bloom, its populated configuration fixture moved from roughly 52.5 ns
+to a 53.26 ns median with the same zero allocations. The production change was
+reverted rather than retaining a small regression. `BenchmarkCommandCuckooFilterConfig`
+remains for any future change that alters the generated code shape.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandCuckooFilterConfig -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

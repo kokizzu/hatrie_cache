@@ -10,6 +10,7 @@ var benchmarkCommandFastInt64Sink int64
 var benchmarkCommandFastFloat64Sink float64
 var benchmarkCommandFastUint64Sink uint64
 var benchmarkBloomConfigSink uint64
+var benchmarkCuckooConfigSink uint64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -248,6 +249,19 @@ func BenchmarkCommandBloomFilterConfig(b *testing.B) {
 			b.Fatalf("commandBloomFilterConfig() = %d/%v/%v, want 32768/0.001/nil", expected, rate, err)
 		}
 		benchmarkBloomConfigSink = expected
+	}
+}
+
+func BenchmarkCommandCuckooFilterConfig(b *testing.B) {
+	request := CacheCommandRequest{Value: "32768", Subkey: "0.001"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		capacity, rate, err := commandCuckooFilterConfig(request)
+		if err != nil || capacity != 32768 || rate != 0.001 {
+			b.Fatalf("commandCuckooFilterConfig() = %d/%v/%v, want 32768/0.001/nil", capacity, rate, err)
+		}
+		benchmarkCuckooConfigSink = capacity
 	}
 }
 
