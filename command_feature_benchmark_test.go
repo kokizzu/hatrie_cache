@@ -12,6 +12,7 @@ var benchmarkCommandFastUint64Sink uint64
 var benchmarkBloomConfigSink uint64
 var benchmarkCuckooConfigSink uint64
 var benchmarkXorExpectedItemsSink uint64
+var benchmarkCountMinIncrementSink uint32
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -276,6 +277,19 @@ func BenchmarkCommandXorFilterExpectedItems(b *testing.B) {
 			b.Fatalf("commandXorFilterExpectedItems() = %d/%v, want 32768/nil", expected, err)
 		}
 		benchmarkXorExpectedItemsSink = expected
+	}
+}
+
+func BenchmarkCommandCountMinSketchIncrement(b *testing.B) {
+	request := CacheCommandRequest{Subkey: " 7 "}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		count, err := commandCountMinSketchIncrement(request)
+		if err != nil || count != 7 {
+			b.Fatalf("commandCountMinSketchIncrement() = %d/%v, want 7/nil", count, err)
+		}
+		benchmarkCountMinIncrementSink = count
 	}
 }
 

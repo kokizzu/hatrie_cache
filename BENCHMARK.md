@@ -13051,6 +13051,24 @@ remains as a focused fixture.
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandXorFilterExpectedItems -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Count-Min Increment Field Reuse
+
+The generic `INCRCMS` parser accepts whitespace-padded increment subkeys. It
+previously trimmed a populated subkey once for emptiness and a second time for
+numeric parsing. The trimmed value is now reused; the default count, pair
+override precedence, range checks, and error messages are unchanged. The exact
+command route remains independently optimized and is unaffected.
+
+Existing Count-Min command tests cover configured, default, invalid, and exact
+path behavior. On seven single-processor one-second samples, the generic
+whitespace-padded increment helper fell from 15.50 ns to 11.74 ns at zero
+allocations: **1.32x faster**.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandCountMinSketch -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandCountMinSketchIncrement -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

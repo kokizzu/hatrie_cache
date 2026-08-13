@@ -4447,8 +4447,9 @@ func commandCountMinSketchConfig(request CacheCommandRequest) (uint64, uint8, er
 
 func commandCountMinSketchIncrement(request CacheCommandRequest) (uint32, error) {
 	count := uint64(1)
-	if strings.TrimSpace(request.Subkey) != "" {
-		parsed, err := strconv.ParseUint(strings.TrimSpace(request.Subkey), 10, 64)
+	subkey := strings.TrimSpace(request.Subkey)
+	if subkey != "" {
+		parsed, err := strconv.ParseUint(subkey, 10, 64)
 		if err != nil {
 			return 0, errors.New("count-min sketch increment must be an unsigned integer")
 		}
