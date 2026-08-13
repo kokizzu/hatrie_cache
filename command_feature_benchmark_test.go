@@ -13,6 +13,7 @@ var benchmarkBloomConfigSink uint64
 var benchmarkCuckooConfigSink uint64
 var benchmarkXorExpectedItemsSink uint64
 var benchmarkCountMinIncrementSink uint32
+var benchmarkHyperLogLogPrecisionSink uint8
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -290,6 +291,19 @@ func BenchmarkCommandCountMinSketchIncrement(b *testing.B) {
 			b.Fatalf("commandCountMinSketchIncrement() = %d/%v, want 7/nil", count, err)
 		}
 		benchmarkCountMinIncrementSink = count
+	}
+}
+
+func BenchmarkCommandHyperLogLogPrecision(b *testing.B) {
+	request := CacheCommandRequest{Value: " 10 "}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		precision, err := commandHyperLogLogPrecision(request)
+		if err != nil || precision != 10 {
+			b.Fatalf("commandHyperLogLogPrecision() = %d/%v, want 10/nil", precision, err)
+		}
+		benchmarkHyperLogLogPrecisionSink = precision
 	}
 }
 

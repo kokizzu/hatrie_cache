@@ -4470,8 +4470,9 @@ func commandCountMinSketchIncrement(request CacheCommandRequest) (uint32, error)
 
 func commandHyperLogLogPrecision(request CacheCommandRequest) (uint8, error) {
 	precision := DefaultHyperLogLogPrecision
-	if strings.TrimSpace(request.Value) != "" {
-		parsed, err := strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+	value := strings.TrimSpace(request.Value)
+	if value != "" {
+		parsed, err := strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return 0, errors.New("hyperloglog precision must be an unsigned integer")
 		}

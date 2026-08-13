@@ -13069,6 +13069,23 @@ make run CMD='go test . -run=TestExecuteCommandCountMinSketch -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandCountMinSketchIncrement -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### HyperLogLog Precision Field Reuse
+
+The generic `CREATEHLL` precision parser accepts whitespace-padded `Value`.
+It now trims that field once and reuses it for parsing rather than scanning it
+again. Precision bounds, default precision, pair override precedence, and
+invalid-value behavior remain unchanged.
+
+Existing HyperLogLog command tests cover configured, pair-overridden, and
+invalid precision. Seven single-processor one-second samples reduced the
+whitespace-padded precision helper from 17.79 ns to 14.37 ns with zero
+allocations: **1.24x faster**.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandHyperLogLog -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandHyperLogLogPrecision -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
