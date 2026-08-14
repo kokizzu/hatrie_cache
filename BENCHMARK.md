@@ -13086,6 +13086,22 @@ make run CMD='go test . -run=TestExecuteCommandHyperLogLog -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandHyperLogLogPrecision -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Top-K Count Field Reuse
+
+The generic Top-K count parser accepts whitespace-padded `Subkey` input. It now
+trims that field once and reuses it for numeric parsing. The default count,
+nonzero validation, pair override precedence, and error behavior are unchanged;
+the exact Top-K command route remains separate.
+
+Existing Top-K command tests cover configured, default, and invalid counts.
+Seven single-processor one-second samples reduced the whitespace-padded generic
+count helper from 14.19 ns to 11.82 ns with zero allocations: **1.20x faster**.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandTopK -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandTopKCount -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

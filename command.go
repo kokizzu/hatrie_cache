@@ -4524,8 +4524,9 @@ func commandTopKCapacity(request CacheCommandRequest) (uint64, error) {
 func commandTopKCount(request CacheCommandRequest) (uint64, error) {
 	count := uint64(1)
 	var err error
-	if strings.TrimSpace(request.Subkey) != "" {
-		count, err = strconv.ParseUint(strings.TrimSpace(request.Subkey), 10, 64)
+	subkey := strings.TrimSpace(request.Subkey)
+	if subkey != "" {
+		count, err = strconv.ParseUint(subkey, 10, 64)
 		if err != nil {
 			return 0, errors.New("top-k count must be an unsigned integer")
 		}

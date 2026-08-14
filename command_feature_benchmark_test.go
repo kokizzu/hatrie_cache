@@ -14,6 +14,7 @@ var benchmarkCuckooConfigSink uint64
 var benchmarkXorExpectedItemsSink uint64
 var benchmarkCountMinIncrementSink uint32
 var benchmarkHyperLogLogPrecisionSink uint8
+var benchmarkTopKCountSink uint64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -304,6 +305,19 @@ func BenchmarkCommandHyperLogLogPrecision(b *testing.B) {
 			b.Fatalf("commandHyperLogLogPrecision() = %d/%v, want 10/nil", precision, err)
 		}
 		benchmarkHyperLogLogPrecisionSink = precision
+	}
+}
+
+func BenchmarkCommandTopKCount(b *testing.B) {
+	request := CacheCommandRequest{Subkey: " 7 "}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		count, err := commandTopKCount(request)
+		if err != nil || count != 7 {
+			b.Fatalf("commandTopKCount() = %d/%v, want 7/nil", count, err)
+		}
+		benchmarkTopKCountSink = count
 	}
 }
 
