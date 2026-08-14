@@ -15,6 +15,7 @@ var benchmarkXorExpectedItemsSink uint64
 var benchmarkCountMinIncrementSink uint32
 var benchmarkHyperLogLogPrecisionSink uint8
 var benchmarkTopKCountSink uint64
+var benchmarkReservoirCapacitySink uint64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -318,6 +319,19 @@ func BenchmarkCommandTopKCount(b *testing.B) {
 			b.Fatalf("commandTopKCount() = %d/%v, want 7/nil", count, err)
 		}
 		benchmarkTopKCountSink = count
+	}
+}
+
+func BenchmarkCommandReservoirSampleCapacity(b *testing.B) {
+	request := CacheCommandRequest{Value: " 16 "}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		capacity, err := commandReservoirSampleCapacity(request)
+		if err != nil || capacity != 16 {
+			b.Fatalf("commandReservoirSampleCapacity() = %d/%v, want 16/nil", capacity, err)
+		}
+		benchmarkReservoirCapacitySink = capacity
 	}
 }
 

@@ -4546,8 +4546,9 @@ func commandTopKCount(request CacheCommandRequest) (uint64, error) {
 func commandReservoirSampleCapacity(request CacheCommandRequest) (uint64, error) {
 	capacity := DefaultReservoirSampleCapacity
 	var err error
-	if strings.TrimSpace(request.Value) != "" {
-		capacity, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+	value := strings.TrimSpace(request.Value)
+	if value != "" {
+		capacity, err = strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return 0, errors.New("reservoir sample capacity must be an unsigned integer")
 		}

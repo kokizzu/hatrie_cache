@@ -13102,6 +13102,23 @@ make run CMD='go test . -run=TestExecuteCommandTopK -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandTopKCount -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Reservoir Sample Capacity Field Reuse
+
+The generic `CREATERS` capacity parser accepts whitespace-padded `Value`. It
+now trims that field once and reuses it for parsing. Default capacity, capacity
+validation, pair override precedence, and invalid-value behavior remain
+unchanged.
+
+Existing Reservoir Sample command tests cover configured, pair-overridden, and
+invalid capacity. Seven single-processor one-second samples reduced the
+whitespace-padded generic capacity helper from about 17.4 ns to 14.15 ns with
+zero allocations: **1.23x faster**.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandReservoirSample -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandReservoirSampleCapacity -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
