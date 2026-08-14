@@ -4565,8 +4565,9 @@ func commandReservoirSampleCapacity(request CacheCommandRequest) (uint64, error)
 func commandQuantileSketchEpsilon(request CacheCommandRequest) (float64, error) {
 	epsilon := DefaultQuantileSketchEpsilon
 	var err error
-	if strings.TrimSpace(request.Value) != "" {
-		epsilon, err = strconv.ParseFloat(strings.TrimSpace(request.Value), 64)
+	value := strings.TrimSpace(request.Value)
+	if value != "" {
+		epsilon, err = strconv.ParseFloat(value, 64)
 		if err != nil {
 			return 0, errors.New("quantile sketch epsilon must be a number")
 		}

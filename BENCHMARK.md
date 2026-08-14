@@ -13119,6 +13119,23 @@ make run CMD='go test . -run=TestExecuteCommandReservoirSample -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandReservoirSampleCapacity -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+#### Quantile Sketch Epsilon Field Reuse
+
+The generic `CREATEQ` epsilon parser accepts whitespace-padded `Value`. It now
+trims that field once and reuses it for float parsing. Default epsilon, epsilon
+range validation, pair override precedence, and invalid-value behavior remain
+unchanged.
+
+Existing Quantile command tests cover configured, pair-overridden, and invalid
+epsilon. Seven single-processor one-second samples reduced the whitespace-padded
+generic epsilon helper from about 32.0 ns to 30.43 ns with zero allocations:
+**1.05x faster**.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandQuantileSketch -count=1'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandQuantileSketchEpsilon -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

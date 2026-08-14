@@ -16,6 +16,7 @@ var benchmarkCountMinIncrementSink uint32
 var benchmarkHyperLogLogPrecisionSink uint8
 var benchmarkTopKCountSink uint64
 var benchmarkReservoirCapacitySink uint64
+var benchmarkQuantileEpsilonSink float64
 
 const benchmarkCommandPipelineOps = 16
 const benchmarkCommandMixedProfileOps = 100
@@ -332,6 +333,19 @@ func BenchmarkCommandReservoirSampleCapacity(b *testing.B) {
 			b.Fatalf("commandReservoirSampleCapacity() = %d/%v, want 16/nil", capacity, err)
 		}
 		benchmarkReservoirCapacitySink = capacity
+	}
+}
+
+func BenchmarkCommandQuantileSketchEpsilon(b *testing.B) {
+	request := CacheCommandRequest{Value: " 0.01 "}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		epsilon, err := commandQuantileSketchEpsilon(request)
+		if err != nil || epsilon != 0.01 {
+			b.Fatalf("commandQuantileSketchEpsilon() = %v/%v, want 0.01/nil", epsilon, err)
+		}
+		benchmarkQuantileEpsilonSink = epsilon
 	}
 }
 
