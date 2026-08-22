@@ -167,6 +167,52 @@ ORDER BY right_id`, resolver)
 	}
 }
 
+func TestExecuteSQLQueryJoinsMultipleSourceKindsInOnePipeline(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		switch key {
+		case "users":
+			return []SQLRow{
+				{"id": int64(1), "team_id": int64(10), "region_id": int64(100), "enabled": true},
+				{"id": int64(2), "team_id": int64(20), "region_id": int64(200), "enabled": true},
+				{"id": int64(3), "team_id": int64(30), "region_id": int64(100), "enabled": true},
+				{"id": int64(4), "team_id": int64(10), "region_id": int64(100), "enabled": false},
+			}, nil
+		case "regions":
+			return []SQLRow{
+				{"id": int64(100), "name": "APAC", "enabled": true},
+				{"id": int64(200), "name": "Europe", "enabled": false},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected source %s(%q)", name, key)
+		}
+	})
+
+	result, err := ExecuteSQLQuery(`
+WITH enabled_teams(id, name) AS (VALUES (10, 'Core'), (20, 'Edge'))
+FROM CACHE('users') AS u
+INNER JOIN enabled_teams AS t ON u.team_id = t.id
+LEFT JOIN (
+  FROM CACHE('regions') AS source
+  WHERE source.enabled = TRUE
+  SELECT source.id, source.name AS region
+) AS r ON u.region_id = r.id
+CROSS JOIN VALUES ('production') AS environment(name)
+WHERE u.enabled = TRUE
+SELECT u.id, t.name AS team, r.region, environment.name AS environment
+ORDER BY u.id`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(multiple source joins) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "team", "region", "environment"}, Rows: []SQLRow{
+		{"id": int64(1), "team": "Core", "region": "APAC", "environment": "production"},
+		{"id": int64(2), "team": "Edge", "region": nil, "environment": "production"},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("multiple source join result = %#v, want %#v", result, want)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)
