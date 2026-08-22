@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"hatrie_cache/internal/jsonwire"
 
@@ -148,7 +149,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, support-bundle, profile, cluster, doctor")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, sql, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, support-bundle, profile, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -170,6 +171,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runStorage(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "sql":
+		return runSQL(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
 		return postJSON(ctx, client, cfg.addr, "/api/snapshot", []byte("{}"), stdout)
 	case "backup":
@@ -3615,6 +3618,59 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 		request.Batch = batch
 	}
 	return postCommandValue(ctx, client, addr, request, *wireFormat, stdout)
+}
+
+func runSQL(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("sql", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	query := flags.String("query", "", "SQL query to compile and execute")
+	filePath := flags.String("file", "", "UTF-8 SQL file to compile and execute")
+	wireFormat := flags.String("wire-format", defaultCommandWireFormat, "command request wire format: auto, protobuf, or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	provided := 0
+	source := ""
+	if strings.TrimSpace(*query) != "" {
+		provided++
+		source = *query
+	}
+	if strings.TrimSpace(*filePath) != "" {
+		provided++
+	}
+	if positional := flags.Args(); len(positional) > 0 {
+		provided++
+		if len(positional) != 1 {
+			return errors.New("sql accepts one positional query; quote multi-word SQL or use -query")
+		}
+		source = positional[0]
+	}
+	if provided != 1 {
+		return errors.New("sql requires exactly one of -query, -file, or one positional query")
+	}
+	if strings.TrimSpace(*filePath) != "" {
+		data, err := os.ReadFile(*filePath)
+		if err != nil {
+			return fmt.Errorf("read SQL file: %w", err)
+		}
+		if !utf8.Valid(data) {
+			return errors.New("SQL file must be valid UTF-8")
+		}
+		source = string(data)
+	}
+	request, err := hatriecache.CompileSQL(source)
+	if err == nil {
+		return postCommandValue(ctx, client, addr, request, *wireFormat, stdout)
+	}
+	if queryErr := hatriecache.ValidateSQLQuery(source); queryErr != nil {
+		return errors.New(hatriecache.FormatSQLDiagnostic(source, queryErr))
+	}
+	body, marshalErr := stdjson.Marshal(hatriecache.SQLQueryRequest{Query: source})
+	if marshalErr != nil {
+		return marshalErr
+	}
+	return postJSON(ctx, client, addr, "/api/sql", body, stdout)
 }
 
 func decodeJSONFlag[T any](value string) (T, error) {

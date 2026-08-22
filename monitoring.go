@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -296,6 +297,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/config", handler.handleConfig)
 	mux.HandleFunc("/api/stats", handler.handleStats)
 	mux.HandleFunc("/api/entries", handler.handleEntries)
+	mux.HandleFunc("/api/sql", handler.handleSQL)
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/backup", handler.handleBackup)
@@ -806,6 +808,33 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, handler.trie.monitoringEntriesPage(prefix, afterKey, hasAfterKey, limit))
+}
+
+func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) || !handler.requireTrie(w) {
+		return
+	}
+	defer r.Body.Close()
+	var request SQLQueryRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMonitoringJSONRequestBytes))
+	if err := decoder.Decode(&request); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("invalid SQL request: "+err.Error()))
+		return
+	}
+	if strings.TrimSpace(request.Query) == "" {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL query is required"))
+		return
+	}
+	result, err := ExecuteSQLQuery(request.Query, handler.trie)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
+		return
+	}
+	writeJSON(w, result)
 }
 
 func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
