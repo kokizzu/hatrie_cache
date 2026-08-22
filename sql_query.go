@@ -1745,7 +1745,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if item.expr.window == nil {
 			continue
 		}
-		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "SUM" {
+		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
 			return SQLQueryResult{}, fmt.Errorf("SQL window function %q is not supported", item.expr.name)
 		}
 		partitions := map[string][]int{}
@@ -1783,6 +1783,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				return false
 			})
 			rank := int64(1)
+			denseRank := int64(1)
 			total := float64(0)
 			for position, index := range indexes {
 				row := sqlExecRow{}
@@ -1804,6 +1805,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 					if changed {
 						rank = int64(position + 1)
+						denseRank++
 					}
 				}
 				switch item.expr.name {
@@ -1811,6 +1813,8 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					out[index].row[result.Columns[column]] = int64(position + 1)
 				case "RANK":
 					out[index].row[result.Columns[column]] = rank
+				case "DENSE_RANK":
+					out[index].row[result.Columns[column]] = denseRank
 				case "SUM":
 					if len(item.expr.args) != 1 {
 						return SQLQueryResult{}, fmt.Errorf("SUM window function expects one argument")
@@ -1819,6 +1823,33 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 						total += value
 					}
 					out[index].row[result.Columns[column]] = total
+				case "LAG", "LEAD":
+					if len(item.expr.args) < 1 || len(item.expr.args) > 3 {
+						return SQLQueryResult{}, fmt.Errorf("%s window function expects one to three arguments", item.expr.name)
+					}
+					offset := 1
+					if len(item.expr.args) >= 2 {
+						value, ok := sqlNumber(evalSQLExpr(item.expr.args[1], out[index].group, row))
+						if !ok || value < 0 || value != float64(int(value)) {
+							return SQLQueryResult{}, fmt.Errorf("%s window offset must be a non-negative integer", item.expr.name)
+						}
+						offset = int(value)
+					}
+					target := position - offset
+					if item.expr.name == "LEAD" {
+						target = position + offset
+					}
+					if target >= 0 && target < len(indexes) {
+						targetRow := sqlExecRow{}
+						if len(out[indexes[target]].group) > 0 {
+							targetRow = out[indexes[target]].group[0]
+						}
+						out[index].row[result.Columns[column]] = evalSQLExpr(item.expr.args[0], out[indexes[target]].group, targetRow)
+					} else if len(item.expr.args) == 3 {
+						out[index].row[result.Columns[column]] = evalSQLExpr(item.expr.args[2], out[index].group, row)
+					} else {
+						out[index].row[result.Columns[column]] = nil
+					}
 				}
 			}
 		}

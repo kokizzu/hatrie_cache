@@ -590,6 +590,29 @@ ORDER BY team, score`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQuerySupportsDenseRankLagAndLeadWindows(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('a', 2), ('a', 2), ('a', 5), ('b', 3) AS values(team, score)
+SELECT team, score,
+       DENSE_RANK() OVER (PARTITION BY team ORDER BY score) AS dense_rank,
+       LAG(score) OVER (PARTITION BY team ORDER BY score) AS previous_score,
+       LEAD(score, 1, -1) OVER (PARTITION BY team ORDER BY score) AS next_score
+ORDER BY team, score`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("window query error = %v", err)
+	}
+	want := []SQLRow{
+		{"team": "a", "score": int64(2), "dense_rank": int64(1), "previous_score": nil, "next_score": int64(2)},
+		{"team": "a", "score": int64(2), "dense_rank": int64(1), "previous_score": int64(2), "next_score": int64(5)},
+		{"team": "a", "score": int64(5), "dense_rank": int64(2), "previous_score": int64(2), "next_score": int64(-1)},
+		{"team": "b", "score": int64(3), "dense_rank": int64(1), "previous_score": nil, "next_score": int64(-1)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("window rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQuerySupportsRecursiveCTEHierarchy(t *testing.T) {
 	t.Parallel()
 	result, err := ExecuteSQLQuery(`

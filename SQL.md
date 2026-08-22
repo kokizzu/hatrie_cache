@@ -315,8 +315,9 @@ span and an RFC3339 example.
 - [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
 - [x] `ORDER BY ... ASC|DESC`, `LIMIT`, and `OFFSET`.
 - [x] `SELECT DISTINCT` after projection, before `ORDER BY`/`LIMIT`.
-- [x] `ROW_NUMBER`, `RANK`, and running `SUM` windows with
-      `OVER (PARTITION BY ... ORDER BY ...)`.
+- [x] `ROW_NUMBER`, `RANK`, `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD`
+      windows with `OVER (PARTITION BY ... ORDER BY ...)`. `LAG`/`LEAD`
+      accept an optional non-negative integer offset and default value.
 - [x] `UNION` (deduplicating) and `UNION ALL` (preserving duplicates) between
       queries with the same projected column names and order.
 - [x] `INTERSECT` and `EXCEPT` with SQL set (deduplicating) semantics.
