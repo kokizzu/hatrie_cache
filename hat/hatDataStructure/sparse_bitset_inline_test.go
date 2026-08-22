@@ -1,4 +1,4 @@
-package hatriecache
+package hatDataStructure
 
 import (
 	"reflect"
@@ -165,7 +165,7 @@ func BenchmarkSparseBitsetInlineLayout(b *testing.B) {
 		add  func(*sparseBitsetData, uint64) bool
 	}{
 		{name: "SliceControl", add: sparseBitsetAddSliceControl},
-		{name: "Inline", add: (*sparseBitsetData).Add},
+		{name: "Inline", add: (*sparseBitsetData).add},
 	} {
 		b.Run("Distinct16384/"+layout.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -190,7 +190,7 @@ func BenchmarkSparseBitsetDistinctSmallContainersAlternating(b *testing.B) {
 			add    func(*sparseBitsetData, uint64) bool
 		}{
 			{add: sparseBitsetAddSliceControl},
-			{inline: true, add: (*sparseBitsetData).Add},
+			{inline: true, add: (*sparseBitsetData).add},
 		}
 		if iteration&1 != 0 {
 			layouts[0], layouts[1] = layouts[1], layouts[0]
@@ -221,7 +221,7 @@ func BenchmarkSparseBitsetInlineRetained100k(b *testing.B) {
 		add  func(*sparseBitsetData, uint64) bool
 	}{
 		{name: "SliceControl", add: sparseBitsetAddSliceControl},
-		{name: "Inline", add: (*sparseBitsetData).Add},
+		{name: "Inline", add: (*sparseBitsetData).add},
 	} {
 		b.Run(layout.name, func(b *testing.B) {
 			var retainedBytes, retainedObjects uint64

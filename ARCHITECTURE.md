@@ -15,7 +15,7 @@ import them without starting the cache server:
 | `hatrie_cache/hat/hatRate` | Bounded sharded token-bucket limiting | `hatriecache.RateLimiter` and `NewRateLimiter` aliases |
 | `hatrie_cache/hat/hatAudit` | Concurrent JSONL audit logging and recent-event retention | `AuditEvent`, `AuditLogger`, and constructors alias it |
 | `hatrie_cache/hat/hatMetrics` | Atomic API audit, write-protection, and rate-limit counters | `APIMetrics`, `APIMetricsSnapshot`, and constructor aliases |
-| `hatrie_cache/hat/hatDataStructure` | Standalone compact algorithms: Fenwick tree, Quantile Sketch, and Roaring Bitmap | Root keeps cache storage, snapshots, replication, and command adapters |
+| `hatrie_cache/hat/hatDataStructure` | Standalone compact algorithms: Fenwick tree, Quantile Sketch, Roaring Bitmap, and Sparse Bitset | Root keeps cache storage, snapshots, replication, and command adapters |
 
 ## Importing a component
 
@@ -48,9 +48,9 @@ The root still contains grouped domain files rather than arbitrary utilities:
 | SQL | `sql*.go` | Query planning, source resolution, and command-backed values share cache interfaces. |
 | Storage and recovery | `leveldb*.go`, `pebble*.go`, `snapshot*.go`, `journal*.go`, `backup*.go` | Their schemas and recovery guarantees are cross-validated together. |
 | Replication | `replication*.go`, `election*.go`, `local_partition.go` | Ownership, topology, journal ordering, and transport safety are one protocol boundary. |
-| Data structures | `*_filter.go`, `*_sketch.go`, `fenwick_tree.go`, `radix_tree.go`, `sparse_bitset.go`, `roaring_bitmap.go` | Each has command, snapshot, binary replication, storage, and compact-memory integrations. Fenwick, Quantile Sketch, and Roaring Bitmap reusable algorithms are in `hat/hatDataStructure`; their cache adapters remain here. |
+| Data structures | `*_filter.go`, `*_sketch.go`, `fenwick_tree.go`, `radix_tree.go`, `sparse_bitset.go`, `roaring_bitmap.go` | Each has command, snapshot, binary replication, storage, and compact-memory integrations. Fenwick, Quantile Sketch, Roaring Bitmap, and Sparse Bitset reusable algorithms are in `hat/hatDataStructure`; their cache adapters remain here. |
 
-Fenwick tree, Quantile Sketch, and Roaring Bitmap are completed data-structure
+Fenwick tree, Quantile Sketch, Roaring Bitmap, and Sparse Bitset are completed data-structure
 extractions. Their public types deep-copy snapshots and validate restored
 state, while root adapters continue to own unchanged cache snapshot schemas,
 binary replication, reusable storage, and `HatTrie` methods. Other structures

@@ -236,50 +236,50 @@ func appendCommandDumpSparseBitsetBinary(destination []byte, expiresAt *time.Tim
 		return destination, err
 	}
 	writer.buf = append(writer.buf, snapshotValueBinarySparseBitset)
-	writer.writeUvarint(bitset.count)
-	writer.writeUvarint(uint64(len(bitset.containers)))
-	for index := range bitset.containers {
-		container := &bitset.containers[index]
-		writer.writeUvarint(container.key)
-		if container.isBitmap() {
+	writer.writeUvarint(bitset.Count())
+	writer.writeUvarint(uint64(bitset.bitset.ContainerCount()))
+	bitset.bitset.VisitContainers(func(key uint64, cardinality uint32, values []uint16, bitmap []uint64) bool {
+		writer.writeUvarint(key)
+		if bitmap != nil {
 			writer.buf = append(writer.buf, snapshotSparseBitsetBinaryBits)
-			writer.writeUvarint(uint64(container.cardinality))
-			writeSnapshotUint64Bytes(&writer.binaryFieldWriter, container.bits[:])
-			continue
+			writer.writeUvarint(uint64(cardinality))
+			writeSnapshotUint64Bytes(&writer.binaryFieldWriter, bitmap)
+			return true
 		}
 		writer.buf = append(writer.buf, snapshotSparseBitsetBinaryArray)
-		writer.writeUvarint(uint64(container.cardinality))
-		values := container.values
-		if values == nil {
-			values = container.inline[:container.cardinality]
-		}
+		writer.writeUvarint(uint64(cardinality))
 		writeSnapshotUint16Bytes(&writer.binaryFieldWriter, values)
-	}
+		return true
+	})
 	return finishReplicationDirectPayload(writer, entry), nil
 }
 
 func liveSparseBitsetBinarySize(bitset sparseBitsetData) (int, error) {
-	total := 1 + binaryUvarintSize(bitset.count) + binaryUvarintSize(uint64(len(bitset.containers)))
-	for index := range bitset.containers {
-		container := &bitset.containers[index]
-		rawSize := len(container.values) * 2
-		if container.isBitmap() {
-			rawSize = len(container.bits) * 8
-		} else if container.values == nil {
-			rawSize = int(container.cardinality) * 2
+	total := 1 + binaryUvarintSize(bitset.Count()) + binaryUvarintSize(uint64(bitset.bitset.ContainerCount()))
+	var visitErr error
+	bitset.bitset.VisitContainers(func(key uint64, cardinality uint32, values []uint16, bitmap []uint64) bool {
+		rawSize := len(values) * 2
+		if bitmap != nil {
+			rawSize = len(bitmap) * 8
 		}
 		payloadSize, err := snapshotValueBinaryBytesSize(rawSize)
 		if err != nil {
-			return 0, err
+			visitErr = err
+			return false
 		}
-		itemSize := binaryUvarintSize(container.key) +
+		itemSize := binaryUvarintSize(key) +
 			1 +
-			binaryUvarintSize(uint64(container.cardinality)) +
+			binaryUvarintSize(uint64(cardinality)) +
 			payloadSize
 		total, err = snapshotValueBinaryAdd(total, itemSize)
 		if err != nil {
-			return 0, err
+			visitErr = err
+			return false
 		}
+		return true
+	})
+	if visitErr != nil {
+		return 0, visitErr
 	}
 	return total, nil
 }
