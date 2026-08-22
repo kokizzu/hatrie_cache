@@ -85,6 +85,11 @@ func TestCompileSQLDottedCollectionAliases(t *testing.T) {
 
 func TestDottedCollectionAliasesNormalizeToExistingCommands(t *testing.T) {
 	t.Parallel()
+	for alias, want := range dottedCommandAliases {
+		if got := normalizedCommand(alias); got != want {
+			t.Fatalf("normalizedCommand(%q) = %q, want %q", alias, got, want)
+		}
+	}
 	for alias, want := range map[string]string{
 		"CMS.CREATE": "CREATECMS", "CMS.ADD": "ADDCMS", "TOPK.CREATE": "CREATETOPK", "TOPK.ADD": "ADDTOPK",
 		"BF.CREATE": "CREATEBF", "RT.PUT": "PUTRT", "FW.RANGE": "RANGEFW", "SET.ADD": "ADDSET",
@@ -340,5 +345,25 @@ func FuzzSQLParsersDoNotPanic(f *testing.F) {
 		_, _ = CompileSQL(source)
 		_ = ValidateSQLQuery(source)
 		_, _ = CompileSQLFunction(source)
+	})
+}
+
+func FuzzExecuteSQLQueryDoesNotPanic(f *testing.F) {
+	for _, seed := range []string{
+		"FROM VALUES (1), (2) AS t(value) SELECT DISTINCT value",
+		"FROM VALUES (1) AS a(id) FULL JOIN VALUES (2) AS b(id) ON a.id = b.id SELECT a.id, b.id",
+		"FROM VALUES (1) AS a(value) SELECT value UNION FROM VALUES (1) AS b(value) SELECT value",
+		"FROM (FROM VALUES (1) AS a(value) SELECT value) AS derived SELECT value",
+		"SELECT FROM VALUES (1) AS a(value)",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, source string) {
+		_, _ = ExecuteSQLQuery(source, SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+			if name == "CACHE" {
+				return []SQLRow{{"id": int64(1), "value": "seed"}}, nil
+			}
+			return nil, nil
+		}))
 	})
 }
