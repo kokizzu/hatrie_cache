@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,7 +30,45 @@ type SQLQueryOptions struct {
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
+	PreparedCache         *SQLPreparedQueryCache
 }
+
+// SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
+// bound to `$n` are never stored in this cache.
+type SQLPreparedQueryCacheStats struct {
+	Entries int
+	Hits    uint64
+	Misses  uint64
+}
+
+// SQLPreparedQueryCache caches parsed, unbound SQL templates by exact source
+// text. It is safe for concurrent query execution.
+type SQLPreparedQueryCache struct {
+	mu       sync.Mutex
+	capacity int
+	entries  map[string]*sqlQuery
+	order    []string
+	hits     uint64
+	misses   uint64
+}
+
+// NewSQLPreparedQueryCache creates a bounded parsed-template cache. A nonpositive
+// capacity disables storage while preserving syntax and binding behavior.
+func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
+	return &SQLPreparedQueryCache{capacity: capacity, entries: map[string]*sqlQuery{}}
+}
+
+// Stats returns a stable snapshot of the cache counters.
+func (cache *SQLPreparedQueryCache) Stats() SQLPreparedQueryCacheStats {
+	if cache == nil {
+		return SQLPreparedQueryCacheStats{}
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	return SQLPreparedQueryCacheStats{Entries: len(cache.entries), Hits: cache.hits, Misses: cache.misses}
+}
+
+var defaultSQLPreparedQueryCache = NewSQLPreparedQueryCache(256)
 
 // SQLQueryRequest is accepted by the monitoring SQL endpoint.
 type SQLQueryRequest struct {
@@ -613,7 +652,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
 	}
-	query, err := parseSQLQueryParameters(source, parameters)
+	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -641,7 +680,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	defer cancel()
-	query, err := parseSQLQueryParameters(source, parameters)
+	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
 	if err != nil {
 		return err
 	}
@@ -792,7 +831,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		return SQLQueryResult{}, err
 	}
 	defer cancel()
-	query, err := parseSQLQueryParameters(source, parameters)
+	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -884,11 +923,51 @@ func ValidateSQLQuery(source string) error { _, err := parseSQLQuery(source); re
 func parseSQLQuery(source string) (*sqlQuery, error) { return parseSQLQueryParameters(source, nil) }
 
 func parseSQLQueryParameters(source string, parameters []interface{}) (*sqlQuery, error) {
+	return parseSQLQueryWithCache(source, parameters, nil)
+}
+
+func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLPreparedQueryCache) (*sqlQuery, error) {
+	if cache == nil {
+		cache = defaultSQLPreparedQueryCache
+	}
+	template, err := cache.template(source)
+	if err != nil {
+		return nil, err
+	}
+	return bindSQLQueryParameters(template, parameters)
+}
+
+func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
+	if cache == nil || cache.capacity <= 0 {
+		return parseSQLQueryTemplate(source)
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if query := cache.entries[source]; query != nil {
+		cache.hits++
+		return query, nil
+	}
+	query, err := parseSQLQueryTemplate(source)
+	if err != nil {
+		return nil, err
+	}
+	cache.misses++
+	if len(cache.entries) >= cache.capacity {
+		evicted := cache.order[0]
+		cache.order = cache.order[1:]
+		delete(cache.entries, evicted)
+	}
+	cache.entries[source] = query
+	cache.order = append(cache.order, source)
+	return query, nil
+}
+
+func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 	tokens, err := lexSQL(source)
 	if err != nil {
 		return nil, err
 	}
-	parser := sqlQueryParser{tokens: tokens, parameters: parameters}
+	parser := sqlQueryParser{tokens: tokens, allowParameters: true}
 	explain := false
 	analyze := false
 	if parser.keyword("EXPLAIN") {
@@ -919,6 +998,264 @@ func parseSQLQueryParameters(source string, parameters []interface{}) (*sqlQuery
 	query.explain = explain
 	query.analyze = analyze
 	return query, nil
+}
+
+// bindSQLQueryParameters returns a private execution copy of a cached query
+// template. Templates are never modified: they may be shared by concurrent
+// requests while every request receives its own parameter values, limit, and
+// offset state.
+func bindSQLQueryParameters(template *sqlQuery, parameters []interface{}) (*sqlQuery, error) {
+	query := cloneSQLQuery(template)
+	if err := bindSQLQuery(query, parameters); err != nil {
+		return nil, err
+	}
+	return query, nil
+}
+
+func bindSQLQuery(query *sqlQuery, parameters []interface{}) error {
+	if query == nil {
+		return nil
+	}
+	for index := range query.ctes {
+		cte := &query.ctes[index]
+		if cte.query != nil {
+			if err := bindSQLQuery(cte.query, parameters); err != nil {
+				return err
+			}
+		}
+		if err := bindSQLValues(cte.values, parameters); err != nil {
+			return err
+		}
+	}
+	if query.from != nil {
+		if err := bindSQLSource(query.from, parameters); err != nil {
+			return err
+		}
+	}
+	for index := range query.joins {
+		join := &query.joins[index]
+		if err := bindSQLSource(&join.source, parameters); err != nil {
+			return err
+		}
+		if err := bindSQLExpr(&join.on, parameters); err != nil {
+			return err
+		}
+	}
+	for index := range query.selects {
+		if err := bindSQLExpr(&query.selects[index].expr, parameters); err != nil {
+			return err
+		}
+	}
+	if err := bindSQLExpr(&query.where, parameters); err != nil {
+		return err
+	}
+	for index := range query.groupBy {
+		if err := bindSQLExpr(&query.groupBy[index], parameters); err != nil {
+			return err
+		}
+	}
+	if err := bindSQLExpr(&query.having, parameters); err != nil {
+		return err
+	}
+	for index := range query.orderBy {
+		if err := bindSQLExpr(&query.orderBy[index].expr, parameters); err != nil {
+			return err
+		}
+	}
+	for index := range query.unions {
+		if err := bindSQLQuery(query.unions[index].query, parameters); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func bindSQLSource(source *sqlSource, parameters []interface{}) error {
+	if source.keyParameter != 0 {
+		value, err := sqlParameterValue(source.keyParameter, source.keyToken, parameters)
+		if err != nil {
+			return err
+		}
+		source.key = fmt.Sprint(value)
+		source.keyParameter = 0
+	}
+	if source.query != nil {
+		if err := bindSQLQuery(source.query, parameters); err != nil {
+			return err
+		}
+	}
+	return bindSQLValues(source.values, parameters)
+}
+
+func bindSQLValues(values [][]interface{}, parameters []interface{}) error {
+	for rowIndex := range values {
+		for columnIndex, value := range values[rowIndex] {
+			parameter, ok := value.(sqlParameter)
+			if !ok {
+				continue
+			}
+			bound, err := sqlParameterValue(parameter.index, parameter.token, parameters)
+			if err != nil {
+				return err
+			}
+			values[rowIndex][columnIndex] = bound
+		}
+	}
+	return nil
+}
+
+func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
+	if expr == nil {
+		return nil
+	}
+	if expr.kind == "parameter" {
+		index, ok := expr.value.(int)
+		if !ok {
+			return fmt.Errorf("internal SQL parameter template is invalid")
+		}
+		value, err := sqlParameterValue(index, expr.token, parameters)
+		if err != nil {
+			return err
+		}
+		expr.kind = "literal"
+		expr.value = value
+	}
+	if err := bindSQLExpr(expr.left, parameters); err != nil {
+		return err
+	}
+	if err := bindSQLExpr(expr.right, parameters); err != nil {
+		return err
+	}
+	for index := range expr.args {
+		if err := bindSQLExpr(&expr.args[index], parameters); err != nil {
+			return err
+		}
+	}
+	if expr.window != nil {
+		for index := range expr.window.partition {
+			if err := bindSQLExpr(&expr.window.partition[index], parameters); err != nil {
+				return err
+			}
+		}
+		for index := range expr.window.order {
+			if err := bindSQLExpr(&expr.window.order[index].expr, parameters); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func sqlParameterValue(index int, token sqlToken, parameters []interface{}) (interface{}, error) {
+	if index < 1 {
+		return nil, sqlTokenDiagnostic(token, "parameter indexes start at $1")
+	}
+	if index > len(parameters) {
+		return nil, sqlTokenDiagnostic(token, fmt.Sprintf("parameter $%d has no supplied parameter (received %d)", index, len(parameters)))
+	}
+	return parameters[index-1], nil
+}
+
+func cloneSQLQuery(source *sqlQuery) *sqlQuery {
+	if source == nil {
+		return nil
+	}
+	query := *source
+	query.ctes = make([]sqlCTE, len(source.ctes))
+	for index, cte := range source.ctes {
+		query.ctes[index] = cte
+		query.ctes[index].columns = append([]string(nil), cte.columns...)
+		query.ctes[index].values = cloneSQLValues(cte.values)
+		query.ctes[index].query = cloneSQLQuery(cte.query)
+	}
+	query.selects = make([]sqlSelectItem, len(source.selects))
+	for index, item := range source.selects {
+		query.selects[index] = item
+		query.selects[index].expr = cloneSQLExpr(item.expr)
+	}
+	query.from = cloneSQLSource(source.from)
+	query.joins = make([]sqlJoin, len(source.joins))
+	for index, join := range source.joins {
+		query.joins[index] = join
+		query.joins[index].source = *cloneSQLSource(&join.source)
+		query.joins[index].on = cloneSQLExpr(join.on)
+	}
+	query.where = cloneSQLExpr(source.where)
+	query.groupBy = cloneSQLExprs(source.groupBy)
+	query.having = cloneSQLExpr(source.having)
+	query.orderBy = cloneSQLOrders(source.orderBy)
+	query.unions = make([]sqlUnion, len(source.unions))
+	for index, union := range source.unions {
+		query.unions[index] = union
+		query.unions[index].query = cloneSQLQuery(union.query)
+	}
+	return &query
+}
+
+func cloneSQLSource(source *sqlSource) *sqlSource {
+	if source == nil {
+		return nil
+	}
+	copy := *source
+	copy.values = cloneSQLValues(source.values)
+	copy.columns = append([]string(nil), source.columns...)
+	copy.query = cloneSQLQuery(source.query)
+	if source.fieldTypes != nil {
+		copy.fieldTypes = make(map[string]sqlSourceFieldType, len(source.fieldTypes))
+		for name, fieldType := range source.fieldTypes {
+			copy.fieldTypes[name] = fieldType
+		}
+	}
+	return &copy
+}
+
+func cloneSQLValues(values [][]interface{}) [][]interface{} {
+	copy := make([][]interface{}, len(values))
+	for index, row := range values {
+		copy[index] = append([]interface{}(nil), row...)
+	}
+	return copy
+}
+
+func cloneSQLExprs(expressions []sqlExpr) []sqlExpr {
+	copy := make([]sqlExpr, len(expressions))
+	for index, expression := range expressions {
+		copy[index] = cloneSQLExpr(expression)
+	}
+	return copy
+}
+
+func cloneSQLOrders(orders []sqlOrder) []sqlOrder {
+	copy := make([]sqlOrder, len(orders))
+	for index, order := range orders {
+		copy[index] = order
+		copy[index].expr = cloneSQLExpr(order.expr)
+	}
+	return copy
+}
+
+func cloneSQLExpr(source sqlExpr) sqlExpr {
+	copy := source
+	if source.left != nil {
+		left := cloneSQLExpr(*source.left)
+		copy.left = &left
+	}
+	if source.right != nil {
+		right := cloneSQLExpr(*source.right)
+		copy.right = &right
+	}
+	copy.args = cloneSQLExprs(source.args)
+	if source.window != nil {
+		window := *source.window
+		window.partition = cloneSQLExprs(source.window.partition)
+		window.order = cloneSQLOrders(source.window.order)
+		if source.window.frame != nil {
+			frame := *source.window.frame
+			window.frame = &frame
+		}
+		copy.window = &window
+	}
+	return copy
 }
 
 type sqlQuery struct {
@@ -955,6 +1292,8 @@ type sqlSource struct {
 	columns          []string
 	fieldTypes       map[string]sqlSourceFieldType
 	query            *sqlQuery
+	keyParameter     int
+	keyToken         sqlToken
 }
 type sqlSourceFieldType struct {
 	name  string
@@ -979,6 +1318,14 @@ type sqlExpr struct {
 	left, right               *sqlExpr
 	args                      []sqlExpr
 	window                    *sqlWindow
+	token                     sqlToken
+}
+
+// sqlParameter is retained only in an immutable parsed template when a
+// placeholder appears in a VALUES source. It is replaced before execution.
+type sqlParameter struct {
+	index int
+	token sqlToken
 }
 type sqlWindow struct {
 	partition []sqlExpr
@@ -995,9 +1342,10 @@ type sqlWindowFrameBound struct {
 }
 
 type sqlQueryParser struct {
-	tokens     []sqlToken
-	index      int
-	parameters []interface{}
+	tokens          []sqlToken
+	index           int
+	parameters      []interface{}
+	allowParameters bool
 }
 
 func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
@@ -1262,10 +1610,14 @@ func (p *sqlQueryParser) parseValues() ([][]interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
-			if expr.kind != "literal" {
+			if expr.kind != "literal" && expr.kind != "parameter" {
 				return nil, p.diagnostic(p.previous(), "VALUES accepts literals only")
 			}
-			row = append(row, expr.value)
+			if expr.kind == "parameter" {
+				row = append(row, sqlParameter{index: expr.value.(int), token: expr.token})
+			} else {
+				row = append(row, expr.value)
+			}
 			if p.current().kind != sqlTokenComma {
 				break
 			}
@@ -1321,11 +1673,17 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 		if err != nil {
 			return sqlSource{}, err
 		}
-		if value.kind != "literal" || p.current().kind != sqlTokenRightParen {
-			return sqlSource{}, p.diagnostic(p.current(), "CACHE requires one literal cache key")
+		if (value.kind != "literal" && value.kind != "parameter") || p.current().kind != sqlTokenRightParen {
+			return sqlSource{}, p.diagnostic(p.current(), "CACHE requires one literal cache key or parameter")
 		}
 		p.next()
-		source := sqlSource{kind: "CACHE", key: fmt.Sprint(value.value)}
+		source := sqlSource{kind: "CACHE"}
+		if value.kind == "parameter" {
+			source.keyParameter = value.value.(int)
+			source.keyToken = value.token
+		} else {
+			source.key = fmt.Sprint(value.value)
+		}
 		if err := p.parseAlias(&source); err != nil {
 			return sqlSource{}, err
 		}
@@ -1757,6 +2115,9 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 		index, err := strconv.Atoi(token.text)
 		if err != nil || index < 1 {
 			return sqlExpr{}, p.diagnostic(token, "parameter indexes start at $1")
+		}
+		if p.allowParameters {
+			return sqlExpr{kind: "parameter", value: index, token: token}, nil
 		}
 		if index > len(p.parameters) {
 			return sqlExpr{}, p.diagnostic(token, fmt.Sprintf("parameter $%d has no supplied parameter (received %d)", index, len(p.parameters)))

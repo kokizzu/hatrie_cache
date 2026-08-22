@@ -548,6 +548,30 @@ Each HatTrie query holds one read snapshot across all of its `CACHE` and
 references use the same resolved rows; individual HatTrie reads remain
 concurrency-safe without holding its lock across query execution.
 
+### Prepared-query cache
+
+Repeated dashboard queries can reuse an immutable parsed template while still
+binding fresh parameter values for every request. `ExecuteSQLQueryParameters`,
+`ExecuteSQLQueryPage`, and row streaming use the bounded default cache; supply
+your own cache when its lifetime or capacity should be explicit:
+
+```go
+prepared := hatriecache.NewSQLPreparedQueryCache(128)
+result, err := hatriecache.ExecuteSQLQueryParameters(ctx,
+    "FROM CACHE($1) AS u WHERE u.team_id = $2 SELECT u.id, u.name",
+    resolver,
+    []interface{}{"users", int64(10)},
+    hatriecache.SQLQueryOptions{PreparedCache: prepared},
+)
+```
+
+The cache stores only parsed templates, never resolved rows or parameter
+values. Each execution deep-copies the template before binding, so concurrent
+requests cannot observe another request's `CACHE($n)`, `VALUES`, predicate,
+join, subquery, window, or pagination state. `PreparedCache.Stats()` exposes
+entry, hit, and miss counts. A cache with capacity zero disables storage; a
+full cache evicts the oldest template.
+
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses

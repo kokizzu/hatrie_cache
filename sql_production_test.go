@@ -102,6 +102,113 @@ func TestExecuteSQLQueryRowsStreamsCompatibleSourceRows(t *testing.T) {
 	}
 }
 
+func TestSQLPreparedQueryCacheReusesImmutableTemplateAndBindsFreshParameters(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(2)
+	resolver := SQLSourceResolverFunc(func(name string, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}}, nil
+	})
+	query := "FROM CACHE($1) AS people WHERE people.id >= $2 SELECT people.id"
+	options := SQLQueryOptions{PreparedCache: cache}
+	first, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{"people", int64(2)}, options)
+	if err != nil || !reflect.DeepEqual(first.Rows, []SQLRow{{"id": int64(2)}, {"id": int64(3)}}) {
+		t.Fatalf("first cached query = %#v/%v", first, err)
+	}
+	second, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{"people", int64(3)}, options)
+	if err != nil || !reflect.DeepEqual(second.Rows, []SQLRow{{"id": int64(3)}}) {
+		t.Fatalf("second cached query = %#v/%v; cached template must not retain first parameters", second, err)
+	}
+	if stats := cache.Stats(); stats.Entries != 1 || stats.Misses != 1 || stats.Hits != 1 {
+		t.Fatalf("cache stats = %#v, want one entry, one miss, and one hit", stats)
+	}
+	if _, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{"people"}, options); err == nil || !strings.Contains(err.Error(), "parameter $2 has no supplied parameter") {
+		t.Fatalf("missing cached parameter error = %v, want precise parameter diagnostic", err)
+	}
+}
+
+func TestSQLPreparedQueryCacheBindsValuesAndNestedQueryParameters(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(2)
+	query := "FROM (FROM VALUES ($1), ($2) AS input(id) WHERE input.id >= $3 SELECT input.id) AS nested SELECT nested.id"
+	result, err := ExecuteSQLQueryParameters(context.Background(), query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) {
+		return nil, fmt.Errorf("resolver must not be called for VALUES")
+	}), []interface{}{int64(1), int64(3), int64(2)}, SQLQueryOptions{PreparedCache: cache})
+	if err != nil {
+		t.Fatalf("execute first values query: %v", err)
+	}
+	if got, want := result.Rows, []SQLRow{{"id": int64(3)}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first values rows = %#v, want %#v", got, want)
+	}
+	result, err = ExecuteSQLQueryParameters(context.Background(), query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) {
+		return nil, fmt.Errorf("resolver must not be called for VALUES")
+	}), []interface{}{int64(4), int64(5), int64(4)}, SQLQueryOptions{PreparedCache: cache})
+	if err != nil {
+		t.Fatalf("execute second values query: %v", err)
+	}
+	if got, want := result.Rows, []SQLRow{{"id": int64(4)}, {"id": int64(5)}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("second values rows = %#v, want %#v", got, want)
+	}
+}
+
+func TestSQLPreparedQueryCacheIsBoundedAndSafeForConcurrentBindings(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(1)
+	first := "FROM VALUES (1) AS first_row(id) SELECT first_row.id"
+	second := "FROM VALUES (2) AS second_row(id) SELECT second_row.id"
+	if _, err := parseSQLQueryWithCache(first, nil, cache); err != nil {
+		t.Fatalf("parse first query: %v", err)
+	}
+	if _, err := parseSQLQueryWithCache(second, nil, cache); err != nil {
+		t.Fatalf("parse second query: %v", err)
+	}
+	if _, err := parseSQLQueryWithCache(first, nil, cache); err != nil {
+		t.Fatalf("parse evicted first query: %v", err)
+	}
+	if got, want := cache.Stats(), (SQLPreparedQueryCacheStats{Entries: 1, Misses: 3}); got != want {
+		t.Fatalf("bounded cache stats = %#v, want %#v", got, want)
+	}
+
+	cache = NewSQLPreparedQueryCache(2)
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("unexpected source %s(%q)", name, key)
+		}
+		return []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}}, nil
+	})
+	query := "FROM CACHE('people') AS person WHERE person.id >= $1 SELECT person.id"
+	errors := make(chan error, 32)
+	for minimum := int64(1); minimum <= 32; minimum++ {
+		minimum := minimum
+		go func() {
+			result, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{minimum}, SQLQueryOptions{PreparedCache: cache})
+			if err != nil {
+				errors <- err
+				return
+			}
+			expected := []SQLRow{}
+			for id := minimum; id <= 3; id++ {
+				expected = append(expected, SQLRow{"id": id})
+			}
+			if !reflect.DeepEqual(result.Rows, expected) {
+				errors <- fmt.Errorf("minimum %d rows = %#v, want %#v", minimum, result.Rows, expected)
+				return
+			}
+			errors <- nil
+		}()
+	}
+	for count := 0; count < cap(errors); count++ {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stats := cache.Stats(); stats.Entries != 1 || stats.Hits != 31 || stats.Misses != 1 {
+		t.Fatalf("concurrent cache stats = %#v, want one miss and 31 hits", stats)
+	}
+}
+
 func TestCompileSQLProductionRejectsAmbiguousOrUnsafeForms(t *testing.T) {
 	t.Parallel()
 
