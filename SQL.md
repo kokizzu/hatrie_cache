@@ -237,7 +237,8 @@ Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
 `INDEX SCAN`; an equality inner join whose right `CACHE` field is indexed uses
-`INDEX JOIN`. Indexes refresh automatically when that cache value changes.
+`INDEX JOIN`. Equality `LEFT JOIN` probes the same index while preserving every
+unmatched left row. Indexes refresh automatically when that cache value changes.
 
 ### Query grammar and semantics
 

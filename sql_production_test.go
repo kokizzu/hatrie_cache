@@ -446,6 +446,33 @@ func TestHatTrieOptionalSQLJSONFieldIndexProbesInnerJoin(t *testing.T) {
 	}
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexProbesLeftJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM VALUES (1), (2) AS wanted(id) LEFT JOIN CACHE('users') AS users ON wanted.id = users.id SELECT wanted.id, users.name ORDER BY wanted.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed left join error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(1), "name": nil}, {"id": int64(2), "name": "Lia"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed left join rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil {
+		t.Fatalf("indexed left join explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX JOIN" {
+			return
+		}
+	}
+	t.Fatalf("indexed left join plan = %#v, want INDEX JOIN", explained.Plan)
+}
+
 func TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics(t *testing.T) {
 	t.Parallel()
 	result, err := ExecuteSQLQuery("FROM VALUES ('before', TIMESTAMP '2026-08-22T08:00:00Z'), ('after', TIMESTAMP '2026-08-22T10:00:00Z') AS events(label, occurred_at) WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z' SELECT label", SQLSourceResolverFunc(nil))
