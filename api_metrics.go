@@ -1,57 +1,13 @@
 package hatriecache
 
-import "sync/atomic"
+import "hatrie_cache/hat/hatMetrics"
 
-type APIMetrics struct {
-	auditEventsTotal               atomic.Uint64
-	auditErrorsTotal               atomic.Uint64
-	writeProtectionRejectionsTotal atomic.Uint64
-	rateLimitRejectionsTotal       atomic.Uint64
-}
+// APIMetrics is retained at the root API for compatibility.
+type APIMetrics = hatMetrics.APIMetrics
 
-type APIMetricsSnapshot struct {
-	AuditEventsTotal               uint64
-	AuditErrorsTotal               uint64
-	WriteProtectionRejectionsTotal uint64
-	RateLimitRejectionsTotal       uint64
-}
+// APIMetricsSnapshot is retained at the root API for compatibility.
+type APIMetricsSnapshot = hatMetrics.APIMetricsSnapshot
 
 func NewAPIMetrics() *APIMetrics {
-	return &APIMetrics{}
-}
-
-func (metrics *APIMetrics) RecordAuditResult(err error) {
-	if metrics == nil {
-		return
-	}
-	metrics.auditEventsTotal.Add(1)
-	if err != nil {
-		metrics.auditErrorsTotal.Add(1)
-	}
-}
-
-func (metrics *APIMetrics) RecordWriteProtectionRejection() {
-	if metrics == nil {
-		return
-	}
-	metrics.writeProtectionRejectionsTotal.Add(1)
-}
-
-func (metrics *APIMetrics) RecordRateLimitRejection() {
-	if metrics == nil {
-		return
-	}
-	metrics.rateLimitRejectionsTotal.Add(1)
-}
-
-func (metrics *APIMetrics) Snapshot() APIMetricsSnapshot {
-	if metrics == nil {
-		return APIMetricsSnapshot{}
-	}
-	return APIMetricsSnapshot{
-		AuditEventsTotal:               metrics.auditEventsTotal.Load(),
-		AuditErrorsTotal:               metrics.auditErrorsTotal.Load(),
-		WriteProtectionRejectionsTotal: metrics.writeProtectionRejectionsTotal.Load(),
-		RateLimitRejectionsTotal:       metrics.rateLimitRejectionsTotal.Load(),
-	}
+	return hatMetrics.NewAPIMetrics()
 }
