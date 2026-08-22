@@ -2396,6 +2396,12 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if source.kind != "CACHE" || condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
+	if condition.op == "AND" {
+		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver); indexed || err != nil {
+			return rows, indexed, err
+		}
+		return resolveSQLIndexedSource(source, *condition.right, resolver)
+	}
 	left, right := *condition.left, *condition.right
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
 		return resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)

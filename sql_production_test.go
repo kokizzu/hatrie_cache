@@ -418,6 +418,24 @@ func TestHatTrieOptionalSQLJSONFieldIndexSupportsRangePredicates(t *testing.T) {
 	}
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexSelectsConjunctivePredicate(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":20,"enabled":false},{"id":2,"team_id":20,"enabled":true},{"id":3,"team_id":30,"enabled":true}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(2)}}) {
+		t.Fatalf("conjunctive index rows/error = %#v/%v", result.Rows, err)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 || explained.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("conjunctive index plan/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+}
+
 func TestHatTrieOptionalSQLJSONFieldIndexProbesInnerJoin(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)
