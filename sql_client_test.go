@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -42,5 +43,38 @@ func TestSQLConnQueryRowsDecodesAndStopsOnCallbackError(t *testing.T) {
 	}
 	if authorization != "Bearer secret" {
 		t.Fatalf("Authorization = %q, want bearer token", authorization)
+	}
+}
+
+func TestSQLConnQueryRowsFollowsBoundedCursorPages(t *testing.T) {
+	t.Parallel()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request SQLQueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		requests++
+		if request.PageSize <= 0 || request.PageSize > 1000 {
+			t.Errorf("page_size = %d, want bounded positive size", request.PageSize)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch request.Cursor {
+		case "":
+			_, _ = w.Write([]byte(`{"columns":["name"],"rows":[{"name":"Ivi"}],"has_more":true,"next_cursor":"second"}`))
+		case "second":
+			_, _ = w.Write([]byte(`{"columns":["name"],"rows":[{"name":"Lia"}]}`))
+		default:
+			t.Errorf("cursor = %q", request.Cursor)
+		}
+	}))
+	defer server.Close()
+	var names []string
+	n, err := QueryRows(context.Background(), NewSQLConn(server.URL, ""), "FROM KEYS SELECT key", func(person sqlClientPerson) error {
+		names = append(names, person.Name)
+		return nil
+	})
+	if err != nil || n != 2 || !reflect.DeepEqual(names, []string{"Ivi", "Lia"}) || requests != 2 {
+		t.Fatalf("QueryRows() n/names/requests/error = %d/%#v/%d/%v", n, names, requests, err)
 	}
 }

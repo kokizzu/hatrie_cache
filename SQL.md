@@ -387,7 +387,9 @@ For HTTP, send the same data as `{"query":"... $1 ...",
 The response contains `has_more` and `next_cursor`; pass that cursor with the
 identical query and parameters for the following page. Cursors are stateless,
 bound to the query/parameter payload, and do not create a server-side result
-cache. The Go SDK exposes this as `conn.QueryPage`.
+cache. The Go SDK exposes this as `conn.QueryPage`; `QueryRows` follows those
+cursors automatically with 1,000-row pages, so it does not retain earlier
+result pages while invoking its callback.
 
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 

@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const sqlQueryRowsPageSize = 1000
+
 // SQLConn is a small HTTP client for the read-only SQL endpoint.
 type SQLConn struct {
 	BaseURL string
@@ -87,22 +89,33 @@ func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit fu
 	if visit == nil {
 		return 0, fmt.Errorf("SQL row callback is required")
 	}
-	result, err := conn.Query(ctx, query)
-	if err != nil {
-		return 0, err
-	}
-	for index, row := range result.Rows {
-		data, err := json.Marshal(row)
+	count := 0
+	cursor := ""
+	for {
+		result, err := conn.QueryPage(ctx, query, nil, sqlQueryRowsPageSize, cursor)
 		if err != nil {
-			return index, err
+			return count, err
 		}
-		var value T
-		if err := json.Unmarshal(data, &value); err != nil {
-			return index, err
+		for _, row := range result.Rows {
+			data, err := json.Marshal(row)
+			if err != nil {
+				return count, err
+			}
+			var value T
+			if err := json.Unmarshal(data, &value); err != nil {
+				return count, err
+			}
+			count++
+			if err := visit(value); err != nil {
+				return count, err
+			}
 		}
-		if err := visit(value); err != nil {
-			return index + 1, err
+		if !result.HasMore {
+			return count, nil
 		}
+		if result.NextCursor == "" {
+			return count, fmt.Errorf("SQL server returned has_more without next_cursor")
+		}
+		cursor = result.NextCursor
 	}
-	return len(result.Rows), nil
 }
