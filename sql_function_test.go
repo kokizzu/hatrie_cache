@@ -140,6 +140,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"CACHE", "query", "FROM CACHE('people') AS p SELECT p.name"},
 		{"CROSS", "query", "FROM VALUES (1) AS a(value) CROSS JOIN VALUES (2) AS b(value) SELECT a.value"},
 		{"DESC", "query", "FROM VALUES (1), (2) AS a(value) SELECT value ORDER BY value DESC"},
+		{"DATE", "query", "FROM VALUES (DATE '2026-08-22') AS a(value) SELECT value"},
 		{"DISTINCT", "query", "FROM VALUES (1), (1) AS a(value) SELECT DISTINCT value"},
 		{"EXCEPT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value EXCEPT FROM VALUES (2) AS b(value) SELECT value"},
 		{"EXPLAIN", "query", "EXPLAIN FROM VALUES (1) AS a(value) SELECT value"},
@@ -255,7 +256,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "RECURSIVE": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "RECURSIVE": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
