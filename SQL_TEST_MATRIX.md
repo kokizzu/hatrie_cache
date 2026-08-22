@@ -34,6 +34,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Duplicate clauses and malformed structure | [`TestExecuteSQLQueryProductionRejectsStructuralErrors`](sql_production_test.go) |
 | One Hatrie key has one typed value slot; type prefixes are required | [`TestHatrieTypesShareOneLogicalKeyNamespace`](sql_production_test.go) |
 | Context cancellation plus configurable join-work, result-byte, sort-memory, and group-memory budgets | [`TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation`](sql_production_test.go) |
+| SQL three-valued null semantics for comparisons, `AND`, and `OR` | [`TestExecuteSQLQueryUsesThreeValuedNullLogic`](sql_production_test.go) |
 | Typed `$1` positional parameters in expressions and `CACHE` sources; missing/zero parameter diagnostics; HTTP JSON parameters | [`TestExecuteSQLQueryParametersBindTypedValuesAndDiagnosePositions`](sql_production_test.go), [`TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors`](sql_http_test.go) |
 | Bounded stateless cursor pages and rejection of cursor reuse with a different query | [`TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor`](sql_http_test.go) |
 | Repeated source references read one per-query snapshot | [`TestExecuteSQLQueryUsesOneSnapshotForRepeatedSources`](sql_production_test.go) |

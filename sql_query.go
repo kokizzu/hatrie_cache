@@ -2312,9 +2312,21 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 func sqlBinaryValue(op string, left, right interface{}) interface{} {
 	switch op {
 	case "AND":
+		if left == nil || right == nil {
+			if (left != nil && !sqlTruthy(left)) || (right != nil && !sqlTruthy(right)) { return false }
+			return nil
+		}
 		return sqlTruthy(left) && sqlTruthy(right)
 	case "OR":
+		if left == nil || right == nil {
+			if (left != nil && sqlTruthy(left)) || (right != nil && sqlTruthy(right)) { return true }
+			return nil
+		}
 		return sqlTruthy(left) || sqlTruthy(right)
+	case "LIKE", "=", "!=", "<>", "<", "<=", ">", ">=":
+		if left == nil || right == nil { return nil }
+	}
+	switch op {
 	case "LIKE":
 		return sqlLike(fmt.Sprint(left), fmt.Sprint(right))
 	case "=":

@@ -353,6 +353,22 @@ SELECT left_users.version AS left_version, right_users.version AS right_version`
 	}
 }
 
+func TestExecuteSQLQueryUsesThreeValuedNullLogic(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		op          string
+		left, right interface{}
+		want        interface{}
+	}{
+		{"=", nil, nil, nil}, {"<>", nil, int64(1), nil}, {"<", int64(1), nil, nil},
+		{"AND", true, nil, nil}, {"AND", false, nil, false}, {"OR", true, nil, true}, {"OR", false, nil, nil},
+	} {
+		if got := sqlBinaryValue(test.op, test.left, test.right); got != test.want {
+			t.Fatalf("%#v %s %#v = %#v, want %#v", test.left, test.op, test.right, got, test.want)
+		}
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

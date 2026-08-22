@@ -282,6 +282,11 @@ LIMIT 100;
 - [x] Equality inner joins use a hash join; filters that reference only the
       initial source are applied before an inner/cross-join pipeline.
 - [x] `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IS [NOT] NULL`, and `LIKE`.
+
+Comparisons and `LIKE` involving `NULL` evaluate to SQL unknown (`NULL`), not
+true or false. `WHERE`/`HAVING` retain only true; `AND` and `OR` use the
+standard three-valued truth table. Use `IS NULL` or `IS NOT NULL` for null
+tests.
 - [x] Projection with `*`, qualified columns, aliases, literals, and aggregate
       expressions.
 - [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
