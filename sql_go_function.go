@@ -101,7 +101,7 @@ func (function *sqlGoFunction) Evaluate(calls []SQLFunctionCall) ([]interface{},
 				return nil, err
 			}
 		}
-		value, err := evalSQLGoFunctionExpr(function.expression, call.Arguments)
+		value, err := evalSQLGoFunctionExpr(function.expression, call.Arguments, function.definition)
 		if err != nil {
 			return nil, err
 		}
@@ -110,14 +110,29 @@ func (function *sqlGoFunction) Evaluate(calls []SQLFunctionCall) ([]interface{},
 	return values, nil
 }
 
-func evalSQLGoFunctionExpr(expression sqlExpr, arguments []interface{}) (interface{}, error) {
+func evalSQLGoFunctionExpr(expression sqlExpr, arguments []interface{}, definition SQLFunctionDefinition) (interface{}, error) {
 	switch expression.kind {
 	case "literal":
 		return expression.value, nil
 	case "field":
 		return arguments[expression.value.(int)], nil
+	case "unary":
+		value, err := evalSQLGoFunctionExpr(*expression.left, arguments, definition)
+		if err != nil {
+			return nil, err
+		}
+		if expression.op == "!" {
+			return !sqlTruthy(value), nil
+		}
+		if expression.op == "-" {
+			if _, ok := sqlNumber(value); !ok {
+				return nil, sqlGoRuntimeError(definition, expression.op, fmt.Sprintf("operator %q expects a numeric operand, got %s", expression.op, sqlFunctionValueType(value)))
+			}
+			return sqlArithmeticValue("*", int64(-1), value), nil
+		}
+		return nil, fmt.Errorf("unsupported GO UDF unary operator %q", expression.op)
 	case "binary":
-		left, err := evalSQLGoFunctionExpr(*expression.left, arguments)
+		left, err := evalSQLGoFunctionExpr(*expression.left, arguments, definition)
 		if err != nil {
 			return nil, err
 		}
@@ -127,11 +142,32 @@ func evalSQLGoFunctionExpr(expression sqlExpr, arguments []interface{}) (interfa
 		if expression.op == "IS NOT NULL" {
 			return left != nil, nil
 		}
-		right, err := evalSQLGoFunctionExpr(*expression.right, arguments)
+		right, err := evalSQLGoFunctionExpr(*expression.right, arguments, definition)
 		if err != nil {
 			return nil, err
+		}
+		if strings.Contains("+-*/%", expression.op) && len(expression.op) == 1 {
+			return sqlGoArithmeticValue(expression.op, left, right, definition)
 		}
 		return sqlBinaryValue(expression.op, left, right), nil
 	}
 	return nil, fmt.Errorf("unsupported GO UDF expression")
+}
+
+func sqlGoArithmeticValue(op string, left, right interface{}, definition SQLFunctionDefinition) (interface{}, error) {
+	_, leftOK := sqlNumber(left)
+	_, rightOK := sqlNumber(right)
+	if !leftOK || !rightOK {
+		return nil, sqlGoRuntimeError(definition, op, fmt.Sprintf("operator %q expects numeric operands, got %s and %s", op, sqlFunctionValueType(left), sqlFunctionValueType(right)))
+	}
+	if op == "/" || op == "%" {
+		if number, _ := sqlNumber(right); number == 0 {
+			return nil, sqlGoRuntimeError(definition, op, "division by zero")
+		}
+	}
+	return sqlArithmeticValue(op, left, right), nil
+}
+
+func sqlGoRuntimeError(definition SQLFunctionDefinition, token, message string) error {
+	return &SQLFunctionError{Definition: definition, Message: message, Line: 1, Column: strings.Index(definition.Source, token) + 1}
 }

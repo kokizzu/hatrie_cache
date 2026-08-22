@@ -104,6 +104,72 @@ func TestExecuteSQLQueryReportsUnknownFunctionWithoutRegistry(t *testing.T) {
 	}
 }
 
+func TestSQLGoFunctionSupportsArithmeticGroupingAndUnaryNot(t *testing.T) {
+	t.Parallel()
+
+	registry := NewSQLFunctionRegistry()
+	definition := SQLFunctionDefinition{
+		Name:          "eligible",
+		Arguments:     []string{"age", "penalty", "disabled"},
+		ArgumentTypes: []string{"INTEGER", "INTEGER", "BOOLEAN"},
+		Language:      "GO",
+		Source:        "return !disabled && (age + 2) * 3 >= 30 && penalty % 2 == 0",
+	}
+	if err := registry.Register(definition); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	got, err := registry.EvaluateSQLFunction("eligible", []SQLFunctionCall{
+		{Arguments: []interface{}{int64(8), int64(2), false}},
+		{Arguments: []interface{}{int64(8), int64(3), false}},
+		{Arguments: []interface{}{int64(20), int64(2), true}},
+	})
+	if err != nil {
+		t.Fatalf("EvaluateSQLFunction() error = %v", err)
+	}
+	if want := []interface{}{true, false, false}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EvaluateSQLFunction() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSQLGoFunctionReportsArithmeticTypeAndDivideByZeroErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name       string
+		definition SQLFunctionDefinition
+		arguments  []interface{}
+		want       string
+	}{
+		{
+			name:       "type",
+			definition: SQLFunctionDefinition{Name: "add", Arguments: []string{"name"}, ArgumentTypes: []string{"TEXT"}, Language: "GO", Source: "return name + 1"},
+			arguments:  []interface{}{"ivi"},
+			want:       `operator "+" expects numeric operands, got TEXT and INTEGER`,
+		},
+		{
+			name:       "zero",
+			definition: SQLFunctionDefinition{Name: "divide", Arguments: []string{"score"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return score / 0"},
+			arguments:  []interface{}{int64(12)},
+			want:       "division by zero",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			registry := NewSQLFunctionRegistry()
+			if err := registry.Register(test.definition); err != nil {
+				t.Fatalf("Register() error = %v", err)
+			}
+			_, err := registry.EvaluateSQLFunction(test.definition.Name, []SQLFunctionCall{{Arguments: test.arguments}})
+			if err == nil {
+				t.Fatal("EvaluateSQLFunction() error = nil, want runtime diagnostic")
+			}
+			formatted := FormatSQLFunctionDiagnostic(test.definition, err)
+			if !strings.Contains(formatted, test.want) {
+				t.Fatalf("FormatSQLFunctionDiagnostic() = %q, want %q", formatted, test.want)
+			}
+		})
+	}
+}
+
 type sqlFunctionTestResolver struct {
 	SQLSourceResolver
 	functions SQLFunctionResolver

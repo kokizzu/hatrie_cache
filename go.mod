@@ -3,11 +3,13 @@ module hatrie_cache
 go 1.26.5
 
 require (
+	github.com/aarzilli/golua v0.0.0-20250217091409-248753f411c4
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/goccy/go-json v0.10.6
 	github.com/kpango/fastime v1.1.10
 	github.com/syndtr/goleveldb v1.0.0
+	github.com/tetratelabs/wazero v1.10.1
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 )
@@ -34,6 +36,7 @@ require (
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
 	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect

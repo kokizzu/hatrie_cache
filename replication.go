@@ -3918,7 +3918,33 @@ func replicationEndpoint(address string) (string, error) {
 }
 
 func normalizedCommand(command string) string {
-	return strings.ToUpper(strings.TrimSpace(command))
+	command = strings.ToUpper(strings.TrimSpace(command))
+	if canonical, ok := dottedCommandAliases[command]; ok {
+		return canonical
+	}
+	return command
+}
+
+// dottedCommandAliases provides SQL/Redis-style collection names without
+// changing the established wire command names. Keep it at normalization so
+// HTTP, CLI, SQL, gRPC, and direct callers behave identically.
+var dottedCommandAliases = map[string]string{
+	"MAP.PUT": "PUTMAP", "MAP.PEEK": "PEEKMAP", "MAP.TAKE": "TAKEMAP",
+	"SLICE.PUSH": "PUSHSLICE", "SLICE.POP": "POPSLICE", "SLICE.SHIFT": "SHIFTSLICE", "SLICE.HEAD": "HEADSLICE", "SLICE.TAIL": "TAILSLICE",
+	"SET.ADD": "ADDSET", "SET.REM": "REMSET", "SET.HAS": "HASSET", "SET.GET": "GETSET",
+	"PQ.PUSH": "PUSHPQ", "PQ.PEEK": "PEEKPQ", "PQ.POP": "POPPQ", "PQ.GET": "GETPQ",
+	"BF.CREATE": "CREATEBF", "BF.ADD": "ADDBF", "BF.HAS": "HASBF", "BF.INFO": "INFOBF",
+	"CF.CREATE": "CREATECF", "CF.ADD": "ADDCF", "CF.HAS": "HASCF", "CF.DEL": "DELCF", "CF.INFO": "INFOCF",
+	"XF.CREATE": "CREATEXF", "XF.ADD": "ADDXF", "XF.BUILD": "BUILDXF", "XF.HAS": "HASXF", "XF.INFO": "INFOXF",
+	"RB.CREATE": "CREATERB", "RB.ADD": "ADDRB", "RB.REM": "REMRB", "RB.HAS": "HASRB", "RB.COUNT": "COUNTRB", "RB.GET": "GETRB", "RB.INFO": "INFORB",
+	"SB.CREATE": "CREATESB", "SB.ADD": "ADDSB", "SB.REM": "REMSB", "SB.HAS": "HASSB", "SB.COUNT": "COUNTSB", "SB.GET": "GETSB", "SB.INFO": "INFOSB",
+	"RT.CREATE": "CREATERT", "RT.PUT": "PUTRT", "RT.GET": "GETRT", "RT.DEL": "DELRT", "RT.HAS": "HASRT", "RT.PREFIX": "PREFIXRT", "RT.INFO": "INFORT",
+	"CMS.CREATE": "CREATECMS", "CMS.ADD": "ADDCMS", "CMS.EST": "ESTCMS", "CMS.INFO": "INFOCMS",
+	"HLL.CREATE": "CREATEHLL", "HLL.ADD": "ADDHLL", "HLL.COUNT": "COUNTHLL", "HLL.INFO": "INFOHLL",
+	"TOPK.CREATE": "CREATETOPK", "TOPK.ADD": "ADDTOPK", "TOPK.EST": "ESTTOPK", "TOPK.GET": "GETTOPK", "TOPK.INFO": "INFOTOPK",
+	"RS.CREATE": "CREATERS", "RS.ADD": "ADDRS", "RS.GET": "GETRS", "RS.INFO": "INFORS",
+	"Q.CREATE": "CREATEQ", "Q.ADD": "ADDQ", "Q.EST": "ESTQ", "Q.INFO": "INFOQ",
+	"FW.CREATE": "CREATEFW", "FW.ADD": "ADDFW", "FW.GET": "GETFW", "FW.SUM": "SUMFW", "FW.RANGE": "RANGEFW", "FW.INFO": "INFOFW",
 }
 
 func topologyNodesByID(topology ClusterTopology) map[string]TopologyNode {

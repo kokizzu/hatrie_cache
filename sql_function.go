@@ -59,15 +59,23 @@ type SQLFunctionResolver interface {
 	EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error)
 }
 
-// SQLFunctionRegistry keeps compiled Go-like functions. It is safe for
-// concurrent query execution.
+// sqlFunctionRuntime evaluates one UDF implementation. Every implementation
+// receives a complete query batch so it may amortize host/runtime crossings.
+type sqlFunctionRuntime interface {
+	Evaluate([]SQLFunctionCall) ([]interface{}, error)
+}
+
+type sqlFunctionCloser interface{ Close() }
+
+// SQLFunctionRegistry keeps compiled UDFs. It is safe for concurrent query
+// execution.
 type SQLFunctionRegistry struct {
 	mu        sync.RWMutex
-	functions map[string]*sqlGoFunction
+	functions map[string]sqlFunctionRuntime
 }
 
 func NewSQLFunctionRegistry() *SQLFunctionRegistry {
-	return &SQLFunctionRegistry{functions: make(map[string]*sqlGoFunction)}
+	return &SQLFunctionRegistry{functions: make(map[string]sqlFunctionRuntime)}
 }
 
 func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) error {
@@ -77,7 +85,18 @@ func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) 
 	if err := normalizeSQLFunctionDefinition(&definition); err != nil {
 		return err
 	}
-	compiled, err := newSQLGoFunction(definition)
+	var compiled sqlFunctionRuntime
+	var err error
+	switch definition.Language {
+	case "GO":
+		compiled, err = newSQLGoFunction(definition)
+	case "LUA":
+		compiled, err = newSQLLuaFunction(definition)
+	case "WASM":
+		compiled, err = newSQLWASMFunction(definition)
+	default:
+		return fmt.Errorf("SQL function %q language %q is not available", definition.Name, definition.Language)
+	}
 	if err != nil {
 		return err
 	}
@@ -109,12 +128,16 @@ func (registry *SQLFunctionRegistry) Close() {
 	}
 	registry.mu.Lock()
 	functions := registry.functions
-	registry.functions = make(map[string]*sqlGoFunction)
+	registry.functions = make(map[string]sqlFunctionRuntime)
 	registry.mu.Unlock()
-	_ = functions
+	for _, function := range functions {
+		if closer, ok := function.(sqlFunctionCloser); ok {
+			closer.Close()
+		}
+	}
 }
 
-// CompileSQLFunction parses CREATE FUNCTION NAME(args...) LANGUAGE GO AS
+// CompileSQLFunction parses CREATE FUNCTION NAME(args...) LANGUAGE GO|LUA|WASM AS
 // 'return expression'. It does not register the function.
 func CompileSQLFunction(source string) (SQLFunctionDefinition, error) {
 	tokens, err := lexSQL(source)
@@ -139,7 +162,7 @@ func CompileSQLFunction(source string) (SQLFunctionDefinition, error) {
 	if err := parser.expectKeyword("LANGUAGE"); err != nil {
 		return SQLFunctionDefinition{}, err
 	}
-	language, err := parser.expectIdentifier("GO", []string{"GO"})
+	language, err := parser.expectIdentifier("GO, LUA, or WASM", []string{"GO", "LUA", "WASM"})
 	if err != nil {
 		return SQLFunctionDefinition{}, err
 	}
@@ -205,8 +228,8 @@ func normalizeSQLFunctionDefinition(definition *SQLFunctionDefinition) error {
 	}
 	definition.Name = strings.TrimSpace(definition.Name)
 	definition.Language = strings.ToUpper(strings.TrimSpace(definition.Language))
-	if definition.Language != "GO" {
-		return fmt.Errorf("SQL function %q language must be GO", definition.Name)
+	if definition.Language != "GO" && definition.Language != "LUA" && definition.Language != "WASM" {
+		return fmt.Errorf("SQL function %q language must be GO, LUA, or WASM", definition.Name)
 	}
 	if len(definition.ArgumentTypes) == 0 {
 		definition.ArgumentTypes = make([]string, len(definition.Arguments))
@@ -225,7 +248,15 @@ func normalizeSQLFunctionDefinition(definition *SQLFunctionDefinition) error {
 			return fmt.Errorf("SQL function argument %q has unsupported type %q", definition.Arguments[i], definition.ArgumentTypes[i])
 		}
 	}
-	return validateSQLGoDefinition(*definition)
+	switch definition.Language {
+	case "GO":
+		return validateSQLGoDefinition(*definition)
+	case "LUA":
+		return validateSQLLuaDefinition(*definition)
+	case "WASM":
+		return validateSQLWASMDefinition(*definition)
+	}
+	return nil
 }
 
 func validateSQLGoDefinition(definition SQLFunctionDefinition) error {
@@ -246,6 +277,28 @@ func validateSQLGoDefinition(definition SQLFunctionDefinition) error {
 	source := strings.TrimSpace(definition.Source)
 	if !strings.HasPrefix(source, "return ") || strings.ContainsAny(source, "\r\n;") {
 		return fmt.Errorf("Go SQL function source must be one return expression")
+	}
+	return nil
+}
+
+func validateSQLLuaDefinition(definition SQLFunctionDefinition) error {
+	if !isSQLIdentifierStart(definition.Name[0]) {
+		return fmt.Errorf("invalid SQL function name %q", definition.Name)
+	}
+	seen := make(map[string]struct{}, len(definition.Arguments))
+	for _, argument := range definition.Arguments {
+		if argument == "" || !isSQLIdentifierStart(argument[0]) {
+			return fmt.Errorf("invalid SQL function argument %q", argument)
+		}
+		key := strings.ToUpper(argument)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate SQL function argument %q", argument)
+		}
+		seen[key] = struct{}{}
+	}
+	source := strings.TrimSpace(definition.Source)
+	if !strings.HasPrefix(source, "return ") || strings.ContainsAny(source, "\r\n") {
+		return fmt.Errorf("Lua SQL function source must be one return expression")
 	}
 	return nil
 }

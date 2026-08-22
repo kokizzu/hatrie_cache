@@ -540,19 +540,42 @@ func (p *sqlQueryParser) parseOrder() ([]sqlOrder, error) {
 	return out, nil
 }
 func (p *sqlQueryParser) parseCondition() (sqlExpr, error) {
-	left, err := p.parseComparison()
+	return p.parseOrCondition()
+}
+
+// SQL evaluates AND before OR. Keeping this split also makes later support for
+// parenthesized predicates unambiguous.
+func (p *sqlQueryParser) parseOrCondition() (sqlExpr, error) {
+	left, err := p.parseAndCondition()
 	if err != nil {
 		return sqlExpr{}, err
 	}
-	for p.keyword("AND") || p.keyword("OR") {
-		op := strings.ToUpper(p.current().text)
+	for p.keyword("OR") {
+		op := "OR"
 		p.next()
-		right, err := p.parseComparison()
+		right, err := p.parseAndCondition()
 		if err != nil {
 			return sqlExpr{}, err
 		}
 		l := left
 		left = sqlExpr{kind: "binary", op: op, left: &l, right: &right}
+	}
+	return left, nil
+}
+
+func (p *sqlQueryParser) parseAndCondition() (sqlExpr, error) {
+	left, err := p.parseComparison()
+	if err != nil {
+		return sqlExpr{}, err
+	}
+	for p.keyword("AND") {
+		p.next()
+		right, err := p.parseComparison()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		previous := left
+		left = sqlExpr{kind: "binary", op: "AND", left: &previous, right: &right}
 	}
 	return left, nil
 }
@@ -593,9 +616,70 @@ func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 	}
 	return left, nil
 }
-func (p *sqlQueryParser) parseExpr() (sqlExpr, error) { return p.parsePrimary() }
+func (p *sqlQueryParser) parseExpr() (sqlExpr, error) { return p.parseAdditiveExpr() }
+
+func (p *sqlQueryParser) parseAdditiveExpr() (sqlExpr, error) {
+	left, err := p.parseMultiplicativeExpr()
+	if err != nil {
+		return sqlExpr{}, err
+	}
+	for p.current().kind == sqlTokenPlus || p.current().kind == sqlTokenMinus {
+		op := p.current().text
+		p.next()
+		right, err := p.parseMultiplicativeExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		previous := left
+		left = sqlExpr{kind: "binary", op: op, left: &previous, right: &right}
+	}
+	return left, nil
+}
+
+func (p *sqlQueryParser) parseMultiplicativeExpr() (sqlExpr, error) {
+	left, err := p.parseUnaryExpr()
+	if err != nil {
+		return sqlExpr{}, err
+	}
+	for p.current().kind == sqlTokenStar || p.current().kind == sqlTokenSlash || p.current().kind == sqlTokenPercent {
+		op := p.current().text
+		p.next()
+		right, err := p.parseUnaryExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		previous := left
+		left = sqlExpr{kind: "binary", op: op, left: &previous, right: &right}
+	}
+	return left, nil
+}
+
+func (p *sqlQueryParser) parseUnaryExpr() (sqlExpr, error) {
+	if p.current().kind == sqlTokenBang || p.current().kind == sqlTokenMinus {
+		token := p.current()
+		p.next()
+		operand, err := p.parseUnaryExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		return sqlExpr{kind: "unary", op: token.text, left: &operand}, nil
+	}
+	return p.parsePrimary()
+}
+
 func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	token := p.current()
+	if token.kind == sqlTokenLeftParen {
+		p.next()
+		expression, err := p.parseCondition()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlExpr{}, err
+		}
+		return expression, nil
+	}
 	if token.kind == sqlTokenStar {
 		p.next()
 		return sqlExpr{kind: "star"}, nil
@@ -1066,6 +1150,24 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			return result
 		}
+	case "unary":
+		value := evalSQLExpr(*expr.left, group, row)
+		switch expr.op {
+		case "!":
+			return !sqlTruthy(value)
+		case "-":
+			switch number := value.(type) {
+			case int64:
+				return -number
+			case int:
+				return -number
+			case float64:
+				return -number
+			case float32:
+				return -number
+			}
+			return nil
+		}
 	case "binary":
 		left := evalSQLExpr(*expr.left, group, row)
 		if expr.op == "IS NULL" {
@@ -1075,26 +1177,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return left != nil
 		}
 		right := evalSQLExpr(*expr.right, group, row)
-		switch expr.op {
-		case "AND":
-			return sqlTruthy(left) && sqlTruthy(right)
-		case "OR":
-			return sqlTruthy(left) || sqlTruthy(right)
-		case "LIKE":
-			return sqlLike(fmt.Sprint(left), fmt.Sprint(right))
-		case "=":
-			return sqlCompare(left, right) == 0
-		case "!=", "<>":
-			return sqlCompare(left, right) != 0
-		case "<":
-			return sqlCompare(left, right) < 0
-		case "<=":
-			return sqlCompare(left, right) <= 0
-		case ">":
-			return sqlCompare(left, right) > 0
-		case ">=":
-			return sqlCompare(left, right) >= 0
-		}
+		return sqlBinaryValue(expr.op, left, right)
 	}
 	return nil
 }
@@ -1299,6 +1382,59 @@ func sqlBinaryValue(op string, left, right interface{}) interface{} {
 		return sqlCompare(left, right) > 0
 	case ">=":
 		return sqlCompare(left, right) >= 0
+	case "+", "-", "*", "/", "%":
+		return sqlArithmeticValue(op, left, right)
 	}
 	return nil
+}
+
+func sqlArithmeticValue(op string, left, right interface{}) interface{} {
+	leftInteger, leftIsInteger := sqlInteger(left)
+	rightInteger, rightIsInteger := sqlInteger(right)
+	if leftIsInteger && rightIsInteger {
+		switch op {
+		case "+":
+			return leftInteger + rightInteger
+		case "-":
+			return leftInteger - rightInteger
+		case "*":
+			return leftInteger * rightInteger
+		case "/":
+			if rightInteger == 0 {
+				return nil
+			}
+			return leftInteger / rightInteger
+		case "%":
+			if rightInteger == 0 {
+				return nil
+			}
+			return leftInteger % rightInteger
+		}
+	}
+	leftNumber, leftOK := sqlNumber(left)
+	rightNumber, rightOK := sqlNumber(right)
+	if !leftOK || !rightOK || (op == "/" && rightNumber == 0) || op == "%" {
+		return nil
+	}
+	switch op {
+	case "+":
+		return leftNumber + rightNumber
+	case "-":
+		return leftNumber - rightNumber
+	case "*":
+		return leftNumber * rightNumber
+	case "/":
+		return leftNumber / rightNumber
+	}
+	return nil
+}
+
+func sqlInteger(value interface{}) (int64, bool) {
+	switch number := value.(type) {
+	case int:
+		return int64(number), true
+	case int64:
+		return number, true
+	}
+	return 0, false
 }

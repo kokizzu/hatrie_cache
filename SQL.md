@@ -43,6 +43,71 @@ canonical spelling emitted by documentation and examples.
 | Quantile sketches | `CREATEQ`/`CREATEQS`/`CREATEQUANTILE`/`RESERVEQ`/`QSRESERVE`; `ADDQ`/`ADDQS`/`QADD`/`QSADD`; `ESTQ`/`QUERYQ`/`QQUERY`/`QSQUERY`/`QUANTILE`; `INFOQ`/`QINFO`/`INFOQS`/`QSINFO` |
 | Fenwick trees | `CREATEFW`/`CREATEFENWICK`/`RESERVEFW`/`FWRESERVE`; `ADDFW`/`FWADD`; `GETFW`/`FWGET`; `SUMFW`/`PREFIXFW`/`FWPREFIX`/`FWSUM`; `RANGEFW`/`FWRANGE`; `INFOFW`/`FWINFO` |
 
+### Preferred dotted aliases and parameters
+
+The established flat names above remain fully supported. The dotted aliases
+below are preferred in new SQL and direct command requests because the data
+structure and operation are immediately visible. Every operation requires
+`key` unless stated otherwise. `value` accepts one scalar; `values` accepts a
+JSON array of scalars; `pairs` accepts a JSON object.
+
+> **One logical key namespace:** Hatrie uses separate backing pools internally,
+> but each cache key has exactly one value type. `CMS.CREATE(key => 'stats')`
+> and `TOPK.CREATE(key => 'stats')` do **not** create isolated values; a
+> different-type write can replace the earlier value. Prefix logical keys by
+> type, for example `cms:stats` and `topk:stats`.
+
+| Type | Preferred command | Parameters | Effect |
+| --- | --- | --- | --- |
+| Map | `MAP.PUT` | `key`, `pairs` or `subkey` + `value` | Upsert one or more map fields. |
+|  | `MAP.PEEK`, `MAP.TAKE` | `key`, `subkey` | Read, or read-and-remove, a map field. |
+| Slice | `SLICE.PUSH` | `key`, `value` or `values` | Append values. |
+|  | `SLICE.POP`, `SLICE.SHIFT`, `SLICE.HEAD`, `SLICE.TAIL` | `key` | Remove last, remove first, read first, or read last value. |
+| Set | `SET.ADD`, `SET.REM` | `key`, `value` or `values` | Add or remove members. |
+|  | `SET.HAS` | `key`, `value` | Test membership. |
+|  | `SET.GET` | `key` | Return all members. |
+| Priority queue | `PQ.PUSH` | `key`, `priority`, `value` or `values` | Push values at a priority. |
+|  | `PQ.PEEK`, `PQ.POP`, `PQ.GET` | `key` | Read best, remove best, or return all entries. |
+| Bloom filter | `BF.CREATE` | `key`, `value` = expected items; optional `subkey` = false-positive rate | Create or replace a Bloom filter. |
+|  | `BF.ADD`, `BF.HAS`, `BF.INFO` | `key`, `value`/`values`; `key`, `value`; or `key` | Add, test, or inspect. |
+| Cuckoo filter | `CF.CREATE` | `key`, `value` = capacity; optional `subkey` = false-positive rate | Create or replace a Cuckoo filter. |
+|  | `CF.ADD`, `CF.DEL`, `CF.HAS`, `CF.INFO` | `key`, `value`/`values`; `key`, `value`/`values`; `key`, `value`; or `key` | Add, delete, test, or inspect. |
+| XOR filter | `XF.CREATE` | `key`; optional `value` = expected items | Create the staged XOR filter. |
+|  | `XF.ADD`, `XF.BUILD`, `XF.HAS`, `XF.INFO` | `key`, `value`/`values`; `key`; `key`, `value`; or `key` | Stage values, build, test, or inspect. |
+| Roaring bitmap | `RB.CREATE` | `key` | Create a bitmap. |
+|  | `RB.ADD`, `RB.REM`, `RB.HAS`, `RB.COUNT`, `RB.GET`, `RB.INFO` | `key`, uint32 `value`/`values`; same; `key`, uint32 `value`; or `key` | Mutate, test, count, enumerate, or inspect. |
+| Sparse bitset | `SB.CREATE` | `key` | Create a sparse bitset. |
+|  | `SB.ADD`, `SB.REM`, `SB.HAS`, `SB.COUNT`, `SB.GET`, `SB.INFO` | `key`, uint64 `value`/`values`; same; `key`, uint64 `value`; or `key` | Mutate, test, count, enumerate, or inspect. |
+| Radix tree | `RT.CREATE` | `key` | Create a radix tree. |
+|  | `RT.PUT` | `key`, `subkey`, `value` | Upsert a subkey. |
+|  | `RT.GET`, `RT.DEL`, `RT.HAS` | `key`, `subkey` | Read, delete, or test a subkey. |
+|  | `RT.PREFIX`, `RT.INFO` | `key`, optional `subkey` prefix; or `key` | Scan a prefix or inspect the tree. |
+| Count-Min sketch | `CMS.CREATE` | `key`, `value` = width; optional `subkey` = depth | Create a sketch. |
+|  | `CMS.ADD` | `key`, `value`/`values`; optional `priority` = increment count | Increment estimates for one or more values. |
+|  | `CMS.EST`, `CMS.INFO` | `key`, `value`; or `key` | Estimate a value or inspect dimensions. |
+| HyperLogLog | `HLL.CREATE` | `key`, optional `value` = precision | Create a cardinality estimator. |
+|  | `HLL.ADD`, `HLL.COUNT`, `HLL.INFO` | `key`, `value`/`values`; or `key` | Add items, estimate cardinality, or inspect. |
+| Top-K | `TOPK.CREATE` | `key`, optional `value` = capacity | Create a heavy-hitter tracker. |
+|  | `TOPK.ADD` | `key`, `value`/`values`; optional `priority` = count | Add observations. |
+|  | `TOPK.EST`, `TOPK.GET`, `TOPK.INFO` | `key`, `value`; or `key` | Estimate a value, return leaders, or inspect. |
+| Reservoir sample | `RS.CREATE` | `key`, optional `value` = capacity | Create a uniform reservoir. |
+|  | `RS.ADD`, `RS.GET`, `RS.INFO` | `key`, `value`/`values`; or `key` | Add observations, return sample, or inspect. |
+| Quantile sketch | `Q.CREATE` | `key`, optional `value` = epsilon | Create an approximate quantile sketch. |
+|  | `Q.ADD` | `key`, numeric `value`/`values` | Add observations. |
+|  | `Q.EST`, `Q.INFO` | `key`, `value` = quantile in [0,1]; or `key` | Estimate a quantile or inspect. |
+| Fenwick tree | `FW.CREATE` | `key`, optional `value` = size | Create a prefix-sum tree. |
+|  | `FW.ADD` | `key`, `value` = index, `subkey` = signed delta | Add a delta at an index. |
+|  | `FW.GET`, `FW.SUM` | `key`, `value` = index | Read a cell or prefix sum. |
+|  | `FW.RANGE`, `FW.INFO` | `key`, `value` = start, `subkey` = end; or `key` | Sum an inclusive range or inspect. |
+
+For example:
+
+```sql
+CALL CMS.CREATE(key => 'frequency:paths', value => 2048, subkey => 4);
+CALL CMS.ADD(key => 'frequency:paths', value => '/home');
+CALL TOPK.CREATE(key => 'popular:paths', value => 100);
+```
+
 `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`,
 `INTERNALBATCH`, `INTERNALBATCHV2`, and `INTERNALDIGESTV1` are deliberately
 excluded. They are replication primitives, need internal authentication and

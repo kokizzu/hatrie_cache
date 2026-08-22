@@ -87,6 +87,10 @@ const (
 	sqlTokenEqual
 	sqlTokenArrow
 	sqlTokenPlus
+	sqlTokenMinus
+	sqlTokenSlash
+	sqlTokenPercent
+	sqlTokenBang
 	sqlTokenDot
 	sqlTokenStar
 	sqlTokenLess
@@ -142,7 +146,7 @@ func lexSQL(source string) ([]sqlToken, error) {
 				return nil, err
 			}
 			tokens = append(tokens, lexer.token(sqlTokenString, value, startLine, startColumn))
-		case ch == '-' || isSQLDigit(ch):
+		case isSQLDigit(ch) || ch == '-' && lexer.offset+1 < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset+1]):
 			value, ok := lexer.readNumber()
 			if !ok {
 				return nil, lexer.diagnostic(startLine, startColumn, startColumn+1, "expected a number")
@@ -163,6 +167,15 @@ func lexSQL(source string) ([]sqlToken, error) {
 		case ch == '+':
 			lexer.advanceRune()
 			tokens = append(tokens, lexer.token(sqlTokenPlus, "+", startLine, startColumn))
+		case ch == '-':
+			lexer.advanceRune()
+			tokens = append(tokens, lexer.token(sqlTokenMinus, "-", startLine, startColumn))
+		case ch == '/':
+			lexer.advanceRune()
+			tokens = append(tokens, lexer.token(sqlTokenSlash, "/", startLine, startColumn))
+		case ch == '%':
+			lexer.advanceRune()
+			tokens = append(tokens, lexer.token(sqlTokenPercent, "%", startLine, startColumn))
 		case ch == '.':
 			lexer.advanceRune()
 			tokens = append(tokens, lexer.token(sqlTokenDot, ".", startLine, startColumn))
@@ -194,7 +207,7 @@ func lexSQL(source string) ([]sqlToken, error) {
 				lexer.advanceRune()
 				tokens = append(tokens, lexer.token(sqlTokenNotEqual, "!=", startLine, startColumn))
 			} else {
-				return nil, lexer.diagnostic(startLine, startColumn, startColumn+1, "unexpected character '!'; expected !=")
+				tokens = append(tokens, lexer.token(sqlTokenBang, "!", startLine, startColumn))
 			}
 		case ch == '=':
 			lexer.advanceRune()
@@ -583,11 +596,10 @@ func (parser *sqlParser) parseDelete() (CacheCommandRequest, error) {
 }
 
 func (parser *sqlParser) parseCall() (CacheCommandRequest, error) {
-	commandToken, err := parser.expectIdentifier("a public cache command", publicSQLCommandNames())
+	commandToken, command, err := parser.parsePublicSQLCommand()
 	if err != nil {
 		return CacheCommandRequest{}, err
 	}
-	command := strings.ToUpper(commandToken.text)
 	if isInternalSQLCommand(command) {
 		return CacheCommandRequest{}, parser.diagnostic(commandToken, "internal replication command "+strconv.Quote(command)+" is not available through SQL")
 	}
@@ -618,6 +630,24 @@ func (parser *sqlParser) parseCall() (CacheCommandRequest, error) {
 		return CacheCommandRequest{}, err
 	}
 	return compileSQLCall(command, arguments)
+}
+
+func (parser *sqlParser) parsePublicSQLCommand() (sqlToken, string, error) {
+	commandToken, err := parser.expectIdentifier("a public cache command", publicSQLCommandNames())
+	if err != nil {
+		return sqlToken{}, "", err
+	}
+	command := strings.ToUpper(commandToken.text)
+	if parser.current().kind == sqlTokenDot {
+		parser.next()
+		suffix, suffixErr := parser.expectIdentifier("a dotted command operation", nil)
+		if suffixErr != nil {
+			return sqlToken{}, "", suffixErr
+		}
+		command += "." + strings.ToUpper(suffix.text)
+		commandToken.endColumn = suffix.endColumn
+	}
+	return commandToken, command, nil
 }
 
 type sqlCallArgument struct {
@@ -735,7 +765,37 @@ func compileSQLNamedCall(command string, arguments []sqlCallArgument) (CacheComm
 	if request.TTLSeconds != nil && request.UnixSeconds != nil {
 		return CacheCommandRequest{}, sqlTokenDiagnostic(sqlToken{}, "ttl_seconds and unix_seconds cannot be combined")
 	}
+	if err := validateSQLNamedCallFields(command, seen); err != nil {
+		return CacheCommandRequest{}, err
+	}
 	return request, nil
+}
+
+// A named argument must be meaningful to the target command. These scalar
+// commands previously accepted fields such as values=>JSON '[...]' and then
+// silently dropped them before the request reached the server.
+func validateSQLNamedCallFields(command string, fields map[string]struct{}) error {
+	var allowed map[string]struct{}
+	switch command {
+	case "GET", "GETSTR", "EXISTS", "TTL", "DUMP", "DEL", "PERSIST":
+		allowed = map[string]struct{}{"key": {}}
+	case "SET", "SETSTR", "SETINT", "INC":
+		allowed = map[string]struct{}{"key": {}, "value": {}}
+	case "SETX", "SETSTRX", "SETINTX":
+		allowed = map[string]struct{}{"key": {}, "value": {}, "ttl_seconds": {}}
+	case "EXPIRE":
+		allowed = map[string]struct{}{"key": {}, "ttl_seconds": {}}
+	case "EXPIREAT":
+		allowed = map[string]struct{}{"key": {}, "unix_seconds": {}}
+	default:
+		return nil
+	}
+	for field := range fields {
+		if _, ok := allowed[field]; !ok {
+			return sqlTokenDiagnostic(sqlToken{}, "CALL "+command+" does not accept "+strconv.Quote(field)+"; this argument would be ignored")
+		}
+	}
+	return nil
 }
 
 func compileSQLPositionalCall(command string, arguments []sqlCallArgument) (CacheCommandRequest, error) {
@@ -1057,6 +1117,11 @@ func publicSQLCommandNames() []string {
 		"CREATERS", "CREATESAMPLE", "RESERVERS", "RSRESERVE", "ADDRS", "RSADD", "GETRS", "RSGET", "SAMPLE", "INFORS", "RSINFO",
 		"CREATEQ", "CREATEQS", "CREATEQUANTILE", "RESERVEQ", "QSRESERVE", "ADDQ", "ADDQS", "QADD", "QSADD", "ESTQ", "QUERYQ", "QQUERY", "QSQUERY", "QUANTILE", "INFOQ", "QINFO", "INFOQS", "QSINFO",
 		"CREATEFW", "CREATEFENWICK", "RESERVEFW", "FWRESERVE", "ADDFW", "FWADD", "GETFW", "FWGET", "SUMFW", "PREFIXFW", "FWPREFIX", "FWSUM", "RANGEFW", "FWRANGE", "INFOFW", "FWINFO",
+		"MAP.PUT", "MAP.PEEK", "MAP.TAKE", "SLICE.PUSH", "SLICE.POP", "SLICE.SHIFT", "SLICE.HEAD", "SLICE.TAIL", "SET.ADD", "SET.REM", "SET.HAS", "SET.GET", "PQ.PUSH", "PQ.PEEK", "PQ.POP", "PQ.GET",
+		"BF.CREATE", "BF.ADD", "BF.HAS", "BF.INFO", "CF.CREATE", "CF.ADD", "CF.HAS", "CF.DEL", "CF.INFO", "XF.CREATE", "XF.ADD", "XF.BUILD", "XF.HAS", "XF.INFO",
+		"RB.CREATE", "RB.ADD", "RB.REM", "RB.HAS", "RB.COUNT", "RB.GET", "RB.INFO", "SB.CREATE", "SB.ADD", "SB.REM", "SB.HAS", "SB.COUNT", "SB.GET", "SB.INFO",
+		"RT.CREATE", "RT.PUT", "RT.GET", "RT.DEL", "RT.HAS", "RT.PREFIX", "RT.INFO", "CMS.CREATE", "CMS.ADD", "CMS.EST", "CMS.INFO", "HLL.CREATE", "HLL.ADD", "HLL.COUNT", "HLL.INFO",
+		"TOPK.CREATE", "TOPK.ADD", "TOPK.EST", "TOPK.GET", "TOPK.INFO", "RS.CREATE", "RS.ADD", "RS.GET", "RS.INFO", "Q.CREATE", "Q.ADD", "Q.EST", "Q.INFO", "FW.CREATE", "FW.ADD", "FW.GET", "FW.SUM", "FW.RANGE", "FW.INFO",
 	}
 }
 
