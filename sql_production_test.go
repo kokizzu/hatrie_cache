@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -388,6 +390,90 @@ func TestHatTrieOptionalSQLJSONFieldIndexRefreshesAndPlansIndexScan(t *testing.T
 	result, err = ExecuteSQLQuery(query, trie)
 	if err != nil || result.Stats == nil || result.Stats.OutputRows != 1 {
 		t.Fatalf("refreshed indexed query = %#v, %v", result, err)
+	}
+}
+
+func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260822))
+	for iteration := 0; iteration < 96; iteration++ {
+		left, right := make([]int, 1+random.Intn(5)), make([]int, 1+random.Intn(5))
+		for index := range left {
+			left[index] = random.Intn(3)
+		}
+		for index := range right {
+			right[index] = random.Intn(3)
+		}
+		values := func(rows []int) string {
+			parts := make([]string, len(rows))
+			for i, value := range rows {
+				parts[i] = fmt.Sprintf("(%d)", value)
+			}
+			return strings.Join(parts, ", ")
+		}
+		query := "FROM VALUES " + values(left) + " AS left_values(id) INNER JOIN VALUES " + values(right) + " AS right_values(id) ON left_values.id = right_values.id SELECT left_values.id ORDER BY left_values.id"
+		got, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d join error = %v", iteration, err)
+		}
+		wantIDs := []int{}
+		for _, l := range left {
+			for _, r := range right {
+				if l == r {
+					wantIDs = append(wantIDs, l)
+				}
+			}
+		}
+		sort.Ints(wantIDs)
+		if len(got.Rows) != len(wantIDs) {
+			t.Fatalf("iteration %d join rows = %#v, want ids %#v", iteration, got.Rows, wantIDs)
+		}
+		for index, want := range wantIDs {
+			if got.Rows[index]["id"] != int64(want) {
+				t.Fatalf("iteration %d join row %d = %#v, want %d", iteration, index, got.Rows[index], want)
+			}
+		}
+
+		setQuery := "FROM VALUES " + values(left) + " AS a(id) SELECT id UNION FROM VALUES " + values(right) + " AS b(id) SELECT id"
+		setResult, err := ExecuteSQLQuery(setQuery, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		set := map[int]bool{}
+		setWant := []int{}
+		for _, value := range append(append([]int{}, left...), right...) {
+			if !set[value] {
+				set[value] = true
+				setWant = append(setWant, value)
+			}
+		}
+		if len(setResult.Rows) != len(setWant) {
+			t.Fatalf("iteration %d union rows = %#v, want %#v", iteration, setResult.Rows, setWant)
+		}
+		for index, want := range setWant {
+			if setResult.Rows[index]["id"] != int64(want) {
+				t.Fatalf("iteration %d union row = %#v, want %d", iteration, setResult.Rows[index], want)
+			}
+		}
+		groupResult, err := ExecuteSQLQuery("FROM VALUES "+values(left)+" AS values(id) GROUP BY id SELECT id, COUNT(*) AS count ORDER BY id", SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts := map[int]int{}
+		for _, value := range left {
+			counts[value]++
+		}
+		rowIndex := 0
+		for _, value := range []int{0, 1, 2} {
+			if counts[value] == 0 {
+				continue
+			}
+			row := groupResult.Rows[rowIndex]
+			if row["id"] != int64(value) || row["count"] != int64(counts[value]) {
+				t.Fatalf("iteration %d group row = %#v, want %d/%d", iteration, row, value, counts[value])
+			}
+			rowIndex++
+		}
 	}
 }
 
