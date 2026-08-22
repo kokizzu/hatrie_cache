@@ -3838,6 +3838,8 @@ type hatTrieAuxStorage struct {
 
 type HatTrie struct {
 	mu                         sync.RWMutex
+	sqlIndexMu                 sync.RWMutex
+	sqlJSONIndexes             map[string]map[string]*sqlJSONFieldIndex
 	telemetryMu                sync.Mutex
 	snapshotCaptureMu          sync.Mutex
 	replicationReadOnlyScanMu  sync.Mutex

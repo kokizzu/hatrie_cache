@@ -369,6 +369,28 @@ func TestExecuteSQLQueryUsesThreeValuedNullLogic(t *testing.T) {
 	}
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexRefreshesAndPlansIndexScan(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":10},{"id":2,"team_id":20},{"id":3,"team_id":20}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "team_id"); err != nil {
+		t.Fatalf("CreateSQLJSONFieldIndex() error = %v", err)
+	}
+	query := "EXPLAIN ANALYZE FROM CACHE('users') AS users WHERE users.team_id = 20 SELECT users.id ORDER BY users.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed query error = %v", err)
+	}
+	if result.Stats == nil || result.Stats.OutputRows != 2 || len(result.Plan) == 0 || result.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("indexed plan = %#v, stats = %#v", result.Plan, result.Stats)
+	}
+	trie.UpsertString("users", `[{"id":4,"team_id":20}]`)
+	result, err = ExecuteSQLQuery(query, trie)
+	if err != nil || result.Stats == nil || result.Stats.OutputRows != 1 {
+		t.Fatalf("refreshed indexed query = %#v, %v", result, err)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

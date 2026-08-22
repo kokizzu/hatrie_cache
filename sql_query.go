@@ -79,6 +79,83 @@ type SQLSourceResolver interface {
 // per-query memoization for repeated sources.
 type SQLSnapshotLocker interface{ LockSQLSnapshot() func() }
 
+type SQLIndexedSourceResolver interface {
+	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error)
+}
+type sqlJSONFieldIndex struct {
+	raw  string
+	rows map[string][]SQLRow
+}
+
+func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
+	if ht == nil || key == "" || field == "" {
+		return fmt.Errorf("SQL JSON index requires a cache key and field")
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONIndexes == nil {
+		ht.sqlJSONIndexes = map[string]map[string]*sqlJSONFieldIndex{}
+	}
+	if ht.sqlJSONIndexes[key] == nil {
+		ht.sqlJSONIndexes[key] = map[string]*sqlJSONFieldIndex{}
+	}
+	ht.sqlJSONIndexes[key][field] = &sqlJSONFieldIndex{}
+	return nil
+}
+func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	if index.raw != string(data) {
+		rows, err := sqlJSONRows(key, data)
+		if err != nil {
+			return nil, false, err
+		}
+		index.raw, index.rows = string(data), map[string][]SQLRow{}
+		for _, row := range rows {
+			if valueKey, ok := sqlIndexValueKey(row[field]); ok {
+				index.rows[valueKey] = append(index.rows[valueKey], row)
+			}
+		}
+	}
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok {
+		return []SQLRow{}, true, nil
+	}
+	return cloneSQLRows(index.rows[valueKey]), true, nil
+}
+func sqlJSONRows(key string, data []byte) ([]SQLRow, error) {
+	if len(data) == 0 {
+		return []SQLRow{}, nil
+	}
+	var rows []SQLRow
+	if json.Unmarshal(data, &rows) == nil {
+		return rows, nil
+	}
+	var row SQLRow
+	if json.Unmarshal(data, &row) == nil {
+		return []SQLRow{row}, nil
+	}
+	return nil, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+}
+func sqlIndexValueKey(value interface{}) (string, bool) {
+	if value == nil {
+		return "", false
+	}
+	encoded, err := json.Marshal(value)
+	return string(encoded), err == nil
+}
+
 // SQLSourceResolverFunc adapts a function to SQLSourceResolver.
 type SQLSourceResolverFunc func(name string, key string) ([]SQLRow, error)
 
@@ -1249,14 +1326,21 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		ctes[cte.name] = rows
 	}
 	started := time.Now()
-	base, err := resolveSQLSource(*q.from, resolver, ctes, metrics, control)
+	base, indexed, err := resolveSQLIndexedSource(*q.from, q.where, resolver)
+	if !indexed {
+		base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
+	}
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
 	if len(base) > maxRows {
 		return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
 	}
-	metrics.recordScan(*q.from, len(base), started)
+	if indexed {
+		metrics.record("INDEX SCAN", sqlExplainSource(*q.from), 0, len(base), started)
+	} else {
+		metrics.recordScan(*q.from, len(base), started)
+	}
 	rows := wrapSQLSource(*q.from, base)
 	functions, _ := resolver.(SQLFunctionResolver)
 	pushedWhere := q.where.kind != "" && sqlCanPushBaseWhere(q)
@@ -1833,6 +1917,21 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 	return nil, nil
 }
 
+func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.(SQLIndexedSourceResolver)
+	if !ok || source.kind != "CACHE" || condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+		return nil, false, nil
+	}
+	left, right := *condition.left, *condition.right
+	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
+		return indexed.ResolveSQLIndexedSource(source.kind, source.key, left.name, right.value)
+	}
+	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+		return indexed.ResolveSQLIndexedSource(source.kind, source.key, right.name, left.value)
+	}
+	return nil, false, nil
+}
+
 func cloneSQLRows(rows []SQLRow) []SQLRow {
 	if rows == nil {
 		return nil
@@ -2313,18 +2412,24 @@ func sqlBinaryValue(op string, left, right interface{}) interface{} {
 	switch op {
 	case "AND":
 		if left == nil || right == nil {
-			if (left != nil && !sqlTruthy(left)) || (right != nil && !sqlTruthy(right)) { return false }
+			if (left != nil && !sqlTruthy(left)) || (right != nil && !sqlTruthy(right)) {
+				return false
+			}
 			return nil
 		}
 		return sqlTruthy(left) && sqlTruthy(right)
 	case "OR":
 		if left == nil || right == nil {
-			if (left != nil && sqlTruthy(left)) || (right != nil && sqlTruthy(right)) { return true }
+			if (left != nil && sqlTruthy(left)) || (right != nil && sqlTruthy(right)) {
+				return true
+			}
 			return nil
 		}
 		return sqlTruthy(left) || sqlTruthy(right)
 	case "LIKE", "=", "!=", "<>", "<", "<=", ">", ">=":
-		if left == nil || right == nil { return nil }
+		if left == nil || right == nil {
+			return nil
+		}
 	}
 	switch op {
 	case "LIKE":

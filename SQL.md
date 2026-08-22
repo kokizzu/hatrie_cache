@@ -232,6 +232,11 @@ Each HatTrie query holds one read snapshot across all of its `CACHE` and
 `KEYS` sources, so concurrent writes cannot create a mixed-time join. External
 resolvers are memoized per query for repeated source references.
 
+Create an optional equality index for a JSON field with
+`trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
+filter such as `WHERE users.team_id = 20` uses `INDEX SCAN`; indexes refresh
+automatically when that cache value changes.
+
 ### Query grammar and semantics
 
 The relational grammar accepts both conventional SQL order and the more
