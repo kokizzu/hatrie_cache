@@ -1203,6 +1203,18 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	if token.kind == sqlTokenIdentifier {
 		p.next()
 		upper := strings.ToUpper(token.text)
+		if upper == "TIMESTAMP" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "an RFC3339 timestamp string after TIMESTAMP", nil)
+			}
+			p.next()
+			parsed, err := time.Parse(time.RFC3339Nano, value.text)
+			if err != nil {
+				return sqlExpr{}, p.diagnostic(value, "TIMESTAMP requires an RFC3339 value such as '2026-08-22T09:00:00Z'")
+			}
+			return sqlExpr{kind: "literal", value: parsed}, nil
+		}
 		if upper == "NULL" {
 			return sqlExpr{kind: "literal", value: nil}, nil
 		}
@@ -2672,6 +2684,17 @@ func sqlCompare(left, right interface{}) int {
 	}
 	if right == nil {
 		return 1
+	}
+	if a, ok := left.(time.Time); ok {
+		if b, ok := right.(time.Time); ok {
+			if a.Before(b) {
+				return -1
+			}
+			if a.After(b) {
+				return 1
+			}
+			return 0
+		}
 	}
 	if a, ok := sqlNumber(left); ok {
 		if b, ok := sqlNumber(right); ok {

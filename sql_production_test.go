@@ -446,6 +446,20 @@ func TestHatTrieOptionalSQLJSONFieldIndexProbesInnerJoin(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES ('before', TIMESTAMP '2026-08-22T08:00:00Z'), ('after', TIMESTAMP '2026-08-22T10:00:00Z') AS events(label, occurred_at) WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z' SELECT label", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("timestamp query error = %v", err)
+	}
+	if want := []SQLRow{{"label": "after"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("timestamp rows = %#v, want %#v", result.Rows, want)
+	}
+	if _, err := ExecuteSQLQuery("FROM VALUES (TIMESTAMP 'not-a-time') AS events(occurred_at) SELECT occurred_at", SQLSourceResolverFunc(nil)); err == nil || !strings.Contains(err.Error(), "RFC3339") {
+		t.Fatalf("invalid timestamp error = %v, want RFC3339 diagnostic", err)
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))

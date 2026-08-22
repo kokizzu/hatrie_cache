@@ -297,6 +297,10 @@ Comparisons and `LIKE` involving `NULL` evaluate to SQL unknown (`NULL`), not
 true or false. `WHERE`/`HAVING` retain only true; `AND` and `OR` use the
 standard three-valued truth table. Use `IS NULL` or `IS NOT NULL` for null
 tests.
+
+Use `TIMESTAMP '2026-08-22T09:00:00Z'` for an RFC3339 instant. Timestamp
+literals compare chronologically and reject malformed values with a source
+span and an RFC3339 example.
 - [x] Projection with `*`, qualified columns, aliases, literals, and aggregate
       expressions.
 - [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
