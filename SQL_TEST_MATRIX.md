@@ -38,6 +38,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | GO UDF use in `WHERE` and `SELECT` | [`TestExecuteSQLQueryUsesGoFunctionInWhereAndSelect`](sql_function_test.go) |
 | Optional sandboxed LuaJIT vector batching and conversion rejection | [`sql_lua_luajit_test.go`](sql_lua_luajit_test.go) (`-tags luajit`) |
 | Numeric Wazero Wasm ABI, type rejection, and runtime close | [`sql_wazero_test.go`](sql_wazero_test.go) |
+| Sandboxed JavaScript→Javy→Wazero vector batching, source spans, and timeout interruption | [`sql_javascript_javy_test.go`](sql_javascript_javy_test.go) (`-tags javy`, explicit compiler path) |
 | HTTP SQL/function malformed requests and normal calls | [`sql_http_test.go`](sql_http_test.go), [`TestMonitoringSQLRoutesRejectMalformedRequests`](sql_production_test.go) |
 | CLI command, relational query, and function routes | [`cmd/hatrie-cli/sql_test.go`](cmd/hatrie-cli/sql_test.go) |
 | Generic Go SDK decode and callback early stop | [`sql_client_test.go`](sql_client_test.go) |
@@ -53,7 +54,7 @@ The parser must reject or diagnose these rather than pretend to implement them:
 - `INTERSECT ALL` and `EXCEPT ALL`.
 - SQL writes through relational `SELECT`; cache mutations use the separately
   compiled command SQL forms.
-- General text/JSON Wasm ABI and JavaScript source UDFs. See [UDF.md](UDF.md)
-  for the safety and overhead decision.
+- General text/JSON Wasm ABI. JavaScript is supported through the separately
+  documented Javy-to-Wazero batch ABI; see [UDF.md](UDF.md).
 
 The repository's canonical full verification entry point is `make test`.
