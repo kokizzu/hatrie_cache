@@ -3663,7 +3663,18 @@ func runSQL(ctx context.Context, client *http.Client, addr string, args []string
 	if err == nil {
 		return postCommandValue(ctx, client, addr, request, *wireFormat, stdout)
 	}
+	definition, functionErr := hatriecache.CompileSQLFunction(source)
+	if functionErr == nil {
+		body, marshalErr := stdjson.Marshal(definition)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		return postJSON(ctx, client, addr, "/api/sql/functions", body, stdout)
+	}
 	if queryErr := hatriecache.ValidateSQLQuery(source); queryErr != nil {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(source)), "CREATE FUNCTION") {
+			return errors.New(hatriecache.FormatSQLFunctionDiagnostic(hatriecache.SQLFunctionDefinition{}, functionErr))
+		}
 		return errors.New(hatriecache.FormatSQLDiagnostic(source, queryErr))
 	}
 	body, marshalErr := stdjson.Marshal(hatriecache.SQLQueryRequest{Query: source})

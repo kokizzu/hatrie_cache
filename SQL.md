@@ -251,10 +251,18 @@ engine, endpoint, and SDK are verified. Before adding them:
       precompiled scalar row predicate (`row.age > 10 && row.score < 9`):
       Go native 1.315 ns/op, GopherLua 120.7 ns/op / 0 allocs, Goja JavaScript
       374.9 ns/op / 3 allocs, and Starlark 768.0 ns/op / 12 allocs.
-- [ ] Document startup cost, steady-state latency, allocation rate, safety
-      model, cancellation behavior, and dependency/license trade-offs.
-- [ ] Ask for approval with the benchmark results and the recommended runtime.
-- [ ] Implement only the approved function runtime and its resource limits.
+- [x] Benchmark large-row LuaJIT marshaling and the requested WebAssembly
+      runtimes; results and the decision are in [`UDF.md`](UDF.md).
+- [x] Use a bounded native `LANGUAGE GO` expression runtime rather than copying
+      every row through cgo into LuaJIT.
+- [x] Reject arbitrary Go execution, imports, loops, host calls, and function
+      calls; only a typed single return expression is accepted.
+- [x] Report source/type failures with function-source diagnostics.
+- [x] Add `CREATE FUNCTION ... LANGUAGE GO AS 'return expression'` routing to
+      `hatrie-cli sql` and `POST /api/sql/functions`.
+- [ ] Persist registered function definitions across process restart.
+- [ ] Define and implement a separately versioned `LANGUAGE WASM` binary ABI
+      if users need non-GO UDFs; JavaScript source is not Wasm by itself.
 
 ## Implementation checklist
 

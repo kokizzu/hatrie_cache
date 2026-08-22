@@ -64,3 +64,31 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 		t.Fatalf("bad query body = %q, want formatted compiler diagnostic", body)
 	}
 }
+
+func TestMonitoringSQLFunctionRouteRegistersTypedGoFunction(t *testing.T) {
+	t.Parallel()
+
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql/functions", strings.NewReader(`{"name":"eligible","arguments":["age","score"],"argument_types":["INTEGER","INTEGER"],"language":"GO","source":"return age > 10 && score < 9"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("register status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM VALUES ('Ivi', 12, 7), ('Lia', 4, 7) AS people(name, age, score) WHERE eligible(age, score) SELECT name"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("query status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var result SQLQueryResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("query response JSON error = %v", err)
+	}
+	if want := (SQLQueryResult{Columns: []string{"name"}, Rows: []SQLRow{{"name": "Ivi"}}}); !reflect.DeepEqual(result, want) {
+		t.Fatalf("query result = %#v, want %#v", result, want)
+	}
+}

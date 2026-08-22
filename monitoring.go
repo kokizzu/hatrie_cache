@@ -69,6 +69,7 @@ type MonitoringOptions struct {
 	ReplicationSafety                *ReplicationSafetyStore
 	EnforceLeaderWrites              bool
 	RuntimeConfig                    map[string]interface{}
+	SQLFunctions                     *SQLFunctionRegistry
 }
 
 type MonitoringHandler struct {
@@ -79,6 +80,20 @@ type MonitoringHandler struct {
 	profileCapture        *monitoringProfileCaptureState
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
+	sqlFunctions          *SQLFunctionRegistry
+}
+
+type monitoringSQLResolver struct {
+	source    SQLSourceResolver
+	functions SQLFunctionResolver
+}
+
+func (resolver monitoringSQLResolver) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
+	return resolver.source.ResolveSQLSource(name, key)
+}
+
+func (resolver monitoringSQLResolver) EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error) {
+	return resolver.functions.EvaluateSQLFunction(name, calls)
 }
 
 type commandExecutionOptions struct {
@@ -249,11 +264,15 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.ReplicationSafety == nil {
 		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
+	if options.SQLFunctions == nil {
+		options.SQLFunctions = NewSQLFunctionRegistry()
+	}
 	handler := &MonitoringHandler{
 		trie:                  trie,
 		options:               options,
 		authTokens:            newAuthTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
 		replicationAuthTokens: newAuthTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
+		sqlFunctions:          options.SQLFunctions,
 	}
 	if options.DiagnosticsProfiling {
 		handler.profileCapture = &monitoringProfileCaptureState{}
@@ -298,6 +317,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/stats", handler.handleStats)
 	mux.HandleFunc("/api/entries", handler.handleEntries)
 	mux.HandleFunc("/api/sql", handler.handleSQL)
+	mux.HandleFunc("/api/sql/functions", handler.handleSQLFunctions)
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/backup", handler.handleBackup)
@@ -829,12 +849,39 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL query is required"))
 		return
 	}
-	result, err := ExecuteSQLQuery(request.Query, handler.trie)
+	result, err := ExecuteSQLQuery(request.Query, monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions})
 	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
+		var functionError *SQLFunctionError
+		if errors.As(err, &functionError) {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLFunctionDiagnostic(functionError.Definition, err)))
+		} else {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
+		}
 		return
 	}
 	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) handleSQLFunctions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) || !handler.requireTrie(w) {
+		return
+	}
+	defer r.Body.Close()
+	var definition SQLFunctionDefinition
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMonitoringJSONRequestBytes))
+	if err := decoder.Decode(&definition); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("invalid SQL function request: "+err.Error()))
+		return
+	}
+	if err := handler.sqlFunctions.Register(definition); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLFunctionDiagnostic(definition, err)))
+		return
+	}
+	writeJSON(w, definition)
 }
 
 func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {

@@ -87,3 +87,28 @@ func TestRunSQLPostsRelationalQueryToSQLRoute(t *testing.T) {
 		t.Fatalf("posted query = %q, want %q", got.Query, query)
 	}
 }
+
+func TestRunSQLPostsGoFunctionToSQLFunctionRoute(t *testing.T) {
+	t.Parallel()
+
+	var got hatriecache.SQLFunctionDefinition
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/sql/functions" {
+			t.Errorf("path = %q, want /api/sql/functions", request.URL.Path)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	query := "CREATE FUNCTION eligible(age INTEGER) LANGUAGE GO AS 'return age > 10'"
+	if err := run(context.Background(), []string{"-addr", server.URL, "sql", "-query", query}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient); err != nil {
+		t.Fatalf("run(sql function) error = %v", err)
+	}
+	if want := (hatriecache.SQLFunctionDefinition{Name: "eligible", Arguments: []string{"age"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return age > 10"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("posted definition = %#v, want %#v", got, want)
+	}
+}
