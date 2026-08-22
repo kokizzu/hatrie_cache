@@ -1,4 +1,4 @@
-package hatriecache
+package hatDataStructure
 
 import (
 	"math/bits"
@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	benchmarkBoolSink                         bool
 	benchmarkRoaringBitmapLayoutContainerSink roaringBitmapContainer
 	benchmarkRoaringBitmapLayoutDataSink      roaringBitmapData
 	benchmarkRoaringBitmapSliceControlSink    roaringBitmapSliceBackingControl
@@ -39,12 +40,12 @@ func TestRoaringBitmapFixedBitmapBackingPreservesTransitions(t *testing.T) {
 			t.Fatalf("contains(%d) = false after bitmap conversion", value)
 		}
 	}
-	wantSnapshot := container.Snapshot()
+	wantSnapshot := container.snapshot()
 	restored, err := newRoaringBitmapContainerFromSnapshot(wantSnapshot)
 	if err != nil {
 		t.Fatalf("newRoaringBitmapContainerFromSnapshot() error = %v", err)
 	}
-	if got := restored.Snapshot(); !reflect.DeepEqual(got, wantSnapshot) {
+	if got := restored.snapshot(); !reflect.DeepEqual(got, wantSnapshot) {
 		t.Fatal("snapshot changed across dense container restore")
 	}
 

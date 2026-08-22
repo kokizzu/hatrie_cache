@@ -177,44 +177,50 @@ func appendCommandDumpRoaringBitmapBinary(destination []byte, expiresAt *time.Ti
 		return destination, err
 	}
 	writer.buf = append(writer.buf, snapshotValueBinaryRoaringBitmap)
-	writer.writeUvarint(bitmap.count)
-	writer.writeUvarint(uint64(len(bitmap.containers)))
-	for index := range bitmap.containers {
-		container := &bitmap.containers[index]
-		writer.writeUvarint(uint64(container.key))
-		if container.isBitmap() {
+	writer.writeUvarint(bitmap.Count())
+	writer.writeUvarint(uint64(bitmap.bitmap.ContainerCount()))
+	bitmap.bitmap.VisitContainers(func(key uint16, cardinality uint32, values []uint16, bitset []uint64) bool {
+		writer.writeUvarint(uint64(key))
+		if bitset != nil {
 			writer.buf = append(writer.buf, snapshotRoaringBitmapBinaryBits)
-			writer.writeUvarint(uint64(container.cardinality))
-			writeSnapshotUint64Bytes(&writer.binaryFieldWriter, container.bits[:])
-			continue
+			writer.writeUvarint(uint64(cardinality))
+			writeSnapshotUint64Bytes(&writer.binaryFieldWriter, bitset)
+			return true
 		}
 		writer.buf = append(writer.buf, snapshotRoaringBitmapBinaryArray)
-		writer.writeUvarint(uint64(container.cardinality))
-		writeSnapshotUint16Bytes(&writer.binaryFieldWriter, container.values)
-	}
+		writer.writeUvarint(uint64(cardinality))
+		writeSnapshotUint16Bytes(&writer.binaryFieldWriter, values)
+		return true
+	})
 	return finishReplicationDirectPayload(writer, entry), nil
 }
 
 func liveRoaringBitmapBinarySize(bitmap roaringBitmapData) (int, error) {
-	total := 1 + binaryUvarintSize(bitmap.count) + binaryUvarintSize(uint64(len(bitmap.containers)))
-	for index := range bitmap.containers {
-		container := &bitmap.containers[index]
-		rawSize := len(container.values) * 2
-		if container.isBitmap() {
-			rawSize = len(container.bits) * 8
+	total := 1 + binaryUvarintSize(bitmap.Count()) + binaryUvarintSize(uint64(bitmap.bitmap.ContainerCount()))
+	var visitErr error
+	bitmap.bitmap.VisitContainers(func(key uint16, cardinality uint32, values []uint16, bitset []uint64) bool {
+		rawSize := len(values) * 2
+		if bitset != nil {
+			rawSize = len(bitset) * 8
 		}
 		payloadSize, err := snapshotValueBinaryBytesSize(rawSize)
 		if err != nil {
-			return 0, err
+			visitErr = err
+			return false
 		}
-		itemSize := binaryUvarintSize(uint64(container.key)) +
+		itemSize := binaryUvarintSize(uint64(key)) +
 			1 +
-			binaryUvarintSize(uint64(container.cardinality)) +
+			binaryUvarintSize(uint64(cardinality)) +
 			payloadSize
 		total, err = snapshotValueBinaryAdd(total, itemSize)
 		if err != nil {
-			return 0, err
+			visitErr = err
+			return false
 		}
+		return true
+	})
+	if visitErr != nil {
+		return 0, visitErr
 	}
 	return total, nil
 }
