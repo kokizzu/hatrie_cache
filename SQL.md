@@ -270,10 +270,13 @@ engine, endpoint, and SDK are verified. Before adding them:
 - [x] Add parser for SELECT, INSERT, UPDATE, DELETE, CALL, and statement lists.
 - [x] Add command compiler and public-command allowlist.
 - [x] Add suggestion and Rust-style diagnostic formatter.
-- [ ] Add parser/compiler tests before implementation (TDD red stage).
-- [ ] Add `hatrie-cli sql` routing, flags, and HTTP execution tests.
-- [ ] Document `sql` in README and Makefile CLI examples.
-- [ ] Implement relational query parsing, planning, and snapshot execution.
-- [ ] Implement `/api/sql` and the streaming Go SDK.
-- [ ] Run focused tests, `go test ./...`, `go build ./...`, and formatting.
-- [ ] Mark completed boxes with verification evidence and commit/push `master`.
+- [x] Add parser/compiler tests for scalar forms, every documented public
+      `CALL` name, batches, internal-command rejection, and diagnostics.
+- [x] Add `hatrie-cli sql` flags, command/relational/function routing, and HTTP
+      execution tests.
+- [x] Document the command inventory, lossless translations, relational SQL
+      sources, SDK, and UDF decision in this document and `UDF.md`.
+- [x] Implement relational query parsing, planning, and snapshot execution.
+- [x] Implement `/api/sql` and the `SQLConn` / generic `QueryRows` SDK.
+- [x] Verify focused SQL/CLI tests and the full `make test` suite.
+- [x] Commit and push directly to `master` (`21b6ead`, `79d8613`, `16cb593`).
