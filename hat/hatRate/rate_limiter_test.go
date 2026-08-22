@@ -1,4 +1,4 @@
-package hatriecache
+package hatRate
 
 import (
 	"strconv"
