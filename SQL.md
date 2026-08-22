@@ -310,6 +310,9 @@ silently selected.
 Use `TIMESTAMP '2026-08-22T09:00:00Z'` for an RFC3339 instant. Timestamp
 literals compare chronologically and reject malformed values with a source
 span and an RFC3339 example.
+
+Use `DATE '2026-08-22'` for a calendar date. Dates validate the calendar,
+serialize as `YYYY-MM-DD`, and compare in chronological order.
 - [x] Projection with `*`, qualified columns, aliases, literals, and aggregate
       expressions.
 - [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.

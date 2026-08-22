@@ -460,6 +460,20 @@ func TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQuerySupportsDateLiteralsAndDiagnostics(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES ('before', DATE '2026-08-21'), ('after', DATE '2026-08-23') AS events(label, occurred_on) WHERE occurred_on > DATE '2026-08-22' SELECT label", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("date query error = %v", err)
+	}
+	if want := []SQLRow{{"label": "after"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("date rows = %#v, want %#v", result.Rows, want)
+	}
+	if _, err := ExecuteSQLQuery("FROM VALUES (DATE '2026-02-30') AS events(occurred_on) SELECT occurred_on", SQLSourceResolverFunc(nil)); err == nil || !strings.Contains(err.Error(), "YYYY-MM-DD") {
+		t.Fatalf("invalid date error = %v, want date diagnostic", err)
+	}
+}
+
 func TestExecuteSQLQueryDiagnosesIncompatibleLiteralComparisonTypes(t *testing.T) {
 	t.Parallel()
 	_, err := ExecuteSQLQuery("FROM VALUES (1) AS values(value) WHERE 1 = '1' SELECT value", SQLSourceResolverFunc(nil))

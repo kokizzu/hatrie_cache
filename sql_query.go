@@ -38,6 +38,11 @@ type SQLQueryRequest struct {
 // SQLRow is one dynamically shaped row returned by the read-only SQL query engine.
 type SQLRow map[string]interface{}
 
+// sqlDate is a canonical calendar date. It intentionally remains distinct
+// from time.Time so DATE values serialize as YYYY-MM-DD rather than a
+// midnight timestamp.
+type sqlDate string
+
 // SQLQueryResult is a materialized result. Streaming clients use QueryRows.
 type SQLQueryResult struct {
 	Columns    []string         `json:"columns"`
@@ -1123,6 +1128,8 @@ func sqlLiteralTypeName(value interface{}) string {
 		return "NUMBER"
 	}
 	switch value.(type) {
+	case sqlDate:
+		return "DATE"
 	case string:
 		return "TEXT"
 	case bool:
@@ -1233,6 +1240,18 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	if token.kind == sqlTokenIdentifier {
 		p.next()
 		upper := strings.ToUpper(token.text)
+		if upper == "DATE" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "a YYYY-MM-DD date string after DATE", nil)
+			}
+			p.next()
+			parsed, err := time.Parse("2006-01-02", value.text)
+			if err != nil || parsed.Format("2006-01-02") != value.text {
+				return sqlExpr{}, p.diagnostic(value, "DATE requires a YYYY-MM-DD value such as '2026-08-22'")
+			}
+			return sqlExpr{kind: "literal", value: sqlDate(value.text)}, nil
+		}
 		if upper == "TIMESTAMP" {
 			value := p.current()
 			if value.kind != sqlTokenString {

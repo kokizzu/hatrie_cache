@@ -28,6 +28,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Standard `AND` precedence, `NOT`, `DISTINCT` | [`TestExecuteSQLQueryUsesStandardBooleanPrecedence`](sql_production_test.go), [`TestExecuteSQLQuerySupportsNotAndDistinct`](sql_production_test.go) |
 | Nulls, `LIKE`, aggregates, `HAVING`, limit and offset | [`TestExecuteSQLQueryAggregateLimitOffsetAndNullMatrix`](sql_production_test.go) |
 | RFC3339 `TIMESTAMP` literals, chronological comparisons, and actionable malformed-literal diagnostics | [`TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics`](sql_production_test.go) |
+| Calendar-valid `DATE` literals, chronological comparisons, and actionable malformed-literal diagnostics | [`TestExecuteSQLQuerySupportsDateLiteralsAndDiagnostics`](sql_production_test.go) |
 | Incompatible non-null literal comparison types are rejected with type names and a Rust-style source span | [`TestExecuteSQLQueryDiagnosesIncompatibleLiteralComparisonTypes`](sql_production_test.go) |
 | Case-sensitive UTF-8 binary text collation is stable for comparison and ordering | [`TestExecuteSQLQueryUsesCaseSensitiveUTF8BinaryStringCollation`](sql_production_test.go) |
 | `RIGHT` and `FULL OUTER JOIN`, including unmatched sides | [`TestExecuteSQLQuerySupportsRightAndFullOuterJoin`](sql_production_test.go) |
