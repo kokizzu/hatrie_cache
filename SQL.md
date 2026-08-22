@@ -284,6 +284,8 @@ LIMIT 100;
 - [x] `UNION` (deduplicating) and `UNION ALL` (preserving duplicates) between
       queries with the same projected column names and order.
 - [x] `INTERSECT` and `EXCEPT` with SQL set (deduplicating) semantics.
+- [x] `EXPLAIN` for a stable, source-free physical plan and `EXPLAIN ANALYZE`
+      for one measured execution plus final output statistics.
 - [x] Uncorrelated derived-table subqueries in `FROM` and joins.
 - [x] Stable source/VALUES/KEYS order before an explicit `ORDER BY`.
 - [x] A 100,000-row source/join limit prevents accidental cross-join explosions.
@@ -294,6 +296,31 @@ out of scope rather than accepted incorrectly.
 
 The server returns ordinary JSON for the CLI and SDK. A query error uses the
 same span diagnostics as command SQL.
+
+### `EXPLAIN` and `EXPLAIN ANALYZE`
+
+Prefix any relational query with `EXPLAIN` to inspect its plan without reading
+`CACHE` or `KEYS` sources and without running SQL UDFs:
+
+```sql
+EXPLAIN
+FROM CACHE('users') AS u
+WHERE u.enabled = true
+SELECT u.name
+ORDER BY u.name
+LIMIT 20;
+```
+
+The returned `plan` and table rows contain `node`, `detail`, and, where known
+without reading a source, `estimated_rows` (currently inline `VALUES` and
+`VALUES` CTEs). Plan nodes include scans, joins, filters, aggregation,
+projection, set operations, sorting, and pagination.
+
+Use `EXPLAIN ANALYZE` to execute the query once. It returns the same plan plus
+`stats`: `elapsed_ns`, `output_rows`, `output_columns`, and `plan_steps`. Its
+final `ANALYZE` result row repeats the measured output-row count and elapsed
+time for table-oriented clients. These are total-query measurements; per-node
+timings and source row counts are not estimated or invented.
 
 ## Go SDK
 

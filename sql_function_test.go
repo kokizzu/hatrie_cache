@@ -132,6 +132,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 	}
 	cases := []keywordCase{
 		{"ALL", "query", "FROM VALUES (1) AS a(value) SELECT value UNION ALL FROM VALUES (2) AS b(value) SELECT value"},
+		{"ANALYZE", "query", "EXPLAIN ANALYZE FROM VALUES (1) AS a(value) SELECT value"},
 		{"AND", "query", "FROM VALUES (TRUE, TRUE) AS a(left_value, right_value) WHERE left_value AND right_value SELECT left_value"},
 		{"AS", "query", "FROM VALUES (1) AS a(value) SELECT value AS result"},
 		{"ASC", "query", "FROM VALUES (2), (1) AS a(value) SELECT value ORDER BY value ASC"},
@@ -141,6 +142,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"DESC", "query", "FROM VALUES (1), (2) AS a(value) SELECT value ORDER BY value DESC"},
 		{"DISTINCT", "query", "FROM VALUES (1), (1) AS a(value) SELECT DISTINCT value"},
 		{"EXCEPT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value EXCEPT FROM VALUES (2) AS b(value) SELECT value"},
+		{"EXPLAIN", "query", "EXPLAIN FROM VALUES (1) AS a(value) SELECT value"},
 		{"FROM", "query", "FROM VALUES (1) AS a(value) SELECT value"},
 		{"FULL", "query", "FROM VALUES (1) AS a(value) FULL JOIN VALUES (2) AS b(value) ON a.value = b.value SELECT a.value"},
 		{"GROUP", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
@@ -249,7 +251,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

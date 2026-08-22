@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const maxSQLQueryRows = 100000
@@ -20,8 +21,28 @@ type SQLRow map[string]interface{}
 
 // SQLQueryResult is a materialized result. Streaming clients use QueryRows.
 type SQLQueryResult struct {
-	Columns []string `json:"columns"`
-	Rows    []SQLRow `json:"rows"`
+	Columns []string         `json:"columns"`
+	Rows    []SQLRow         `json:"rows"`
+	Plan    []SQLExplainStep `json:"plan,omitempty"`
+	Stats   *SQLQueryStats   `json:"stats,omitempty"`
+}
+
+// SQLExplainStep is one stable, human-readable operation in an EXPLAIN plan.
+// EstimatedRows is present only when the parser can know it without reading a
+// cache source (for example an inline VALUES source).
+type SQLExplainStep struct {
+	Node          string `json:"node"`
+	Detail        string `json:"detail"`
+	EstimatedRows *int   `json:"estimated_rows,omitempty"`
+}
+
+// SQLQueryStats is emitted only by EXPLAIN ANALYZE. It describes one actual
+// execution, including its total elapsed time, not an extrapolated estimate.
+type SQLQueryStats struct {
+	ElapsedNanos  int64 `json:"elapsed_ns"`
+	OutputRows    int   `json:"output_rows"`
+	OutputColumns int   `json:"output_columns"`
+	PlanSteps     int   `json:"plan_steps"`
 }
 
 // SQLSourceResolver supplies the two cache-backed relational sources. Returning
@@ -81,6 +102,9 @@ func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult,
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
+	if query.explain {
+		return explainSQLQuery(query, resolver)
+	}
 	return executeSQLQuery(query, resolver, nil)
 }
 
@@ -93,6 +117,23 @@ func parseSQLQuery(source string) (*sqlQuery, error) {
 		return nil, err
 	}
 	parser := sqlQueryParser{tokens: tokens}
+	explain := false
+	analyze := false
+	if parser.keyword("EXPLAIN") {
+		explain = true
+		parser.next()
+		if parser.keyword("ANALYZE") {
+			analyze = true
+			parser.next()
+		}
+		if parser.current().kind == sqlTokenEOF || parser.current().kind == sqlTokenSemicolon {
+			label := "EXPLAIN"
+			if analyze {
+				label += " ANALYZE"
+			}
+			return nil, parser.diagnostic(parser.current(), label+" requires a query after it")
+		}
+	}
 	query, err := parser.parseQuery(false)
 	if err != nil {
 		return nil, err
@@ -103,6 +144,8 @@ func parseSQLQuery(source string) (*sqlQuery, error) {
 	if parser.current().kind != sqlTokenEOF {
 		return nil, parser.expected(parser.current(), "end of input", nil)
 	}
+	query.explain = explain
+	query.analyze = analyze
 	return query, nil
 }
 
@@ -119,6 +162,8 @@ type sqlQuery struct {
 	offset   int
 	distinct bool
 	unions   []sqlUnion
+	explain  bool
+	analyze  bool
 }
 type sqlUnion struct {
 	kind  string
@@ -164,6 +209,9 @@ type sqlQueryParser struct {
 
 func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 	q := &sqlQuery{limit: -1}
+	if p.keyword("UNION") || p.keyword("INTERSECT") || p.keyword("EXCEPT") {
+		return nil, p.expected(p.current(), "SELECT, FROM, or WITH", []string{"SELECT", "FROM", "WITH"})
+	}
 	if p.keyword("WITH") {
 		p.next()
 		for {
@@ -332,6 +380,13 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			}
 			union.all = true
 			p.next()
+		}
+		if p.current().kind == sqlTokenEOF || p.current().kind == sqlTokenSemicolon || stopRight && p.current().kind == sqlTokenRightParen {
+			label := kind
+			if union.all {
+				label += " ALL"
+			}
+			return nil, p.diagnostic(p.current(), label+" requires a query after it")
 		}
 		right, err := p.parseQuery(stopRight)
 		if err != nil {
@@ -896,7 +951,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL":
+	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL":
 		return true
 	}
 	return false
@@ -1135,6 +1190,190 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 		}
 	}
 	return result, nil
+}
+
+func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResult, error) {
+	steps := sqlExplainSteps(query)
+	result := SQLQueryResult{
+		Columns: []string{"node", "detail", "estimated_rows"},
+		Rows:    make([]SQLRow, 0, len(steps)+1),
+		Plan:    steps,
+	}
+	for _, step := range steps {
+		row := SQLRow{"node": step.Node, "detail": step.Detail}
+		if step.EstimatedRows != nil {
+			row["estimated_rows"] = *step.EstimatedRows
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	if !query.analyze {
+		return result, nil
+	}
+	started := time.Now()
+	executed, err := executeSQLQuery(query, resolver, nil)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	result.Stats = &SQLQueryStats{
+		ElapsedNanos:  time.Since(started).Nanoseconds(),
+		OutputRows:    len(executed.Rows),
+		OutputColumns: len(executed.Columns),
+		PlanSteps:     len(steps),
+	}
+	result.Columns = append(result.Columns, "actual_rows", "elapsed_ns")
+	result.Rows = append(result.Rows, SQLRow{
+		"node":        "ANALYZE",
+		"detail":      "execution summary",
+		"actual_rows": result.Stats.OutputRows,
+		"elapsed_ns":  result.Stats.ElapsedNanos,
+	})
+	return result, nil
+}
+
+func sqlExplainSteps(query *sqlQuery) []SQLExplainStep {
+	steps := make([]SQLExplainStep, 0, 8+len(query.ctes)+len(query.joins)+len(query.unions))
+	sqlAppendExplainSteps(&steps, query, "")
+	return steps
+}
+
+func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string) {
+	for _, cte := range query.ctes {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "CTE", Detail: cte.name})
+		if cte.query != nil {
+			sqlAppendExplainSteps(steps, cte.query, prefix+"  ")
+		} else {
+			estimate := len(cte.values)
+			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
+		}
+	}
+	*steps = append(*steps, sqlExplainSourceStep(prefix+"SCAN", *query.from))
+	if query.from.kind == "SUBQUERY" && query.from.query != nil {
+		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ")
+	}
+	for _, join := range query.joins {
+		detail := join.kind + " JOIN " + sqlExplainSource(join.source)
+		if join.kind != "CROSS" {
+			detail += " ON " + sqlExplainExpression(join.on)
+		}
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "JOIN", Detail: detail})
+		if join.source.kind == "SUBQUERY" && join.source.query != nil {
+			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ")
+		}
+	}
+	if query.where.kind != "" {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "FILTER", Detail: sqlExplainExpression(query.where)})
+	}
+	if len(query.groupBy) > 0 || sqlQueryHasAggregate(query) {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "AGGREGATE", Detail: sqlExplainExpressions(query.groupBy)})
+	}
+	if query.having.kind != "" {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "HAVING", Detail: sqlExplainExpression(query.having)})
+	}
+	*steps = append(*steps, SQLExplainStep{Node: prefix + "PROJECT", Detail: sqlExplainSelects(query.selects)})
+	if query.distinct {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "DISTINCT", Detail: "deduplicate projected rows"})
+	}
+	if len(query.orderBy) > 0 {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "SORT", Detail: sqlExplainOrders(query.orderBy)})
+	}
+	if query.limit >= 0 || query.offset > 0 {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "LIMIT", Detail: fmt.Sprintf("limit=%d offset=%d", query.limit, query.offset)})
+	}
+	for _, union := range query.unions {
+		kind := union.kind
+		if union.all {
+			kind += " ALL"
+		}
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "SET", Detail: kind})
+		sqlAppendExplainSteps(steps, union.query, prefix+"  ")
+	}
+}
+
+func sqlExplainSourceStep(node string, source sqlSource) SQLExplainStep {
+	step := SQLExplainStep{Node: node, Detail: sqlExplainSource(source)}
+	if source.kind == "VALUES" {
+		estimate := len(source.values)
+		step.EstimatedRows = &estimate
+	}
+	return step
+}
+
+func sqlExplainSource(source sqlSource) string {
+	var detail string
+	switch source.kind {
+	case "CACHE":
+		detail = "CACHE(" + strconv.Quote(source.key) + ")"
+	case "VALUES":
+		detail = "VALUES"
+	case "CTE":
+		detail = "CTE " + source.key
+	case "KEYS":
+		detail = "KEYS"
+	case "SUBQUERY":
+		detail = "derived query"
+	default:
+		detail = source.kind
+	}
+	if source.alias != "" {
+		detail += " AS " + source.alias
+	}
+	return detail
+}
+
+func sqlExplainExpression(expression sqlExpr) string {
+	switch expression.kind {
+	case "field":
+		if expression.qualifier != "" {
+			return expression.qualifier + "." + expression.name
+		}
+		return expression.name
+	case "literal":
+		return fmt.Sprintf("%#v", expression.value)
+	case "star":
+		return "*"
+	case "func":
+		return expression.name + "(" + sqlExplainExpressions(expression.args) + ")"
+	case "unary":
+		return expression.op + " " + sqlExplainExpression(*expression.left)
+	case "binary":
+		if expression.op == "IS NULL" || expression.op == "IS NOT NULL" {
+			return sqlExplainExpression(*expression.left) + " " + expression.op
+		}
+		return sqlExplainExpression(*expression.left) + " " + expression.op + " " + sqlExplainExpression(*expression.right)
+	}
+	return "<unknown expression>"
+}
+
+func sqlExplainExpressions(expressions []sqlExpr) string {
+	values := make([]string, len(expressions))
+	for index, expression := range expressions {
+		values[index] = sqlExplainExpression(expression)
+	}
+	return strings.Join(values, ", ")
+}
+
+func sqlExplainSelects(items []sqlSelectItem) string {
+	values := make([]string, len(items))
+	for index, item := range items {
+		values[index] = sqlExplainExpression(item.expr)
+		if item.alias != "" {
+			values[index] += " AS " + item.alias
+		}
+	}
+	return strings.Join(values, ", ")
+}
+
+func sqlExplainOrders(orders []sqlOrder) string {
+	values := make([]string, len(orders))
+	for index, order := range orders {
+		values[index] = sqlExplainExpression(order.expr)
+		if order.desc {
+			values[index] += " DESC"
+		} else {
+			values[index] += " ASC"
+		}
+	}
+	return strings.Join(values, ", ")
 }
 
 func sameSQLColumns(left, right []string) bool {

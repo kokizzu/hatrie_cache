@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -197,6 +198,231 @@ FROM VALUES (2), (3) AS right_values(value) SELECT value`, resolver)
 		if err != nil || !reflect.DeepEqual(result.Rows, want) {
 			t.Fatalf("%s result = %#v, %v; want %#v", operator, result, err, want)
 		}
+	}
+}
+
+func TestExecuteSQLQueryUnionAllDiagnosticsPointAtTheOffendingToken(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, source, message string
+		line, column          int
+	}{
+		{
+			name: "missing_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL`,
+			message: "UNION ALL requires a query after it",
+			line:    2,
+			column:  10,
+		},
+		{
+			name: "duplicate_all",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL ALL
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "ALL"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "semicolon_instead_of_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL;`,
+			message: "UNION ALL requires a query after it",
+			line:    2,
+			column:  10,
+		},
+		{
+			name: "derived_query_closes_after_all",
+			source: `FROM (
+  FROM VALUES (1) AS a(value) SELECT value
+  UNION ALL
+) AS derived
+SELECT value`,
+			message: "UNION ALL requires a query after it",
+			line:    4,
+			column:  1,
+		},
+		{
+			name: "repeated_union_operator",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL UNION
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "UNION"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "repeated_intersect_operator",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL INTERSECT
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "INTERSECT"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "repeated_except_operator",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL EXCEPT
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "EXCEPT"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "punctuation_cannot_start_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL ,`,
+			message: `unexpected ","`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "literal_cannot_start_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL 1`,
+			message: `unexpected "1"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "incomplete_select_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL
+SELECT value`,
+			message: "query requires FROM",
+			line:    3,
+			column:  13,
+		},
+		{
+			name: "incomplete_from_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL
+FROM VALUES (2) AS b(value)`,
+			message: "query requires SELECT",
+			line:    3,
+			column:  len("FROM VALUES (2) AS b(value)") + 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(test.source, SQLSourceResolverFunc(nil))
+			diagnostic, ok := err.(*SQLDiagnostic)
+			if !ok {
+				t.Fatalf("ExecuteSQLQuery() error = %T %[1]v, want SQLDiagnostic", err)
+			}
+			if !strings.Contains(diagnostic.Message, test.message) || diagnostic.Line != test.line || diagnostic.Column != test.column {
+				t.Fatalf("diagnostic = %#v, want message containing %q at %d:%d", diagnostic, test.message, test.line, test.column)
+			}
+			formatted := FormatSQLDiagnostic(test.source, err)
+			wantLocation := fmt.Sprintf("--> query:%d:%d", test.line, test.column)
+			if !strings.Contains(formatted, wantLocation) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want %q", formatted, wantLocation)
+			}
+			line := strings.Split(test.source, "\n")[test.line-1]
+			wantExcerpt := fmt.Sprintf("%d | %s\n  | %s^", test.line, line, strings.Repeat(" ", test.column-1))
+			if !strings.Contains(formatted, wantExcerpt) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want Rust-style excerpt %q", formatted, wantExcerpt)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryExplainDescribesWithoutReadingSources(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		t.Fatalf("EXPLAIN unexpectedly resolved %s(%q)", name, key)
+		return nil, nil
+	})
+	result, err := ExecuteSQLQuery(`
+EXPLAIN
+FROM CACHE('must-not-be-read') AS people
+WHERE age >= 18
+SELECT name
+ORDER BY name
+LIMIT 2`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN) error = %v", err)
+	}
+	if result.Stats != nil {
+		t.Fatalf("EXPLAIN stats = %#v, want nil without ANALYZE", result.Stats)
+	}
+	if want := []string{"node", "detail", "estimated_rows"}; !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("EXPLAIN columns = %#v, want %#v", result.Columns, want)
+	}
+	if want := []string{"SCAN", "FILTER", "PROJECT", "SORT", "LIMIT"}; len(result.Plan) != len(want) {
+		t.Fatalf("EXPLAIN plan = %#v, want %d steps", result.Plan, len(want))
+	} else {
+		for index, node := range want {
+			if result.Plan[index].Node != node {
+				t.Fatalf("EXPLAIN step %d = %#v, want node %q", index, result.Plan[index], node)
+			}
+		}
+	}
+	if len(result.Rows) != len(result.Plan) || result.Rows[0]["detail"] != `CACHE("must-not-be-read") AS people` {
+		t.Fatalf("EXPLAIN rows = %#v, want plan rows without source reads", result.Rows)
+	}
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReturnsMeasuredExecutionStats(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (3), (1), (2) AS values(value)
+WHERE value >= 2
+SELECT value
+ORDER BY value
+LIMIT 1`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN ANALYZE) error = %v", err)
+	}
+	if result.Stats == nil {
+		t.Fatal("EXPLAIN ANALYZE stats = nil")
+	}
+	if result.Stats.OutputRows != 1 || result.Stats.OutputColumns != 1 || result.Stats.PlanSteps != len(result.Plan) || result.Stats.ElapsedNanos < 0 {
+		t.Fatalf("EXPLAIN ANALYZE stats = %#v, plan = %#v", result.Stats, result.Plan)
+	}
+	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %#v", result.Columns, want)
+	}
+	last := result.Rows[len(result.Rows)-1]
+	if last["node"] != "ANALYZE" || last["actual_rows"] != 1 || last["elapsed_ns"] != result.Stats.ElapsedNanos {
+		t.Fatalf("EXPLAIN ANALYZE summary = %#v, stats = %#v", last, result.Stats)
+	}
+}
+
+func TestExecuteSQLQueryExplainDiagnosticsPointAtTheOffendingToken(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, source, message string
+		line, column          int
+	}{
+		{"missing_query", "EXPLAIN", "EXPLAIN requires a query after it", 1, 8},
+		{"semicolon_instead_of_query", "EXPLAIN ;", "EXPLAIN requires a query after it", 1, 9},
+		{"analyze_missing_query", "EXPLAIN ANALYZE", "EXPLAIN ANALYZE requires a query after it", 1, 16},
+		{"repeated_analyze", "EXPLAIN ANALYZE ANALYZE FROM VALUES (1) AS a(value) SELECT value", `unexpected "ANALYZE"`, 1, 17},
+		{"from_without_select", "EXPLAIN FROM VALUES (1) AS a(value)", "query requires SELECT", 1, len("EXPLAIN FROM VALUES (1) AS a(value)") + 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(test.source, SQLSourceResolverFunc(nil))
+			diagnostic, ok := err.(*SQLDiagnostic)
+			if !ok {
+				t.Fatalf("ExecuteSQLQuery() error = %T %[1]v, want SQLDiagnostic", err)
+			}
+			if !strings.Contains(diagnostic.Message, test.message) || diagnostic.Line != test.line || diagnostic.Column != test.column {
+				t.Fatalf("diagnostic = %#v, want message containing %q at %d:%d", diagnostic, test.message, test.line, test.column)
+			}
+			formatted := FormatSQLDiagnostic(test.source, err)
+			wantLocation := fmt.Sprintf("--> query:%d:%d", test.line, test.column)
+			if !strings.Contains(formatted, wantLocation) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want %q", formatted, wantLocation)
+			}
+			line := strings.Split(test.source, "\n")[test.line-1]
+			wantExcerpt := fmt.Sprintf("%d | %s\n  | %s^", test.line, line, strings.Repeat(" ", test.column-1))
+			if !strings.Contains(formatted, wantExcerpt) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want Rust-style excerpt %q", formatted, wantExcerpt)
+			}
+		})
 	}
 }
 

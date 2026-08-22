@@ -54,6 +54,20 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 	}
 
 	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"EXPLAIN ANALYZE FROM CACHE('people') AS p SELECT p.name"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("EXPLAIN ANALYZE status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("EXPLAIN ANALYZE response JSON error = %v", err)
+	}
+	if result.Stats == nil || result.Stats.OutputRows != 1 || len(result.Plan) == 0 || result.Rows[len(result.Rows)-1]["node"] != "ANALYZE" {
+		t.Fatalf("EXPLAIN ANALYZE result = %#v, want plan and execution statistics", result)
+	}
+
+	response = httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM KEYS JION KEYS SELECT *"}`))
 	request.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(response, request)

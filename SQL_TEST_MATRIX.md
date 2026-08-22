@@ -26,11 +26,12 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Standard `AND` precedence, `NOT`, `DISTINCT` | [`TestExecuteSQLQueryUsesStandardBooleanPrecedence`](sql_production_test.go), [`TestExecuteSQLQuerySupportsNotAndDistinct`](sql_production_test.go) |
 | Nulls, `LIKE`, aggregates, `HAVING`, limit and offset | [`TestExecuteSQLQueryAggregateLimitOffsetAndNullMatrix`](sql_production_test.go) |
 | `RIGHT` and `FULL OUTER JOIN`, including unmatched sides | [`TestExecuteSQLQuerySupportsRightAndFullOuterJoin`](sql_production_test.go) |
-| `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT` | [`TestExecuteSQLQuerySupportsUnionAndUnionAll`](sql_production_test.go) |
+| `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`; malformed `UNION ALL` source spans for missing, repeated, punctuated, literal, and incomplete right queries | [`TestExecuteSQLQuerySupportsUnionAndUnionAll`](sql_production_test.go), [`TestExecuteSQLQueryUnionAllDiagnosticsPointAtTheOffendingToken`](sql_production_test.go) |
+| Source-free `EXPLAIN` plan; `EXPLAIN ANALYZE` total execution statistics; malformed prefix source spans | [`TestExecuteSQLQueryExplainDescribesWithoutReadingSources`](sql_production_test.go), [`TestExecuteSQLQueryExplainAnalyzeReturnsMeasuredExecutionStats`](sql_production_test.go), [`TestExecuteSQLQueryExplainDiagnosticsPointAtTheOffendingToken`](sql_production_test.go) |
 | Derived-table sources | [`TestExecuteSQLQuerySupportsDerivedTableSubqueries`](sql_production_test.go) |
 | Duplicate clauses and malformed structure | [`TestExecuteSQLQueryProductionRejectsStructuralErrors`](sql_production_test.go) |
 | One Hatrie key has one typed value slot; type prefixes are required | [`TestHatrieTypesShareOneLogicalKeyNamespace`](sql_production_test.go) |
-| Every accepted relational keyword/contextual word: clauses, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | 75 named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
+| Every accepted relational keyword/contextual word: clauses, `EXPLAIN`/`ANALYZE`, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | Named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | Contextual clause diagnostics (`INNER` requires `JOIN`, `GROUP`/`ORDER` require `BY`, `IS` requires `NULL`, unsupported `INTERSECT ALL`) | [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 
 ## UDFs, API, and robustness
@@ -43,7 +44,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Optional sandboxed LuaJIT vector batching and conversion rejection | [`sql_lua_luajit_test.go`](sql_lua_luajit_test.go) (`-tags luajit`) |
 | Numeric Wazero Wasm ABI, type rejection, and runtime close | [`sql_wazero_test.go`](sql_wazero_test.go) |
 | Sandboxed JavaScript→Javy→Wazero vector batching, source spans, and timeout interruption | [`sql_javascript_javy_test.go`](sql_javascript_javy_test.go) (`-tags javy`, explicit compiler path) |
-| HTTP SQL/function malformed requests and normal calls | [`sql_http_test.go`](sql_http_test.go), [`TestMonitoringSQLRoutesRejectMalformedRequests`](sql_production_test.go) |
+| HTTP SQL/function malformed requests, normal calls, and `EXPLAIN ANALYZE` JSON | [`TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors`](sql_http_test.go), [`TestMonitoringSQLFunctionRouteRegistersTypedGoFunction`](sql_http_test.go), [`TestMonitoringSQLRoutesRejectMalformedRequests`](sql_production_test.go) |
 | CLI command, relational query, and function routes | [`cmd/hatrie-cli/sql_test.go`](cmd/hatrie-cli/sql_test.go) |
 | Generic Go SDK decode and callback early stop | [`sql_client_test.go`](sql_client_test.go) |
 | Parser and executor panic resistance | [`FuzzSQLParsersDoNotPanic`](sql_production_test.go), [`FuzzExecuteSQLQueryDoesNotPanic`](sql_production_test.go) |
