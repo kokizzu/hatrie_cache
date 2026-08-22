@@ -2545,6 +2545,10 @@ See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons. The comparison includes single-command
 rows, pipelined write rows, and mixed read-heavy/write-heavy workload profiles.
+See [`DATA_STRUCTURE.md`](DATA_STRUCTURE.md) for the complete data-structure
+reference, command inputs, response forms, and examples. See
+[`DS_SPLIT_proposal.md`](DS_SPLIT_proposal.md) for the evaluation of splitting
+the shared HAT-trie by value type.
 
 Use the HTTP client CLI against a running monitoring server:
 
