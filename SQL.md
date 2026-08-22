@@ -316,11 +316,14 @@ without reading a source, `estimated_rows` (currently inline `VALUES` and
 `VALUES` CTEs). Plan nodes include scans, joins, filters, aggregation,
 projection, set operations, sorting, and pagination.
 
-Use `EXPLAIN ANALYZE` to execute the query once. It returns the same plan plus
-`stats`: `elapsed_ns`, `output_rows`, `output_columns`, and `plan_steps`. Its
-final `ANALYZE` result row repeats the measured output-row count and elapsed
-time for table-oriented clients. These are total-query measurements; per-node
-timings and source row counts are not estimated or invented.
+Use `EXPLAIN ANALYZE` to execute the query once. It returns the plan plus
+`stats`: total `elapsed_ns`, `output_rows`, `output_columns`, and `plan_steps`.
+Each executed scan, join, filter, aggregation, projection, distinct, sort,
+pagination, and set-operation plan step also carries `actual_input_rows`,
+`actual_output_rows`, and its own `elapsed_ns`. Its final `ANALYZE` result row
+repeats the measured output-row count and total elapsed time for table-oriented
+clients. Source estimates remain absent when they would require reading or
+guessing about a cache source.
 
 ## Go SDK
 

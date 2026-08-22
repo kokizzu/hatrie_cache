@@ -437,6 +437,61 @@ LIMIT 1`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQueryExplainAnalyzeReportsPerOperatorStats(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (1), (2), (3) AS left_values(id)
+INNER JOIN VALUES (2), (3), (4) AS right_values(id) ON left_values.id = right_values.id
+WHERE left_values.id >= 2
+SELECT COUNT(*) AS total
+ORDER BY total DESC
+LIMIT 1
+UNION ALL
+FROM VALUES (9) AS trailing(id)
+SELECT 1 AS total`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN ANALYZE) error = %v", err)
+	}
+	if result.Stats == nil || result.Stats.OutputRows != 2 {
+		t.Fatalf("EXPLAIN ANALYZE stats = %#v, want two output rows", result.Stats)
+	}
+	for _, node := range []string{"SCAN", "JOIN", "FILTER", "AGGREGATE", "PROJECT", "SORT", "LIMIT", "SET"} {
+		var step *SQLExplainStep
+		for index := range result.Plan {
+			if result.Plan[index].Node == node {
+				step = &result.Plan[index]
+				break
+			}
+		}
+		if step == nil {
+			t.Fatalf("EXPLAIN ANALYZE plan = %#v, missing %s", result.Plan, node)
+		}
+		if step.ActualInputRows == nil || step.ActualOutputRows == nil || step.ElapsedNanos == nil {
+			t.Fatalf("EXPLAIN ANALYZE %s step = %#v, want input rows, output rows, and elapsed ns", node, step)
+		}
+	}
+	for _, want := range []struct {
+		node          string
+		input, output int
+	}{
+		{"JOIN", 6, 2},
+		{"FILTER", 2, 2},
+		{"AGGREGATE", 2, 1},
+		{"SORT", 1, 1},
+		{"LIMIT", 1, 1},
+		{"SET", 2, 2},
+	} {
+		for _, step := range result.Plan {
+			if step.Node == want.node && step.ActualInputRows != nil && step.ActualOutputRows != nil && *step.ActualInputRows == want.input && *step.ActualOutputRows == want.output {
+				goto found
+			}
+		}
+		t.Fatalf("EXPLAIN ANALYZE plan = %#v, missing %s %d→%d", result.Plan, want.node, want.input, want.output)
+	found:
+	}
+}
+
 func TestExecuteSQLQueryExplainDiagnosticsPointAtTheOffendingToken(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

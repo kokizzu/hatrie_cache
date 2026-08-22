@@ -31,9 +31,12 @@ type SQLQueryResult struct {
 // EstimatedRows is present only when the parser can know it without reading a
 // cache source (for example an inline VALUES source).
 type SQLExplainStep struct {
-	Node          string `json:"node"`
-	Detail        string `json:"detail"`
-	EstimatedRows *int   `json:"estimated_rows,omitempty"`
+	Node             string `json:"node"`
+	Detail           string `json:"detail"`
+	EstimatedRows    *int   `json:"estimated_rows,omitempty"`
+	ActualInputRows  *int   `json:"actual_input_rows,omitempty"`
+	ActualOutputRows *int   `json:"actual_output_rows,omitempty"`
+	ElapsedNanos     *int64 `json:"elapsed_ns,omitempty"`
 }
 
 // SQLQueryStats is emitted only by EXPLAIN ANALYZE. It describes one actual
@@ -966,6 +969,38 @@ type sqlExecRow struct {
 }
 
 func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow) (SQLQueryResult, error) {
+	return executeSQLQueryWithMetrics(q, resolver, ctes, nil)
+}
+
+type sqlExecutionMetrics struct {
+	steps []SQLExplainStep
+}
+
+func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outputRows int, started time.Time) {
+	if metrics == nil {
+		return
+	}
+	elapsed := time.Since(started).Nanoseconds()
+	metrics.steps = append(metrics.steps, SQLExplainStep{
+		Node:             node,
+		Detail:           detail,
+		ActualInputRows:  sqlExplainIntPointer(inputRows),
+		ActualOutputRows: sqlExplainIntPointer(outputRows),
+		ElapsedNanos:     &elapsed,
+	})
+}
+
+func sqlExplainIntPointer(value int) *int { return &value }
+
+func (metrics *sqlExecutionMetrics) recordScan(source sqlSource, outputRows int, started time.Time) {
+	metrics.record("SCAN", sqlExplainSource(source), 0, outputRows, started)
+	if metrics == nil || source.kind != "VALUES" {
+		return
+	}
+	metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(len(source.values))
+}
+
+func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics) (SQLQueryResult, error) {
 	if ctes == nil {
 		ctes = map[string][]SQLRow{}
 	}
@@ -973,7 +1008,7 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 		var rows []SQLRow
 		var err error
 		if cte.query != nil {
-			r, e := executeSQLQuery(cte.query, resolver, ctes)
+			r, e := executeSQLQueryWithMetrics(cte.query, resolver, ctes, metrics)
 			err = e
 			rows = r.Rows
 		} else {
@@ -984,17 +1019,20 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 		}
 		ctes[cte.name] = rows
 	}
-	base, err := resolveSQLSource(*q.from, resolver, ctes)
+	started := time.Now()
+	base, err := resolveSQLSource(*q.from, resolver, ctes, metrics)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
 	if len(base) > maxSQLQueryRows {
 		return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxSQLQueryRows)
 	}
+	metrics.recordScan(*q.from, len(base), started)
 	rows := wrapSQLSource(*q.from, base)
 	leftAliases := []string{q.from.alias}
 	for _, join := range q.joins {
-		right, err := resolveSQLSource(join.source, resolver, ctes)
+		started = time.Now()
+		right, err := resolveSQLSource(join.source, resolver, ctes, metrics)
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
@@ -1002,6 +1040,7 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxSQLQueryRows)
 		}
 		wrapped := wrapSQLSource(join.source, right)
+		inputRows := len(rows) + len(wrapped)
 		var next []sqlExecRow
 		matchedRight := make([]bool, len(wrapped))
 		for _, left := range rows {
@@ -1042,11 +1081,18 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 				}
 			}
 		}
+		detail := join.kind + " JOIN " + sqlExplainSource(join.source)
+		if join.kind != "CROSS" {
+			detail += " ON " + sqlExplainExpression(join.on)
+		}
+		metrics.record("JOIN", detail, inputRows, len(next), started)
 		rows = next
 		leftAliases = append(leftAliases, join.source.alias)
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	if q.where.kind != "" {
+		started = time.Now()
+		inputRows := len(rows)
 		values, err := evalSQLExprBatch(q.where, rows, functions)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -1058,8 +1104,15 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 			}
 		}
 		rows = filtered
+		metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
 	}
+	started = time.Now()
+	inputRows := len(rows)
 	groups := groupSQLRows(rows, q.groupBy, q)
+	if len(q.groupBy) > 0 || sqlQueryHasAggregate(q) {
+		metrics.record("AGGREGATE", sqlExplainExpressions(q.groupBy), inputRows, len(groups), started)
+	}
+	started = time.Now()
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(groups))}
 	type output struct {
 		row   SQLRow
@@ -1107,7 +1160,10 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 			out[index].row[result.Columns[column]] = values[index]
 		}
 	}
+	metrics.record("PROJECT", sqlExplainSelects(q.selects), len(groups), len(out), started)
 	if q.distinct {
+		started = time.Now()
+		inputRows := len(out)
 		seen := make(map[string]struct{}, len(out))
 		filtered := out[:0]
 		for _, item := range out {
@@ -1119,8 +1175,11 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 			filtered = append(filtered, item)
 		}
 		out = filtered
+		metrics.record("DISTINCT", "deduplicate projected rows", inputRows, len(out), started)
 	}
 	if len(q.orderBy) > 0 {
+		started = time.Now()
+		inputRows := len(out)
 		sort.SliceStable(out, func(i, j int) bool {
 			for _, item := range q.orderBy {
 				a := evalOutputOrder(item.expr, out[i].row, out[i].group)
@@ -1135,7 +1194,10 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 			}
 			return false
 		})
+		metrics.record("SORT", sqlExplainOrders(q.orderBy), inputRows, len(out), started)
 	}
+	started = time.Now()
+	inputRows = len(out)
 	start := q.offset
 	if start > len(out) {
 		start = len(out)
@@ -1147,14 +1209,19 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 	for _, item := range out[start:end] {
 		result.Rows = append(result.Rows, item.row)
 	}
+	if q.limit >= 0 || q.offset > 0 {
+		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), inputRows, len(result.Rows), started)
+	}
 	for _, union := range q.unions {
-		right, err := executeSQLQuery(union.query, resolver, ctes)
+		right, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics)
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
 		if !sameSQLColumns(result.Columns, right.Columns) {
 			return SQLQueryResult{}, fmt.Errorf("%s queries must project the same column names in the same order", union.kind)
 		}
+		started = time.Now()
+		inputRows = len(result.Rows) + len(right.Rows)
 		switch union.kind {
 		case "UNION":
 			result.Rows = append(result.Rows, right.Rows...)
@@ -1188,6 +1255,11 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 		default:
 			return SQLQueryResult{}, fmt.Errorf("unsupported SQL set operation %q", union.kind)
 		}
+		kind := union.kind
+		if union.all {
+			kind += " ALL"
+		}
+		metrics.record("SET", kind, inputRows, len(result.Rows), started)
 	}
 	return result, nil
 }
@@ -1210,7 +1282,8 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResul
 		return result, nil
 	}
 	started := time.Now()
-	executed, err := executeSQLQuery(query, resolver, nil)
+	metrics := &sqlExecutionMetrics{}
+	executed, err := executeSQLQueryWithMetrics(query, resolver, nil, metrics)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -1218,7 +1291,16 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResul
 		ElapsedNanos:  time.Since(started).Nanoseconds(),
 		OutputRows:    len(executed.Rows),
 		OutputColumns: len(executed.Columns),
-		PlanSteps:     len(steps),
+		PlanSteps:     len(metrics.steps),
+	}
+	result.Plan = metrics.steps
+	result.Rows = result.Rows[:0]
+	for _, step := range result.Plan {
+		row := SQLRow{"node": step.Node, "detail": step.Detail, "actual_input_rows": *step.ActualInputRows, "actual_output_rows": *step.ActualOutputRows, "elapsed_ns": *step.ElapsedNanos}
+		if step.EstimatedRows != nil {
+			row["estimated_rows"] = *step.EstimatedRows
+		}
+		result.Rows = append(result.Rows, row)
 	}
 	result.Columns = append(result.Columns, "actual_rows", "elapsed_ns")
 	result.Rows = append(result.Rows, SQLRow{
@@ -1417,14 +1499,14 @@ func sqlOutputRowKey(row SQLRow) string {
 	}
 	return builder.String()
 }
-func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow) ([]SQLRow, error) {
+func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics) ([]SQLRow, error) {
 	switch source.kind {
 	case "VALUES":
 		return valuesSQLRows(source.values, source.columns), nil
 	case "CTE":
 		return ctes[source.key], nil
 	case "SUBQUERY":
-		result, err := executeSQLQuery(source.query, resolver, ctes)
+		result, err := executeSQLQueryWithMetrics(source.query, resolver, ctes, metrics)
 		if err != nil {
 			return nil, err
 		}
