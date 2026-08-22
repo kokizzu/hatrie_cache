@@ -634,6 +634,20 @@ ORDER BY node`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQueryEnforcesRecursiveCTEDepthLimit(t *testing.T) {
+	t.Parallel()
+	_, err := ExecuteSQLQueryContext(context.Background(), `
+WITH RECURSIVE sequence(value) AS (
+  FROM VALUES (1) AS seed(value) SELECT value
+  UNION ALL
+  FROM sequence AS previous WHERE previous.value < 3 SELECT previous.value + 1 AS value
+)
+FROM sequence SELECT value`, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxRecursionDepth: 1})
+	if err == nil || !strings.Contains(err.Error(), "recursion depth") || !strings.Contains(err.Error(), "maximum 1") {
+		t.Fatalf("recursive depth error = %v, want configured limit", err)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

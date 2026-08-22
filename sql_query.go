@@ -18,12 +18,13 @@ const maxSQLPageSize = 10000
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
-	MaxRows        int
-	MaxJoinWork    int
-	MaxResultBytes int
-	MaxSortBytes   int
-	MaxGroupBytes  int
-	Timeout        time.Duration
+	MaxRows           int
+	MaxJoinWork       int
+	MaxResultBytes    int
+	MaxSortBytes      int
+	MaxGroupBytes     int
+	MaxRecursionDepth int
+	Timeout           time.Duration
 }
 
 // SQLQueryRequest is accepted by the monitoring SQL endpoint.
@@ -1420,7 +1421,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.Timeout < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.Timeout > 0 {
@@ -2017,6 +2018,7 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 	}
 	total := cloneSQLRows(seedRows)
 	frontier := cloneSQLRows(seedRows)
+	depth := 0
 	seen := map[string]struct{}{}
 	if !union.all {
 		for _, row := range total {
@@ -2027,6 +2029,10 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 		if err := control.check(); err != nil {
 			return nil, err
 		}
+		if control != nil && control.options.MaxRecursionDepth > 0 && depth >= control.options.MaxRecursionDepth {
+			return nil, fmt.Errorf("recursive CTE %q recursion depth %d exceeds maximum %d", cte.name, depth+1, control.options.MaxRecursionDepth)
+		}
+		depth++
 		ctes[cte.name] = cloneSQLRows(frontier)
 		nextResult, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics, control)
 		if err != nil {

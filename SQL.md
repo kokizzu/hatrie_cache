@@ -333,6 +333,10 @@ incorrectly. Recursive CTEs support direct self-reference only; mutual
 recursion and recursive terms with more than one set operation are rejected
 with an actionable diagnostic.
 
+`SQLQueryOptions.MaxRecursionDepth` optionally limits recursive-term
+expansions; zero leaves recursion governed by the normal row and timeout
+budgets. This is separate from `MaxRows`, which bounds total generated rows.
+
 The server returns ordinary JSON for the CLI and SDK. A query error uses the
 same span diagnostics as command SQL.
 
