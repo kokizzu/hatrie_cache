@@ -1029,6 +1029,24 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	}
 	metrics.recordScan(*q.from, len(base), started)
 	rows := wrapSQLSource(*q.from, base)
+	functions, _ := resolver.(SQLFunctionResolver)
+	pushedWhere := q.where.kind != "" && sqlCanPushBaseWhere(q)
+	if pushedWhere {
+		started = time.Now()
+		inputRows := len(rows)
+		values, err := evalSQLExprBatch(q.where, rows, functions)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		filtered := rows[:0]
+		for index, row := range rows {
+			if sqlTruthy(values[index]) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+		metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
+	}
 	leftAliases := []string{q.from.alias}
 	for _, join := range q.joins {
 		started = time.Now()
@@ -1043,25 +1061,51 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		inputRows := len(rows) + len(wrapped)
 		var next []sqlExecRow
 		matchedRight := make([]bool, len(wrapped))
-		for _, left := range rows {
-			matched := false
-			for rightIndex, r := range wrapped {
-				combined := mergeSQLRows(left, r)
-				ok := join.kind == "CROSS" || sqlTruthy(evalSQLExpr(join.on, []sqlExecRow{combined}, combined))
-				if ok {
-					matched = true
+		leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
+		if join.kind != "INNER" {
+			hashJoin = false
+		}
+		if hashJoin {
+			buckets := make(map[string][]int, len(wrapped))
+			for rightIndex, row := range wrapped {
+				if key, ok := sqlHashJoinKey(sqlField(row, join.source.alias, rightField)); ok {
+					buckets[key] = append(buckets[key], rightIndex)
+				}
+			}
+			for _, left := range rows {
+				key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
+				if !ok {
+					continue
+				}
+				for _, rightIndex := range buckets[key] {
+					next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
 					matchedRight[rightIndex] = true
-					next = append(next, combined)
 					if len(next) > maxSQLQueryRows {
 						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
 					}
 				}
 			}
-			if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
-				empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
-				next = append(next, mergeSQLRows(left, empty))
-				if len(next) > maxSQLQueryRows {
-					return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+		} else {
+			for _, left := range rows {
+				matched := false
+				for rightIndex, r := range wrapped {
+					combined := mergeSQLRows(left, r)
+					ok := join.kind == "CROSS" || sqlTruthy(evalSQLExpr(join.on, []sqlExecRow{combined}, combined))
+					if ok {
+						matched = true
+						matchedRight[rightIndex] = true
+						next = append(next, combined)
+						if len(next) > maxSQLQueryRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+						}
+					}
+				}
+				if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
+					empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
+					next = append(next, mergeSQLRows(left, empty))
+					if len(next) > maxSQLQueryRows {
+						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+					}
 				}
 			}
 		}
@@ -1085,12 +1129,15 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if join.kind != "CROSS" {
 			detail += " ON " + sqlExplainExpression(join.on)
 		}
-		metrics.record("JOIN", detail, inputRows, len(next), started)
+		node := "JOIN"
+		if hashJoin {
+			node = "HASH JOIN"
+		}
+		metrics.record(node, detail, inputRows, len(next), started)
 		rows = next
 		leftAliases = append(leftAliases, join.source.alias)
 	}
-	functions, _ := resolver.(SQLFunctionResolver)
-	if q.where.kind != "" {
+	if q.where.kind != "" && !pushedWhere {
 		started = time.Now()
 		inputRows := len(rows)
 		values, err := evalSQLExprBatch(q.where, rows, functions)
@@ -1555,6 +1602,76 @@ func mergeSQLRows(left, right sqlExecRow) sqlExecRow {
 	}
 	return out
 }
+
+func sqlCanPushBaseWhere(query *sqlQuery) bool {
+	for _, join := range query.joins {
+		if join.kind != "INNER" && join.kind != "CROSS" {
+			return false
+		}
+	}
+	return sqlExprReferencesOnlyAlias(query.where, query.from.alias)
+}
+
+func sqlExprReferencesOnlyAlias(expression sqlExpr, alias string) bool {
+	switch expression.kind {
+	case "literal":
+		return true
+	case "field":
+		return expression.qualifier != "" && expression.qualifier == alias
+	case "unary":
+		return expression.left != nil && sqlExprReferencesOnlyAlias(*expression.left, alias)
+	case "binary":
+		return expression.left != nil && sqlExprReferencesOnlyAlias(*expression.left, alias) && (expression.right == nil || sqlExprReferencesOnlyAlias(*expression.right, alias))
+	case "func":
+		for _, argument := range expression.args {
+			if !sqlExprReferencesOnlyAlias(argument, alias) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func sqlHashJoinFields(expression sqlExpr, leftAliases []string, rightAlias string) (string, string, string, bool) {
+	if expression.kind != "binary" || expression.op != "=" || expression.left == nil || expression.right == nil || expression.left.kind != "field" || expression.right.kind != "field" {
+		return "", "", "", false
+	}
+	left := *expression.left
+	right := *expression.right
+	isLeftAlias := func(alias string) bool {
+		for _, candidate := range leftAliases {
+			if alias == candidate {
+				return true
+			}
+		}
+		return false
+	}
+	if isLeftAlias(left.qualifier) && right.qualifier == rightAlias {
+		return left.qualifier, left.name, right.name, true
+	}
+	if isLeftAlias(right.qualifier) && left.qualifier == rightAlias {
+		return right.qualifier, right.name, left.name, true
+	}
+	return "", "", "", false
+}
+
+func sqlHashJoinKey(value interface{}) (string, bool) {
+	if value == nil {
+		return "", false
+	}
+	if number, ok := sqlNumber(value); ok {
+		return "number:" + strconv.FormatFloat(number, 'g', -1, 64), true
+	}
+	switch value := value.(type) {
+	case string:
+		return "string:" + value, true
+	case bool:
+		return "bool:" + strconv.FormatBool(value), true
+	}
+	return "", false
+}
+
 func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) [][]sqlExecRow {
 	if len(by) == 0 {
 		if !sqlQueryHasAggregate(q) {

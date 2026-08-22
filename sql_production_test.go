@@ -213,6 +213,38 @@ ORDER BY u.id`, resolver)
 	}
 }
 
+func TestExecuteSQLQueryPushesBaseFilterIntoHashJoin(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (1), (2), (3) AS left_values(id)
+INNER JOIN VALUES (2), (3) AS right_values(id) ON left_values.id = right_values.id
+WHERE left_values.id = 2
+SELECT left_values.id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(2)}}; result.Stats == nil || result.Stats.OutputRows != len(want) {
+		t.Fatalf("EXPLAIN ANALYZE stats = %#v, want %#v", result.Stats, want)
+	}
+	var filterIndex, joinIndex = -1, -1
+	for index, step := range result.Plan {
+		switch step.Node {
+		case "FILTER":
+			if step.ActualInputRows != nil && step.ActualOutputRows != nil && *step.ActualInputRows == 3 && *step.ActualOutputRows == 1 {
+				filterIndex = index
+			}
+		case "HASH JOIN":
+			if step.ActualInputRows != nil && step.ActualOutputRows != nil && *step.ActualInputRows == 3 && *step.ActualOutputRows == 1 {
+				joinIndex = index
+			}
+		}
+	}
+	if filterIndex < 0 || joinIndex < 0 || filterIndex >= joinIndex {
+		t.Fatalf("plan = %#v, want base filter 3→1 before hash join 3→1", result.Plan)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)
@@ -456,7 +488,7 @@ SELECT 1 AS total`, SQLSourceResolverFunc(nil))
 	if result.Stats == nil || result.Stats.OutputRows != 2 {
 		t.Fatalf("EXPLAIN ANALYZE stats = %#v, want two output rows", result.Stats)
 	}
-	for _, node := range []string{"SCAN", "JOIN", "FILTER", "AGGREGATE", "PROJECT", "SORT", "LIMIT", "SET"} {
+	for _, node := range []string{"SCAN", "HASH JOIN", "FILTER", "AGGREGATE", "PROJECT", "SORT", "LIMIT", "SET"} {
 		var step *SQLExplainStep
 		for index := range result.Plan {
 			if result.Plan[index].Node == node {
@@ -475,8 +507,8 @@ SELECT 1 AS total`, SQLSourceResolverFunc(nil))
 		node          string
 		input, output int
 	}{
-		{"JOIN", 6, 2},
-		{"FILTER", 2, 2},
+		{"HASH JOIN", 5, 2},
+		{"FILTER", 3, 2},
 		{"AGGREGATE", 2, 1},
 		{"SORT", 1, 1},
 		{"LIMIT", 1, 1},

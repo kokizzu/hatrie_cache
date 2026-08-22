@@ -275,6 +275,8 @@ LIMIT 100;
 - [x] `FROM` `KEYS`, `CACHE('key')`, CTE, and inline `VALUES` sources.
 - [x] Inner, `LEFT [OUTER] JOIN`, `RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`,
       and `CROSS JOIN`; `ON` is mandatory except for CROSS JOIN.
+- [x] Equality inner joins use a hash join; filters that reference only the
+      initial source are applied before an inner/cross-join pipeline.
 - [x] `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IS [NOT] NULL`, and `LIKE`.
 - [x] Projection with `*`, qualified columns, aliases, literals, and aggregate
       expressions.
