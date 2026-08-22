@@ -238,7 +238,19 @@ Result:
 
 `DISTINCT` removes duplicate projected rows. `LIMIT` keeps the first N rows
 after ordering; `OFFSET` skips rows before applying the limit. Window functions
-also include `ROW_NUMBER`, `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD`.
+also include `ROW_NUMBER`, `DENSE_RANK`, `LAG`, `LEAD`, and numeric
+`SUM`/`AVG`/`MIN`/`MAX` frames.
+
+Use a `ROWS BETWEEN … AND …` frame for moving aggregates. Bounds support
+`UNBOUNDED PRECEDING`, `n PRECEDING`, `CURRENT ROW`, `n FOLLOWING`, and
+`UNBOUNDED FOLLOWING`; a frame start may not follow its end.
+
+```sql
+FROM VALUES (1, 10), (2, 20), (3, 30) AS readings(sample, value)
+SELECT sample,
+       AVG(value) OVER (ORDER BY sample ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS moving_average
+ORDER BY sample;
+```
 
 ### Combine query results
 
@@ -263,6 +275,8 @@ the first side but not the second. These operations are read-only.
 | Query a query | `FROM (SELECT ... ) AS derived SELECT ...` | Derived table is read-only and uncorrelated. |
 | Match text | `WHERE name LIKE 'Ad%'` | Keeps matching non-NULL strings; comparisons are case-sensitive UTF-8 binary. |
 | Compare time correctly | `WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z'` or `day > DATE '2026-08-22'` | Chronological typed comparison; malformed literals are rejected locally. |
+| Normalize a dynamic field explicitly | `CAST(raw_score AS NUMBER)` | Supports `TEXT`, `NUMBER`, `DECIMAL`, `BOOLEAN`, `DATE`, and `TIMESTAMP`; invalid dynamic values produce a source-spanned error instead of silently becoming NULL. |
+| Validate a JSON source schema | `FROM CACHE('users') AS u(id INTEGER, joined_on DATE)` | Validates and converts declared non-null fields before relational evaluation; a bad row identifies its cache key, row, field, expected type, and source span. |
 | Inspect a plan | `EXPLAIN FROM VALUES (1) AS rows(value) SELECT value` | Returns a plan without reading cache sources. |
 | Measure one plan | `EXPLAIN ANALYZE FROM ... SELECT ...` | Executes once and returns plan steps plus elapsed/output statistics. |
 | Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
@@ -270,6 +284,54 @@ the first side but not the second. These operations are read-only.
 
 The exact command and relational examples in this section are executed by
 `TestSQLGuideCommandExamples` and `TestSQLGuideRelationalExamples`.
+
+### Explicit casts
+
+Use `CAST(expression AS type)` whenever a JSON field's stored representation
+needs to change for a comparison, grouping key, or calculation. Supported
+targets are `TEXT`, `NUMBER`, `DECIMAL`, `BOOLEAN`, `DATE`, and `TIMESTAMP`. `NULL`
+remains `NULL`. Text-to-number/date/timestamp conversions are strict; boolean
+conversion accepts `true`/`false` text (case-insensitive) and numeric `0`/`1`.
+
+`DECIMAL '123.45'` and `CAST(raw AS DECIMAL)` preserve arbitrary-precision
+decimal comparison semantics rather than reducing the value to `float64`.
+Decimal literals accept an optional sign and fractional part, but not exponent
+notation or fractions; use a quoted decimal string such as `DECIMAL '10.01'`.
+
+```sql
+FROM CACHE('imported-scores') AS scores
+WHERE CAST(scores.raw_score AS NUMBER) >= 80
+SELECT scores.name, CAST(scores.imported_on AS DATE) AS imported_on
+ORDER BY CAST(scores.raw_score AS NUMBER) DESC;
+```
+
+If one row contains an incompatible dynamic value, execution stops with the
+existing Rust-style source excerpt pointing at `CAST`, rather than treating the
+value as a match, an ordering key, or an implicit null.
+
+### Typed JSON source fields
+
+`CACHE` sources may declare the expected type of selected JSON fields directly
+after their alias. Supported field types are `TEXT`, `NUMBER`, `INTEGER`,
+`DECIMAL`, `BOOLEAN`, `DATE`, `TIMESTAMP`, and `JSON` (object or array).
+Declared non-null values are validated once for the query and converted to the
+matching SQL type; absent and JSON-null fields remain SQL `NULL`.
+
+```sql
+FROM CACHE('users') AS users(
+  id INTEGER,
+  joined_on DATE,
+  balance DECIMAL,
+  profile JSON
+)
+WHERE users.joined_on >= DATE '2026-01-01'
+SELECT users.id, users.balance;
+```
+
+Schema validation operates on a query-local clone, never mutating the cached
+JSON source. An incompatible row stops the query with a Rust-style diagnostic
+at the declared type, for example `CACHE("users") row 2 field "id" expects
+INTEGER, got TEXT`.
 
 ## Command inventory
 
@@ -481,8 +543,9 @@ without mirroring them into a second relational store. `KEYS` supplies the
 metadata/index view for key discovery and administration.
 
 Each HatTrie query holds one read snapshot across all of its `CACHE` and
-`KEYS` sources, so concurrent writes cannot create a mixed-time join. External
-resolvers are memoized per query for repeated source references.
+`KEYS` sources. Every resolver is memoized per query, so repeated source
+references use the same resolved rows; individual HatTrie reads remain
+concurrency-safe without holding its lock across query execution.
 
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
@@ -492,6 +555,23 @@ filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
 unmatched left row. An indexed equality/range predicate remains selectable
 inside an `AND` condition; all remaining predicates are still evaluated.
 Indexes refresh automatically when that cache value changes.
+
+For a recurring equality filter on two or more fields, create a composite
+index in its declared field order:
+
+```go
+if err := trie.CreateSQLJSONCompositeIndex("users", "team_id", "enabled"); err != nil {
+	return err
+}
+```
+
+`WHERE users.team_id = 20 AND users.enabled = TRUE` then uses the longest
+matching composite index as an `INDEX SCAN`; condition order in SQL does not
+matter. Composite indexes currently accelerate qualified equality predicates,
+not ranges or joins, and the full condition is still evaluated for correctness.
+Use `trie.SQLJSONIndexStats("users", "team_id", "enabled")` to obtain its
+refreshed row count and distinct composite-key count. Single-field indexes use
+the same stats method with one field.
 
 ### Query grammar and semantics
 

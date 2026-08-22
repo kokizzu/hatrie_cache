@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These cases are the compact regression suite for the subset documented in
@@ -433,6 +434,53 @@ func TestHatTrieOptionalSQLJSONFieldIndexSelectsConjunctivePredicate(t *testing.
 	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
 	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 || explained.Plan[0].Node != "INDEX SCAN" {
 		t.Fatalf("conjunctive index plan/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+}
+
+func TestHatTrieSQLCompositeJSONIndexPlansAndReportsStatistics(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":20,"enabled":true},{"id":2,"team_id":20,"enabled":false},{"id":3,"team_id":20,"enabled":true},{"id":4,"team_id":30,"enabled":true}]`)
+	if err := trie.CreateSQLJSONCompositeIndex("users", "team_id", "enabled"); err != nil {
+		t.Fatalf("CreateSQLJSONCompositeIndex() error = %v", err)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id ORDER BY users.id", trie)
+	if err != nil {
+		t.Fatalf("composite index query error = %v", err)
+	}
+	if !strings.Contains(fmt.Sprint(explained.Plan), "INDEX SCAN") {
+		t.Fatalf("composite index plan = %#v, want INDEX SCAN", explained.Plan)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id ORDER BY users.id", trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(1)}, {"id": float64(3)}}) {
+		t.Fatalf("composite index result = %#v, %v, want indexed ids 1 and 3", result, err)
+	}
+	stats, ok, err := trie.SQLJSONIndexStats("users", "team_id", "enabled")
+	if err != nil || !ok || stats.Rows != 4 || stats.DistinctKeys != 3 || !reflect.DeepEqual(stats.Fields, []string{"team_id", "enabled"}) {
+		t.Fatalf("SQLJSONIndexStats() = %#v/%t/%v, want four rows and three composite keys", stats, ok, err)
+	}
+	trie.UpsertString("users", `[{"id":4,"team_id":20,"enabled":true}]`)
+	result, err = ExecuteSQLQuery("FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id", trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(4)}}) {
+		t.Fatalf("refreshed composite index result = %#v, %v, want the replacement row", result, err)
+	}
+	stats, ok, err = trie.SQLJSONIndexStats("users", "team_id", "enabled")
+	if err != nil || !ok || stats.Rows != 1 || stats.DistinctKeys != 1 {
+		t.Fatalf("refreshed SQLJSONIndexStats() = %#v/%t/%v, want one row and one key", stats, ok, err)
+	}
+}
+
+func TestHatTrieSQLCompositeJSONIndexRejectsInvalidDefinitions(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	for _, fields := range [][]string{nil, {"team_id"}, {"", "enabled"}, {"team_id", "team_id"}} {
+		if err := trie.CreateSQLJSONCompositeIndex("users", fields...); err == nil {
+			t.Fatalf("CreateSQLJSONCompositeIndex(%q) succeeded, want validation error", fields)
+		}
+	}
+	var nilTrie *HatTrie
+	if err := nilTrie.CreateSQLJSONCompositeIndex("users", "team_id", "enabled"); err == nil {
+		t.Fatal("nil CreateSQLJSONCompositeIndex() succeeded, want validation error")
 	}
 }
 
@@ -1108,6 +1156,169 @@ func TestHatTrieSQLSourceDataTypeMatrix(t *testing.T) {
 	if _, err := trie.ResolveSQLSource("UNKNOWN", ""); err == nil {
 		t.Fatal("unknown SQL source error = nil")
 	}
+}
+
+func TestExecuteSQLQueryCastsTypedValuesAndDiagnosesDynamicFailures(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('42', '2026-08-22', '2026-08-22T09:00:00Z', 1) AS values(raw_number, raw_date, raw_timestamp, raw_boolean)
+SELECT CAST(raw_number AS NUMBER) AS number_value,
+       CAST(raw_date AS DATE) AS date_value,
+       CAST(raw_timestamp AS TIMESTAMP) AS timestamp_value,
+       CAST(raw_boolean AS BOOLEAN) AS boolean_value`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(CAST) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"number_value", "date_value", "timestamp_value", "boolean_value"}, Rows: []SQLRow{{
+		"number_value": float64(42), "date_value": sqlDate("2026-08-22"),
+		"timestamp_value": mustSQLTimestamp(t, "2026-08-22T09:00:00Z"), "boolean_value": true,
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("CAST result = %#v, want %#v", result, want)
+	}
+
+	invalidCastQuery := "FROM VALUES ('not-a-number') AS values(raw) SELECT CAST(raw AS NUMBER)"
+	_, err = ExecuteSQLQuery(invalidCastQuery, SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "CAST cannot convert TEXT value") || !strings.Contains(err.Error(), "NUMBER") {
+		t.Fatalf("invalid dynamic CAST error = %v, want clear TEXT-to-NUMBER diagnostic", err)
+	}
+	diagnostic, ok := err.(*SQLDiagnostic)
+	if !ok || diagnostic.Line != 1 || diagnostic.Column != strings.Index(invalidCastQuery, "CAST")+1 {
+		t.Fatalf("invalid dynamic CAST diagnostic = %#v, want a source span at CAST", err)
+	}
+	if formatted := FormatSQLDiagnostic(invalidCastQuery, err); !strings.Contains(formatted, "error: CAST cannot convert TEXT value") || !strings.Contains(formatted, "--> query:1:") || !strings.Contains(formatted, "^") {
+		t.Fatalf("invalid dynamic CAST formatted diagnostic = %q, want Rust-style source excerpt", formatted)
+	}
+	_, err = ExecuteSQLQuery("FROM VALUES ('1') AS values(raw) SELECT CAST(raw AS BOOLEAN)", SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "CAST cannot convert TEXT value") || !strings.Contains(err.Error(), "BOOLEAN") {
+		t.Fatalf("ambiguous text-to-BOOLEAN CAST error = %v, want strict true/false diagnostic", err)
+	}
+
+	for name, query := range map[string]string{
+		"where":    "FROM VALUES ('not-a-number') AS values(raw) WHERE CAST(raw AS NUMBER) > 0 SELECT raw",
+		"is null":  "FROM VALUES ('not-a-number') AS values(raw) WHERE CAST(raw AS NUMBER) IS NULL SELECT raw",
+		"having":   "FROM VALUES ('not-a-number') AS values(raw) SELECT COUNT(*) HAVING CAST(raw AS NUMBER) > 0",
+		"group by": "FROM VALUES ('not-a-number') AS values(raw) GROUP BY CAST(raw AS NUMBER) SELECT COUNT(*)",
+		"order by": "FROM VALUES ('not-a-number') AS values(raw) SELECT raw ORDER BY CAST(raw AS NUMBER)",
+		"join on":  "FROM VALUES ('not-a-number') AS left_values(raw) INNER JOIN VALUES (1) AS right_values(id) ON CAST(left_values.raw AS NUMBER) = right_values.id SELECT right_values.id",
+		"window":   "FROM VALUES ('not-a-number') AS values(raw) SELECT ROW_NUMBER() OVER (ORDER BY CAST(raw AS NUMBER))",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+			if err == nil || !strings.Contains(err.Error(), "CAST cannot convert TEXT value") {
+				t.Fatalf("%s dynamic CAST error = %v, want clear diagnostic", name, err)
+			}
+		})
+	}
+}
+
+func TestSQLCastSyntaxDiagnosticsIdentifyTheFault(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		source, want string
+	}{
+		{"FROM VALUES ('42') AS values(raw) SELECT CAST(raw NUMBER)", "expected AS"},
+		{"FROM VALUES ('42') AS values(raw) SELECT CAST(raw AS MONEY)", "unsupported CAST target"},
+		{"FROM VALUES ('42') AS values(raw) SELECT CAST(raw AS NUMBER", "expected )"},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			err := ValidateSQLQuery(test.source)
+			diagnostic, ok := err.(*SQLDiagnostic)
+			if !ok || !strings.Contains(diagnostic.Message, test.want) || diagnostic.Line != 1 || diagnostic.Column < 1 {
+				t.Fatalf("ValidateSQLQuery() error = %#v, want source-spanned diagnostic containing %q", err, test.want)
+			}
+			if formatted := FormatSQLDiagnostic(test.source, err); !strings.Contains(formatted, "--> query:1:") || !strings.Contains(formatted, "^") {
+				t.Fatalf("formatted CAST syntax diagnostic = %q, want Rust-style source excerpt", formatted)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryPreservesExactDecimalValues(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('2.30'), ('10.01'), ('2.3') AS values(raw)
+WHERE CAST(raw AS DECIMAL) < DECIMAL '3.00'
+SELECT CAST(raw AS DECIMAL) AS value
+ORDER BY CAST(raw AS DECIMAL)`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(DECIMAL) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"value"}, Rows: []SQLRow{{"value": sqlDecimal("2.30")}, {"value": sqlDecimal("2.3")}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("DECIMAL CAST result = %#v, want %#v", result, want)
+	}
+
+	result, err = ExecuteSQLQuery("FROM VALUES (DECIMAL '9007199254740993.000000000000000001') AS values(value) WHERE value > DECIMAL '9007199254740993' SELECT value", SQLSourceResolverFunc(nil))
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"value": sqlDecimal("9007199254740993.000000000000000001")}}) {
+		t.Fatalf("exact DECIMAL comparison = %#v, %v", result, err)
+	}
+}
+
+func TestHatTrieSQLTypedJSONFieldsValidateAndConvertRows(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"active":true,"name":"Ivi","score":1.5,"joined_on":"2026-08-22","changed_at":"2026-08-22T09:00:00Z","balance":"9007199254740993.000000000000000001","extra":{"source":"import"}}]`)
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('users') AS users(id INTEGER, active BOOLEAN, name TEXT, score NUMBER, joined_on DATE, changed_at TIMESTAMP, balance DECIMAL, extra JSON)
+WHERE users.joined_on = DATE '2026-08-22'
+SELECT users.id, users.active, users.name, users.score, users.joined_on, users.changed_at, users.balance, users.extra`, trie)
+	if err != nil {
+		t.Fatalf("typed CACHE query error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "active", "name", "score", "joined_on", "changed_at", "balance", "extra"}, Rows: []SQLRow{{
+		"id": int64(1), "active": true, "name": "Ivi", "score": float64(1.5), "joined_on": sqlDate("2026-08-22"),
+		"changed_at": mustSQLTimestamp(t, "2026-08-22T09:00:00Z"), "balance": sqlDecimal("9007199254740993.000000000000000001"), "extra": map[string]interface{}{"source": "import"},
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("typed CACHE result = %#v, want %#v", result, want)
+	}
+
+	trie.UpsertString("users", `[{"id":1},{"id":"not-an-integer"}]`)
+	invalidQuery := "FROM CACHE('users') AS users(id INTEGER) SELECT users.id"
+	_, err = ExecuteSQLQuery(invalidQuery, trie)
+	diagnostic, ok := err.(*SQLDiagnostic)
+	if !ok || !strings.Contains(diagnostic.Message, `CACHE("users") row 2 field "id" expects INTEGER, got TEXT`) || diagnostic.Column != strings.Index(invalidQuery, "INTEGER")+1 {
+		t.Fatalf("typed JSON field diagnostic = %#v, want source-spanned row/field/type error", err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsRowsWindowFramesAndMovingAggregates(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES (1, 10), (2, 20), (3, 30) AS values(id, amount)
+SELECT id,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS moving_sum,
+       AVG(amount) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS forward_avg,
+       MIN(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS local_min,
+       MAX(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS local_max
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(ROWS frame) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "moving_sum", "forward_avg", "local_min", "local_max"}, Rows: []SQLRow{
+		{"id": int64(1), "moving_sum": float64(10), "forward_avg": float64(15), "local_min": float64(10), "local_max": float64(20)},
+		{"id": int64(2), "moving_sum": float64(30), "forward_avg": float64(25), "local_min": float64(10), "local_max": float64(30)},
+		{"id": int64(3), "moving_sum": float64(50), "forward_avg": float64(30), "local_min": float64(20), "local_max": float64(30)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("ROWS frame result = %#v, want %#v", result, want)
+	}
+	invalidFrame := "FROM VALUES (1) AS values(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW)"
+	err = ValidateSQLQuery(invalidFrame)
+	diagnostic, ok := err.(*SQLDiagnostic)
+	if !ok || !strings.Contains(diagnostic.Message, "ROWS frame start must not follow its end") || diagnostic.Column < 1 {
+		t.Fatalf("invalid ROWS frame diagnostic = %#v, want source-spanned ordering error", err)
+	}
+}
+
+func mustSQLTimestamp(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }
 
 func TestHatrieTypesShareOneLogicalKeyNamespace(t *testing.T) {

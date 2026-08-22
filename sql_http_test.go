@@ -131,6 +131,30 @@ func TestMonitoringSQLRouteUsesHatTrieJSONFieldIndex(t *testing.T) {
 	}
 }
 
+func TestMonitoringSQLRouteUsesHatTrieCompositeJSONIndex(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"team_id":20,"enabled":true},{"id":2,"team_id":20,"enabled":false},{"id":3,"team_id":30,"enabled":true}]`)
+	if err := trie.CreateSQLJSONCompositeIndex("people", "team_id", "enabled"); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewMonitoringHandler(trie, MonitoringOptions{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"EXPLAIN ANALYZE FROM CACHE('people') AS p WHERE p.team_id = 20 AND p.enabled = TRUE SELECT p.id"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var result SQLQueryResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Stats == nil || len(result.Plan) == 0 || result.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("plan = %#v, stats = %#v, want an HTTP composite INDEX SCAN", result.Plan, result.Stats)
+	}
+}
+
 func TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor(t *testing.T) {
 	t.Parallel()
 	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()

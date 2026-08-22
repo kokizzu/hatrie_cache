@@ -3840,6 +3840,7 @@ type HatTrie struct {
 	mu                         sync.RWMutex
 	sqlIndexMu                 sync.RWMutex
 	sqlJSONIndexes             map[string]map[string]*sqlJSONFieldIndex
+	sqlJSONCompositeIndexes    map[string]map[string]*sqlJSONCompositeIndex
 	telemetryMu                sync.Mutex
 	snapshotCaptureMu          sync.Mutex
 	replicationReadOnlyScanMu  sync.Mutex

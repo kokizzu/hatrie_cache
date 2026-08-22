@@ -111,6 +111,14 @@ func (resolver monitoringSQLResolver) ResolveSQLIndexedRangeSource(name, key, fi
 	return indexed.ResolveSQLIndexedRangeSource(name, key, field, operator, value)
 }
 
+func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(SQLCompositeIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLCompositeIndexedSource(name, key, fields, values)
+}
+
 func (resolver monitoringSQLResolver) LockSQLSnapshot() func() {
 	if locker, ok := resolver.source.(SQLSnapshotLocker); ok {
 		return locker.LockSQLSnapshot()

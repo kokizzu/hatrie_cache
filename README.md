@@ -1,6 +1,6 @@
 # hatrie_cache
 
-Hatrie Cache is an in-memory cache and data-structure server built around a C
+Hatrie Cache is an In-memory cache and data-structure server built around a C
 HAT-trie. It provides typed cache values, TTLs, snapshots/backups, optional
 durable storage, replication, HTTP/2 and gRPC APIs, and an opt-in monitoring
 server. It is intended for controlled deployments; review the operations and

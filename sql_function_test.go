@@ -138,9 +138,11 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"ASC", "query", "FROM VALUES (2), (1) AS a(value) SELECT value ORDER BY value ASC"},
 		{"BY", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
 		{"CACHE", "query", "FROM CACHE('people') AS p SELECT p.name"},
+		{"CAST", "query", "FROM VALUES ('42') AS a(value) SELECT CAST(value AS NUMBER)"},
 		{"CROSS", "query", "FROM VALUES (1) AS a(value) CROSS JOIN VALUES (2) AS b(value) SELECT a.value"},
 		{"DESC", "query", "FROM VALUES (1), (2) AS a(value) SELECT value ORDER BY value DESC"},
 		{"DATE", "query", "FROM VALUES (DATE '2026-08-22') AS a(value) SELECT value"},
+		{"DECIMAL", "query", "FROM VALUES (DECIMAL '12.50') AS a(value) SELECT value"},
 		{"DISTINCT", "query", "FROM VALUES (1), (1) AS a(value) SELECT DISTINCT value"},
 		{"EXCEPT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value EXCEPT FROM VALUES (2) AS b(value) SELECT value"},
 		{"EXPLAIN", "query", "EXPLAIN FROM VALUES (1) AS a(value) SELECT value"},
@@ -149,6 +151,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"GROUP", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
 		{"HAVING", "query", "FROM VALUES (1) AS a(value) GROUP BY value HAVING COUNT(*) = 1 SELECT value"},
 		{"INNER", "query", "FROM VALUES (1) AS a(value) INNER JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"JSON_FIELD_TYPES", "query", "FROM CACHE('people') AS p(id INTEGER, name TEXT, score NUMBER, price DECIMAL, active BOOLEAN, day DATE, occurred_at TIMESTAMP, extra JSON) SELECT p.id"},
 		{"INTERSECT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value INTERSECT FROM VALUES (2) AS b(value) SELECT value"},
 		{"IS", "query", "FROM VALUES (NULL) AS a(value) WHERE value IS NULL SELECT value"},
 		{"JOIN", "query", "FROM VALUES (1) AS a(value) JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
@@ -167,6 +170,14 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"PARTITION", "query", "FROM VALUES ('a', 1) AS a(team, value) SELECT ROW_NUMBER() OVER (PARTITION BY team ORDER BY value) AS row_number"},
 		{"RIGHT", "query", "FROM VALUES (1) AS a(value) RIGHT JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT b.value"},
 		{"RECURSIVE", "query", "WITH RECURSIVE sequence(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM sequence AS previous WHERE value < 2 SELECT value + 1 AS value) FROM sequence SELECT value"},
+		{"BETWEEN", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"CURRENT", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"FOLLOWING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING)"},
+		{"PRECEDING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)"},
+		{"ROW", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"ROWS", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"ROWS_WINDOW_FRAME", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"UNBOUNDED", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"SELECT", "query", "FROM VALUES (1) AS a(value) SELECT value"},
 		{"TIMESTAMP", "query", "FROM VALUES (TIMESTAMP '2026-08-22T09:00:00Z') AS a(value) SELECT value"},
 		{"UNION", "query", "FROM VALUES (1) AS a(value) SELECT value UNION FROM VALUES (2) AS b(value) SELECT value"},
@@ -256,7 +267,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "RECURSIVE": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

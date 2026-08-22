@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +46,74 @@ type SQLRow map[string]interface{}
 // midnight timestamp.
 type sqlDate string
 
+// sqlDecimal preserves its user-visible decimal spelling while comparisons use
+// arbitrary-precision rational values. It deliberately does not reuse
+// float64, which would lose significant digits from financial-style values.
+type sqlDecimal string
+
+func parseSQLDecimal(value string) (sqlDecimal, bool) {
+	if value == "" {
+		return "", false
+	}
+	index := 0
+	if value[index] == '+' || value[index] == '-' {
+		index++
+	}
+	digits := 0
+	for index < len(value) && value[index] >= '0' && value[index] <= '9' {
+		index++
+		digits++
+	}
+	if index < len(value) && value[index] == '.' {
+		index++
+		fractionStart := index
+		for index < len(value) && value[index] >= '0' && value[index] <= '9' {
+			index++
+		}
+		if index == fractionStart {
+			return "", false
+		}
+	}
+	if digits == 0 || index != len(value) {
+		return "", false
+	}
+	if _, ok := new(big.Rat).SetString(value); !ok {
+		return "", false
+	}
+	return sqlDecimal(value), true
+}
+
+// sqlEvalError carries a dynamic expression failure through the existing
+// value-oriented evaluator. Execution checks it at expression boundaries, so
+// an invalid CAST is never mistaken for NULL or returned as a result value.
+type sqlEvalError struct {
+	err   error
+	token sqlToken
+}
+
+func (e sqlEvalError) Error() string { return e.err.Error() }
+
+func sqlExpressionError(value interface{}) error {
+	if failed, ok := value.(sqlEvalError); ok {
+		return failed
+	}
+	return nil
+}
+
+func sqlEvaluationFailure(err error) sqlEvalError {
+	if failed, ok := err.(sqlEvalError); ok {
+		return failed
+	}
+	return sqlEvalError{err: err}
+}
+
+func sqlRuntimeDiagnostic(err error) error {
+	if failed, ok := err.(sqlEvalError); ok && failed.token.line > 0 {
+		return sqlTokenDiagnostic(failed.token, failed.err.Error())
+	}
+	return err
+}
+
 // SQLQueryResult is a materialized result. Streaming clients use QueryRows.
 type SQLQueryResult struct {
 	Columns    []string         `json:"columns"`
@@ -81,9 +151,9 @@ type SQLSourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]SQLRow, error)
 }
 
-// SQLSnapshotLocker optionally holds a consistent source snapshot for one
-// query. HatTrie uses its read lock; external resolvers still receive
-// per-query memoization for repeated sources.
+// SQLSnapshotLocker optionally coordinates a consistent source snapshot for one
+// query. Every resolver also receives per-query memoization for repeated
+// sources.
 type SQLSnapshotLocker interface{ LockSQLSnapshot() func() }
 
 type SQLIndexedSourceResolver interface {
@@ -96,6 +166,21 @@ type SQLRangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]SQLRow, bool, error)
 }
 
+// SQLCompositeIndexedSourceResolver optionally resolves equality predicates
+// through a multi-field JSON index. fields and values have matching positions.
+type SQLCompositeIndexedSourceResolver interface {
+	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error)
+}
+
+// SQLJSONIndexStats describes the current materialized state of one optional
+// JSON index. It is refreshed from the cache value before being returned.
+type SQLJSONIndexStats struct {
+	Key          string
+	Fields       []string
+	Rows         int
+	DistinctKeys int
+}
+
 type sqlJSONFieldIndex struct {
 	raw     string
 	rows    map[string][]SQLRow
@@ -104,6 +189,11 @@ type sqlJSONFieldIndex struct {
 type sqlJSONFieldIndexEntry struct {
 	value interface{}
 	row   SQLRow
+}
+type sqlJSONCompositeIndex struct {
+	raw    string
+	fields []string
+	rows   map[string][]SQLRow
 }
 
 func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
@@ -121,6 +211,39 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	ht.sqlJSONIndexes[key][field] = &sqlJSONFieldIndex{}
 	return nil
 }
+
+// CreateSQLJSONCompositeIndex creates an optional equality index over two or
+// more JSON object fields in one CACHE value. Field order is significant and
+// is retained in reported statistics and index keys.
+func (ht *HatTrie) CreateSQLJSONCompositeIndex(key string, fields ...string) error {
+	if ht == nil || key == "" || len(fields) < 2 {
+		return fmt.Errorf("SQL composite JSON index requires a cache key and at least two fields")
+	}
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		if field == "" {
+			return fmt.Errorf("SQL composite JSON index fields must not be empty")
+		}
+		if _, exists := seen[field]; exists {
+			return fmt.Errorf("SQL composite JSON index field %q is repeated", field)
+		}
+		seen[field] = struct{}{}
+	}
+	copyFields := append([]string(nil), fields...)
+	identifier := sqlJSONCompositeIndexIdentifier(copyFields)
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONCompositeIndexes == nil {
+		ht.sqlJSONCompositeIndexes = map[string]map[string]*sqlJSONCompositeIndex{}
+	}
+	if ht.sqlJSONCompositeIndexes[key] == nil {
+		ht.sqlJSONCompositeIndexes[key] = map[string]*sqlJSONCompositeIndex{}
+	}
+	ht.sqlJSONCompositeIndexes[key][identifier] = &sqlJSONCompositeIndex{fields: copyFields}
+	return nil
+}
+
+func sqlJSONCompositeIndexIdentifier(fields []string) string { return strings.Join(fields, "\x00") }
 func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
 	if name != "CACHE" {
 		return nil, false, nil
@@ -143,6 +266,91 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		return []SQLRow{}, true, nil
 	}
 	return cloneSQLRows(index.rows[valueKey]), true, nil
+}
+
+// ResolveSQLCompositeIndexedSource uses the longest configured composite
+// index whose fields are all present in the supplied equality predicates.
+func (ht *HatTrie) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(fields) != len(values) || len(fields) < 2 {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	provided := make(map[string]interface{}, len(fields))
+	for index, field := range fields {
+		provided[field] = values[index]
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	var selected *sqlJSONCompositeIndex
+	for _, candidate := range ht.sqlJSONCompositeIndexes[key] {
+		if len(candidate.fields) <= 1 || selected != nil && len(candidate.fields) <= len(selected.fields) {
+			continue
+		}
+		available := true
+		for _, field := range candidate.fields {
+			if _, ok := provided[field]; !ok {
+				available = false
+				break
+			}
+		}
+		if available {
+			selected = candidate
+		}
+	}
+	if selected == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONCompositeIndex(selected, key, data); err != nil {
+		return nil, false, err
+	}
+	lookup := make([]interface{}, len(selected.fields))
+	for index, field := range selected.fields {
+		lookup[index] = provided[field]
+	}
+	valueKey, ok := sqlJSONCompositeIndexValueKey(lookup)
+	if !ok {
+		return []SQLRow{}, true, nil
+	}
+	return cloneSQLRows(selected.rows[valueKey]), true, nil
+}
+
+// SQLJSONIndexStats returns fresh cardinality statistics for an optional
+// single-field or composite JSON index.
+func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndexStats, bool, error) {
+	if ht == nil || key == "" || len(fields) == 0 {
+		return SQLJSONIndexStats{}, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return SQLJSONIndexStats{}, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if len(fields) == 1 {
+		index := ht.sqlJSONIndexes[key][fields[0]]
+		if index == nil {
+			return SQLJSONIndexStats{}, false, nil
+		}
+		if err := refreshSQLJSONFieldIndex(index, key, fields[0], data); err != nil {
+			return SQLJSONIndexStats{}, false, err
+		}
+		return SQLJSONIndexStats{Key: key, Fields: append([]string(nil), fields...), Rows: len(index.ordered), DistinctKeys: len(index.rows)}, true, nil
+	}
+	index := ht.sqlJSONCompositeIndexes[key][sqlJSONCompositeIndexIdentifier(fields)]
+	if index == nil {
+		return SQLJSONIndexStats{}, false, nil
+	}
+	if err := refreshSQLJSONCompositeIndex(index, key, data); err != nil {
+		return SQLJSONIndexStats{}, false, err
+	}
+	rows := 0
+	for _, posting := range index.rows {
+		rows += len(posting)
+	}
+	return SQLJSONIndexStats{Key: key, Fields: append([]string(nil), index.fields...), Rows: rows, DistinctKeys: len(index.rows)}, true, nil
 }
 
 // ResolveSQLIndexedRangeSource uses the ordered representation of an opt-in
@@ -204,6 +412,39 @@ func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data 
 		return sqlCompare(index.ordered[i].value, index.ordered[j].value) < 0
 	})
 	return nil
+}
+
+func refreshSQLJSONCompositeIndex(index *sqlJSONCompositeIndex, key string, data []byte) error {
+	if index.raw == string(data) {
+		return nil
+	}
+	rows, err := sqlJSONRows(key, data)
+	if err != nil {
+		return err
+	}
+	index.raw, index.rows = string(data), map[string][]SQLRow{}
+	for _, row := range rows {
+		values := make([]interface{}, len(index.fields))
+		for fieldIndex, field := range index.fields {
+			values[fieldIndex] = row[field]
+		}
+		if valueKey, ok := sqlJSONCompositeIndexValueKey(values); ok {
+			index.rows[valueKey] = append(index.rows[valueKey], row)
+		}
+	}
+	return nil
+}
+
+func sqlJSONCompositeIndexValueKey(values []interface{}) (string, bool) {
+	keys := make([]string, len(values))
+	for index, value := range values {
+		key, ok := sqlIndexValueKey(value)
+		if !ok {
+			return "", false
+		}
+		keys[index] = key
+	}
+	return strings.Join(keys, "\x00"), true
 }
 func sqlJSONRows(key string, data []byte) ([]SQLRow, error) {
 	if len(data) == 0 {
@@ -271,13 +512,12 @@ func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
 	}
 }
 
-// LockSQLSnapshot holds a HatTrie read snapshot for a relational query.
+// LockSQLSnapshot exists for resolvers that coordinate snapshot lifetime. A
+// HatTrie source copies and memoizes each resolved source per query; it must not
+// hold ht.mu across execution because normal source readers acquire the same
+// lock and KEYS may need its exclusive maintenance path.
 func (ht *HatTrie) LockSQLSnapshot() func() {
-	if ht == nil {
-		return func() {}
-	}
-	ht.mu.RLock()
-	return ht.mu.RUnlock
+	return func() {}
 }
 
 // ExecuteSQLQuery parses and executes a read-only relational query against a
@@ -310,9 +550,11 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return SQLQueryResult{}, err
 	}
 	if query.explain {
-		return explainSQLQuery(query, resolver, control)
+		result, err := explainSQLQuery(query, resolver, control)
+		return result, sqlRuntimeDiagnostic(err)
 	}
-	return executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	return result, sqlRuntimeDiagnostic(err)
 }
 
 type sqlCursor struct {
@@ -372,7 +614,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	query.limit = fetch
 	result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 	if err != nil {
-		return SQLQueryResult{}, err
+		return SQLQueryResult{}, sqlRuntimeDiagnostic(err)
 	}
 	if len(result.Rows) > pageSize {
 		result.Rows = result.Rows[:pageSize]
@@ -497,7 +739,12 @@ type sqlSource struct {
 	kind, key, alias string
 	values           [][]interface{}
 	columns          []string
+	fieldTypes       map[string]sqlSourceFieldType
 	query            *sqlQuery
+}
+type sqlSourceFieldType struct {
+	name  string
+	token sqlToken
 }
 type sqlJoin struct {
 	kind   string
@@ -522,6 +769,15 @@ type sqlExpr struct {
 type sqlWindow struct {
 	partition []sqlExpr
 	order     []sqlOrder
+	frame     *sqlWindowFrame
+}
+type sqlWindowFrame struct {
+	start sqlWindowFrameBound
+	end   sqlWindowFrameBound
+}
+type sqlWindowFrameBound struct {
+	kind   string
+	offset int
 }
 
 type sqlQueryParser struct {
@@ -826,7 +1082,9 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 			return sqlSource{}, err
 		}
 		source := sqlSource{kind: "SUBQUERY", query: query}
-		p.parseAlias(&source)
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
 		return source, nil
 	}
 	if p.keyword("VALUES") {
@@ -835,7 +1093,9 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 			return sqlSource{}, err
 		}
 		source := sqlSource{kind: "VALUES", values: rows}
-		p.parseAlias(&source)
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
 		return source, nil
 	}
 	if p.keyword("CACHE") {
@@ -852,13 +1112,17 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 		}
 		p.next()
 		source := sqlSource{kind: "CACHE", key: fmt.Sprint(value.value)}
-		p.parseAlias(&source)
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
 		return source, nil
 	}
 	if p.keyword("KEYS") {
 		p.next()
 		source := sqlSource{kind: "KEYS"}
-		p.parseAlias(&source)
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
 		return source, nil
 	}
 	name, err := p.expectIdentifier("a source name", nil)
@@ -866,10 +1130,12 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 		return sqlSource{}, err
 	}
 	source := sqlSource{kind: "CTE", key: strings.ToUpper(name.text)}
-	p.parseAlias(&source)
+	if err := p.parseAlias(&source); err != nil {
+		return sqlSource{}, err
+	}
 	return source, nil
 }
-func (p *sqlQueryParser) parseAlias(source *sqlSource) {
+func (p *sqlQueryParser) parseAlias(source *sqlSource) error {
 	if p.keyword("AS") {
 		p.next()
 		if p.current().kind == sqlTokenIdentifier {
@@ -881,8 +1147,16 @@ func (p *sqlQueryParser) parseAlias(source *sqlSource) {
 		p.next()
 	}
 	if p.current().kind == sqlTokenLeftParen {
-		cols, _ := p.parseColumns()
-		source.columns = cols
+		if source.kind == "CACHE" {
+			fieldTypes, err := p.parseSourceFieldTypes()
+			if err != nil {
+				return err
+			}
+			source.fieldTypes = fieldTypes
+		} else {
+			cols, _ := p.parseColumns()
+			source.columns = cols
+		}
 	}
 	if source.alias == "" {
 		if source.kind == "CTE" {
@@ -891,6 +1165,41 @@ func (p *sqlQueryParser) parseAlias(source *sqlSource) {
 			source.alias = strings.ToLower(source.kind)
 		}
 	}
+	return nil
+}
+
+func (p *sqlQueryParser) parseSourceFieldTypes() (map[string]sqlSourceFieldType, error) {
+	p.next()
+	fields := map[string]sqlSourceFieldType{}
+	for {
+		field, err := p.expectIdentifier("a JSON field name", nil)
+		if err != nil {
+			return nil, err
+		}
+		typeToken := p.current()
+		if typeToken.kind != sqlTokenIdentifier {
+			return nil, p.expected(typeToken, "a field type after "+field.text, []string{"TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "JSON"})
+		}
+		p.next()
+		typeName := strings.ToUpper(typeToken.text)
+		switch typeName {
+		case "TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "JSON":
+		default:
+			return nil, p.diagnostic(typeToken, "unsupported JSON field type "+strconv.Quote(typeToken.text)+"; expected TEXT, NUMBER, INTEGER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, or JSON")
+		}
+		if _, exists := fields[field.text]; exists {
+			return nil, p.diagnostic(field, "JSON field "+strconv.Quote(field.text)+" is declared more than once")
+		}
+		fields[field.text] = sqlSourceFieldType{name: typeName, token: typeToken}
+		if p.current().kind != sqlTokenComma {
+			break
+		}
+		p.next()
+	}
+	if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+		return nil, err
+	}
+	return fields, nil
 }
 func (p *sqlQueryParser) parseJoin() (sqlJoin, error) {
 	kind := "INNER"
@@ -1129,6 +1438,8 @@ func sqlLiteralTypeName(value interface{}) string {
 		return "NUMBER"
 	}
 	switch value.(type) {
+	case sqlDecimal:
+		return "DECIMAL"
 	case sqlDate:
 		return "DATE"
 	case string:
@@ -1253,6 +1564,18 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			}
 			return sqlExpr{kind: "literal", value: sqlDate(value.text)}, nil
 		}
+		if upper == "DECIMAL" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "a decimal string after DECIMAL", nil)
+			}
+			p.next()
+			decimal, ok := parseSQLDecimal(value.text)
+			if !ok {
+				return sqlExpr{}, p.diagnostic(value, "DECIMAL requires digits with an optional fractional part, such as '123.45'")
+			}
+			return sqlExpr{kind: "literal", value: decimal}, nil
+		}
 		if upper == "TIMESTAMP" {
 			value := p.current()
 			if value.kind != sqlTokenString {
@@ -1264,6 +1587,31 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 				return sqlExpr{}, p.diagnostic(value, "TIMESTAMP requires an RFC3339 value such as '2026-08-22T09:00:00Z'")
 			}
 			return sqlExpr{kind: "literal", value: parsed}, nil
+		}
+		if upper == "CAST" && p.current().kind == sqlTokenLeftParen {
+			p.next()
+			argument, err := p.parseExpr()
+			if err != nil {
+				return sqlExpr{}, err
+			}
+			if err := p.expectKeyword("AS"); err != nil {
+				return sqlExpr{}, err
+			}
+			target := p.current()
+			if target.kind != sqlTokenIdentifier {
+				return sqlExpr{}, p.expected(target, "a CAST target type (TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, or TIMESTAMP)", nil)
+			}
+			p.next()
+			targetType := strings.ToUpper(target.text)
+			switch targetType {
+			case "TEXT", "NUMBER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP":
+			default:
+				return sqlExpr{}, p.diagnostic(target, fmt.Sprintf("unsupported CAST target %q; expected TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, or TIMESTAMP", target.text))
+			}
+			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+				return sqlExpr{}, err
+			}
+			return sqlExpr{kind: "cast", name: targetType, args: []sqlExpr{argument}, value: token}, nil
 		}
 		if upper == "NULL" {
 			return sqlExpr{kind: "literal", value: nil}, nil
@@ -1322,6 +1670,13 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 					}
 					window.order = values
 				}
+				if p.keyword("ROWS") {
+					frame, err := p.parseSQLWindowFrame()
+					if err != nil {
+						return sqlExpr{}, err
+					}
+					window.frame = &frame
+				}
 				if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 					return sqlExpr{}, err
 				}
@@ -1342,6 +1697,142 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 		return expr, nil
 	}
 	return sqlExpr{}, p.expected(token, "a column, literal, function, or *", nil)
+}
+
+func (p *sqlQueryParser) parseSQLWindowFrame() (sqlWindowFrame, error) {
+	p.next()
+	if err := p.expectKeyword("BETWEEN"); err != nil {
+		return sqlWindowFrame{}, err
+	}
+	start, err := p.parseSQLWindowFrameBound("frame start")
+	if err != nil {
+		return sqlWindowFrame{}, err
+	}
+	if err := p.expectKeyword("AND"); err != nil {
+		return sqlWindowFrame{}, err
+	}
+	end, err := p.parseSQLWindowFrameBound("frame end")
+	if err != nil {
+		return sqlWindowFrame{}, err
+	}
+	if start.kind == "UNBOUNDED FOLLOWING" {
+		return sqlWindowFrame{}, p.diagnostic(p.previous(), "a ROWS frame cannot start with UNBOUNDED FOLLOWING")
+	}
+	if end.kind == "UNBOUNDED PRECEDING" {
+		return sqlWindowFrame{}, p.diagnostic(p.previous(), "a ROWS frame cannot end with UNBOUNDED PRECEDING")
+	}
+	if sqlWindowFrameBoundPosition(start) > sqlWindowFrameBoundPosition(end) {
+		return sqlWindowFrame{}, p.diagnostic(p.previous(), "ROWS frame start must not follow its end")
+	}
+	return sqlWindowFrame{start: start, end: end}, nil
+}
+
+func (p *sqlQueryParser) parseSQLWindowFrameBound(name string) (sqlWindowFrameBound, error) {
+	if p.keyword("UNBOUNDED") {
+		p.next()
+		if p.keyword("PRECEDING") {
+			p.next()
+			return sqlWindowFrameBound{kind: "UNBOUNDED PRECEDING"}, nil
+		}
+		if p.keyword("FOLLOWING") {
+			p.next()
+			return sqlWindowFrameBound{kind: "UNBOUNDED FOLLOWING"}, nil
+		}
+		return sqlWindowFrameBound{}, p.expected(p.current(), "PRECEDING or FOLLOWING after UNBOUNDED", []string{"PRECEDING", "FOLLOWING"})
+	}
+	if p.keyword("CURRENT") {
+		p.next()
+		if err := p.expectKeyword("ROW"); err != nil {
+			return sqlWindowFrameBound{}, err
+		}
+		return sqlWindowFrameBound{kind: "CURRENT ROW"}, nil
+	}
+	offset, err := p.parseInteger(name)
+	if err != nil {
+		return sqlWindowFrameBound{}, err
+	}
+	if p.keyword("PRECEDING") {
+		p.next()
+		return sqlWindowFrameBound{kind: "PRECEDING", offset: offset}, nil
+	}
+	if p.keyword("FOLLOWING") {
+		p.next()
+		return sqlWindowFrameBound{kind: "FOLLOWING", offset: offset}, nil
+	}
+	return sqlWindowFrameBound{}, p.expected(p.current(), "PRECEDING or FOLLOWING after "+name, []string{"PRECEDING", "FOLLOWING"})
+}
+
+func sqlWindowFrameBoundPosition(bound sqlWindowFrameBound) int {
+	switch bound.kind {
+	case "UNBOUNDED PRECEDING":
+		return -1 << 30
+	case "PRECEDING":
+		return -bound.offset
+	case "CURRENT ROW":
+		return 0
+	case "FOLLOWING":
+		return bound.offset
+	case "UNBOUNDED FOLLOWING":
+		return 1 << 30
+	}
+	return 0
+}
+
+func sqlWindowFrameBounds(frame *sqlWindowFrame, position, length int) (int, int) {
+	if length == 0 {
+		return 0, -1
+	}
+	if frame == nil {
+		return 0, position
+	}
+	resolve := func(bound sqlWindowFrameBound) int {
+		switch bound.kind {
+		case "UNBOUNDED PRECEDING":
+			return 0
+		case "PRECEDING":
+			return position - bound.offset
+		case "CURRENT ROW":
+			return position
+		case "FOLLOWING":
+			return position + bound.offset
+		case "UNBOUNDED FOLLOWING":
+			return length - 1
+		}
+		return position
+	}
+	start, end := resolve(frame.start), resolve(frame.end)
+	if start < 0 {
+		start = 0
+	}
+	if end >= length {
+		end = length - 1
+	}
+	return start, end
+}
+
+func sqlWindowAggregate(name string, values []float64) interface{} {
+	if len(values) == 0 {
+		return nil
+	}
+	result := values[0]
+	for _, value := range values[1:] {
+		switch name {
+		case "SUM", "AVG":
+			result += value
+		case "MIN":
+			if value < result {
+				result = value
+			}
+		case "MAX":
+			if value > result {
+				result = value
+			}
+		}
+	}
+	if name == "AVG" {
+		return result / float64(len(values))
+	}
+	return result
 }
 func (p *sqlQueryParser) parseInteger(name string) (int, error) {
 	token := p.current()
@@ -1560,6 +2051,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		filtered := rows[:0]
 		for index, row := range rows {
+			if err := sqlExpressionError(values[index]); err != nil {
+				return SQLQueryResult{}, err
+			}
 			if sqlTruthy(values[index]) {
 				filtered = append(filtered, row)
 			}
@@ -1667,7 +2161,11 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 						return SQLQueryResult{}, err
 					}
 					combined := mergeSQLRows(left, r)
-					ok := join.kind == "CROSS" || sqlTruthy(evalSQLExpr(join.on, []sqlExecRow{combined}, combined))
+					value := evalSQLExpr(join.on, []sqlExecRow{combined}, combined)
+					if err := sqlExpressionError(value); err != nil {
+						return SQLQueryResult{}, err
+					}
+					ok := join.kind == "CROSS" || sqlTruthy(value)
 					if ok {
 						matched = true
 						matchedRight[rightIndex] = true
@@ -1723,6 +2221,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		filtered := rows[:0]
 		for index, row := range rows {
+			if err := sqlExpressionError(values[index]); err != nil {
+				return SQLQueryResult{}, err
+			}
 			if sqlTruthy(values[index]) {
 				filtered = append(filtered, row)
 			}
@@ -1732,7 +2233,10 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	}
 	started = time.Now()
 	inputRows := len(rows)
-	groups := groupSQLRows(rows, q.groupBy, q)
+	groups, err := groupSQLRows(rows, q.groupBy, q)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
 	if control != nil && control.options.MaxGroupBytes > 0 && sqlGroupedRowsBytes(groups) > control.options.MaxGroupBytes {
 		return SQLQueryResult{}, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
 	}
@@ -1751,8 +2255,14 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if len(group) > 0 {
 			representative = group[0]
 		}
-		if q.having.kind != "" && !sqlTruthy(evalSQLExpr(q.having, group, representative)) {
-			continue
+		if q.having.kind != "" {
+			value := evalSQLExpr(q.having, group, representative)
+			if err := sqlExpressionError(value); err != nil {
+				return SQLQueryResult{}, err
+			}
+			if !sqlTruthy(value) {
+				continue
+			}
 		}
 		row := SQLRow{}
 		for idx, item := range q.selects {
@@ -1764,7 +2274,11 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				}
 				continue
 			}
-			row[result.Columns[idx]] = evalSQLExpr(item.expr, group, representative)
+			value := evalSQLExpr(item.expr, group, representative)
+			if err := sqlExpressionError(value); err != nil {
+				return SQLQueryResult{}, err
+			}
+			row[result.Columns[idx]] = value
 		}
 		out = append(out, output{row: row, group: group})
 	}
@@ -1772,8 +2286,29 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if item.expr.window == nil {
 			continue
 		}
-		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
+		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "AVG" && item.expr.name != "MIN" && item.expr.name != "MAX" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
 			return SQLQueryResult{}, fmt.Errorf("SQL window function %q is not supported", item.expr.name)
+		}
+		for _, output := range out {
+			row := sqlExecRow{}
+			if len(output.group) > 0 {
+				row = output.group[0]
+			}
+			for _, expression := range item.expr.window.partition {
+				if err := sqlExpressionError(evalSQLExpr(expression, output.group, row)); err != nil {
+					return SQLQueryResult{}, err
+				}
+			}
+			for _, order := range item.expr.window.order {
+				if err := sqlExpressionError(evalSQLExpr(order.expr, output.group, row)); err != nil {
+					return SQLQueryResult{}, err
+				}
+			}
+			for _, argument := range item.expr.args {
+				if err := sqlExpressionError(evalSQLExpr(argument, output.group, row)); err != nil {
+					return SQLQueryResult{}, err
+				}
+			}
 		}
 		partitions := map[string][]int{}
 		for index := range out {
@@ -1811,7 +2346,6 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			})
 			rank := int64(1)
 			denseRank := int64(1)
-			total := float64(0)
 			for position, index := range indexes {
 				row := sqlExecRow{}
 				if len(out[index].group) > 0 {
@@ -1842,14 +2376,26 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					out[index].row[result.Columns[column]] = rank
 				case "DENSE_RANK":
 					out[index].row[result.Columns[column]] = denseRank
-				case "SUM":
+				case "SUM", "AVG", "MIN", "MAX":
 					if len(item.expr.args) != 1 {
-						return SQLQueryResult{}, fmt.Errorf("SUM window function expects one argument")
+						return SQLQueryResult{}, fmt.Errorf("%s window function expects one argument", item.expr.name)
 					}
-					if value, ok := sqlNumber(evalSQLExpr(item.expr.args[0], out[index].group, row)); ok {
-						total += value
+					start, end := sqlWindowFrameBounds(item.expr.window.frame, position, len(indexes))
+					var values []float64
+					for framePosition := start; framePosition <= end; framePosition++ {
+						frameRow := sqlExecRow{}
+						if len(out[indexes[framePosition]].group) > 0 {
+							frameRow = out[indexes[framePosition]].group[0]
+						}
+						value := evalSQLExpr(item.expr.args[0], out[indexes[framePosition]].group, frameRow)
+						if err := sqlExpressionError(value); err != nil {
+							return SQLQueryResult{}, err
+						}
+						if number, ok := sqlNumber(value); ok {
+							values = append(values, number)
+						}
 					}
-					out[index].row[result.Columns[column]] = total
+					out[index].row[result.Columns[column]] = sqlWindowAggregate(item.expr.name, values)
 				case "LAG", "LEAD":
 					if len(item.expr.args) < 1 || len(item.expr.args) > 3 {
 						return SQLQueryResult{}, fmt.Errorf("%s window function expects one to three arguments", item.expr.name)
@@ -1921,6 +2467,13 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		metrics.record("DISTINCT", "deduplicate projected rows", inputRows, len(out), started)
 	}
 	if len(q.orderBy) > 0 {
+		for _, output := range out {
+			for _, item := range q.orderBy {
+				if err := sqlExpressionError(evalOutputOrder(item.expr, output.row, output.group)); err != nil {
+					return SQLQueryResult{}, err
+				}
+			}
+		}
 		if control != nil && control.options.MaxSortBytes > 0 {
 			sortBytes := 0
 			for _, item := range out {
@@ -2272,6 +2825,11 @@ func sqlExplainExpression(expression sqlExpr) string {
 		return fmt.Sprintf("%#v", expression.value)
 	case "star":
 		return "*"
+	case "cast":
+		if len(expression.args) == 1 {
+			return "CAST(" + sqlExplainExpression(expression.args[0]) + " AS " + expression.name + ")"
+		}
+		return "CAST(<invalid>)"
 	case "func":
 		return expression.name + "(" + sqlExplainExpressions(expression.args) + ")"
 	case "unary":
@@ -2377,7 +2935,7 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		cacheKey := source.kind + "\x00" + source.key
 		if control != nil {
 			if rows, ok := control.sources[cacheKey]; ok {
-				return cloneSQLRows(rows), nil
+				return validateSQLSourceFieldTypes(source, cloneSQLRows(rows))
 			}
 		}
 		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
@@ -2387,14 +2945,103 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		if control != nil {
 			control.sources[cacheKey] = cloneSQLRows(rows)
 		}
-		return rows, nil
+		return validateSQLSourceFieldTypes(source, rows)
 	}
 	return nil, nil
 }
 
+func validateSQLSourceFieldTypes(source sqlSource, rows []SQLRow) ([]SQLRow, error) {
+	if len(source.fieldTypes) == 0 {
+		return rows, nil
+	}
+	validated := cloneSQLRows(rows)
+	for rowIndex, row := range validated {
+		for field, fieldType := range source.fieldTypes {
+			value, exists := row[field]
+			if !exists || value == nil {
+				continue
+			}
+			converted, ok := sqlTypedJSONFieldValue(value, fieldType.name)
+			if !ok {
+				return nil, sqlEvalError{err: fmt.Errorf("CACHE(%q) row %d field %q expects %s, got %s", source.key, rowIndex+1, field, fieldType.name, sqlLiteralTypeName(value)), token: fieldType.token}
+			}
+			row[field] = converted
+		}
+	}
+	return validated, nil
+}
+
+func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bool) {
+	switch typeName {
+	case "TEXT":
+		text, ok := value.(string)
+		return text, ok
+	case "BOOLEAN":
+		boolean, ok := value.(bool)
+		return boolean, ok
+	case "NUMBER":
+		_, ok := sqlNumber(value)
+		return value, ok
+	case "INTEGER":
+		number, ok := sqlNumber(value)
+		if !ok || math.Trunc(number) != number || number < float64(-1<<63) || number >= float64(1<<63) {
+			return nil, false
+		}
+		return int64(number), true
+	case "DECIMAL":
+		if decimal, ok := value.(sqlDecimal); ok {
+			return decimal, true
+		}
+		if text, ok := value.(string); ok {
+			decimal, ok := parseSQLDecimal(text)
+			return decimal, ok
+		}
+		if number, ok := sqlNumber(value); ok {
+			decimal, ok := parseSQLDecimal(strconv.FormatFloat(number, 'f', -1, 64))
+			return decimal, ok
+		}
+		return nil, false
+	case "DATE":
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		parsed, err := time.Parse("2006-01-02", text)
+		if err != nil || parsed.Format("2006-01-02") != text {
+			return nil, false
+		}
+		return sqlDate(text), true
+	case "TIMESTAMP":
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, text)
+		if err != nil {
+			return nil, false
+		}
+		return parsed, true
+	case "JSON":
+		switch value.(type) {
+		case map[string]interface{}, []interface{}:
+			return value, true
+		}
+	}
+	return nil, false
+}
+
 func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
-	if source.kind != "CACHE" || condition.kind != "binary" || condition.left == nil || condition.right == nil {
+	if source.kind != "CACHE" || len(source.fieldTypes) != 0 || condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
+	}
+	if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
+		fields, values := sqlCompositeIndexedEqualities(source, condition)
+		if len(fields) >= 2 {
+			rows, available, err := indexed.ResolveSQLCompositeIndexedSource(source.kind, source.key, fields, values)
+			if available || err != nil {
+				return rows, available, err
+			}
+		}
 	}
 	if condition.op == "AND" {
 		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver); indexed || err != nil {
@@ -2410,6 +3057,42 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
 	}
 	return nil, false, nil
+}
+
+func sqlCompositeIndexedEqualities(source sqlSource, condition sqlExpr) ([]string, []interface{}) {
+	values := map[string]interface{}{}
+	var collect func(sqlExpr)
+	collect = func(expression sqlExpr) {
+		if expression.kind != "binary" {
+			return
+		}
+		if expression.op == "AND" && expression.left != nil && expression.right != nil {
+			collect(*expression.left)
+			collect(*expression.right)
+			return
+		}
+		if expression.op != "=" || expression.left == nil || expression.right == nil {
+			return
+		}
+		left, right := *expression.left, *expression.right
+		if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
+			values[left.name] = right.value
+		}
+		if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+			values[right.name] = left.value
+		}
+	}
+	collect(condition)
+	fields := make([]string, 0, len(values))
+	for field := range values {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	orderedValues := make([]interface{}, len(fields))
+	for index, field := range fields {
+		orderedValues[index] = values[field]
+	}
+	return fields, orderedValues
 }
 
 func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
@@ -2538,6 +3221,8 @@ func sqlExprReferencesOnlyAlias(expression sqlExpr, alias string) bool {
 		return expression.left != nil && sqlExprReferencesOnlyAlias(*expression.left, alias)
 	case "binary":
 		return expression.left != nil && sqlExprReferencesOnlyAlias(*expression.left, alias) && (expression.right == nil || sqlExprReferencesOnlyAlias(*expression.right, alias))
+	case "cast":
+		return len(expression.args) == 1 && sqlExprReferencesOnlyAlias(expression.args[0], alias)
 	case "func":
 		for _, argument := range expression.args {
 			if !sqlExprReferencesOnlyAlias(argument, alias) {
@@ -2588,26 +3273,30 @@ func sqlHashJoinKey(value interface{}) (string, bool) {
 	return "", false
 }
 
-func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) [][]sqlExecRow {
+func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow, error) {
 	if len(by) == 0 {
 		if !sqlQueryHasAggregate(q) {
 			out := make([][]sqlExecRow, len(rows))
 			for i, row := range rows {
 				out[i] = []sqlExecRow{row}
 			}
-			return out
+			return out, nil
 		}
 		if len(rows) == 0 {
-			return [][]sqlExecRow{{}}
+			return [][]sqlExecRow{{}}, nil
 		}
-		return [][]sqlExecRow{rows}
+		return [][]sqlExecRow{rows}, nil
 	}
 	groups := map[string][]sqlExecRow{}
 	order := []string{}
 	for _, row := range rows {
 		parts := make([]string, len(by))
 		for i, expr := range by {
-			parts[i] = fmt.Sprintf("%#v", evalSQLExpr(expr, []sqlExecRow{row}, row))
+			value := evalSQLExpr(expr, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(value); err != nil {
+				return nil, err
+			}
+			parts[i] = fmt.Sprintf("%#v", value)
 		}
 		key := strings.Join(parts, "\x00")
 		if _, ok := groups[key]; !ok {
@@ -2619,7 +3308,7 @@ func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) [][]sqlExecRow {
 	for _, key := range order {
 		out = append(out, groups[key])
 	}
-	return out
+	return out, nil
 }
 func sqlQueryHasAggregate(q *sqlQuery) bool {
 	for _, item := range q.selects {
@@ -2638,6 +3327,13 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 		case "COUNT", "SUM", "AVG", "MIN", "MAX":
 			return true
 		}
+		for _, arg := range expr.args {
+			if sqlExprHasAggregate(arg) {
+				return true
+			}
+		}
+	}
+	if expr.kind == "cast" {
 		for _, arg := range expr.args {
 			if sqlExprHasAggregate(arg) {
 				return true
@@ -2670,6 +3366,21 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return expr.value
 	case "field":
 		return sqlField(row, expr.qualifier, expr.name)
+	case "cast":
+		if len(expr.args) != 1 {
+			token, _ := expr.value.(sqlToken)
+			return sqlEvalError{err: fmt.Errorf("CAST expects exactly one expression"), token: token}
+		}
+		value := evalSQLExpr(expr.args[0], group, row)
+		if err := sqlExpressionError(value); err != nil {
+			return sqlEvaluationFailure(err)
+		}
+		converted, err := sqlCastValue(value, expr.name)
+		if err != nil {
+			token, _ := expr.value.(sqlToken)
+			return sqlEvalError{err: err, token: token}
+		}
+		return converted
 	case "func":
 		switch expr.name {
 		case "COUNT":
@@ -2678,7 +3389,11 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			var n int64
 			for _, r := range group {
-				if evalSQLExpr(expr.args[0], []sqlExecRow{r}, r) != nil {
+				value := evalSQLExpr(expr.args[0], []sqlExecRow{r}, r)
+				if err := sqlExpressionError(value); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				if value != nil {
 					n++
 				}
 			}
@@ -2686,7 +3401,11 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		case "SUM", "AVG", "MIN", "MAX":
 			var values []float64
 			for _, r := range group {
-				if n, ok := sqlNumber(evalSQLExpr(expr.args[0], []sqlExecRow{r}, r)); ok {
+				value := evalSQLExpr(expr.args[0], []sqlExecRow{r}, r)
+				if err := sqlExpressionError(value); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				if n, ok := sqlNumber(value); ok {
 					values = append(values, n)
 				}
 			}
@@ -2710,6 +3429,9 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		}
 	case "unary":
 		value := evalSQLExpr(*expr.left, group, row)
+		if err := sqlExpressionError(value); err != nil {
+			return sqlEvaluationFailure(err)
+		}
 		switch expr.op {
 		case "!":
 			return !sqlTruthy(value)
@@ -2728,6 +3450,9 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		}
 	case "binary":
 		left := evalSQLExpr(*expr.left, group, row)
+		if err := sqlExpressionError(left); err != nil {
+			return sqlEvaluationFailure(err)
+		}
 		if expr.op == "IS NULL" {
 			return left == nil
 		}
@@ -2735,9 +3460,108 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return left != nil
 		}
 		right := evalSQLExpr(*expr.right, group, row)
+		if err := sqlExpressionError(right); err != nil {
+			return sqlEvaluationFailure(err)
+		}
 		return sqlBinaryValue(expr.op, left, right)
 	}
 	return nil
+}
+
+func sqlCastValue(value interface{}, target string) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+	fail := func() (interface{}, error) {
+		return nil, fmt.Errorf("CAST cannot convert %s value %q to %s", sqlLiteralTypeName(value), fmt.Sprint(value), target)
+	}
+	switch target {
+	case "TEXT":
+		if timestamp, ok := value.(time.Time); ok {
+			return timestamp.Format(time.RFC3339Nano), nil
+		}
+		return fmt.Sprint(value), nil
+	case "NUMBER":
+		if number, ok := sqlNumber(value); ok {
+			return number, nil
+		}
+		text, ok := value.(string)
+		if !ok {
+			return fail()
+		}
+		number, err := strconv.ParseFloat(text, 64)
+		if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+			return fail()
+		}
+		return number, nil
+	case "DECIMAL":
+		if decimal, ok := value.(sqlDecimal); ok {
+			return decimal, nil
+		}
+		if text, ok := value.(string); ok {
+			if decimal, ok := parseSQLDecimal(text); ok {
+				return decimal, nil
+			}
+			return fail()
+		}
+		if number, ok := sqlNumber(value); ok {
+			if decimal, ok := parseSQLDecimal(strconv.FormatFloat(number, 'f', -1, 64)); ok {
+				return decimal, nil
+			}
+		}
+		return fail()
+	case "BOOLEAN":
+		switch typed := value.(type) {
+		case bool:
+			return typed, nil
+		case string:
+			switch strings.ToLower(typed) {
+			case "true":
+				return true, nil
+			case "false":
+				return false, nil
+			}
+		case int, int64, float32, float64:
+			number, _ := sqlNumber(typed)
+			if number == 0 {
+				return false, nil
+			}
+			if number == 1 {
+				return true, nil
+			}
+		}
+		return fail()
+	case "DATE":
+		switch typed := value.(type) {
+		case sqlDate:
+			return typed, nil
+		case time.Time:
+			return sqlDate(typed.Format("2006-01-02")), nil
+		case string:
+			parsed, err := time.Parse("2006-01-02", typed)
+			if err == nil && parsed.Format("2006-01-02") == typed {
+				return sqlDate(typed), nil
+			}
+		}
+		return fail()
+	case "TIMESTAMP":
+		switch typed := value.(type) {
+		case time.Time:
+			return typed, nil
+		case sqlDate:
+			parsed, err := time.Parse("2006-01-02", string(typed))
+			if err == nil {
+				return parsed.UTC(), nil
+			}
+		case string:
+			parsed, err := time.Parse(time.RFC3339Nano, typed)
+			if err == nil {
+				return parsed, nil
+			}
+		}
+		return fail()
+	}
+	return nil, fmt.Errorf("unsupported CAST target %q", target)
 }
 func sqlField(row sqlExecRow, qualifier, name string) interface{} {
 	if qualifier != "" {
@@ -2801,6 +3625,15 @@ func sqlCompare(left, right interface{}) int {
 				return 1
 			}
 			return 0
+		}
+	}
+	if a, ok := left.(sqlDecimal); ok {
+		if b, ok := right.(sqlDecimal); ok {
+			leftValue, leftOK := new(big.Rat).SetString(string(a))
+			rightValue, rightOK := new(big.Rat).SetString(string(b))
+			if leftOK && rightOK {
+				return leftValue.Cmp(rightValue)
+			}
 		}
 	}
 	if a, ok := sqlNumber(left); ok {
@@ -2907,6 +3740,10 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 		if expr.op == "IS NULL" || expr.op == "IS NOT NULL" {
 			out := make([]interface{}, len(rows))
 			for i := range rows {
+				if err := sqlExpressionError(left[i]); err != nil {
+					out[i] = sqlEvaluationFailure(err)
+					continue
+				}
 				if expr.op == "IS NULL" {
 					out[i] = left[i] == nil
 				} else {
@@ -2921,6 +3758,14 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 		}
 		out := make([]interface{}, len(rows))
 		for i := range rows {
+			if err := sqlExpressionError(left[i]); err != nil {
+				out[i] = sqlEvaluationFailure(err)
+				continue
+			}
+			if err := sqlExpressionError(right[i]); err != nil {
+				out[i] = sqlEvaluationFailure(err)
+				continue
+			}
 			out[i] = sqlBinaryValue(expr.op, left[i], right[i])
 		}
 		return out, nil
