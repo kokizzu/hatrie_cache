@@ -72,7 +72,7 @@ func TestREADMEStartsWithProductSummaryAndNavigation(t *testing.T) {
 	}
 	for _, token := range []string{
 		"In-memory", "Start Here", "DATA_STRUCTURE.md", "SQL.md", "Operations Manual",
-		"BENCHMARK.md", "Performance and implementation history",
+		"BENCHMARK.md", "ARCHITECTURE.md", "Performance and implementation history",
 	} {
 		if !strings.Contains(opening, token) {
 			t.Fatalf("README.md opening missing %q", token)

@@ -12,6 +12,7 @@ security guidance before exposing it on a network.
 - New to the SQL interface: [SQL.md](SQL.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
+- Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
 - API and configuration examples: [Development](#development)
 
 The default process does not start the monitoring HTTP/2 or gRPC server. Enable
