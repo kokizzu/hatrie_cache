@@ -6,6 +6,9 @@ authenticated `/api/commands` request format. Read-only relational `SELECT`
 queries are validated locally and executed through the authenticated
 `/api/sql` endpoint against a cache snapshot.
 
+Executable production coverage is tracked in
+[SQL_TEST_MATRIX.md](SQL_TEST_MATRIX.md).
+
 ## Goals
 
 - [x] Provide familiar SQL forms for scalar cache reads and writes.

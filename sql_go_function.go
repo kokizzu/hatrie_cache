@@ -248,54 +248,6 @@ func (program sqlGoProgram) Evaluate(arguments []interface{}, definition SQLFunc
 	return stack[0], nil
 }
 
-func evalSQLGoFunctionExpr(expression sqlExpr, arguments []interface{}, definition SQLFunctionDefinition) (interface{}, error) {
-	switch expression.kind {
-	case "literal":
-		return expression.value, nil
-	case "field":
-		return arguments[expression.value.(int)], nil
-	case "unary":
-		value, err := evalSQLGoFunctionExpr(*expression.left, arguments, definition)
-		if err != nil {
-			return nil, err
-		}
-		if expression.op == "!" {
-			return !sqlTruthy(value), nil
-		}
-		if expression.op == "-" {
-			if _, ok := sqlNumber(value); !ok {
-				return nil, sqlGoRuntimeError(definition, expression.op, fmt.Sprintf("operator %q expects a numeric operand, got %s", expression.op, sqlFunctionValueType(value)))
-			}
-			return sqlArithmeticValue("*", int64(-1), value), nil
-		}
-		return nil, fmt.Errorf("unsupported GO UDF unary operator %q", expression.op)
-	case "binary":
-		left, err := evalSQLGoFunctionExpr(*expression.left, arguments, definition)
-		if err != nil {
-			return nil, err
-		}
-		if expression.op == "IS NULL" {
-			return left == nil, nil
-		}
-		if expression.op == "IS NOT NULL" {
-			return left != nil, nil
-		}
-		right, err := evalSQLGoFunctionExpr(*expression.right, arguments, definition)
-		if err != nil {
-			return nil, err
-		}
-		if strings.Contains("+-*/%", expression.op) && len(expression.op) == 1 {
-			return sqlGoArithmeticValue(expression.op, left, right, definition)
-		}
-		return sqlBinaryValue(expression.op, left, right), nil
-	}
-	return nil, fmt.Errorf("unsupported GO UDF expression")
-}
-
-func sqlGoArithmeticValue(op string, left, right interface{}, definition SQLFunctionDefinition) (interface{}, error) {
-	return sqlGoArithmeticValueAt(op, left, right, definition, strings.Index(definition.Source, op)+1)
-}
-
 func sqlGoArithmeticValueAt(op string, left, right interface{}, definition SQLFunctionDefinition, column int) (interface{}, error) {
 	_, leftOK := sqlNumber(left)
 	_, rightOK := sqlNumber(right)
@@ -308,10 +260,6 @@ func sqlGoArithmeticValueAt(op string, left, right interface{}, definition SQLFu
 		}
 	}
 	return sqlArithmeticValue(op, left, right), nil
-}
-
-func sqlGoRuntimeError(definition SQLFunctionDefinition, token, message string) error {
-	return sqlGoRuntimeErrorAt(definition, strings.Index(definition.Source, token)+1, message)
 }
 
 func sqlGoRuntimeErrorAt(definition SQLFunctionDefinition, column int, message string) error {
