@@ -20,6 +20,257 @@ Executable production coverage is tracked in
 - [x] Keep internal replication commands inaccessible through SQL.
 - [x] Expose the feature through `hatrie-cli sql` with unit tests.
 
+## First SQL session
+
+This SQL interface has two different modes. They look similar but solve
+different problems:
+
+| Mode | What it reads/writes | Statements |
+| --- | --- | --- |
+| **Command SQL** | One cache key at a time. It can create, replace, update, expire, and delete cache values. | `SELECT value|exists|ttl|dump FROM cache`, `INSERT`, `UPDATE`, `DELETE`, `CALL` |
+| **Relational SQL** | A read-only snapshot of JSON rows or cache metadata. It never changes a cache value. | `SELECT ... FROM CACHE(...)`, `KEYS`, `VALUES`, CTEs, joins, grouping, and related clauses |
+
+Do not confuse `SELECT value FROM cache WHERE key = 'name'` with `SELECT ...
+FROM CACHE('users')`: the first is a command-SQL lookup of one cache key; the
+second is a relational query over JSON rows held in a cache value.
+
+### Command SQL: create, read, change, expire, and delete
+
+The following session is intentionally small and sequential. Run each statement
+separately to see its reply. When several statements are sent in one SQL
+program, the CLI compiles them into a non-transactional `BATCH` and returns one
+response per statement in source order.
+
+**Before cache state:** `name=∅`, `views=∅`, and `temporary=∅`. `∅` means that
+the key does not exist.
+
+```sql
+SELECT exists FROM cache WHERE key = 'name';
+INSERT INTO cache (key, value) VALUES ('name', 'Ivi');
+SELECT value FROM cache WHERE key = 'name';
+UPDATE cache SET value = 'Ada' WHERE key = 'name';
+CALL GET('name');
+
+INSERT INTO cache (key, counter) VALUES ('views', 41);
+UPDATE cache SET value = value + 1 WHERE key = 'views';
+
+INSERT INTO cache (key, value, ttl_seconds) VALUES ('temporary', 'yes', 60);
+SELECT ttl FROM cache WHERE key = 'temporary';
+CALL PERSIST(key => 'temporary');
+SELECT ttl FROM cache WHERE key = 'temporary';
+
+DELETE FROM cache WHERE key = 'name';
+SELECT exists FROM cache WHERE key = 'name';
+```
+
+| Statement | Result | State after it runs |
+| --- | --- | --- |
+| first `SELECT exists` | `0` | `name=∅` |
+| `INSERT ... ('name','Ivi')` | `stored string` | `name="Ivi"` |
+| `SELECT value` | `Ivi` | unchanged |
+| `UPDATE ... value='Ada'` | `stored string` | `name="Ada"` |
+| `CALL GET('name')` | `Ada` | unchanged |
+| `INSERT ... counter=41` | `stored counter` | `views=41` |
+| `UPDATE ... value=value+1` | `42` | `views=42` |
+| timed `INSERT` | `stored string with ttl` | `temporary="yes"` with a 60-second expiry |
+| first `SELECT ttl` | a positive number of seconds | unchanged |
+| `CALL PERSIST` | `ttl removed` | `temporary="yes"` with no expiry |
+| second `SELECT ttl` | `-1` | unchanged; `-1` means no expiry |
+| `DELETE` then `SELECT exists` | `deleted`, then `0` | `name=∅` |
+
+**After cache state:** `name=∅`, `views=42`, and `temporary="yes"` with no
+TTL. `INSERT` is a cache upsert, not a relational-table insert: inserting the
+same key again replaces its value. `UPDATE` also targets exactly one cache key
+because its `WHERE` clause must be `key = ...`.
+
+### `CALL`: SQL syntax for every cache command
+
+`CALL` exposes every public cache command without losing any command fields:
+
+```sql
+CALL NAME(field => value, other_field => value);
+```
+
+Use `=>` for named fields. Values such as a list or object must be explicit
+JSON literals, so SQL strings and JSON do not get confused.
+
+**Before cache state:** `user:1=∅`, `tags=∅`, `jobs=∅`.
+
+```sql
+CALL MAP.PUT(key => 'user:1', pairs => JSON '{"name":"Ivi","role":"admin"}');
+CALL MAP.PEEK(key => 'user:1', subkey => 'name');
+CALL SET.ADD(key => 'tags', values => JSON '["go","cache"]');
+CALL SET.HAS(key => 'tags', value => 'go');
+CALL SLICE.PUSH(key => 'jobs', values => JSON '["build","verify"]');
+CALL SLICE.POP(key => 'jobs');
+```
+
+| Statement | Result | State after it runs |
+| --- | --- | --- |
+| `MAP.PUT` | `stored map fields` | `user:1={name:Ivi,role:admin}` |
+| `MAP.PEEK` | `Ivi` | map unchanged |
+| `SET.ADD` | `2` newly added members | `tags={go,cache}` |
+| `SET.HAS` | `1` | set unchanged |
+| `SLICE.PUSH` | `pushed slice values` | `jobs=[build,verify]` |
+| `SLICE.POP` | `verify` | `jobs=[build]` |
+
+The command inventory below lists every accepted `CALL` spelling, including
+aliases and dotted names. Its data-structure behavior is exactly the same as a
+direct command request. For the complete before/request/reply/after flow of
+every cache command, including filters, sketches, bitmaps, radix trees, and
+Fenwick trees, read [DATA_STRUCTURE.md](DATA_STRUCTURE.md). `CALL` changes only
+the input syntax; it does not change the stored value or reply semantics.
+
+### Command-SQL errors and safety
+
+- A command for the wrong type, such as `CALL SET.ADD` on a string key, returns
+  an error and leaves the old value unchanged.
+- Counter arithmetic is signed 32-bit and rejects overflow.
+- `ttl_seconds` must be positive. `PERSIST` removes an existing TTL; it does
+  not delete the key.
+- A multi-statement program is ordered but not atomic: an error in a later
+  statement does not undo an earlier successful statement.
+- Internal replication commands are rejected by the SQL compiler.
+
+## Relational query walkthrough
+
+Relational SQL is read-only. It is for asking questions about JSON records that
+your application has already stored as raw bytes. Command SQL does not convert
+`INSERT ... value='...'` into a JSON row source. For an in-process application,
+the setup looks like this:
+
+```go
+trie.UpsertBytes("users", []byte(`[
+  {"id":1,"name":"Ada","team_id":10,"enabled":true,"score":9},
+  {"id":2,"name":"Ivi","team_id":10,"enabled":true,"score":7},
+  {"id":3,"name":"Noa","team_id":20,"enabled":false,"score":7}
+]`))
+trie.UpsertBytes("teams", []byte(`[
+  {"id":10,"name":"Core"}, {"id":20,"name":"Edge"}
+]`))
+```
+
+**Before query state:** the `users` and `teams` JSON bytes above exist. Every
+query below observes one consistent snapshot and leaves both keys unchanged.
+
+### Filter and project rows
+
+```sql
+FROM CACHE('users') AS u
+WHERE u.enabled = TRUE AND u.score >= 7
+SELECT u.name, u.score
+ORDER BY u.score DESC, u.name ASC;
+```
+
+Result:
+
+| name | score |
+| --- | ---: |
+| Ada | 9 |
+| Ivi | 7 |
+
+`FROM` chooses rows, `WHERE` keeps only rows whose condition is true, `SELECT`
+chooses output columns, and `ORDER BY` sorts the result. The source JSON and
+cache state do not change.
+
+### Join related JSON values
+
+```sql
+FROM CACHE('users') AS u
+LEFT JOIN CACHE('teams') AS t ON u.team_id = t.id
+WHERE u.enabled = TRUE
+SELECT u.name, t.name AS team
+ORDER BY u.name;
+```
+
+Result:
+
+| name | team |
+| --- | --- |
+| Ada | Core |
+| Ivi | Core |
+
+`LEFT JOIN` keeps every qualifying user even when no team matches; fields from
+the missing team become `NULL`. `INNER JOIN` keeps only matching pairs. `RIGHT
+JOIN`, `FULL OUTER JOIN`, and `CROSS JOIN` are also supported; see the query
+grammar section for their rules.
+
+### Group and aggregate rows
+
+```sql
+FROM CACHE('users') AS u
+SELECT u.team_id, COUNT(*) AS members, SUM(u.score) AS total_score
+GROUP BY u.team_id
+HAVING COUNT(*) >= 1
+ORDER BY u.team_id;
+```
+
+Result:
+
+| team_id | members | total_score |
+| ---: | ---: | ---: |
+| 10 | 2 | 16 |
+| 20 | 1 | 7 |
+
+`GROUP BY` makes one output row per equal `team_id`. `COUNT`, `SUM`, `AVG`,
+`MIN`, and `MAX` summarize each group. `HAVING` filters those finished groups;
+use `WHERE` to filter input rows before grouping.
+
+### Inline rows, CTEs, distinct values, windows, and pagination
+
+`VALUES` supplies small rows directly in a query; `WITH` gives them a temporary
+name. This needs no cache key and is useful for learning, tests, and parameters.
+
+```sql
+WITH scores(name, score) AS (VALUES ('Ada', 9), ('Ivi', 7), ('Noa', 7))
+SELECT DISTINCT name, score, RANK() OVER (ORDER BY score DESC) AS place
+FROM scores
+ORDER BY score DESC, name ASC
+LIMIT 2;
+```
+
+Result:
+
+| name | score | place |
+| --- | ---: | ---: |
+| Ada | 9 | 1 |
+| Ivi | 7 | 2 |
+
+`DISTINCT` removes duplicate projected rows. `LIMIT` keeps the first N rows
+after ordering; `OFFSET` skips rows before applying the limit. Window functions
+also include `ROW_NUMBER`, `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD`.
+
+### Combine query results
+
+```sql
+SELECT value FROM VALUES (1), (2) AS left_rows(value)
+UNION
+SELECT value FROM VALUES (2), (3) AS right_rows(value)
+ORDER BY value;
+```
+
+Result: `1`, `2`, `3`. `UNION` removes duplicates; `UNION ALL` preserves them.
+`INTERSECT` keeps rows common to both sides, and `EXCEPT` keeps rows present in
+the first side but not the second. These operations are read-only.
+
+### Other relational tools
+
+| Need | Use | Result/effect |
+| --- | --- | --- |
+| Inspect cache metadata | `FROM KEYS SELECT key, type, ttl_ms ORDER BY key` | One read-only row per cache key. |
+| Reuse a query | `WITH active AS (...) SELECT ... FROM active` | Named rows exist only for this query. |
+| Walk a hierarchy/sequence | `WITH RECURSIVE walk(...) AS (seed UNION ALL step) SELECT ...` | Repeats the recursive term within row/depth budgets; never mutates cache data. |
+| Query a query | `FROM (SELECT ... ) AS derived SELECT ...` | Derived table is read-only and uncorrelated. |
+| Match text | `WHERE name LIKE 'Ad%'` | Keeps matching non-NULL strings; comparisons are case-sensitive UTF-8 binary. |
+| Compare time correctly | `WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z'` or `day > DATE '2026-08-22'` | Chronological typed comparison; malformed literals are rejected locally. |
+| Inspect a plan | `EXPLAIN FROM VALUES (1) AS rows(value) SELECT value` | Returns a plan without reading cache sources. |
+| Measure one plan | `EXPLAIN ANALYZE FROM ... SELECT ...` | Executes once and returns plan steps plus elapsed/output statistics. |
+| Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
+| Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
+
+The exact command and relational examples in this section are executed by
+`TestSQLGuideCommandExamples` and `TestSQLGuideRelationalExamples`.
+
 ## Command inventory
 
 The SQL language accepts the following public command names in `CALL`.

@@ -28,7 +28,7 @@ func TestDataStructureDocumentationCoversValueFamiliesAndCommands(t *testing.T) 
 			t.Fatalf("DATA_STRUCTURE.md does not document canonical command %s", canonical)
 		}
 	}
-	for _, token := range []string{"POST /api/commands", "Request fields", "Response fields", "Input", "Output"} {
+	for _, token := range []string{"POST /api/commands", "Request fields", "Response fields", "Input", "Output", "`PERSIST`"} {
 		if !strings.Contains(doc, token) {
 			t.Fatalf("DATA_STRUCTURE.md missing %q", token)
 		}

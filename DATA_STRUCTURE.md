@@ -61,6 +61,7 @@ Output:
 | `TTL` | `key` | Remaining seconds or the documented negative sentinel. |
 | `EXPIRE` | `key`, `ttl_seconds` | Applies a relative TTL to a live key. |
 | `EXPIREAT` | `key`, `unix_seconds` | Applies an absolute Unix TTL to a live key. |
+| `PERSIST` | `key` | Removes a live key's TTL without changing its value. |
 | `BATCH` | `batch` of public requests | Ordered `responses`; no rollback on failure. |
 
 ```json
@@ -197,6 +198,7 @@ always described in [Response fields](#response-fields).
 | `TTL` | `name="Ivi"`, no expiry | `{"key":"name"}` | `value:"-1"` | unchanged |
 | `EXPIRE` | `name="Ivi"` | `{"key":"name","ttl_seconds":60}` | `ttl updated` | same value, expires in 60 s |
 | `EXPIREAT` | `name="Ivi"` | `{"key":"name","unix_seconds":1893456000}` | `ttl updated` | same value, expires at that Unix second |
+| `PERSIST` | `name="Ivi"` with a TTL | `{"key":"name"}` | `ttl removed` | same value, no TTL |
 | `BATCH` | `views=∅` | `{"batch":[{"command":"SETINT","key":"views","value":"41"},{"command":"INC","key":"views","value":"1"},{"command":"GET","key":"views"}]}` | three ordered `responses`; last is `42` | `views=42` |
 
 `GETSTR` is an alias of `GET`; `SETSTR` is an alias of `SET`; `SETSTRX` is an

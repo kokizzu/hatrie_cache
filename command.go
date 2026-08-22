@@ -41,6 +41,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if ht == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	request.Command = normalizedCommand(request.Command)
 	if ht.localPartitionSet() != nil {
 		command := strings.ToUpper(strings.TrimSpace(request.Command))
 		if command == "BATCH" {
@@ -198,6 +199,13 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "key not found"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ttl updated"}
+	case "PERSIST":
+		ht.mu.Lock()
+		defer ht.mu.Unlock()
+		if !ht.persistLocked(key) {
+			return CacheCommandResponse{OK: true, Message: "key not found or no ttl"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ttl removed"}
 	case "PUTMAP":
 		fields, ok := commandMapFields(request)
 		if !ok {
