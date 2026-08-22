@@ -9,15 +9,16 @@ import (
 	mathbits "math/bits"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatDataStructure"
 	"hatrie_cache/hat/hatHash"
 )
 
 const (
 	DefaultBloomFilterExpectedItems     uint64  = 10000
 	DefaultBloomFilterFalsePositiveRate float64 = 0.01
-	minBloomFilterBits                  uint64  = 64
-	maxBloomFilterBits                  uint64  = 1 << 31
-	maxBloomFilterHashes                uint8   = 64
+	minBloomFilterBits                  uint64  = hatDataStructure.MinBloomFilterBits
+	maxBloomFilterBits                  uint64  = hatDataStructure.MaxBloomFilterBits
+	maxBloomFilterHashes                uint8   = hatDataStructure.MaxBloomFilterHashes
 	bloomFilterFNVOffset64              uint64  = hatHash.FNVOffset64
 	bloomFilterFNVPrime64               uint64  = hatHash.FNVPrime64
 )
@@ -72,30 +73,7 @@ func newBloomFilterDataWithShape(bitCount uint64, hashCount uint8) bloomFilterDa
 }
 
 func bloomFilterShape(expectedItems uint64, falsePositiveRate float64) (uint64, uint8, error) {
-	if expectedItems == 0 {
-		return 0, 0, errors.New("hatriecache: bloom filter expected items must be positive")
-	}
-	if falsePositiveRate <= 0 || falsePositiveRate >= 1 || math.IsNaN(falsePositiveRate) {
-		return 0, 0, errors.New("hatriecache: bloom filter false positive rate must be between 0 and 1")
-	}
-
-	bits := math.Ceil(-float64(expectedItems) * math.Log(falsePositiveRate) / (math.Ln2 * math.Ln2))
-	if math.IsInf(bits, 0) || bits > float64(maxBloomFilterBits) {
-		return 0, 0, errors.New("hatriecache: bloom filter bit count is too large")
-	}
-	bitCount := uint64(bits)
-	if bitCount < minBloomFilterBits {
-		bitCount = minBloomFilterBits
-	}
-
-	hashes := math.Ceil((float64(bitCount) / float64(expectedItems)) * math.Ln2)
-	if math.IsInf(hashes, 0) || hashes < 1 {
-		hashes = 1
-	}
-	if hashes > float64(maxBloomFilterHashes) {
-		return 0, 0, errors.New("hatriecache: bloom filter hash count is too large")
-	}
-	return bitCount, uint8(hashes), nil
+	return hatDataStructure.BloomFilterShape(expectedItems, falsePositiveRate)
 }
 
 func validateBloomFilterSnapshot(snapshot bloomFilterSnapshot) error {
