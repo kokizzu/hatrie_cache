@@ -82,9 +82,21 @@ type SQLSnapshotLocker interface{ LockSQLSnapshot() func() }
 type SQLIndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error)
 }
+
+// SQLRangeIndexedSourceResolver is an optional extension for index-backed
+// ordered comparisons. Implementations must preserve sqlCompare semantics.
+type SQLRangeIndexedSourceResolver interface {
+	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]SQLRow, bool, error)
+}
+
 type sqlJSONFieldIndex struct {
-	raw  string
-	rows map[string][]SQLRow
+	raw     string
+	rows    map[string][]SQLRow
+	ordered []sqlJSONFieldIndexEntry
+}
+type sqlJSONFieldIndexEntry struct {
+	value interface{}
+	row   SQLRow
 }
 
 func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
@@ -116,23 +128,75 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	if index == nil {
 		return nil, false, nil
 	}
-	if index.raw != string(data) {
-		rows, err := sqlJSONRows(key, data)
-		if err != nil {
-			return nil, false, err
-		}
-		index.raw, index.rows = string(data), map[string][]SQLRow{}
-		for _, row := range rows {
-			if valueKey, ok := sqlIndexValueKey(row[field]); ok {
-				index.rows[valueKey] = append(index.rows[valueKey], row)
-			}
-		}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return nil, false, err
 	}
 	valueKey, ok := sqlIndexValueKey(value)
 	if !ok {
 		return []SQLRow{}, true, nil
 	}
 	return cloneSQLRows(index.rows[valueKey]), true, nil
+}
+
+// ResolveSQLIndexedRangeSource uses the ordered representation of an opt-in
+// JSON field index. Missing and null fields are absent because ordinary SQL
+// comparisons with NULL are unknown and therefore never pass WHERE.
+func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || value == nil {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	start, end := 0, len(index.ordered)
+	switch operator {
+	case "<":
+		end = sort.Search(len(index.ordered), func(i int) bool { return sqlCompare(index.ordered[i].value, value) >= 0 })
+	case "<=":
+		end = sort.Search(len(index.ordered), func(i int) bool { return sqlCompare(index.ordered[i].value, value) > 0 })
+	case ">":
+		start = sort.Search(len(index.ordered), func(i int) bool { return sqlCompare(index.ordered[i].value, value) > 0 })
+	case ">=":
+		start = sort.Search(len(index.ordered), func(i int) bool { return sqlCompare(index.ordered[i].value, value) >= 0 })
+	default:
+		return nil, false, nil
+	}
+	rows := make([]SQLRow, end-start)
+	for i, entry := range index.ordered[start:end] {
+		rows[i] = entry.row
+	}
+	return cloneSQLRows(rows), true, nil
+}
+
+func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data []byte) error {
+	if index.raw == string(data) {
+		return nil
+	}
+	rows, err := sqlJSONRows(key, data)
+	if err != nil {
+		return err
+	}
+	index.raw, index.rows, index.ordered = string(data), map[string][]SQLRow{}, nil
+	for _, row := range rows {
+		if valueKey, ok := sqlIndexValueKey(row[field]); ok {
+			index.rows[valueKey] = append(index.rows[valueKey], row)
+			index.ordered = append(index.ordered, sqlJSONFieldIndexEntry{value: row[field], row: row})
+		}
+	}
+	sort.SliceStable(index.ordered, func(i, j int) bool {
+		return sqlCompare(index.ordered[i].value, index.ordered[j].value) < 0
+	})
+	return nil
 }
 func sqlJSONRows(key string, data []byte) ([]SQLRow, error) {
 	if len(data) == 0 {
@@ -1444,6 +1508,52 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	leftAliases := []string{q.from.alias}
 	for _, join := range q.joins {
 		started = time.Now()
+		leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
+		if join.kind != "INNER" {
+			hashJoin = false
+		}
+		if hashJoin && join.source.kind == "CACHE" {
+			if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
+				// Probe once with NULL to verify that the optional index exists and
+				// to surface malformed JSON even when every left key is NULL.
+				_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				if available {
+					inputRows := len(rows)
+					var next []sqlExecRow
+					for _, left := range rows {
+						value := sqlField(left, leftQualifier, leftField)
+						if _, ok := sqlHashJoinKey(value); !ok {
+							continue
+						}
+						if err := control.addJoinWork(1); err != nil {
+							return SQLQueryResult{}, err
+						}
+						candidates, _, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, value)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+						for _, candidate := range candidates {
+							if err := control.addJoinWork(1); err != nil {
+								return SQLQueryResult{}, err
+							}
+							wrappedCandidate := sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}
+							next = append(next, mergeSQLRows(left, wrappedCandidate))
+							if len(next) > maxRows {
+								return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+							}
+						}
+					}
+					detail := join.kind + " JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
+					metrics.record("INDEX JOIN", detail, inputRows, len(next), started)
+					rows = next
+					leftAliases = append(leftAliases, join.source.alias)
+					continue
+				}
+			}
+		}
 		right, err := resolveSQLSource(join.source, resolver, ctes, metrics, control)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -1455,10 +1565,6 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		inputRows := len(rows) + len(wrapped)
 		var next []sqlExecRow
 		matchedRight := make([]bool, len(wrapped))
-		leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
-		if join.kind != "INNER" {
-			hashJoin = false
-		}
 		if hashJoin {
 			buckets := make(map[string][]int, len(wrapped))
 			for rightIndex, row := range wrapped {
@@ -2174,18 +2280,46 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 }
 
 func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
-	indexed, ok := resolver.(SQLIndexedSourceResolver)
-	if !ok || source.kind != "CACHE" || condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+	if source.kind != "CACHE" || condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
 	left, right := *condition.left, *condition.right
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
-		return indexed.ResolveSQLIndexedSource(source.kind, source.key, left.name, right.value)
+		return resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
 	}
 	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
-		return indexed.ResolveSQLIndexedSource(source.kind, source.key, right.name, left.value)
+		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
 	}
 	return nil, false, nil
+}
+
+func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+	if operator == "=" {
+		indexed, ok := resolver.(SQLIndexedSourceResolver)
+		if !ok {
+			return nil, false, nil
+		}
+		return indexed.ResolveSQLIndexedSource(source.kind, source.key, field, value)
+	}
+	indexed, ok := resolver.(SQLRangeIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLIndexedRangeSource(source.kind, source.key, field, operator, value)
+}
+
+func sqlReverseComparison(operator string) string {
+	switch operator {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	}
+	return operator
 }
 
 func cloneSQLRows(rows []SQLRow) []SQLRow {

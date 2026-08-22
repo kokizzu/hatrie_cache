@@ -115,6 +115,20 @@ func TestMonitoringSQLRouteUsesHatTrieJSONFieldIndex(t *testing.T) {
 	if result.Stats == nil || len(result.Plan) == 0 || result.Plan[0].Node != "INDEX SCAN" {
 		t.Fatalf("plan = %#v, stats = %#v, want an HTTP INDEX SCAN", result.Plan, result.Stats)
 	}
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"EXPLAIN ANALYZE FROM CACHE('people') AS p WHERE p.team_id >= 20 SELECT p.id"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("range status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	result = SQLQueryResult{}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Stats == nil || len(result.Plan) == 0 || result.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("range plan = %#v, stats = %#v, want an HTTP INDEX SCAN", result.Plan, result.Stats)
+	}
 }
 
 func TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor(t *testing.T) {

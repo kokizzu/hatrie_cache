@@ -393,6 +393,59 @@ func TestHatTrieOptionalSQLJSONFieldIndexRefreshesAndPlansIndexScan(t *testing.T
 	}
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexSupportsRangePredicates(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":10},{"id":2,"team_id":20},{"id":3,"team_id":30}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('users') AS users WHERE users.team_id >= 20 SELECT users.id ORDER BY users.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("range index query error = %v", err)
+	}
+	if want := []SQLRow{{"id": float64(2)}, {"id": float64(3)}}; !reflect.DeepEqual(result.Rows[:2], want) {
+		t.Fatalf("range index rows = %#v, want %#v", result.Rows[:2], want)
+	}
+	reversed, err := ExecuteSQLQuery("FROM CACHE('users') AS users WHERE 20 <= users.team_id SELECT users.id ORDER BY users.id", trie)
+	if err != nil || !reflect.DeepEqual(reversed.Rows, result.Rows) {
+		t.Fatalf("reversed range rows/error = %#v/%v, want %#v", reversed.Rows, err, result.Rows)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 || explained.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("range index plan/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexProbesInnerJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"name":"Ivi"},{"id":2,"name":"Lia"},{"id":3,"name":"Noe"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM VALUES (2), (3) AS wanted(id) INNER JOIN CACHE('users') AS users ON wanted.id = users.id SELECT users.name ORDER BY users.name"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed join error = %v", err)
+	}
+	if want := []SQLRow{{"name": "Lia"}, {"name": "Noe"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed join rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 {
+		t.Fatalf("indexed join explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	found := false
+	for _, step := range explained.Plan {
+		found = found || step.Node == "INDEX JOIN"
+	}
+	if !found {
+		t.Fatalf("indexed join plan = %#v, want INDEX JOIN", explained.Plan)
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))
