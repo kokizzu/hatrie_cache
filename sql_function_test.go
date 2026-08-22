@@ -137,9 +137,11 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"AS", "query", "FROM VALUES (1) AS a(value) SELECT value AS result"},
 		{"ASC", "query", "FROM VALUES (2), (1) AS a(value) SELECT value ORDER BY value ASC"},
 		{"BY", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
+		{"BREADTH", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) SEARCH BREADTH FIRST BY value SET search_order FROM walk SELECT search_order"},
 		{"CACHE", "query", "FROM CACHE('people') AS p SELECT p.name"},
 		{"CAST", "query", "FROM VALUES ('42') AS a(value) SELECT CAST(value AS NUMBER)"},
 		{"CROSS", "query", "FROM VALUES (1) AS a(value) CROSS JOIN VALUES (2) AS b(value) SELECT a.value"},
+		{"CYCLE", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) CYCLE value SET is_cycle FROM walk SELECT is_cycle"},
 		{"DESC", "query", "FROM VALUES (1), (2) AS a(value) SELECT value ORDER BY value DESC"},
 		{"DATE", "query", "FROM VALUES (DATE '2026-08-22') AS a(value) SELECT value"},
 		{"DECIMAL", "query", "FROM VALUES (DECIMAL '12.50') AS a(value) SELECT value"},
@@ -173,10 +175,12 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"BETWEEN", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"CURRENT", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"FOLLOWING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING)"},
+		{"FIRST", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) SEARCH BREADTH FIRST BY value SET search_order FROM walk SELECT search_order"},
 		{"PRECEDING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)"},
 		{"ROW", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"ROWS", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"ROWS_WINDOW_FRAME", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"SEARCH", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) SEARCH BREADTH FIRST BY value SET search_order FROM walk SELECT search_order"},
 		{"UNBOUNDED", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"SELECT", "query", "FROM VALUES (1) AS a(value) SELECT value"},
 		{"TIMESTAMP", "query", "FROM VALUES (TIMESTAMP '2026-08-22T09:00:00Z') AS a(value) SELECT value"},
@@ -267,7 +271,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

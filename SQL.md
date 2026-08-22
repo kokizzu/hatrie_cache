@@ -711,6 +711,21 @@ budgets. This is separate from `MaxRows`, which bounds total generated rows.
 Set `SQLQueryOptions.DetectRecursiveCycles` to reject an already-produced
 `UNION ALL` row with a clear cycle diagnostic.
 
+Recursive CTEs may expose breadth-first traversal and non-terminating-cycle
+information directly in their rows:
+
+```sql
+WITH RECURSIVE walk(node, depth) AS (...)
+SEARCH BREADTH FIRST BY node SET search_order
+CYCLE node SET is_cycle
+FROM walk SELECT node, depth, search_order, is_cycle;
+```
+
+`SEARCH` sorts each recursion level by its `BY` columns and assigns a
+one-based `search_order`. `CYCLE` marks a repeated key as `TRUE`, returns that
+row once, and does not use it as another recursion frontier. The option-based
+cycle detector remains available when repeated rows should be an error.
+
 The server returns ordinary JSON for the CLI and SDK. A query error uses the
 same span diagnostics as command SQL.
 

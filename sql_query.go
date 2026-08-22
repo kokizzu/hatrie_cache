@@ -1165,6 +1165,8 @@ func cloneSQLQuery(source *sqlQuery) *sqlQuery {
 	for index, cte := range source.ctes {
 		query.ctes[index] = cte
 		query.ctes[index].columns = append([]string(nil), cte.columns...)
+		query.ctes[index].searchBy = append([]string(nil), cte.searchBy...)
+		query.ctes[index].cycleBy = append([]string(nil), cte.cycleBy...)
 		query.ctes[index].values = cloneSQLValues(cte.values)
 		query.ctes[index].query = cloneSQLQuery(cte.query)
 	}
@@ -1285,6 +1287,10 @@ type sqlCTE struct {
 	query     *sqlQuery
 	values    [][]interface{}
 	recursive bool
+	searchBy  []string
+	searchSet string
+	cycleBy   []string
+	cycleSet  string
 }
 type sqlSource struct {
 	kind, key, alias string
@@ -1394,6 +1400,62 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return nil, err
 			}
+			if p.keyword("SEARCH") {
+				search := p.current()
+				p.next()
+				if !p.keyword("BREADTH") {
+					return nil, p.expected(p.current(), "BREADTH after SEARCH", []string{"BREADTH"})
+				}
+				p.next()
+				if err := p.expectKeyword("FIRST"); err != nil {
+					return nil, err
+				}
+				if err := p.expectKeyword("BY"); err != nil {
+					return nil, err
+				}
+				for {
+					column, err := p.expectIdentifier("a SEARCH BY column", nil)
+					if err != nil {
+						return nil, err
+					}
+					cte.searchBy = append(cte.searchBy, column.text)
+					if p.current().kind != sqlTokenComma {
+						break
+					}
+					p.next()
+				}
+				if err := p.expectKeyword("SET"); err != nil {
+					return nil, err
+				}
+				set, err := p.expectIdentifier("a SEARCH output column", nil)
+				if err != nil {
+					return nil, err
+				}
+				cte.searchSet = set.text
+				_ = search
+			}
+			if p.keyword("CYCLE") {
+				p.next()
+				for {
+					column, err := p.expectIdentifier("a CYCLE column", nil)
+					if err != nil {
+						return nil, err
+					}
+					cte.cycleBy = append(cte.cycleBy, column.text)
+					if p.current().kind != sqlTokenComma {
+						break
+					}
+					p.next()
+				}
+				if err := p.expectKeyword("SET"); err != nil {
+					return nil, err
+				}
+				set, err := p.expectIdentifier("a CYCLE output column", nil)
+				if err != nil {
+					return nil, err
+				}
+				cte.cycleSet = set.text
+			}
 			if cte.query != nil && sqlQueryReferencesCTE(cte.query, cte.name) {
 				if !withRecursive {
 					return nil, p.diagnostic(name, "recursive CTE "+name.text+" requires WITH RECURSIVE")
@@ -1402,6 +1464,9 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 					return nil, p.diagnostic(name, "recursive CTE "+name.text+" requires exactly one UNION or UNION ALL recursive term")
 				}
 				cte.recursive = true
+			}
+			if (cte.searchSet != "" || cte.cycleSet != "") && !cte.recursive {
+				return nil, p.diagnostic(name, "SEARCH and CYCLE are only valid for a recursive CTE")
 			}
 			q.ctes = append(q.ctes, cte)
 			if p.current().kind != sqlTokenComma {
@@ -3318,6 +3383,29 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 			seen[sqlOutputRowKey(row)] = struct{}{}
 		}
 	}
+	cycleSeen := map[string]struct{}{}
+	if cte.cycleSet != "" {
+		for _, row := range total {
+			key, err := sqlRecursiveCycleKey(row, cte.cycleBy)
+			if err != nil {
+				return nil, fmt.Errorf("recursive CTE %q CYCLE: %w", cte.name, err)
+			}
+			cycleSeen[key] = struct{}{}
+			row[cte.cycleSet] = false
+		}
+		frontier = cloneSQLRows(total)
+	}
+	searchOrder := int64(0)
+	if cte.searchSet != "" {
+		if err := sortSQLRecursiveRows(total, cte.searchBy); err != nil {
+			return nil, fmt.Errorf("recursive CTE %q SEARCH: %w", cte.name, err)
+		}
+		for _, row := range total {
+			searchOrder++
+			row[cte.searchSet] = searchOrder
+		}
+		frontier = cloneSQLRows(total)
+	}
 	for len(frontier) > 0 {
 		if err := control.check(); err != nil {
 			return nil, err
@@ -3358,14 +3446,70 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 				seen[key] = struct{}{}
 			}
 		}
+		frontierNext := next
+		if cte.cycleSet != "" {
+			frontierNext = make([]SQLRow, 0, len(next))
+			for _, row := range next {
+				key, err := sqlRecursiveCycleKey(row, cte.cycleBy)
+				if err != nil {
+					return nil, fmt.Errorf("recursive CTE %q CYCLE: %w", cte.name, err)
+				}
+				_, cycle := cycleSeen[key]
+				row[cte.cycleSet] = cycle
+				if !cycle {
+					cycleSeen[key] = struct{}{}
+					frontierNext = append(frontierNext, row)
+				}
+			}
+		}
+		if cte.searchSet != "" {
+			if err := sortSQLRecursiveRows(next, cte.searchBy); err != nil {
+				return nil, fmt.Errorf("recursive CTE %q SEARCH: %w", cte.name, err)
+			}
+			for _, row := range next {
+				searchOrder++
+				row[cte.searchSet] = searchOrder
+			}
+		}
 		if len(total)+len(next) > maxRows {
 			return nil, fmt.Errorf("recursive CTE %q exceeds the %d row limit; add a terminating condition", cte.name, maxRows)
 		}
 		total = append(total, next...)
-		frontier = cloneSQLRows(next)
+		frontier = cloneSQLRows(frontierNext)
 	}
 	metrics.record("RECURSIVE CTE", cte.name, len(seedRows), len(total), started)
 	return total, nil
+}
+
+func sqlRecursiveCycleKey(row SQLRow, columns []string) (string, error) {
+	key := make(SQLRow, len(columns))
+	for _, column := range columns {
+		value, exists := row[column]
+		if !exists {
+			return "", fmt.Errorf("column %q is not projected by the recursive term", column)
+		}
+		key[column] = value
+	}
+	return sqlOutputRowKey(key), nil
+}
+
+func sortSQLRecursiveRows(rows []SQLRow, columns []string) error {
+	for _, row := range rows {
+		for _, column := range columns {
+			if _, exists := row[column]; !exists {
+				return fmt.Errorf("column %q is not projected by the recursive term", column)
+			}
+		}
+	}
+	sort.SliceStable(rows, func(left, right int) bool {
+		for _, column := range columns {
+			if comparison := sqlCompare(rows[left][column], rows[right][column]); comparison != 0 {
+				return comparison < 0
+			}
+		}
+		return false
+	})
+	return nil
 }
 
 // sqlCTEOutputRows applies the optional CTE column list to a query result.

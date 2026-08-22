@@ -955,6 +955,34 @@ ORDER BY node`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQueryRecursiveCTESearchAndCycleColumns(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+WITH RECURSIVE walk(node, level) AS (
+  FROM VALUES (1, 0) AS seed(node, level) SELECT node, level
+  UNION ALL
+  FROM VALUES (2, 1), (1, 2) AS edges(node, parent)
+  INNER JOIN walk AS previous ON edges.parent = previous.node
+  SELECT edges.node, previous.level + 1 AS level
+)
+SEARCH BREADTH FIRST BY node SET search_order
+CYCLE node SET is_cycle
+FROM walk
+SELECT node, level, search_order, is_cycle
+ORDER BY search_order`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("recursive SEARCH/CYCLE query error = %v", err)
+	}
+	want := []SQLRow{
+		{"node": int64(1), "level": int64(0), "search_order": int64(1), "is_cycle": false},
+		{"node": int64(2), "level": int64(1), "search_order": int64(2), "is_cycle": false},
+		{"node": int64(1), "level": int64(2), "search_order": int64(3), "is_cycle": true},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("recursive SEARCH/CYCLE rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQueryEnforcesRecursiveCTEDepthLimit(t *testing.T) {
 	t.Parallel()
 	_, err := ExecuteSQLQueryContext(context.Background(), `
