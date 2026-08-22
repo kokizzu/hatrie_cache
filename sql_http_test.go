@@ -54,6 +54,20 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 	}
 
 	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM CACHE($1) AS p WHERE p.id = $2 SELECT p.name","parameters":["people",1]}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("parameterized query status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parameterized query JSON error = %v", err)
+	}
+	if want := (SQLQueryResult{Columns: []string{"name"}, Rows: []SQLRow{{"name": "Ivi"}}}); !reflect.DeepEqual(result, want) {
+		t.Fatalf("parameterized result = %#v, want %#v", result, want)
+	}
+
+	response = httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"EXPLAIN ANALYZE FROM CACHE('people') AS p SELECT p.name"}`))
 	request.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(response, request)

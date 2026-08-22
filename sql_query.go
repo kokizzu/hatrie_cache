@@ -25,7 +25,8 @@ type SQLQueryOptions struct {
 
 // SQLQueryRequest is accepted by the monitoring SQL endpoint.
 type SQLQueryRequest struct {
-	Query string `json:"query"`
+	Query      string        `json:"query"`
+	Parameters []interface{} `json:"parameters,omitempty"`
 }
 
 // SQLRow is one dynamically shaped row returned by the read-only SQL query engine.
@@ -119,6 +120,12 @@ func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult,
 // ExecuteSQLQueryContext executes a query with cancellation and resource
 // budgets. It is the context-aware counterpart of ExecuteSQLQuery.
 func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSourceResolver, options SQLQueryOptions) (SQLQueryResult, error) {
+	return ExecuteSQLQueryParameters(ctx, source, resolver, nil, options)
+}
+
+// ExecuteSQLQueryParameters executes source with positional $1, $2, ...
+// values supplied separately from SQL text.
+func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
 	control, cancel, err := newSQLExecutionControl(ctx, options)
 	if err != nil {
 		return SQLQueryResult{}, err
@@ -127,7 +134,7 @@ func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSour
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
 	}
-	query, err := parseSQLQuery(source)
+	query, err := parseSQLQueryParameters(source, parameters)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -140,12 +147,14 @@ func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSour
 // ValidateSQLQuery verifies syntax without reading any cache source.
 func ValidateSQLQuery(source string) error { _, err := parseSQLQuery(source); return err }
 
-func parseSQLQuery(source string) (*sqlQuery, error) {
+func parseSQLQuery(source string) (*sqlQuery, error) { return parseSQLQueryParameters(source, nil) }
+
+func parseSQLQueryParameters(source string, parameters []interface{}) (*sqlQuery, error) {
 	tokens, err := lexSQL(source)
 	if err != nil {
 		return nil, err
 	}
-	parser := sqlQueryParser{tokens: tokens}
+	parser := sqlQueryParser{tokens: tokens, parameters: parameters}
 	explain := false
 	analyze := false
 	if parser.keyword("EXPLAIN") {
@@ -232,8 +241,9 @@ type sqlExpr struct {
 }
 
 type sqlQueryParser struct {
-	tokens []sqlToken
-	index  int
+	tokens     []sqlToken
+	index      int
+	parameters []interface{}
 }
 
 func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
@@ -864,6 +874,17 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			return sqlExpr{}, p.diagnostic(token, "invalid integer")
 		}
 		return sqlExpr{kind: "literal", value: v}, nil
+	}
+	if token.kind == sqlTokenParameter {
+		p.next()
+		index, err := strconv.Atoi(token.text)
+		if err != nil || index < 1 {
+			return sqlExpr{}, p.diagnostic(token, "parameter indexes start at $1")
+		}
+		if index > len(p.parameters) {
+			return sqlExpr{}, p.diagnostic(token, fmt.Sprintf("parameter $%d has no supplied parameter (received %d)", index, len(p.parameters)))
+		}
+		return sqlExpr{kind: "literal", value: p.parameters[index-1]}, nil
 	}
 	if token.kind == sqlTokenIdentifier {
 		p.next()

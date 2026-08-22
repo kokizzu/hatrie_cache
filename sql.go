@@ -98,6 +98,7 @@ const (
 	sqlTokenGreater
 	sqlTokenGreaterEqual
 	sqlTokenNotEqual
+	sqlTokenParameter
 )
 
 type sqlToken struct {
@@ -217,6 +218,16 @@ func lexSQL(source string) ([]sqlToken, error) {
 			} else {
 				tokens = append(tokens, lexer.token(sqlTokenEqual, "=", startLine, startColumn))
 			}
+		case ch == '$':
+			lexer.advanceRune()
+			if lexer.offset >= len(lexer.source) || !isSQLDigit(lexer.source[lexer.offset]) {
+				return nil, lexer.diagnostic(startLine, startColumn, lexer.column, "expected a positional parameter such as $1")
+			}
+			start := lexer.offset
+			for lexer.offset < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset]) {
+				lexer.advanceRune()
+			}
+			tokens = append(tokens, lexer.token(sqlTokenParameter, lexer.source[start:lexer.offset], startLine, startColumn))
 		default:
 			return nil, lexer.diagnostic(startLine, startColumn, startColumn+1, fmt.Sprintf("unexpected character %q", ch))
 		}

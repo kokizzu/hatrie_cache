@@ -295,6 +295,39 @@ func TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryParametersBindTypedValuesAndDiagnosePositions(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("resolved %s(%q), want CACHE(people)", name, key)
+		}
+		return []SQLRow{{"id": int64(1), "name": "Ivi"}, {"id": int64(2), "name": "Lia"}}, nil
+	})
+	result, err := ExecuteSQLQueryParameters(context.Background(), `
+FROM CACHE($1) AS people
+WHERE people.id = $2
+SELECT people.name, $3 AS requested_name`, resolver, []interface{}{"people", int64(2), "Lia"}, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryParameters() error = %v", err)
+	}
+	if want := (SQLQueryResult{Columns: []string{"name", "requested_name"}, Rows: []SQLRow{{"name": "Lia", "requested_name": "Lia"}}}); !reflect.DeepEqual(result, want) {
+		t.Fatalf("parameterized result = %#v, want %#v", result, want)
+	}
+	for _, test := range []struct {
+		source, want string
+		column       int
+	}{
+		{"FROM VALUES ($0) AS values(value) SELECT value", "parameter indexes start at $1", 14},
+		{"FROM VALUES ($2) AS values(value) SELECT value", "no supplied parameter", 14},
+	} {
+		_, err := ExecuteSQLQueryParameters(context.Background(), test.source, SQLSourceResolverFunc(nil), []interface{}{"one"}, SQLQueryOptions{})
+		diagnostic, ok := err.(*SQLDiagnostic)
+		if !ok || !strings.Contains(diagnostic.Message, test.want) || diagnostic.Column != test.column {
+			t.Fatalf("parameter diagnostic = %#v, want %q at column %d", err, test.want, test.column)
+		}
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

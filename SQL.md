@@ -318,6 +318,22 @@ result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
     })
 ```
 
+### Positional parameters
+
+Pass values separately from SQL with one-based `$1`, `$2`, … placeholders.
+They preserve their JSON/Go type and work in expressions, `VALUES`, and
+`CACHE($1)` source keys. Missing values and `$0` point to the placeholder in a
+Rust-style source diagnostic.
+
+```go
+result, err := conn.QueryParameters(ctx,
+    "FROM CACHE($1) AS users WHERE users.id = $2 SELECT users.name",
+    []interface{}{"users", int64(42)})
+```
+
+For HTTP, send the same data as `{"query":"... $1 ...",
+"parameters":[...]}`. Values are never interpolated into the SQL text.
+
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 
 Prefix any relational query with `EXPLAIN` to inspect its plan without reading

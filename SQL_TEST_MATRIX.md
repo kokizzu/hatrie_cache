@@ -34,6 +34,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Duplicate clauses and malformed structure | [`TestExecuteSQLQueryProductionRejectsStructuralErrors`](sql_production_test.go) |
 | One Hatrie key has one typed value slot; type prefixes are required | [`TestHatrieTypesShareOneLogicalKeyNamespace`](sql_production_test.go) |
 | Context cancellation plus configurable join-work, result-byte, sort-memory, and group-memory budgets | [`TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation`](sql_production_test.go) |
+| Typed `$1` positional parameters in expressions and `CACHE` sources; missing/zero parameter diagnostics; HTTP JSON parameters | [`TestExecuteSQLQueryParametersBindTypedValuesAndDiagnosePositions`](sql_production_test.go), [`TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors`](sql_http_test.go) |
 | Every accepted relational keyword/contextual word: clauses, `EXPLAIN`/`ANALYZE`, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | Named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | Contextual clause diagnostics (`INNER` requires `JOIN`, `GROUP`/`ORDER` require `BY`, `IS` requires `NULL`, unsupported `INTERSECT ALL`) | [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 
