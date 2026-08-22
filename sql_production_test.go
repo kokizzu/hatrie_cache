@@ -999,16 +999,20 @@ func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
 			return []SQLRow{{"id": int64(1), "team_id": int64(10), "score": int64(9)}, {"id": int64(2), "team_id": int64(10), "score": int64(7)}, {"id": int64(3), "team_id": int64(20), "score": int64(4)}}, nil
 		case "teams":
 			return []SQLRow{{"id": int64(10), "label": "Core"}}, nil
+		case "events":
+			return []SQLRow{{"id": int64(1), "occurred_at": "2026-08-21T23:00:00Z"}, {"id": int64(2), "occurred_at": "2026-08-22T09:00:00Z"}}, nil
 		default:
 			return nil, fmt.Errorf("unexpected key %q", key)
 		}
 	})
-	setup := `CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); CREATE TABLE teams(id INTEGER, label TEXT); INSERT INTO teams VALUES(10,'Core');`
+	setup := `CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); CREATE TABLE teams(id INTEGER, label TEXT); INSERT INTO teams VALUES(10,'Core'); CREATE TABLE events(id INTEGER, occurred_at TEXT); INSERT INTO events VALUES(1,'2026-08-21T23:00:00Z'),(2,'2026-08-22T09:00:00Z');`
 	for _, test := range []struct{ name, hatrie, sqlite string }{
 		{"inner_filter", "SELECT p.id, t.label FROM CACHE('people') AS p JOIN CACHE('teams') AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id", "SELECT p.id, t.label FROM people AS p JOIN teams AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id"},
 		{"left_join", "SELECT p.id, t.label FROM CACHE('people') AS p LEFT JOIN CACHE('teams') AS t ON p.team_id = t.id ORDER BY p.id", "SELECT p.id, t.label FROM people AS p LEFT JOIN teams AS t ON p.team_id = t.id ORDER BY p.id"},
 		{"group", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM CACHE('people') AS p GROUP BY p.team_id ORDER BY p.team_id", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM people AS p GROUP BY p.team_id ORDER BY p.team_id"},
 		{"window", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM CACHE('people') AS p ORDER BY p.id", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM people AS p ORDER BY p.id"},
+		{"timestamp", "SELECT e.id FROM CACHE('events') AS e WHERE CAST(e.occurred_at AS TIMESTAMP) >= TIMESTAMP '2026-08-22T00:00:00Z' ORDER BY e.id", "SELECT e.id FROM events AS e WHERE e.occurred_at >= '2026-08-22T00:00:00Z' ORDER BY e.id"},
+		{"recursive", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE previous.value < 3 SELECT previous.value + 1 AS value) FROM walk SELECT value ORDER BY value", "WITH RECURSIVE walk(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM walk WHERE value < 3) SELECT value FROM walk ORDER BY value"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := ExecuteSQLQuery(test.hatrie, resolver)
