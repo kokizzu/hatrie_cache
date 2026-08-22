@@ -477,6 +477,29 @@ func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQuerySupportsPartitionedWindowFunctions(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('a', 2), ('a', 5), ('b', 3), ('b', 7) AS values(team, score)
+SELECT team, score,
+       ROW_NUMBER() OVER (PARTITION BY team ORDER BY score) AS row_number,
+       RANK() OVER (PARTITION BY team ORDER BY score) AS rank,
+       SUM(score) OVER (PARTITION BY team ORDER BY score) AS running_score
+ORDER BY team, score`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("window query error = %v", err)
+	}
+	want := []SQLRow{
+		{"team": "a", "score": int64(2), "row_number": int64(1), "rank": int64(1), "running_score": float64(2)},
+		{"team": "a", "score": int64(5), "row_number": int64(2), "rank": int64(2), "running_score": float64(7)},
+		{"team": "b", "score": int64(3), "row_number": int64(1), "rank": int64(1), "running_score": float64(3)},
+		{"team": "b", "score": int64(7), "row_number": int64(2), "rank": int64(2), "running_score": float64(10)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("window rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

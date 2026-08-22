@@ -445,6 +445,11 @@ type sqlExpr struct {
 	value                     interface{}
 	left, right               *sqlExpr
 	args                      []sqlExpr
+	window                    *sqlWindow
+}
+type sqlWindow struct {
+	partition []sqlExpr
+	order     []sqlOrder
 }
 
 type sqlQueryParser struct {
@@ -1124,7 +1129,41 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return sqlExpr{}, err
 			}
-			return sqlExpr{kind: "func", name: upper, args: args}, nil
+			expr := sqlExpr{kind: "func", name: upper, args: args}
+			if p.keyword("OVER") {
+				p.next()
+				if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+					return sqlExpr{}, err
+				}
+				window := &sqlWindow{}
+				if p.keyword("PARTITION") {
+					p.next()
+					if err := p.expectKeyword("BY"); err != nil {
+						return sqlExpr{}, err
+					}
+					values, err := p.parseExprList()
+					if err != nil {
+						return sqlExpr{}, err
+					}
+					window.partition = values
+				}
+				if p.keyword("ORDER") {
+					p.next()
+					if err := p.expectKeyword("BY"); err != nil {
+						return sqlExpr{}, err
+					}
+					values, err := p.parseOrder()
+					if err != nil {
+						return sqlExpr{}, err
+					}
+					window.order = values
+				}
+				if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+					return sqlExpr{}, err
+				}
+				expr.window = window
+			}
+			return expr, nil
 		}
 		expr := sqlExpr{kind: "field", name: token.text}
 		if p.current().kind == sqlTokenDot {
@@ -1514,6 +1553,91 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		out = append(out, output{row: row, group: group})
 	}
 	for column, item := range q.selects {
+		if item.expr.window == nil {
+			continue
+		}
+		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "SUM" {
+			return SQLQueryResult{}, fmt.Errorf("SQL window function %q is not supported", item.expr.name)
+		}
+		partitions := map[string][]int{}
+		for index := range out {
+			row := sqlExecRow{}
+			if len(out[index].group) > 0 {
+				row = out[index].group[0]
+			}
+			parts := make([]string, len(item.expr.window.partition))
+			for partIndex, expression := range item.expr.window.partition {
+				parts[partIndex] = fmt.Sprintf("%#v", evalSQLExpr(expression, out[index].group, row))
+			}
+			key := strings.Join(parts, "\x00")
+			partitions[key] = append(partitions[key], index)
+		}
+		for _, indexes := range partitions {
+			sort.SliceStable(indexes, func(a, b int) bool {
+				left, right := out[indexes[a]], out[indexes[b]]
+				leftRow, rightRow := sqlExecRow{}, sqlExecRow{}
+				if len(left.group) > 0 {
+					leftRow = left.group[0]
+				}
+				if len(right.group) > 0 {
+					rightRow = right.group[0]
+				}
+				for _, order := range item.expr.window.order {
+					cmp := sqlCompare(evalSQLExpr(order.expr, left.group, leftRow), evalSQLExpr(order.expr, right.group, rightRow))
+					if cmp != 0 {
+						if order.desc {
+							return cmp > 0
+						}
+						return cmp < 0
+					}
+				}
+				return false
+			})
+			rank := int64(1)
+			total := float64(0)
+			for position, index := range indexes {
+				row := sqlExecRow{}
+				if len(out[index].group) > 0 {
+					row = out[index].group[0]
+				}
+				if position > 0 && len(item.expr.window.order) > 0 {
+					previous := indexes[position-1]
+					previousRow := sqlExecRow{}
+					if len(out[previous].group) > 0 {
+						previousRow = out[previous].group[0]
+					}
+					changed := false
+					for _, order := range item.expr.window.order {
+						if sqlCompare(evalSQLExpr(order.expr, out[index].group, row), evalSQLExpr(order.expr, out[previous].group, previousRow)) != 0 {
+							changed = true
+							break
+						}
+					}
+					if changed {
+						rank = int64(position + 1)
+					}
+				}
+				switch item.expr.name {
+				case "ROW_NUMBER":
+					out[index].row[result.Columns[column]] = int64(position + 1)
+				case "RANK":
+					out[index].row[result.Columns[column]] = rank
+				case "SUM":
+					if len(item.expr.args) != 1 {
+						return SQLQueryResult{}, fmt.Errorf("SUM window function expects one argument")
+					}
+					if value, ok := sqlNumber(evalSQLExpr(item.expr.args[0], out[index].group, row)); ok {
+						total += value
+					}
+					out[index].row[result.Columns[column]] = total
+				}
+			}
+		}
+	}
+	for column, item := range q.selects {
+		if item.expr.window != nil {
+			continue
+		}
 		if !sqlExprHasCustomFunction(item.expr, functions) {
 			continue
 		}
@@ -2121,6 +2245,9 @@ func sqlQueryHasAggregate(q *sqlQuery) bool {
 	return sqlExprHasAggregate(q.having)
 }
 func sqlExprHasAggregate(expr sqlExpr) bool {
+	if expr.window != nil {
+		return false
+	}
 	if expr.kind == "func" {
 		switch expr.name {
 		case "COUNT", "SUM", "AVG", "MIN", "MAX":

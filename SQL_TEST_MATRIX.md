@@ -39,6 +39,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Bounded stateless cursor pages and rejection of cursor reuse with a different query | [`TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor`](sql_http_test.go) |
 | Repeated source references read one per-query snapshot | [`TestExecuteSQLQueryUsesOneSnapshotForRepeatedSources`](sql_production_test.go) |
 | Optional JSON equality index, `INDEX SCAN` planning, and refresh after a cache write | [`TestHatTrieOptionalSQLJSONFieldIndexRefreshesAndPlansIndexScan`](sql_production_test.go) |
+| Partitioned `ROW_NUMBER`, `RANK`, and running `SUM` windows | [`TestExecuteSQLQuerySupportsPartitionedWindowFunctions`](sql_production_test.go) |
 | Every accepted relational keyword/contextual word: clauses, `EXPLAIN`/`ANALYZE`, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | Named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | Contextual clause diagnostics (`INNER` requires `JOIN`, `GROUP`/`ORDER` require `BY`, `IS` requires `NULL`, unsupported `INTERSECT ALL`) | [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 
