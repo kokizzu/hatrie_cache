@@ -335,8 +335,9 @@ engine, endpoint, and SDK are verified. Before adding them:
 - [x] Add `CREATE FUNCTION ... LANGUAGE GO AS 'return expression'` routing to
       `hatrie-cli sql` and `POST /api/sql/functions`.
 - [ ] Persist registered function definitions across process restart.
-- [ ] Define and implement a separately versioned `LANGUAGE WASM` binary ABI
-      if users need non-GO UDFs; JavaScript source is not Wasm by itself.
+- [x] Define and implement a numeric `LANGUAGE WASM` ABI and sandboxed
+      `LANGUAGE JS` compiler-to-Wasm path; see [`UDF.md`](UDF.md) for limits,
+      installation, benchmarks, and executable tests.
 
 ## Implementation checklist
 

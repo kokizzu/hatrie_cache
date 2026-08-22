@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -55,6 +56,59 @@ func TestSQLGoFunctionRegistryEvaluatesOneBatch(t *testing.T) {
 	}
 	if want := []interface{}{true, false, false}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("EvaluateSQLFunction() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCompileSQLFunctionAcceptsJavaScriptAndReportsMissingCompiler(t *testing.T) {
+	t.Parallel()
+	definition, err := CompileSQLFunction(`CREATE FUNCTION double_it(value INTEGER) LANGUAGE JS AS 'return value * 2;'`)
+	if err != nil {
+		t.Fatalf("CompileSQLFunction() error = %v", err)
+	}
+	if definition.Language != "JS" {
+		t.Fatalf("language = %q, want JS", definition.Language)
+	}
+	registry := NewSQLFunctionRegistryWithOptions(SQLFunctionRegistryOptions{JavyPath: "/does/not/exist"})
+	err = registry.Register(definition)
+	if err == nil || !strings.Contains(err.Error(), "not an executable Javy binary") {
+		t.Fatalf("Register() error = %v, want clear Javy compiler prerequisite", err)
+	}
+}
+
+func TestSQLJavaScriptValidationRejectsMissingReturnAndUnsafeInteger(t *testing.T) {
+	t.Parallel()
+	definition := SQLFunctionDefinition{Name: "no_return", Language: "JS", Source: "const value = 1;"}
+	err := NewSQLFunctionRegistry().Register(definition)
+	if err == nil || !strings.Contains(err.Error(), "must contain a return statement") {
+		t.Fatalf("Register() error = %v, want return diagnostic", err)
+	}
+	if _, err := sqlJSInteger(9007199254740992); err == nil || !strings.Contains(err.Error(), "exact number range") {
+		t.Fatalf("sqlJSInteger() error = %v, want precision diagnostic", err)
+	}
+	reserved := SQLFunctionDefinition{Name: "reserved", Arguments: []string{"__hatrie_row"}, Language: "JS", Source: "return __hatrie_row;"}
+	err = NewSQLFunctionRegistry().Register(reserved)
+	if err == nil || !strings.Contains(err.Error(), "reserved __hatrie_ prefix") {
+		t.Fatalf("Register() error = %v, want reserved-name diagnostic", err)
+	}
+}
+
+func TestSQLJavaScriptValueConversionPreservesJSONShapes(t *testing.T) {
+	t.Parallel()
+	definition := SQLFunctionDefinition{Name: "shape", Arguments: []string{"value"}, ArgumentTypes: []string{"ANY"}, Language: "JS", Source: "return value;"}
+	input, err := sqlJSBatchInput(definition, []SQLFunctionCall{{Arguments: []interface{}{map[string]interface{}{"name": "Ivi", "tags": []interface{}{"bass", float64(2)}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(input), `[[{"name":"Ivi","tags":["bass",2]}]]`; got != want {
+		t.Fatalf("sqlJSBatchInput() = %s, want %s", got, want)
+	}
+	values, err := sqlJSBatchOutput([]byte(`[{"name":"Ivi","tags":["bass",2]}]`), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []interface{}{map[string]interface{}{"name": "Ivi", "tags": []interface{}{"bass", json.Number("2")}}}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("sqlJSBatchOutput() = %#v, want %#v", values, want)
 	}
 }
 

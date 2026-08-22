@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SQLFunctionDefinition is a named, scalar Go-like expression used by read-only
@@ -72,10 +73,32 @@ type sqlFunctionCloser interface{ Close() }
 type SQLFunctionRegistry struct {
 	mu        sync.RWMutex
 	functions map[string]sqlFunctionRuntime
+	options   SQLFunctionRegistryOptions
+}
+
+// SQLFunctionRegistryOptions configures optional, sandboxed UDF runtimes.
+// JavyPath is the absolute path to the Javy JavaScript-to-Wasm compiler. When
+// blank, LANGUAGE JS searches for a `javy` executable on PATH at registration.
+// JavaScript is compiled once when registered and is executed only inside
+// Wazero afterwards.
+type SQLFunctionRegistryOptions struct {
+	JavyPath           string
+	JSCompileTimeout   time.Duration
+	JSExecutionTimeout time.Duration
 }
 
 func NewSQLFunctionRegistry() *SQLFunctionRegistry {
-	return &SQLFunctionRegistry{functions: make(map[string]sqlFunctionRuntime)}
+	return NewSQLFunctionRegistryWithOptions(SQLFunctionRegistryOptions{})
+}
+
+func NewSQLFunctionRegistryWithOptions(options SQLFunctionRegistryOptions) *SQLFunctionRegistry {
+	if options.JSCompileTimeout <= 0 {
+		options.JSCompileTimeout = 30 * time.Second
+	}
+	if options.JSExecutionTimeout <= 0 {
+		options.JSExecutionTimeout = time.Second
+	}
+	return &SQLFunctionRegistry{functions: make(map[string]sqlFunctionRuntime), options: options}
 }
 
 func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) error {
@@ -94,6 +117,8 @@ func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) 
 		compiled, err = newSQLLuaFunction(definition)
 	case "WASM":
 		compiled, err = newSQLWASMFunction(definition)
+	case "JS":
+		compiled, err = newSQLJSFunction(definition, registry.options)
 	default:
 		return fmt.Errorf("SQL function %q language %q is not available", definition.Name, definition.Language)
 	}
@@ -105,7 +130,9 @@ func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) 
 	previous := registry.functions[key]
 	registry.functions[key] = compiled
 	registry.mu.Unlock()
-	_ = previous
+	if closer, ok := previous.(sqlFunctionCloser); ok {
+		closer.Close()
+	}
 	return nil
 }
 
@@ -137,7 +164,7 @@ func (registry *SQLFunctionRegistry) Close() {
 	}
 }
 
-// CompileSQLFunction parses CREATE FUNCTION NAME(args...) LANGUAGE GO|LUA|WASM AS
+// CompileSQLFunction parses CREATE FUNCTION NAME(args...) LANGUAGE GO|LUA|WASM|JS AS
 // 'return expression'. It does not register the function.
 func CompileSQLFunction(source string) (SQLFunctionDefinition, error) {
 	tokens, err := lexSQL(source)
@@ -162,7 +189,7 @@ func CompileSQLFunction(source string) (SQLFunctionDefinition, error) {
 	if err := parser.expectKeyword("LANGUAGE"); err != nil {
 		return SQLFunctionDefinition{}, err
 	}
-	language, err := parser.expectIdentifier("GO, LUA, or WASM", []string{"GO", "LUA", "WASM"})
+	language, err := parser.expectIdentifier("GO, LUA, WASM, or JS", []string{"GO", "LUA", "WASM", "JS"})
 	if err != nil {
 		return SQLFunctionDefinition{}, err
 	}
@@ -228,8 +255,8 @@ func normalizeSQLFunctionDefinition(definition *SQLFunctionDefinition) error {
 	}
 	definition.Name = strings.TrimSpace(definition.Name)
 	definition.Language = strings.ToUpper(strings.TrimSpace(definition.Language))
-	if definition.Language != "GO" && definition.Language != "LUA" && definition.Language != "WASM" {
-		return fmt.Errorf("SQL function %q language must be GO, LUA, or WASM", definition.Name)
+	if definition.Language != "GO" && definition.Language != "LUA" && definition.Language != "WASM" && definition.Language != "JS" {
+		return fmt.Errorf("SQL function %q language must be GO, LUA, WASM, or JS", definition.Name)
 	}
 	if len(definition.ArgumentTypes) == 0 {
 		definition.ArgumentTypes = make([]string, len(definition.Arguments))
@@ -255,6 +282,8 @@ func normalizeSQLFunctionDefinition(definition *SQLFunctionDefinition) error {
 		return validateSQLLuaDefinition(*definition)
 	case "WASM":
 		return validateSQLWASMDefinition(*definition)
+	case "JS":
+		return validateSQLJSDefinition(*definition)
 	}
 	return nil
 }
