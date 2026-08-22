@@ -2925,8 +2925,8 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 						}
 						next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
 						matchedRight[rightIndex] = true
-						if len(next) > maxSQLQueryRows {
-							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+								if len(next) > maxRows {
+									return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 						}
 					}
 				}
@@ -2947,16 +2947,16 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 							matched = true
 							matchedRight[rightIndex] = true
 							next = append(next, combined)
-							if len(next) > maxSQLQueryRows {
-								return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+								if len(next) > maxRows {
+									return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 							}
 						}
 					}
 					if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
 						empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
 						next = append(next, mergeSQLRows(left, empty))
-						if len(next) > maxSQLQueryRows {
-							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+						if len(next) > maxRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 						}
 					}
 				}
@@ -2972,8 +2972,8 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 					emptyLeft := sqlExecRow{sources: emptySources, order: append([]string{}, leftAliases...)}
 					next = append(next, mergeSQLRows(emptyLeft, right))
-					if len(next) > maxSQLQueryRows {
-						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+					if len(next) > maxRows {
+						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 					}
 				}
 			}

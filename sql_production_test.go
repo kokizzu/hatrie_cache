@@ -1039,6 +1039,21 @@ func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
 			}
 		})
 	}
+	// SQLite establishes the unbounded cross-product cardinality; Hatrie's
+	// separate resource policy must then reject that same valid result before it
+	// exceeds the caller's configured row budget.
+	output, err := exec.Command("sqlite3", "-json", ":memory:", "SELECT a.value AS left_value, b.value AS right_value FROM (SELECT 1 AS value UNION ALL SELECT 2) AS a CROSS JOIN (SELECT 1 AS value UNION ALL SELECT 2) AS b").Output()
+	if err != nil {
+		t.Fatalf("sqlite resource baseline: %v", err)
+	}
+	var sqliteRows []map[string]interface{}
+	if err := json.Unmarshal(output, &sqliteRows); err != nil || len(sqliteRows) != 4 {
+		t.Fatalf("sqlite resource baseline rows = %#v, error = %v, want four rows", sqliteRows, err)
+	}
+	_, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES (1), (2) AS a(value) CROSS JOIN VALUES (1), (2) AS b(value) SELECT a.value AS left_value, b.value AS right_value", SQLSourceResolverFunc(nil), SQLQueryOptions{MaxRows: 3})
+	if err == nil || !strings.Contains(err.Error(), "row limit") {
+		t.Fatalf("bounded cross-product error = %v, want row-limit rejection", err)
+	}
 }
 
 func TestExecuteSQLQueryEnforcesRecursiveCTEDepthLimit(t *testing.T) {
