@@ -31,11 +31,7 @@ func appendCommandDumpFenwickTreeBinary(destination []byte, expiresAt *time.Time
 }
 
 func appendCommandDumpQuantileSketchBinary(destination []byte, expiresAt *time.Time, sketch quantileSketchData) ([]byte, error) {
-	snapshot := quantileSketchSnapshot{
-		Epsilon: sketch.epsilon,
-		Count:   sketch.count,
-		Summary: sketch.summary,
-	}
+	snapshot := sketch.Snapshot()
 	size, err := snapshotValueBinaryQuantileSketchSize(snapshot)
 	if err != nil {
 		return destination, err
