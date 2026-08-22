@@ -598,6 +598,16 @@ Use `trie.SQLJSONIndexStats("users", "team_id", "enabled")` to obtain its
 refreshed row count and distinct composite-key count. Single-field indexes use
 the same stats method with one field.
 
+For a connected chain of two or more equality `INNER JOIN`s, the executor also
+uses exact source cardinalities from the current snapshot to start with the
+smallest source and greedily add the cheapest connected source. `EXPLAIN
+ANALYZE` records this as `JOIN REORDER` with the chosen cardinality order.
+Outer, cross, non-equality, and base-filtered joins retain their conservative
+logical execution path so null preservation and filter pushdown stay exact.
+The final unordered row sequence remains the same deterministic source order
+as the written join chain; an explicit `ORDER BY` remains the portable way to
+request an output ordering.
+
 ### Query grammar and semantics
 
 The relational grammar accepts both conventional SQL order and the more

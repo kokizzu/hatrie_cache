@@ -209,6 +209,54 @@ func TestSQLPreparedQueryCacheIsBoundedAndSafeForConcurrentBindings(t *testing.T
 	}
 }
 
+func TestExecuteSQLQueryReordersConnectedInnerHashJoinsByCardinality(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" {
+			return nil, fmt.Errorf("unexpected source %s", name)
+		}
+		switch key {
+		case "orders":
+			return []SQLRow{
+				{"id": int64(1), "member_id": int64(10)},
+				{"id": int64(2), "member_id": int64(20)},
+				{"id": int64(3), "member_id": int64(10)},
+			}, nil
+		case "members":
+			return []SQLRow{
+				{"id": int64(10), "group_id": int64(1), "name": "Ada"},
+				{"id": int64(20), "group_id": int64(1), "name": "Ivi"},
+			}, nil
+		case "groups":
+			return []SQLRow{{"id": int64(1), "name": "Core"}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected cache key %q", key)
+		}
+	})
+	query := "FROM CACHE('orders') AS orders JOIN CACHE('members') AS members ON orders.member_id = members.id JOIN CACHE('groups') AS groups ON members.group_id = groups.id SELECT orders.id, members.name AS member, groups.name AS group_name"
+	result, err := ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatalf("execute reordered join: %v", err)
+	}
+	if got, want := result.Rows, []SQLRow{
+		{"id": int64(1), "member": "Ada", "group_name": "Core"},
+		{"id": int64(2), "member": "Ivi", "group_name": "Core"},
+		{"id": int64(3), "member": "Ada", "group_name": "Core"},
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reordered rows = %#v, want %#v", got, want)
+	}
+	analysis, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, resolver)
+	if err != nil {
+		t.Fatalf("explain reordered join: %v", err)
+	}
+	for _, step := range analysis.Plan {
+		if step.Node == "JOIN REORDER" && strings.Contains(step.Detail, "groups") && strings.Contains(step.Detail, "1 row") {
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want JOIN REORDER beginning with the smallest source", analysis.Plan)
+}
+
 func TestCompileSQLProductionRejectsAmbiguousOrUnsafeForms(t *testing.T) {
 	t.Parallel()
 

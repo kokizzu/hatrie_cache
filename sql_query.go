@@ -2487,8 +2487,9 @@ func sqlSuspectedClauseTypo(value string) bool {
 }
 
 type sqlExecRow struct {
-	sources map[string]SQLRow
-	order   []string
+	sources  map[string]SQLRow
+	order    []string
+	ordinals map[string]int
 }
 
 func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow) (SQLQueryResult, error) {
@@ -2568,6 +2569,135 @@ func (metrics *sqlExecutionMetrics) recordScan(source sqlSource, outputRows int,
 	metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(len(source.values))
 }
 
+// executeSQLReorderedInnerHashJoins chooses a connected inner-hash-join order
+// from the exact cardinalities observed for this snapshot. It deliberately
+// leaves outer joins, cross joins, non-equality joins, and base-only WHERE
+// pushdown on the established executor: those forms have ordering or null
+// preservation semantics that must not be changed by a cost optimization.
+func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, maxRows int) ([]sqlExecRow, bool, error) {
+	if q.from == nil || len(q.joins) < 2 || q.where.kind != "" {
+		return nil, false, nil
+	}
+	sources := []sqlSource{*q.from}
+	aliases := []string{q.from.alias}
+	for _, join := range q.joins {
+		if join.kind != "INNER" || join.source.alias == "" {
+			return nil, false, nil
+		}
+		if _, _, _, ok := sqlHashJoinFields(join.on, aliases, join.source.alias); !ok {
+			return nil, false, nil
+		}
+		sources = append(sources, join.source)
+		aliases = append(aliases, join.source.alias)
+	}
+	for left := range sources {
+		for right := left + 1; right < len(sources); right++ {
+			if sources[left].alias == sources[right].alias {
+				return nil, false, nil
+			}
+		}
+	}
+
+	rowsByAlias := make(map[string][]sqlExecRow, len(sources))
+	for _, source := range sources {
+		started := time.Now()
+		resolved, err := resolveSQLSource(source, resolver, ctes, metrics, control)
+		if err != nil {
+			return nil, true, err
+		}
+		if len(resolved) > maxRows {
+			return nil, true, fmt.Errorf("SQL source %q exceeds the %d row limit", source.alias, maxRows)
+		}
+		rowsByAlias[source.alias] = wrapSQLSource(source, resolved)
+		metrics.recordScan(source, len(resolved), started)
+	}
+
+	start := 0
+	for index := 1; index < len(sources); index++ {
+		if len(rowsByAlias[sources[index].alias]) < len(rowsByAlias[sources[start].alias]) {
+			start = index
+		}
+	}
+	rows := rowsByAlias[sources[start].alias]
+	selected := map[string]bool{sources[start].alias: true}
+	selectedAliases := []string{sources[start].alias}
+	order := []string{fmt.Sprintf("%s (%d rows)", sources[start].alias, len(rows))}
+	startedPlan := time.Now()
+	for len(selected) < len(sources) {
+		bestSource := -1
+		bestJoin := -1
+		var leftQualifier, leftField, rightField string
+		for sourceIndex, source := range sources {
+			if selected[source.alias] {
+				continue
+			}
+			for joinIndex, join := range q.joins {
+				qualifier, field, targetField, ok := sqlHashJoinFields(join.on, selectedAliases, source.alias)
+				if !ok {
+					continue
+				}
+				if bestSource == -1 || len(rowsByAlias[source.alias]) < len(rowsByAlias[sources[bestSource].alias]) || (len(rowsByAlias[source.alias]) == len(rowsByAlias[sources[bestSource].alias]) && sourceIndex < bestSource) {
+					bestSource, bestJoin = sourceIndex, joinIndex
+					leftQualifier, leftField, rightField = qualifier, field, targetField
+				}
+			}
+		}
+		if bestSource == -1 || bestJoin == -1 {
+			return nil, false, nil
+		}
+		join := q.joins[bestJoin]
+		right := rowsByAlias[sources[bestSource].alias]
+		inputRows := len(rows) + len(right)
+		joinStarted := time.Now()
+		buckets := make(map[string][]int, len(right))
+		for rightIndex, row := range right {
+			if err := control.addJoinWork(1); err != nil {
+				return nil, true, err
+			}
+			if key, ok := sqlHashJoinKey(sqlField(row, sources[bestSource].alias, rightField)); ok {
+				buckets[key] = append(buckets[key], rightIndex)
+			}
+		}
+		var next []sqlExecRow
+		for _, left := range rows {
+			key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
+			if !ok {
+				continue
+			}
+			for _, rightIndex := range buckets[key] {
+				if err := control.addJoinWork(1); err != nil {
+					return nil, true, err
+				}
+				next = append(next, mergeSQLRows(left, right[rightIndex]))
+				if len(next) > maxRows {
+					return nil, true, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+				}
+			}
+		}
+		detail := "INNER JOIN " + sqlExplainSource(sources[bestSource]) + " ON " + sqlExplainExpression(join.on)
+		metrics.record("HASH JOIN", detail, inputRows, len(next), joinStarted)
+		rows = next
+		selected[sources[bestSource].alias] = true
+		selectedAliases = append(selectedAliases, sources[bestSource].alias)
+		order = append(order, fmt.Sprintf("%s (%d rows)", sources[bestSource].alias, len(right)))
+	}
+	// The physical plan may begin with a different source, but relational
+	// callers historically receive deterministic nested-source order unless an
+	// explicit ORDER BY says otherwise. Restore that order using immutable row
+	// ordinals captured while each source was wrapped.
+	sort.SliceStable(rows, func(left, right int) bool {
+		for _, alias := range aliases {
+			leftOrdinal, rightOrdinal := rows[left].ordinals[alias], rows[right].ordinals[alias]
+			if leftOrdinal != rightOrdinal {
+				return leftOrdinal < rightOrdinal
+			}
+		}
+		return false
+	})
+	metrics.record("JOIN REORDER", "cardinality order: "+strings.Join(order, " -> "), len(sources), len(rows), startedPlan)
+	return rows, true, nil
+}
+
 func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) (SQLQueryResult, error) {
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
@@ -2598,194 +2728,202 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		ctes[cte.name] = rows
 	}
-	started := time.Now()
-	base, indexed, err := resolveSQLIndexedSource(*q.from, q.where, resolver)
-	if !indexed {
-		base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
-	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	var started time.Time
+	rows, reordered, err := executeSQLReorderedInnerHashJoins(q, resolver, ctes, metrics, control, maxRows)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
-	if len(base) > maxRows {
-		return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
-	}
-	if indexed {
-		metrics.record("INDEX SCAN", sqlExplainSource(*q.from), 0, len(base), started)
-	} else {
-		metrics.recordScan(*q.from, len(base), started)
-	}
-	rows := wrapSQLSource(*q.from, base)
-	functions, _ := resolver.(SQLFunctionResolver)
-	pushedWhere := q.where.kind != "" && sqlCanPushBaseWhere(q)
-	if pushedWhere {
+	pushedWhere := false
+	if !reordered {
 		started = time.Now()
-		inputRows := len(rows)
-		values, err := evalSQLExprBatch(q.where, rows, functions)
+		base, indexed, err := resolveSQLIndexedSource(*q.from, q.where, resolver)
+		if !indexed {
+			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
+		}
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
-		filtered := rows[:0]
-		for index, row := range rows {
-			if err := sqlExpressionError(values[index]); err != nil {
+		if len(base) > maxRows {
+			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
+		}
+		if indexed {
+			metrics.record("INDEX SCAN", sqlExplainSource(*q.from), 0, len(base), started)
+		} else {
+			metrics.recordScan(*q.from, len(base), started)
+		}
+		rows = wrapSQLSource(*q.from, base)
+		pushedWhere = q.where.kind != "" && sqlCanPushBaseWhere(q)
+		if pushedWhere {
+			started = time.Now()
+			inputRows := len(rows)
+			values, err := evalSQLExprBatch(q.where, rows, functions)
+			if err != nil {
 				return SQLQueryResult{}, err
 			}
-			if sqlTruthy(values[index]) {
-				filtered = append(filtered, row)
-			}
-		}
-		rows = filtered
-		metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
-	}
-	leftAliases := []string{q.from.alias}
-	for _, join := range q.joins {
-		started = time.Now()
-		leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
-		indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
-		if join.kind != "INNER" {
-			hashJoin = false
-		}
-		if indexJoin && join.source.kind == "CACHE" {
-			if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
-				// Probe once with NULL to verify that the optional index exists and
-				// to surface malformed JSON even when every left key is NULL.
-				_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
-				if err != nil {
+			filtered := rows[:0]
+			for index, row := range rows {
+				if err := sqlExpressionError(values[index]); err != nil {
 					return SQLQueryResult{}, err
 				}
-				if available {
-					inputRows := len(rows)
-					var next []sqlExecRow
-					for _, left := range rows {
-						value := sqlField(left, leftQualifier, leftField)
-						matched := false
-						if _, ok := sqlHashJoinKey(value); ok {
-							if err := control.addJoinWork(1); err != nil {
-								return SQLQueryResult{}, err
-							}
-							candidates, _, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, value)
-							if err != nil {
-								return SQLQueryResult{}, err
-							}
-							for _, candidate := range candidates {
+				if sqlTruthy(values[index]) {
+					filtered = append(filtered, row)
+				}
+			}
+			rows = filtered
+			metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
+		}
+		leftAliases := []string{q.from.alias}
+		for _, join := range q.joins {
+			started = time.Now()
+			leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
+			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
+			if join.kind != "INNER" {
+				hashJoin = false
+			}
+			if indexJoin && join.source.kind == "CACHE" {
+				if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
+					// Probe once with NULL to verify that the optional index exists and
+					// to surface malformed JSON even when every left key is NULL.
+					_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+					if err != nil {
+						return SQLQueryResult{}, err
+					}
+					if available {
+						inputRows := len(rows)
+						var next []sqlExecRow
+						for _, left := range rows {
+							value := sqlField(left, leftQualifier, leftField)
+							matched := false
+							if _, ok := sqlHashJoinKey(value); ok {
 								if err := control.addJoinWork(1); err != nil {
 									return SQLQueryResult{}, err
 								}
-								matched = true
-								wrappedCandidate := sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}
-								next = append(next, mergeSQLRows(left, wrappedCandidate))
-								if len(next) > maxRows {
-									return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+								candidates, _, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, value)
+								if err != nil {
+									return SQLQueryResult{}, err
+								}
+								for _, candidate := range candidates {
+									if err := control.addJoinWork(1); err != nil {
+										return SQLQueryResult{}, err
+									}
+									matched = true
+									wrappedCandidate := sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}
+									next = append(next, mergeSQLRows(left, wrappedCandidate))
+									if len(next) > maxRows {
+										return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+									}
 								}
 							}
+							if join.kind == "LEFT" && !matched {
+								empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
+								next = append(next, mergeSQLRows(left, empty))
+							}
 						}
-						if join.kind == "LEFT" && !matched {
-							empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
-							next = append(next, mergeSQLRows(left, empty))
-						}
+						detail := join.kind + " JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
+						metrics.record("INDEX JOIN", detail, inputRows, len(next), started)
+						rows = next
+						leftAliases = append(leftAliases, join.source.alias)
+						continue
 					}
-					detail := join.kind + " JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
-					metrics.record("INDEX JOIN", detail, inputRows, len(next), started)
-					rows = next
-					leftAliases = append(leftAliases, join.source.alias)
-					continue
 				}
 			}
-		}
-		right, err := resolveSQLSource(join.source, resolver, ctes, metrics, control)
-		if err != nil {
-			return SQLQueryResult{}, err
-		}
-		if len(right) > maxRows {
-			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
-		}
-		wrapped := wrapSQLSource(join.source, right)
-		inputRows := len(rows) + len(wrapped)
-		var next []sqlExecRow
-		matchedRight := make([]bool, len(wrapped))
-		if hashJoin {
-			buckets := make(map[string][]int, len(wrapped))
-			for rightIndex, row := range wrapped {
-				if err := control.addJoinWork(1); err != nil {
-					return SQLQueryResult{}, err
-				}
-				if key, ok := sqlHashJoinKey(sqlField(row, join.source.alias, rightField)); ok {
-					buckets[key] = append(buckets[key], rightIndex)
-				}
+			right, err := resolveSQLSource(join.source, resolver, ctes, metrics, control)
+			if err != nil {
+				return SQLQueryResult{}, err
 			}
-			for _, left := range rows {
-				key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
-				if !ok {
-					continue
-				}
-				for _, rightIndex := range buckets[key] {
+			if len(right) > maxRows {
+				return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+			}
+			wrapped := wrapSQLSource(join.source, right)
+			inputRows := len(rows) + len(wrapped)
+			var next []sqlExecRow
+			matchedRight := make([]bool, len(wrapped))
+			if hashJoin {
+				buckets := make(map[string][]int, len(wrapped))
+				for rightIndex, row := range wrapped {
 					if err := control.addJoinWork(1); err != nil {
 						return SQLQueryResult{}, err
 					}
-					next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
-					matchedRight[rightIndex] = true
-					if len(next) > maxSQLQueryRows {
-						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+					if key, ok := sqlHashJoinKey(sqlField(row, join.source.alias, rightField)); ok {
+						buckets[key] = append(buckets[key], rightIndex)
 					}
 				}
-			}
-		} else {
-			for _, left := range rows {
-				matched := false
-				for rightIndex, r := range wrapped {
-					if err := control.addJoinWork(1); err != nil {
-						return SQLQueryResult{}, err
+				for _, left := range rows {
+					key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
+					if !ok {
+						continue
 					}
-					combined := mergeSQLRows(left, r)
-					value := evalSQLExpr(join.on, []sqlExecRow{combined}, combined)
-					if err := sqlExpressionError(value); err != nil {
-						return SQLQueryResult{}, err
-					}
-					ok := join.kind == "CROSS" || sqlTruthy(value)
-					if ok {
-						matched = true
+					for _, rightIndex := range buckets[key] {
+						if err := control.addJoinWork(1); err != nil {
+							return SQLQueryResult{}, err
+						}
+						next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
 						matchedRight[rightIndex] = true
-						next = append(next, combined)
 						if len(next) > maxSQLQueryRows {
 							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
 						}
 					}
 				}
-				if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
-					empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
-					next = append(next, mergeSQLRows(left, empty))
+			} else {
+				for _, left := range rows {
+					matched := false
+					for rightIndex, r := range wrapped {
+						if err := control.addJoinWork(1); err != nil {
+							return SQLQueryResult{}, err
+						}
+						combined := mergeSQLRows(left, r)
+						value := evalSQLExpr(join.on, []sqlExecRow{combined}, combined)
+						if err := sqlExpressionError(value); err != nil {
+							return SQLQueryResult{}, err
+						}
+						ok := join.kind == "CROSS" || sqlTruthy(value)
+						if ok {
+							matched = true
+							matchedRight[rightIndex] = true
+							next = append(next, combined)
+							if len(next) > maxSQLQueryRows {
+								return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+							}
+						}
+					}
+					if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
+						empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
+						next = append(next, mergeSQLRows(left, empty))
+						if len(next) > maxSQLQueryRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+						}
+					}
+				}
+			}
+			if join.kind == "RIGHT" || join.kind == "FULL" {
+				for rightIndex, right := range wrapped {
+					if matchedRight[rightIndex] {
+						continue
+					}
+					emptySources := make(map[string]SQLRow, len(leftAliases))
+					for _, alias := range leftAliases {
+						emptySources[alias] = SQLRow{}
+					}
+					emptyLeft := sqlExecRow{sources: emptySources, order: append([]string{}, leftAliases...)}
+					next = append(next, mergeSQLRows(emptyLeft, right))
 					if len(next) > maxSQLQueryRows {
 						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
 					}
 				}
 			}
-		}
-		if join.kind == "RIGHT" || join.kind == "FULL" {
-			for rightIndex, right := range wrapped {
-				if matchedRight[rightIndex] {
-					continue
-				}
-				emptySources := make(map[string]SQLRow, len(leftAliases))
-				for _, alias := range leftAliases {
-					emptySources[alias] = SQLRow{}
-				}
-				emptyLeft := sqlExecRow{sources: emptySources, order: append([]string{}, leftAliases...)}
-				next = append(next, mergeSQLRows(emptyLeft, right))
-				if len(next) > maxSQLQueryRows {
-					return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
-				}
+			detail := join.kind + " JOIN " + sqlExplainSource(join.source)
+			if join.kind != "CROSS" {
+				detail += " ON " + sqlExplainExpression(join.on)
 			}
+			node := "JOIN"
+			if hashJoin {
+				node = "HASH JOIN"
+			}
+			metrics.record(node, detail, inputRows, len(next), started)
+			rows = next
+			leftAliases = append(leftAliases, join.source.alias)
 		}
-		detail := join.kind + " JOIN " + sqlExplainSource(join.source)
-		if join.kind != "CROSS" {
-			detail += " ON " + sqlExplainExpression(join.on)
-		}
-		node := "JOIN"
-		if hashJoin {
-			node = "HASH JOIN"
-		}
-		metrics.record(node, detail, inputRows, len(next), started)
-		rows = next
-		leftAliases = append(leftAliases, join.source.alias)
 	}
 	if q.where.kind != "" && !pushedWhere {
 		started = time.Now()
@@ -3734,17 +3872,23 @@ func valuesSQLRows(values [][]interface{}, columns []string) []SQLRow {
 func wrapSQLSource(source sqlSource, rows []SQLRow) []sqlExecRow {
 	out := make([]sqlExecRow, len(rows))
 	for i, row := range rows {
-		out[i] = sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}}
+		out[i] = sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}, ordinals: map[string]int{source.alias: i}}
 	}
 	return out
 }
 func mergeSQLRows(left, right sqlExecRow) sqlExecRow {
-	out := sqlExecRow{sources: map[string]SQLRow{}, order: append(append([]string{}, left.order...), right.order...)}
+	out := sqlExecRow{sources: map[string]SQLRow{}, order: append(append([]string{}, left.order...), right.order...), ordinals: map[string]int{}}
 	for k, v := range left.sources {
 		out.sources[k] = v
 	}
 	for k, v := range right.sources {
 		out.sources[k] = v
+	}
+	for alias, ordinal := range left.ordinals {
+		out.ordinals[alias] = ordinal
+	}
+	for alias, ordinal := range right.ordinals {
+		out.ordinals[alias] = ordinal
 	}
 	return out
 }
