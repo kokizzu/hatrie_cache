@@ -283,6 +283,12 @@ the first side but not the second. These operations are read-only.
 | Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
 | Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing result rows. |
 
+Streaming also supports one equality `INNER` or `LEFT JOIN` when the left
+`CACHE` source is streamable and the right `CACHE` join field has an available
+JSON index. The executor streams the left rows and probes the right index per
+row; it never materializes a join-result slice. Other join forms and joins
+without that index remain rejected with an explanatory error.
+
 The exact command and relational examples in this section are executed by
 `TestSQLGuideCommandExamples` and `TestSQLGuideRelationalExamples`.
 

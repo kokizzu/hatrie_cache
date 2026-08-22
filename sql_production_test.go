@@ -20,6 +20,54 @@ type sqlStreamingTestResolver struct {
 	rows         []SQLRow
 	resolveCalls int
 	streamCalls  int
+	indexRows    []SQLRow
+	indexCalls   int
+}
+
+func (resolver *sqlStreamingTestResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || key != "teams" || field != "id" {
+		return nil, false, fmt.Errorf("unexpected index source %s(%q).%s", name, key, field)
+	}
+	resolver.indexCalls++
+	if value == nil {
+		return nil, true, nil
+	}
+	var rows []SQLRow
+	for _, row := range resolver.indexRows {
+		if reflect.DeepEqual(row["id"], value) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, true, nil
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedInnerAndLeftJoin(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, join string
+		want       []SQLRow
+	}{
+		{"inner", "JOIN", []SQLRow{{"id": int64(1), "team": "Core"}}},
+		{"left", "LEFT JOIN", []SQLRow{{"id": int64(1), "team": "Core"}, {"id": int64(2), "team": nil}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &sqlStreamingTestResolver{rows: []SQLRow{{"id": int64(1), "team_id": int64(10)}, {"id": int64(2), "team_id": int64(20)}}, indexRows: []SQLRow{{"id": int64(10), "name": "Core"}}}
+			var got []SQLRow
+			err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person "+test.join+" CACHE('teams') AS team ON person.team_id = team.id SELECT person.id, team.name AS team", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+				got = append(got, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("stream indexed %s join: %v", test.name, err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("stream indexed %s rows = %#v, want %#v", test.name, got, test.want)
+			}
+			if resolver.resolveCalls != 0 || resolver.streamCalls != 1 || resolver.indexCalls != 3 {
+				t.Fatalf("resolver calls materialized=%d stream=%d index=%d, want 0/1/3", resolver.resolveCalls, resolver.streamCalls, resolver.indexCalls)
+			}
+		})
+	}
 }
 
 func (resolver *sqlStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
