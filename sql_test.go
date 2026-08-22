@@ -75,6 +75,24 @@ func TestCompileSQLCallLosslesslyMapsPublicCommandFields(t *testing.T) {
 	}
 }
 
+func TestCompileSQLAcceptsEveryDocumentedPublicCallName(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range publicSQLCommandNames() {
+		command := command
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+			request, err := CompileSQL("CALL " + command + "(key => 'test-key')")
+			if err != nil {
+				t.Fatalf("CompileSQL(%s) error = %v", command, err)
+			}
+			if request.Command != command || request.Key != "test-key" {
+				t.Fatalf("CompileSQL(%s) = %#v, want command/key", command, request)
+			}
+		})
+	}
+}
+
 func TestCompileSQLCompilesProgramsToOrderedBatch(t *testing.T) {
 	t.Parallel()
 
