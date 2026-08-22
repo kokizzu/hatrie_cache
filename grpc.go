@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"hatrie_cache/internal/authn"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
@@ -46,10 +47,10 @@ type CacheGRPCServer struct {
 }
 
 func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServer {
-	options.AuthToken = normalizeAuthToken(options.AuthToken)
-	options.AuthPreviousToken = normalizeAuthToken(options.AuthPreviousToken)
-	options.ReplicationAuthToken = normalizeAuthToken(options.ReplicationAuthToken)
-	options.ReplicationAuthPreviousToken = normalizeAuthToken(options.ReplicationAuthPreviousToken)
+	options.AuthToken = authn.Normalize(options.AuthToken)
+	options.AuthPreviousToken = authn.Normalize(options.AuthPreviousToken)
+	options.ReplicationAuthToken = authn.Normalize(options.ReplicationAuthToken)
+	options.ReplicationAuthPreviousToken = authn.Normalize(options.ReplicationAuthPreviousToken)
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
 	}
@@ -70,19 +71,19 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 }
 
 func (server *CacheGRPCServer) requireReplicationAuthorized(ctx context.Context) error {
-	tokens := newAuthTokenSet(server.options.ReplicationAuthToken, server.options.ReplicationAuthPreviousToken, server.options.ReplicationAuthPreviousExpiresAt)
-	if !tokens.configured() {
+	tokens := authn.NewTokenSet(server.options.ReplicationAuthToken, server.options.ReplicationAuthPreviousToken, server.options.ReplicationAuthPreviousExpiresAt)
+	if !tokens.Configured() {
 		return server.requireAuthorized(ctx)
 	}
 	now := time.Now()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		for _, candidate := range md.Get("x-hatrie-replication-token") {
-			if tokens.matches(candidate, now) {
+			if tokens.Matches(candidate, now) {
 				return nil
 			}
 		}
 		for _, candidate := range md.Get("authorization") {
-			if tokens.matches(authBearerToken(candidate), now) {
+			if tokens.Matches(authn.BearerToken(candidate), now) {
 				return nil
 			}
 		}
@@ -123,8 +124,8 @@ func (server *CacheGRPCServer) requestContext(ctx context.Context) (context.Cont
 }
 
 func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
-	tokens := newAuthTokenSet(server.options.AuthToken, server.options.AuthPreviousToken, server.options.AuthPreviousExpiresAt)
-	if !tokens.configured() {
+	tokens := authn.NewTokenSet(server.options.AuthToken, server.options.AuthPreviousToken, server.options.AuthPreviousExpiresAt)
+	if !tokens.Configured() {
 		return nil
 	}
 	md, ok := metadata.FromIncomingContext(ctx)
@@ -133,12 +134,12 @@ func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
 	}
 	now := time.Now()
 	for _, candidate := range md.Get("x-hatrie-auth-token") {
-		if tokens.matches(candidate, now) {
+		if tokens.Matches(candidate, now) {
 			return nil
 		}
 	}
 	for _, candidate := range md.Get("authorization") {
-		if tokens.matches(authBearerToken(candidate), now) {
+		if tokens.Matches(authn.BearerToken(candidate), now) {
 			return nil
 		}
 	}

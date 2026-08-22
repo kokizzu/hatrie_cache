@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hatrie_cache/internal/authn"
 	"hatrie_cache/internal/jsonwire"
 
 	"google.golang.org/grpc"
@@ -423,7 +424,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		client:                   client,
 		timeout:                  timeout,
 		wireFormat:               wireFormat,
-		authToken:                normalizeAuthToken(options.AuthToken),
+		authToken:                authn.Normalize(options.AuthToken),
 		outbox:                   options.AsyncOutbox,
 		journal:                  options.Journal,
 		breakerFailures:          options.CircuitBreakerFailures,

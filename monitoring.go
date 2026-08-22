@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"hatrie_cache/internal/authn"
 	"hatrie_cache/internal/jsonwire"
 )
 
@@ -75,8 +76,8 @@ type MonitoringOptions struct {
 type MonitoringHandler struct {
 	trie                  *HatTrie
 	options               MonitoringOptions
-	authTokens            authTokenSet
-	replicationAuthTokens authTokenSet
+	authTokens            authn.TokenSet
+	replicationAuthTokens authn.TokenSet
 	profileCapture        *monitoringProfileCaptureState
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
@@ -312,8 +313,8 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	handler := &MonitoringHandler{
 		trie:                  trie,
 		options:               options,
-		authTokens:            newAuthTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
-		replicationAuthTokens: newAuthTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
+		authTokens:            authn.NewTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
+		replicationAuthTokens: authn.NewTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
 		sqlFunctions:          options.SQLFunctions,
 	}
 	if options.DiagnosticsProfiling {
@@ -381,7 +382,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
 	var out http.Handler = mux
-	if handler.authTokens.configured() || handler.replicationAuthTokens.configured() {
+	if handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
 		out = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, out)
 	}
 	out = gzipHTTPHandler(out)
@@ -389,7 +390,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 		return out
 	}
 	var profileHandler http.Handler = http.HandlerFunc(handler.handleProfile)
-	if handler.authTokens.configured() || handler.replicationAuthTokens.configured() {
+	if handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
 		profileHandler = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, profileHandler)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +402,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	})
 }
 
-func monitoringAuthHandler(tokens authTokenSet, replicationTokens authTokenSet, next http.Handler) http.Handler {
+func monitoringAuthHandler(tokens authn.TokenSet, replicationTokens authn.TokenSet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestHasAuthToken(r, tokens) {
 			next.ServeHTTP(w, r)
@@ -411,7 +412,7 @@ func monitoringAuthHandler(tokens authTokenSet, replicationTokens authTokenSet, 
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !tokens.configured() && !monitoringPathRequiresReplicationAuth(r) {
+		if !tokens.Configured() && !monitoringPathRequiresReplicationAuth(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -437,26 +438,26 @@ func monitoringPathRequiresAuth(path string) bool {
 	return strings.HasPrefix(path, "/api/") || path == "/metrics"
 }
 
-func monitoringRequestHasAuthToken(r *http.Request, tokens authTokenSet) bool {
-	if !tokens.configured() {
+func monitoringRequestHasAuthToken(r *http.Request, tokens authn.TokenSet) bool {
+	if !tokens.Configured() {
 		return false
 	}
 	now := time.Now()
-	if tokens.matches(r.Header.Get("X-Hatrie-Auth-Token"), now) {
+	if tokens.Matches(r.Header.Get("X-Hatrie-Auth-Token"), now) {
 		return true
 	}
-	return tokens.matches(authBearerToken(r.Header.Get("Authorization")), now)
+	return tokens.Matches(authn.BearerToken(r.Header.Get("Authorization")), now)
 }
 
-func monitoringReplicationRequestAuthorized(r *http.Request, tokens authTokenSet) bool {
-	if !tokens.configured() {
+func monitoringReplicationRequestAuthorized(r *http.Request, tokens authn.TokenSet) bool {
+	if !tokens.Configured() {
 		return false
 	}
 	now := time.Now()
-	if tokens.matches(r.Header.Get("X-Hatrie-Replication-Token"), now) {
+	if tokens.Matches(r.Header.Get("X-Hatrie-Replication-Token"), now) {
 		return true
 	}
-	return tokens.matches(authBearerToken(r.Header.Get("Authorization")), now)
+	return tokens.Matches(authn.BearerToken(r.Header.Get("Authorization")), now)
 }
 
 func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
@@ -1054,7 +1055,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 }
 
 func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {
-	if !handler.replicationAuthTokens.configured() {
+	if !handler.replicationAuthTokens.Configured() {
 		return false
 	}
 	monitoringAuthorized := monitoringRequestHasAuthToken(r, handler.authTokens)

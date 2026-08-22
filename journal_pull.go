@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"hatrie_cache/internal/authn"
 )
 
 const DefaultCommandJournalPullTimeout = 30 * time.Second
@@ -384,7 +386,7 @@ func journalCheckpointEndpoint(source string) (string, error) {
 }
 
 func setReplicationAuthHeaders(request *http.Request, authToken string) {
-	authToken = normalizeAuthToken(authToken)
+	authToken = authn.Normalize(authToken)
 	if request == nil || authToken == "" {
 		return
 	}

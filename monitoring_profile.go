@@ -61,7 +61,7 @@ func (handler *MonitoringHandler) handleProfile(w http.ResponseWriter, r *http.R
 		writeMethodNotAllowed(w)
 		return
 	}
-	if !handler.authTokens.configured() {
+	if !handler.authTokens.Configured() {
 		writeJSONStatus(w, http.StatusServiceUnavailable, commandError("diagnostics profiling requires a monitoring operator auth token"))
 		return
 	}
