@@ -803,6 +803,90 @@ func TestHatTrieOptionalSQLJSONFieldIndexProbesLeftJoin(t *testing.T) {
 	t.Fatalf("indexed left join plan = %#v, want INDEX JOIN", explained.Plan)
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexProbesRightJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id, users.name ORDER BY wanted.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed right join error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(1), "name": nil}, {"id": int64(2), "name": "Lia"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed right join rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil {
+		t.Fatalf("indexed right join explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX RIGHT JOIN" {
+			return
+		}
+	}
+	t.Fatalf("indexed right join plan = %#v, want INDEX RIGHT JOIN", explained.Plan)
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRightJoinRespectsWhere(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id WHERE users.name = 'Lia' SELECT wanted.id", trie)
+	if err != nil {
+		t.Fatalf("right join with WHERE error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("right join with WHERE rows = %#v, want %#v", result.Rows, want)
+	}
+	result, err = ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id WHERE users.name = 'Lia' SELECT wanted.id", trie)
+	if err != nil || result.Stats == nil {
+		t.Fatalf("right join with WHERE explain/error/stats = %#v/%v/%#v", result.Plan, err, result.Stats)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX RIGHT JOIN" {
+			return
+		}
+	}
+	t.Fatalf("right join with WHERE plan = %#v, want INDEX RIGHT JOIN", result.Plan)
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRightJoinDoesNotMatchNulls(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":null,"name":"Null"},{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('users') AS users RIGHT JOIN VALUES (NULL), (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id, users.name ORDER BY wanted.id", trie)
+	if err != nil {
+		t.Fatalf("indexed right join with NULL error = %v", err)
+	}
+	if want := []SQLRow{{"id": nil, "name": nil}, {"id": int64(2), "name": "Lia"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed right join with NULL rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRightJoinHonorsExecutionLimits(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExecuteSQLQueryContext(context.Background(), "FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id", trie, SQLQueryOptions{MaxRows: 1}); err == nil || !strings.Contains(err.Error(), `SQL source "wanted" exceeds the 1 row limit`) {
+		t.Fatalf("indexed right join MaxRows error = %v, want right-source limit", err)
+	}
+	if _, err := ExecuteSQLQueryContext(context.Background(), "FROM CACHE('users') AS users RIGHT JOIN VALUES (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id", trie, SQLQueryOptions{MaxJoinWork: 1}); err == nil || !strings.Contains(err.Error(), "join work budget exceeded") {
+		t.Fatalf("indexed right join MaxJoinWork error = %v, want join-work limit", err)
+	}
+}
+
 func TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics(t *testing.T) {
 	t.Parallel()
 	result, err := ExecuteSQLQuery("FROM VALUES ('before', TIMESTAMP '2026-08-22T08:00:00Z'), ('after', TIMESTAMP '2026-08-22T10:00:00Z') AS events(label, occurred_at) WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z' SELECT label", SQLSourceResolverFunc(nil))
@@ -1087,6 +1171,46 @@ func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
 			}
 		})
 	}
+	t.Run("indexed_filter", func(t *testing.T) {
+		trie := newTestTrie(t)
+		trie.UpsertString("people", `[{"id":1,"team_id":10,"score":9},{"id":2,"team_id":10,"score":7},{"id":3,"team_id":20,"score":4}]`)
+		if err := trie.CreateSQLJSONFieldIndex("people", "team_id"); err != nil {
+			t.Fatal(err)
+		}
+		query := "FROM CACHE('people') AS p WHERE p.team_id = 10 SELECT p.id, p.score ORDER BY p.id"
+		got, err := ExecuteSQLQuery(query, trie)
+		if err != nil {
+			t.Fatalf("indexed Hatrie query: %v", err)
+		}
+		output, err := exec.Command("sqlite3", "-json", ":memory:", "CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); SELECT p.id, p.score FROM people AS p WHERE p.team_id = 10 ORDER BY p.id").Output()
+		if err != nil {
+			t.Fatalf("indexed SQLite query: %v", err)
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("decode indexed SQLite JSON: %v", err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatalf("encode indexed Hatrie rows: %v", err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatalf("decode indexed Hatrie rows: %v", err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("indexed SQLite differential mismatch\nhatrie=%#v\nsqlite=%#v", normalized, want)
+		}
+		explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+		if err != nil || explained.Stats == nil {
+			t.Fatalf("indexed explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+		}
+		for _, step := range explained.Plan {
+			if step.Node == "INDEX SCAN" {
+				return
+			}
+		}
+		t.Fatalf("indexed differential plan = %#v, want INDEX SCAN", explained.Plan)
+	})
 	// SQLite establishes the unbounded cross-product cardinality; Hatrie's
 	// separate resource policy must then reject that same valid result before it
 	// exceeds the caller's configured row budget.

@@ -2893,6 +2893,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			started = time.Now()
 			leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
 			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
+			rightIndexJoin := hashJoin && join.kind == "RIGHT"
 			if join.kind != "INNER" {
 				hashJoin = false
 			}
@@ -2937,6 +2938,57 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 						}
 						detail := join.kind + " JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
 						metrics.record("INDEX JOIN", detail, inputRows, len(next), started)
+						rows = next
+						leftAliases = append(leftAliases, join.source.alias)
+						continue
+					}
+				}
+			}
+			// A base-only WHERE is applied before this loop. Re-probing the raw
+			// CACHE index would otherwise put filtered left rows back as unmatched
+			// right rows, so preserve SQL's filter semantics by using the general
+			// join path in that case.
+			if rightIndexJoin && !pushedWhere && len(leftAliases) == 1 && q.from.kind == "CACHE" {
+				if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
+					_, available, err := indexed.ResolveSQLIndexedSource(q.from.kind, q.from.key, leftField, nil)
+					if err != nil {
+						return SQLQueryResult{}, err
+					}
+					if available {
+						right, err := resolveSQLSource(join.source, resolver, ctes, metrics, control)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+						if len(right) > maxRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+						}
+						inputRows := len(rows) + len(right)
+						var next []sqlExecRow
+						for _, candidateRight := range wrapSQLSource(join.source, right) {
+							if err := control.addJoinWork(1); err != nil {
+								return SQLQueryResult{}, err
+							}
+							value := sqlField(candidateRight, join.source.alias, rightField)
+							candidates, _, err := indexed.ResolveSQLIndexedSource(q.from.kind, q.from.key, leftField, value)
+							if err != nil {
+								return SQLQueryResult{}, err
+							}
+							if len(candidates) == 0 {
+								empty := sqlExecRow{sources: map[string]SQLRow{q.from.alias: {}}, order: []string{q.from.alias}}
+								next = append(next, mergeSQLRows(empty, candidateRight))
+							}
+							for _, candidateLeft := range candidates {
+								if err := control.addJoinWork(1); err != nil {
+									return SQLQueryResult{}, err
+								}
+								wrappedLeft := sqlExecRow{sources: map[string]SQLRow{q.from.alias: candidateLeft}, order: []string{q.from.alias}}
+								next = append(next, mergeSQLRows(wrappedLeft, candidateRight))
+							}
+							if len(next) > maxRows {
+								return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+							}
+						}
+						metrics.record("INDEX RIGHT JOIN", "RIGHT JOIN "+sqlExplainSource(join.source)+" ON "+sqlExplainExpression(join.on), inputRows, len(next), started)
 						rows = next
 						leftAliases = append(leftAliases, join.source.alias)
 						continue

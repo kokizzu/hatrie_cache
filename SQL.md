@@ -583,7 +583,8 @@ Create an optional JSON field index with
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
 `INDEX SCAN`; an equality inner join whose right `CACHE` field is indexed uses
 `INDEX JOIN`. Equality `LEFT JOIN` probes the same index while preserving every
-unmatched left row. An indexed equality/range predicate remains selectable
+unmatched left row. Equality `RIGHT JOIN` probes an index on its left CACHE
+source while preserving every unmatched right row (`INDEX RIGHT JOIN`). An indexed equality/range predicate remains selectable
 inside an `AND` condition; all remaining predicates are still evaluated.
 Indexes refresh automatically when that cache value changes.
 
