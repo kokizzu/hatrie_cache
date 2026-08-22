@@ -20,7 +20,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"hatrie_cache/internal/authn"
+	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatHttp"
 	"hatrie_cache/internal/jsonwire"
 )
 
@@ -76,8 +77,8 @@ type MonitoringOptions struct {
 type MonitoringHandler struct {
 	trie                  *HatTrie
 	options               MonitoringOptions
-	authTokens            authn.TokenSet
-	replicationAuthTokens authn.TokenSet
+	authTokens            hatAuth.TokenSet
+	replicationAuthTokens hatAuth.TokenSet
 	profileCapture        *monitoringProfileCaptureState
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
@@ -313,8 +314,8 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	handler := &MonitoringHandler{
 		trie:                  trie,
 		options:               options,
-		authTokens:            authn.NewTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
-		replicationAuthTokens: authn.NewTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
+		authTokens:            hatAuth.NewTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
+		replicationAuthTokens: hatAuth.NewTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
 		sqlFunctions:          options.SQLFunctions,
 	}
 	if options.DiagnosticsProfiling {
@@ -385,7 +386,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	if handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
 		out = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, out)
 	}
-	out = gzipHTTPHandler(out)
+	out = hatHttp.GzipHandler(out)
 	if handler.profileCapture == nil {
 		return out
 	}
@@ -402,7 +403,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	})
 }
 
-func monitoringAuthHandler(tokens authn.TokenSet, replicationTokens authn.TokenSet, next http.Handler) http.Handler {
+func monitoringAuthHandler(tokens hatAuth.TokenSet, replicationTokens hatAuth.TokenSet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestHasAuthToken(r, tokens) {
 			next.ServeHTTP(w, r)
@@ -438,7 +439,7 @@ func monitoringPathRequiresAuth(path string) bool {
 	return strings.HasPrefix(path, "/api/") || path == "/metrics"
 }
 
-func monitoringRequestHasAuthToken(r *http.Request, tokens authn.TokenSet) bool {
+func monitoringRequestHasAuthToken(r *http.Request, tokens hatAuth.TokenSet) bool {
 	if !tokens.Configured() {
 		return false
 	}
@@ -446,10 +447,10 @@ func monitoringRequestHasAuthToken(r *http.Request, tokens authn.TokenSet) bool 
 	if tokens.Matches(r.Header.Get("X-Hatrie-Auth-Token"), now) {
 		return true
 	}
-	return tokens.Matches(authn.BearerToken(r.Header.Get("Authorization")), now)
+	return tokens.Matches(hatAuth.BearerToken(r.Header.Get("Authorization")), now)
 }
 
-func monitoringReplicationRequestAuthorized(r *http.Request, tokens authn.TokenSet) bool {
+func monitoringReplicationRequestAuthorized(r *http.Request, tokens hatAuth.TokenSet) bool {
 	if !tokens.Configured() {
 		return false
 	}
@@ -457,7 +458,7 @@ func monitoringReplicationRequestAuthorized(r *http.Request, tokens authn.TokenS
 	if tokens.Matches(r.Header.Get("X-Hatrie-Replication-Token"), now) {
 		return true
 	}
-	return tokens.Matches(authn.BearerToken(r.Header.Get("Authorization")), now)
+	return tokens.Matches(hatAuth.BearerToken(r.Header.Get("Authorization")), now)
 }
 
 func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
@@ -3190,12 +3191,12 @@ func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
 }
 
 func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*jsonwire.Decoder, func(), func() bool, bool) {
-	body, closeBody, ok := limitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
+	body, closeBody, ok := hatHttp.LimitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
 	if !ok {
 		return nil, nil, nil, false
 	}
 	return jsonwire.NewDecoder(body), closeBody, func() bool {
-		return trackedRequestBodyTooLarge(body)
+		return hatHttp.TrackedRequestBodyTooLarge(body)
 	}, true
 }
 
@@ -3222,12 +3223,12 @@ func monitoringCommandRequest(w http.ResponseWriter, r *http.Request) (CacheComm
 }
 
 func monitoringCommandRequestFromFormat(w http.ResponseWriter, r *http.Request, format CommandWireFormat) (CacheCommandRequest, func(), bool) {
-	body, closeBody, ok := limitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
+	body, closeBody, ok := hatHttp.LimitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
 	if !ok {
 		return CacheCommandRequest{}, nil, false
 	}
 	bodyTooLarge := func() bool {
-		return trackedRequestBodyTooLarge(body)
+		return hatHttp.TrackedRequestBodyTooLarge(body)
 	}
 	if format == CommandWireFormatProtobuf {
 		request, err := decodeCommandRequestProto(body, maxMonitoringJSONRequestBytes)

@@ -1,4 +1,6 @@
-package hatriecache
+// Package hatHttp provides shared HTTP transport mechanics without cache or
+// command dependencies.
+package hatHttp
 
 import (
 	"compress/gzip"
@@ -18,10 +20,11 @@ type gzipResponseWriter struct {
 	wrote      bool
 }
 
-func gzipHTTPHandler(next http.Handler) http.Handler {
+// GzipHandler compresses eligible responses when the request accepts gzip.
+func GzipHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		addVaryHeader(w.Header(), "Accept-Encoding")
-		if !requestAcceptsGzip(r) || r.Method == http.MethodHead || r.Header.Get("Range") != "" {
+		AddVaryHeader(w.Header(), "Accept-Encoding")
+		if !RequestAcceptsGzip(r) || r.Method == http.MethodHead || r.Header.Get("Range") != "" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -32,16 +35,19 @@ func gzipHTTPHandler(next http.Handler) http.Handler {
 	})
 }
 
-func addVaryHeader(header http.Header, value string) {
+// AddVaryHeader adds value unless Vary already contains it or a wildcard.
+func AddVaryHeader(header http.Header, value string) {
 	for _, existing := range header.Values("Vary") {
-		if varyHeaderContains(existing, value) {
+		if VaryHeaderContains(existing, value) {
 			return
 		}
 	}
 	header.Add("Vary", value)
 }
 
-func varyHeaderContains(headerValue string, value string) bool {
+// VaryHeaderContains reports whether a comma-separated Vary value contains
+// value or the wildcard token.
+func VaryHeaderContains(headerValue string, value string) bool {
 	for headerValue != "" {
 		token, rest, ok := strings.Cut(headerValue, ",")
 		token = strings.TrimSpace(token)
@@ -56,7 +62,8 @@ func varyHeaderContains(headerValue string, value string) bool {
 	return false
 }
 
-func requestAcceptsGzip(r *http.Request) bool {
+// RequestAcceptsGzip applies Accept-Encoding quality and wildcard rules.
+func RequestAcceptsGzip(r *http.Request) bool {
 	gzipQuality := -1.0
 	wildcardQuality := -1.0
 	acceptEncoding := r.Header.Get("Accept-Encoding")
@@ -153,7 +160,9 @@ func responseAllowsBody(statusCode int) bool {
 	return statusCode >= 200 && statusCode != http.StatusNoContent && statusCode != http.StatusNotModified
 }
 
-func limitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int64) (io.Reader, func(), bool) {
+// LimitedEncodedRequestBody returns a decoded request body whose decoded size
+// cannot exceed limit. The caller must invoke the returned close function.
+func LimitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int64) (io.Reader, func(), bool) {
 	encoding := strings.TrimSpace(r.Header.Get("Content-Encoding"))
 	if encoding == "" || strings.EqualFold(encoding, "identity") {
 		body := newTrackedRequestBody(http.MaxBytesReader(w, r.Body, limit+1), limit)
@@ -212,7 +221,9 @@ func (body *trackedRequestBody) TooLarge() bool {
 	return body.tooLarge
 }
 
-func trackedRequestBodyTooLarge(reader io.Reader) bool {
+// TrackedRequestBodyTooLarge reports whether a reader returned by
+// LimitedEncodedRequestBody exceeded its decoded byte limit.
+func TrackedRequestBodyTooLarge(reader io.Reader) bool {
 	body, ok := reader.(*trackedRequestBody)
 	return ok && body.TooLarge()
 }

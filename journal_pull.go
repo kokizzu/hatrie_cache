@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"hatrie_cache/internal/authn"
+	"hatrie_cache/hat/hatAuth"
 )
 
 const DefaultCommandJournalPullTimeout = 30 * time.Second
@@ -386,7 +386,7 @@ func journalCheckpointEndpoint(source string) (string, error) {
 }
 
 func setReplicationAuthHeaders(request *http.Request, authToken string) {
-	authToken = authn.Normalize(authToken)
+	authToken = hatAuth.Normalize(authToken)
 	if request == nil || authToken == "" {
 		return
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"hatrie_cache/hat/hatHttp"
 	"hatrie_cache/internal/gen/hatriecache/v1"
 	"hatrie_cache/internal/jsonwire"
 
@@ -352,7 +353,7 @@ func decodeCommandRequestProto(reader io.Reader, limit int64) (CacheCommandReque
 }
 
 func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int, response CacheCommandResponse, fallback CommandWireFormat) {
-	addVaryHeader(w.Header(), "Accept")
+	hatHttp.AddVaryHeader(w.Header(), "Accept")
 	format, ok := commandWireFormatFromAccept(r.Header.Get("Accept"), fallback)
 	if !ok {
 		http.Error(w, "no acceptable command response content type", http.StatusNotAcceptable)

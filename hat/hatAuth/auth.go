@@ -1,6 +1,6 @@
-// Package authn provides shared authentication token handling for transport
+// Package hatAuth provides shared authentication token handling for transport
 // boundaries. It intentionally contains no cache or protocol dependencies.
-package authn
+package hatAuth
 
 import (
 	"crypto/subtle"

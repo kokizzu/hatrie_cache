@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"hatrie_cache/hat/hatHttp"
 )
 
 func BenchmarkCommandWireJSON(b *testing.B) {
@@ -81,7 +83,7 @@ func BenchmarkAcceptEncodingGzipNegotiation(b *testing.B) {
 	request.Header.Set("Accept-Encoding", "br;q=1, gzip; foo; q=0.8, *;q=0.1")
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		if !requestAcceptsGzip(request) {
+		if !hatHttp.RequestAcceptsGzip(request) {
 			b.Fatal("requestAcceptsGzip() = false, want true")
 		}
 	}
@@ -92,7 +94,7 @@ func BenchmarkAddVaryHeaderDeduplicated(b *testing.B) {
 	header.Add("Vary", "Accept, Accept-Encoding, Origin")
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		addVaryHeader(header, "Accept-Encoding")
+		hatHttp.AddVaryHeader(header, "Accept-Encoding")
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"hatrie_cache/hat/hatHttp"
 )
 
 type closeTrackingBody struct {
@@ -25,7 +27,7 @@ func (body *closeTrackingBody) Close() error {
 }
 
 func TestGzipHTTPHandlerLeavesNoBodyResponsesUncompressed(t *testing.T) {
-	handler := gzipHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := hatHttp.GzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -45,7 +47,7 @@ func TestGzipHTTPHandlerLeavesNoBodyResponsesUncompressed(t *testing.T) {
 }
 
 func TestGzipHTTPHandlerSkipsRangeRequests(t *testing.T) {
-	handler := gzipHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := hatHttp.GzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write([]byte("partial"))
 	}))
@@ -67,7 +69,7 @@ func TestGzipHTTPHandlerSkipsRangeRequests(t *testing.T) {
 }
 
 func TestGzipHTTPHandlerAddsVaryWhenResponseIsPlain(t *testing.T) {
-	handler := gzipHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := hatHttp.GzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("plain"))
 	}))
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -135,7 +137,7 @@ func TestRequestAcceptsGzipRespectsQuality(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			request.Header.Set("Accept-Encoding", tt.acceptEncoding)
-			if got := requestAcceptsGzip(request); got != tt.want {
+			if got := hatHttp.RequestAcceptsGzip(request); got != tt.want {
 				t.Fatalf("requestAcceptsGzip(%q) = %v, want %v", tt.acceptEncoding, got, tt.want)
 			}
 		})
@@ -145,9 +147,9 @@ func TestRequestAcceptsGzipRespectsQuality(t *testing.T) {
 func TestAddVaryHeaderDeduplicatesCommaSeparatedValues(t *testing.T) {
 	header := http.Header{}
 	header.Add("Vary", "Accept, Accept-Encoding")
-	addVaryHeader(header, "accept-encoding")
-	addVaryHeader(header, "Accept")
-	addVaryHeader(header, "Origin")
+	hatHttp.AddVaryHeader(header, "accept-encoding")
+	hatHttp.AddVaryHeader(header, "Accept")
+	hatHttp.AddVaryHeader(header, "Origin")
 
 	if got := header.Values("Vary"); len(got) != 2 {
 		t.Fatalf("Vary values = %#v, want original plus Origin", got)
@@ -160,7 +162,7 @@ func TestAddVaryHeaderDeduplicatesCommaSeparatedValues(t *testing.T) {
 func TestAddVaryHeaderRespectsWildcard(t *testing.T) {
 	header := http.Header{}
 	header.Add("Vary", "Accept, *")
-	addVaryHeader(header, "Accept-Encoding")
+	hatHttp.AddVaryHeader(header, "Accept-Encoding")
 
 	if got := header.Values("Vary"); len(got) != 1 || got[0] != "Accept, *" {
 		t.Fatalf("Vary values = %#v, want original wildcard only", got)
@@ -168,10 +170,10 @@ func TestAddVaryHeaderRespectsWildcard(t *testing.T) {
 }
 
 func TestVaryHeaderContainsTrimsTokens(t *testing.T) {
-	if !varyHeaderContains(" Accept ,  Accept-Encoding ", "accept-encoding") {
+	if !hatHttp.VaryHeaderContains(" Accept ,  Accept-Encoding ", "accept-encoding") {
 		t.Fatal("varyHeaderContains() = false, want true for trimmed case-insensitive token")
 	}
-	if varyHeaderContains("Accept-Language", "Accept") {
+	if hatHttp.VaryHeaderContains("Accept-Language", "Accept") {
 		t.Fatal("varyHeaderContains() = true for partial token, want false")
 	}
 }
@@ -181,7 +183,7 @@ func TestLimitedEncodedRequestBodyClosesIdentityBody(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
 	request.Body = body
 
-	reader, closeBody, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
+	reader, closeBody, ok := hatHttp.LimitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
 	if !ok {
 		t.Fatal("limitedEncodedRequestBody(identity) ok = false, want true")
 	}
@@ -200,7 +202,7 @@ func TestLimitedEncodedRequestBodyClosesGzipBody(t *testing.T) {
 	request.Body = body
 	request.Header.Set("Content-Encoding", "gzip")
 
-	reader, closeBody, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
+	reader, closeBody, ok := hatHttp.LimitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
 	if !ok {
 		t.Fatal("limitedEncodedRequestBody(gzip) ok = false, want true")
 	}
@@ -219,7 +221,7 @@ func TestLimitedEncodedRequestBodyTracksDecodedLimit(t *testing.T) {
 	request.Body = body
 	request.Header.Set("Content-Encoding", "gzip")
 
-	reader, closeBody, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 8)
+	reader, closeBody, ok := hatHttp.LimitedEncodedRequestBody(httptest.NewRecorder(), request, 8)
 	if !ok {
 		t.Fatal("limitedEncodedRequestBody(gzip) ok = false, want true")
 	}
@@ -227,7 +229,7 @@ func TestLimitedEncodedRequestBodyTracksDecodedLimit(t *testing.T) {
 	if _, err := io.ReadAll(reader); err == nil {
 		t.Fatal("ReadAll(oversized gzip body) error = nil, want max bytes error")
 	}
-	if !trackedRequestBodyTooLarge(reader) {
+	if !hatHttp.TrackedRequestBodyTooLarge(reader) {
 		t.Fatal("trackedRequestBodyTooLarge() = false, want true")
 	}
 }
@@ -238,7 +240,7 @@ func TestLimitedEncodedRequestBodyClosesInvalidGzipBody(t *testing.T) {
 	request.Body = body
 	request.Header.Set("Content-Encoding", "gzip")
 
-	_, _, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
+	_, _, ok := hatHttp.LimitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
 	if ok {
 		t.Fatal("limitedEncodedRequestBody(invalid gzip) ok = true, want false")
 	}
