@@ -1,6 +1,8 @@
 package hatriecache
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -242,6 +244,54 @@ SELECT left_values.id`, SQLSourceResolverFunc(nil))
 	}
 	if filterIndex < 0 || joinIndex < 0 || filterIndex >= joinIndex {
 		t.Fatalf("plan = %#v, want base filter 3→1 before hash join 3→1", result.Plan)
+	}
+}
+
+func TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation(t *testing.T) {
+	t.Parallel()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ExecuteSQLQueryContext(cancelled, "FROM VALUES (1) AS values(id) SELECT id", SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled query error = %v, want context.Canceled", err)
+	}
+
+	for _, test := range []struct {
+		name, source string
+		options      SQLQueryOptions
+		want         string
+	}{
+		{
+			name:    "join_work",
+			source:  "FROM VALUES (1), (2), (3) AS left_values(id) CROSS JOIN VALUES (1), (2), (3) AS right_values(id) SELECT left_values.id",
+			options: SQLQueryOptions{MaxJoinWork: 4},
+			want:    "join work budget",
+		},
+		{
+			name:    "result_bytes",
+			source:  "FROM VALUES ('this row is deliberately longer than the budget') AS values(value) SELECT value",
+			options: SQLQueryOptions{MaxResultBytes: 8},
+			want:    "result byte budget",
+		},
+		{
+			name:    "sort_bytes",
+			source:  "FROM VALUES ('long value'), ('another long value') AS values(value) SELECT value ORDER BY value",
+			options: SQLQueryOptions{MaxSortBytes: 8},
+			want:    "sort memory budget",
+		},
+		{
+			name:    "group_bytes",
+			source:  "FROM VALUES ('long value'), ('another long value') AS values(value) GROUP BY value SELECT value",
+			options: SQLQueryOptions{MaxGroupBytes: 8},
+			want:    "group memory budget",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQueryContext(context.Background(), test.source, SQLSourceResolverFunc(nil), test.options)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ExecuteSQLQueryContext() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

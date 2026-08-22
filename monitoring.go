@@ -849,7 +849,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL query is required"))
 		return
 	}
-	result, err := ExecuteSQLQuery(request.Query, monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions})
+	result, err := ExecuteSQLQueryContext(r.Context(), request.Query, monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions}, SQLQueryOptions{})
 	if err != nil {
 		var functionError *SQLFunctionError
 		if errors.As(err, &functionError) {

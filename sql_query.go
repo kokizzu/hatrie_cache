@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,6 +11,17 @@ import (
 )
 
 const maxSQLQueryRows = 100000
+
+// SQLQueryOptions bounds one query. Zero uses the safe default or disables an
+// optional byte/work budget; Timeout derives a deadline from ctx.
+type SQLQueryOptions struct {
+	MaxRows        int
+	MaxJoinWork    int
+	MaxResultBytes int
+	MaxSortBytes   int
+	MaxGroupBytes  int
+	Timeout        time.Duration
+}
 
 // SQLQueryRequest is accepted by the monitoring SQL endpoint.
 type SQLQueryRequest struct {
@@ -101,14 +113,28 @@ func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
 // ExecuteSQLQuery parses and executes a read-only relational query against a
 // snapshot supplied by resolver. It intentionally does not execute cache commands.
 func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult, error) {
+	return ExecuteSQLQueryContext(context.Background(), source, resolver, SQLQueryOptions{})
+}
+
+// ExecuteSQLQueryContext executes a query with cancellation and resource
+// budgets. It is the context-aware counterpart of ExecuteSQLQuery.
+func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSourceResolver, options SQLQueryOptions) (SQLQueryResult, error) {
+	control, cancel, err := newSQLExecutionControl(ctx, options)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	defer cancel()
+	if err := control.check(); err != nil {
+		return SQLQueryResult{}, err
+	}
 	query, err := parseSQLQuery(source)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
 	if query.explain {
-		return explainSQLQuery(query, resolver)
+		return explainSQLQuery(query, resolver, control)
 	}
-	return executeSQLQuery(query, resolver, nil)
+	return executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 }
 
 // ValidateSQLQuery verifies syntax without reading any cache source.
@@ -969,7 +995,51 @@ type sqlExecRow struct {
 }
 
 func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow) (SQLQueryResult, error) {
-	return executeSQLQueryWithMetrics(q, resolver, ctes, nil)
+	return executeSQLQueryWithMetrics(q, resolver, ctes, nil, nil)
+}
+
+type sqlExecutionControl struct {
+	ctx      context.Context
+	maxRows  int
+	options  SQLQueryOptions
+	joinWork int
+}
+
+func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlExecutionControl, context.CancelFunc, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.Timeout < 0 {
+		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
+	}
+	if options.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(ctx, options.Timeout)
+		return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options}, cancel, nil
+	}
+	return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options}, func() {}, nil
+}
+
+func sqlQueryMaxRows(options SQLQueryOptions) int {
+	if options.MaxRows > 0 {
+		return options.MaxRows
+	}
+	return maxSQLQueryRows
+}
+func (control *sqlExecutionControl) check() error {
+	if control == nil {
+		return nil
+	}
+	return control.ctx.Err()
+}
+func (control *sqlExecutionControl) addJoinWork(work int) error {
+	if control == nil || control.options.MaxJoinWork == 0 {
+		return control.check()
+	}
+	control.joinWork += work
+	if control.joinWork > control.options.MaxJoinWork {
+		return fmt.Errorf("SQL join work budget exceeded: %d comparisons, maximum %d", control.joinWork, control.options.MaxJoinWork)
+	}
+	return control.check()
 }
 
 type sqlExecutionMetrics struct {
@@ -1000,7 +1070,14 @@ func (metrics *sqlExecutionMetrics) recordScan(source sqlSource, outputRows int,
 	metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(len(source.values))
 }
 
-func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics) (SQLQueryResult, error) {
+func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) (SQLQueryResult, error) {
+	if err := control.check(); err != nil {
+		return SQLQueryResult{}, err
+	}
+	maxRows := maxSQLQueryRows
+	if control != nil {
+		maxRows = control.maxRows
+	}
 	if ctes == nil {
 		ctes = map[string][]SQLRow{}
 	}
@@ -1008,7 +1085,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		var rows []SQLRow
 		var err error
 		if cte.query != nil {
-			r, e := executeSQLQueryWithMetrics(cte.query, resolver, ctes, metrics)
+			r, e := executeSQLQueryWithMetrics(cte.query, resolver, ctes, metrics, control)
 			err = e
 			rows = r.Rows
 		} else {
@@ -1020,12 +1097,12 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		ctes[cte.name] = rows
 	}
 	started := time.Now()
-	base, err := resolveSQLSource(*q.from, resolver, ctes, metrics)
+	base, err := resolveSQLSource(*q.from, resolver, ctes, metrics, control)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
-	if len(base) > maxSQLQueryRows {
-		return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxSQLQueryRows)
+	if len(base) > maxRows {
+		return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
 	}
 	metrics.recordScan(*q.from, len(base), started)
 	rows := wrapSQLSource(*q.from, base)
@@ -1050,12 +1127,12 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	leftAliases := []string{q.from.alias}
 	for _, join := range q.joins {
 		started = time.Now()
-		right, err := resolveSQLSource(join.source, resolver, ctes, metrics)
+		right, err := resolveSQLSource(join.source, resolver, ctes, metrics, control)
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
-		if len(right) > maxSQLQueryRows {
-			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxSQLQueryRows)
+		if len(right) > maxRows {
+			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
 		}
 		wrapped := wrapSQLSource(join.source, right)
 		inputRows := len(rows) + len(wrapped)
@@ -1068,6 +1145,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if hashJoin {
 			buckets := make(map[string][]int, len(wrapped))
 			for rightIndex, row := range wrapped {
+				if err := control.addJoinWork(1); err != nil {
+					return SQLQueryResult{}, err
+				}
 				if key, ok := sqlHashJoinKey(sqlField(row, join.source.alias, rightField)); ok {
 					buckets[key] = append(buckets[key], rightIndex)
 				}
@@ -1078,6 +1158,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					continue
 				}
 				for _, rightIndex := range buckets[key] {
+					if err := control.addJoinWork(1); err != nil {
+						return SQLQueryResult{}, err
+					}
 					next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
 					matchedRight[rightIndex] = true
 					if len(next) > maxSQLQueryRows {
@@ -1089,6 +1172,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			for _, left := range rows {
 				matched := false
 				for rightIndex, r := range wrapped {
+					if err := control.addJoinWork(1); err != nil {
+						return SQLQueryResult{}, err
+					}
 					combined := mergeSQLRows(left, r)
 					ok := join.kind == "CROSS" || sqlTruthy(evalSQLExpr(join.on, []sqlExecRow{combined}, combined))
 					if ok {
@@ -1156,6 +1242,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	started = time.Now()
 	inputRows := len(rows)
 	groups := groupSQLRows(rows, q.groupBy, q)
+	if control != nil && control.options.MaxGroupBytes > 0 && sqlGroupedRowsBytes(groups) > control.options.MaxGroupBytes {
+		return SQLQueryResult{}, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
+	}
 	if len(q.groupBy) > 0 || sqlQueryHasAggregate(q) {
 		metrics.record("AGGREGATE", sqlExplainExpressions(q.groupBy), inputRows, len(groups), started)
 	}
@@ -1225,6 +1314,15 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		metrics.record("DISTINCT", "deduplicate projected rows", inputRows, len(out), started)
 	}
 	if len(q.orderBy) > 0 {
+		if control != nil && control.options.MaxSortBytes > 0 {
+			sortBytes := 0
+			for _, item := range out {
+				sortBytes += sqlRowBytes(item.row)
+			}
+			if sortBytes > control.options.MaxSortBytes {
+				return SQLQueryResult{}, fmt.Errorf("SQL sort memory budget exceeded: maximum %d bytes", control.options.MaxSortBytes)
+			}
+		}
 		started = time.Now()
 		inputRows := len(out)
 		sort.SliceStable(out, func(i, j int) bool {
@@ -1256,11 +1354,14 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	for _, item := range out[start:end] {
 		result.Rows = append(result.Rows, item.row)
 	}
+	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+		return SQLQueryResult{}, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
 	if q.limit >= 0 || q.offset > 0 {
 		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), inputRows, len(result.Rows), started)
 	}
 	for _, union := range q.unions {
-		right, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics)
+		right, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics, control)
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
@@ -1311,7 +1412,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	return result, nil
 }
 
-func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResult, error) {
+func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
 	steps := sqlExplainSteps(query)
 	result := SQLQueryResult{
 		Columns: []string{"node", "detail", "estimated_rows"},
@@ -1330,7 +1431,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResul
 	}
 	started := time.Now()
 	metrics := &sqlExecutionMetrics{}
-	executed, err := executeSQLQueryWithMetrics(query, resolver, nil, metrics)
+	executed, err := executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -1546,14 +1647,14 @@ func sqlOutputRowKey(row SQLRow) string {
 	}
 	return builder.String()
 }
-func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics) ([]SQLRow, error) {
+func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) ([]SQLRow, error) {
 	switch source.kind {
 	case "VALUES":
 		return valuesSQLRows(source.values, source.columns), nil
 	case "CTE":
 		return ctes[source.key], nil
 	case "SUBQUERY":
-		result, err := executeSQLQueryWithMetrics(source.query, resolver, ctes, metrics)
+		result, err := executeSQLQueryWithMetrics(source.query, resolver, ctes, metrics, control)
 		if err != nil {
 			return nil, err
 		}
@@ -1601,6 +1702,34 @@ func mergeSQLRows(left, right sqlExecRow) sqlExecRow {
 		out.sources[k] = v
 	}
 	return out
+}
+
+func sqlRowBytes(row SQLRow) int {
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		return len(fmt.Sprintf("%#v", row))
+	}
+	return len(encoded)
+}
+
+func sqlRowsBytes(rows []SQLRow) int {
+	total := 0
+	for _, row := range rows {
+		total += sqlRowBytes(row)
+	}
+	return total
+}
+
+func sqlGroupedRowsBytes(groups [][]sqlExecRow) int {
+	total := 0
+	for _, group := range groups {
+		for _, row := range group {
+			for _, source := range row.sources {
+				total += sqlRowBytes(source)
+			}
+		}
+	}
+	return total
 }
 
 func sqlCanPushBaseWhere(query *sqlQuery) bool {

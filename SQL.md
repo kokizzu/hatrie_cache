@@ -299,6 +299,25 @@ out of scope rather than accepted incorrectly.
 The server returns ordinary JSON for the CLI and SDK. A query error uses the
 same span diagnostics as command SQL.
 
+### Execution budgets and cancellation
+
+Use `ExecuteSQLQueryContext` when executing in-process queries that need a
+deadline or resource limits. `MaxRows` defaults to 100,000; the other limits
+are opt-in. `MaxJoinWork` bounds nested/hash join work, while byte budgets
+bound materialized grouping, sorting, and returned rows. Cancellation is
+checked throughout execution and returns the original context error.
+
+```go
+result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
+    hatriecache.SQLQueryOptions{
+        Timeout:        2 * time.Second,
+        MaxJoinWork:    1_000_000,
+        MaxResultBytes: 8 << 20,
+        MaxSortBytes:   16 << 20,
+        MaxGroupBytes:  16 << 20,
+    })
+```
+
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 
 Prefix any relational query with `EXPLAIN` to inspect its plan without reading
