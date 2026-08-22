@@ -2547,8 +2547,9 @@ Redis/Tarantool speedup comparisons. The comparison includes single-command
 rows, pipelined write rows, and mixed read-heavy/write-heavy workload profiles.
 See [`DATA_STRUCTURE.md`](DATA_STRUCTURE.md) for the complete data-structure
 reference, command inputs, response forms, and examples. See
-[`DS_SPLIT_proposal.md`](DS_SPLIT_proposal.md) for the evaluation of splitting
-the shared HAT-trie by value type.
+[`DS_SPLIT_PROPOSAL.md`](DS_SPLIT_PROPOSAL.md) for the evaluation of splitting
+the shared HAT-trie by value type. See [`INDEX_PROPOSAL.md`](INDEX_PROPOSAL.md)
+for the proposed typed SQL indexes for filtering, grouping, and ordered scans.
 
 Use the HTTP client CLI against a running monitoring server:
 

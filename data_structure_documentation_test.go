@@ -36,9 +36,9 @@ func TestDataStructureDocumentationCoversValueFamiliesAndCommands(t *testing.T) 
 }
 
 func TestDSSplitProposalDocumentsCurrentDesignAndDecision(t *testing.T) {
-	data, err := os.ReadFile("DS_SPLIT_proposal.md")
+	data, err := os.ReadFile("DS_SPLIT_PROPOSAL.md")
 	if err != nil {
-		t.Fatalf("ReadFile(DS_SPLIT_proposal.md) error = %v", err)
+		t.Fatalf("ReadFile(DS_SPLIT_PROPOSAL.md) error = %v", err)
 	}
 	doc := string(data)
 	for _, token := range []string{
@@ -46,7 +46,24 @@ func TestDSSplitProposalDocumentsCurrentDesignAndDecision(t *testing.T) {
 		"cross-type", "backup", "replication", "prefix", "lock",
 	} {
 		if !strings.Contains(doc, token) {
-			t.Fatalf("DS_SPLIT_proposal.md missing %q", token)
+			t.Fatalf("DS_SPLIT_PROPOSAL.md missing %q", token)
+		}
+	}
+}
+
+func TestIndexProposalDocumentsCurrentAndProposedIndexes(t *testing.T) {
+	data, err := os.ReadFile("INDEX_PROPOSAL.md")
+	if err != nil {
+		t.Fatalf("ReadFile(INDEX_PROPOSAL.md) error = %v", err)
+	}
+	doc := string(data)
+	for _, token := range []string{
+		"CreateSQLJSONFieldIndex", "full rebuild", "String equality", "HAT-trie",
+		"Integer", "date", "datetime", "sorted vector", "posting list",
+		"Recommendation", "benchmark", "not implemented",
+	} {
+		if !strings.Contains(doc, token) {
+			t.Fatalf("INDEX_PROPOSAL.md missing %q", token)
 		}
 	}
 }

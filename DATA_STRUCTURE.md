@@ -181,5 +181,6 @@ snapshot/journal data, not stable application API. Do not send them from an
 application client; use public commands, `BATCH`, backup/restore, or the
 replication endpoints.
 
-See [BENCHMARK.md](BENCHMARK.md) for benchmark coverage and
-[DS_SPLIT_proposal.md](DS_SPLIT_proposal.md) for the shared-index rationale.
+See [BENCHMARK.md](BENCHMARK.md) for benchmark coverage,
+[DS_SPLIT_PROPOSAL.md](DS_SPLIT_PROPOSAL.md) for the shared-index rationale,
+and [INDEX_PROPOSAL.md](INDEX_PROPOSAL.md) for typed SQL index design.
