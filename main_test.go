@@ -6535,8 +6535,8 @@ func TestFenwickTreeEmptyTreeAllocatesLazily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newFenwickTreeData(max) error = %v", err)
 	}
-	if len(tree.tree) != 0 {
-		t.Fatalf("newFenwickTreeData(max) allocated %d counters, want lazy empty backing", len(tree.tree))
+	if tree.BackingLength() != 0 {
+		t.Fatalf("newFenwickTreeData(max) allocated %d counters, want lazy empty backing", tree.BackingLength())
 	}
 	if got, ok := tree.Value(maxFenwickTreeSize - 1); !ok || got != 0 {
 		t.Fatalf("Value(empty max-1) = %d/%v, want 0/true", got, ok)
@@ -6578,14 +6578,14 @@ func TestFenwickTreeEmptyTreeAllocatesLazily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newFenwickTreeDataFromSnapshot(legacy zero) error = %v", err)
 	}
-	if len(restored.tree) != 0 || restored.updates != 2 {
+	if restored.BackingLength() != 0 || restored.Info().Updates != 2 {
 		t.Fatalf("restored legacy zero = %#v, want lazy tree preserving updates", restored)
 	}
 	if update, ok := restored.Add(7, 5); !ok || update.Value != 5 || update.PrefixSum != 5 || update.Total != 5 || update.Updates != 3 {
 		t.Fatalf("Add(restored legacy zero) = %#v/%v, want allocated third update", update, ok)
 	}
-	if len(restored.tree) != 9 {
-		t.Fatalf("Add(restored legacy zero) allocated %d counters, want 9", len(restored.tree))
+	if restored.BackingLength() != 9 {
+		t.Fatalf("Add(restored legacy zero) allocated %d counters, want 9", restored.BackingLength())
 	}
 
 	ht := newTestTrie(t)

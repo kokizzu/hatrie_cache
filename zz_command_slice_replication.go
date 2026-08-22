@@ -16,16 +16,7 @@ func (ht *HatTrie) appendCommandDumpSliceEntryBinaryLocked(destination []byte, e
 }
 
 func appendCommandDumpFenwickTreeBinary(destination []byte, expiresAt *time.Time, tree fenwickTreeData) ([]byte, error) {
-	values := tree.tree
-	if fenwickTreeRawIsZero(values) {
-		values = nil
-	}
-	snapshot := fenwickTreeSnapshot{
-		Size:    tree.size,
-		Updates: tree.updates,
-		Total:   tree.total,
-		Tree:    values,
-	}
+	snapshot := tree.Snapshot()
 	size, err := snapshotValueBinaryFenwickTreeSize(snapshot)
 	if err != nil {
 		return destination, err

@@ -1,40 +1,24 @@
 package hatriecache
 
-import (
-	"errors"
-	"strconv"
-)
+import "hatrie_cache/hat/hatDataStructure"
 
 const (
-	DefaultFenwickTreeSize = uint64(1024)
-	maxFenwickTreeSize     = uint64(1 << 20)
-)
-
-const (
-	maxFenwickTreeInt64 = int64(^uint64(0) >> 1)
-	minFenwickTreeInt64 = -maxFenwickTreeInt64 - 1
+	DefaultFenwickTreeSize = hatDataStructure.DefaultFenwickTreeSize
+	maxFenwickTreeSize     = hatDataStructure.MaxFenwickTreeSize
+	maxFenwickTreeInt64    = int64(^uint64(0) >> 1)
+	minFenwickTreeInt64    = -maxFenwickTreeInt64 - 1
 )
 
 // FenwickTreeUpdate reports the result of an O(log n) point update.
-type FenwickTreeUpdate struct {
-	Index     uint64 `json:"index"`
-	Delta     int64  `json:"delta"`
-	Value     int64  `json:"value"`
-	PrefixSum int64  `json:"prefix_sum"`
-	Total     int64  `json:"total"`
-	Updates   uint64 `json:"updates"`
-}
+type FenwickTreeUpdate = hatDataStructure.FenwickTreeUpdate
 
 // FenwickTreeInfo reports the shape and memory footprint of a compact prefix
 // sum tree.
-type FenwickTreeInfo struct {
-	Size         uint64 `json:"size"`
-	Updates      uint64 `json:"updates"`
-	Total        int64  `json:"total"`
-	TreeBytes    uint64 `json:"tree_bytes"`
-	EncodedBytes int64  `json:"encoded_bytes"`
-}
+type FenwickTreeInfo = hatDataStructure.FenwickTreeInfo
 
+// fenwickTreeSnapshot remains the cache snapshot schema. Conversion at this
+// boundary keeps persistence and replication formats independent of the
+// public data-structure package.
 type fenwickTreeSnapshot struct {
 	Size    uint64  `json:"size"`
 	Updates uint64  `json:"updates,omitempty"`
@@ -43,269 +27,83 @@ type fenwickTreeSnapshot struct {
 }
 
 type fenwickTreeData struct {
-	size    uint64
-	updates uint64
-	total   int64
-	tree    []int64
+	tree hatDataStructure.FenwickTree
 }
 
 func newFenwickTreeData(size uint64) (fenwickTreeData, error) {
-	if err := validateFenwickTreeSize(size); err != nil {
-		return fenwickTreeData{}, err
-	}
-	return fenwickTreeData{
-		size: size,
-	}, nil
+	tree, err := hatDataStructure.NewFenwickTree(size)
+	return fenwickTreeData{tree: tree}, err
 }
 
 func newDefaultFenwickTreeData() fenwickTreeData {
-	data, err := newFenwickTreeData(DefaultFenwickTreeSize)
-	if err != nil {
-		panic(err)
-	}
-	return data
+	return fenwickTreeData{tree: hatDataStructure.NewDefaultFenwickTree()}
 }
 
 func validateFenwickTreeSize(size uint64) error {
-	if size == 0 || size > maxFenwickTreeSize {
-		return errors.New("hatriecache: fenwick tree size must be between 1 and " + strconv.FormatUint(maxFenwickTreeSize, 10))
-	}
-	return nil
+	_, err := hatDataStructure.NewFenwickTree(size)
+	return err
 }
 
 func validateFenwickTreeSnapshot(snapshot fenwickTreeSnapshot) error {
-	if err := validateFenwickTreeSize(snapshot.Size); err != nil {
-		return err
-	}
-	if len(snapshot.Tree) == 0 {
-		if snapshot.Total != 0 {
-			return errors.New("hatriecache: empty fenwick tree snapshot has nonzero total")
-		}
-		return nil
-	}
-	if len(snapshot.Tree) != int(snapshot.Size)+1 {
-		return errors.New("hatriecache: fenwick tree snapshot size does not match tree length")
-	}
-	if snapshot.Tree[0] != 0 {
-		return errors.New("hatriecache: fenwick tree snapshot sentinel must be zero")
-	}
-	data := fenwickTreeData{
-		size:    snapshot.Size,
-		updates: snapshot.Updates,
-		total:   snapshot.Total,
-		tree:    snapshot.Tree,
-	}
-	total, ok := data.PrefixSum(snapshot.Size - 1)
-	if !ok {
-		return errors.New("hatriecache: fenwick tree snapshot totals overflow")
-	}
-	if total != snapshot.Total {
-		return errors.New("hatriecache: fenwick tree snapshot total does not match tree")
-	}
-	return nil
+	return hatDataStructure.ValidateFenwickTreeSnapshot(fenwickTreeSnapshotToPublic(snapshot))
 }
 
 func newFenwickTreeDataFromSnapshot(snapshot fenwickTreeSnapshot) (fenwickTreeData, error) {
-	if err := validateFenwickTreeSnapshot(snapshot); err != nil {
-		return fenwickTreeData{}, err
+	tree, err := hatDataStructure.NewFenwickTreeFromSnapshot(fenwickTreeSnapshotToPublic(snapshot))
+	return fenwickTreeData{tree: tree}, err
+}
+
+func fenwickTreeSnapshotToPublic(snapshot fenwickTreeSnapshot) hatDataStructure.FenwickTreeSnapshot {
+	return hatDataStructure.FenwickTreeSnapshot{
+		Size:    snapshot.Size,
+		Updates: snapshot.Updates,
+		Total:   snapshot.Total,
+		Tree:    snapshot.Tree,
 	}
-	data := fenwickTreeData{
-		size:    snapshot.Size,
-		updates: snapshot.Updates,
-		total:   snapshot.Total,
+}
+
+func fenwickTreeSnapshotFromPublic(snapshot hatDataStructure.FenwickTreeSnapshot) fenwickTreeSnapshot {
+	return fenwickTreeSnapshot{
+		Size:    snapshot.Size,
+		Updates: snapshot.Updates,
+		Total:   snapshot.Total,
+		Tree:    snapshot.Tree,
 	}
-	if len(snapshot.Tree) == 0 || fenwickTreeRawIsZero(snapshot.Tree) {
-		return data, nil
-	}
-	data.tree = make([]int64, len(snapshot.Tree))
-	copy(data.tree, snapshot.Tree)
-	return data, nil
 }
 
 func (tree *fenwickTreeData) Add(index uint64, delta int64) (FenwickTreeUpdate, bool) {
-	if tree == nil || delta == 0 || index >= tree.size || !tree.validShape() {
+	if tree == nil {
 		return FenwickTreeUpdate{}, false
 	}
-	value, prefix, total, ok := tree.prepareAdd(index, delta)
-	if !ok {
-		return FenwickTreeUpdate{}, false
-	}
-	tree.ensureTree()
-	for pos := index + 1; pos <= tree.size; pos += pos & -pos {
-		tree.tree[pos] += delta
-	}
-	tree.total = total
-	tree.updates = saturatingAddUint64(tree.updates, 1)
-	update := FenwickTreeUpdate{
-		Index:     index,
-		Delta:     delta,
-		Value:     value,
-		PrefixSum: prefix,
-		Total:     tree.total,
-		Updates:   tree.updates,
-	}
-	tree.compactIfZero()
-	return update, true
+	return tree.tree.Add(index, delta)
 }
 
 func (tree fenwickTreeData) Value(index uint64) (int64, bool) {
-	return tree.RangeSum(index, index)
+	return tree.tree.Value(index)
 }
 
 func (tree fenwickTreeData) PrefixSum(index uint64) (int64, bool) {
-	if index >= tree.size || !tree.validShape() {
-		return 0, false
-	}
-	if len(tree.tree) == 0 {
-		return 0, true
-	}
-	var sum int64
-	for pos := index + 1; pos > 0; pos -= pos & -pos {
-		next, ok := checkedAddFenwickInt64(sum, tree.tree[pos])
-		if !ok {
-			return 0, false
-		}
-		sum = next
-	}
-	return sum, true
+	return tree.tree.PrefixSum(index)
 }
 
 func (tree fenwickTreeData) RangeSum(start uint64, end uint64) (int64, bool) {
-	if start > end || end >= tree.size || !tree.validShape() {
-		return 0, false
-	}
-	if len(tree.tree) == 0 {
-		return 0, true
-	}
-	right, ok := tree.PrefixSum(end)
-	if !ok {
-		return 0, false
-	}
-	if start == 0 {
-		return right, true
-	}
-	left, ok := tree.PrefixSum(start - 1)
-	if !ok {
-		return 0, false
-	}
-	return checkedSubFenwickInt64(right, left)
+	return tree.tree.RangeSum(start, end)
 }
 
 func (tree fenwickTreeData) Snapshot() fenwickTreeSnapshot {
-	out := make([]int64, 0)
-	if len(tree.tree) > 0 && !fenwickTreeRawIsZero(tree.tree) {
-		out = make([]int64, len(tree.tree))
-		copy(out, tree.tree)
-	}
-	return fenwickTreeSnapshot{
-		Size:    tree.size,
-		Updates: tree.updates,
-		Total:   tree.total,
-		Tree:    out,
-	}
+	return fenwickTreeSnapshotFromPublic(tree.tree.Snapshot())
 }
 
 func (tree fenwickTreeData) Info() FenwickTreeInfo {
-	info := FenwickTreeInfo{
-		Size:      tree.size,
-		Updates:   tree.updates,
-		Total:     tree.total,
-		TreeBytes: uint64(len(tree.tree)) * 8,
-	}
-	info.EncodedBytes = tree.EncodedSize()
-	return info
+	return tree.tree.Info()
 }
 
 func (tree fenwickTreeData) EncodedSize() int64 {
-	size, err := jsonEncodedSize(tree.Snapshot())
-	if err != nil {
-		return 0
-	}
-	return size
+	return tree.tree.EncodedSize()
 }
 
-func (tree fenwickTreeData) prepareAdd(index uint64, delta int64) (int64, int64, int64, bool) {
-	prefix, ok := tree.PrefixSum(index)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	value := prefix
-	if index > 0 {
-		left, ok := tree.PrefixSum(index - 1)
-		if !ok {
-			return 0, 0, 0, false
-		}
-		value, ok = checkedSubFenwickInt64(prefix, left)
-		if !ok {
-			return 0, 0, 0, false
-		}
-	}
-	value, ok = checkedAddFenwickInt64(value, delta)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	prefix, ok = checkedAddFenwickInt64(prefix, delta)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	total, ok := checkedAddFenwickInt64(tree.total, delta)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	if len(tree.tree) == 0 {
-		return value, prefix, total, true
-	}
-	for pos := index + 1; pos <= tree.size; pos += pos & -pos {
-		if _, ok := checkedAddFenwickInt64(tree.tree[pos], delta); !ok {
-			return 0, 0, 0, false
-		}
-	}
-	return value, prefix, total, true
-}
-
-func (tree fenwickTreeData) validShape() bool {
-	return len(tree.tree) == 0 || len(tree.tree) == int(tree.size)+1
-}
-
-func (tree *fenwickTreeData) ensureTree() {
-	if tree != nil && len(tree.tree) == 0 && tree.size > 0 {
-		tree.tree = make([]int64, int(tree.size)+1)
-	}
-}
-
-func (tree *fenwickTreeData) compactIfZero() {
-	if tree != nil && tree.total == 0 && fenwickTreeRawIsZero(tree.tree) {
-		tree.tree = nil
-	}
-}
-
-func fenwickTreeRawIsZero(tree []int64) bool {
-	for _, value := range tree {
-		if value != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func checkedAddFenwickInt64(left int64, right int64) (int64, bool) {
-	if right > 0 && left > maxFenwickTreeInt64-right {
-		return 0, false
-	}
-	if right < 0 && left < minFenwickTreeInt64-right {
-		return 0, false
-	}
-	return left + right, true
-}
-
-func checkedSubFenwickInt64(left int64, right int64) (int64, bool) {
-	if right > 0 && left < minFenwickTreeInt64+right {
-		return 0, false
-	}
-	if right < 0 && left > maxFenwickTreeInt64+right {
-		return 0, false
-	}
-	return left - right, true
+func (tree fenwickTreeData) BackingLength() int {
+	return tree.tree.BackingLength()
 }
 
 // FenwickTreeStorage stores compact Fenwick trees outside the trie.
