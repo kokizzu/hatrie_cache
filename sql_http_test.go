@@ -93,6 +93,30 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 	}
 }
 
+func TestMonitoringSQLRouteUsesHatTrieJSONFieldIndex(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"team_id":20},{"id":2,"team_id":30}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewMonitoringHandler(trie, MonitoringOptions{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"EXPLAIN ANALYZE FROM CACHE('people') AS p WHERE p.team_id = 20 SELECT p.id"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var result SQLQueryResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Stats == nil || len(result.Plan) == 0 || result.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("plan = %#v, stats = %#v, want an HTTP INDEX SCAN", result.Plan, result.Stats)
+	}
+}
+
 func TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor(t *testing.T) {
 	t.Parallel()
 	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()

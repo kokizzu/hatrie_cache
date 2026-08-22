@@ -92,6 +92,17 @@ func (resolver monitoringSQLResolver) ResolveSQLSource(name string, key string) 
 	return resolver.source.ResolveSQLSource(name, key)
 }
 
+// ResolveSQLIndexedSource preserves optional source-index capability through
+// the monitoring wrapper so /api/sql receives the same planner choices as a
+// direct HatTrie query.
+func (resolver monitoringSQLResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(SQLIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLIndexedSource(name, key, field, value)
+}
+
 func (resolver monitoringSQLResolver) LockSQLSnapshot() func() {
 	if locker, ok := resolver.source.(SQLSnapshotLocker); ok {
 		return locker.LockSQLSnapshot()
