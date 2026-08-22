@@ -2,98 +2,22 @@ package hatriecache
 
 import (
 	"io"
-	"os"
-	"sort"
-	"sync"
-	"time"
 
-	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatAudit"
 )
 
-type AuditEvent struct {
-	Time       string                 `json:"time"`
-	Node       string                 `json:"node,omitempty"`
-	Protocol   string                 `json:"protocol,omitempty"`
-	RemoteAddr string                 `json:"remote_addr,omitempty"`
-	Method     string                 `json:"method,omitempty"`
-	Path       string                 `json:"path,omitempty"`
-	Action     string                 `json:"action"`
-	Command    string                 `json:"command,omitempty"`
-	Key        string                 `json:"key,omitempty"`
-	OK         bool                   `json:"ok"`
-	Status     int                    `json:"status,omitempty"`
-	Message    string                 `json:"message,omitempty"`
-	Details    map[string]interface{} `json:"details,omitempty"`
-}
+// AuditEvent is retained at the root API for compatibility.
+type AuditEvent = hatAudit.AuditEvent
 
-type AuditLogger struct {
-	mu     sync.Mutex
-	writer io.Writer
-	closer io.Closer
-	now    func() time.Time
-	recent []AuditEvent
-}
+// AuditLogger is retained at the root API for compatibility.
+type AuditLogger = hatAudit.AuditLogger
 
-const maxRecentAuditEvents = 128
+const maxRecentAuditEvents = hatAudit.MaxRecentAuditEvents
 
 func NewAuditLogger(writer io.Writer) *AuditLogger {
-	return &AuditLogger{writer: writer, now: time.Now}
+	return hatAudit.NewAuditLogger(writer)
 }
 
 func OpenAuditLogger(path string) (*AuditLogger, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	logger := NewAuditLogger(file)
-	logger.closer = file
-	return logger, nil
-}
-
-func (logger *AuditLogger) Log(event AuditEvent) error {
-	if logger == nil || logger.writer == nil {
-		return nil
-	}
-	logger.mu.Lock()
-	defer logger.mu.Unlock()
-	if event.Time == "" {
-		event.Time = logger.now().UTC().Format(time.RFC3339Nano)
-	}
-	logger.recent = append(logger.recent, event)
-	if len(logger.recent) > maxRecentAuditEvents {
-		copy(logger.recent, logger.recent[len(logger.recent)-maxRecentAuditEvents:])
-		logger.recent = logger.recent[:maxRecentAuditEvents]
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	if _, err := logger.writer.Write(append(data, '\n')); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (logger *AuditLogger) Recent(limit int) []AuditEvent {
-	if logger == nil {
-		return nil
-	}
-	logger.mu.Lock()
-	defer logger.mu.Unlock()
-	if limit <= 0 || limit > len(logger.recent) {
-		limit = len(logger.recent)
-	}
-	out := make([]AuditEvent, limit)
-	copy(out, logger.recent[len(logger.recent)-limit:])
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Time > out[j].Time
-	})
-	return out
-}
-
-func (logger *AuditLogger) Close() error {
-	if logger == nil || logger.closer == nil {
-		return nil
-	}
-	return logger.closer.Close()
+	return hatAudit.OpenAuditLogger(path)
 }
