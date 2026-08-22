@@ -1,4 +1,4 @@
-package hatriecache
+package hatDataStructure
 
 import (
 	"encoding/base64"

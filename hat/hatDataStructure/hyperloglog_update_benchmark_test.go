@@ -1,4 +1,4 @@
-package hatriecache
+package hatDataStructure
 
 import (
 	"strconv"
@@ -12,7 +12,7 @@ func BenchmarkHyperLogLogRawUniqueAdd(b *testing.B) {
 	for idx := range values {
 		values[idx] = "raw-unique:" + strconv.Itoa(idx)
 	}
-	hll, err := newHyperLogLogData(maxHyperLogLogPrecision)
+	hll, err := newHyperLogLogData(MaxHyperLogLogPrecision)
 	if err != nil {
 		b.Fatal(err)
 	}

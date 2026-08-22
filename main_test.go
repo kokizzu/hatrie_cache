@@ -5376,8 +5376,8 @@ func TestHyperLogLogEmptyRegistersAllocatesLazily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newHyperLogLogData(max) error = %v", err)
 	}
-	if len(hll.registers) != 0 {
-		t.Fatalf("newHyperLogLogData(max) allocated %d registers, want lazy empty backing", len(hll.registers))
+	if hll.Info().RegisterBytes != 0 {
+		t.Fatalf("newHyperLogLogData(max) allocated %d registers, want lazy empty backing", hll.Info().RegisterBytes)
 	}
 	if got := hll.Count(); got != 0 {
 		t.Fatalf("Count(empty max) = %d, want 0", got)
@@ -5405,8 +5405,8 @@ func TestHyperLogLogEmptyRegistersAllocatesLazily(t *testing.T) {
 	if _, err := hll.AddOneChecked(func() {}); err == nil {
 		t.Fatal("AddOneChecked(unsupported empty) error = nil, want error")
 	}
-	if len(hll.registers) != 0 {
-		t.Fatalf("AddOneChecked(unsupported empty) allocated %d registers, want none", len(hll.registers))
+	if hll.Info().RegisterBytes != 0 {
+		t.Fatalf("AddOneChecked(unsupported empty) allocated %d registers, want none", hll.Info().RegisterBytes)
 	}
 
 	legacyZero := hyperLogLogSnapshot{
@@ -5417,14 +5417,14 @@ func TestHyperLogLogEmptyRegistersAllocatesLazily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newHyperLogLogDataFromSnapshot(legacy zero) error = %v", err)
 	}
-	if len(restored.registers) != 0 {
-		t.Fatalf("restored legacy zero allocated %d registers, want lazy empty backing", len(restored.registers))
+	if restored.Info().RegisterBytes != 0 {
+		t.Fatalf("restored legacy zero allocated %d registers, want lazy empty backing", restored.Info().RegisterBytes)
 	}
 	if estimate, err := restored.AddOneChecked("alpha"); err != nil || estimate != 1 {
 		t.Fatalf("AddOneChecked(restored legacy zero) = %d/%v, want one changed register", estimate, err)
 	}
-	if len(restored.registers) != hyperLogLogRegisterCount(maxHyperLogLogPrecision) {
-		t.Fatalf("AddOneChecked(restored legacy zero) allocated %d registers, want %d", len(restored.registers), hyperLogLogRegisterCount(maxHyperLogLogPrecision))
+	if restored.Info().RegisterBytes != uint64(hyperLogLogRegisterCount(maxHyperLogLogPrecision)) {
+		t.Fatalf("AddOneChecked(restored legacy zero) allocated %d registers, want %d", restored.Info().RegisterBytes, hyperLogLogRegisterCount(maxHyperLogLogPrecision))
 	}
 
 	ht := newTestTrie(t)

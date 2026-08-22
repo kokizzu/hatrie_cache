@@ -102,11 +102,9 @@ func appendCommandDumpCountMinSketchBinary(destination []byte, expiresAt *time.T
 }
 
 func appendCommandDumpHyperLogLogBinary(destination []byte, expiresAt *time.Time, hll hyperLogLogData) ([]byte, error) {
-	snapshot := hyperLogLogSnapshot{
-		Precision:    hll.precision,
-		Observations: hll.observations,
-	}
-	size, err := snapshotValueBinaryHyperLogLogSize(snapshot, len(hll.registers))
+	snapshot := hyperLogLogSnapshot{Precision: hll.hll.Precision(), Observations: hll.hll.Observations()}
+	registers := hll.hll.RawRegisters()
+	size, err := snapshotValueBinaryHyperLogLogSize(snapshot, len(registers))
 	if err != nil {
 		return destination, err
 	}
@@ -115,7 +113,7 @@ func appendCommandDumpHyperLogLogBinary(destination []byte, expiresAt *time.Time
 	if err != nil {
 		return destination, err
 	}
-	writeSnapshotValueBinaryHyperLogLog(&writer.binaryFieldWriter, snapshot, hll.registers)
+	writeSnapshotValueBinaryHyperLogLog(&writer.binaryFieldWriter, snapshot, registers)
 	return finishReplicationDirectPayload(writer, entry), nil
 }
 

@@ -62,7 +62,7 @@ func TestHyperLogLogScalarAddCheckedCandidatePreservesEdgeCases(t *testing.T) {
 	reference := candidate
 	got, gotErr = hyperLogLogAddCheckedScalarCandidate(&candidate, func() {})
 	want, wantErr = hyperLogLogAddCheckedScalarReference(&reference, func() {})
-	if gotErr == nil || wantErr == nil || got != want || !reflect.DeepEqual(candidate, reference) || len(candidate.registers) != 0 {
+	if gotErr == nil || wantErr == nil || got != want || !reflect.DeepEqual(candidate, reference) || len(candidate.hll.RawRegisters()) != 0 {
 		t.Fatalf("invalid scalar AddChecked = %t/%v/%#v, want %t/%v/%#v", got, gotErr, candidate, want, wantErr, reference)
 	}
 }

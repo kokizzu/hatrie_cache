@@ -7,12 +7,10 @@ import (
 )
 
 type hyperLogLogCommandBatchState struct {
-	present       bool
-	hasTTL        bool
-	harmonicSum   float64
-	zeroRegisters uint32
-	count         uint64
-	snapshot      hyperLogLogSnapshot
+	present  bool
+	hasTTL   bool
+	count    uint64
+	snapshot hyperLogLogSnapshot
 }
 
 func TestHyperLogLogBatchCommandExactMatchesGeneric(t *testing.T) {
@@ -47,6 +45,9 @@ func TestHyperLogLogBatchCommandExactMatchesGeneric(t *testing.T) {
 				if err := trie.UpsertHyperLogLog("hll:batch", 10); err != nil {
 					t.Fatal(err)
 				}
+				if _, err := trie.AddHyperLogLogChecked("hll:batch", "saturated-initial"); err != nil {
+					t.Fatal(err)
+				}
 				trie.mu.Lock()
 				defer trie.mu.Unlock()
 				raw := trie.tryLocation("hll:batch")
@@ -55,7 +56,13 @@ func TestHyperLogLogBatchCommandExactMatchesGeneric(t *testing.T) {
 				}
 				var value HatValue
 				value.fromValue(*raw)
-				trie.hyperLogLogs.array[value.Index].observations = ^uint64(0) - 1
+				snapshot := trie.hyperLogLogs.array[value.Index].Snapshot()
+				snapshot.Observations = ^uint64(0) - 1
+				restored, err := newHyperLogLogDataFromSnapshot(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				trie.hyperLogLogs.PutData(value.Index, restored)
 			},
 			values: Slice{"saturated-a", "saturated-b", "saturated-c"},
 		},
@@ -132,12 +139,10 @@ func runHyperLogLogBatchCommandFixture(t *testing.T, command string, setup func(
 	}
 	data := trie.hyperLogLogs.array[value.Index]
 	return response, hyperLogLogCommandBatchState{
-		present:       true,
-		hasTTL:        value.HasTtl(),
-		harmonicSum:   data.harmonicSum,
-		zeroRegisters: data.zeroRegisters,
-		count:         data.Count(),
-		snapshot:      data.Snapshot(),
+		present:  true,
+		hasTTL:   value.HasTtl(),
+		count:    data.Count(),
+		snapshot: data.Snapshot(),
 	}
 }
 
