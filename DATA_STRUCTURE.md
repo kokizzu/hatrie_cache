@@ -97,7 +97,7 @@ Output: `{"ok":true,"message":"ok","value":"12"}`.
 | Map | `PUTMAP`, `PEEKMAP`, `TAKEMAP` | Put `subkey` + `value`, or multiple fields in `pairs`; reads use `subkey`. | Peek returns without removal; take returns then removes. Objects/arrays are JSON text. |
 | Slice/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` | Push one `value` or `values`; reads use `key`. | Pop/shift remove one end; head/tail read one end. |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` | Add/remove one `value` or `values`; membership uses `value`. | Membership is `"1"`/`"0"`; get is a JSON array. |
-| Priority queue | `PUSHPQ`, `PEEKPQ`, `POPPQ`, `GETPQ` | Push `value` with integer `priority`; reads use `key`. | Peek/pop return selected item; pop removes it; get is ordered JSON. |
+| Priority queue | `PUSHPQ`, `PEEKPQ`, `POPPQ`, `GETPQ` | Push `value` with integer `priority`; reads use `key`. | Peek/pop return a JSON `{priority,value}` item; pop removes it; get is ordered JSON. |
 
 Input:
 
@@ -112,8 +112,8 @@ Input:
 {"command":"POPPQ","key":"queue"}
 ```
 
-Output values are respectively `"admin"`, `"verify"`, `"1"`, and
-`"urgent"`.
+Output values are respectively `"admin"`, `"verify"`, `"1"`, and JSON
+`{"priority":10,"value":"urgent"}`.
 
 ## Filters and probabilistic structures
 
@@ -166,6 +166,245 @@ Input:
 
 Output: `COUNTRB` is `"2"`; prefix contains the `user:7` entry; the Fenwick
 range result is `"7"` for this single update.
+
+## Command-by-command state transitions
+
+This is the practical manual for a first-time user. `∅` means the key does not
+exist. `->` describes the persistent state change, not the response. All
+examples use the canonical command name; accepted compatibility aliases have
+the same effect. The executable version of the ordinary public flows is
+`TestDataStructureGuideExamples` in `data_structure_examples_test.go`.
+
+To keep each table readable, the `Request` column shows fields in addition to
+the command in the first column. A complete HTTP body adds it back, for
+example `{"command":"SET","key":"name","value":"Ivi"}`. The `Reply`
+column shows the meaningful `message` and/or `value`; the full JSON envelope is
+always described in [Response fields](#response-fields).
+
+### Key lifecycle and scalar values
+
+| Command | Before state | Request | Reply | After state |
+| --- | --- | --- | --- | --- |
+| `GET` | `name=∅` | `{"key":"name"}` | `key not found` | `name=∅` |
+| `DUMP` | `name="Ivi"` | `{"key":"name"}` | tagged JSON entry containing `Ivi` | unchanged |
+| `EXISTS` | `name=∅` | `{"key":"name"}` | `value:"0"` | unchanged |
+| `SET` | `name=∅` | `{"key":"name","value":"Ivi"}` | `stored string` | `name="Ivi"` |
+| `SETX` | `name=∅` | `{"key":"name","value":"Ivi","ttl_seconds":60}` | `stored string with ttl` | `name="Ivi"`, expires in 60 s |
+| `SETINT` | `views=∅` | `{"key":"views","value":"41"}` | `stored counter` | `views=41` |
+| `SETINTX` | `views=∅` | `{"key":"views","value":"41","ttl_seconds":60}` | `stored counter with ttl` | `views=41`, expires in 60 s |
+| `INC` | `views=41` | `{"key":"views","value":"1"}` | `value:"42"` | `views=42` |
+| `DEL` | `name="Ivi"` | `{"key":"name"}` | `deleted` | `name=∅` |
+| `TTL` | `name="Ivi"`, no expiry | `{"key":"name"}` | `value:"-1"` | unchanged |
+| `EXPIRE` | `name="Ivi"` | `{"key":"name","ttl_seconds":60}` | `ttl updated` | same value, expires in 60 s |
+| `EXPIREAT` | `name="Ivi"` | `{"key":"name","unix_seconds":1893456000}` | `ttl updated` | same value, expires at that Unix second |
+| `BATCH` | `views=∅` | `{"batch":[{"command":"SETINT","key":"views","value":"41"},{"command":"INC","key":"views","value":"1"},{"command":"GET","key":"views"}]}` | three ordered `responses`; last is `42` | `views=42` |
+
+`GETSTR` is an alias of `GET`; `SETSTR` is an alias of `SET`; `SETSTRX` is an
+alias of `SETX`. `SET`, `SETINT`, and every `CREATE*` command replace a live
+value of another type at the same key. `INC` rejects non-counters and 32-bit
+overflow. A positive `ttl_seconds` is required for `*X` and `EXPIRE`.
+
+### Map, deque, set, and priority queue
+
+| Command | Before state | Request | Reply | After state |
+| --- | --- | --- | --- | --- |
+| `PUTMAP` | `user=∅` | `{"key":"user","pairs":{"name":"Ivi","role":"admin"}}` | `stored map fields` | `user={name:Ivi,role:admin}` |
+| `PEEKMAP` | `user.role="admin"` | `{"key":"user","subkey":"role"}` | `value:"admin"` | unchanged |
+| `TAKEMAP` | `user.role="admin"` | `{"key":"user","subkey":"role"}` | `removed`, `value:"admin"` | `user={name:Ivi}` |
+| `PUSHSLICE` | `jobs=∅` | `{"key":"jobs","values":["build","verify","deploy"]}` | `pushed slice values` | `jobs=[build,verify,deploy]` |
+| `POPSLICE` | `jobs=[build,verify,deploy]` | `{"key":"jobs"}` | `removed`, `value:"deploy"` | `jobs=[build,verify]` |
+| `SHIFTSLICE` | `jobs=[build,verify]` | `{"key":"jobs"}` | `removed`, `value:"build"` | `jobs=[verify]` |
+| `HEADSLICE` | `jobs=[build,verify]` | `{"key":"jobs"}` | `value:"build"` | unchanged |
+| `TAILSLICE` | `jobs=[build,verify]` | `{"key":"jobs"}` | `value:"verify"` | unchanged |
+| `ADDSET` | `tags=∅` | `{"key":"tags","values":["go","cache","go"]}` | `value:"2"` newly added | `tags={go,cache}` |
+| `REMSET` | `tags={go,cache}` | `{"key":"tags","value":"go"}` | `value:"1"` removed | `tags={cache}` |
+| `HASSET` | `tags={cache}` | `{"key":"tags","value":"go"}` | `value:"0"` | unchanged |
+| `GETSET` | `tags={cache}` | `{"key":"tags"}` | `value:"[\\"cache\\"]"` | unchanged |
+| `PUSHPQ` | `queue=∅` | `{"key":"queue","priority":10,"value":"urgent"}` | `value:"1"` item added | `queue=[{priority:10,value:urgent}]` |
+| `PEEKPQ` | one `urgent` item | `{"key":"queue"}` | JSON `{"priority":10,"value":"urgent"}` | unchanged |
+| `POPPQ` | one `urgent` item | `{"key":"queue"}` | JSON `{"priority":10,"value":"urgent"}` | `queue=[]` |
+| `GETPQ` | one `urgent` item | `{"key":"queue"}` | JSON array of priority/value items | unchanged |
+
+`PUSHSLICE` appends; `POPSLICE` removes from the tail; `SHIFTSLICE` removes
+from the head. Sets ignore duplicate additions. Priority-queue reads include
+both priority and value, so a client can see why an item was selected.
+
+### Filters and sketches
+
+| Command | Before state | Request | Reply | After state |
+| --- | --- | --- | --- | --- |
+| `CREATEBF` | `seen=∅` | `{"key":"seen","value":"1000","subkey":"0.01"}` | `created bloom filter` | empty Bloom filter, capacity target 1000 |
+| `ADDBF` | Bloom filter `{}` | `{"key":"seen","value":"alice"}` | `value:"1"` added | filter may report `alice` present |
+| `HASBF` | Bloom filter with `alice` added | `{"key":"seen","value":"alice"}` | `value:"1"` | unchanged; a `1` can be a false positive for unadded values |
+| `INFOBF` | live Bloom filter | `{"key":"seen"}` | JSON configuration/statistics | unchanged |
+| `CREATECF` | `active=∅` | `{"key":"active","value":"1000","subkey":"0.01"}` | `created cuckoo filter` | empty Cuckoo filter |
+| `ADDCF` | Cuckoo filter `{}` | `{"key":"active","value":"alice"}` | `value:"1"` added | filter may report `alice` present |
+| `HASCF` | Cuckoo filter with `alice` | `{"key":"active","value":"alice"}` | `value:"1"` | unchanged |
+| `DELCF` | Cuckoo filter with `alice` | `{"key":"active","value":"alice"}` | `value:"1"` removed | filter reports `alice` absent |
+| `INFOCF` | live Cuckoo filter | `{"key":"active"}` | JSON configuration/statistics | unchanged |
+| `CREATEXF` | `allow=∅` | `{"key":"allow","value":"1000"}` | `created xor filter` | empty, unbuilt XOR filter |
+| `ADDXF` | unbuilt XOR filter | `{"key":"allow","value":"alice"}` | `value:"1"` staged | staged source includes `alice`; still unbuilt |
+| `BUILDXF` | staged `alice` | `{"key":"allow"}` | `built xor filter` plus JSON info | built filter can answer queries |
+| `HASXF` | built filter with `alice` staged | `{"key":"allow","value":"alice"}` | `value:"1"` | unchanged; querying before build is an error |
+| `INFOXF` | live XOR filter | `{"key":"allow"}` | JSON info including build state | unchanged |
+| `CREATECMS` | `freq=∅` | `{"key":"freq","value":"256","subkey":"4"}` | `created count-min sketch` | empty width-256/depth-4 sketch |
+| `INCRCMS` | estimate(`path`)=0 | `{"key":"freq","value":"path","subkey":"3"}` | `value:"3"` estimate | estimate(`path`) is at least 3 |
+| `ESTCMS` | `path` incremented by 3 | `{"key":"freq","value":"path"}` | `value:"3"` in this flow | unchanged; count-min answers are approximate upper bounds |
+| `INFOCMS` | live Count-Min Sketch | `{"key":"freq"}` | JSON configuration/statistics | unchanged |
+| `CREATEHLL` | `visitors=∅` | `{"key":"visitors","value":"14"}` | `created hyperloglog` | empty HLL, precision 14 |
+| `ADDHLL` | empty HLL | `{"key":"visitors","values":["alice","bob"]}` | current approximate cardinality | HLL represents two distinct inputs |
+| `COUNTHLL` | HLL with two inputs | `{"key":"visitors"}` | positive approximate cardinality | unchanged |
+| `INFOHLL` | live HLL | `{"key":"visitors"}` | JSON configuration/statistics | unchanged |
+| `CREATETOPK` | `popular=∅` | `{"key":"popular","value":"3"}` | `created top-k` | empty Top-K, capacity 3 |
+| `ADDTOPK` | empty Top-K | `{"key":"popular","value":"alpha","subkey":"5"}` | JSON estimate, `count:5` | `alpha` tracked with count 5 |
+| `ESTTOPK` | `alpha` tracked | `{"key":"popular","value":"alpha"}` | JSON estimate, `count:5` | unchanged |
+| `GETTOPK` | `alpha` tracked | `{"key":"popular"}` | JSON ranked candidate list | unchanged |
+| `INFOTOPK` | live Top-K | `{"key":"popular"}` | JSON configuration/statistics | unchanged |
+| `CREATERS` | `sample=∅` | `{"key":"sample","value":"3"}` | `created reservoir sample` | empty sample, capacity 3 |
+| `ADDRS` | empty capacity-3 sample | `{"key":"sample","values":["alpha","beta"]}` | JSON update | sample contains `alpha`,`beta` |
+| `GETRS` | sample has two values | `{"key":"sample"}` | JSON `alpha`,`beta` array | unchanged |
+| `INFORS` | live reservoir sample | `{"key":"sample"}` | JSON configuration/statistics | unchanged |
+| `CREATEQ` | `latency=∅` | `{"key":"latency","value":"0.01"}` | `created quantile sketch` | empty quantile sketch, epsilon 0.01 |
+| `ADDQ` | empty quantile sketch | `{"key":"latency","values":["10","20","30"]}` | JSON update/estimate | sketch represents those observations |
+| `ESTQ` | values 10,20,30 observed | `{"key":"latency","value":"0.5"}` | JSON approximate median | unchanged |
+| `INFOQ` | live quantile sketch | `{"key":"latency"}` | JSON configuration/statistics | unchanged |
+
+Bloom, Cuckoo, and XOR filters answer membership with possible false positives;
+they cannot return their original inserted values. Count-Min, HyperLogLog,
+Top-K, reservoir, and quantile structures deliberately trade exact history for
+bounded memory. The reservoir becomes random once more input values than its
+capacity arrive.
+
+### Bitmaps, radix tree, and Fenwick tree
+
+| Command | Before state | Request | Reply | After state |
+| --- | --- | --- | --- | --- |
+| `CREATERB` | `cohort=∅` | `{"key":"cohort"}` | `created roaring bitmap` | empty uint32 bitmap |
+| `ADDRB` | empty bitmap | `{"key":"cohort","values":["7","42"]}` | `value:"2"` added | `{7,42}` |
+| `REMRB` | `{7,42}` | `{"key":"cohort","value":"7"}` | `value:"1"` removed | `{42}` |
+| `HASRB` | `{42}` | `{"key":"cohort","value":"42"}` | `value:"1"` | unchanged |
+| `COUNTRB` | `{7,42}` | `{"key":"cohort"}` | `value:"2"` | unchanged |
+| `GETRB` | `{7,42}` | `{"key":"cohort"}` | JSON `[7,42]` | unchanged |
+| `INFORB` | live bitmap | `{"key":"cohort"}` | JSON size/container information | unchanged |
+| `CREATESB` | `ids=∅` | `{"key":"ids"}` | `created sparse bitset` | empty uint64 set |
+| `ADDSB` | empty sparse bitset | `{"key":"ids","values":["7","18446744073709551615"]}` | `value:"2"` added | two uint64 IDs present |
+| `REMSB` | IDs include 7 | `{"key":"ids","value":"7"}` | `value:"1"` removed | ID 7 absent |
+| `HASSB` | IDs include 7 | `{"key":"ids","value":"7"}` | `value:"1"` | unchanged |
+| `COUNTSB` | two IDs present | `{"key":"ids"}` | `value:"2"` | unchanged |
+| `GETSB` | IDs 7 and max uint64 | `{"key":"ids"}` | JSON ID array | unchanged |
+| `INFOSB` | live sparse bitset | `{"key":"ids"}` | JSON size/container information | unchanged |
+| `CREATERT` | `sessions=∅` | `{"key":"sessions"}` | `created radix tree` | empty string-prefix index |
+| `PUTRT` | empty radix tree | `{"key":"sessions","subkey":"user:7/profile","value":"active"}` | `value:"1"` stored | one indexed key/value |
+| `GETRT` | indexed profile is active | `{"key":"sessions","subkey":"user:7/profile"}` | `value:"active"` | unchanged |
+| `DELRT` | indexed profile is active | `{"key":"sessions","subkey":"user:7/profile"}` | `value:"1"` removed | indexed profile absent |
+| `HASRT` | indexed profile is active | `{"key":"sessions","subkey":"user:7/profile"}` | `value:"1"` | unchanged |
+| `PREFIXRT` | entries start `user:7/` and `team:2/` | `{"key":"sessions","subkey":"user:"}` | JSON matching entries | only `user:` entries returned; state unchanged |
+| `INFORT` | live radix tree | `{"key":"sessions"}` | JSON count/size information | unchanged |
+| `CREATEFW` | `hourly=∅` | `{"key":"hourly","value":"24"}` | `created fenwick tree` | 24 zero-valued positions |
+| `ADDFW` | cell 13 is 0 | `{"key":"hourly","value":"13","subkey":"7"}` | JSON update | cell 13 is 7 |
+| `GETFW` | cell 13 is 7 | `{"key":"hourly","value":"13"}` | `value:"7"` | unchanged |
+| `SUMFW` | only cell 13 is 7 | `{"key":"hourly","value":"13"}` | `value:"7"` | unchanged; sum is positions 1 through 13 |
+| `RANGEFW` | only cell 13 is 7 | `{"key":"hourly","value":"8","subkey":"13"}` | `value:"7"` | unchanged; inclusive range 8 through 13 |
+| `INFOFW` | live Fenwick tree | `{"key":"hourly"}` | JSON size/update information | unchanged |
+
+Roaring bitmaps accept unsigned 32-bit IDs; sparse bitsets accept unsigned
+64-bit IDs. A radix tree is for string-key prefix lookup, not the cache's main
+key index. A Fenwick tree is for fast point updates and prefix/range sums; its
+positions are one-based in these commands.
+
+### Replication-only protocol commands
+
+| Command | Before state | Request | Reply | After state |
+| --- | --- | --- | --- | --- |
+| `INTERNALSET` | authenticated replica has old entry | encoded JSON snapshot entry | `internal value stored` | key matches encoded source entry |
+| `INTERNALDEL` | authenticated replica has key | replication delete for key | `internal value deleted` | key is absent |
+| `INTERNALSETV2` | authenticated replica has old entry | binary compatibility record | internal replication acknowledgement | key matches source entry |
+| `INTERNALSETV3` | authenticated replica has old entry | compact keyless binary record | internal replication acknowledgement | key matches source entry |
+| `INTERNALBATCH` | replica has multiple old entries | encoded internal command list | one internal batch acknowledgement | listed changes applied in order |
+| `INTERNALBATCHV2` | replica has multiple old entries | binary internal command list | one internal batch acknowledgement | listed changes applied in order |
+| `INTERNALDIGESTV1` | replica needs anti-entropy page | authenticated topology-scoped digest request | read-only digest page | unchanged |
+
+These seven commands are intentionally not runnable examples. They are
+authenticated replication wire protocol, not stable application API; use
+public commands, backup/restore, or replication endpoints instead.
+
+### Accepted command aliases
+
+The canonical names above are preferred in new code. The following aliases are
+accepted for compatibility and have exactly the same before/after effect as the
+canonical command in the state tables.
+
+| Canonical command | Accepted aliases |
+| --- | --- |
+| `GET` | `GETSTR` |
+| `SET` | `SETSTR` |
+| `SETX` | `SETSTRX` |
+| `PUSHPQ` | `PUSHPRIORITY` |
+| `PEEKPQ` | `PEEKPRIORITY` |
+| `POPPQ` | `POPPRIORITY` |
+| `GETPQ` | `GETPRIORITY` |
+| `CREATEBF` | `RESERVEBF`, `BFRESERVE` |
+| `ADDBF` | `BFADD` |
+| `HASBF` | `BFHAS`, `BFEXISTS` |
+| `INFOBF` | `BFINFO` |
+| `CREATECF` | `RESERVECF`, `CFRESERVE` |
+| `ADDCF` | `CFADD` |
+| `HASCF` | `CFHAS`, `CFEXISTS` |
+| `DELCF` | `REMCF`, `CFDEL` |
+| `INFOCF` | `CFINFO` |
+| `CREATEXF` | `RESERVEXF`, `XFRESERVE`, `CREATEXOR` |
+| `ADDXF` | `XFADD` |
+| `BUILDXF` | `XFBUILD` |
+| `HASXF` | `XFHAS`, `XFEXISTS` |
+| `INFOXF` | `XFINFO` |
+| `CREATERB` | `CREATEROARING`, `RBRESERVE` |
+| `ADDRB` | `RBADD` |
+| `REMRB` | `DELRB`, `RBREM`, `RBDEL` |
+| `HASRB` | `RBHAS`, `RBEXISTS` |
+| `COUNTRB` | `RBCOUNT` |
+| `GETRB` | `RBGET` |
+| `INFORB` | `RBINFO` |
+| `CREATESB` | `CREATESPARSEBITSET`, `SBRESERVE` |
+| `ADDSB` | `SBADD` |
+| `REMSB` | `DELSB`, `SBREM`, `SBDEL` |
+| `HASSB` | `SBHAS`, `SBEXISTS` |
+| `COUNTSB` | `SBCOUNT` |
+| `GETSB` | `SBGET` |
+| `INFOSB` | `SBINFO` |
+| `CREATERT` | `CREATERADIX`, `RTCREATE` |
+| `PUTRT` | `RTPUT` |
+| `GETRT` | `RTGET` |
+| `DELRT` | `REMRT`, `RTDEL`, `RTREM` |
+| `HASRT` | `RTEXISTS`, `RTHAS` |
+| `PREFIXRT` | `SCANRT`, `RTPREFIX`, `RTSCAN` |
+| `INFORT` | `RTINFO` |
+| `CREATECMS` | `RESERVECMS`, `CMSRESERVE` |
+| `INCRCMS` | `ADDCMS`, `CMSADD` |
+| `ESTCMS` | `QUERYCMS`, `CMSQUERY`, `CMSCOUNT` |
+| `INFOCMS` | `CMSINFO` |
+| `CREATEHLL` | `RESERVEHLL`, `HLLRESERVE` |
+| `ADDHLL` | `HLLADD` |
+| `COUNTHLL` | `ESTHLL`, `HLLCOUNT`, `HLLCARD` |
+| `INFOHLL` | `HLLINFO` |
+| `CREATETOPK` | `RESERVETOPK`, `TOPKRESERVE` |
+| `ADDTOPK` | `TOPKADD` |
+| `ESTTOPK` | `QUERYTOPK`, `TOPKCOUNT` |
+| `GETTOPK` | `TOPK` |
+| `INFOTOPK` | `TOPKINFO` |
+| `CREATERS` | `CREATESAMPLE`, `RESERVERS`, `RSRESERVE` |
+| `ADDRS` | `RSADD` |
+| `GETRS` | `RSGET`, `SAMPLE` |
+| `INFORS` | `RSINFO` |
+| `CREATEQ` | `CREATEQS`, `CREATEQUANTILE`, `RESERVEQ`, `QSRESERVE` |
+| `ADDQ` | `ADDQS`, `QADD`, `QSADD` |
+| `ESTQ` | `QUERYQ`, `QQUERY`, `QSQUERY`, `QUANTILE` |
+| `INFOQ` | `QINFO`, `INFOQS`, `QSINFO` |
+| `CREATEFW` | `CREATEFENWICK`, `RESERVEFW`, `FWRESERVE` |
+| `ADDFW` | `FWADD` |
+| `GETFW` | `FWGET` |
+| `SUMFW` | `PREFIXFW`, `FWPREFIX`, `FWSUM` |
+| `RANGEFW` | `FWRANGE` |
+| `INFOFW` | `FWINFO` |
 
 ## Type replacement and internal commands
 
