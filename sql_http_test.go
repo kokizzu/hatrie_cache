@@ -93,6 +93,47 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 	}
 }
 
+func TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor(t *testing.T) {
+	t.Parallel()
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()
+	query := "FROM VALUES (1), (2), (3), (4), (5) AS values(id) SELECT id ORDER BY id"
+	requestBody := `{"query":"` + query + `","page_size":2}`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("first page status = %d: %s", response.Code, response.Body.String())
+	}
+	var first SQLQueryResult
+	if err := json.Unmarshal(response.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if want := []SQLRow{{"id": float64(1)}, {"id": float64(2)}}; !reflect.DeepEqual(first.Rows, want) || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page = %#v, want rows %#v and a cursor", first, want)
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"`+query+`","page_size":2,"cursor":"`+first.NextCursor+`"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	var second SQLQueryResult
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &second) != nil {
+		t.Fatalf("second page status/body = %d/%s", response.Code, response.Body.String())
+	}
+	if want := []SQLRow{{"id": float64(3)}, {"id": float64(4)}}; !reflect.DeepEqual(second.Rows, want) || !second.HasMore {
+		t.Fatalf("second page = %#v, want %#v", second, want)
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM VALUES (99) AS values(id) SELECT id","page_size":2,"cursor":"`+first.NextCursor+`"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "cursor does not match") {
+		t.Fatalf("mismatched cursor status/body = %d/%s", response.Code, response.Body.String())
+	}
+}
+
 func TestMonitoringSQLFunctionRouteRegistersTypedGoFunction(t *testing.T) {
 	t.Parallel()
 

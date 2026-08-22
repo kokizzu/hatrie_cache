@@ -2,6 +2,8 @@ package hatriecache
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -11,6 +13,7 @@ import (
 )
 
 const maxSQLQueryRows = 100000
+const maxSQLPageSize = 10000
 
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
@@ -27,6 +30,8 @@ type SQLQueryOptions struct {
 type SQLQueryRequest struct {
 	Query      string        `json:"query"`
 	Parameters []interface{} `json:"parameters,omitempty"`
+	PageSize   int           `json:"page_size,omitempty"`
+	Cursor     string        `json:"cursor,omitempty"`
 }
 
 // SQLRow is one dynamically shaped row returned by the read-only SQL query engine.
@@ -34,10 +39,12 @@ type SQLRow map[string]interface{}
 
 // SQLQueryResult is a materialized result. Streaming clients use QueryRows.
 type SQLQueryResult struct {
-	Columns []string         `json:"columns"`
-	Rows    []SQLRow         `json:"rows"`
-	Plan    []SQLExplainStep `json:"plan,omitempty"`
-	Stats   *SQLQueryStats   `json:"stats,omitempty"`
+	Columns    []string         `json:"columns"`
+	Rows       []SQLRow         `json:"rows"`
+	Plan       []SQLExplainStep `json:"plan,omitempty"`
+	Stats      *SQLQueryStats   `json:"stats,omitempty"`
+	HasMore    bool             `json:"has_more,omitempty"`
+	NextCursor string           `json:"next_cursor,omitempty"`
 }
 
 // SQLExplainStep is one stable, human-readable operation in an EXPLAIN plan.
@@ -142,6 +149,102 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return explainSQLQuery(query, resolver, control)
 	}
 	return executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+}
+
+type sqlCursor struct {
+	Fingerprint string `json:"f"`
+	Offset      int    `json:"o"`
+}
+
+// ExecuteSQLQueryPage executes one bounded page. Cursors are opaque and bound
+// to both SQL text and the encoded parameter values.
+func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (SQLQueryResult, error) {
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	if pageSize > maxSQLPageSize {
+		return SQLQueryResult{}, fmt.Errorf("SQL page_size exceeds the maximum %d", maxSQLPageSize)
+	}
+	control, cancel, err := newSQLExecutionControl(ctx, options)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	defer cancel()
+	query, err := parseSQLQueryParameters(source, parameters)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	if query.explain {
+		return SQLQueryResult{}, fmt.Errorf("EXPLAIN does not support cursor pagination")
+	}
+	fingerprint, err := sqlCursorFingerprint(source, parameters)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	offset := 0
+	if cursor != "" {
+		value, err := decodeSQLCursor(cursor)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		if value.Fingerprint != fingerprint {
+			return SQLQueryResult{}, fmt.Errorf("SQL cursor does not match this query and parameters")
+		}
+		offset = value.Offset
+	}
+	originalLimit := query.limit
+	query.offset += offset
+	fetch := pageSize + 1
+	if originalLimit >= 0 {
+		remaining := originalLimit - offset
+		if remaining <= 0 {
+			fetch = 0
+		} else if remaining < fetch {
+			fetch = remaining
+		}
+	}
+	query.limit = fetch
+	result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	if len(result.Rows) > pageSize {
+		result.Rows = result.Rows[:pageSize]
+		result.HasMore = true
+		next, err := encodeSQLCursor(sqlCursor{Fingerprint: fingerprint, Offset: offset + pageSize})
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		result.NextCursor = next
+	}
+	return result, nil
+}
+
+func sqlCursorFingerprint(source string, parameters []interface{}) (string, error) {
+	encoded, err := json.Marshal(parameters)
+	if err != nil {
+		return "", fmt.Errorf("encode SQL cursor parameters: %w", err)
+	}
+	sum := sha256.Sum256(append(append([]byte(source), 0), encoded...))
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
+}
+func encodeSQLCursor(cursor sqlCursor) (string, error) {
+	value, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+func decodeSQLCursor(value string) (sqlCursor, error) {
+	encoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return sqlCursor{}, fmt.Errorf("invalid SQL cursor")
+	}
+	var cursor sqlCursor
+	if json.Unmarshal(encoded, &cursor) != nil || cursor.Offset < 0 || cursor.Fingerprint == "" {
+		return sqlCursor{}, fmt.Errorf("invalid SQL cursor")
+	}
+	return cursor, nil
 }
 
 // ValidateSQLQuery verifies syntax without reading any cache source.

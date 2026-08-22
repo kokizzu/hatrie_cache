@@ -30,10 +30,20 @@ func (conn *SQLConn) Query(ctx context.Context, query string) (SQLQueryResult, e
 // QueryParameters executes query with positional $1, $2, ... values encoded
 // separately from the SQL source.
 func (conn *SQLConn) QueryParameters(ctx context.Context, query string, parameters []interface{}) (SQLQueryResult, error) {
+	return conn.queryRequest(ctx, SQLQueryRequest{Query: query, Parameters: parameters})
+}
+
+// QueryPage obtains one bounded result page. Pass NextCursor to retrieve the
+// following page; a cursor is bound to query and parameters.
+func (conn *SQLConn) QueryPage(ctx context.Context, query string, parameters []interface{}, pageSize int, cursor string) (SQLQueryResult, error) {
+	return conn.queryRequest(ctx, SQLQueryRequest{Query: query, Parameters: parameters, PageSize: pageSize, Cursor: cursor})
+}
+
+func (conn *SQLConn) queryRequest(ctx context.Context, payload SQLQueryRequest) (SQLQueryResult, error) {
 	if conn == nil || strings.TrimSpace(conn.BaseURL) == "" {
 		return SQLQueryResult{}, fmt.Errorf("SQL connection URL is required")
 	}
-	body, err := json.Marshal(SQLQueryRequest{Query: query, Parameters: parameters})
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return SQLQueryResult{}, err
 	}

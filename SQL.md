@@ -334,6 +334,14 @@ result, err := conn.QueryParameters(ctx,
 For HTTP, send the same data as `{"query":"... $1 ...",
 "parameters":[...]}`. Values are never interpolated into the SQL text.
 
+### Cursor pagination
+
+`POST /api/sql` accepts `page_size` (maximum 10,000) and an opaque `cursor`.
+The response contains `has_more` and `next_cursor`; pass that cursor with the
+identical query and parameters for the following page. Cursors are stateless,
+bound to the query/parameter payload, and do not create a server-side result
+cache. The Go SDK exposes this as `conn.QueryPage`.
+
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 
 Prefix any relational query with `EXPLAIN` to inspect its plan without reading
