@@ -9,6 +9,7 @@ import (
 	mathbits "math/bits"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatHash"
 )
 
 const (
@@ -17,8 +18,8 @@ const (
 	minBloomFilterBits                  uint64  = 64
 	maxBloomFilterBits                  uint64  = 1 << 31
 	maxBloomFilterHashes                uint8   = 64
-	bloomFilterFNVOffset64              uint64  = 14695981039346656037
-	bloomFilterFNVPrime64               uint64  = 1099511628211
+	bloomFilterFNVOffset64              uint64  = hatHash.FNVOffset64
+	bloomFilterFNVPrime64               uint64  = hatHash.FNVPrime64
 )
 
 // BloomFilterInfo reports the shape and current fill level of a Bloom filter.
@@ -462,47 +463,19 @@ func bloomFilterItemKey(value interface{}) ([]byte, error) {
 }
 
 func bloomFilterFNV64a(value []byte) uint64 {
-	hash := bloomFilterFNVOffset64
-	for idx := 0; idx < len(value); idx++ {
-		hash ^= uint64(value[idx])
-		hash *= bloomFilterFNVPrime64
-	}
-	return hash
+	return hatHash.FNV1a64(value)
 }
 
 func bloomFilterFNV64(value []byte) uint64 {
-	hash := bloomFilterFNVOffset64
-	for idx := 0; idx < len(value); idx++ {
-		hash *= bloomFilterFNVPrime64
-		hash ^= uint64(value[idx])
-	}
-	return hash
+	return hatHash.FNV1_64(value)
 }
 
 func bloomFilterFNV64aJSONString(value string) uint64 {
-	hash := bloomFilterFNVOffset64
-	hash ^= uint64('"')
-	hash *= bloomFilterFNVPrime64
-	for idx := 0; idx < len(value); idx++ {
-		hash ^= uint64(value[idx])
-		hash *= bloomFilterFNVPrime64
-	}
-	hash ^= uint64('"')
-	hash *= bloomFilterFNVPrime64
-	return hash
+	return hatHash.FNV1a64JSONString(value)
 }
 
 func bloomFilterFNV64JSONString(value string) uint64 {
-	hash := bloomFilterFNVOffset64
-	hash *= bloomFilterFNVPrime64
-	hash ^= uint64('"')
-	for idx := 0; idx < len(value); idx++ {
-		hash *= bloomFilterFNVPrime64
-		hash ^= uint64(value[idx])
-	}
-	hash *= bloomFilterFNVPrime64
-	hash ^= uint64('"')
-	return hash
+	return hatHash.FNV1_64JSONString(value)
 }
 
 func bloomFilterWordCount(bitCount uint64) uint64 {
