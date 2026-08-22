@@ -222,6 +222,7 @@ server and return rows; they never implicitly mutate cache values.
 | `CACHE('key')` | The JSON value stored at one cache key. A JSON array of objects produces one row per object; a JSON object produces one row with its fields. Scalars and arrays containing non-objects are rejected with an actionable error. |
 | `VALUES (...)` | Inline rows, primarily for CTEs, tests, and joining query parameters. |
 | `WITH name [(columns...)] AS (SELECT ... | VALUES ...)` | A named source scoped to one query. CTEs can reference earlier CTEs. |
+| `WITH RECURSIVE name [(columns...)] AS (seed UNION [ALL] recursive_term)` | A named hierarchy/sequence source. Each recursive iteration sees only rows from the previous iteration. |
 | `(SELECT ... | FROM ... SELECT ...) AS alias` | An uncorrelated, read-only derived-table source; it can appear in `FROM` or a join. |
 
 `CACHE('key')` makes application-owned JSON cache values directly queryable
@@ -280,7 +281,10 @@ ORDER BY memberships DESC, u.name ASC
 LIMIT 100;
 ```
 
-- [x] `WITH ... AS` and `VALUES` CTEs.
+- [x] `WITH ... AS`, `VALUES`, and terminating `WITH RECURSIVE` CTEs. A
+      recursive CTE has one seed plus one `UNION` or `UNION ALL` recursive
+      term. `UNION` removes rows seen in prior iterations; `UNION ALL` is
+      guarded by the query row limit and should include a terminating filter.
 - [x] `FROM` `KEYS`, `CACHE('key')`, CTE, and inline `VALUES` sources.
 - [x] Inner, `LEFT [OUTER] JOIN`, `RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`,
       and `CROSS JOIN`; `ON` is mandatory except for CROSS JOIN.
@@ -309,8 +313,10 @@ tests.
 - [x] A 100,000-row source/join limit prevents accidental cross-join explosions.
 
 Parenthesized boolean precedence and arithmetic expressions are supported.
-Correlated subqueries, window functions, and recursive CTEs remain explicitly
-out of scope rather than accepted incorrectly.
+Correlated subqueries remain explicitly out of scope rather than accepted
+incorrectly. Recursive CTEs support direct self-reference only; mutual
+recursion and recursive terms with more than one set operation are rejected
+with an actionable diagnostic.
 
 The server returns ordinary JSON for the CLI and SDK. A query error uses the
 same span diagnostics as command SQL.

@@ -161,8 +161,11 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"ON", "query", "FROM VALUES (1) AS a(value) JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
 		{"OR", "query", "FROM VALUES (FALSE, TRUE) AS a(left_value, right_value) WHERE left_value OR right_value SELECT right_value"},
 		{"ORDER", "query", "FROM VALUES (1) AS a(value) SELECT value ORDER BY value"},
+		{"OVER", "query", "FROM VALUES (1) AS a(value) SELECT ROW_NUMBER() OVER (ORDER BY value) AS row_number"},
 		{"OUTER", "query", "FROM VALUES (1) AS a(value) FULL OUTER JOIN VALUES (2) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"PARTITION", "query", "FROM VALUES ('a', 1) AS a(team, value) SELECT ROW_NUMBER() OVER (PARTITION BY team ORDER BY value) AS row_number"},
 		{"RIGHT", "query", "FROM VALUES (1) AS a(value) RIGHT JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT b.value"},
+		{"RECURSIVE", "query", "WITH RECURSIVE sequence(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM sequence AS previous WHERE value < 2 SELECT value + 1 AS value) FROM sequence SELECT value"},
 		{"SELECT", "query", "FROM VALUES (1) AS a(value) SELECT value"},
 		{"UNION", "query", "FROM VALUES (1) AS a(value) SELECT value UNION FROM VALUES (2) AS b(value) SELECT value"},
 		{"VALUES", "query", "FROM VALUES (1) AS a(value) SELECT value"},
@@ -251,7 +254,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "RECURSIVE": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -282,6 +285,8 @@ func TestSQLKeywordInventoryReportsContextualDiagnostics(t *testing.T) {
 		{"order_requires_by", "FROM VALUES (1) AS a(value) SELECT value ORDER value", "expected BY"},
 		{"is_requires_null", "FROM VALUES (NULL) AS a(value) WHERE value IS TRUE SELECT value", "expected NULL"},
 		{"intersect_all_is_rejected", "FROM VALUES (1) AS a(value) SELECT value INTERSECT ALL FROM VALUES (1) AS b(value) SELECT value", "INTERSECT ALL is not supported"},
+		{"self_reference_requires_recursive", "WITH sequence(value) AS (FROM sequence SELECT value) FROM sequence SELECT value", "requires WITH RECURSIVE"},
+		{"recursive_requires_union_term", "WITH RECURSIVE sequence(value) AS (FROM sequence SELECT value) FROM sequence SELECT value", "requires exactly one UNION or UNION ALL recursive term"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := ExecuteSQLQuery(test.source, SQLSourceResolverFunc(nil))

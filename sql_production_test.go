@@ -500,6 +500,27 @@ ORDER BY team, score`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQuerySupportsRecursiveCTEHierarchy(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+WITH RECURSIVE ancestors(node, parent, level) AS (
+  FROM VALUES (1, NULL, 0) AS seed(id, parent_id, depth) SELECT id, parent_id, depth
+  UNION ALL
+  FROM VALUES (2, 1), (3, 2) AS nodes(id, parent_id)
+  INNER JOIN ancestors AS previous ON nodes.parent_id = previous.node
+  SELECT nodes.id, nodes.parent_id, previous.level + 1 AS depth
+)
+FROM ancestors
+SELECT node, level
+ORDER BY node`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("recursive CTE error = %v", err)
+	}
+	if want := []SQLRow{{"node": int64(1), "level": int64(0)}, {"node": int64(2), "level": int64(1)}, {"node": int64(3), "level": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("recursive CTE rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

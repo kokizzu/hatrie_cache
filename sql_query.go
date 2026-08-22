@@ -416,10 +416,11 @@ type sqlUnion struct {
 	query *sqlQuery
 }
 type sqlCTE struct {
-	name    string
-	columns []string
-	query   *sqlQuery
-	values  [][]interface{}
+	name      string
+	columns   []string
+	query     *sqlQuery
+	values    [][]interface{}
+	recursive bool
 }
 type sqlSource struct {
 	kind, key, alias string
@@ -465,6 +466,10 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 	}
 	if p.keyword("WITH") {
 		p.next()
+		withRecursive := p.keyword("RECURSIVE")
+		if withRecursive {
+			p.next()
+		}
 		for {
 			name, err := p.expectIdentifier("a CTE name", nil)
 			if err != nil {
@@ -499,6 +504,15 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			}
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return nil, err
+			}
+			if cte.query != nil && sqlQueryReferencesCTE(cte.query, cte.name) {
+				if !withRecursive {
+					return nil, p.diagnostic(name, "recursive CTE "+name.text+" requires WITH RECURSIVE")
+				}
+				if len(cte.query.unions) != 1 || cte.query.unions[0].kind != "UNION" || cte.query.unions[0].query == nil || len(cte.query.unions[0].query.unions) != 0 {
+					return nil, p.diagnostic(name, "recursive CTE "+name.text+" requires exactly one UNION or UNION ALL recursive term")
+				}
+				cte.recursive = true
 			}
 			q.ctes = append(q.ctes, cte)
 			if p.current().kind != sqlTokenComma {
@@ -647,6 +661,30 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 		q.unions = append(q.unions, union)
 	}
 	return q, nil
+}
+
+func sqlQueryReferencesCTE(query *sqlQuery, name string) bool {
+	if query == nil {
+		return false
+	}
+	if query.from != nil && sqlSourceReferencesCTE(*query.from, name) {
+		return true
+	}
+	for _, join := range query.joins {
+		if sqlSourceReferencesCTE(join.source, name) {
+			return true
+		}
+	}
+	for _, union := range query.unions {
+		if sqlQueryReferencesCTE(union.query, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func sqlSourceReferencesCTE(source sqlSource, name string) bool {
+	return source.kind == "CTE" && source.key == name || source.kind == "SUBQUERY" && sqlQueryReferencesCTE(source.query, name)
 }
 
 func (p *sqlQueryParser) parseColumns() ([]string, error) {
@@ -1247,7 +1285,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL":
+	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE":
 		return true
 	}
 	return false
@@ -1352,10 +1390,14 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	for _, cte := range q.ctes {
 		var rows []SQLRow
 		var err error
-		if cte.query != nil {
+		if cte.recursive {
+			rows, err = executeSQLRecursiveCTE(cte, resolver, ctes, metrics, control, maxRows)
+		} else if cte.query != nil {
 			r, e := executeSQLQueryWithMetrics(cte.query, resolver, ctes, metrics, control)
 			err = e
-			rows = r.Rows
+			if err == nil {
+				rows, err = sqlCTEOutputRows(cte, r)
+			}
 		} else {
 			rows = valuesSQLRows(cte.values, cte.columns)
 		}
@@ -1770,6 +1812,96 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		metrics.record("SET", kind, inputRows, len(result.Rows), started)
 	}
 	return result, nil
+}
+
+// executeSQLRecursiveCTE evaluates the non-recursive seed once and then
+// repeatedly evaluates the recursive UNION term against the previous working
+// table. This mirrors SQL recursive-CTE semantics and prevents a term from
+// observing rows produced earlier in the same iteration.
+func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, maxRows int) ([]SQLRow, error) {
+	if cte.query == nil || len(cte.query.unions) != 1 {
+		return nil, fmt.Errorf("recursive CTE %q has no recursive UNION term", cte.name)
+	}
+	started := time.Now()
+	seedQuery := *cte.query
+	union := seedQuery.unions[0]
+	seedQuery.unions = nil
+	seed, err := executeSQLQueryWithMetrics(&seedQuery, resolver, ctes, metrics, control)
+	if err != nil {
+		return nil, err
+	}
+	seedRows, err := sqlCTEOutputRows(cte, seed)
+	if err != nil {
+		return nil, err
+	}
+	if len(seedRows) > maxRows {
+		return nil, fmt.Errorf("recursive CTE %q exceeds the %d row limit", cte.name, maxRows)
+	}
+	total := cloneSQLRows(seedRows)
+	frontier := cloneSQLRows(seedRows)
+	seen := map[string]struct{}{}
+	if !union.all {
+		for _, row := range total {
+			seen[sqlOutputRowKey(row)] = struct{}{}
+		}
+	}
+	for len(frontier) > 0 {
+		if err := control.check(); err != nil {
+			return nil, err
+		}
+		ctes[cte.name] = cloneSQLRows(frontier)
+		nextResult, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics, control)
+		if err != nil {
+			return nil, err
+		}
+		next, err := sqlCTEOutputRows(cte, nextResult)
+		if err != nil {
+			return nil, err
+		}
+		if len(cte.columns) == 0 && !sameSQLColumns(seed.Columns, nextResult.Columns) {
+			return nil, fmt.Errorf("recursive CTE %q seed and recursive terms must project the same column names in the same order", cte.name)
+		}
+		if !union.all {
+			filtered := next[:0]
+			for _, row := range next {
+				key := sqlOutputRowKey(row)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				filtered = append(filtered, row)
+			}
+			next = filtered
+		}
+		if len(total)+len(next) > maxRows {
+			return nil, fmt.Errorf("recursive CTE %q exceeds the %d row limit; add a terminating condition", cte.name, maxRows)
+		}
+		total = append(total, next...)
+		frontier = cloneSQLRows(next)
+	}
+	metrics.record("RECURSIVE CTE", cte.name, len(seedRows), len(total), started)
+	return total, nil
+}
+
+// sqlCTEOutputRows applies the optional CTE column list to a query result.
+// The declared names are the only names visible to later CTE terms and to the
+// outer query, matching regular SQL CTE scoping.
+func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
+	if len(cte.columns) == 0 {
+		return result.Rows, nil
+	}
+	if len(cte.columns) != len(result.Columns) {
+		return nil, fmt.Errorf("CTE %q declares %d columns but its query returns %d", cte.name, len(cte.columns), len(result.Columns))
+	}
+	rows := make([]SQLRow, len(result.Rows))
+	for index, row := range result.Rows {
+		mapped := make(SQLRow, len(cte.columns))
+		for column, name := range cte.columns {
+			mapped[name] = row[result.Columns[column]]
+		}
+		rows[index] = mapped
+	}
+	return rows, nil
 }
 
 func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {

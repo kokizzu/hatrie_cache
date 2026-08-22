@@ -40,6 +40,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Repeated source references read one per-query snapshot | [`TestExecuteSQLQueryUsesOneSnapshotForRepeatedSources`](sql_production_test.go) |
 | Optional JSON equality index, `INDEX SCAN` planning, and refresh after a cache write | [`TestHatTrieOptionalSQLJSONFieldIndexRefreshesAndPlansIndexScan`](sql_production_test.go) |
 | Partitioned `ROW_NUMBER`, `RANK`, and running `SUM` windows | [`TestExecuteSQLQuerySupportsPartitionedWindowFunctions`](sql_production_test.go) |
+| Direct self-recursive CTE seed/working-table evaluation (`UNION ALL` hierarchy traversal), plus clear diagnostics when `RECURSIVE` or its required set term is absent | [`TestExecuteSQLQuerySupportsRecursiveCTEHierarchy`](sql_production_test.go), [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 | Every accepted relational keyword/contextual word: clauses, `EXPLAIN`/`ANALYZE`, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | Named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | Contextual clause diagnostics (`INNER` requires `JOIN`, `GROUP`/`ORDER` require `BY`, `IS` requires `NULL`, unsupported `INTERSECT ALL`) | [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 
@@ -64,8 +65,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 
 The parser must reject or diagnose these rather than pretend to implement them:
 
-- Correlated subqueries and recursive CTEs.
-- Window functions.
+- Correlated subqueries and mutually-recursive CTEs.
 - `INTERSECT ALL` and `EXCEPT ALL`.
 - SQL writes through relational `SELECT`; cache mutations use the separately
   compiled command SQL forms.
