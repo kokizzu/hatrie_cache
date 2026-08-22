@@ -1,5 +1,27 @@
 # hatrie_cache
-Experimental distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
+
+Hatrie Cache is an in-memory cache and data-structure server built around a C
+HAT-trie. It provides typed cache values, TTLs, snapshots/backups, optional
+durable storage, replication, HTTP/2 and gRPC APIs, and an opt-in monitoring
+server. It is intended for controlled deployments; review the operations and
+security guidance before exposing it on a network.
+
+## Start Here
+
+- New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
+- New to the SQL interface: [SQL.md](SQL.md)
+- Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
+- Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
+- API and configuration examples: [Development](#development)
+
+The default process does not start the monitoring HTTP/2 or gRPC server. Enable
+it explicitly when needed, configure authentication before remote access, and
+keep backups outside the cache host.
+
+## Performance and implementation history
+
+<details>
+<summary>Performance and implementation history (measured changes and rejected tradeoffs)</summary>
 
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
@@ -373,6 +395,8 @@ wire, and persistence formats are unchanged.
 Map, slice, set, and priority queue APIs deep-copy nested JSON-style map/slice
 values at storage and read boundaries so callers cannot mutate cached state
 through shared nested references.
+
+</details>
 
 ## Development
 

@@ -61,6 +61,31 @@ func TestREADMEListsCompactStructureCommands(t *testing.T) {
 	}
 }
 
+func TestREADMEStartsWithProductSummaryAndNavigation(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	opening := string(data)
+	if end := strings.Index(opening, "<details>"); end >= 0 {
+		opening = opening[:end]
+	}
+	for _, token := range []string{
+		"In-memory", "Start Here", "DATA_STRUCTURE.md", "SQL.md", "Operations Manual",
+		"BENCHMARK.md", "Performance and implementation history",
+	} {
+		if !strings.Contains(opening, token) {
+			t.Fatalf("README.md opening missing %q", token)
+		}
+	}
+	if strings.Contains(opening, "compact HAT-trie indexes with a ring") {
+		t.Fatal("README.md opening includes detailed performance history")
+	}
+	if !strings.Contains(string(data), "<summary>Performance and implementation history") {
+		t.Fatal("README.md does not collapse detailed performance history")
+	}
+}
+
 func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 	commandGroups := executeCommandCases(t)
 	data, err := os.ReadFile("BENCHMARK.md")
