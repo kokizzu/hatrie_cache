@@ -234,7 +234,7 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.from = &source
-		case p.keyword("JOIN") || p.keyword("LEFT") || p.keyword("RIGHT") || p.keyword("FULL") || p.keyword("CROSS"):
+		case p.keyword("JOIN") || p.keyword("INNER") || p.keyword("LEFT") || p.keyword("RIGHT") || p.keyword("FULL") || p.keyword("CROSS"):
 			if q.from == nil {
 				return nil, p.diagnostic(p.current(), "JOIN requires FROM first")
 			}
@@ -480,7 +480,12 @@ func (p *sqlQueryParser) parseAlias(source *sqlSource) {
 func (p *sqlQueryParser) parseJoin() (sqlJoin, error) {
 	kind := "INNER"
 	token := p.current()
-	if p.keyword("LEFT") {
+	if p.keyword("INNER") {
+		p.next()
+		if err := p.expectKeyword("JOIN"); err != nil {
+			return sqlJoin{}, err
+		}
+	} else if p.keyword("LEFT") {
 		kind = "LEFT"
 		p.next()
 		if p.keyword("OUTER") {

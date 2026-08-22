@@ -2,7 +2,11 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -109,6 +113,180 @@ func TestSQLJavaScriptValueConversionPreservesJSONShapes(t *testing.T) {
 	want := []interface{}{map[string]interface{}{"name": "Ivi", "tags": []interface{}{"bass", json.Number("2")}}}
 	if !reflect.DeepEqual(values, want) {
 		t.Fatalf("sqlJSBatchOutput() = %#v, want %#v", values, want)
+	}
+}
+
+// TestSQLAcceptedKeywordInventory keeps every accepted SQL grammar word tied
+// to an executable positive case. The subtest name is intentionally the exact
+// word plus its context, so a parser expansion cannot be documented without
+// adding a corresponding test here and to SQL_TEST_MATRIX.md.
+func TestSQLAcceptedKeywordInventory(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name string, key string) ([]SQLRow, error) {
+		return []SQLRow{{"id": int64(1), "name": "Ivi", "key": "entry"}}, nil
+	})
+	type keywordCase struct {
+		name   string
+		mode   string
+		source string
+	}
+	cases := []keywordCase{
+		{"ALL", "query", "FROM VALUES (1) AS a(value) SELECT value UNION ALL FROM VALUES (2) AS b(value) SELECT value"},
+		{"AND", "query", "FROM VALUES (TRUE, TRUE) AS a(left_value, right_value) WHERE left_value AND right_value SELECT left_value"},
+		{"AS", "query", "FROM VALUES (1) AS a(value) SELECT value AS result"},
+		{"ASC", "query", "FROM VALUES (2), (1) AS a(value) SELECT value ORDER BY value ASC"},
+		{"BY", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
+		{"CACHE", "query", "FROM CACHE('people') AS p SELECT p.name"},
+		{"CROSS", "query", "FROM VALUES (1) AS a(value) CROSS JOIN VALUES (2) AS b(value) SELECT a.value"},
+		{"DESC", "query", "FROM VALUES (1), (2) AS a(value) SELECT value ORDER BY value DESC"},
+		{"DISTINCT", "query", "FROM VALUES (1), (1) AS a(value) SELECT DISTINCT value"},
+		{"EXCEPT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value EXCEPT FROM VALUES (2) AS b(value) SELECT value"},
+		{"FROM", "query", "FROM VALUES (1) AS a(value) SELECT value"},
+		{"FULL", "query", "FROM VALUES (1) AS a(value) FULL JOIN VALUES (2) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"GROUP", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
+		{"HAVING", "query", "FROM VALUES (1) AS a(value) GROUP BY value HAVING COUNT(*) = 1 SELECT value"},
+		{"INNER", "query", "FROM VALUES (1) AS a(value) INNER JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"INTERSECT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value INTERSECT FROM VALUES (2) AS b(value) SELECT value"},
+		{"IS", "query", "FROM VALUES (NULL) AS a(value) WHERE value IS NULL SELECT value"},
+		{"JOIN", "query", "FROM VALUES (1) AS a(value) JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"KEYS", "query", "FROM KEYS SELECT key"},
+		{"LEFT", "query", "FROM VALUES (1) AS a(value) LEFT JOIN VALUES (2) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"LIKE", "query", "FROM VALUES ('Ivi') AS a(name) WHERE name LIKE 'I%' SELECT name"},
+		{"LIMIT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value LIMIT 1"},
+		{"NOT", "query", "FROM VALUES (FALSE) AS a(value) WHERE NOT value SELECT value"},
+		{"NULL", "query", "FROM VALUES (NULL) AS a(value) SELECT value"},
+		{"OFFSET", "query", "FROM VALUES (1), (2) AS a(value) SELECT value OFFSET 1"},
+		{"ON", "query", "FROM VALUES (1) AS a(value) JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"OR", "query", "FROM VALUES (FALSE, TRUE) AS a(left_value, right_value) WHERE left_value OR right_value SELECT right_value"},
+		{"ORDER", "query", "FROM VALUES (1) AS a(value) SELECT value ORDER BY value"},
+		{"OUTER", "query", "FROM VALUES (1) AS a(value) FULL OUTER JOIN VALUES (2) AS b(value) ON a.value = b.value SELECT a.value"},
+		{"RIGHT", "query", "FROM VALUES (1) AS a(value) RIGHT JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT b.value"},
+		{"SELECT", "query", "FROM VALUES (1) AS a(value) SELECT value"},
+		{"UNION", "query", "FROM VALUES (1) AS a(value) SELECT value UNION FROM VALUES (2) AS b(value) SELECT value"},
+		{"VALUES", "query", "FROM VALUES (1) AS a(value) SELECT value"},
+		{"WHERE", "query", "FROM VALUES (1) AS a(value) WHERE value = 1 SELECT value"},
+		{"WITH", "query", "WITH a(value) AS (VALUES (1)) FROM a SELECT value"},
+		{"TRUE", "query", "FROM VALUES (TRUE) AS a(value) WHERE value SELECT value"},
+		{"FALSE", "query", "FROM VALUES (FALSE) AS a(value) WHERE NOT value SELECT value"},
+		{"INSERT", "command", "INSERT INTO cache (key, value) VALUES ('k', 'v')"},
+		{"INTO", "command", "INSERT INTO cache (key, value) VALUES ('k', 'v')"},
+		{"COUNTER_INSERT_FIELD", "command", "INSERT INTO cache (key, counter) VALUES ('k', 1)"},
+		{"TTL_SECONDS_INSERT_FIELD", "command", "INSERT INTO cache (key, value, ttl_seconds) VALUES ('k', 'v', 1)"},
+		{"UNIX_SECONDS_INSERT_FIELD", "command", "INSERT INTO cache (key, value, unix_seconds) VALUES ('k', 'v', 1)"},
+		{"UPDATE", "command", "UPDATE cache SET value = 'v' WHERE key = 'k'"},
+		{"SET", "command", "UPDATE cache SET value = 'v' WHERE key = 'k'"},
+		{"VALUE_UPDATE_FIELD", "command", "UPDATE cache SET value = 'v' WHERE key = 'k'"},
+		{"TTL_SECONDS_UPDATE_FIELD", "command", "UPDATE cache SET ttl_seconds = 1 WHERE key = 'k'"},
+		{"UNIX_SECONDS_UPDATE_FIELD", "command", "UPDATE cache SET unix_seconds = 1 WHERE key = 'k'"},
+		{"DELETE", "command", "DELETE FROM cache WHERE key = 'k'"},
+		{"CALL", "command", "CALL GET('k')"},
+		{"VALUE_SELECTOR", "command", "SELECT value FROM cache WHERE key = 'k'"},
+		{"EXISTS_SELECTOR", "command", "SELECT exists FROM cache WHERE key = 'k'"},
+		{"TTL_SELECTOR", "command", "SELECT ttl FROM cache WHERE key = 'k'"},
+		{"DUMP_SELECTOR", "command", "SELECT dump FROM cache WHERE key = 'k'"},
+		{"KEY_NAMED_FIELD", "command", "CALL SETSTR(key => 'k', value => 'v')"},
+		{"VALUE_NAMED_FIELD", "command", "CALL SETSTR(key => 'k', value => 'v')"},
+		{"SUBKEY_NAMED_FIELD", "command", "CALL RT.PUT(key => 'k', subkey => 'field', value => 'v')"},
+		{"VALUES_NAMED_FIELD", "command", "CALL ADDSET(key => 'k', values => JSON '[\"v\"]')"},
+		{"PAIRS_NAMED_FIELD", "command", "CALL PUTMAP(key => 'k', pairs => JSON '{\"field\":\"v\"}')"},
+		{"PRIORITY_NAMED_FIELD", "command", "CALL PUSHPQ(key => 'k', priority => 1, value => 'v')"},
+		{"TTL_SECONDS_NAMED_FIELD", "command", "CALL SETSTRX(key => 'k', value => 'v', ttl_seconds => 1)"},
+		{"UNIX_SECONDS_NAMED_FIELD", "command", "CALL EXPIREAT(key => 'k', unix_seconds => 1)"},
+		{"JSON", "command", "CALL ADDSET(key => 'k', values => JSON '[\"v\"]')"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var err error
+			switch test.mode {
+			case "query":
+				_, err = ExecuteSQLQuery(test.source, resolver)
+			case "command":
+				_, err = CompileSQL(test.source)
+			default:
+				t.Fatalf("unknown test mode %q", test.mode)
+			}
+			if err != nil {
+				t.Fatalf("%s keyword source %q: %v", test.name, test.source, err)
+			}
+		})
+	}
+	for _, word := range []string{"CREATE", "FUNCTION", "LANGUAGE", "AS"} {
+		t.Run(word, func(t *testing.T) {
+			_, err := CompileSQLFunction("CREATE FUNCTION syntax_" + strings.ToLower(word) + "() LANGUAGE GO AS 'return true'")
+			if err != nil {
+				t.Fatalf("%s syntax keyword: %v", word, err)
+			}
+		})
+	}
+	for _, typeName := range []string{"ANY", "INTEGER", "NUMBER", "TEXT", "BOOLEAN"} {
+		t.Run("TYPE_"+typeName, func(t *testing.T) {
+			_, err := CompileSQLFunction("CREATE FUNCTION typed_" + strings.ToLower(typeName) + "(value " + typeName + ") LANGUAGE GO AS 'return value == value'")
+			if err != nil {
+				t.Fatalf("%s type: %v", typeName, err)
+			}
+		})
+	}
+	for _, language := range []struct {
+		name, source string
+	}{
+		{"GO", "return true"},
+		{"LUA", "return true"},
+		{"WASM", "AGFzbQEAAAA="},
+		{"JS", "return true;"},
+	} {
+		t.Run("LANGUAGE_"+language.name, func(t *testing.T) {
+			_, err := CompileSQLFunction("CREATE FUNCTION language_" + strings.ToLower(language.name) + "() LANGUAGE " + language.name + " AS '" + language.source + "'")
+			if err != nil {
+				t.Fatalf("%s language: %v", language.name, err)
+			}
+		})
+	}
+}
+
+func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
+	t.Parallel()
+	// This is the declared inventory behind TestSQLAcceptedKeywordInventory.
+	// When a parser gains a new literal word, this test fails and requires both
+	// a named execution case above and a SQL_TEST_MATRIX.md update.
+	covered := map[string]struct{}{
+		"ALL": {}, "AND": {}, "AS": {}, "ASC": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "RIGHT": {}, "SELECT": {}, "SET": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+	}
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	prefix := regexp.MustCompile(`(?:keyword|expectKeyword)\("([A-Za-z_]+)"\)`)
+	for _, sourceName := range []string{"sql.go", "sql_query.go", "sql_function.go"} {
+		source, err := os.ReadFile(filepath.Join(filepath.Dir(filename), sourceName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range prefix.FindAllSubmatch(source, -1) {
+			word := strings.ToUpper(string(match[1]))
+			if _, ok := covered[word]; !ok {
+				t.Fatalf("parser accepts %q but it has no declared keyword-inventory coverage; add a named TestSQLAcceptedKeywordInventory case", word)
+			}
+		}
+	}
+}
+
+func TestSQLKeywordInventoryReportsContextualDiagnostics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"inner_requires_join", "FROM VALUES (1) AS a(value) INNER VALUES (1) AS b(value) SELECT a.value", "expected JOIN"},
+		{"group_requires_by", "FROM VALUES (1) AS a(value) GROUP value SELECT value", "expected BY"},
+		{"order_requires_by", "FROM VALUES (1) AS a(value) SELECT value ORDER value", "expected BY"},
+		{"is_requires_null", "FROM VALUES (NULL) AS a(value) WHERE value IS TRUE SELECT value", "expected NULL"},
+		{"intersect_all_is_rejected", "FROM VALUES (1) AS a(value) SELECT value INTERSECT ALL FROM VALUES (1) AS b(value) SELECT value", "INTERSECT ALL is not supported"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(test.source, SQLSourceResolverFunc(nil))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ExecuteSQLQuery(%q) error = %v, want %q", test.source, err, test.want)
+			}
+		})
 	}
 }
 

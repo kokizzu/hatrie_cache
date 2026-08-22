@@ -15,6 +15,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Internal replication commands cannot be compiled | [`TestCompileSQLRejectsInternalReplicationCommands`](sql_test.go) |
 | Duplicate fields, ambiguous scalar forms, mixed call styles, unsafe batch form | [`TestCompileSQLProductionRejectsAmbiguousOrUnsafeForms`](sql_production_test.go) |
 | Rust-style lexical/parser diagnostics and suggestions | [`TestFormatSQLDiagnosticSuggestsKeywordAndShowsSourceSpan`](sql_test.go) |
+| Every accepted statement word, selector, mutation field, named-call field, and `JSON` literal marker | Named subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 
 ## Relational execution
 
@@ -29,12 +30,15 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Derived-table sources | [`TestExecuteSQLQuerySupportsDerivedTableSubqueries`](sql_production_test.go) |
 | Duplicate clauses and malformed structure | [`TestExecuteSQLQueryProductionRejectsStructuralErrors`](sql_production_test.go) |
 | One Hatrie key has one typed value slot; type prefixes are required | [`TestHatrieTypesShareOneLogicalKeyNamespace`](sql_production_test.go) |
+| Every accepted relational keyword/contextual word: clauses, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | 75 named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
+| Contextual clause diagnostics (`INNER` requires `JOIN`, `GROUP`/`ORDER` require `BY`, `IS` requires `NULL`, unsupported `INTERSECT ALL`) | [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 
 ## UDFs, API, and robustness
 
 | Requirement | Evidence |
 | --- | --- |
 | GO parsing, typed arguments, source spans, arithmetic and divide-by-zero diagnostics | [`sql_function_test.go`](sql_function_test.go) |
+| Every `CREATE FUNCTION` syntax word, language (`GO`, `LUA`, `WASM`, `JS`), and declared type (`ANY`, `INTEGER`, `NUMBER`, `TEXT`, `BOOLEAN`) | Named subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | GO UDF use in `WHERE` and `SELECT` | [`TestExecuteSQLQueryUsesGoFunctionInWhereAndSelect`](sql_function_test.go) |
 | Optional sandboxed LuaJIT vector batching and conversion rejection | [`sql_lua_luajit_test.go`](sql_lua_luajit_test.go) (`-tags luajit`) |
 | Numeric Wazero Wasm ABI, type rejection, and runtime close | [`sql_wazero_test.go`](sql_wazero_test.go) |
