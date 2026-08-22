@@ -460,6 +460,18 @@ func TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryDiagnosesIncompatibleLiteralComparisonTypes(t *testing.T) {
+	t.Parallel()
+	_, err := ExecuteSQLQuery("FROM VALUES (1) AS values(value) WHERE 1 = '1' SELECT value", SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "cannot compare NUMBER with TEXT") {
+		t.Fatalf("comparison error = %v, want NUMBER/TEXT diagnostic", err)
+	}
+	formatted := FormatSQLDiagnostic("FROM VALUES (1) AS values(value) WHERE 1 = '1' SELECT value", err)
+	if !strings.Contains(formatted, "query:1:") || !strings.Contains(formatted, "^") {
+		t.Fatalf("formatted comparison diagnostic = %q, want source span", formatted)
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))

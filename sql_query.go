@@ -1098,9 +1098,38 @@ func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 		if err != nil {
 			return sqlExpr{}, err
 		}
+		if err := p.validateSQLLiteralComparison(left, right, p.previous()); err != nil {
+			return sqlExpr{}, err
+		}
 		return sqlExpr{kind: "binary", op: op, left: &left, right: &right}, nil
 	}
 	return left, nil
+}
+
+func (p *sqlQueryParser) validateSQLLiteralComparison(left, right sqlExpr, token sqlToken) error {
+	if left.kind != "literal" || right.kind != "literal" || left.value == nil || right.value == nil {
+		return nil
+	}
+	leftType, rightType := sqlLiteralTypeName(left.value), sqlLiteralTypeName(right.value)
+	if leftType == rightType || leftType == "NUMBER" && rightType == "NUMBER" {
+		return nil
+	}
+	return p.diagnostic(token, "cannot compare "+leftType+" with "+rightType+"; compare values of the same type or convert the input before binding it")
+}
+
+func sqlLiteralTypeName(value interface{}) string {
+	if _, ok := sqlNumber(value); ok {
+		return "NUMBER"
+	}
+	switch value.(type) {
+	case string:
+		return "TEXT"
+	case bool:
+		return "BOOLEAN"
+	case time.Time:
+		return "TIMESTAMP"
+	}
+	return strings.ToUpper(fmt.Sprintf("%T", value))
 }
 func (p *sqlQueryParser) parseExpr() (sqlExpr, error) { return p.parseAdditiveExpr() }
 

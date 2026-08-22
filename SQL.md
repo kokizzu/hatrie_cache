@@ -298,6 +298,11 @@ true or false. `WHERE`/`HAVING` retain only true; `AND` and `OR` use the
 standard three-valued truth table. Use `IS NULL` or `IS NOT NULL` for null
 tests.
 
+Numbers compare numerically across integer/decimal literals. Non-null literal
+comparisons between incompatible types (for example `1 = '1'`) are rejected
+locally with both type names and a source span, rather than silently coercing
+them to strings.
+
 Use `TIMESTAMP '2026-08-22T09:00:00Z'` for an RFC3339 instant. Timestamp
 literals compare chronologically and reject malformed values with a source
 span and an RFC3339 example.
