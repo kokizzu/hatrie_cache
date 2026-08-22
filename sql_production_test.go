@@ -2,11 +2,13 @@ package hatriecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"reflect"
 	"sort"
 	"strings"
@@ -980,6 +982,58 @@ ORDER BY search_order`, SQLSourceResolverFunc(nil))
 	}
 	if !reflect.DeepEqual(result.Rows, want) {
 		t.Fatalf("recursive SEARCH/CYCLE rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI is unavailable; install SQLite to run SQL differential cases")
+	}
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" {
+			return nil, fmt.Errorf("unexpected source %s", name)
+		}
+		switch key {
+		case "people":
+			return []SQLRow{{"id": int64(1), "team_id": int64(10), "score": int64(9)}, {"id": int64(2), "team_id": int64(10), "score": int64(7)}, {"id": int64(3), "team_id": int64(20), "score": int64(4)}}, nil
+		case "teams":
+			return []SQLRow{{"id": int64(10), "label": "Core"}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected key %q", key)
+		}
+	})
+	setup := `CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); CREATE TABLE teams(id INTEGER, label TEXT); INSERT INTO teams VALUES(10,'Core');`
+	for _, test := range []struct{ name, hatrie, sqlite string }{
+		{"inner_filter", "SELECT p.id, t.label FROM CACHE('people') AS p JOIN CACHE('teams') AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id", "SELECT p.id, t.label FROM people AS p JOIN teams AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id"},
+		{"left_join", "SELECT p.id, t.label FROM CACHE('people') AS p LEFT JOIN CACHE('teams') AS t ON p.team_id = t.id ORDER BY p.id", "SELECT p.id, t.label FROM people AS p LEFT JOIN teams AS t ON p.team_id = t.id ORDER BY p.id"},
+		{"group", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM CACHE('people') AS p GROUP BY p.team_id ORDER BY p.team_id", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM people AS p GROUP BY p.team_id ORDER BY p.team_id"},
+		{"window", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM CACHE('people') AS p ORDER BY p.id", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM people AS p ORDER BY p.id"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ExecuteSQLQuery(test.hatrie, resolver)
+			if err != nil {
+				t.Fatalf("hatrie query: %v", err)
+			}
+			output, err := exec.Command("sqlite3", "-json", ":memory:", setup+test.sqlite).Output()
+			if err != nil {
+				t.Fatalf("sqlite query: %v", err)
+			}
+			var want, normalized []map[string]interface{}
+			if err := json.Unmarshal(output, &want); err != nil {
+				t.Fatalf("decode sqlite JSON: %v", err)
+			}
+			encoded, err := json.Marshal(got.Rows)
+			if err != nil {
+				t.Fatalf("encode hatrie rows: %v", err)
+			}
+			if err := json.Unmarshal(encoded, &normalized); err != nil {
+				t.Fatalf("decode normalized hatrie rows: %v", err)
+			}
+			if !reflect.DeepEqual(normalized, want) {
+				t.Fatalf("SQLite differential mismatch\nhatrie=%#v\nsqlite=%#v", normalized, want)
+			}
+		})
 	}
 }
 
