@@ -689,6 +689,20 @@ FROM sequence SELECT value`, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxRecu
 	}
 }
 
+func TestExecuteSQLQueryDetectsRecursiveCTECycles(t *testing.T) {
+	t.Parallel()
+	_, err := ExecuteSQLQueryContext(context.Background(), `
+WITH RECURSIVE cycle(value) AS (
+  FROM VALUES (1) AS seed(value) SELECT value
+  UNION ALL
+  FROM cycle AS previous SELECT previous.value
+)
+FROM cycle SELECT value`, SQLSourceResolverFunc(nil), SQLQueryOptions{DetectRecursiveCycles: true})
+	if err == nil || !strings.Contains(err.Error(), "cycle") || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("recursive cycle error = %v, want cycle diagnostic", err)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

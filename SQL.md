@@ -340,6 +340,8 @@ with an actionable diagnostic.
 `SQLQueryOptions.MaxRecursionDepth` optionally limits recursive-term
 expansions; zero leaves recursion governed by the normal row and timeout
 budgets. This is separate from `MaxRows`, which bounds total generated rows.
+Set `SQLQueryOptions.DetectRecursiveCycles` to reject an already-produced
+`UNION ALL` row with a clear cycle diagnostic.
 
 The server returns ordinary JSON for the CLI and SDK. A query error uses the
 same span diagnostics as command SQL.

@@ -46,6 +46,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Partitioned `ROW_NUMBER`, `RANK`, `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD` windows | [`TestExecuteSQLQuerySupportsPartitionedWindowFunctions`](sql_production_test.go), [`TestExecuteSQLQuerySupportsDenseRankLagAndLeadWindows`](sql_production_test.go) |
 | Direct self-recursive CTE seed/working-table evaluation (`UNION ALL` hierarchy traversal), plus clear diagnostics when `RECURSIVE` or its required set term is absent | [`TestExecuteSQLQuerySupportsRecursiveCTEHierarchy`](sql_production_test.go), [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 | Configured recursive CTE expansion-depth guard | [`TestExecuteSQLQueryEnforcesRecursiveCTEDepthLimit`](sql_production_test.go) |
+| Opt-in recursive `UNION ALL` cycle detector | [`TestExecuteSQLQueryDetectsRecursiveCTECycles`](sql_production_test.go) |
 | Every accepted relational keyword/contextual word: clauses, `EXPLAIN`/`ANALYZE`, all join forms, boolean/null operators, source forms, sort/pagination, set operations, and literals | Named positive subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | Contextual clause diagnostics (`INNER` requires `JOIN`, `GROUP`/`ORDER` require `BY`, `IS` requires `NULL`, unsupported `INTERSECT ALL`) | [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 

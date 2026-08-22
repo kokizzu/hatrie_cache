@@ -18,13 +18,14 @@ const maxSQLPageSize = 10000
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
-	MaxRows           int
-	MaxJoinWork       int
-	MaxResultBytes    int
-	MaxSortBytes      int
-	MaxGroupBytes     int
-	MaxRecursionDepth int
-	Timeout           time.Duration
+	MaxRows               int
+	MaxJoinWork           int
+	MaxResultBytes        int
+	MaxSortBytes          int
+	MaxGroupBytes         int
+	MaxRecursionDepth     int
+	DetectRecursiveCycles bool
+	Timeout               time.Duration
 }
 
 // SQLQueryRequest is accepted by the monitoring SQL endpoint.
@@ -2045,7 +2046,8 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 	frontier := cloneSQLRows(seedRows)
 	depth := 0
 	seen := map[string]struct{}{}
-	if !union.all {
+	detectCycles := control != nil && control.options.DetectRecursiveCycles
+	if !union.all || detectCycles {
 		for _, row := range total {
 			seen[sqlOutputRowKey(row)] = struct{}{}
 		}
@@ -2081,6 +2083,14 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 				filtered = append(filtered, row)
 			}
 			next = filtered
+		} else if detectCycles {
+			for _, row := range next {
+				key := sqlOutputRowKey(row)
+				if _, exists := seen[key]; exists {
+					return nil, fmt.Errorf("recursive CTE %q detected a cycle at depth %d; use UNION for deduplication or disable cycle detection", cte.name, depth)
+				}
+				seen[key] = struct{}{}
+			}
 		}
 		if len(total)+len(next) > maxRows {
 			return nil, fmt.Errorf("recursive CTE %q exceeds the %d row limit; add a terminating condition", cte.name, maxRows)
