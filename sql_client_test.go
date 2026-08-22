@@ -23,8 +23,12 @@ func TestSQLConnQueryRowsDecodesAndStopsOnCallbackError(t *testing.T) {
 		if r.URL.Path != "/api/sql" || r.Method != http.MethodPost {
 			t.Errorf("request = %s %s, want POST /api/sql", r.Method, r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"columns":["name"],"rows":[{"name":"Ivi"},{"name":"Lia"}]}`))
+		var request SQLQueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || !request.Stream {
+			t.Errorf("stream request = %#v/%v, want stream=true", request, err)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"type\":\"columns\",\"columns\":[\"name\"]}\n{\"type\":\"row\",\"row\":{\"name\":\"Ivi\"}}\n{\"type\":\"row\",\"row\":{\"name\":\"Lia\"}}\n"))
 	}))
 	defer server.Close()
 
@@ -46,7 +50,7 @@ func TestSQLConnQueryRowsDecodesAndStopsOnCallbackError(t *testing.T) {
 	}
 }
 
-func TestSQLConnQueryRowsFollowsBoundedCursorPages(t *testing.T) {
+func TestSQLConnQueryRowsConsumesOneNDJSONResponse(t *testing.T) {
 	t.Parallel()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,18 +59,11 @@ func TestSQLConnQueryRowsFollowsBoundedCursorPages(t *testing.T) {
 			t.Fatal(err)
 		}
 		requests++
-		if request.PageSize <= 0 || request.PageSize > 1000 {
-			t.Errorf("page_size = %d, want bounded positive size", request.PageSize)
+		if !request.Stream || request.PageSize != 0 || request.Cursor != "" {
+			t.Errorf("stream/page/cursor = %t/%d/%q, want true/0/empty", request.Stream, request.PageSize, request.Cursor)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		switch request.Cursor {
-		case "":
-			_, _ = w.Write([]byte(`{"columns":["name"],"rows":[{"name":"Ivi"}],"has_more":true,"next_cursor":"second"}`))
-		case "second":
-			_, _ = w.Write([]byte(`{"columns":["name"],"rows":[{"name":"Lia"}]}`))
-		default:
-			t.Errorf("cursor = %q", request.Cursor)
-		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"type\":\"columns\",\"columns\":[\"name\"]}\n{\"type\":\"row\",\"row\":{\"name\":\"Ivi\"}}\n{\"type\":\"row\",\"row\":{\"name\":\"Lia\"}}\n{\"type\":\"done\",\"rows\":2}\n"))
 	}))
 	defer server.Close()
 	var names []string
@@ -74,7 +71,7 @@ func TestSQLConnQueryRowsFollowsBoundedCursorPages(t *testing.T) {
 		names = append(names, person.Name)
 		return nil
 	})
-	if err != nil || n != 2 || !reflect.DeepEqual(names, []string{"Ivi", "Lia"}) || requests != 2 {
+	if err != nil || n != 2 || !reflect.DeepEqual(names, []string{"Ivi", "Lia"}) || requests != 1 {
 		t.Fatalf("QueryRows() n/names/requests/error = %d/%#v/%d/%v", n, names, requests, err)
 	}
 }

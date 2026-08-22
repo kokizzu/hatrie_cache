@@ -14,6 +14,33 @@ import (
 	"time"
 )
 
+type sqlStreamingTestResolver struct {
+	rows         []SQLRow
+	resolveCalls int
+	streamCalls  int
+}
+
+func (resolver *sqlStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	resolver.resolveCalls++
+	return nil, errors.New("materialized source resolution must not be used for a streamed query")
+}
+
+func (resolver *sqlStreamingTestResolver) StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error {
+	if name != "CACHE" || key != "people" {
+		return fmt.Errorf("stream source = %s(%q), want CACHE(people)", name, key)
+	}
+	resolver.streamCalls++
+	for _, row := range resolver.rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // These cases are the compact regression suite for the subset documented in
 // SQL.md. They deliberately cover semantics, not only successful parsing.
 func TestCompileSQLProductionScalarMatrix(t *testing.T) {
@@ -40,6 +67,38 @@ func TestCompileSQLProductionScalarMatrix(t *testing.T) {
 		if !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("CompileSQL(%q) = %#v, want %#v", test.source, got, test.want)
 		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsCompatibleSourceRows(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{rows: []SQLRow{
+		{"name": "Ari", "age": int64(12)},
+		{"name": "Bea", "age": int64(21)},
+		{"name": "Cai", "age": int64(34)},
+		{"name": "Dee", "age": int64(45)},
+	}}
+	var columns []string
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS p WHERE p.age >= 21 SELECT p.name, p.age + 1 AS next_age OFFSET 1 LIMIT 2", resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryRows() error = %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls = materialized:%d streamed:%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if want := []string{"name", "next_age"}; !reflect.DeepEqual(columns, want) {
+		t.Fatalf("columns = %#v, want %#v", columns, want)
+	}
+	if want := []SQLRow{{"name": "Cai", "next_age": int64(35)}, {"name": "Dee", "next_age": int64(46)}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows = %#v, want %#v", rows, want)
+	}
+	if err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS p SELECT p.name ORDER BY p.name", resolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil }); err == nil || !strings.Contains(err.Error(), "cannot stream") {
+		t.Fatalf("ordered ExecuteSQLQueryRows() error = %v, want a streamability error", err)
 	}
 }
 

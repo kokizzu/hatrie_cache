@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-const sqlQueryRowsPageSize = 1000
-
 // SQLConn is a small HTTP client for the read-only SQL endpoint.
 type SQLConn struct {
 	BaseURL string
@@ -81,6 +79,42 @@ func (conn *SQLConn) queryRequest(ctx context.Context, payload SQLQueryRequest) 
 	return result, nil
 }
 
+func (conn *SQLConn) streamRequest(ctx context.Context, payload SQLQueryRequest) (*http.Response, error) {
+	if conn == nil || strings.TrimSpace(conn.BaseURL) == "" {
+		return nil, fmt.Errorf("SQL connection URL is required")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.BaseURL+"/api/sql", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/x-ndjson")
+	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(conn.Token) != "" {
+		req.Header.Set("Authorization", "Bearer "+conn.Token)
+	}
+	client := conn.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		defer resp.Body.Close()
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, fmt.Errorf("SQL server returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+	}
+	return resp, nil
+}
+
 // QueryRows invokes visit once for each decoded row. It returns the number of
 // rows delivered to visit; returning an error from visit stops iteration.
 // Go does not support generic methods, so this is intentionally a generic
@@ -89,33 +123,41 @@ func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit fu
 	if visit == nil {
 		return 0, fmt.Errorf("SQL row callback is required")
 	}
+	resp, err := conn.streamRequest(ctx, SQLQueryRequest{Query: query, Stream: true})
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
 	count := 0
-	cursor := ""
+	decoder := json.NewDecoder(resp.Body)
 	for {
-		result, err := conn.QueryPage(ctx, query, nil, sqlQueryRowsPageSize, cursor)
-		if err != nil {
+		var message struct {
+			Type  string          `json:"type"`
+			Row   json.RawMessage `json:"row"`
+			Error string          `json:"error"`
+		}
+		if err := decoder.Decode(&message); err != nil {
+			if err == io.EOF {
+				return count, nil
+			}
 			return count, err
 		}
-		for _, row := range result.Rows {
-			data, err := json.Marshal(row)
-			if err != nil {
-				return count, err
-			}
+		switch message.Type {
+		case "columns", "done":
+			continue
+		case "error":
+			return count, fmt.Errorf("SQL stream error: %s", message.Error)
+		case "row":
 			var value T
-			if err := json.Unmarshal(data, &value); err != nil {
+			if err := json.Unmarshal(message.Row, &value); err != nil {
 				return count, err
 			}
 			count++
 			if err := visit(value); err != nil {
 				return count, err
 			}
+		default:
+			return count, fmt.Errorf("SQL stream returned unknown message type %q", message.Type)
 		}
-		if !result.HasMore {
-			return count, nil
-		}
-		if result.NextCursor == "" {
-			return count, fmt.Errorf("SQL server returned has_more without next_cursor")
-		}
-		cursor = result.NextCursor
 	}
 }

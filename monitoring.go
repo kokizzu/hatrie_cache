@@ -92,6 +92,14 @@ func (resolver monitoringSQLResolver) ResolveSQLSource(name string, key string) 
 	return resolver.source.ResolveSQLSource(name, key)
 }
 
+func (resolver monitoringSQLResolver) StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error {
+	streaming, ok := resolver.source.(SQLStreamSourceResolver)
+	if !ok {
+		return fmt.Errorf("SQL source %q does not support row streaming", name)
+	}
+	return streaming.StreamSQLSource(ctx, name, key, visit)
+}
+
 // ResolveSQLIndexedSource preserves optional source-index capability through
 // the monitoring wrapper so /api/sql receives the same planner choices as a
 // direct HatTrie query.
@@ -881,6 +889,70 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	}
 	if strings.TrimSpace(request.Query) == "" {
 		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL query is required"))
+		return
+	}
+	if request.Stream {
+		if request.PageSize != 0 || request.Cursor != "" {
+			writeJSONStatus(w, http.StatusBadRequest, commandError("SQL streaming cannot be combined with cursor pagination"))
+			return
+		}
+		query, err := parseSQLQueryParameters(request.Query, request.Parameters)
+		if err == nil {
+			err = validateSQLQueryStreamable(query)
+		}
+		if err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+		encoder := json.NewEncoder(w)
+		flusher, _ := w.(http.Flusher)
+		rows := 0
+		columnsWritten := false
+		resolver := monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions}
+		err = ExecuteSQLQueryRows(r.Context(), request.Query, resolver, request.Parameters, SQLQueryOptions{}, func(columns []string, row SQLRow) error {
+			if !columnsWritten {
+				if err := encoder.Encode(struct {
+					Type    string   `json:"type"`
+					Columns []string `json:"columns"`
+				}{Type: "columns", Columns: columns}); err != nil {
+					return err
+				}
+				columnsWritten = true
+			}
+			if err := encoder.Encode(struct {
+				Type string `json:"type"`
+				Row  SQLRow `json:"row"`
+			}{Type: "row", Row: row}); err != nil {
+				return err
+			}
+			rows++
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return nil
+		})
+		if !columnsWritten {
+			_ = encoder.Encode(struct {
+				Type    string   `json:"type"`
+				Columns []string `json:"columns"`
+			}{Type: "columns", Columns: sqlColumns(query.selects)})
+		}
+		if err != nil {
+			_ = encoder.Encode(struct {
+				Type  string `json:"type"`
+				Error string `json:"error"`
+			}{Type: "error", Error: FormatSQLDiagnostic(request.Query, err)})
+		} else {
+			_ = encoder.Encode(struct {
+				Type string `json:"type"`
+				Rows int    `json:"rows"`
+			}{Type: "done", Rows: rows})
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
 		return
 	}
 	var result SQLQueryResult

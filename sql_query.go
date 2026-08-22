@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -36,6 +37,7 @@ type SQLQueryRequest struct {
 	Parameters []interface{} `json:"parameters,omitempty"`
 	PageSize   int           `json:"page_size,omitempty"`
 	Cursor     string        `json:"cursor,omitempty"`
+	Stream     bool          `json:"stream,omitempty"`
 }
 
 // SQLRow is one dynamically shaped row returned by the read-only SQL query engine.
@@ -149,6 +151,12 @@ type SQLQueryStats struct {
 // nil rows is equivalent to an empty source.
 type SQLSourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]SQLRow, error)
+}
+
+// SQLStreamSourceResolver supplies source rows one at a time. It lets the SQL
+// executor avoid materializing a source or result for stream-compatible queries.
+type SQLStreamSourceResolver interface {
+	StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error
 }
 
 // SQLSnapshotLocker optionally coordinates a consistent source snapshot for one
@@ -512,6 +520,66 @@ func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
 	}
 }
 
+// StreamSQLSource visits CACHE JSON object rows incrementally. KEYS is not
+// streamable yet because its monitoring metadata scan has different expiration
+// maintenance semantics.
+func (ht *HatTrie) StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if visit == nil {
+		return fmt.Errorf("SQL row callback is required")
+	}
+	if name != "CACHE" {
+		return fmt.Errorf("SQL source %q does not support row streaming", name)
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return err
+	}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil
+	}
+	if !json.Valid(data) {
+		return fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+	}
+	if data[0] != '[' {
+		var row SQLRow
+		if err := json.Unmarshal(data, &row); err != nil {
+			return fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return visit(row)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
+		return fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+	}
+	for decoder.More() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var row SQLRow
+		if err := decoder.Decode(&row); err != nil {
+			return fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+	}
+	return nil
+}
+
 // LockSQLSnapshot exists for resolvers that coordinate snapshot lifetime. A
 // HatTrie source copies and memoizes each resolved source per query; it must not
 // hold ht.mu across execution because normal source readers acquire the same
@@ -555,6 +623,152 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	}
 	result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 	return result, sqlRuntimeDiagnostic(err)
+}
+
+var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
+
+// ExecuteSQLQueryRows evaluates a stream-compatible query and invokes visit as
+// each projected row becomes available. It never builds a result-row slice.
+// Queries requiring a global view (joins, grouping, ordering, windows, set
+// operations, DISTINCT, or custom functions) return an explanatory error
+// instead of silently falling back to materialized execution.
+func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) error {
+	if visit == nil {
+		return fmt.Errorf("SQL row callback is required")
+	}
+	control, cancel, err := newSQLExecutionControl(ctx, options)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	query, err := parseSQLQueryParameters(source, parameters)
+	if err != nil {
+		return err
+	}
+	if err := validateSQLQueryStreamable(query); err != nil {
+		return err
+	}
+	columns := sqlColumns(query.selects)
+	if query.limit == 0 {
+		return nil
+	}
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	streamRow := func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, nil, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			value := evalSQLExpr(item.expr, nil, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	}
+	if err := streamSQLSourceRows(ctx, *query.from, resolver, streamRow); err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	return nil
+}
+
+func validateSQLQueryStreamable(query *sqlQuery) error {
+	if query.explain || len(query.ctes) > 0 || len(query.joins) > 0 || len(query.unions) > 0 || len(query.groupBy) > 0 || query.having.kind != "" || query.distinct || len(query.orderBy) > 0 || sqlQueryHasAggregate(query) {
+		return fmt.Errorf("SQL query cannot stream because it requires materialized joins, grouping, ordering, DISTINCT, EXPLAIN, or set operations")
+	}
+	if query.from == nil || query.from.kind != "CACHE" && query.from.kind != "VALUES" {
+		if query.from == nil {
+			return fmt.Errorf("SQL query cannot stream without a source")
+		}
+		return fmt.Errorf("SQL source %q cannot stream rows yet; use CACHE or VALUES", query.from.kind)
+	}
+	if len(query.from.fieldTypes) > 0 {
+		return fmt.Errorf("typed CACHE fields cannot stream yet because validation must remain identical to materialized queries")
+	}
+	if query.where.window != nil || sqlExprHasCustomFunction(query.where, nil) {
+		return fmt.Errorf("SQL query cannot stream custom functions or window expressions")
+	}
+	for _, item := range query.selects {
+		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) || sqlExprHasCustomFunction(item.expr, nil) {
+			return fmt.Errorf("SQL query cannot stream SELECT * , aggregate, window, or custom-function expressions")
+		}
+	}
+	return nil
+}
+
+func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSourceResolver, visit func(SQLRow) error) error {
+	switch source.kind {
+	case "VALUES":
+		for _, values := range source.values {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			row := SQLRow{}
+			for index, column := range source.columns {
+				if index < len(values) {
+					row[column] = values[index]
+				}
+			}
+			if err := visit(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "CACHE":
+		if streaming, ok := resolver.(SQLStreamSourceResolver); ok {
+			return streaming.StreamSQLSource(ctx, source.kind, source.key, visit)
+		}
+		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := visit(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("SQL source %q cannot stream rows yet", source.kind)
+	}
 }
 
 type sqlCursor struct {

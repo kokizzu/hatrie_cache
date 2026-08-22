@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bufio"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -193,6 +194,51 @@ func TestMonitoringSQLRoutePaginatesWithBoundOpaqueCursor(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "cursor does not match") {
 		t.Fatalf("mismatched cursor status/body = %d/%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMonitoringSQLRouteStreamsNDJSONRows(t *testing.T) {
+	t.Parallel()
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM VALUES (1), (2), (3) AS values(id) WHERE id > 1 SELECT id","stream":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "application/x-ndjson") {
+		t.Fatalf("status/content-type = %d/%q, want 200/application/x-ndjson: %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	var messages []struct {
+		Type    string   `json:"type"`
+		Columns []string `json:"columns"`
+		Row     SQLRow   `json:"row"`
+		Rows    int      `json:"rows"`
+	}
+	scanner := bufio.NewScanner(response.Body)
+	for scanner.Scan() {
+		var message struct {
+			Type    string   `json:"type"`
+			Columns []string `json:"columns"`
+			Row     SQLRow   `json:"row"`
+			Rows    int      `json:"rows"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, message)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 || messages[0].Type != "columns" || !reflect.DeepEqual(messages[0].Columns, []string{"id"}) || !reflect.DeepEqual(messages[1].Row, SQLRow{"id": float64(2)}) || !reflect.DeepEqual(messages[2].Row, SQLRow{"id": float64(3)}) || messages[3].Type != "done" || messages[3].Rows != 2 {
+		t.Fatalf("NDJSON messages = %#v", messages)
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM VALUES (1), (2) AS values(id) SELECT id ORDER BY id","stream":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "cannot stream") {
+		t.Fatalf("ordered stream status/body = %d/%s, want streamability diagnostic", response.Code, response.Body.String())
 	}
 }
 

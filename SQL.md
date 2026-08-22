@@ -281,6 +281,7 @@ the first side but not the second. These operations are read-only.
 | Measure one plan | `EXPLAIN ANALYZE FROM ... SELECT ...` | Executes once and returns plan steps plus elapsed/output statistics. |
 | Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
 | Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
+| Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing result rows. |
 
 The exact command and relational examples in this section are executed by
 `TestSQLGuideCommandExamples` and `TestSQLGuideRelationalExamples`.
@@ -720,9 +721,23 @@ For HTTP, send the same data as `{"query":"... $1 ...",
 The response contains `has_more` and `next_cursor`; pass that cursor with the
 identical query and parameters for the following page. Cursors are stateless,
 bound to the query/parameter payload, and do not create a server-side result
-cache. The Go SDK exposes this as `conn.QueryPage`; `QueryRows` follows those
-cursors automatically with 1,000-row pages, so it does not retain earlier
-result pages while invoking its callback.
+cache. The Go SDK exposes this materialized-page API as `conn.QueryPage`.
+
+### NDJSON row streaming
+
+Set `"stream":true` in a `POST /api/sql` request to receive
+`application/x-ndjson`. The server writes one `{"type":"columns",...}`
+record, then one `{"type":"row","row":...}` record per projected row,
+and finally `{"type":"done","rows":N}`. A runtime failure after response
+headers is an `{"type":"error","error":"..."}` terminal record.
+
+Streaming is deliberately exact rather than pretending that every query can
+stream: it currently accepts one `CACHE` or `VALUES` source with scalar
+`WHERE`, projection, `OFFSET`, and `LIMIT`. It rejects joins, CTEs, grouping,
+aggregates, ordering, windows, set operations, `DISTINCT`, typed JSON schemas,
+and custom functions until each has a bounded-memory streaming operator.
+`QueryRows[T]` uses this NDJSON path and closes the response immediately when
+its callback returns an error.
 
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 
