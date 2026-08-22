@@ -472,6 +472,17 @@ func TestExecuteSQLQueryDiagnosesIncompatibleLiteralComparisonTypes(t *testing.T
 	}
 }
 
+func TestExecuteSQLQueryUsesCaseSensitiveUTF8BinaryStringCollation(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES ('a'), ('Z'), ('é') AS values(value) SELECT value ORDER BY value", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []SQLRow{{"value": "Z"}, {"value": "a"}, {"value": "é"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("binary string order = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))
