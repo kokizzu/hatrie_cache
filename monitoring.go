@@ -92,6 +92,13 @@ func (resolver monitoringSQLResolver) ResolveSQLSource(name string, key string) 
 	return resolver.source.ResolveSQLSource(name, key)
 }
 
+func (resolver monitoringSQLResolver) LockSQLSnapshot() func() {
+	if locker, ok := resolver.source.(SQLSnapshotLocker); ok {
+		return locker.LockSQLSnapshot()
+	}
+	return func() {}
+}
+
 func (resolver monitoringSQLResolver) EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error) {
 	return resolver.functions.EvaluateSQLFunction(name, calls)
 }

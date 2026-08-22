@@ -74,6 +74,11 @@ type SQLSourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]SQLRow, error)
 }
 
+// SQLSnapshotLocker optionally holds a consistent source snapshot for one
+// query. HatTrie uses its read lock; external resolvers still receive
+// per-query memoization for repeated sources.
+type SQLSnapshotLocker interface{ LockSQLSnapshot() func() }
+
 // SQLSourceResolverFunc adapts a function to SQLSourceResolver.
 type SQLSourceResolverFunc func(name string, key string) ([]SQLRow, error)
 
@@ -118,6 +123,15 @@ func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
 	}
 }
 
+// LockSQLSnapshot holds a HatTrie read snapshot for a relational query.
+func (ht *HatTrie) LockSQLSnapshot() func() {
+	if ht == nil {
+		return func() {}
+	}
+	ht.mu.RLock()
+	return ht.mu.RUnlock
+}
+
 // ExecuteSQLQuery parses and executes a read-only relational query against a
 // snapshot supplied by resolver. It intentionally does not execute cache commands.
 func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult, error) {
@@ -133,6 +147,8 @@ func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSour
 // ExecuteSQLQueryParameters executes source with positional $1, $2, ...
 // values supplied separately from SQL text.
 func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	release := lockSQLSnapshot(resolver)
+	defer release()
 	control, cancel, err := newSQLExecutionControl(ctx, options)
 	if err != nil {
 		return SQLQueryResult{}, err
@@ -159,6 +175,8 @@ type sqlCursor struct {
 // ExecuteSQLQueryPage executes one bounded page. Cursors are opaque and bound
 // to both SQL text and the encoded parameter values.
 func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (SQLQueryResult, error) {
+	release := lockSQLSnapshot(resolver)
+	defer release()
 	if pageSize <= 0 {
 		pageSize = 100
 	}
@@ -218,6 +236,15 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		result.NextCursor = next
 	}
 	return result, nil
+}
+
+func lockSQLSnapshot(resolver SQLSourceResolver) func() {
+	if locker, ok := resolver.(SQLSnapshotLocker); ok {
+		if release := locker.LockSQLSnapshot(); release != nil {
+			return release
+		}
+	}
+	return func() {}
 }
 
 func sqlCursorFingerprint(source string, parameters []interface{}) (string, error) {
@@ -1127,6 +1154,7 @@ type sqlExecutionControl struct {
 	maxRows  int
 	options  SQLQueryOptions
 	joinWork int
+	sources  map[string][]SQLRow
 }
 
 func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlExecutionControl, context.CancelFunc, error) {
@@ -1138,9 +1166,9 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	}
 	if options.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(ctx, options.Timeout)
-		return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options}, cancel, nil
+		return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}, cancel, nil
 	}
-	return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options}, func() {}, nil
+	return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}, func() {}, nil
 }
 
 func sqlQueryMaxRows(options SQLQueryOptions) int {
@@ -1787,9 +1815,36 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		if resolver == nil {
 			return nil, nil
 		}
-		return resolver.ResolveSQLSource(source.kind, source.key)
+		cacheKey := source.kind + "\x00" + source.key
+		if control != nil {
+			if rows, ok := control.sources[cacheKey]; ok {
+				return cloneSQLRows(rows), nil
+			}
+		}
+		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
+		if err != nil {
+			return nil, err
+		}
+		if control != nil {
+			control.sources[cacheKey] = cloneSQLRows(rows)
+		}
+		return rows, nil
 	}
 	return nil, nil
+}
+
+func cloneSQLRows(rows []SQLRow) []SQLRow {
+	if rows == nil {
+		return nil
+	}
+	cloned := make([]SQLRow, len(rows))
+	for index, row := range rows {
+		cloned[index] = make(SQLRow, len(row))
+		for key, value := range row {
+			cloned[index][key] = value
+		}
+	}
+	return cloned
 }
 func valuesSQLRows(values [][]interface{}, columns []string) []SQLRow {
 	if len(columns) == 0 && len(values) > 0 {

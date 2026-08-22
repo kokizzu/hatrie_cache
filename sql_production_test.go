@@ -328,6 +328,31 @@ SELECT people.name, $3 AS requested_name`, resolver, []interface{}{"people", int
 	}
 }
 
+func TestExecuteSQLQueryUsesOneSnapshotForRepeatedSources(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		calls++
+		if calls == 1 {
+			return []SQLRow{{"id": int64(1), "version": "first"}}, nil
+		}
+		return []SQLRow{{"id": int64(1), "version": "changed"}}, nil
+	})
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('users') AS left_users
+INNER JOIN CACHE('users') AS right_users ON left_users.id = right_users.id
+SELECT left_users.version AS left_version, right_users.version AS right_version`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("resolver calls = %d, want one snapshot read", calls)
+	}
+	if want := []SQLRow{{"left_version": "first", "right_version": "first"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("snapshot result = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

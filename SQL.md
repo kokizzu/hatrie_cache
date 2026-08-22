@@ -228,6 +228,10 @@ server and return rows; they never implicitly mutate cache values.
 without mirroring them into a second relational store. `KEYS` supplies the
 metadata/index view for key discovery and administration.
 
+Each HatTrie query holds one read snapshot across all of its `CACHE` and
+`KEYS` sources, so concurrent writes cannot create a mixed-time join. External
+resolvers are memoized per query for repeated source references.
+
 ### Query grammar and semantics
 
 The relational grammar accepts both conventional SQL order and the more
