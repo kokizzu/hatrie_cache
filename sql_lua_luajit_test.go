@@ -3,6 +3,7 @@
 package hatriecache
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,31 @@ func TestSQLLuaFunctionVectorizedBatch(t *testing.T) {
 	}
 	if got, want := values[1], int64(0); got != want {
 		t.Fatalf("second result = %#v, want %#v", got, want)
+	}
+}
+
+func BenchmarkSQLLuaFunctionBatch(b *testing.B) {
+	registry := NewSQLFunctionRegistry()
+	definition := SQLFunctionDefinition{Name: "eligible", Arguments: []string{"age", "score"}, ArgumentTypes: []string{"INTEGER", "INTEGER"}, Language: "LUA", Source: "return age > 10 and score < 9"}
+	if err := registry.Register(definition); err != nil {
+		b.Fatal(err)
+	}
+	for _, size := range []int{1_000, 10_000, 100_000} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			calls := make([]SQLFunctionCall, size)
+			for index := range calls {
+				calls[index] = SQLFunctionCall{Arguments: []interface{}{int64(index % 30), int64((index * 7) % 12)}}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				values, err := registry.EvaluateSQLFunction("eligible", calls)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sqlFunctionBenchmarkResult = values
+			}
+		})
 	}
 }
 

@@ -112,6 +112,108 @@ ORDER BY id`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQuerySupportsNotAndDistinct(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('a', TRUE), ('a', TRUE), ('b', FALSE), ('c', FALSE) AS values(label, disabled)
+WHERE NOT disabled
+SELECT DISTINCT label
+ORDER BY label DESC`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"label"}, Rows: []SQLRow{{"label": "c"}, {"label": "b"}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("NOT/DISTINCT result = %#v, want %#v", result, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsRightAndFullOuterJoin(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		switch key {
+		case "left":
+			return []SQLRow{{"id": int64(1), "left_value": "a"}, {"id": int64(2), "left_value": "b"}}, nil
+		case "right":
+			return []SQLRow{{"id": int64(2), "right_value": "x"}, {"id": int64(3), "right_value": "y"}}, nil
+		}
+		return nil, nil
+	})
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('left') AS l
+FULL OUTER JOIN CACHE('right') AS r ON l.id = r.id
+SELECT l.id AS left_id, r.id AS right_id, l.left_value, r.right_value
+ORDER BY right_id`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(FULL OUTER JOIN) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"left_id", "right_id", "left_value", "right_value"}, Rows: []SQLRow{
+		{"left_id": int64(1), "right_id": nil, "left_value": "a", "right_value": nil},
+		{"left_id": int64(2), "right_id": int64(2), "left_value": "b", "right_value": "x"},
+		{"left_id": nil, "right_id": int64(3), "left_value": nil, "right_value": "y"},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("FULL OUTER JOIN result = %#v, want %#v", result, want)
+	}
+	right, err := ExecuteSQLQuery(`FROM CACHE('left') AS l RIGHT JOIN CACHE('right') AS r ON l.id = r.id SELECT r.id ORDER BY r.id`, resolver)
+	if err != nil || !reflect.DeepEqual(right.Rows, []SQLRow{{"id": int64(2)}, {"id": int64(3)}}) {
+		t.Fatalf("RIGHT JOIN result = %#v, %v", right, err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(nil)
+	union, err := ExecuteSQLQuery(`
+FROM VALUES (1), (2) AS left_values(value) SELECT value
+UNION
+FROM VALUES (2), (3) AS right_values(value) SELECT value`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(UNION) error = %v", err)
+	}
+	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(3)}}; !reflect.DeepEqual(union.Rows, want) {
+		t.Fatalf("UNION rows = %#v, want %#v", union.Rows, want)
+	}
+	all, err := ExecuteSQLQuery(`
+FROM VALUES (1), (2) AS left_values(value) SELECT value
+UNION ALL
+FROM VALUES (2), (3) AS right_values(value) SELECT value`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(UNION ALL) error = %v", err)
+	}
+	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(2)}, {"value": int64(3)}}; !reflect.DeepEqual(all.Rows, want) {
+		t.Fatalf("UNION ALL rows = %#v, want %#v", all.Rows, want)
+	}
+	for operator, want := range map[string][]SQLRow{
+		"INTERSECT": {{"value": int64(2)}},
+		"EXCEPT":    {{"value": int64(1)}},
+	} {
+		result, err := ExecuteSQLQuery("FROM VALUES (1), (2) AS left_values(value) SELECT value "+operator+" FROM VALUES (2), (3) AS right_values(value) SELECT value", resolver)
+		if err != nil || !reflect.DeepEqual(result.Rows, want) {
+			t.Fatalf("%s result = %#v, %v; want %#v", operator, result, err, want)
+		}
+	}
+}
+
+func TestExecuteSQLQuerySupportsDerivedTableSubqueries(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM (
+  FROM VALUES ('a', 2), ('b', 5), ('c', 9) AS values(label, score)
+  WHERE score >= 5
+  SELECT label, score * 2 AS doubled
+) AS filtered
+WHERE doubled < 15
+SELECT label, doubled`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(derived table) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"label", "doubled"}, Rows: []SQLRow{{"label": "b", "doubled": int64(10)}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("derived-table result = %#v, want %#v", result, want)
+	}
+}
+
 func TestExecuteSQLQueryAggregateLimitOffsetAndNullMatrix(t *testing.T) {
 	t.Parallel()
 

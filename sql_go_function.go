@@ -11,7 +11,21 @@ import (
 // access to the host process.
 type sqlGoFunction struct {
 	definition SQLFunctionDefinition
-	expression sqlExpr
+	program    sqlGoProgram
+}
+
+// sqlGoProgram is a compact post-order instruction stream inspired by typed
+// interpreter IRs such as Go-Joker. It replaces recursive AST walking in the
+// per-row hot path while retaining the deliberately bounded GO UDF language.
+type sqlGoProgram struct {
+	instructions []sqlGoInstruction
+	stackSize    int
+}
+
+type sqlGoInstruction struct {
+	op     string
+	value  interface{}
+	column int
 }
 
 func newSQLGoFunction(definition SQLFunctionDefinition) (*sqlGoFunction, error) {
@@ -26,7 +40,11 @@ func newSQLGoFunction(definition SQLFunctionDefinition) (*sqlGoFunction, error) 
 	if err := bindSQLGoFunctionFields(&expression, definition, arguments); err != nil {
 		return nil, err
 	}
-	return &sqlGoFunction{definition: definition, expression: expression}, nil
+	program, err := compileSQLGoProgram(expression, definition)
+	if err != nil {
+		return nil, err
+	}
+	return &sqlGoFunction{definition: definition, program: program}, nil
 }
 
 func parseSQLGoFunctionExpression(definition SQLFunctionDefinition) (sqlExpr, error) {
@@ -92,6 +110,7 @@ func sqlGoFunctionSourceError(definition SQLFunctionDefinition, token, message s
 
 func (function *sqlGoFunction) Evaluate(calls []SQLFunctionCall) ([]interface{}, error) {
 	values := make([]interface{}, len(calls))
+	stack := make([]interface{}, 0, function.program.stackSize)
 	for row, call := range calls {
 		if len(call.Arguments) != len(function.definition.Arguments) {
 			return nil, &SQLFunctionError{Definition: function.definition, Message: fmt.Sprintf("expects %d arguments, got %d", len(function.definition.Arguments), len(call.Arguments)), Line: 1, Column: 1}
@@ -101,13 +120,132 @@ func (function *sqlGoFunction) Evaluate(calls []SQLFunctionCall) ([]interface{},
 				return nil, err
 			}
 		}
-		value, err := evalSQLGoFunctionExpr(function.expression, call.Arguments, function.definition)
+		value, err := function.program.Evaluate(call.Arguments, function.definition, stack)
 		if err != nil {
 			return nil, err
 		}
 		values[row] = value
 	}
 	return values, nil
+}
+
+func compileSQLGoProgram(expression sqlExpr, definition SQLFunctionDefinition) (sqlGoProgram, error) {
+	program := sqlGoProgram{instructions: make([]sqlGoInstruction, 0, 8)}
+	depth, maxDepth, err := appendSQLGoProgram(&program, expression, definition, 0, 0)
+	if err != nil {
+		return sqlGoProgram{}, err
+	}
+	if depth != 1 {
+		return sqlGoProgram{}, fmt.Errorf("GO UDF compiler produced invalid stack depth %d", depth)
+	}
+	program.stackSize = maxDepth
+	return program, nil
+}
+
+func appendSQLGoProgram(program *sqlGoProgram, expression sqlExpr, definition SQLFunctionDefinition, depth, maxDepth int) (int, int, error) {
+	column := strings.Index(definition.Source, expression.op) + 1
+	switch expression.kind {
+	case "literal":
+		program.instructions = append(program.instructions, sqlGoInstruction{op: "literal", value: expression.value, column: column})
+		depth++
+	case "field":
+		program.instructions = append(program.instructions, sqlGoInstruction{op: "argument", value: expression.value, column: strings.Index(definition.Source, expression.name) + 1})
+		depth++
+	case "unary":
+		var err error
+		depth, maxDepth, err = appendSQLGoProgram(program, *expression.left, definition, depth, maxDepth)
+		if err != nil {
+			return depth, maxDepth, err
+		}
+		program.instructions = append(program.instructions, sqlGoInstruction{op: "unary " + expression.op, column: column})
+	case "binary":
+		var err error
+		depth, maxDepth, err = appendSQLGoProgram(program, *expression.left, definition, depth, maxDepth)
+		if err != nil {
+			return depth, maxDepth, err
+		}
+		if expression.op != "IS NULL" && expression.op != "IS NOT NULL" {
+			depth, maxDepth, err = appendSQLGoProgram(program, *expression.right, definition, depth, maxDepth)
+			if err != nil {
+				return depth, maxDepth, err
+			}
+			depth--
+		}
+		program.instructions = append(program.instructions, sqlGoInstruction{op: "binary " + expression.op, column: column})
+	default:
+		return depth, maxDepth, fmt.Errorf("unsupported GO UDF expression %q", expression.kind)
+	}
+	if depth > maxDepth {
+		maxDepth = depth
+	}
+	return depth, maxDepth, nil
+}
+
+func (program sqlGoProgram) Evaluate(arguments []interface{}, definition SQLFunctionDefinition, stack []interface{}) (interface{}, error) {
+	stack = stack[:0]
+	for _, instruction := range program.instructions {
+		switch instruction.op {
+		case "literal":
+			stack = append(stack, instruction.value)
+		case "argument":
+			stack = append(stack, arguments[instruction.value.(int)])
+		default:
+			if strings.HasPrefix(instruction.op, "unary ") {
+				if len(stack) == 0 {
+					return nil, fmt.Errorf("GO UDF stack underflow")
+				}
+				value := stack[len(stack)-1]
+				op := strings.TrimPrefix(instruction.op, "unary ")
+				if op == "!" {
+					stack[len(stack)-1] = !sqlTruthy(value)
+					continue
+				}
+				if op == "-" {
+					if _, ok := sqlNumber(value); !ok {
+						return nil, sqlGoRuntimeErrorAt(definition, instruction.column, fmt.Sprintf("operator %q expects a numeric operand, got %s", op, sqlFunctionValueType(value)))
+					}
+					stack[len(stack)-1] = sqlArithmeticValue("*", int64(-1), value)
+					continue
+				}
+				return nil, fmt.Errorf("unsupported GO UDF unary operator %q", op)
+			}
+			if !strings.HasPrefix(instruction.op, "binary ") {
+				return nil, fmt.Errorf("unsupported GO UDF instruction %q", instruction.op)
+			}
+			if len(stack) == 0 {
+				return nil, fmt.Errorf("GO UDF stack underflow")
+			}
+			op := strings.TrimPrefix(instruction.op, "binary ")
+			if op == "IS NULL" {
+				stack[len(stack)-1] = stack[len(stack)-1] == nil
+				continue
+			}
+			if op == "IS NOT NULL" {
+				stack[len(stack)-1] = stack[len(stack)-1] != nil
+				continue
+			}
+			if len(stack) < 2 {
+				return nil, fmt.Errorf("GO UDF stack underflow")
+			}
+			left, right := stack[len(stack)-2], stack[len(stack)-1]
+			stack = stack[:len(stack)-2]
+			var value interface{}
+			var err error
+			if strings.Contains("+-*/%", op) && len(op) == 1 {
+				value, err = sqlGoArithmeticValueAt(op, left, right, definition, instruction.column)
+			} else {
+				value = sqlBinaryValue(op, left, right)
+			}
+			if err != nil {
+				return nil, err
+			}
+			stack = append(stack, value)
+		}
+	}
+	if len(stack) != 1 {
+		return nil, fmt.Errorf("GO UDF program ended with stack depth %d", len(stack))
+	}
+	return stack[0], nil
 }
 
 func evalSQLGoFunctionExpr(expression sqlExpr, arguments []interface{}, definition SQLFunctionDefinition) (interface{}, error) {
@@ -155,19 +293,27 @@ func evalSQLGoFunctionExpr(expression sqlExpr, arguments []interface{}, definiti
 }
 
 func sqlGoArithmeticValue(op string, left, right interface{}, definition SQLFunctionDefinition) (interface{}, error) {
+	return sqlGoArithmeticValueAt(op, left, right, definition, strings.Index(definition.Source, op)+1)
+}
+
+func sqlGoArithmeticValueAt(op string, left, right interface{}, definition SQLFunctionDefinition, column int) (interface{}, error) {
 	_, leftOK := sqlNumber(left)
 	_, rightOK := sqlNumber(right)
 	if !leftOK || !rightOK {
-		return nil, sqlGoRuntimeError(definition, op, fmt.Sprintf("operator %q expects numeric operands, got %s and %s", op, sqlFunctionValueType(left), sqlFunctionValueType(right)))
+		return nil, sqlGoRuntimeErrorAt(definition, column, fmt.Sprintf("operator %q expects numeric operands, got %s and %s", op, sqlFunctionValueType(left), sqlFunctionValueType(right)))
 	}
 	if op == "/" || op == "%" {
 		if number, _ := sqlNumber(right); number == 0 {
-			return nil, sqlGoRuntimeError(definition, op, "division by zero")
+			return nil, sqlGoRuntimeErrorAt(definition, column, "division by zero")
 		}
 	}
 	return sqlArithmeticValue(op, left, right), nil
 }
 
 func sqlGoRuntimeError(definition SQLFunctionDefinition, token, message string) error {
-	return &SQLFunctionError{Definition: definition, Message: message, Line: 1, Column: strings.Index(definition.Source, token) + 1}
+	return sqlGoRuntimeErrorAt(definition, strings.Index(definition.Source, token)+1, message)
+}
+
+func sqlGoRuntimeErrorAt(definition SQLFunctionDefinition, column int, message string) error {
+	return &SQLFunctionError{Definition: definition, Message: message, Line: 1, Column: column}
 }

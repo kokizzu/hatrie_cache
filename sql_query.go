@@ -107,16 +107,23 @@ func parseSQLQuery(source string) (*sqlQuery, error) {
 }
 
 type sqlQuery struct {
-	ctes    []sqlCTE
-	selects []sqlSelectItem
-	from    *sqlSource
-	joins   []sqlJoin
-	where   sqlExpr
-	groupBy []sqlExpr
-	having  sqlExpr
-	orderBy []sqlOrder
-	limit   int
-	offset  int
+	ctes     []sqlCTE
+	selects  []sqlSelectItem
+	from     *sqlSource
+	joins    []sqlJoin
+	where    sqlExpr
+	groupBy  []sqlExpr
+	having   sqlExpr
+	orderBy  []sqlOrder
+	limit    int
+	offset   int
+	distinct bool
+	unions   []sqlUnion
+}
+type sqlUnion struct {
+	kind  string
+	all   bool
+	query *sqlQuery
 }
 type sqlCTE struct {
 	name    string
@@ -128,6 +135,7 @@ type sqlSource struct {
 	kind, key, alias string
 	values           [][]interface{}
 	columns          []string
+	query            *sqlQuery
 }
 type sqlJoin struct {
 	kind   string
@@ -200,13 +208,17 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			p.next()
 		}
 	}
-	for p.current().kind != sqlTokenEOF && !(stopRight && p.current().kind == sqlTokenRightParen) {
+	for p.current().kind != sqlTokenEOF && !(stopRight && p.current().kind == sqlTokenRightParen) && !p.keyword("UNION") && !p.keyword("INTERSECT") && !p.keyword("EXCEPT") {
 		switch {
 		case p.keyword("SELECT"):
 			if q.selects != nil {
 				return nil, p.diagnostic(p.current(), "SELECT appears more than once")
 			}
 			p.next()
+			if p.keyword("DISTINCT") {
+				q.distinct = true
+				p.next()
+			}
 			items, err := p.parseSelect()
 			if err != nil {
 				return nil, err
@@ -222,7 +234,7 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.from = &source
-		case p.keyword("JOIN") || p.keyword("LEFT") || p.keyword("CROSS"):
+		case p.keyword("JOIN") || p.keyword("LEFT") || p.keyword("RIGHT") || p.keyword("FULL") || p.keyword("CROSS"):
 			if q.from == nil {
 				return nil, p.diagnostic(p.current(), "JOIN requires FROM first")
 			}
@@ -310,6 +322,24 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 	if q.selects == nil {
 		return nil, p.diagnostic(p.current(), "query requires SELECT")
 	}
+	if p.keyword("UNION") || p.keyword("INTERSECT") || p.keyword("EXCEPT") {
+		kind := strings.ToUpper(p.current().text)
+		p.next()
+		union := sqlUnion{kind: kind}
+		if p.keyword("ALL") {
+			if kind != "UNION" {
+				return nil, p.diagnostic(p.current(), kind+" ALL is not supported")
+			}
+			union.all = true
+			p.next()
+		}
+		right, err := p.parseQuery(stopRight)
+		if err != nil {
+			return nil, err
+		}
+		union.query = right
+		q.unions = append(q.unions, union)
+	}
 	return q, nil
 }
 
@@ -371,6 +401,19 @@ func (p *sqlQueryParser) parseValues() ([][]interface{}, error) {
 	return rows, nil
 }
 func (p *sqlQueryParser) parseSource() (sqlSource, error) {
+	if p.current().kind == sqlTokenLeftParen {
+		p.next()
+		query, err := p.parseQuery(true)
+		if err != nil {
+			return sqlSource{}, err
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlSource{}, err
+		}
+		source := sqlSource{kind: "SUBQUERY", query: query}
+		p.parseAlias(&source)
+		return source, nil
+	}
 	if p.keyword("VALUES") {
 		rows, err := p.parseValues()
 		if err != nil {
@@ -439,6 +482,24 @@ func (p *sqlQueryParser) parseJoin() (sqlJoin, error) {
 	token := p.current()
 	if p.keyword("LEFT") {
 		kind = "LEFT"
+		p.next()
+		if p.keyword("OUTER") {
+			p.next()
+		}
+		if err := p.expectKeyword("JOIN"); err != nil {
+			return sqlJoin{}, err
+		}
+	} else if p.keyword("RIGHT") {
+		kind = "RIGHT"
+		p.next()
+		if p.keyword("OUTER") {
+			p.next()
+		}
+		if err := p.expectKeyword("JOIN"); err != nil {
+			return sqlJoin{}, err
+		}
+	} else if p.keyword("FULL") {
+		kind = "FULL"
 		p.next()
 		if p.keyword("OUTER") {
 			p.next()
@@ -564,13 +625,13 @@ func (p *sqlQueryParser) parseOrCondition() (sqlExpr, error) {
 }
 
 func (p *sqlQueryParser) parseAndCondition() (sqlExpr, error) {
-	left, err := p.parseComparison()
+	left, err := p.parseNotCondition()
 	if err != nil {
 		return sqlExpr{}, err
 	}
 	for p.keyword("AND") {
 		p.next()
-		right, err := p.parseComparison()
+		right, err := p.parseNotCondition()
 		if err != nil {
 			return sqlExpr{}, err
 		}
@@ -578,6 +639,18 @@ func (p *sqlQueryParser) parseAndCondition() (sqlExpr, error) {
 		left = sqlExpr{kind: "binary", op: "AND", left: &previous, right: &right}
 	}
 	return left, nil
+}
+
+func (p *sqlQueryParser) parseNotCondition() (sqlExpr, error) {
+	if p.keyword("NOT") {
+		p.next()
+		operand, err := p.parseNotCondition()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		return sqlExpr{kind: "unary", op: "!", left: &operand}, nil
+	}
+	return p.parseComparison()
 }
 func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 	left, err := p.parseExpr()
@@ -818,7 +891,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "SELECT", "FROM", "JOIN", "LEFT", "RIGHT", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC":
+	case "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL":
 		return true
 	}
 	return false
@@ -859,6 +932,7 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 		return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxSQLQueryRows)
 	}
 	rows := wrapSQLSource(*q.from, base)
+	leftAliases := []string{q.from.alias}
 	for _, join := range q.joins {
 		right, err := resolveSQLSource(join.source, resolver, ctes)
 		if err != nil {
@@ -869,20 +943,22 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 		}
 		wrapped := wrapSQLSource(join.source, right)
 		var next []sqlExecRow
+		matchedRight := make([]bool, len(wrapped))
 		for _, left := range rows {
 			matched := false
-			for _, r := range wrapped {
+			for rightIndex, r := range wrapped {
 				combined := mergeSQLRows(left, r)
 				ok := join.kind == "CROSS" || sqlTruthy(evalSQLExpr(join.on, []sqlExecRow{combined}, combined))
 				if ok {
 					matched = true
+					matchedRight[rightIndex] = true
 					next = append(next, combined)
 					if len(next) > maxSQLQueryRows {
 						return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
 					}
 				}
 			}
-			if join.kind == "LEFT" && !matched {
+			if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
 				empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
 				next = append(next, mergeSQLRows(left, empty))
 				if len(next) > maxSQLQueryRows {
@@ -890,7 +966,24 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 				}
 			}
 		}
+		if join.kind == "RIGHT" || join.kind == "FULL" {
+			for rightIndex, right := range wrapped {
+				if matchedRight[rightIndex] {
+					continue
+				}
+				emptySources := make(map[string]SQLRow, len(leftAliases))
+				for _, alias := range leftAliases {
+					emptySources[alias] = SQLRow{}
+				}
+				emptyLeft := sqlExecRow{sources: emptySources, order: append([]string{}, leftAliases...)}
+				next = append(next, mergeSQLRows(emptyLeft, right))
+				if len(next) > maxSQLQueryRows {
+					return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxSQLQueryRows)
+				}
+			}
+		}
 		rows = next
+		leftAliases = append(leftAliases, join.source.alias)
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	if q.where.kind != "" {
@@ -954,6 +1047,19 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 			out[index].row[result.Columns[column]] = values[index]
 		}
 	}
+	if q.distinct {
+		seen := make(map[string]struct{}, len(out))
+		filtered := out[:0]
+		for _, item := range out {
+			key := sqlOutputRowKey(item.row)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			filtered = append(filtered, item)
+		}
+		out = filtered
+	}
 	if len(q.orderBy) > 0 {
 		sort.SliceStable(out, func(i, j int) bool {
 			for _, item := range q.orderBy {
@@ -981,7 +1087,91 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 	for _, item := range out[start:end] {
 		result.Rows = append(result.Rows, item.row)
 	}
+	for _, union := range q.unions {
+		right, err := executeSQLQuery(union.query, resolver, ctes)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		if !sameSQLColumns(result.Columns, right.Columns) {
+			return SQLQueryResult{}, fmt.Errorf("%s queries must project the same column names in the same order", union.kind)
+		}
+		switch union.kind {
+		case "UNION":
+			result.Rows = append(result.Rows, right.Rows...)
+			if !union.all {
+				result.Rows = distinctSQLQueryRows(result.Rows)
+			}
+		case "INTERSECT":
+			available := make(map[string]struct{}, len(right.Rows))
+			for _, row := range right.Rows {
+				available[sqlOutputRowKey(row)] = struct{}{}
+			}
+			filtered := result.Rows[:0]
+			for _, row := range result.Rows {
+				if _, exists := available[sqlOutputRowKey(row)]; exists {
+					filtered = append(filtered, row)
+				}
+			}
+			result.Rows = distinctSQLQueryRows(filtered)
+		case "EXCEPT":
+			excluded := make(map[string]struct{}, len(right.Rows))
+			for _, row := range right.Rows {
+				excluded[sqlOutputRowKey(row)] = struct{}{}
+			}
+			filtered := result.Rows[:0]
+			for _, row := range result.Rows {
+				if _, exists := excluded[sqlOutputRowKey(row)]; !exists {
+					filtered = append(filtered, row)
+				}
+			}
+			result.Rows = distinctSQLQueryRows(filtered)
+		default:
+			return SQLQueryResult{}, fmt.Errorf("unsupported SQL set operation %q", union.kind)
+		}
+	}
 	return result, nil
+}
+
+func sameSQLColumns(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if !strings.EqualFold(left[index], right[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func distinctSQLQueryRows(rows []SQLRow) []SQLRow {
+	seen := make(map[string]struct{}, len(rows))
+	out := rows[:0]
+	for _, row := range rows {
+		key := sqlOutputRowKey(row)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, row)
+	}
+	return out
+}
+
+func sqlOutputRowKey(row SQLRow) string {
+	if encoded, err := json.Marshal(row); err == nil {
+		return string(encoded)
+	}
+	keys := make([]string, 0, len(row))
+	for key := range row {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var builder strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&builder, "%q=%#v;", key, row[key])
+	}
+	return builder.String()
 }
 func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow) ([]SQLRow, error) {
 	switch source.kind {
@@ -989,6 +1179,12 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		return valuesSQLRows(source.values, source.columns), nil
 	case "CTE":
 		return ctes[source.key], nil
+	case "SUBQUERY":
+		result, err := executeSQLQuery(source.query, resolver, ctes)
+		if err != nil {
+			return nil, err
+		}
+		return result.Rows, nil
 	case "CACHE", "KEYS":
 		if resolver == nil {
 			return nil, nil

@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"encoding/base64"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,31 @@ func TestSQLWASMFunctionNumericABI(t *testing.T) {
 	}
 	if got, want := values[0], int64(42); got != want {
 		t.Fatalf("result = %#v, want %#v", got, want)
+	}
+}
+
+func BenchmarkSQLWASMFunctionBatch(b *testing.B) {
+	wasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x01, 0x7e, 0x01, 0x7e, 0x03, 0x02, 0x01, 0x00, 0x07, 0x0c, 0x01, 0x08, 'p', 'l', 'u', 's', '_', 'o', 'n', 'e', 0x00, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x42, 0x01, 0x7c, 0x0b}
+	registry := NewSQLFunctionRegistry()
+	if err := registry.Register(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "WASM", Source: base64.StdEncoding.EncodeToString(wasm)}); err != nil {
+		b.Fatal(err)
+	}
+	for _, size := range []int{1_000, 10_000, 100_000} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			calls := make([]SQLFunctionCall, size)
+			for index := range calls {
+				calls[index] = SQLFunctionCall{Arguments: []interface{}{int64(index)}}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				values, err := registry.EvaluateSQLFunction("plus_one", calls)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sqlFunctionBenchmarkResult = values
+			}
+		})
 	}
 }
 

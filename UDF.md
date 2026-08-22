@@ -31,6 +31,12 @@ it is never silently run through a different interpreter. An invalid value or
 runtime failure is returned as an SQL function diagnostic, not hidden or
 converted to a result.
 
+The GO source is parsed once, validated against declared arguments, and lowered
+to a compact post-order stack program before the first row runs. This takes the
+small typed-IR idea from Go-Joker without embedding its broad Clojure-like
+language surface. The stack is reused for every row in a batch; it is not an
+unsafe native-code JIT and cannot gain host-process capabilities.
+
 ## Values, SQL sources, and language compatibility
 
 The SQL layer is intentionally relational. It does not pretend that every
@@ -110,17 +116,27 @@ and LuaJIT 2.1. Results are guidance for this host, not a universal claim.
 | --- | ---: | --- |
 | Native Go loop | 0.46–0.52 ns/row | Compiler-optimized loop only. |
 | Experimental small Go callback VM | 11.65–12.39 ns/row | Callback dispatch. |
-| Implemented `GO`, including result vector (1K / 10K / 100K) | 91–95 / 909–980 / 8,403–9,100 ns per batch (84–98 ns/row) | Expression evaluation and output interface slice. |
+| Implemented stack-IR `GO`, including result vector (1K / 10K / 100K) | 90.6–93.6 µs / 923–949 µs / 8.01–8.50 ms per batch (80–94 ns/row) | 3–4 allocations per batch: result vector plus reused evaluation stack. |
 | LuaJIT loop, data already resident in Lua | 4.07–4.46 ns/row | Excludes any bridge; not representative alone. |
-| LuaJIT positional vector bridge (1K / 10K / 100K) | 211.5 / 219.7 / 213.5 ns/row | Constructing argument tables and copying result table. |
+| Implemented LuaJIT positional vector bridge (1K / 10K / 100K) | 379–401 / 3.99–4.17 / 40.6–42.7 ms per batch (379–427 ns/row) | Constructing argument tables and copying result table. |
 | LuaJIT object-shaped vector bridge (1K / 10K / 100K) | 396 / 408 / 464 ns/row | Object-key marshaling in addition to result copying. |
-| Wazero scalar Wasm call | 55.2 ns/call | Wasm call boundary only; no text/vector ABI. |
+| Implemented Wazero numeric Wasm ABI (1K / 10K / 100K) | 74–78 µs / 766–792 µs / 7.09–7.72 ms per batch (71–78 ns/row) | One Wasm call per row; Wazero call/result allocations currently dominate. |
 | Wasmtime-go scalar Wasm call | 1,993 ns/call | CGO call boundary. |
 | Wasmer-go scalar Wasm call | crashed on this host | Not suitable for this project. |
 
-`GO` remains the default. LuaJIT is useful only when its richer expression
-semantics justify its roughly 2–5× host-bridge cost and optional CGO deployment
-requirement. Wazero backs the current numeric Wasm ABI. JavaScript will not be
+The reproducible benchmark functions are
+[`BenchmarkSQLGoFunctionBatch`](sql_function_test.go),
+[`BenchmarkSQLLuaFunctionBatch`](sql_lua_luajit_test.go), and
+[`BenchmarkSQLWASMFunctionBatch`](sql_wazero_test.go). They are run with
+`go test -run '^$' -bench ...`; LuaJIT uses `-tags luajit`. The
+"data already resident in Lua" number is included only to show why excluding
+marshaling would give a misleading runtime comparison.
+
+`GO` remains the default because it is bounded, rich enough for SQL predicates,
+and has minimal batch allocation. LuaJIT is useful only when its richer
+expression semantics justify its roughly 4–5× host-bridge cost and optional
+CGO deployment requirement. Wazero backs the current numeric Wasm ABI.
+JavaScript will not be
 advertised until a runtime has a verified execution interrupt, a minimal host
 surface, a stable batch ABI, and source diagnostics.
 
