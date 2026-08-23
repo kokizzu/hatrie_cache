@@ -72,7 +72,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | CLI command, relational query, and function routes | [`cmd/hatrie-cli/sql_test.go`](cmd/hatrie-cli/sql_test.go) |
 | Generic Go SDK decode and callback early stop | [`sql_client_test.go`](sql_client_test.go) |
 | Parser and executor panic resistance | [`FuzzSQLParsersDoNotPanic`](sql_production_test.go), [`FuzzExecuteSQLQueryDoesNotPanic`](sql_production_test.go) |
-| Deterministic generated-reference cases plus SQLite differential cases for INNER/LEFT joins, grouping, windows, timestamps, recursive CTEs, and indexed filters; the index case also proves `INDEX SCAN` rather than only matching output | [`TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets`](sql_production_test.go), [`TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows`](sql_production_test.go) |
+| Deterministic generated-reference cases plus SQLite differential cases for INNER/LEFT/RIGHT/FULL joins (including unmatched-side NULLs), grouping, windows, timestamps, recursive CTEs, and indexed filters; the index case also proves `INDEX SCAN` rather than only matching output | [`TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets`](sql_production_test.go), [`TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows`](sql_production_test.go) |
 | Full suite, race, vet, and package coverage | `make test` (`scripts/verify-go.sh`) |
 
 ## Deliberately unsupported

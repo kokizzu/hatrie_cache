@@ -1376,14 +1376,20 @@ func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
 			return []SQLRow{{"id": int64(10), "label": "Core"}}, nil
 		case "events":
 			return []SQLRow{{"id": int64(1), "occurred_at": "2026-08-21T23:00:00Z"}, {"id": int64(2), "occurred_at": "2026-08-22T09:00:00Z"}}, nil
+		case "left_side":
+			return []SQLRow{{"id": int64(1)}, {"id": int64(2)}}, nil
+		case "right_side":
+			return []SQLRow{{"id": int64(2)}, {"id": int64(3)}}, nil
 		default:
 			return nil, fmt.Errorf("unexpected key %q", key)
 		}
 	})
-	setup := `CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); CREATE TABLE teams(id INTEGER, label TEXT); INSERT INTO teams VALUES(10,'Core'); CREATE TABLE events(id INTEGER, occurred_at TEXT); INSERT INTO events VALUES(1,'2026-08-21T23:00:00Z'),(2,'2026-08-22T09:00:00Z');`
+	setup := `CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); CREATE TABLE teams(id INTEGER, label TEXT); INSERT INTO teams VALUES(10,'Core'); CREATE TABLE events(id INTEGER, occurred_at TEXT); INSERT INTO events VALUES(1,'2026-08-21T23:00:00Z'),(2,'2026-08-22T09:00:00Z'); CREATE TABLE left_side(id INTEGER); INSERT INTO left_side VALUES(1),(2); CREATE TABLE right_side(id INTEGER); INSERT INTO right_side VALUES(2),(3);`
 	for _, test := range []struct{ name, hatrie, sqlite string }{
 		{"inner_filter", "SELECT p.id, t.label FROM CACHE('people') AS p JOIN CACHE('teams') AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id", "SELECT p.id, t.label FROM people AS p JOIN teams AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id"},
 		{"left_join", "SELECT p.id, t.label FROM CACHE('people') AS p LEFT JOIN CACHE('teams') AS t ON p.team_id = t.id ORDER BY p.id", "SELECT p.id, t.label FROM people AS p LEFT JOIN teams AS t ON p.team_id = t.id ORDER BY p.id"},
+		{"right_join", "SELECT l.id AS left_id, r.id AS right_id FROM CACHE('left_side') AS l RIGHT JOIN CACHE('right_side') AS r ON l.id = r.id ORDER BY r.id", "SELECT l.id AS left_id, r.id AS right_id FROM left_side AS l RIGHT JOIN right_side AS r ON l.id = r.id ORDER BY r.id"},
+		{"full_join", "SELECT l.id AS left_id, r.id AS right_id FROM CACHE('left_side') AS l FULL JOIN CACHE('right_side') AS r ON l.id = r.id ORDER BY COALESCE(l.id, r.id)", "SELECT l.id AS left_id, r.id AS right_id FROM left_side AS l FULL JOIN right_side AS r ON l.id = r.id ORDER BY COALESCE(l.id, r.id)"},
 		{"group", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM CACHE('people') AS p GROUP BY p.team_id ORDER BY p.team_id", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM people AS p GROUP BY p.team_id ORDER BY p.team_id"},
 		{"window", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM CACHE('people') AS p ORDER BY p.id", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM people AS p ORDER BY p.id"},
 		{"timestamp", "SELECT e.id FROM CACHE('events') AS e WHERE CAST(e.occurred_at AS TIMESTAMP) >= TIMESTAMP '2026-08-22T00:00:00Z' ORDER BY e.id", "SELECT e.id FROM events AS e WHERE e.occurred_at >= '2026-08-22T00:00:00Z' ORDER BY e.id"},
