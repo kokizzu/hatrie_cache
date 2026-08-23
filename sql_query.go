@@ -3849,14 +3849,31 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
 		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ")
 	}
+	leftAliases := []string{}
+	if query.from != nil && query.from.alias != "" {
+		leftAliases = append(leftAliases, query.from.alias)
+	}
 	for _, join := range query.joins {
 		detail := join.kind + " JOIN " + sqlExplainSource(join.source)
 		if join.kind != "CROSS" {
 			detail += " ON " + sqlExplainExpression(join.on)
 		}
-		*steps = append(*steps, SQLExplainStep{Node: prefix + "JOIN", Detail: detail})
+		node := "JOIN"
+		if join.kind == "CROSS" {
+			node = "CROSS JOIN"
+		} else if _, _, _, ok := sqlHashJoinFields(join.on, leftAliases, join.source.alias); ok {
+			node = "EQUALITY JOIN"
+			detail += "; eligible for HASH JOIN"
+			if _, _, _, ok := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias); ok {
+				detail += " or COMPOSITE INDEX JOIN"
+			}
+		}
+		*steps = append(*steps, SQLExplainStep{Node: prefix + node, Detail: detail})
 		if join.source.kind == "SUBQUERY" && join.source.query != nil {
 			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ")
+		}
+		if join.source.alias != "" {
+			leftAliases = append(leftAliases, join.source.alias)
 		}
 	}
 	if query.where.kind != "" {

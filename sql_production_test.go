@@ -1605,6 +1605,20 @@ LIMIT 2`, resolver)
 	}
 }
 
+func TestExecuteSQLQueryExplainIdentifiesEqualityJoinCandidates(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("EXPLAIN FROM VALUES (1) AS left_side(id) LEFT JOIN VALUES (1) AS right_side(id) ON left_side.id = right_side.id SELECT left_side.id", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("EXPLAIN equality join: %v", err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "EQUALITY JOIN" && strings.Contains(step.Detail, "HASH JOIN") && strings.Contains(step.Detail, "LEFT JOIN") {
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN equality join plan = %#v, want EQUALITY JOIN with HASH JOIN eligibility", result.Plan)
+}
+
 func TestExecuteSQLQueryExplainAnalyzeReturnsMeasuredExecutionStats(t *testing.T) {
 	t.Parallel()
 	result, err := ExecuteSQLQuery(`

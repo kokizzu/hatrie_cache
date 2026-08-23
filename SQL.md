@@ -277,7 +277,7 @@ the first side but not the second. These operations are read-only.
 | Compare time correctly | `WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z'` or `day > DATE '2026-08-22'` | Chronological typed comparison; malformed literals are rejected locally. |
 | Normalize a dynamic field explicitly | `CAST(raw_score AS NUMBER)` | Supports `TEXT`, `NUMBER`, `DECIMAL`, `BOOLEAN`, `DATE`, and `TIMESTAMP`; invalid dynamic values produce a source-spanned error instead of silently becoming NULL. |
 | Validate a JSON source schema | `FROM CACHE('users') AS u(id INTEGER, joined_on DATE)` | Validates and converts declared non-null fields before relational evaluation; a bad row identifies its cache key, row, field, expected type, and source span. |
-| Inspect a plan | `EXPLAIN FROM VALUES (1) AS rows(value) SELECT value` | Returns a plan without reading cache sources. |
+| Inspect a plan | `EXPLAIN FROM VALUES (1) AS rows(value) SELECT value` | Returns a plan without reading cache sources; simple equality joins are marked as hash-join eligible. |
 | Measure one plan | `EXPLAIN ANALYZE FROM ... SELECT ...` | Executes once and returns plan steps plus elapsed/output statistics. |
 | Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
 | Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
@@ -825,8 +825,12 @@ LIMIT 20;
 
 The returned `plan` and table rows contain `node`, `detail`, and, where known
 without reading a source, `estimated_rows` (currently inline `VALUES` and
-`VALUES` CTEs). Plan nodes include scans, joins, filters, aggregation,
-projection, set operations, sorting, and pagination.
+`VALUES` CTEs). A simple field-equality join is an `EQUALITY JOIN` whose detail
+states that it is eligible for `HASH JOIN`; a multi-field equality join also
+notes potential `COMPOSITE INDEX JOIN` use. This is a static capability report,
+not a promise to read a live index: `EXPLAIN ANALYZE` reports the operator that
+was actually selected and executed. Other plan nodes include scans, joins,
+filters, aggregation, projection, set operations, sorting, and pagination.
 
 Use `EXPLAIN ANALYZE` to execute the query once. It returns the plan plus
 `stats`: total `elapsed_ns`, `output_rows`, `output_columns`, and `plan_steps`.
