@@ -130,11 +130,7 @@ func validateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
 }
 
 func bloomFilterRawSetBits(data []byte) uint64 {
-	var total uint64
-	for idx := 0; idx < len(data)/8; idx++ {
-		total += uint64(mathbits.OnesCount64(binary.LittleEndian.Uint64(data[idx*8 : idx*8+8])))
-	}
-	return total
+	return hatDataStructure.BloomFilterRawSetBits(data)
 }
 
 func newBloomFilterDataFromSnapshot(snapshot bloomFilterSnapshot) (bloomFilterData, error) {

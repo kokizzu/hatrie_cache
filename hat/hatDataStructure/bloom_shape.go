@@ -1,8 +1,10 @@
 package hatDataStructure
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
+	"math/bits"
 )
 
 const (
@@ -42,3 +44,12 @@ func BloomFilterShape(expectedItems uint64, falsePositiveRate float64) (uint64, 
 
 // BloomFilterWordCount returns the uint64 backing words required for bitCount.
 func BloomFilterWordCount(bitCount uint64) uint64 { return (bitCount + 63) / 64 }
+
+// BloomFilterRawSetBits counts set bits in a little-endian uint64 payload.
+func BloomFilterRawSetBits(data []byte) uint64 {
+	var total uint64
+	for idx := 0; idx < len(data)/8; idx++ {
+		total += uint64(bits.OnesCount64(binary.LittleEndian.Uint64(data[idx*8 : idx*8+8])))
+	}
+	return total
+}
