@@ -723,6 +723,8 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
 	}
+	release := lockSQLSnapshot(resolver)
+	defer release()
 	control, cancel, err := newSQLExecutionControl(ctx, options)
 	if err != nil {
 		return err

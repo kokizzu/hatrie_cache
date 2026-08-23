@@ -815,6 +815,10 @@ each has a bounded-memory streaming operator.
 `QueryRows[T]` uses this NDJSON path and closes the response immediately when
 its callback returns an error.
 
+Streaming acquires the same resolver snapshot lock as materialized and paged
+queries, and releases it after the final callback or error. A streamed source
+therefore cannot observe a different cache snapshot halfway through one query.
+
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 
 Prefix any relational query with `EXPLAIN` to inspect its plan without reading

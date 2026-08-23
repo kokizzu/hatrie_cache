@@ -31,6 +31,43 @@ type sqlSelectiveIndexTestResolver struct {
 	unavailable map[string]bool
 }
 
+type sqlSnapshotStreamingTestResolver struct {
+	locked, released bool
+}
+
+func (resolver *sqlSnapshotStreamingTestResolver) LockSQLSnapshot() func() {
+	resolver.locked = true
+	return func() { resolver.released = true }
+}
+
+func (resolver *sqlSnapshotStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	return nil, errors.New("streaming resolver must not materialize its source")
+}
+
+func (resolver *sqlSnapshotStreamingTestResolver) StreamSQLSource(_ context.Context, _ string, _ string, visit func(SQLRow) error) error {
+	if !resolver.locked {
+		return errors.New("streaming source was read without its snapshot lock")
+	}
+	return visit(SQLRow{"id": int64(1)})
+}
+
+func TestExecuteSQLQueryRowsHoldsAndReleasesSnapshot(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSnapshotStreamingTestResolver{}
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person SELECT person.id", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		if row["id"] != int64(1) {
+			return fmt.Errorf("row = %#v, want id 1", row)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streaming snapshot query: %v", err)
+	}
+	if !resolver.locked || !resolver.released {
+		t.Fatalf("streaming snapshot lifecycle locked=%t released=%t, want both true", resolver.locked, resolver.released)
+	}
+}
+
 func (resolver *sqlSelectiveIndexTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
 	return resolver.rows, nil
 }
