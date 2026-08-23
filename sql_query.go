@@ -2977,9 +2977,6 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			leftQualifiers, leftFields, rightFields, compositeIndexJoin := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias)
 			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
 			rightIndexJoin := hashJoin && join.kind == "RIGHT"
-			if join.kind != "INNER" {
-				hashJoin = false
-			}
 			if compositeIndexJoin && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
 					// Resolve once with NULLs to establish index availability and to
@@ -3158,16 +3155,24 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 				}
 				for _, left := range rows {
+					matched := false
 					key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
-					if !ok {
-						continue
-					}
-					for _, rightIndex := range buckets[key] {
-						if err := control.addJoinWork(1); err != nil {
-							return SQLQueryResult{}, err
+					if ok {
+						for _, rightIndex := range buckets[key] {
+							if err := control.addJoinWork(1); err != nil {
+								return SQLQueryResult{}, err
+							}
+							matched = true
+							next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
+							matchedRight[rightIndex] = true
+							if len(next) > maxRows {
+								return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+							}
 						}
-						next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
-						matchedRight[rightIndex] = true
+					}
+					if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
+						empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
+						next = append(next, mergeSQLRows(left, empty))
 						if len(next) > maxRows {
 							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 						}

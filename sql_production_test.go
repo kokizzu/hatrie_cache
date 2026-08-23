@@ -486,6 +486,39 @@ ORDER BY right_id`, resolver)
 	}
 }
 
+func TestExecuteSQLQueryUsesHashJoinForEqualityOuterJoins(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, join string
+		want       []SQLRow
+	}{
+		{"left", "LEFT JOIN", []SQLRow{{"left_id": int64(1), "right_id": nil}, {"left_id": int64(2), "right_id": int64(2)}}},
+		{"right", "RIGHT JOIN", []SQLRow{{"left_id": int64(2), "right_id": int64(2)}, {"left_id": nil, "right_id": int64(3)}}},
+		{"full", "FULL JOIN", []SQLRow{{"left_id": int64(1), "right_id": nil}, {"left_id": int64(2), "right_id": int64(2)}, {"left_id": nil, "right_id": int64(3)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := "FROM VALUES (1), (2) AS left_side(id) " + test.join + " VALUES (2), (3) AS right_side(id) ON left_side.id = right_side.id SELECT left_side.id AS left_id, right_side.id AS right_id"
+			result, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("%s outer join error = %v", test.name, err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("%s outer join rows = %#v, want %#v", test.name, result.Rows, test.want)
+			}
+			explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil))
+			if err != nil || explained.Stats == nil {
+				t.Fatalf("%s outer join explain/error/stats = %#v/%v/%#v", test.name, explained.Plan, err, explained.Stats)
+			}
+			for _, step := range explained.Plan {
+				if step.Node == "HASH JOIN" {
+					return
+				}
+			}
+			t.Fatalf("%s outer join plan = %#v, want HASH JOIN", test.name, explained.Plan)
+		})
+	}
+}
+
 func TestExecuteSQLQueryJoinsMultipleSourceKindsInOnePipeline(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {

@@ -619,8 +619,11 @@ For a connected chain of two or more equality `INNER JOIN`s, the executor also
 uses exact source cardinalities from the current snapshot to start with the
 smallest source and greedily add the cheapest connected source. `EXPLAIN
 ANALYZE` records this as `JOIN REORDER` with the chosen cardinality order.
-Outer, cross, non-equality, and base-filtered joins retain their conservative
-logical execution path so null preservation and filter pushdown stay exact.
+All single-column equality `INNER`, `LEFT`, `RIGHT`, and `FULL` joins use a
+hash table and report `HASH JOIN`; null-preserving sides are emitted after the
+matching probe pass. Cross, non-equality, and base-filtered joins retain their
+conservative logical execution path so null preservation and filter pushdown
+stay exact.
 The final unordered row sequence remains the same deterministic source order
 as the written join chain; an explicit `ORDER BY` remains the portable way to
 request an output ordering.
