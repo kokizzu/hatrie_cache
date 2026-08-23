@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatDataStructure"
 )
 
 const (
 	DefaultXorFilterExpectedItems uint64  = 10000
-	maxXorFilterItems             uint64  = 1 << 22
+	maxXorFilterItems             uint64  = hatDataStructure.MaxXorFilterItems
 	xorFilterLoadFactor           float64 = 1.23
 	xorFilterFingerprintBits      uint8   = 8
 	xorFilterMaxBuildAttempts     int     = 128
@@ -97,13 +97,7 @@ func newDefaultXorFilterData() xorFilterData {
 }
 
 func validateXorFilterExpectedItems(expectedItems uint64) error {
-	if expectedItems == 0 {
-		return errors.New("hatriecache: xor filter expected items must be positive")
-	}
-	if expectedItems > maxXorFilterItems {
-		return errors.New("hatriecache: xor filter expected items must be <= " + strconv.FormatUint(maxXorFilterItems, 10))
-	}
-	return nil
+	return hatDataStructure.ValidateXorFilterExpectedItems(expectedItems)
 }
 
 func validateXorFilterSnapshot(snapshot xorFilterSnapshot) error {
