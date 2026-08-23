@@ -16,6 +16,7 @@ import them without starting the cache server:
 | `hatrie_cache/hat/hatAudit` | Concurrent JSONL audit logging and recent-event retention | `AuditEvent`, `AuditLogger`, and constructors alias it |
 | `hatrie_cache/hat/hatMetrics` | Atomic API audit, write-protection, and rate-limit counters | `APIMetrics`, `APIMetricsSnapshot`, and constructor aliases |
 | `hatrie_cache/hat/hatHash` | Allocation-free FNV-64 and JSON-string hash variants | Root compatibility wrappers serve Bloom, Count-Min, Cuckoo, HyperLogLog, and XOR structures |
+| `hatrie_cache/hat/hatStorage` | Compact reusable-index metadata and generic tail trimming | Root storage pools retain ownership but share one tested vacancy tracker |
 | `hatrie_cache/hat/hatDataStructure` | Standalone compact algorithms: Fenwick tree, Quantile Sketch, Roaring Bitmap, Sparse Bitset, HyperLogLog, and Bloom Filter shape calculation | Root keeps cache storage, snapshots, replication, and command adapters |
 
 ## Importing a component

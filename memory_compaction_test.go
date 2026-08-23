@@ -485,7 +485,8 @@ func assertCompactedStorageIndexes(t *testing.T, trie *HatTrie) {
 		&trie.reservoirSamples.reusables, &trie.xorFilters.reusables,
 		&trie.radixTrees.reusables, &trie.dbrefs.reusables,
 	} {
-		if indexes.Len() != 0 || len(indexes.stack) != 0 || len(indexes.bits) != 0 {
+		stackLen, wordLen := indexes.MetadataLengths()
+		if indexes.Len() != 0 || stackLen != 0 || wordLen != 0 {
 			t.Fatalf("compacted storage retained reusable indexes: %#v", indexes)
 		}
 	}

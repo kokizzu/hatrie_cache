@@ -6839,10 +6839,11 @@ func TestTrimReusableTailCompactsReusableIndexMetadata(t *testing.T) {
 	if got := indexes.Len(); got != 1 {
 		t.Fatalf("reusable count after trim = %d, want 1", got)
 	}
-	if got := len(indexes.stack); got != 1 {
+	stackLen, wordLen := indexes.MetadataLengths()
+	if got := stackLen; got != 1 {
 		t.Fatalf("reusable stack len after trim = %d, want 1", got)
 	}
-	if got := len(indexes.bits); got != 1 {
+	if got := wordLen; got != 1 {
 		t.Fatalf("reusable bitmap words after trim = %d, want 1", got)
 	}
 	if !indexes.Has(10) {
@@ -7577,7 +7578,8 @@ func TestDiskStorageDestroyReleasesMetadataAndFiles(t *testing.T) {
 	if disks.paths != nil {
 		t.Fatalf("paths after Destroy = %#v, want nil", disks.paths)
 	}
-	if disks.reusables.Len() != 0 || disks.reusables.stack != nil || disks.reusables.bits != nil {
+	stackLen, wordLen := disks.reusables.MetadataLengths()
+	if disks.reusables.Len() != 0 || stackLen != 0 || wordLen != 0 {
 		t.Fatalf("reusables after Destroy = %#v, want cleared", disks.reusables)
 	}
 }
@@ -7601,7 +7603,8 @@ func TestOwnedDiskStorageDestroyReleasesMetadataAndDirectory(t *testing.T) {
 	if disks.paths != nil {
 		t.Fatalf("paths after owned Destroy = %#v, want nil", disks.paths)
 	}
-	if disks.reusables.Len() != 0 || disks.reusables.stack != nil || disks.reusables.bits != nil {
+	stackLen, wordLen := disks.reusables.MetadataLengths()
+	if disks.reusables.Len() != 0 || stackLen != 0 || wordLen != 0 {
 		t.Fatalf("reusables after owned Destroy = %#v, want cleared", disks.reusables)
 	}
 }

@@ -320,14 +320,10 @@ func stableStorageRemap(length int, reusables *reusableIndexes) []int32 {
 }
 
 func cloneReusableIndexes(source *reusableIndexes) reusableIndexes {
-	if source == nil || source.count == 0 {
+	if source == nil {
 		return reusableIndexes{}
 	}
-	return reusableIndexes{
-		stack: cloneStorageSliceExact(source.stack),
-		bits:  cloneStorageSliceExact(source.bits),
-		count: source.count,
-	}
+	return source.Clone()
 }
 
 func cloneStorageSliceExact[T any](source []T) []T {
@@ -630,8 +626,7 @@ func reusableBackingBytes(indexes *reusableIndexes) uint64 {
 	if indexes == nil {
 		return 0
 	}
-	return uint64(cap(indexes.stack))*uint64(unsafe.Sizeof(int32(0))) +
-		uint64(cap(indexes.bits))*uint64(unsafe.Sizeof(uint64(0)))
+	return indexes.BackingBytes()
 }
 
 // StartMemoryCompactor starts an opt-in background compactor. It skips ticks
