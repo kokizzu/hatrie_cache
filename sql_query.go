@@ -713,9 +713,11 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 
 // ExecuteSQLQueryRows evaluates a stream-compatible query and invokes visit as
 // each projected row becomes available. It never builds a result-row slice.
-// Queries requiring a global view (joins, grouping, ordering, windows, set
+// Queries requiring a global view (grouping, ordering, windows, set
 // operations, DISTINCT, or custom functions) return an explanatory error
-// instead of silently falling back to materialized execution.
+// instead of silently falling back to materialized execution. A chain of
+// indexed INNER/LEFT CACHE joins is also streamable because each next source
+// is probed only for the current row.
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) error {
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
@@ -732,25 +734,29 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err := validateSQLQueryStreamable(query); err != nil {
 		return err
 	}
-	if len(query.joins) == 1 {
+	if len(query.joins) > 0 {
 		indexed, ok := resolver.(SQLIndexedSourceResolver)
 		if !ok {
-			return fmt.Errorf("SQL query cannot stream this join because the resolver has no right-side index")
+			return fmt.Errorf("SQL query cannot stream these joins because the resolver has no right-side index")
 		}
-		join := query.joins[0]
-		_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, sqlStreamJoinRightField(query), nil)
-		if err != nil {
-			return sqlRuntimeDiagnostic(err)
-		}
-		if !available {
-			return fmt.Errorf("SQL query cannot stream this join because the right-side index is unavailable")
+		aliases := []string{query.from.alias}
+		for _, join := range query.joins {
+			_, _, rightField, _ := sqlHashJoinFields(join.on, aliases, join.source.alias)
+			_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+			if err != nil {
+				return sqlRuntimeDiagnostic(err)
+			}
+			if !available {
+				return fmt.Errorf("SQL query cannot stream join %q because its right-side index is unavailable", join.source.alias)
+			}
+			aliases = append(aliases, join.source.alias)
 		}
 	}
 	columns := sqlColumns(query.selects)
 	if query.limit == 0 {
 		return nil
 	}
-	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	inputRows, expandedRows, seen, emitted, resultBytes := 0, 0, 0, 0, 0
 	emitRow := func(execRow sqlExecRow) error {
 		if err := control.check(); err != nil {
 			return err
@@ -794,17 +800,25 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		}
 		return nil
 	}
-	streamRow := func(sourceRow SQLRow) error {
-		inputRows++
-		if inputRows > control.maxRows {
-			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
-		}
-		left := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
-		if len(query.joins) == 0 {
+	var streamJoined func(int, sqlExecRow) error
+	streamJoined = func(joinIndex int, left sqlExecRow) error {
+		if joinIndex == len(query.joins) {
+			expandedRows++
+			if expandedRows > control.maxRows {
+				return fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", control.maxRows)
+			}
 			return emitRow(left)
 		}
-		join := query.joins[0]
-		leftQualifier, leftField, rightField, _ := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
+		join := query.joins[joinIndex]
+		aliases := make([]string, 1, joinIndex+1)
+		aliases[0] = query.from.alias
+		for index := 0; index < joinIndex; index++ {
+			aliases = append(aliases, query.joins[index].source.alias)
+		}
+		leftQualifier, leftField, rightField, _ := sqlHashJoinFields(join.on, aliases, join.source.alias)
+		if err := control.addJoinWork(1); err != nil {
+			return err
+		}
 		indexed := resolver.(SQLIndexedSourceResolver)
 		value := sqlField(left, leftQualifier, leftField)
 		candidates, _, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, value)
@@ -812,14 +826,27 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 			return err
 		}
 		if len(candidates) == 0 && join.kind == "LEFT" {
-			return emitRow(mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}))
+			empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
+			return streamJoined(joinIndex+1, mergeSQLRows(left, empty))
 		}
 		for _, candidate := range candidates {
-			if err := emitRow(mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}})); err != nil {
+			if err := control.addJoinWork(1); err != nil {
+				return err
+			}
+			right := sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}
+			if err := streamJoined(joinIndex+1, mergeSQLRows(left, right)); err != nil {
 				return err
 			}
 		}
 		return nil
+	}
+	streamRow := func(sourceRow SQLRow) error {
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		left := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		return streamJoined(0, left)
 	}
 	if err := streamSQLSourceRows(ctx, *query.from, resolver, streamRow); err != nil && err != errSQLStreamLimitReached {
 		return sqlRuntimeDiagnostic(err)
@@ -827,23 +854,22 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	return nil
 }
 
-func sqlStreamJoinRightField(query *sqlQuery) string {
-	_, _, field, _ := sqlHashJoinFields(query.joins[0].on, []string{query.from.alias}, query.joins[0].source.alias)
-	return field
-}
-
 func validateSQLQueryStreamable(query *sqlQuery) error {
-	if query.explain || len(query.ctes) > 0 || len(query.joins) > 1 || len(query.unions) > 0 || len(query.groupBy) > 0 || query.having.kind != "" || query.distinct || len(query.orderBy) > 0 || sqlQueryHasAggregate(query) {
-		return fmt.Errorf("SQL query cannot stream because it requires materialized joins, grouping, ordering, DISTINCT, EXPLAIN, or set operations")
+	if query.explain || len(query.ctes) > 0 || len(query.unions) > 0 || len(query.groupBy) > 0 || query.having.kind != "" || query.distinct || len(query.orderBy) > 0 || sqlQueryHasAggregate(query) {
+		return fmt.Errorf("SQL query cannot stream because it requires materialized grouping, ordering, DISTINCT, EXPLAIN, or set operations")
 	}
-	if len(query.joins) == 1 {
-		join := query.joins[0]
+	aliases := []string{}
+	if query.from != nil {
+		aliases = append(aliases, query.from.alias)
+	}
+	for _, join := range query.joins {
 		if (join.kind != "INNER" && join.kind != "LEFT") || join.source.kind != "CACHE" {
-			return fmt.Errorf("SQL query can stream only one indexed INNER or LEFT CACHE join")
+			return fmt.Errorf("SQL query can stream only indexed INNER or LEFT CACHE joins")
 		}
-		if _, _, _, ok := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias); !ok {
+		if _, _, _, ok := sqlHashJoinFields(join.on, aliases, join.source.alias); !ok {
 			return fmt.Errorf("SQL query can stream a join only with an equality ON condition")
 		}
+		aliases = append(aliases, join.source.alias)
 	}
 	if query.from == nil || query.from.kind != "CACHE" && query.from.kind != "VALUES" {
 		if query.from == nil {

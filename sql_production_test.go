@@ -17,28 +17,78 @@ import (
 )
 
 type sqlStreamingTestResolver struct {
-	rows         []SQLRow
-	resolveCalls int
-	streamCalls  int
-	indexRows    []SQLRow
-	indexCalls   int
+	rows           []SQLRow
+	resolveCalls   int
+	streamCalls    int
+	indexRows      []SQLRow
+	indexRowsByKey map[string][]SQLRow
+	indexCalls     int
 }
 
 func (resolver *sqlStreamingTestResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
-	if name != "CACHE" || key != "teams" || field != "id" {
+	if name != "CACHE" || field != "id" {
 		return nil, false, fmt.Errorf("unexpected index source %s(%q).%s", name, key, field)
 	}
 	resolver.indexCalls++
 	if value == nil {
 		return nil, true, nil
 	}
+	indexedRows := resolver.indexRows
+	if resolver.indexRowsByKey != nil {
+		var ok bool
+		indexedRows, ok = resolver.indexRowsByKey[key]
+		if !ok {
+			return nil, false, nil
+		}
+	}
 	var rows []SQLRow
-	for _, row := range resolver.indexRows {
+	for _, row := range indexedRows {
 		if reflect.DeepEqual(row["id"], value) {
 			rows = append(rows, row)
 		}
 	}
 	return rows, true, nil
+}
+
+func TestExecuteSQLQueryRowsStreamsChainedIndexedJoins(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{
+		rows: []SQLRow{{"id": int64(1), "team_id": int64(10)}, {"id": int64(2), "team_id": int64(20)}},
+		indexRowsByKey: map[string][]SQLRow{
+			"teams":  {{"id": int64(10), "group_id": int64(100)}, {"id": int64(20), "group_id": int64(200)}},
+			"groups": {{"id": int64(100), "name": "Core"}},
+		},
+	}
+	var got []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person INNER JOIN CACHE('teams') AS team ON person.team_id = team.id LEFT JOIN CACHE('groups') AS group ON team.group_id = group.id SELECT person.id, group.name AS group_name", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream chained indexed joins: %v", err)
+	}
+	if want := []SQLRow{{"id": int64(1), "group_name": "Core"}, {"id": int64(2), "group_name": nil}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stream chained indexed joins = %#v, want %#v", got, want)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 || resolver.indexCalls != 6 {
+		t.Fatalf("resolver calls materialized=%d stream=%d index=%d, want 0/1/6", resolver.resolveCalls, resolver.streamCalls, resolver.indexCalls)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedJoinsHonorMaxRows(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{
+		rows:      []SQLRow{{"id": int64(1), "team_id": int64(10)}},
+		indexRows: []SQLRow{{"id": int64(10), "name": "Core"}, {"id": int64(10), "name": "Backup"}},
+	}
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person JOIN CACHE('teams') AS team ON person.team_id = team.id SELECT person.id, team.name", resolver, nil, SQLQueryOptions{MaxRows: 1}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "SQL join exceeds the 1 row limit") {
+		t.Fatalf("streamed indexed join MaxRows error = %v, want join-row limit", err)
+	}
+	err = ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person JOIN CACHE('teams') AS team ON person.team_id = team.id SELECT person.id, team.name", resolver, nil, SQLQueryOptions{MaxJoinWork: 1}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "join work budget exceeded") {
+		t.Fatalf("streamed indexed join MaxJoinWork error = %v, want join-work limit", err)
+	}
 }
 
 func TestExecuteSQLQueryRowsStreamsIndexedInnerAndLeftJoin(t *testing.T) {
