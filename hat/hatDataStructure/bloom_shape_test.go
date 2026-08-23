@@ -17,4 +17,7 @@ func TestBloomFilterShapeIsUsableByImporters(t *testing.T) {
 	if _, _, err := hatDataStructure.BloomFilterShape(0, 0.01); err == nil {
 		t.Fatal("BloomFilterShape(0, 0.01) error = nil")
 	}
+	if got := hatDataStructure.BloomFilterWordCount(65); got != 2 {
+		t.Fatalf("BloomFilterWordCount(65) = %d, want 2", got)
+	}
 }

@@ -457,7 +457,7 @@ func bloomFilterFNV64JSONString(value string) uint64 {
 }
 
 func bloomFilterWordCount(bitCount uint64) uint64 {
-	return (bitCount + 63) / 64
+	return hatDataStructure.BloomFilterWordCount(bitCount)
 }
 
 // BloomFilterStorage stores Bloom filter values outside the trie.

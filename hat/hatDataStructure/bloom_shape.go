@@ -39,3 +39,6 @@ func BloomFilterShape(expectedItems uint64, falsePositiveRate float64) (uint64, 
 	}
 	return bitCount, uint8(hashes), nil
 }
+
+// BloomFilterWordCount returns the uint64 backing words required for bitCount.
+func BloomFilterWordCount(bitCount uint64) uint64 { return (bitCount + 63) / 64 }
