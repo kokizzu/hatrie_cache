@@ -114,19 +114,7 @@ func validateBloomFilterSnapshot(snapshot bloomFilterSnapshot) error {
 }
 
 func validateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-	usedBits := bitCount % 64
-	if usedBits == 0 {
-		return nil
-	}
-	lastWord := binary.LittleEndian.Uint64(data[len(data)-8:])
-	usedMask := (uint64(1) << uint(usedBits)) - 1
-	if lastWord&^usedMask != 0 {
-		return errors.New("hatriecache: bloom filter bitset has unused bits set")
-	}
-	return nil
+	return hatDataStructure.ValidateBloomFilterUnusedBits(bitCount, data)
 }
 
 func bloomFilterRawSetBits(data []byte) uint64 {

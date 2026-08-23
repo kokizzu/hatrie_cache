@@ -53,3 +53,15 @@ func BloomFilterRawSetBits(data []byte) uint64 {
 	}
 	return total
 }
+
+// ValidateBloomFilterUnusedBits rejects set bits beyond bitCount.
+func ValidateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
+	if len(data) == 0 || bitCount%64 == 0 {
+		return nil
+	}
+	last := binary.LittleEndian.Uint64(data[len(data)-8:])
+	if last&^((uint64(1)<<uint(bitCount%64))-1) != 0 {
+		return errors.New("hatriecache: bloom filter bitset has unused bits set")
+	}
+	return nil
+}
