@@ -4161,8 +4161,8 @@ func TestBloomFilterRejectsInvalidConfig(t *testing.T) {
 
 func TestBloomFilterEmptyBitsetAllocatesLazily(t *testing.T) {
 	filter := newBloomFilterDataWithShape(maxBloomFilterBits, 1)
-	if len(filter.words) != 0 || filter.EncodedSize() != 0 {
-		t.Fatalf("empty max Bloom filter allocated %d words/%d bytes, want lazy empty backing", len(filter.words), filter.EncodedSize())
+	if len(filter.filter.RawWords()) != 0 || filter.EncodedSize() != 0 {
+		t.Fatalf("empty max Bloom filter allocated %d words/%d bytes, want lazy empty backing", len(filter.filter.RawWords()), filter.EncodedSize())
 	}
 	if filter.Contains("alpha") {
 		t.Fatal("empty lazy Bloom filter contains alpha, want miss")
@@ -4188,8 +4188,8 @@ func TestBloomFilterEmptyBitsetAllocatesLazily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBloomFilterDataFromSnapshot(full zero bitset) error = %v", err)
 	}
-	if len(restored.words) != 0 || restored.EncodedSize() != 0 {
-		t.Fatalf("restored empty Bloom filter allocated %d words/%d bytes, want lazy empty backing", len(restored.words), restored.EncodedSize())
+	if len(restored.filter.RawWords()) != 0 || restored.EncodedSize() != 0 {
+		t.Fatalf("restored empty Bloom filter allocated %d words/%d bytes, want lazy empty backing", len(restored.filter.RawWords()), restored.EncodedSize())
 	}
 
 	ht := newTestTrie(t)
@@ -4197,8 +4197,8 @@ func TestBloomFilterEmptyBitsetAllocatesLazily(t *testing.T) {
 		t.Fatalf("UpsertBloomFilter() error = %v", err)
 	}
 	hval := ht.Get("seen")
-	if len(ht.bloomFilters.array[hval.Index].words) != 0 {
-		t.Fatalf("empty trie Bloom filter allocated %d words, want lazy empty backing", len(ht.bloomFilters.array[hval.Index].words))
+	if len(ht.bloomFilters.array[hval.Index].filter.RawWords()) != 0 {
+		t.Fatalf("empty trie Bloom filter allocated %d words, want lazy empty backing", len(ht.bloomFilters.array[hval.Index].filter.RawWords()))
 	}
 	if info, ok := ht.BloomFilterInfo("seen"); !ok || info.BitBytes != 0 || info.Insertions != 0 {
 		t.Fatalf("BloomFilterInfo(empty) = %#v/%v, want no allocated bit bytes", info, ok)

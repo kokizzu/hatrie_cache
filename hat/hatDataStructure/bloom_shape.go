@@ -59,6 +59,9 @@ func ValidateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
 	if len(data) == 0 || bitCount%64 == 0 {
 		return nil
 	}
+	if len(data) < 8 {
+		return errors.New("hatriecache: invalid bloom filter bitset length")
+	}
 	last := binary.LittleEndian.Uint64(data[len(data)-8:])
 	if last&^((uint64(1)<<uint(bitCount%64))-1) != 0 {
 		return errors.New("hatriecache: bloom filter bitset has unused bits set")

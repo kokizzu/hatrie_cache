@@ -55,11 +55,12 @@ func (ht *HatTrie) appendCommandDumpFixedEntryBinaryLocked(destination []byte, e
 
 func appendCommandDumpBloomFilterBinary(destination []byte, expiresAt *time.Time, filter bloomFilterData) ([]byte, error) {
 	snapshot := bloomFilterSnapshot{
-		BitCount:   uint64(filter.bitCount),
-		HashCount:  filter.hashCount,
-		Insertions: filter.insertions,
+		BitCount:   filter.filter.BitCount(),
+		HashCount:  filter.filter.HashCount(),
+		Insertions: filter.filter.Insertions(),
 	}
-	rawSize := len(filter.words) * 8
+	words := filter.filter.RawWords()
+	rawSize := len(words) * 8
 	size, err := snapshotValueBinaryBloomFilterSize(snapshot, rawSize)
 	if err != nil {
 		return destination, err
@@ -73,7 +74,7 @@ func appendCommandDumpBloomFilterBinary(destination []byte, expiresAt *time.Time
 	writer.writeUvarint(snapshot.BitCount)
 	writer.writeUvarint(uint64(snapshot.HashCount))
 	writer.writeUvarint(snapshot.Insertions)
-	writeSnapshotUint64Bytes(&writer.binaryFieldWriter, filter.words)
+	writeSnapshotUint64Bytes(&writer.binaryFieldWriter, words)
 	return finishReplicationDirectPayload(writer, entry), nil
 }
 

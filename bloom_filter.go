@@ -1,12 +1,7 @@
 package hatriecache
 
 import (
-	"encoding/base64"
-	"encoding/binary"
-	"errors"
 	"fmt"
-	"math"
-	mathbits "math/bits"
 
 	json "github.com/goccy/go-json"
 	"hatrie_cache/hat/hatDataStructure"
@@ -23,38 +18,19 @@ const (
 	bloomFilterFNVPrime64               uint64  = hatHash.FNVPrime64
 )
 
-// BloomFilterInfo reports the shape and current fill level of a Bloom filter.
-// Bloom filters do not store their inserted values, only a compact bitset.
-type BloomFilterInfo struct {
-	BitCount                   uint64  `json:"bit_count"`
-	BitBytes                   uint64  `json:"bit_bytes"`
-	HashCount                  uint8   `json:"hash_count"`
-	Insertions                 uint64  `json:"insertions"`
-	SetBits                    uint64  `json:"set_bits"`
-	FillRatio                  float64 `json:"fill_ratio"`
-	EstimatedFalsePositiveRate float64 `json:"estimated_false_positive_rate"`
-}
-
-type bloomFilterSnapshot struct {
-	BitCount   uint64 `json:"bit_count"`
-	HashCount  uint8  `json:"hash_count"`
-	Insertions uint64 `json:"insertions"`
-	Bits       string `json:"bits"`
-}
+type BloomFilterInfo = hatDataStructure.BloomFilterInfo
+type bloomFilterSnapshot = hatDataStructure.BloomFilterSnapshot
 
 type bloomFilterData struct {
-	words      []uint64
-	insertions uint64
-	bitCount   uint32
-	hashCount  uint8
+	filter hatDataStructure.BloomFilter
 }
 
 func newBloomFilterData(expectedItems uint64, falsePositiveRate float64) (bloomFilterData, error) {
-	bitCount, hashCount, err := bloomFilterShape(expectedItems, falsePositiveRate)
+	filter, err := hatDataStructure.NewBloomFilter(expectedItems, falsePositiveRate)
 	if err != nil {
 		return bloomFilterData{}, err
 	}
-	return newBloomFilterDataWithShape(bitCount, hashCount), nil
+	return bloomFilterData{filter: filter}, nil
 }
 
 func newDefaultBloomFilterData() bloomFilterData {
@@ -66,10 +42,11 @@ func newDefaultBloomFilterData() bloomFilterData {
 }
 
 func newBloomFilterDataWithShape(bitCount uint64, hashCount uint8) bloomFilterData {
-	return bloomFilterData{
-		bitCount:  uint32(bitCount),
-		hashCount: hashCount,
+	filter, err := hatDataStructure.NewBloomFilterWithShape(bitCount, hashCount)
+	if err != nil {
+		return bloomFilterData{}
 	}
+	return bloomFilterData{filter: filter}
 }
 
 func bloomFilterShape(expectedItems uint64, falsePositiveRate float64) (uint64, uint8, error) {
@@ -77,40 +54,7 @@ func bloomFilterShape(expectedItems uint64, falsePositiveRate float64) (uint64, 
 }
 
 func validateBloomFilterSnapshot(snapshot bloomFilterSnapshot) error {
-	if snapshot.BitCount < minBloomFilterBits || snapshot.BitCount > maxBloomFilterBits {
-		return errors.New("hatriecache: invalid bloom filter bit count")
-	}
-	if snapshot.HashCount == 0 || snapshot.HashCount > maxBloomFilterHashes {
-		return errors.New("hatriecache: invalid bloom filter hash count")
-	}
-	size, ok := base64DecodedSize(snapshot.Bits)
-	if !ok {
-		return errors.New("hatriecache: invalid base64 encoding")
-	}
-	if size == 0 {
-		if snapshot.Insertions != 0 {
-			return errors.New("hatriecache: empty bloom filter bitset has insertions")
-		}
-		return nil
-	}
-	if uint64(size) != bloomFilterWordCount(snapshot.BitCount)*8 {
-		return errors.New("hatriecache: invalid bloom filter bitset length")
-	}
-	data, err := base64.StdEncoding.DecodeString(snapshot.Bits)
-	if err != nil {
-		return err
-	}
-	if err := validateBloomFilterUnusedBits(snapshot.BitCount, data); err != nil {
-		return err
-	}
-	setBits := bloomFilterRawSetBits(data)
-	if snapshot.Insertions == 0 && setBits != 0 {
-		return errors.New("hatriecache: empty bloom filter snapshot has set bits")
-	}
-	if snapshot.Insertions > 0 && setBits == 0 {
-		return errors.New("hatriecache: populated bloom filter snapshot has no set bits")
-	}
-	return nil
+	return hatDataStructure.ValidateBloomFilterSnapshot(snapshot)
 }
 
 func validateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
@@ -122,27 +66,11 @@ func bloomFilterRawSetBits(data []byte) uint64 {
 }
 
 func newBloomFilterDataFromSnapshot(snapshot bloomFilterSnapshot) (bloomFilterData, error) {
-	if err := validateBloomFilterSnapshot(snapshot); err != nil {
-		return bloomFilterData{}, err
-	}
-	raw, err := base64.StdEncoding.DecodeString(snapshot.Bits)
+	filter, err := hatDataStructure.NewBloomFilterFromSnapshot(snapshot)
 	if err != nil {
 		return bloomFilterData{}, err
 	}
-	out := bloomFilterData{
-		bitCount:   uint32(snapshot.BitCount),
-		hashCount:  snapshot.HashCount,
-		insertions: snapshot.Insertions,
-	}
-	if len(raw) == 0 || (snapshot.Insertions == 0 && bloomFilterRawSetBits(raw) == 0) {
-		return out, nil
-	}
-	out.words = make([]uint64, len(raw)/8)
-	for idx := range out.words {
-		out.words[idx] = binary.LittleEndian.Uint64(raw[idx*8 : idx*8+8])
-	}
-	out.maskUnusedBits()
-	return out, nil
+	return bloomFilterData{filter: filter}, nil
 }
 
 func (filter *bloomFilterData) Add(value interface{}) bool {
@@ -151,14 +79,14 @@ func (filter *bloomFilterData) Add(value interface{}) bool {
 }
 
 func (filter *bloomFilterData) AddChecked(value interface{}) (bool, error) {
-	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+	if filter == nil || filter.filter.BitCount() == 0 || filter.filter.HashCount() == 0 {
 		return false, nil
 	}
 	key, err := bloomFilterItemKey(value)
 	if err != nil {
 		return false, err
 	}
-	return filter.addKey(key), nil
+	return filter.filter.AddBytes(key), nil
 }
 
 func (filter *bloomFilterData) AddOne(value interface{}, values ...interface{}) int {
@@ -167,7 +95,7 @@ func (filter *bloomFilterData) AddOne(value interface{}, values ...interface{}) 
 }
 
 func (filter *bloomFilterData) AddOneChecked(value interface{}, values ...interface{}) (int, error) {
-	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+	if filter == nil || filter.filter.BitCount() == 0 || filter.filter.HashCount() == 0 {
 		return 0, nil
 	}
 	keys, err := bloomFilterItemKeys(value, values...)
@@ -184,7 +112,7 @@ func (filter *bloomFilterData) AddOneChecked(value interface{}, values ...interf
 }
 
 func (filter *bloomFilterData) addCommandBatch(values Slice) (int, error) {
-	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+	if filter == nil || filter.filter.BitCount() == 0 || filter.filter.HashCount() == 0 {
 		return 0, nil
 	}
 	var encoded [][]byte
@@ -227,40 +155,11 @@ func (filter *bloomFilterData) addCommandBatch(values Slice) (int, error) {
 }
 
 func (filter *bloomFilterData) addKey(key []byte) bool {
-	filter.ensureWords()
-	changed := false
-	filter.visitIndexes(key, func(index uint64) {
-		word := index / 64
-		mask := uint64(1) << uint(index%64)
-		if filter.words[word]&mask == 0 {
-			filter.words[word] |= mask
-			changed = true
-		}
-	})
-	if changed {
-		filter.insertions++
-	}
-	return changed
+	return filter != nil && filter.filter.AddBytes(key)
 }
 
 func (filter *bloomFilterData) addJSONString(value string) bool {
-	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
-		return false
-	}
-	filter.ensureWords()
-	changed := false
-	filter.visitJSONStringIndexes(value, func(index uint64) {
-		word := index / 64
-		mask := uint64(1) << uint(index%64)
-		if filter.words[word]&mask == 0 {
-			filter.words[word] |= mask
-			changed = true
-		}
-	})
-	if changed {
-		filter.insertions++
-	}
-	return changed
+	return filter != nil && filter.filter.AddJSONString(value)
 }
 
 func (filter *bloomFilterData) Contains(value interface{}) bool {
@@ -269,130 +168,38 @@ func (filter *bloomFilterData) Contains(value interface{}) bool {
 }
 
 func (filter *bloomFilterData) ContainsChecked(value interface{}) (bool, error) {
-	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+	if filter == nil || filter.filter.BitCount() == 0 || filter.filter.HashCount() == 0 {
 		return false, nil
 	}
 	key, err := bloomFilterItemKey(value)
 	if err != nil {
 		return false, err
 	}
-	return filter.containsKey(key), nil
+	return filter.filter.ContainsBytes(key), nil
 }
 
 func (filter *bloomFilterData) containsKey(key []byte) bool {
-	if len(filter.words) == 0 {
-		return false
-	}
-	contains := true
-	filter.visitIndexes(key, func(index uint64) {
-		word := index / 64
-		mask := uint64(1) << uint(index%64)
-		if filter.words[word]&mask == 0 {
-			contains = false
-		}
-	})
-	return contains
+	return filter != nil && filter.filter.ContainsBytes(key)
 }
 
 func (filter *bloomFilterData) containsJSONString(value string) bool {
-	if filter == nil || len(filter.words) == 0 {
-		return false
-	}
-	contains := true
-	filter.visitJSONStringIndexes(value, func(index uint64) {
-		word := index / 64
-		mask := uint64(1) << uint(index%64)
-		if filter.words[word]&mask == 0 {
-			contains = false
-		}
-	})
-	return contains
+	return filter != nil && filter.filter.ContainsJSONString(value)
 }
 
 func (filter bloomFilterData) Info() BloomFilterInfo {
-	setBits := filter.SetBits()
-	fillRatio := 0.0
-	if filter.bitCount > 0 {
-		fillRatio = float64(setBits) / float64(filter.bitCount)
-	}
-	return BloomFilterInfo{
-		BitCount:                   uint64(filter.bitCount),
-		BitBytes:                   uint64(len(filter.words)) * 8,
-		HashCount:                  filter.hashCount,
-		Insertions:                 filter.insertions,
-		SetBits:                    setBits,
-		FillRatio:                  fillRatio,
-		EstimatedFalsePositiveRate: math.Pow(fillRatio, float64(filter.hashCount)),
-	}
+	return filter.filter.Info()
 }
 
 func (filter bloomFilterData) SetBits() uint64 {
-	var total uint64
-	for _, word := range filter.words {
-		total += uint64(mathbits.OnesCount64(word))
-	}
-	return total
+	return filter.filter.SetBits()
 }
 
 func (filter bloomFilterData) Snapshot() bloomFilterSnapshot {
-	var data []byte
-	if len(filter.words) > 0 {
-		data = make([]byte, len(filter.words)*8)
-		for idx, word := range filter.words {
-			binary.LittleEndian.PutUint64(data[idx*8:idx*8+8], word)
-		}
-	}
-	return bloomFilterSnapshot{
-		BitCount:   uint64(filter.bitCount),
-		HashCount:  filter.hashCount,
-		Insertions: filter.insertions,
-		Bits:       base64.StdEncoding.EncodeToString(data),
-	}
+	return filter.filter.Snapshot()
 }
 
 func (filter bloomFilterData) EncodedSize() int64 {
-	return int64(len(filter.words) * 8)
-}
-
-func (filter *bloomFilterData) visitIndexes(key []byte, visit func(uint64)) {
-	bitCount := uint64(filter.bitCount)
-	first := bloomFilterFNV64a(key)
-	step := bloomFilterFNV64(key)
-	if step == 0 {
-		step = bloomFilterFNVPrime64
-	}
-	step |= 1
-	for idx := uint8(0); idx < filter.hashCount; idx++ {
-		visit((first + uint64(idx)*step) % bitCount)
-	}
-}
-
-func (filter *bloomFilterData) visitJSONStringIndexes(value string, visit func(uint64)) {
-	bitCount := uint64(filter.bitCount)
-	first := bloomFilterFNV64aJSONString(value)
-	step := bloomFilterFNV64JSONString(value)
-	if step == 0 {
-		step = bloomFilterFNVPrime64
-	}
-	step |= 1
-	for idx := uint8(0); idx < filter.hashCount; idx++ {
-		visit((first + uint64(idx)*step) % bitCount)
-	}
-}
-
-func (filter *bloomFilterData) ensureWords() {
-	if filter == nil || len(filter.words) > 0 || filter.bitCount == 0 {
-		return
-	}
-	filter.words = make([]uint64, int(bloomFilterWordCount(uint64(filter.bitCount))))
-}
-
-func (filter *bloomFilterData) maskUnusedBits() {
-	if filter == nil || len(filter.words) == 0 || filter.bitCount%64 == 0 {
-		return
-	}
-	mask := (uint64(1) << uint(filter.bitCount%64)) - 1
-	filter.words[len(filter.words)-1] &= mask
+	return filter.filter.EncodedSize()
 }
 
 func bloomFilterItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
