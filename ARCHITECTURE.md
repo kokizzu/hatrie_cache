@@ -58,3 +58,17 @@ state, while root adapters continue to own unchanged cache snapshot schemas,
 binary replication, reusable storage, and `HatTrie` methods. Other structures
 will follow this same algorithm-first rule rather than duplicating
 implementations.
+
+## Cache-Bound Structures
+
+The remaining root data-structure files are intentionally not superficial
+wrappers. They depend on cache-owned behavior that must not be duplicated in a
+public component:
+
+| Structure | Root-owned boundary | Extraction decision |
+| --- | --- | --- |
+| Count-Min Sketch | Generic JSON identity and exact command batches; the attempted state adapter made direct increments 1.14x slower. | Retain the mutable core locally; shared FNV hashing is already public. |
+| Cuckoo Filter | Mutable buckets, deterministic relocation, fixed binary payloads, and generic JSON identity. | Keep the mutable core local; publish shape calculation and constants. |
+| XOR Filter | Staged generic values and static build/retry state. | Keep building and lookup local; publish expected-item validation. |
+| Top-K and reservoir sample | Cache cloning, generic JSON values, and durable snapshots. | Keep mutable heaps local; publish bounded-capacity validation. |
+| Radix tree and collections | Cache clone/validation semantics and direct JSON serialization of arbitrary values. | Keep their value-bearing cores local rather than duplicate cache semantics. |
