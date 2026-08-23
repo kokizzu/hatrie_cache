@@ -384,6 +384,22 @@ func TestSQLPreparedQueryCacheIsBoundedAndSafeForConcurrentBindings(t *testing.T
 	}
 }
 
+func TestSQLPreparedQueryCacheEvictsLeastRecentlyUsedTemplate(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(2)
+	first := "FROM VALUES (1) AS first_row(id) SELECT first_row.id"
+	second := "FROM VALUES (2) AS second_row(id) SELECT second_row.id"
+	third := "FROM VALUES (3) AS third_row(id) SELECT third_row.id"
+	for _, query := range []string{first, second, first, third, first} {
+		if _, err := parseSQLQueryWithCache(query, nil, cache); err != nil {
+			t.Fatalf("parse cached query %q: %v", query, err)
+		}
+	}
+	if got, want := cache.Stats(), (SQLPreparedQueryCacheStats{Entries: 2, Hits: 2, Misses: 3}); got != want {
+		t.Fatalf("LRU cache stats = %#v, want %#v", got, want)
+	}
+}
+
 func TestExecuteSQLQueryReordersConnectedInnerHashJoinsByCardinality(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {

@@ -576,7 +576,7 @@ values. Each execution deep-copies the template before binding, so concurrent
 requests cannot observe another request's `CACHE($n)`, `VALUES`, predicate,
 join, subquery, window, or pagination state. `PreparedCache.Stats()` exposes
 entry, hit, and miss counts. A cache with capacity zero disables storage; a
-full cache evicts the oldest template.
+full cache evicts the least-recently-used template.
 
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified

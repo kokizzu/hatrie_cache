@@ -42,7 +42,8 @@ type SQLPreparedQueryCacheStats struct {
 }
 
 // SQLPreparedQueryCache caches parsed, unbound SQL templates by exact source
-// text. It is safe for concurrent query execution.
+// text with least-recently-used eviction. It is safe for concurrent query
+// execution.
 type SQLPreparedQueryCache struct {
 	mu       sync.Mutex
 	capacity int
@@ -1066,6 +1067,7 @@ func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
 	defer cache.mu.Unlock()
 	if query := cache.entries[source]; query != nil {
 		cache.hits++
+		cache.touch(source)
 		return query, nil
 	}
 	query, err := parseSQLQueryTemplate(source)
@@ -1081,6 +1083,18 @@ func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
 	cache.entries[source] = query
 	cache.order = append(cache.order, source)
 	return query, nil
+}
+
+// touch moves a cached key to the newest position. The caller holds cache.mu.
+func (cache *SQLPreparedQueryCache) touch(source string) {
+	for index, entry := range cache.order {
+		if entry != source {
+			continue
+		}
+		copy(cache.order[index:], cache.order[index+1:])
+		cache.order[len(cache.order)-1] = source
+		return
+	}
 }
 
 func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
