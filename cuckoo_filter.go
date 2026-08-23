@@ -6,21 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatDataStructure"
 )
 
 const (
 	DefaultCuckooFilterCapacity          uint64  = 10000
 	DefaultCuckooFilterFalsePositiveRate float64 = 0.01
-	cuckooFilterBucketSize               uint8   = 4
-	cuckooFilterTargetLoad               float64 = 0.95
+	cuckooFilterBucketSize               uint8   = hatDataStructure.CuckooFilterBucketSize
+	cuckooFilterTargetLoad               float64 = hatDataStructure.CuckooFilterTargetLoad
 	cuckooFilterMaxKicks                 int     = 500
-	minCuckooFilterBuckets               uint64  = 2
-	maxCuckooFilterBuckets               uint64  = 1 << 24
-	minCuckooFilterFingerprintBits       uint8   = 4
-	maxCuckooFilterFingerprintBits       uint8   = 16
+	minCuckooFilterBuckets               uint64  = hatDataStructure.MinCuckooFilterBuckets
+	maxCuckooFilterBuckets               uint64  = hatDataStructure.MaxCuckooFilterBuckets
+	minCuckooFilterFingerprintBits       uint8   = hatDataStructure.MinCuckooFilterFingerprintBits
+	maxCuckooFilterFingerprintBits       uint8   = hatDataStructure.MaxCuckooFilterFingerprintBits
 )
 
 // CuckooFilterInfo reports the shape and fill level of a Cuckoo filter.
@@ -75,31 +75,7 @@ func newCuckooFilterDataWithShape(bucketCount uint64, fingerprintBits uint8) cuc
 }
 
 func cuckooFilterShape(capacity uint64, falsePositiveRate float64) (uint64, uint8, error) {
-	if capacity == 0 {
-		return 0, 0, errors.New("hatriecache: cuckoo filter capacity must be positive")
-	}
-	if falsePositiveRate <= 0 || falsePositiveRate >= 1 || math.IsNaN(falsePositiveRate) {
-		return 0, 0, errors.New("hatriecache: cuckoo filter false positive rate must be between 0 and 1")
-	}
-	bitsNeeded := math.Ceil(math.Log2((2 * float64(cuckooFilterBucketSize)) / falsePositiveRate))
-	if math.IsInf(bitsNeeded, 0) || bitsNeeded > float64(maxCuckooFilterFingerprintBits) {
-		return 0, 0, errors.New("hatriecache: cuckoo filter false positive rate is too small")
-	}
-	if bitsNeeded < float64(minCuckooFilterFingerprintBits) {
-		bitsNeeded = float64(minCuckooFilterFingerprintBits)
-	}
-	bucketsNeeded := math.Ceil(float64(capacity) / (float64(cuckooFilterBucketSize) * cuckooFilterTargetLoad))
-	if math.IsInf(bucketsNeeded, 0) || bucketsNeeded > float64(maxCuckooFilterBuckets) {
-		return 0, 0, errors.New("hatriecache: cuckoo filter bucket count is too large")
-	}
-	bucketCount := nextPowerOfTwoUint64(uint64(bucketsNeeded))
-	if bucketCount < minCuckooFilterBuckets {
-		bucketCount = minCuckooFilterBuckets
-	}
-	if bucketCount > maxCuckooFilterBuckets {
-		return 0, 0, errors.New("hatriecache: cuckoo filter bucket count is too large")
-	}
-	return bucketCount, uint8(bitsNeeded), nil
+	return hatDataStructure.CuckooFilterShape(capacity, falsePositiveRate)
 }
 
 func validateCuckooFilterSnapshot(snapshot cuckooFilterSnapshot) error {
@@ -630,16 +606,6 @@ func cuckooFilterItemKey(value interface{}) ([]byte, error) {
 		return nil, fmt.Errorf("hatriecache: unsupported cuckoo filter value: %w", err)
 	}
 	return data, nil
-}
-
-func nextPowerOfTwoUint64(value uint64) uint64 {
-	if value <= 1 {
-		return 1
-	}
-	if value > 1<<63 {
-		return 0
-	}
-	return uint64(1) << uint(bits.Len64(value-1))
 }
 
 func isPowerOfTwoUint64(value uint64) bool {
