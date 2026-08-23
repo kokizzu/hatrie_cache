@@ -858,6 +858,43 @@ func TestHatTrieOptionalSQLJSONFieldIndexProbesInnerJoin(t *testing.T) {
 	}
 }
 
+func TestHatTrieCompositeJSONIndexProbesMultiColumnInnerAndLeftJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("members", `[{"team_id":10,"role":"admin","name":"Ada"},{"team_id":10,"role":"viewer","name":"Bea"},{"team_id":20,"role":"admin","name":"Cai"}]`)
+	if err := trie.CreateSQLJSONCompositeIndex("members", "team_id", "role"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, join string
+		want       []SQLRow
+	}{
+		{"inner", "INNER JOIN", []SQLRow{{"team_id": int64(10), "role": "admin", "name": "Ada"}, {"team_id": int64(20), "role": "admin", "name": "Cai"}}},
+		{"left", "LEFT JOIN", []SQLRow{{"team_id": int64(10), "role": "admin", "name": "Ada"}, {"team_id": int64(10), "role": nil, "name": nil}, {"team_id": int64(20), "role": "admin", "name": "Cai"}, {"team_id": int64(30), "role": "admin", "name": nil}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := "FROM VALUES (10, 'admin'), (20, 'admin'), (30, 'admin'), (10, NULL) AS wanted(team_id, role) " + test.join + " CACHE('members') AS member ON wanted.team_id = member.team_id AND wanted.role = member.role SELECT wanted.team_id, wanted.role, member.name ORDER BY wanted.team_id"
+			result, err := ExecuteSQLQuery(query, trie)
+			if err != nil {
+				t.Fatalf("composite indexed %s join: %v", test.name, err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("composite indexed %s rows = %#v, want %#v", test.name, result.Rows, test.want)
+			}
+			explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+			if err != nil || explained.Stats == nil {
+				t.Fatalf("composite indexed %s explain/error/stats = %#v/%v/%#v", test.name, explained.Plan, err, explained.Stats)
+			}
+			for _, step := range explained.Plan {
+				if step.Node == "COMPOSITE INDEX JOIN" {
+					return
+				}
+			}
+			t.Fatalf("composite indexed %s plan = %#v, want COMPOSITE INDEX JOIN", test.name, explained.Plan)
+		})
+	}
+}
+
 func TestHatTrieOptionalSQLJSONFieldIndexProbesLeftJoin(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

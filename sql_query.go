@@ -2974,10 +2974,69 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		for _, join := range q.joins {
 			started = time.Now()
 			leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
+			leftQualifiers, leftFields, rightFields, compositeIndexJoin := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias)
 			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
 			rightIndexJoin := hashJoin && join.kind == "RIGHT"
 			if join.kind != "INNER" {
 				hashJoin = false
+			}
+			if compositeIndexJoin && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
+				if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
+					// Resolve once with NULLs to establish index availability and to
+					// surface malformed JSON even when all left-side keys are NULL.
+					_, available, err := indexed.ResolveSQLCompositeIndexedSource(join.source.kind, join.source.key, rightFields, make([]interface{}, len(rightFields)))
+					if err != nil {
+						return SQLQueryResult{}, err
+					}
+					if available {
+						inputRows := len(rows)
+						var next []sqlExecRow
+						for _, left := range rows {
+							values := make([]interface{}, len(leftFields))
+							valid := true
+							for index := range leftFields {
+								value := sqlField(left, leftQualifiers[index], leftFields[index])
+								if _, ok := sqlHashJoinKey(value); !ok {
+									valid = false
+									break
+								}
+								values[index] = value
+							}
+							matched := false
+							if valid {
+								if err := control.addJoinWork(1); err != nil {
+									return SQLQueryResult{}, err
+								}
+								candidates, _, err := indexed.ResolveSQLCompositeIndexedSource(join.source.kind, join.source.key, rightFields, values)
+								if err != nil {
+									return SQLQueryResult{}, err
+								}
+								for _, candidate := range candidates {
+									if err := control.addJoinWork(1); err != nil {
+										return SQLQueryResult{}, err
+									}
+									matched = true
+									right := sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}
+									next = append(next, mergeSQLRows(left, right))
+									if len(next) > maxRows {
+										return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+									}
+								}
+							}
+							if join.kind == "LEFT" && !matched {
+								empty := sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}
+								next = append(next, mergeSQLRows(left, empty))
+								if len(next) > maxRows {
+									return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+								}
+							}
+						}
+						metrics.record("COMPOSITE INDEX JOIN", join.kind+" JOIN "+sqlExplainSource(join.source)+" ON "+sqlExplainExpression(join.on), inputRows, len(next), started)
+						rows = next
+						leftAliases = append(leftAliases, join.source.alias)
+						continue
+					}
+				}
 			}
 			if indexJoin && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
@@ -4331,6 +4390,39 @@ func sqlHashJoinFields(expression sqlExpr, leftAliases []string, rightAlias stri
 		return right.qualifier, right.name, left.name, true
 	}
 	return "", "", "", false
+}
+
+// sqlCompositeJoinFields accepts only a pure AND of two or more field-equality
+// terms that each connect an already-joined source to the new right source.
+// Returning fields in right-field order makes the mapping deterministic while
+// leaving the resolver free to select any compatible configured composite index.
+func sqlCompositeJoinFields(expression sqlExpr, leftAliases []string, rightAlias string) (leftQualifiers, leftFields, rightFields []string, ok bool) {
+	type pair struct{ qualifier, leftField, rightField string }
+	pairs := []pair{}
+	seenRight := map[string]bool{}
+	var collect func(sqlExpr) bool
+	collect = func(current sqlExpr) bool {
+		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
+			return collect(*current.left) && collect(*current.right)
+		}
+		qualifier, leftField, rightField, matched := sqlHashJoinFields(current, leftAliases, rightAlias)
+		if !matched || seenRight[rightField] {
+			return false
+		}
+		seenRight[rightField] = true
+		pairs = append(pairs, pair{qualifier: qualifier, leftField: leftField, rightField: rightField})
+		return true
+	}
+	if !collect(expression) || len(pairs) < 2 {
+		return nil, nil, nil, false
+	}
+	sort.Slice(pairs, func(left, right int) bool { return pairs[left].rightField < pairs[right].rightField })
+	for _, pair := range pairs {
+		leftQualifiers = append(leftQualifiers, pair.qualifier)
+		leftFields = append(leftFields, pair.leftField)
+		rightFields = append(rightFields, pair.rightField)
+	}
+	return leftQualifiers, leftFields, rightFields, true
 }
 
 func sqlHashJoinKey(value interface{}) (string, bool) {

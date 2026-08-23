@@ -606,8 +606,11 @@ if err := trie.CreateSQLJSONCompositeIndex("users", "team_id", "enabled"); err !
 
 `WHERE users.team_id = 20 AND users.enabled = TRUE` then uses the longest
 matching composite index as an `INDEX SCAN`; condition order in SQL does not
-matter. Composite indexes currently accelerate qualified equality predicates,
-not ranges or joins, and the full condition is still evaluated for correctness.
+matter. A pure `AND` of two or more left-to-right equality terms in an `INNER`
+or `LEFT JOIN` also probes the composite index and reports `COMPOSITE INDEX
+JOIN`. `LEFT JOIN` preserves unmatched rows; a `NULL` join key remains
+unmatched under normal SQL null semantics. Composite indexes do not accelerate
+ranges, and every predicate condition is still evaluated for correctness.
 Use `trie.SQLJSONIndexStats("users", "team_id", "enabled")` to obtain its
 refreshed row count and distinct composite-key count. Single-field indexes use
 the same stats method with one field.
