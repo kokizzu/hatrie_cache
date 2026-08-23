@@ -7,11 +7,12 @@ import (
 	"strconv"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatDataStructure"
 )
 
 const (
 	DefaultTopKCapacity uint64 = 100
-	maxTopKCapacity     uint64 = 1 << 20
+	maxTopKCapacity     uint64 = hatDataStructure.MaxTopKCapacity
 	topKInlineIndexSize        = 2
 	topKDirectStringMax        = 4
 )
@@ -77,13 +78,7 @@ func newDefaultTopKData() topKData {
 }
 
 func validateTopKCapacity(capacity uint64) error {
-	if capacity == 0 {
-		return errors.New("hatriecache: top-k capacity must be positive")
-	}
-	if capacity > maxTopKCapacity {
-		return errors.New("hatriecache: top-k capacity is too large")
-	}
-	return nil
+	return hatDataStructure.ValidateTopKCapacity(capacity)
 }
 
 func validateTopKSnapshot(snapshot topKSnapshot) error {
