@@ -595,6 +595,12 @@ shows the average posting-list cardinality as `estimated_rows` beside the
 actual result cardinality. A mismatch is useful evidence that a value is hot;
 the estimate never changes query semantics or hides actual row counts.
 
+For an `AND` of individually indexed equality predicates, the optimizer probes
+the available term with the lowest average posting-list estimate first; ties
+keep SQL's written order. It still evaluates the entire `WHERE` expression
+after probing, and falls back to another available index or a source scan when
+statistics or the preferred index are unavailable.
+
 For a recurring equality filter on two or more fields, create a composite
 index in its declared field order:
 

@@ -25,6 +25,81 @@ type sqlStreamingTestResolver struct {
 	indexCalls     int
 }
 
+type sqlSelectiveIndexTestResolver struct {
+	rows        []SQLRow
+	calls       []string
+	unavailable map[string]bool
+}
+
+func (resolver *sqlSelectiveIndexTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	return resolver.rows, nil
+}
+
+func (resolver *sqlSelectiveIndexTestResolver) ResolveSQLIndexedSource(_ string, _ string, field string, value interface{}) ([]SQLRow, bool, error) {
+	resolver.calls = append(resolver.calls, field)
+	if resolver.unavailable[field] {
+		return nil, false, nil
+	}
+	rows := make([]SQLRow, 0, len(resolver.rows))
+	for _, row := range resolver.rows {
+		if reflect.DeepEqual(row[field], value) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, true, nil
+}
+
+func (resolver *sqlSelectiveIndexTestResolver) SQLJSONIndexStats(_ string, fields ...string) (SQLJSONIndexStats, bool, error) {
+	if len(fields) != 1 {
+		return SQLJSONIndexStats{}, false, nil
+	}
+	field := fields[0]
+	switch field {
+	case "kind":
+		return SQLJSONIndexStats{Rows: 100, DistinctKeys: 2}, true, nil
+	case "id":
+		return SQLJSONIndexStats{Rows: 100, DistinctKeys: 100}, true, nil
+	default:
+		return SQLJSONIndexStats{}, false, nil
+	}
+}
+
+func TestExecuteSQLQueryChoosesMostSelectiveIndexedConjunct(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{rows: []SQLRow{
+		{"id": int64(7), "kind": "common"},
+		{"id": int64(8), "kind": "common"},
+	}}
+	result, err := ExecuteSQLQuery("FROM CACHE('events') AS event WHERE event.kind = 'common' AND event.id = 7 SELECT event.id", resolver)
+	if err != nil {
+		t.Fatalf("selective indexed query: %v", err)
+	}
+	if want := []SQLRow{{"id": int64(7)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("selective indexed rows = %#v, want %#v", result.Rows, want)
+	}
+	if want := []string{"id"}; !reflect.DeepEqual(resolver.calls, want) {
+		t.Fatalf("index probes = %#v, want most-selective %v", resolver.calls, want)
+	}
+}
+
+func TestExecuteSQLQueryFallsBackWhenMostSelectiveIndexIsUnavailable(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{
+		rows:        []SQLRow{{"id": int64(7), "kind": "common"}, {"id": int64(8), "kind": "common"}},
+		unavailable: map[string]bool{"id": true},
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('events') AS event WHERE event.kind = 'common' AND event.id = 7 SELECT event.id", resolver)
+	if err != nil {
+		t.Fatalf("fallback indexed query: %v", err)
+	}
+	if want := []SQLRow{{"id": int64(7)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("fallback indexed rows = %#v, want %#v", result.Rows, want)
+	}
+	if want := []string{"id", "kind"}; !reflect.DeepEqual(resolver.calls, want) {
+		t.Fatalf("fallback index probes = %#v, want %v", resolver.calls, want)
+	}
+}
+
 func (resolver *sqlStreamingTestResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
 	if name != "CACHE" || field != "id" {
 		return nil, false, fmt.Errorf("unexpected index source %s(%q).%s", name, key, field)

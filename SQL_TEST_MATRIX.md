@@ -25,6 +25,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Source-first syntax, inner/left/cross joins, grouping and ordering | [`sql_query_test.go`](sql_query_test.go) |
 | One multi-join pipeline across `CACHE`, a `VALUES` CTE, a filtered derived `CACHE` source, and inline `VALUES`; verifies inner, left, and cross sequencing with null preservation | [`TestExecuteSQLQueryJoinsMultipleSourceKindsInOnePipeline`](sql_production_test.go) |
 | Equality hash join and safe base-source filter pushdown before an inner join | [`TestExecuteSQLQueryPushesBaseFilterIntoHashJoin`](sql_production_test.go) |
+| Equality `AND` filters choose the lowest-cardinality available field index while retaining the complete predicate evaluation | [`TestExecuteSQLQueryChoosesMostSelectiveIndexedConjunct`](sql_production_test.go) |
 | Connected multi-way equality inner joins choose the smallest current-snapshot source first, expose the decision through `EXPLAIN ANALYZE`, and retain deterministic written-source result order | [`TestExecuteSQLQueryReordersConnectedInnerHashJoinsByCardinality`](sql_production_test.go) |
 | Standard `AND` precedence, `NOT`, `DISTINCT` | [`TestExecuteSQLQueryUsesStandardBooleanPrecedence`](sql_production_test.go), [`TestExecuteSQLQuerySupportsNotAndDistinct`](sql_production_test.go) |
 | Nulls, `LIKE`, aggregates, `HAVING`, limit and offset | [`TestExecuteSQLQueryAggregateLimitOffsetAndNullMatrix`](sql_production_test.go) |

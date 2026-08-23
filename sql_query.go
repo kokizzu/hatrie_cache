@@ -4166,6 +4166,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		}
 	}
 	if condition.op == "AND" {
+		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver); indexed || err != nil {
+			return rows, indexed, err
+		}
 		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver); indexed || err != nil {
 			return rows, indexed, err
 		}
@@ -4177,6 +4180,46 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	}
 	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
 		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+	}
+	return nil, false, nil
+}
+
+// resolveSQLMostSelectiveIndexedConjunct uses available equality-index
+// cardinality estimates to choose an AND term before the historical
+// left-to-right fallback. The complete predicate is still evaluated after the
+// probe, so estimates affect work only, never correctness.
+func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+	type candidate struct {
+		condition sqlExpr
+		estimate  int
+	}
+	conjuncts := []sqlExpr{}
+	var collect func(sqlExpr)
+	collect = func(expression sqlExpr) {
+		if expression.kind == "binary" && expression.op == "AND" && expression.left != nil && expression.right != nil {
+			collect(*expression.left)
+			collect(*expression.right)
+			return
+		}
+		conjuncts = append(conjuncts, expression)
+	}
+	collect(condition)
+	candidates := make([]candidate, 0, len(conjuncts))
+	for _, conjunct := range conjuncts {
+		estimate, err := sqlIndexedEqualityEstimate(source, conjunct, resolver)
+		if err != nil {
+			return nil, false, err
+		}
+		if estimate != nil {
+			candidates = append(candidates, candidate{condition: conjunct, estimate: *estimate})
+		}
+	}
+	sort.SliceStable(candidates, func(left, right int) bool { return candidates[left].estimate < candidates[right].estimate })
+	for _, candidate := range candidates {
+		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver)
+		if indexed || err != nil {
+			return rows, indexed, err
+		}
 	}
 	return nil, false, nil
 }
