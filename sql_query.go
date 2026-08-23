@@ -192,6 +192,13 @@ type SQLSourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]SQLRow, error)
 }
 
+// sqlJSONIndexStatsResolver is optional optimizer metadata. Keeping it
+// separate from SQLSourceResolver preserves source compatibility: callers that
+// cannot provide statistics continue to execute with no estimate.
+type sqlJSONIndexStatsResolver interface {
+	SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndexStats, bool, error)
+}
+
 // SQLStreamSourceResolver supplies source rows one at a time. It lets the SQL
 // executor avoid materializing a source or result for stream-compatible queries.
 type SQLStreamSourceResolver interface {
@@ -219,13 +226,25 @@ type SQLCompositeIndexedSourceResolver interface {
 	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error)
 }
 
-// SQLJSONIndexStats describes the current materialized state of one optional
-// JSON index. It is refreshed from the cache value before being returned.
+// SQLJSONIndexFrequencyBucket is one deterministic posting-list frequency in
+// an optional JSON index. It exposes skew without leaking indexed values.
+type SQLJSONIndexFrequencyBucket struct {
+	RowsPerKey   int `json:"rows_per_key"`
+	DistinctKeys int `json:"distinct_keys"`
+}
+
+// SQLJSONIndexStats describes the current materialized state and equality
+// selectivity distribution of one optional JSON index. It is refreshed from
+// the cache value before being returned.
 type SQLJSONIndexStats struct {
-	Key          string
-	Fields       []string
-	Rows         int
-	DistinctKeys int
+	Key                string
+	Fields             []string
+	Rows               int
+	DistinctKeys       int
+	MinRowsPerKey      int
+	MaxRowsPerKey      int
+	AverageRowsPerKey  float64
+	FrequencyHistogram []SQLJSONIndexFrequencyBucket
 }
 
 type sqlJSONFieldIndex struct {
@@ -384,7 +403,7 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 		if err := refreshSQLJSONFieldIndex(index, key, fields[0], data); err != nil {
 			return SQLJSONIndexStats{}, false, err
 		}
-		return SQLJSONIndexStats{Key: key, Fields: append([]string(nil), fields...), Rows: len(index.ordered), DistinctKeys: len(index.rows)}, true, nil
+		return sqlJSONIndexStats(key, fields, index.rows), true, nil
 	}
 	index := ht.sqlJSONCompositeIndexes[key][sqlJSONCompositeIndexIdentifier(fields)]
 	if index == nil {
@@ -393,11 +412,37 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 	if err := refreshSQLJSONCompositeIndex(index, key, data); err != nil {
 		return SQLJSONIndexStats{}, false, err
 	}
-	rows := 0
-	for _, posting := range index.rows {
-		rows += len(posting)
+	return sqlJSONIndexStats(key, index.fields, index.rows), true, nil
+}
+
+func sqlJSONIndexStats(key string, fields []string, postings map[string][]SQLRow) SQLJSONIndexStats {
+	stats := SQLJSONIndexStats{Key: key, Fields: append([]string(nil), fields...), DistinctKeys: len(postings)}
+	frequencies := make(map[int]int, len(postings))
+	for _, posting := range postings {
+		count := len(posting)
+		stats.Rows += count
+		if stats.MinRowsPerKey == 0 || count < stats.MinRowsPerKey {
+			stats.MinRowsPerKey = count
+		}
+		if count > stats.MaxRowsPerKey {
+			stats.MaxRowsPerKey = count
+		}
+		frequencies[count]++
 	}
-	return SQLJSONIndexStats{Key: key, Fields: append([]string(nil), index.fields...), Rows: rows, DistinctKeys: len(index.rows)}, true, nil
+	if stats.DistinctKeys == 0 {
+		return stats
+	}
+	stats.AverageRowsPerKey = float64(stats.Rows) / float64(stats.DistinctKeys)
+	counts := make([]int, 0, len(frequencies))
+	for count := range frequencies {
+		counts = append(counts, count)
+	}
+	sort.Ints(counts)
+	stats.FrequencyHistogram = make([]SQLJSONIndexFrequencyBucket, 0, len(counts))
+	for _, count := range counts {
+		stats.FrequencyHistogram = append(stats.FrequencyHistogram, SQLJSONIndexFrequencyBucket{RowsPerKey: count, DistinctKeys: frequencies[count]})
+	}
+	return stats
 }
 
 // ResolveSQLIndexedRangeSource uses the ordered representation of an opt-in
@@ -2674,6 +2719,13 @@ func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outpu
 	})
 }
 
+func (metrics *sqlExecutionMetrics) recordEstimated(node, detail string, estimatedRows *int, inputRows, outputRows int, started time.Time) {
+	metrics.record(node, detail, inputRows, outputRows, started)
+	if metrics != nil && estimatedRows != nil {
+		metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(*estimatedRows)
+	}
+}
+
 func sqlExplainIntPointer(value int) *int { return &value }
 
 func (metrics *sqlExecutionMetrics) recordScan(source sqlSource, outputRows int, started time.Time) {
@@ -2863,7 +2915,11 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
 		}
 		if indexed {
-			metrics.record("INDEX SCAN", sqlExplainSource(*q.from), 0, len(base), started)
+			estimatedRows, err := sqlIndexedEqualityEstimate(*q.from, q.where, resolver)
+			if err != nil {
+				return SQLQueryResult{}, err
+			}
+			metrics.recordEstimated("INDEX SCAN", sqlExplainSource(*q.from), estimatedRows, 0, len(base), started)
 		} else {
 			metrics.recordScan(*q.from, len(base), started)
 		}
@@ -4016,6 +4072,35 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
 	}
 	return nil, false, nil
+}
+
+// sqlIndexedEqualityEstimate reports the average posting-list cardinality for
+// a simple indexed equality predicate. It is deliberately an estimate rather
+// than the exact lookup length so EXPLAIN ANALYZE can surface skew by comparing
+// this number with ActualOutputRows. Composite and range predicates keep a nil
+// estimate until their individual distributions are available.
+func sqlIndexedEqualityEstimate(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) (*int, error) {
+	statsResolver, ok := resolver.(sqlJSONIndexStatsResolver)
+	if !ok || source.kind != "CACHE" || condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+		return nil, nil
+	}
+	left, right := *condition.left, *condition.right
+	field := ""
+	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
+		field = left.name
+	}
+	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+		field = right.name
+	}
+	if field == "" {
+		return nil, nil
+	}
+	stats, available, err := statsResolver.SQLJSONIndexStats(source.key, field)
+	if err != nil || !available || stats.DistinctKeys == 0 {
+		return nil, err
+	}
+	estimate := (stats.Rows + stats.DistinctKeys - 1) / stats.DistinctKeys
+	return &estimate, nil
 }
 
 func sqlCompositeIndexedEqualities(source sqlSource, condition sqlExpr) ([]string, []interface{}) {

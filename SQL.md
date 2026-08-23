@@ -588,6 +588,13 @@ source while preserving every unmatched right row (`INDEX RIGHT JOIN`). An index
 inside an `AND` condition; all remaining predicates are still evaluated.
 Indexes refresh automatically when that cache value changes.
 
+`SQLJSONIndexStats` reports total and distinct indexed rows plus deterministic
+posting-list skew (`MinRowsPerKey`, `MaxRowsPerKey`, `AverageRowsPerKey`, and a
+frequency histogram). For a simple equality index probe, `EXPLAIN ANALYZE`
+shows the average posting-list cardinality as `estimated_rows` beside the
+actual result cardinality. A mismatch is useful evidence that a value is hot;
+the estimate never changes query semantics or hides actual row counts.
+
 For a recurring equality filter on two or more fields, create a composite
 index in its declared field order:
 

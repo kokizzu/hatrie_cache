@@ -720,7 +720,7 @@ func TestHatTrieSQLCompositeJSONIndexPlansAndReportsStatistics(t *testing.T) {
 		t.Fatalf("composite index result = %#v, %v, want indexed ids 1 and 3", result, err)
 	}
 	stats, ok, err := trie.SQLJSONIndexStats("users", "team_id", "enabled")
-	if err != nil || !ok || stats.Rows != 4 || stats.DistinctKeys != 3 || !reflect.DeepEqual(stats.Fields, []string{"team_id", "enabled"}) {
+	if err != nil || !ok || stats.Rows != 4 || stats.DistinctKeys != 3 || stats.MinRowsPerKey != 1 || stats.MaxRowsPerKey != 2 || stats.AverageRowsPerKey != 4.0/3.0 || !reflect.DeepEqual(stats.Fields, []string{"team_id", "enabled"}) {
 		t.Fatalf("SQLJSONIndexStats() = %#v/%t/%v, want four rows and three composite keys", stats, ok, err)
 	}
 	trie.UpsertString("users", `[{"id":4,"team_id":20,"enabled":true}]`)
@@ -729,9 +729,41 @@ func TestHatTrieSQLCompositeJSONIndexPlansAndReportsStatistics(t *testing.T) {
 		t.Fatalf("refreshed composite index result = %#v, %v, want the replacement row", result, err)
 	}
 	stats, ok, err = trie.SQLJSONIndexStats("users", "team_id", "enabled")
-	if err != nil || !ok || stats.Rows != 1 || stats.DistinctKeys != 1 {
+	if err != nil || !ok || stats.Rows != 1 || stats.DistinctKeys != 1 || stats.MinRowsPerKey != 1 || stats.MaxRowsPerKey != 1 || stats.AverageRowsPerKey != 1 {
 		t.Fatalf("refreshed SQLJSONIndexStats() = %#v/%t/%v, want one row and one key", stats, ok, err)
 	}
+}
+
+func TestHatTrieSQLJSONIndexStatsExposeSkewAndExplainEstimate(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("events", `[{"id":1,"kind":"hot"},{"id":2,"kind":"hot"},{"id":3,"kind":"hot"},{"id":4,"kind":"hot"},{"id":5,"kind":"hot"},{"id":6,"kind":"warm"},{"id":7,"kind":"warm"},{"id":8,"kind":"cold"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("events", "kind"); err != nil {
+		t.Fatal(err)
+	}
+	stats, ok, err := trie.SQLJSONIndexStats("events", "kind")
+	if err != nil || !ok {
+		t.Fatalf("SQLJSONIndexStats() = %#v/%t/%v", stats, ok, err)
+	}
+	if stats.Rows != 8 || stats.DistinctKeys != 3 || stats.MinRowsPerKey != 1 || stats.MaxRowsPerKey != 5 || stats.AverageRowsPerKey != 8.0/3.0 {
+		t.Fatalf("SQLJSONIndexStats() = %#v, want rows=8 distinct=3 min=1 max=5 average=%v", stats, 8.0/3.0)
+	}
+	if want := []SQLJSONIndexFrequencyBucket{{RowsPerKey: 1, DistinctKeys: 1}, {RowsPerKey: 2, DistinctKeys: 1}, {RowsPerKey: 5, DistinctKeys: 1}}; !reflect.DeepEqual(stats.FrequencyHistogram, want) {
+		t.Fatalf("SQLJSONIndexStats().FrequencyHistogram = %#v, want %#v", stats.FrequencyHistogram, want)
+	}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.kind = 'hot' SELECT event.id", trie)
+	if err != nil || result.Stats == nil {
+		t.Fatalf("indexed EXPLAIN ANALYZE = %#v/%v/%#v", result.Plan, err, result.Stats)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX SCAN" {
+			if step.EstimatedRows == nil || *step.EstimatedRows != 3 || step.ActualOutputRows == nil || *step.ActualOutputRows != 5 {
+				t.Fatalf("indexed estimate/actual = %#v, want 3/5", step)
+			}
+			return
+		}
+	}
+	t.Fatalf("indexed EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
 }
 
 func TestHatTrieSQLCompositeJSONIndexRejectsInvalidDefinitions(t *testing.T) {
