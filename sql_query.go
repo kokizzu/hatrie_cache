@@ -1154,6 +1154,9 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 }
 
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if sqlExternalSetStreamable(query, control) {
+		return executeSQLExternalSetStream(ctx, query, resolver, control, visit)
+	}
 	if sqlUnionAllStreamable(query) {
 		return executeSQLUnionAllStream(ctx, query, resolver, control, visit)
 	}
@@ -1321,6 +1324,238 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		return sqlRuntimeDiagnostic(err)
 	}
 	return nil
+}
+
+func sqlExternalSetStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
+	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || len(query.unions) != 1 {
+		return false
+	}
+	union := query.unions[0]
+	if union.all || (union.kind != "UNION" && union.kind != "INTERSECT" && union.kind != "EXCEPT") || union.query == nil {
+		return false
+	}
+	left := *query
+	left.unions = nil
+	return sqlQueryRowsBaseStreamable(&left) && sqlQueryRowsBaseStreamable(union.query) && sameSQLColumns(sqlColumns(left.selects), sqlColumns(union.query.selects))
+}
+
+func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	left := *query
+	left.unions = nil
+	union := query.unions[0]
+	columns := sqlColumns(left.selects)
+	available := int64(control.options.MaxSpillBytes)
+	paths := map[string]struct{}{}
+	defer func() {
+		for path := range paths {
+			_ = os.Remove(path)
+		}
+	}()
+	runs := []sqlSpillRun{}
+	chunk := []sqlSpillSetRecord{}
+	chunkBytes, ordinal := 0, 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(chunk, func(i, j int) bool { return sqlSpillSetRecordBefore(chunk[i], chunk[j]) })
+		run, err := sqlWriteSpillSetRun(control.options.SpillDirectory, chunk, &available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		runs = append(runs, run)
+		chunk, chunkBytes = []sqlSpillSetRecord{}, 0
+		return nil
+	}
+	appendBranch := func(branch *sqlQuery, right bool) error {
+		return executeSQLQueryRowsParsed(ctx, branch, resolver, control, func(branchColumns []string, row SQLRow) error {
+			if !sameSQLColumns(columns, branchColumns) {
+				return fmt.Errorf("%s queries must project the same column names in the same order", union.kind)
+			}
+			record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinal, Right: right}
+			ordinal++
+			recordBytes := sqlSpillSetRecordBytes(record)
+			if len(chunk) > 0 && chunkBytes+recordBytes > control.options.MaxSetBytes {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			chunk = append(chunk, record)
+			chunkBytes += recordBytes
+			return nil
+		})
+	}
+	if err := appendBranch(&left, false); err != nil {
+		return err
+	}
+	if err := appendBranch(union.query, true); err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
+		return err
+	}
+	for len(runs) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(runs) {
+				end = len(runs)
+			}
+			merged, err := sqlMergeSpillSetRunsToRun(runs[start:end], control.options.SpillDirectory, &available, control)
+			if err != nil {
+				return err
+			}
+			paths[merged.path] = struct{}{}
+			for _, run := range runs[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("remove SQL set spill file: %w", err)
+				}
+				delete(paths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		runs = next
+	}
+	readers, err := sqlOpenSpillSetReaders(runs)
+	if err != nil {
+		return err
+	}
+	defer closeSQLSpillSetReaders(readers)
+	ordinalRuns := []sqlSpillRun{}
+	ordinalChunk := []sqlSpillOutput{}
+	ordinalBytes := 0
+	ordinalOrder := []sqlOrder{{}}
+	flushOrdinals := func() error {
+		if len(ordinalChunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(ordinalChunk, func(i, j int) bool { return sqlSpillOutputLess(ordinalChunk[i], ordinalChunk[j], ordinalOrder) })
+		run, err := sqlWriteSpillRun(control.options.SpillDirectory, ordinalChunk, &available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		ordinalRuns = append(ordinalRuns, run)
+		ordinalChunk, ordinalBytes = []sqlSpillOutput{}, 0
+		return nil
+	}
+	for {
+		first, ok, err := sqlNextRawSpillSet(readers, control)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			break
+		}
+		hasLeft, hasRight := !first.Right, first.Right
+		firstLeft := first
+		for {
+			best := -1
+			for index, reader := range readers {
+				if reader.done || reader.current.Key != first.Key || best >= 0 && !sqlSpillSetRecordBefore(reader.current, readers[best].current) {
+					continue
+				}
+				best = index
+			}
+			if best < 0 {
+				break
+			}
+			record := readers[best].current
+			if record.Right {
+				hasRight = true
+			} else if !hasLeft {
+				hasLeft, firstLeft = true, record
+			}
+			if err := readers[best].next(); err != nil {
+				return err
+			}
+		}
+		selected := false
+		switch union.kind {
+		case "UNION":
+			selected = true
+		case "INTERSECT":
+			selected = hasLeft && hasRight
+		case "EXCEPT":
+			selected = hasLeft && !hasRight
+		}
+		if !selected {
+			continue
+		}
+		output := first
+		if union.kind != "UNION" {
+			output = firstLeft
+		}
+		record := sqlSpillOutput{Row: output.Row, Keys: []interface{}{int64(output.Ordinal)}, Ordinal: output.Ordinal}
+		recordBytes := sqlSpillOutputBytes(record)
+		if len(ordinalChunk) > 0 && ordinalBytes+recordBytes > control.options.MaxSetBytes {
+			if err := flushOrdinals(); err != nil {
+				return err
+			}
+		}
+		ordinalChunk = append(ordinalChunk, record)
+		ordinalBytes += recordBytes
+	}
+	if err := flushOrdinals(); err != nil {
+		return err
+	}
+	closeSQLSpillSetReaders(readers)
+	for _, run := range runs {
+		if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove SQL set spill file: %w", err)
+		}
+		delete(paths, run.path)
+		available += run.bytes
+	}
+	for len(ordinalRuns) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(ordinalRuns)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(ordinalRuns); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(ordinalRuns) {
+				end = len(ordinalRuns)
+			}
+			merged, err := sqlMergeSpillRunsToWriter(ordinalRuns[start:end], ordinalOrder, control.options.SpillDirectory, &available, control)
+			if err != nil {
+				return err
+			}
+			paths[merged.path] = struct{}{}
+			for _, run := range ordinalRuns[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("remove SQL set ordinal spill file: %w", err)
+				}
+				delete(paths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		ordinalRuns = next
+	}
+	position, emitted, resultBytes := 0, 0, 0
+	err = sqlMergeSpillRunsToVisit(ordinalRuns, ordinalOrder, control, func(record sqlSpillOutput) error {
+		if position >= query.offset {
+			if query.limit >= 0 && emitted >= query.limit {
+				return errSQLStreamLimitReached
+			}
+			if control.options.MaxResultBytes > 0 {
+				resultBytes += sqlRowBytes(record.Row)
+				if resultBytes > control.options.MaxResultBytes {
+					return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+				}
+			}
+			if err := visit(columns, record.Row); err != nil {
+				return err
+			}
+			emitted++
+		}
+		position++
+		return nil
+	})
+	if errors.Is(err, errSQLStreamLimitReached) {
+		return nil
+	}
+	return err
 }
 
 // evalSQLStreamExpr evaluates one source row through the same vectorized

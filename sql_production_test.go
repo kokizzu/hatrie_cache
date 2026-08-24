@@ -27,6 +27,37 @@ type sqlStreamingTestResolver struct {
 	indexCalls     int
 }
 
+type sqlMultiStreamingTestResolver struct {
+	sources      map[string][]SQLRow
+	resolveCalls int
+	streamCalls  int
+}
+
+func (resolver *sqlMultiStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	resolver.resolveCalls++
+	return nil, errors.New("set stream must not materialize a source")
+}
+
+func (resolver *sqlMultiStreamingTestResolver) StreamSQLSource(ctx context.Context, name, key string, visit func(SQLRow) error) error {
+	if name != "CACHE" {
+		return fmt.Errorf("stream source = %s, want CACHE", name)
+	}
+	rows, ok := resolver.sources[key]
+	if !ok {
+		return fmt.Errorf("stream key = %q, want configured source", key)
+	}
+	resolver.streamCalls++
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(cloneSQLRows([]SQLRow{row})[0]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type sqlOrderedStreamingTestResolver struct {
 	rows         []SQLRow
 	orderedCalls int
@@ -558,6 +589,86 @@ func TestExecuteSQLQueryRowsExternalGroupCleansUpOnFailure(t *testing.T) {
 				t.Fatalf("external group leftovers = %#v, want none", entries)
 			}
 		})
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalSetOperations(t *testing.T) {
+	t.Parallel()
+
+	sources := map[string][]SQLRow{
+		"left":  {{"value": int64(3)}, {"value": int64(1)}, {"value": int64(3)}, {"value": nil}, {"value": int64(2)}},
+		"right": {{"value": int64(2)}, {"value": nil}, {"value": int64(4)}, {"value": int64(2)}},
+	}
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" {
+			return nil, fmt.Errorf("source = %s, want CACHE", name)
+		}
+		return cloneSQLRows(sources[key]), nil
+	})
+	for _, operation := range []string{"UNION", "INTERSECT", "EXCEPT"} {
+		t.Run(operation, func(t *testing.T) {
+			query := "FROM CACHE('left') AS left_row SELECT left_row.value " + operation + " FROM CACHE('right') AS right_row SELECT right_row.value"
+			want, err := ExecuteSQLQuery(query, baseline)
+			if err != nil {
+				t.Fatalf("materialized baseline: %v", err)
+			}
+			resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{"left": cloneSQLRows(sources["left"]), "right": cloneSQLRows(sources["right"])}}
+			got := []SQLRow{}
+			directory := t.TempDir()
+			err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+				got = append(got, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("external %s stream: %v", operation, err)
+			}
+			if resolver.resolveCalls != 0 || resolver.streamCalls != 2 {
+				t.Fatalf("%s resolver calls materialized=%d streamed=%d, want 0/2", operation, resolver.resolveCalls, resolver.streamCalls)
+			}
+			if !reflect.DeepEqual(got, want.Rows) {
+				t.Fatalf("external %s rows = %#v, want %#v", operation, got, want.Rows)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external %s leftovers = %#v, want none", operation, entries)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalSetMergesOrdinalRuns(t *testing.T) {
+	t.Parallel()
+
+	left, right := make([]SQLRow, 40), make([]SQLRow, 40)
+	for index := range left {
+		left[index] = SQLRow{"value": int64((index * 17) % len(left))}
+		right[index] = SQLRow{"value": int64(40 + (index*19)%len(right))}
+	}
+	query := "FROM CACHE('left') AS left_row SELECT left_row.value UNION FROM CACHE('right') AS right_row SELECT right_row.value"
+	baseline := SQLSourceResolverFunc(func(_ string, key string) ([]SQLRow, error) {
+		if key == "left" {
+			return cloneSQLRows(left), nil
+		}
+		return cloneSQLRows(right), nil
+	})
+	want, err := ExecuteSQLQuery(query, baseline)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{"left": cloneSQLRows(left), "right": cloneSQLRows(right)}}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external set ordinal merge: %v", err)
+	}
+	if !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("external set ordinal merge rows = %#v, want %#v", got, want.Rows)
 	}
 }
 
