@@ -678,6 +678,31 @@ func TestExecuteSQLQueryRowsStreamsIndexedDistinctOrder(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsIndexedRankWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue"}, {"id": int64(1), "team": "blue"}, {"id": int64(3), "team": "red"}, {"id": int64(4), "team": nil}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team, ROW_NUMBER() OVER (ORDER BY people.team NULLS LAST) AS row_number, RANK() OVER (ORDER BY people.team NULLS LAST) AS rank, DENSE_RANK() OVER (ORDER BY people.team NULLS LAST) AS dense_rank ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed rank baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed rank stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed rank stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
 	t.Parallel()
 	rows := []SQLRow{{"age": nil}, {"age": int64(12)}}

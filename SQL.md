@@ -613,6 +613,9 @@ For the similarly narrow `SELECT DISTINCT indexed_field … ORDER BY
 indexed_field` form, `QueryRows` retains only the preceding canonical field
 value: equal index entries are adjacent, including `NULL`, so it emits each
 field value once without a membership map.
+`ROW_NUMBER`, `RANK`, and `DENSE_RANK` can also stream when their unpartitioned
+one-field window order exactly matches that same final indexed `ORDER BY`.
+They retain only the current position, rank state, and previous ordering value.
 Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
 shapes deliberately retain the general executor until they have an equally
 direct ordering proof.
