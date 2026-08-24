@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1488,6 +1489,55 @@ func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 				t.Fatalf("iteration %d group row = %#v, want %d/%d", iteration, row, value, counts[value])
 			}
 			rowIndex++
+		}
+	}
+}
+
+func TestSQLGeneratedSQLiteNullPaginationDifferential(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260824))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(8))
+		for index := range values {
+			if random.Intn(3) == 0 {
+				values[index] = "NULL"
+			} else {
+				values[index] = strconv.Itoa(random.Intn(5))
+			}
+		}
+		rows := strings.Join(func() []string {
+			out := make([]string, len(values))
+			for index, value := range values {
+				out[index] = "(" + value + ")"
+			}
+			return out
+		}(), ", ")
+		hatrieQuery := "WITH data(value) AS (VALUES " + rows + ") FROM data WHERE value IS NULL OR value BETWEEN 1 AND 3 SELECT value ORDER BY value NULLS LAST LIMIT 3 OFFSET 1"
+		got, err := ExecuteSQLQuery(hatrieQuery, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d HatTrie query: %v", iteration, err)
+		}
+		sqliteQuery := "WITH data(value) AS (VALUES " + rows + ") SELECT value FROM data WHERE value IS NULL OR value BETWEEN 1 AND 3 ORDER BY value NULLS LAST LIMIT 3 OFFSET 1"
+		output, err := exec.Command("sqlite3", "-json", ":memory:", sqliteQuery).Output()
+		if err != nil {
+			t.Fatalf("iteration %d SQLite query: %v", iteration, err)
+		}
+		if len(output) == 0 {
+			output = []byte("[]")
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("iteration %d decode SQLite JSON: %v", iteration, err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatalf("iteration %d encode HatTrie rows: %v", iteration, err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatalf("iteration %d decode HatTrie JSON: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("iteration %d null/pagination differential mismatch\nquery=%s\nhatrie=%#v\nsqlite=%#v", iteration, hatrieQuery, normalized, want)
 		}
 	}
 }
