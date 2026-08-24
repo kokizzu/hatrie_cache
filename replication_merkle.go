@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
+
+	"hatrie_cache/hat/hatMerkle"
 )
 
-const replicationMerkleBucketCount = 1024
+const replicationMerkleBucketCount = hatMerkle.BucketCount
 const replicationMerkleInitialTableCapacity = 1024
 const replicationMerklePendingInlineLimit = 32
 const replicationMerkleMaxPendingKeys = 1024
@@ -21,47 +23,14 @@ type replicationMerkleLeaf struct {
 	count uint64
 }
 
-type replicationMerkleBucketMask [replicationMerkleBucketCount / 64]uint64
-
-func (mask replicationMerkleBucketMask) contains(bucket int) bool {
-	return bucket >= 0 && bucket < replicationMerkleBucketCount && mask[bucket/64]&(uint64(1)<<uint(bucket%64)) != 0
-}
-
-func (mask replicationMerkleBucketMask) containsKey(key string) bool {
-	return mask.contains(replicationMerkleBucket(xxhash.Sum64String(key)))
-}
-
-func (mask replicationMerkleBucketMask) empty() bool {
-	for _, word := range mask {
-		if word != 0 {
-			return false
-		}
-	}
-	return true
-}
+type replicationMerkleBucketMask = hatMerkle.BucketMask
 
 func encodeReplicationMerkleBucketMask(mask replicationMerkleBucketMask) string {
-	var data [len(mask) * 8]byte
-	for index, word := range mask {
-		binary.LittleEndian.PutUint64(data[index*8:], word)
-	}
-	return base64.RawStdEncoding.EncodeToString(data[:])
+	return hatMerkle.EncodeBucketMask(mask)
 }
 
 func decodeReplicationMerkleBucketMask(value string) (replicationMerkleBucketMask, error) {
-	mask := replicationMerkleBucketMask{}
-	data := make([]byte, len(mask)*8)
-	if len(value) != base64.RawStdEncoding.EncodedLen(len(data)) {
-		return mask, errors.New("hatriecache: invalid replication Merkle bucket mask")
-	}
-	n, err := base64.RawStdEncoding.Decode(data, []byte(value))
-	if err != nil || n != len(data) {
-		return mask, errors.New("hatriecache: invalid replication Merkle bucket mask")
-	}
-	for index := range mask {
-		mask[index] = binary.LittleEndian.Uint64(data[index*8:])
-	}
-	return mask, nil
+	return hatMerkle.DecodeBucketMask(value)
 }
 
 type replicationMerkleSnapshot struct {
@@ -364,7 +333,7 @@ func (index *replicationMerkleIndex) retainedBytes() int {
 }
 
 func replicationMerkleBucket(keyHash uint64) int {
-	return int(keyHash >> (64 - 10))
+	return hatMerkle.BucketForHash(keyHash)
 }
 
 func replicationMerkleContribution(keyHash uint64, digest replicationDigest) uint64 {

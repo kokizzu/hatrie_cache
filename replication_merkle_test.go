@@ -44,7 +44,7 @@ func TestReplicationMerkleIndexTracksMutationsWithinCompactBudget(t *testing.T) 
 		t.Fatalf("changed replicationMerkleSnapshot() error = %v", err)
 	}
 	mask := changed.changedBuckets(rightSnapshot)
-	if mask.empty() {
+	if mask.Empty() {
 		t.Fatal("changed Merkle snapshots produced an empty bucket mask")
 	}
 

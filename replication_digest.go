@@ -497,7 +497,7 @@ func (replicator *HTTPReplicator) replicationDigestInventoryForTarget(ctx contex
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if !buckets.containsKey(entry.Key) {
+			if !buckets.ContainsKey(entry.Key) {
 				return nil
 			}
 			route, ok := routing.replicationScanRouteForKey(entry.Key)
@@ -588,7 +588,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		for _, remote := range page.entries {
 			key := remote.Message
 			route, routed := routing.replicationScanRouteForKey(key)
-			if !strings.HasPrefix(key, inventory.prefix) || (inventory.hasBuckets && !inventory.buckets.containsKey(key)) || !routed || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, inventory.target.ID) {
+			if !strings.HasPrefix(key, inventory.prefix) || (inventory.hasBuckets && !inventory.buckets.ContainsKey(key)) || !routed || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, inventory.target.ID) {
 				pageResult.OK = false
 				pageResult.Error = "hatriecache: key outside replication digest scope"
 				return append(writer.targets, pageResult), writer.changed, writer.deleted, false
@@ -911,7 +911,7 @@ func (iterator *replicationDigestSourceIterator) includes(entry Entry) (bool, er
 	if iterator.mode&replicationDigestSourceInvariantScope != 0 {
 		return true, nil
 	}
-	if iterator.inventory.hasBuckets && !iterator.inventory.buckets.containsKey(entry.Key) {
+	if iterator.inventory.hasBuckets && !iterator.inventory.buckets.ContainsKey(entry.Key) {
 		return false, nil
 	}
 	route, ok := iterator.routing.replicationScanRouteForKey(entry.Key)
@@ -1479,7 +1479,7 @@ func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAf
 			scan.consume()
 			continue
 		}
-		if hasBuckets && !buckets.containsKey(entry.Key) {
+		if hasBuckets && !buckets.ContainsKey(entry.Key) {
 			page.nextAfterKey = entry.Key
 			scan.consume()
 			continue
@@ -1560,7 +1560,7 @@ func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRou
 		if !ok {
 			return replicationDigest{hash: hasher.Sum64(), size: count}, nil
 		}
-		if hasBuckets && !buckets.containsKey(entry.Key) {
+		if hasBuckets && !buckets.ContainsKey(entry.Key) {
 			scan.consume()
 			continue
 		}
