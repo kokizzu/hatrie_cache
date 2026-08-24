@@ -160,6 +160,16 @@ func responseAllowsBody(statusCode int) bool {
 	return statusCode >= 200 && statusCode != http.StatusNoContent && statusCode != http.StatusNotModified
 }
 
+// LimitedReaderExceeded consumes the remaining bounded reader input and
+// reports whether it reached the configured limit.
+func LimitedReaderExceeded(reader *io.LimitedReader) bool {
+	if reader == nil || reader.N <= 0 {
+		return true
+	}
+	_, _ = io.Copy(io.Discard, reader)
+	return reader.N <= 0
+}
+
 // LimitedEncodedRequestBody returns a decoded request body whose decoded size
 // cannot exceed limit. The caller must invoke the returned close function.
 func LimitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int64) (io.Reader, func(), bool) {
