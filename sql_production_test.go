@@ -119,6 +119,27 @@ func TestExecuteSQLQueryChoosesMostSelectiveIndexedConjunct(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryExplainAnalyzeReportsIndexEstimateError(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{rows: []SQLRow{
+		{"id": int64(7), "kind": "common"},
+		{"id": int64(8), "kind": "common"},
+	}}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.kind = 'common' SELECT event.id", resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX SCAN" {
+			if step.EstimatedRows == nil || *step.EstimatedRows != 50 || step.ActualOutputRows == nil || *step.ActualOutputRows != 2 || step.EstimateErrorRows == nil || *step.EstimateErrorRows != -48 {
+				t.Fatalf("index estimate step = %#v, want estimated/actual/error 50/2/-48", step)
+			}
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
+}
+
 func TestExecuteSQLQueryFallsBackWhenMostSelectiveIndexIsUnavailable(t *testing.T) {
 	t.Parallel()
 	resolver := &sqlSelectiveIndexTestResolver{
@@ -976,8 +997,8 @@ func TestHatTrieSQLJSONIndexStatsExposeSkewAndExplainEstimate(t *testing.T) {
 	}
 	for _, step := range result.Plan {
 		if step.Node == "INDEX SCAN" {
-			if step.EstimatedRows == nil || *step.EstimatedRows != 5 || step.ActualOutputRows == nil || *step.ActualOutputRows != 5 {
-				t.Fatalf("indexed estimate/actual = %#v, want 5/5", step)
+			if step.EstimatedRows == nil || *step.EstimatedRows != 5 || step.ActualOutputRows == nil || *step.ActualOutputRows != 5 || step.EstimateErrorRows == nil || *step.EstimateErrorRows != 0 {
+				t.Fatalf("indexed estimate/actual/error = %#v, want 5/5/0", step)
 			}
 			return
 		}
@@ -1940,7 +1961,7 @@ LIMIT 1`, SQLSourceResolverFunc(nil))
 	if result.Stats.OutputRows != 1 || result.Stats.OutputColumns != 1 || result.Stats.PlanSteps != len(result.Plan) || result.Stats.ElapsedNanos < 0 {
 		t.Fatalf("EXPLAIN ANALYZE stats = %#v, plan = %#v", result.Stats, result.Plan)
 	}
-	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
+	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
 		t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %#v", result.Columns, want)
 	}
 	last := result.Rows[len(result.Rows)-1]

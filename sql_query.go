@@ -213,7 +213,10 @@ type SQLExplainStep struct {
 	EstimatedRows    *int   `json:"estimated_rows,omitempty"`
 	ActualInputRows  *int   `json:"actual_input_rows,omitempty"`
 	ActualOutputRows *int   `json:"actual_output_rows,omitempty"`
-	ElapsedNanos     *int64 `json:"elapsed_ns,omitempty"`
+	// EstimateErrorRows is actual output rows minus estimated rows. Positive
+	// values mean the estimate was too low; negative values mean it was too high.
+	EstimateErrorRows *int   `json:"estimate_error_rows,omitempty"`
+	ElapsedNanos      *int64 `json:"elapsed_ns,omitempty"`
 }
 
 // SQLQueryStats is emitted only by EXPLAIN ANALYZE. It describes one actual
@@ -3030,7 +3033,9 @@ func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outpu
 func (metrics *sqlExecutionMetrics) recordEstimated(node, detail string, estimatedRows *int, inputRows, outputRows int, started time.Time) {
 	metrics.record(node, detail, inputRows, outputRows, started)
 	if metrics != nil && estimatedRows != nil {
-		metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(*estimatedRows)
+		step := &metrics.steps[len(metrics.steps)-1]
+		step.EstimatedRows = sqlExplainIntPointer(*estimatedRows)
+		step.EstimateErrorRows = sqlExplainIntPointer(outputRows - *estimatedRows)
 	}
 }
 
@@ -4091,9 +4096,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
 		}
+		if step.EstimateErrorRows != nil {
+			row["estimate_error_rows"] = *step.EstimateErrorRows
+		}
 		result.Rows = append(result.Rows, row)
 	}
-	result.Columns = append(result.Columns, "actual_rows", "elapsed_ns")
+	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "elapsed_ns")
 	result.Rows = append(result.Rows, SQLRow{
 		"node":        "ANALYZE",
 		"detail":      "execution summary",
