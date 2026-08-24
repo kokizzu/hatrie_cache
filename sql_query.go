@@ -1164,6 +1164,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlIndexedDistinctStreamable(query, resolver) {
 		return executeSQLIndexedDistinctStream(ctx, query, resolver, control, visit)
 	}
+	if sqlIndexedLagWindowStreamable(query, resolver) {
+		return executeSQLIndexedLagWindowStream(ctx, query, resolver, control, visit)
+	}
 	if sqlIndexedRankWindowStreamable(query, resolver) {
 		return executeSQLIndexedRankWindowStream(ctx, query, resolver, control, visit)
 	}
@@ -2545,6 +2548,146 @@ func executeSQLIndexedRankWindowStream(ctx context.Context, query *sqlQuery, res
 	}
 	if !available {
 		return fmt.Errorf("SQL query cannot stream these rank windows because the ordered index is unavailable")
+	}
+	return nil
+}
+
+// sqlIndexedLagWindowStreamable recognizes literal-offset LAG windows whose
+// ordered index is also the final query order. The existing LAG ring buffer is
+// bounded by the literal offset, so no row history slice is needed.
+func sqlIndexedLagWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || query.where.window != nil || len(query.orderBy) != 1 {
+		return false
+	}
+	order := query.orderBy[0]
+	if order.expr.kind != "field" || order.expr.qualifier != query.from.alias || order.expr.name == "" {
+		return false
+	}
+	if _, ok := resolver.(SQLOrderedStreamSourceResolver); !ok {
+		return false
+	}
+	hasLag := false
+	for _, item := range query.selects {
+		expr := item.expr
+		if expr.window == nil {
+			if expr.kind == "star" || sqlExprHasAggregate(expr) || sqlExprHasWindow(expr) {
+				return false
+			}
+			continue
+		}
+		if expr.kind != "func" || strings.ToUpper(expr.name) != "LAG" || len(expr.window.partition) != 0 || len(expr.window.order) != 1 || expr.window.frame != nil {
+			return false
+		}
+		windowOrder := expr.window.order[0]
+		if !sqlSameField(windowOrder.expr, order.expr) || windowOrder.desc != order.desc || windowOrder.nullsFirst != order.nullsFirst || windowOrder.nullsLast != order.nullsLast {
+			return false
+		}
+		if _, ok := sqlRunningWindowLagOffset(expr.args); !ok {
+			return false
+		}
+		for _, argument := range expr.args {
+			if sqlExprHasAggregate(argument) || sqlExprHasWindow(argument) || sqlExprHasCustomFunction(argument, nil) {
+				return false
+			}
+		}
+		hasLag = true
+	}
+	return hasLag
+}
+
+// executeSQLIndexedLagWindowStream projects scalar expressions and bounded
+// LAG histories from one ordered index scan. Each LAG retains only its literal
+// offset ring; the index supplies the otherwise global order.
+func executeSQLIndexedLagWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	streaming, ok := resolver.(SQLOrderedStreamSourceResolver)
+	if !ok {
+		return fmt.Errorf("SQL query cannot stream these LAG windows because the resolver has no ordered index stream")
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	states := make([]*sqlRunningWindowState, len(query.selects))
+	for index, item := range query.selects {
+		if item.expr.window == nil {
+			continue
+		}
+		offset, _ := sqlRunningWindowLagOffset(item.expr.args)
+		state := &sqlRunningWindowState{name: "LAG", arg: item.expr.args[0], lagOffset: offset}
+		if len(item.expr.args) == 3 {
+			fallback := item.expr.args[2]
+			state.lagDefault = &fallback
+		}
+		if offset > 0 && offset < control.maxRows {
+			state.lagValues = make([]interface{}, offset)
+		}
+		states[index] = state
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	columns := sqlColumns(query.selects)
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	emit := func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			if states[index] != nil {
+				value, err := states[index].add(execRow)
+				if err != nil {
+					return err
+				}
+				row[columns[index]] = value
+				continue
+			}
+			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+			if err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	}
+	order := query.orderBy[0]
+	available, err := streaming.StreamSQLOrderedSource(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, emit)
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if !available {
+		return fmt.Errorf("SQL query cannot stream these LAG windows because the ordered index is unavailable")
 	}
 	return nil
 }
