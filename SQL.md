@@ -926,8 +926,11 @@ schemas, and custom functions. It also supports a global, no-join selection
 made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
 keep constant state and emit one final row without retaining source rows. It
 still rejects CTEs, grouped aggregates, unbounded ordering, windows, set
-operations, `DISTINCT`, typed JSON schemas, and custom functions until each
-has a bounded-memory streaming operator.
+operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
+`DISTINCT`, typed JSON schemas, and custom functions until each has a
+bounded-memory streaming operator. `UNION ALL` is the exception: when every
+branch is independently streamable and projects the same columns, rows stream
+left-to-right with each branch's own `WHERE`, `OFFSET`, and `LIMIT` semantics.
 `QueryRows[T]` uses this NDJSON path and closes the response immediately when
 its callback returns an error.
 

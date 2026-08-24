@@ -1022,6 +1022,13 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err != nil {
 		return err
 	}
+	return executeSQLQueryRowsParsed(ctx, query, resolver, control, visit)
+}
+
+func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if sqlUnionAllStreamable(query) {
+		return executeSQLUnionAllStream(ctx, query, resolver, control, visit)
+	}
 	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
 		return executeSQLGlobalAggregateStream(ctx, query, resolver, control, visit, aggregates)
 	}
@@ -1147,6 +1154,73 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	}
 	if err := streamSQLSourceRows(ctx, *query.from, resolver, streamRow); err != nil && err != errSQLStreamLimitReached {
 		return sqlRuntimeDiagnostic(err)
+	}
+	return nil
+}
+
+func sqlQueryRowsBaseStreamable(query *sqlQuery) bool {
+	if query == nil || query.explain || len(query.unions) != 0 {
+		return false
+	}
+	if _, ok := sqlGlobalStreamAggregates(query); ok || sqlTopNStreamable(query) {
+		return true
+	}
+	return validateSQLQueryStreamable(query) == nil
+}
+
+func sqlUnionAllStreamColumns(query *sqlQuery) ([]string, bool) {
+	if query == nil || query.explain {
+		return nil, false
+	}
+	base := *query
+	base.unions = nil
+	if !sqlQueryRowsBaseStreamable(&base) {
+		return nil, false
+	}
+	columns := sqlColumns(base.selects)
+	for _, union := range query.unions {
+		if union.kind != "UNION" || !union.all || union.query == nil {
+			return nil, false
+		}
+		rightColumns, ok := sqlUnionAllStreamColumns(union.query)
+		if !ok || !sameSQLColumns(columns, rightColumns) {
+			return nil, false
+		}
+	}
+	return columns, true
+}
+
+// sqlUnionAllStreamable proves the one set operation that needs no global
+// membership state. Each branch must be independently streamable and project
+// the same columns, matching the materialized executor's contract.
+func sqlUnionAllStreamable(query *sqlQuery) bool {
+	if query == nil || len(query.unions) == 0 {
+		return false
+	}
+	_, ok := sqlUnionAllStreamColumns(query)
+	return ok
+}
+
+func executeSQLUnionAllStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	columns, ok := sqlUnionAllStreamColumns(query)
+	if !ok {
+		return fmt.Errorf("SQL query cannot stream these set operations because they require materialized membership state")
+	}
+	emit := func(branchColumns []string, row SQLRow) error {
+		if !sameSQLColumns(columns, branchColumns) {
+			return fmt.Errorf("UNION queries must project the same column names in the same order")
+		}
+		return visit(columns, row)
+	}
+	left := *query
+	left.unions = nil
+	if err := executeSQLQueryRowsParsed(ctx, &left, resolver, control, emit); err != nil {
+		return err
+	}
+	for _, union := range query.unions {
+		if err := executeSQLQueryRowsParsed(ctx, union.query, resolver, control, emit); err != nil {
+			return err
+		}
 	}
 	return nil
 }

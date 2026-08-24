@@ -252,6 +252,44 @@ func TestExecuteSQLQueryRowsStreamsBoundedTopNOrdering(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsUnionAll(t *testing.T) {
+	t.Parallel()
+	query := "FROM CACHE('people') AS left_person WHERE left_person.id >= 1 SELECT left_person.id AS id LIMIT 2 OFFSET 1 UNION ALL FROM CACHE('people') AS right_person WHERE right_person.id < 3 SELECT right_person.id AS id LIMIT 1 OFFSET 1"
+	baselineRows := []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}}
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return cloneSQLRows(baselineRows), nil
+	})
+	want, err := ExecuteSQLQuery(query, baseline)
+	if err != nil {
+		t.Fatalf("materialized UNION ALL baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(baselineRows)}
+	var columns []string
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed UNION ALL: %v", err)
+	}
+	if !reflect.DeepEqual(columns, want.Columns) || !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("streamed UNION ALL = %#v/%#v, want %#v/%#v", columns, got, want.Columns, want.Rows)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 2 {
+		t.Fatalf("UNION ALL resolver calls materialized=%d streamed=%d, want 0/2", resolver.resolveCalls, resolver.streamCalls)
+	}
+	union := strings.Replace(query, "UNION ALL", "UNION", 1)
+	err = ExecuteSQLQueryRows(context.Background(), union, resolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "set operations") {
+		t.Fatalf("streamed UNION error = %v, want set-operation materialization diagnostic", err)
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsBoundedTopNProperty(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260825))
