@@ -2125,6 +2125,25 @@ func TestExecuteSQLQueryRowsObserverReportsStreamedOutput(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsExplainsUnavailableGlobalStreaming(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		query string
+		want  string
+	}{
+		{query: "FROM VALUES (1), (1) AS values(id) SELECT DISTINCT id", want: "MaxSetBytes"},
+		{query: "FROM VALUES (2), (1) AS values(id) SELECT id ORDER BY id", want: "MaxSortBytes"},
+	} {
+		t.Run(test.want, func(t *testing.T) {
+			err := ExecuteSQLQueryRows(context.Background(), test.query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil })
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("stream error = %v, want guidance containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
 	t.Parallel()
 	query := "FROM VALUES (3, DATE '2026-08-03'), (1, DATE '2026-08-01'), (2, DATE '2026-08-02'), (4, DATE '2026-08-04') AS values(id, occurred_on) SELECT id, occurred_on, CAST(id AS DECIMAL) AS amount ORDER BY occurred_on DESC, id"

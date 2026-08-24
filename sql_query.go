@@ -3634,7 +3634,13 @@ func executeSQLIndexedLagWindowStream(ctx context.Context, query *sqlQuery, reso
 }
 
 func validateSQLQueryStreamable(query *sqlQuery) error {
-	if query.explain || len(query.ctes) > 0 || len(query.unions) > 0 || len(query.groupBy) > 0 || query.having.kind != "" || query.distinct || len(query.orderBy) > 0 || sqlQueryHasAggregate(query) {
+	if query.distinct {
+		return fmt.Errorf("SQL query cannot stream this DISTINCT shape: use a compatible ordered index, or for a direct scalar CACHE/VALUES query configure MaxSetBytes, SpillDirectory, and MaxSpillBytes")
+	}
+	if len(query.orderBy) > 0 {
+		return fmt.Errorf("SQL query cannot stream this ORDER BY: use a compatible ordered index, add a finite LIMIT for bounded top-N, or for a direct scalar CACHE/VALUES query configure MaxSortBytes, SpillDirectory, and MaxSpillBytes")
+	}
+	if query.explain || len(query.ctes) > 0 || len(query.unions) > 0 || len(query.groupBy) > 0 || query.having.kind != "" || sqlQueryHasAggregate(query) {
 		return fmt.Errorf("SQL query cannot stream because it requires materialized grouping, ordering, DISTINCT, EXPLAIN, or set operations")
 	}
 	aliases := []string{}
