@@ -230,6 +230,10 @@ func TestExecuteSQLQueryRowsStreamsIndexedInnerAndLeftJoin(t *testing.T) {
 			}
 		})
 	}
+	explained, err := ExecuteSQLQuery("EXPLAIN FROM VALUES (1) AS values(value) WHERE value IN (1, 2) SELECT value", SQLSourceResolverFunc(nil))
+	if err != nil || len(explained.Plan) < 2 || explained.Plan[1].Detail != "value IN (1, 2)" {
+		t.Fatalf("IN EXPLAIN = %#v/%v, want readable membership filter", explained.Plan, err)
+	}
 }
 
 func (resolver *sqlStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
@@ -1277,6 +1281,28 @@ func TestExecuteSQLQuerySupportsFetchFirst(t *testing.T) {
 	}
 	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
 		t.Fatalf("FETCH FIRST rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsInWithNullSemantics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, where string
+		want        []SQLRow
+	}{
+		{"match", "value IN (1, NULL)", []SQLRow{{"value": int64(1)}}},
+		{"not_in_null_is_unknown", "value NOT IN (1, NULL)", []SQLRow{}},
+		{"not_in_without_null", "value NOT IN (1, 3)", []SQLRow{{"value": int64(2)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (1), (2), (NULL) AS values(value) WHERE "+test.where+" SELECT value ORDER BY value NULLS LAST", SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("IN query: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("IN rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
 	}
 }
 

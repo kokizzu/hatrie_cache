@@ -2240,6 +2240,31 @@ func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 		}
 		return sqlExpr{kind: "binary", op: map[bool]string{false: "IS NULL", true: "IS NOT NULL"}[not], left: &left}, nil
 	}
+	notIn := false
+	if p.keyword("NOT") {
+		notIn = true
+		p.next()
+		if !p.keyword("IN") {
+			return sqlExpr{}, p.expected(p.current(), "IN after NOT", []string{"IN"})
+		}
+	}
+	if p.keyword("IN") {
+		p.next()
+		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+			return sqlExpr{}, err
+		}
+		values, err := p.parseExprList()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlExpr{}, err
+		}
+		return sqlExpr{kind: "in", op: map[bool]string{false: "IN", true: "NOT IN"}[notIn], left: &left, args: values}, nil
+	}
+	if notIn {
+		return sqlExpr{}, p.expected(p.current(), "IN after NOT", []string{"IN"})
+	}
 	if p.keyword("LIKE") {
 		p.next()
 		right, err := p.parseExpr()
@@ -4043,6 +4068,8 @@ func sqlExplainExpression(expression sqlExpr) string {
 		return expression.name + "(" + sqlExplainExpressions(expression.args) + ")"
 	case "unary":
 		return expression.op + " " + sqlExplainExpression(*expression.left)
+	case "in":
+		return sqlExplainExpression(*expression.left) + " " + expression.op + " (" + sqlExplainExpressions(expression.args) + ")"
 	case "binary":
 		if expression.op == "IS NULL" || expression.op == "IS NOT NULL" {
 			return sqlExplainExpression(*expression.left) + " " + expression.op
@@ -4788,6 +4815,19 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			return nil
 		}
+	case "in":
+		left := evalSQLExpr(*expr.left, group, row)
+		if err := sqlExpressionError(left); err != nil {
+			return sqlEvaluationFailure(err)
+		}
+		values := make([]interface{}, len(expr.args))
+		for index, argument := range expr.args {
+			values[index] = evalSQLExpr(argument, group, row)
+			if err := sqlExpressionError(values[index]); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+		}
+		return sqlInValue(expr.op, left, values)
 	case "binary":
 		left := evalSQLExpr(*expr.left, group, row)
 		if err := sqlExpressionError(left); err != nil {
@@ -4806,6 +4846,26 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return sqlBinaryValue(expr.op, left, right)
 	}
 	return nil
+}
+
+func sqlInValue(op string, left interface{}, values []interface{}) interface{} {
+	if left == nil {
+		return nil
+	}
+	unknown := false
+	for _, value := range values {
+		comparison := sqlBinaryValue("=", left, value)
+		if comparison == true {
+			return op != "NOT IN"
+		}
+		if comparison == nil {
+			unknown = true
+		}
+	}
+	if unknown {
+		return nil
+	}
+	return op == "NOT IN"
 }
 
 func sqlCastValue(value interface{}, target string) (interface{}, error) {
