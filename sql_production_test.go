@@ -2084,6 +2084,54 @@ func TestSQLGeneratedSQLiteNullPaginationDifferential(t *testing.T) {
 	}
 }
 
+func TestSQLGeneratedSQLiteDerivedExpressionDifferential(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 is required for differential testing")
+	}
+	random := rand.New(rand.NewSource(20260826))
+	for iteration := 0; iteration < 64; iteration++ {
+		values := make([]string, 1+random.Intn(12))
+		for id := range values {
+			raw := float64(random.Intn(17)-8) / 2
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(9) - 4)
+			}
+			values[id] = fmt.Sprintf("(%d, '%.2f', %s)", id, raw, score)
+		}
+		limit := 1 + random.Intn(6)
+		rows := strings.Join(values, ", ")
+		hatrieQuery := fmt.Sprintf("FROM (FROM VALUES %s AS source(id, raw, score) WHERE source.score IS NULL OR source.score BETWEEN -3 AND 3 SELECT source.id, source.raw, source.score) AS filtered WHERE CAST(filtered.raw AS NUMBER) BETWEEN -2.5 AND 2.5 AND (filtered.score IS NULL OR filtered.score IN (-2, -1, 0, 1, NULL)) SELECT filtered.id, filtered.raw, filtered.score, CASE WHEN filtered.score BETWEEN 1 AND 2 THEN 'middle' WHEN filtered.score IS NULL THEN 'missing' ELSE 'other' END AS bucket ORDER BY filtered.score DESC NULLS LAST, filtered.id FETCH FIRST %d ROWS ONLY", rows, limit)
+		got, err := ExecuteSQLQuery(hatrieQuery, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d HatTrie query: %v\nquery=%s", iteration, err, hatrieQuery)
+		}
+		sqliteQuery := fmt.Sprintf("WITH source(id, raw, score) AS (VALUES %s), filtered AS (SELECT id, raw, score FROM source WHERE score IS NULL OR score BETWEEN -3 AND 3) SELECT id, raw, score, CASE WHEN score BETWEEN 1 AND 2 THEN 'middle' WHEN score IS NULL THEN 'missing' ELSE 'other' END AS bucket FROM filtered WHERE CAST(raw AS REAL) BETWEEN -2.5 AND 2.5 AND (score IS NULL OR score IN (-2, -1, 0, 1, NULL)) ORDER BY score DESC NULLS LAST, id LIMIT %d", rows, limit)
+		output, err := exec.Command("sqlite3", "-json", ":memory:", sqliteQuery).Output()
+		if err != nil {
+			t.Fatalf("iteration %d SQLite query: %v\nquery=%s", iteration, err, sqliteQuery)
+		}
+		if len(output) == 0 {
+			output = []byte("[]")
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("iteration %d decode SQLite JSON: %v", iteration, err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatalf("iteration %d encode HatTrie rows: %v", iteration, err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatalf("iteration %d decode HatTrie JSON: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("iteration %d derived/expression differential mismatch\nhatrie_query=%s\nsqlite_query=%s\nhatrie=%#v\nsqlite=%#v", iteration, hatrieQuery, sqliteQuery, normalized, want)
+		}
+	}
+}
+
 func TestExecuteSQLQuerySupportsPartitionedWindowFunctions(t *testing.T) {
 	t.Parallel()
 	result, err := ExecuteSQLQuery(`
