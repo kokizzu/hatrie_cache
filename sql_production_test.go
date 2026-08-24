@@ -778,6 +778,61 @@ func TestExecuteSQLQueryRowsStreamsIndexedRunningAggregateWindows(t *testing.T) 
 	}
 }
 
+func TestExecuteSQLQueryRowsIndexedOrderedStreamsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260903))
+	for iteration := 0; iteration < 64; iteration++ {
+		rows := make([]SQLRow, 0, 15)
+		id := int64(0)
+		for _, team := range []interface{}{"blue", "red", nil} {
+			for count := 0; count < random.Intn(6); count++ {
+				id++
+				score := interface{}(nil)
+				if random.Intn(4) != 0 {
+					score = int64(random.Intn(21) - 10)
+				}
+				rows = append(rows, SQLRow{"id": id, "team": team, "score": score})
+			}
+		}
+		if len(rows) == 0 {
+			rows = append(rows, SQLRow{"id": int64(1), "team": "blue", "score": int64(0)})
+		}
+		offset := random.Intn(6)
+		limit := 1 + random.Intn(8)
+		lagOffset := random.Intn(8)
+		leadOffset := random.Intn(8)
+		queries := []string{
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, people.score ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT DISTINCT people.team ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, ROW_NUMBER() OVER (ORDER BY people.team NULLS LAST) AS row_number, RANK() OVER (ORDER BY people.team NULLS LAST) AS rank, DENSE_RANK() OVER (ORDER BY people.team NULLS LAST) AS dense_rank ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, LAG(people.score, %d, -99) OVER (ORDER BY people.team NULLS LAST) AS previous_score ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", lagOffset, offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, LEAD(people.score, %d, -99) OVER (ORDER BY people.team NULLS LAST) AS next_score ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", leadOffset, offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, SUM(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_sum, AVG(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_average, MIN(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_minimum, MAX(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_maximum ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+		}
+		for _, query := range queries {
+			baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+			if err != nil {
+				t.Fatalf("iteration %d materialized baseline: %v\nquery=%s", iteration, err, query)
+			}
+			resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+			got := []SQLRow{}
+			err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+				got = append(got, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("iteration %d indexed stream: %v\nquery=%s", iteration, err, query)
+			}
+			if resolver.orderedCalls != 1 {
+				t.Fatalf("iteration %d ordered source calls = %d, want 1\nquery=%s", iteration, resolver.orderedCalls, query)
+			}
+			if !reflect.DeepEqual(got, baseline.Rows) {
+				t.Fatalf("iteration %d indexed stream = %#v, want %#v\nquery=%s", iteration, got, baseline.Rows, query)
+			}
+		}
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
 	t.Parallel()
 	rows := []SQLRow{{"age": nil}, {"age": int64(12)}}
