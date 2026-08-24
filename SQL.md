@@ -591,9 +591,10 @@ Indexes refresh automatically when that cache value changes.
 `SQLJSONIndexStats` reports total and distinct indexed rows plus deterministic
 posting-list skew (`MinRowsPerKey`, `MaxRowsPerKey`, `AverageRowsPerKey`, and a
 frequency histogram). For a simple equality index probe, `EXPLAIN ANALYZE`
-shows the average posting-list cardinality as `estimated_rows` beside the
-actual result cardinality. A mismatch is useful evidence that a value is hot;
-the estimate never changes query semantics or hides actual row counts.
+uses the exact current posting-list count when the resolver provides it; other
+resolvers fall back to the average cardinality. The value-estimate API accepts
+only a value the caller already supplied and never enumerates indexed values.
+The estimate never changes query semantics or hides actual row counts.
 
 For an `AND` of individually indexed equality predicates, the optimizer probes
 the available term with the lowest average posting-list estimate first; ties

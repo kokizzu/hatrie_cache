@@ -968,13 +968,43 @@ func TestHatTrieSQLJSONIndexStatsExposeSkewAndExplainEstimate(t *testing.T) {
 	}
 	for _, step := range result.Plan {
 		if step.Node == "INDEX SCAN" {
-			if step.EstimatedRows == nil || *step.EstimatedRows != 3 || step.ActualOutputRows == nil || *step.ActualOutputRows != 5 {
-				t.Fatalf("indexed estimate/actual = %#v, want 3/5", step)
+			if step.EstimatedRows == nil || *step.EstimatedRows != 5 || step.ActualOutputRows == nil || *step.ActualOutputRows != 5 {
+				t.Fatalf("indexed estimate/actual = %#v, want 5/5", step)
 			}
 			return
 		}
 	}
 	t.Fatalf("indexed EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
+}
+
+func TestHatTrieSQLJSONIndexValueEstimateUsesExactPostingCount(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("events", `[{"id":1,"kind":"hot"},{"id":2,"kind":"hot"},{"id":3,"kind":"hot"},{"id":4,"kind":"hot"},{"id":5,"kind":"hot"},{"id":6,"kind":"cold"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("events", "kind"); err != nil {
+		t.Fatal(err)
+	}
+	rows, known, available, err := trie.SQLJSONIndexValueEstimate("events", "kind", "hot")
+	if err != nil || !available || !known || rows != 5 {
+		t.Fatalf("SQLJSONIndexValueEstimate(hot) = %d/%t/%t/%v, want 5/true/true/nil", rows, known, available, err)
+	}
+	rows, known, available, err = trie.SQLJSONIndexValueEstimate("events", "kind", "missing")
+	if err != nil || !available || !known || rows != 0 {
+		t.Fatalf("SQLJSONIndexValueEstimate(missing) = %d/%t/%t/%v, want 0/true/true/nil", rows, known, available, err)
+	}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.kind = 'hot' SELECT event.id", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX SCAN" && step.EstimatedRows != nil {
+			if *step.EstimatedRows != 5 {
+				t.Fatalf("hot INDEX SCAN estimate = %d, want exact 5", *step.EstimatedRows)
+			}
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX SCAN estimate", result.Plan)
 }
 
 func TestHatTrieSQLCompositeJSONIndexRejectsInvalidDefinitions(t *testing.T) {

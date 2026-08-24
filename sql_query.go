@@ -200,6 +200,13 @@ type sqlJSONIndexStatsResolver interface {
 	SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndexStats, bool, error)
 }
 
+// sqlJSONIndexValueStatsResolver optionally provides the exact current posting
+// count for a caller-supplied equality value. It never enumerates indexed
+// values, so optimizers can recognize hot values without exposing cache data.
+type sqlJSONIndexValueStatsResolver interface {
+	SQLJSONIndexValueEstimate(key, field string, value interface{}) (rows int, exact bool, available bool, err error)
+}
+
 // SQLStreamSourceResolver supplies source rows one at a time. It lets the SQL
 // executor avoid materializing a source or result for stream-compatible queries.
 type SQLStreamSourceResolver interface {
@@ -414,6 +421,34 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 		return SQLJSONIndexStats{}, false, err
 	}
 	return sqlJSONIndexStats(key, index.fields, index.rows), true, nil
+}
+
+// SQLJSONIndexValueEstimate returns the exact posting-list size for one value
+// supplied by the caller. It does not expose or enumerate any indexed values.
+// exact is false only when the value cannot be represented by this index;
+// available is false when the requested field index does not exist.
+func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{}) (rows int, exact bool, available bool, err error) {
+	if ht == nil || key == "" || field == "" {
+		return 0, false, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return 0, false, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return 0, false, false, nil
+	}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return 0, false, true, err
+	}
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok {
+		return 0, true, true, nil
+	}
+	return len(index.rows[valueKey]), true, true, nil
 }
 
 func sqlJSONIndexStats(key string, fields []string, postings map[string][]SQLRow) SQLJSONIndexStats {
@@ -4246,19 +4281,34 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 // this number with ActualOutputRows. Composite and range predicates keep a nil
 // estimate until their individual distributions are available.
 func sqlIndexedEqualityEstimate(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) (*int, error) {
-	statsResolver, ok := resolver.(sqlJSONIndexStatsResolver)
-	if !ok || source.kind != "CACHE" || condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+	if source.kind != "CACHE" || condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
 		return nil, nil
 	}
 	left, right := *condition.left, *condition.right
 	field := ""
+	var value interface{}
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
 		field = left.name
+		value = right.value
 	}
 	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
 		field = right.name
+		value = left.value
 	}
 	if field == "" {
+		return nil, nil
+	}
+	if valueResolver, ok := resolver.(sqlJSONIndexValueStatsResolver); ok {
+		rows, exact, available, err := valueResolver.SQLJSONIndexValueEstimate(source.key, field, value)
+		if err != nil {
+			return nil, err
+		}
+		if available && exact {
+			return &rows, nil
+		}
+	}
+	statsResolver, ok := resolver.(sqlJSONIndexStatsResolver)
+	if !ok {
 		return nil, nil
 	}
 	stats, available, err := statsResolver.SQLJSONIndexStats(source.key, field)
