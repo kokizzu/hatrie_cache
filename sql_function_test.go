@@ -177,6 +177,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"RIGHT", "query", "FROM VALUES (1) AS a(value) RIGHT JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT b.value"},
 		{"RECURSIVE", "query", "WITH RECURSIVE sequence(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM sequence AS previous WHERE value < 2 SELECT value + 1 AS value) FROM sequence SELECT value"},
 		{"BETWEEN", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
+		{"BETWEEN_PREDICATE", "query", "FROM VALUES (2) AS a(value) WHERE value BETWEEN 1 AND 3 SELECT value"},
 		{"CURRENT", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"FOLLOWING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING)"},
 		{"FIRST", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) SEARCH BREADTH FIRST BY value SET search_order FROM walk SELECT search_order"},

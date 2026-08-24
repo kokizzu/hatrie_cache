@@ -275,6 +275,7 @@ the first side but not the second. These operations are read-only.
 | Query a query | `FROM (SELECT ... ) AS derived SELECT ...` | Derived table is read-only and uncorrelated. |
 | Match text | `WHERE name LIKE 'Ad%'` | Keeps matching non-NULL strings; comparisons are case-sensitive UTF-8 binary. |
 | Match one of several values | `WHERE state IN ('open', 'paused')` | `NOT IN` is also supported; a list containing `NULL` follows SQL three-valued logic. |
+| Match an inclusive range | `WHERE score BETWEEN 60 AND 100` | `NOT BETWEEN` is supported; either null operand yields unknown. |
 | Compare time correctly | `WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z'` or `day > DATE '2026-08-22'` | Chronological typed comparison; malformed literals are rejected locally. |
 | Normalize a dynamic field explicitly | `CAST(raw_score AS NUMBER)` | Supports `TEXT`, `NUMBER`, `DECIMAL`, `BOOLEAN`, `DATE`, and `TIMESTAMP`; invalid dynamic values produce a source-spanned error instead of silently becoming NULL. |
 | Validate a JSON source schema | `FROM CACHE('users') AS u(id INTEGER, joined_on DATE)` | Validates and converts declared non-null fields before relational evaluation; a bad row identifies its cache key, row, field, expected type, and source span. |

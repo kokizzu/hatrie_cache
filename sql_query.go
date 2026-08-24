@@ -2240,13 +2240,10 @@ func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 		}
 		return sqlExpr{kind: "binary", op: map[bool]string{false: "IS NULL", true: "IS NOT NULL"}[not], left: &left}, nil
 	}
-	notIn := false
+	notComparison := false
 	if p.keyword("NOT") {
-		notIn = true
+		notComparison = true
 		p.next()
-		if !p.keyword("IN") {
-			return sqlExpr{}, p.expected(p.current(), "IN after NOT", []string{"IN"})
-		}
 	}
 	if p.keyword("IN") {
 		p.next()
@@ -2260,10 +2257,25 @@ func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 			return sqlExpr{}, err
 		}
-		return sqlExpr{kind: "in", op: map[bool]string{false: "IN", true: "NOT IN"}[notIn], left: &left, args: values}, nil
+		return sqlExpr{kind: "in", op: map[bool]string{false: "IN", true: "NOT IN"}[notComparison], left: &left, args: values}, nil
 	}
-	if notIn {
-		return sqlExpr{}, p.expected(p.current(), "IN after NOT", []string{"IN"})
+	if p.keyword("BETWEEN") {
+		p.next()
+		lower, err := p.parseExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		if err := p.expectKeyword("AND"); err != nil {
+			return sqlExpr{}, err
+		}
+		upper, err := p.parseExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		return sqlExpr{kind: "between", op: map[bool]string{false: "BETWEEN", true: "NOT BETWEEN"}[notComparison], left: &left, args: []sqlExpr{lower, upper}}, nil
+	}
+	if notComparison {
+		return sqlExpr{}, p.expected(p.current(), "IN or BETWEEN after NOT", []string{"IN", "BETWEEN"})
 	}
 	if p.keyword("LIKE") {
 		p.next()
@@ -4070,6 +4082,11 @@ func sqlExplainExpression(expression sqlExpr) string {
 		return expression.op + " " + sqlExplainExpression(*expression.left)
 	case "in":
 		return sqlExplainExpression(*expression.left) + " " + expression.op + " (" + sqlExplainExpressions(expression.args) + ")"
+	case "between":
+		if len(expression.args) == 2 {
+			return sqlExplainExpression(*expression.left) + " " + expression.op + " " + sqlExplainExpression(expression.args[0]) + " AND " + sqlExplainExpression(expression.args[1])
+		}
+		return "<invalid BETWEEN>"
 	case "binary":
 		if expression.op == "IS NULL" || expression.op == "IS NOT NULL" {
 			return sqlExplainExpression(*expression.left) + " " + expression.op
@@ -4828,6 +4845,20 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 		}
 		return sqlInValue(expr.op, left, values)
+	case "between":
+		left := evalSQLExpr(*expr.left, group, row)
+		if err := sqlExpressionError(left); err != nil {
+			return sqlEvaluationFailure(err)
+		}
+		lower := evalSQLExpr(expr.args[0], group, row)
+		upper := evalSQLExpr(expr.args[1], group, row)
+		if err := sqlExpressionError(lower); err != nil {
+			return sqlEvaluationFailure(err)
+		}
+		if err := sqlExpressionError(upper); err != nil {
+			return sqlEvaluationFailure(err)
+		}
+		return sqlBetweenValue(expr.op, left, lower, upper)
 	case "binary":
 		left := evalSQLExpr(*expr.left, group, row)
 		if err := sqlExpressionError(left); err != nil {
@@ -4866,6 +4897,14 @@ func sqlInValue(op string, left interface{}, values []interface{}) interface{} {
 		return nil
 	}
 	return op == "NOT IN"
+}
+
+func sqlBetweenValue(op string, left, lower, upper interface{}) interface{} {
+	value := sqlBinaryValue("AND", sqlBinaryValue(">=", left, lower), sqlBinaryValue("<=", left, upper))
+	if value == nil || op != "NOT BETWEEN" {
+		return value
+	}
+	return !sqlTruthy(value)
 }
 
 func sqlCastValue(value interface{}, target string) (interface{}, error) {

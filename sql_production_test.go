@@ -649,6 +649,10 @@ func TestExecuteSQLQueryUsesHashJoinForEqualityOuterJoins(t *testing.T) {
 			t.Fatalf("%s outer join plan = %#v, want HASH JOIN", test.name, explained.Plan)
 		})
 	}
+	explained, err := ExecuteSQLQuery("EXPLAIN FROM VALUES (2) AS values(value) WHERE value BETWEEN 1 AND 3 SELECT value", SQLSourceResolverFunc(nil))
+	if err != nil || len(explained.Plan) < 2 || explained.Plan[1].Detail != "value BETWEEN 1 AND 3" {
+		t.Fatalf("BETWEEN EXPLAIN = %#v/%v, want readable range filter", explained.Plan, err)
+	}
 }
 
 func TestExecuteSQLQueryJoinsMultipleSourceKindsInOnePipeline(t *testing.T) {
@@ -1301,6 +1305,28 @@ func TestExecuteSQLQuerySupportsInWithNullSemantics(t *testing.T) {
 			}
 			if !reflect.DeepEqual(result.Rows, test.want) {
 				t.Fatalf("IN rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySupportsBetweenWithNullSemantics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, where string
+		want        []SQLRow
+	}{
+		{"inclusive", "value BETWEEN 2 AND 3", []SQLRow{{"value": int64(2)}, {"value": int64(3)}}},
+		{"not_between", "value NOT BETWEEN 2 AND 3", []SQLRow{{"value": int64(1)}}},
+		{"null_bound_is_unknown", "value BETWEEN 1 AND NULL", []SQLRow{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (1), (2), (3), (NULL) AS values(value) WHERE "+test.where+" SELECT value ORDER BY value NULLS LAST", SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("BETWEEN query: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("BETWEEN rows = %#v, want %#v", result.Rows, test.want)
 			}
 		})
 	}
