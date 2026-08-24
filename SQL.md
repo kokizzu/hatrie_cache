@@ -287,7 +287,7 @@ the first side but not the second. These operations are read-only.
 | Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
 | Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
 | Limit with standard syntax | `FETCH FIRST 20 ROWS ONLY` | Equivalent to `LIMIT 20`; cannot be combined with `LIMIT`. |
-| Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing all result rows; finite source-only top-N sorting is also bounded. |
+| Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing all result rows; finite source-only top-N and configured unbounded scalar external sorting are bounded. |
 
 Streaming also supports a chain of equality `INNER` or `LEFT JOIN`s when the
 left `CACHE` source is streamable and every right `CACHE` join field has an
@@ -865,6 +865,12 @@ and uses the original row ordinal to keep equal keys stable. It merges at most
 all temporary files on success or failure, and reports `EXTERNAL SORT` with
 its live spill bytes and final-run count in `EXPLAIN ANALYZE`.
 
+The same configuration also lets `ExecuteSQLQueryRows` / NDJSON stream an
+otherwise unbounded scalar direct `CACHE` or `VALUES` `ORDER BY`: it reads the
+source into bounded runs, then sends the final merge straight to the callback
+without building a result-row slice. Indexed ordering and finite top-N queries
+keep using their cheaper direct-stream and heap paths respectively.
+
 For `UNION` (without `ALL`), `INTERSECT`, and `EXCEPT`, `MaxSetBytes` similarly
 limits distinct-set membership. Once exceeded, a configured spill directory
 merges canonical projected-row identities on disk and then restores the
@@ -957,11 +963,14 @@ at a time, retaining no result-row slice and preserving the function's normal
 type and source diagnostics. A source-only query with a finite `ORDER BY … LIMIT`
 (optionally with `OFFSET`) uses a stable bounded top-N heap: it retains at most
 `LIMIT + OFFSET` candidates, then emits sorted rows after its source is read.
-That ordered subset excludes joins, most grouping, windows, sets, distinct,
-typed schemas, and custom functions. The direct indexed grouped-aggregate form
-described above is the grouping exception. It also supports a global, no-join selection
-made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
-keep constant state and emit one final row without retaining source rows. It
+An unbounded scalar `CACHE` or `VALUES` order can instead stream its final
+bounded external-sort merge when `MaxSortBytes`, `SpillDirectory`, and
+`MaxSpillBytes` are configured. Those ordered subsets exclude joins, most
+grouping, windows, sets, distinct, typed schemas, and custom functions. The
+direct indexed grouped-aggregate form described above is the grouping exception.
+It also supports a global, no-join selection made only of direct `COUNT`, `SUM`,
+`AVG`, `MIN`, and `MAX` expressions; those keep constant state and emit one
+final row without retaining source rows. It
 also streams an unbounded, direct one-field indexed `ORDER BY` over one untyped
 `CACHE` source; that proof includes its scalar `WHERE`, projection, `OFFSET`,
 and `LIMIT`. It still rejects CTEs, other grouped aggregates, unbounded ordering
