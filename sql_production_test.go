@@ -365,6 +365,189 @@ func TestExecuteSQLQueryRowsStreamsExternalSortValues(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsExternalSortFallsBackWhenOrderedIndexMissing(t *testing.T) {
+	t.Parallel()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"score":4},{"id":2,"score":1},{"id":3,"score":null},{"id":4,"score":3}]`)
+	query := "FROM CACHE('people') AS person SELECT person.id, person.score ORDER BY person.score ASC NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, trie, nil, SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external sort fallback: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external sort fallback rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalDistinct(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"id": int64(1), "score": int64(2)}, {"id": int64(2), "score": int64(1)}, {"id": int64(3), "score": int64(2)}, {"id": int64(4), "score": nil}, {"id": int64(5), "score": int64(1)}, {"id": int64(6), "score": nil}, {"id": int64(7), "score": int64(3)}}
+	query := "FROM CACHE('people') AS person SELECT DISTINCT person.score AS value OFFSET 1 LIMIT 2"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external DISTINCT stream: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("external DISTINCT resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external DISTINCT rows = %#v, want %#v", got, baseline.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external DISTINCT leftovers = %#v, want none", entries)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalDistinctValues(t *testing.T) {
+	t.Parallel()
+
+	query := "FROM VALUES (2), (1), (2), (NULL), (1), (3) AS values(value) SELECT DISTINCT value OFFSET 1 LIMIT 2"
+	baseline, err := ExecuteSQLQuery(query, nil)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, nil, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external DISTINCT VALUES stream: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external DISTINCT VALUES rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalDistinctMergesOrdinalRuns(t *testing.T) {
+	t.Parallel()
+
+	rows := make([]SQLRow, 40)
+	for index := range rows {
+		rows[index] = SQLRow{"id": int64((index * 17) % len(rows))}
+	}
+	query := "FROM CACHE('people') AS person SELECT DISTINCT person.id AS value"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external DISTINCT ordinal merge: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external DISTINCT ordinal merge rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalDistinctRandomized(t *testing.T) {
+	t.Parallel()
+
+	random := rand.New(rand.NewSource(20260825))
+	for iteration := 0; iteration < 32; iteration++ {
+		rows := make([]SQLRow, 40)
+		for index := range rows {
+			rows[index] = SQLRow{"id": int64(index), "score": int64(random.Intn(21) - 10)}
+			if random.Intn(5) == 0 {
+				rows[index]["score"] = nil
+			}
+		}
+		query := fmt.Sprintf("FROM CACHE('people') AS person SELECT DISTINCT person.score AS value OFFSET %d LIMIT %d", random.Intn(8), 1+random.Intn(8))
+		baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+		if err != nil {
+			t.Fatalf("iteration %d materialized baseline: %v", iteration, err)
+		}
+		resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+		got := []SQLRow{}
+		directory := t.TempDir()
+		err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d external DISTINCT stream: %v", iteration, err)
+		}
+		if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+			t.Fatalf("iteration %d resolver calls materialized=%d streamed=%d, want 0/1", iteration, resolver.resolveCalls, resolver.streamCalls)
+		}
+		if !reflect.DeepEqual(got, baseline.Rows) {
+			t.Fatalf("iteration %d external DISTINCT rows = %#v, want %#v", iteration, got, baseline.Rows)
+		}
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("iteration %d external DISTINCT leftovers = %#v, want none", iteration, entries)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalDistinctCleansUpOnFailure(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"score": int64(3)}, {"score": int64(1)}, {"score": int64(3)}}
+	query := "FROM CACHE('people') AS person SELECT DISTINCT person.score AS value"
+	for _, test := range []struct {
+		name    string
+		options SQLQueryOptions
+		visit   func([]string, SQLRow) error
+		want    string
+	}{
+		{name: "callback", options: SQLQueryOptions{MaxSetBytes: 1, MaxSpillBytes: 1 << 20}, visit: func([]string, SQLRow) error { return errors.New("stop distinct merge") }, want: "stop distinct merge"},
+		{name: "disk budget", options: SQLQueryOptions{MaxSetBytes: 1, MaxSpillBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "spill disk budget"},
+		{name: "result budget", options: SQLQueryOptions{MaxSetBytes: 1, MaxSpillBytes: 1 << 20, MaxResultBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "result byte budget"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			test.options.SpillDirectory = directory
+			err := ExecuteSQLQueryRows(context.Background(), query, &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}, nil, test.options, test.visit)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("external DISTINCT error = %v, want %q", err, test.want)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external DISTINCT leftovers = %#v, want none", entries)
+			}
+		})
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsExternalSortRandomized(t *testing.T) {
 	t.Parallel()
 

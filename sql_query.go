@@ -1125,15 +1125,16 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 
 // ExecuteSQLQueryRows evaluates a stream-compatible query and invokes visit as
 // each projected row becomes available. It never builds a result-row slice.
-// Queries requiring unsupported global state (grouping, windows, set
-// operations, or DISTINCT) return an explanatory error instead of silently
-// falling back to materialized execution. Compatible indexed orders stream
-// directly; finite direct-source orders use a bounded top-N heap; and an
-// unbounded scalar direct-source order can use bounded external spill runs when
-// MaxSortBytes, SpillDirectory, and MaxSpillBytes are configured. Scalar custom
-// functions are evaluated one source row at a time. A chain of indexed
-// INNER/LEFT CACHE joins is also streamable because each next source is probed
-// only for the current row.
+// Queries requiring unsupported global state (grouping, windows, or set
+// operations) return an explanatory error instead of silently falling back to
+// materialized execution. Compatible indexed orders stream directly; finite
+// direct-source orders use a bounded top-N heap; and an unbounded scalar direct
+// source order can use bounded external spill runs when MaxSortBytes,
+// SpillDirectory, and MaxSpillBytes are configured. A scalar direct-source
+// DISTINCT query can similarly use bounded external set runs when MaxSetBytes
+// is configured. Scalar custom functions are evaluated one source row at a
+// time. A chain of indexed INNER/LEFT CACHE joins is also streamable because
+// each next source is probed only for the current row.
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) error {
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
@@ -1167,6 +1168,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	}
 	if sqlIndexedDistinctStreamable(query, resolver) {
 		return executeSQLIndexedDistinctStream(ctx, query, resolver, control, visit)
+	}
+	if sqlExternalDistinctStreamable(query, control) {
+		return executeSQLExternalDistinctStream(ctx, query, resolver, control, visit)
 	}
 	if sqlIndexedRunningAggregateWindowStreamable(query, resolver) {
 		return executeSQLIndexedRunningAggregateWindowStream(ctx, query, resolver, control, visit)
@@ -2106,6 +2110,242 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 	})
 }
 
+// sqlExternalDistinctStreamable recognizes direct scalar DISTINCT queries for
+// which an external key merge can retain only bounded set runs. The final
+// ordinal merge restores SQL's first-occurrence result order without retaining
+// a result-row slice.
+func sqlExternalDistinctStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
+	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || !query.distinct || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	for _, selectItem := range query.selects {
+		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) || sqlExprHasCustomFunction(selectItem.expr, nil) {
+			return false
+		}
+	}
+	return true
+}
+
+// executeSQLExternalDistinctStream writes bounded key-sorted runs, selects one
+// first-occurrence row per key, then externally restores the source ordinal
+// before invoking visit. At no point does it build a source, set, or result
+// slice.
+func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	columns := sqlColumns(query.selects)
+	available := int64(control.options.MaxSpillBytes)
+	allPaths := map[string]struct{}{}
+	defer func() {
+		for path := range allPaths {
+			_ = os.Remove(path)
+		}
+	}()
+	keyRuns := []sqlSpillRun{}
+	keyChunk := make([]sqlSpillSetRecord, 0)
+	keyChunkBytes := 0
+	flushKeys := func() error {
+		if len(keyChunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(keyChunk, func(left, right int) bool { return sqlSpillSetRecordBefore(keyChunk[left], keyChunk[right]) })
+		run, err := sqlWriteSpillSetRun(control.options.SpillDirectory, keyChunk, &available, control)
+		if err != nil {
+			return err
+		}
+		allPaths[run.path] = struct{}{}
+		keyRuns = append(keyRuns, run)
+		keyChunk = make([]sqlSpillSetRecord, 0)
+		keyChunkBytes = 0
+		return nil
+	}
+	inputRows, ordinal := 0, 0
+	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, nil, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			value := evalSQLExpr(item.expr, nil, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinal}
+		ordinal++
+		recordBytes := sqlSpillSetRecordBytes(record)
+		if len(keyChunk) > 0 && keyChunkBytes+recordBytes > control.options.MaxSetBytes {
+			if err := flushKeys(); err != nil {
+				return err
+			}
+		}
+		keyChunk = append(keyChunk, record)
+		keyChunkBytes += recordBytes
+		return nil
+	})
+	if err != nil {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if err := flushKeys(); err != nil {
+		return err
+	}
+	for len(keyRuns) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(keyRuns)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(keyRuns); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(keyRuns) {
+				end = len(keyRuns)
+			}
+			merged, err := sqlMergeSpillSetRunsToRun(keyRuns[start:end], control.options.SpillDirectory, &available, control)
+			if err != nil {
+				return err
+			}
+			allPaths[merged.path] = struct{}{}
+			for _, run := range keyRuns[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("remove SQL DISTINCT spill file: %w", err)
+				}
+				delete(allPaths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		keyRuns = next
+	}
+	readers, err := sqlOpenSpillSetReaders(keyRuns)
+	if err != nil {
+		return err
+	}
+	ordinalRuns := []sqlSpillRun{}
+	ordinalChunk := make([]sqlSpillOutput, 0)
+	ordinalChunkBytes := 0
+	ordinalOrder := []sqlOrder{{}}
+	flushOrdinals := func() error {
+		if len(ordinalChunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(ordinalChunk, func(left, right int) bool {
+			return sqlSpillOutputLess(ordinalChunk[left], ordinalChunk[right], ordinalOrder)
+		})
+		run, err := sqlWriteSpillRun(control.options.SpillDirectory, ordinalChunk, &available, control)
+		if err != nil {
+			return err
+		}
+		allPaths[run.path] = struct{}{}
+		ordinalRuns = append(ordinalRuns, run)
+		ordinalChunk = make([]sqlSpillOutput, 0)
+		ordinalChunkBytes = 0
+		return nil
+	}
+	for {
+		first, ok, err := sqlNextRawSpillSet(readers, control)
+		if err != nil {
+			closeSQLSpillSetReaders(readers)
+			return err
+		}
+		if !ok {
+			break
+		}
+		for {
+			best := -1
+			for index, reader := range readers {
+				if reader.done || reader.current.Key != first.Key || best >= 0 && !sqlSpillSetRecordBefore(reader.current, readers[best].current) {
+					continue
+				}
+				best = index
+			}
+			if best < 0 {
+				break
+			}
+			if err := readers[best].next(); err != nil {
+				closeSQLSpillSetReaders(readers)
+				return err
+			}
+		}
+		record := sqlSpillOutput{Row: first.Row, Keys: []interface{}{int64(first.Ordinal)}, Ordinal: first.Ordinal}
+		recordBytes := sqlSpillOutputBytes(record)
+		if len(ordinalChunk) > 0 && ordinalChunkBytes+recordBytes > control.options.MaxSetBytes {
+			if err := flushOrdinals(); err != nil {
+				closeSQLSpillSetReaders(readers)
+				return err
+			}
+		}
+		ordinalChunk = append(ordinalChunk, record)
+		ordinalChunkBytes += recordBytes
+	}
+	closeSQLSpillSetReaders(readers)
+	if err := flushOrdinals(); err != nil {
+		return err
+	}
+	for _, run := range keyRuns {
+		if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove SQL DISTINCT spill file: %w", err)
+		}
+		delete(allPaths, run.path)
+		available += run.bytes
+	}
+	for len(ordinalRuns) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(ordinalRuns)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(ordinalRuns); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(ordinalRuns) {
+				end = len(ordinalRuns)
+			}
+			merged, err := sqlMergeSpillRunsToWriter(ordinalRuns[start:end], ordinalOrder, control.options.SpillDirectory, &available, control)
+			if err != nil {
+				return err
+			}
+			allPaths[merged.path] = struct{}{}
+			for _, run := range ordinalRuns[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("remove SQL DISTINCT ordinal spill file: %w", err)
+				}
+				delete(allPaths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		ordinalRuns = next
+	}
+	position, emitted, resultBytes := 0, 0, 0
+	err = sqlMergeSpillRunsToVisit(ordinalRuns, ordinalOrder, control, func(record sqlSpillOutput) error {
+		if position >= query.offset {
+			if query.limit >= 0 && emitted >= query.limit {
+				return errSQLStreamLimitReached
+			}
+			if control.options.MaxResultBytes > 0 {
+				resultBytes += sqlRowBytes(record.Row)
+				if resultBytes > control.options.MaxResultBytes {
+					return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+				}
+			}
+			if err := visit(columns, record.Row); err != nil {
+				return err
+			}
+			emitted++
+		}
+		position++
+		return nil
+	})
+	if errors.Is(err, errSQLStreamLimitReached) {
+		return nil
+	}
+	return err
+}
+
 type sqlStreamAggregate struct {
 	name  string
 	arg   *sqlExpr
@@ -2479,6 +2719,9 @@ func executeSQLIndexedOrderStream(ctx context.Context, query *sqlQuery, resolver
 		return sqlRuntimeDiagnostic(err)
 	}
 	if !available {
+		if sqlExternalSortStreamable(query, control) {
+			return executeSQLExternalSortStream(ctx, query, resolver, control, visit)
+		}
 		return fmt.Errorf("SQL query cannot stream this ordered scan because the ordered index is unavailable")
 	}
 	return nil

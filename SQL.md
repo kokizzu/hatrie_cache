@@ -871,6 +871,14 @@ source into bounded runs, then sends the final merge straight to the callback
 without building a result-row slice. Indexed ordering and finite top-N queries
 keep using their cheaper direct-stream and heap paths respectively.
 
+With `MaxSetBytes` under that same spill configuration, row streaming also
+accepts scalar direct `CACHE` or `VALUES` `SELECT DISTINCT` queries without an
+`ORDER BY`. It writes key-sorted bounded runs, selects the first source ordinal
+for every projected-row identity, and merges those ordinals back to the callback.
+This preserves ordinary `DISTINCT` first-occurrence order plus `OFFSET`/`LIMIT`
+without holding a source, membership set, or result-row slice. Multi-branch
+`UNION`, `INTERSECT`, and `EXCEPT` still retain their ordinary global semantics.
+
 For `UNION` (without `ALL`), `INTERSECT`, and `EXCEPT`, `MaxSetBytes` similarly
 limits distinct-set membership. Once exceeded, a configured spill directory
 merges canonical projected-row identities on disk and then restores the
@@ -976,7 +984,8 @@ also streams an unbounded, direct one-field indexed `ORDER BY` over one untyped
 and `LIMIT`. It still rejects CTEs, other grouped aggregates, unbounded ordering
 without such an index proof, most windows,
 set operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
-`DISTINCT`, typed JSON schemas, and custom functions inside those global
+`DISTINCT` outside the configured direct scalar external-set shape, typed JSON
+schemas, and custom functions inside those global
 operators until each has a bounded-memory streaming operator. `UNION ALL` is
 the exception: when every
 branch is independently streamable and projects the same columns, rows stream
