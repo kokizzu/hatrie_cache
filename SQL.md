@@ -848,7 +848,11 @@ an `Observer`; when `QueryID` is empty the executor assigns a unique `sql-N`
 ID. `SlowQueryThreshold` marks events whose total elapsed time reaches that
 duration. Events include exact materialized row-payload bytes, output shape,
 error text, and an explicit cancellation reason for context cancellation or
-deadline expiry.
+deadline expiry. Events also include `Operators`: privacy-safe per-operator
+node names, measured input/output rows, elapsed time, and any available row
+estimate. Unlike `EXPLAIN ANALYZE`, these counters intentionally omit plan
+details, SQL text, cache keys, predicates, and result values; they are safe to
+send directly to a metrics or structured-log sink.
 
 ```go
 result, err := hatriecache.ExecuteSQLQueryParameters(ctx, sql, resolver, args,

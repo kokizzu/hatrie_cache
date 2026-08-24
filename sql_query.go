@@ -76,6 +76,20 @@ type SQLQueryEvent struct {
 	Canceled           bool   `json:"canceled,omitempty"`
 	CancellationReason string `json:"cancellation_reason,omitempty"`
 	Error              string `json:"error,omitempty"`
+	// Operators deliberately includes counters only: it never contains SQL
+	// text, cache keys, predicates, or result values.
+	Operators []SQLQueryOperator `json:"operators,omitempty"`
+}
+
+// SQLQueryOperator is one privacy-safe execution counter included in an
+// observer event. It has the same measured rows and timing as EXPLAIN ANALYZE
+// but intentionally omits the plan detail, which can contain SQL text.
+type SQLQueryOperator struct {
+	Node          string `json:"node"`
+	InputRows     int    `json:"input_rows"`
+	OutputRows    int    `json:"output_rows"`
+	ElapsedNanos  int64  `json:"elapsed_ns"`
+	EstimatedRows *int   `json:"estimated_rows,omitempty"`
 }
 
 // SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
@@ -899,7 +913,7 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 	}
 }
 
-func (observation sqlQueryObservation) finish(result SQLQueryResult, err error) {
+func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep) {
 	if observation.observer == nil {
 		return
 	}
@@ -919,15 +933,38 @@ func (observation sqlQueryObservation) finish(result SQLQueryResult, err error) 
 			event.CancellationReason = err.Error()
 		}
 	}
+	event.Operators = sqlQueryOperators(steps)
 	observation.observer.ObserveSQLQuery(event)
+}
+
+func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
+	operators := make([]SQLQueryOperator, 0, len(steps))
+	for _, step := range steps {
+		if step.ActualInputRows == nil || step.ActualOutputRows == nil || step.ElapsedNanos == nil {
+			continue
+		}
+		operator := SQLQueryOperator{
+			Node:         step.Node,
+			InputRows:    *step.ActualInputRows,
+			OutputRows:   *step.ActualOutputRows,
+			ElapsedNanos: *step.ElapsedNanos,
+		}
+		if step.EstimatedRows != nil {
+			estimate := *step.EstimatedRows
+			operator.EstimatedRows = &estimate
+		}
+		operators = append(operators, operator)
+	}
+	return operators
 }
 
 // ExecuteSQLQueryParameters executes source with positional $1, $2, ...
 // values supplied separately from SQL text.
 func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
 	observation := newSQLQueryObservation(options)
+	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
-	defer func() { observation.finish(result, err) }()
+	defer func() { observation.finish(result, err, operatorSteps) }()
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
@@ -944,10 +981,18 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	}
 	if query.explain {
 		result, err = explainSQLQuery(query, resolver, control)
+		operatorSteps = result.Plan
 		result.QueryID = observation.id
 		return result, sqlRuntimeDiagnostic(err)
 	}
-	result, err = executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	var metrics *sqlExecutionMetrics
+	if observation.observer != nil {
+		metrics = &sqlExecutionMetrics{}
+	}
+	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
+	if metrics != nil {
+		operatorSteps = metrics.steps
+	}
 	result.QueryID = observation.id
 	return result, sqlRuntimeDiagnostic(err)
 }
@@ -1337,8 +1382,9 @@ type sqlCursor struct {
 // to both SQL text and the encoded parameter values.
 func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (result SQLQueryResult, err error) {
 	observation := newSQLQueryObservation(options)
+	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
-	defer func() { observation.finish(result, err) }()
+	defer func() { observation.finish(result, err, operatorSteps) }()
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	if pageSize <= 0 {
@@ -1386,7 +1432,14 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		}
 	}
 	query.limit = fetch
-	result, err = executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	var metrics *sqlExecutionMetrics
+	if observation.observer != nil {
+		metrics = &sqlExecutionMetrics{}
+	}
+	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
+	if metrics != nil {
+		operatorSteps = metrics.steps
+	}
 	result.QueryID = observation.id
 	if err != nil {
 		return result, sqlRuntimeDiagnostic(err)

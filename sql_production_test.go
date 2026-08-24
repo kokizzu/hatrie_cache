@@ -875,6 +875,36 @@ func TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryObserverIncludesSafeOperatorCounters(t *testing.T) {
+	t.Parallel()
+	var events []SQLQueryEvent
+	result, err := ExecuteSQLQueryContext(context.Background(), "FROM VALUES (1), (2), (3) AS values(id) WHERE id > 1 SELECT id ORDER BY id", SQLSourceResolverFunc(nil), SQLQueryOptions{
+		QueryID: "operators-1",
+		Observer: SQLQueryObserverFunc(func(event SQLQueryEvent) {
+			events = append(events, event)
+		}),
+	})
+	if err != nil {
+		t.Fatalf("observed query: %v", err)
+	}
+	if len(result.Rows) != 2 || len(events) != 1 {
+		t.Fatalf("result/events = %#v/%#v, want two rows/one event", result.Rows, events)
+	}
+	if events[0].QueryID != "operators-1" || !events[0].OK {
+		t.Fatalf("event = %#v, want successful named event", events[0])
+	}
+	operators := map[string]SQLQueryOperator{}
+	for _, operator := range events[0].Operators {
+		operators[operator.Node] = operator
+	}
+	for _, node := range []string{"SCAN", "FILTER", "PROJECT", "SORT"} {
+		operator, ok := operators[node]
+		if !ok || operator.InputRows < 0 || operator.OutputRows < 0 || operator.ElapsedNanos < 0 {
+			t.Fatalf("event operators = %#v, want safe %s counter", events[0].Operators, node)
+		}
+	}
+}
+
 func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
 	t.Parallel()
 	query := "FROM VALUES (3, DATE '2026-08-03'), (1, DATE '2026-08-01'), (2, DATE '2026-08-02'), (4, DATE '2026-08-04') AS values(id, occurred_on) SELECT id, occurred_on, CAST(id AS DECIMAL) AS amount ORDER BY occurred_on DESC, id"
