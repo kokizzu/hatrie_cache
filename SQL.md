@@ -876,15 +876,19 @@ accepts scalar direct `CACHE` or `VALUES` `SELECT DISTINCT` queries without an
 `ORDER BY`. It writes key-sorted bounded runs, selects the first source ordinal
 for every projected-row identity, and merges those ordinals back to the callback.
 This preserves ordinary `DISTINCT` first-occurrence order plus `OFFSET`/`LIMIT`
-without holding a source, membership set, or result-row slice. Multi-branch
-`UNION`, `INTERSECT`, and `EXCEPT` still retain their ordinary global semantics.
+without holding a source, membership set, or result-row slice. Chained set
+expressions use the same bounded external stages in the parser's existing
+right-associated order; each nested stage is read back from ordinal-sorted
+spill runs rather than materializing an intermediate row slice.
 
-A single scalar direct-source `UNION`, `INTERSECT`, or `EXCEPT` can use the
-same bounded external-set path when both branches are independently streamable
-and project the same columns. It merges projected-row identities on disk, then
+Scalar direct-source `UNION`, `INTERSECT`, and `EXCEPT` expressions can use the
+same bounded external-set path when every branch is independently streamable
+and projects the same columns. It merges projected-row identities on disk, then
 restores the existing first-occurrence output order directly to `QueryRows` or
-NDJSON. Chained set expressions, joins, typed sources, custom functions, and
-set-level ordering retain their ordinary global execution path.
+NDJSON. Nested set stages release their consumed runs before the next merge,
+so `MaxSpillBytes` bounds all live intermediate files. Joins, typed sources,
+custom functions, and set-level ordering retain their ordinary global execution
+path.
 
 For `UNION` (without `ALL`), `INTERSECT`, and `EXCEPT`, `MaxSetBytes` similarly
 limits distinct-set membership. Once exceeded, a configured spill directory

@@ -2178,6 +2178,105 @@ func TestExecuteSQLQueryRowsExplainsUnavailableGlobalStreaming(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsChainedExternalSetOperations(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{
+		"left":   {{"value": int64(3)}, {"value": int64(1)}, {"value": int64(3)}},
+		"middle": {{"value": int64(2)}, {"value": int64(4)}, {"value": int64(2)}},
+		"right":  {{"value": int64(1)}, {"value": int64(4)}},
+	}}
+	directory := t.TempDir()
+	query := `FROM CACHE('left') AS left_row SELECT left_row.value
+UNION
+FROM CACHE('middle') AS middle_row SELECT middle_row.value
+EXCEPT
+FROM CACHE('right') AS right_row SELECT right_row.value`
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{
+		MaxSetBytes:    1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream chained external set: %v", err)
+	}
+	if want := []SQLRow{{"value": int64(3)}, {"value": int64(1)}, {"value": int64(2)}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("stream chained set rows = %#v, want %#v", rows, want)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 3 {
+		t.Fatalf("chained set resolver calls materialized=%d streamed=%d, want 0/3", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
+		t.Fatalf("chained set spill cleanup = %#v/%v, want no files", entries, err)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsChainedExternalSetSemantics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, first, second string
+		left, middle, right []SQLRow
+		want                []SQLRow
+	}{
+		{
+			name:  "except_of_union",
+			first: "EXCEPT", second: "UNION",
+			left:   []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(1)}},
+			middle: []SQLRow{{"value": int64(2)}, {"value": int64(3)}},
+			right:  []SQLRow{{"value": int64(3)}, {"value": int64(4)}, {"value": int64(4)}},
+			want:   []SQLRow{{"value": int64(1)}},
+		},
+		{
+			name:  "intersect_of_intersect_with_empty_right",
+			first: "INTERSECT", second: "INTERSECT",
+			left:   []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(1)}},
+			middle: []SQLRow{{"value": int64(1)}, {"value": int64(2)}},
+			right:  nil,
+			want:   nil,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{"left": test.left, "middle": test.middle, "right": test.right}}
+			query := "FROM CACHE('left') AS left_row SELECT left_row.value\n" + test.first + "\nFROM CACHE('middle') AS middle_row SELECT middle_row.value\n" + test.second + "\nFROM CACHE('right') AS right_row SELECT right_row.value"
+			var rows []SQLRow
+			err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("stream chained external set: %v", err)
+			}
+			if !reflect.DeepEqual(rows, test.want) {
+				t.Fatalf("stream chained set rows = %#v, want %#v", rows, test.want)
+			}
+			if resolver.resolveCalls != 0 || resolver.streamCalls != 3 {
+				t.Fatalf("chained set resolver calls materialized=%d streamed=%d, want 0/3", resolver.resolveCalls, resolver.streamCalls)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsCleansChainedExternalSetSpillsOnDiskBudgetError(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{
+		"left":   {{"value": "a very long left value"}},
+		"middle": {{"value": "a very long middle value"}},
+		"right":  {{"value": "a very long right value"}},
+	}}
+	query := "FROM CACHE('left') AS left_row SELECT left_row.value UNION FROM CACHE('middle') AS middle_row SELECT middle_row.value EXCEPT FROM CACHE('right') AS right_row SELECT right_row.value"
+	err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("chained set disk budget error = %v, want spill disk budget", err)
+	}
+	if entries, readErr := os.ReadDir(directory); readErr != nil || len(entries) != 0 {
+		t.Fatalf("chained set failed spill cleanup = %#v/%v, want no files", entries, readErr)
+	}
+}
+
 func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
 	t.Parallel()
 	query := "FROM VALUES (3, DATE '2026-08-03'), (1, DATE '2026-08-01'), (2, DATE '2026-08-02'), (4, DATE '2026-08-04') AS values(id, occurred_on) SELECT id, occurred_on, CAST(id AS DECIMAL) AS amount ORDER BY occurred_on DESC, id"

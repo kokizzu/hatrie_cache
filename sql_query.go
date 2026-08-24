@@ -1375,19 +1375,48 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 }
 
 func sqlExternalSetStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
-	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || len(query.unions) != 1 {
+	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || len(query.unions) == 0 {
 		return false
 	}
-	union := query.unions[0]
-	if union.all || (union.kind != "UNION" && union.kind != "INTERSECT" && union.kind != "EXCEPT") || union.query == nil {
-		return false
+	_, ok := sqlExternalSetStreamColumns(query)
+	return ok
+}
+
+// sqlExternalSetStreamColumns proves the recursively parsed, right-associated
+// set tree can be evaluated through bounded spill stages. Each left operand is
+// a base query and every right operand is either another stage or a base query.
+func sqlExternalSetStreamColumns(query *sqlQuery) ([]string, bool) {
+	if query == nil || query.explain {
+		return nil, false
 	}
 	left := *query
 	left.unions = nil
-	return sqlQueryRowsBaseStreamable(&left) && sqlQueryRowsBaseStreamable(union.query) && sameSQLColumns(sqlColumns(left.selects), sqlColumns(union.query.selects))
+	if !sqlQueryRowsBaseStreamable(&left) {
+		return nil, false
+	}
+	columns := sqlColumns(left.selects)
+	if len(query.unions) == 0 {
+		return columns, true
+	}
+	if len(query.unions) != 1 {
+		return nil, false
+	}
+	union := query.unions[0]
+	if union.all || (union.kind != "UNION" && union.kind != "INTERSECT" && union.kind != "EXCEPT") || union.query == nil {
+		return nil, false
+	}
+	rightColumns, ok := sqlExternalSetStreamColumns(union.query)
+	return columns, ok && sameSQLColumns(columns, rightColumns)
+}
+
+func sqlExternalSetHasNestedStage(query *sqlQuery) bool {
+	return query != nil && len(query.unions) == 1 && query.unions[0].query != nil && len(query.unions[0].query.unions) != 0
 }
 
 func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	if sqlExternalSetHasNestedStage(query) {
+		return executeSQLExternalSetChainStream(ctx, query, resolver, control, visit)
+	}
 	left := *query
 	left.unions = nil
 	union := query.unions[0]
@@ -1584,6 +1613,311 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 	err = sqlMergeSpillRunsToVisit(ordinalRuns, ordinalOrder, control, func(record sqlSpillOutput) error {
 		if position >= query.offset {
 			if query.limit >= 0 && emitted >= query.limit {
+				return errSQLStreamLimitReached
+			}
+			if control.options.MaxResultBytes > 0 {
+				resultBytes += sqlRowBytes(record.Row)
+				if resultBytes > control.options.MaxResultBytes {
+					return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+				}
+			}
+			if err := visit(columns, record.Row); err != nil {
+				return err
+			}
+			emitted++
+		}
+		position++
+		return nil
+	})
+	if errors.Is(err, errSQLStreamLimitReached) {
+		return nil
+	}
+	return err
+}
+
+// sqlSpillRowStream emits rows without retaining an input slice. It is used to
+// connect external set stages: the output of one stage becomes the right input
+// of its parent through ordinal-sorted spill runs.
+type sqlSpillRowStream func(func(SQLRow) error) error
+
+func executeSQLExternalSetChainStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	available := int64(control.options.MaxSpillBytes)
+	paths := map[string]struct{}{}
+	defer func() {
+		for path := range paths {
+			_ = os.Remove(path)
+		}
+	}()
+	runs, columns, err := sqlBuildExternalSetChainRuns(ctx, query, resolver, control, &available, paths)
+	if err != nil {
+		return err
+	}
+	return sqlVisitExternalSetOutputRuns(runs, columns, query.offset, query.limit, control, visit)
+}
+
+func sqlBuildExternalSetChainRuns(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, available *int64, paths map[string]struct{}) ([]sqlSpillRun, []string, error) {
+	left := *query
+	left.unions = nil
+	columns := sqlColumns(left.selects)
+	leftStream := func(emit func(SQLRow) error) error {
+		return executeSQLQueryRowsParsed(ctx, &left, resolver, control, func(branchColumns []string, row SQLRow) error {
+			if !sameSQLColumns(columns, branchColumns) {
+				return fmt.Errorf("set queries must project the same column names in the same order")
+			}
+			return emit(row)
+		})
+	}
+	if len(query.unions) == 0 {
+		runs, err := sqlSpillExternalSetInput(leftStream, control, available, paths)
+		return runs, columns, err
+	}
+	union := query.unions[0]
+	rightRuns, rightColumns, err := sqlBuildExternalSetChainRuns(ctx, union.query, resolver, control, available, paths)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !sameSQLColumns(columns, rightColumns) {
+		return nil, nil, fmt.Errorf("%s queries must project the same column names in the same order", union.kind)
+	}
+	rightStream := func(emit func(SQLRow) error) error {
+		return sqlMergeSpillRunsToVisit(rightRuns, []sqlOrder{{}}, control, func(record sqlSpillOutput) error {
+			return emit(record.Row)
+		})
+	}
+	cleanRight := func() error { return sqlReleaseSpillRuns(rightRuns, available, paths, "set stage input") }
+	runs, err := sqlSpillExternalSetStage(leftStream, rightStream, cleanRight, union.kind, control, available, paths)
+	if err != nil {
+		return nil, nil, err
+	}
+	return runs, columns, nil
+}
+
+// sqlSpillExternalSetInput persists a base stream in ordinal order so it can
+// be consumed by a parent set stage without a result-row slice.
+func sqlSpillExternalSetInput(stream sqlSpillRowStream, control *sqlExecutionControl, available *int64, paths map[string]struct{}) ([]sqlSpillRun, error) {
+	runs := []sqlSpillRun{}
+	chunk := []sqlSpillOutput{}
+	chunkBytes, ordinal := 0, 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		run, err := sqlWriteSpillRun(control.options.SpillDirectory, chunk, available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		runs = append(runs, run)
+		chunk, chunkBytes = []sqlSpillOutput{}, 0
+		return nil
+	}
+	if err := stream(func(row SQLRow) error {
+		record := sqlSpillOutput{Row: row, Keys: []interface{}{int64(ordinal)}, Ordinal: ordinal}
+		ordinal++
+		recordBytes := sqlSpillOutputBytes(record)
+		if len(chunk) > 0 && chunkBytes+recordBytes > control.options.MaxSetBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		chunk = append(chunk, record)
+		chunkBytes += recordBytes
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+// sqlSpillExternalSetStage creates one bounded binary set stage. The right
+// stream may be a nested stage; its input runs are released immediately after
+// their records have been absorbed, before this stage's merge needs disk.
+func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func() error, operation string, control *sqlExecutionControl, available *int64, paths map[string]struct{}) ([]sqlSpillRun, error) {
+	runs := []sqlSpillRun{}
+	chunk := []sqlSpillSetRecord{}
+	chunkBytes, ordinal := 0, 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(chunk, func(i, j int) bool { return sqlSpillSetRecordBefore(chunk[i], chunk[j]) })
+		run, err := sqlWriteSpillSetRun(control.options.SpillDirectory, chunk, available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		runs = append(runs, run)
+		chunk, chunkBytes = []sqlSpillSetRecord{}, 0
+		return nil
+	}
+	appendStream := func(stream sqlSpillRowStream, rightSide bool) error {
+		return stream(func(row SQLRow) error {
+			record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinal, Right: rightSide}
+			ordinal++
+			recordBytes := sqlSpillSetRecordBytes(record)
+			if len(chunk) > 0 && chunkBytes+recordBytes > control.options.MaxSetBytes {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			chunk = append(chunk, record)
+			chunkBytes += recordBytes
+			return nil
+		})
+	}
+	if err := appendStream(left, false); err != nil {
+		return nil, err
+	}
+	if err := appendStream(right, true); err != nil {
+		return nil, err
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	if releaseRight != nil {
+		if err := releaseRight(); err != nil {
+			return nil, err
+		}
+	}
+	for len(runs) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(runs) {
+				end = len(runs)
+			}
+			merged, err := sqlMergeSpillSetRunsToRun(runs[start:end], control.options.SpillDirectory, available, control)
+			if err != nil {
+				return nil, err
+			}
+			paths[merged.path] = struct{}{}
+			if err := sqlReleaseSpillRuns(runs[start:end], available, paths, "set spill file"); err != nil {
+				return nil, err
+			}
+			next = append(next, merged)
+		}
+		runs = next
+	}
+	readers, err := sqlOpenSpillSetReaders(runs)
+	if err != nil {
+		return nil, err
+	}
+	defer closeSQLSpillSetReaders(readers)
+	ordinalRuns := []sqlSpillRun{}
+	ordinalChunk := []sqlSpillOutput{}
+	ordinalBytes := 0
+	ordinalOrder := []sqlOrder{{}}
+	flushOrdinals := func() error {
+		if len(ordinalChunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(ordinalChunk, func(i, j int) bool { return sqlSpillOutputLess(ordinalChunk[i], ordinalChunk[j], ordinalOrder) })
+		run, err := sqlWriteSpillRun(control.options.SpillDirectory, ordinalChunk, available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		ordinalRuns = append(ordinalRuns, run)
+		ordinalChunk, ordinalBytes = []sqlSpillOutput{}, 0
+		return nil
+	}
+	for {
+		first, ok, err := sqlNextRawSpillSet(readers, control)
+		if err != nil || !ok {
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+		hasLeft, hasRight := !first.Right, first.Right
+		firstLeft := first
+		for {
+			best := -1
+			for index, reader := range readers {
+				if reader.done || reader.current.Key != first.Key || best >= 0 && !sqlSpillSetRecordBefore(reader.current, readers[best].current) {
+					continue
+				}
+				best = index
+			}
+			if best < 0 {
+				break
+			}
+			record := readers[best].current
+			if record.Right {
+				hasRight = true
+			} else if !hasLeft {
+				hasLeft, firstLeft = true, record
+			}
+			if err := readers[best].next(); err != nil {
+				return nil, err
+			}
+		}
+		selected := operation == "UNION" || operation == "INTERSECT" && hasLeft && hasRight || operation == "EXCEPT" && hasLeft && !hasRight
+		if !selected {
+			continue
+		}
+		output := first
+		if operation != "UNION" {
+			output = firstLeft
+		}
+		record := sqlSpillOutput{Row: output.Row, Keys: []interface{}{int64(output.Ordinal)}, Ordinal: output.Ordinal}
+		recordBytes := sqlSpillOutputBytes(record)
+		if len(ordinalChunk) > 0 && ordinalBytes+recordBytes > control.options.MaxSetBytes {
+			if err := flushOrdinals(); err != nil {
+				return nil, err
+			}
+		}
+		ordinalChunk = append(ordinalChunk, record)
+		ordinalBytes += recordBytes
+	}
+	if err := flushOrdinals(); err != nil {
+		return nil, err
+	}
+	closeSQLSpillSetReaders(readers)
+	if err := sqlReleaseSpillRuns(runs, available, paths, "set spill file"); err != nil {
+		return nil, err
+	}
+	for len(ordinalRuns) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(ordinalRuns)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(ordinalRuns); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(ordinalRuns) {
+				end = len(ordinalRuns)
+			}
+			merged, err := sqlMergeSpillRunsToWriter(ordinalRuns[start:end], ordinalOrder, control.options.SpillDirectory, available, control)
+			if err != nil {
+				return nil, err
+			}
+			paths[merged.path] = struct{}{}
+			if err := sqlReleaseSpillRuns(ordinalRuns[start:end], available, paths, "set ordinal spill file"); err != nil {
+				return nil, err
+			}
+			next = append(next, merged)
+		}
+		ordinalRuns = next
+	}
+	return ordinalRuns, nil
+}
+
+func sqlReleaseSpillRuns(runs []sqlSpillRun, available *int64, paths map[string]struct{}, label string) error {
+	for _, run := range runs {
+		if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove SQL %s: %w", label, err)
+		}
+		delete(paths, run.path)
+		*available += run.bytes
+	}
+	return nil
+}
+
+func sqlVisitExternalSetOutputRuns(runs []sqlSpillRun, columns []string, offset, limit int, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	position, emitted, resultBytes := 0, 0, 0
+	err := sqlMergeSpillRunsToVisit(runs, []sqlOrder{{}}, control, func(record sqlSpillOutput) error {
+		if position >= offset {
+			if limit >= 0 && emitted >= limit {
 				return errSQLStreamLimitReached
 			}
 			if control.options.MaxResultBytes > 0 {
