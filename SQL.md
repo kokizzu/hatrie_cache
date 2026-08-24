@@ -797,6 +797,31 @@ result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
     })
 ```
 
+### Query observations
+
+Materialized queries can carry an application request ID and emit one compact,
+structured completion event without exposing SQL text or result values. Supply
+an `Observer`; when `QueryID` is empty the executor assigns a unique `sql-N`
+ID. `SlowQueryThreshold` marks events whose total elapsed time reaches that
+duration. Events include exact materialized row-payload bytes, output shape,
+error text, and an explicit cancellation reason for context cancellation or
+deadline expiry.
+
+```go
+result, err := hatriecache.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
+    hatriecache.SQLQueryOptions{
+        QueryID:            requestID,
+        SlowQueryThreshold: 200 * time.Millisecond,
+        Observer: hatriecache.SQLQueryObserverFunc(func(event hatriecache.SQLQueryEvent) {
+            logger.Info("sql query complete", "query_id", event.QueryID,
+                "slow", event.Slow, "result_bytes", event.ResultBytes,
+                "error", event.Error)
+        }),
+    })
+_ = result
+_ = err
+```
+
 ### Positional parameters
 
 Pass values separately from SQL with one-based `$1`, `$2`, … placeholders.

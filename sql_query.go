@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,6 +33,41 @@ type SQLQueryOptions struct {
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
 	PreparedCache         *SQLPreparedQueryCache
+	// QueryID is returned with the result and included in an observation event.
+	// When Observer is set but QueryID is empty, execution assigns a unique ID.
+	QueryID            string
+	SlowQueryThreshold time.Duration
+	Observer           SQLQueryObserver
+}
+
+// SQLQueryObserver receives one structured event after a materialized SQL
+// query completes, including parse, budget, and cancellation failures.
+type SQLQueryObserver interface {
+	ObserveSQLQuery(SQLQueryEvent)
+}
+
+// SQLQueryObserverFunc adapts a function into SQLQueryObserver.
+type SQLQueryObserverFunc func(SQLQueryEvent)
+
+func (fn SQLQueryObserverFunc) ObserveSQLQuery(event SQLQueryEvent) {
+	if fn != nil {
+		fn(event)
+	}
+}
+
+// SQLQueryEvent is an execution summary suitable for a structured log or
+// metrics sink. It deliberately excludes SQL text and row values.
+type SQLQueryEvent struct {
+	QueryID            string `json:"query_id"`
+	ElapsedNanos       int64  `json:"elapsed_ns"`
+	OutputRows         int    `json:"output_rows"`
+	OutputColumns      int    `json:"output_columns"`
+	ResultBytes        int    `json:"result_bytes"`
+	OK                 bool   `json:"ok"`
+	Slow               bool   `json:"slow"`
+	Canceled           bool   `json:"canceled,omitempty"`
+	CancellationReason string `json:"cancellation_reason,omitempty"`
+	Error              string `json:"error,omitempty"`
 }
 
 // SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
@@ -158,6 +195,7 @@ func sqlRuntimeDiagnostic(err error) error {
 
 // SQLQueryResult is a materialized result. Streaming clients use QueryRows.
 type SQLQueryResult struct {
+	QueryID    string           `json:"query_id,omitempty"`
 	Columns    []string         `json:"columns"`
 	Rows       []SQLRow         `json:"rows"`
 	Plan       []SQLExplainStep `json:"plan,omitempty"`
@@ -720,28 +758,78 @@ func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSour
 	return ExecuteSQLQueryParameters(ctx, source, resolver, nil, options)
 }
 
+var sqlQueryIDSequence atomic.Uint64
+
+type sqlQueryObservation struct {
+	id        string
+	observer  SQLQueryObserver
+	started   time.Time
+	threshold time.Duration
+}
+
+func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
+	id := strings.TrimSpace(options.QueryID)
+	if id == "" && options.Observer != nil {
+		id = fmt.Sprintf("sql-%d", sqlQueryIDSequence.Add(1))
+	}
+	return sqlQueryObservation{
+		id:        id,
+		observer:  options.Observer,
+		started:   time.Now(),
+		threshold: options.SlowQueryThreshold,
+	}
+}
+
+func (observation sqlQueryObservation) finish(result SQLQueryResult, err error) {
+	if observation.observer == nil {
+		return
+	}
+	event := SQLQueryEvent{
+		QueryID:       observation.id,
+		ElapsedNanos:  time.Since(observation.started).Nanoseconds(),
+		OutputRows:    len(result.Rows),
+		OutputColumns: len(result.Columns),
+		ResultBytes:   sqlRowsBytes(result.Rows),
+		OK:            err == nil,
+	}
+	event.Slow = observation.threshold > 0 && time.Duration(event.ElapsedNanos) >= observation.threshold
+	if err != nil {
+		event.Error = err.Error()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			event.Canceled = true
+			event.CancellationReason = err.Error()
+		}
+	}
+	observation.observer.ObserveSQLQuery(event)
+}
+
 // ExecuteSQLQueryParameters executes source with positional $1, $2, ...
 // values supplied separately from SQL text.
-func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
+	observation := newSQLQueryObservation(options)
+	result.QueryID = observation.id
+	defer func() { observation.finish(result, err) }()
 	release := lockSQLSnapshot(resolver)
 	defer release()
-	control, cancel, err := newSQLExecutionControl(ctx, options)
-	if err != nil {
-		return SQLQueryResult{}, err
+	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
+	if controlErr != nil {
+		return result, controlErr
 	}
 	defer cancel()
-	if err := control.check(); err != nil {
-		return SQLQueryResult{}, err
+	if err = control.check(); err != nil {
+		return result, err
 	}
-	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
-	if err != nil {
-		return SQLQueryResult{}, err
+	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
+	if parseErr != nil {
+		return result, parseErr
 	}
 	if query.explain {
-		result, err := explainSQLQuery(query, resolver, control)
+		result, err = explainSQLQuery(query, resolver, control)
+		result.QueryID = observation.id
 		return result, sqlRuntimeDiagnostic(err)
 	}
-	result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	result, err = executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	result.QueryID = observation.id
 	return result, sqlRuntimeDiagnostic(err)
 }
 
@@ -976,39 +1064,42 @@ type sqlCursor struct {
 
 // ExecuteSQLQueryPage executes one bounded page. Cursors are opaque and bound
 // to both SQL text and the encoded parameter values.
-func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (SQLQueryResult, error) {
+func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (result SQLQueryResult, err error) {
+	observation := newSQLQueryObservation(options)
+	result.QueryID = observation.id
+	defer func() { observation.finish(result, err) }()
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	if pageSize <= 0 {
 		pageSize = 100
 	}
 	if pageSize > maxSQLPageSize {
-		return SQLQueryResult{}, fmt.Errorf("SQL page_size exceeds the maximum %d", maxSQLPageSize)
+		return result, fmt.Errorf("SQL page_size exceeds the maximum %d", maxSQLPageSize)
 	}
-	control, cancel, err := newSQLExecutionControl(ctx, options)
-	if err != nil {
-		return SQLQueryResult{}, err
+	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
+	if controlErr != nil {
+		return result, controlErr
 	}
 	defer cancel()
-	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
-	if err != nil {
-		return SQLQueryResult{}, err
+	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
+	if parseErr != nil {
+		return result, parseErr
 	}
 	if query.explain {
-		return SQLQueryResult{}, fmt.Errorf("EXPLAIN does not support cursor pagination")
+		return result, fmt.Errorf("EXPLAIN does not support cursor pagination")
 	}
-	fingerprint, err := sqlCursorFingerprint(source, parameters)
-	if err != nil {
-		return SQLQueryResult{}, err
+	fingerprint, fingerprintErr := sqlCursorFingerprint(source, parameters)
+	if fingerprintErr != nil {
+		return result, fingerprintErr
 	}
 	offset := 0
 	if cursor != "" {
-		value, err := decodeSQLCursor(cursor)
-		if err != nil {
-			return SQLQueryResult{}, err
+		value, cursorErr := decodeSQLCursor(cursor)
+		if cursorErr != nil {
+			return result, cursorErr
 		}
 		if value.Fingerprint != fingerprint {
-			return SQLQueryResult{}, fmt.Errorf("SQL cursor does not match this query and parameters")
+			return result, fmt.Errorf("SQL cursor does not match this query and parameters")
 		}
 		offset = value.Offset
 	}
@@ -1024,16 +1115,17 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		}
 	}
 	query.limit = fetch
-	result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	result, err = executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+	result.QueryID = observation.id
 	if err != nil {
-		return SQLQueryResult{}, sqlRuntimeDiagnostic(err)
+		return result, sqlRuntimeDiagnostic(err)
 	}
 	if len(result.Rows) > pageSize {
 		result.Rows = result.Rows[:pageSize]
 		result.HasMore = true
-		next, err := encodeSQLCursor(sqlCursor{Fingerprint: fingerprint, Offset: offset + pageSize})
-		if err != nil {
-			return SQLQueryResult{}, err
+		next, cursorErr := encodeSQLCursor(sqlCursor{Fingerprint: fingerprint, Offset: offset + pageSize})
+		if cursorErr != nil {
+			return result, cursorErr
 		}
 		result.NextCursor = next
 	}
@@ -2884,7 +2976,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.Timeout > 0 {
