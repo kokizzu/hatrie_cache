@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"hatrie_cache/hat/hatSql"
 )
 
 const maxSQLQueryRows = 100000
@@ -140,17 +142,8 @@ func (cache *SQLPreparedQueryCache) Stats() SQLPreparedQueryCacheStats {
 
 var defaultSQLPreparedQueryCache = NewSQLPreparedQueryCache(256)
 
-// SQLQueryRequest is accepted by the monitoring SQL endpoint.
-type SQLQueryRequest struct {
-	Query      string        `json:"query"`
-	Parameters []interface{} `json:"parameters,omitempty"`
-	PageSize   int           `json:"page_size,omitempty"`
-	Cursor     string        `json:"cursor,omitempty"`
-	Stream     bool          `json:"stream,omitempty"`
-}
-
-// SQLRow is one dynamically shaped row returned by the read-only SQL query engine.
-type SQLRow map[string]interface{}
+type SQLQueryRequest = hatSql.QueryRequest
+type SQLRow = hatSql.Row
 
 // sqlDate is a canonical calendar date. It intentionally remains distinct
 // from time.Time so DATE values serialize as YYYY-MM-DD rather than a
@@ -273,46 +266,9 @@ func sqlRuntimeDiagnostic(err error) error {
 	return err
 }
 
-// SQLQueryResult is a materialized result. Streaming clients use QueryRows.
-type SQLQueryResult struct {
-	QueryID    string           `json:"query_id,omitempty"`
-	Columns    []string         `json:"columns"`
-	Rows       []SQLRow         `json:"rows"`
-	Plan       []SQLExplainStep `json:"plan,omitempty"`
-	Stats      *SQLQueryStats   `json:"stats,omitempty"`
-	HasMore    bool             `json:"has_more,omitempty"`
-	NextCursor string           `json:"next_cursor,omitempty"`
-}
-
-// SQLExplainStep is one stable, human-readable operation in an EXPLAIN plan.
-// EstimatedRows is present only when the parser can know it without reading a
-// cache source (for example an inline VALUES source).
-type SQLExplainStep struct {
-	Node              string `json:"node"`
-	Detail            string `json:"detail"`
-	EstimatedRows     *int   `json:"estimated_rows,omitempty"`
-	ActualInputRows   *int   `json:"actual_input_rows,omitempty"`
-	ActualOutputRows  *int   `json:"actual_output_rows,omitempty"`
-	ActualInputBytes  *int   `json:"actual_input_bytes,omitempty"`
-	ActualOutputBytes *int   `json:"actual_output_bytes,omitempty"`
-	// EstimateErrorRows is actual output rows minus estimated rows. Positive
-	// values mean the estimate was too low; negative values mean it was too high.
-	EstimateErrorRows *int `json:"estimate_error_rows,omitempty"`
-	// EstimateErrorPercent is the signed error relative to a nonzero estimate.
-	// Zero estimates retain EstimateErrorRows and omit a synthetic infinity.
-	EstimateErrorPercent *float64 `json:"estimate_error_percent,omitempty"`
-	ElapsedNanos         *int64   `json:"elapsed_ns,omitempty"`
-}
-
-// SQLQueryStats is emitted only by EXPLAIN ANALYZE. It describes one actual
-// execution, including its total elapsed time, not an extrapolated estimate.
-type SQLQueryStats struct {
-	ElapsedNanos  int64 `json:"elapsed_ns"`
-	OutputRows    int   `json:"output_rows"`
-	OutputColumns int   `json:"output_columns"`
-	ResultBytes   int   `json:"result_bytes"`
-	PlanSteps     int   `json:"plan_steps"`
-}
+type SQLQueryResult = hatSql.QueryResult
+type SQLExplainStep = hatSql.ExplainStep
+type SQLQueryStats = hatSql.QueryStats
 
 // SQLSourceResolver supplies the two cache-backed relational sources. Returning
 // nil rows is equivalent to an empty source.

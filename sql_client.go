@@ -1,163 +1,20 @@
 package hatriecache
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"strings"
+
+	"hatrie_cache/hat/hatSql"
 )
 
-// SQLConn is a small HTTP client for the read-only SQL endpoint.
-type SQLConn struct {
-	BaseURL string
-	Token   string
-	Client  *http.Client
-}
+// SQLConn is a compatibility alias for the portable SQL HTTP client.
+type SQLConn = hatSql.Conn
 
 // NewSQLConn creates a connection to a hatrie-cache monitoring endpoint.
 func NewSQLConn(baseURL string, token string) *SQLConn {
-	return &SQLConn{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, Client: http.DefaultClient}
+	return hatSql.NewConn(baseURL, token)
 }
 
-// Query executes one relational SQL query and returns its materialized rows.
-func (conn *SQLConn) Query(ctx context.Context, query string) (SQLQueryResult, error) {
-	return conn.QueryParameters(ctx, query, nil)
-}
-
-// QueryParameters executes query with positional $1, $2, ... values encoded
-// separately from the SQL source.
-func (conn *SQLConn) QueryParameters(ctx context.Context, query string, parameters []interface{}) (SQLQueryResult, error) {
-	return conn.queryRequest(ctx, SQLQueryRequest{Query: query, Parameters: parameters})
-}
-
-// QueryPage obtains one bounded result page. Pass NextCursor to retrieve the
-// following page; a cursor is bound to query and parameters.
-func (conn *SQLConn) QueryPage(ctx context.Context, query string, parameters []interface{}, pageSize int, cursor string) (SQLQueryResult, error) {
-	return conn.queryRequest(ctx, SQLQueryRequest{Query: query, Parameters: parameters, PageSize: pageSize, Cursor: cursor})
-}
-
-func (conn *SQLConn) queryRequest(ctx context.Context, payload SQLQueryRequest) (SQLQueryResult, error) {
-	if conn == nil || strings.TrimSpace(conn.BaseURL) == "" {
-		return SQLQueryResult{}, fmt.Errorf("SQL connection URL is required")
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return SQLQueryResult{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.BaseURL+"/api/sql", bytes.NewReader(body))
-	if err != nil {
-		return SQLQueryResult{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(conn.Token) != "" {
-		req.Header.Set("Authorization", "Bearer "+conn.Token)
-	}
-	client := conn.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return SQLQueryResult{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if readErr != nil {
-			return SQLQueryResult{}, readErr
-		}
-		return SQLQueryResult{}, fmt.Errorf("SQL server returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
-	}
-	var result SQLQueryResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return SQLQueryResult{}, err
-	}
-	return result, nil
-}
-
-func (conn *SQLConn) streamRequest(ctx context.Context, payload SQLQueryRequest) (*http.Response, error) {
-	if conn == nil || strings.TrimSpace(conn.BaseURL) == "" {
-		return nil, fmt.Errorf("SQL connection URL is required")
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.BaseURL+"/api/sql", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/x-ndjson")
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(conn.Token) != "" {
-		req.Header.Set("Authorization", "Bearer "+conn.Token)
-	}
-	client := conn.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		defer resp.Body.Close()
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if readErr != nil {
-			return nil, readErr
-		}
-		return nil, fmt.Errorf("SQL server returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
-	}
-	return resp, nil
-}
-
-// QueryRows invokes visit once for each decoded row. It returns the number of
-// rows delivered to visit; returning an error from visit stops iteration.
-// Go does not support generic methods, so this is intentionally a generic
-// package function instead of a method on SQLConn.
+// QueryRows invokes visit once for each streamed SQL row.
 func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit func(T) error) (int, error) {
-	if visit == nil {
-		return 0, fmt.Errorf("SQL row callback is required")
-	}
-	resp, err := conn.streamRequest(ctx, SQLQueryRequest{Query: query, Stream: true})
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	count := 0
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var message struct {
-			Type  string          `json:"type"`
-			Row   json.RawMessage `json:"row"`
-			Error string          `json:"error"`
-		}
-		if err := decoder.Decode(&message); err != nil {
-			if err == io.EOF {
-				return count, nil
-			}
-			return count, err
-		}
-		switch message.Type {
-		case "columns", "done":
-			continue
-		case "error":
-			return count, fmt.Errorf("SQL stream error: %s", message.Error)
-		case "row":
-			var value T
-			if err := json.Unmarshal(message.Row, &value); err != nil {
-				return count, err
-			}
-			count++
-			if err := visit(value); err != nil {
-				return count, err
-			}
-		default:
-			return count, fmt.Errorf("SQL stream returned unknown message type %q", message.Type)
-		}
-	}
+	return hatSql.QueryRows(ctx, conn, query, visit)
 }
