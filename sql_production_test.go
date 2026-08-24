@@ -728,6 +728,31 @@ func TestExecuteSQLQueryRowsStreamsIndexedLagWindows(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsIndexedLeadWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue", "score": int64(3)}, {"id": int64(1), "team": "blue", "score": int64(5)}, {"id": int64(3), "team": "red", "score": int64(2)}, {"id": int64(4), "team": nil, "score": int64(7)}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team, LEAD(people.score, 2, -1) OVER (ORDER BY people.team NULLS LAST) AS next_score ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed LEAD baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed LEAD stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed LEAD stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
 	t.Parallel()
 	rows := []SQLRow{{"age": nil}, {"age": int64(12)}}

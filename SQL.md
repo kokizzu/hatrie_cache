@@ -618,6 +618,8 @@ one-field window order exactly matches that same final indexed `ORDER BY`.
 They retain only the current position, rank state, and previous ordering value.
 `LAG(expression [, literal_offset [, default]])` can use the same proof with a
 fixed-size history ring bounded by its literal offset.
+`LEAD(expression [, literal_offset [, default]])` is likewise streamable for
+that exact order, with a pending queue bounded by the largest literal offset.
 Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
 shapes deliberately retain the general executor until they have an equally
 direct ordering proof.
