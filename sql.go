@@ -1,10 +1,8 @@
 package hatriecache
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"hatrie_cache/hat/hatSql"
 
@@ -74,238 +72,26 @@ func (token sqlToken) display() string {
 	return strconv.Quote(token.text)
 }
 
-type sqlLexer struct {
-	source string
-	offset int
-	line   int
-	column int
-}
-
 func lexSQL(source string) ([]sqlToken, error) {
-	lexer := sqlLexer{source: source, line: 1, column: 1}
-	tokens := make([]sqlToken, 0, len(source)/4+1)
-	for {
-		lexer.skipWhitespace()
-		if lexer.offset >= len(lexer.source) {
-			tokens = append(tokens, lexer.token(sqlTokenEOF, "", lexer.line, lexer.column))
-			return tokens, nil
-		}
-		startLine, startColumn := lexer.line, lexer.column
-		ch := lexer.source[lexer.offset]
-		switch {
-		case isSQLIdentifierStart(ch):
-			start := lexer.offset
-			for lexer.offset < len(lexer.source) && isSQLIdentifierPart(lexer.source[lexer.offset]) {
-				lexer.advanceRune()
-			}
-			tokens = append(tokens, lexer.token(sqlTokenIdentifier, lexer.source[start:lexer.offset], startLine, startColumn))
-		case ch == '\'':
-			value, err := lexer.readString(startLine, startColumn)
-			if err != nil {
-				return nil, err
-			}
-			tokens = append(tokens, lexer.token(sqlTokenString, value, startLine, startColumn))
-		case isSQLDigit(ch) || ch == '-' && lexer.offset+1 < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset+1]):
-			value, ok := lexer.readNumber()
-			if !ok {
-				return nil, lexer.diagnostic(startLine, startColumn, startColumn+1, "expected a number")
-			}
-			tokens = append(tokens, lexer.token(sqlTokenNumber, value, startLine, startColumn))
-		case ch == ',':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenComma, ",", startLine, startColumn))
-		case ch == ';':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenSemicolon, ";", startLine, startColumn))
-		case ch == '(':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenLeftParen, "(", startLine, startColumn))
-		case ch == ')':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenRightParen, ")", startLine, startColumn))
-		case ch == '+':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenPlus, "+", startLine, startColumn))
-		case ch == '-':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenMinus, "-", startLine, startColumn))
-		case ch == '/':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenSlash, "/", startLine, startColumn))
-		case ch == '%':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenPercent, "%", startLine, startColumn))
-		case ch == '.':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenDot, ".", startLine, startColumn))
-		case ch == '*':
-			lexer.advanceRune()
-			tokens = append(tokens, lexer.token(sqlTokenStar, "*", startLine, startColumn))
-		case ch == '<':
-			lexer.advanceRune()
-			if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '=' {
-				lexer.advanceRune()
-				tokens = append(tokens, lexer.token(sqlTokenLessEqual, "<=", startLine, startColumn))
-			} else if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '>' {
-				lexer.advanceRune()
-				tokens = append(tokens, lexer.token(sqlTokenNotEqual, "<>", startLine, startColumn))
-			} else {
-				tokens = append(tokens, lexer.token(sqlTokenLess, "<", startLine, startColumn))
-			}
-		case ch == '>':
-			lexer.advanceRune()
-			if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '=' {
-				lexer.advanceRune()
-				tokens = append(tokens, lexer.token(sqlTokenGreaterEqual, ">=", startLine, startColumn))
-			} else {
-				tokens = append(tokens, lexer.token(sqlTokenGreater, ">", startLine, startColumn))
-			}
-		case ch == '!':
-			lexer.advanceRune()
-			if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '=' {
-				lexer.advanceRune()
-				tokens = append(tokens, lexer.token(sqlTokenNotEqual, "!=", startLine, startColumn))
-			} else {
-				tokens = append(tokens, lexer.token(sqlTokenBang, "!", startLine, startColumn))
-			}
-		case ch == '=':
-			lexer.advanceRune()
-			if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '>' {
-				lexer.advanceRune()
-				tokens = append(tokens, lexer.token(sqlTokenArrow, "=>", startLine, startColumn))
-			} else {
-				tokens = append(tokens, lexer.token(sqlTokenEqual, "=", startLine, startColumn))
-			}
-		case ch == '$':
-			lexer.advanceRune()
-			if lexer.offset >= len(lexer.source) || !isSQLDigit(lexer.source[lexer.offset]) {
-				return nil, lexer.diagnostic(startLine, startColumn, lexer.column, "expected a positional parameter such as $1")
-			}
-			start := lexer.offset
-			for lexer.offset < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset]) {
-				lexer.advanceRune()
-			}
-			tokens = append(tokens, lexer.token(sqlTokenParameter, lexer.source[start:lexer.offset], startLine, startColumn))
-		default:
-			return nil, lexer.diagnostic(startLine, startColumn, startColumn+1, fmt.Sprintf("unexpected character %q", ch))
+	tokens, err := hatSql.Lex(source)
+	if err != nil {
+		return nil, err
+	}
+	converted := make([]sqlToken, len(tokens))
+	for index, token := range tokens {
+		converted[index] = sqlToken{
+			kind:      sqlTokenKind(token.Kind),
+			text:      token.Text,
+			line:      token.Line,
+			column:    token.Column,
+			endColumn: token.EndColumn,
 		}
 	}
-}
-
-func (lexer *sqlLexer) token(kind sqlTokenKind, text string, line int, column int) sqlToken {
-	return sqlToken{kind: kind, text: text, line: line, column: column, endColumn: lexer.column}
-}
-
-func (lexer *sqlLexer) diagnostic(line int, column int, endColumn int, message string) error {
-	return &SQLDiagnostic{Message: message, Line: line, Column: column, EndColumn: endColumn}
-}
-
-func (lexer *sqlLexer) skipWhitespace() {
-	for lexer.offset < len(lexer.source) {
-		switch lexer.source[lexer.offset] {
-		case ' ', '\t', '\r', '\n':
-			lexer.advanceRune()
-		default:
-			return
-		}
-	}
-}
-
-func (lexer *sqlLexer) advanceRune() {
-	if lexer.offset >= len(lexer.source) {
-		return
-	}
-	runeValue, size := utf8.DecodeRuneInString(lexer.source[lexer.offset:])
-	if runeValue == utf8.RuneError && size == 1 {
-		size = 1
-	}
-	lexer.offset += size
-	if runeValue == '\n' {
-		lexer.line++
-		lexer.column = 1
-		return
-	}
-	lexer.column++
-}
-
-func (lexer *sqlLexer) readString(line int, column int) (string, error) {
-	lexer.advanceRune() // opening quote
-	var value strings.Builder
-	for lexer.offset < len(lexer.source) {
-		if lexer.source[lexer.offset] != '\'' {
-			runeValue, size := utf8.DecodeRuneInString(lexer.source[lexer.offset:])
-			value.WriteString(lexer.source[lexer.offset : lexer.offset+size])
-			lexer.offset += size
-			if runeValue == '\n' {
-				lexer.line++
-				lexer.column = 1
-			} else {
-				lexer.column++
-			}
-			continue
-		}
-		lexer.advanceRune()
-		if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '\'' {
-			value.WriteByte('\'')
-			lexer.advanceRune()
-			continue
-		}
-		return value.String(), nil
-	}
-	return "", lexer.diagnostic(line, column, lexer.column, "unterminated string literal")
-}
-
-func (lexer *sqlLexer) readNumber() (string, bool) {
-	start := lexer.offset
-	if lexer.source[lexer.offset] == '-' {
-		lexer.advanceRune()
-	}
-	digits := 0
-	for lexer.offset < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset]) {
-		digits++
-		lexer.advanceRune()
-	}
-	if digits == 0 {
-		return "", false
-	}
-	if lexer.offset < len(lexer.source) && lexer.source[lexer.offset] == '.' {
-		lexer.advanceRune()
-		fractionDigits := 0
-		for lexer.offset < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset]) {
-			fractionDigits++
-			lexer.advanceRune()
-		}
-		if fractionDigits == 0 {
-			return "", false
-		}
-	}
-	if lexer.offset < len(lexer.source) && (lexer.source[lexer.offset] == 'e' || lexer.source[lexer.offset] == 'E') {
-		lexer.advanceRune()
-		if lexer.offset < len(lexer.source) && (lexer.source[lexer.offset] == '+' || lexer.source[lexer.offset] == '-') {
-			lexer.advanceRune()
-		}
-		exponentDigits := 0
-		for lexer.offset < len(lexer.source) && isSQLDigit(lexer.source[lexer.offset]) {
-			exponentDigits++
-			lexer.advanceRune()
-		}
-		if exponentDigits == 0 {
-			return "", false
-		}
-	}
-	return lexer.source[start:lexer.offset], true
+	return converted, nil
 }
 
 func isSQLIdentifierStart(value byte) bool {
-	return value == '_' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
-}
-
-func isSQLIdentifierPart(value byte) bool {
-	return isSQLIdentifierStart(value) || isSQLDigit(value)
-}
-
-func isSQLDigit(value byte) bool {
-	return value >= '0' && value <= '9'
+	return hatSql.IsIdentifierStart(value)
 }
 
 type sqlParser struct {
