@@ -163,6 +163,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"LIMIT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value LIMIT 1"},
 		{"NOT", "query", "FROM VALUES (FALSE) AS a(value) WHERE NOT value SELECT value"},
 		{"NULL", "query", "FROM VALUES (NULL) AS a(value) SELECT value"},
+		{"NULLS", "query", "FROM VALUES (NULL), (1) AS a(value) SELECT value ORDER BY value NULLS LAST"},
 		{"OFFSET", "query", "FROM VALUES (1), (2) AS a(value) SELECT value OFFSET 1"},
 		{"ON", "query", "FROM VALUES (1) AS a(value) JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
 		{"OR", "query", "FROM VALUES (FALSE, TRUE) AS a(left_value, right_value) WHERE left_value OR right_value SELECT right_value"},
@@ -176,6 +177,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"CURRENT", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"FOLLOWING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING)"},
 		{"FIRST", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) SEARCH BREADTH FIRST BY value SET search_order FROM walk SELECT search_order"},
+		{"LAST", "query", "FROM VALUES (NULL), (1) AS a(value) SELECT value ORDER BY value NULLS LAST"},
 		{"PRECEDING", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)"},
 		{"ROW", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
 		{"ROWS", "query", "FROM VALUES (1) AS a(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"},
@@ -271,7 +273,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

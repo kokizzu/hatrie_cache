@@ -1248,6 +1248,27 @@ func TestExecuteSQLQueryUsesCaseSensitiveUTF8BinaryStringCollation(t *testing.T)
 	}
 }
 
+func TestExecuteSQLQuerySupportsExplicitNullOrder(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, order string
+		want        []SQLRow
+	}{
+		{"ascending_last", "value ASC NULLS LAST", []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": nil}}},
+		{"descending_first", "value DESC NULLS FIRST", []SQLRow{{"value": nil}, {"value": int64(2)}, {"value": int64(1)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (NULL), (2), (1) AS values(value) SELECT value ORDER BY "+test.order, SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("explicit null ordering: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("explicit null ordering rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))

@@ -1487,8 +1487,10 @@ type sqlSelectItem struct {
 	alias string
 }
 type sqlOrder struct {
-	expr sqlExpr
-	desc bool
+	expr       sqlExpr
+	desc       bool
+	nullsFirst bool
+	nullsLast  bool
 }
 type sqlExpr struct {
 	kind, name, qualifier, op string
@@ -2129,6 +2131,18 @@ func (p *sqlQueryParser) parseOrder() ([]sqlOrder, error) {
 		} else if p.keyword("DESC") {
 			p.next()
 			value.desc = true
+		}
+		if p.keyword("NULLS") {
+			p.next()
+			if p.keyword("FIRST") {
+				value.nullsFirst = true
+				p.next()
+			} else if p.keyword("LAST") {
+				value.nullsLast = true
+				p.next()
+			} else {
+				return nil, p.expected(p.current(), "FIRST or LAST after NULLS", []string{"FIRST", "LAST"})
+			}
 		}
 		out = append(out, value)
 		if p.current().kind != sqlTokenComma {
@@ -3567,6 +3581,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				a := evalOutputOrder(item.expr, out[i].row, out[i].group)
 				b := evalOutputOrder(item.expr, out[j].row, out[j].group)
 				cmp := sqlCompare(a, b)
+				if (a == nil || b == nil) && a != b && (item.nullsFirst || item.nullsLast) {
+					return (a == nil) == item.nullsFirst
+				}
 				if cmp != 0 {
 					if item.desc {
 						return cmp > 0
@@ -4043,6 +4060,11 @@ func sqlExplainOrders(orders []sqlOrder) string {
 			values[index] += " DESC"
 		} else {
 			values[index] += " ASC"
+		}
+		if order.nullsFirst {
+			values[index] += " NULLS FIRST"
+		} else if order.nullsLast {
+			values[index] += " NULLS LAST"
 		}
 	}
 	return strings.Join(values, ", ")
