@@ -6,64 +6,24 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
-	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatTopology"
 )
 
-const clusterTopologyVersion = 1
+const clusterTopologyVersion = hatTopology.Version
 
 const (
-	TopologyModeSharded     = "sharded"
-	TopologyModeFullReplica = "full_replica"
+	TopologyModeSharded     = hatTopology.TopologyModeSharded
+	TopologyModeFullReplica = hatTopology.TopologyModeFullReplica
 )
 
-// ClusterTopology describes the cache cluster nodes and deterministic shard map.
-type ClusterTopology struct {
-	Version      uint64                `json:"version"`
-	Mode         string                `json:"mode,omitempty"`
-	BucketCount  uint32                `json:"bucket_count,omitempty"`
-	BucketRanges []TopologyBucketRange `json:"bucket_ranges,omitempty"`
-	Self         string                `json:"self,omitempty"`
-	Nodes        []TopologyNode        `json:"nodes"`
-	Shards       []TopologyShard       `json:"shards,omitempty"`
-}
-
-// TopologyNode describes one cache node address and optional role.
-type TopologyNode struct {
-	ID                string `json:"id"`
-	Address           string `json:"address"`
-	GRPCAddress       string `json:"grpc_address,omitempty"`
-	Role              string `json:"role,omitempty"`
-	Maintenance       bool   `json:"maintenance,omitempty"`
-	MaintenanceReason string `json:"maintenance_reason,omitempty"`
-	MaintenanceSince  string `json:"maintenance_since,omitempty"`
-}
-
-// TopologyShard describes one shard primary and optional replicas.
-type TopologyShard struct {
-	ID       uint32   `json:"id"`
-	Primary  string   `json:"primary"`
-	Replicas []string `json:"replicas,omitempty"`
-}
-
-// TopologyBucketRange maps an inclusive virtual-bucket range to one shard.
-type TopologyBucketRange struct {
-	Start uint32 `json:"start"`
-	End   uint32 `json:"end"`
-	Shard uint32 `json:"shard"`
-}
-
-// TopologyRoute reports which shard owns a key.
-type TopologyRoute struct {
-	Key    string        `json:"key"`
-	Mode   string        `json:"mode"`
-	Bucket *uint32       `json:"bucket,omitempty"`
-	Shard  TopologyShard `json:"shard"`
-	Owners []string      `json:"owners,omitempty"`
-}
+type ClusterTopology = hatTopology.ClusterTopology
+type TopologyNode = hatTopology.TopologyNode
+type TopologyShard = hatTopology.TopologyShard
+type TopologyBucketRange = hatTopology.TopologyBucketRange
+type TopologyRoute = hatTopology.TopologyRoute
 
 // TopologyStore stores a validated topology and optionally persists updates.
 type TopologyStore struct {
@@ -77,18 +37,7 @@ type TopologyStore struct {
 
 // SingleNodeTopology returns a valid one-node topology with sharding disabled.
 func SingleNodeTopology(nodeID string, address string) ClusterTopology {
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
-		nodeID = "local"
-	}
-	return ClusterTopology{
-		Version: clusterTopologyVersion,
-		Mode:    TopologyModeFullReplica,
-		Self:    nodeID,
-		Nodes: []TopologyNode{
-			{ID: nodeID, Address: strings.TrimSpace(address), Role: "primary"},
-		},
-	}
+	return hatTopology.SingleNodeTopology(nodeID, address)
 }
 
 // OpenTopologyStore loads a topology file, or uses fallback when the path is
@@ -133,26 +82,12 @@ func newTopologyStore(path string, topology ClusterTopology) *TopologyStore {
 
 // LoadTopology reads and validates topology JSON from disk.
 func LoadTopology(path string) (ClusterTopology, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return ClusterTopology{}, err
-	}
-	defer file.Close()
-
-	topology, err := decodeTopologyJSONReader(file)
-	if err != nil {
-		return ClusterTopology{}, err
-	}
-	return normalizeTopology(topology)
+	return hatTopology.LoadTopology(path)
 }
 
 // SaveTopology validates and writes topology JSON atomically.
 func SaveTopology(path string, topology ClusterTopology) error {
-	normalized, err := normalizeTopology(topology)
-	if err != nil {
-		return err
-	}
-	return writeJSONFileAtomic(path, normalized)
+	return hatTopology.SaveTopology(path, topology)
 }
 
 // Get returns a copy of the current topology.
@@ -318,7 +253,7 @@ func normalizedTopologyRouteForKey(topology ClusterTopology, key string) (Topolo
 	}
 	if topology.BucketCount > 0 {
 		bucket := hashKeyToBucket(key, topology.BucketCount)
-		shard, ok := topology.shardForBucket(bucket, shards)
+		shard, ok := shardForBucket(topology, bucket, shards)
 		if !ok {
 			return TopologyRoute{}, false
 		}
@@ -354,244 +289,16 @@ func normalizedFullReplicaShard(topology ClusterTopology) (TopologyShard, bool) 
 	return TopologyShard{ID: 0, Primary: primary, Replicas: replicas}, true
 }
 
-// Fingerprint returns a stable content hash for topology routing and ownership.
-// The Self field is ignored because each node may set it to its own id.
-func (topology ClusterTopology) Fingerprint() string {
-	normalized, err := normalizeTopology(topology)
-	if err != nil {
-		return ""
-	}
-	normalized.Self = ""
-	sort.Slice(normalized.Nodes, func(i, j int) bool {
-		return normalized.Nodes[i].ID < normalized.Nodes[j].ID
-	})
-	sort.Slice(normalized.Shards, func(i, j int) bool {
-		return normalized.Shards[i].ID < normalized.Shards[j].ID
-	})
-	sort.Slice(normalized.BucketRanges, func(i, j int) bool {
-		if normalized.BucketRanges[i].Start != normalized.BucketRanges[j].Start {
-			return normalized.BucketRanges[i].Start < normalized.BucketRanges[j].Start
-		}
-		if normalized.BucketRanges[i].End != normalized.BucketRanges[j].End {
-			return normalized.BucketRanges[i].End < normalized.BucketRanges[j].End
-		}
-		return normalized.BucketRanges[i].Shard < normalized.BucketRanges[j].Shard
-	})
-
-	hash := fnv.New64a()
-	writeTopologyFingerprintPart(hash, strconv.FormatUint(normalized.Version, 10))
-	writeTopologyFingerprintPart(hash, normalized.Mode)
-	writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(normalized.BucketCount), 10))
-	for _, bucketRange := range normalized.BucketRanges {
-		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(bucketRange.Start), 10))
-		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(bucketRange.End), 10))
-		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(bucketRange.Shard), 10))
-	}
-	for _, node := range normalized.Nodes {
-		writeTopologyFingerprintPart(hash, node.ID)
-		writeTopologyFingerprintPart(hash, node.Address)
-		writeTopologyFingerprintPart(hash, node.GRPCAddress)
-		writeTopologyFingerprintPart(hash, node.Role)
-	}
-	for _, shard := range normalized.Shards {
-		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(shard.ID), 10))
-		writeTopologyFingerprintPart(hash, shard.Primary)
-		replicas := append([]string(nil), shard.Replicas...)
-		sort.Strings(replicas)
-		for _, replica := range replicas {
-			writeTopologyFingerprintPart(hash, replica)
-		}
-	}
-	return strconv.FormatUint(hash.Sum64(), 16)
-}
-
-func writeTopologyFingerprintPart(writer io.Writer, value string) {
-	_, _ = writer.Write([]byte(value))
-	_, _ = writer.Write([]byte{0})
-}
-
-func (topology ClusterTopology) verifiesReplicationFingerprint() bool {
-	normalized, err := normalizeTopology(topology)
-	if err != nil {
-		return false
-	}
-	return normalizedTopologyVerifiesReplicationFingerprint(normalized)
-}
-
 func normalizedTopologyVerifiesReplicationFingerprint(topology ClusterTopology) bool {
 	return len(topology.Nodes) > 1 || len(topology.Shards) > 1 || len(topology.BucketRanges) > 0
 }
 
-// ShardForKey returns the shard selected for key.
-func (topology ClusterTopology) ShardForKey(key string) (TopologyShard, bool) {
-	route, ok := topology.RouteForKey(key)
-	return route.Shard, ok
-}
-
-// RouteForKey returns the deterministic route selected for key.
-func (topology ClusterTopology) RouteForKey(key string) (TopologyRoute, bool) {
-	mode := topologyModeFor(topology)
-	if mode == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
-		if !ok {
-			return TopologyRoute{}, false
-		}
-		return TopologyRoute{Key: key, Mode: mode, Shard: shard, Owners: routeOwners(shard)}, true
-	}
-
-	shards := cloneShards(topology.Shards)
-	if len(shards) == 0 {
-		return TopologyRoute{}, false
-	}
-	sort.Slice(shards, func(i, j int) bool {
-		return shards[i].ID < shards[j].ID
-	})
-
-	if topology.BucketCount > 0 {
-		bucket := hashKeyToBucket(key, topology.BucketCount)
-		shard, ok := topology.shardForBucket(bucket, shards)
-		if !ok {
-			return TopologyRoute{}, false
-		}
-		return TopologyRoute{
-			Key:    key,
-			Mode:   mode,
-			Bucket: &bucket,
-			Shard:  shard,
-			Owners: routeOwners(shard),
-		}, true
-	}
-
-	idx := hashKeyToShardIndex(key, len(shards))
-	shard := shards[idx]
-	return TopologyRoute{Key: key, Mode: mode, Shard: shard, Owners: routeOwners(shard)}, true
-}
-
 func decodeTopologyJSONReader(reader io.Reader) (ClusterTopology, error) {
-	var topology ClusterTopology
-	decoder := json.NewDecoder(reader)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&topology); err != nil {
-		return ClusterTopology{}, err
-	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return ClusterTopology{}, errors.New("hatriecache: invalid topology JSON")
-		}
-		return ClusterTopology{}, err
-	}
-	return topology, nil
+	return hatTopology.DecodeJSON(reader)
 }
 
 func normalizeTopology(topology ClusterTopology) (ClusterTopology, error) {
-	if topology.Version == 0 {
-		topology.Version = clusterTopologyVersion
-	}
-	if topology.Version != clusterTopologyVersion {
-		return ClusterTopology{}, errors.New("hatriecache: unsupported topology version")
-	}
-	topology.Mode = topologyModeFor(topology)
-	if topology.Mode != TopologyModeSharded && topology.Mode != TopologyModeFullReplica {
-		return ClusterTopology{}, errors.New("hatriecache: topology mode must be sharded or full_replica")
-	}
-	if len(topology.Nodes) == 0 {
-		return ClusterTopology{}, errors.New("hatriecache: topology requires at least one node")
-	}
-	if topology.Mode == TopologyModeSharded && len(topology.Shards) == 0 {
-		return ClusterTopology{}, errors.New("hatriecache: topology requires at least one shard")
-	}
-	if topology.Mode == TopologyModeFullReplica && len(topology.BucketRanges) > 0 {
-		return ClusterTopology{}, errors.New("hatriecache: full replica topology cannot define bucket ranges")
-	}
-	if topology.Mode == TopologyModeFullReplica && topology.BucketCount != 0 {
-		return ClusterTopology{}, errors.New("hatriecache: full replica topology cannot define bucket_count")
-	}
-
-	out := ClusterTopology{
-		Version:      topology.Version,
-		Mode:         topology.Mode,
-		BucketCount:  topology.BucketCount,
-		BucketRanges: cloneBucketRanges(topology.BucketRanges),
-		Self:         strings.TrimSpace(topology.Self),
-		Nodes:        cloneNodes(topology.Nodes),
-		Shards:       cloneShards(topology.Shards),
-	}
-
-	nodeIDs := map[string]bool{}
-	for idx := range out.Nodes {
-		out.Nodes[idx].ID = strings.TrimSpace(out.Nodes[idx].ID)
-		out.Nodes[idx].Address = strings.TrimSpace(out.Nodes[idx].Address)
-		out.Nodes[idx].GRPCAddress = strings.TrimSpace(out.Nodes[idx].GRPCAddress)
-		out.Nodes[idx].Role = strings.TrimSpace(out.Nodes[idx].Role)
-		out.Nodes[idx].MaintenanceReason = strings.TrimSpace(out.Nodes[idx].MaintenanceReason)
-		out.Nodes[idx].MaintenanceSince = strings.TrimSpace(out.Nodes[idx].MaintenanceSince)
-		if !out.Nodes[idx].Maintenance {
-			out.Nodes[idx].MaintenanceReason = ""
-			out.Nodes[idx].MaintenanceSince = ""
-		}
-		if out.Nodes[idx].ID == "" {
-			return ClusterTopology{}, errors.New("hatriecache: topology node id is required")
-		}
-		if nodeIDs[out.Nodes[idx].ID] {
-			return ClusterTopology{}, errors.New("hatriecache: duplicate topology node")
-		}
-		if out.Nodes[idx].Role != "" && out.Nodes[idx].Role != "primary" && out.Nodes[idx].Role != "replica" {
-			return ClusterTopology{}, errors.New("hatriecache: topology node role must be primary or replica")
-		}
-		nodeIDs[out.Nodes[idx].ID] = true
-	}
-	if out.Self != "" && !nodeIDs[out.Self] {
-		return ClusterTopology{}, errors.New("hatriecache: topology self node is not registered")
-	}
-
-	shardIDs := map[uint32]bool{}
-	for idx := range out.Shards {
-		shard := &out.Shards[idx]
-		shard.Primary = strings.TrimSpace(shard.Primary)
-		if shardIDs[shard.ID] {
-			return ClusterTopology{}, errors.New("hatriecache: duplicate topology shard")
-		}
-		if !nodeIDs[shard.Primary] {
-			return ClusterTopology{}, errors.New("hatriecache: topology shard primary is not registered")
-		}
-		shardIDs[shard.ID] = true
-
-		replicas := make([]string, 0, len(shard.Replicas))
-		seenReplicas := map[string]bool{shard.Primary: true}
-		for _, replica := range shard.Replicas {
-			replica = strings.TrimSpace(replica)
-			if replica == "" {
-				continue
-			}
-			if !nodeIDs[replica] {
-				return ClusterTopology{}, errors.New("hatriecache: topology shard replica is not registered")
-			}
-			if seenReplicas[replica] {
-				return ClusterTopology{}, errors.New("hatriecache: duplicate topology shard replica")
-			}
-			seenReplicas[replica] = true
-			replicas = append(replicas, replica)
-		}
-		sort.Strings(replicas)
-		if len(replicas) == 0 {
-			shard.Replicas = nil
-		} else {
-			shard.Replicas = replicas
-		}
-	}
-
-	if err := normalizeBucketRanges(&out, shardIDs); err != nil {
-		return ClusterTopology{}, err
-	}
-
-	sort.Slice(out.Nodes, func(i, j int) bool {
-		return out.Nodes[i].ID < out.Nodes[j].ID
-	})
-	sort.Slice(out.Shards, func(i, j int) bool {
-		return out.Shards[i].ID < out.Shards[j].ID
-	})
-	return out, nil
+	return hatTopology.Normalize(topology)
 }
 
 func topologyMode(mode string) string {
@@ -602,57 +309,7 @@ func topologyMode(mode string) string {
 	return mode
 }
 
-func topologyModeFor(topology ClusterTopology) string {
-	if strings.TrimSpace(topology.Mode) == "" && (len(topology.Shards) > 0 || topology.BucketCount > 0 || len(topology.BucketRanges) > 0) {
-		// Preserve pre-mode topology files whose shard map made their intent clear.
-		return TopologyModeSharded
-	}
-	return topologyMode(topology.Mode)
-}
-
-func normalizeBucketRanges(topology *ClusterTopology, shardIDs map[uint32]bool) error {
-	if len(topology.BucketRanges) == 0 {
-		return nil
-	}
-	if topology.Mode != TopologyModeSharded {
-		return errors.New("hatriecache: bucket ranges require sharded topology")
-	}
-	if topology.BucketCount == 0 {
-		return errors.New("hatriecache: bucket_count is required for bucket ranges")
-	}
-	for idx := range topology.BucketRanges {
-		bucketRange := &topology.BucketRanges[idx]
-		if bucketRange.Start > bucketRange.End {
-			return errors.New("hatriecache: topology bucket range start exceeds end")
-		}
-		if bucketRange.End >= topology.BucketCount {
-			return errors.New("hatriecache: topology bucket range exceeds bucket_count")
-		}
-		if !shardIDs[bucketRange.Shard] {
-			return errors.New("hatriecache: topology bucket range shard is not registered")
-		}
-	}
-	sort.Slice(topology.BucketRanges, func(i, j int) bool {
-		if topology.BucketRanges[i].Start == topology.BucketRanges[j].Start {
-			return topology.BucketRanges[i].End < topology.BucketRanges[j].End
-		}
-		return topology.BucketRanges[i].Start < topology.BucketRanges[j].Start
-	})
-	if topology.BucketRanges[0].Start != 0 {
-		return errors.New("hatriecache: topology bucket ranges must start at zero")
-	}
-	for idx := 1; idx < len(topology.BucketRanges); idx++ {
-		if topology.BucketRanges[idx].Start != topology.BucketRanges[idx-1].End+1 {
-			return errors.New("hatriecache: topology bucket ranges must not overlap or leave gaps")
-		}
-	}
-	if topology.BucketRanges[len(topology.BucketRanges)-1].End != topology.BucketCount-1 {
-		return errors.New("hatriecache: topology bucket ranges must cover every bucket")
-	}
-	return nil
-}
-
-func (topology ClusterTopology) shardForBucket(bucket uint32, shards []TopologyShard) (TopologyShard, bool) {
+func shardForBucket(topology ClusterTopology, bucket uint32, shards []TopologyShard) (TopologyShard, bool) {
 	for _, bucketRange := range topology.BucketRanges {
 		if bucket >= bucketRange.Start && bucket <= bucketRange.End {
 			for _, shard := range shards {
@@ -669,7 +326,7 @@ func (topology ClusterTopology) shardForBucket(bucket uint32, shards []TopologyS
 	return shards[int(bucket%uint32(len(shards)))], true
 }
 
-func (topology ClusterTopology) fullReplicaShard() (TopologyShard, bool) {
+func fullReplicaShard(topology ClusterTopology) (TopologyShard, bool) {
 	nodes := cloneNodes(topology.Nodes)
 	if len(nodes) == 0 {
 		return TopologyShard{}, false

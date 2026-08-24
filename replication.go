@@ -2673,7 +2673,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 		snapshot.inactive = election.inactiveNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
+		shard, ok := fullReplicaShard(topology)
 		if !ok {
 			return replicationRoutingSnapshot{}, false
 		}

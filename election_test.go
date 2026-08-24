@@ -471,7 +471,7 @@ func electionStatusSnapshotControl(store *ElectionStore) ElectionStatus {
 
 func electionShardsSnapshotControl(topology ClusterTopology) []TopologyShard {
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
+		shard, ok := fullReplicaShard(topology)
 		if !ok {
 			return nil
 		}

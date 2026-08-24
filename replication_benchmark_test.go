@@ -2658,7 +2658,7 @@ func newReplicationRoutingSnapshotOwnerSlicesControl(self string, topologyStore 
 		snapshot.online = election.activeNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
+		shard, ok := fullReplicaShard(topology)
 		if !ok {
 			return replicationRoutingSnapshotOwnerSlicesControl{}, false
 		}
@@ -3289,7 +3289,7 @@ func (snapshot replicationRoutingSnapshotShardMapsControl) routeForKey(key strin
 	if mode != TopologyModeFullReplica {
 		if snapshot.topology.BucketCount > 0 {
 			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
-			selected, ok := snapshot.topology.shardForBucket(value, snapshot.shards)
+			selected, ok := shardForBucket(snapshot.topology, value, snapshot.shards)
 			if !ok {
 				return ElectionKeyRoute{}, false
 			}
@@ -3314,7 +3314,7 @@ func (snapshot replicationRoutingSnapshotShardMapsControl) routeForKeyAndTargets
 	if mode != TopologyModeFullReplica {
 		if snapshot.topology.BucketCount > 0 {
 			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
-			selected, ok := snapshot.topology.shardForBucket(value, snapshot.shards)
+			selected, ok := shardForBucket(snapshot.topology, value, snapshot.shards)
 			if !ok {
 				return ElectionKeyRoute{}, nil, false
 			}
@@ -3361,7 +3361,7 @@ func newReplicationRoutingSnapshotShardMapsControl(self string, topologyStore *T
 		snapshot.online = election.activeNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
+		shard, ok := fullReplicaShard(topology)
 		if !ok {
 			return replicationRoutingSnapshotShardMapsControl{}, false
 		}
@@ -3800,7 +3800,7 @@ func newReplicationRoutingSnapshotNodeMapControl(self string, topologyStore *Top
 		snapshot.online = election.activeNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
+		shard, ok := fullReplicaShard(topology)
 		if !ok {
 			return replicationRoutingSnapshotNodeMapControl{}, false
 		}
@@ -3842,7 +3842,7 @@ func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topology
 		fingerprint: fingerprint,
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
+		shard, ok := fullReplicaShard(topology)
 		if !ok {
 			return replicationRoutingSnapshot{}, false
 		}
