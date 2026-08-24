@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hatrie_cache/hat/hatMetrics"
 )
 
 var replicationTargetLatencyMillisBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000}
@@ -19,12 +21,7 @@ type replicationMetrics struct {
 	breakerTransitions map[string]map[string]uint64
 }
 
-type replicationHistogram struct {
-	bounds  []float64
-	buckets []uint64
-	count   uint64
-	sum     float64
-}
+type replicationHistogram = hatMetrics.Histogram
 
 type ReplicationMetricsSnapshot struct {
 	TargetLatencyMillis       map[string]ReplicationHistogramSnapshot
@@ -33,12 +30,7 @@ type ReplicationMetricsSnapshot struct {
 	CircuitBreakerTransitions map[string]map[string]uint64
 }
 
-type ReplicationHistogramSnapshot struct {
-	Bounds  []float64
-	Buckets []uint64
-	Count   uint64
-	Sum     float64
-}
+type ReplicationHistogramSnapshot = hatMetrics.HistogramSnapshot
 
 func (replicator *HTTPReplicator) recordReplicationTargetLatency(target TopologyNode, duration time.Duration) {
 	if replicator == nil {
@@ -82,7 +74,7 @@ func (metrics *replicationMetrics) observeTargetLatency(target string, value flo
 	metrics.mu.Lock()
 	defer metrics.mu.Unlock()
 	histogram := metrics.targetHistogramLocked(&metrics.targetLatency, target, replicationTargetLatencyMillisBuckets)
-	histogram.observe(value)
+	histogram.Observe(value)
 }
 
 func (metrics *replicationMetrics) observeTargetBatchItems(target string, value float64) {
@@ -92,7 +84,7 @@ func (metrics *replicationMetrics) observeTargetBatchItems(target string, value 
 	metrics.mu.Lock()
 	defer metrics.mu.Unlock()
 	histogram := metrics.targetHistogramLocked(&metrics.targetBatchItems, target, replicationBatchItemsBuckets)
-	histogram.observe(value)
+	histogram.Observe(value)
 }
 
 func (metrics *replicationMetrics) observeRetryDelay(value float64) {
@@ -104,7 +96,7 @@ func (metrics *replicationMetrics) observeRetryDelay(value float64) {
 	if metrics.retryDelayMillis == nil {
 		metrics.retryDelayMillis = newReplicationHistogram(replicationRetryDelayMillisBuckets)
 	}
-	metrics.retryDelayMillis.observe(value)
+	metrics.retryDelayMillis.Observe(value)
 }
 
 func (metrics *replicationMetrics) recordCircuitTransition(target string, state string) {
@@ -128,7 +120,7 @@ func (metrics *replicationMetrics) targetHistogramLocked(targets *map[string]*re
 	}
 	histogram := (*targets)[target]
 	if histogram == nil {
-		histogram = newReplicationHistogram(bounds)
+		histogram = hatMetrics.NewHistogram(bounds)
 		(*targets)[target] = histogram
 	}
 	return histogram
@@ -149,40 +141,11 @@ func (metrics *replicationMetrics) snapshot() ReplicationMetricsSnapshot {
 }
 
 func newReplicationHistogram(bounds []float64) *replicationHistogram {
-	copiedBounds := append([]float64(nil), bounds...)
-	return &replicationHistogram{
-		bounds:  copiedBounds,
-		buckets: make([]uint64, len(copiedBounds)),
-	}
-}
-
-func (histogram *replicationHistogram) observe(value float64) {
-	if histogram == nil {
-		return
-	}
-	if value < 0 {
-		value = 0
-	}
-	histogram.count++
-	histogram.sum += value
-	for idx, bound := range histogram.bounds {
-		if value <= bound {
-			histogram.buckets[idx]++
-			return
-		}
-	}
+	return hatMetrics.NewHistogram(bounds)
 }
 
 func snapshotReplicationHistogram(histogram *replicationHistogram) ReplicationHistogramSnapshot {
-	if histogram == nil {
-		return ReplicationHistogramSnapshot{}
-	}
-	return ReplicationHistogramSnapshot{
-		Bounds:  append([]float64(nil), histogram.bounds...),
-		Buckets: append([]uint64(nil), histogram.buckets...),
-		Count:   histogram.count,
-		Sum:     histogram.sum,
-	}
+	return histogram.Snapshot()
 }
 
 func snapshotReplicationHistogramMap(source map[string]*replicationHistogram) map[string]ReplicationHistogramSnapshot {
