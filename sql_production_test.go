@@ -159,6 +159,28 @@ func TestExecuteSQLQueryFallsBackWhenMostSelectiveIndexIsUnavailable(t *testing.
 	}
 }
 
+func TestExecuteSQLQueryExplainAnalyzeReportsIndexCandidateDecision(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{
+		rows:        []SQLRow{{"id": int64(7), "kind": "common"}},
+		unavailable: map[string]bool{"id": true},
+	}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('people') AS p WHERE p.kind = 'common' AND p.id = 7 SELECT p.id", resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range result.Plan {
+		if step.Node != "INDEX CANDIDATES" {
+			continue
+		}
+		if step.ActualInputRows == nil || *step.ActualInputRows != 2 || step.ActualOutputRows == nil || *step.ActualOutputRows != 1 || !strings.Contains(step.Detail, "p.id = 7 estimated_rows=1 rejected: index unavailable") || !strings.Contains(step.Detail, `p.kind = "common" estimated_rows=50 selected`) {
+			t.Fatalf("index candidate plan = %#v, want candidate estimates, rejection, and selection", step)
+		}
+		return
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX CANDIDATES", result.Plan)
+}
+
 func (resolver *sqlStreamingTestResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
 	if name != "CACHE" || field != "id" {
 		return nil, false, fmt.Errorf("unexpected index source %s(%q).%s", name, key, field)
@@ -937,9 +959,15 @@ func TestHatTrieOptionalSQLJSONFieldIndexSelectsConjunctivePredicate(t *testing.
 		t.Fatalf("conjunctive index rows/error = %#v/%v", result.Rows, err)
 	}
 	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
-	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 || explained.Plan[0].Node != "INDEX SCAN" {
+	if err != nil || explained.Stats == nil {
 		t.Fatalf("conjunctive index plan/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
 	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX SCAN" {
+			return
+		}
+	}
+	t.Fatalf("conjunctive index plan = %#v, want INDEX SCAN", explained.Plan)
 }
 
 func TestHatTrieSQLCompositeJSONIndexPlansAndReportsStatistics(t *testing.T) {

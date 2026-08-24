@@ -3281,7 +3281,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		base, ordered, err := resolveSQLOrderedSource(q, resolver)
 		indexed := ordered
 		if !indexed {
-			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver)
+			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics)
 		}
 		if !indexed {
 			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
@@ -4602,7 +4602,7 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 	return nil, false
 }
 
-func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics) ([]SQLRow, bool, error) {
 	if source.kind != "CACHE" || len(source.fieldTypes) != 0 || condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
@@ -4616,13 +4616,13 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		}
 	}
 	if condition.op == "AND" {
-		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver); indexed || err != nil {
+		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver, metrics); indexed || err != nil {
 			return rows, indexed, err
 		}
-		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver); indexed || err != nil {
+		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver, metrics); indexed || err != nil {
 			return rows, indexed, err
 		}
-		return resolveSQLIndexedSource(source, *condition.right, resolver)
+		return resolveSQLIndexedSource(source, *condition.right, resolver, metrics)
 	}
 	left, right := *condition.left, *condition.right
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
@@ -4665,7 +4665,7 @@ func resolveSQLOrderedSource(q *sqlQuery, resolver SQLSourceResolver) ([]SQLRow,
 // cardinality estimates to choose an AND term before the historical
 // left-to-right fallback. The complete predicate is still evaluated after the
 // probe, so estimates affect work only, never correctness.
-func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics) ([]SQLRow, bool, error) {
 	type candidate struct {
 		condition sqlExpr
 		estimate  int
@@ -4692,11 +4692,21 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 		}
 	}
 	sort.SliceStable(candidates, func(left, right int) bool { return candidates[left].estimate < candidates[right].estimate })
+	started := time.Now()
+	details := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
-		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver)
+		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver, metrics)
 		if indexed || err != nil {
+			if err == nil {
+				details = append(details, fmt.Sprintf("%s estimated_rows=%d selected", sqlExplainExpression(candidate.condition), candidate.estimate))
+				metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 1, started)
+			}
 			return rows, indexed, err
 		}
+		details = append(details, fmt.Sprintf("%s estimated_rows=%d rejected: index unavailable", sqlExplainExpression(candidate.condition), candidate.estimate))
+	}
+	if len(candidates) > 0 {
+		metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 0, started)
 	}
 	return nil, false, nil
 }
