@@ -918,7 +918,10 @@ headers is an `{"type":"error","error":"..."}` terminal record.
 Streaming is deliberately exact rather than pretending that every query can
 stream: it accepts one `CACHE` or `VALUES` source with scalar `WHERE`,
 projection, `OFFSET`, and `LIMIT`, plus a chain of indexed equality `INNER` or
-`LEFT` CACHE joins. A source-only query with a finite `ORDER BY … LIMIT`
+`LEFT` CACHE joins. Registered scalar custom functions are also valid in that
+`WHERE` and projection subset: the executor evaluates a one-row function batch
+at a time, retaining no result-row slice and preserving the function's normal
+type and source diagnostics. A source-only query with a finite `ORDER BY … LIMIT`
 (optionally with `OFFSET`) uses a stable bounded top-N heap: it retains at most
 `LIMIT + OFFSET` candidates, then emits sorted rows after its source is read.
 That ordered subset excludes joins, grouping, windows, sets, distinct, typed
@@ -927,8 +930,9 @@ made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
 keep constant state and emit one final row without retaining source rows. It
 still rejects CTEs, grouped aggregates, unbounded ordering, most windows, set
 operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
-`DISTINCT`, typed JSON schemas, and custom functions until each has a
-bounded-memory streaming operator. `UNION ALL` is the exception: when every
+`DISTINCT`, typed JSON schemas, and custom functions inside those global
+operators until each has a bounded-memory streaming operator. `UNION ALL` is
+the exception: when every
 branch is independently streamable and projects the same columns, rows stream
 left-to-right with each branch's own `WHERE`, `OFFSET`, and `LIMIT` semantics.
 It also streams unpartitioned, unordered windows with the default running

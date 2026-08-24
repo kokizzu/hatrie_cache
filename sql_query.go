@@ -1023,10 +1023,10 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 // ExecuteSQLQueryRows evaluates a stream-compatible query and invokes visit as
 // each projected row becomes available. It never builds a result-row slice.
 // Queries requiring a global view (grouping, ordering, windows, set
-// operations, DISTINCT, or custom functions) return an explanatory error
-// instead of silently falling back to materialized execution. A chain of
-// indexed INNER/LEFT CACHE joins is also streamable because each next source
-// is probed only for the current row.
+// operations, or DISTINCT) return an explanatory error instead of silently
+// falling back to materialized execution. Scalar custom functions are evaluated
+// one source row at a time. A chain of indexed INNER/LEFT CACHE joins is also
+// streamable because each next source is probed only for the current row.
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) error {
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
@@ -1061,6 +1061,7 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if err := validateSQLQueryStreamable(query); err != nil {
 		return err
 	}
+	functions, _ := resolver.(SQLFunctionResolver)
 	if len(query.joins) > 0 {
 		indexed, ok := resolver.(SQLIndexedSourceResolver)
 		if !ok {
@@ -1089,8 +1090,8 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 			return err
 		}
 		if query.where.kind != "" {
-			value := evalSQLExpr(query.where, nil, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
 				return err
 			}
 			if !sqlTruthy(value) {
@@ -1106,8 +1107,8 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		}
 		row := SQLRow{}
 		for index, item := range query.selects {
-			value := evalSQLExpr(item.expr, nil, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+			if err != nil {
 				return err
 			}
 			row[columns[index]] = value
@@ -1179,6 +1180,24 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		return sqlRuntimeDiagnostic(err)
 	}
 	return nil
+}
+
+// evalSQLStreamExpr evaluates one source row through the same vectorized
+// expression implementation as materialized execution. A one-row batch keeps
+// custom functions bounded while preserving their typed errors and CASE's lazy
+// branch semantics.
+func evalSQLStreamExpr(expr sqlExpr, row sqlExecRow, functions SQLFunctionResolver) (interface{}, error) {
+	values, err := evalSQLExprBatch(expr, []sqlExecRow{row}, functions)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) != 1 {
+		return nil, fmt.Errorf("SQL expression produced %d values for one streamed row", len(values))
+	}
+	if err := sqlExpressionError(values[0]); err != nil {
+		return nil, err
+	}
+	return values[0], nil
 }
 
 func sqlQueryRowsBaseStreamable(query *sqlQuery) bool {
@@ -1760,12 +1779,12 @@ func validateSQLQueryStreamable(query *sqlQuery) error {
 	if len(query.from.fieldTypes) > 0 {
 		return fmt.Errorf("typed CACHE fields cannot stream yet because validation must remain identical to materialized queries")
 	}
-	if query.where.window != nil || sqlExprHasCustomFunction(query.where, nil) {
-		return fmt.Errorf("SQL query cannot stream custom functions or window expressions")
+	if query.where.window != nil {
+		return fmt.Errorf("SQL query cannot stream window expressions")
 	}
 	for _, item := range query.selects {
-		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) || sqlExprHasCustomFunction(item.expr, nil) {
-			return fmt.Errorf("SQL query cannot stream SELECT * , aggregate, window, or custom-function expressions")
+		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) {
+			return fmt.Errorf("SQL query cannot stream SELECT *, aggregate, or window expressions")
 		}
 	}
 	return nil

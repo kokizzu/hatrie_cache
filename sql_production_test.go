@@ -27,6 +27,15 @@ type sqlStreamingTestResolver struct {
 	indexCalls     int
 }
 
+type sqlStreamingFunctionTestResolver struct {
+	*sqlStreamingTestResolver
+	functions SQLFunctionResolver
+}
+
+func (resolver sqlStreamingFunctionTestResolver) EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error) {
+	return resolver.functions.EvaluateSQLFunction(name, calls)
+}
+
 type sqlSelectiveIndexTestResolver struct {
 	rows        []SQLRow
 	calls       []string
@@ -476,6 +485,42 @@ func TestExecuteSQLQueryRowsStreamsCompatibleSourceRows(t *testing.T) {
 	}
 	if err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS p SELECT p.name ORDER BY p.name", resolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil }); err == nil || !strings.Contains(err.Error(), "cannot stream") {
 		t.Fatalf("ordered ExecuteSQLQueryRows() error = %v, want a streamability error", err)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsScalarCustomFunctions(t *testing.T) {
+	t.Parallel()
+	functions := NewSQLFunctionRegistry()
+	if err := functions.Register(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value + 1"}); err != nil {
+		t.Fatalf("register custom function: %v", err)
+	}
+	streaming := &sqlStreamingTestResolver{rows: []SQLRow{{"age": int64(12)}, {"age": int64(21)}, {"age": int64(34)}}}
+	resolver := sqlStreamingFunctionTestResolver{sqlStreamingTestResolver: streaming, functions: functions}
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person WHERE plus_one(person.age) >= 22 SELECT plus_one(person.age) AS next_age", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream scalar function query: %v", err)
+	}
+	if want := []SQLRow{{"next_age": int64(22)}, {"next_age": int64(35)}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("stream scalar function rows = %#v, want %#v", rows, want)
+	}
+	if streaming.resolveCalls != 0 || streaming.streamCalls != 1 {
+		t.Fatalf("stream scalar function resolver calls materialized=%d streamed=%d, want 0/1", streaming.resolveCalls, streaming.streamCalls)
+	}
+	badStreaming := &sqlStreamingTestResolver{rows: []SQLRow{{"age": "not-an-integer"}}}
+	badResolver := sqlStreamingFunctionTestResolver{sqlStreamingTestResolver: badStreaming, functions: functions}
+	err = ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person SELECT plus_one(person.age) AS next_age", badResolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil })
+	if err == nil {
+		t.Fatal("stream scalar function type error = nil, want function diagnostic")
+	}
+	formatted := FormatSQLFunctionDiagnostic(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value + 1"}, err)
+	for _, want := range []string{`argument "value" expects INTEGER, got TEXT`, "--> function plus_one:1:", "return value + 1"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("stream function diagnostic = %q, want %q", formatted, want)
+		}
 	}
 }
 
