@@ -697,6 +697,12 @@ true or false. `WHERE`/`HAVING` retain only true; `AND` and `OR` use the
 standard three-valued truth table. Use `IS NULL` or `IS NOT NULL` for null
 tests.
 
+`CASE` supports searched conditions (`CASE WHEN condition THEN value ... END`)
+and a simple comparison operand (`CASE value WHEN match THEN result ... END`).
+`ELSE` is optional and otherwise produces null. Only the selected `THEN` or
+`ELSE` expression is evaluated, so a non-selected branch cannot raise a
+conversion or function error.
+
 Numbers compare numerically across integer/decimal literals. Non-null literal
 comparisons between incompatible types (for example `1 = '1'`) are rejected
 locally with both type names and a source span, rather than silently coercing
@@ -719,6 +725,8 @@ Use `DATE '2026-08-22'` for a calendar date. Dates validate the calendar,
 serialize as `YYYY-MM-DD`, and compare in chronological order.
 - [x] Projection with `*`, qualified columns, aliases, literals, and aggregate
       expressions.
+- [x] Searched and simple `CASE` expressions with lazy selected-branch
+      evaluation and optional `ELSE`.
 - [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
 - [x] `ORDER BY ... ASC|DESC`, `LIMIT`, and `OFFSET`.
 - [x] `SELECT DISTINCT` after projection, before `ORDER BY`/`LIMIT`.

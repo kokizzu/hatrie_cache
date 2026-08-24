@@ -1303,6 +1303,14 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 			return err
 		}
 	}
+	for index := range expr.cases {
+		if err := bindSQLExpr(&expr.cases[index].when, parameters); err != nil {
+			return err
+		}
+		if err := bindSQLExpr(&expr.cases[index].then, parameters); err != nil {
+			return err
+		}
+	}
 	if expr.window != nil {
 		for index := range expr.window.partition {
 			if err := bindSQLExpr(&expr.window.partition[index], parameters); err != nil {
@@ -1419,6 +1427,12 @@ func cloneSQLExpr(source sqlExpr) sqlExpr {
 		copy.right = &right
 	}
 	copy.args = cloneSQLExprs(source.args)
+	if source.cases != nil {
+		copy.cases = make([]sqlCaseWhen, len(source.cases))
+		for index, branch := range source.cases {
+			copy.cases[index] = sqlCaseWhen{when: cloneSQLExpr(branch.when), then: cloneSQLExpr(branch.then)}
+		}
+	}
 	if source.window != nil {
 		window := *source.window
 		window.partition = cloneSQLExprs(source.window.partition)
@@ -1492,11 +1506,16 @@ type sqlOrder struct {
 	nullsFirst bool
 	nullsLast  bool
 }
+type sqlCaseWhen struct {
+	when sqlExpr
+	then sqlExpr
+}
 type sqlExpr struct {
 	kind, name, qualifier, op string
 	value                     interface{}
 	left, right               *sqlExpr
 	args                      []sqlExpr
+	cases                     []sqlCaseWhen
 	window                    *sqlWindow
 	token                     sqlToken
 }
@@ -2381,6 +2400,53 @@ func (p *sqlQueryParser) parseUnaryExpr() (sqlExpr, error) {
 	return p.parsePrimary()
 }
 
+func (p *sqlQueryParser) parseCaseExpression(token sqlToken) (sqlExpr, error) {
+	expression := sqlExpr{kind: "case", token: token}
+	if !p.keyword("WHEN") {
+		operand, err := p.parseExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		expression.left = &operand
+	}
+	if !p.keyword("WHEN") {
+		return sqlExpr{}, p.expected(p.current(), "WHEN in CASE expression", []string{"WHEN"})
+	}
+	for p.keyword("WHEN") {
+		p.next()
+		var when sqlExpr
+		var err error
+		if expression.left == nil {
+			when, err = p.parseCondition()
+		} else {
+			when, err = p.parseExpr()
+		}
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		if err := p.expectKeyword("THEN"); err != nil {
+			return sqlExpr{}, err
+		}
+		then, err := p.parseExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		expression.cases = append(expression.cases, sqlCaseWhen{when: when, then: then})
+	}
+	if p.keyword("ELSE") {
+		p.next()
+		fallback, err := p.parseExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		expression.right = &fallback
+	}
+	if err := p.expectKeyword("END"); err != nil {
+		return sqlExpr{}, err
+	}
+	return expression, nil
+}
+
 func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	token := p.current()
 	if token.kind == sqlTokenLeftParen {
@@ -2434,6 +2500,9 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	if token.kind == sqlTokenIdentifier {
 		p.next()
 		upper := strings.ToUpper(token.text)
+		if upper == "CASE" {
+			return p.parseCaseExpression(token)
+		}
 		if upper == "DATE" {
 			value := p.current()
 			if value.kind != sqlTokenString {
@@ -4081,6 +4150,20 @@ func sqlExplainExpression(expression sqlExpr) string {
 		return "CAST(<invalid>)"
 	case "func":
 		return expression.name + "(" + sqlExplainExpressions(expression.args) + ")"
+	case "case":
+		parts := make([]string, 0, len(expression.cases)*2+2)
+		parts = append(parts, "CASE")
+		if expression.left != nil {
+			parts = append(parts, sqlExplainExpression(*expression.left))
+		}
+		for _, branch := range expression.cases {
+			parts = append(parts, "WHEN", sqlExplainExpression(branch.when), "THEN", sqlExplainExpression(branch.then))
+		}
+		if expression.right != nil {
+			parts = append(parts, "ELSE", sqlExplainExpression(*expression.right))
+		}
+		parts = append(parts, "END")
+		return strings.Join(parts, " ")
 	case "unary":
 		return expression.op + " " + sqlExplainExpression(*expression.left)
 	case "in":
@@ -4577,6 +4660,16 @@ func sqlExprReferencesOnlyAlias(expression sqlExpr, alias string) bool {
 		return expression.left != nil && sqlExprReferencesOnlyAlias(*expression.left, alias) && (expression.right == nil || sqlExprReferencesOnlyAlias(*expression.right, alias))
 	case "cast":
 		return len(expression.args) == 1 && sqlExprReferencesOnlyAlias(expression.args[0], alias)
+	case "case":
+		if expression.left != nil && !sqlExprReferencesOnlyAlias(*expression.left, alias) {
+			return false
+		}
+		for _, branch := range expression.cases {
+			if !sqlExprReferencesOnlyAlias(branch.when, alias) || !sqlExprReferencesOnlyAlias(branch.then, alias) {
+				return false
+			}
+		}
+		return expression.right == nil || sqlExprReferencesOnlyAlias(*expression.right, alias)
 	case "func":
 		for _, argument := range expression.args {
 			if !sqlExprReferencesOnlyAlias(argument, alias) {
@@ -4727,6 +4820,13 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 			}
 		}
 	}
+	if expr.kind == "case" {
+		for _, branch := range expr.cases {
+			if sqlExprHasAggregate(branch.when) || sqlExprHasAggregate(branch.then) {
+				return true
+			}
+		}
+	}
 	if expr.left != nil && sqlExprHasAggregate(*expr.left) {
 		return true
 	}
@@ -4768,6 +4868,38 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return sqlEvalError{err: err, token: token}
 		}
 		return converted
+	case "case":
+		var operand interface{}
+		if expr.left != nil {
+			operand = evalSQLExpr(*expr.left, group, row)
+			if err := sqlExpressionError(operand); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+		}
+		for _, branch := range expr.cases {
+			condition := evalSQLExpr(branch.when, group, row)
+			if err := sqlExpressionError(condition); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if expr.left != nil {
+				condition = sqlBinaryValue("=", operand, condition)
+			}
+			if sqlTruthy(condition) {
+				value := evalSQLExpr(branch.then, group, row)
+				if err := sqlExpressionError(value); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				return value
+			}
+		}
+		if expr.right != nil {
+			value := evalSQLExpr(*expr.right, group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return value
+		}
+		return nil
 	case "func":
 		switch expr.name {
 		case "COUNT":
@@ -5139,6 +5271,11 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 			return true
 		}
 	}
+	for _, branch := range expr.cases {
+		if sqlExprHasCustomFunction(branch.when, functions) || sqlExprHasCustomFunction(branch.then, functions) {
+			return true
+		}
+	}
 	return false
 }
 func sqlBuiltinFunction(name string) bool {
@@ -5173,6 +5310,83 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 			return nil, fmt.Errorf("SQL function %q returned %d values for %d rows", expr.name, len(values), len(rows))
 		}
 		return values, nil
+	}
+	if expr.kind == "case" {
+		out := make([]interface{}, len(rows))
+		resolved := make([]bool, len(rows))
+		var operand []interface{}
+		if expr.left != nil {
+			values, err := evalSQLExprBatch(*expr.left, rows, functions)
+			if err != nil {
+				return nil, err
+			}
+			operand = values
+			for index, value := range values {
+				if err := sqlExpressionError(value); err != nil {
+					out[index] = sqlEvaluationFailure(err)
+					resolved[index] = true
+				}
+			}
+		}
+		for _, branch := range expr.cases {
+			conditions, err := evalSQLExprBatch(branch.when, rows, functions)
+			if err != nil {
+				return nil, err
+			}
+			indexes := make([]int, 0, len(rows))
+			for index, condition := range conditions {
+				if resolved[index] {
+					continue
+				}
+				if err := sqlExpressionError(condition); err != nil {
+					out[index] = sqlEvaluationFailure(err)
+					resolved[index] = true
+					continue
+				}
+				if operand != nil {
+					condition = sqlBinaryValue("=", operand[index], condition)
+				}
+				if sqlTruthy(condition) {
+					indexes = append(indexes, index)
+				}
+			}
+			if len(indexes) == 0 {
+				continue
+			}
+			selectedRows := make([]sqlExecRow, len(indexes))
+			for selectedIndex, index := range indexes {
+				selectedRows[selectedIndex] = rows[index]
+			}
+			values, err := evalSQLExprBatch(branch.then, selectedRows, functions)
+			if err != nil {
+				return nil, err
+			}
+			for selectedIndex, index := range indexes {
+				out[index] = values[selectedIndex]
+				resolved[index] = true
+			}
+		}
+		indexes := make([]int, 0, len(rows))
+		for index := range rows {
+			if !resolved[index] {
+				indexes = append(indexes, index)
+			}
+		}
+		if expr.right == nil || len(indexes) == 0 {
+			return out, nil
+		}
+		selectedRows := make([]sqlExecRow, len(indexes))
+		for selectedIndex, index := range indexes {
+			selectedRows[selectedIndex] = rows[index]
+		}
+		values, err := evalSQLExprBatch(*expr.right, selectedRows, functions)
+		if err != nil {
+			return nil, err
+		}
+		for selectedIndex, index := range indexes {
+			out[index] = values[selectedIndex]
+		}
+		return out, nil
 	}
 	if expr.kind == "binary" {
 		left, err := evalSQLExprBatch(*expr.left, rows, functions)

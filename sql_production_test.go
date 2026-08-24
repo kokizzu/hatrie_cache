@@ -1353,6 +1353,40 @@ func TestExecuteSQLQuerySupportsBetweenWithNullSemantics(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQuerySupportsCaseExpressions(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES (1), (2), (NULL) AS values(value) SELECT value, CASE WHEN value = 1 THEN 'one' WHEN value = 2 THEN 'two' ELSE 'other' END AS searched, CASE value WHEN 1 THEN 'one' WHEN NULL THEN 'null' ELSE 'other' END AS simple ORDER BY value NULLS LAST", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("CASE query: %v", err)
+	}
+	want := []SQLRow{
+		{"value": int64(1), "searched": "one", "simple": "one"},
+		{"value": int64(2), "searched": "two", "simple": "other"},
+		{"value": nil, "searched": "other", "simple": "other"},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("CASE rows = %#v, want %#v", result.Rows, want)
+	}
+	result, err = ExecuteSQLQuery("FROM VALUES (1) AS values(value) SELECT CASE WHEN value = 1 THEN 'selected' ELSE CAST('not a number' AS NUMBER) END AS value", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("CASE must evaluate only its selected branch: %v", err)
+	}
+	if want := []SQLRow{{"value": "selected"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("lazy CASE rows = %#v, want %#v", result.Rows, want)
+	}
+	functions := NewSQLFunctionRegistry()
+	if err := functions.Register(SQLFunctionDefinition{Name: "double_case", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value * 2"}); err != nil {
+		t.Fatalf("register CASE function: %v", err)
+	}
+	result, err = ExecuteSQLQuery("FROM VALUES (1), (2) AS values(value) SELECT CASE WHEN value = 1 THEN double_case(value) ELSE double_case(0) END AS value ORDER BY value", sqlFunctionTestResolver{functions: functions})
+	if err != nil {
+		t.Fatalf("CASE custom function query: %v", err)
+	}
+	if want := []SQLRow{{"value": int64(0)}, {"value": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("CASE custom function rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))

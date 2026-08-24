@@ -140,6 +140,11 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"BREADTH", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) SEARCH BREADTH FIRST BY value SET search_order FROM walk SELECT search_order"},
 		{"CACHE", "query", "FROM CACHE('people') AS p SELECT p.name"},
 		{"CAST", "query", "FROM VALUES ('42') AS a(value) SELECT CAST(value AS NUMBER)"},
+		{"CASE", "query", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one' ELSE 'other' END AS label"},
+		{"WHEN", "query", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one' ELSE 'other' END AS label"},
+		{"THEN", "query", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one' ELSE 'other' END AS label"},
+		{"ELSE", "query", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one' ELSE 'other' END AS label"},
+		{"END", "query", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one' ELSE 'other' END AS label"},
 		{"CROSS", "query", "FROM VALUES (1) AS a(value) CROSS JOIN VALUES (2) AS b(value) SELECT a.value"},
 		{"CYCLE", "query", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE value < 1 SELECT value) CYCLE value SET is_cycle FROM walk SELECT is_cycle"},
 		{"DESC", "query", "FROM VALUES (1), (2) AS a(value) SELECT value ORDER BY value DESC"},
@@ -277,7 +282,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FETCH": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "IN": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "ONLY": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CASE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "ELSE": {}, "END": {}, "EXCEPT": {}, "EXPLAIN": {}, "FETCH": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "IN": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "ONLY": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "THEN": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHEN": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -309,6 +314,8 @@ func TestSQLKeywordInventoryReportsContextualDiagnostics(t *testing.T) {
 		{"is_requires_null", "FROM VALUES (NULL) AS a(value) WHERE value IS TRUE SELECT value", "expected NULL"},
 		{"intersect_all_is_rejected", "FROM VALUES (1) AS a(value) SELECT value INTERSECT ALL FROM VALUES (1) AS b(value) SELECT value", "INTERSECT ALL is not supported"},
 		{"fetch_conflicts_with_limit", "FROM VALUES (1) AS a(value) SELECT value LIMIT 1 FETCH FIRST 1 ROWS ONLY", "FETCH cannot be combined with LIMIT"},
+		{"case_requires_then", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 'one' END", "expected THEN"},
+		{"case_requires_end", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one'", "expected END"},
 		{"self_reference_requires_recursive", "WITH sequence(value) AS (FROM sequence SELECT value) FROM sequence SELECT value", "requires WITH RECURSIVE"},
 		{"recursive_requires_union_term", "WITH RECURSIVE sequence(value) AS (FROM sequence SELECT value) FROM sequence SELECT value", "requires exactly one UNION or UNION ALL recursive term"},
 	} {
