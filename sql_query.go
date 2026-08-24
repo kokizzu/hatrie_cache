@@ -225,6 +225,7 @@ type SQLQueryStats struct {
 	ElapsedNanos  int64 `json:"elapsed_ns"`
 	OutputRows    int   `json:"output_rows"`
 	OutputColumns int   `json:"output_columns"`
+	ResultBytes   int   `json:"result_bytes"`
 	PlanSteps     int   `json:"plan_steps"`
 }
 
@@ -4087,6 +4088,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		ElapsedNanos:  time.Since(started).Nanoseconds(),
 		OutputRows:    len(executed.Rows),
 		OutputColumns: len(executed.Columns),
+		ResultBytes:   sqlRowsBytes(executed.Rows),
 		PlanSteps:     len(metrics.steps),
 	}
 	result.Plan = metrics.steps
@@ -4101,12 +4103,13 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		result.Rows = append(result.Rows, row)
 	}
-	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "elapsed_ns")
+	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "result_bytes", "elapsed_ns")
 	result.Rows = append(result.Rows, SQLRow{
-		"node":        "ANALYZE",
-		"detail":      "execution summary",
-		"actual_rows": result.Stats.OutputRows,
-		"elapsed_ns":  result.Stats.ElapsedNanos,
+		"node":         "ANALYZE",
+		"detail":       "execution summary",
+		"actual_rows":  result.Stats.OutputRows,
+		"result_bytes": result.Stats.ResultBytes,
+		"elapsed_ns":   result.Stats.ElapsedNanos,
 	})
 	return result, nil
 }

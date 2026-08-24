@@ -891,7 +891,8 @@ was actually selected and executed. Other plan nodes include scans, joins,
 filters, aggregation, projection, set operations, sorting, and pagination.
 
 Use `EXPLAIN ANALYZE` to execute the query once. It returns the plan plus
-`stats`: total `elapsed_ns`, `output_rows`, `output_columns`, and `plan_steps`.
+`stats`: total `elapsed_ns`, `output_rows`, `output_columns`, exact
+row-payload `result_bytes`, and `plan_steps`.
 Each executed scan, join, filter, aggregation, projection, distinct, sort,
 pagination, and set-operation plan step also carries `actual_input_rows`,
 `actual_output_rows`, and its own `elapsed_ns`. Index scans with an estimate
