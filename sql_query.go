@@ -270,6 +270,13 @@ type SQLRangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]SQLRow, bool, error)
 }
 
+// SQLOrderedSourceResolver is an optional extension for reading one indexed
+// CACHE field in SQL ORDER BY order. The returned rows must retain their
+// original source order for equal values and for NULL values.
+type SQLOrderedSourceResolver interface {
+	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error)
+}
+
 // SQLCompositeIndexedSourceResolver optionally resolves equality predicates
 // through a multi-field JSON index. fields and values have matching positions.
 type SQLCompositeIndexedSourceResolver interface {
@@ -301,6 +308,7 @@ type sqlJSONFieldIndex struct {
 	raw     string
 	rows    map[string][]SQLRow
 	ordered []sqlJSONFieldIndexEntry
+	nulls   []SQLRow
 }
 type sqlJSONFieldIndexEntry struct {
 	value interface{}
@@ -563,6 +571,55 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	return cloneSQLRows(rows), true, nil
 }
 
+// ResolveSQLOrderedSource returns every JSON source row in the exact order of
+// one opt-in indexed field. It is used only for a compatible ORDER BY plan;
+// callers outside the SQL executor may use it as an optional resolver method.
+func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	rows := make([]SQLRow, 0, len(index.ordered)+len(index.nulls))
+	if desc {
+		for end := len(index.ordered); end > 0; {
+			start := end - 1
+			for start > 0 && sqlCompare(index.ordered[start-1].value, index.ordered[end-1].value) == 0 {
+				start--
+			}
+			for _, entry := range index.ordered[start:end] {
+				rows = append(rows, entry.row)
+			}
+			end = start
+		}
+	} else {
+		for _, entry := range index.ordered {
+			rows = append(rows, entry.row)
+		}
+	}
+	placeNullsFirst := false
+	if len(rows) > 0 {
+		placeNullsFirst, _ = sqlOrderLess(sqlOrder{desc: desc, nullsFirst: nullsFirst, nullsLast: nullsLast}, nil, index.ordered[0].value)
+	}
+	if placeNullsFirst {
+		rows = append(append([]SQLRow{}, index.nulls...), rows...)
+	} else {
+		rows = append(rows, index.nulls...)
+	}
+	return cloneSQLRows(rows), true, nil
+}
+
 func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data []byte) error {
 	if index.raw == string(data) {
 		return nil
@@ -571,11 +628,13 @@ func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data 
 	if err != nil {
 		return err
 	}
-	index.raw, index.rows, index.ordered = string(data), map[string][]SQLRow{}, nil
+	index.raw, index.rows, index.ordered, index.nulls = string(data), map[string][]SQLRow{}, nil, nil
 	for _, row := range rows {
 		if valueKey, ok := sqlIndexValueKey(row[field]); ok {
 			index.rows[valueKey] = append(index.rows[valueKey], row)
 			index.ordered = append(index.ordered, sqlJSONFieldIndexEntry{value: row[field], row: row})
+		} else {
+			index.nulls = append(index.nulls, row)
 		}
 	}
 	sort.SliceStable(index.ordered, func(i, j int) bool {
@@ -3216,9 +3275,14 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		return SQLQueryResult{}, err
 	}
 	pushedWhere := false
+	indexOrdered := false
 	if !reordered {
 		started = time.Now()
-		base, indexed, err := resolveSQLIndexedSource(*q.from, q.where, resolver)
+		base, ordered, err := resolveSQLOrderedSource(q, resolver)
+		indexed := ordered
+		if !indexed {
+			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver)
+		}
 		if !indexed {
 			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
 		}
@@ -3228,7 +3292,10 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if len(base) > maxRows {
 			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
 		}
-		if indexed {
+		if ordered {
+			metrics.record("INDEX ORDER SCAN", sqlExplainSource(*q.from)+" ORDER BY "+sqlExplainOrders(q.orderBy), 0, len(base), started)
+			indexOrdered = true
+		} else if indexed {
 			estimatedRows, err := sqlIndexedEqualityEstimate(*q.from, q.where, resolver)
 			if err != nil {
 				return SQLQueryResult{}, err
@@ -3596,7 +3663,12 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	}
 	started = time.Now()
 	inputRows := len(rows)
-	groups, err := groupSQLRows(rows, q.groupBy, q)
+	var groups [][]sqlExecRow
+	if indexOrdered && len(q.groupBy) > 0 {
+		groups, err = groupSQLRowsOrdered(rows, q.groupBy, q)
+	} else {
+		groups, err = groupSQLRows(rows, q.groupBy, q)
+	}
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -3604,7 +3676,11 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		return SQLQueryResult{}, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
 	}
 	if len(q.groupBy) > 0 || sqlQueryHasAggregate(q) {
-		metrics.record("AGGREGATE", sqlExplainExpressions(q.groupBy), inputRows, len(groups), started)
+		node := "AGGREGATE"
+		if indexOrdered && len(q.groupBy) > 0 {
+			node = "INDEX GROUP AGGREGATE"
+		}
+		metrics.record(node, sqlExplainExpressions(q.groupBy), inputRows, len(groups), started)
 	}
 	started = time.Now()
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(groups))}
@@ -3825,7 +3901,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		out = filtered
 		metrics.record("DISTINCT", "deduplicate projected rows", inputRows, len(out), started)
 	}
-	if len(q.orderBy) > 0 {
+	if len(q.orderBy) > 0 && !indexOrdered {
 		for _, output := range out {
 			for _, item := range q.orderBy {
 				if err := sqlExpressionError(evalOutputOrder(item.expr, output.row, output.group)); err != nil {
@@ -4558,6 +4634,33 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	return nil, false, nil
 }
 
+// resolveSQLOrderedSource chooses the narrow order-preserving scan that can
+// replace both a source scan and the final SORT. It intentionally excludes
+// filters, joins, unions, typed sources, aliases, and composite order keys:
+// those forms need the established executor until their ordering proof is as
+// direct as this one-field case.
+func resolveSQLOrderedSource(q *sqlQuery, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+	if q == nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || q.where.kind != "" || q.distinct || sqlQueryHasWindow(q) || len(q.joins) != 0 || len(q.unions) != 0 || len(q.orderBy) != 1 {
+		return nil, false, nil
+	}
+	order := q.orderBy[0]
+	if order.expr.kind != "field" || order.expr.qualifier != q.from.alias || order.expr.name == "" {
+		return nil, false, nil
+	}
+	if len(q.groupBy) > 0 {
+		if len(q.groupBy) != 1 || q.groupBy[0].kind != "field" || q.groupBy[0].qualifier != order.expr.qualifier || q.groupBy[0].name != order.expr.name {
+			return nil, false, nil
+		}
+	} else if sqlQueryHasAggregate(q) {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(SQLOrderedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLOrderedSource(q.from.kind, q.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast)
+}
+
 // resolveSQLMostSelectiveIndexedConjunct uses available equality-index
 // cardinality estimates to choose an AND term before the historical
 // left-to-right fallback. The complete predicate is still evaluated after the
@@ -4964,6 +5067,38 @@ func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow,
 	}
 	return out, nil
 }
+
+// groupSQLRowsOrdered groups adjacent equal keys from an index-ordered source.
+// Its caller proves that the one GROUP BY expression is exactly the indexed
+// ORDER BY field, so a key cannot reappear after a different key. This avoids
+// the grouping hash table while retaining all group rows for aggregate
+// semantics and existing group-memory accounting.
+func groupSQLRowsOrdered(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow, error) {
+	if len(by) == 0 {
+		return groupSQLRows(rows, by, q)
+	}
+	out := make([][]sqlExecRow, 0, len(rows))
+	previousKey := ""
+	for index, row := range rows {
+		parts := make([]string, len(by))
+		for expressionIndex, expr := range by {
+			value := evalSQLExpr(expr, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(value); err != nil {
+				return nil, err
+			}
+			parts[expressionIndex] = fmt.Sprintf("%#v", value)
+		}
+		key := strings.Join(parts, "\x00")
+		if index == 0 || key != previousKey {
+			out = append(out, []sqlExecRow{row})
+			previousKey = key
+			continue
+		}
+		out[len(out)-1] = append(out[len(out)-1], row)
+	}
+	return out, nil
+}
+
 func sqlQueryHasAggregate(q *sqlQuery) bool {
 	for _, item := range q.selects {
 		if sqlExprHasAggregate(item.expr) {
@@ -4972,6 +5107,49 @@ func sqlQueryHasAggregate(q *sqlQuery) bool {
 	}
 	return sqlExprHasAggregate(q.having)
 }
+
+func sqlQueryHasWindow(q *sqlQuery) bool {
+	if q == nil {
+		return false
+	}
+	for _, item := range q.selects {
+		if sqlExprHasWindow(item.expr) {
+			return true
+		}
+	}
+	if sqlExprHasWindow(q.having) || sqlExprHasWindow(q.where) {
+		return true
+	}
+	for _, item := range q.groupBy {
+		if sqlExprHasWindow(item) {
+			return true
+		}
+	}
+	for _, item := range q.orderBy {
+		if sqlExprHasWindow(item.expr) {
+			return true
+		}
+	}
+	return false
+}
+
+func sqlExprHasWindow(expr sqlExpr) bool {
+	if expr.window != nil {
+		return true
+	}
+	for _, arg := range expr.args {
+		if sqlExprHasWindow(arg) {
+			return true
+		}
+	}
+	for _, branch := range expr.cases {
+		if sqlExprHasWindow(branch.when) || sqlExprHasWindow(branch.then) {
+			return true
+		}
+	}
+	return expr.left != nil && sqlExprHasWindow(*expr.left) || expr.right != nil && sqlExprHasWindow(*expr.right)
+}
+
 func sqlExprHasAggregate(expr sqlExpr) bool {
 	if expr.window != nil {
 		return false

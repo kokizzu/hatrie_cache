@@ -590,7 +590,15 @@ full cache evicts the least-recently-used template.
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
-`INDEX SCAN`; an equality inner join whose right `CACHE` field is indexed uses
+`INDEX SCAN`. A one-source query with one qualified `ORDER BY users.team_id`
+can read the same index in order and report `INDEX ORDER SCAN`, avoiding the
+final `SORT`; it retains source order for equal values and honors `NULLS FIRST`
+or `NULLS LAST`. When its single `GROUP BY` is that exact same field, it also
+reports `INDEX GROUP AGGREGATE` instead of building a grouping hash table.
+Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
+shapes deliberately retain the general executor until they have an equally
+direct ordering proof.
+An equality inner join whose right `CACHE` field is indexed uses
 `INDEX JOIN`. Equality `LEFT JOIN` probes the same index while preserving every
 unmatched left row. Equality `RIGHT JOIN` probes an index on its left CACHE
 source while preserving every unmatched right row (`INDEX RIGHT JOIN`). An indexed equality/range predicate remains selectable

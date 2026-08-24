@@ -1007,6 +1007,164 @@ func TestHatTrieSQLJSONIndexStatsExposeSkewAndExplainEstimate(t *testing.T) {
 	t.Fatalf("indexed EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
 }
 
+func TestHatTrieSQLJSONFieldIndexAvoidsSortForCompatibleOrder(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"age":2},{"id":2,"age":null},{"id":3},{"id":4,"age":1},{"id":5,"age":2}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS person SELECT person.id, person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SQLRow{
+		{"id": float64(2), "age": nil},
+		{"id": float64(3), "age": nil},
+		{"id": float64(1), "age": float64(2)},
+		{"id": float64(5), "age": float64(2)},
+		{"id": float64(4), "age": float64(1)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("ordered index rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('people') AS person SELECT person.id, person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, step := range explained.Plan {
+		seen[step.Node] = true
+	}
+	if !seen["INDEX ORDER SCAN"] || seen["SORT"] {
+		t.Fatalf("EXPLAIN ANALYZE nodes = %#v, want INDEX ORDER SCAN without SORT", explained.Plan)
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexAvoidsHashGroupingForCompatibleOrder(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"age":2},{"age":null},{},{"age":2},{"age":1}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS person SELECT person.age, COUNT(*) AS members GROUP BY person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SQLRow{
+		{"age": nil, "members": int64(2)},
+		{"age": float64(2), "members": int64(2)},
+		{"age": float64(1), "members": int64(1)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("ordered index groups = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('people') AS person SELECT person.age, COUNT(*) AS members GROUP BY person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, step := range explained.Plan {
+		seen[step.Node] = true
+	}
+	if !seen["INDEX ORDER SCAN"] || !seen["INDEX GROUP AGGREGATE"] || seen["SORT"] {
+		t.Fatalf("EXPLAIN ANALYZE nodes = %#v, want INDEX ORDER SCAN + INDEX GROUP AGGREGATE without SORT", explained.Plan)
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderFastPathPreservesDistinctAndWindowSemantics(t *testing.T) {
+	t.Parallel()
+	data := `[{"id":1,"age":2,"team":1},{"id":2,"age":1,"team":1},{"id":1,"age":0,"team":1}]`
+	plain := newTestTrie(t)
+	plain.UpsertString("people", data)
+	indexed := newTestTrie(t)
+	indexed.UpsertString("people", data)
+	if err := indexed.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		"FROM CACHE('people') AS person SELECT DISTINCT person.id ORDER BY person.age",
+		"FROM CACHE('people') AS person SELECT person.id, ROW_NUMBER() OVER (ORDER BY person.team) AS position ORDER BY person.age",
+	} {
+		want, err := ExecuteSQLQuery(query, plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ExecuteSQLQuery(query, indexed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Rows, want.Rows) {
+			t.Fatalf("indexed result for %q = %#v, want non-index result %#v", query, got.Rows, want.Rows)
+		}
+		explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, indexed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, step := range explained.Plan {
+			if step.Node == "INDEX ORDER SCAN" {
+				t.Fatalf("EXPLAIN ANALYZE for %q used unsafe index ordering: %#v", query, explained.Plan)
+			}
+		}
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderFastPathMatchesGeneralSortDifferential(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260824))
+	orders := []string{
+		"ORDER BY person.age",
+		"ORDER BY person.age DESC",
+		"ORDER BY person.age NULLS LAST",
+		"ORDER BY person.age DESC NULLS FIRST",
+	}
+	for iteration := 0; iteration < 48; iteration++ {
+		rows := make([]SQLRow, 1+random.Intn(12))
+		for index := range rows {
+			var age interface{}
+			switch random.Intn(5) {
+			case 0:
+				age = nil
+			case 1:
+				age = random.Intn(4)
+			case 2:
+				age = []string{"Ada", "Zed", "é"}[random.Intn(3)]
+			case 3:
+				age = random.Intn(2) == 0
+			default:
+				age = random.Intn(4)
+			}
+			rows[index] = SQLRow{"id": index, "age": age}
+		}
+		data, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain := newTestTrie(t)
+		plain.UpsertString("people", string(data))
+		indexed := newTestTrie(t)
+		indexed.UpsertString("people", string(data))
+		if err := indexed.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+			t.Fatal(err)
+		}
+		for _, order := range orders {
+			query := "FROM CACHE('people') AS person SELECT person.id, person.age " + order
+			want, err := ExecuteSQLQuery(query, plain)
+			if err != nil {
+				t.Fatalf("iteration %d plain %q: %v", iteration, order, err)
+			}
+			got, err := ExecuteSQLQuery(query, indexed)
+			if err != nil {
+				t.Fatalf("iteration %d indexed %q: %v", iteration, order, err)
+			}
+			if !reflect.DeepEqual(got.Rows, want.Rows) {
+				t.Fatalf("iteration %d indexed %q = %#v, want %#v", iteration, order, got.Rows, want.Rows)
+			}
+		}
+	}
+}
+
 func TestHatTrieSQLJSONIndexValueEstimateUsesExactPostingCount(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)
