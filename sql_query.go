@@ -3880,6 +3880,15 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		rows = filtered
 		metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
 	}
+	if indexOrdered {
+		result, handled, err := executeSQLOrderedGroupAggregate(q, rows, control, metrics)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		if handled {
+			return result, nil
+		}
+	}
 	started = time.Now()
 	inputRows := len(rows)
 	var groups [][]sqlExecRow
@@ -5643,6 +5652,216 @@ func groupSQLRowsOrdered(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlE
 		out[len(out)-1] = append(out[len(out)-1], row)
 	}
 	return out, nil
+}
+
+type sqlOrderedGroupProjection struct {
+	column    string
+	group     bool
+	aggregate *sqlOrderedAggregate
+}
+
+type sqlOrderedAggregate struct {
+	name  string
+	field sqlExpr
+	count int64
+	sum   float64
+	seen  bool
+	min   float64
+	max   float64
+}
+
+func sqlSameField(left, right sqlExpr) bool {
+	return left.kind == "field" && right.kind == "field" && left.qualifier == right.qualifier && left.name == right.name
+}
+
+// sqlOrderedGroupProjections recognizes only aggregates whose state can be
+// updated one source row at a time. More expressive grouped queries continue
+// through the established materialized evaluator rather than approximating its
+// representative-row, HAVING, window, or function semantics.
+func sqlOrderedGroupProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, bool) {
+	if q == nil || len(q.groupBy) != 1 || q.groupBy[0].kind != "field" || q.having.kind != "" || q.distinct || len(q.unions) != 0 || sqlQueryHasWindow(q) {
+		return nil, false
+	}
+	columns := sqlColumns(q.selects)
+	projections := make([]sqlOrderedGroupProjection, len(q.selects))
+	for index, item := range q.selects {
+		projection := sqlOrderedGroupProjection{column: columns[index]}
+		if sqlSameField(item.expr, q.groupBy[0]) {
+			projection.group = true
+			projections[index] = projection
+			continue
+		}
+		if item.expr.kind != "func" {
+			return nil, false
+		}
+		name := strings.ToUpper(item.expr.name)
+		aggregate := &sqlOrderedAggregate{name: name}
+		switch name {
+		case "COUNT":
+			if len(item.expr.args) == 0 || len(item.expr.args) == 1 && item.expr.args[0].kind == "star" {
+				projection.aggregate = aggregate
+				projections[index] = projection
+				continue
+			}
+			if len(item.expr.args) != 1 || item.expr.args[0].kind != "field" {
+				return nil, false
+			}
+			aggregate.field = item.expr.args[0]
+		case "SUM", "AVG", "MIN", "MAX":
+			if len(item.expr.args) != 1 || item.expr.args[0].kind != "field" {
+				return nil, false
+			}
+			aggregate.field = item.expr.args[0]
+		default:
+			return nil, false
+		}
+		projection.aggregate = aggregate
+		projections[index] = projection
+	}
+	return projections, true
+}
+
+func (aggregate *sqlOrderedAggregate) add(row sqlExecRow) error {
+	if aggregate.name == "COUNT" && aggregate.field.kind == "" {
+		aggregate.count++
+		return nil
+	}
+	value := evalSQLExpr(aggregate.field, []sqlExecRow{row}, row)
+	if err := sqlExpressionError(value); err != nil {
+		return err
+	}
+	if aggregate.name == "COUNT" {
+		if value != nil {
+			aggregate.count++
+		}
+		return nil
+	}
+	number, ok := sqlNumber(value)
+	if !ok {
+		return nil
+	}
+	if !aggregate.seen {
+		aggregate.seen = true
+		aggregate.sum = number
+		aggregate.min = number
+		aggregate.max = number
+		aggregate.count = 1
+		return nil
+	}
+	aggregate.count++
+	switch aggregate.name {
+	case "SUM", "AVG":
+		aggregate.sum += number
+	case "MIN":
+		if number < aggregate.min {
+			aggregate.min = number
+		}
+	case "MAX":
+		if number > aggregate.max {
+			aggregate.max = number
+		}
+	}
+	return nil
+}
+
+func (aggregate *sqlOrderedAggregate) value() interface{} {
+	if aggregate.name == "COUNT" {
+		return aggregate.count
+	}
+	if !aggregate.seen {
+		return nil
+	}
+	switch aggregate.name {
+	case "SUM":
+		return aggregate.sum
+	case "AVG":
+		return aggregate.sum / float64(aggregate.count)
+	case "MIN":
+		return aggregate.min
+	case "MAX":
+		return aggregate.max
+	}
+	return nil
+}
+
+// executeSQLOrderedGroupAggregate consumes an index-ordered GROUP BY stream
+// with constant state per aggregate. resolveSQLOrderedSource has already
+// proved that equal group keys are adjacent and that the final ORDER BY uses
+// the same field, so no grouping hash map or final sort is needed.
+func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	projections, ok := sqlOrderedGroupProjections(q)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	result := SQLQueryResult{Columns: sqlColumns(q.selects)}
+	started := time.Now()
+	groupCount := 0
+	position := 0
+	var key string
+	var groupValue interface{}
+	var aggregates []sqlOrderedAggregate
+	emit := func() error {
+		if groupCount == 0 {
+			return nil
+		}
+		row := SQLRow{}
+		for index, projection := range projections {
+			if projection.group {
+				row[projection.column] = groupValue
+				continue
+			}
+			row[projection.column] = aggregates[index].value()
+		}
+		if position >= q.offset && (q.limit < 0 || len(result.Rows) < q.limit) {
+			result.Rows = append(result.Rows, row)
+		}
+		position++
+		return nil
+	}
+	for _, sourceRow := range rows {
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		value := evalSQLExpr(q.groupBy[0], []sqlExecRow{sourceRow}, sourceRow)
+		if err := sqlExpressionError(value); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		currentKey := fmt.Sprintf("%#v", value)
+		if groupCount == 0 || currentKey != key {
+			if err := emit(); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			key = currentKey
+			groupValue = value
+			aggregates = make([]sqlOrderedAggregate, len(projections))
+			for index, projection := range projections {
+				if projection.aggregate != nil {
+					aggregates[index] = *projection.aggregate
+				}
+			}
+			groupCount++
+		}
+		for index, projection := range projections {
+			if projection.aggregate == nil {
+				continue
+			}
+			if err := aggregates[index].add(sourceRow); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+		}
+	}
+	if err := emit(); err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
+	metrics.record("INDEX GROUP AGGREGATE", "streaming "+sqlExplainExpressions(q.groupBy), len(rows), groupCount, started)
+	metrics.record("PROJECT", sqlExplainSelects(q.selects), groupCount, groupCount, started)
+	if q.limit >= 0 || q.offset > 0 {
+		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), groupCount, len(result.Rows), started)
+	}
+	return result, true, nil
 }
 
 func sqlQueryHasAggregate(q *sqlQuery) bool {

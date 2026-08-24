@@ -1308,6 +1308,44 @@ func TestHatTrieSQLJSONFieldIndexOrderFastPathPreservesDistinctAndWindowSemantic
 	}
 }
 
+func TestHatTrieSQLJSONFieldIndexOrderedAggregationStreamsConstantState(t *testing.T) {
+	t.Parallel()
+	data := `[
+        {"age":1,"score":2},{"age":1,"score":4},{"age":1,"score":6},
+        {"age":2,"score":3},{"age":2,"score":9},{"age":3,"score":5},
+        {"age":3},{"score":7}
+    ]`
+	plain := newTestTrie(t)
+	trie := newTestTrie(t)
+	plain.UpsertString("people", data)
+	trie.UpsertString("people", data)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('people') AS person SELECT person.age, COUNT(*) AS members, COUNT(person.score) AS scored_members, SUM(person.score) AS total, AVG(person.score) AS average, MIN(person.score) AS minimum, MAX(person.score) AS maximum GROUP BY person.age ORDER BY person.age ASC NULLS LAST"
+	want, err := ExecuteSQLQuery(query, plain)
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, trie, SQLQueryOptions{MaxGroupBytes: 1})
+	if err != nil {
+		t.Fatalf("streamed ordered aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("streamed ordered aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("explain streamed ordered aggregate: %v", err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX GROUP AGGREGATE" && strings.Contains(step.Detail, "streaming") {
+			return
+		}
+	}
+	t.Fatalf("streamed ordered aggregate plan = %#v, want streaming INDEX GROUP AGGREGATE", explained.Plan)
+}
+
 func TestHatTrieSQLJSONFieldIndexOrderFastPathMatchesGeneralSortDifferential(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260824))

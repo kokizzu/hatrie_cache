@@ -595,6 +595,12 @@ can read the same index in order and report `INDEX ORDER SCAN`, avoiding the
 final `SORT`; it retains source order for equal values and honors `NULLS FIRST`
 or `NULLS LAST`. When its single `GROUP BY` is that exact same field, it also
 reports `INDEX GROUP AGGREGATE` instead of building a grouping hash table.
+For direct grouped-field projections plus `COUNT`, `SUM`, `AVG`, `MIN`, or
+`MAX` over a direct field, that operator is a constant-state streaming
+aggregate: it retains no source rows and can therefore run below a group-memory
+budget that would reject materialized grouping. `HAVING`, windows, distinct,
+custom functions, expressions around aggregates, and representative-row
+projections deliberately retain the established materialized group semantics.
 Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
 shapes deliberately retain the general executor until they have an equally
 direct ordering proof.
