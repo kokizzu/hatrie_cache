@@ -1143,6 +1143,34 @@ func TestHatTrieOptionalSQLJSONFieldIndexProbesLeftJoin(t *testing.T) {
 	t.Fatalf("indexed left join plan = %#v, want INDEX JOIN", explained.Plan)
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexProbesRangeInnerAndLeftJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"age":18,"name":"Ada"},{"age":21,"name":"Bea"},{"age":30,"name":"Cai"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		kind string
+		want []SQLRow
+	}{
+		{"INNER", []SQLRow{{"minimum": int64(20), "name": "Bea"}, {"minimum": int64(20), "name": "Cai"}}},
+		{"LEFT", []SQLRow{{"minimum": int64(20), "name": "Bea"}, {"minimum": int64(20), "name": "Cai"}, {"minimum": int64(40), "name": nil}}},
+	} {
+		t.Run(test.kind, func(t *testing.T) {
+			query := "FROM VALUES (20), (40) AS wanted(minimum) " + test.kind + " JOIN CACHE('people') AS person ON wanted.minimum <= person.age SELECT wanted.minimum, person.name ORDER BY wanted.minimum, person.name"
+			result, err := ExecuteSQLQuery(query, trie)
+			if err != nil || !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("range %s join = %#v/%v, want %#v", test.kind, result.Rows, err, test.want)
+			}
+			explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+			if err != nil || explained.Stats == nil || !strings.Contains(fmt.Sprint(explained.Plan), "RANGE INDEX JOIN") {
+				t.Fatalf("range %s explain = %#v/%v", test.kind, explained.Plan, err)
+			}
+		})
+	}
+}
+
 func TestHatTrieOptionalSQLJSONFieldIndexProbesRightJoin(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

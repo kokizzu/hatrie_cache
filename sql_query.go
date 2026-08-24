@@ -3262,6 +3262,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		for _, join := range q.joins {
 			started = time.Now()
 			leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
+			rangeLeftQualifier, rangeLeftField, rangeRightField, rangeOperator, rangeJoin := sqlRangeJoinFields(join.on, leftAliases, join.source.alias)
 			leftQualifiers, leftFields, rightFields, compositeIndexJoin := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias)
 			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
 			rightIndexJoin := hashJoin && join.kind == "RIGHT"
@@ -3320,6 +3321,54 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 						rows = next
 						leftAliases = append(leftAliases, join.source.alias)
 						continue
+					}
+				}
+			}
+			if rangeJoin && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
+				if indexed, ok := resolver.(SQLRangeIndexedSourceResolver); ok {
+					var probe interface{}
+					for _, left := range rows {
+						if value := sqlField(left, rangeLeftQualifier, rangeLeftField); value != nil {
+							probe = value
+							break
+						}
+					}
+					if probe != nil {
+						_, available, err := indexed.ResolveSQLIndexedRangeSource(join.source.kind, join.source.key, rangeRightField, rangeOperator, probe)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+						if available {
+							inputRows := len(rows)
+							var next []sqlExecRow
+							for _, left := range rows {
+								value := sqlField(left, rangeLeftQualifier, rangeLeftField)
+								matched := false
+								if value != nil {
+									candidates, _, err := indexed.ResolveSQLIndexedRangeSource(join.source.kind, join.source.key, rangeRightField, rangeOperator, value)
+									if err != nil {
+										return SQLQueryResult{}, err
+									}
+									for _, candidate := range candidates {
+										if err := control.addJoinWork(1); err != nil {
+											return SQLQueryResult{}, err
+										}
+										matched = true
+										next = append(next, mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}))
+									}
+								}
+								if join.kind == "LEFT" && !matched {
+									next = append(next, mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}))
+								}
+								if len(next) > maxRows {
+									return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+								}
+							}
+							metrics.record("RANGE INDEX JOIN", join.kind+" JOIN "+sqlExplainSource(join.source)+" ON "+sqlExplainExpression(join.on), inputRows, len(next), started)
+							rows = next
+							leftAliases = append(leftAliases, join.source.alias)
+							continue
+						}
 					}
 				}
 			}
@@ -4805,6 +4854,28 @@ func sqlHashJoinFields(expression sqlExpr, leftAliases []string, rightAlias stri
 		return right.qualifier, right.name, left.name, true
 	}
 	return "", "", "", false
+}
+
+func sqlRangeJoinFields(expression sqlExpr, leftAliases []string, rightAlias string) (string, string, string, string, bool) {
+	if expression.kind != "binary" || (expression.op != "<" && expression.op != "<=" && expression.op != ">" && expression.op != ">=") || expression.left == nil || expression.right == nil || expression.left.kind != "field" || expression.right.kind != "field" {
+		return "", "", "", "", false
+	}
+	left, right := *expression.left, *expression.right
+	isLeft := func(alias string) bool {
+		for _, candidate := range leftAliases {
+			if alias == candidate {
+				return true
+			}
+		}
+		return false
+	}
+	if isLeft(left.qualifier) && right.qualifier == rightAlias {
+		return left.qualifier, left.name, right.name, sqlReverseComparison(expression.op), true
+	}
+	if isLeft(right.qualifier) && left.qualifier == rightAlias {
+		return right.qualifier, right.name, left.name, expression.op, true
+	}
+	return "", "", "", "", false
 }
 
 // sqlCompositeJoinFields accepts only a pure AND of two or more field-equality
