@@ -12,27 +12,27 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
+	"hatrie_cache/hat/hatBackup"
 	"hatrie_cache/internal/jsonwire"
 )
 
 const (
-	BackupBundleVersion      = 1
+	BackupBundleVersion      = hatBackup.BundleVersion
 	backupBundleManifestPath = "manifest.json"
 	backupBundleSnapshotPath = "snapshot.hc"
 	backupBundleJournalPath  = "commands.journal"
 	backupBundleStorePath    = "cache.leveldb"
 )
 
-type BackupMode string
+type BackupMode = hatBackup.Mode
 
 const (
-	BackupModeAuto              BackupMode = "auto"
-	BackupModeSnapshot          BackupMode = "snapshot"
-	BackupModePebbleCheckpoint  BackupMode = "pebble-checkpoint"
-	BackupModePebbleIncremental BackupMode = "pebble-incremental"
+	BackupModeAuto              = hatBackup.ModeAuto
+	BackupModeSnapshot          = hatBackup.ModeSnapshot
+	BackupModePebbleCheckpoint  = hatBackup.ModePebbleCheckpoint
+	BackupModePebbleIncremental = hatBackup.ModePebbleIncremental
 )
 
 type BackupBundleOptions struct {
@@ -45,118 +45,20 @@ type BackupBundleOptions struct {
 	RepositoryRetain int
 }
 
-type BackupPartitionMetadata struct {
-	Mode                string   `json:"mode,omitempty"`
-	Partitions          []string `json:"partitions,omitempty"`
-	NodeID              string   `json:"node_id,omitempty"`
-	TopologyEpoch       uint64   `json:"topology_epoch,omitempty"`
-	TopologyFingerprint string   `json:"topology_fingerprint,omitempty"`
-	KeyPrefixes         []string `json:"key_prefixes,omitempty"`
-}
-
-type BackupBundleManifest struct {
-	Version           int                      `json:"version"`
-	CreatedAt         time.Time                `json:"created_at"`
-	Mode              BackupMode               `json:"mode,omitempty"`
-	Snapshot          string                   `json:"snapshot,omitempty"`
-	SnapshotFormat    string                   `json:"snapshot_format,omitempty"`
-	Store             string                   `json:"store,omitempty"`
-	StorageBackend    string                   `json:"storage_backend,omitempty"`
-	StorageFormat     string                   `json:"storage_format,omitempty"`
-	StorageGeneration uint64                   `json:"storage_generation,omitempty"`
-	StorageIdentity   string                   `json:"storage_identity,omitempty"`
-	BackupID          string                   `json:"backup_id,omitempty"`
-	ParentBackupID    string                   `json:"parent_backup_id,omitempty"`
-	Incremental       bool                     `json:"incremental,omitempty"`
-	NewObjects        int                      `json:"new_objects,omitempty"`
-	ReusedObjects     int                      `json:"reused_objects,omitempty"`
-	NewObjectBytes    int64                    `json:"new_object_bytes,omitempty"`
-	ReusedObjectBytes int64                    `json:"reused_object_bytes,omitempty"`
-	Journal           string                   `json:"journal,omitempty"`
-	JournalFormat     string                   `json:"journal_format,omitempty"`
-	JournalSequence   uint64                   `json:"journal_sequence"`
-	Partition         *BackupPartitionMetadata `json:"partition,omitempty"`
-	Files             []BackupBundleFile       `json:"files"`
-	RestoreHint       string                   `json:"restore_hint"`
-}
+type BackupPartitionMetadata = hatBackup.PartitionMetadata
+type BackupBundleManifest = hatBackup.BundleManifest
+type BackupBundleFile = hatBackup.BundleFile
 
 func ParseBackupMode(value string) (BackupMode, error) {
-	switch BackupMode(strings.ToLower(strings.TrimSpace(value))) {
-	case "", BackupModeAuto:
-		return BackupModeAuto, nil
-	case BackupModeSnapshot:
-		return BackupModeSnapshot, nil
-	case BackupModePebbleCheckpoint:
-		return BackupModePebbleCheckpoint, nil
-	case BackupModePebbleIncremental:
-		return BackupModePebbleIncremental, nil
-	default:
-		return "", errors.New("hatriecache: backup mode must be auto, snapshot, pebble-checkpoint, or pebble-incremental")
-	}
-}
-
-type BackupBundleFile struct {
-	Path   string `json:"path"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
+	return hatBackup.ParseMode(value)
 }
 
 func normalizeBackupPartitionMetadata(input BackupPartitionMetadata) (*BackupPartitionMetadata, error) {
-	out := BackupPartitionMetadata{
-		Mode:                strings.TrimSpace(input.Mode),
-		NodeID:              strings.TrimSpace(input.NodeID),
-		TopologyEpoch:       input.TopologyEpoch,
-		TopologyFingerprint: strings.TrimSpace(input.TopologyFingerprint),
-	}
-	var err error
-	out.Partitions, err = normalizeBackupPartitionList("partition", input.Partitions)
-	if err != nil {
-		return nil, err
-	}
-	out.KeyPrefixes, err = normalizeBackupPartitionList("key prefix", input.KeyPrefixes)
-	if err != nil {
-		return nil, err
-	}
-	if out.Mode == "" && out.NodeID == "" && out.TopologyEpoch == 0 && out.TopologyFingerprint == "" && len(out.Partitions) == 0 && len(out.KeyPrefixes) == 0 {
-		return nil, nil
-	}
-	if out.Mode == "" {
-		out.Mode = "partitioned"
-	}
-	if len(out.Partitions) == 0 {
-		return nil, errors.New("hatriecache: backup partition metadata requires at least one partition id")
-	}
-	return &out, nil
-}
-
-func normalizeBackupPartitionList(label string, values []string) ([]string, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return nil, fmt.Errorf("hatriecache: backup %s id is required", label)
-		}
-		if _, ok := seen[value]; ok {
-			return nil, fmt.Errorf("hatriecache: duplicate backup %s %q", label, value)
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out, nil
+	return hatBackup.NormalizePartitionMetadata(input)
 }
 
 func cloneBackupPartitionMetadata(input *BackupPartitionMetadata) *BackupPartitionMetadata {
-	if input == nil {
-		return nil
-	}
-	out := *input
-	out.Partitions = append([]string(nil), input.Partitions...)
-	out.KeyPrefixes = append([]string(nil), input.KeyPrefixes...)
-	return &out
+	return hatBackup.ClonePartitionMetadata(input)
 }
 
 func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
