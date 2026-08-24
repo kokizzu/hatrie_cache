@@ -2590,11 +2590,11 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 // bounded ORDER BY stays on the cheaper in-memory top-N path, while indexed
 // orders remain a direct scan.
 func sqlExternalSortStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
-	if control == nil || control.options.MaxSortBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || query.from == nil || query.limit >= 0 || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+	if control == nil || control.options.MaxSortBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || query.from == nil || query.limit >= 0 || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) {
 		return false
 	}
 	for _, selectItem := range query.selects {
-		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) || sqlExprHasCustomFunction(selectItem.expr, nil) {
+		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) {
 			return false
 		}
 	}
@@ -2607,11 +2607,13 @@ func sqlExternalSortStreamable(query *sqlQuery, control *sqlExecutionControl) bo
 }
 
 // executeSQLExternalSortStream keeps only one bounded input run in memory and
-// emits the final merge directly to the row callback. It intentionally covers
-// the same scalar projection/order expressions as the existing top-N stream,
-// without falling back to a materialized query result.
+// emits the final merge directly to the row callback. It supports the same
+// scalar projection/filter expressions as the ordinary stream, including
+// registered scalar functions evaluated one row at a time. Custom ORDER BY
+// keys remain excluded until alias/order evaluation has the same proof.
 func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
 	columns := sqlColumns(query.selects)
+	functions, _ := resolver.(SQLFunctionResolver)
 	available := int64(control.options.MaxSpillBytes)
 	allPaths := map[string]struct{}{}
 	defer func() {
@@ -2648,8 +2650,8 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 		}
 		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
 		if query.where.kind != "" {
-			value := evalSQLExpr(query.where, nil, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
 				return err
 			}
 			if !sqlTruthy(value) {
@@ -2658,8 +2660,8 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 		}
 		row := SQLRow{}
 		for index, item := range query.selects {
-			value := evalSQLExpr(item.expr, nil, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+			if err != nil {
 				return err
 			}
 			row[columns[index]] = value
@@ -2735,11 +2737,11 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 // ordinal merge restores SQL's first-occurrence result order without retaining
 // a result-row slice.
 func sqlExternalDistinctStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
-	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || !query.distinct || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || !query.distinct || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) {
 		return false
 	}
 	for _, selectItem := range query.selects {
-		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) || sqlExprHasCustomFunction(selectItem.expr, nil) {
+		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) {
 			return false
 		}
 	}
@@ -2752,6 +2754,7 @@ func sqlExternalDistinctStreamable(query *sqlQuery, control *sqlExecutionControl
 // slice.
 func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
 	columns := sqlColumns(query.selects)
+	functions, _ := resolver.(SQLFunctionResolver)
 	available := int64(control.options.MaxSpillBytes)
 	allPaths := map[string]struct{}{}
 	defer func() {
@@ -2788,8 +2791,8 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 		}
 		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
 		if query.where.kind != "" {
-			value := evalSQLExpr(query.where, nil, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
 				return err
 			}
 			if !sqlTruthy(value) {
@@ -2798,8 +2801,8 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 		}
 		row := SQLRow{}
 		for index, item := range query.selects {
-			value := evalSQLExpr(item.expr, nil, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+			if err != nil {
 				return err
 			}
 			row[columns[index]] = value

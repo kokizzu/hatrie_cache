@@ -887,8 +887,7 @@ and projects the same columns. It merges projected-row identities on disk, then
 restores the existing first-occurrence output order directly to `QueryRows` or
 NDJSON. Nested set stages release their consumed runs before the next merge,
 so `MaxSpillBytes` bounds all live intermediate files. Joins, typed sources,
-custom functions, and set-level ordering retain their ordinary global execution
-path.
+and set-level ordering retain their ordinary global execution path.
 
 For `UNION` (without `ALL`), `INTERSECT`, and `EXCEPT`, `MaxSetBytes` similarly
 limits distinct-set membership. Once exceeded, a configured spill directory
@@ -999,7 +998,9 @@ normal type and source diagnostics. A source-only query with a finite `ORDER BY 
 An unbounded scalar `CACHE` or `VALUES` order can instead stream its final
 bounded external-sort merge when `MaxSortBytes`, `SpillDirectory`, and
 `MaxSpillBytes` are configured. Those ordered subsets exclude joins, most
-grouping, windows, sets, distinct, typed schemas, and custom functions. The
+grouping, windows, sets, distinct, typed schemas, and custom ordering keys.
+Registered scalar functions remain valid in their `WHERE` and projection
+expressions, evaluated in bounded one-row batches. The
 direct indexed grouped-aggregate form described above is the grouping exception.
 It also supports a global, no-join selection made only of direct `COUNT`, `SUM`,
 `AVG`, `MIN`, and `MAX` expressions; those keep constant state and emit one
@@ -1010,7 +1011,7 @@ and `LIMIT`. It still rejects CTEs, other grouped aggregates, unbounded ordering
 without such an index proof, most windows,
 set operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
 `DISTINCT` outside the configured direct scalar external-set shape, typed JSON
-schemas inside global operators, and custom functions inside those global
+schemas inside global operators, and custom ordering keys inside those global
 operators until each has a bounded-memory streaming operator. `UNION ALL` is
 the exception: when every
 branch is independently streamable and projects the same columns, rows stream

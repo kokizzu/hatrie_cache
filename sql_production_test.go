@@ -1102,6 +1102,51 @@ func TestExecuteSQLQueryRowsStreamsScalarCustomFunctions(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsExternalUDFSortAndDistinct(t *testing.T) {
+	t.Parallel()
+	functions := NewSQLFunctionRegistry()
+	if err := functions.Register(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value + 1"}); err != nil {
+		t.Fatalf("register custom function: %v", err)
+	}
+	for _, test := range []struct {
+		name, query string
+		options     SQLQueryOptions
+		want        []SQLRow
+	}{
+		{
+			name:    "external_sort",
+			query:   "FROM CACHE('people') AS person WHERE plus_one(person.age) >= 2 SELECT plus_one(person.age) AS next_age ORDER BY person.age DESC",
+			options: SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20},
+			want:    []SQLRow{{"next_age": int64(4)}, {"next_age": int64(3)}, {"next_age": int64(2)}, {"next_age": int64(2)}},
+		},
+		{
+			name:    "external_distinct",
+			query:   "FROM CACHE('people') AS person SELECT DISTINCT plus_one(person.age) AS next_age",
+			options: SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20},
+			want:    []SQLRow{{"next_age": int64(2)}, {"next_age": int64(3)}, {"next_age": int64(4)}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			streaming := &sqlStreamingTestResolver{rows: []SQLRow{{"age": int64(1)}, {"age": int64(2)}, {"age": int64(1)}, {"age": int64(3)}}}
+			resolver := sqlStreamingFunctionTestResolver{sqlStreamingTestResolver: streaming, functions: functions}
+			var rows []SQLRow
+			err := ExecuteSQLQueryRows(context.Background(), test.query, resolver, nil, test.options, func(_ []string, row SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("stream external UDF query: %v", err)
+			}
+			if !reflect.DeepEqual(rows, test.want) {
+				t.Fatalf("stream external UDF rows = %#v, want %#v", rows, test.want)
+			}
+			if streaming.resolveCalls != 0 || streaming.streamCalls != 1 {
+				t.Fatalf("resolver calls materialized=%d streamed=%d, want 0/1", streaming.resolveCalls, streaming.streamCalls)
+			}
+		})
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsGlobalAggregates(t *testing.T) {
 	t.Parallel()
 	rows := []SQLRow{{"age": int64(12)}, {"age": int64(21)}, {"age": nil}, {"age": int64(34)}}
