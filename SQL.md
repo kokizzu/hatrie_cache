@@ -846,9 +846,13 @@ direct `GROUP BY` field, that same direct `ORDER BY` field, direct group-field
 projection, and direct `COUNT`, `SUM`, `AVG`, `MIN`, or `MAX` fields. The
 executor writes bounded aggregate-contribution runs and merges them in source
 order, preserving floating-point `SUM`/`AVG` behavior while avoiding retained
-group rows; `EXPLAIN ANALYZE` reports `EXTERNAL GROUP AGGREGATE`. `HAVING`,
-windows, distinct, custom functions, expressions around aggregates, and other
-group/order shapes retain their materialized semantics and group-memory budget.
+group rows. For a single untyped `CACHE` source that implements
+`SQLStreamSourceResolver` (or for `VALUES`) with an optional source-local,
+non-UDF `WHERE`, it also reads input incrementally instead of first building
+the source row slice; `EXPLAIN ANALYZE` reports `STREAM SCAN` followed by
+`EXTERNAL GROUP AGGREGATE`. `HAVING`, windows, distinct, joins, CTEs, typed
+fields, custom functions, expressions around aggregates, and other group/order
+shapes retain their materialized semantics and group-memory budget.
 
 ### Query observations
 

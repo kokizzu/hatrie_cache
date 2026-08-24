@@ -1087,6 +1087,86 @@ func TestExecuteSQLQueryContextSpillsDirectGroupedAggregatesWithinDiskBudget(t *
 	}
 }
 
+func TestExecuteSQLQueryContextStreamsSpilledDirectGroupedAggregates(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{
+		{"team": "red", "score": int64(3)},
+		{"team": "blue", "score": int64(-2)},
+		{"team": "red", "score": int64(7)},
+		{"team": "blue", "score": int64(5)},
+		{"team": nil, "score": int64(1)},
+	}
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total, AVG(person.score) AS average GROUP BY person.team ORDER BY person.team ASC NULLS LAST"
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return cloneSQLRows(rows), nil
+	})
+	want, err := ExecuteSQLQueryContext(context.Background(), query, baseline, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("streamed spill grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("streamed spill grouped aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("explain streamed spill grouped aggregate: %v", err)
+	}
+	seenStream, seenFilter, seenAggregate := false, false, false
+	for _, step := range explained.Plan {
+		if step.Node == "STREAM SCAN" {
+			if step.ActualOutputRows == nil || *step.ActualOutputRows != len(rows) {
+				t.Fatalf("stream scan plan = %#v, want %d source rows", step, len(rows))
+			}
+			seenStream = true
+		}
+		if step.Node == "FILTER" {
+			if step.ActualInputRows == nil || *step.ActualInputRows != len(rows) || step.ActualOutputRows == nil || *step.ActualOutputRows != 4 {
+				t.Fatalf("stream filter plan = %#v, want 5 input and 4 output rows", step)
+			}
+			seenFilter = true
+		}
+		seenAggregate = seenAggregate || step.Node == "EXTERNAL GROUP AGGREGATE"
+	}
+	if !seenStream || !seenFilter || !seenAggregate {
+		t.Fatalf("streamed spill grouped aggregate plan = %#v, want STREAM SCAN, FILTER, and EXTERNAL GROUP AGGREGATE", explained.Plan)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 2 {
+		t.Fatalf("resolver calls after EXPLAIN materialized=%d streamed=%d, want 0/2", resolver.resolveCalls, resolver.streamCalls)
+	}
+	limited := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	_, err = ExecuteSQLQueryContext(context.Background(), query, limited, SQLQueryOptions{
+		MaxRows:        len(rows) - 1,
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err == nil || !strings.Contains(err.Error(), "source \"person\" exceeds the 4 row limit") {
+		t.Fatalf("streamed spill MaxRows error = %v, want source row-limit diagnostic", err)
+	}
+	if limited.resolveCalls != 0 || limited.streamCalls != 1 {
+		t.Fatalf("limited resolver calls materialized=%d streamed=%d, want 0/1", limited.resolveCalls, limited.streamCalls)
+	}
+}
+
 func TestExecuteSQLQueryContextSpilledGroupAggregatePreservesFloatAdditionOrder(t *testing.T) {
 	t.Parallel()
 	values := make([]string, 0, 96)
