@@ -1161,6 +1161,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
 		return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
 	}
+	if sqlIndexedOrderStreamable(query, resolver) {
+		return executeSQLIndexedOrderStream(ctx, query, resolver, control, visit)
+	}
 	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
 		return executeSQLGlobalAggregateStream(ctx, query, resolver, control, visit, aggregates)
 	}
@@ -2214,6 +2217,102 @@ func executeSQLIndexedGroupAggregateStream(ctx context.Context, query *sqlQuery,
 	}
 	if err := emit(); err != nil && err != errSQLStreamLimitReached {
 		return err
+	}
+	return nil
+}
+
+// sqlIndexedOrderStreamable proves the one-field indexed order that can be
+// emitted directly. Filtering preserves source order, while joins, DISTINCT,
+// grouped aggregates, windows, and expressions used as sort keys need a
+// global operator and deliberately remain on their established paths.
+func sqlIndexedOrderStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || len(query.orderBy) != 1 {
+		return false
+	}
+	order := query.orderBy[0]
+	if order.expr.kind != "field" || order.expr.qualifier != query.from.alias || order.expr.name == "" {
+		return false
+	}
+	if _, ok := resolver.(SQLOrderedStreamSourceResolver); !ok {
+		return false
+	}
+	for _, item := range query.selects {
+		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) {
+			return false
+		}
+	}
+	return true
+}
+
+// executeSQLIndexedOrderStream projects directly from an ordered JSON index.
+// It keeps neither source rows nor sort candidates, so an unbounded ORDER BY
+// can be consumed through QueryRows as long as the index proves its order.
+func executeSQLIndexedOrderStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	streaming, ok := resolver.(SQLOrderedStreamSourceResolver)
+	if !ok {
+		return fmt.Errorf("SQL query cannot stream this ordered scan because the resolver has no ordered index stream")
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	columns := sqlColumns(query.selects)
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	emit := func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+			if err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	}
+	order := query.orderBy[0]
+	available, err := streaming.StreamSQLOrderedSource(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, emit)
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if !available {
+		return fmt.Errorf("SQL query cannot stream this ordered scan because the ordered index is unavailable")
 	}
 	return nil
 }

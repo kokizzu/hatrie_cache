@@ -628,6 +628,31 @@ func TestExecuteSQLQueryRowsIndexedGroupedAggregateDoesNotMaterializeSource(t *t
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsIndexedOrderWithoutLimit(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue"}, {"id": int64(1), "team": "blue"}, {"id": int64(3), "team": "red"}, {"id": int64(4), "team": nil}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed order baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed ordered stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed ordered stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
 	t.Parallel()
 	rows := []SQLRow{{"age": nil}, {"age": int64(12)}}

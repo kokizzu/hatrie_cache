@@ -593,7 +593,10 @@ filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
 `INDEX SCAN`. A one-source query with one qualified `ORDER BY users.team_id`
 can read the same index in order and report `INDEX ORDER SCAN`, avoiding the
 final `SORT`; it retains source order for equal values and honors `NULLS FIRST`
-or `NULLS LAST`. When its single `GROUP BY` is that exact same field, it also
+or `NULLS LAST`. The same untyped single-source scalar shape can use `QueryRows`
+without a `LIMIT`: HatTrie visits the ordered index directly, so it does not
+build a source slice or sort candidates. When its single `GROUP BY` is that
+exact same field, it also
 reports `INDEX GROUP AGGREGATE` instead of building a grouping hash table.
 For direct grouped-field projections plus `COUNT`, `SUM`, `AVG`, `MIN`, or
 `MAX` over a direct field, that operator is a constant-state streaming
@@ -943,7 +946,10 @@ typed schemas, and custom functions. The direct indexed grouped-aggregate form
 described above is the grouping exception. It also supports a global, no-join selection
 made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
 keep constant state and emit one final row without retaining source rows. It
-still rejects CTEs, other grouped aggregates, unbounded ordering, most windows,
+also streams an unbounded, direct one-field indexed `ORDER BY` over one untyped
+`CACHE` source; that proof includes its scalar `WHERE`, projection, `OFFSET`,
+and `LIMIT`. It still rejects CTEs, other grouped aggregates, unbounded ordering
+without such an index proof, most windows,
 set operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
 `DISTINCT`, typed JSON schemas, and custom functions inside those global
 operators until each has a bounded-memory streaming operator. `UNION ALL` is
