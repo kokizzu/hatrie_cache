@@ -8,59 +8,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hatrie_cache/hat/hatSql"
 )
 
-// SQLFunctionDefinition is a named, scalar Go-like expression used by read-only
-// SQL queries. Source must be one return expression; control flow is excluded
-// so execution remains bounded by the query batch.
-type SQLFunctionDefinition struct {
-	Name          string   `json:"name"`
-	Arguments     []string `json:"arguments"`
-	ArgumentTypes []string `json:"argument_types"`
-	Language      string   `json:"language"`
-	Source        string   `json:"source"`
-}
-
-// SQLFunctionCall contains one invocation's positional values.
-type SQLFunctionCall struct{ Arguments []interface{} }
-
-// SQLFunctionError preserves the UDF source location for clear diagnostics.
-type SQLFunctionError struct {
-	Definition   SQLFunctionDefinition
-	Message      string
-	Line, Column int
-}
-
-func (err *SQLFunctionError) Error() string {
-	return "SQL function " + err.Definition.Name + ": " + err.Message
-}
+type SQLFunctionDefinition = hatSql.FunctionDefinition
+type SQLFunctionCall = hatSql.FunctionCall
+type SQLFunctionError = hatSql.FunctionError
+type SQLFunctionResolver = hatSql.FunctionResolver
 
 func FormatSQLFunctionDiagnostic(definition SQLFunctionDefinition, err error) string {
-	functionError, ok := err.(*SQLFunctionError)
-	if !ok {
-		return err.Error()
-	}
-	if functionError.Definition.Name != "" {
-		definition = functionError.Definition
-	}
-	line, column := functionError.Line, functionError.Column
-	if line < 1 {
-		line = 1
-	}
-	if column < 1 {
-		column = 1
-	}
-	sourceLines := strings.Split(definition.Source, "\n")
-	if line > len(sourceLines) {
-		line = 1
-	}
-	source := sourceLines[line-1]
-	return fmt.Sprintf("error: %s\n --> function %s:%d:%d\n  |\n%d | %s\n  | %s^", functionError.Message, definition.Name, line, column, line, source, strings.Repeat(" ", column-1))
-}
-
-// SQLFunctionResolver supplies vectorized custom SQL function results.
-type SQLFunctionResolver interface {
-	EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error)
+	return hatSql.FormatFunctionDiagnostic(definition, err)
 }
 
 // sqlFunctionRuntime evaluates one UDF implementation. Every implementation
