@@ -447,7 +447,9 @@ with the existing BATCH command, this is a pipeline, not a transaction. Use
 `BEGIN ATOMIC; ...; COMMIT` for the opt-in scalar atomic mode. It validates the
 entire supported scalar batch before writes begin; commands such as `INC` that
 can fail after mutation are rejected rather than being falsely described as
-transactional.
+transactional. With local partitions enabled, every command in an atomic batch
+must route to the same partition; cross-partition atomic batches are rejected
+before any command is executed.
 
 | SQL form | Existing command request |
 | --- | --- |

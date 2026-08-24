@@ -386,6 +386,22 @@ func (ht *HatTrie) executePartitionedPublicBatchCommand(request CacheCommandRequ
 		return commandError(err.Error())
 	}
 	set := ht.localPartitionSet()
+	if request.Atomic {
+		partition := 0
+		for index, payload := range payloads {
+			candidate := int(xxhash.Sum64String(strings.TrimSpace(payload.Key)) & set.mask)
+			if index == 0 {
+				partition = candidate
+				continue
+			}
+			if candidate != partition {
+				return commandError("atomic BATCH requires all commands to target one local partition")
+			}
+		}
+		// A child trie serializes the whole supported scalar batch under one lock;
+		// fanning it out would lose that all-or-nothing boundary.
+		return set.tries[partition].ExecuteCommand(request)
+	}
 	type partitionBatch struct {
 		indexes   []int
 		requests  []CacheCommandRequest
@@ -434,6 +450,20 @@ func (ht *HatTrie) executePartitionedPublicBatchCommand(request CacheCommandRequ
 
 func executePartitionedPublicCommandBatch(ctx context.Context, trie *HatTrie, request CacheCommandRequest, payloads []CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
 	set := trie.localPartitionSet()
+	if request.Atomic {
+		partition := 0
+		for index, payload := range payloads {
+			candidate := int(xxhash.Sum64String(strings.TrimSpace(payload.Key)) & set.mask)
+			if index == 0 {
+				partition = candidate
+				continue
+			}
+			if candidate != partition {
+				return commandError("atomic BATCH requires all commands to target one local partition"), false
+			}
+		}
+		return executePublicCommandBatch(ctx, set.tries[partition], request, options)
+	}
 	if options.Journal == nil && options.DirtyTracker == nil && options.Replicator == nil && !options.EnforceLeaderWrites {
 		return trie.executePartitionedPublicBatchCommand(request), false
 	}

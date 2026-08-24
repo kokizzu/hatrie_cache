@@ -188,6 +188,66 @@ func TestLocalPartitionsExecuteCommandsAndCrossPartitionBatchInOrder(t *testing.
 	}
 }
 
+func TestLocalPartitionsAtomicBatchRequiresOnePartition(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+
+	firstPartition := -1
+	first, second, other := "", "", ""
+	for index := 0; second == "" || other == ""; index++ {
+		key := fmt.Sprintf("atomic:partition:%d", index)
+		partition, enabled, err := trie.LocalPartitionForKey(key)
+		if err != nil || !enabled {
+			t.Fatalf("LocalPartitionForKey(%q) = %d/%v/%v", key, partition, enabled, err)
+		}
+		if first == "" {
+			firstPartition = partition
+			first = key
+			continue
+		}
+		if partition == firstPartition && second == "" {
+			second = key
+		}
+		if partition != firstPartition && other == "" {
+			other = key
+		}
+	}
+
+	response := trie.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{
+		{Command: "SETSTR", Key: first, Value: "written"},
+		{Command: "SETINT", Key: second, Value: "not-an-integer"},
+	}})
+	if response.OK {
+		t.Fatalf("same-partition atomic BATCH response = %#v, want failure", response)
+	}
+	if trie.Exists(first) {
+		t.Fatal("same-partition atomic BATCH retained a write after failure")
+	}
+
+	response = trie.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{
+		{Command: "SETSTR", Key: first, Value: "must-not-write"},
+		{Command: "SETSTR", Key: other, Value: "must-not-write"},
+	}})
+	if response.OK || !strings.Contains(response.Message, "one local partition") {
+		t.Fatalf("cross-partition atomic BATCH response = %#v, want one-partition rejection", response)
+	}
+	if trie.Exists(first) || trie.Exists(other) {
+		t.Fatal("cross-partition atomic BATCH wrote despite rejection")
+	}
+	response, _ = executeCacheCommand(context.Background(), trie, CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{
+		{Command: "SETSTR", Key: first, Value: "must-not-write"},
+		{Command: "SETSTR", Key: other, Value: "must-not-write"},
+	}}, commandExecutionOptions{DirtyTracker: &LevelDBDirtyTracker{}})
+	if response.OK || !strings.Contains(response.Message, "one local partition") {
+		t.Fatalf("side-effect cross-partition atomic BATCH response = %#v, want one-partition rejection", response)
+	}
+	if trie.Exists(first) || trie.Exists(other) {
+		t.Fatal("side-effect cross-partition atomic BATCH wrote despite rejection")
+	}
+}
+
 func TestLocalPartitionsSnapshotRoundTripRemainsPortable(t *testing.T) {
 	source := newTestTrie(t)
 	if err := source.ConfigureLocalPartitions(8); err != nil {
