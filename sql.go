@@ -6,59 +6,17 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"hatrie_cache/hat/hatSql"
+
 	json "github.com/goccy/go-json"
 )
 
-// SQLDiagnostic describes a local SQL parse or compilation error. Positions are
-// one-based and point into the original query.
-type SQLDiagnostic struct {
-	Message    string
-	Line       int
-	Column     int
-	EndColumn  int
-	Suggestion string
-}
-
-func (diagnostic *SQLDiagnostic) Error() string {
-	if diagnostic == nil {
-		return ""
-	}
-	if diagnostic.Suggestion == "" {
-		return diagnostic.Message
-	}
-	return diagnostic.Message + "; did you mean `" + diagnostic.Suggestion + "`?"
-}
+type SQLDiagnostic = hatSql.Diagnostic
 
 // FormatSQLDiagnostic formats a SQLDiagnostic with a Rust-style source span.
 // Non-SQL errors are returned unchanged.
 func FormatSQLDiagnostic(source string, err error) string {
-	diagnostic, ok := err.(*SQLDiagnostic)
-	if !ok || diagnostic == nil {
-		if err == nil {
-			return ""
-		}
-		return err.Error()
-	}
-	line := diagnostic.Line
-	if line < 1 {
-		line = 1
-	}
-	column := diagnostic.Column
-	if column < 1 {
-		column = 1
-	}
-	lines := strings.Split(source, "\n")
-	text := ""
-	if line <= len(lines) {
-		text = lines[line-1]
-	}
-	width := diagnostic.EndColumn - column
-	if width < 1 {
-		width = 1
-	}
-	return fmt.Sprintf("error: %s\n --> query:%d:%d\n  |\n%d | %s\n  | %s%s",
-		diagnostic.Error(), line, column, line, text,
-		strings.Repeat(" ", column-1), strings.Repeat("^", width))
+	return hatSql.FormatDiagnostic(source, err)
 }
 
 // CompileSQL translates the SQL-like CLI language into the existing command
