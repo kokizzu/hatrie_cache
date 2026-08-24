@@ -512,6 +512,77 @@ func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsRunningWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{
+		{"id": int64(1), "score": int64(2)},
+		{"id": int64(2), "score": int64(-1)},
+		{"id": int64(3), "score": int64(4)},
+		{"id": int64(4), "score": int64(6)},
+	}
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.id, ROW_NUMBER() OVER () AS row_number, RANK() OVER () AS rank, DENSE_RANK() OVER () AS dense_rank, SUM(person.score) OVER () AS running_sum, AVG(person.score) OVER () AS running_average, MIN(person.score) OVER () AS running_minimum, MAX(person.score) OVER () AS running_maximum OFFSET 1 LIMIT 2"
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return cloneSQLRows(rows), nil
+	})
+	want, err := ExecuteSQLQuery(query, baseline)
+	if err != nil {
+		t.Fatalf("materialized running-window baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed running windows: %v", err)
+	}
+	if !reflect.DeepEqual(columns, want.Columns) || !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("streamed running windows = %#v/%#v, want %#v/%#v", columns, got, want.Columns, want.Rows)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("running-window resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsRunningWindowsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260829))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for index := range values {
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(19) - 9)
+			}
+			values[index] = fmt.Sprintf("(%d, %s)", index, score)
+		}
+		limit := 1 + random.Intn(8)
+		offset := random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES %s AS values(id, score) WHERE score IS NOT NULL SELECT id, ROW_NUMBER() OVER () AS row_number, RANK() OVER () AS rank, DENSE_RANK() OVER () AS dense_rank, SUM(score) OVER () AS running_sum, AVG(score) OVER () AS running_average, MIN(score) OVER () AS running_minimum, MAX(score) OVER () AS running_maximum OFFSET %d LIMIT %d", strings.Join(values, ", "), offset, limit)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized running-window baseline: %v", iteration, err)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d streamed running windows: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d streamed running windows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
 func TestSQLPreparedQueryCacheReusesImmutableTemplateAndBindsFreshParameters(t *testing.T) {
 	t.Parallel()
 	cache := NewSQLPreparedQueryCache(2)

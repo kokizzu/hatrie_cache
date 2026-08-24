@@ -1029,6 +1029,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlUnionAllStreamable(query) {
 		return executeSQLUnionAllStream(ctx, query, resolver, control, visit)
 	}
+	if sqlRunningWindowStreamable(query) {
+		return executeSQLRunningWindowStream(ctx, query, resolver, control, visit)
+	}
 	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
 		return executeSQLGlobalAggregateStream(ctx, query, resolver, control, visit, aggregates)
 	}
@@ -1221,6 +1224,187 @@ func executeSQLUnionAllStream(ctx context.Context, query *sqlQuery, resolver SQL
 		if err := executeSQLQueryRowsParsed(ctx, union.query, resolver, control, emit); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+type sqlRunningWindowState struct {
+	name  string
+	arg   sqlExpr
+	count int64
+	sum   float64
+	min   float64
+	max   float64
+	seen  bool
+}
+
+// sqlRunningWindowStreamable recognizes the unpartitioned, unordered window
+// subset whose default frame is exactly all qualifying preceding rows through
+// the current row. No state needs to be retained per source row.
+func sqlRunningWindowStreamable(query *sqlQuery) bool {
+	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	hasWindow := false
+	for _, item := range query.selects {
+		expr := item.expr
+		if expr.window == nil {
+			if expr.kind == "star" || sqlExprHasAggregate(expr) || sqlExprHasWindow(expr) || sqlExprHasCustomFunction(expr, nil) {
+				return false
+			}
+			continue
+		}
+		hasWindow = true
+		if expr.kind != "func" || len(expr.window.partition) != 0 || len(expr.window.order) != 0 || expr.window.frame != nil {
+			return false
+		}
+		switch strings.ToUpper(expr.name) {
+		case "ROW_NUMBER", "RANK", "DENSE_RANK":
+			if len(expr.args) != 0 {
+				return false
+			}
+		case "SUM", "AVG", "MIN", "MAX":
+			if len(expr.args) != 1 || sqlExprHasAggregate(expr.args[0]) || sqlExprHasWindow(expr.args[0]) || sqlExprHasCustomFunction(expr.args[0], nil) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasWindow
+}
+
+func (state *sqlRunningWindowState) add(row sqlExecRow) (interface{}, error) {
+	switch state.name {
+	case "ROW_NUMBER":
+		state.count++
+		return state.count, nil
+	case "RANK", "DENSE_RANK":
+		// With no ORDER BY every row is tied, so both ranks are one.
+		return int64(1), nil
+	}
+	value := evalSQLExpr(state.arg, []sqlExecRow{row}, row)
+	if err := sqlExpressionError(value); err != nil {
+		return nil, err
+	}
+	number, ok := sqlNumber(value)
+	if !ok {
+		return state.value(), nil
+	}
+	if !state.seen {
+		state.seen = true
+		state.count = 1
+		state.sum, state.min, state.max = number, number, number
+		return state.value(), nil
+	}
+	state.count++
+	switch state.name {
+	case "SUM", "AVG":
+		state.sum += number
+	case "MIN":
+		if number < state.min {
+			state.min = number
+		}
+	case "MAX":
+		if number > state.max {
+			state.max = number
+		}
+	}
+	return state.value(), nil
+}
+
+func (state sqlRunningWindowState) value() interface{} {
+	if !state.seen {
+		return nil
+	}
+	switch state.name {
+	case "SUM":
+		return state.sum
+	case "AVG":
+		return state.sum / float64(state.count)
+	case "MIN":
+		return state.min
+	case "MAX":
+		return state.max
+	}
+	return nil
+}
+
+func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	columns := sqlColumns(query.selects)
+	states := make([]*sqlRunningWindowState, len(query.selects))
+	for index, item := range query.selects {
+		if item.expr.window == nil {
+			continue
+		}
+		state := &sqlRunningWindowState{name: strings.ToUpper(item.expr.name)}
+		if len(item.expr.args) == 1 {
+			state.arg = item.expr.args[0]
+		}
+		states[index] = state
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, []sqlExecRow{execRow}, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			if states[index] != nil {
+				value, err := states[index].add(execRow)
+				if err != nil {
+					return err
+				}
+				row[columns[index]] = value
+				continue
+			}
+			value := evalSQLExpr(item.expr, []sqlExecRow{execRow}, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	})
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
 	}
 	return nil
 }

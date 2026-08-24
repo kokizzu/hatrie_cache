@@ -925,12 +925,16 @@ That ordered subset excludes joins, grouping, windows, sets, distinct, typed
 schemas, and custom functions. It also supports a global, no-join selection
 made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
 keep constant state and emit one final row without retaining source rows. It
-still rejects CTEs, grouped aggregates, unbounded ordering, windows, set
+still rejects CTEs, grouped aggregates, unbounded ordering, most windows, set
 operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
 `DISTINCT`, typed JSON schemas, and custom functions until each has a
 bounded-memory streaming operator. `UNION ALL` is the exception: when every
 branch is independently streamable and projects the same columns, rows stream
 left-to-right with each branch's own `WHERE`, `OFFSET`, and `LIMIT` semantics.
+It also streams unpartitioned, unordered windows with the default running
+frame: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, and numeric `SUM`/`AVG`/`MIN`/`MAX`.
+Partitioned, ordered, framed, `LAG`, and `LEAD` windows still require a global
+operator.
 `QueryRows[T]` uses this NDJSON path and closes the response immediately when
 its callback returns an error.
 
