@@ -1161,6 +1161,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
 		return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
 	}
+	if sqlIndexedDistinctStreamable(query, resolver) {
+		return executeSQLIndexedDistinctStream(ctx, query, resolver, control, visit)
+	}
 	if sqlIndexedOrderStreamable(query, resolver) {
 		return executeSQLIndexedOrderStream(ctx, query, resolver, control, visit)
 	}
@@ -2313,6 +2316,96 @@ func executeSQLIndexedOrderStream(ctx context.Context, query *sqlQuery, resolver
 	}
 	if !available {
 		return fmt.Errorf("SQL query cannot stream this ordered scan because the ordered index is unavailable")
+	}
+	return nil
+}
+
+// sqlIndexedDistinctStreamable proves DISTINCT for the exact field defining
+// one indexed ORDER BY. Every equal projected value is adjacent, allowing the
+// executor to retain just the previously emitted canonical row key.
+func sqlIndexedDistinctStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || !query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || len(query.orderBy) != 1 || len(query.selects) != 1 {
+		return false
+	}
+	selectExpr, order := query.selects[0].expr, query.orderBy[0]
+	if selectExpr.kind != "field" || selectExpr.qualifier != query.from.alias || !sqlSameField(selectExpr, order.expr) {
+		return false
+	}
+	_, ok := resolver.(SQLOrderedStreamSourceResolver)
+	return ok
+}
+
+// executeSQLIndexedDistinctStream uses index adjacency to emit one direct
+// projected field per distinct key without a set map or materialized result.
+func executeSQLIndexedDistinctStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	streaming, ok := resolver.(SQLOrderedStreamSourceResolver)
+	if !ok {
+		return fmt.Errorf("SQL query cannot stream this DISTINCT scan because the resolver has no ordered index stream")
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	columns := sqlColumns(query.selects)
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	previousKey, havePrevious := "", false
+	emit := func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		value, err := evalSQLStreamExpr(query.selects[0].expr, execRow, functions)
+		if err != nil {
+			return err
+		}
+		row := SQLRow{columns[0]: value}
+		key := sqlOutputRowKey(row)
+		if havePrevious && key == previousKey {
+			return nil
+		}
+		havePrevious, previousKey = true, key
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	}
+	order := query.orderBy[0]
+	available, err := streaming.StreamSQLOrderedSource(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, emit)
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if !available {
+		return fmt.Errorf("SQL query cannot stream this DISTINCT scan because the ordered index is unavailable")
 	}
 	return nil
 }

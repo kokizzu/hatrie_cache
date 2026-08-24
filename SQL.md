@@ -609,6 +609,10 @@ the ordered index and retains only the active group's aggregate state, so no
 source-row or group slice is created. `HAVING`, windows, distinct, expressions
 around aggregates, and representative-row projections deliberately retain the
 established materialized group semantics.
+For the similarly narrow `SELECT DISTINCT indexed_field … ORDER BY
+indexed_field` form, `QueryRows` retains only the preceding canonical field
+value: equal index entries are adjacent, including `NULL`, so it emits each
+field value once without a membership map.
 Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
 shapes deliberately retain the general executor until they have an equally
 direct ordering proof.
