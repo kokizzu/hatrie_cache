@@ -938,8 +938,10 @@ left-to-right with each branch's own `WHERE`, `OFFSET`, and `LIMIT` semantics.
 It also streams unpartitioned, unordered windows with the default running
 frame: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, and numeric `SUM`/`AVG`/`MIN`/`MAX`.
 `LAG(expression [, literal_offset [, default]]) OVER ()` also streams with a
-fixed-size history bounded by its offset. Partitioned, ordered, framed, or
-dynamic-offset `LAG`, and every `LEAD`, still require a global operator.
+fixed-size history bounded by its offset. `LEAD` with that same unpartitioned
+literal-offset shape streams with a pending queue bounded by its offset.
+Partitioned, ordered, framed, or dynamic-offset `LAG`/`LEAD` still require a
+global operator.
 `QueryRows[T]` uses this NDJSON path and closes the response immediately when
 its callback returns an error.
 

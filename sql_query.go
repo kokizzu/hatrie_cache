@@ -1049,6 +1049,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlUnionAllStreamable(query) {
 		return executeSQLUnionAllStream(ctx, query, resolver, control, visit)
 	}
+	if sqlLeadWindowStreamable(query) {
+		return executeSQLLeadWindowStream(ctx, query, resolver, control, visit)
+	}
 	if sqlRunningWindowStreamable(query) {
 		return executeSQLRunningWindowStream(ctx, query, resolver, control, visit)
 	}
@@ -1347,6 +1350,157 @@ func sqlRunningWindowLagOffset(args []sqlExpr) (int, bool) {
 		return 0, false
 	}
 	return int(offset), true
+}
+
+// sqlLeadWindowStreamable recognizes the subset that can delay each output by
+// a fixed literal offset. Unlike running windows, LEAD needs future input, but
+// the pending queue is bounded by the largest requested offset.
+func sqlLeadWindowStreamable(query *sqlQuery) bool {
+	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	hasLead := false
+	for _, item := range query.selects {
+		expr := item.expr
+		if expr.window == nil {
+			if expr.kind == "star" || sqlExprHasAggregate(expr) || sqlExprHasWindow(expr) || sqlExprHasCustomFunction(expr, nil) {
+				return false
+			}
+			continue
+		}
+		if expr.kind != "func" || strings.ToUpper(expr.name) != "LEAD" || len(expr.window.partition) != 0 || len(expr.window.order) != 0 || expr.window.frame != nil {
+			return false
+		}
+		if _, ok := sqlRunningWindowLagOffset(expr.args); !ok {
+			return false
+		}
+		for _, argument := range expr.args {
+			if sqlExprHasAggregate(argument) || sqlExprHasWindow(argument) || sqlExprHasCustomFunction(argument, nil) {
+				return false
+			}
+		}
+		hasLead = true
+	}
+	return hasLead
+}
+
+type sqlLeadWindowDefinition struct {
+	column   int
+	argument sqlExpr
+	offset   int
+	fallback *sqlExpr
+}
+
+// executeSQLLeadWindowStream retains only qualifying rows whose fixed-offset
+// future value has not arrived. The pending queue is therefore bounded by the
+// largest literal LEAD offset rather than the source cardinality.
+func executeSQLLeadWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	columns := sqlColumns(query.selects)
+	definitions := make(map[int]sqlLeadWindowDefinition)
+	maximumOffset := 0
+	for column, item := range query.selects {
+		if item.expr.window == nil {
+			continue
+		}
+		offset, _ := sqlRunningWindowLagOffset(item.expr.args)
+		definition := sqlLeadWindowDefinition{column: column, argument: item.expr.args[0], offset: offset}
+		if len(item.expr.args) == 3 {
+			fallback := item.expr.args[2]
+			definition.fallback = &fallback
+		}
+		definitions[column] = definition
+		if offset > maximumOffset {
+			maximumOffset = offset
+		}
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	// Do not preallocate from SQL text: a valid but enormous literal offset must
+	// still be harmless when the bounded source is small.
+	pending := []sqlExecRow{}
+	emitAvailable := func(final bool) error {
+		for len(pending) > 0 && (final || len(pending) > maximumOffset) {
+			current := pending[0]
+			row := SQLRow{}
+			for column, item := range query.selects {
+				if definition, ok := definitions[column]; ok {
+					value := interface{}(nil)
+					if definition.offset < len(pending) {
+						target := pending[definition.offset]
+						value = evalSQLExpr(definition.argument, []sqlExecRow{target}, target)
+					} else if definition.fallback != nil {
+						value = evalSQLExpr(*definition.fallback, []sqlExecRow{current}, current)
+					}
+					if err := sqlExpressionError(value); err != nil {
+						return err
+					}
+					row[columns[column]] = value
+					continue
+				}
+				value := evalSQLExpr(item.expr, []sqlExecRow{current}, current)
+				if err := sqlExpressionError(value); err != nil {
+					return err
+				}
+				row[columns[column]] = value
+			}
+			pending[0] = sqlExecRow{}
+			pending = pending[1:]
+			seen++
+			if seen <= query.offset {
+				continue
+			}
+			if query.limit >= 0 && emitted >= query.limit {
+				return errSQLStreamLimitReached
+			}
+			if control.options.MaxResultBytes > 0 {
+				resultBytes += sqlRowBytes(row)
+				if resultBytes > control.options.MaxResultBytes {
+					return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+				}
+			}
+			emitted++
+			if err := visit(columns, row); err != nil {
+				return err
+			}
+			if query.limit >= 0 && emitted >= query.limit {
+				return errSQLStreamLimitReached
+			}
+		}
+		return nil
+	}
+	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		current := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, []sqlExecRow{current}, current)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		pending = append(pending, current)
+		return emitAvailable(false)
+	})
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if err == errSQLStreamLimitReached {
+		return nil
+	}
+	if err := emitAvailable(true); err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	return nil
 }
 
 func (state *sqlRunningWindowState) add(row sqlExecRow) (interface{}, error) {

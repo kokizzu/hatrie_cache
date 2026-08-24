@@ -638,6 +638,67 @@ func TestExecuteSQLQueryRowsStreamsUnpartitionedLagWindows(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsUnpartitionedLeadWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(1), "score": int64(2)}, {"id": int64(2), "score": nil}, {"id": int64(3), "score": int64(7)}, {"id": int64(4), "score": int64(9)}}
+	query := "FROM CACHE('people') AS person SELECT person.id, LEAD(person.score) OVER () AS next_score, LEAD(person.score, 2, -1) OVER () AS two_ahead_score OFFSET 1 LIMIT 3"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized LEAD baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed LEAD query: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("LEAD resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(columns, materialized.Columns) || !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("streamed LEAD = %#v/%#v, want %#v/%#v", columns, got, materialized.Columns, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsUnpartitionedLeadWindowsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260831))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for index := range values {
+			if random.Intn(4) == 0 {
+				values[index] = "NULL"
+			} else {
+				values[index] = strconv.Itoa(random.Intn(21) - 10)
+			}
+		}
+		leadOffset := random.Intn(7)
+		offset := random.Intn(5)
+		limit := 1 + random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES (%s) AS values(value) SELECT value, LEAD(value, %d, -99) OVER () AS following OFFSET %d LIMIT %d", strings.Join(values, "), ("), leadOffset, offset, limit)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized LEAD: %v\nquery=%s", iteration, err, query)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d streamed LEAD: %v\nquery=%s", iteration, err, query)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d streamed LEAD rows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsUnpartitionedLagWindowsProperty(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260830))
