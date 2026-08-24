@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -1024,6 +1025,9 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
 		return executeSQLGlobalAggregateStream(ctx, query, resolver, control, visit, aggregates)
 	}
+	if sqlTopNStreamable(query) {
+		return executeSQLTopNStream(ctx, query, resolver, control, visit)
+	}
 	if err := validateSQLQueryStreamable(query); err != nil {
 		return err
 	}
@@ -1143,6 +1147,162 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	}
 	if err := streamSQLSourceRows(ctx, *query.from, resolver, streamRow); err != nil && err != errSQLStreamLimitReached {
 		return sqlRuntimeDiagnostic(err)
+	}
+	return nil
+}
+
+type sqlTopNStreamItem struct {
+	row     SQLRow
+	keys    []interface{}
+	ordinal int
+}
+
+func sqlTopNStreamBefore(left, right sqlTopNStreamItem, order []sqlOrder) bool {
+	for index, item := range order {
+		if less, decided := sqlOrderLess(item, left.keys[index], right.keys[index]); decided {
+			return less
+		}
+	}
+	return left.ordinal < right.ordinal
+}
+
+// sqlTopNStreamHeap keeps the worst retained row at index zero. It therefore
+// consumes O(LIMIT + OFFSET) memory rather than materializing every source row.
+type sqlTopNStreamHeap struct {
+	items []sqlTopNStreamItem
+	order []sqlOrder
+}
+
+func (heap sqlTopNStreamHeap) Len() int { return len(heap.items) }
+func (heap sqlTopNStreamHeap) Less(left, right int) bool {
+	return sqlTopNStreamBefore(heap.items[right], heap.items[left], heap.order)
+}
+func (heap sqlTopNStreamHeap) Swap(left, right int) {
+	heap.items[left], heap.items[right] = heap.items[right], heap.items[left]
+}
+func (heap *sqlTopNStreamHeap) Push(value interface{}) {
+	heap.items = append(heap.items, value.(sqlTopNStreamItem))
+}
+func (heap *sqlTopNStreamHeap) Pop() interface{} {
+	last := len(heap.items) - 1
+	value := heap.items[last]
+	heap.items = heap.items[:last]
+	return value
+}
+
+// sqlTopNStreamable recognizes only the bounded-order subset whose projection
+// and ORDER BY expressions can be evaluated per source row. Unsupported SQL
+// retains the existing diagnostic instead of silently materializing.
+func sqlTopNStreamable(query *sqlQuery) bool {
+	if query == nil || query.explain || query.from == nil || query.limit < 0 || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	for _, selectItem := range query.selects {
+		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) || sqlExprHasCustomFunction(selectItem.expr, nil) {
+			return false
+		}
+	}
+	for _, order := range query.orderBy {
+		if sqlExprHasAggregate(order.expr) || sqlExprHasWindow(order.expr) || sqlExprHasCustomFunction(order.expr, nil) {
+			return false
+		}
+	}
+	return true
+}
+
+func sqlTopNStreamCapacity(query *sqlQuery, maxRows int) int {
+	if query.limit <= 0 || maxRows <= 0 {
+		return 0
+	}
+	if query.offset >= maxRows || query.limit > maxRows-query.offset {
+		return maxRows
+	}
+	return query.limit + query.offset
+}
+
+func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	if query.limit == 0 {
+		return nil
+	}
+	capacity := sqlTopNStreamCapacity(query, control.maxRows)
+	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: query.orderBy}
+	heap.Init(&candidates)
+	columns := sqlColumns(query.selects)
+	inputRows := 0
+	ordinal := 0
+	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, nil, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			value := evalSQLExpr(item.expr, nil, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		candidate := sqlTopNStreamItem{row: row, keys: make([]interface{}, len(query.orderBy)), ordinal: ordinal}
+		ordinal++
+		for index, order := range query.orderBy {
+			value := evalOutputOrder(order.expr, row, []sqlExecRow{execRow})
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			candidate.keys[index] = value
+		}
+		if candidates.Len() < capacity {
+			heap.Push(&candidates, candidate)
+			return nil
+		}
+		if sqlTopNStreamBefore(candidate, candidates.items[0], query.orderBy) {
+			candidates.items[0] = candidate
+			heap.Fix(&candidates, 0)
+		}
+		return nil
+	})
+	if err != nil {
+		return sqlRuntimeDiagnostic(err)
+	}
+	sort.SliceStable(candidates.items, func(left, right int) bool {
+		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], query.orderBy)
+	})
+	start := query.offset
+	if start > len(candidates.items) {
+		start = len(candidates.items)
+	}
+	end := start + query.limit
+	if end > len(candidates.items) {
+		end = len(candidates.items)
+	}
+	resultBytes := 0
+	for _, candidate := range candidates.items[start:end] {
+		if err := control.check(); err != nil {
+			return err
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(candidate.row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		if err := visit(columns, candidate.row); err != nil {
+			return err
+		}
 	}
 	return nil
 }

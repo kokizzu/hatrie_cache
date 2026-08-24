@@ -232,6 +232,68 @@ func TestExecuteSQLQueryRowsStreamsChainedIndexedJoins(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsBoundedTopNOrdering(t *testing.T) {
+	t.Parallel()
+	query := "FROM VALUES (0, 3), (1, 1), (2, NULL), (3, 2), (4, 1), (5, 0) AS values(id, score) SELECT id, score ORDER BY score ASC NULLS LAST, id LIMIT 3 OFFSET 1"
+	want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{MaxResultBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("bounded top-N stream: %v", err)
+	}
+	if !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("bounded top-N rows = %#v, want %#v", got, want.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsBoundedTopNProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260825))
+	for iteration := 0; iteration < 80; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for id := range values {
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(7) - 3)
+			}
+			values[id] = fmt.Sprintf("(%d, %s)", id, score)
+		}
+		descending := random.Intn(2) == 0
+		nullOrder := "NULLS LAST"
+		if random.Intn(2) == 0 {
+			nullOrder = "NULLS FIRST"
+		}
+		order := "ASC"
+		if descending {
+			order = "DESC"
+		}
+		limit := 1 + random.Intn(8)
+		offset := random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES %s AS values(id, score) SELECT id, score ORDER BY score %s %s, id LIMIT %d OFFSET %d", strings.Join(values, ", "), order, nullOrder, limit, offset)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized baseline: %v", iteration, err)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{MaxResultBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d bounded top-N stream: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d bounded top-N rows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsIndexedJoinsHonorMaxRows(t *testing.T) {
 	t.Parallel()
 	resolver := &sqlStreamingTestResolver{

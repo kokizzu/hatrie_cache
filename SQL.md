@@ -284,7 +284,7 @@ the first side but not the second. These operations are read-only.
 | Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
 | Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
 | Limit with standard syntax | `FETCH FIRST 20 ROWS ONLY` | Equivalent to `LIMIT 20`; cannot be combined with `LIMIT`. |
-| Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing result rows. |
+| Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing all result rows; finite source-only top-N sorting is also bounded. |
 
 Streaming also supports a chain of equality `INNER` or `LEFT JOIN`s when the
 left `CACHE` source is streamable and every right `CACHE` join field has an
@@ -904,12 +904,16 @@ headers is an `{"type":"error","error":"..."}` terminal record.
 Streaming is deliberately exact rather than pretending that every query can
 stream: it accepts one `CACHE` or `VALUES` source with scalar `WHERE`,
 projection, `OFFSET`, and `LIMIT`, plus a chain of indexed equality `INNER` or
-`LEFT` CACHE joins. It also supports a global, no-join selection made only of
-direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those keep constant
-state and emit one final row without retaining source rows. It rejects CTEs,
-grouped aggregates, ordering, windows, set operations, `DISTINCT`, typed JSON
-schemas, and custom functions until each has a bounded-memory streaming
-operator.
+`LEFT` CACHE joins. A source-only query with a finite `ORDER BY … LIMIT`
+(optionally with `OFFSET`) uses a stable bounded top-N heap: it retains at most
+`LIMIT + OFFSET` candidates, then emits sorted rows after its source is read.
+That ordered subset excludes joins, grouping, windows, sets, distinct, typed
+schemas, and custom functions. It also supports a global, no-join selection
+made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
+keep constant state and emit one final row without retaining source rows. It
+still rejects CTEs, grouped aggregates, unbounded ordering, windows, set
+operations, `DISTINCT`, typed JSON schemas, and custom functions until each
+has a bounded-memory streaming operator.
 `QueryRows[T]` uses this NDJSON path and closes the response immediately when
 its callback returns an error.
 
