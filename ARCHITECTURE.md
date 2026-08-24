@@ -17,11 +17,12 @@ import them without starting the cache server:
 | `hatrie_cache/hat/hatMetrics` | Atomic API audit, write-protection, and rate-limit counters | `APIMetrics`, `APIMetricsSnapshot`, and constructor aliases |
 | `hatrie_cache/hat/hatCodec` | Exact JSON encoded-size helpers used for request and response limits | Root JSON-size helpers delegate to it |
 | `hatrie_cache/hat/hatHash` | Allocation-free FNV-64 and JSON-string hash variants | Root compatibility wrappers serve Bloom, Count-Min, Cuckoo, HyperLogLog, and XOR structures |
-| `hatrie_cache/hat/hatStorage` | Compact reusable-index metadata and generic tail trimming | Root storage pools retain ownership but share one tested vacancy tracker |
+| `hatrie_cache/hat/hatStorage` | Storage backend and persistence-format identifiers, validation, compact reusable-index metadata, and generic tail trimming | Root storage pools and store lifecycles retain ownership; configuration aliases and vacancy tracking share the public model |
 | `hatrie_cache/hat/hatTopology` | Cluster topology model, validation, fingerprinting, routing, and atomic JSON persistence | Root aliases its model; `TopologyStore` retains synchronization and its normalized routing fast path |
 | `hatrie_cache/hat/hatMerkle` | Fixed 1,024-bucket mask selection and canonical inventory-mask wire encoding | Replication aliases `BucketMask`; mutable index/table ownership remains root-local |
 | `hatrie_cache/hat/hatBackup` | Backup mode, manifest, file checksum, and partition-coverage model | Root aliases the portable model; creation and staged recovery retain storage ownership |
 | `hatrie_cache/hat/hatDataStructure` | Standalone compact algorithms: Fenwick tree, Quantile Sketch, Roaring Bitmap, Sparse Bitset, HyperLogLog, Bloom Filter, and Cuckoo Filter shape calculation | Root keeps cache storage, generic JSON coercion, replication, and command adapters |
+| `hatrie_cache/hat/hatSql` | SQL request/result wire model, HTTP client, resolver and observability contracts, UDF contracts, diagnostics, and the shared source-span lexer | Root compatibility aliases preserve existing callers; cache-backed planning, prepared templates, and execution retain cache ownership |
 
 ## Importing a component
 
@@ -51,7 +52,7 @@ The root still contains grouped domain files rather than arbitrary utilities:
 
 | Domain | Root files | Why it remains together |
 | --- | --- | --- |
-| SQL | `sql*.go` | Query planning, source resolution, and command-backed values share cache interfaces. |
+| SQL execution | `sql_query.go`, `sql_function.go`, and runtime adapters | Query planning, prepared templates, source resolution, and command-backed values share cache interfaces. The portable wire model, lexer, diagnostics, observer/resolver interfaces, and UDF contracts are in `hat/hatSql`. |
 | Storage and recovery | `leveldb*.go`, `pebble*.go`, `snapshot*.go`, `journal*.go`, `backup*.go` | Their schemas and recovery guarantees are cross-validated together. |
 | Replication | `replication*.go`, `election*.go`, `local_partition.go` | Ownership, topology, journal ordering, and transport safety are one protocol boundary. |
 | Data structures | `*_filter.go`, `*_sketch.go`, `fenwick_tree.go`, `radix_tree.go`, `sparse_bitset.go`, `roaring_bitmap.go` | Each has command, snapshot, binary replication, storage, and compact-memory integrations. Fenwick, Quantile Sketch, Roaring Bitmap, Sparse Bitset, HyperLogLog, and Bloom Filter reusable algorithms are in `hat/hatDataStructure`; their cache adapters remain here. |
