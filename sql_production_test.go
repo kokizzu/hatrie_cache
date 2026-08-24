@@ -136,7 +136,16 @@ func TestExecuteSQLQueryExplainAnalyzeReportsIndexEstimateError(t *testing.T) {
 			if step.EstimatedRows == nil || *step.EstimatedRows != 50 || step.ActualOutputRows == nil || *step.ActualOutputRows != 2 || step.EstimateErrorRows == nil || *step.EstimateErrorRows != -48 {
 				t.Fatalf("index estimate step = %#v, want estimated/actual/error 50/2/-48", step)
 			}
-			return
+			for _, row := range result.Rows {
+				if row["node"] != "INDEX SCAN" {
+					continue
+				}
+				if percent, ok := row["estimate_error_percent"].(float64); !ok || percent != -96 {
+					t.Fatalf("index estimate row = %#v, want estimate_error_percent -96", row)
+				}
+				return
+			}
+			t.Fatalf("EXPLAIN ANALYZE rows = %#v, want INDEX SCAN output row", result.Rows)
 		}
 	}
 	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
@@ -2934,7 +2943,7 @@ LIMIT 1`, SQLSourceResolverFunc(nil))
 	if result.Stats.OutputRows != 1 || result.Stats.OutputColumns != 1 || result.Stats.ResultBytes <= 0 || result.Stats.PlanSteps != len(result.Plan) || result.Stats.ElapsedNanos < 0 {
 		t.Fatalf("EXPLAIN ANALYZE stats = %#v, plan = %#v", result.Stats, result.Plan)
 	}
-	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
+	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
 		t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %#v", result.Columns, want)
 	}
 	last := result.Rows[len(result.Rows)-1]

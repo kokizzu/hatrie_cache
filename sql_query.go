@@ -86,13 +86,14 @@ type SQLQueryEvent struct {
 // observer event. It has the same measured rows and timing as EXPLAIN ANALYZE
 // but intentionally omits the plan detail, which can contain SQL text.
 type SQLQueryOperator struct {
-	Node          string `json:"node"`
-	InputRows     int    `json:"input_rows"`
-	OutputRows    int    `json:"output_rows"`
-	InputBytes    *int   `json:"input_bytes,omitempty"`
-	OutputBytes   *int   `json:"output_bytes,omitempty"`
-	ElapsedNanos  int64  `json:"elapsed_ns"`
-	EstimatedRows *int   `json:"estimated_rows,omitempty"`
+	Node                 string   `json:"node"`
+	InputRows            int      `json:"input_rows"`
+	OutputRows           int      `json:"output_rows"`
+	InputBytes           *int     `json:"input_bytes,omitempty"`
+	OutputBytes          *int     `json:"output_bytes,omitempty"`
+	ElapsedNanos         int64    `json:"elapsed_ns"`
+	EstimatedRows        *int     `json:"estimated_rows,omitempty"`
+	EstimateErrorPercent *float64 `json:"estimate_error_percent,omitempty"`
 }
 
 // SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
@@ -290,8 +291,11 @@ type SQLExplainStep struct {
 	ActualOutputBytes *int   `json:"actual_output_bytes,omitempty"`
 	// EstimateErrorRows is actual output rows minus estimated rows. Positive
 	// values mean the estimate was too low; negative values mean it was too high.
-	EstimateErrorRows *int   `json:"estimate_error_rows,omitempty"`
-	ElapsedNanos      *int64 `json:"elapsed_ns,omitempty"`
+	EstimateErrorRows *int `json:"estimate_error_rows,omitempty"`
+	// EstimateErrorPercent is the signed error relative to a nonzero estimate.
+	// Zero estimates retain EstimateErrorRows and omit a synthetic infinity.
+	EstimateErrorPercent *float64 `json:"estimate_error_percent,omitempty"`
+	ElapsedNanos         *int64   `json:"elapsed_ns,omitempty"`
 }
 
 // SQLQueryStats is emitted only by EXPLAIN ANALYZE. It describes one actual
@@ -965,6 +969,10 @@ func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
 		if step.ActualOutputBytes != nil {
 			bytes := *step.ActualOutputBytes
 			operator.OutputBytes = &bytes
+		}
+		if step.EstimateErrorPercent != nil {
+			percent := *step.EstimateErrorPercent
+			operator.EstimateErrorPercent = &percent
 		}
 		operators = append(operators, operator)
 	}
@@ -3798,6 +3806,10 @@ func (metrics *sqlExecutionMetrics) recordEstimated(node, detail string, estimat
 		step := &metrics.steps[len(metrics.steps)-1]
 		step.EstimatedRows = sqlExplainIntPointer(*estimatedRows)
 		step.EstimateErrorRows = sqlExplainIntPointer(outputRows - *estimatedRows)
+		if *estimatedRows != 0 {
+			percent := float64(outputRows-*estimatedRows) * 100 / float64(*estimatedRows)
+			step.EstimateErrorPercent = &percent
+		}
 	}
 }
 
@@ -5011,9 +5023,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.EstimateErrorRows != nil {
 			row["estimate_error_rows"] = *step.EstimateErrorRows
 		}
+		if step.EstimateErrorPercent != nil {
+			row["estimate_error_percent"] = *step.EstimateErrorPercent
+		}
 		result.Rows = append(result.Rows, row)
 	}
-	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
+	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
 	result.Rows = append(result.Rows, SQLRow{
 		"node":         "ANALYZE",
 		"detail":       "execution summary",
