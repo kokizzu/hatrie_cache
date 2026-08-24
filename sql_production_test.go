@@ -1025,6 +1025,144 @@ func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) 
 	}
 }
 
+func TestExecuteSQLQueryContextSpillsDirectGroupedAggregatesWithinDiskBudget(t *testing.T) {
+	t.Parallel()
+	values := make([]string, 0, 60)
+	for id := 0; id < 60; id++ {
+		values = append(values, fmt.Sprintf("(%d, %d)", id%7, id-30))
+	}
+	query := "FROM VALUES " + strings.Join(values, ", ") + " AS values(team, score) SELECT team, COUNT(*) AS members, COUNT(score) AS scored_members, SUM(score) AS total, AVG(score) AS average, MIN(score) AS minimum, MAX(score) AS maximum GROUP BY team ORDER BY team ASC NULLS LAST"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	directory := t.TempDir()
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("spill grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("spill grouped aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("explain spill grouped aggregate: %v", err)
+	}
+	seen := false
+	for _, step := range explained.Plan {
+		seen = seen || step.Node == "EXTERNAL GROUP AGGREGATE"
+	}
+	if !seen {
+		t.Fatalf("spill grouped aggregate plan = %#v, want EXTERNAL GROUP AGGREGATE", explained.Plan)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory retains temporary files: %#v", entries)
+	}
+	_, err = ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("group spill disk budget error = %v, want spill disk budget", err)
+	}
+	entries, err = os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory after failure: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("group spill failure retains temporary files: %#v", entries)
+	}
+}
+
+func TestExecuteSQLQueryContextSpilledGroupAggregatePreservesFloatAdditionOrder(t *testing.T) {
+	t.Parallel()
+	values := make([]string, 0, 96)
+	for index := 0; index < 96; index++ {
+		score := "1"
+		switch index % 3 {
+		case 0:
+			score = "10000000000000000"
+		case 2:
+			score = "-10000000000000000"
+		}
+		values = append(values, "(0, "+score+")")
+	}
+	query := "FROM VALUES " + strings.Join(values, ", ") + " AS values(team, score) SELECT team, SUM(score) AS total, AVG(score) AS average GROUP BY team ORDER BY team"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("spill grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("spill float aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+}
+
+func TestExecuteSQLQueryContextSpilledGroupAggregateProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260827))
+	for iteration := 0; iteration < 40; iteration++ {
+		values := make([]string, 1+random.Intn(40))
+		for index := range values {
+			team := "NULL"
+			if random.Intn(4) != 0 {
+				team = strconv.Itoa(random.Intn(5) - 2)
+			}
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(13) - 6)
+			}
+			values[index] = "(" + team + ", " + score + ")"
+		}
+		direction := "ASC"
+		if random.Intn(2) == 0 {
+			direction = "DESC"
+		}
+		nulls := "NULLS LAST"
+		if random.Intn(2) == 0 {
+			nulls = "NULLS FIRST"
+		}
+		limit := 1 + random.Intn(6)
+		offset := random.Intn(5)
+		query := fmt.Sprintf("FROM VALUES %s AS values(team, score) SELECT team, COUNT(*) AS members, COUNT(score) AS scored_members, SUM(score) AS total, AVG(score) AS average, MIN(score) AS minimum, MAX(score) AS maximum GROUP BY team ORDER BY team %s %s LIMIT %d OFFSET %d", strings.Join(values, ", "), direction, nulls, limit, offset)
+		want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+		if err != nil {
+			t.Fatalf("iteration %d unbounded baseline: %v", iteration, err)
+		}
+		got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+			MaxGroupBytes:  1,
+			SpillDirectory: t.TempDir(),
+			MaxSpillBytes:  1 << 20,
+		})
+		if err != nil {
+			t.Fatalf("iteration %d spill grouped aggregate: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(got.Rows, want.Rows) {
+			t.Fatalf("iteration %d spill grouped aggregate rows = %#v, want %#v\nquery=%s", iteration, got.Rows, want.Rows, query)
+		}
+	}
+}
+
 func TestExecuteSQLQueryContextSpillSortPreservesStableOrderAcrossMergePasses(t *testing.T) {
 	t.Parallel()
 	values := make([]string, 0, 80)

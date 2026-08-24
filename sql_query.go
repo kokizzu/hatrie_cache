@@ -4102,6 +4102,15 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			return result, nil
 		}
 	}
+	if control != nil && control.options.MaxGroupBytes > 0 && control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
+		result, handled, err := executeSQLSpilledGroupAggregate(q, rows, control, metrics)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		if handled {
+			return result, nil
+		}
+	}
 	started = time.Now()
 	inputRows := len(rows)
 	var groups [][]sqlExecRow
@@ -5656,6 +5665,288 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 	return rows, int64(maxSpillBytes) - available, len(runs), nil
 }
 
+type sqlSpillGroupAggregate struct {
+	Name  string
+	Count int64
+	Sum   float64
+	Seen  bool
+	Min   float64
+	Max   float64
+}
+
+type sqlSpillGroupRecord struct {
+	Key        string
+	Value      interface{}
+	Ordinal    int
+	Aggregates []sqlSpillGroupAggregate
+}
+
+type sqlSpillGroupRun struct {
+	path  string
+	bytes int64
+}
+
+type sqlSpillGroupReader struct {
+	file    *os.File
+	decoder *gob.Decoder
+	current sqlSpillGroupRecord
+	done    bool
+}
+
+func sqlSpillGroupRecordBefore(left, right sqlSpillGroupRecord, order sqlOrder) bool {
+	if less, decided := sqlOrderLess(order, left.Value, right.Value); decided {
+		return less
+	}
+	// Group identity must be the secondary ordering so every partial state for
+	// one key is adjacent across independently sorted runs. SQL does not define
+	// an order among otherwise equal ORDER BY keys.
+	if left.Key != right.Key {
+		return left.Key < right.Key
+	}
+	return left.Ordinal < right.Ordinal
+}
+
+func sqlSpillGroupRecordBytes(record sqlSpillGroupRecord) int {
+	return len(record.Key) + sqlRowBytes(SQLRow{"group": record.Value}) + len(record.Aggregates)*64 + 32
+}
+
+func sqlSpillGroupAggregateFromOrdered(aggregate sqlOrderedAggregate) sqlSpillGroupAggregate {
+	return sqlSpillGroupAggregate{Name: aggregate.name, Count: aggregate.count, Sum: aggregate.sum, Seen: aggregate.seen, Min: aggregate.min, Max: aggregate.max}
+}
+
+func (aggregate sqlSpillGroupAggregate) value() interface{} {
+	if aggregate.Name == "COUNT" {
+		return aggregate.Count
+	}
+	if !aggregate.Seen {
+		return nil
+	}
+	switch aggregate.Name {
+	case "SUM":
+		return aggregate.Sum
+	case "AVG":
+		return aggregate.Sum / float64(aggregate.Count)
+	case "MIN":
+		return aggregate.Min
+	case "MAX":
+		return aggregate.Max
+	}
+	return nil
+}
+
+func sqlMergeSpillGroupRecord(left, right sqlSpillGroupRecord) sqlSpillGroupRecord {
+	if right.Ordinal < left.Ordinal {
+		left.Ordinal = right.Ordinal
+		left.Value = right.Value
+	}
+	for index := range left.Aggregates {
+		other := right.Aggregates[index]
+		current := &left.Aggregates[index]
+		if current.Name == "COUNT" {
+			current.Count += other.Count
+			continue
+		}
+		if !other.Seen {
+			continue
+		}
+		if !current.Seen {
+			*current = other
+			continue
+		}
+		current.Count += other.Count
+		switch current.Name {
+		case "SUM", "AVG":
+			current.Sum += other.Sum
+		case "MIN":
+			if other.Min < current.Min {
+				current.Min = other.Min
+			}
+		case "MAX":
+			if other.Max > current.Max {
+				current.Max = other.Max
+			}
+		}
+	}
+	return left
+}
+
+func sqlWriteSpillGroupRun(directory string, records []sqlSpillGroupRecord, available *int64, control *sqlExecutionControl) (sqlSpillGroupRun, error) {
+	file, err := os.CreateTemp(directory, "hatrie-sql-group-*")
+	if err != nil {
+		return sqlSpillGroupRun{}, fmt.Errorf("create SQL group spill file: %w", err)
+	}
+	run := sqlSpillGroupRun{path: file.Name()}
+	remove := true
+	defer func() {
+		if remove {
+			_ = file.Close()
+			_ = os.Remove(run.path)
+		}
+	}()
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	for _, record := range records {
+		if err := control.check(); err != nil {
+			return sqlSpillGroupRun{}, err
+		}
+		if err := encoder.Encode(record); err != nil {
+			if errors.Is(err, errSQLSpillDiskBudget) {
+				return sqlSpillGroupRun{}, fmt.Errorf("SQL spill disk budget exceeded while writing aggregate runs")
+			}
+			return sqlSpillGroupRun{}, fmt.Errorf("write SQL group spill file: %w", err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return sqlSpillGroupRun{}, fmt.Errorf("close SQL group spill file: %w", err)
+	}
+	info, err := os.Stat(run.path)
+	if err != nil {
+		return sqlSpillGroupRun{}, fmt.Errorf("inspect SQL group spill file: %w", err)
+	}
+	run.bytes = info.Size()
+	remove = false
+	return run, nil
+}
+
+func openSQLSpillGroupReader(run sqlSpillGroupRun) (*sqlSpillGroupReader, error) {
+	file, err := os.Open(run.path)
+	if err != nil {
+		return nil, fmt.Errorf("open SQL group spill file: %w", err)
+	}
+	reader := &sqlSpillGroupReader{file: file, decoder: gob.NewDecoder(file)}
+	if err := reader.next(); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return reader, nil
+}
+
+func (reader *sqlSpillGroupReader) next() error {
+	if reader.done {
+		return nil
+	}
+	var record sqlSpillGroupRecord
+	if err := reader.decoder.Decode(&record); err != nil {
+		if errors.Is(err, io.EOF) {
+			reader.done = true
+			return nil
+		}
+		return fmt.Errorf("read SQL group spill file: %w", err)
+	}
+	reader.current = record
+	return nil
+}
+
+func closeSQLSpillGroupReaders(readers []*sqlSpillGroupReader) {
+	for _, reader := range readers {
+		if reader != nil && reader.file != nil {
+			_ = reader.file.Close()
+		}
+	}
+}
+
+func sqlOpenSpillGroupReaders(runs []sqlSpillGroupRun) ([]*sqlSpillGroupReader, error) {
+	readers := make([]*sqlSpillGroupReader, len(runs))
+	for index, run := range runs {
+		reader, err := openSQLSpillGroupReader(run)
+		if err != nil {
+			closeSQLSpillGroupReaders(readers)
+			return nil, err
+		}
+		readers[index] = reader
+	}
+	return readers, nil
+}
+
+func sqlNextRawSpillGroup(readers []*sqlSpillGroupReader, order sqlOrder, control *sqlExecutionControl) (sqlSpillGroupRecord, bool, error) {
+	if err := control.check(); err != nil {
+		return sqlSpillGroupRecord{}, false, err
+	}
+	best := -1
+	for index, reader := range readers {
+		if reader.done || best >= 0 && !sqlSpillGroupRecordBefore(reader.current, readers[best].current, order) {
+			continue
+		}
+		best = index
+	}
+	if best < 0 {
+		return sqlSpillGroupRecord{}, false, nil
+	}
+	record := readers[best].current
+	if err := readers[best].next(); err != nil {
+		return sqlSpillGroupRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func sqlNextSpillGroup(readers []*sqlSpillGroupReader, order sqlOrder, control *sqlExecutionControl) (sqlSpillGroupRecord, bool, error) {
+	record, ok, err := sqlNextRawSpillGroup(readers, order, control)
+	if err != nil || !ok {
+		return record, ok, err
+	}
+	for {
+		best := -1
+		for index, reader := range readers {
+			if reader.done || reader.current.Key != record.Key || best >= 0 && !sqlSpillGroupRecordBefore(reader.current, readers[best].current, order) {
+				continue
+			}
+			best = index
+		}
+		if best < 0 {
+			return record, true, nil
+		}
+		record = sqlMergeSpillGroupRecord(record, readers[best].current)
+		if err := readers[best].next(); err != nil {
+			return sqlSpillGroupRecord{}, false, err
+		}
+	}
+}
+
+func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, directory string, available *int64, control *sqlExecutionControl) (sqlSpillGroupRun, error) {
+	readers, err := sqlOpenSpillGroupReaders(runs)
+	if err != nil {
+		return sqlSpillGroupRun{}, err
+	}
+	defer closeSQLSpillGroupReaders(readers)
+	file, err := os.CreateTemp(directory, "hatrie-sql-group-merge-*")
+	if err != nil {
+		return sqlSpillGroupRun{}, fmt.Errorf("create SQL group merge file: %w", err)
+	}
+	run := sqlSpillGroupRun{path: file.Name()}
+	remove := true
+	defer func() {
+		if remove {
+			_ = file.Close()
+			_ = os.Remove(run.path)
+		}
+	}()
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	for {
+		record, ok, err := sqlNextRawSpillGroup(readers, order, control)
+		if err != nil {
+			return sqlSpillGroupRun{}, err
+		}
+		if !ok {
+			break
+		}
+		if err := encoder.Encode(record); err != nil {
+			if errors.Is(err, errSQLSpillDiskBudget) {
+				return sqlSpillGroupRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging aggregate runs")
+			}
+			return sqlSpillGroupRun{}, fmt.Errorf("write SQL group merge file: %w", err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return sqlSpillGroupRun{}, fmt.Errorf("close SQL group merge file: %w", err)
+	}
+	info, err := os.Stat(run.path)
+	if err != nil {
+		return sqlSpillGroupRun{}, fmt.Errorf("inspect SQL group merge file: %w", err)
+	}
+	run.bytes = info.Size()
+	remove = false
+	return run, nil
+}
+
 func sqlCanPushBaseWhere(query *sqlQuery) bool {
 	for _, join := range query.joins {
 		if join.kind != "INNER" && join.kind != "CROSS" {
@@ -6006,7 +6297,7 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
-	result := SQLQueryResult{Columns: sqlColumns(q.selects)}
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	started := time.Now()
 	groupCount := 0
 	position := 0
@@ -6070,6 +6361,191 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
 	}
 	metrics.record("INDEX GROUP AGGREGATE", "streaming "+sqlExplainExpressions(q.groupBy), len(rows), groupCount, started)
+	metrics.record("PROJECT", sqlExplainSelects(q.selects), groupCount, groupCount, started)
+	if q.limit >= 0 || q.offset > 0 {
+		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), groupCount, len(result.Rows), started)
+	}
+	return result, true, nil
+}
+
+func sqlSpilledGroupAggregateProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, sqlOrder, bool) {
+	projections, ok := sqlOrderedGroupProjections(q)
+	if !ok || len(q.orderBy) != 1 || !sqlSameField(q.orderBy[0].expr, q.groupBy[0]) {
+		return nil, sqlOrder{}, false
+	}
+	return projections, q.orderBy[0], true
+}
+
+func sqlAddSpillGroupAggregate(state *sqlSpillGroupAggregate, definition *sqlOrderedAggregate, row sqlExecRow) error {
+	if definition.name == "COUNT" && definition.field.kind == "" {
+		state.Count++
+		return nil
+	}
+	value := evalSQLExpr(definition.field, []sqlExecRow{row}, row)
+	if err := sqlExpressionError(value); err != nil {
+		return err
+	}
+	if definition.name == "COUNT" {
+		if value != nil {
+			state.Count++
+		}
+		return nil
+	}
+	number, ok := sqlNumber(value)
+	if !ok {
+		return nil
+	}
+	if !state.Seen {
+		state.Seen = true
+		state.Count = 1
+		state.Sum = number
+		state.Min = number
+		state.Max = number
+		return nil
+	}
+	state.Count++
+	switch state.Name {
+	case "SUM", "AVG":
+		state.Sum += number
+	case "MIN":
+		if number < state.Min {
+			state.Min = number
+		}
+	case "MAX":
+		if number > state.Max {
+			state.Max = number
+		}
+	}
+	return nil
+}
+
+// executeSQLSpilledGroupAggregate implements the direct aggregate subset with
+// bounded contribution runs. It deliberately requires ORDER BY the same single
+// group field, allowing sorted spill-run merging to preserve query order and
+// source-order floating-point accumulation without retaining group rows.
+func executeSQLSpilledGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	projections, order, ok := sqlSpilledGroupAggregateProjections(q)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	available := int64(control.options.MaxSpillBytes)
+	paths := map[string]struct{}{}
+	defer func() {
+		for path := range paths {
+			_ = os.Remove(path)
+		}
+	}()
+	buffer := []sqlSpillGroupRecord{}
+	bufferBytes := 0
+	runs := []sqlSpillGroupRun{}
+	flush := func() error {
+		if len(buffer) == 0 {
+			return nil
+		}
+		sort.SliceStable(buffer, func(left, right int) bool { return sqlSpillGroupRecordBefore(buffer[left], buffer[right], order) })
+		run, err := sqlWriteSpillGroupRun(control.options.SpillDirectory, buffer, &available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		runs = append(runs, run)
+		buffer = []sqlSpillGroupRecord{}
+		bufferBytes = 0
+		return nil
+	}
+	started := time.Now()
+	for ordinal, row := range rows {
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		value := evalSQLExpr(q.groupBy[0], []sqlExecRow{row}, row)
+		if err := sqlExpressionError(value); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		key := fmt.Sprintf("%#v", value)
+		record := sqlSpillGroupRecord{Key: key, Value: value, Ordinal: ordinal, Aggregates: make([]sqlSpillGroupAggregate, len(projections))}
+		for index, projection := range projections {
+			if projection.aggregate != nil {
+				record.Aggregates[index] = sqlSpillGroupAggregateFromOrdered(*projection.aggregate)
+			}
+		}
+		for index, projection := range projections {
+			if projection.aggregate == nil {
+				continue
+			}
+			if err := sqlAddSpillGroupAggregate(&record.Aggregates[index], projection.aggregate, row); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+		}
+		buffer = append(buffer, record)
+		bufferBytes += sqlSpillGroupRecordBytes(record)
+		if bufferBytes > control.options.MaxGroupBytes {
+			if err := flush(); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	for len(runs) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillGroupRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(runs) {
+				end = len(runs)
+			}
+			merged, err := sqlMergeSpillGroupRunsToRun(runs[start:end], order, control.options.SpillDirectory, &available, control)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			paths[merged.path] = struct{}{}
+			for _, run := range runs[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return SQLQueryResult{}, true, fmt.Errorf("remove SQL group spill file: %w", err)
+				}
+				delete(paths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		runs = next
+	}
+	readers, err := sqlOpenSpillGroupReaders(runs)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	defer closeSQLSpillGroupReaders(readers)
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	groupCount := 0
+	position := 0
+	for {
+		record, ok, err := sqlNextSpillGroup(readers, order, control)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if !ok {
+			break
+		}
+		groupCount++
+		if position >= q.offset && (q.limit < 0 || len(result.Rows) < q.limit) {
+			row := SQLRow{}
+			for index, projection := range projections {
+				if projection.group {
+					row[projection.column] = record.Value
+				} else {
+					row[projection.column] = record.Aggregates[index].value()
+				}
+			}
+			result.Rows = append(result.Rows, row)
+		}
+		position++
+	}
+	if control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
+	spillBytes := int64(control.options.MaxSpillBytes) - available
+	metrics.record("EXTERNAL GROUP AGGREGATE", fmt.Sprintf("%s spill_bytes=%d runs=%d", sqlExplainExpressions(q.groupBy), spillBytes, len(runs)), len(rows), groupCount, started)
 	metrics.record("PROJECT", sqlExplainSelects(q.selects), groupCount, groupCount, started)
 	if q.limit >= 0 || q.offset > 0 {
 		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), groupCount, len(result.Rows), started)

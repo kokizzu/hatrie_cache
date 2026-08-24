@@ -840,6 +840,16 @@ its live spill bytes and final-run count in `EXPLAIN ANALYZE`. This currently
 spills only the final sort; grouping, windows, CTEs, and set operations retain
 their independent in-memory budgets.
 
+The same spill directory and disk budget can also execute a bounded direct
+grouped aggregate when `MaxGroupBytes` is set. The supported shape is one
+direct `GROUP BY` field, that same direct `ORDER BY` field, direct group-field
+projection, and direct `COUNT`, `SUM`, `AVG`, `MIN`, or `MAX` fields. The
+executor writes bounded aggregate-contribution runs and merges them in source
+order, preserving floating-point `SUM`/`AVG` behavior while avoiding retained
+group rows; `EXPLAIN ANALYZE` reports `EXTERNAL GROUP AGGREGATE`. `HAVING`,
+windows, distinct, custom functions, expressions around aggregates, and other
+group/order shapes retain their materialized semantics and group-memory budget.
+
 ### Query observations
 
 Materialized queries can carry an application request ID and emit one compact,
