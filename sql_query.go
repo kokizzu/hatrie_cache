@@ -1164,6 +1164,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlIndexedDistinctStreamable(query, resolver) {
 		return executeSQLIndexedDistinctStream(ctx, query, resolver, control, visit)
 	}
+	if sqlIndexedRunningAggregateWindowStreamable(query, resolver) {
+		return executeSQLIndexedRunningAggregateWindowStream(ctx, query, resolver, control, visit)
+	}
 	if sqlIndexedLeadWindowStreamable(query, resolver) {
 		return executeSQLIndexedLeadWindowStream(ctx, query, resolver, control, visit)
 	}
@@ -2636,6 +2639,128 @@ func sqlIndexedLeadWindowStreamable(query *sqlQuery, resolver SQLSourceResolver)
 		hasLead = true
 	}
 	return hasLead
+}
+
+func sqlIndexedRunningAggregateWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || query.where.window != nil || len(query.orderBy) != 1 {
+		return false
+	}
+	order := query.orderBy[0]
+	if order.expr.kind != "field" || order.expr.qualifier != query.from.alias || order.expr.name == "" {
+		return false
+	}
+	if _, ok := resolver.(SQLOrderedStreamSourceResolver); !ok {
+		return false
+	}
+	hasAggregate := false
+	for _, item := range query.selects {
+		expr := item.expr
+		if expr.window == nil {
+			if expr.kind == "star" || sqlExprHasAggregate(expr) || sqlExprHasWindow(expr) {
+				return false
+			}
+			continue
+		}
+		if expr.kind != "func" || len(expr.window.partition) != 0 || len(expr.window.order) != 1 || expr.window.frame != nil || len(expr.args) != 1 || sqlExprHasAggregate(expr.args[0]) || sqlExprHasWindow(expr.args[0]) || sqlExprHasCustomFunction(expr.args[0], nil) {
+			return false
+		}
+		windowOrder := expr.window.order[0]
+		if !sqlSameField(windowOrder.expr, order.expr) || windowOrder.desc != order.desc || windowOrder.nullsFirst != order.nullsFirst || windowOrder.nullsLast != order.nullsLast {
+			return false
+		}
+		switch strings.ToUpper(expr.name) {
+		case "SUM", "AVG", "MIN", "MAX":
+			hasAggregate = true
+		default:
+			return false
+		}
+	}
+	return hasAggregate
+}
+
+func executeSQLIndexedRunningAggregateWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	streaming, ok := resolver.(SQLOrderedStreamSourceResolver)
+	if !ok {
+		return fmt.Errorf("SQL query cannot stream these running windows because the resolver has no ordered index stream")
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	states := make([]*sqlRunningWindowState, len(query.selects))
+	for index, item := range query.selects {
+		if item.expr.window == nil {
+			continue
+		}
+		states[index] = &sqlRunningWindowState{name: strings.ToUpper(item.expr.name), arg: item.expr.args[0]}
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	columns := sqlColumns(query.selects)
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	emit := func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		row := SQLRow{}
+		for index, item := range query.selects {
+			if states[index] != nil {
+				value, err := states[index].add(execRow)
+				if err != nil {
+					return err
+				}
+				row[columns[index]] = value
+				continue
+			}
+			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+			if err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	}
+	order := query.orderBy[0]
+	available, err := streaming.StreamSQLOrderedSource(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, emit)
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if !available {
+		return fmt.Errorf("SQL query cannot stream these running windows because the ordered index is unavailable")
+	}
+	return nil
 }
 
 func executeSQLIndexedLeadWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {

@@ -620,6 +620,8 @@ They retain only the current position, rank state, and previous ordering value.
 fixed-size history ring bounded by its literal offset.
 `LEAD(expression [, literal_offset [, default]])` is likewise streamable for
 that exact order, with a pending queue bounded by the largest literal offset.
+Running `SUM`, `AVG`, `MIN`, and `MAX` windows are also streamable for that
+exact order, each with constant aggregate state.
 Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
 shapes deliberately retain the general executor until they have an equally
 direct ordering proof.
