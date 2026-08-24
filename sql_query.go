@@ -3481,12 +3481,8 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					rightRow = right.group[0]
 				}
 				for _, order := range item.expr.window.order {
-					cmp := sqlCompare(evalSQLExpr(order.expr, left.group, leftRow), evalSQLExpr(order.expr, right.group, rightRow))
-					if cmp != 0 {
-						if order.desc {
-							return cmp > 0
-						}
-						return cmp < 0
+					if less, decided := sqlOrderLess(order, evalSQLExpr(order.expr, left.group, leftRow), evalSQLExpr(order.expr, right.group, rightRow)); decided {
+						return less
 					}
 				}
 				return false
@@ -3636,15 +3632,8 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			for _, item := range q.orderBy {
 				a := evalOutputOrder(item.expr, out[i].row, out[i].group)
 				b := evalOutputOrder(item.expr, out[j].row, out[j].group)
-				cmp := sqlCompare(a, b)
-				if (a == nil || b == nil) && a != b && (item.nullsFirst || item.nullsLast) {
-					return (a == nil) == item.nullsFirst
-				}
-				if cmp != 0 {
-					if item.desc {
-						return cmp > 0
-					}
-					return cmp < 0
+				if less, decided := sqlOrderLess(item, a, b); decided {
+					return less
 				}
 			}
 			return false
@@ -4058,6 +4047,20 @@ func sqlExplainSource(source sqlSource) string {
 		detail += " AS " + source.alias
 	}
 	return detail
+}
+
+func sqlOrderLess(order sqlOrder, left, right interface{}) (bool, bool) {
+	if (left == nil || right == nil) && left != right && (order.nullsFirst || order.nullsLast) {
+		return (left == nil) == order.nullsFirst, true
+	}
+	cmp := sqlCompare(left, right)
+	if cmp == 0 {
+		return false, false
+	}
+	if order.desc {
+		return cmp > 0, true
+	}
+	return cmp < 0, true
 }
 
 func sqlExplainExpression(expression sqlExpr) string {

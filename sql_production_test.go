@@ -1277,6 +1277,27 @@ func TestExecuteSQLQuerySupportsExplicitNullOrder(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryWindowOrderHonorsExplicitNullOrder(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, order string
+		want        []SQLRow
+	}{
+		{"last", "value NULLS LAST", []SQLRow{{"value": int64(1), "position": int64(1)}, {"value": int64(2), "position": int64(2)}, {"value": nil, "position": int64(3)}}},
+		{"first", "value NULLS FIRST", []SQLRow{{"value": nil, "position": int64(1)}, {"value": int64(1), "position": int64(2)}, {"value": int64(2), "position": int64(3)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (NULL), (2), (1) AS values(value) SELECT value, ROW_NUMBER() OVER (ORDER BY "+test.order+") AS position ORDER BY position", SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("window explicit null ordering: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("window explicit null ordering rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
 func TestExecuteSQLQuerySupportsFetchFirst(t *testing.T) {
 	t.Parallel()
 	result, err := ExecuteSQLQuery("FROM VALUES (3), (1), (2) AS values(value) SELECT value ORDER BY value FETCH FIRST 2 ROWS ONLY", SQLSourceResolverFunc(nil))

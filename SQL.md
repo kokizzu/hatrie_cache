@@ -708,7 +708,8 @@ silently selected.
 
 Use `NULLS FIRST` or `NULLS LAST` after an `ORDER BY` expression whenever null
 placement must be explicit, for example `ORDER BY completed_at DESC NULLS
-LAST`. Omitting it retains the engine's existing comparison order.
+LAST`. The same rule applies inside a window `OVER (... ORDER BY ...)` clause.
+Omitting it retains the engine's existing comparison order.
 
 Use `TIMESTAMP '2026-08-22T09:00:00Z'` for an RFC3339 instant. Timestamp
 literals compare chronologically and reject malformed values with a source
