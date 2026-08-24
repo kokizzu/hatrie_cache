@@ -39,19 +39,34 @@ const (
 // Token is one SQL lexical unit. Positions are one-based and EndColumn is
 // exclusive, which makes it suitable for rendering source spans directly.
 type Token struct {
-	Kind      TokenKind
-	Text      string
-	Line      int
-	Column    int
-	EndColumn int
+	kind      TokenKind
+	text      string
+	line      int
+	column    int
+	endColumn int
 }
+
+// Kind returns the token category.
+func (token Token) Kind() TokenKind { return token.kind }
+
+// Text returns the decoded token text.
+func (token Token) Text() string { return token.text }
+
+// Line returns the one-based source line.
+func (token Token) Line() int { return token.line }
+
+// Column returns the one-based source column.
+func (token Token) Column() int { return token.column }
+
+// EndColumn returns the exclusive one-based source column.
+func (token Token) EndColumn() int { return token.endColumn }
 
 // Display returns a user-facing representation of a token.
 func (token Token) Display() string {
-	if token.Kind == TokenEOF {
+	if token.kind == TokenEOF {
 		return "end of input"
 	}
-	return strconv.Quote(token.Text)
+	return strconv.Quote(token.text)
 }
 
 // Lex tokenizes the SQL grammar shared by cache-command compilation and
@@ -175,7 +190,7 @@ type lexer struct {
 }
 
 func (lexer *lexer) token(kind TokenKind, text string, line int, column int) Token {
-	return Token{Kind: kind, Text: text, Line: line, Column: column, EndColumn: lexer.column}
+	return Token{kind: kind, text: text, line: line, column: column, endColumn: lexer.column}
 }
 
 func (lexer *lexer) diagnostic(line int, column int, endColumn int, message string) error {

@@ -80,11 +80,11 @@ func lexSQL(source string) ([]sqlToken, error) {
 	converted := make([]sqlToken, len(tokens))
 	for index, token := range tokens {
 		converted[index] = sqlToken{
-			kind:      sqlTokenKind(token.Kind),
-			text:      token.Text,
-			line:      token.Line,
-			column:    token.Column,
-			endColumn: token.EndColumn,
+			kind:      sqlTokenKind(token.Kind()),
+			text:      token.Text(),
+			line:      token.Line(),
+			column:    token.Column(),
+			endColumn: token.EndColumn(),
 		}
 	}
 	return converted, nil

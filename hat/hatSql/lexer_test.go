@@ -32,7 +32,7 @@ func TestLexPreservesValuesAndSourceSpans(t *testing.T) {
 	}
 	for index, expected := range want {
 		got := tokens[index]
-		if got.Kind != expected.kind || got.Text != expected.text || got.Line != expected.line || got.Column != expected.col || got.EndColumn != expected.endColumn {
+		if got.Kind() != expected.kind || got.Text() != expected.text || got.Line() != expected.line || got.Column() != expected.col || got.EndColumn() != expected.endColumn {
 			t.Errorf("token %d = %#v, want kind=%v text=%q line=%d col=%d end=%d", index, got, expected.kind, expected.text, expected.line, expected.col, expected.endColumn)
 		}
 	}

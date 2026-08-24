@@ -947,7 +947,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 			_ = encoder.Encode(struct {
 				Type    string   `json:"type"`
 				Columns []string `json:"columns"`
-			}{Type: "columns", Columns: sqlColumns(query.selects)})
+			}{Type: "columns", Columns: SQLQueryColumns(query)})
 		}
 		if err != nil {
 			_ = encoder.Encode(struct {
