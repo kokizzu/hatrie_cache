@@ -974,10 +974,15 @@ headers is an `{"type":"error","error":"..."}` terminal record.
 Streaming is deliberately exact rather than pretending that every query can
 stream: it accepts one `CACHE` or `VALUES` source with scalar `WHERE`,
 projection, `OFFSET`, and `LIMIT`, plus a chain of indexed equality `INNER` or
-`LEFT` CACHE joins. Registered scalar custom functions are also valid in that
-`WHERE` and projection subset: the executor evaluates a one-row function batch
-at a time, retaining no result-row slice and preserving the function's normal
-type and source diagnostics. A source-only query with a finite `ORDER BY … LIMIT`
+`LEFT` CACHE joins. A no-join typed `CACHE` source is also streamed: every row
+is validated and converted before relational evaluation, and the scanner drains
+after a result `LIMIT` so a later malformed declared field produces the same
+source-spanned diagnostic as materialized execution. Typed sources with joins
+remain rejected because indexed probes have not yet been proven to retain that
+full validation contract. Registered scalar custom functions are also valid in
+that `WHERE` and projection subset: the executor evaluates a one-row function
+batch at a time, retaining no result-row slice and preserving the function's
+normal type and source diagnostics. A source-only query with a finite `ORDER BY … LIMIT`
 (optionally with `OFFSET`) uses a stable bounded top-N heap: it retains at most
 `LIMIT + OFFSET` candidates, then emits sorted rows after its source is read.
 An unbounded scalar `CACHE` or `VALUES` order can instead stream its final
@@ -994,7 +999,7 @@ and `LIMIT`. It still rejects CTEs, other grouped aggregates, unbounded ordering
 without such an index proof, most windows,
 set operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
 `DISTINCT` outside the configured direct scalar external-set shape, typed JSON
-schemas, and custom functions inside those global
+schemas inside global operators, and custom functions inside those global
 operators until each has a bounded-memory streaming operator. `UNION ALL` is
 the exception: when every
 branch is independently streamable and projects the same columns, rows stream

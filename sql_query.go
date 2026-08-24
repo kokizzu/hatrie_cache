@@ -1139,7 +1139,9 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 // DISTINCT query can similarly use bounded external set runs when MaxSetBytes
 // is configured. Scalar custom functions are evaluated one source row at a
 // time. A chain of indexed INNER/LEFT CACHE joins is also streamable because
-// each next source is probed only for the current row.
+// each next source is probed only for the current row. A direct typed CACHE
+// source is also streamed after each row is validated and converted; it drains
+// the source after LIMIT so declared-field diagnostics match materialization.
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) (err error) {
 	observation := newSQLQueryObservation(options)
 	outputRows, outputColumns, resultBytes := 0, 0, 0
@@ -1241,10 +1243,15 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		}
 	}
 	columns := sqlColumns(query.selects)
-	if query.limit == 0 {
+	// A typed source must still be fully validated even when LIMIT 0 would
+	// otherwise let the stream stop before reading it. This retains the
+	// materialized executor's promise that declared CACHE fields are checked
+	// before relational evaluation.
+	if query.limit == 0 && len(query.from.fieldTypes) == 0 {
 		return nil
 	}
 	inputRows, expandedRows, seen, emitted, resultBytes := 0, 0, 0, 0, 0
+	limitReached := query.limit == 0
 	emitRow := func(execRow sqlExecRow) error {
 		if err := control.check(); err != nil {
 			return err
@@ -1329,12 +1336,23 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		return nil
 	}
 	streamRow := func(sourceRow SQLRow) error {
+		// Keep consuming a typed source after the result limit so a malformed
+		// later declared field is reported exactly as in materialized execution.
+		// streamSQLSourceRows performs that per-row validation before this call.
+		if limitReached {
+			return nil
+		}
 		inputRows++
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
 		left := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
-		return streamJoined(0, left)
+		err := streamJoined(0, left)
+		if err == errSQLStreamLimitReached && len(query.from.fieldTypes) > 0 {
+			limitReached = true
+			return nil
+		}
+		return err
 	}
 	if err := streamSQLSourceRows(ctx, *query.from, resolver, streamRow); err != nil && err != errSQLStreamLimitReached {
 		return sqlRuntimeDiagnostic(err)
@@ -3662,8 +3680,8 @@ func validateSQLQueryStreamable(query *sqlQuery) error {
 		}
 		return fmt.Errorf("SQL source %q cannot stream rows yet; use CACHE or VALUES", query.from.kind)
 	}
-	if len(query.from.fieldTypes) > 0 {
-		return fmt.Errorf("typed CACHE fields cannot stream yet because validation must remain identical to materialized queries")
+	if len(query.from.fieldTypes) > 0 && len(query.joins) > 0 {
+		return fmt.Errorf("typed CACHE fields can stream only without joins because indexed join probes must preserve declared field validation")
 	}
 	if query.where.window != nil {
 		return fmt.Errorf("SQL query cannot stream window expressions")
@@ -3695,8 +3713,22 @@ func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSour
 		}
 		return nil
 	case "CACHE":
+		rowIndex := 0
+		validate := func(row SQLRow) (SQLRow, error) {
+			rowIndex++
+			if len(source.fieldTypes) == 0 {
+				return row, nil
+			}
+			return validateSQLSourceFieldTypeRow(source, row, rowIndex)
+		}
 		if streaming, ok := resolver.(SQLStreamSourceResolver); ok {
-			return streaming.StreamSQLSource(ctx, source.kind, source.key, visit)
+			return streaming.StreamSQLSource(ctx, source.kind, source.key, func(row SQLRow) error {
+				validated, err := validate(row)
+				if err != nil {
+					return err
+				}
+				return visit(validated)
+			})
 		}
 		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
 		if err != nil {
@@ -3706,7 +3738,11 @@ func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSour
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := visit(row); err != nil {
+			validated, err := validate(row)
+			if err != nil {
+				return err
+			}
+			if err := visit(validated); err != nil {
 				return err
 			}
 		}
@@ -7244,19 +7280,32 @@ func validateSQLSourceFieldTypes(source sqlSource, rows []SQLRow) ([]SQLRow, err
 	if len(source.fieldTypes) == 0 {
 		return rows, nil
 	}
-	validated := cloneSQLRows(rows)
-	for rowIndex, row := range validated {
-		for field, fieldType := range source.fieldTypes {
-			value, exists := row[field]
-			if !exists || value == nil {
-				continue
-			}
-			converted, ok := sqlTypedJSONFieldValue(value, fieldType.name)
-			if !ok {
-				return nil, sqlEvalError{err: fmt.Errorf("CACHE(%q) row %d field %q expects %s, got %s", source.key, rowIndex+1, field, fieldType.name, sqlLiteralTypeName(value)), token: fieldType.token}
-			}
-			row[field] = converted
+	validated := make([]SQLRow, len(rows))
+	for rowIndex, row := range rows {
+		converted, err := validateSQLSourceFieldTypeRow(source, row, rowIndex+1)
+		if err != nil {
+			return nil, err
 		}
+		validated[rowIndex] = converted
+	}
+	return validated, nil
+}
+
+// validateSQLSourceFieldTypeRow is the row-at-a-time form used by both
+// materialized and streamed CACHE sources. Keeping the conversion and the
+// source-spanned error in one place prevents the two executors from drifting.
+func validateSQLSourceFieldTypeRow(source sqlSource, row SQLRow, rowIndex int) (SQLRow, error) {
+	validated := cloneSQLRows([]SQLRow{row})[0]
+	for field, fieldType := range source.fieldTypes {
+		value, exists := validated[field]
+		if !exists || value == nil {
+			continue
+		}
+		converted, ok := sqlTypedJSONFieldValue(value, fieldType.name)
+		if !ok {
+			return nil, sqlEvalError{err: fmt.Errorf("CACHE(%q) row %d field %q expects %s, got %s", source.key, rowIndex, field, fieldType.name, sqlLiteralTypeName(value)), token: fieldType.token}
+		}
+		validated[field] = converted
 	}
 	return validated, nil
 }

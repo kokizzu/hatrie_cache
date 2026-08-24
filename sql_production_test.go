@@ -1043,6 +1043,29 @@ func TestExecuteSQLQueryRowsStreamsCompatibleSourceRows(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsTypedCacheFieldsWithMaterializedValidation(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{rows: []SQLRow{
+		{"id": float64(1), "joined_on": "2026-08-22"},
+		{"id": "not-an-integer", "joined_on": "2026-08-23"},
+	}}
+	query := "FROM CACHE('people') AS p(id INTEGER, joined_on DATE) SELECT p.id, p.joined_on LIMIT 1"
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), `CACHE("people") row 2 field "id" expects INTEGER, got TEXT`) {
+		t.Fatalf("typed streamed validation error = %v, want row 2 INTEGER diagnostic", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls = materialized:%d streamed:%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if want := []SQLRow{{"id": int64(1), "joined_on": sqlDate("2026-08-22")}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("typed streamed rows = %#v, want %#v", rows, want)
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsScalarCustomFunctions(t *testing.T) {
 	t.Parallel()
 	functions := NewSQLFunctionRegistry()
