@@ -472,6 +472,95 @@ func TestExecuteSQLQueryRowsExternalDistinctMergesOrdinalRuns(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsExternalGroupAggregate(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"team": "red", "score": int64(3)}, {"team": "blue", "score": int64(-2)}, {"team": "red", "score": int64(7)}, {"team": "blue", "score": int64(5)}, {"team": nil, "score": int64(1)}}
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total, AVG(person.score) AS average GROUP BY person.team ORDER BY person.team ASC NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxGroupBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external grouped stream: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("external group resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external grouped rows = %#v, want %#v", got, baseline.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external group leftovers = %#v, want none", entries)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalGroupFallsBackWhenOrderedIndexMissing(t *testing.T) {
+	t.Parallel()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"team":"red","score":3},{"team":"blue","score":-2},{"team":"red","score":7},{"team":"blue","score":5},{"team":null,"score":1}]`)
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total GROUP BY person.team ORDER BY person.team ASC NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, trie, nil, SQLQueryOptions{MaxGroupBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external group fallback: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external group fallback rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalGroupCleansUpOnFailure(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"team": "red", "score": int64(3)}, {"team": "blue", "score": int64(1)}, {"team": "red", "score": int64(7)}}
+	query := "FROM CACHE('people') AS person SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total GROUP BY person.team ORDER BY person.team"
+	for _, test := range []struct {
+		name    string
+		options SQLQueryOptions
+		visit   func([]string, SQLRow) error
+		want    string
+	}{
+		{name: "callback", options: SQLQueryOptions{MaxGroupBytes: 1, MaxSpillBytes: 1 << 20}, visit: func([]string, SQLRow) error { return errors.New("stop grouped merge") }, want: "stop grouped merge"},
+		{name: "result budget", options: SQLQueryOptions{MaxGroupBytes: 1, MaxSpillBytes: 1 << 20, MaxResultBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "result byte budget"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			test.options.SpillDirectory = directory
+			err := ExecuteSQLQueryRows(context.Background(), query, &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}, nil, test.options, test.visit)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("external group error = %v, want %q", err, test.want)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external group leftovers = %#v, want none", entries)
+			}
+		})
+	}
+}
+
 func TestExecuteSQLQueryRowsStreamsExternalDistinctRandomized(t *testing.T) {
 	t.Parallel()
 

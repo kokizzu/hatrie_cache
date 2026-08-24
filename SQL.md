@@ -897,9 +897,11 @@ group rows. For a single untyped `CACHE` source that implements
 `SQLStreamSourceResolver` (or for `VALUES`) with an optional source-local,
 non-UDF `WHERE`, it also reads input incrementally instead of first building
 the source row slice; `EXPLAIN ANALYZE` reports `STREAM SCAN` followed by
-`EXTERNAL GROUP AGGREGATE`. `HAVING`, windows, distinct, joins, CTEs, typed
-fields, custom functions, expressions around aggregates, and other group/order
-shapes retain their materialized semantics and group-memory budget.
+`EXTERNAL GROUP AGGREGATE`. `ExecuteSQLQueryRows` / NDJSON emits the final
+merged groups straight to its callback rather than constructing a result-row
+slice. `HAVING`, windows, distinct, joins, CTEs, typed fields, custom
+functions, expressions around aggregates, and other group/order shapes retain
+their materialized semantics and group-memory budget.
 
 ### Query observations
 

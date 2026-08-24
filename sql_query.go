@@ -1166,6 +1166,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
 		return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
 	}
+	if _, handled, err := executeSQLStreamedSpilledGroupAggregate(query, resolver, control, nil, visit); handled {
+		return err
+	}
 	if sqlIndexedDistinctStreamable(query, resolver) {
 		return executeSQLIndexedDistinctStream(ctx, query, resolver, control, visit)
 	}
@@ -2617,6 +2620,9 @@ func executeSQLIndexedGroupAggregateStream(ctx context.Context, query *sqlQuery,
 		return sqlRuntimeDiagnostic(err)
 	}
 	if !available {
+		if _, handled, fallbackErr := executeSQLStreamedSpilledGroupAggregate(query, resolver, control, nil, visit); handled {
+			return fallbackErr
+		}
 		return fmt.Errorf("SQL query cannot stream this grouped aggregate because the ordered index is unavailable")
 	}
 	if err == errSQLStreamLimitReached {
@@ -5632,7 +5638,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		ctes[cte.name] = rows
 	}
-	if result, handled, streamErr := executeSQLStreamedSpilledGroupAggregate(q, resolver, control, metrics); handled {
+	if result, handled, streamErr := executeSQLStreamedSpilledGroupAggregate(q, resolver, control, metrics, nil); handled {
 		return result, streamErr
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
@@ -8795,7 +8801,7 @@ func sqlCanStreamSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceResolver, 
 // eligibility proof intentionally keeps the established materialized executor
 // for joins, typed fields, CTEs, custom functions, and other shapes whose
 // per-row semantics are not yet equivalent here.
-func executeSQLStreamedSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+func executeSQLStreamedSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
 	if !sqlCanStreamSpilledGroupAggregate(q, resolver, control) {
 		return SQLQueryResult{}, false, nil
 	}
@@ -8844,7 +8850,7 @@ func executeSQLStreamedSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceReso
 			filteredRows++
 			return visit(row)
 		})
-	}, control, metrics)
+	}, control, metrics, visit)
 	filterElapsed = time.Since(filterStarted).Nanoseconds()
 	streamElapsed = time.Since(streamStarted).Nanoseconds()
 	return result, handled, err
@@ -8858,10 +8864,10 @@ func executeSQLSpilledGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 			}
 		}
 		return nil
-	}, control, metrics)
+	}, control, metrics, nil)
 }
 
-func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) error) error, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) error) error, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
 	projections, order, ok := sqlSpilledGroupAggregateProjections(q)
 	if !ok {
 		return SQLQueryResult{}, false, nil
@@ -8962,7 +8968,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 	defer closeSQLSpillGroupReaders(readers)
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	groupCount := 0
-	position := 0
+	position, emitted, resultBytes := 0, 0, 0
 	for {
 		record, ok, err := sqlNextSpillGroup(readers, order, control)
 		if err != nil {
@@ -8972,7 +8978,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 			break
 		}
 		groupCount++
-		if position >= q.offset && (q.limit < 0 || len(result.Rows) < q.limit) {
+		if position >= q.offset && (q.limit < 0 || emitted < q.limit) {
 			row := SQLRow{}
 			for index, projection := range projections {
 				if projection.group {
@@ -8981,18 +8987,28 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 					row[projection.column] = record.Aggregates[index].value()
 				}
 			}
-			result.Rows = append(result.Rows, row)
+			if control.options.MaxResultBytes > 0 {
+				resultBytes += sqlRowBytes(row)
+				if resultBytes > control.options.MaxResultBytes {
+					return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+				}
+			}
+			if visit != nil {
+				if err := visit(result.Columns, row); err != nil {
+					return SQLQueryResult{}, true, err
+				}
+			} else {
+				result.Rows = append(result.Rows, row)
+			}
+			emitted++
 		}
 		position++
 	}
-	if control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
-		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
-	}
 	spillBytes := int64(control.options.MaxSpillBytes) - available
 	metrics.record("EXTERNAL GROUP AGGREGATE", fmt.Sprintf("%s spill_bytes=%d runs=%d", sqlExplainExpressions(q.groupBy), spillBytes, len(runs)), inputRows, groupCount, started)
-	metrics.record("PROJECT", sqlExplainSelects(q.selects), groupCount, groupCount, started)
+	metrics.record("PROJECT", sqlExplainSelects(q.selects), groupCount, emitted, started)
 	if q.limit >= 0 || q.offset > 0 {
-		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), groupCount, len(result.Rows), started)
+		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), groupCount, emitted, started)
 	}
 	return result, true, nil
 }
