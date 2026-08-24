@@ -1406,6 +1406,34 @@ func TestHatTrieOptionalSQLJSONFieldIndexProbesRangeInnerAndLeftJoin(t *testing.
 	}
 }
 
+func TestHatTrieOptionalSQLJSONFieldIndexProbesRangeJoinWithAdditionalPredicate(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"age":18,"name":"Ada","enabled":true},{"age":21,"name":"Bea","enabled":false},{"age":30,"name":"Cai","enabled":true}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM VALUES (20), (40) AS wanted(minimum) LEFT JOIN CACHE('people') AS person ON wanted.minimum <= person.age AND person.enabled = TRUE SELECT wanted.minimum, person.name ORDER BY wanted.minimum"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SQLRow{{"minimum": int64(20), "name": "Cai"}, {"minimum": int64(40), "name": nil}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("range join with extra predicate = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "RANGE INDEX JOIN" {
+			return
+		}
+	}
+	t.Fatalf("range join with extra predicate plan = %#v, want RANGE INDEX JOIN", explained.Plan)
+}
+
 func TestHatTrieOptionalSQLJSONFieldIndexProbesRightJoin(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

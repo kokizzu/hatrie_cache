@@ -3572,8 +3572,19 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 										if err := control.addJoinWork(1); err != nil {
 											return SQLQueryResult{}, err
 										}
+										combined := mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}})
+										on := evalSQLExpr(join.on, []sqlExecRow{combined}, combined)
+										if err := sqlExpressionError(on); err != nil {
+											return SQLQueryResult{}, err
+										}
+										if !sqlTruthy(on) {
+											continue
+										}
 										matched = true
-										next = append(next, mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}))
+										next = append(next, combined)
+										if len(next) > maxRows {
+											return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+										}
 									}
 								}
 								if join.kind == "LEFT" && !matched {
@@ -5122,6 +5133,12 @@ func sqlHashJoinFields(expression sqlExpr, leftAliases []string, rightAlias stri
 }
 
 func sqlRangeJoinFields(expression sqlExpr, leftAliases []string, rightAlias string) (string, string, string, string, bool) {
+	if expression.kind == "binary" && expression.op == "AND" && expression.left != nil && expression.right != nil {
+		if qualifier, leftField, rightField, operator, ok := sqlRangeJoinFields(*expression.left, leftAliases, rightAlias); ok {
+			return qualifier, leftField, rightField, operator, true
+		}
+		return sqlRangeJoinFields(*expression.right, leftAliases, rightAlias)
+	}
 	if expression.kind != "binary" || (expression.op != "<" && expression.op != "<=" && expression.op != ">" && expression.op != ">=") || expression.left == nil || expression.right == nil || expression.left.kind != "field" || expression.right.kind != "field" {
 		return "", "", "", "", false
 	}

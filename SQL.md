@@ -603,6 +603,10 @@ An equality inner join whose right `CACHE` field is indexed uses
 unmatched left row. Equality `RIGHT JOIN` probes an index on its left CACHE
 source while preserving every unmatched right row (`INDEX RIGHT JOIN`). An indexed equality/range predicate remains selectable
 inside an `AND` condition; all remaining predicates are still evaluated.
+Likewise, an `INNER` or `LEFT` range join may use one indexed comparison inside
+an `ON ... AND ...` condition and reports `RANGE INDEX JOIN`; every candidate
+still evaluates the complete `ON` expression before it can match, so additional
+predicates and SQL null semantics remain exact.
 Indexes refresh automatically when that cache value changes.
 
 `SQLJSONIndexStats` reports total and distinct indexed rows plus deterministic
