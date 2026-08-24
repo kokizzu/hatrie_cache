@@ -1074,6 +1074,12 @@ func TestExecuteSQLQueryObserverIncludesSafeOperatorCounters(t *testing.T) {
 			t.Fatalf("event operators = %#v, want safe %s counter", events[0].Operators, node)
 		}
 	}
+	for _, node := range []string{"SCAN", "FILTER", "PROJECT"} {
+		operator := operators[node]
+		if operator.InputBytes == nil || operator.OutputBytes == nil || *operator.OutputBytes <= 0 {
+			t.Fatalf("event operators = %#v, want safe %s byte counters", events[0].Operators, node)
+		}
+	}
 }
 
 func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
@@ -2928,12 +2934,51 @@ LIMIT 1`, SQLSourceResolverFunc(nil))
 	if result.Stats.OutputRows != 1 || result.Stats.OutputColumns != 1 || result.Stats.ResultBytes <= 0 || result.Stats.PlanSteps != len(result.Plan) || result.Stats.ElapsedNanos < 0 {
 		t.Fatalf("EXPLAIN ANALYZE stats = %#v, plan = %#v", result.Stats, result.Plan)
 	}
-	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "result_bytes", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
+	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
 		t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %#v", result.Columns, want)
 	}
 	last := result.Rows[len(result.Rows)-1]
 	if last["node"] != "ANALYZE" || last["actual_rows"] != 1 || last["elapsed_ns"] != result.Stats.ElapsedNanos {
 		t.Fatalf("EXPLAIN ANALYZE summary = %#v, stats = %#v", last, result.Stats)
+	}
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReportsOperatorByteFlow(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (1, 'discard'), (2, 'keep'), (3, 'also keep') AS values(id, label)
+WHERE id >= 2
+SELECT id, label`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("EXPLAIN ANALYZE byte flow: %v", err)
+	}
+	for _, column := range []string{"actual_input_bytes", "actual_output_bytes"} {
+		found := false
+		for _, got := range result.Columns {
+			found = found || got == column
+		}
+		if !found {
+			t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %q", result.Columns, column)
+		}
+	}
+	bytesByNode := map[string][2]int{}
+	for _, row := range result.Rows {
+		node, _ := row["node"].(string)
+		input, inputOK := row["actual_input_bytes"].(int)
+		output, outputOK := row["actual_output_bytes"].(int)
+		if inputOK && outputOK {
+			bytesByNode[node] = [2]int{input, output}
+		}
+	}
+	for _, node := range []string{"SCAN", "FILTER", "PROJECT"} {
+		flow, ok := bytesByNode[node]
+		if !ok || flow[1] <= 0 {
+			t.Fatalf("EXPLAIN ANALYZE byte flow = %#v, want non-empty %s output bytes", bytesByNode, node)
+		}
+	}
+	if scan, filter := bytesByNode["SCAN"], bytesByNode["FILTER"]; filter[0] != scan[1] || filter[1] >= filter[0] {
+		t.Fatalf("SCAN/FILTER bytes = %#v/%#v, want filter input equal scan output and fewer filtered bytes", scan, filter)
 	}
 }
 

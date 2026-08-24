@@ -863,8 +863,8 @@ ID. `SlowQueryThreshold` marks events whose total elapsed time reaches that
 duration. Events include exact materialized row-payload bytes, output shape,
 error text, and an explicit cancellation reason for context cancellation or
 deadline expiry. Events also include `Operators`: privacy-safe per-operator
-node names, measured input/output rows, elapsed time, and any available row
-estimate. Unlike `EXPLAIN ANALYZE`, these counters intentionally omit plan
+node names, measured input/output rows, exact byte flow where available,
+elapsed time, and any available row estimate. Unlike `EXPLAIN ANALYZE`, these counters intentionally omit plan
 details, SQL text, cache keys, predicates, and result values; they are safe to
 send directly to a metrics or structured-log sink.
 
@@ -970,7 +970,9 @@ Use `EXPLAIN ANALYZE` to execute the query once. It returns the plan plus
 row-payload `result_bytes`, and `plan_steps`.
 Each executed scan, join, filter, aggregation, projection, distinct, sort,
 pagination, and set-operation plan step also carries `actual_input_rows`,
-`actual_output_rows`, and its own `elapsed_ns`. Index scans with an estimate
+`actual_output_rows`, and its own `elapsed_ns`. Core row-carrying operators
+also report exact logical `actual_input_bytes` and `actual_output_bytes` (JSON
+payload bytes, excluding aliases and plan metadata). Index scans with an estimate
 also carry signed `estimate_error_rows` (`actual − estimated`), so a positive
 value identifies an underestimated posting list and a negative value an
 overestimate. When a conjunction offers several estimated equality-index

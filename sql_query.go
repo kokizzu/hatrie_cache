@@ -89,6 +89,8 @@ type SQLQueryOperator struct {
 	Node          string `json:"node"`
 	InputRows     int    `json:"input_rows"`
 	OutputRows    int    `json:"output_rows"`
+	InputBytes    *int   `json:"input_bytes,omitempty"`
+	OutputBytes   *int   `json:"output_bytes,omitempty"`
 	ElapsedNanos  int64  `json:"elapsed_ns"`
 	EstimatedRows *int   `json:"estimated_rows,omitempty"`
 }
@@ -279,11 +281,13 @@ type SQLQueryResult struct {
 // EstimatedRows is present only when the parser can know it without reading a
 // cache source (for example an inline VALUES source).
 type SQLExplainStep struct {
-	Node             string `json:"node"`
-	Detail           string `json:"detail"`
-	EstimatedRows    *int   `json:"estimated_rows,omitempty"`
-	ActualInputRows  *int   `json:"actual_input_rows,omitempty"`
-	ActualOutputRows *int   `json:"actual_output_rows,omitempty"`
+	Node              string `json:"node"`
+	Detail            string `json:"detail"`
+	EstimatedRows     *int   `json:"estimated_rows,omitempty"`
+	ActualInputRows   *int   `json:"actual_input_rows,omitempty"`
+	ActualOutputRows  *int   `json:"actual_output_rows,omitempty"`
+	ActualInputBytes  *int   `json:"actual_input_bytes,omitempty"`
+	ActualOutputBytes *int   `json:"actual_output_bytes,omitempty"`
 	// EstimateErrorRows is actual output rows minus estimated rows. Positive
 	// values mean the estimate was too low; negative values mean it was too high.
 	EstimateErrorRows *int   `json:"estimate_error_rows,omitempty"`
@@ -953,6 +957,14 @@ func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
 		if step.EstimatedRows != nil {
 			estimate := *step.EstimatedRows
 			operator.EstimatedRows = &estimate
+		}
+		if step.ActualInputBytes != nil {
+			bytes := *step.ActualInputBytes
+			operator.InputBytes = &bytes
+		}
+		if step.ActualOutputBytes != nil {
+			bytes := *step.ActualOutputBytes
+			operator.OutputBytes = &bytes
 		}
 		operators = append(operators, operator)
 	}
@@ -3756,17 +3768,28 @@ type sqlExecutionMetrics struct {
 }
 
 func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outputRows int, started time.Time) {
+	metrics.recordBytes(node, detail, inputRows, outputRows, -1, -1, started)
+}
+
+func (metrics *sqlExecutionMetrics) recordBytes(node, detail string, inputRows, outputRows, inputBytes, outputBytes int, started time.Time) {
 	if metrics == nil {
 		return
 	}
 	elapsed := time.Since(started).Nanoseconds()
-	metrics.steps = append(metrics.steps, SQLExplainStep{
+	step := SQLExplainStep{
 		Node:             node,
 		Detail:           detail,
 		ActualInputRows:  sqlExplainIntPointer(inputRows),
 		ActualOutputRows: sqlExplainIntPointer(outputRows),
 		ElapsedNanos:     &elapsed,
-	})
+	}
+	if inputBytes >= 0 {
+		step.ActualInputBytes = sqlExplainIntPointer(inputBytes)
+	}
+	if outputBytes >= 0 {
+		step.ActualOutputBytes = sqlExplainIntPointer(outputBytes)
+	}
+	metrics.steps = append(metrics.steps, step)
 }
 
 func (metrics *sqlExecutionMetrics) recordEstimated(node, detail string, estimatedRows *int, inputRows, outputRows int, started time.Time) {
@@ -3782,6 +3805,14 @@ func sqlExplainIntPointer(value int) *int { return &value }
 
 func (metrics *sqlExecutionMetrics) recordScan(source sqlSource, outputRows int, started time.Time) {
 	metrics.record("SCAN", sqlExplainSource(source), 0, outputRows, started)
+	if metrics == nil || source.kind != "VALUES" {
+		return
+	}
+	metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(len(source.values))
+}
+
+func (metrics *sqlExecutionMetrics) recordScanRows(source sqlSource, rows []SQLRow, started time.Time) {
+	metrics.recordBytes("SCAN", sqlExplainSource(source), 0, len(rows), 0, sqlRowsBytes(rows), started)
 	if metrics == nil || source.kind != "VALUES" {
 		return
 	}
@@ -3828,7 +3859,7 @@ func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, 
 			return nil, true, fmt.Errorf("SQL source %q exceeds the %d row limit", source.alias, maxRows)
 		}
 		rowsByAlias[source.alias] = wrapSQLSource(source, resolved)
-		metrics.recordScan(source, len(resolved), started)
+		metrics.recordScanRows(source, resolved, started)
 	}
 
 	start := 0
@@ -3984,13 +4015,14 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			}
 			metrics.recordEstimated("INDEX SCAN", sqlExplainSource(*q.from), estimatedRows, 0, len(base), started)
 		} else {
-			metrics.recordScan(*q.from, len(base), started)
+			metrics.recordScanRows(*q.from, base, started)
 		}
 		rows = wrapSQLSource(*q.from, base)
 		pushedWhere = q.where.kind != "" && sqlCanPushBaseWhere(q)
 		if pushedWhere {
 			started = time.Now()
 			inputRows := len(rows)
+			inputBytes := sqlExecRowsBytes(rows)
 			values, err := evalSQLExprBatch(q.where, rows, functions)
 			if err != nil {
 				return SQLQueryResult{}, err
@@ -4005,7 +4037,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				}
 			}
 			rows = filtered
-			metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
+			metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
 		}
 		leftAliases := []string{q.from.alias}
 		for _, join := range q.joins {
@@ -4338,6 +4370,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	if q.where.kind != "" && !pushedWhere {
 		started = time.Now()
 		inputRows := len(rows)
+		inputBytes := sqlExecRowsBytes(rows)
 		values, err := evalSQLExprBatch(q.where, rows, functions)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -4352,7 +4385,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			}
 		}
 		rows = filtered
-		metrics.record("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), started)
+		metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
 	}
 	if indexOrdered {
 		result, handled, err := executeSQLOrderedGroupAggregate(q, rows, control, metrics)
@@ -4595,7 +4628,11 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			out[index].row[result.Columns[column]] = values[index]
 		}
 	}
-	metrics.record("PROJECT", sqlExplainSelects(q.selects), len(groups), len(out), started)
+	projectedBytes := 0
+	for _, output := range out {
+		projectedBytes += sqlRowBytes(output.row)
+	}
+	metrics.recordBytes("PROJECT", sqlExplainSelects(q.selects), len(groups), len(out), sqlGroupedRowsBytes(groups), projectedBytes, started)
 	if q.distinct {
 		started = time.Now()
 		inputRows := len(out)
@@ -4962,6 +4999,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	result.Rows = result.Rows[:0]
 	for _, step := range result.Plan {
 		row := SQLRow{"node": step.Node, "detail": step.Detail, "actual_input_rows": *step.ActualInputRows, "actual_output_rows": *step.ActualOutputRows, "elapsed_ns": *step.ElapsedNanos}
+		if step.ActualInputBytes != nil {
+			row["actual_input_bytes"] = *step.ActualInputBytes
+		}
+		if step.ActualOutputBytes != nil {
+			row["actual_output_bytes"] = *step.ActualOutputBytes
+		}
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
 		}
@@ -4970,7 +5013,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		result.Rows = append(result.Rows, row)
 	}
-	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "result_bytes", "elapsed_ns")
+	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
 	result.Rows = append(result.Rows, SQLRow{
 		"node":         "ANALYZE",
 		"detail":       "execution summary",
@@ -5630,6 +5673,19 @@ func sqlRowsBytes(rows []SQLRow) int {
 	total := 0
 	for _, row := range rows {
 		total += sqlRowBytes(row)
+	}
+	return total
+}
+
+// sqlExecRowsBytes measures the logical source payload carried by execution
+// rows. Join aliases are intentionally not serialized: bytes describe values,
+// not plan metadata.
+func sqlExecRowsBytes(rows []sqlExecRow) int {
+	total := 0
+	for _, row := range rows {
+		for _, source := range row.sources {
+			total += sqlRowBytes(source)
+		}
 	}
 	return total
 }
