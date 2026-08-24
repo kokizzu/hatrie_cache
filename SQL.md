@@ -977,9 +977,10 @@ also carry signed `estimate_error_rows` (`actual − estimated`) and, for a
 nonzero estimate, `estimate_error_percent`. A positive value identifies an
 underestimated posting list and a negative value an overestimate. When a
 conjunction offers several estimated equality-index probes, an `INDEX
-CANDIDATES` step lists each candidate, its estimated rows, the selected probe,
-and explicit rejection such as `index unavailable`; its input/output counts are
-candidate/selected counts. Its final `ANALYZE` result
+CANDIDATES` step lists each candidate, its estimated rows, its deterministic
+`estimated_cost` (one index lookup plus those estimated rows to check), the
+selected probe, and explicit rejection such as `index unavailable`; its
+input/output counts are candidate/selected counts. Its final `ANALYZE` result
 row repeats the measured output-row count and total elapsed time for
 table-oriented clients. Source estimates remain absent when they would require
 reading or guessing about a cache source.

@@ -5469,6 +5469,7 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 	type candidate struct {
 		condition sqlExpr
 		estimate  int
+		cost      int
 	}
 	conjuncts := []sqlExpr{}
 	var collect func(sqlExpr)
@@ -5488,7 +5489,7 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 			return nil, false, err
 		}
 		if estimate != nil {
-			candidates = append(candidates, candidate{condition: conjunct, estimate: *estimate})
+			candidates = append(candidates, candidate{condition: conjunct, estimate: *estimate, cost: sqlIndexedEqualityProbeCost(*estimate)})
 		}
 	}
 	sort.SliceStable(candidates, func(left, right int) bool { return candidates[left].estimate < candidates[right].estimate })
@@ -5498,17 +5499,31 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver, metrics)
 		if indexed || err != nil {
 			if err == nil {
-				details = append(details, fmt.Sprintf("%s estimated_rows=%d selected", sqlExplainExpression(candidate.condition), candidate.estimate))
+				details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d selected", sqlExplainExpression(candidate.condition), candidate.estimate, candidate.cost))
 				metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 1, started)
 			}
 			return rows, indexed, err
 		}
-		details = append(details, fmt.Sprintf("%s estimated_rows=%d rejected: index unavailable", sqlExplainExpression(candidate.condition), candidate.estimate))
+		details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d rejected: index unavailable", sqlExplainExpression(candidate.condition), candidate.estimate, candidate.cost))
 	}
 	if len(candidates) > 0 {
 		metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 0, started)
 	}
 	return nil, false, nil
+}
+
+// sqlIndexedEqualityProbeCost models one indexed lookup plus the estimated
+// posting-list rows that must be checked by the complete predicate. It is used
+// only to explain a candidate decision; rows remain the stable sort key, so an
+// estimate can never change query results or the written-order tie break.
+func sqlIndexedEqualityProbeCost(estimatedRows int) int {
+	if estimatedRows < 0 {
+		return 0
+	}
+	if estimatedRows == int(^uint(0)>>1) {
+		return estimatedRows
+	}
+	return estimatedRows + 1
 }
 
 // sqlIndexedEqualityEstimate reports the average posting-list cardinality for

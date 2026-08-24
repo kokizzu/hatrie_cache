@@ -183,12 +183,19 @@ func TestExecuteSQLQueryExplainAnalyzeReportsIndexCandidateDecision(t *testing.T
 		if step.Node != "INDEX CANDIDATES" {
 			continue
 		}
-		if step.ActualInputRows == nil || *step.ActualInputRows != 2 || step.ActualOutputRows == nil || *step.ActualOutputRows != 1 || !strings.Contains(step.Detail, "p.id = 7 estimated_rows=1 rejected: index unavailable") || !strings.Contains(step.Detail, `p.kind = "common" estimated_rows=50 selected`) {
-			t.Fatalf("index candidate plan = %#v, want candidate estimates, rejection, and selection", step)
+		if step.ActualInputRows == nil || *step.ActualInputRows != 2 || step.ActualOutputRows == nil || *step.ActualOutputRows != 1 || !strings.Contains(step.Detail, "p.id = 7 estimated_rows=1 estimated_cost=2 rejected: index unavailable") || !strings.Contains(step.Detail, `p.kind = "common" estimated_rows=50 estimated_cost=51 selected`) {
+			t.Fatalf("index candidate plan = %#v, want candidate estimates, cost, rejection, and selection", step)
 		}
 		return
 	}
 	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX CANDIDATES", result.Plan)
+}
+
+func TestSQLIndexedEqualityProbeCostSaturates(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	if got := sqlIndexedEqualityProbeCost(maxInt); got != maxInt {
+		t.Fatalf("sqlIndexedEqualityProbeCost(MaxInt) = %d, want %d", got, maxInt)
+	}
 }
 
 func (resolver *sqlStreamingTestResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
