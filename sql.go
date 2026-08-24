@@ -360,6 +360,40 @@ func (parser *sqlParser) parseProgram() (CacheCommandRequest, error) {
 	if parser.current().kind == sqlTokenEOF {
 		return CacheCommandRequest{}, parser.expected(parser.current(), "a SQL statement", nil)
 	}
+	if parser.current().kind == sqlTokenIdentifier && strings.EqualFold(parser.current().text, "BEGIN") {
+		parser.next()
+		if parser.current().kind != sqlTokenIdentifier || !strings.EqualFold(parser.current().text, "ATOMIC") {
+			return CacheCommandRequest{}, parser.expected(parser.current(), "ATOMIC after BEGIN", []string{"ATOMIC"})
+		}
+		parser.next()
+		if parser.current().kind != sqlTokenSemicolon {
+			return CacheCommandRequest{}, parser.expected(parser.current(), "a semicolon after BEGIN ATOMIC", nil)
+		}
+		parser.next()
+		requests := make([]CacheCommandRequest, 0, 1)
+		for !(parser.current().kind == sqlTokenIdentifier && strings.EqualFold(parser.current().text, "COMMIT")) {
+			if parser.current().kind == sqlTokenEOF {
+				return CacheCommandRequest{}, parser.expected(parser.current(), "COMMIT to close BEGIN ATOMIC", []string{"COMMIT"})
+			}
+			request, err := parser.parseStatement()
+			if err != nil {
+				return CacheCommandRequest{}, err
+			}
+			requests = append(requests, request)
+			if parser.current().kind != sqlTokenSemicolon {
+				return CacheCommandRequest{}, parser.expected(parser.current(), "a semicolon or COMMIT", []string{"COMMIT"})
+			}
+			parser.next()
+		}
+		parser.next()
+		if parser.current().kind == sqlTokenSemicolon {
+			parser.next()
+		}
+		if parser.current().kind != sqlTokenEOF {
+			return CacheCommandRequest{}, parser.expected(parser.current(), "end of input after COMMIT", nil)
+		}
+		return CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: requests}, nil
+	}
 	requests := make([]CacheCommandRequest, 0, 1)
 	for parser.current().kind != sqlTokenEOF {
 		request, err := parser.parseStatement()

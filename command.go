@@ -18,6 +18,7 @@ const maxPublicCommandBatchSize = 4096
 
 type CacheCommandRequest struct {
 	Command     string                `json:"command"`
+	Atomic      bool                  `json:"atomic,omitempty"`
 	Key         string                `json:"key"`
 	Value       string                `json:"value,omitempty"`
 	Values      Slice                 `json:"values,omitempty"`
@@ -1056,6 +1057,13 @@ func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor(request CacheComm
 			return CacheCommandResponse{}, false
 		}
 	}
+	if request.Atomic {
+		for index, payload := range payloads {
+			if err := validateAtomicScalarBatchPayload(payload, index); err != nil {
+				return commandError(err.Error()), true
+			}
+		}
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -1089,6 +1097,37 @@ func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor(request CacheComm
 		}
 	}
 	return publicCommandBatchResponse(responses[:responseCount], allOK), true
+}
+
+func validateAtomicScalarBatchPayload(request CacheCommandRequest, index int) error {
+	command := normalizedCommand(request.Command)
+	if strings.TrimSpace(request.Key) == "" || !validKey(strings.TrimSpace(request.Key)) {
+		return fmt.Errorf("atomic batch value %d: valid key is required", index)
+	}
+	switch command {
+	case "INC":
+		return fmt.Errorf("atomic batch value %d: INC is not supported because counter overflow cannot be rolled back", index)
+	case "SETINT":
+		if _, err := strconv.ParseInt(request.Value, 10, 32); err != nil {
+			return fmt.Errorf("atomic batch value %d: value must be a 32-bit integer", index)
+		}
+	case "SETINTX":
+		if _, err := strconv.ParseInt(request.Value, 10, 32); err != nil {
+			return fmt.Errorf("atomic batch value %d: value must be a 32-bit integer", index)
+		}
+		if _, ok := requirePositiveTTL(request.TTLSeconds); !ok {
+			return fmt.Errorf("atomic batch value %d: positive ttl_seconds is required", index)
+		}
+	case "SETX", "SETSTRX", "EXPIRE":
+		if _, ok := requirePositiveTTL(request.TTLSeconds); !ok {
+			return fmt.Errorf("atomic batch value %d: positive ttl_seconds is required", index)
+		}
+	case "EXPIREAT":
+		if request.UnixSeconds == nil {
+			return fmt.Errorf("atomic batch value %d: unix_seconds is required", index)
+		}
+	}
+	return nil
 }
 
 type publicScalarBatchCommand uint8

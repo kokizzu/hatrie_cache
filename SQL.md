@@ -443,7 +443,11 @@ binary payload rules, and must never be made available by a normal SQL client.
 
 Each parsed statement becomes a `CacheCommandRequest`; a program with more than
 one statement becomes `{command:"BATCH", batch:[...]}` in source order. As
-with the existing BATCH command, this is a pipeline, not a transaction.
+with the existing BATCH command, this is a pipeline, not a transaction. Use
+`BEGIN ATOMIC; ...; COMMIT` for the opt-in scalar atomic mode. It validates the
+entire supported scalar batch before writes begin; commands such as `INC` that
+can fail after mutation are rejected rather than being falsely described as
+transactional.
 
 | SQL form | Existing command request |
 | --- | --- |

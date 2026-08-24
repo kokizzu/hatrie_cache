@@ -112,6 +112,18 @@ func TestCompileSQLCompilesProgramsToOrderedBatch(t *testing.T) {
 	}
 }
 
+func TestCompileSQLCompilesAtomicProgram(t *testing.T) {
+	t.Parallel()
+	got, err := CompileSQL("BEGIN ATOMIC; INSERT INTO cache (key, value) VALUES ('name', 'ivi'); COMMIT;")
+	if err != nil {
+		t.Fatalf("CompileSQL() error = %v", err)
+	}
+	want := CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{{Command: "SETSTR", Key: "name", Value: "ivi"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CompileSQL() = %#v, want %#v", got, want)
+	}
+}
+
 func TestCompileSQLRejectsInternalReplicationCommands(t *testing.T) {
 	t.Parallel()
 
