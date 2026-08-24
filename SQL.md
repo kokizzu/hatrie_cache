@@ -281,6 +281,7 @@ the first side but not the second. These operations are read-only.
 | Measure one plan | `EXPLAIN ANALYZE FROM ... SELECT ...` | Executes once and returns plan steps plus elapsed/output statistics. |
 | Avoid text interpolation | `... WHERE u.id = $1` with separate parameters | Parameters keep their JSON/Go type and are not concatenated into SQL. |
 | Page results | `POST /api/sql` with `page_size` and returned `cursor` | Reads the next page from the same query/parameter payload; no mutation. |
+| Limit with standard syntax | `FETCH FIRST 20 ROWS ONLY` | Equivalent to `LIMIT 20`; cannot be combined with `LIMIT`. |
 | Stream rows | `POST /api/sql` with `"stream":true` | Emits NDJSON column, row, and terminal records without materializing result rows. |
 
 Streaming also supports a chain of equality `INNER` or `LEFT JOIN`s when the

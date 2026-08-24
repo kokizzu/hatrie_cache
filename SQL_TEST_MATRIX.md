@@ -29,6 +29,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Connected multi-way equality inner joins choose the smallest current-snapshot source first, expose the decision through `EXPLAIN ANALYZE`, and retain deterministic written-source result order | [`TestExecuteSQLQueryReordersConnectedInnerHashJoinsByCardinality`](sql_production_test.go) |
 | Standard `AND` precedence, `NOT`, `DISTINCT` | [`TestExecuteSQLQueryUsesStandardBooleanPrecedence`](sql_production_test.go), [`TestExecuteSQLQuerySupportsNotAndDistinct`](sql_production_test.go) |
 | Nulls, `LIKE`, aggregates, `HAVING`, limit and offset | [`TestExecuteSQLQueryAggregateLimitOffsetAndNullMatrix`](sql_production_test.go) |
+| Standard `FETCH FIRST n ROWS ONLY` pagination alias plus strict `LIMIT` conflict diagnostics | [`TestExecuteSQLQuerySupportsFetchFirst`](sql_production_test.go), [`TestSQLKeywordInventoryReportsContextualDiagnostics`](sql_function_test.go) |
 | RFC3339 `TIMESTAMP` literals, chronological comparisons, and actionable malformed-literal diagnostics | [`TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics`](sql_production_test.go) |
 | Calendar-valid `DATE` literals, chronological comparisons, and actionable malformed-literal diagnostics | [`TestExecuteSQLQuerySupportsDateLiteralsAndDiagnostics`](sql_production_test.go) |
 | Incompatible non-null literal comparison types are rejected with type names and a Rust-style source span | [`TestExecuteSQLQueryDiagnosesIncompatibleLiteralComparisonTypes`](sql_production_test.go) |

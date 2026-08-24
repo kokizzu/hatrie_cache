@@ -1269,6 +1269,17 @@ func TestExecuteSQLQuerySupportsExplicitNullOrder(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQuerySupportsFetchFirst(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES (3), (1), (2) AS values(value) SELECT value ORDER BY value FETCH FIRST 2 ROWS ONLY", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("FETCH FIRST query: %v", err)
+	}
+	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("FETCH FIRST rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
 	t.Parallel()
 	random := rand.New(rand.NewSource(20260822))

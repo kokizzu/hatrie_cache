@@ -148,6 +148,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"DISTINCT", "query", "FROM VALUES (1), (1) AS a(value) SELECT DISTINCT value"},
 		{"EXCEPT", "query", "FROM VALUES (1), (2) AS a(value) SELECT value EXCEPT FROM VALUES (2) AS b(value) SELECT value"},
 		{"EXPLAIN", "query", "EXPLAIN FROM VALUES (1) AS a(value) SELECT value"},
+		{"FETCH", "query", "FROM VALUES (1), (2) AS a(value) SELECT value FETCH FIRST 1 ROWS ONLY"},
 		{"FROM", "query", "FROM VALUES (1) AS a(value) SELECT value"},
 		{"FULL", "query", "FROM VALUES (1) AS a(value) FULL JOIN VALUES (2) AS b(value) ON a.value = b.value SELECT a.value"},
 		{"GROUP", "query", "FROM VALUES (1), (1) AS a(value) GROUP BY value SELECT value"},
@@ -165,6 +166,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"NULL", "query", "FROM VALUES (NULL) AS a(value) SELECT value"},
 		{"NULLS", "query", "FROM VALUES (NULL), (1) AS a(value) SELECT value ORDER BY value NULLS LAST"},
 		{"OFFSET", "query", "FROM VALUES (1), (2) AS a(value) SELECT value OFFSET 1"},
+		{"ONLY", "query", "FROM VALUES (1), (2) AS a(value) SELECT value FETCH FIRST 1 ROWS ONLY"},
 		{"ON", "query", "FROM VALUES (1) AS a(value) JOIN VALUES (1) AS b(value) ON a.value = b.value SELECT a.value"},
 		{"OR", "query", "FROM VALUES (FALSE, TRUE) AS a(left_value, right_value) WHERE left_value OR right_value SELECT right_value"},
 		{"ORDER", "query", "FROM VALUES (1) AS a(value) SELECT value ORDER BY value"},
@@ -273,7 +275,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "EXCEPT": {}, "EXPLAIN": {}, "FETCH": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "INNER": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "ONLY": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -304,6 +306,7 @@ func TestSQLKeywordInventoryReportsContextualDiagnostics(t *testing.T) {
 		{"order_requires_by", "FROM VALUES (1) AS a(value) SELECT value ORDER value", "expected BY"},
 		{"is_requires_null", "FROM VALUES (NULL) AS a(value) WHERE value IS TRUE SELECT value", "expected NULL"},
 		{"intersect_all_is_rejected", "FROM VALUES (1) AS a(value) SELECT value INTERSECT ALL FROM VALUES (1) AS b(value) SELECT value", "INTERSECT ALL is not supported"},
+		{"fetch_conflicts_with_limit", "FROM VALUES (1) AS a(value) SELECT value LIMIT 1 FETCH FIRST 1 ROWS ONLY", "FETCH cannot be combined with LIMIT"},
 		{"self_reference_requires_recursive", "WITH sequence(value) AS (FROM sequence SELECT value) FROM sequence SELECT value", "requires WITH RECURSIVE"},
 		{"recursive_requires_union_term", "WITH RECURSIVE sequence(value) AS (FROM sequence SELECT value) FROM sequence SELECT value", "requires exactly one UNION or UNION ALL recursive term"},
 	} {

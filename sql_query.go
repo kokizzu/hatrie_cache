@@ -1740,6 +1740,25 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.limit = value
+		case p.keyword("FETCH"):
+			if q.limit >= 0 {
+				return nil, p.diagnostic(p.current(), "FETCH cannot be combined with LIMIT")
+			}
+			p.next()
+			if err := p.expectKeyword("FIRST"); err != nil {
+				return nil, err
+			}
+			value, err := p.parseInteger("FETCH FIRST")
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectKeyword("ROWS"); err != nil {
+				return nil, err
+			}
+			if err := p.expectKeyword("ONLY"); err != nil {
+				return nil, err
+			}
+			q.limit = value
 		case p.keyword("OFFSET"):
 			if q.offset != 0 {
 				return nil, p.diagnostic(p.current(), "OFFSET appears more than once")
@@ -2728,7 +2747,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE":
+	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE":
 		return true
 	}
 	return false
