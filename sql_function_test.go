@@ -27,6 +27,61 @@ func TestCompileSQLFunctionDefinition(t *testing.T) {
 	}
 }
 
+func TestSQLFunctionRegistryPersistsDefinitionsAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sql-functions.json")
+	definition := SQLFunctionDefinition{Name: "eligible", Arguments: []string{"age", "score"}, ArgumentTypes: []string{"INTEGER", "INTEGER"}, Language: "GO", Source: "return age > 10 && score < 9"}
+	registry, err := OpenSQLFunctionRegistry(SQLFunctionRegistryOptions{PersistencePath: path})
+	if err != nil {
+		t.Fatalf("OpenSQLFunctionRegistry() error = %v", err)
+	}
+	if err := registry.Register(definition); err != nil {
+		registry.Close()
+		t.Fatalf("Register() error = %v", err)
+	}
+	registry.Close()
+
+	restarted, err := OpenSQLFunctionRegistry(SQLFunctionRegistryOptions{PersistencePath: path})
+	if err != nil {
+		t.Fatalf("OpenSQLFunctionRegistry(restart) error = %v", err)
+	}
+	defer restarted.Close()
+	got, err := restarted.EvaluateSQLFunction("eligible", []SQLFunctionCall{{Arguments: []interface{}{int64(12), int64(7)}}, {Arguments: []interface{}{int64(4), int64(7)}}})
+	if err != nil {
+		t.Fatalf("EvaluateSQLFunction() after restart error = %v", err)
+	}
+	if want := []interface{}{true, false}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EvaluateSQLFunction() after restart = %#v, want %#v", got, want)
+	}
+}
+
+func TestSQLFunctionRegistryRejectsBrokenPersistedDefinitions(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sql-functions.json")
+	if err := os.WriteFile(path, []byte(`[{"name":"broken","language":"GO","source":"return missing > 0"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenSQLFunctionRegistry(SQLFunctionRegistryOptions{PersistencePath: path}); err == nil || !strings.Contains(err.Error(), "load SQL function definition 0") || !strings.Contains(err.Error(), "unknown argument") {
+		t.Fatalf("OpenSQLFunctionRegistry() error = %v, want indexed function diagnostic", err)
+	}
+}
+
+func TestSQLFunctionRegistryDoesNotInstallFunctionWhenPersistenceFails(t *testing.T) {
+	t.Parallel()
+
+	registry := NewSQLFunctionRegistryWithOptions(SQLFunctionRegistryOptions{PersistencePath: t.TempDir()})
+	defer registry.Close()
+	err := registry.Register(SQLFunctionDefinition{Name: "eligible", Arguments: []string{"age"}, Language: "GO", Source: "return age > 10"})
+	if err == nil || !strings.Contains(err.Error(), "persist SQL function definitions") {
+		t.Fatalf("Register() error = %v, want persistence failure", err)
+	}
+	if _, err := registry.EvaluateSQLFunction("eligible", []SQLFunctionCall{{Arguments: []interface{}{int64(12)}}}); err == nil || !strings.Contains(err.Error(), "unknown SQL function") {
+		t.Fatalf("EvaluateSQLFunction() after failed persistence error = %v, want no installed function", err)
+	}
+}
+
 func TestSQLGoFunctionRegistryReportsTypedArgumentErrorWithFunctionSource(t *testing.T) {
 	t.Parallel()
 

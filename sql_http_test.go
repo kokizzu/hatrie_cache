@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -267,5 +268,46 @@ func TestMonitoringSQLFunctionRouteRegistersTypedGoFunction(t *testing.T) {
 	}
 	if want := (SQLQueryResult{Columns: []string{"name"}, Rows: []SQLRow{{"name": "Ivi"}}}); !reflect.DeepEqual(result, want) {
 		t.Fatalf("query result = %#v, want %#v", result, want)
+	}
+}
+
+func TestMonitoringSQLFunctionRoutePersistsAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sql-functions.json")
+	registry, err := OpenSQLFunctionRegistry(SQLFunctionRegistryOptions{PersistencePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{SQLFunctions: registry}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql/functions", strings.NewReader(`{"name":"eligible","arguments":["age","score"],"argument_types":["INTEGER","INTEGER"],"language":"GO","source":"return age > 10 && score < 9"}`))
+	request.Header.Set("Content-Type", "application/json")
+	first.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		registry.Close()
+		t.Fatalf("register status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	registry.Close()
+
+	restarted, err := OpenSQLFunctionRegistry(SQLFunctionRegistryOptions{PersistencePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	second := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{SQLFunctions: restarted}).Handler()
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM VALUES ('Ivi', 12, 7), ('Lia', 4, 7) AS people(name, age, score) WHERE eligible(age, score) SELECT name"}`))
+	request.Header.Set("Content-Type", "application/json")
+	second.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("restarted query status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var result SQLQueryResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("restarted query JSON error = %v", err)
+	}
+	if want := (SQLQueryResult{Columns: []string{"name"}, Rows: []SQLRow{{"name": "Ivi"}}}); !reflect.DeepEqual(result, want) {
+		t.Fatalf("restarted query result = %#v, want %#v", result, want)
 	}
 }

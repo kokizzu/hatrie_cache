@@ -1,7 +1,10 @@
 package hatriecache
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -71,9 +74,10 @@ type sqlFunctionCloser interface{ Close() }
 // SQLFunctionRegistry keeps compiled UDFs. It is safe for concurrent query
 // execution.
 type SQLFunctionRegistry struct {
-	mu        sync.RWMutex
-	functions map[string]sqlFunctionRuntime
-	options   SQLFunctionRegistryOptions
+	mu          sync.RWMutex
+	functions   map[string]sqlFunctionRuntime
+	definitions map[string]SQLFunctionDefinition
+	options     SQLFunctionRegistryOptions
 }
 
 // SQLFunctionRegistryOptions configures optional, sandboxed UDF runtimes.
@@ -82,6 +86,10 @@ type SQLFunctionRegistry struct {
 // JavaScript is compiled once when registered and is executed only inside
 // Wazero afterwards.
 type SQLFunctionRegistryOptions struct {
+	// PersistencePath stores normalized function definitions. OpenSQLFunctionRegistry
+	// reloads and recompiles this file so registered functions survive a restart.
+	// An empty path keeps the registry in-memory only.
+	PersistencePath    string
 	JavyPath           string
 	JSCompileTimeout   time.Duration
 	JSExecutionTimeout time.Duration
@@ -98,18 +106,68 @@ func NewSQLFunctionRegistryWithOptions(options SQLFunctionRegistryOptions) *SQLF
 	if options.JSExecutionTimeout <= 0 {
 		options.JSExecutionTimeout = time.Second
 	}
-	return &SQLFunctionRegistry{functions: make(map[string]sqlFunctionRuntime), options: options}
+	return &SQLFunctionRegistry{functions: make(map[string]sqlFunctionRuntime), definitions: make(map[string]SQLFunctionDefinition), options: options}
+}
+
+// OpenSQLFunctionRegistry creates a registry and restores any definitions from
+// PersistencePath. Definitions are revalidated and recompiled before the
+// registry is returned, so a broken persisted function prevents a server from
+// silently starting without its expected SQL behavior.
+func OpenSQLFunctionRegistry(options SQLFunctionRegistryOptions) (*SQLFunctionRegistry, error) {
+	registry := NewSQLFunctionRegistryWithOptions(options)
+	if err := registry.Load(); err != nil {
+		registry.Close()
+		return nil, err
+	}
+	return registry, nil
 }
 
 func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) error {
 	if registry == nil {
 		return fmt.Errorf("SQL function registry is required")
 	}
-	if err := normalizeSQLFunctionDefinition(&definition); err != nil {
+	compiled, err := registry.compile(definition)
+	if err != nil {
 		return err
 	}
-	var compiled sqlFunctionRuntime
-	var err error
+	definition = compiled.definition
+	key := strings.ToUpper(definition.Name)
+	registry.mu.Lock()
+	definitions := make(map[string]SQLFunctionDefinition, len(registry.definitions)+1)
+	for name, existing := range registry.definitions {
+		definitions[name] = existing
+	}
+	definitions[key] = definition
+	if err := registry.persistDefinitionsLocked(definitions); err != nil {
+		registry.mu.Unlock()
+		if closer, ok := compiled.runtime.(sqlFunctionCloser); ok {
+			closer.Close()
+		}
+		return err
+	}
+	previous := registry.functions[key]
+	registry.functions[key] = compiled.runtime
+	registry.definitions = definitions
+	registry.mu.Unlock()
+	if closer, ok := previous.(sqlFunctionCloser); ok {
+		closer.Close()
+	}
+	return nil
+}
+
+type sqlCompiledFunction struct {
+	definition SQLFunctionDefinition
+	runtime    sqlFunctionRuntime
+}
+
+func (registry *SQLFunctionRegistry) compile(definition SQLFunctionDefinition) (sqlCompiledFunction, error) {
+	if err := normalizeSQLFunctionDefinition(&definition); err != nil {
+		return sqlCompiledFunction{}, err
+	}
+	var (
+		compiled sqlFunctionRuntime
+		err      error
+	)
 	switch definition.Language {
 	case "GO":
 		compiled, err = newSQLGoFunction(definition)
@@ -120,18 +178,86 @@ func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) 
 	case "JS":
 		compiled, err = newSQLJSFunction(definition, registry.options)
 	default:
-		return fmt.Errorf("SQL function %q language %q is not available", definition.Name, definition.Language)
+		return sqlCompiledFunction{}, fmt.Errorf("SQL function %q language %q is not available", definition.Name, definition.Language)
 	}
 	if err != nil {
-		return err
+		return sqlCompiledFunction{}, err
 	}
-	key := strings.ToUpper(definition.Name)
+	return sqlCompiledFunction{definition: definition, runtime: compiled}, nil
+}
+
+// Load replaces this registry with every persisted definition. It is useful for
+// controlled in-process reloads; OpenSQLFunctionRegistry calls it at startup.
+func (registry *SQLFunctionRegistry) Load() error {
+	if registry == nil {
+		return fmt.Errorf("SQL function registry is required")
+	}
+	path := strings.TrimSpace(registry.options.PersistencePath)
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read SQL function definitions: %w", err)
+	}
+	var definitions []SQLFunctionDefinition
+	if err := json.Unmarshal(data, &definitions); err != nil {
+		return fmt.Errorf("parse SQL function definitions: %w", err)
+	}
+	functions := make(map[string]sqlFunctionRuntime, len(definitions))
+	stored := make(map[string]SQLFunctionDefinition, len(definitions))
+	closeCompiled := func() {
+		for _, function := range functions {
+			if closer, ok := function.(sqlFunctionCloser); ok {
+				closer.Close()
+			}
+		}
+	}
+	for index, definition := range definitions {
+		compiled, err := registry.compile(definition)
+		if err != nil {
+			closeCompiled()
+			return fmt.Errorf("load SQL function definition %d: %w", index, err)
+		}
+		key := strings.ToUpper(compiled.definition.Name)
+		if _, duplicate := functions[key]; duplicate {
+			if closer, ok := compiled.runtime.(sqlFunctionCloser); ok {
+				closer.Close()
+			}
+			closeCompiled()
+			return fmt.Errorf("load SQL function definitions: duplicate function %q", compiled.definition.Name)
+		}
+		functions[key] = compiled.runtime
+		stored[key] = compiled.definition
+	}
 	registry.mu.Lock()
-	previous := registry.functions[key]
-	registry.functions[key] = compiled
+	previous := registry.functions
+	registry.functions = functions
+	registry.definitions = stored
 	registry.mu.Unlock()
-	if closer, ok := previous.(sqlFunctionCloser); ok {
-		closer.Close()
+	for _, function := range previous {
+		if closer, ok := function.(sqlFunctionCloser); ok {
+			closer.Close()
+		}
+	}
+	return nil
+}
+
+func (registry *SQLFunctionRegistry) persistDefinitionsLocked(definitions map[string]SQLFunctionDefinition) error {
+	path := strings.TrimSpace(registry.options.PersistencePath)
+	if path == "" {
+		return nil
+	}
+	ordered := make([]SQLFunctionDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		ordered = append(ordered, definition)
+	}
+	sort.Slice(ordered, func(left, right int) bool { return ordered[left].Name < ordered[right].Name })
+	if err := writeJSONFileAtomic(path, ordered); err != nil {
+		return fmt.Errorf("persist SQL function definitions: %w", err)
 	}
 	return nil
 }
@@ -156,6 +282,7 @@ func (registry *SQLFunctionRegistry) Close() {
 	registry.mu.Lock()
 	functions := registry.functions
 	registry.functions = make(map[string]sqlFunctionRuntime)
+	registry.definitions = make(map[string]SQLFunctionDefinition)
 	registry.mu.Unlock()
 	for _, function := range functions {
 		if closer, ok := function.(sqlFunctionCloser); ok {

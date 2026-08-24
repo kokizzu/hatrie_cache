@@ -129,7 +129,10 @@ the input syntax; it does not change the stored value or reply semantics.
 - `ttl_seconds` must be positive. `PERSIST` removes an existing TTL; it does
   not delete the key.
 - A multi-statement program is ordered but not atomic: an error in a later
-  statement does not undo an earlier successful statement.
+  statement does not undo an earlier successful statement. Use `BEGIN ATOMIC;
+  ...; COMMIT;` when every statement maps to a supported scalar command. The
+  compiler rejects unsafe forms such as `INC` before any write occurs, rather
+  than pretending that a partial rollback is safe.
 - Internal replication commands are rejected by the SQL compiler.
 
 ## Relational query walkthrough
@@ -1065,10 +1068,20 @@ engine, endpoint, and SDK are verified. Before adding them:
 - [x] Report source/type failures with function-source diagnostics.
 - [x] Add `CREATE FUNCTION ... LANGUAGE GO AS 'return expression'` routing to
       `hatrie-cli sql` and `POST /api/sql/functions`.
-- [ ] Persist registered function definitions across process restart.
+- [x] Persist normalized registered function definitions across process
+      restart with `-sql-functions-path=/var/lib/hatrie-cache/sql-functions.json`.
 - [x] Define and implement a numeric `LANGUAGE WASM` ABI and sandboxed
       `LANGUAGE JS` compiler-to-Wasm path; see [`UDF.md`](UDF.md) for limits,
       installation, benchmarks, and executable tests.
+
+When `-sql-functions-path` is configured on `hatrie-cache`, every successful
+`POST /api/sql/functions` registration atomically rewrites a deterministic JSON
+definition file. Startup reloads and recompiles every definition before the
+server begins accepting requests. A malformed file or a function that no longer
+compiles fails startup with the specific function index and source diagnostic;
+the server never silently starts with missing functions. The file contains only
+the user-provided definition metadata and source, never compiled Wasm or Go
+runtime state. Leave the flag empty for the previous in-memory-only behavior.
 
 ## Implementation checklist
 

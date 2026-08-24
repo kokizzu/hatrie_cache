@@ -68,6 +68,7 @@ type config struct {
 	counterWriteStripes            int
 	memoryCompactionInterval       time.Duration
 	monitoringWebDir               string
+	sqlFunctionsPath               string
 	monitoringReadHeaderTimeout    time.Duration
 	monitoringIdleTimeout          time.Duration
 	nodeID                         string
@@ -393,6 +394,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	stopReplicationSyncer := startReplicationSyncer(ctx, trie, replicator, cfg.replicationSyncInterval, cfg.replicationSyncPrefix, stderr)
 	defer stopReplicationSyncer()
+	sqlFunctions, err := hatriecache.OpenSQLFunctionRegistry(hatriecache.SQLFunctionRegistryOptions{PersistencePath: cfg.sqlFunctionsPath})
+	if err != nil {
+		return err
+	}
+	defer sqlFunctions.Close()
 
 	monitoringHandler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		NodeName:                         defaultNodeID(cfg.nodeID),
@@ -420,6 +426,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		ReplicationSafety:                replicationSafety,
 		EnforceLeaderWrites:              cfg.enforceLeaderWrites,
 		RuntimeConfig:                    redactedConfig(cfg),
+		SQLFunctions:                     sqlFunctions,
 	})
 	stopDBCompactor := startLevelDBCompactor(ctx, dbStore, cfg.dbCompactInterval, levelDBCompactorOptions{
 		StartKey: cfg.dbCompactStartKey,
@@ -569,6 +576,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.counterWriteStripes, "counter-write-stripes", cfg.counterWriteStripes, "existing-counter write lock stripes; use 0 to disable")
 	flags.DurationVar(&cfg.memoryCompactionInterval, "memory-compaction-interval", cfg.memoryCompactionInterval, "optional interval for rebuilding trie and typed pools after churn; use 0 to disable")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
+	flags.StringVar(&cfg.sqlFunctionsPath, "sql-functions-path", cfg.sqlFunctionsPath, "optional path that persists registered SQL function definitions across restart")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")

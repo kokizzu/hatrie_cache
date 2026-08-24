@@ -87,6 +87,18 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	}
 }
 
+func TestParseConfigSQLFunctionsPath(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := parseConfig([]string{"-sql-functions-path", "/tmp/functions.json"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.sqlFunctionsPath != "/tmp/functions.json" {
+		t.Fatalf("sqlFunctionsPath = %q, want configured path", cfg.sqlFunctionsPath)
+	}
+}
+
 func TestParseConfigAppliesProductionProfileDefaults(t *testing.T) {
 	cfg, err := parseConfig([]string{"-profile", "production"}, &bytes.Buffer{})
 	if err != nil {

@@ -67,6 +67,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Requirement | Evidence |
 | --- | --- |
 | GO parsing, typed arguments, source spans, arithmetic and divide-by-zero diagnostics | [`sql_function_test.go`](sql_function_test.go) |
+| Persisted function definitions atomically survive registry/server restart; malformed definitions fail startup and a failed persistence write leaves no new callable function | [`TestSQLFunctionRegistryPersistsDefinitionsAcrossRestart`](sql_function_test.go), [`TestSQLFunctionRegistryRejectsBrokenPersistedDefinitions`](sql_function_test.go), [`TestSQLFunctionRegistryDoesNotInstallFunctionWhenPersistenceFails`](sql_function_test.go), [`TestMonitoringSQLFunctionRoutePersistsAcrossRestart`](sql_http_test.go), [`TestParseConfigSQLFunctionsPath`](cmd/hatrie-cache/main_test.go) |
 | Every `CREATE FUNCTION` syntax word, language (`GO`, `LUA`, `WASM`, `JS`), and declared type (`ANY`, `INTEGER`, `NUMBER`, `TEXT`, `BOOLEAN`) | Named subtests in [`TestSQLAcceptedKeywordInventory`](sql_function_test.go) |
 | GO UDF use in `WHERE` and `SELECT` | [`TestExecuteSQLQueryUsesGoFunctionInWhereAndSelect`](sql_function_test.go) |
 | Optional sandboxed LuaJIT vector batching and conversion rejection | [`sql_lua_luajit_test.go`](sql_lua_luajit_test.go) (`-tags luajit`) |
