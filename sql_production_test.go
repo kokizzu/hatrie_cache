@@ -2133,6 +2133,17 @@ func TestExecuteSQLQueryRowsObserverReportsStreamedOutput(t *testing.T) {
 	if event.QueryID != "stream-observer-1" || !event.OK || event.OutputRows != 2 || event.OutputColumns != 1 || event.ResultBytes <= 0 {
 		t.Fatalf("stream event = %#v, want successful counted event", event)
 	}
+	streamOutput := SQLQueryOperator{}
+	foundStreamOutput := false
+	for _, operator := range event.Operators {
+		if operator.Node == "STREAM OUTPUT" {
+			streamOutput, foundStreamOutput = operator, true
+			break
+		}
+	}
+	if !foundStreamOutput || streamOutput.InputRows != 2 || streamOutput.OutputRows != 2 || streamOutput.OutputBytes == nil || *streamOutput.OutputBytes != event.ResultBytes || streamOutput.ElapsedNanos < 0 {
+		t.Fatalf("stream event operators = %#v, want measured STREAM OUTPUT counter", event.Operators)
+	}
 	events = nil
 	err = ExecuteSQLQueryRows(context.Background(), "FROM VALUES (1) AS values(id) SELECT id", SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
 		QueryID: "stream-observer-failure",

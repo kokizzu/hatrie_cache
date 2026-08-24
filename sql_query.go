@@ -1145,7 +1145,21 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) (err error) {
 	observation := newSQLQueryObservation(options)
 	outputRows, outputColumns, resultBytes := 0, 0, 0
-	defer func() { observation.finishSummary(outputRows, outputColumns, resultBytes, err, nil) }()
+	defer func() {
+		// A row callback may be backed by NDJSON, an SDK iterator, or an
+		// application sink. It is the one operator common to every streamed
+		// execution path, so record its exact completed payload counters even
+		// when the lower-level path has no materialized plan steps to report.
+		elapsed := time.Since(observation.started).Nanoseconds()
+		steps := []SQLExplainStep{{
+			Node:              "STREAM OUTPUT",
+			ActualInputRows:   &outputRows,
+			ActualOutputRows:  &outputRows,
+			ActualOutputBytes: &resultBytes,
+			ElapsedNanos:      &elapsed,
+		}}
+		observation.finishSummary(outputRows, outputColumns, resultBytes, err, steps)
+	}()
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
 	}

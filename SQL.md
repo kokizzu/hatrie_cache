@@ -924,6 +924,13 @@ elapsed time, and any available row estimate. Unlike `EXPLAIN ANALYZE`, these co
 details, SQL text, cache keys, predicates, and result values; they are safe to
 send directly to a metrics or structured-log sink.
 
+Every `ExecuteSQLQueryRows` / NDJSON execution includes a `STREAM OUTPUT`
+operator. Its input/output row counts are the successfully delivered callback
+rows, its output bytes are the exact emitted row payload, and its elapsed time
+covers the whole streamed execution. This remains present on an early callback
+failure so sinks can distinguish a failure before any delivered rows from one
+after partial output.
+
 ```go
 result, err := hatriecache.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
     hatriecache.SQLQueryOptions{
