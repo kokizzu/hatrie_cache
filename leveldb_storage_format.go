@@ -5,34 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
+
+	"hatrie_cache/hat/hatStorage"
 
 	json "github.com/goccy/go-json"
 )
 
-type StorageFormat string
+type StorageFormat = hatStorage.Format
 
 const (
-	StorageFormatJSON   StorageFormat = "json"
-	StorageFormatBinary StorageFormat = "binary"
+	StorageFormatJSON   = hatStorage.FormatJSON
+	StorageFormatBinary = hatStorage.FormatBinary
 )
 
-const DefaultStorageFormat = StorageFormatBinary
+const DefaultStorageFormat = hatStorage.DefaultFormat
 
 var levelDBBinaryMagic = []byte{'h', 'c', 'd', 'b', 1}
 
 var errLevelDBBinaryRecordTooLarge = errors.New("hatriecache: binary leveldb entry is too large")
 
 func ParseStorageFormat(value string) (StorageFormat, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(StorageFormatBinary), "bin":
-		return StorageFormatBinary, nil
-	case string(StorageFormatJSON):
-		return StorageFormatJSON, nil
-	default:
-		return "", fmt.Errorf("hatriecache: unsupported storage format %q", value)
-	}
+	return hatStorage.ParseFormat(value)
 }
 
 func marshalLevelDBEntry(entry snapshotEntry, format StorageFormat) ([]byte, error) {

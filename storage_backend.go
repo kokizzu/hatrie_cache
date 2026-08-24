@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"hatrie_cache/hat/hatStorage"
 )
 
 // StorageBackend selects the local persistent key/value engine.
-type StorageBackend string
+type StorageBackend = hatStorage.Backend
 
 const (
-	StorageBackendAuto    StorageBackend = "auto"
-	StorageBackendPebble  StorageBackend = "pebble"
-	StorageBackendLevelDB StorageBackend = "leveldb"
+	StorageBackendAuto    = hatStorage.BackendAuto
+	StorageBackendPebble  = hatStorage.BackendPebble
+	StorageBackendLevelDB = hatStorage.BackendLevelDB
 )
 
 // DefaultStorageBackend is used for new paths opened in auto mode.
-const DefaultStorageBackend = StorageBackendPebble
+const DefaultStorageBackend = hatStorage.DefaultBackend
 
 const storageBackendMarkerSuffix = ".backend"
 
@@ -61,16 +63,7 @@ type PersistentStore interface {
 
 // ParseStorageBackend validates an auto, Pebble, or LevelDB backend name.
 func ParseStorageBackend(value string) (StorageBackend, error) {
-	switch StorageBackend(strings.ToLower(strings.TrimSpace(value))) {
-	case "", StorageBackendAuto:
-		return StorageBackendAuto, nil
-	case StorageBackendPebble:
-		return StorageBackendPebble, nil
-	case StorageBackendLevelDB:
-		return StorageBackendLevelDB, nil
-	default:
-		return "", fmt.Errorf("hatriecache: storage backend must be auto, pebble, or leveldb")
-	}
+	return hatStorage.ParseBackend(value)
 }
 
 // OpenPersistentStore opens an auto-detected store with the default codec.
