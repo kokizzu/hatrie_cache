@@ -57,52 +57,10 @@ type SQLQueryOptions struct {
 	Observer           SQLQueryObserver
 }
 
-// SQLQueryObserver receives one structured event after a SQL query completes,
-// including streamed, parse, budget, and cancellation failures.
-type SQLQueryObserver interface {
-	ObserveSQLQuery(SQLQueryEvent)
-}
-
-// SQLQueryObserverFunc adapts a function into SQLQueryObserver.
-type SQLQueryObserverFunc func(SQLQueryEvent)
-
-func (fn SQLQueryObserverFunc) ObserveSQLQuery(event SQLQueryEvent) {
-	if fn != nil {
-		fn(event)
-	}
-}
-
-// SQLQueryEvent is an execution summary suitable for a structured log or
-// metrics sink. It deliberately excludes SQL text and row values.
-type SQLQueryEvent struct {
-	QueryID            string `json:"query_id"`
-	ElapsedNanos       int64  `json:"elapsed_ns"`
-	OutputRows         int    `json:"output_rows"`
-	OutputColumns      int    `json:"output_columns"`
-	ResultBytes        int    `json:"result_bytes"`
-	OK                 bool   `json:"ok"`
-	Slow               bool   `json:"slow"`
-	Canceled           bool   `json:"canceled,omitempty"`
-	CancellationReason string `json:"cancellation_reason,omitempty"`
-	Error              string `json:"error,omitempty"`
-	// Operators deliberately includes counters only: it never contains SQL
-	// text, cache keys, predicates, or result values.
-	Operators []SQLQueryOperator `json:"operators,omitempty"`
-}
-
-// SQLQueryOperator is one privacy-safe execution counter included in an
-// observer event. It has the same measured rows and timing as EXPLAIN ANALYZE
-// but intentionally omits the plan detail, which can contain SQL text.
-type SQLQueryOperator struct {
-	Node                 string   `json:"node"`
-	InputRows            int      `json:"input_rows"`
-	OutputRows           int      `json:"output_rows"`
-	InputBytes           *int     `json:"input_bytes,omitempty"`
-	OutputBytes          *int     `json:"output_bytes,omitempty"`
-	ElapsedNanos         int64    `json:"elapsed_ns"`
-	EstimatedRows        *int     `json:"estimated_rows,omitempty"`
-	EstimateErrorPercent *float64 `json:"estimate_error_percent,omitempty"`
-}
+type SQLQueryObserver = hatSql.QueryObserver
+type SQLQueryObserverFunc = hatSql.QueryObserverFunc
+type SQLQueryEvent = hatSql.QueryEvent
+type SQLQueryOperator = hatSql.QueryOperator
 
 // SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
 // bound to `$n` are never stored in this cache.
@@ -270,11 +228,7 @@ type SQLQueryResult = hatSql.QueryResult
 type SQLExplainStep = hatSql.ExplainStep
 type SQLQueryStats = hatSql.QueryStats
 
-// SQLSourceResolver supplies the two cache-backed relational sources. Returning
-// nil rows is equivalent to an empty source.
-type SQLSourceResolver interface {
-	ResolveSQLSource(name string, key string) ([]SQLRow, error)
-}
+type SQLSourceResolver = hatSql.SourceResolver
 
 // sqlJSONIndexStatsResolver is optional optimizer metadata. Keeping it
 // separate from SQLSourceResolver preserves source compatibility: callers that
@@ -290,68 +244,15 @@ type sqlJSONIndexValueStatsResolver interface {
 	SQLJSONIndexValueEstimate(key, field string, value interface{}) (rows int, exact bool, available bool, err error)
 }
 
-// SQLStreamSourceResolver supplies source rows one at a time. It lets the SQL
-// executor avoid materializing a source or result for stream-compatible queries.
-type SQLStreamSourceResolver interface {
-	StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error
-}
-
-// SQLSnapshotLocker optionally coordinates a consistent source snapshot for one
-// query. Every resolver also receives per-query memoization for repeated
-// sources.
-type SQLSnapshotLocker interface{ LockSQLSnapshot() func() }
-
-type SQLIndexedSourceResolver interface {
-	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error)
-}
-
-// SQLRangeIndexedSourceResolver is an optional extension for index-backed
-// ordered comparisons. Implementations must preserve sqlCompare semantics.
-type SQLRangeIndexedSourceResolver interface {
-	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]SQLRow, bool, error)
-}
-
-// SQLOrderedSourceResolver is an optional extension for reading one indexed
-// CACHE field in SQL ORDER BY order. The returned rows must retain their
-// original source order for equal values and for NULL values.
-type SQLOrderedSourceResolver interface {
-	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error)
-}
-
-// SQLOrderedStreamSourceResolver is the streaming counterpart of
-// SQLOrderedSourceResolver. It visits an indexed CACHE source in the exact
-// one-field SQL ORDER BY order without constructing a per-query source slice.
-// The bool reports whether the requested ordered index is available.
-type SQLOrderedStreamSourceResolver interface {
-	StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error)
-}
-
-// SQLCompositeIndexedSourceResolver optionally resolves equality predicates
-// through a multi-field JSON index. fields and values have matching positions.
-type SQLCompositeIndexedSourceResolver interface {
-	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error)
-}
-
-// SQLJSONIndexFrequencyBucket is one deterministic posting-list frequency in
-// an optional JSON index. It exposes skew without leaking indexed values.
-type SQLJSONIndexFrequencyBucket struct {
-	RowsPerKey   int `json:"rows_per_key"`
-	DistinctKeys int `json:"distinct_keys"`
-}
-
-// SQLJSONIndexStats describes the current materialized state and equality
-// selectivity distribution of one optional JSON index. It is refreshed from
-// the cache value before being returned.
-type SQLJSONIndexStats struct {
-	Key                string
-	Fields             []string
-	Rows               int
-	DistinctKeys       int
-	MinRowsPerKey      int
-	MaxRowsPerKey      int
-	AverageRowsPerKey  float64
-	FrequencyHistogram []SQLJSONIndexFrequencyBucket
-}
+type SQLStreamSourceResolver = hatSql.StreamSourceResolver
+type SQLSnapshotLocker = hatSql.SnapshotLocker
+type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
+type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
+type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
+type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
+type SQLCompositeIndexedSourceResolver = hatSql.CompositeIndexedSourceResolver
+type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
+type SQLJSONIndexStats = hatSql.JSONIndexStats
 
 type sqlJSONFieldIndex struct {
 	raw     string
@@ -836,15 +737,7 @@ func sqlIndexValueKey(value interface{}) (string, bool) {
 	return string(encoded), err == nil
 }
 
-// SQLSourceResolverFunc adapts a function to SQLSourceResolver.
-type SQLSourceResolverFunc func(name string, key string) ([]SQLRow, error)
-
-func (fn SQLSourceResolverFunc) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
-	if fn == nil {
-		return nil, nil
-	}
-	return fn(name, key)
-}
+type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 
 // ResolveSQLSource exposes a stable, read-only snapshot of cache data to SQL.
 // CACHE(key) requires a JSON object or array of JSON objects. KEYS returns the
