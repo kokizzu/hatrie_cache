@@ -362,6 +362,55 @@ func TestExecuteSQLQueryRowsStreamsCompatibleSourceRows(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsStreamsGlobalAggregates(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"age": int64(12)}, {"age": int64(21)}, {"age": nil}, {"age": int64(34)}}
+	query := "FROM CACHE('people') AS person WHERE person.age >= 20 SELECT COUNT(*) AS total, SUM(person.age) AS sum_age, AVG(person.age) AS average_age, MIN(person.age) AS min_age, MAX(person.age) AS max_age"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream global aggregates: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("aggregate resolver calls = materialized:%d streamed:%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(columns, materialized.Columns) || !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("stream global aggregate = %#v/%#v, want %#v/%#v", columns, got, materialized.Columns, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"age": nil}, {"age": int64(12)}}
+	query := "FROM CACHE('people') AS person WHERE person.age > 99 SELECT COUNT(*) AS total, COUNT(person.age) AS numeric_count, SUM(person.age) AS sum_age, AVG(person.age) AS average_age, MIN(person.age) AS min_age, MAX(person.age) AS max_age"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream empty global aggregates: %v", err)
+	}
+	if !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("stream empty global aggregate = %#v, want %#v", got, materialized.Rows)
+	}
+}
+
 func TestSQLPreparedQueryCacheReusesImmutableTemplateAndBindsFreshParameters(t *testing.T) {
 	t.Parallel()
 	cache := NewSQLPreparedQueryCache(2)

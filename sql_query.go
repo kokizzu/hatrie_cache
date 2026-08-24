@@ -920,6 +920,9 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err != nil {
 		return err
 	}
+	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
+		return executeSQLGlobalAggregateStream(ctx, query, resolver, control, visit, aggregates)
+	}
 	if err := validateSQLQueryStreamable(query); err != nil {
 		return err
 	}
@@ -1041,6 +1044,155 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return sqlRuntimeDiagnostic(err)
 	}
 	return nil
+}
+
+type sqlStreamAggregate struct {
+	name  string
+	arg   *sqlExpr
+	count int64
+	sum   float64
+	value float64
+	seen  bool
+}
+
+// sqlGlobalStreamAggregates recognizes the constant-state aggregate subset.
+// It excludes joins, grouping, HAVING, and expressions around aggregates so
+// this path cannot change their materialized-query semantics.
+func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
+	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || query.where.window != nil || sqlExprHasCustomFunction(query.where, nil) {
+		return nil, false
+	}
+	aggregates := make([]sqlStreamAggregate, len(query.selects))
+	for index, item := range query.selects {
+		expr := item.expr
+		if expr.kind != "func" || expr.window != nil || sqlExprHasCustomFunction(expr, nil) {
+			return nil, false
+		}
+		aggregate := sqlStreamAggregate{name: expr.name}
+		switch expr.name {
+		case "COUNT":
+			if len(expr.args) > 1 {
+				return nil, false
+			}
+			if len(expr.args) == 1 && expr.args[0].kind != "star" {
+				argument := expr.args[0]
+				aggregate.arg = &argument
+			}
+		case "SUM", "AVG", "MIN", "MAX":
+			if len(expr.args) != 1 || expr.args[0].kind == "star" {
+				return nil, false
+			}
+			argument := expr.args[0]
+			aggregate.arg = &argument
+		default:
+			return nil, false
+		}
+		aggregates[index] = aggregate
+	}
+	return aggregates, true
+}
+
+func (aggregate *sqlStreamAggregate) add(row sqlExecRow) error {
+	if aggregate.name == "COUNT" && aggregate.arg == nil {
+		aggregate.count++
+		return nil
+	}
+	value := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+	if err := sqlExpressionError(value); err != nil {
+		return err
+	}
+	if aggregate.name == "COUNT" {
+		if value != nil {
+			aggregate.count++
+		}
+		return nil
+	}
+	number, ok := sqlNumber(value)
+	if !ok {
+		return nil
+	}
+	if !aggregate.seen {
+		aggregate.value, aggregate.sum, aggregate.count, aggregate.seen = number, number, 1, true
+		return nil
+	}
+	aggregate.count++
+	switch aggregate.name {
+	case "SUM", "AVG":
+		aggregate.sum += number
+	case "MIN":
+		if number < aggregate.value {
+			aggregate.value = number
+		}
+	case "MAX":
+		if number > aggregate.value {
+			aggregate.value = number
+		}
+	}
+	return nil
+}
+
+func (aggregate sqlStreamAggregate) result() interface{} {
+	switch aggregate.name {
+	case "COUNT":
+		return aggregate.count
+	case "SUM":
+		if aggregate.seen {
+			return aggregate.sum
+		}
+	case "AVG":
+		if aggregate.seen {
+			return aggregate.sum / float64(aggregate.count)
+		}
+	case "MIN", "MAX":
+		if aggregate.seen {
+			return aggregate.value
+		}
+	}
+	return nil
+}
+
+func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error, aggregates []sqlStreamAggregate) error {
+	inputRows := 0
+	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		row := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		for index := range aggregates {
+			if err := aggregates[index].add(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if query.offset > 0 || query.limit == 0 {
+		return nil
+	}
+	columns := sqlColumns(query.selects)
+	row := SQLRow{}
+	for index, aggregate := range aggregates {
+		row[columns[index]] = aggregate.result()
+	}
+	if control.options.MaxResultBytes > 0 && sqlRowBytes(row) > control.options.MaxResultBytes {
+		return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
+	return visit(columns, row)
 }
 
 func validateSQLQueryStreamable(query *sqlQuery) error {

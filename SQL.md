@@ -865,9 +865,12 @@ headers is an `{"type":"error","error":"..."}` terminal record.
 Streaming is deliberately exact rather than pretending that every query can
 stream: it accepts one `CACHE` or `VALUES` source with scalar `WHERE`,
 projection, `OFFSET`, and `LIMIT`, plus a chain of indexed equality `INNER` or
-`LEFT` CACHE joins. It rejects CTEs, grouping, aggregates, ordering, windows,
-set operations, `DISTINCT`, typed JSON schemas, and custom functions until
-each has a bounded-memory streaming operator.
+`LEFT` CACHE joins. It also supports a global, no-join selection made only of
+direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those keep constant
+state and emit one final row without retaining source rows. It rejects CTEs,
+grouped aggregates, ordering, windows, set operations, `DISTINCT`, typed JSON
+schemas, and custom functions until each has a bounded-memory streaming
+operator.
 `QueryRows[T]` uses this NDJSON path and closes the response immediately when
 its callback returns an error.
 
