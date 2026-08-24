@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"reflect"
 	"sort"
@@ -871,6 +872,126 @@ func TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation(t *testing.T) {
 				t.Fatalf("ExecuteSQLQueryContext() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
+	t.Parallel()
+	query := "FROM VALUES (3, DATE '2026-08-03'), (1, DATE '2026-08-01'), (2, DATE '2026-08-02'), (4, DATE '2026-08-04') AS values(id, occurred_on) SELECT id, occurred_on, CAST(id AS DECIMAL) AS amount ORDER BY occurred_on DESC, id"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	directory := t.TempDir()
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   64,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("spill sort: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("spill sort rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   64,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("explain spill sort: %v", err)
+	}
+	seen := false
+	for _, step := range explained.Plan {
+		seen = seen || step.Node == "EXTERNAL SORT"
+	}
+	if !seen {
+		t.Fatalf("spill sort plan = %#v, want EXTERNAL SORT", explained.Plan)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory retains temporary files: %#v", entries)
+	}
+	_, err = ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   64,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("spill disk budget error = %v, want spill disk budget", err)
+	}
+	entries, err = os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory after failure: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill failure retains temporary files: %#v", entries)
+	}
+}
+
+func TestExecuteSQLQueryContextSpillSortPreservesStableOrderAcrossMergePasses(t *testing.T) {
+	t.Parallel()
+	values := make([]string, 0, 80)
+	for id := 0; id < 80; id++ {
+		values = append(values, fmt.Sprintf("(%d, %d)", id, id%4))
+	}
+	query := "FROM VALUES " + strings.Join(values, ", ") + " AS values(id, score) SELECT id, score ORDER BY score LIMIT 17 OFFSET 11"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	directory := t.TempDir()
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("many-run spill sort: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("many-run spill sort rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory retains temporary files: %#v", entries)
+	}
+}
+
+func TestExecuteSQLQueryContextSpillSortPreservesNestedAndTypedValues(t *testing.T) {
+	t.Parallel()
+	timestamp := time.Date(2026, time.August, 24, 9, 10, 11, 12, time.UTC)
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("unexpected source %s(%q)", name, key)
+		}
+		return []SQLRow{
+			{"id": int64(2), "meta": map[string]interface{}{"tags": []interface{}{"beta", float64(2)}, "nested": map[string]interface{}{"active": true}}, "occurred_at": timestamp, "amount": json.Number("2.50")},
+			{"id": int64(1), "meta": map[string]interface{}{"tags": []interface{}{"alpha", float64(1)}, "nested": map[string]interface{}{"active": false}}, "occurred_at": timestamp.Add(-time.Hour), "amount": json.Number("1.25")},
+		}, nil
+	})
+	query := "FROM CACHE('people') AS person SELECT person.id, person.meta, person.occurred_at, person.amount ORDER BY person.id"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{
+		MaxSortBytes:   1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("typed spill sort: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("typed spill sort rows = %#v, want %#v", got.Rows, want.Rows)
 	}
 }
 

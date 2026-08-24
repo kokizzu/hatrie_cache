@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,11 +27,16 @@ const maxSQLPageSize = 10000
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
-	MaxRows               int
-	MaxJoinWork           int
-	MaxResultBytes        int
-	MaxSortBytes          int
-	MaxGroupBytes         int
+	MaxRows        int
+	MaxJoinWork    int
+	MaxResultBytes int
+	MaxSortBytes   int
+	MaxGroupBytes  int
+	// SpillDirectory and MaxSpillBytes opt into bounded temporary files for a
+	// sort that exceeds MaxSortBytes. Both must be set; the default remains a
+	// safe in-memory budget failure. Temporary files are removed before return.
+	SpillDirectory        string
+	MaxSpillBytes         int
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
@@ -129,6 +137,54 @@ type sqlDate string
 // arbitrary-precision rational values. It deliberately does not reuse
 // float64, which would lose significant digits from financial-style values.
 type sqlDecimal string
+
+// sqlSpillOutput is deliberately limited to values needed after projection:
+// sort keys, a stable input ordinal, and the user-visible projected row. The
+// source/group state is not serialized, which avoids retaining join inputs
+// while an external merge is running.
+type sqlSpillOutput struct {
+	Row     SQLRow
+	Keys    []interface{}
+	Ordinal int
+}
+
+type sqlSpillRun struct {
+	path  string
+	bytes int64
+}
+
+const maxSQLSpillMergeFanIn = 32
+
+var errSQLSpillDiskBudget = errors.New("SQL spill disk budget exceeded")
+
+func init() {
+	// Gob requires concrete dynamic interface values to be registered. These
+	// cover the SQL value domain, including nested decoded JSON values and the
+	// date/decimal types that preserve SQL semantics beyond JSON's defaults.
+	gob.Register(SQLRow{})
+	gob.Register(map[string]interface{}{})
+	gob.Register([]interface{}{})
+	gob.Register([]SQLRow{})
+	gob.Register([]byte{})
+	gob.Register(false)
+	gob.Register("")
+	gob.Register(int(0))
+	gob.Register(int8(0))
+	gob.Register(int16(0))
+	gob.Register(int32(0))
+	gob.Register(int64(0))
+	gob.Register(uint(0))
+	gob.Register(uint8(0))
+	gob.Register(uint16(0))
+	gob.Register(uint32(0))
+	gob.Register(uint64(0))
+	gob.Register(float32(0))
+	gob.Register(float64(0))
+	gob.Register(json.Number(""))
+	gob.Register(sqlDate(""))
+	gob.Register(sqlDecimal(""))
+	gob.Register(time.Time{})
+}
 
 func parseSQLDecimal(value string) (sqlDecimal, bool) {
 	if value == "" {
@@ -3191,7 +3247,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.Timeout > 0 {
@@ -4064,13 +4120,23 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		out = filtered
 		metrics.record("DISTINCT", "deduplicate projected rows", inputRows, len(out), started)
 	}
+	externallySorted := false
+	sortInputRows := 0
 	if len(q.orderBy) > 0 && !indexOrdered {
+		spillRecords := make([]sqlSpillOutput, 0, len(out))
 		for _, output := range out {
-			for _, item := range q.orderBy {
-				if err := sqlExpressionError(evalOutputOrder(item.expr, output.row, output.group)); err != nil {
+			if err := control.check(); err != nil {
+				return SQLQueryResult{}, err
+			}
+			record := sqlSpillOutput{Row: output.row, Keys: make([]interface{}, len(q.orderBy)), Ordinal: len(spillRecords)}
+			for index, item := range q.orderBy {
+				value := evalOutputOrder(item.expr, output.row, output.group)
+				if err := sqlExpressionError(value); err != nil {
 					return SQLQueryResult{}, err
 				}
+				record.Keys[index] = value
 			}
+			spillRecords = append(spillRecords, record)
 		}
 		if control != nil && control.options.MaxSortBytes > 0 {
 			sortBytes := 0
@@ -4078,41 +4144,62 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				sortBytes += sqlRowBytes(item.row)
 			}
 			if sortBytes > control.options.MaxSortBytes {
-				return SQLQueryResult{}, fmt.Errorf("SQL sort memory budget exceeded: maximum %d bytes", control.options.MaxSortBytes)
+				if control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 {
+					return SQLQueryResult{}, fmt.Errorf("SQL sort memory budget exceeded: maximum %d bytes", control.options.MaxSortBytes)
+				}
+				started = time.Now()
+				rows, spillBytes, runs, err := sqlExternalSortRows(spillRecords, q.orderBy, control.options.SpillDirectory, control.options.MaxSortBytes, control.options.MaxSpillBytes, q.offset, q.limit, control)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				result.Rows = rows
+				groups = nil
+				out = nil
+				externallySorted = true
+				sortInputRows = len(spillRecords)
+				metrics.record("EXTERNAL SORT", fmt.Sprintf("%s spill_bytes=%d runs=%d", sqlExplainOrders(q.orderBy), spillBytes, runs), sortInputRows, sortInputRows, started)
 			}
 		}
-		started = time.Now()
-		inputRows := len(out)
-		sort.SliceStable(out, func(i, j int) bool {
-			for _, item := range q.orderBy {
-				a := evalOutputOrder(item.expr, out[i].row, out[i].group)
-				b := evalOutputOrder(item.expr, out[j].row, out[j].group)
-				if less, decided := sqlOrderLess(item, a, b); decided {
-					return less
+		if !externallySorted {
+			started = time.Now()
+			inputRows := len(out)
+			sort.SliceStable(out, func(i, j int) bool {
+				for _, item := range q.orderBy {
+					a := evalOutputOrder(item.expr, out[i].row, out[i].group)
+					b := evalOutputOrder(item.expr, out[j].row, out[j].group)
+					if less, decided := sqlOrderLess(item, a, b); decided {
+						return less
+					}
 				}
-			}
-			return false
-		})
-		metrics.record("SORT", sqlExplainOrders(q.orderBy), inputRows, len(out), started)
+				return false
+			})
+			metrics.record("SORT", sqlExplainOrders(q.orderBy), inputRows, len(out), started)
+		}
 	}
-	started = time.Now()
-	inputRows = len(out)
-	start := q.offset
-	if start > len(out) {
-		start = len(out)
+	if !externallySorted {
+		started = time.Now()
+		inputRows = len(out)
+		start := q.offset
+		if start > len(out) {
+			start = len(out)
+		}
+		end := len(out)
+		if q.limit >= 0 && start+q.limit < end {
+			end = start + q.limit
+		}
+		for _, item := range out[start:end] {
+			result.Rows = append(result.Rows, item.row)
+		}
+		if q.limit >= 0 || q.offset > 0 {
+			metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), inputRows, len(result.Rows), started)
+		}
 	}
-	end := len(out)
-	if q.limit >= 0 && start+q.limit < end {
-		end = start + q.limit
-	}
-	for _, item := range out[start:end] {
-		result.Rows = append(result.Rows, item.row)
+	if externallySorted && (q.limit >= 0 || q.offset > 0) {
+		started = time.Now()
+		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), sortInputRows, len(result.Rows), started)
 	}
 	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
 		return SQLQueryResult{}, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
-	}
-	if q.limit >= 0 || q.offset > 0 {
-		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), inputRows, len(result.Rows), started)
 	}
 	for _, union := range q.unions {
 		right, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics, control)
@@ -5065,6 +5152,286 @@ func sqlGroupedRowsBytes(groups [][]sqlExecRow) int {
 		}
 	}
 	return total
+}
+
+type sqlSpillBudgetWriter struct {
+	writer    io.Writer
+	available *int64
+}
+
+func (writer sqlSpillBudgetWriter) Write(data []byte) (int, error) {
+	if int64(len(data)) > *writer.available {
+		return 0, errSQLSpillDiskBudget
+	}
+	written, err := writer.writer.Write(data)
+	*writer.available -= int64(written)
+	return written, err
+}
+
+func sqlSpillOutputLess(left, right sqlSpillOutput, order []sqlOrder) bool {
+	for index, item := range order {
+		if less, decided := sqlOrderLess(item, left.Keys[index], right.Keys[index]); decided {
+			return less
+		}
+	}
+	return left.Ordinal < right.Ordinal
+}
+
+func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int64, control *sqlExecutionControl) (sqlSpillRun, error) {
+	file, err := os.CreateTemp(directory, "hatrie-sql-sort-*")
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("create SQL sort spill file: %w", err)
+	}
+	run := sqlSpillRun{path: file.Name()}
+	remove := true
+	defer func() {
+		if remove {
+			_ = file.Close()
+			_ = os.Remove(run.path)
+		}
+	}()
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	for _, record := range records {
+		if err := control.check(); err != nil {
+			return sqlSpillRun{}, err
+		}
+		if err := encoder.Encode(record); err != nil {
+			if errors.Is(err, errSQLSpillDiskBudget) {
+				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while writing sort runs")
+			}
+			return sqlSpillRun{}, fmt.Errorf("write SQL sort spill file: %w", err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return sqlSpillRun{}, fmt.Errorf("close SQL sort spill file: %w", err)
+	}
+	info, err := os.Stat(run.path)
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("inspect SQL sort spill file: %w", err)
+	}
+	run.bytes = info.Size()
+	remove = false
+	return run, nil
+}
+
+type sqlSpillReader struct {
+	file    *os.File
+	decoder *gob.Decoder
+	current sqlSpillOutput
+	done    bool
+}
+
+func openSQLSpillReader(run sqlSpillRun) (*sqlSpillReader, error) {
+	file, err := os.Open(run.path)
+	if err != nil {
+		return nil, fmt.Errorf("open SQL sort spill file: %w", err)
+	}
+	reader := &sqlSpillReader{file: file, decoder: gob.NewDecoder(file)}
+	if err := reader.next(); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return reader, nil
+}
+
+func (reader *sqlSpillReader) next() error {
+	if reader.done {
+		return nil
+	}
+	var record sqlSpillOutput
+	if err := reader.decoder.Decode(&record); err != nil {
+		if errors.Is(err, io.EOF) {
+			reader.done = true
+			return nil
+		}
+		return fmt.Errorf("read SQL sort spill file: %w", err)
+	}
+	reader.current = record
+	return nil
+}
+
+func closeSQLSpillReaders(readers []*sqlSpillReader) {
+	for _, reader := range readers {
+		if reader != nil && reader.file != nil {
+			_ = reader.file.Close()
+		}
+	}
+}
+
+func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory string, available *int64, control *sqlExecutionControl) (sqlSpillRun, error) {
+	readers := make([]*sqlSpillReader, len(runs))
+	for index, run := range runs {
+		reader, err := openSQLSpillReader(run)
+		if err != nil {
+			closeSQLSpillReaders(readers)
+			return sqlSpillRun{}, err
+		}
+		readers[index] = reader
+	}
+	defer closeSQLSpillReaders(readers)
+	file, err := os.CreateTemp(directory, "hatrie-sql-sort-merge-*")
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("create SQL sort merge file: %w", err)
+	}
+	run := sqlSpillRun{path: file.Name()}
+	remove := true
+	defer func() {
+		if remove {
+			_ = file.Close()
+			_ = os.Remove(run.path)
+		}
+	}()
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	for {
+		if err := control.check(); err != nil {
+			return sqlSpillRun{}, err
+		}
+		best := -1
+		for index, reader := range readers {
+			if reader.done || best >= 0 && !sqlSpillOutputLess(reader.current, readers[best].current, order) {
+				continue
+			}
+			best = index
+		}
+		if best < 0 {
+			break
+		}
+		if err := encoder.Encode(readers[best].current); err != nil {
+			if errors.Is(err, errSQLSpillDiskBudget) {
+				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging sort runs")
+			}
+			return sqlSpillRun{}, fmt.Errorf("write SQL sort merge file: %w", err)
+		}
+		if err := readers[best].next(); err != nil {
+			return sqlSpillRun{}, err
+		}
+	}
+	if err := file.Close(); err != nil {
+		return sqlSpillRun{}, fmt.Errorf("close SQL sort merge file: %w", err)
+	}
+	info, err := os.Stat(run.path)
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("inspect SQL sort merge file: %w", err)
+	}
+	run.bytes = info.Size()
+	remove = false
+	return run, nil
+}
+
+func sqlMergeSpillRunsToRows(runs []sqlSpillRun, order []sqlOrder, offset, limit int, control *sqlExecutionControl) ([]SQLRow, error) {
+	readers := make([]*sqlSpillReader, len(runs))
+	for index, run := range runs {
+		reader, err := openSQLSpillReader(run)
+		if err != nil {
+			closeSQLSpillReaders(readers)
+			return nil, err
+		}
+		readers[index] = reader
+	}
+	defer closeSQLSpillReaders(readers)
+	rows := []SQLRow{}
+	position := 0
+	for {
+		if err := control.check(); err != nil {
+			return nil, err
+		}
+		best := -1
+		for index, reader := range readers {
+			if reader.done || best >= 0 && !sqlSpillOutputLess(reader.current, readers[best].current, order) {
+				continue
+			}
+			best = index
+		}
+		if best < 0 {
+			break
+		}
+		if position >= offset && (limit < 0 || len(rows) < limit) {
+			rows = append(rows, readers[best].current.Row)
+		}
+		position++
+		if err := readers[best].next(); err != nil {
+			return nil, err
+		}
+	}
+	return rows, nil
+}
+
+func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory string, maxRunBytes, maxSpillBytes, offset, limit int, control *sqlExecutionControl) ([]SQLRow, int64, int, error) {
+	if directory == "" || maxSpillBytes <= 0 {
+		return nil, 0, 0, fmt.Errorf("SQL external sort requires SpillDirectory and MaxSpillBytes")
+	}
+	available := int64(maxSpillBytes)
+	allPaths := map[string]struct{}{}
+	defer func() {
+		for path := range allPaths {
+			_ = os.Remove(path)
+		}
+	}()
+	runs := []sqlSpillRun{}
+	chunk := make([]sqlSpillOutput, 0)
+	chunkBytes := 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(chunk, func(left, right int) bool { return sqlSpillOutputLess(chunk[left], chunk[right], order) })
+		run, err := sqlWriteSpillRun(directory, chunk, &available, control)
+		if err != nil {
+			return err
+		}
+		allPaths[run.path] = struct{}{}
+		runs = append(runs, run)
+		chunk = make([]sqlSpillOutput, 0)
+		chunkBytes = 0
+		return nil
+	}
+	for _, record := range records {
+		if err := control.check(); err != nil {
+			return nil, 0, 0, err
+		}
+		recordBytes := sqlRowBytes(record.Row)
+		for _, key := range record.Keys {
+			recordBytes += len(fmt.Sprintf("%#v", key))
+		}
+		if len(chunk) > 0 && chunkBytes+recordBytes > maxRunBytes {
+			if err := flush(); err != nil {
+				return nil, 0, 0, err
+			}
+		}
+		chunk = append(chunk, record)
+		chunkBytes += recordBytes
+	}
+	if err := flush(); err != nil {
+		return nil, 0, 0, err
+	}
+	for len(runs) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(runs) {
+				end = len(runs)
+			}
+			merged, err := sqlMergeSpillRunsToWriter(runs[start:end], order, directory, &available, control)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			allPaths[merged.path] = struct{}{}
+			for _, run := range runs[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return nil, 0, 0, fmt.Errorf("remove SQL sort spill file: %w", err)
+				}
+				delete(allPaths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		runs = next
+	}
+	rows, err := sqlMergeSpillRunsToRows(runs, order, offset, limit, control)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return rows, int64(maxSpillBytes) - available, len(runs), nil
 }
 
 func sqlCanPushBaseWhere(query *sqlQuery) bool {

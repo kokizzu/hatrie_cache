@@ -809,6 +809,31 @@ result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
     })
 ```
 
+For a query whose final `ORDER BY` is larger than its in-memory sort budget,
+callers can explicitly permit a bounded external merge sort. Set all three
+values below: `MaxSortBytes` remains the maximum one sorted run held in
+memory, `SpillDirectory` is a caller-owned writable temporary directory, and
+`MaxSpillBytes` bounds every live temporary run for this query. Without both
+spill settings, exceeding `MaxSortBytes` still fails safely as before.
+
+```go
+result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
+    hatriecache.SQLQueryOptions{
+        MaxSortBytes:   16 << 20,
+        SpillDirectory: "/var/tmp/hatrie-sql",
+        MaxSpillBytes:  512 << 20,
+    })
+```
+
+The executor evaluates every `ORDER BY` expression before serializing a run,
+preserves SQL values (including `DATE`, `DECIMAL`, timestamps, and nested JSON)
+and uses the original row ordinal to keep equal keys stable. It merges at most
+32 runs at once, performs further bounded merge passes when needed, deletes
+all temporary files on success or failure, and reports `EXTERNAL SORT` with
+its live spill bytes and final-run count in `EXPLAIN ANALYZE`. This currently
+spills only the final sort; grouping, windows, CTEs, and set operations retain
+their independent in-memory budgets.
+
 ### Query observations
 
 Materialized queries can carry an application request ID and emit one compact,
