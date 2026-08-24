@@ -598,9 +598,14 @@ reports `INDEX GROUP AGGREGATE` instead of building a grouping hash table.
 For direct grouped-field projections plus `COUNT`, `SUM`, `AVG`, `MIN`, or
 `MAX` over a direct field, that operator is a constant-state streaming
 aggregate: it retains no source rows and can therefore run below a group-memory
-budget that would reject materialized grouping. `HAVING`, windows, distinct,
-custom functions, expressions around aggregates, and representative-row
-projections deliberately retain the established materialized group semantics.
+budget that would reject materialized grouping. HatTrie's ordered JSON index
+also exposes this exact shape to `QueryRows`: one untyped `CACHE` source, one
+indexed `GROUP BY` field, that same one-field `ORDER BY`, direct group-field
+projection, and direct `COUNT`, `SUM`, `AVG`, `MIN`, or `MAX` fields. It visits
+the ordered index and retains only the active group's aggregate state, so no
+source-row or group slice is created. `HAVING`, windows, distinct, expressions
+around aggregates, and representative-row projections deliberately retain the
+established materialized group semantics.
 Filters, joins, composite order keys, `DISTINCT`, windows, aliases, and other
 shapes deliberately retain the general executor until they have an equally
 direct ordering proof.
@@ -933,12 +938,13 @@ at a time, retaining no result-row slice and preserving the function's normal
 type and source diagnostics. A source-only query with a finite `ORDER BY … LIMIT`
 (optionally with `OFFSET`) uses a stable bounded top-N heap: it retains at most
 `LIMIT + OFFSET` candidates, then emits sorted rows after its source is read.
-That ordered subset excludes joins, grouping, windows, sets, distinct, typed
-schemas, and custom functions. It also supports a global, no-join selection
+That ordered subset excludes joins, most grouping, windows, sets, distinct,
+typed schemas, and custom functions. The direct indexed grouped-aggregate form
+described above is the grouping exception. It also supports a global, no-join selection
 made only of direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` expressions; those
 keep constant state and emit one final row without retaining source rows. It
-still rejects CTEs, grouped aggregates, unbounded ordering, most windows, set
-operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
+still rejects CTEs, other grouped aggregates, unbounded ordering, most windows,
+set operations that need global membership (`UNION`, `INTERSECT`, and `EXCEPT`),
 `DISTINCT`, typed JSON schemas, and custom functions inside those global
 operators until each has a bounded-memory streaming operator. `UNION ALL` is
 the exception: when every

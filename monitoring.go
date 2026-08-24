@@ -102,6 +102,14 @@ func (resolver monitoringSQLResolver) StreamSQLSource(ctx context.Context, name 
 	return streaming.StreamSQLSource(ctx, name, key, visit)
 }
 
+func (resolver monitoringSQLResolver) StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error) {
+	streaming, ok := resolver.source.(SQLOrderedStreamSourceResolver)
+	if !ok {
+		return false, nil
+	}
+	return streaming.StreamSQLOrderedSource(ctx, name, key, field, desc, nullsFirst, nullsLast, visit)
+}
+
 // ResolveSQLIndexedSource preserves optional source-index capability through
 // the monitoring wrapper so /api/sql receives the same planner choices as a
 // direct HatTrie query.

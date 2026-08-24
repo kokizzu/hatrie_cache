@@ -27,6 +27,31 @@ type sqlStreamingTestResolver struct {
 	indexCalls     int
 }
 
+type sqlOrderedStreamingTestResolver struct {
+	rows         []SQLRow
+	orderedCalls int
+}
+
+func (resolver *sqlOrderedStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	return nil, errors.New("indexed grouped stream must not materialize its source")
+}
+
+func (resolver *sqlOrderedStreamingTestResolver) StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error) {
+	if name != "CACHE" || key != "people" || field != "team" || desc || nullsFirst || !nullsLast {
+		return false, fmt.Errorf("ordered stream = %s(%q).%s desc=%t nulls=%t/%t", name, key, field, desc, nullsFirst, nullsLast)
+	}
+	resolver.orderedCalls++
+	for _, row := range resolver.rows {
+		if err := ctx.Err(); err != nil {
+			return true, err
+		}
+		if err := visit(cloneSQLRows([]SQLRow{row})[0]); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
 type sqlStreamingFunctionTestResolver struct {
 	*sqlStreamingTestResolver
 	functions SQLFunctionResolver
@@ -548,6 +573,58 @@ func TestExecuteSQLQueryRowsStreamsGlobalAggregates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(columns, materialized.Columns) || !reflect.DeepEqual(got, materialized.Rows) {
 		t.Fatalf("stream global aggregate = %#v/%#v, want %#v/%#v", columns, got, materialized.Columns, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedGroupedAggregates(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"team":"blue","score":3},{"team":"red","score":2},{"team":"blue","score":5},{"team":"red","score":7},{"team":null,"score":11}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "team"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('people') AS people GROUP BY people.team SELECT people.team, COUNT(*) AS members, SUM(people.score) AS total, AVG(people.score) AS average, MIN(people.score) AS minimum, MAX(people.score) AS maximum ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQueryContext(context.Background(), query, trie, SQLQueryOptions{MaxGroupBytes: 1})
+	if err != nil {
+		t.Fatalf("indexed aggregate baseline: %v", err)
+	}
+	columns := []string(nil)
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, trie, nil, SQLQueryOptions{MaxGroupBytes: 1}, func(actualColumns []string, row SQLRow) error {
+		columns = append([]string{}, actualColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream indexed grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(columns, baseline.Columns) || !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("stream indexed grouped aggregate = %#v/%#v, want %#v/%#v", columns, got, baseline.Columns, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsIndexedGroupedAggregateDoesNotMaterializeSource(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"team": "blue", "score": int64(3)}, {"team": "blue", "score": int64(5)}, {"team": "red", "score": int64(2)}, {"team": "red", "score": int64(7)}, {"team": nil, "score": int64(11)}}
+	query := "FROM CACHE('people') AS people GROUP BY people.team SELECT people.team, COUNT(*) AS members, SUM(people.score) AS total ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed aggregate baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed grouped stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed grouped stream rows = %#v, want %#v", got, baseline.Rows)
 	}
 }
 
@@ -2115,6 +2192,41 @@ func TestHatTrieSQLJSONFieldIndexOrderFastPathMatchesGeneralSortDifferential(t *
 			}
 		}
 	}
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderHandlesAllNulls(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"team_id":null},{"id":2,"team_id":null}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	ordered, available, err := trie.ResolveSQLOrderedSource("CACHE", "people", "team_id", false, true, false)
+	if err != nil || !available {
+		t.Fatalf("all-null ordered index = %#v/%v, want available rows", ordered, err)
+	}
+	if want := []SQLRow{{"id": float64(1), "team_id": nil}, {"id": float64(2), "team_id": nil}}; !reflect.DeepEqual(ordered, want) {
+		t.Fatalf("all-null ordered index rows = %#v, want %#v", ordered, want)
+	}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team_id ORDER BY people.team_id NULLS FIRST"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("all-null indexed order query: %v", err)
+	}
+	want := []SQLRow{{"id": float64(1), "team_id": nil}, {"id": float64(2), "team_id": nil}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("all-null indexed order rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("all-null indexed order explain: %v", err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX ORDER SCAN" {
+			return
+		}
+	}
+	t.Fatalf("all-null indexed order plan = %#v, want INDEX ORDER SCAN", explained.Plan)
 }
 
 func TestHatTrieSQLJSONIndexValueEstimateUsesExactPostingCount(t *testing.T) {

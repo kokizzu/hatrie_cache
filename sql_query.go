@@ -361,6 +361,14 @@ type SQLOrderedSourceResolver interface {
 	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error)
 }
 
+// SQLOrderedStreamSourceResolver is the streaming counterpart of
+// SQLOrderedSourceResolver. It visits an indexed CACHE source in the exact
+// one-field SQL ORDER BY order without constructing a per-query source slice.
+// The bool reports whether the requested ordered index is available.
+type SQLOrderedStreamSourceResolver interface {
+	StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error)
+}
+
 // SQLCompositeIndexedSourceResolver optionally resolves equality predicates
 // through a multi-field JSON index. fields and values have matching positions.
 type SQLCompositeIndexedSourceResolver interface {
@@ -693,7 +701,7 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 		}
 	}
 	placeNullsFirst := false
-	if len(rows) > 0 {
+	if len(index.ordered) > 0 {
 		placeNullsFirst, _ = sqlOrderLess(sqlOrder{desc: desc, nullsFirst: nullsFirst, nullsLast: nullsLast}, nil, index.ordered[0].value)
 	}
 	if placeNullsFirst {
@@ -702,6 +710,96 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 		rows = append(rows, index.nulls...)
 	}
 	return cloneSQLRows(rows), true, nil
+}
+
+// StreamSQLOrderedSource visits an indexed CACHE source in one-field SQL
+// ORDER BY order. It captures immutable index slice headers while locked, then
+// releases the index before calling visit; refreshes replace slices instead of
+// mutating their backing arrays, so this remains a stable query snapshot.
+func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+	if visit == nil {
+		return false, fmt.Errorf("SQL row callback is required")
+	}
+	if name != "CACHE" {
+		return false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return false, err
+	}
+	ht.sqlIndexMu.Lock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		ht.sqlIndexMu.Unlock()
+		return false, nil
+	}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		ht.sqlIndexMu.Unlock()
+		return false, err
+	}
+	ordered, nulls := index.ordered, index.nulls
+	placeNullsFirst := false
+	if len(ordered) > 0 {
+		placeNullsFirst, _ = sqlOrderLess(sqlOrder{desc: desc, nullsFirst: nullsFirst, nullsLast: nullsLast}, nil, ordered[0].value)
+	}
+	ht.sqlIndexMu.Unlock()
+	clone := func(row SQLRow) SQLRow {
+		copy := make(SQLRow, len(row))
+		for name, value := range row {
+			copy[name] = value
+		}
+		return copy
+	}
+	emit := func(row SQLRow) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return visit(clone(row))
+	}
+	emitNulls := func() error {
+		for _, row := range nulls {
+			if err := emit(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	emitOrdered := func() error {
+		if desc {
+			for end := len(ordered); end > 0; {
+				start := end - 1
+				for start > 0 && sqlCompare(ordered[start-1].value, ordered[end-1].value) == 0 {
+					start--
+				}
+				for _, entry := range ordered[start:end] {
+					if err := emit(entry.row); err != nil {
+						return err
+					}
+				}
+				end = start
+			}
+			return nil
+		}
+		for _, entry := range ordered {
+			if err := emit(entry.row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if placeNullsFirst {
+		if err := emitNulls(); err != nil {
+			return true, err
+		}
+		return true, emitOrdered()
+	}
+	if err := emitOrdered(); err != nil {
+		return true, err
+	}
+	return true, emitNulls()
 }
 
 func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data []byte) error {
@@ -1059,6 +1157,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	}
 	if sqlRunningWindowStreamable(query) {
 		return executeSQLRunningWindowStream(ctx, query, resolver, control, visit)
+	}
+	if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
+		return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
 	}
 	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
 		return executeSQLGlobalAggregateStream(ctx, query, resolver, control, visit, aggregates)
@@ -1982,6 +2083,139 @@ func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resol
 		return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
 	}
 	return visit(columns, row)
+}
+
+// sqlIndexedGroupStreamable proves the narrow aggregate form for which an
+// indexed source order makes equal group keys adjacent. It deliberately keeps
+// the existing direct-field/aggregate proof shared with the materialized index
+// group operator, so grouped QueryRows cannot silently change SQL semantics.
+func sqlIndexedGroupStreamable(query *sqlQuery, resolver SQLSourceResolver) ([]sqlOrderedGroupProjection, bool) {
+	if query == nil || query.explain || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || query.distinct || query.having.kind != "" || query.where.window != nil || len(query.groupBy) != 1 || len(query.orderBy) != 1 {
+		return nil, false
+	}
+	if !sqlSameField(query.groupBy[0], query.orderBy[0].expr) {
+		return nil, false
+	}
+	if _, ok := resolver.(SQLOrderedStreamSourceResolver); !ok {
+		return nil, false
+	}
+	projections, ok := sqlOrderedGroupProjections(query)
+	return projections, ok
+}
+
+// executeSQLIndexedGroupAggregateStream maintains one active group while an
+// ordered JSON index supplies adjacent equal keys. It never creates a source
+// row or group slice; only the active aggregate state and one emitted result
+// row are retained.
+func executeSQLIndexedGroupAggregateStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error, projections []sqlOrderedGroupProjection) error {
+	streaming, ok := resolver.(SQLOrderedStreamSourceResolver)
+	if !ok {
+		return fmt.Errorf("SQL query cannot stream this grouped aggregate because the resolver has no ordered index stream")
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	columns := sqlColumns(query.selects)
+	if query.limit == 0 {
+		return nil
+	}
+	inputRows, groupCount, position, emitted, resultBytes := 0, 0, 0, 0, 0
+	var key string
+	var groupValue interface{}
+	var aggregates []sqlOrderedAggregate
+	emit := func() error {
+		if groupCount == 0 {
+			return nil
+		}
+		if position < query.offset {
+			position++
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		row := SQLRow{}
+		for index, projection := range projections {
+			if projection.group {
+				row[projection.column] = groupValue
+			} else {
+				row[projection.column] = aggregates[index].value()
+			}
+		}
+		position++
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	}
+	consume := func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		if query.where.kind != "" {
+			value, err := evalSQLStreamExpr(query.where, execRow, functions)
+			if err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		value, err := evalSQLStreamExpr(query.groupBy[0], execRow, functions)
+		if err != nil {
+			return err
+		}
+		currentKey := fmt.Sprintf("%#v", value)
+		if groupCount == 0 || currentKey != key {
+			if err := emit(); err != nil {
+				return err
+			}
+			key, groupValue = currentKey, value
+			aggregates = make([]sqlOrderedAggregate, len(projections))
+			for index, projection := range projections {
+				if projection.aggregate != nil {
+					aggregates[index] = *projection.aggregate
+				}
+			}
+			groupCount++
+		}
+		for index, projection := range projections {
+			if projection.aggregate == nil {
+				continue
+			}
+			if err := aggregates[index].add(execRow); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	available, err := streaming.StreamSQLOrderedSource(ctx, query.from.kind, query.from.key, query.groupBy[0].name, query.orderBy[0].desc, query.orderBy[0].nullsFirst, query.orderBy[0].nullsLast, consume)
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	if !available {
+		return fmt.Errorf("SQL query cannot stream this grouped aggregate because the ordered index is unavailable")
+	}
+	if err == errSQLStreamLimitReached {
+		return nil
+	}
+	if err := emit(); err != nil && err != errSQLStreamLimitReached {
+		return err
+	}
+	return nil
 }
 
 func validateSQLQueryStreamable(query *sqlQuery) error {
