@@ -2083,6 +2083,48 @@ func TestExecuteSQLQueryObserverIncludesSafeOperatorCounters(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryRowsObserverReportsStreamedOutput(t *testing.T) {
+	t.Parallel()
+
+	events := []SQLQueryEvent{}
+	rows := []SQLRow{}
+	err := ExecuteSQLQueryRows(context.Background(), "FROM VALUES (1), (2) AS values(id) SELECT id", SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
+		QueryID: "stream-observer-1",
+		Observer: SQLQueryObserverFunc(func(event SQLQueryEvent) {
+			events = append(events, event)
+		}),
+	}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed query: %v", err)
+	}
+	if got, want := rows, []SQLRow{{"id": int64(1)}, {"id": int64(2)}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("streamed rows = %#v, want %#v", got, want)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one event", events)
+	}
+	event := events[0]
+	if event.QueryID != "stream-observer-1" || !event.OK || event.OutputRows != 2 || event.OutputColumns != 1 || event.ResultBytes <= 0 {
+		t.Fatalf("stream event = %#v, want successful counted event", event)
+	}
+	events = nil
+	err = ExecuteSQLQueryRows(context.Background(), "FROM VALUES (1) AS values(id) SELECT id", SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
+		QueryID: "stream-observer-failure",
+		Observer: SQLQueryObserverFunc(func(event SQLQueryEvent) {
+			events = append(events, event)
+		}),
+	}, func([]string, SQLRow) error { return errors.New("stop stream") })
+	if err == nil || !strings.Contains(err.Error(), "stop stream") {
+		t.Fatalf("stream callback error = %v, want stop stream", err)
+	}
+	if len(events) != 1 || events[0].QueryID != "stream-observer-failure" || events[0].OK || events[0].OutputRows != 0 || !strings.Contains(events[0].Error, "stop stream") {
+		t.Fatalf("failed stream event = %#v, want failed zero-output event", events)
+	}
+}
+
 func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
 	t.Parallel()
 	query := "FROM VALUES (3, DATE '2026-08-03'), (1, DATE '2026-08-01'), (2, DATE '2026-08-02'), (4, DATE '2026-08-04') AS values(id, occurred_on) SELECT id, occurred_on, CAST(id AS DECIMAL) AS amount ORDER BY occurred_on DESC, id"

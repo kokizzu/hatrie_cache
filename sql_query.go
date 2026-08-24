@@ -47,15 +47,16 @@ type SQLQueryOptions struct {
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
 	PreparedCache         *SQLPreparedQueryCache
-	// QueryID is returned with the result and included in an observation event.
-	// When Observer is set but QueryID is empty, execution assigns a unique ID.
+	// QueryID is returned with materialized results and included in every
+	// observation event. When Observer is set but QueryID is empty, execution
+	// assigns a unique ID.
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
 }
 
-// SQLQueryObserver receives one structured event after a materialized SQL
-// query completes, including parse, budget, and cancellation failures.
+// SQLQueryObserver receives one structured event after a SQL query completes,
+// including streamed, parse, budget, and cancellation failures.
 type SQLQueryObserver interface {
 	ObserveSQLQuery(SQLQueryEvent)
 }
@@ -1026,15 +1027,19 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 }
 
 func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep) {
+	observation.finishSummary(len(result.Rows), len(result.Columns), sqlRowsBytes(result.Rows), err, steps)
+}
+
+func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, resultBytes int, err error, steps []SQLExplainStep) {
 	if observation.observer == nil {
 		return
 	}
 	event := SQLQueryEvent{
 		QueryID:       observation.id,
 		ElapsedNanos:  time.Since(observation.started).Nanoseconds(),
-		OutputRows:    len(result.Rows),
-		OutputColumns: len(result.Columns),
-		ResultBytes:   sqlRowsBytes(result.Rows),
+		OutputRows:    outputRows,
+		OutputColumns: outputColumns,
+		ResultBytes:   resultBytes,
 		OK:            err == nil,
 	}
 	event.Slow = observation.threshold > 0 && time.Duration(event.ElapsedNanos) >= observation.threshold
@@ -1135,7 +1140,10 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 // is configured. Scalar custom functions are evaluated one source row at a
 // time. A chain of indexed INNER/LEFT CACHE joins is also streamable because
 // each next source is probed only for the current row.
-func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) error {
+func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) (err error) {
+	observation := newSQLQueryObservation(options)
+	outputRows, outputColumns, resultBytes := 0, 0, 0
+	defer func() { observation.finishSummary(outputRows, outputColumns, resultBytes, err, nil) }()
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
 	}
@@ -1150,7 +1158,15 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err != nil {
 		return err
 	}
-	return executeSQLQueryRowsParsed(ctx, query, resolver, control, visit)
+	outputColumns = len(sqlColumns(query.selects))
+	return executeSQLQueryRowsParsed(ctx, query, resolver, control, func(columns []string, row SQLRow) error {
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		outputRows++
+		resultBytes += sqlRowBytes(row)
+		return nil
+	})
 }
 
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {

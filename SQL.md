@@ -912,13 +912,13 @@ their materialized semantics and group-memory budget.
 
 ### Query observations
 
-Materialized queries can carry an application request ID and emit one compact,
-structured completion event without exposing SQL text or result values. Supply
-an `Observer`; when `QueryID` is empty the executor assigns a unique `sql-N`
-ID. `SlowQueryThreshold` marks events whose total elapsed time reaches that
-duration. Events include exact materialized row-payload bytes, output shape,
-error text, and an explicit cancellation reason for context cancellation or
-deadline expiry. Events also include `Operators`: privacy-safe per-operator
+Materialized and streamed queries can carry an application request ID and emit
+one compact, structured completion event without exposing SQL text or result
+values. Supply an `Observer`; when `QueryID` is empty the executor assigns a
+unique `sql-N` ID. `SlowQueryThreshold` marks events whose total elapsed time
+reaches that duration. Events include exact emitted row-payload bytes, output
+shape, error text, and an explicit cancellation reason for context cancellation
+or deadline expiry. Events also include `Operators`: privacy-safe per-operator
 node names, measured input/output rows, exact byte flow where available,
 elapsed time, and any available row estimate. Unlike `EXPLAIN ANALYZE`, these counters intentionally omit plan
 details, SQL text, cache keys, predicates, and result values; they are safe to
