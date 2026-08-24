@@ -1268,18 +1268,24 @@ func executeSQLUnionAllStream(ctx context.Context, query *sqlQuery, resolver SQL
 }
 
 type sqlRunningWindowState struct {
-	name  string
-	arg   sqlExpr
-	count int64
-	sum   float64
-	min   float64
-	max   float64
-	seen  bool
+	name        string
+	arg         sqlExpr
+	count       int64
+	sum         float64
+	min         float64
+	max         float64
+	seen        bool
+	lagOffset   int
+	lagDefault  *sqlExpr
+	lagValues   []interface{}
+	lagPosition int
+	lagSeen     int
 }
 
-// sqlRunningWindowStreamable recognizes the unpartitioned, unordered window
-// subset whose default frame is exactly all qualifying preceding rows through
-// the current row. No state needs to be retained per source row.
+// sqlRunningWindowStreamable recognizes unpartitioned, unordered windows whose
+// default frame is all qualifying preceding rows through the current row, plus
+// LAG with a literal offset. They need only constant state or a fixed history,
+// never one retained state object per source row.
 func sqlRunningWindowStreamable(query *sqlQuery) bool {
 	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return false
@@ -1306,11 +1312,41 @@ func sqlRunningWindowStreamable(query *sqlQuery) bool {
 			if len(expr.args) != 1 || sqlExprHasAggregate(expr.args[0]) || sqlExprHasWindow(expr.args[0]) || sqlExprHasCustomFunction(expr.args[0], nil) {
 				return false
 			}
+		case "LAG":
+			if _, ok := sqlRunningWindowLagOffset(expr.args); !ok {
+				return false
+			}
+			for _, argument := range expr.args {
+				if sqlExprHasAggregate(argument) || sqlExprHasWindow(argument) || sqlExprHasCustomFunction(argument, nil) {
+					return false
+				}
+			}
 		default:
 			return false
 		}
 	}
 	return hasWindow
+}
+
+// sqlRunningWindowLagOffset accepts only a literal offset because streamed LAG
+// needs a fixed-size history. Materialized execution remains available for
+// dynamic offsets and for LEAD, which requires future rows.
+func sqlRunningWindowLagOffset(args []sqlExpr) (int, bool) {
+	if len(args) < 1 || len(args) > 3 {
+		return 0, false
+	}
+	if len(args) == 1 {
+		return 1, true
+	}
+	if args[1].kind != "literal" {
+		return 0, false
+	}
+	offset, ok := sqlNumber(args[1].value)
+	maxInt := int(^uint(0) >> 1)
+	if !ok || offset < 0 || offset >= float64(maxInt) || offset != float64(int(offset)) {
+		return 0, false
+	}
+	return int(offset), true
 }
 
 func (state *sqlRunningWindowState) add(row sqlExecRow) (interface{}, error) {
@@ -1321,6 +1357,30 @@ func (state *sqlRunningWindowState) add(row sqlExecRow) (interface{}, error) {
 	case "RANK", "DENSE_RANK":
 		// With no ORDER BY every row is tied, so both ranks are one.
 		return int64(1), nil
+	case "LAG":
+		value := evalSQLExpr(state.arg, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(value); err != nil {
+			return nil, err
+		}
+		defaultValue := interface{}(nil)
+		if state.lagDefault != nil {
+			defaultValue = evalSQLExpr(*state.lagDefault, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(defaultValue); err != nil {
+				return nil, err
+			}
+		}
+		result := defaultValue
+		if state.lagOffset == 0 {
+			result = value
+		} else if state.lagSeen >= state.lagOffset {
+			result = state.lagValues[state.lagPosition]
+		}
+		if len(state.lagValues) > 0 {
+			state.lagValues[state.lagPosition] = value
+			state.lagPosition = (state.lagPosition + 1) % len(state.lagValues)
+		}
+		state.lagSeen++
+		return result, nil
 	}
 	value := evalSQLExpr(state.arg, []sqlExecRow{row}, row)
 	if err := sqlExpressionError(value); err != nil {
@@ -1379,6 +1439,18 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 		state := &sqlRunningWindowState{name: strings.ToUpper(item.expr.name)}
 		if len(item.expr.args) == 1 {
 			state.arg = item.expr.args[0]
+		}
+		if state.name == "LAG" {
+			offset, _ := sqlRunningWindowLagOffset(item.expr.args)
+			state.arg = item.expr.args[0]
+			state.lagOffset = offset
+			if len(item.expr.args) == 3 {
+				defaultExpr := item.expr.args[2]
+				state.lagDefault = &defaultExpr
+			}
+			if offset > 0 && offset < control.maxRows {
+				state.lagValues = make([]interface{}, offset)
+			}
 		}
 		states[index] = state
 	}
