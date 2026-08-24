@@ -2860,6 +2860,70 @@ func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
 	}
 }
 
+func TestSQLGeneratedSQLiteCompositeIndexDifferential(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI is unavailable; install SQLite to run SQL differential cases")
+	}
+	random := rand.New(rand.NewSource(20260901))
+	for iteration := 0; iteration < 48; iteration++ {
+		rows := make([]SQLRow, 1+random.Intn(24))
+		sqliteValues := make([]string, len(rows))
+		for index := range rows {
+			teamID := random.Intn(4)
+			enabled := random.Intn(2) == 0
+			rows[index] = SQLRow{"id": index + 1, "team_id": teamID, "enabled": enabled}
+			enabledValue := 0
+			if enabled {
+				enabledValue = 1
+			}
+			sqliteValues[index] = fmt.Sprintf("(%d,%d,%d)", index+1, teamID, enabledValue)
+		}
+		data, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trie := newTestTrie(t)
+		trie.UpsertString("events", string(data))
+		if err := trie.CreateSQLJSONCompositeIndex("events", "team_id", "enabled"); err != nil {
+			t.Fatal(err)
+		}
+		teamID := random.Intn(4)
+		enabled := random.Intn(2) == 0
+		enabledSQL, enabledValue := "FALSE", 0
+		if enabled {
+			enabledSQL, enabledValue = "TRUE", 1
+		}
+		query := fmt.Sprintf("FROM CACHE('events') AS event WHERE event.team_id = %d AND event.enabled = %s SELECT event.id ORDER BY event.id", teamID, enabledSQL)
+		got, err := ExecuteSQLQuery(query, trie)
+		if err != nil {
+			t.Fatalf("iteration %d HatTrie query: %v\nquery=%s", iteration, err, query)
+		}
+		sqliteQuery := fmt.Sprintf("CREATE TABLE events(id INTEGER, team_id INTEGER, enabled INTEGER); INSERT INTO events VALUES %s; SELECT id FROM events WHERE team_id = %d AND enabled = %d ORDER BY id", strings.Join(sqliteValues, ","), teamID, enabledValue)
+		output, err := exec.Command("sqlite3", "-json", ":memory:", sqliteQuery).Output()
+		if err != nil {
+			t.Fatalf("iteration %d SQLite query: %v\nquery=%s", iteration, err, sqliteQuery)
+		}
+		if len(output) == 0 {
+			output = []byte("[]")
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("iteration %d decode SQLite JSON: %v", iteration, err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("iteration %d composite-index SQLite mismatch\nhatrie_query=%s\nsqlite_query=%s\nhatrie=%#v\nsqlite=%#v", iteration, query, sqliteQuery, normalized, want)
+		}
+	}
+}
+
 func TestExecuteSQLQueryEnforcesRecursiveCTEDepthLimit(t *testing.T) {
 	t.Parallel()
 	_, err := ExecuteSQLQueryContext(context.Background(), `
