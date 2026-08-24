@@ -1219,6 +1219,12 @@ func TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation(t *testing.T) {
 			options: SQLQueryOptions{MaxGroupBytes: 8},
 			want:    "group memory budget",
 		},
+		{
+			name:    "set_bytes",
+			source:  "FROM VALUES ('long value') AS left_values(value) SELECT value UNION FROM VALUES ('another long value') AS right_values(value) SELECT value",
+			options: SQLQueryOptions{MaxSetBytes: 8},
+			want:    "set memory budget",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := ExecuteSQLQueryContext(context.Background(), test.source, SQLSourceResolverFunc(nil), test.options)
@@ -1321,6 +1327,108 @@ func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) 
 	if len(entries) != 0 {
 		t.Fatalf("spill failure retains temporary files: %#v", entries)
 	}
+}
+
+func TestExecuteSQLQueryContextSpillsSetOperationsWithinDiskBudget(t *testing.T) {
+	t.Parallel()
+	left := "FROM VALUES (1), (1), (2), (3) AS left_values(id) SELECT id"
+	right := "FROM VALUES (2), (3), (3), (4) AS right_values(id) SELECT id"
+	tests := []struct {
+		name, operation string
+		want            []SQLRow
+	}{
+		{"union", "UNION", []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}, {"id": int64(4)}}},
+		{"intersect", "INTERSECT", []SQLRow{{"id": int64(2)}, {"id": int64(3)}}},
+		{"except", "EXCEPT", []SQLRow{{"id": int64(1)}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			query := left + " " + test.operation + " " + right
+			baseline, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+			if err != nil {
+				t.Fatalf("baseline %s: %v", test.operation, err)
+			}
+			if !reflect.DeepEqual(baseline.Rows, test.want) {
+				t.Fatalf("baseline %s rows = %#v, want %#v", test.operation, baseline.Rows, test.want)
+			}
+			directory := t.TempDir()
+			options := SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}
+			got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), options)
+			if err != nil {
+				t.Fatalf("spill %s: %v", test.operation, err)
+			}
+			if !reflect.DeepEqual(got.Rows, baseline.Rows) {
+				t.Fatalf("spill %s rows = %#v, want %#v", test.operation, got.Rows, baseline.Rows)
+			}
+			explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil), options)
+			if err != nil {
+				t.Fatalf("explain spill %s: %v", test.operation, err)
+			}
+			seen := false
+			for _, step := range explained.Plan {
+				seen = seen || step.Node == "EXTERNAL SET"
+			}
+			if !seen {
+				t.Fatalf("spill %s plan = %#v, want EXTERNAL SET", test.operation, explained.Plan)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatalf("read spill directory: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("spill %s retains temporary files: %#v", test.operation, entries)
+			}
+		})
+	}
+	t.Run("union_all_does_not_need_membership_budget", func(t *testing.T) {
+		query := left + " UNION ALL " + right
+		baseline, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+		if err != nil {
+			t.Fatalf("UNION ALL baseline: %v", err)
+		}
+		got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxSetBytes: 1})
+		if err != nil {
+			t.Fatalf("UNION ALL with set budget: %v", err)
+		}
+		if !reflect.DeepEqual(got.Rows, baseline.Rows) {
+			t.Fatalf("UNION ALL rows = %#v, want %#v", got.Rows, baseline.Rows)
+		}
+	})
+	t.Run("many_runs_and_disk_budget", func(t *testing.T) {
+		leftValues, rightValues := make([]string, 0, 80), make([]string, 0, 80)
+		for value := 0; value < 80; value++ {
+			leftValues = append(leftValues, fmt.Sprintf("(%d)", value))
+			rightValues = append(rightValues, fmt.Sprintf("(%d)", value+40))
+		}
+		directory := t.TempDir()
+		left := "FROM VALUES " + strings.Join(leftValues, ", ") + " AS left_values(id) SELECT id"
+		right := "FROM VALUES " + strings.Join(rightValues, ", ") + " AS right_values(id) SELECT id"
+		for _, operation := range []string{"UNION", "INTERSECT", "EXCEPT"} {
+			query := left + " " + operation + " " + right
+			baseline, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+			if err != nil {
+				t.Fatalf("many-run %s baseline: %v", operation, err)
+			}
+			got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20})
+			if err != nil {
+				t.Fatalf("many-run %s spill: %v", operation, err)
+			}
+			if !reflect.DeepEqual(got.Rows, baseline.Rows) {
+				t.Fatalf("many-run %s spill rows = %#v, want %#v", operation, got.Rows, baseline.Rows)
+			}
+		}
+		_, err := ExecuteSQLQueryContext(context.Background(), left+" UNION "+right, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1})
+		if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+			t.Fatalf("set spill disk budget error = %v, want spill disk budget", err)
+		}
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			t.Fatalf("read spill directory after failure: %v", err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("set spill failure retains temporary files: %#v", entries)
+		}
+	})
 }
 
 func TestExecuteSQLQueryContextSpillsDirectGroupedAggregatesWithinDiskBudget(t *testing.T) {

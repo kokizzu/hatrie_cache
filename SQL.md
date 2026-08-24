@@ -812,20 +812,23 @@ result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
         MaxResultBytes: 8 << 20,
         MaxSortBytes:   16 << 20,
         MaxGroupBytes:  16 << 20,
+        MaxSetBytes:    16 << 20,
     })
 ```
 
-For a query whose final `ORDER BY` is larger than its in-memory sort budget,
-callers can explicitly permit a bounded external merge sort. Set all three
-values below: `MaxSortBytes` remains the maximum one sorted run held in
-memory, `SpillDirectory` is a caller-owned writable temporary directory, and
-`MaxSpillBytes` bounds every live temporary run for this query. Without both
-spill settings, exceeding `MaxSortBytes` still fails safely as before.
+For a query whose final `ORDER BY`, direct grouped aggregate, or distinct set
+operation is larger than its in-memory budget, callers can explicitly permit
+bounded spill runs. Set `SpillDirectory` (a caller-owned writable temporary
+directory) and `MaxSpillBytes`, then set the operator-specific byte limit.
+`MaxSortBytes`, `MaxGroupBytes`, and `MaxSetBytes` remain the maximum one
+in-memory run or set-state budget; without both spill settings, exceeding an
+enabled budget still fails safely as before.
 
 ```go
 result, err := hatriecache.ExecuteSQLQueryContext(ctx, sql, resolver,
     hatriecache.SQLQueryOptions{
         MaxSortBytes:   16 << 20,
+        MaxSetBytes:    16 << 20,
         SpillDirectory: "/var/tmp/hatrie-sql",
         MaxSpillBytes:  512 << 20,
     })
@@ -836,9 +839,15 @@ preserves SQL values (including `DATE`, `DECIMAL`, timestamps, and nested JSON)
 and uses the original row ordinal to keep equal keys stable. It merges at most
 32 runs at once, performs further bounded merge passes when needed, deletes
 all temporary files on success or failure, and reports `EXTERNAL SORT` with
-its live spill bytes and final-run count in `EXPLAIN ANALYZE`. This currently
-spills only the final sort; grouping, windows, CTEs, and set operations retain
-their independent in-memory budgets.
+its live spill bytes and final-run count in `EXPLAIN ANALYZE`.
+
+For `UNION` (without `ALL`), `INTERSECT`, and `EXCEPT`, `MaxSetBytes` similarly
+limits distinct-set membership. Once exceeded, a configured spill directory
+merges canonical projected-row identities on disk and then restores the
+engine's existing first-occurrence result order. `EXPLAIN ANALYZE` reports an
+`EXTERNAL SET` operator with its live spill bytes and final-run count. The
+individual set-operation branches still use their ordinary materialized query
+semantics; only the global membership phase is spilled.
 
 The same spill directory and disk budget can also execute a bounded direct
 grouped aggregate when `MaxGroupBytes` is set. The supported shape is one

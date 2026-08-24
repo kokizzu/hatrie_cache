@@ -33,6 +33,11 @@ type SQLQueryOptions struct {
 	MaxResultBytes int
 	MaxSortBytes   int
 	MaxGroupBytes  int
+	// MaxSetBytes bounds one in-memory distinct UNION, INTERSECT, or EXCEPT
+	// operation.
+	// When combined with SpillDirectory and MaxSpillBytes, oversized distinct
+	// set membership is merged through temporary runs instead of failing.
+	MaxSetBytes int
 	// SpillDirectory and MaxSpillBytes opt into bounded temporary files for a
 	// sort that exceeds MaxSortBytes. Both must be set; the default remains a
 	// safe in-memory budget failure. Temporary files are removed before return.
@@ -3983,7 +3988,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.Timeout > 0 {
@@ -4997,6 +5002,19 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		started = time.Now()
 		inputRows = len(result.Rows) + len(right.Rows)
+		setBytes := sqlRowsBytes(result.Rows) + sqlRowsBytes(right.Rows)
+		if control != nil && !union.all && control.options.MaxSetBytes > 0 && setBytes > control.options.MaxSetBytes {
+			if control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
+				rows, spillBytes, runs, err := sqlExternalSetRows(result.Rows, right.Rows, union.kind, control.options.SpillDirectory, control.options.MaxSetBytes, control.options.MaxSpillBytes, control)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				result.Rows = rows
+				metrics.record("EXTERNAL SET", fmt.Sprintf("%s spill_bytes=%d runs=%d", union.kind, spillBytes, runs), inputRows, len(result.Rows), started)
+				continue
+			}
+			return SQLQueryResult{}, fmt.Errorf("SQL set memory budget exceeded: maximum %d bytes", control.options.MaxSetBytes)
+		}
 		switch union.kind {
 		case "UNION":
 			result.Rows = append(result.Rows, right.Rows...)
@@ -6253,6 +6271,332 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 	rows, err := sqlMergeSpillRunsToRows(runs, order, offset, limit, control)
 	if err != nil {
 		return nil, 0, 0, err
+	}
+	return rows, int64(maxSpillBytes) - available, len(runs), nil
+}
+
+// sqlSpillSetRecord retains only what a DISTINCT set operator needs while it
+// is on disk. Ordinal is the concatenated left/right input position, so the
+// final result can keep the engine's existing first-occurrence ordering.
+type sqlSpillSetRecord struct {
+	Key     string
+	Row     SQLRow
+	Ordinal int
+	Right   bool
+}
+
+type sqlSpillSetReader struct {
+	file    *os.File
+	decoder *gob.Decoder
+	current sqlSpillSetRecord
+	done    bool
+}
+
+func sqlSpillSetRecordBefore(left, right sqlSpillSetRecord) bool {
+	if left.Key != right.Key {
+		return left.Key < right.Key
+	}
+	return left.Ordinal < right.Ordinal
+}
+
+func sqlSpillSetRecordBytes(record sqlSpillSetRecord) int {
+	return len(record.Key) + sqlRowBytes(record.Row) + 32
+}
+
+func sqlWriteSpillSetRun(directory string, records []sqlSpillSetRecord, available *int64, control *sqlExecutionControl) (sqlSpillRun, error) {
+	file, err := os.CreateTemp(directory, "hatrie-sql-set-*")
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("create SQL set spill file: %w", err)
+	}
+	run := sqlSpillRun{path: file.Name()}
+	remove := true
+	defer func() {
+		if remove {
+			_ = file.Close()
+			_ = os.Remove(run.path)
+		}
+	}()
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	for _, record := range records {
+		if err := control.check(); err != nil {
+			return sqlSpillRun{}, err
+		}
+		if err := encoder.Encode(record); err != nil {
+			if errors.Is(err, errSQLSpillDiskBudget) {
+				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while writing set runs")
+			}
+			return sqlSpillRun{}, fmt.Errorf("write SQL set spill file: %w", err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return sqlSpillRun{}, fmt.Errorf("close SQL set spill file: %w", err)
+	}
+	info, err := os.Stat(run.path)
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("inspect SQL set spill file: %w", err)
+	}
+	run.bytes = info.Size()
+	remove = false
+	return run, nil
+}
+
+func openSQLSpillSetReader(run sqlSpillRun) (*sqlSpillSetReader, error) {
+	file, err := os.Open(run.path)
+	if err != nil {
+		return nil, fmt.Errorf("open SQL set spill file: %w", err)
+	}
+	reader := &sqlSpillSetReader{file: file, decoder: gob.NewDecoder(file)}
+	if err := reader.next(); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return reader, nil
+}
+
+func (reader *sqlSpillSetReader) next() error {
+	if reader.done {
+		return nil
+	}
+	var record sqlSpillSetRecord
+	if err := reader.decoder.Decode(&record); err != nil {
+		if errors.Is(err, io.EOF) {
+			reader.done = true
+			return nil
+		}
+		return fmt.Errorf("read SQL set spill file: %w", err)
+	}
+	reader.current = record
+	return nil
+}
+
+func closeSQLSpillSetReaders(readers []*sqlSpillSetReader) {
+	for _, reader := range readers {
+		if reader != nil && reader.file != nil {
+			_ = reader.file.Close()
+		}
+	}
+}
+
+func sqlOpenSpillSetReaders(runs []sqlSpillRun) ([]*sqlSpillSetReader, error) {
+	readers := make([]*sqlSpillSetReader, len(runs))
+	for index, run := range runs {
+		reader, err := openSQLSpillSetReader(run)
+		if err != nil {
+			closeSQLSpillSetReaders(readers)
+			return nil, err
+		}
+		readers[index] = reader
+	}
+	return readers, nil
+}
+
+func sqlNextRawSpillSet(readers []*sqlSpillSetReader, control *sqlExecutionControl) (sqlSpillSetRecord, bool, error) {
+	if err := control.check(); err != nil {
+		return sqlSpillSetRecord{}, false, err
+	}
+	best := -1
+	for index, reader := range readers {
+		if reader.done || best >= 0 && !sqlSpillSetRecordBefore(reader.current, readers[best].current) {
+			continue
+		}
+		best = index
+	}
+	if best < 0 {
+		return sqlSpillSetRecord{}, false, nil
+	}
+	record := readers[best].current
+	if err := readers[best].next(); err != nil {
+		return sqlSpillSetRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func sqlMergeSpillSetRunsToRun(runs []sqlSpillRun, directory string, available *int64, control *sqlExecutionControl) (sqlSpillRun, error) {
+	readers, err := sqlOpenSpillSetReaders(runs)
+	if err != nil {
+		return sqlSpillRun{}, err
+	}
+	defer closeSQLSpillSetReaders(readers)
+	file, err := os.CreateTemp(directory, "hatrie-sql-set-merge-*")
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("create SQL set merge file: %w", err)
+	}
+	run := sqlSpillRun{path: file.Name()}
+	remove := true
+	defer func() {
+		if remove {
+			_ = file.Close()
+			_ = os.Remove(run.path)
+		}
+	}()
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	for {
+		record, ok, err := sqlNextRawSpillSet(readers, control)
+		if err != nil {
+			return sqlSpillRun{}, err
+		}
+		if !ok {
+			break
+		}
+		if err := encoder.Encode(record); err != nil {
+			if errors.Is(err, errSQLSpillDiskBudget) {
+				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging set runs")
+			}
+			return sqlSpillRun{}, fmt.Errorf("write SQL set spill file: %w", err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return sqlSpillRun{}, fmt.Errorf("close SQL set spill file: %w", err)
+	}
+	info, err := os.Stat(run.path)
+	if err != nil {
+		return sqlSpillRun{}, fmt.Errorf("inspect SQL set spill file: %w", err)
+	}
+	run.bytes = info.Size()
+	remove = false
+	return run, nil
+}
+
+type sqlSetOutput struct {
+	row     SQLRow
+	ordinal int
+}
+
+func sqlExternalSetRows(left, right []SQLRow, operation, directory string, maxRunBytes, maxSpillBytes int, control *sqlExecutionControl) ([]SQLRow, int64, int, error) {
+	if directory == "" || maxSpillBytes <= 0 {
+		return nil, 0, 0, fmt.Errorf("SQL external set requires SpillDirectory and MaxSpillBytes")
+	}
+	available := int64(maxSpillBytes)
+	allPaths := map[string]struct{}{}
+	defer func() {
+		for path := range allPaths {
+			_ = os.Remove(path)
+		}
+	}()
+	runs := []sqlSpillRun{}
+	chunk := make([]sqlSpillSetRecord, 0)
+	chunkBytes := 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(chunk, func(left, right int) bool { return sqlSpillSetRecordBefore(chunk[left], chunk[right]) })
+		run, err := sqlWriteSpillSetRun(directory, chunk, &available, control)
+		if err != nil {
+			return err
+		}
+		allPaths[run.path] = struct{}{}
+		runs = append(runs, run)
+		chunk = make([]sqlSpillSetRecord, 0)
+		chunkBytes = 0
+		return nil
+	}
+	appendRows := func(rows []SQLRow, rightSide bool, ordinalStart int) error {
+		for index, row := range rows {
+			if err := control.check(); err != nil {
+				return err
+			}
+			record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinalStart + index, Right: rightSide}
+			recordBytes := sqlSpillSetRecordBytes(record)
+			if len(chunk) > 0 && chunkBytes+recordBytes > maxRunBytes {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			chunk = append(chunk, record)
+			chunkBytes += recordBytes
+		}
+		return nil
+	}
+	if err := appendRows(left, false, 0); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := appendRows(right, true, len(left)); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := flush(); err != nil {
+		return nil, 0, 0, err
+	}
+	for len(runs) > maxSQLSpillMergeFanIn {
+		next := make([]sqlSpillRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
+		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
+			end := start + maxSQLSpillMergeFanIn
+			if end > len(runs) {
+				end = len(runs)
+			}
+			merged, err := sqlMergeSpillSetRunsToRun(runs[start:end], directory, &available, control)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			allPaths[merged.path] = struct{}{}
+			for _, run := range runs[start:end] {
+				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return nil, 0, 0, fmt.Errorf("remove SQL set spill file: %w", err)
+				}
+				delete(allPaths, run.path)
+				available += run.bytes
+			}
+			next = append(next, merged)
+		}
+		runs = next
+	}
+	readers, err := sqlOpenSpillSetReaders(runs)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer closeSQLSpillSetReaders(readers)
+	output := make([]sqlSetOutput, 0)
+	for {
+		first, ok, err := sqlNextRawSpillSet(readers, control)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if !ok {
+			break
+		}
+		hasLeft, hasRight := !first.Right, first.Right
+		firstLeft := first
+		for {
+			best := -1
+			for index, reader := range readers {
+				if reader.done || reader.current.Key != first.Key || best >= 0 && !sqlSpillSetRecordBefore(reader.current, readers[best].current) {
+					continue
+				}
+				best = index
+			}
+			if best < 0 {
+				break
+			}
+			record := readers[best].current
+			if record.Right {
+				hasRight = true
+			} else if !hasLeft {
+				hasLeft = true
+				firstLeft = record
+			}
+			if err := readers[best].next(); err != nil {
+				return nil, 0, 0, err
+			}
+		}
+		switch operation {
+		case "UNION":
+			output = append(output, sqlSetOutput{row: first.Row, ordinal: first.Ordinal})
+		case "INTERSECT":
+			if hasLeft && hasRight {
+				output = append(output, sqlSetOutput{row: firstLeft.Row, ordinal: firstLeft.Ordinal})
+			}
+		case "EXCEPT":
+			if hasLeft && !hasRight {
+				output = append(output, sqlSetOutput{row: firstLeft.Row, ordinal: firstLeft.Ordinal})
+			}
+		default:
+			return nil, 0, 0, fmt.Errorf("unsupported SQL set operation %q", operation)
+		}
+	}
+	sort.SliceStable(output, func(left, right int) bool { return output[left].ordinal < output[right].ordinal })
+	rows := make([]SQLRow, len(output))
+	for index, record := range output {
+		rows[index] = record.row
 	}
 	return rows, int64(maxSpillBytes) - available, len(runs), nil
 }
