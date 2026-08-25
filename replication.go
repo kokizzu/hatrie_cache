@@ -49,22 +49,15 @@ const replicationSetBinaryCommand = "INTERNALSETV2"
 const replicationSetCompactCommand = "INTERNALSETV3"
 const replicationDigestCommand = "INTERNALDIGESTV1"
 
-type ReplicationTransport string
+type ReplicationTransport = hatReplication.Transport
 
 const (
-	ReplicationTransportHTTP       ReplicationTransport = "http"
-	ReplicationTransportGRPCStream ReplicationTransport = "grpc-stream"
+	ReplicationTransportHTTP       = hatReplication.TransportHTTP
+	ReplicationTransportGRPCStream = hatReplication.TransportGRPCStream
 )
 
 func ParseReplicationTransport(value string) (ReplicationTransport, error) {
-	switch ReplicationTransport(strings.ToLower(strings.TrimSpace(value))) {
-	case "", ReplicationTransportHTTP:
-		return ReplicationTransportHTTP, nil
-	case ReplicationTransportGRPCStream:
-		return ReplicationTransportGRPCStream, nil
-	default:
-		return "", errors.New("hatriecache: replication transport must be http or grpc-stream")
-	}
+	return hatReplication.ParseTransport(value)
 }
 
 var (
