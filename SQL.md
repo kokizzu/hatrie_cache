@@ -299,6 +299,12 @@ SELECT value FROM VALUES (2), (3) AS right_rows(value)
 ORDER BY value;
 ```
 
+`UNION` keeps the first occurrence of each projected row. The executor
+deduplicates the left input while building membership, then admits only unseen
+right rows, so it does not first materialize a combined duplicate result.
+`UNION ALL` preserves every row and bypasses this membership work. Large
+distinct set operations retain the existing bounded external-set spill path.
+
 Result: `1`, `2`, `3`. `UNION` removes duplicates; `UNION ALL` preserves them.
 `INTERSECT` keeps rows common to both sides, and `EXCEPT` keeps rows present in
 the first side but not the second. These operations are read-only.

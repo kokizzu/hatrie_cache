@@ -7036,10 +7036,29 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		switch union.kind {
 		case "UNION":
-			result.Rows = append(result.Rows, right.Rows...)
-			if !union.all {
-				result.Rows = distinctSQLQueryRows(result.Rows)
+			if union.all {
+				result.Rows = append(result.Rows, right.Rows...)
+				break
 			}
+			seen := make(map[string]struct{}, len(result.Rows)+len(right.Rows))
+			unique := result.Rows[:0]
+			for _, row := range result.Rows {
+				key := sqlOutputRowKey(row)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				unique = append(unique, row)
+			}
+			for _, row := range right.Rows {
+				key := sqlOutputRowKey(row)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				unique = append(unique, row)
+			}
+			result.Rows = unique
 		case "INTERSECT":
 			available := make(map[string]struct{}, len(right.Rows))
 			for _, row := range right.Rows {
@@ -7070,6 +7089,8 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		kind := union.kind
 		if union.all {
 			kind += " ALL"
+		} else if union.kind == "UNION" {
+			kind += " early duplicate elimination"
 		}
 		metrics.record("SET", kind, inputRows, len(result.Rows), started)
 	}

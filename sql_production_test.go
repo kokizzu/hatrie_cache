@@ -4169,6 +4169,20 @@ FROM VALUES (2), (3) AS right_values(value) SELECT value`, resolver)
 	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(2)}, {"value": int64(3)}}; !reflect.DeepEqual(all.Rows, want) {
 		t.Fatalf("UNION ALL rows = %#v, want %#v", all.Rows, want)
 	}
+	explained, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE FROM VALUES (1), (2), (2) AS left_values(value) SELECT value
+UNION
+FROM VALUES (2), (3), (3) AS right_values(value) SELECT value`, resolver)
+	if err != nil {
+		t.Fatalf("EXPLAIN ANALYZE UNION error = %v", err)
+	}
+	seenEarlyDedup := false
+	for _, step := range explained.Rows {
+		seenEarlyDedup = seenEarlyDedup || step["node"] == "SET" && strings.Contains(fmt.Sprint(step["detail"]), "early duplicate elimination")
+	}
+	if !seenEarlyDedup {
+		t.Fatalf("UNION plan = %#v, want early duplicate elimination", explained.Rows)
+	}
 	for operator, want := range map[string][]SQLRow{
 		"INTERSECT": {{"value": int64(2)}},
 		"EXCEPT":    {{"value": int64(1)}},
