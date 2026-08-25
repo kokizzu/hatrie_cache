@@ -25,6 +25,7 @@ import (
 	json "github.com/goccy/go-json"
 
 	hatriecache "hatrie_cache"
+	"hatrie_cache/hat/hatAuth"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -58,6 +59,7 @@ type config struct {
 	monitoringAuthToken            string
 	monitoringAuthPreviousToken    string
 	monitoringAuthPreviousExpiry   time.Time
+	rbacPolicyPath                 string
 	diagnosticsProfiling           bool
 	auditLogPath                   string
 	writeProtection                bool
@@ -190,6 +192,10 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if !cfg.monitoringServer {
 		fmt.Fprintln(stdout, "monitoring server disabled; pass -monitoring-server to start it")
 		return nil
+	}
+	rbacPolicy, err := loadRBACPolicy(cfg.rbacPolicyPath)
+	if err != nil {
+		return err
 	}
 	auditLog, err := openAuditLogIfConfigured(cfg.auditLogPath)
 	if err != nil {
@@ -406,6 +412,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		AuthToken:                        cfg.monitoringAuthToken,
 		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
 		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		RBACPolicy:                       rbacPolicy,
 		DiagnosticsProfiling:             cfg.diagnosticsProfiling,
 		ReplicationAuthToken:             cfg.replicationAuthToken,
 		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
@@ -566,6 +573,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.monitoringAuthPreviousToken, "monitoring-auth-previous-token", "", "previous monitoring bearer token accepted only until its expiry")
 	flags.Func("monitoring-auth-previous-token-expires-at", "absolute RFC3339 expiry for the previous monitoring bearer token", rfc3339TimeFlag(&cfg.monitoringAuthPreviousExpiry))
+	flags.StringVar(&cfg.rbacPolicyPath, "rbac-policy", cfg.rbacPolicyPath, "optional JSON role-based access policy; requires monitoring authentication")
 	flags.BoolVar(&cfg.diagnosticsProfiling, "diagnostics-profiling", cfg.diagnosticsProfiling, "enable authenticated bounded runtime profile capture")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
@@ -658,6 +666,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	cfg.monitoringAuthToken = strings.TrimSpace(cfg.monitoringAuthToken)
 	cfg.monitoringAuthPreviousToken = strings.TrimSpace(cfg.monitoringAuthPreviousToken)
+	cfg.rbacPolicyPath = strings.TrimSpace(cfg.rbacPolicyPath)
 	cfg.replicationAuthToken = strings.TrimSpace(cfg.replicationAuthToken)
 	cfg.replicationAuthPreviousToken = strings.TrimSpace(cfg.replicationAuthPreviousToken)
 	now := time.Now()
@@ -666,6 +675,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.diagnosticsProfiling && cfg.monitoringAuthToken == "" {
 		return config{}, errors.New("diagnostics profiling requires -monitoring-auth-token")
+	}
+	if cfg.rbacPolicyPath != "" && cfg.monitoringAuthToken == "" {
+		return config{}, errors.New("RBAC policy requires -monitoring-auth-token")
 	}
 	if err := validatePreviousAuthToken("replication", cfg.replicationAuthToken, cfg.replicationAuthPreviousToken, cfg.replicationAuthPreviousExpiry, now); err != nil {
 		return config{}, err
@@ -1073,7 +1085,52 @@ func validateConfigReferences(cfg config) error {
 			return fmt.Errorf("load topology: %w", err)
 		}
 	}
+	if _, err := loadRBACPolicy(cfg.rbacPolicyPath); err != nil {
+		return err
+	}
 	return nil
+}
+
+func loadRBACPolicy(path string) (hatAuth.Policy, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return hatAuth.Policy{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return hatAuth.Policy{}, fmt.Errorf("read RBAC policy %s: %w", path, err)
+	}
+	decoder := stdjson.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var policy hatAuth.Policy
+	if err := decoder.Decode(&policy); err != nil {
+		return hatAuth.Policy{}, fmt.Errorf("parse RBAC policy %s: %w", path, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return hatAuth.Policy{}, fmt.Errorf("parse RBAC policy %s: multiple JSON values", path)
+	}
+	if len(policy.Principals) == 0 || len(policy.Roles) == 0 {
+		return hatAuth.Policy{}, fmt.Errorf("RBAC policy %s must define principals and roles", path)
+	}
+	roles := make(map[string]struct{}, len(policy.Roles))
+	for _, role := range policy.Roles {
+		name := strings.TrimSpace(role.Name)
+		if name == "" {
+			return hatAuth.Policy{}, fmt.Errorf("RBAC policy %s has a role without a name", path)
+		}
+		if _, exists := roles[name]; exists {
+			return hatAuth.Policy{}, fmt.Errorf("RBAC policy %s has duplicate role %q", path, name)
+		}
+		roles[name] = struct{}{}
+	}
+	for _, assigned := range policy.Principals {
+		for _, role := range assigned {
+			if _, exists := roles[strings.TrimSpace(role)]; !exists {
+				return hatAuth.Policy{}, fmt.Errorf("RBAC policy %s assigns an unknown role", path)
+			}
+		}
+	}
+	return policy, nil
 }
 
 func writeRedactedConfig(writer io.Writer, cfg config) error {
@@ -1098,6 +1155,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"monitoring_tls_key":                   cfg.monitoringTLSKey,
 		"monitoring_auth_token":                redactedSecret(cfg.monitoringAuthToken),
 		"monitoring_auth_previous_token":       redactedSecret(cfg.monitoringAuthPreviousToken),
+		"rbac_policy":                          cfg.rbacPolicyPath,
 		"diagnostics_profiling":                cfg.diagnosticsProfiling,
 		"audit_log_path":                       cfg.auditLogPath,
 		"write_protection":                     cfg.writeProtection,
@@ -1586,6 +1644,10 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
+	rbacPolicy, err := loadRBACPolicy(cfg.rbacPolicyPath)
+	if err != nil {
+		return nil, nil, err
+	}
 	options, err := grpcServerOptions(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -1600,6 +1662,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		AuthToken:                        cfg.monitoringAuthToken,
 		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
 		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		RBACPolicy:                       rbacPolicy,
 		ReplicationAuthToken:             cfg.replicationAuthToken,
 		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
 		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,

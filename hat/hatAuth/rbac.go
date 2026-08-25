@@ -38,9 +38,26 @@ func (policy Policy) Authorize(principal, command, namespace, source string) boo
 			continue
 		}
 		for _, rule := range role.Rules {
-			if selectorMatches(rule.Commands, command) && selectorMatches(rule.Namespaces, namespace) && selectorMatches(rule.Sources, source) {
+			if commandSelectorMatches(rule.Commands, command) && selectorMatches(rule.Namespaces, namespace) && selectorMatches(rule.Sources, source) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func commandSelectorMatches(selectors []string, value string) bool {
+	if len(selectors) == 0 || strings.TrimSpace(value) == "" {
+		return true
+	}
+	value = strings.ToUpper(strings.TrimSpace(value))
+	for _, selector := range selectors {
+		selector = strings.ToUpper(strings.TrimSpace(selector))
+		if selector == "*" || selector == value {
+			return true
+		}
+		if strings.HasSuffix(selector, "*") && strings.HasPrefix(value, strings.TrimSuffix(selector, "*")) {
+			return true
 		}
 	}
 	return false
@@ -50,9 +67,9 @@ func selectorMatches(selectors []string, value string) bool {
 	if len(selectors) == 0 || strings.TrimSpace(value) == "" {
 		return true
 	}
-	value = strings.ToUpper(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
 	for _, selector := range selectors {
-		selector = strings.ToUpper(strings.TrimSpace(selector))
+		selector = strings.TrimSpace(selector)
 		if selector == "*" || selector == value {
 			return true
 		}

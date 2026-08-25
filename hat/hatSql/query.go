@@ -10751,6 +10751,63 @@ func ParseQueryParameters(source string, parameters []interface{}) (*ParsedQuery
 	return ParseSQLQueryParameters(source, parameters)
 }
 
+// QuerySourceNames parses source and returns each physical CACHE or EXTERNAL
+// source name in first-use order. CTEs and derived queries are traversed so
+// callers can apply authorization before executing the query.
+func QuerySourceNames(source string) ([]string, error) {
+	return QuerySourceNamesParameters(source, nil)
+}
+
+// QuerySourceNamesParameters is QuerySourceNames with positional parameters
+// bound before source discovery.
+func QuerySourceNamesParameters(source string, parameters []interface{}) ([]string, error) {
+	query, err := parseSQLQueryParameters(source, parameters)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	names := make([]string, 0)
+	appendSource := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		names = append(names, candidate)
+	}
+	var visitSource func(sqlSource)
+	var visitQuery func(*sqlQuery)
+	visitSource = func(candidate sqlSource) {
+		switch candidate.kind {
+		case "CACHE", "EXTERNAL":
+			appendSource(candidate.key)
+		case "SUBQUERY":
+			visitQuery(candidate.query)
+		}
+	}
+	visitQuery = func(candidate *sqlQuery) {
+		if candidate == nil {
+			return
+		}
+		for _, cte := range candidate.ctes {
+			visitQuery(cte.query)
+		}
+		if candidate.from != nil {
+			visitSource(*candidate.from)
+		}
+		for _, join := range candidate.joins {
+			visitSource(join.source)
+		}
+		for _, union := range candidate.unions {
+			visitQuery(union.query)
+		}
+	}
+	visitQuery(query)
+	return names, nil
+}
+
 // ValidateSQLQueryStreamable reports whether query can emit rows incrementally.
 func ValidateSQLQueryStreamable(query *ParsedQuery) error {
 	return validateSQLQueryStreamable(query)

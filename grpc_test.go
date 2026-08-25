@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"hatrie_cache/hat/hatAuth"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
@@ -876,6 +877,29 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 	}
 	if entry.TtlMillis == nil || entry.GetTtlMillis() != int64(time.Minute/time.Millisecond) {
 		t.Fatalf("entry ttl = %v, want 60000", entry.TtlMillis)
+	}
+}
+
+func TestCacheGRPCServerEnforcesRBACForEveryCommand(t *testing.T) {
+	client, stop := newTestGRPCClient(t, newTestTrie(t), CacheGRPCOptions{
+		AuthToken: "reader-token",
+		RBACPolicy: hatAuth.Policy{
+			Principals: map[string][]string{"reader-token": {"reader"}},
+			Roles: []hatAuth.Role{{Name: "reader", Rules: []hatAuth.Rule{{
+				Commands:   []string{"GET"},
+				Namespaces: []string{"tenant-a:*"},
+			}}}},
+		},
+	})
+	defer stop()
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer reader-token"))
+
+	if _, err := client.Command(ctx, &hatriecachev1.CommandRequest{Command: "GET", Key: "tenant-a:missing"}); err != nil {
+		t.Fatalf("allowed GET error = %v", err)
+	}
+	_, err := client.Command(ctx, &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "tenant-a:value", Value: "blocked"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("disallowed SETSTR error = %v, want PermissionDenied", err)
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hatrie_cache/hat/hatAuth"
 )
 
 func TestHatTrieResolvesSQLCacheAndKeySources(t *testing.T) {
@@ -93,6 +95,69 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 	}
 	if body := response.Body.String(); !strings.Contains(body, "did you mean `JOIN`?") || !strings.Contains(body, "query:1:") {
 		t.Fatalf("bad query body = %q, want formatted compiler diagnostic", body)
+	}
+}
+
+func TestMonitoringHandlerEnforcesRBACForCommandsAndSQLSources(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("tenant-a:people", `[{"id":1,"name":"Ivi"}]`)
+	handler := NewMonitoringHandler(trie, MonitoringOptions{
+		AuthToken: "reader-token",
+		RBACPolicy: hatAuth.Policy{
+			Principals: map[string][]string{"reader-token": {"reader"}},
+			Roles: []hatAuth.Role{{Name: "reader", Rules: []hatAuth.Rule{
+				{Commands: []string{"GET"}, Namespaces: []string{"tenant-a:*"}},
+				{Commands: []string{"SQL"}, Sources: []string{"tenant-a:people"}},
+			}}},
+		},
+	}).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"GET","key":"tenant-a:missing"}`))
+	request.Header.Set("Authorization", "Bearer reader-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("allowed command status = %d: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"tenant-a:people","value":"blocked"}`))
+	request.Header.Set("Authorization", "Bearer reader-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("disallowed command status = %d, want 403: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"BATCH","batch":[{"command":"GET","key":"tenant-a:missing"},{"command":"SETSTR","key":"tenant-a:people","value":"blocked"}]}`))
+	request.Header.Set("Authorization", "Bearer reader-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("partially disallowed batch status = %d, want 403: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM CACHE('tenant-a:people') AS p SELECT p.name"}`))
+	request.Header.Set("Authorization", "Bearer reader-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("allowed SQL status = %d: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM CACHE('tenant-b:people') AS p SELECT p.name"}`))
+	request.Header.Set("Authorization", "Bearer reader-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("disallowed SQL source status = %d, want 403: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM CACHE('tenant-a:people') AS p JOIN CACHE('tenant-b:people') AS b ON p.id = b.id SELECT p.name"}`))
+	request.Header.Set("Authorization", "Bearer reader-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("multi-source SQL status = %d, want 403: %s", response.Code, response.Body.String())
 	}
 }
 

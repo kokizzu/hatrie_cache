@@ -2,10 +2,21 @@ package hatSql_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"hatrie_cache/hat/hatSql"
 )
+
+func TestQuerySourceNamesReturnsPhysicalSourcesInQueryOrder(t *testing.T) {
+	sources, err := hatSql.QuerySourceNames("WITH selected AS (SELECT * FROM CACHE('tenant-a:users')) SELECT * FROM selected JOIN CACHE('tenant-a:orders') AS orders ON selected.id = orders.user_id")
+	if err != nil {
+		t.Fatalf("QuerySourceNames() error = %v", err)
+	}
+	if want := []string{"tenant-a:users", "tenant-a:orders"}; !reflect.DeepEqual(sources, want) {
+		t.Fatalf("QuerySourceNames() = %#v, want %#v", sources, want)
+	}
+}
 
 func TestExecuteSQLQueryWithExternalResolver(t *testing.T) {
 	cache := hatSql.NewPreparedQueryCache(2)

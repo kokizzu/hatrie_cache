@@ -50,6 +50,7 @@ type MonitoringOptions struct {
 	AuthToken                        string
 	AuthPreviousToken                string
 	AuthPreviousExpiresAt            time.Time
+	RBACPolicy                       hatAuth.Policy
 	DiagnosticsProfiling             bool
 	ReplicationAuthToken             string
 	ReplicationAuthPreviousToken     string
@@ -421,6 +422,20 @@ func monitoringRequestHasAuthToken(r *http.Request, tokens hatAuth.TokenSet) boo
 		return true
 	}
 	return tokens.Matches(hatAuth.BearerToken(r.Header.Get("Authorization")), now)
+}
+
+func monitoringRequestPrincipal(r *http.Request, tokens hatAuth.TokenSet) string {
+	if r == nil || !tokens.Configured() {
+		return ""
+	}
+	now := time.Now()
+	if candidate := strings.TrimSpace(r.Header.Get("X-Hatrie-Auth-Token")); candidate != "" && tokens.Matches(candidate, now) {
+		return candidate
+	}
+	if candidate := strings.TrimSpace(hatAuth.BearerToken(r.Header.Get("Authorization"))); candidate != "" && tokens.Matches(candidate, now) {
+		return candidate
+	}
+	return ""
 }
 
 func monitoringReplicationRequestAuthorized(r *http.Request, tokens hatAuth.TokenSet) bool {
@@ -869,6 +884,9 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL query is required"))
 		return
 	}
+	if handler.rejectSQLRBACHTTP(w, r, request) {
+		return
+	}
 	if request.Stream {
 		if request.PageSize != 0 || request.Cursor != "" {
 			writeJSONStatus(w, http.StatusBadRequest, commandError("SQL streaming cannot be combined with cursor pagination"))
@@ -1010,6 +1028,9 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if handler.rejectReplicationAuthHTTP(w, r, request) {
 		return
 	}
+	if handler.rejectCommandRBACHTTP(w, r, request) {
+		return
+	}
 	if handler.rejectDangerousCommandHTTP(w, r, request, requestFormat) {
 		return
 	}
@@ -1030,6 +1051,58 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	}
 	handler.auditCommandHTTP(r, request, response, response.OK, http.StatusOK)
 	writeCommandResponseWire(w, r, http.StatusOK, response, requestFormat)
+}
+
+func (handler *MonitoringHandler) rejectCommandRBACHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {
+	if isInternalReplicationCommand(request) && monitoringReplicationRequestAuthorized(r, handler.replicationAuthTokens) {
+		return false
+	}
+	if handler.authorizeCommand(monitoringRequestPrincipal(r, handler.authTokens), request) {
+		return false
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "command", Command: normalizedCommand(request.Command), Key: strings.TrimSpace(request.Key), OK: false, Status: http.StatusForbidden, Message: "forbidden by RBAC policy"})
+	writeJSONStatus(w, http.StatusForbidden, commandError("forbidden"))
+	return true
+}
+
+func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *http.Request, request SQLQueryRequest) bool {
+	sources, err := SQLQuerySourceNames(request.Query, request.Parameters)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
+		return true
+	}
+	principal := monitoringRequestPrincipal(r, handler.authTokens)
+	if len(sources) == 0 {
+		if handler.options.RBACPolicy.Authorize(principal, "SQL", "", "") {
+			return false
+		}
+	} else {
+		allowed := true
+		for _, source := range sources {
+			if !handler.options.RBACPolicy.Authorize(principal, "SQL", source, source) {
+				allowed = false
+				break
+			}
+		}
+		if allowed {
+			return false
+		}
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "sql.query", Command: "SQL", OK: false, Status: http.StatusForbidden, Message: "forbidden by RBAC policy"})
+	writeJSONStatus(w, http.StatusForbidden, commandError("forbidden"))
+	return true
+}
+
+func (handler *MonitoringHandler) authorizeCommand(principal string, request CacheCommandRequest) bool {
+	if normalizedCommand(request.Command) == "BATCH" {
+		for _, nested := range request.Batch {
+			if !handler.authorizeCommand(principal, nested) {
+				return false
+			}
+		}
+		return true
+	}
+	return handler.options.RBACPolicy.Authorize(principal, normalizedCommand(request.Command), strings.TrimSpace(request.Key), "")
 }
 
 func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {

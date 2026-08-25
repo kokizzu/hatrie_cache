@@ -99,6 +99,27 @@ func TestParseConfigSQLFunctionsPath(t *testing.T) {
 	}
 }
 
+func TestParseConfigRBACPolicyPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rbac.json")
+	if err := os.WriteFile(path, []byte(`{"principals":{"reader-token":["reader"]},"roles":[{"name":"reader","rules":[{"commands":["GET"]}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := parseConfig([]string{"-monitoring-auth-token", "reader-token", "-rbac-policy", path}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.rbacPolicyPath != path {
+		t.Fatalf("rbacPolicyPath = %q, want %q", cfg.rbacPolicyPath, path)
+	}
+	if err := validateConfigReferences(cfg); err != nil {
+		t.Fatalf("validateConfigReferences() error = %v", err)
+	}
+	_, err = parseConfig([]string{"-rbac-policy", path}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "monitoring-auth-token") {
+		t.Fatalf("parseConfig() error = %v, want monitoring authentication requirement", err)
+	}
+}
+
 func TestParseConfigAppliesProductionProfileDefaults(t *testing.T) {
 	cfg, err := parseConfig([]string{"-profile", "production"}, &bytes.Buffer{})
 	if err != nil {

@@ -22,6 +22,7 @@ type CacheGRPCOptions struct {
 	AuthToken                        string
 	AuthPreviousToken                string
 	AuthPreviousExpiresAt            time.Time
+	RBACPolicy                       hatAuth.Policy
 	ReplicationAuthToken             string
 	ReplicationAuthPreviousToken     string
 	ReplicationAuthPreviousExpiresAt time.Time
@@ -128,22 +129,34 @@ func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
 	if !tokens.Configured() {
 		return nil
 	}
+	if server.authenticatedPrincipal(ctx) != "" {
+		return nil
+	}
+	return status.Error(codes.Unauthenticated, "unauthorized")
+}
+
+func (server *CacheGRPCServer) authenticatedPrincipal(ctx context.Context) string {
+	tokens := hatAuth.NewTokenSet(server.options.AuthToken, server.options.AuthPreviousToken, server.options.AuthPreviousExpiresAt)
+	if !tokens.Configured() {
+		return ""
+	}
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "unauthorized")
+		return ""
 	}
 	now := time.Now()
 	for _, candidate := range md.Get("x-hatrie-auth-token") {
 		if tokens.Matches(candidate, now) {
-			return nil
+			return candidate
 		}
 	}
 	for _, candidate := range md.Get("authorization") {
-		if tokens.Matches(hatAuth.BearerToken(candidate), now) {
-			return nil
+		principal := hatAuth.BearerToken(candidate)
+		if tokens.Matches(principal, now) {
+			return principal
 		}
 	}
-	return status.Error(codes.Unauthenticated, "unauthorized")
+	return ""
 }
 
 func (server *CacheGRPCServer) auditGRPC(event AuditEvent) {
@@ -314,6 +327,9 @@ func (server *CacheGRPCServer) CommandBatchStream(stream hatriecachev1.CacheServ
 
 func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *hatriecachev1.CommandRequest, method string) (*hatriecachev1.CommandResponse, error) {
 	command := cacheCommandRequestFromProto(request)
+	if !server.authorizeGRPCCommand(ctx, command) {
+		return nil, status.Error(codes.PermissionDenied, "forbidden")
+	}
 	if commandShouldJournal(command) {
 		audit := AuditEvent{
 			Command: normalizedCommand(command.Command),
@@ -345,6 +361,18 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 		})
 	}
 	return grpcCommandResponse(response), nil
+}
+
+func (server *CacheGRPCServer) authorizeGRPCCommand(ctx context.Context, request CacheCommandRequest) bool {
+	if normalizedCommand(request.Command) == "BATCH" {
+		for _, nested := range request.Batch {
+			if !server.authorizeGRPCCommand(ctx, nested) {
+				return false
+			}
+		}
+		return true
+	}
+	return server.options.RBACPolicy.Authorize(server.authenticatedPrincipal(ctx), normalizedCommand(request.Command), strings.TrimSpace(request.Key), "")
 }
 
 func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {

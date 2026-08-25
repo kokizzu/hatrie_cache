@@ -43,6 +43,12 @@ type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 
+// SQLQuerySourceNames returns the physical CACHE and EXTERNAL source names
+// referenced by query after binding positional parameters.
+func SQLQuerySourceNames(query string, parameters []interface{}) ([]string, error) {
+	return hatSql.QuerySourceNamesParameters(query, parameters)
+}
+
 // SQLPartitionPruningPlan reports whether a SQL source can be routed to one
 // local partition. CACHE(key) is prunable because its namespace key is known;
 // KEYS intentionally scans every partition.

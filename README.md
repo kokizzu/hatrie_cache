@@ -759,6 +759,34 @@ rendered with:
 MONITORING_AUTH_TOKEN=change-me docker compose -f deploy/docker-compose.production.yml config
 ```
 
+### Scoped RBAC
+
+Use `-rbac-policy /etc/hatrie-cache/rbac.json` to apply role rules to every
+HTTP and gRPC cache command, plus every physical `CACHE(...)` or
+`EXTERNAL(...)` SQL source. RBAC is disabled by default and requires
+`-monitoring-auth-token`; the policy maps authenticated token values to roles,
+so store it with restrictive file permissions and never expose it through
+configuration management output.
+
+```json
+{
+  "principals": {"reader-token": ["tenant-reader"]},
+  "roles": [{
+    "name": "tenant-reader",
+    "rules": [
+      {"commands": ["GET", "GETSTR"], "namespaces": ["tenant-a:*"]},
+      {"commands": ["SQL"], "sources": ["tenant-a:people"]}
+    ]
+  }]
+}
+```
+
+Command selectors are case-insensitive. Namespace and SQL source selectors are
+case-sensitive cache names; `*` matches all and a trailing `*` is a prefix.
+Each batch member and each SQL source must be allowed. Authenticated internal
+replication commands continue to use the separate replication token and are
+not treated as client traffic.
+
 ### Restore And Recovery Runbook
 
 Restore snapshot+journal data to a clean data directory, then start the node
