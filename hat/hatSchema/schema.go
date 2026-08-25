@@ -33,8 +33,9 @@ type Column struct {
 
 // Source is one named SQL source and its ordered schema.
 type Source struct {
-	Name    string   `json:"name"`
-	Columns []Column `json:"columns"`
+	Name        string       `json:"name"`
+	Columns     []Column     `json:"columns"`
+	Constraints []Constraint `json:"constraints,omitempty"`
 }
 
 // Schema is a versioned collection of named sources.
@@ -47,8 +48,7 @@ type Schema struct {
 func (schema Schema) Clone() Schema {
 	out := Schema{Version: schema.Version, Sources: make(map[string]Source, len(schema.Sources))}
 	for name, source := range schema.Sources {
-		source.Columns = append([]Column(nil), source.Columns...)
-		out.Sources[name] = source
+		out.Sources[name] = cloneSource(source)
 	}
 	return out
 }
@@ -57,10 +57,12 @@ func (schema Schema) Clone() Schema {
 type ChangeKind string
 
 const (
-	ChangeCreateSource ChangeKind = "create_source"
-	ChangeDropSource   ChangeKind = "drop_source"
-	ChangeAddColumn    ChangeKind = "add_column"
-	ChangeDropColumn   ChangeKind = "drop_column"
+	ChangeCreateSource   ChangeKind = "create_source"
+	ChangeDropSource     ChangeKind = "drop_source"
+	ChangeAddColumn      ChangeKind = "add_column"
+	ChangeDropColumn     ChangeKind = "drop_column"
+	ChangeAddConstraint  ChangeKind = "add_constraint"
+	ChangeDropConstraint ChangeKind = "drop_constraint"
 )
 
 // Change modifies one source. CreateSource uses Source; column changes use
@@ -70,6 +72,7 @@ type Change struct {
 	SourceName string     `json:"source_name,omitempty"`
 	Source     Source     `json:"source,omitempty"`
 	Column     Column     `json:"column,omitempty"`
+	Constraint Constraint `json:"constraint,omitempty"`
 }
 
 // Migration is an ordered forward change set with its explicit reverse.
@@ -155,14 +158,16 @@ func applyChange(schema *Schema, change Change) error {
 		for index := range source.Columns {
 			source.Columns[index] = normalizeColumn(source.Columns[index])
 		}
+		for index := range source.Constraints {
+			source.Constraints[index] = normalizeConstraint(source.Constraints[index])
+		}
 		if err := validateSource(source); err != nil {
 			return err
 		}
 		if _, exists := schema.Sources[source.Name]; exists {
 			return fmt.Errorf("hatSchema: source %q already exists", source.Name)
 		}
-		source.Columns = append([]Column(nil), source.Columns...)
-		schema.Sources[source.Name] = source
+		schema.Sources[source.Name] = cloneSource(source)
 		return nil
 	case ChangeDropSource:
 		if sourceName == "" {
@@ -170,6 +175,9 @@ func applyChange(schema *Schema, change Change) error {
 		}
 		if _, exists := schema.Sources[sourceName]; !exists {
 			return fmt.Errorf("hatSchema: source %q does not exist", sourceName)
+		}
+		if owner, constraint, referenced := sourceConstraintReferences(schema, sourceName, "", sourceName); referenced {
+			return fmt.Errorf("hatSchema: source %q is referenced by constraint %q in source %q", sourceName, constraint.Name, owner.Name)
 		}
 		delete(schema.Sources, sourceName)
 		return nil
@@ -198,7 +206,38 @@ func applyChange(schema *Schema, change Change) error {
 		if index < 0 {
 			return fmt.Errorf("hatSchema: column %q does not exist in source %q", columnName, sourceName)
 		}
+		if owner, constraint, referenced := sourceConstraintReferences(schema, sourceName, columnName, ""); referenced {
+			return fmt.Errorf("hatSchema: column %q in source %q is referenced by constraint %q in source %q", columnName, sourceName, constraint.Name, owner.Name)
+		}
 		source.Columns = append(source.Columns[:index:index], source.Columns[index+1:]...)
+		schema.Sources[sourceName] = source
+		return nil
+	case ChangeAddConstraint:
+		source, exists := schema.Sources[sourceName]
+		if !exists {
+			return fmt.Errorf("hatSchema: source %q does not exist", sourceName)
+		}
+		constraint := normalizeConstraint(change.Constraint)
+		if err := validateConstraint(source, constraint); err != nil {
+			return err
+		}
+		if sourceConstraintIndex(source, constraint.Name) >= 0 {
+			return fmt.Errorf("hatSchema: constraint %q already exists in source %q", constraint.Name, sourceName)
+		}
+		source.Constraints = append(source.Constraints, cloneConstraint(constraint))
+		schema.Sources[sourceName] = source
+		return schema.Validate()
+	case ChangeDropConstraint:
+		source, exists := schema.Sources[sourceName]
+		if !exists {
+			return fmt.Errorf("hatSchema: source %q does not exist", sourceName)
+		}
+		constraintName := strings.TrimSpace(change.Constraint.Name)
+		index := sourceConstraintIndex(source, constraintName)
+		if index < 0 {
+			return fmt.Errorf("hatSchema: constraint %q does not exist in source %q", constraintName, sourceName)
+		}
+		source.Constraints = append(source.Constraints[:index:index], source.Constraints[index+1:]...)
 		schema.Sources[sourceName] = source
 		return nil
 	default:
@@ -222,6 +261,17 @@ func validateSource(source Source) error {
 			return fmt.Errorf("hatSchema: duplicate column %q in source %q", column.Name, source.Name)
 		}
 		seen[column.Name] = struct{}{}
+	}
+	constraints := make(map[string]struct{}, len(source.Constraints))
+	for _, constraint := range source.Constraints {
+		constraint = normalizeConstraint(constraint)
+		if err := validateConstraint(source, constraint); err != nil {
+			return err
+		}
+		if _, exists := constraints[constraint.Name]; exists {
+			return fmt.Errorf("hatSchema: duplicate constraint %q in source %q", constraint.Name, source.Name)
+		}
+		constraints[constraint.Name] = struct{}{}
 	}
 	return nil
 }
@@ -251,4 +301,51 @@ func sourceColumnIndex(source Source, name string) int {
 		}
 	}
 	return -1
+}
+
+func sourceConstraintIndex(source Source, name string) int {
+	for index, constraint := range source.Constraints {
+		if constraint.Name == name {
+			return index
+		}
+	}
+	return -1
+}
+
+func cloneSource(source Source) Source {
+	source.Columns = append([]Column(nil), source.Columns...)
+	source.Constraints = cloneConstraints(source.Constraints)
+	return source
+}
+
+func sourceConstraintReferences(schema *Schema, sourceName, columnName, skipOwner string) (Source, Constraint, bool) {
+	for ownerName, owner := range schema.Sources {
+		if ownerName == skipOwner {
+			continue
+		}
+		for _, constraint := range owner.Constraints {
+			if columnName == "" {
+				if constraint.Kind == ConstraintForeignKey && constraint.ReferenceSource == sourceName {
+					return owner, constraint, true
+				}
+				continue
+			}
+			if ownerName == sourceName && constraintUsesColumn(constraint.Columns, columnName) {
+				return owner, constraint, true
+			}
+			if constraint.Kind == ConstraintForeignKey && constraint.ReferenceSource == sourceName && constraintUsesColumn(constraint.ReferenceColumns, columnName) {
+				return owner, constraint, true
+			}
+		}
+	}
+	return Source{}, Constraint{}, false
+}
+
+func constraintUsesColumn(columns []string, name string) bool {
+	for _, column := range columns {
+		if column == name {
+			return true
+		}
+	}
+	return false
 }
