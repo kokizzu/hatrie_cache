@@ -249,6 +249,9 @@ type sqlDate string
 // float64, which would lose significant digits from financial-style values.
 type sqlDecimal string
 
+// sqlUUID is a canonical lower-case RFC 4122 UUID string.
+type sqlUUID string
+
 // sqlSpillOutput is deliberately limited to values needed after projection:
 // sort keys, a stable input ordinal, and the user-visible projected row. The
 // source/group state is not serialized, which avoids retaining join inputs
@@ -306,6 +309,7 @@ func init() {
 	gob.Register(json.Number(""))
 	gob.Register(sqlDate(""))
 	gob.Register(sqlDecimal(""))
+	gob.Register(sqlUUID(""))
 	gob.Register(time.Time{})
 }
 
@@ -10729,6 +10733,9 @@ type SQLDate = sqlDate
 // SQLDecimal preserves decimal spelling while comparisons use exact rational
 // arithmetic.
 type SQLDecimal = sqlDecimal
+
+// SQLUUID is the canonical UUID value used by typed source schemas.
+type SQLUUID = sqlUUID
 
 // ParseSQLQueryWithCache parses source and binds positional parameters using
 // cache when non-nil.

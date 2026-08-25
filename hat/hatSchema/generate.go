@@ -115,6 +115,12 @@ func modelGoType(columnType Type) (string, string, error) {
 		return "bool", "", nil
 	case TypeDate, TypeTimestamp:
 		return "time.Time", "time", nil
+	case TypeUUID:
+		return "hatSql.SQLUUID", "hatrie_cache/hat/hatSql", nil
+	case TypeDuration:
+		return "time.Duration", "time", nil
+	case TypeBinary:
+		return "[]byte", "", nil
 	case TypeJSON:
 		return "any", "", nil
 	default:

@@ -15,6 +15,9 @@ func TestGenerateGoModelsEmitsFormattedTypedModels(t *testing.T) {
 				{Name: "id", Type: TypeInteger, NotNull: true},
 				{Name: "balance", Type: TypeDecimal, NotNull: true},
 				{Name: "created_at", Type: TypeTimestamp, NotNull: true},
+				{Name: "session_id", Type: TypeUUID, NotNull: true},
+				{Name: "elapsed", Type: TypeDuration, NotNull: true},
+				{Name: "payload", Type: TypeBinary, NotNull: true},
 			},
 		},
 	}}, ModelOptions{Package: "models"})
@@ -32,6 +35,9 @@ func TestGenerateGoModelsEmitsFormattedTypedModels(t *testing.T) {
 		"Balance   hatSql.SQLDecimal",
 		"CreatedAt time.Time",
 		"`json:\"created_at\"`",
+		"SessionId hatSql.SQLUUID",
+		"Elapsed   time.Duration",
+		"Payload   []byte",
 	} {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("generated model missing %q:\n%s", fragment, text)
