@@ -10,6 +10,7 @@ nulls, types, and operational boundaries are tested alongside happy paths.
 | Requirement | Evidence |
 | --- | --- |
 | Scalar command translations, TTL/expiration forms, positional scalar calls | [`TestCompileSQLProductionScalarMatrix`](sql_production_test.go) |
+| `INSERT ... SELECT` validates all selected writes before one atomic command batch; direct `UPDATE` and `DELETE` execute through the same public command semantics | [`TestExecuteSQLMutationSupportsInsertSelectAndExistingDML`](sql_test.go), [`TestExecuteSQLMutationValidatesInsertSelectBeforeWriting`](sql_test.go) |
 | Every documented public flat command name | [`TestCompileSQLAcceptsEveryDocumentedPublicCallName`](sql_test.go) |
 | Dotted aliases, including every alias-map entry | [`TestCompileSQLDottedCollectionAliases`](sql_production_test.go), [`TestDottedCollectionAliasesNormalizeToExistingCommands`](sql_production_test.go) |
 | Internal replication commands cannot be compiled | [`TestCompileSQLRejectsInternalReplicationCommands`](sql_test.go) |

@@ -1,8 +1,11 @@
 package hatriecache
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"hatrie_cache/hat/hatSql"
 
@@ -10,6 +13,248 @@ import (
 )
 
 type SQLDiagnostic = hatSql.Diagnostic
+
+// SQLMutationResult describes one SQL mutation execution. INSERT ... SELECT
+// reports the number of rows staged into its atomic cache-command batch.
+type SQLMutationResult struct {
+	Affected int                  `json:"affected"`
+	Response CacheCommandResponse `json:"response"`
+}
+
+// ExecuteSQLMutation executes direct command-SQL mutations and INSERT ...
+// SELECT against trie. INSERT ... SELECT accepts a relational query after the
+// target column list; its selected columns are mapped positionally to key,
+// value or counter, and optional ttl_seconds or unix_seconds fields. All rows
+// are validated before one atomic command batch is applied, so an invalid
+// selected row cannot leave preceding writes behind.
+func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
+	if trie == nil {
+		return SQLMutationResult{}, ErrNilHatTrie
+	}
+	if err := ctx.Err(); err != nil {
+		return SQLMutationResult{}, err
+	}
+	insert, insertSelect, err := parseSQLInsertSelect(source)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if !insertSelect {
+		request, err := CompileSQL(source)
+		if err != nil {
+			return SQLMutationResult{}, err
+		}
+		response := trie.ExecuteCommand(request)
+		if !response.OK {
+			return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
+		}
+		return SQLMutationResult{Affected: sqlMutationAffected(request), Response: response}, nil
+	}
+	query, err := ExecuteSQLQueryParameters(ctx, insert.query, trie, parameters, options)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if len(query.Columns) != len(insert.columns) {
+		return SQLMutationResult{}, fmt.Errorf("INSERT ... SELECT returned %d columns for %d target columns", len(query.Columns), len(insert.columns))
+	}
+	requests := make([]CacheCommandRequest, len(query.Rows))
+	for rowIndex, row := range query.Rows {
+		if err := ctx.Err(); err != nil {
+			return SQLMutationResult{}, err
+		}
+		request, err := insert.request(query.Columns, row)
+		if err != nil {
+			return SQLMutationResult{}, fmt.Errorf("INSERT ... SELECT row %d: %w", rowIndex+1, err)
+		}
+		requests[rowIndex] = request
+	}
+	if len(requests) == 0 {
+		return SQLMutationResult{Response: CacheCommandResponse{OK: true, Message: "no rows selected"}}, nil
+	}
+	if len(requests) > maxPublicCommandBatchSize {
+		return SQLMutationResult{}, fmt.Errorf("INSERT ... SELECT produced %d rows; atomic cache command batches are limited to %d", len(requests), maxPublicCommandBatchSize)
+	}
+	response := trie.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: requests})
+	if !response.OK {
+		return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
+	}
+	return SQLMutationResult{Affected: len(requests), Response: response}, nil
+}
+
+func sqlMutationAffected(request CacheCommandRequest) int {
+	if strings.EqualFold(request.Command, "BATCH") {
+		total := 0
+		for _, item := range request.Batch {
+			total += sqlMutationAffected(item)
+		}
+		return total
+	}
+	switch normalizedCommand(request.Command) {
+	case "SET", "SETSTR", "SETX", "SETSTRX", "SETINT", "SETINTX", "INC", "EXPIRE", "EXPIREAT", "DEL", "PERSIST":
+		return 1
+	default:
+		return 0
+	}
+}
+
+type sqlInsertSelect struct {
+	columns []string
+	query   string
+}
+
+func parseSQLInsertSelect(source string) (sqlInsertSelect, bool, error) {
+	tokens, err := lexSQL(source)
+	if err != nil {
+		return sqlInsertSelect{}, false, err
+	}
+	index := 0
+	keyword := func(value string) bool {
+		return index < len(tokens) && tokens[index].kind == sqlTokenIdentifier && strings.EqualFold(tokens[index].text, value)
+	}
+	if !keyword("INSERT") {
+		return sqlInsertSelect{}, false, nil
+	}
+	index++
+	if !keyword("INTO") {
+		return sqlInsertSelect{}, false, nil
+	}
+	index++
+	if !keyword("CACHE") {
+		return sqlInsertSelect{}, false, nil
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenLeftParen {
+		return sqlInsertSelect{}, false, nil
+	}
+	index++
+	columns := make([]string, 0, 2)
+	for {
+		if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier {
+			return sqlInsertSelect{}, false, nil
+		}
+		columns = append(columns, strings.ToLower(tokens[index].text))
+		index++
+		if index < len(tokens) && tokens[index].kind == sqlTokenComma {
+			index++
+			continue
+		}
+		break
+	}
+	if index >= len(tokens) || tokens[index].kind != sqlTokenRightParen {
+		return sqlInsertSelect{}, false, nil
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier {
+		return sqlInsertSelect{}, false, nil
+	}
+	if !strings.EqualFold(tokens[index].text, "SELECT") && !strings.EqualFold(tokens[index].text, "FROM") && !strings.EqualFold(tokens[index].text, "WITH") {
+		return sqlInsertSelect{}, false, nil
+	}
+	if err := validateSQLInsertSelectColumns(columns); err != nil {
+		return sqlInsertSelect{}, true, err
+	}
+	offset, err := sqlTokenByteOffset(source, tokens[index])
+	if err != nil {
+		return sqlInsertSelect{}, true, err
+	}
+	return sqlInsertSelect{columns: columns, query: source[offset:]}, true, nil
+}
+
+func validateSQLInsertSelectColumns(columns []string) error {
+	fields := make(map[string]sqlValue, len(columns))
+	for _, column := range columns {
+		if _, exists := fields[column]; exists {
+			return fmt.Errorf("duplicate INSERT column %q", column)
+		}
+		fields[column] = sqlValue{}
+	}
+	if _, ok := fields["key"]; !ok {
+		return fmt.Errorf("INSERT ... SELECT requires a key column")
+	}
+	_, value := fields["value"]
+	_, counter := fields["counter"]
+	if value == counter {
+		return fmt.Errorf("INSERT ... SELECT requires exactly one of value or counter")
+	}
+	for column := range fields {
+		switch column {
+		case "key", "value", "counter", "ttl_seconds", "unix_seconds":
+		default:
+			return fmt.Errorf("unknown INSERT column %q", column)
+		}
+	}
+	if _, ttl := fields["ttl_seconds"]; ttl {
+		if _, unix := fields["unix_seconds"]; unix {
+			return fmt.Errorf("ttl_seconds and unix_seconds cannot be combined")
+		}
+	}
+	return nil
+}
+
+func (insert sqlInsertSelect) request(columns []string, row SQLRow) (CacheCommandRequest, error) {
+	fields := make(map[string]sqlValue, len(insert.columns))
+	for index, target := range insert.columns {
+		value, exists := row[columns[index]]
+		if !exists {
+			return CacheCommandRequest{}, fmt.Errorf("selected column %q is missing", columns[index])
+		}
+		converted, err := sqlInsertSelectValue(value)
+		if err != nil {
+			return CacheCommandRequest{}, fmt.Errorf("column %q: %w", target, err)
+		}
+		fields[target] = converted
+	}
+	return compileSQLInsert(fields)
+}
+
+func sqlInsertSelectValue(value interface{}) (sqlValue, error) {
+	if value == nil {
+		return sqlValue{json: true}, nil
+	}
+	switch typed := value.(type) {
+	case string:
+		return sqlValue{text: typed}, nil
+	case bool:
+		return sqlValue{text: strconv.FormatBool(typed)}, nil
+	case int:
+		return sqlValue{text: strconv.Itoa(typed)}, nil
+	case int64:
+		return sqlValue{text: strconv.FormatInt(typed, 10)}, nil
+	case float64:
+		return sqlValue{text: strconv.FormatFloat(typed, 'f', -1, 64)}, nil
+	case json.Number:
+		return sqlValue{text: typed.String()}, nil
+	case sqlDate:
+		return sqlValue{text: string(typed)}, nil
+	case sqlDecimal:
+		return sqlValue{text: string(typed)}, nil
+	default:
+		return sqlValue{}, fmt.Errorf("must be a scalar, got %T", value)
+	}
+}
+
+func sqlTokenByteOffset(source string, token sqlToken) (int, error) {
+	line, column := 1, 1
+	for offset := 0; offset < len(source); {
+		if line == token.line && column == token.column {
+			return offset, nil
+		}
+		runeValue, size := utf8.DecodeRuneInString(source[offset:])
+		if runeValue == utf8.RuneError && size == 0 {
+			return 0, fmt.Errorf("invalid SQL source offset")
+		}
+		offset += size
+		if runeValue == '\n' {
+			line++
+			column = 1
+		} else {
+			column++
+		}
+	}
+	if line == token.line && column == token.column {
+		return len(source), nil
+	}
+	return 0, fmt.Errorf("invalid SQL source position")
+}
 
 // FormatSQLDiagnostic formats a SQLDiagnostic with a Rust-style source span.
 // Non-SQL errors are returned unchanged.

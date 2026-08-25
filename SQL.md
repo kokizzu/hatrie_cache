@@ -83,6 +83,29 @@ TTL. `INSERT` is a cache upsert, not a relational-table insert: inserting the
 same key again replaces its value. `UPDATE` also targets exactly one cache key
 because its `WHERE` clause must be `key = ...`.
 
+### `INSERT ... SELECT`
+
+`ExecuteSQLMutation` also supports selecting many cache writes from a
+read-only relational snapshot. The target columns may be `key` with exactly
+one of `value` or `counter`, plus optional `ttl_seconds` or `unix_seconds`.
+Selected columns map to those target columns by position. It validates every
+selected row and applies one atomic cache-command batch, so an invalid key or
+value prevents all writes. The atomic form is intentionally limited to the
+public batch maximum of 4096 rows.
+
+```go
+result, err := hatriecache.ExecuteSQLMutation(ctx, trie, `
+INSERT INTO cache (key, value)
+FROM VALUES ('user:1', 'Ada'), ('user:2', 'Lin') AS rows(key, value)
+SELECT key, value`, nil, hatriecache.SQLQueryOptions{})
+// result.Affected == 2
+```
+
+The relational query is evaluated before mutation and uses its normal query
+context, cancellation, and resource budgets. It is an execution API rather
+than `CompileSQL` because a static command request cannot contain rows that
+only exist after the relational query runs.
+
 ### `CALL`: SQL syntax for every cache command
 
 `CALL` exposes every public cache command without losing any command fields:
@@ -497,6 +520,7 @@ select        = "SELECT" ("value" | "exists" | "ttl" | "dump")
                 "FROM" "cache" "WHERE" "key" "=" scalar ;
 insert        = "INSERT" "INTO" "cache" "(" columns ")"
                 "VALUES" "(" scalars ")" ;
+insert_select = "INSERT" "INTO" "cache" "(" columns ")" relational_query ;
 update        = "UPDATE" "cache" "SET" assignment "WHERE" "key" "=" scalar ;
 delete        = "DELETE" "FROM" "cache" "WHERE" "key" "=" scalar ;
 call          = "CALL" identifier "(" [ arguments ] ")" ;

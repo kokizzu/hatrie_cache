@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -121,6 +122,49 @@ func TestCompileSQLCompilesAtomicProgram(t *testing.T) {
 	want := CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{{Command: "SETSTR", Key: "name", Value: "ivi"}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CompileSQL() = %#v, want %#v", got, want)
+	}
+}
+
+func TestExecuteSQLMutationSupportsInsertSelectAndExistingDML(t *testing.T) {
+	trie := newTestTrie(t)
+	result, err := ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, value)
+FROM VALUES ('user:1', 'Ada'), ('user:2', 'Lin') AS rows(key, value)
+SELECT key, value`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(INSERT SELECT) error = %v", err)
+	}
+	if result.Affected != 2 || !result.Response.OK {
+		t.Fatalf("ExecuteSQLMutation(INSERT SELECT) = %#v", result)
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "user:2"}); !got.OK || got.Value != "Lin" {
+		t.Fatalf("user:2 = %#v, want Lin", got)
+	}
+
+	result, err = ExecuteSQLMutation(context.Background(), trie, "UPDATE cache SET value = 'Grace' WHERE key = 'user:1'", nil, SQLQueryOptions{})
+	if err != nil || result.Affected != 1 {
+		t.Fatalf("ExecuteSQLMutation(UPDATE) = %#v, %v", result, err)
+	}
+	result, err = ExecuteSQLMutation(context.Background(), trie, "DELETE FROM cache WHERE key = 'user:2'", nil, SQLQueryOptions{})
+	if err != nil || result.Affected != 1 {
+		t.Fatalf("ExecuteSQLMutation(DELETE) = %#v, %v", result, err)
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "user:2"}); !got.OK || got.Value != "0" {
+		t.Fatalf("user:2 exists = %#v, want deleted", got)
+	}
+}
+
+func TestExecuteSQLMutationValidatesInsertSelectBeforeWriting(t *testing.T) {
+	trie := newTestTrie(t)
+	_, err := ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, value)
+FROM VALUES ('good', 'value'), (NULL, 'invalid') AS rows(key, value)
+SELECT key, value`, nil, SQLQueryOptions{})
+	if err == nil {
+		t.Fatal("ExecuteSQLMutation() accepted a NULL generated key")
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "good"}); !got.OK || got.Value != "0" {
+		t.Fatalf("good exists after rejected INSERT SELECT = %#v, want no write", got)
 	}
 }
 
