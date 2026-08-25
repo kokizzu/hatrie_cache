@@ -831,6 +831,16 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 }
 
 func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint64, error) {
+	return journal.replayThrough(trie, afterSequence, 0)
+}
+
+// ReplayThrough replays journal entries after afterSequence through
+// targetSequence. A target of zero replays through the current journal tail.
+func (journal *CommandJournal) ReplayThrough(trie *HatTrie, afterSequence uint64, targetSequence uint64) (uint64, error) {
+	return journal.replayThrough(trie, afterSequence, targetSequence)
+}
+
+func (journal *CommandJournal) replayThrough(trie *HatTrie, afterSequence uint64, targetSequence uint64) (uint64, error) {
 	if journal == nil {
 		return 0, ErrNilCommandJournal
 	}
@@ -859,11 +869,20 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 	if afterSequence < compactedThrough {
 		return 0, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, compactedThrough)
 	}
+	if targetSequence != 0 && targetSequence > maxSequence {
+		return 0, fmt.Errorf("hatriecache: requested journal sequence %d exceeds latest sequence %d", targetSequence, maxSequence)
+	}
+	if targetSequence == 0 {
+		targetSequence = maxSequence
+	}
+	if targetSequence < afterSequence {
+		return 0, fmt.Errorf("hatriecache: requested journal sequence %d precedes snapshot sequence %d", targetSequence, afterSequence)
+	}
 	if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
 			return nil
 		}
-		if entry.Sequence <= afterSequence {
+		if entry.Sequence <= afterSequence || entry.Sequence > targetSequence {
 			return nil
 		}
 		response := trie.ExecuteCommand(entry.Request)
@@ -875,7 +894,7 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 		return 0, err
 	}
 	journal.advanceSequenceLocked(maxSequence)
-	return maxSequence, nil
+	return targetSequence, nil
 }
 
 func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJournalTail, error) {
