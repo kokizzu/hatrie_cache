@@ -43,6 +43,17 @@ type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 
+// CanonicalSQLSnapshot encodes a query result as stable JSON for regression
+// fixtures without volatile execution statistics.
+func CanonicalSQLSnapshot(result SQLQueryResult) ([]byte, error) {
+	return hatSql.CanonicalSnapshot(result)
+}
+
+// SnapshotSQLQuery executes a query and returns its stable regression fixture.
+func SnapshotSQLQuery(ctx context.Context, query string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) ([]byte, error) {
+	return hatSql.SnapshotQuery(ctx, query, resolver, parameters, options)
+}
+
 // SQLQuerySourceNames returns the physical CACHE and EXTERNAL source names
 // referenced by query after binding positional parameters.
 func SQLQuerySourceNames(query string, parameters []interface{}) ([]string, error) {
