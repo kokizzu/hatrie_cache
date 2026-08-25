@@ -4363,6 +4363,7 @@ type sqlWindow struct {
 	frame     *sqlWindowFrame
 }
 type sqlWindowFrame struct {
+	kind  string
 	start sqlWindowFrameBound
 	end   sqlWindowFrameBound
 }
@@ -5452,8 +5453,8 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 					}
 					window.order = values
 				}
-				if p.keyword("ROWS") {
-					frame, err := p.parseSQLWindowFrame()
+				if p.keyword("ROWS") || p.keyword("RANGE") {
+					frame, err := p.parseSQLWindowFrame(strings.ToUpper(p.current().text))
 					if err != nil {
 						return sqlExpr{}, err
 					}
@@ -5481,7 +5482,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	return sqlExpr{}, p.expected(token, "a column, literal, function, or *", nil)
 }
 
-func (p *sqlQueryParser) parseSQLWindowFrame() (sqlWindowFrame, error) {
+func (p *sqlQueryParser) parseSQLWindowFrame(kind string) (sqlWindowFrame, error) {
 	p.next()
 	if err := p.expectKeyword("BETWEEN"); err != nil {
 		return sqlWindowFrame{}, err
@@ -5498,15 +5499,15 @@ func (p *sqlQueryParser) parseSQLWindowFrame() (sqlWindowFrame, error) {
 		return sqlWindowFrame{}, err
 	}
 	if start.kind == "UNBOUNDED FOLLOWING" {
-		return sqlWindowFrame{}, p.diagnostic(p.previous(), "a ROWS frame cannot start with UNBOUNDED FOLLOWING")
+		return sqlWindowFrame{}, p.diagnostic(p.previous(), "a "+kind+" frame cannot start with UNBOUNDED FOLLOWING")
 	}
 	if end.kind == "UNBOUNDED PRECEDING" {
-		return sqlWindowFrame{}, p.diagnostic(p.previous(), "a ROWS frame cannot end with UNBOUNDED PRECEDING")
+		return sqlWindowFrame{}, p.diagnostic(p.previous(), "a "+kind+" frame cannot end with UNBOUNDED PRECEDING")
 	}
 	if sqlWindowFrameBoundPosition(start) > sqlWindowFrameBoundPosition(end) {
-		return sqlWindowFrame{}, p.diagnostic(p.previous(), "ROWS frame start must not follow its end")
+		return sqlWindowFrame{}, p.diagnostic(p.previous(), kind+" frame start must not follow its end")
 	}
-	return sqlWindowFrame{start: start, end: end}, nil
+	return sqlWindowFrame{kind: kind, start: start, end: end}, nil
 }
 
 func (p *sqlQueryParser) parseSQLWindowFrameBound(name string) (sqlWindowFrameBound, error) {
@@ -5590,6 +5591,75 @@ func sqlWindowFrameBounds(frame *sqlWindowFrame, position, length int) (int, int
 		end = length - 1
 	}
 	return start, end
+}
+
+func sqlRangeWindowFrameBounds(frame *sqlWindowFrame, order sqlOrder, values []interface{}, position int) (int, int, error) {
+	if len(values) == 0 {
+		return 0, -1, nil
+	}
+	current, ok := sqlNumber(values[position])
+	if !ok {
+		return 0, -1, fmt.Errorf("RANGE frame ORDER BY value must be numeric")
+	}
+	start, err := sqlRangeWindowFrameBoundValue(frame.start, current, order.desc)
+	if err != nil {
+		return 0, -1, err
+	}
+	end, err := sqlRangeWindowFrameBoundValue(frame.end, current, order.desc)
+	if err != nil {
+		return 0, -1, err
+	}
+	minimum, maximum := start, end
+	if minimum > maximum {
+		minimum, maximum = maximum, minimum
+	}
+	first, last := -1, -1
+	for index, value := range values {
+		number, ok := sqlNumber(value)
+		if !ok {
+			return 0, -1, fmt.Errorf("RANGE frame ORDER BY value must be numeric")
+		}
+		if number < minimum || number > maximum {
+			continue
+		}
+		if first < 0 {
+			first = index
+		}
+		last = index
+	}
+	if first < 0 {
+		return 0, -1, nil
+	}
+	return first, last, nil
+}
+
+func sqlRangeWindowFrameBoundValue(bound sqlWindowFrameBound, current float64, descending bool) (float64, error) {
+	switch bound.kind {
+	case "UNBOUNDED PRECEDING":
+		if descending {
+			return math.Inf(1), nil
+		}
+		return math.Inf(-1), nil
+	case "UNBOUNDED FOLLOWING":
+		if descending {
+			return math.Inf(-1), nil
+		}
+		return math.Inf(1), nil
+	case "CURRENT ROW":
+		return current, nil
+	case "PRECEDING":
+		if descending {
+			return current + float64(bound.offset), nil
+		}
+		return current - float64(bound.offset), nil
+	case "FOLLOWING":
+		if descending {
+			return current - float64(bound.offset), nil
+		}
+		return current + float64(bound.offset), nil
+	default:
+		return 0, fmt.Errorf("invalid RANGE frame bound %q", bound.kind)
+	}
 }
 
 func sqlWindowAggregate(name string, values []float64) interface{} {
@@ -6686,6 +6756,24 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				}
 				return false
 			})
+			var rangeValues []interface{}
+			if item.expr.window.frame != nil && item.expr.window.frame.kind == "RANGE" {
+				if len(item.expr.window.order) != 1 {
+					return SQLQueryResult{}, fmt.Errorf("RANGE frame requires exactly one ORDER BY expression")
+				}
+				rangeValues = make([]interface{}, len(indexes))
+				for position, index := range indexes {
+					row := sqlExecRow{}
+					if len(out[index].group) > 0 {
+						row = out[index].group[0]
+					}
+					value := evalSQLExpr(item.expr.window.order[0].expr, out[index].group, row)
+					if err := sqlExpressionError(value); err != nil {
+						return SQLQueryResult{}, err
+					}
+					rangeValues[position] = value
+				}
+			}
 			rank := int64(1)
 			denseRank := int64(1)
 			for position, index := range indexes {
@@ -6723,6 +6811,13 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 						return SQLQueryResult{}, fmt.Errorf("%s window function expects one argument", item.expr.name)
 					}
 					start, end := sqlWindowFrameBounds(item.expr.window.frame, position, len(indexes))
+					if item.expr.window.frame != nil && item.expr.window.frame.kind == "RANGE" {
+						var err error
+						start, end, err = sqlRangeWindowFrameBounds(item.expr.window.frame, item.expr.window.order[0], rangeValues, position)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+					}
 					var values []float64
 					for framePosition := start; framePosition <= end; framePosition++ {
 						frameRow := sqlExecRow{}

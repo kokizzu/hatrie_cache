@@ -278,6 +278,18 @@ SELECT sample,
 ORDER BY sample;
 ```
 
+`RANGE BETWEEN ...` uses the distance of one numeric `ORDER BY` value instead
+of physical row positions. It includes peers with the same order value and
+supports ascending or descending order; multiple order expressions and
+non-numeric range values are rejected rather than producing ambiguous results.
+
+```sql
+FROM VALUES (1, 10), (2, 20), (4, 40) AS readings(sample, value)
+SELECT sample,
+       SUM(value) OVER (ORDER BY sample RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS nearby_sum
+ORDER BY sample;
+```
+
 ### Combine query results
 
 ```sql

@@ -4742,6 +4742,66 @@ ORDER BY id`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQuerySupportsRangeWindowFrames(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES (1, 10), (2, 20), (4, 40) AS values(id, amount)
+SELECT id,
+       SUM(amount) OVER (ORDER BY id RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS nearby_sum
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(RANGE frame) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "nearby_sum"}, Rows: []SQLRow{
+		{"id": int64(1), "nearby_sum": float64(30)},
+		{"id": int64(2), "nearby_sum": float64(30)},
+		{"id": int64(4), "nearby_sum": float64(40)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("RANGE frame result = %#v, want %#v", result, want)
+	}
+
+	result, err = ExecuteSQLQuery(`
+FROM VALUES (1, 10), (1, 20), (2, 30) AS values(id, amount)
+SELECT id, SUM(amount) OVER (ORDER BY id RANGE BETWEEN CURRENT ROW AND CURRENT ROW) AS peer_sum
+ORDER BY id, amount`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(RANGE peer frame) error = %v", err)
+	}
+	want = SQLQueryResult{Columns: []string{"id", "peer_sum"}, Rows: []SQLRow{
+		{"id": int64(1), "peer_sum": float64(30)},
+		{"id": int64(1), "peer_sum": float64(30)},
+		{"id": int64(2), "peer_sum": float64(30)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("RANGE peer frame result = %#v, want %#v", result, want)
+	}
+
+	result, err = ExecuteSQLQuery(`
+FROM VALUES (1, 10), (2, 20), (4, 40) AS values(id, amount)
+SELECT id,
+       SUM(amount) OVER (ORDER BY id DESC RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS nearby_sum
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(descending RANGE frame) error = %v", err)
+	}
+	want = SQLQueryResult{Columns: []string{"id", "nearby_sum"}, Rows: []SQLRow{
+		{"id": int64(1), "nearby_sum": float64(30)},
+		{"id": int64(2), "nearby_sum": float64(30)},
+		{"id": int64(4), "nearby_sum": float64(40)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("descending RANGE frame result = %#v, want %#v", result, want)
+	}
+
+	_, err = ExecuteSQLQuery(`
+FROM VALUES (1, 1, 10) AS values(left_id, right_id, amount)
+SELECT SUM(amount) OVER (ORDER BY left_id, right_id RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS total`, SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "RANGE frame requires exactly one ORDER BY expression") {
+		t.Fatalf("multi-column RANGE error = %v, want one-order diagnostic", err)
+	}
+}
+
 func mustSQLTimestamp(t *testing.T, value string) time.Time {
 	t.Helper()
 	parsed, err := time.Parse(time.RFC3339Nano, value)
