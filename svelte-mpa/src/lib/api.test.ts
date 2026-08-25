@@ -8,6 +8,7 @@ import {
   loadReplicationStatus,
   loadStorageStatus,
   runCommand,
+  runSQL,
   sampleCommandResponse,
   syncReplication
 } from './api';
@@ -17,6 +18,16 @@ afterEach(() => {
 });
 
 describe('command fallback', () => {
+	  it('posts SQL text and typed parameters to the read-only query endpoint', async () => {
+	    const fetchMock = vi.fn(async (_path: string | URL | Request, init?: RequestInit) => {
+	      expect(_path).toBe('/api/sql');
+	      expect(init?.method).toBe('POST');
+	      expect(init?.body).toBe(JSON.stringify({ query: 'SELECT $1', parameters: [7, true] }));
+	      return new Response(JSON.stringify({ columns: ['value'], rows: [{ value: 7 }] }), { status: 200 });
+	    });
+	    vi.stubGlobal('fetch', fetchMock);
+	    await expect(runSQL('SELECT $1', [7, true])).resolves.toEqual({ columns: ['value'], rows: [{ value: 7 }] });
+	  });
   it('uses the shared bounded entries limit in requests', async () => {
     const fetchMock = vi.fn(async (path: string | URL | Request) => {
       expect(path).toBe(`/api/entries?limit=${DEFAULT_ENTRIES_LIMIT}`);
