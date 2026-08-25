@@ -100,6 +100,12 @@ func (store *TopologyStore) Get() ClusterTopology {
 	return cloneTopology(store.topology)
 }
 
+// TopologySnapshot implements hatTopology.TopologySnapshotProvider. The
+// returned topology is normalized and independent from later store updates.
+func (store *TopologyStore) TopologySnapshot() hatTopology.ClusterTopology {
+	return store.Get()
+}
+
 func (store *TopologyStore) replicationSnapshot() (ClusterTopology, string) {
 	if store == nil {
 		return ClusterTopology{}, ""

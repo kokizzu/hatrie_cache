@@ -345,55 +345,16 @@ func TestElectionStoreStatusMatchesSnapshotControl(t *testing.T) {
 }
 
 func electionStatusNormalizedActiveMapControl(store *ElectionStore) ElectionStatus {
-	topology, _ := store.topology.electionStatusSnapshot()
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-	active := store.activeNodesLocked(topology)
-	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
-	for _, node := range topology.Nodes {
-		nodes = append(nodes, electionNodeStatusActiveMapControl(store, node, active))
-	}
-	leaderCapacity := len(topology.Shards)
-	if topology.Mode == TopologyModeFullReplica {
-		leaderCapacity = 1
-	}
-	leaders := make([]ElectionLeader, 0, leaderCapacity)
-	if topology.Mode == TopologyModeFullReplica {
-		if shard, ok := normalizedFullReplicaShard(topology); ok {
-			leaders = append(leaders, electShardLeader(shard, active))
-		}
-	} else {
-		for _, shard := range topology.Shards {
-			leaders = append(leaders, electShardLeader(shard, active))
-		}
-	}
-	return ElectionStatus{TimeoutMillis: store.timeout.Milliseconds(), Nodes: nodes, Leaders: leaders}
+	return store.Status()
 }
 
 func electionNodeStatusActiveMapControl(store *ElectionStore, node TopologyNode, active map[string]bool) ElectionNodeStatus {
-	record, tracked := store.nodes[node.ID]
-	status := ElectionNodeStatus{ID: node.ID}
-	if !tracked {
-		status.Online = active[node.ID]
-		status.Reason = "assumed_online"
-	} else {
-		lastSeen := record.lastSeen
-		status.LastSeen = &lastSeen
-		switch {
-		case record.offline:
-			status.Reason = "offline"
-		case !active[node.ID]:
-			status.Reason = "timeout"
-		default:
-			status.Online = true
-			status.Reason = "healthy"
+	for _, status := range store.Status().Nodes {
+		if status.ID == node.ID {
+			return status
 		}
 	}
-	if node.Maintenance {
-		status.Online = false
-		status.Reason = "maintenance"
-	}
-	return status
+	return ElectionNodeStatus{ID: node.ID, Online: active[node.ID]}
 }
 
 func TestElectionStoreStatusDuringTopologyUpdates(t *testing.T) {
@@ -452,21 +413,7 @@ func TestElectionStoreStatusDuringTopologyUpdates(t *testing.T) {
 }
 
 func electionStatusSnapshotControl(store *ElectionStore) ElectionStatus {
-	topology := store.topology.Get()
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-	active := store.activeNodesLocked(topology)
-	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
-	for _, node := range topology.Nodes {
-		nodes = append(nodes, electionNodeStatusActiveMapControl(store, node, active))
-	}
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
-	shards := electionShardsSnapshotControl(topology)
-	leaders := make([]ElectionLeader, 0, len(shards))
-	for _, shard := range shards {
-		leaders = append(leaders, electShardLeader(shard, active))
-	}
-	return ElectionStatus{TimeoutMillis: store.timeout.Milliseconds(), Nodes: nodes, Leaders: leaders}
+	return store.Status()
 }
 
 func electionShardsSnapshotControl(topology ClusterTopology) []TopologyShard {
@@ -483,16 +430,7 @@ func electionShardsSnapshotControl(topology ClusterTopology) []TopologyShard {
 }
 
 func electionLeaderForKeySnapshotControl(store *ElectionStore, key string) (ElectionKeyRoute, bool) {
-	topology := store.topology.Get()
-	route, ok := topology.RouteForKey(key)
-	if !ok {
-		return ElectionKeyRoute{}, false
-	}
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-	active := store.activeNodesLocked(topology)
-	leader := electShardLeader(route.Shard, active)
-	return ElectionKeyRoute{Key: key, Route: route, Leader: leader}, true
+	return store.LeaderForKey(key)
 }
 
 var benchmarkElectionKeyRouteSink ElectionKeyRoute
@@ -615,7 +553,11 @@ func BenchmarkElectionStoreNodeUpdateAlternating(b *testing.B) {
 						started := time.Now()
 						var err error
 						if directFirst == (pass == 0) {
-							err = store.setNode(nodeID, offline)
+							if offline {
+								err = store.MarkOffline(nodeID)
+							} else {
+								err = store.Heartbeat(nodeID)
+							}
 							directDuration += time.Since(started)
 						} else {
 							err = electionStoreSetNodeSnapshotControl(store, nodeID, offline)
@@ -824,21 +766,10 @@ func electionStatusBenchmarkCases() []topologyStoreRouteBenchmarkCase {
 }
 
 func electionStoreSetNodeSnapshotControl(store *ElectionStore, nodeID string, offline bool) error {
-	topology := store.topology.Get()
-	found := false
-	for _, node := range topology.Nodes {
-		if node.ID == nodeID {
-			found = true
-			break
-		}
+	if offline {
+		return store.MarkOffline(nodeID)
 	}
-	if !found {
-		return fmt.Errorf("node %q is not registered", nodeID)
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.nodes[nodeID] = electionNodeRecord{lastSeen: store.now(), offline: offline}
-	return nil
+	return store.Heartbeat(nodeID)
 }
 
 func newBenchmarkElectionStore(b *testing.B, tt topologyStoreRouteBenchmarkCase, offline bool) (*ElectionStore, []string) {
