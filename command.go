@@ -11,32 +11,15 @@ import (
 	"unicode/utf8"
 
 	json "github.com/goccy/go-json"
+
+	"hatrie_cache/hat/hatCommand"
 )
 
 const maxCommandTTLSeconds = int64(1<<63-1) / int64(time.Second)
 const maxPublicCommandBatchSize = 4096
 
-type CacheCommandRequest struct {
-	Command     string                `json:"command"`
-	Atomic      bool                  `json:"atomic,omitempty"`
-	Key         string                `json:"key"`
-	Value       string                `json:"value,omitempty"`
-	Values      Slice                 `json:"values,omitempty"`
-	Batch       []CacheCommandRequest `json:"batch,omitempty"`
-	Subkey      string                `json:"subkey,omitempty"`
-	Pairs       Map                   `json:"pairs,omitempty"`
-	Priority    *int64                `json:"priority,omitempty"`
-	TTLSeconds  *int64                `json:"ttl_seconds,omitempty"`
-	UnixSeconds *int64                `json:"unix_seconds,omitempty"`
-	BinaryValue []byte                `json:"-"`
-}
-
-type CacheCommandResponse struct {
-	OK        bool                   `json:"ok"`
-	Message   string                 `json:"message"`
-	Value     string                 `json:"value,omitempty"`
-	Responses []CacheCommandResponse `json:"responses,omitempty"`
-}
+type CacheCommandRequest = hatCommand.Request
+type CacheCommandResponse = hatCommand.Response
 
 func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandResponse {
 	if ht == nil {
