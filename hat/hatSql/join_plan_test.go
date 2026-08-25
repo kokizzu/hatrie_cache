@@ -1,7 +1,9 @@
 package hatSql_test
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -13,6 +15,24 @@ type exactJoinPlanResolver struct {
 	indexCalls    int
 	estimateCalls int
 	rangeCalls    int
+	streamCalls   int
+}
+
+func (resolver *exactJoinPlanResolver) StreamSQLSource(ctx context.Context, name, key string, visit func(hatSql.Row) error) error {
+	rows, ok := resolver.sources[key]
+	if !ok || name != "CACHE" {
+		return fmt.Errorf("unexpected stream source %s(%q)", name, key)
+	}
+	resolver.streamCalls++
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (resolver *exactJoinPlanResolver) ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]hatSql.Row, bool, error) {
@@ -163,6 +183,76 @@ func TestOuterJoinDoesNotPushRightPredicate(t *testing.T) {
 	}
 	if len(result.Rows) != 0 {
 		t.Fatalf("outer join rows = %#v, want empty result", result.Rows)
+	}
+}
+
+func TestLargeEqualityJoinSpillsBoundedHashPartitions(t *testing.T) {
+	resolver := &exactJoinPlanResolver{sources: map[string][]hatSql.Row{
+		"left": {
+			{"id": 1, "k": "a"},
+			{"id": 2, "k": "b"},
+			{"id": 3, "k": "a"},
+		},
+		"right": {
+			{"k": "a", "name": "Ada"},
+			{"k": "b", "name": "Bea"},
+			{"k": "a", "name": "Cia"},
+		},
+	}}
+	directory := t.TempDir()
+	options := hatSql.QueryOptions{MaxJoinBytes: 128, SpillDirectory: directory, MaxSpillBytes: 1 << 20}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.name"
+	result, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []hatSql.Row{
+		{"id": 1, "name": "Ada"},
+		{"id": 1, "name": "Cia"},
+		{"id": 2, "name": "Bea"},
+		{"id": 3, "name": "Ada"},
+		{"id": 3, "name": "Cia"},
+	}
+	if fmt.Sprintf("%#v", result.Rows) != fmt.Sprintf("%#v", want) {
+		t.Fatalf("spilled join rows = %#v, want %#v", result.Rows, want)
+	}
+	if resolver.streamCalls != 2 {
+		t.Fatalf("stream calls = %d, want two streamed join inputs", resolver.streamCalls)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory entries = %#v, want cleanup", entries)
+	}
+
+	analysis, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasPlanDetail(analysis.Plan, "SPILL HASH JOIN", "partitioned") {
+		t.Fatalf("spilled join plan = %#v, want partitioned spill hash join", analysis.Plan)
+	}
+}
+
+func TestLargeEqualityJoinSpillBudgetCleansTemporaryFiles(t *testing.T) {
+	resolver := &exactJoinPlanResolver{sources: map[string][]hatSql.Row{
+		"left":  {{"id": 1, "k": "team"}},
+		"right": {{"k": "team", "name": "Ada"}},
+	}}
+	directory := t.TempDir()
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.name"
+	_, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{MaxJoinBytes: 128, SpillDirectory: directory, MaxSpillBytes: 1})
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("spilled join error = %v, want disk-budget failure", err)
+	}
+	entries, readErr := os.ReadDir(directory)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed spill directory entries = %#v, want cleanup", entries)
 	}
 }
 

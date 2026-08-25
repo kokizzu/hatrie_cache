@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"math"
 	"math/big"
@@ -147,8 +148,13 @@ const maxSQLPageSize = 10000
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
-	MaxRows        int
-	MaxJoinWork    int
+	MaxRows     int
+	MaxJoinWork int
+	// MaxJoinBytes bounds in-memory hash partitions. Combined with
+	// SpillDirectory and MaxSpillBytes it enables a streamed spill hash join
+	// for a direct two-source INNER equality join. Zero keeps the existing
+	// in-memory join behavior.
+	MaxJoinBytes   int
 	MaxResultBytes int
 	MaxSortBytes   int
 	MaxGroupBytes  int
@@ -253,8 +259,20 @@ type sqlSpillRun struct {
 }
 
 const maxSQLSpillMergeFanIn = 32
+const sqlSpillHashPartitions = 64
 
 var errSQLSpillDiskBudget = errors.New("SQL spill disk budget exceeded")
+
+type sqlSpillHashInput struct {
+	Row     SQLRow
+	Ordinal int
+}
+
+type sqlSpillHashPartition struct {
+	path    string
+	file    *os.File
+	encoder *gob.Encoder
+}
 
 func init() {
 	// Gob requires concrete dynamic interface values to be registered. These
@@ -3479,6 +3497,286 @@ func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSour
 	}
 }
 
+func sqlSpillHashJoinStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
+	if query == nil || query.from == nil || control == nil || control.options.MaxJoinBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.from.kind != "CACHE" || query.joins[0].source.kind != "CACHE" || query.joins[0].kind != "INNER" || query.where.kind != "" || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || len(query.joins[0].source.fieldTypes) != 0 {
+		return false
+	}
+	if _, ok := resolver.(SQLStreamSourceResolver); !ok {
+		return false
+	}
+	_, _, _, ok := sqlHashJoinFields(query.joins[0].on, []string{query.from.alias}, query.joins[0].source.alias)
+	if !ok {
+		return false
+	}
+	for _, item := range query.selects {
+		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) || sqlExprHasFunction(item.expr) {
+			return false
+		}
+	}
+	return true
+}
+
+// executeSQLSpillHashJoin partitions each streamed input on its equality key,
+// then builds at most one right partition at a time. Output is spilled and
+// merged by original source ordinal so enabling the fallback does not change
+// the established deterministic no-ORDER-BY result order.
+func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	if !sqlSpillHashJoinStreamable(query, resolver, control) {
+		return SQLQueryResult{}, false, nil
+	}
+	_, leftField, rightField, _ := sqlHashJoinFields(query.joins[0].on, []string{query.from.alias}, query.joins[0].source.alias)
+	available := int64(control.options.MaxSpillBytes)
+	paths := map[string]struct{}{}
+	defer func() {
+		for path := range paths {
+			_ = os.Remove(path)
+		}
+	}()
+	leftParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-left-*", &available, paths)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	rightParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-right-*", &available, paths)
+	if err != nil {
+		closeSQLSpillHashPartitions(leftParts)
+		return SQLQueryResult{}, true, err
+	}
+	leftRows, rightRows := 0, 0
+	if err := streamSQLSourceRows(control.ctx, *query.from, resolver, func(row SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		if leftRows >= control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		ordinal := leftRows
+		leftRows++
+		key, ok := sqlHashJoinKey(row[leftField])
+		if !ok {
+			return nil
+		}
+		return writeSQLSpillHashInput(leftParts[sqlSpillHashPartitionIndex(key)], sqlSpillHashInput{Row: row, Ordinal: ordinal})
+	}); err != nil {
+		closeSQLSpillHashPartitions(leftParts)
+		closeSQLSpillHashPartitions(rightParts)
+		return SQLQueryResult{}, true, err
+	}
+	if err := streamSQLSourceRows(control.ctx, query.joins[0].source, resolver, func(row SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		if rightRows >= control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.joins[0].source.alias, control.maxRows)
+		}
+		ordinal := rightRows
+		rightRows++
+		key, ok := sqlHashJoinKey(row[rightField])
+		if !ok {
+			return nil
+		}
+		return writeSQLSpillHashInput(rightParts[sqlSpillHashPartitionIndex(key)], sqlSpillHashInput{Row: row, Ordinal: ordinal})
+	}); err != nil {
+		closeSQLSpillHashPartitions(leftParts)
+		closeSQLSpillHashPartitions(rightParts)
+		return SQLQueryResult{}, true, err
+	}
+	if err := closeSQLSpillHashPartitions(leftParts); err != nil {
+		closeSQLSpillHashPartitions(rightParts)
+		return SQLQueryResult{}, true, err
+	}
+	if err := closeSQLSpillHashPartitions(rightParts); err != nil {
+		return SQLQueryResult{}, true, err
+	}
+
+	chunkLimit := control.options.MaxJoinBytes
+	outputRuns := []sqlSpillRun{}
+	outputChunk := make([]sqlSpillOutput, 0)
+	outputBytes, outputRows := 0, 0
+	flushOutput := func() error {
+		if len(outputChunk) == 0 {
+			return nil
+		}
+		sort.SliceStable(outputChunk, func(left, right int) bool {
+			return sqlSpillOutputLess(outputChunk[left], outputChunk[right], []sqlOrder{{}})
+		})
+		run, err := sqlWriteSpillRun(control.options.SpillDirectory, outputChunk, &available, control)
+		if err != nil {
+			return err
+		}
+		paths[run.path] = struct{}{}
+		outputRuns = append(outputRuns, run)
+		outputChunk, outputBytes = make([]sqlSpillOutput, 0), 0
+		return nil
+	}
+
+	columns := sqlColumns(query.selects)
+	for index := range leftParts {
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		processRightChunk := func(right []sqlSpillHashInput) error {
+			buckets := make(map[string][]sqlSpillHashInput, len(right))
+			for _, entry := range right {
+				key, _ := sqlHashJoinKey(entry.Row[rightField])
+				buckets[key] = append(buckets[key], entry)
+			}
+			return visitSQLSpillHashPartition(leftParts[index].path, control, func(leftEntry sqlSpillHashInput) error {
+				key, _ := sqlHashJoinKey(leftEntry.Row[leftField])
+				for _, rightEntry := range buckets[key] {
+					if err := control.addJoinWork(1); err != nil {
+						return err
+					}
+					combined := mergeSQLRows(
+						sqlExecRow{sources: map[string]SQLRow{query.from.alias: leftEntry.Row}, order: []string{query.from.alias}},
+						sqlExecRow{sources: map[string]SQLRow{query.joins[0].source.alias: rightEntry.Row}, order: []string{query.joins[0].source.alias}},
+					)
+					row := SQLRow{}
+					for column, item := range query.selects {
+						value := evalSQLExpr(item.expr, []sqlExecRow{combined}, combined)
+						if err := sqlExpressionError(value); err != nil {
+							return err
+						}
+						row[columns[column]] = value
+					}
+					if outputRows >= control.maxRows {
+						return fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", control.maxRows)
+					}
+					outputRows++
+					ordinal := int64(leftEntry.Ordinal)*int64(control.maxRows+1) + int64(rightEntry.Ordinal)
+					record := sqlSpillOutput{Row: row, Keys: []interface{}{ordinal}, Ordinal: outputRows}
+					outputChunk = append(outputChunk, record)
+					outputBytes += sqlSpillOutputBytes(record)
+					if outputBytes >= chunkLimit {
+						return flushOutput()
+					}
+				}
+				return nil
+			})
+		}
+		rightChunk := make([]sqlSpillHashInput, 0)
+		rightBytes := 0
+		err := visitSQLSpillHashPartition(rightParts[index].path, control, func(entry sqlSpillHashInput) error {
+			entryBytes := sqlRowBytes(entry.Row) + 16
+			if len(rightChunk) > 0 && rightBytes+entryBytes > chunkLimit {
+				if err := processRightChunk(rightChunk); err != nil {
+					return err
+				}
+				rightChunk, rightBytes = rightChunk[:0], 0
+			}
+			rightChunk = append(rightChunk, entry)
+			rightBytes += entryBytes
+			return nil
+		})
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if err := processRightChunk(rightChunk); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+	}
+	if err := flushOutput(); err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	rows, err := sqlMergeSpillRunsToRows(outputRuns, []sqlOrder{{}}, 0, -1, control)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	if metrics != nil {
+		metrics.record("SPILL HASH JOIN", fmt.Sprintf("partitioned equality join (%d partitions)", sqlSpillHashPartitions), leftRows+rightRows, len(rows), time.Now())
+	}
+	return SQLQueryResult{Columns: columns, Rows: rows}, true, nil
+}
+
+func newSQLSpillHashPartitions(directory, pattern string, available *int64, paths map[string]struct{}) ([]sqlSpillHashPartition, error) {
+	partitions := make([]sqlSpillHashPartition, sqlSpillHashPartitions)
+	for index := range partitions {
+		file, err := os.CreateTemp(directory, pattern)
+		if err != nil {
+			closeSQLSpillHashPartitions(partitions[:index])
+			return nil, fmt.Errorf("create SQL hash spill file: %w", err)
+		}
+		paths[file.Name()] = struct{}{}
+		partitions[index] = sqlSpillHashPartition{path: file.Name(), file: file, encoder: gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})}
+	}
+	return partitions, nil
+}
+
+func writeSQLSpillHashInput(partition sqlSpillHashPartition, input sqlSpillHashInput) error {
+	if err := partition.encoder.Encode(input); err != nil {
+		if errors.Is(err, errSQLSpillDiskBudget) {
+			return fmt.Errorf("SQL spill disk budget exceeded while writing hash partitions")
+		}
+		return fmt.Errorf("write SQL hash spill partition: %w", err)
+	}
+	return nil
+}
+
+func closeSQLSpillHashPartitions(partitions []sqlSpillHashPartition) error {
+	var first error
+	for index := range partitions {
+		if partitions[index].file != nil {
+			if err := partitions[index].file.Close(); err != nil && first == nil {
+				first = err
+			}
+			partitions[index].file = nil
+		}
+	}
+	return first
+}
+
+func readSQLSpillHashPartition(path string, control *sqlExecutionControl) ([]sqlSpillHashInput, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open SQL hash spill partition: %w", err)
+	}
+	defer file.Close()
+	decoder := gob.NewDecoder(file)
+	entries := []sqlSpillHashInput{}
+	for {
+		if err := control.check(); err != nil {
+			return nil, err
+		}
+		var entry sqlSpillHashInput
+		if err := decoder.Decode(&entry); err != nil {
+			if errors.Is(err, io.EOF) {
+				return entries, nil
+			}
+			return nil, fmt.Errorf("read SQL hash spill partition: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+}
+
+func visitSQLSpillHashPartition(path string, control *sqlExecutionControl, visit func(sqlSpillHashInput) error) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open SQL hash spill partition: %w", err)
+	}
+	defer file.Close()
+	decoder := gob.NewDecoder(file)
+	for {
+		if err := control.check(); err != nil {
+			return err
+		}
+		var entry sqlSpillHashInput
+		if err := decoder.Decode(&entry); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("read SQL hash spill partition: %w", err)
+		}
+		if err := visit(entry); err != nil {
+			return err
+		}
+	}
+}
+
+func sqlSpillHashPartitionIndex(key string) int {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(key))
+	return int(hash.Sum32() % sqlSpillHashPartitions)
+}
+
 type sqlCursor struct {
 	Fingerprint string `json:"f"`
 	Offset      int    `json:"o"`
@@ -5414,7 +5712,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.Timeout > 0 {
@@ -5759,6 +6057,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			return SQLQueryResult{}, err
 		}
 		ctes[cte.name] = rows
+	}
+	if result, handled, spillErr := executeSQLSpillHashJoin(q, resolver, control, metrics); handled {
+		return result, spillErr
 	}
 	if result, handled, streamErr := executeSQLStreamedSpilledGroupAggregate(q, resolver, control, metrics, nil); handled {
 		return result, streamErr
