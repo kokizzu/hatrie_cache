@@ -168,6 +168,47 @@ SELECT key, value`, nil, SQLQueryOptions{})
 	}
 }
 
+func TestSQLTransactionProvidesSnapshotReadsRollbackAndConflictVisibility(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"name":"Ada"}]`)
+	tx, err := BeginSQLTransaction(trie)
+	if err != nil {
+		t.Fatalf("BeginSQLTransaction() error = %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Execute("INSERT INTO cache (key, value) VALUES ('draft', 'private')"); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "draft"}); !got.OK || got.Value != "0" {
+		t.Fatalf("live draft = %#v, want invisible", got)
+	}
+	result, err := tx.Query(context.Background(), "FROM CACHE('people') AS p SELECT p.name", nil, SQLQueryOptions{})
+	if err != nil || len(result.Rows) != 1 || result.Rows[0]["name"] != "Ada" {
+		t.Fatalf("Query() = %#v, %v", result, err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "draft"}); !got.OK || got.Value != "0" {
+		t.Fatalf("live draft after rollback = %#v, want absent", got)
+	}
+
+	tx, err = BeginSQLTransaction(trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Execute("INSERT INTO cache (key, value) VALUES ('draft', 'private')"); err != nil {
+		t.Fatal(err)
+	}
+	trie.UpsertString("concurrent", "write")
+	if err := tx.Commit(); err == nil {
+		t.Fatal("Commit() accepted a stale snapshot")
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "draft"}); !got.OK || got.Value != "0" {
+		t.Fatalf("live draft after conflict = %#v, want absent", got)
+	}
+}
+
 func TestCompileSQLRejectsInternalReplicationCommands(t *testing.T) {
 	t.Parallel()
 

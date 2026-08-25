@@ -477,6 +477,14 @@ transactional. With local partitions enabled, every command in an atomic batch
 must route to the same partition; cross-partition atomic batches are rejected
 before any command is executed.
 
+For a multi-step application session, `BeginSQLTransaction` provides
+snapshot-isolated scalar command SQL. `Execute` stages supported scalar
+mutations in a private snapshot, `Query` reads that snapshot including its own
+writes, and `Rollback` destroys it without touching live data. `Commit` checks
+the live mutation epoch while applying the atomic batch; a concurrent write
+causes a conflict and publishes none of the staged commands. Transactions do
+not accept `INC`, reads through command SQL, or cross-partition writes.
+
 | SQL form | Existing command request |
 | --- | --- |
 | `SELECT value FROM cache WHERE key = 'k'` | `GETSTR`, `key='k'` |

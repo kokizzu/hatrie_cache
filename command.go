@@ -1016,6 +1016,33 @@ func (ht *HatTrie) executePublicBatchCommand(request CacheCommandRequest) CacheC
 	return executePublicCommandBatchRequests(request, ht.ExecuteCommand)
 }
 
+// executeSQLTransactionBatch applies already-validated scalar writes only when
+// the snapshot epoch still matches while ht.mu is held.
+func (ht *HatTrie) executeSQLTransactionBatch(epoch uint64, payloads []CacheCommandRequest) CacheCommandResponse {
+	if len(payloads) == 0 {
+		return CacheCommandResponse{OK: true, Message: "committed"}
+	}
+	for index, payload := range payloads {
+		if err := validateAtomicScalarBatchPayload(payload, index); err != nil {
+			return commandError(err.Error())
+		}
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	if ht.mutationEpoch != epoch {
+		return commandError("SQL transaction conflict: cache changed after its snapshot")
+	}
+	responses := make([]CacheCommandResponse, len(payloads))
+	for index, payload := range payloads {
+		response := ht.executePublicScalarBatchPayloadLocked(payload, index)
+		if !response.OK {
+			return commandError("SQL transaction commit rejected: " + response.Message)
+		}
+		responses[index] = response
+	}
+	return publicCommandBatchResponse(responses, true)
+}
+
 func executePublicCommandBatchRequests(request CacheCommandRequest, execute func(CacheCommandRequest) CacheCommandResponse) CacheCommandResponse {
 	payloads, err := publicCommandBatchRequests(request)
 	if err != nil {
