@@ -12,12 +12,19 @@
   let error = '';
   let result: SQLQueryResult | null = null;
   let history: HistoryItem[] = [];
+	let highlightLayer: HTMLPreElement;
 
   try { history = JSON.parse(sessionStorage.getItem(historyKey) ?? '[]'); } catch { history = []; }
 
   function highlight(source: string) {
-    return source.replace(/\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|GROUP|BY|ORDER|LIMIT|EXPLAIN|ANALYZE|AS|AND|OR|COUNT|SUM|AVG)\b/gi, '<mark>$1</mark>');
+    const escaped = source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return escaped.replace(/\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|GROUP|BY|ORDER|LIMIT|EXPLAIN|ANALYZE|AS|AND|OR|COUNT|SUM|AVG)\b/gi, '<mark>$1</mark>');
   }
+	function syncHighlight(event: Event) {
+		const input = event.currentTarget as HTMLTextAreaElement;
+		highlightLayer.scrollTop = input.scrollTop;
+		highlightLayer.scrollLeft = input.scrollLeft;
+	}
   function save(item: HistoryItem) {
     history = [item, ...history.filter((entry) => entry.query !== item.query)].slice(0, 20);
     sessionStorage.setItem(historyKey, JSON.stringify(history));
@@ -44,8 +51,7 @@
   <section class="sql-layout">
     <section class="panel sql-editor">
       <div class="panel-heading"><div><h2>Query</h2><p>Snapshot query workspace</p></div><BarChart3 size={18} aria-hidden="true" /></div>
-      <div class="sql-highlight" aria-hidden="true">{@html highlight(query)}</div>
-      <textarea aria-label="SQL query" bind:value={query} spellcheck="false" rows="9"></textarea>
+      <div class="code-editor"><pre bind:this={highlightLayer} aria-hidden="true">{@html highlight(query)}{`\n`}</pre><textarea aria-label="SQL query" bind:value={query} on:scroll={syncHighlight} spellcheck="false" rows="9"></textarea></div>
       <label><span>Parameters JSON</span><input bind:value={parameters} /></label>
       <div class="sql-actions"><label class="checkbox-row"><input type="checkbox" bind:checked={analyze} /><span>Explain analyze</span></label><button class="icon-button" type="button" title="Clear query" on:click={reset}><RotateCcw size={17}/></button><button class="primary-button" type="button" disabled={running || !query.trim()} on:click={execute}><Play size={17}/>{running ? 'Running' : 'Run'}</button></div>
       {#if error}<p class="sql-error">{error}</p>{/if}

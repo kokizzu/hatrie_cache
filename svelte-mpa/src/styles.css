@@ -726,8 +726,12 @@ textarea {
 }
 
 .sql-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; }
-.sql-editor textarea { width: 100%; box-sizing: border-box; min-height: 180px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.sql-highlight { display: none; }
+.code-editor { position: relative; min-height: 180px; overflow: hidden; border: 1px solid var(--line); background: #10151c; }
+.code-editor pre, .sql-editor textarea { box-sizing: border-box; min-height: 180px; margin: 0; padding: 12px; border: 0; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; tab-size: 2; }
+.code-editor pre { position: absolute; inset: 0; overflow: hidden; color: #d5dbe5; pointer-events: none; }
+.code-editor pre mark { color: #73c0ff; background: transparent; font-weight: 700; }
+.sql-editor textarea { position: relative; display: block; width: 100%; resize: vertical; color: transparent; caret-color: #f6f8fb; background: transparent; }
+.sql-editor textarea::selection { background: rgba(115, 192, 255, .35); color: transparent; }
 .sql-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 14px; }
 .sql-history button { display: grid; grid-template-columns: 1fr auto; width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; padding: 10px 0; text-align: left; color: inherit; cursor: pointer; }
 .sql-history button small { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); margin-top: 4px; font-family: ui-monospace, monospace; }
