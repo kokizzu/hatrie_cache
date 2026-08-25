@@ -4843,3 +4843,20 @@ func FuzzExecuteSQLQueryDoesNotPanic(f *testing.F) {
 		}))
 	})
 }
+
+func FuzzSQLUDFDiagnosticsDoNotPanic(f *testing.F) {
+	for _, seed := range []struct{ source, message string }{
+		{"CREATE FUNCTION positive(value INTEGER) LANGUAGE GO AS 'return value > 0'", "runtime failure"},
+		{"CREATE FUNCTION text(value TEXT) LANGUAGE GO AS 'return value == value'", "unexpected type"},
+		{"CREATE FUNCTION malformed(value INTEGER) LANGUAGE GO AS 'return value'", "failed\nwith detail"},
+	} {
+		f.Add(seed.source, seed.message)
+	}
+	f.Fuzz(func(t *testing.T, source string, message string) {
+		definition, err := CompileSQLFunction(source)
+		if err != nil {
+			return
+		}
+		_ = FormatSQLFunctionDiagnostic(definition, errors.New(message))
+	})
+}
