@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"hatrie_cache/hat/hatSql"
@@ -27,15 +25,11 @@ type sqlFunctionRuntime interface {
 	Evaluate([]SQLFunctionCall) ([]interface{}, error)
 }
 
-type sqlFunctionCloser interface{ Close() }
-
 // SQLFunctionRegistry keeps compiled UDFs. It is safe for concurrent query
 // execution.
 type SQLFunctionRegistry struct {
-	mu          sync.RWMutex
-	functions   map[string]sqlFunctionRuntime
-	definitions map[string]SQLFunctionDefinition
-	options     SQLFunctionRegistryOptions
+	core    *hatSql.Registry
+	options SQLFunctionRegistryOptions
 }
 
 // SQLFunctionRegistryOptions configures optional, sandboxed UDF runtimes.
@@ -64,7 +58,15 @@ func NewSQLFunctionRegistryWithOptions(options SQLFunctionRegistryOptions) *SQLF
 	if options.JSExecutionTimeout <= 0 {
 		options.JSExecutionTimeout = time.Second
 	}
-	return &SQLFunctionRegistry{functions: make(map[string]sqlFunctionRuntime), definitions: make(map[string]SQLFunctionDefinition), options: options}
+	registry := &SQLFunctionRegistry{options: options}
+	registry.core = hatSql.NewRegistry(func(definition hatSql.FunctionDefinition) (hatSql.FunctionDefinition, hatSql.FunctionRuntime, error) {
+		compiled, err := registry.compile(definition)
+		if err != nil {
+			return hatSql.FunctionDefinition{}, nil, err
+		}
+		return compiled.definition, compiled.runtime, nil
+	})
+	return registry
 }
 
 // OpenSQLFunctionRegistry creates a registry and restores any definitions from
@@ -81,36 +83,10 @@ func OpenSQLFunctionRegistry(options SQLFunctionRegistryOptions) (*SQLFunctionRe
 }
 
 func (registry *SQLFunctionRegistry) Register(definition SQLFunctionDefinition) error {
-	if registry == nil {
+	if registry == nil || registry.core == nil {
 		return fmt.Errorf("SQL function registry is required")
 	}
-	compiled, err := registry.compile(definition)
-	if err != nil {
-		return err
-	}
-	definition = compiled.definition
-	key := strings.ToUpper(definition.Name)
-	registry.mu.Lock()
-	definitions := make(map[string]SQLFunctionDefinition, len(registry.definitions)+1)
-	for name, existing := range registry.definitions {
-		definitions[name] = existing
-	}
-	definitions[key] = definition
-	if err := registry.persistDefinitionsLocked(definitions); err != nil {
-		registry.mu.Unlock()
-		if closer, ok := compiled.runtime.(sqlFunctionCloser); ok {
-			closer.Close()
-		}
-		return err
-	}
-	previous := registry.functions[key]
-	registry.functions[key] = compiled.runtime
-	registry.definitions = definitions
-	registry.mu.Unlock()
-	if closer, ok := previous.(sqlFunctionCloser); ok {
-		closer.Close()
-	}
-	return nil
+	return registry.core.Register(definition, registry.persistDefinitions)
 }
 
 type sqlCompiledFunction struct {
@@ -165,88 +141,32 @@ func (registry *SQLFunctionRegistry) Load() error {
 	if err := json.Unmarshal(data, &definitions); err != nil {
 		return fmt.Errorf("parse SQL function definitions: %w", err)
 	}
-	functions := make(map[string]sqlFunctionRuntime, len(definitions))
-	stored := make(map[string]SQLFunctionDefinition, len(definitions))
-	closeCompiled := func() {
-		for _, function := range functions {
-			if closer, ok := function.(sqlFunctionCloser); ok {
-				closer.Close()
-			}
-		}
-	}
-	for index, definition := range definitions {
-		compiled, err := registry.compile(definition)
-		if err != nil {
-			closeCompiled()
-			return fmt.Errorf("load SQL function definition %d: %w", index, err)
-		}
-		key := strings.ToUpper(compiled.definition.Name)
-		if _, duplicate := functions[key]; duplicate {
-			if closer, ok := compiled.runtime.(sqlFunctionCloser); ok {
-				closer.Close()
-			}
-			closeCompiled()
-			return fmt.Errorf("load SQL function definitions: duplicate function %q", compiled.definition.Name)
-		}
-		functions[key] = compiled.runtime
-		stored[key] = compiled.definition
-	}
-	registry.mu.Lock()
-	previous := registry.functions
-	registry.functions = functions
-	registry.definitions = stored
-	registry.mu.Unlock()
-	for _, function := range previous {
-		if closer, ok := function.(sqlFunctionCloser); ok {
-			closer.Close()
-		}
-	}
-	return nil
+	return registry.core.Replace(definitions)
 }
 
-func (registry *SQLFunctionRegistry) persistDefinitionsLocked(definitions map[string]SQLFunctionDefinition) error {
+func (registry *SQLFunctionRegistry) persistDefinitions(definitions []SQLFunctionDefinition) error {
 	path := strings.TrimSpace(registry.options.PersistencePath)
 	if path == "" {
 		return nil
 	}
-	ordered := make([]SQLFunctionDefinition, 0, len(definitions))
-	for _, definition := range definitions {
-		ordered = append(ordered, definition)
-	}
-	sort.Slice(ordered, func(left, right int) bool { return ordered[left].Name < ordered[right].Name })
-	if err := writeJSONFileAtomic(path, ordered); err != nil {
+	if err := writeJSONFileAtomic(path, definitions); err != nil {
 		return fmt.Errorf("persist SQL function definitions: %w", err)
 	}
 	return nil
 }
 
 func (registry *SQLFunctionRegistry) EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error) {
-	if registry == nil {
+	if registry == nil || registry.core == nil {
 		return nil, fmt.Errorf("SQL function registry is required")
 	}
-	registry.mu.RLock()
-	function := registry.functions[strings.ToUpper(strings.TrimSpace(name))]
-	registry.mu.RUnlock()
-	if function == nil {
-		return nil, fmt.Errorf("unknown SQL function %q", name)
-	}
-	return function.Evaluate(calls)
+	return registry.core.EvaluateSQLFunction(name, calls)
 }
 
 func (registry *SQLFunctionRegistry) Close() {
 	if registry == nil {
 		return
 	}
-	registry.mu.Lock()
-	functions := registry.functions
-	registry.functions = make(map[string]sqlFunctionRuntime)
-	registry.definitions = make(map[string]SQLFunctionDefinition)
-	registry.mu.Unlock()
-	for _, function := range functions {
-		if closer, ok := function.(sqlFunctionCloser); ok {
-			closer.Close()
-		}
-	}
+	registry.core.Close()
 }
 
 // CompileSQLFunction parses CREATE FUNCTION NAME(args...) LANGUAGE GO|LUA|WASM|JS AS
