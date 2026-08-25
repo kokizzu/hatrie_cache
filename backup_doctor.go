@@ -13,55 +13,16 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hatrie_cache/hat/hatBackup"
+
 	json "github.com/goccy/go-json"
 )
 
-type BackupDoctorReport struct {
-	OK                  bool                       `json:"ok"`
-	Kind                string                     `json:"kind"`
-	Path                string                     `json:"path"`
-	BackupID            string                     `json:"backup_id,omitempty"`
-	Snapshot            *BackupDoctorSnapshot      `json:"snapshot,omitempty"`
-	Journal             *BackupDoctorJournal       `json:"journal,omitempty"`
-	LevelDB             *BackupDoctorLevelDB       `json:"leveldb,omitempty"`
-	Files               []BackupBundleFile         `json:"files,omitempty"`
-	Partition           *BackupPartitionMetadata   `json:"partition,omitempty"`
-	PartitionValidation *BackupPartitionValidation `json:"partition_validation,omitempty"`
-	RecoveredKeys       int                        `json:"recovered_keys,omitempty"`
-	JournalSequence     uint64                     `json:"journal_sequence,omitempty"`
-}
-
-type BackupDoctorSnapshot struct {
-	Path            string `json:"path"`
-	OK              bool   `json:"ok"`
-	Keys            int    `json:"keys"`
-	JournalSequence uint64 `json:"journal_sequence"`
-}
-
-type BackupDoctorJournal struct {
-	Path         string `json:"path"`
-	OK           bool   `json:"ok"`
-	Entries      int    `json:"entries"`
-	LastSequence uint64 `json:"last_sequence"`
-}
-
-type BackupDoctorLevelDB struct {
-	Path    string `json:"path"`
-	Backend string `json:"backend,omitempty"`
-	OK      bool   `json:"ok"`
-	Keys    int    `json:"keys"`
-}
-
-type BackupPartitionValidation struct {
-	OK                       bool     `json:"ok"`
-	CheckedKeys              int      `json:"checked_keys"`
-	InvalidKeys              int      `json:"invalid_keys"`
-	CheckedJournalKeys       int      `json:"checked_journal_keys,omitempty"`
-	InvalidJournalKeys       int      `json:"invalid_journal_keys,omitempty"`
-	KeyPrefixes              []string `json:"key_prefixes,omitempty"`
-	InvalidKeySamples        []string `json:"invalid_key_samples,omitempty"`
-	InvalidJournalKeySamples []string `json:"invalid_journal_key_samples,omitempty"`
-}
+type BackupDoctorReport = hatBackup.DoctorReport
+type BackupDoctorSnapshot = hatBackup.DoctorSnapshot
+type BackupDoctorJournal = hatBackup.DoctorJournal
+type BackupDoctorLevelDB = hatBackup.DoctorStore
+type BackupPartitionValidation = hatBackup.PartitionValidation
 
 const backupPartitionInvalidKeySampleLimit = 8
 const maxBackupBundleManifestBytes = 1 << 20

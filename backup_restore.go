@@ -8,32 +8,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"hatrie_cache/hat/hatBackup"
 )
 
-type BackupBundleRestoreOptions struct {
-	Overwrite bool
-}
-
-type BackupBundleRestoreReport struct {
-	OK                  bool                       `json:"ok"`
-	Bundle              string                     `json:"bundle"`
-	DataDir             string                     `json:"data_dir"`
-	BackupID            string                     `json:"backup_id,omitempty"`
-	Mode                BackupMode                 `json:"mode,omitempty"`
-	Snapshot            string                     `json:"snapshot"`
-	Store               string                     `json:"store,omitempty"`
-	StorageBackend      string                     `json:"storage_backend,omitempty"`
-	Journal             string                     `json:"journal,omitempty"`
-	Partition           *BackupPartitionMetadata   `json:"partition,omitempty"`
-	PartitionValidation *BackupPartitionValidation `json:"partition_validation,omitempty"`
-	JournalSequence     uint64                     `json:"journal_sequence"`
-	RecoveredKeys       int                        `json:"recovered_keys"`
-}
-
-type RestoreRehearsalOptions struct {
-	WorkDir     string
-	KeepWorkDir bool
-}
+type BackupBundleRestoreOptions = hatBackup.RestoreOptions
+type BackupBundleRestoreReport = hatBackup.RestoreReport
+type RestoreRehearsalOptions = hatBackup.RehearsalOptions
 
 type RestoreRehearsalReport struct {
 	OK              bool                           `json:"ok"`
@@ -57,13 +38,7 @@ type RestoreRehearsalRuntimeReport struct {
 	Gets   []RestoreRehearsalGetCheck `json:"gets,omitempty"`
 }
 
-type RestoreRehearsalGetCheck struct {
-	Key      string  `json:"key"`
-	OK       bool    `json:"ok"`
-	Value    string  `json:"value,omitempty"`
-	Expected *string `json:"expected,omitempty"`
-	Error    string  `json:"error,omitempty"`
-}
+type RestoreRehearsalGetCheck = hatBackup.RehearsalGetCheck
 
 func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundleRestoreOptions) (BackupBundleRestoreReport, error) {
 	bundlePath = strings.TrimSpace(bundlePath)
