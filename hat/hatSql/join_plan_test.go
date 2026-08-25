@@ -12,6 +12,26 @@ type exactJoinPlanResolver struct {
 	sources       map[string][]hatSql.Row
 	indexCalls    int
 	estimateCalls int
+	rangeCalls    int
+}
+
+func (resolver *exactJoinPlanResolver) ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]hatSql.Row, bool, error) {
+	if name != "CACHE" || key != "right" || field != "score" || operator != ">=" {
+		return nil, false, nil
+	}
+	minimum, ok := hatSql.Number(value)
+	if !ok {
+		return nil, false, fmt.Errorf("invalid range value %T", value)
+	}
+	resolver.rangeCalls++
+	rows := make([]hatSql.Row, 0)
+	for _, row := range resolver.sources[key] {
+		score, ok := hatSql.Number(row["score"])
+		if ok && score >= minimum {
+			rows = append(rows, row)
+		}
+	}
+	return hatSql.CloneRows(rows), true, nil
 }
 
 func (resolver *exactJoinPlanResolver) ResolveSQLSource(name, key string) ([]hatSql.Row, error) {
@@ -103,9 +123,56 @@ func TestExactIndexJoinPlanKeepsSparsePostingListProbes(t *testing.T) {
 	}
 }
 
+func TestInnerJoinPushesRightOnlyRangePredicateIntoIndex(t *testing.T) {
+	resolver := &exactJoinPlanResolver{sources: map[string][]hatSql.Row{
+		"left": {
+			{"id": 1, "k": "team"},
+			{"id": 2, "k": "team"},
+		},
+		"right": {
+			{"k": "team", "score": 10},
+			{"k": "team", "score": 90},
+			{"k": "team", "score": 95},
+		},
+	}}
+	query := "EXPLAIN ANALYZE FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE r.score >= 90 SELECT l.id, r.score"
+	result, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.rangeCalls != 1 {
+		t.Fatalf("range index calls = %d, want one pushed range probe", resolver.rangeCalls)
+	}
+	if len(result.Rows) == 0 || !hasPlanDetail(result.Plan, "JOIN FILTER PUSH DOWN", "right predicate pushed") {
+		t.Fatalf("pushed range rows/plan = %#v/%#v, want right predicate pushdown", result.Rows, result.Plan)
+	}
+}
+
+func TestOuterJoinDoesNotPushRightPredicate(t *testing.T) {
+	resolver := &exactJoinPlanResolver{sources: map[string][]hatSql.Row{
+		"left":  {{"id": 1, "k": "team"}},
+		"right": {{"k": "team", "score": 10}},
+	}}
+	query := "FROM CACHE('left') AS l LEFT JOIN CACHE('right') AS r ON l.k = r.k WHERE r.score >= 90 SELECT l.id"
+	result, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.rangeCalls != 0 {
+		t.Fatalf("outer join range calls = %d, want no right predicate pushdown", resolver.rangeCalls)
+	}
+	if len(result.Rows) != 0 {
+		t.Fatalf("outer join rows = %#v, want empty result", result.Rows)
+	}
+}
+
 func hasJoinPlan(steps []hatSql.ExplainStep, detail string) bool {
+	return hasPlanDetail(steps, "JOIN PLAN", detail)
+}
+
+func hasPlanDetail(steps []hatSql.ExplainStep, node, detail string) bool {
 	for _, step := range steps {
-		if step.Node == "JOIN PLAN" && strings.Contains(step.Detail, detail) {
+		if step.Node == node && strings.Contains(step.Detail, detail) {
 			return true
 		}
 	}

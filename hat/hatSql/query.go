@@ -5829,8 +5829,18 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			leftQualifiers, leftFields, rightFields, compositeIndexJoin := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias)
 			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
 			rightIndexJoin := hashJoin && join.kind == "RIGHT"
+			rightCondition := sqlInnerJoinPushdownCondition(q.where, join)
+			rightPushed := rightCondition.kind != ""
+			var pushedRight []SQLRow
+			if rightPushed {
+				var err error
+				pushedRight, err = resolveSQLJoinPushedSource(join.source, rightCondition, resolver, ctes, metrics, control, maxRows)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+			}
 			forceHashJoin := false
-			if indexJoin && join.source.kind == "CACHE" {
+			if indexJoin && !rightPushed && join.source.kind == "CACHE" {
 				plan, planned, err := sqlPlanIndexedJoin(resolver, join.source, rightField, leftQualifier, leftField, rows)
 				if err != nil {
 					return SQLQueryResult{}, err
@@ -5840,7 +5850,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					forceHashJoin = plan.useHash
 				}
 			}
-			if compositeIndexJoin && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
+			if compositeIndexJoin && !rightPushed && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
 					// Resolve once with NULLs to establish index availability and to
 					// surface malformed JSON even when all left-side keys are NULL.
@@ -5898,7 +5908,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 				}
 			}
-			if rangeJoin && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
+			if rangeJoin && !rightPushed && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLRangeIndexedSourceResolver); ok {
 					var probe interface{}
 					for _, left := range rows {
@@ -5957,7 +5967,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 				}
 			}
-			if indexJoin && !forceHashJoin && join.source.kind == "CACHE" {
+			if indexJoin && !rightPushed && !forceHashJoin && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
 					// Probe once with NULL to verify that the optional index exists and
 					// to surface malformed JSON even when every left key is NULL.
@@ -6055,12 +6065,16 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 				}
 			}
-			right, err := resolveSQLSource(join.source, resolver, ctes, metrics, control)
-			if err != nil {
-				return SQLQueryResult{}, err
-			}
-			if len(right) > maxRows {
-				return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+			right := pushedRight
+			if !rightPushed {
+				var err error
+				right, err = resolveSQLSource(join.source, resolver, ctes, metrics, control)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				if len(right) > maxRows {
+					return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+				}
 			}
 			wrapped := wrapSQLSource(join.source, right)
 			inputRows := len(rows) + len(wrapped)
@@ -7239,6 +7253,50 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
 	}
 	return nil, false, nil
+}
+
+// resolveSQLJoinPushedSource resolves and filters an INNER JOIN input before
+// hash construction. The original WHERE remains in the plan and is evaluated
+// again after the join, making this a work-only optimization rather than a
+// semantic shortcut.
+func resolveSQLJoinPushedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, maxRows int) ([]SQLRow, error) {
+	started := time.Now()
+	rows, indexed, err := resolveSQLIndexedSource(source, condition, resolver, metrics)
+	if err != nil {
+		return nil, err
+	}
+	if !indexed {
+		rows, err = resolveSQLSource(source, resolver, ctes, metrics, control)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(rows) > maxRows {
+		return nil, fmt.Errorf("SQL source %q exceeds the %d row limit", source.alias, maxRows)
+	}
+	if indexed {
+		metrics.record("JOIN INDEX SCAN", sqlExplainSource(source), 0, len(rows), started)
+	} else {
+		metrics.recordScanRows(source, rows, started)
+	}
+
+	filterStarted := time.Now()
+	filtered := make([]SQLRow, 0, len(rows))
+	for _, row := range rows {
+		if err := control.check(); err != nil {
+			return nil, err
+		}
+		execRow := sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}}
+		value := evalSQLExpr(condition, []sqlExecRow{execRow}, execRow)
+		if err := sqlExpressionError(value); err != nil {
+			return nil, err
+		}
+		if sqlTruthy(value) {
+			filtered = append(filtered, row)
+		}
+	}
+	metrics.record("JOIN FILTER PUSH DOWN", "right predicate pushed: "+sqlExplainExpression(condition), len(rows), len(filtered), filterStarted)
+	return filtered, nil
 }
 
 // resolveSQLOrderedSource chooses the narrow order-preserving scan that can
@@ -8455,6 +8513,60 @@ func sqlCanPushBaseWhere(query *sqlQuery) bool {
 		}
 	}
 	return sqlExprReferencesOnlyAlias(query.where, query.from.alias)
+}
+
+// sqlInnerJoinPushdownCondition extracts deterministic AND terms that inspect
+// only one new INNER JOIN source. Outer joins are intentionally excluded: a
+// right predicate can change whether an unmatched null-extended row exists.
+func sqlInnerJoinPushdownCondition(condition sqlExpr, join sqlJoin) sqlExpr {
+	if join.kind != "INNER" || condition.kind == "" {
+		return sqlExpr{}
+	}
+	terms := []sqlExpr{}
+	var collect func(sqlExpr)
+	collect = func(current sqlExpr) {
+		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
+			collect(*current.left)
+			collect(*current.right)
+			return
+		}
+		if sqlExprReferencesOnlyAlias(current, join.source.alias) && !sqlExprHasWindow(current) && !sqlExprHasAggregate(current) && !sqlExprHasFunction(current) {
+			terms = append(terms, current)
+		}
+	}
+	collect(condition)
+	if len(terms) == 0 {
+		return sqlExpr{}
+	}
+	result := terms[0]
+	for _, term := range terms[1:] {
+		left, right := result, term
+		result = sqlExpr{kind: "binary", op: "AND", left: &left, right: &right}
+	}
+	return result
+}
+
+func sqlExprHasFunction(expression sqlExpr) bool {
+	if expression.kind == "func" {
+		return true
+	}
+	if expression.left != nil && sqlExprHasFunction(*expression.left) {
+		return true
+	}
+	if expression.right != nil && sqlExprHasFunction(*expression.right) {
+		return true
+	}
+	for _, argument := range expression.args {
+		if sqlExprHasFunction(argument) {
+			return true
+		}
+	}
+	for _, branch := range expression.cases {
+		if sqlExprHasFunction(branch.when) || sqlExprHasFunction(branch.then) {
+			return true
+		}
+	}
+	return false
 }
 
 func sqlExprReferencesOnlyAlias(expression sqlExpr, alias string) bool {
