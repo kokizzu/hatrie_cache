@@ -31,6 +31,8 @@ type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = hatSql.CompositeIndexedSourceResolver
+type SQLJSONIndexStatsResolver = hatSql.JSONIndexStatsResolver
+type SQLIndexValueEstimator = hatSql.IndexValueEstimator
 type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
@@ -249,7 +251,7 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 		if err := refreshSQLJSONFieldIndex(index, key, fields[0], data); err != nil {
 			return SQLJSONIndexStats{}, false, err
 		}
-		return sqlJSONIndexStats(key, fields, index.rows), true, nil
+		return sqlJSONIndexStats(key, fields, index.rows, len(index.nulls)), true, nil
 	}
 	index := ht.sqlJSONCompositeIndexes[key][sqlJSONCompositeIndexIdentifier(fields)]
 	if index == nil {
@@ -289,8 +291,11 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	return len(index.rows[valueKey]), true, true, nil
 }
 
-func sqlJSONIndexStats(key string, fields []string, postings map[string][]SQLRow) SQLJSONIndexStats {
+func sqlJSONIndexStats(key string, fields []string, postings map[string][]SQLRow, nullRows ...int) SQLJSONIndexStats {
 	stats := SQLJSONIndexStats{Key: key, Fields: append([]string(nil), fields...), DistinctKeys: len(postings)}
+	if len(nullRows) > 0 {
+		stats.NullRows = nullRows[0]
+	}
 	frequencies := make(map[int]int, len(postings))
 	for _, posting := range postings {
 		count := len(posting)

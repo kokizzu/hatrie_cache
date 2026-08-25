@@ -92,6 +92,20 @@ type CompositeIndexedSourceResolver interface {
 	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error)
 }
 
+// JSONIndexStatsResolver exposes exact current cardinality of a materialized
+// JSON index without exposing indexed values. It lets the optimizer compare a
+// hash build against index probes before materializing the right source.
+type JSONIndexStatsResolver interface {
+	SQLJSONIndexStats(key string, fields ...string) (JSONIndexStats, bool, error)
+}
+
+// IndexValueEstimator exposes the exact current posting-list size for one
+// equality value. Implementations must return exact=false when a value cannot
+// be represented by the index and available=false when no such index exists.
+type IndexValueEstimator interface {
+	SQLJSONIndexValueEstimate(key, field string, value interface{}) (rows int, exact bool, available bool, err error)
+}
+
 // JSONIndexFrequencyBucket reports a posting-list frequency without exposing values.
 type JSONIndexFrequencyBucket struct {
 	RowsPerKey   int `json:"rows_per_key"`
@@ -103,6 +117,7 @@ type JSONIndexStats struct {
 	Key                string
 	Fields             []string
 	Rows               int
+	NullRows           int
 	DistinctKeys       int
 	MinRowsPerKey      int
 	MaxRowsPerKey      int

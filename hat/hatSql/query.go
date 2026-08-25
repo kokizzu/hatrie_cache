@@ -348,20 +348,6 @@ func sqlRuntimeDiagnostic(err error) error {
 	return err
 }
 
-// sqlJSONIndexStatsResolver is optional optimizer metadata. Keeping it
-// separate from SQLSourceResolver preserves source compatibility: callers that
-// cannot provide statistics continue to execute with no estimate.
-type sqlJSONIndexStatsResolver interface {
-	SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndexStats, bool, error)
-}
-
-// sqlJSONIndexValueStatsResolver optionally provides the exact current posting
-// count for a caller-supplied equality value. It never enumerates indexed
-// values, so optimizers can recognize hot values without exposing cache data.
-type sqlJSONIndexValueStatsResolver interface {
-	SQLJSONIndexValueEstimate(key, field string, value interface{}) (rows int, exact bool, available bool, err error)
-}
-
 // ExecuteSQLQuery parses and executes a read-only relational query against a
 // snapshot supplied by resolver. It intentionally does not execute cache commands.
 func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult, error) {
@@ -5461,6 +5447,100 @@ func (control *sqlExecutionControl) addJoinWork(work int) error {
 	return control.check()
 }
 
+type sqlIndexedJoinPlan struct {
+	useHash          bool
+	probes           int
+	estimatedMatches int
+	indexCost        int
+	hashCost         int
+}
+
+func (plan sqlIndexedJoinPlan) detail() string {
+	selected := "INDEX JOIN"
+	if plan.useHash {
+		selected = "HASH JOIN"
+	}
+	return fmt.Sprintf("exact index postings: probes=%d matches=%d index_cost=%d hash_cost=%d; selected %s", plan.probes, plan.estimatedMatches, plan.indexCost, plan.hashCost, selected)
+}
+
+// sqlPlanIndexedJoin compares a cloned posting-list probe with a hash build
+// using exact snapshot index cardinalities. Equality output work is common to
+// both algorithms; the extra index cloning cost is why a hot key can favor a
+// hash join even when an equality index exists.
+func sqlPlanIndexedJoin(resolver SQLSourceResolver, source sqlSource, rightField, leftQualifier, leftField string, left []sqlExecRow) (sqlIndexedJoinPlan, bool, error) {
+	statsResolver, hasStats := resolver.(JSONIndexStatsResolver)
+	valueResolver, hasValues := resolver.(IndexValueEstimator)
+	if !hasStats || !hasValues || source.kind != "CACHE" {
+		return sqlIndexedJoinPlan{}, false, nil
+	}
+	stats, available, err := statsResolver.SQLJSONIndexStats(source.key, rightField)
+	if err != nil {
+		return sqlIndexedJoinPlan{}, false, err
+	}
+	if !available {
+		return sqlIndexedJoinPlan{}, false, nil
+	}
+
+	frequencies := make(map[string]int, len(left))
+	values := make(map[string]interface{}, len(left))
+	probes := 0
+	for _, row := range left {
+		value := sqlField(row, leftQualifier, leftField)
+		key, ok := sqlHashJoinKey(value)
+		if !ok {
+			continue
+		}
+		probes = sqlSaturatingAdd(probes, 1)
+		frequencies[key] = sqlSaturatingAdd(frequencies[key], 1)
+		values[key] = value
+	}
+	matches := 0
+	for key, count := range frequencies {
+		rows, exact, available, err := valueResolver.SQLJSONIndexValueEstimate(source.key, rightField, values[key])
+		if err != nil {
+			return sqlIndexedJoinPlan{}, false, err
+		}
+		if !available || !exact || rows < 0 {
+			return sqlIndexedJoinPlan{}, false, nil
+		}
+		matches = sqlSaturatingAdd(matches, sqlSaturatingMultiply(count, rows))
+	}
+	sourceRows := sqlSaturatingAdd(stats.Rows, stats.NullRows)
+	plan := sqlIndexedJoinPlan{
+		probes:           probes,
+		estimatedMatches: matches,
+		indexCost:        sqlSaturatingAdd(probes, sqlSaturatingMultiply(matches, 2)),
+		hashCost:         sqlSaturatingAdd(sqlSaturatingAdd(sourceRows, probes), matches),
+	}
+	plan.useHash = plan.hashCost < plan.indexCost
+	return plan, true, nil
+}
+
+func sqlSaturatingAdd(left, right int) int {
+	if left < 0 || right < 0 {
+		return int(^uint(0) >> 1)
+	}
+	maximum := int(^uint(0) >> 1)
+	if left > maximum-right {
+		return maximum
+	}
+	return left + right
+}
+
+func sqlSaturatingMultiply(left, right int) int {
+	if left < 0 || right < 0 {
+		return int(^uint(0) >> 1)
+	}
+	if left == 0 || right == 0 {
+		return 0
+	}
+	maximum := int(^uint(0) >> 1)
+	if left > maximum/right {
+		return maximum
+	}
+	return left * right
+}
+
 type sqlExecutionMetrics struct {
 	steps []SQLExplainStep
 }
@@ -5749,6 +5829,17 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			leftQualifiers, leftFields, rightFields, compositeIndexJoin := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias)
 			indexJoin := hashJoin && (join.kind == "INNER" || join.kind == "LEFT")
 			rightIndexJoin := hashJoin && join.kind == "RIGHT"
+			forceHashJoin := false
+			if indexJoin && join.source.kind == "CACHE" {
+				plan, planned, err := sqlPlanIndexedJoin(resolver, join.source, rightField, leftQualifier, leftField, rows)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				if planned {
+					metrics.record("JOIN PLAN", plan.detail(), len(rows), len(rows), time.Now())
+					forceHashJoin = plan.useHash
+				}
+			}
 			if compositeIndexJoin && (join.kind == "INNER" || join.kind == "LEFT") && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
 					// Resolve once with NULLs to establish index availability and to
@@ -5866,7 +5957,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 					}
 				}
 			}
-			if indexJoin && join.source.kind == "CACHE" {
+			if indexJoin && !forceHashJoin && join.source.kind == "CACHE" {
 				if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
 					// Probe once with NULL to verify that the optional index exists and
 					// to surface malformed JSON even when every left key is NULL.
@@ -7265,7 +7356,7 @@ func sqlIndexedEqualityEstimate(source sqlSource, condition sqlExpr, resolver SQ
 	if field == "" {
 		return nil, nil
 	}
-	if valueResolver, ok := resolver.(sqlJSONIndexValueStatsResolver); ok {
+	if valueResolver, ok := resolver.(IndexValueEstimator); ok {
 		rows, exact, available, err := valueResolver.SQLJSONIndexValueEstimate(source.key, field, value)
 		if err != nil {
 			return nil, err
@@ -7274,7 +7365,7 @@ func sqlIndexedEqualityEstimate(source sqlSource, condition sqlExpr, resolver SQ
 			return &rows, nil
 		}
 	}
-	statsResolver, ok := resolver.(sqlJSONIndexStatsResolver)
+	statsResolver, ok := resolver.(JSONIndexStatsResolver)
 	if !ok {
 		return nil, nil
 	}
