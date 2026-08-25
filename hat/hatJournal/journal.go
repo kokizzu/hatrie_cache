@@ -150,6 +150,39 @@ type segment struct {
 	end   uint64
 }
 
+// Segment identifies one immutable archived range in a segmented journal.
+type Segment struct {
+	Path  string
+	Start uint64
+	End   uint64
+}
+
+// SegmentDirectory returns the directory used to retain archived journal
+// segments for path.
+func SegmentDirectory(path string) string {
+	return path + ".segments"
+}
+
+// SegmentPath returns the canonical file path for an archived sequence range.
+func SegmentPath(path string, start uint64, end uint64) string {
+	name := fmt.Sprintf("%020d-%020d%s", start, end, segmentSuffix)
+	return filepath.Join(SegmentDirectory(path), name)
+}
+
+// ListSegments returns all archived journal segments in sequence order. It
+// rejects malformed, overlapping, symbolic-link, and directory entries.
+func ListSegments(path string) ([]Segment, error) {
+	segments, err := listSegments(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Segment, len(segments))
+	for index, current := range segments {
+		out[index] = Segment{Path: current.path, Start: current.start, End: current.end}
+	}
+	return out, nil
+}
+
 // Inspect scans journal framing and sequence continuity without changing any
 // file. It validates the portable record header; callers that need command
 // semantic validation should additionally use the cache package inspector.
@@ -202,7 +235,7 @@ func Inspect(path string, options InspectOptions) (Inspection, error) {
 }
 
 func listSegments(path string) ([]segment, error) {
-	dir := path + ".segments"
+	dir := SegmentDirectory(path)
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

@@ -6,12 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
-)
 
-const commandJournalSegmentSuffix = ".journal"
+	"hatrie_cache/hat/hatJournal"
+)
 
 type commandJournalSegment struct {
 	path  string
@@ -24,57 +21,21 @@ func (journal *CommandJournal) segmented() bool {
 }
 
 func commandJournalSegmentDir(path string) string {
-	return path + ".segments"
+	return hatJournal.SegmentDirectory(path)
 }
 
 func commandJournalSegmentPath(path string, start uint64, end uint64) string {
-	name := fmt.Sprintf("%020d-%020d%s", start, end, commandJournalSegmentSuffix)
-	return filepath.Join(commandJournalSegmentDir(path), name)
+	return hatJournal.SegmentPath(path, start, end)
 }
 
 func listCommandJournalSegments(path string) ([]commandJournalSegment, error) {
-	dir := commandJournalSegmentDir(path)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+	portable, err := hatJournal.ListSegments(path)
 	if err != nil {
 		return nil, err
 	}
-	segments := make([]commandJournalSegment, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			return nil, fmt.Errorf("hatriecache: unexpected directory in journal segments: %s", entry.Name())
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, commandJournalSegmentSuffix) {
-			return nil, fmt.Errorf("hatriecache: unexpected journal segment file %q", name)
-		}
-		bounds := strings.Split(strings.TrimSuffix(name, commandJournalSegmentSuffix), "-")
-		if len(bounds) != 2 {
-			return nil, fmt.Errorf("hatriecache: invalid journal segment file %q", name)
-		}
-		start, startErr := strconv.ParseUint(bounds[0], 10, 64)
-		end, endErr := strconv.ParseUint(bounds[1], 10, 64)
-		if startErr != nil || endErr != nil || start == 0 || end < start {
-			return nil, fmt.Errorf("hatriecache: invalid journal segment file %q", name)
-		}
-		segments = append(segments, commandJournalSegment{
-			path:  filepath.Join(dir, name),
-			start: start,
-			end:   end,
-		})
-	}
-	sort.Slice(segments, func(left int, right int) bool {
-		if segments[left].start == segments[right].start {
-			return segments[left].end < segments[right].end
-		}
-		return segments[left].start < segments[right].start
-	})
-	for idx := 1; idx < len(segments); idx++ {
-		if segments[idx].start <= segments[idx-1].end {
-			return nil, fmt.Errorf("hatriecache: overlapping command journal segments %q and %q", filepath.Base(segments[idx-1].path), filepath.Base(segments[idx].path))
-		}
+	segments := make([]commandJournalSegment, len(portable))
+	for index, segment := range portable {
+		segments[index] = commandJournalSegment{path: segment.Path, start: segment.Start, end: segment.End}
 	}
 	return segments, nil
 }
