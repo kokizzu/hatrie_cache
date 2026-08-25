@@ -79,7 +79,7 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 		definition: definition,
 		snapshot: MaterializedView{
 			Status: status,
-			Result: cloneMaterializedQueryResult(result),
+			Result: cloneQueryResult(result),
 		},
 	}
 	return cloneMaterializedViewStatus(status), nil
@@ -137,7 +137,7 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 		if err != nil {
 			return nil, fmt.Errorf("refresh materialized view %q: %w", candidate.definition.Name, err)
 		}
-		results[candidate.definition.Name] = cloneMaterializedQueryResult(result)
+		results[candidate.definition.Name] = cloneQueryResult(result)
 	}
 
 	refreshedAt := time.Now().UTC()
@@ -211,7 +211,7 @@ func sameMaterializedViewDefinition(left, right MaterializedViewDefinition) bool
 func cloneMaterializedView(view MaterializedView) MaterializedView {
 	return MaterializedView{
 		Status: cloneMaterializedViewStatus(view.Status),
-		Result: cloneMaterializedQueryResult(view.Result),
+		Result: cloneQueryResult(view.Result),
 	}
 }
 
@@ -220,7 +220,7 @@ func cloneMaterializedViewStatus(status MaterializedViewStatus) MaterializedView
 	return status
 }
 
-func cloneMaterializedQueryResult(result QueryResult) QueryResult {
+func cloneQueryResult(result QueryResult) QueryResult {
 	result.Columns = append([]string(nil), result.Columns...)
 	result.Rows = CloneRows(result.Rows)
 	result.Plan = cloneMaterializedExplainSteps(result.Plan)

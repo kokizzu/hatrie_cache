@@ -700,6 +700,37 @@ resolver sources. This is incremental invalidation and recomputation, not
 row-delta maintenance: a changed dependency reruns the affected view query.
 `Get` returns an independent snapshot, safe for callers to inspect or modify.
 
+### Query-result subscriptions
+
+`hatSql.QuerySubscriptions` publishes a new snapshot when an explicitly
+declared dependency changes and the query rows actually differ. It does not
+install background polling or write hooks: call `NotifyChanged` after a
+successful application update. This keeps cache writes independent from query
+execution and lets applications define their own update transaction boundary.
+
+```go
+subscriptions := hatSql.NewQuerySubscriptions(1) // one coalesced latest update
+subscription, err := subscriptions.Subscribe(ctx, hatSql.QuerySubscriptionDefinition{
+    Query:        "FROM CACHE('users') WHERE active = true SELECT id, name",
+    Dependencies: []string{"users"},
+}, resolver, hatSql.QueryOptions{})
+if err != nil {
+    return err
+}
+if err := subscriptions.NotifyChanged(ctx, []string{"users"}, resolver, hatSql.QueryOptions{}); err != nil {
+    return err
+}
+for update := range subscription.Updates() {
+    consume(update.Result)
+}
+```
+
+The initial result is available from `Snapshot()` at revision one. Updates are
+coalesced when a consumer is slow, so each subscriber receives the newest
+state without an unbounded queue. `NotifyChanged` evaluates every affected
+query before publishing any of them; a query error preserves all last
+known-good snapshots. `Close` removes a subscription and closes its channel.
+
 ### External CSV, JSON, and Parquet tables
 
 `hatSql.ExternalTables` imports caller-supplied CSV, JSON, or Parquet bytes into named,
