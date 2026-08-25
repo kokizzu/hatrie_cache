@@ -3,7 +3,6 @@ package hatriecache
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"hatrie_cache/hat/hatStorage"
@@ -21,7 +20,7 @@ const (
 // DefaultStorageBackend is used for new paths opened in auto mode.
 const DefaultStorageBackend = hatStorage.DefaultBackend
 
-const storageBackendMarkerSuffix = ".backend"
+const storageBackendMarkerSuffix = hatStorage.BackendMarkerSuffix
 
 type persistentReferenceStore interface {
 	Entry(string) (snapshotEntry, bool, error)
@@ -107,54 +106,19 @@ func InspectPersistentStore(store PersistentStore) (hatStorage.Inspection, error
 }
 
 func resolveStorageBackend(path string, requested StorageBackend) (StorageBackend, error) {
-	requested, err := ParseStorageBackend(string(requested))
-	if err != nil {
-		return "", err
-	}
-	marked, hasMarker, err := readStorageBackendMarker(path)
-	if err != nil {
-		return "", err
-	}
-	if hasMarker {
-		if requested != StorageBackendAuto && requested != marked {
-			return "", fmt.Errorf("hatriecache: storage backend %q does not match %q marker", requested, marked)
-		}
-		return marked, nil
-	}
-	if requested != StorageBackendAuto {
-		return requested, nil
-	}
-	entries, err := os.ReadDir(path)
-	if err == nil && len(entries) > 0 {
-		return StorageBackendLevelDB, nil
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	return DefaultStorageBackend, nil
+	return hatStorage.ResolveBackend(path, requested)
 }
 
 func storageBackendMarkerPath(path string) string {
-	return path + storageBackendMarkerSuffix
+	return hatStorage.BackendMarkerPath(path)
 }
 
 func readStorageBackendMarker(path string) (StorageBackend, bool, error) {
-	data, err := os.ReadFile(storageBackendMarkerPath(path))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	backend, err := ParseStorageBackend(string(data))
-	if err != nil || backend == StorageBackendAuto {
-		return "", false, fmt.Errorf("hatriecache: invalid storage backend marker %q", strings.TrimSpace(string(data)))
-	}
-	return backend, true, nil
+	return hatStorage.ReadBackendMarker(path)
 }
 
 func writeStorageBackendMarker(path string, backend StorageBackend) error {
-	return writeFileAtomic(storageBackendMarkerPath(path), []byte(string(backend)+"\n"))
+	return hatStorage.WriteBackendMarker(path, backend)
 }
 
 func (store *LevelDBStore) Backend() StorageBackend {
