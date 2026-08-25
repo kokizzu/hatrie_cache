@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hatrie_cache/hat/hatJournal"
 )
 
 const (
@@ -27,16 +29,10 @@ const defaultCommandJournalRecordBatchChunkBytes = 128 << 10
 const maxCommandJournalReusablePayloadBufferBytes = 1 << 20
 
 const (
-	DefaultCommandJournalTailLimit                      = 1000
-	MaxCommandJournalTailLimit                          = 10000
-	DefaultCommandJournalPullBatches                    = 100
-	MaxCommandJournalPullBatches                        = 1000
-	DefaultJournalGroupCommitWindow       time.Duration = 0
-	DefaultJournalGroupCommitMaxBatch                   = 64
-	MaxJournalGroupCommitBatch                          = 4096
-	DefaultCommandJournalSegmentMaxBytes  int64         = 64 << 20
-	DefaultCommandJournalRetainedSegments               = 16
-	MaxCommandJournalRetainedSegments                   = 1024
+	DefaultCommandJournalTailLimit   = 1000
+	MaxCommandJournalTailLimit       = 10000
+	DefaultCommandJournalPullBatches = 100
+	MaxCommandJournalPullBatches     = 1000
 )
 
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
@@ -115,19 +111,6 @@ type commandJournalEntry struct {
 	Outbox     *replicationOutboxJob `json:"outbox,omitempty"`
 }
 
-// CommandJournalOptions configures journal encoding, durable group commit, and
-// optional bounded segment rotation. SegmentMaxBytes zero keeps one file.
-// A zero window opportunistically batches callers already queued; a positive
-// window waits up to that duration for more callers. A maximum batch of one
-// disables group commit and uses the immediate-fsync path.
-type CommandJournalOptions struct {
-	Format              CommandJournalFormat
-	GroupCommitWindow   time.Duration
-	GroupCommitMaxBatch int
-	SegmentMaxBytes     int64
-	RetainedSegments    int
-}
-
 type commandJournalJob struct {
 	trie           *HatTrie
 	request        CacheCommandRequest
@@ -190,31 +173,12 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("hatriecache: journal path is required")
 	}
-	format, err := ParseCommandJournalFormat(string(options.Format))
+	normalized, err := hatJournal.ValidateOptions(options)
 	if err != nil {
 		return nil, err
 	}
-	if options.GroupCommitWindow < 0 {
-		return nil, errors.New("hatriecache: journal group commit window must be non-negative")
-	}
-	if options.GroupCommitMaxBatch < 1 {
-		return nil, errors.New("hatriecache: journal group commit max batch must be positive")
-	}
-	if options.GroupCommitMaxBatch > MaxJournalGroupCommitBatch {
-		return nil, fmt.Errorf("hatriecache: journal group commit max batch must be <= %d", MaxJournalGroupCommitBatch)
-	}
-	if options.SegmentMaxBytes < 0 {
-		return nil, errors.New("hatriecache: journal segment max bytes must be non-negative")
-	}
-	if options.RetainedSegments < 0 {
-		return nil, errors.New("hatriecache: retained journal segments must be non-negative")
-	}
-	if options.RetainedSegments > MaxCommandJournalRetainedSegments {
-		return nil, fmt.Errorf("hatriecache: retained journal segments must be <= %d", MaxCommandJournalRetainedSegments)
-	}
-	if options.SegmentMaxBytes > 0 && options.RetainedSegments == 0 {
-		return nil, errors.New("hatriecache: retained journal segments must be positive when segmentation is enabled")
-	}
+	options = normalized
+	format := options.Format
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}

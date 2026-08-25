@@ -69,6 +69,20 @@ func TestParseCommandJournalFormat(t *testing.T) {
 	}
 }
 
+func TestInspectCommandJournalValidatesCacheCommandSemantics(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	if err := os.WriteFile(path, []byte("{\"version\":1,\"sequence\":1,\"request\":{\"command\":\"GET\"}}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := InspectCommandJournal(path, CommandJournalOptions{
+		Format:              CommandJournalFormatJSON,
+		GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not journalable") {
+		t.Fatalf("InspectCommandJournal() error = %v, want non-journalable command", err)
+	}
+}
+
 func TestMarshalCommandJournalEntryNormalizesFormatAliases(t *testing.T) {
 	entry := commandJournalEntry{
 		Version:  commandJournalVersion,

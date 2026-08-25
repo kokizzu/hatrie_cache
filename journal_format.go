@@ -4,33 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
-
 	json "github.com/goccy/go-json"
+	"io"
 )
-
-type CommandJournalFormat string
-
-const (
-	CommandJournalFormatJSON   CommandJournalFormat = "json"
-	CommandJournalFormatBinary CommandJournalFormat = "binary"
-)
-
-const DefaultCommandJournalFormat = CommandJournalFormatBinary
 
 var commandJournalBinaryMagic = []byte{'h', 'c', 'j', 'n', 1}
-
-func ParseCommandJournalFormat(value string) (CommandJournalFormat, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(CommandJournalFormatBinary), "bin":
-		return CommandJournalFormatBinary, nil
-	case string(CommandJournalFormatJSON):
-		return CommandJournalFormatJSON, nil
-	default:
-		return "", fmt.Errorf("hatriecache: unsupported command journal format %q", value)
-	}
-}
 
 func marshalCommandJournalEntry(entry commandJournalEntry, format CommandJournalFormat) ([]byte, error) {
 	switch format {
