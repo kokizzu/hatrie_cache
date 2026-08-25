@@ -21,6 +21,9 @@ const (
 	ParameterBoolean   ParameterType = "BOOLEAN"
 	ParameterDate      ParameterType = "DATE"
 	ParameterTimestamp ParameterType = "TIMESTAMP"
+	ParameterUUID      ParameterType = "UUID"
+	ParameterDuration  ParameterType = "DURATION"
+	ParameterBinary    ParameterType = "BINARY"
 	ParameterJSON      ParameterType = "JSON"
 )
 
@@ -134,7 +137,7 @@ func (query *SQLPreparedQuery) bind(values []interface{}) ([]interface{}, error)
 
 func (typeName ParameterType) valid() bool {
 	switch typeName {
-	case ParameterAny, ParameterText, ParameterNumber, ParameterInteger, ParameterDecimal, ParameterBoolean, ParameterDate, ParameterTimestamp, ParameterJSON:
+	case ParameterAny, ParameterText, ParameterNumber, ParameterInteger, ParameterDecimal, ParameterBoolean, ParameterDate, ParameterTimestamp, ParameterUUID, ParameterDuration, ParameterBinary, ParameterJSON:
 		return true
 	default:
 		return false
@@ -164,6 +167,21 @@ func (parameter ParameterSpec) convert(value interface{}) (interface{}, error) {
 	if parameter.Type == ParameterDecimal {
 		if decimal, ok := value.(sqlDecimal); ok {
 			return decimal, nil
+		}
+	}
+	if parameter.Type == ParameterUUID {
+		if uuid, ok := value.(sqlUUID); ok {
+			return uuid, nil
+		}
+	}
+	if parameter.Type == ParameterDuration {
+		if duration, ok := value.(sqlDuration); ok {
+			return duration, nil
+		}
+	}
+	if parameter.Type == ParameterBinary {
+		if binary, ok := value.([]byte); ok {
+			return append([]byte(nil), binary...), nil
 		}
 	}
 	converted, ok := sqlTypedJSONFieldValue(value, string(parameter.Type))

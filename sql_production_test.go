@@ -4731,6 +4731,74 @@ ORDER BY CAST(raw AS DECIMAL)`, SQLSourceResolverFunc(nil))
 	}
 }
 
+func TestExecuteSQLQuerySupportsUUIDDurationAndBinaryValues(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES
+  (UUID '9F315BA2-1729-4C73-92F7-C3E046F8EAE3', DURATION '2h3m4s', BINARY 'Ynl0ZXM='),
+  (UUID '00000000-0000-4000-8000-000000000001', DURATION '1s', BINARY 'YQ==')
+AS values(id, elapsed, payload)
+WHERE id = UUID '9f315ba2-1729-4c73-92f7-c3e046f8eae3'
+  AND elapsed > DURATION '2h'
+  AND payload = BINARY 'Ynl0ZXM='
+SELECT id, elapsed, payload,
+       CAST(id AS TEXT) AS id_text,
+       CAST(elapsed AS TEXT) AS elapsed_text,
+       CAST(payload AS TEXT) AS payload_text`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(extended values) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "elapsed", "payload", "id_text", "elapsed_text", "payload_text"}, Rows: []SQLRow{{
+		"id": sqlUUID("9f315ba2-1729-4c73-92f7-c3e046f8eae3"), "elapsed": sqlDuration((2*time.Hour + 3*time.Minute + 4*time.Second).String()), "payload": []byte("bytes"),
+		"id_text": "9f315ba2-1729-4c73-92f7-c3e046f8eae3", "elapsed_text": "2h3m4s", "payload_text": "Ynl0ZXM=",
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("extended value result = %#v, want %#v", result, want)
+	}
+
+	for name, query := range map[string]string{
+		"UUID":     "FROM VALUES (UUID 'not-a-uuid') AS values(value) SELECT value",
+		"DURATION": "FROM VALUES (DURATION 'tomorrow') AS values(value) SELECT value",
+		"BINARY":   "FROM VALUES (BINARY 'not base64') AS values(value) SELECT value",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateSQLQuery(query); err == nil {
+				t.Fatalf("ValidateSQLQuery(%s) error = nil", name)
+			}
+		})
+	}
+}
+
+func TestHatTrieSQLTypedJSONFieldsSupportUUIDDurationAndBinary(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("sessions", `[{"id":"9F315BA2-1729-4C73-92F7-C3E046F8EAE3","elapsed":"2h3m4s","payload":"Ynl0ZXM="}]`)
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('sessions') AS sessions(id UUID, elapsed DURATION, payload BINARY)
+WHERE elapsed >= DURATION '2h'
+SELECT id, elapsed, payload`, trie)
+	if err != nil {
+		t.Fatalf("typed extended CACHE query error = %v", err)
+	}
+	want := []SQLRow{{
+		"id": sqlUUID("9f315ba2-1729-4c73-92f7-c3e046f8eae3"), "elapsed": sqlDuration((2*time.Hour + 3*time.Minute + 4*time.Second).String()), "payload": []byte("bytes"),
+	}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("typed extended CACHE result = %#v, want %#v", result.Rows, want)
+	}
+
+	prepared, err := PrepareSQLQuery("FROM VALUES ($1, $2, $3) AS values(id, elapsed, payload) SELECT id, elapsed, payload", []SQLParameterSpec{
+		{Type: SQLParameterUUID}, {Type: SQLParameterDuration}, {Type: SQLParameterBinary},
+	}, nil)
+	if err != nil {
+		t.Fatalf("PrepareSQLQuery(extended parameters) error = %v", err)
+	}
+	result, err = prepared.Execute(context.Background(), SQLSourceResolverFunc(nil), []interface{}{"9F315BA2-1729-4C73-92F7-C3E046F8EAE3", "2h3m4s", "Ynl0ZXM="}, SQLQueryOptions{})
+	if err != nil || !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("prepared extended value result = %#v, %v; want %#v", result.Rows, err, want)
+	}
+}
+
 func TestHatTrieSQLTypedJSONFieldsValidateAndConvertRows(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

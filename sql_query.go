@@ -19,6 +19,10 @@ type SQLPreparedQueryCacheStats = hatSql.SQLPreparedQueryCacheStats
 type SQLPreparedQuery = hatSql.SQLPreparedQuery
 type SQLParameterType = hatSql.ParameterType
 type SQLParameterSpec = hatSql.ParameterSpec
+type SQLDate = hatSql.SQLDate
+type SQLDecimal = hatSql.SQLDecimal
+type SQLUUID = hatSql.SQLUUID
+type SQLDuration = hatSql.SQLDuration
 type SQLQueryRequest = hatSql.QueryRequest
 type SQLRow = hatSql.Row
 type SQLQueryResult = hatSql.QueryResult
@@ -138,6 +142,9 @@ const (
 	SQLParameterBoolean   = hatSql.ParameterBoolean
 	SQLParameterDate      = hatSql.ParameterDate
 	SQLParameterTimestamp = hatSql.ParameterTimestamp
+	SQLParameterUUID      = hatSql.ParameterUUID
+	SQLParameterDuration  = hatSql.ParameterDuration
+	SQLParameterBinary    = hatSql.ParameterBinary
 	SQLParameterJSON      = hatSql.ParameterJSON
 )
 
@@ -201,8 +208,10 @@ func sqlNumber(value interface{}) (float64, bool) { return hatSql.Number(value) 
 
 func sqlInteger(value interface{}) (int64, bool) { return hatSql.Integer(value) }
 
-type sqlDate = hatSql.SQLDate
-type sqlDecimal = hatSql.SQLDecimal
+type sqlDate = SQLDate
+type sqlDecimal = SQLDecimal
+type sqlUUID = SQLUUID
+type sqlDuration = SQLDuration
 
 func sqlBinaryValue(op string, left, right interface{}) interface{} {
 	return hatSql.BinaryValue(op, left, right)

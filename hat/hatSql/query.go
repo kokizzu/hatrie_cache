@@ -252,6 +252,11 @@ type sqlDecimal string
 // sqlUUID is a canonical lower-case RFC 4122 UUID string.
 type sqlUUID string
 
+// sqlDuration is a canonical Go duration string, such as "2h3m4s". Keeping
+// its string representation makes query JSON and spill data portable while
+// still allowing exact duration comparisons after parsing.
+type sqlDuration string
+
 // sqlSpillOutput is deliberately limited to values needed after projection:
 // sort keys, a stable input ordinal, and the user-visible projected row. The
 // source/group state is not serialized, which avoids retaining join inputs
@@ -310,6 +315,7 @@ func init() {
 	gob.Register(sqlDate(""))
 	gob.Register(sqlDecimal(""))
 	gob.Register(sqlUUID(""))
+	gob.Register(sqlDuration(""))
 	gob.Register(time.Time{})
 }
 
@@ -343,6 +349,32 @@ func parseSQLDecimal(value string) (sqlDecimal, bool) {
 		return "", false
 	}
 	return sqlDecimal(value), true
+}
+
+func parseSQLUUID(value string) (sqlUUID, bool) {
+	if len(value) != 36 {
+		return "", false
+	}
+	for index := 0; index < len(value); index++ {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if value[index] != '-' {
+				return "", false
+			}
+			continue
+		}
+		if !((value[index] >= '0' && value[index] <= '9') || (value[index] >= 'a' && value[index] <= 'f') || (value[index] >= 'A' && value[index] <= 'F')) {
+			return "", false
+		}
+	}
+	return sqlUUID(strings.ToLower(value)), true
+}
+
+func parseSQLDuration(value string) (sqlDuration, bool) {
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return "", false
+	}
+	return sqlDuration(parsed.String()), true
 }
 
 // sqlEvalError carries a dynamic expression failure through the existing
@@ -4889,14 +4921,14 @@ func (p *sqlQueryParser) parseSourceFieldTypes() (map[string]sqlSourceFieldType,
 		}
 		typeToken := p.current()
 		if typeToken.kind != sqlTokenIdentifier {
-			return nil, p.expected(typeToken, "a field type after "+field.text, []string{"TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "JSON"})
+			return nil, p.expected(typeToken, "a field type after "+field.text, []string{"TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "DURATION", "BINARY", "JSON"})
 		}
 		p.next()
 		typeName := strings.ToUpper(typeToken.text)
 		switch typeName {
-		case "TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "JSON":
+		case "TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "DURATION", "BINARY", "JSON":
 		default:
-			return nil, p.diagnostic(typeToken, "unsupported JSON field type "+strconv.Quote(typeToken.text)+"; expected TEXT, NUMBER, INTEGER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, or JSON")
+			return nil, p.diagnostic(typeToken, "unsupported JSON field type "+strconv.Quote(typeToken.text)+"; expected TEXT, NUMBER, INTEGER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, DURATION, BINARY, or JSON")
 		}
 		if _, exists := fields[field.text]; exists {
 			return nil, p.diagnostic(field, "JSON field "+strconv.Quote(field.text)+" is declared more than once")
@@ -5202,6 +5234,12 @@ func sqlLiteralTypeName(value interface{}) string {
 		return "DECIMAL"
 	case sqlDate:
 		return "DATE"
+	case sqlUUID:
+		return "UUID"
+	case sqlDuration:
+		return "DURATION"
+	case []byte:
+		return "BINARY"
 	case string:
 		return "TEXT"
 	case bool:
@@ -5389,6 +5427,42 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			}
 			return sqlExpr{kind: "literal", value: decimal}, nil
 		}
+		if upper == "UUID" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "an RFC 4122 UUID string after UUID", nil)
+			}
+			p.next()
+			uuid, ok := parseSQLUUID(value.text)
+			if !ok {
+				return sqlExpr{}, p.diagnostic(value, "UUID requires a canonical RFC 4122 value such as '9f315ba2-1729-4c73-92f7-c3e046f8eae3'")
+			}
+			return sqlExpr{kind: "literal", value: uuid}, nil
+		}
+		if upper == "DURATION" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "a Go duration string after DURATION", nil)
+			}
+			p.next()
+			duration, ok := parseSQLDuration(value.text)
+			if !ok {
+				return sqlExpr{}, p.diagnostic(value, "DURATION requires a Go duration such as '2h3m4s'")
+			}
+			return sqlExpr{kind: "literal", value: duration}, nil
+		}
+		if upper == "BINARY" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "a base64 string after BINARY", nil)
+			}
+			p.next()
+			decoded, err := base64.StdEncoding.DecodeString(value.text)
+			if err != nil {
+				return sqlExpr{}, p.diagnostic(value, "BINARY requires standard base64 such as 'Ynl0ZXM='")
+			}
+			return sqlExpr{kind: "literal", value: decoded}, nil
+		}
 		if upper == "TIMESTAMP" {
 			value := p.current()
 			if value.kind != sqlTokenString {
@@ -5412,14 +5486,14 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			}
 			target := p.current()
 			if target.kind != sqlTokenIdentifier {
-				return sqlExpr{}, p.expected(target, "a CAST target type (TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, or TIMESTAMP)", nil)
+				return sqlExpr{}, p.expected(target, "a CAST target type (TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, DURATION, or BINARY)", nil)
 			}
 			p.next()
 			targetType := strings.ToUpper(target.text)
 			switch targetType {
-			case "TEXT", "NUMBER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP":
+			case "TEXT", "NUMBER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "DURATION", "BINARY":
 			default:
-				return sqlExpr{}, p.diagnostic(target, fmt.Sprintf("unsupported CAST target %q; expected TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, or TIMESTAMP", target.text))
+				return sqlExpr{}, p.diagnostic(target, fmt.Sprintf("unsupported CAST target %q; expected TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, DURATION, or BINARY", target.text))
 			}
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return sqlExpr{}, err
@@ -7722,6 +7796,9 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 		}
 		return nil, false
 	case "DATE":
+		if date, ok := value.(sqlDate); ok {
+			return date, true
+		}
 		text, ok := value.(string)
 		if !ok {
 			return nil, false
@@ -7732,6 +7809,9 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 		}
 		return sqlDate(text), true
 	case "TIMESTAMP":
+		if timestamp, ok := value.(time.Time); ok {
+			return timestamp, true
+		}
 		text, ok := value.(string)
 		if !ok {
 			return nil, false
@@ -7741,6 +7821,42 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 			return nil, false
 		}
 		return parsed, true
+	case "UUID":
+		if uuid, ok := value.(sqlUUID); ok {
+			return uuid, true
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		uuid, ok := parseSQLUUID(text)
+		return uuid, ok
+	case "DURATION":
+		if duration, ok := value.(sqlDuration); ok {
+			return duration, true
+		}
+		if duration, ok := value.(time.Duration); ok {
+			return sqlDuration(duration.String()), true
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		duration, ok := parseSQLDuration(text)
+		return duration, ok
+	case "BINARY":
+		if binary, ok := value.([]byte); ok {
+			return append([]byte(nil), binary...), true
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		binary, err := base64.StdEncoding.DecodeString(text)
+		if err != nil {
+			return nil, false
+		}
+		return binary, true
 	case "JSON":
 		switch value.(type) {
 		case map[string]interface{}, []interface{}:
@@ -10249,6 +10365,12 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 		if timestamp, ok := value.(time.Time); ok {
 			return timestamp.Format(time.RFC3339Nano), nil
 		}
+		if duration, ok := value.(sqlDuration); ok {
+			return string(duration), nil
+		}
+		if binary, ok := value.([]byte); ok {
+			return base64.StdEncoding.EncodeToString(binary), nil
+		}
 		return fmt.Sprint(value), nil
 	case "NUMBER":
 		if number, ok := sqlNumber(value); ok {
@@ -10329,6 +10451,38 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 			}
 		}
 		return fail()
+	case "UUID":
+		switch typed := value.(type) {
+		case sqlUUID:
+			return typed, nil
+		case string:
+			if uuid, ok := parseSQLUUID(typed); ok {
+				return uuid, nil
+			}
+		}
+		return fail()
+	case "DURATION":
+		switch typed := value.(type) {
+		case sqlDuration:
+			return typed, nil
+		case time.Duration:
+			return sqlDuration(typed.String()), nil
+		case string:
+			if duration, ok := parseSQLDuration(typed); ok {
+				return duration, nil
+			}
+		}
+		return fail()
+	case "BINARY":
+		switch typed := value.(type) {
+		case []byte:
+			return append([]byte(nil), typed...), nil
+		case string:
+			if binary, err := base64.StdEncoding.DecodeString(typed); err == nil {
+				return binary, nil
+			}
+		}
+		return fail()
 	}
 	return nil, fmt.Errorf("unsupported CAST target %q", target)
 }
@@ -10403,6 +10557,26 @@ func sqlCompare(left, right interface{}) int {
 			if leftOK && rightOK {
 				return leftValue.Cmp(rightValue)
 			}
+		}
+	}
+	if a, ok := left.(sqlDuration); ok {
+		if b, ok := right.(sqlDuration); ok {
+			leftDuration, leftErr := time.ParseDuration(string(a))
+			rightDuration, rightErr := time.ParseDuration(string(b))
+			if leftErr == nil && rightErr == nil {
+				if leftDuration < rightDuration {
+					return -1
+				}
+				if leftDuration > rightDuration {
+					return 1
+				}
+				return 0
+			}
+		}
+	}
+	if a, ok := left.([]byte); ok {
+		if b, ok := right.([]byte); ok {
+			return strings.Compare(string(a), string(b))
 		}
 	}
 	if a, ok := sqlNumber(left); ok {
@@ -10736,6 +10910,10 @@ type SQLDecimal = sqlDecimal
 
 // SQLUUID is the canonical UUID value used by typed source schemas.
 type SQLUUID = sqlUUID
+
+// SQLDuration is the canonical Go duration string used by typed source
+// schemas, such as "2h3m4s".
+type SQLDuration = sqlDuration
 
 // ParseSQLQueryWithCache parses source and binds positional parameters using
 // cache when non-nil.
