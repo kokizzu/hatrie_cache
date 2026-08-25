@@ -57,22 +57,28 @@ type MonitoringOptions struct {
 	AuditLog                         *AuditLogger
 	WriteProtected                   bool
 	RateLimiter                      *RateLimiter
-	Metrics                          *APIMetrics
-	StartAt                          time.Time
-	Snapshot                         func() error
-	LevelDBStore                     PersistentStore
-	LevelDBDirtyTracker              *LevelDBDirtyTracker
-	BackupSnapshotFormat             SnapshotFormat
-	Journal                          *CommandJournal
-	JournalRecoveryRepositoryPath    string
-	JournalRecoveryRepositoryRetain  int
-	Topology                         *TopologyStore
-	Election                         *ElectionStore
-	Replicator                       *HTTPReplicator
-	ReplicationSafety                *ReplicationSafetyStore
-	EnforceLeaderWrites              bool
-	RuntimeConfig                    map[string]interface{}
-	SQLFunctions                     *SQLFunctionRegistry
+	// SQLRateLimiter limits read-only SQL requests per authenticated caller (or
+	// remote address when monitoring authentication is not configured).
+	SQLRateLimiter *RateLimiter
+	// SQLQueryOptions is enforced for every monitoring SQL request, including
+	// streaming and paginated reads. Zero keeps the engine defaults.
+	SQLQueryOptions                 SQLQueryOptions
+	Metrics                         *APIMetrics
+	StartAt                         time.Time
+	Snapshot                        func() error
+	LevelDBStore                    PersistentStore
+	LevelDBDirtyTracker             *LevelDBDirtyTracker
+	BackupSnapshotFormat            SnapshotFormat
+	Journal                         *CommandJournal
+	JournalRecoveryRepositoryPath   string
+	JournalRecoveryRepositoryRetain int
+	Topology                        *TopologyStore
+	Election                        *ElectionStore
+	Replicator                      *HTTPReplicator
+	ReplicationSafety               *ReplicationSafetyStore
+	EnforceLeaderWrites             bool
+	RuntimeConfig                   map[string]interface{}
+	SQLFunctions                    *SQLFunctionRegistry
 }
 
 type MonitoringHandler struct {
@@ -841,6 +847,9 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	if requestContextDone(w, r) || !handler.requireTrie(w) {
 		return
 	}
+	if handler.rejectSQLHTTP(w, r) {
+		return
+	}
 	defer r.Body.Close()
 	var request SQLQueryRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMonitoringJSONRequestBytes))
@@ -872,7 +881,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		rows := 0
 		columnsWritten := false
 		resolver := monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions}
-		err = ExecuteSQLQueryRows(r.Context(), request.Query, resolver, request.Parameters, SQLQueryOptions{}, func(columns []string, row SQLRow) error {
+		err = ExecuteSQLQueryRows(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions, func(columns []string, row SQLRow) error {
 			if !columnsWritten {
 				if err := encoder.Encode(struct {
 					Type    string   `json:"type"`
@@ -920,9 +929,9 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	var err error
 	resolver := monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions}
 	if request.PageSize != 0 || request.Cursor != "" {
-		result, err = ExecuteSQLQueryPage(r.Context(), request.Query, resolver, request.Parameters, SQLQueryOptions{}, request.PageSize, request.Cursor)
+		result, err = ExecuteSQLQueryPage(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions, request.PageSize, request.Cursor)
 	} else {
-		result, err = ExecuteSQLQueryParameters(r.Context(), request.Query, resolver, request.Parameters, SQLQueryOptions{})
+		result, err = ExecuteSQLQueryParameters(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions)
 	}
 	if err != nil {
 		var functionError *SQLFunctionError
@@ -934,6 +943,29 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) rejectSQLHTTP(w http.ResponseWriter, r *http.Request) bool {
+	if handler.options.SQLRateLimiter == nil || handler.options.SQLRateLimiter.Allow(monitoringSQLRateLimitKey(r)) {
+		return false
+	}
+	handler.options.Metrics.RecordRateLimitRejection()
+	handler.auditHTTP(r, AuditEvent{Action: "sql.query", OK: false, Status: http.StatusTooManyRequests, Message: "SQL query rate limit exceeded"})
+	writeJSONStatus(w, http.StatusTooManyRequests, commandError("SQL query rate limit exceeded"))
+	return true
+}
+
+func monitoringSQLRateLimitKey(r *http.Request) string {
+	if r == nil {
+		return "sql"
+	}
+	if token := strings.TrimSpace(hatAuth.BearerToken(r.Header.Get("Authorization"))); token != "" {
+		return "sql-auth:" + token
+	}
+	if token := strings.TrimSpace(r.Header.Get("X-Hatrie-Auth-Token")); token != "" {
+		return "sql-auth:" + token
+	}
+	return "sql-ip:" + monitoringRateLimitKey(r)
 }
 
 func (handler *MonitoringHandler) handleSQLFunctions(w http.ResponseWriter, r *http.Request) {

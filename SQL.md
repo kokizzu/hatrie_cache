@@ -918,6 +918,29 @@ and uses the original row ordinal to keep equal keys stable. It merges at most
 all temporary files on success or failure, and reports `EXTERNAL SORT` with
 its live spill bytes and final-run count in `EXPLAIN ANALYZE`.
 
+For the monitoring endpoint, configure the policy on `MonitoringOptions` so
+request JSON cannot relax it. `SQLRateLimiter` is a separate token bucket for
+read-only SQL: authenticated requests are bucketed by their authenticated
+token, otherwise by remote address. This avoids letting expensive dashboard
+queries consume the write-command quota.
+
+```go
+handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
+    SQLQueryOptions: hatriecache.SQLQueryOptions{
+        Timeout:        2 * time.Second,
+        MaxRows:        100_000,
+        MaxJoinWork:    1_000_000,
+        MaxResultBytes: 8 << 20,
+        MaxSortBytes:   16 << 20,
+        MaxGroupBytes:  16 << 20,
+        MaxSetBytes:    16 << 20,
+        SpillDirectory: "/var/tmp/hatrie-sql",
+        MaxSpillBytes:  512 << 20,
+    },
+    SQLRateLimiter: hatriecache.NewRateLimiter(30, time.Minute),
+})
+```
+
 The same configuration also lets `ExecuteSQLQueryRows` / NDJSON stream an
 otherwise unbounded scalar direct `CACHE` or `VALUES` `ORDER BY`: it reads the
 source into bounded runs, then sends the final merge straight to the callback

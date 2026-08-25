@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHatTrieResolvesSQLCacheAndKeySources(t *testing.T) {
@@ -92,6 +93,32 @@ func TestMonitoringSQLRouteExecutesReadOnlyQueryAndFormatsSyntaxErrors(t *testin
 	}
 	if body := response.Body.String(); !strings.Contains(body, "did you mean `JOIN`?") || !strings.Contains(body, "query:1:") {
 		t.Fatalf("bad query body = %q, want formatted compiler diagnostic", body)
+	}
+}
+
+func TestMonitoringSQLRouteHonorsResourcePolicyAndCallerQuota(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1},{"id":2}]`)
+	limited := NewMonitoringHandler(trie, MonitoringOptions{SQLQueryOptions: SQLQueryOptions{MaxRows: 1}}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM CACHE('people') AS p SELECT p.id"}`))
+	limited.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "row limit") {
+		t.Fatalf("resource policy response = %d %q, want row-limit rejection", response.Code, response.Body.String())
+	}
+
+	quota := NewMonitoringHandler(trie, MonitoringOptions{SQLRateLimiter: NewRateLimiter(1, time.Hour)}).Handler()
+	for attempt := 0; attempt < 2; attempt++ {
+		response = httptest.NewRecorder()
+		request = httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":"FROM CACHE('people') AS p SELECT p.id LIMIT 1"}`))
+		request.RemoteAddr = "198.51.100.10:1234"
+		quota.ServeHTTP(response, request)
+		if attempt == 0 && response.Code != http.StatusOK {
+			t.Fatalf("first quota response = %d: %s", response.Code, response.Body.String())
+		}
+		if attempt == 1 && response.Code != http.StatusTooManyRequests {
+			t.Fatalf("second quota response = %d: %s, want 429", response.Code, response.Body.String())
+		}
 	}
 }
 
