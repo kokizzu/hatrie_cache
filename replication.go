@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatReplication"
 	"hatrie_cache/internal/jsonwire"
 
@@ -61,7 +62,7 @@ func ParseReplicationTransport(value string) (ReplicationTransport, error) {
 }
 
 var (
-	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
+	errReplicationResponseTooLarge = hatCommand.ErrResponseTooLarge
 )
 
 type HTTPReplicatorOptions struct {
