@@ -651,6 +651,42 @@ result, err := prepared.Execute(ctx, resolver, []interface{}{int64(10), true}, h
 schema is copied when prepared and `Parameters()` returns a copy, so callers
 cannot modify a query shared by concurrent requests.
 
+### Materialized views
+
+The public `hatSql` package provides an in-process materialized-view registry
+for repeated read-only queries. Each definition declares the cache keys that
+invalidate it. `RefreshChanged` reruns only views whose dependency list
+intersects the changed keys, then atomically replaces their snapshots. A query
+failure preserves every last known-good snapshot.
+
+```go
+views := hatSql.NewMaterializedViews()
+_, err := views.Create(ctx, hatSql.MaterializedViewDefinition{
+    Name:         "active_users",
+    Query:        "FROM CACHE('users') WHERE active = true SELECT id, name",
+    Dependencies: []string{"users"},
+}, resolver, hatSql.QueryOptions{})
+if err != nil {
+    return err
+}
+
+// Call this after a successful update of the users source.
+statuses, err := views.RefreshChanged(ctx, []string{"users"}, resolver, hatSql.QueryOptions{})
+if err != nil {
+    return err
+}
+view, ok := views.Get("active_users")
+_ = statuses
+_ = view
+_ = ok
+```
+
+Dependencies are deliberately explicit rather than inferred from SQL text, so
+the registry works equally with `CACHE`, `VALUES`, CTE, and application-defined
+resolver sources. This is incremental invalidation and recomputation, not
+row-delta maintenance: a changed dependency reruns the affected view query.
+`Get` returns an independent snapshot, safe for callers to inspect or modify.
+
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
