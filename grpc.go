@@ -11,9 +11,9 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatGrpc"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
@@ -76,18 +76,8 @@ func (server *CacheGRPCServer) requireReplicationAuthorized(ctx context.Context)
 	if !tokens.Configured() {
 		return server.requireAuthorized(ctx)
 	}
-	now := time.Now()
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		for _, candidate := range md.Get("x-hatrie-replication-token") {
-			if tokens.Matches(candidate, now) {
-				return nil
-			}
-		}
-		for _, candidate := range md.Get("authorization") {
-			if tokens.Matches(hatAuth.BearerToken(candidate), now) {
-				return nil
-			}
-		}
+	if hatGrpc.Principal(ctx, tokens, "x-hatrie-replication-token") != "" {
+		return nil
 	}
 	if server.options.AuthToken != "" {
 		return server.requireAuthorized(ctx)
@@ -137,26 +127,7 @@ func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
 
 func (server *CacheGRPCServer) authenticatedPrincipal(ctx context.Context) string {
 	tokens := hatAuth.NewTokenSet(server.options.AuthToken, server.options.AuthPreviousToken, server.options.AuthPreviousExpiresAt)
-	if !tokens.Configured() {
-		return ""
-	}
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
-	now := time.Now()
-	for _, candidate := range md.Get("x-hatrie-auth-token") {
-		if tokens.Matches(candidate, now) {
-			return candidate
-		}
-	}
-	for _, candidate := range md.Get("authorization") {
-		principal := hatAuth.BearerToken(candidate)
-		if tokens.Matches(principal, now) {
-			return principal
-		}
-	}
-	return ""
+	return hatGrpc.Principal(ctx, tokens, "x-hatrie-auth-token")
 }
 
 func (server *CacheGRPCServer) auditGRPC(event AuditEvent) {
