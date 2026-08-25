@@ -44,10 +44,7 @@ var ErrNilCommandJournal = errors.New("hatriecache: command journal is nil")
 var errCommandJournalBinaryRecordTooLarge = errors.New("hatriecache: command journal binary record is too large")
 var errCommandJournalJSONRecordTooLarge = errors.New("hatriecache: command journal JSON record is too large")
 
-type CommandJournalRecord struct {
-	Sequence uint64              `json:"sequence"`
-	Request  CacheCommandRequest `json:"request"`
-}
+type CommandJournalRecord = hatJournal.Record
 
 type compactCommandJournalSetCommand uint8
 

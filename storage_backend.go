@@ -41,6 +41,7 @@ type persistentReferenceStoreEntryTransformer interface {
 // PersistentStore is the common durability and lazy-loading contract supported
 // by Pebble and LevelDB. LevelDB-named option/result types remain compatible.
 type PersistentStore interface {
+	hatStorage.Engine
 	Backend() StorageBackend
 	Path() string
 	Format() StorageFormat

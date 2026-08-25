@@ -38,6 +38,14 @@ type Inspector interface {
 	Properties() (Properties, error)
 }
 
+// Engine is the common lifecycle and inspection surface implemented by local
+// persistent engines such as LevelDB and Pebble. Cache-specific read/write
+// methods intentionally remain outside this narrow package boundary.
+type Engine interface {
+	Inspector
+	Close() error
+}
+
 // Inspection is a portable store report suitable for operator APIs.
 type Inspection struct {
 	Backend      Backend      `json:"backend"`

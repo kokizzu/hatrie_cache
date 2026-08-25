@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"hatrie_cache/hat/hatSnapshot"
 	"hatrie_cache/internal/jsonwire"
 
 	json "github.com/goccy/go-json"
@@ -31,18 +32,18 @@ var (
 	errSnapshotDuplicateActiveKey = errors.New("hatriecache: snapshot contains duplicate active key")
 )
 
-type SnapshotFormat string
+type SnapshotFormat = hatSnapshot.Format
 
 const (
-	SnapshotFormatBinary         SnapshotFormat = "binary"
-	SnapshotFormatGzipBinary     SnapshotFormat = "gzip-binary"
-	SnapshotFormatGzipBestBinary SnapshotFormat = "gzip-best-binary"
-	SnapshotFormatJSON           SnapshotFormat = "json"
-	SnapshotFormatGzipJSON       SnapshotFormat = "gzip-json"
-	SnapshotFormatGzipBestJSON   SnapshotFormat = "gzip-best-json"
+	SnapshotFormatBinary         = hatSnapshot.FormatBinary
+	SnapshotFormatGzipBinary     = hatSnapshot.FormatGzipBinary
+	SnapshotFormatGzipBestBinary = hatSnapshot.FormatGzipBestBinary
+	SnapshotFormatJSON           = hatSnapshot.FormatJSON
+	SnapshotFormatGzipJSON       = hatSnapshot.FormatGzipJSON
+	SnapshotFormatGzipBestJSON   = hatSnapshot.FormatGzipBestJSON
 )
 
-const DefaultSnapshotFormat = SnapshotFormatGzipBestBinary
+const DefaultSnapshotFormat = hatSnapshot.DefaultFormat
 
 var snapshotBestGzipWriterPool = sync.Pool{
 	New: func() interface{} {
@@ -55,24 +56,7 @@ var snapshotBestGzipWriterPool = sync.Pool{
 }
 
 func ParseSnapshotFormat(value string) (SnapshotFormat, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "":
-		return DefaultSnapshotFormat, nil
-	case string(SnapshotFormatGzipBestBinary), "best-gzip-binary", "gzip-small-binary", "small-gzip-binary":
-		return SnapshotFormatGzipBestBinary, nil
-	case string(SnapshotFormatGzipBinary), "gzip-bin", "binary.gz", "gzbin":
-		return SnapshotFormatGzipBinary, nil
-	case string(SnapshotFormatBinary), "bin":
-		return SnapshotFormatBinary, nil
-	case string(SnapshotFormatGzipBestJSON), "gzip-best", "best-gzip-json", "gzip-small-json", "small-gzip-json":
-		return SnapshotFormatGzipBestJSON, nil
-	case string(SnapshotFormatGzipJSON), "gzip", "json.gz", "gzjson":
-		return SnapshotFormatGzipJSON, nil
-	case string(SnapshotFormatJSON):
-		return SnapshotFormatJSON, nil
-	default:
-		return "", fmt.Errorf("hatriecache: unsupported snapshot format %q", value)
-	}
+	return hatSnapshot.ParseFormat(value)
 }
 
 type snapshotFile struct {
@@ -81,9 +65,7 @@ type snapshotFile struct {
 	Entries         []snapshotEntry `json:"entries"`
 }
 
-type SnapshotMetadata struct {
-	JournalSequence uint64
-}
+type SnapshotMetadata = hatSnapshot.Metadata
 
 // ReadSnapshotMetadata validates a snapshot file without mutating a trie.
 func ReadSnapshotMetadata(path string) (SnapshotMetadata, error) {
