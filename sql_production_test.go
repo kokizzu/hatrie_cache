@@ -4815,6 +4815,74 @@ func TestExecuteSQLQueryUnicodeCaseInsensitiveCollation(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryUnicodeCollationDeduplicatesDistinctAndSets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, query string
+		want        []SQLRow
+	}{
+		{
+			name:  "distinct",
+			query: "FROM VALUES ('CAFÉ'), ('Cafe\u0301') AS values(name) SELECT DISTINCT name",
+			want:  []SQLRow{{"name": "CAFÉ"}},
+		},
+		{
+			name:  "union",
+			query: "FROM VALUES ('CAFÉ') AS left_values(name) SELECT name UNION FROM VALUES ('Cafe\u0301') AS right_values(name) SELECT name",
+			want:  []SQLRow{{"name": "CAFÉ"}},
+		},
+		{
+			name:  "intersect",
+			query: "FROM VALUES ('CAFÉ') AS left_values(name) SELECT name INTERSECT FROM VALUES ('Cafe\u0301') AS right_values(name) SELECT name",
+			want:  []SQLRow{{"name": "CAFÉ"}},
+		},
+		{
+			name:  "except",
+			query: "FROM VALUES ('CAFÉ') AS left_values(name) SELECT name EXCEPT FROM VALUES ('Cafe\u0301') AS right_values(name) SELECT name",
+			want:  []SQLRow{},
+		},
+	}
+	for _, mode := range []struct {
+		name    string
+		options SQLQueryOptions
+	}{
+		{name: "memory", options: SQLQueryOptions{Collation: SQLCollationUnicodeCI}},
+		{name: "spill", options: SQLQueryOptions{Collation: SQLCollationUnicodeCI, MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}},
+	} {
+		for _, test := range tests {
+			t.Run(mode.name+"/"+test.name, func(t *testing.T) {
+				result, err := ExecuteSQLQueryContext(context.Background(), test.query, SQLSourceResolverFunc(nil), mode.options)
+				if err != nil {
+					t.Fatalf("unicode collation %s: %v", test.name, err)
+				}
+				if !reflect.DeepEqual(result.Rows, test.want) {
+					t.Fatalf("unicode collation %s rows = %#v, want %#v", test.name, result.Rows, test.want)
+				}
+			})
+		}
+	}
+	for _, test := range tests {
+		t.Run("streamed-spill/"+test.name, func(t *testing.T) {
+			rows := []SQLRow{}
+			err := ExecuteSQLQueryRows(context.Background(), test.query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
+				Collation:      SQLCollationUnicodeCI,
+				MaxSetBytes:    1,
+				SpillDirectory: t.TempDir(),
+				MaxSpillBytes:  1 << 20,
+			}, func(_ []string, row SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("streamed unicode collation %s: %v", test.name, err)
+			}
+			if !reflect.DeepEqual(rows, test.want) {
+				t.Fatalf("streamed unicode collation %s rows = %#v, want %#v", test.name, rows, test.want)
+			}
+		})
+	}
+}
+
 func TestExecuteSQLQuerySpillFaultInjectionCleansTemporaryFiles(t *testing.T) {
 	t.Parallel()
 	query := "FROM VALUES (3), (1), (2) AS values(id) SELECT id ORDER BY id"

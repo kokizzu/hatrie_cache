@@ -878,6 +878,7 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 	left.unions = nil
 	union := query.unions[0]
 	columns := sqlColumns(left.selects)
+	collation := sqlQueryCollation(query)
 	available := int64(control.options.MaxSpillBytes)
 	paths := map[string]struct{}{}
 	defer func() {
@@ -907,7 +908,7 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 			if !sameSQLColumns(columns, branchColumns) {
 				return fmt.Errorf("%s queries must project the same column names in the same order", union.kind)
 			}
-			record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinal, Right: right}
+			record := sqlSpillSetRecord{Key: sqlOutputRowKeyWithCollation(row, collation), Row: row, Ordinal: ordinal, Right: right}
 			ordinal++
 			recordBytes := sqlSpillSetRecordBytes(record)
 			if len(chunk) > 0 && chunkBytes+recordBytes > control.options.MaxSetBytes {
@@ -1142,7 +1143,7 @@ func sqlBuildExternalSetChainRuns(ctx context.Context, query *sqlQuery, resolver
 		})
 	}
 	cleanRight := func() error { return sqlReleaseSpillRuns(rightRuns, available, paths, "set stage input") }
-	runs, err := sqlSpillExternalSetStage(leftStream, rightStream, cleanRight, union.kind, control, available, paths)
+	runs, err := sqlSpillExternalSetStage(leftStream, rightStream, cleanRight, union.kind, sqlQueryCollation(query), control, available, paths)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1192,7 +1193,7 @@ func sqlSpillExternalSetInput(stream sqlSpillRowStream, control *sqlExecutionCon
 // sqlSpillExternalSetStage creates one bounded binary set stage. The right
 // stream may be a nested stage; its input runs are released immediately after
 // their records have been absorbed, before this stage's merge needs disk.
-func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func() error, operation string, control *sqlExecutionControl, available *int64, paths map[string]struct{}) ([]sqlSpillRun, error) {
+func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func() error, operation string, collation SQLCollation, control *sqlExecutionControl, available *int64, paths map[string]struct{}) ([]sqlSpillRun, error) {
 	runs := []sqlSpillRun{}
 	chunk := []sqlSpillSetRecord{}
 	chunkBytes, ordinal := 0, 0
@@ -1212,7 +1213,7 @@ func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func()
 	}
 	appendStream := func(stream sqlSpillRowStream, rightSide bool) error {
 		return stream(func(row SQLRow) error {
-			record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinal, Right: rightSide}
+			record := sqlSpillSetRecord{Key: sqlOutputRowKeyWithCollation(row, collation), Row: row, Ordinal: ordinal, Right: rightSide}
 			ordinal++
 			recordBytes := sqlSpillSetRecordBytes(record)
 			if len(chunk) > 0 && chunkBytes+recordBytes > control.options.MaxSetBytes {
@@ -2211,6 +2212,7 @@ func sqlExternalDistinctStreamable(query *sqlQuery, control *sqlExecutionControl
 // slice.
 func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
 	columns := sqlColumns(query.selects)
+	collation := sqlQueryCollation(query)
 	functions, _ := resolver.(SQLFunctionResolver)
 	available := int64(control.options.MaxSpillBytes)
 	allPaths := map[string]struct{}{}
@@ -2264,7 +2266,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 			}
 			row[columns[index]] = value
 		}
-		record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinal}
+		record := sqlSpillSetRecord{Key: sqlOutputRowKeyWithCollation(row, collation), Row: row, Ordinal: ordinal}
 		ordinal++
 		recordBytes := sqlSpillSetRecordBytes(record)
 		if len(keyChunk) > 0 && keyChunkBytes+recordBytes > control.options.MaxSetBytes {
@@ -2837,6 +2839,7 @@ func executeSQLIndexedDistinctStream(ctx context.Context, query *sqlQuery, resol
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	columns := sqlColumns(query.selects)
+	collation := sqlQueryCollation(query)
 	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
 	previousKey, havePrevious := "", false
 	emit := func(sourceRow SQLRow) error {
@@ -2862,7 +2865,7 @@ func executeSQLIndexedDistinctStream(ctx context.Context, query *sqlQuery, resol
 			return err
 		}
 		row := SQLRow{columns[0]: value}
-		key := sqlOutputRowKey(row)
+		key := sqlOutputRowKeyWithCollation(row, collation)
 		if havePrevious && key == previousKey {
 			return nil
 		}
@@ -7028,7 +7031,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		seen := make(map[string]struct{}, len(out))
 		filtered := out[:0]
 		for _, item := range out {
-			key := sqlOutputRowKey(item.row)
+			key := sqlOutputRowKeyWithCollation(item.row, sqlQueryCollation(q))
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -7132,7 +7135,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		setBytes := sqlRowsBytes(result.Rows) + sqlRowsBytes(right.Rows)
 		if control != nil && !union.all && control.options.MaxSetBytes > 0 && setBytes > control.options.MaxSetBytes {
 			if control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
-				rows, spillBytes, runs, err := sqlExternalSetRows(result.Rows, right.Rows, union.kind, control.options.SpillDirectory, control.options.MaxSetBytes, control.options.MaxSpillBytes, control)
+				rows, spillBytes, runs, err := sqlExternalSetRows(result.Rows, right.Rows, union.kind, control.options.SpillDirectory, control.options.MaxSetBytes, control.options.MaxSpillBytes, sqlQueryCollation(q), control)
 				if err != nil {
 					return SQLQueryResult{}, err
 				}
@@ -7151,7 +7154,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			seen := make(map[string]struct{}, len(result.Rows)+len(right.Rows))
 			unique := result.Rows[:0]
 			for _, row := range result.Rows {
-				key := sqlOutputRowKey(row)
+				key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))
 				if _, exists := seen[key]; exists {
 					continue
 				}
@@ -7159,7 +7162,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 				unique = append(unique, row)
 			}
 			for _, row := range right.Rows {
-				key := sqlOutputRowKey(row)
+				key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))
 				if _, exists := seen[key]; exists {
 					continue
 				}
@@ -7170,27 +7173,27 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		case "INTERSECT":
 			available := make(map[string]struct{}, len(right.Rows))
 			for _, row := range right.Rows {
-				available[sqlOutputRowKey(row)] = struct{}{}
+				available[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))] = struct{}{}
 			}
 			filtered := result.Rows[:0]
 			for _, row := range result.Rows {
-				if _, exists := available[sqlOutputRowKey(row)]; exists {
+				if _, exists := available[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))]; exists {
 					filtered = append(filtered, row)
 				}
 			}
-			result.Rows = distinctSQLQueryRows(filtered)
+			result.Rows = distinctSQLQueryRows(filtered, sqlQueryCollation(q))
 		case "EXCEPT":
 			excluded := make(map[string]struct{}, len(right.Rows))
 			for _, row := range right.Rows {
-				excluded[sqlOutputRowKey(row)] = struct{}{}
+				excluded[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))] = struct{}{}
 			}
 			filtered := result.Rows[:0]
 			for _, row := range result.Rows {
-				if _, exists := excluded[sqlOutputRowKey(row)]; !exists {
+				if _, exists := excluded[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))]; !exists {
 					filtered = append(filtered, row)
 				}
 			}
-			result.Rows = distinctSQLQueryRows(filtered)
+			result.Rows = distinctSQLQueryRows(filtered, sqlQueryCollation(q))
 		default:
 			return SQLQueryResult{}, fmt.Errorf("unsupported SQL set operation %q", union.kind)
 		}
@@ -7231,17 +7234,18 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 	total := cloneSQLRows(seedRows)
 	frontier := cloneSQLRows(seedRows)
 	depth := 0
+	collation := sqlQueryCollation(cte.query)
 	seen := map[string]struct{}{}
 	detectCycles := control != nil && control.options.DetectRecursiveCycles
 	if !union.all || detectCycles {
 		for _, row := range total {
-			seen[sqlOutputRowKey(row)] = struct{}{}
+			seen[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(cte.query))] = struct{}{}
 		}
 	}
 	cycleSeen := map[string]struct{}{}
 	if cte.cycleSet != "" {
 		for _, row := range total {
-			key, err := sqlRecursiveCycleKey(row, cte.cycleBy)
+			key, err := sqlRecursiveCycleKey(row, cte.cycleBy, collation)
 			if err != nil {
 				return nil, fmt.Errorf("recursive CTE %q CYCLE: %w", cte.name, err)
 			}
@@ -7284,7 +7288,7 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 		if !union.all {
 			filtered := next[:0]
 			for _, row := range next {
-				key := sqlOutputRowKey(row)
+				key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(cte.query))
 				if _, exists := seen[key]; exists {
 					continue
 				}
@@ -7294,7 +7298,7 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 			next = filtered
 		} else if detectCycles {
 			for _, row := range next {
-				key := sqlOutputRowKey(row)
+				key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(cte.query))
 				if _, exists := seen[key]; exists {
 					return nil, fmt.Errorf("recursive CTE %q detected a cycle at depth %d; use UNION for deduplication or disable cycle detection", cte.name, depth)
 				}
@@ -7305,7 +7309,7 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 		if cte.cycleSet != "" {
 			frontierNext = make([]SQLRow, 0, len(next))
 			for _, row := range next {
-				key, err := sqlRecursiveCycleKey(row, cte.cycleBy)
+				key, err := sqlRecursiveCycleKey(row, cte.cycleBy, collation)
 				if err != nil {
 					return nil, fmt.Errorf("recursive CTE %q CYCLE: %w", cte.name, err)
 				}
@@ -7336,7 +7340,7 @@ func executeSQLRecursiveCTE(cte sqlCTE, resolver SQLSourceResolver, ctes map[str
 	return total, nil
 }
 
-func sqlRecursiveCycleKey(row SQLRow, columns []string) (string, error) {
+func sqlRecursiveCycleKey(row SQLRow, columns []string, collation SQLCollation) (string, error) {
 	key := make(SQLRow, len(columns))
 	for _, column := range columns {
 		value, exists := row[column]
@@ -7345,7 +7349,7 @@ func sqlRecursiveCycleKey(row SQLRow, columns []string) (string, error) {
 		}
 		key[column] = value
 	}
-	return sqlOutputRowKey(key), nil
+	return sqlOutputRowKeyWithCollation(key, collation), nil
 }
 
 func sortSQLRecursiveRows(rows []SQLRow, columns []string) error {
@@ -7672,11 +7676,11 @@ func sameSQLColumns(left, right []string) bool {
 	return true
 }
 
-func distinctSQLQueryRows(rows []SQLRow) []SQLRow {
+func distinctSQLQueryRows(rows []SQLRow, collation SQLCollation) []SQLRow {
 	seen := make(map[string]struct{}, len(rows))
 	out := rows[:0]
 	for _, row := range rows {
-		key := sqlOutputRowKey(row)
+		key := sqlOutputRowKeyWithCollation(row, collation)
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -7700,6 +7704,21 @@ func sqlOutputRowKey(row SQLRow) string {
 		fmt.Fprintf(&builder, "%q=%#v;", key, row[key])
 	}
 	return builder.String()
+}
+
+func sqlOutputRowKeyWithCollation(row SQLRow, collation SQLCollation) string {
+	if collation.normalized() == SQLCollationBinary {
+		return sqlOutputRowKey(row)
+	}
+	key := make(SQLRow, len(row))
+	for column, value := range row {
+		if text, ok := value.(string); ok {
+			key[column] = sqlCollationKey(collation, text)
+			continue
+		}
+		key[column] = value
+	}
+	return sqlOutputRowKey(key)
 }
 func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) ([]SQLRow, error) {
 	switch source.kind {
@@ -8909,7 +8928,7 @@ type sqlSetOutput struct {
 	ordinal int
 }
 
-func sqlExternalSetRows(left, right []SQLRow, operation, directory string, maxRunBytes, maxSpillBytes int, control *sqlExecutionControl) ([]SQLRow, int64, int, error) {
+func sqlExternalSetRows(left, right []SQLRow, operation, directory string, maxRunBytes, maxSpillBytes int, collation SQLCollation, control *sqlExecutionControl) ([]SQLRow, int64, int, error) {
 	if directory == "" || maxSpillBytes <= 0 {
 		return nil, 0, 0, fmt.Errorf("SQL external set requires SpillDirectory and MaxSpillBytes")
 	}
@@ -8943,7 +8962,7 @@ func sqlExternalSetRows(left, right []SQLRow, operation, directory string, maxRu
 			if err := control.check(); err != nil {
 				return err
 			}
-			record := sqlSpillSetRecord{Key: sqlOutputRowKey(row), Row: row, Ordinal: ordinalStart + index, Right: rightSide}
+			record := sqlSpillSetRecord{Key: sqlOutputRowKeyWithCollation(row, collation), Row: row, Ordinal: ordinalStart + index, Right: rightSide}
 			recordBytes := sqlSpillSetRecordBytes(record)
 			if len(chunk) > 0 && chunkBytes+recordBytes > maxRunBytes {
 				if err := flush(); err != nil {

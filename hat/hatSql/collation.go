@@ -144,6 +144,18 @@ func applySQLQueryCollation(query *sqlQuery, collation SQLCollation) {
 	}
 }
 
+func sqlQueryCollation(query *sqlQuery) SQLCollation {
+	if query == nil {
+		return SQLCollationBinary
+	}
+	for _, item := range query.selects {
+		if item.expr.collation != "" {
+			return item.expr.collation.normalized()
+		}
+	}
+	return SQLCollationBinary
+}
+
 func applySQLSourceCollation(source *sqlSource, collation SQLCollation) {
 	if source != nil {
 		applySQLQueryCollation(source.query, collation)
