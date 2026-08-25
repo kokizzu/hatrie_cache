@@ -99,6 +99,12 @@ func OpenPersistentStoreWithFormat(path string, requested StorageBackend, format
 	return store, nil
 }
 
+// InspectPersistentStore returns portable capability and engine diagnostics for
+// a configured store without changing its lifecycle or cached data.
+func InspectPersistentStore(store PersistentStore) (hatStorage.Inspection, error) {
+	return hatStorage.Inspect(store)
+}
+
 func resolveStorageBackend(path string, requested StorageBackend) (StorageBackend, error) {
 	requested, err := ParseStorageBackend(string(requested))
 	if err != nil {

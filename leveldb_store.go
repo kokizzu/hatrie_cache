@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"hatrie_cache/hat/hatStorage"
+
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -83,12 +85,7 @@ type LevelDBCompactionResult struct {
 }
 
 // LevelDBProperties reports selected LevelDB engine property snapshots.
-type LevelDBProperties struct {
-	Stats      string `json:"stats,omitempty"`
-	SSTables   string `json:"sstables,omitempty"`
-	WriteDelay string `json:"write_delay,omitempty"`
-	BlockPool  string `json:"block_pool,omitempty"`
-}
+type LevelDBProperties = hatStorage.Properties
 
 // LevelDBFlushResult reports a completed manual LevelDB save/flush.
 type LevelDBFlushResult struct {
