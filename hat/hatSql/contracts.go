@@ -84,6 +84,12 @@ type TextIndexedSourceResolver interface {
 	ResolveSQLTextSource(name, key, field, query string) ([]Row, bool, error)
 }
 
+// ExternalSourceResolver supplies a named, imported external table. It is
+// used only by EXTERNAL('name') sources and never receives a filesystem path.
+type ExternalSourceResolver interface {
+	ResolveSQLExternalSource(name string) ([]Row, error)
+}
+
 // OrderedSourceResolver optionally reads one source field in SQL ORDER BY order.
 type OrderedSourceResolver interface {
 	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]Row, bool, error)

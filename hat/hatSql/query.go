@@ -4798,6 +4798,29 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 		}
 		return source, nil
 	}
+	if p.keyword("EXTERNAL") {
+		p.next()
+		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+			return sqlSource{}, err
+		}
+		value, err := p.parsePrimary()
+		if err != nil {
+			return sqlSource{}, err
+		}
+		if value.kind != "literal" || p.current().kind != sqlTokenRightParen {
+			return sqlSource{}, p.diagnostic(p.current(), "EXTERNAL requires one literal table name")
+		}
+		name, ok := value.value.(string)
+		if !ok || name == "" {
+			return sqlSource{}, p.diagnostic(value.token, "EXTERNAL requires a non-empty string table name")
+		}
+		p.next()
+		source := sqlSource{kind: "EXTERNAL", key: name}
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
+		return source, nil
+	}
 	if p.keyword("KEYS") {
 		p.next()
 		source := sqlSource{kind: "KEYS"}
@@ -5754,7 +5777,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE":
+	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL":
 		return true
 	}
 	return false
@@ -7388,6 +7411,8 @@ func sqlExplainSource(source sqlSource) string {
 	switch source.kind {
 	case "CACHE":
 		detail = "CACHE(" + strconv.Quote(source.key) + ")"
+	case "EXTERNAL":
+		detail = "EXTERNAL(" + strconv.Quote(source.key) + ")"
 	case "VALUES":
 		detail = "VALUES"
 	case "CTE":
@@ -7577,6 +7602,28 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 			control.sources[cacheKey] = cloneSQLRows(rows)
 		}
 		return validateSQLSourceFieldTypes(source, rows)
+	case "EXTERNAL":
+		if resolver == nil {
+			return nil, fmt.Errorf("EXTERNAL(%q) requires an external source resolver", source.key)
+		}
+		cacheKey := source.kind + "\x00" + source.key
+		if control != nil {
+			if rows, ok := control.sources[cacheKey]; ok {
+				return cloneSQLRows(rows), nil
+			}
+		}
+		external, ok := resolver.(ExternalSourceResolver)
+		if !ok {
+			return nil, fmt.Errorf("EXTERNAL(%q) requires an external source resolver", source.key)
+		}
+		rows, err := external.ResolveSQLExternalSource(source.key)
+		if err != nil {
+			return nil, err
+		}
+		if control != nil {
+			control.sources[cacheKey] = cloneSQLRows(rows)
+		}
+		return rows, nil
 	}
 	return nil, nil
 }
