@@ -12,6 +12,8 @@ import (
 )
 
 type SQLQueryOptions = hatSql.SQLQueryOptions
+type SQLAdaptivePlanner = hatSql.AdaptivePlanner
+type SQLAdaptivePlannerOptions = hatSql.AdaptivePlannerOptions
 type SQLPreparedQueryCache = hatSql.SQLPreparedQueryCache
 type SQLPreparedQueryCacheStats = hatSql.SQLPreparedQueryCacheStats
 type SQLPreparedQuery = hatSql.SQLPreparedQuery
@@ -124,6 +126,10 @@ const (
 
 func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
 	return hatSql.NewSQLPreparedQueryCache(capacity)
+}
+
+func NewSQLAdaptivePlanner(options SQLAdaptivePlannerOptions) *SQLAdaptivePlanner {
+	return hatSql.NewAdaptivePlanner(options)
 }
 
 // PrepareSQLQuery parses source once and binds a typed positional-parameter

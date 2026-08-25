@@ -175,6 +175,9 @@ type SQLQueryOptions struct {
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
 	PreparedCache         *SQLPreparedQueryCache
+	// AdaptivePlanner learns index candidate cardinality from prior queries.
+	// Nil preserves the deterministic estimate-only planner.
+	AdaptivePlanner *AdaptivePlanner
 	// QueryID is returned with materialized results and included in every
 	// observation event. When Observer is set but QueryID is empty, execution
 	// assigns a unique ID.
@@ -502,8 +505,8 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, sqlRuntimeDiagnostic(err)
 	}
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil {
-		metrics = &sqlExecutionMetrics{}
+	if observation.observer != nil || options.AdaptivePlanner != nil {
+		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if metrics != nil {
@@ -5936,7 +5939,8 @@ func sqlSaturatingMultiply(left, right int) int {
 }
 
 type sqlExecutionMetrics struct {
-	steps []SQLExplainStep
+	steps    []SQLExplainStep
+	adaptive *AdaptivePlanner
 }
 
 func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outputRows int, started time.Time) {
@@ -7771,13 +7775,33 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		return resolveSQLIndexedSource(source, *condition.right, resolver, metrics)
 	}
 	left, right := *condition.left, *condition.right
+	var adaptiveKey string
+	var adaptiveEstimate *int
+	if metrics != nil && metrics.adaptive != nil {
+		adaptiveKey = sqlAdaptiveIndexKey(source, condition)
+		var estimateErr error
+		adaptiveEstimate, estimateErr = sqlIndexedEqualityEstimate(source, condition, resolver)
+		if estimateErr != nil {
+			return nil, false, estimateErr
+		}
+		if adaptiveEstimate != nil && !metrics.adaptive.ShouldUseIndex(adaptiveKey) {
+			return nil, false, nil
+		}
+	}
+	var rows []SQLRow
+	var indexed bool
+	var err error
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
-		return resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
+		rows, indexed, err = resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
+	} else if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+		rows, indexed, err = resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+	} else {
+		return nil, false, nil
 	}
-	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
-		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+	if err == nil && indexed && adaptiveEstimate != nil && metrics != nil && metrics.adaptive != nil {
+		metrics.adaptive.ObserveIndex(adaptiveKey, *adaptiveEstimate, len(rows))
 	}
-	return nil, false, nil
+	return rows, indexed, err
 }
 
 func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
@@ -7905,6 +7929,11 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 	started := time.Now()
 	details := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
+		adaptiveKey := sqlAdaptiveIndexKey(source, candidate.condition)
+		if metrics != nil && metrics.adaptive != nil && !metrics.adaptive.ShouldUseIndex(adaptiveKey) {
+			details = append(details, fmt.Sprintf("%s estimated_rows=%d adaptive: scan selected after prior underestimate", sqlExplainExpression(candidate.condition), candidate.estimate))
+			continue
+		}
 		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver, metrics)
 		if indexed || err != nil {
 			if err == nil {
@@ -7919,6 +7948,10 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 		metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 0, started)
 	}
 	return nil, false, nil
+}
+
+func sqlAdaptiveIndexKey(source sqlSource, condition sqlExpr) string {
+	return source.kind + "\x00" + source.key + "\x00" + sqlExplainExpression(condition)
 }
 
 // sqlIndexedEqualityProbeCost models one indexed lookup plus the estimated
