@@ -41,6 +41,41 @@ type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 
+// SQLPartitionPruningPlan reports whether a SQL source can be routed to one
+// local partition. CACHE(key) is prunable because its namespace key is known;
+// KEYS intentionally scans every partition.
+type SQLPartitionPruningPlan struct {
+	Source     string `json:"source"`
+	Key        string `json:"key,omitempty"`
+	Pruned     bool   `json:"pruned"`
+	Partition  int    `json:"partition,omitempty"`
+	Partitions int    `json:"partitions"`
+}
+
+// SQLPartitionPruningPlan returns the local-partition routing decision for a
+// supported SQL source. Partitioning is disabled by default, in which case
+// Pruned is false and Partitions is zero.
+func (ht *HatTrie) SQLPartitionPruningPlan(source string, key string) (SQLPartitionPruningPlan, error) {
+	plan := SQLPartitionPruningPlan{Source: strings.ToUpper(strings.TrimSpace(source)), Key: strings.TrimSpace(key)}
+	set := ht.localPartitionSet()
+	if set == nil {
+		return plan, nil
+	}
+	plan.Partitions = len(set.tries)
+	if plan.Source != "CACHE" {
+		return plan, nil
+	}
+	partition, enabled, err := ht.LocalPartitionForKey(plan.Key)
+	if err != nil {
+		return SQLPartitionPruningPlan{}, err
+	}
+	if enabled {
+		plan.Pruned = true
+		plan.Partition = partition
+	}
+	return plan, nil
+}
+
 // SQLJSONIndexHealth reports the current coverage of one lazily refreshed
 // JSON field index. Refreshed is true when this inspection rebuilt the index
 // from a changed CACHE value.
@@ -865,6 +900,15 @@ func sqlIndexValueKey(value interface{}) (string, bool) {
 // CACHE(key) requires a JSON object or array of JSON objects. KEYS returns the
 // same metadata fields exposed by the monitoring entries endpoint.
 func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
+	if name == "CACHE" {
+		plan, err := ht.SQLPartitionPruningPlan(name, key)
+		if err != nil {
+			return nil, err
+		}
+		if plan.Pruned {
+			return ht.localPartitionSet().tries[plan.Partition].ResolveSQLSource(name, key)
+		}
+	}
 	switch name {
 	case "KEYS":
 		entries := ht.monitoringEntries("")
