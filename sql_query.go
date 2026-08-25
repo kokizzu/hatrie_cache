@@ -56,6 +56,25 @@ type SQLJSONIndexHealth struct {
 	Refreshed    bool
 }
 
+// SQLJSONRangeHistogramBucket is one contiguous quantile bucket from an
+// ordered JSON field index. Lower and Upper are inclusive observed values.
+type SQLJSONRangeHistogramBucket struct {
+	Lower interface{}
+	Upper interface{}
+	Rows  int
+}
+
+// SQLJSONRangeStats describes ordered-index coverage for range planning.
+// Buckets are equal-depth contiguous buckets rather than value-width buckets,
+// which keeps skewed distributions useful without retaining another index.
+type SQLJSONRangeStats struct {
+	Key      string
+	Field    string
+	Rows     int
+	NullRows int
+	Buckets  []SQLJSONRangeHistogramBucket
+}
+
 const (
 	SQLParameterAny       = hatSql.ParameterAny
 	SQLParameterText      = hatSql.ParameterText
@@ -449,6 +468,81 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	return len(index.rows[valueKey]), true, true, nil
 }
 
+// SQLJSONRangeStats returns fresh equal-depth histogram buckets for one
+// optional ordered field index. A nonpositive bucket count uses 16 buckets;
+// the result never has more buckets than indexed rows.
+func (ht *HatTrie) SQLJSONRangeStats(key, field string, bucketCount int) (SQLJSONRangeStats, bool, error) {
+	if ht == nil || key == "" || field == "" {
+		return SQLJSONRangeStats{}, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return SQLJSONRangeStats{}, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return SQLJSONRangeStats{}, false, nil
+	}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return SQLJSONRangeStats{}, false, err
+	}
+	stats := SQLJSONRangeStats{Key: key, Field: field, Rows: len(index.ordered), NullRows: len(index.nulls)}
+	if len(index.ordered) == 0 {
+		return stats, true, nil
+	}
+	if bucketCount <= 0 {
+		bucketCount = 16
+	}
+	if bucketCount > len(index.ordered) {
+		bucketCount = len(index.ordered)
+	}
+	bucketSize := (len(index.ordered) + bucketCount - 1) / bucketCount
+	stats.Buckets = make([]SQLJSONRangeHistogramBucket, 0, bucketCount)
+	for start := 0; start < len(index.ordered); start += bucketSize {
+		end := start + bucketSize
+		if end > len(index.ordered) {
+			end = len(index.ordered)
+		}
+		stats.Buckets = append(stats.Buckets, SQLJSONRangeHistogramBucket{
+			Lower: index.ordered[start].value,
+			Upper: index.ordered[end-1].value,
+			Rows:  end - start,
+		})
+	}
+	return stats, true, nil
+}
+
+// SQLJSONRangeEstimate returns the exact number of indexed rows matching one
+// SQL range comparison. It shares the range scan's ordering and NULL rules.
+func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value interface{}) (rows int, exact bool, available bool, err error) {
+	if ht == nil || key == "" || field == "" {
+		return 0, false, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return 0, false, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return 0, false, false, nil
+	}
+	if value == nil {
+		return 0, true, true, nil
+	}
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return 0, false, true, err
+	}
+	start, end, ok := sqlJSONRangeBounds(index.ordered, operator, value)
+	if !ok {
+		return 0, false, true, fmt.Errorf("unsupported SQL range operator %q", operator)
+	}
+	return end - start, true, true, nil
+}
+
 func sqlJSONIndexStats(key string, fields []string, postings map[string][]SQLRow, nullRows ...int) SQLJSONIndexStats {
 	stats := SQLJSONIndexStats{Key: key, Fields: append([]string(nil), fields...), DistinctKeys: len(postings)}
 	if len(nullRows) > 0 {
@@ -502,17 +596,8 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
 		return nil, false, err
 	}
-	start, end := 0, len(index.ordered)
-	switch operator {
-	case "<":
-		end = sort.Search(len(index.ordered), func(i int) bool { return hatSql.Compare(index.ordered[i].value, value) >= 0 })
-	case "<=":
-		end = sort.Search(len(index.ordered), func(i int) bool { return hatSql.Compare(index.ordered[i].value, value) > 0 })
-	case ">":
-		start = sort.Search(len(index.ordered), func(i int) bool { return hatSql.Compare(index.ordered[i].value, value) > 0 })
-	case ">=":
-		start = sort.Search(len(index.ordered), func(i int) bool { return hatSql.Compare(index.ordered[i].value, value) >= 0 })
-	default:
+	start, end, ok := sqlJSONRangeBounds(index.ordered, operator, value)
+	if !ok {
 		return nil, false, nil
 	}
 	rows := make([]SQLRow, end-start)
@@ -520,6 +605,23 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 		rows[i] = entry.row
 	}
 	return hatSql.CloneRows(rows), true, nil
+}
+
+func sqlJSONRangeBounds(ordered []sqlJSONFieldIndexEntry, operator string, value interface{}) (start, end int, ok bool) {
+	start, end = 0, len(ordered)
+	switch operator {
+	case "<":
+		end = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) >= 0 })
+	case "<=":
+		end = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) > 0 })
+	case ">":
+		start = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) > 0 })
+	case ">=":
+		start = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) >= 0 })
+	default:
+		return 0, 0, false
+	}
+	return start, end, true
 }
 
 // ResolveSQLOrderedSource returns every JSON source row in the exact order of

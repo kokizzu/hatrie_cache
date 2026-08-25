@@ -77,6 +77,29 @@ SELECT article.id`, trie)
 	}
 }
 
+func TestSQLJSONRangeStatisticsUseOrderedIndex(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("events", `[{"score":1},{"score":2},{"score":3},{"score":4},{"score":5},{"name":"missing"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("events", "score"); err != nil {
+		t.Fatal(err)
+	}
+	stats, ok, err := trie.SQLJSONRangeStats("events", "score", 2)
+	if err != nil || !ok {
+		t.Fatalf("SQLJSONRangeStats() = %#v, %v, %v", stats, ok, err)
+	}
+	if stats.Rows != 5 || stats.NullRows != 1 || !reflect.DeepEqual(stats.Buckets, []SQLJSONRangeHistogramBucket{
+		{Lower: float64(1), Upper: float64(3), Rows: 3},
+		{Lower: float64(4), Upper: float64(5), Rows: 2},
+	}) {
+		t.Fatalf("range stats = %#v", stats)
+	}
+	rows, exact, available, err := trie.SQLJSONRangeEstimate("events", "score", ">=", float64(3))
+	if err != nil || !available || !exact || rows != 3 {
+		t.Fatalf("SQLJSONRangeEstimate() = (%d, %v, %v, %v), want (3, true, true, nil)", rows, exact, available, err)
+	}
+}
+
 func TestExecuteSQLQueryEmitsStructuredObservability(t *testing.T) {
 	t.Parallel()
 	var events []SQLQueryEvent

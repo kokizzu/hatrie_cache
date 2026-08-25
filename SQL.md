@@ -846,6 +846,13 @@ resolvers fall back to the average cardinality. The value-estimate API accepts
 only a value the caller already supplied and never enumerates indexed values.
 The estimate never changes query semantics or hides actual row counts.
 
+`SQLJSONRangeStats(key, field, buckets)` exposes equal-depth histogram buckets
+from that same ordered field index, including indexed and NULL row counts.
+`SQLJSONRangeEstimate(key, field, operator, value)` returns the exact count for
+one `<`, `<=`, `>`, or `>=` comparison. Both refresh lazily from the current
+cache value and reuse the range index; they do not allocate a second copy of
+the source rows.
+
 For an `AND` of individually indexed equality predicates, the optimizer probes
 the available term with the lowest average posting-list estimate first; ties
 keep SQL's written order. It still evaluates the entire `WHERE` expression
