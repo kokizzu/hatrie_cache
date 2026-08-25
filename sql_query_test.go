@@ -8,6 +8,26 @@ import (
 	"time"
 )
 
+func TestSQLJSONIndexHealthRefreshesOnlineIndex(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"team":"core"},{"team":"core"},{"name":"missing"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "team"); err != nil {
+		t.Fatal(err)
+	}
+	health, ok, err := trie.SQLJSONIndexHealth("people", "team")
+	if err != nil || !ok {
+		t.Fatalf("SQLJSONIndexHealth() = %#v, %v, %v", health, ok, err)
+	}
+	if health.Rows != 3 || health.IndexedRows != 2 || health.NullRows != 1 || health.DistinctKeys != 1 || !health.Current {
+		t.Fatalf("index health = %#v", health)
+	}
+	trie.UpsertString("people", `[{"team":"platform"}]`)
+	health, ok, err = trie.SQLJSONIndexHealth("people", "team")
+	if err != nil || !ok || health.Rows != 1 || health.IndexedRows != 1 || health.DistinctKeys != 1 || !health.Current {
+		t.Fatalf("refreshed index health = %#v, %v, %v", health, ok, err)
+	}
+}
+
 func TestExecuteSQLQueryEmitsStructuredObservability(t *testing.T) {
 	t.Parallel()
 	var events []SQLQueryEvent

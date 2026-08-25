@@ -40,6 +40,21 @@ type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 
+// SQLJSONIndexHealth reports the current coverage of one lazily refreshed
+// JSON field index. Refreshed is true when this inspection rebuilt the index
+// from a changed CACHE value.
+type SQLJSONIndexHealth struct {
+	Key          string
+	Field        string
+	Rows         int
+	IndexedRows  int
+	NullRows     int
+	DistinctKeys int
+	SourceBytes  int
+	Current      bool
+	Refreshed    bool
+}
+
 const (
 	SQLParameterAny       = hatSql.ParameterAny
 	SQLParameterText      = hatSql.ParameterText
@@ -145,6 +160,38 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	}
 	ht.sqlJSONIndexes[key][field] = &sqlJSONFieldIndex{}
 	return nil
+}
+
+// SQLJSONIndexHealth refreshes and reports one configured field index. It is
+// safe to call while the cache is being queried; refresh remains serialized by
+// the existing SQL-index mutex.
+func (ht *HatTrie) SQLJSONIndexHealth(key, field string) (SQLJSONIndexHealth, bool, error) {
+	if ht == nil || key == "" || field == "" {
+		return SQLJSONIndexHealth{}, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return SQLJSONIndexHealth{}, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return SQLJSONIndexHealth{}, false, nil
+	}
+	refreshed := index.raw != string(data)
+	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return SQLJSONIndexHealth{}, false, err
+	}
+	indexedRows := 0
+	for _, rows := range index.rows {
+		indexedRows += len(rows)
+	}
+	return SQLJSONIndexHealth{
+		Key: key, Field: field, Rows: indexedRows + len(index.nulls), IndexedRows: indexedRows,
+		NullRows: len(index.nulls), DistinctKeys: len(index.rows), SourceBytes: len(data),
+		Current: index.raw == string(data), Refreshed: refreshed,
+	}, true, nil
 }
 
 // CreateSQLJSONCompositeIndex creates an optional equality index over two or
