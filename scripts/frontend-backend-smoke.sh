@@ -83,8 +83,10 @@ go build -o "$server_bin" ./cmd/hatrie-cache
 	-monitoring-web-dir "$FRONTEND/dist" \
 	-node-id smoke-node \
 	-db-path "$tmp_dir/cache.leveldb" \
+	-journal-path "$tmp_dir/journal.log" \
 	-audit-log-path "$tmp_dir/audit.jsonl" \
 	-replication=true \
+	-replication-mode command \
 	-replication-async=true \
 	-replication-queue-size 4 >"$server_log" 2>&1 &
 server_pid=$!
@@ -125,7 +127,7 @@ await request('/api/commands', {
   body: JSON.stringify({ command: 'SETSTR', key: 'smoke:admin', value: 'value' })
 });
 const storage = await request('/api/storage');
-if (!storage.leveldb_configured || !String(storage.path || '').includes('cache.leveldb')) {
+if (!(storage.configured ?? storage.leveldb_configured) || !String(storage.path || '').includes('cache.leveldb')) {
   throw new Error(`unexpected storage ${JSON.stringify(storage)}`);
 }
 const flush = await request('/api/storage/flush', {
@@ -133,7 +135,7 @@ const flush = await request('/api/storage/flush', {
   headers: { accept: 'application/json', 'content-type': 'application/json' },
   body: '{}'
 });
-if (flush.store !== 'leveldb') {
+if (!['leveldb', 'pebble'].includes(flush.store)) {
   throw new Error(`unexpected flush ${JSON.stringify(flush)}`);
 }
 const replication = await request('/api/replication');
@@ -147,6 +149,14 @@ if (!audit.configured || !audit.events.some((event) => event.action === 'storage
 const admin = await request('/admin.html');
 if (!admin.includes('<title>HATrie Cache Admin</title>')) {
   throw new Error('admin HTML title missing');
+}
+const catalog = await request('/api/sql/catalog');
+if (!Array.isArray(catalog.namespaces) || !catalog.schema || !Array.isArray(catalog.indexes)) {
+	throw new Error('SQL catalog response missing expected fields');
+}
+const catalogPage = await request('/catalog.html');
+if (!catalogPage.includes('<title>HATrie Cache Catalog</title>')) {
+	throw new Error('catalog HTML title missing');
 }
 NODE
 

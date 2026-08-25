@@ -162,6 +162,25 @@ nav a:hover {
   margin-bottom: 18px;
 }
 
+.catalog-panel {
+  margin-top: 18px;
+}
+
+.catalog-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 18px;
+}
+
+.catalog-tags code {
+  background: #e8f1fb;
+  border: 1px solid #c8dced;
+  border-radius: 4px;
+  color: #1c4f7a;
+  padding: 5px 8px;
+}
+
 .stat-tile,
 .panel,
 .toolbar {

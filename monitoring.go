@@ -23,6 +23,7 @@ import (
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatHttp"
 	"hatrie_cache/hat/hatMonitoring"
+	"hatrie_cache/hat/hatSchema"
 	"hatrie_cache/internal/jsonwire"
 )
 
@@ -80,6 +81,25 @@ type MonitoringOptions struct {
 	EnforceLeaderWrites             bool
 	RuntimeConfig                   map[string]interface{}
 	SQLFunctions                    *SQLFunctionRegistry
+	// SQLCatalog is optional declared metadata rendered by the monitoring UI.
+	// It is separate from live cache values and is served read-only.
+	SQLCatalog SQLCatalog
+}
+
+// SQLCatalog is the monitoring-visible declaration of SQL namespaces, source
+// schemas, and configured indexes.
+type SQLCatalog struct {
+	Namespaces []string          `json:"namespaces"`
+	Schema     hatSchema.Schema  `json:"schema"`
+	Indexes    []SQLCatalogIndex `json:"indexes"`
+}
+
+// SQLCatalogIndex describes one configured source index for the management UI.
+type SQLCatalogIndex struct {
+	Source  string   `json:"source"`
+	Name    string   `json:"name"`
+	Kind    string   `json:"kind"`
+	Columns []string `json:"columns"`
 }
 
 type MonitoringHandler struct {
@@ -253,6 +273,7 @@ type storageOperationStatus struct {
 }
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
+	options.SQLCatalog = cloneSQLCatalog(options.SQLCatalog)
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
 	}
@@ -335,6 +356,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/stats", handler.handleStats)
 	server.HandleFunc("/api/entries", handler.handleEntries)
 	server.HandleFunc("/api/sql", handler.handleSQL)
+	server.HandleFunc("/api/sql/catalog", handler.handleSQLCatalog)
 	server.HandleFunc("/api/sql/functions", handler.handleSQLFunctions)
 	server.HandleFunc("/api/commands", handler.handleCommands)
 	server.HandleFunc("/api/snapshot", handler.handleSnapshot)
@@ -975,6 +997,27 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	}
 	handler.auditSQLQuery(r, request, sources, len(result.Rows), true, http.StatusOK, "")
 	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) handleSQLCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	writeJSON(w, cloneSQLCatalog(handler.options.SQLCatalog))
+}
+
+func cloneSQLCatalog(catalog SQLCatalog) SQLCatalog {
+	copy := SQLCatalog{
+		Namespaces: append([]string{}, catalog.Namespaces...),
+		Schema:     catalog.Schema.Clone(),
+		Indexes:    make([]SQLCatalogIndex, len(catalog.Indexes)),
+	}
+	for index, entry := range catalog.Indexes {
+		copy.Indexes[index] = entry
+		copy.Indexes[index].Columns = append([]string{}, entry.Columns...)
+	}
+	return copy
 }
 
 func (handler *MonitoringHandler) rejectSQLHTTP(w http.ResponseWriter, r *http.Request) bool {

@@ -2280,7 +2280,7 @@ func TestREADMEListsFrontendSmoke(t *testing.T) {
 		"make frontend-smoke",
 		"make frontend-backend-smoke",
 		"Vite preview",
-		"dashboard/keys/commands/admin HTML",
+		"dashboard/keys/catalog/commands/admin HTML",
 		"`FRONTEND_SMOKE_REQUIRE_BROWSER=true`",
 		"real `hatrie-cache` monitoring server",
 		"`/api/storage/flush`",

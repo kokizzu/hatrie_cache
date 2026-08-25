@@ -531,7 +531,7 @@ make frontend-backend-smoke
 ```
 
 `make frontend-smoke` builds the Svelte MPA, serves the production bundle with
-Vite preview on a loopback port, verifies dashboard/keys/commands/admin HTML
+Vite preview on a loopback port, verifies dashboard/keys/catalog/commands/admin HTML
 entrypoints, and renders the Admin page with Chrome/Chromium when one is
 available. Set `FRONTEND_SMOKE_REQUIRE_BROWSER=true` to fail when a browser is
 not installed.
@@ -542,6 +542,11 @@ MPA. It verifies real `/api/health`, `/api/storage`, `/api/storage/flush`,
 
 The Admin page at `/admin.html` exposes LevelDB flush/compact controls and
 replication queue/sync status.
+
+The Catalog page at `/catalog.html` reads optional declared SQL metadata from
+`MonitoringOptions.SQLCatalog`. Supply namespaces, a versioned `hatSchema.Schema`,
+and `SQLCatalogIndex` entries when constructing the monitoring handler; the
+`GET /api/sql/catalog` response is read-only and copied before it is served.
 
 Run the full local verification suite with `make verify` or the explicit alias
 `make verify-local`. It checks deploy configuration, Go tests/race/coverage, C

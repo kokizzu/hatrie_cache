@@ -88,6 +88,7 @@ const baseURL = process.argv[2];
 const routes = [
   { path: '/', title: 'HATrie Cache Dashboard', tokens: ['<div id="app"></div>', '/assets/'] },
   { path: '/keys.html', title: 'HATrie Cache Keys', tokens: ['<div id="app"></div>', '/assets/'] },
+  { path: '/catalog.html', title: 'HATrie Cache Catalog', tokens: ['<div id="app"></div>', '/assets/'] },
   { path: '/commands.html', title: 'HATrie Cache Commands', tokens: ['<div id="app"></div>', '/assets/'] },
   { path: '/admin.html', title: 'HATrie Cache Admin', tokens: ['<div id="app"></div>', '/assets/'] }
 ];

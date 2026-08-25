@@ -13,7 +13,58 @@ import (
 	"time"
 
 	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatSchema"
 )
+
+func TestMonitoringSQLCatalogReturnsIndependentSchemaAndIndexes(t *testing.T) {
+	t.Parallel()
+	catalog := SQLCatalog{
+		Namespaces: []string{"tenant-b", "tenant-a"},
+		Schema: hatSchema.Schema{Version: 3, Sources: map[string]hatSchema.Source{
+			"people": {Name: "people", Columns: []hatSchema.Column{{Name: "id", Type: hatSchema.TypeUUID, NotNull: true}}},
+		}},
+		Indexes: []SQLCatalogIndex{{Source: "people", Name: "people_id", Kind: "hash", Columns: []string{"id"}}},
+	}
+	monitoring := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{SQLCatalog: catalog})
+	handler := monitoring.Handler()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/sql/catalog", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("catalog status = %d, body=%s", response.Code, response.Body.String())
+	}
+	var got SQLCatalog
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	if !reflect.DeepEqual(got, catalog) {
+		t.Fatalf("catalog = %#v, want %#v", got, catalog)
+	}
+	got.Namespaces[0] = "mutated"
+	got.Schema.Sources["people"] = hatSchema.Source{Name: "mutated"}
+	if reflect.DeepEqual(got, monitoring.options.SQLCatalog) {
+		t.Fatalf("catalog response aliases handler state: got %#v", got)
+	}
+}
+
+func TestMonitoringSQLCatalogEmptyCollectionsEncodeAsArrays(t *testing.T) {
+	t.Parallel()
+	monitoring := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{})
+	response := httptest.NewRecorder()
+	monitoring.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/sql/catalog", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("catalog status = %d, body=%s", response.Code, response.Body.String())
+	}
+	var got SQLCatalog
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	if got.Namespaces == nil {
+		t.Fatal("catalog namespaces encoded as null, want []")
+	}
+	if got.Indexes == nil {
+		t.Fatal("catalog indexes encoded as null, want []")
+	}
+}
 
 func TestHatTrieResolvesSQLCacheAndKeySources(t *testing.T) {
 	t.Parallel()

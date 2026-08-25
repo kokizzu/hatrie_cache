@@ -95,6 +95,30 @@ export type SQLQueryResult = {
   plan?: SQLExplainStep[];
 };
 
+export type SQLCatalogColumn = {
+  name: string;
+  type: string;
+  not_null?: boolean;
+};
+
+export type SQLCatalogSource = {
+  name: string;
+  columns: SQLCatalogColumn[];
+};
+
+export type SQLCatalogIndex = {
+  source: string;
+  name: string;
+  kind: string;
+  columns: string[];
+};
+
+export type SQLCatalog = {
+  namespaces: string[];
+  schema: { version: number; sources: Record<string, SQLCatalogSource> };
+  indexes: SQLCatalogIndex[];
+};
+
 export type StorageStatus = {
   configured?: boolean;
   leveldb_configured: boolean;
@@ -529,7 +553,11 @@ export async function runCommand(request: CommandRequest): Promise<CommandRespon
 }
 
 export async function runSQL(query: string, parameters: unknown[] = []): Promise<SQLQueryResult> {
-  return postJSON<SQLQueryResult>('/api/sql', { query, parameters });
+	return postJSON<SQLQueryResult>('/api/sql', { query, parameters });
+}
+
+export async function loadSQLCatalog(): Promise<SQLCatalog> {
+	return readJSONWithFallback<SQLCatalog>('/api/sql/catalog', { namespaces: [], schema: { version: 0, sources: {} }, indexes: [] });
 }
 
 export async function loadStorageStatus(): Promise<StorageStatus> {
