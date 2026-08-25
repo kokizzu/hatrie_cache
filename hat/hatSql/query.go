@@ -156,8 +156,11 @@ type SQLQueryOptions struct {
 	// in-memory join behavior.
 	MaxJoinBytes   int
 	MaxResultBytes int
-	MaxSortBytes   int
-	MaxGroupBytes  int
+	// Workers enables bounded parallel CPU work for eligible query operators.
+	// Zero keeps the deterministic sequential default.
+	Workers       int
+	MaxSortBytes  int
+	MaxGroupBytes int
 	// MaxSetBytes bounds one in-memory distinct UNION, INTERSECT, or EXCEPT
 	// operation.
 	// When combined with SpillDirectory and MaxSpillBytes, oversized distinct
@@ -5712,7 +5715,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.Timeout > 0 {
@@ -6100,7 +6103,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		} else {
 			metrics.recordScanRows(*q.from, base, started)
 		}
-		rows = wrapSQLSource(*q.from, base)
+		rows = wrapSQLSourceWorkers(*q.from, base, control.options.Workers)
 		pushedWhere = q.where.kind != "" && sqlCanPushBaseWhere(q)
 		if pushedWhere {
 			started = time.Now()
@@ -6540,8 +6543,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		row   SQLRow
 		group []sqlExecRow
 	}
-	out := make([]output, 0, len(groups))
-	for _, group := range groups {
+	projectGroup := func(group []sqlExecRow) (output, bool, error) {
 		representative := sqlExecRow{}
 		if len(group) > 0 {
 			representative = group[0]
@@ -6549,10 +6551,10 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		if q.having.kind != "" {
 			value := evalSQLExpr(q.having, group, representative)
 			if err := sqlExpressionError(value); err != nil {
-				return SQLQueryResult{}, err
+				return output{}, false, err
 			}
 			if !sqlTruthy(value) {
-				continue
+				return output{}, false, nil
 			}
 		}
 		row := SQLRow{}
@@ -6567,11 +6569,64 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			}
 			value := evalSQLExpr(item.expr, group, representative)
 			if err := sqlExpressionError(value); err != nil {
-				return SQLQueryResult{}, err
+				return output{}, false, err
 			}
 			row[result.Columns[idx]] = value
 		}
-		out = append(out, output{row: row, group: group})
+		return output{row: row, group: group}, true, nil
+	}
+	out := make([]output, 0, len(groups))
+	parallelGroups := control.options.Workers > 1 && len(groups) > 1 && !sqlExprHasCustomFunction(q.having, functions)
+	if parallelGroups {
+		for _, item := range q.selects {
+			if sqlExprHasCustomFunction(item.expr, functions) {
+				parallelGroups = false
+				break
+			}
+		}
+	}
+	if !parallelGroups {
+		for _, group := range groups {
+			projected, include, err := projectGroup(group)
+			if err != nil {
+				return SQLQueryResult{}, err
+			}
+			if include {
+				out = append(out, projected)
+			}
+		}
+	} else {
+		projected := make([]output, len(groups))
+		included := make([]bool, len(groups))
+		errs := make([]error, len(groups))
+		workers := control.options.Workers
+		if workers > len(groups) {
+			workers = len(groups)
+		}
+		jobs := make(chan int)
+		var groupWait sync.WaitGroup
+		for range workers {
+			groupWait.Add(1)
+			go func() {
+				defer groupWait.Done()
+				for index := range jobs {
+					projected[index], included[index], errs[index] = projectGroup(groups[index])
+				}
+			}()
+		}
+		for index := range groups {
+			jobs <- index
+		}
+		close(jobs)
+		groupWait.Wait()
+		for index := range groups {
+			if errs[index] != nil {
+				return SQLQueryResult{}, errs[index]
+			}
+			if included[index] {
+				out = append(out, projected[index])
+			}
+		}
 	}
 	for column, item := range q.selects {
 		if item.expr.window == nil {
@@ -7834,10 +7889,38 @@ func valuesSQLRows(values [][]interface{}, columns []string) []SQLRow {
 	return out
 }
 func wrapSQLSource(source sqlSource, rows []SQLRow) []sqlExecRow {
+	return wrapSQLSourceWorkers(source, rows, 0)
+}
+
+// wrapSQLSourceWorkers parallelizes independent scan-row envelopes while each
+// output slot keeps the original source ordinal for deterministic joins.
+func wrapSQLSourceWorkers(source sqlSource, rows []SQLRow, workers int) []sqlExecRow {
 	out := make([]sqlExecRow, len(rows))
-	for i, row := range rows {
-		out[i] = sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}, ordinals: map[string]int{source.alias: i}}
+	if workers < 2 || len(rows) < 2 {
+		for i, row := range rows {
+			out[i] = sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}, ordinals: map[string]int{source.alias: i}}
+		}
+		return out
 	}
+	if workers > len(rows) {
+		workers = len(rows)
+	}
+	jobs := make(chan int)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range jobs {
+				out[index] = sqlExecRow{sources: map[string]SQLRow{source.alias: rows[index]}, order: []string{source.alias}, ordinals: map[string]int{source.alias: index}}
+			}
+		}()
+	}
+	for index := range rows {
+		jobs <- index
+	}
+	close(jobs)
+	group.Wait()
 	return out
 }
 func mergeSQLRows(left, right sqlExecRow) sqlExecRow {
@@ -8136,19 +8219,14 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 		}
 	}()
 	runs := []sqlSpillRun{}
+	chunks := [][]sqlSpillOutput{}
 	chunk := make([]sqlSpillOutput, 0)
 	chunkBytes := 0
 	flush := func() error {
 		if len(chunk) == 0 {
 			return nil
 		}
-		sort.SliceStable(chunk, func(left, right int) bool { return sqlSpillOutputLess(chunk[left], chunk[right], order) })
-		run, err := sqlWriteSpillRun(directory, chunk, &available, control)
-		if err != nil {
-			return err
-		}
-		allPaths[run.path] = struct{}{}
-		runs = append(runs, run)
+		chunks = append(chunks, chunk)
 		chunk = make([]sqlSpillOutput, 0)
 		chunkBytes = 0
 		return nil
@@ -8168,6 +8246,18 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 	}
 	if err := flush(); err != nil {
 		return nil, 0, 0, err
+	}
+	sqlSortSpillChunks(chunks, order, control)
+	for _, chunk := range chunks {
+		if err := control.check(); err != nil {
+			return nil, 0, 0, err
+		}
+		run, err := sqlWriteSpillRun(directory, chunk, &available, control)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		allPaths[run.path] = struct{}{}
+		runs = append(runs, run)
 	}
 	for len(runs) > maxSQLSpillMergeFanIn {
 		next := make([]sqlSpillRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
@@ -8197,6 +8287,40 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 		return nil, 0, 0, err
 	}
 	return rows, int64(maxSpillBytes) - available, len(runs), nil
+}
+
+func sqlSortSpillChunks(chunks [][]sqlSpillOutput, order []sqlOrder, control *sqlExecutionControl) {
+	workers := 1
+	if control != nil && control.options.Workers > 1 {
+		workers = control.options.Workers
+	}
+	if workers > len(chunks) {
+		workers = len(chunks)
+	}
+	if workers <= 1 {
+		for _, chunk := range chunks {
+			sort.SliceStable(chunk, func(left, right int) bool { return sqlSpillOutputLess(chunk[left], chunk[right], order) })
+		}
+		return
+	}
+	jobs := make(chan int)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range jobs {
+				sort.SliceStable(chunks[index], func(left, right int) bool {
+					return sqlSpillOutputLess(chunks[index][left], chunks[index][right], order)
+				})
+			}
+		}()
+	}
+	for index := range chunks {
+		jobs <- index
+	}
+	close(jobs)
+	group.Wait()
 }
 
 // sqlSpillSetRecord retains only what a DISTINCT set operator needs while it

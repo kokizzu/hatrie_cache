@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -253,6 +254,29 @@ func TestLargeEqualityJoinSpillBudgetCleansTemporaryFiles(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("failed spill directory entries = %#v, want cleanup", entries)
+	}
+}
+
+func TestWorkersPreserveGroupedResultOrder(t *testing.T) {
+	resolver := &exactJoinPlanResolver{sources: map[string][]hatSql.Row{
+		"events": {
+			{"kind": "a", "value": 1},
+			{"kind": "b", "value": 2},
+			{"kind": "a", "value": 3},
+			{"kind": "c", "value": 4},
+		},
+	}}
+	query := "FROM CACHE('events') AS e SELECT e.kind, COUNT(*) AS total, SUM(e.value) AS sum GROUP BY e.kind"
+	sequential, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parallel, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(parallel, sequential) {
+		t.Fatalf("parallel grouped result = %#v, want %#v", parallel, sequential)
 	}
 }
 
