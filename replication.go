@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatReplication"
 	"hatrie_cache/internal/jsonwire"
 
 	"google.golang.org/grpc"
@@ -341,9 +342,9 @@ type replicationCircuitBreakerState struct {
 }
 
 const (
-	replicationCircuitClosed   = "closed"
-	replicationCircuitOpen     = "open"
-	replicationCircuitHalfOpen = "half_open"
+	replicationCircuitClosed   = string(hatReplication.StateClosed)
+	replicationCircuitOpen     = string(hatReplication.StateOpen)
+	replicationCircuitHalfOpen = string(hatReplication.StateHalfOpen)
 )
 
 type ReplicationSafetyStore struct {
@@ -3497,16 +3498,17 @@ func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
 	state := replicator.breakers[node]
+	decision := hatReplication.BeforeAttempt(replicationBreakerSnapshot(state), replicationBreakerConfig(replicator), now)
 	switch state.state {
 	case replicationCircuitOpen:
-		if state.openUntil == nil || now.Before(*state.openUntil) {
+		if !decision.Allowed {
 			result.CircuitOpen = true
 			result.CircuitState = replicationCircuitOpen
 			result.CircuitOpenUntil = cloneTimePtr(state.openUntil)
 			result.Error = "replication circuit breaker open"
 			return result, false, replicationCircuitOpen
 		}
-		state.state = replicationCircuitHalfOpen
+		state.state = string(decision.State)
 		replicator.breakers[node] = state
 		replicator.recordReplicationCircuitTransition(target, replicationCircuitHalfOpen)
 		return result, true, replicationCircuitHalfOpen
@@ -3538,15 +3540,11 @@ func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, at
 	if result.OK {
 		result.CircuitState = replicationCircuitClosed
 		if existing, ok := replicator.breakers[node]; ok {
-			if existing.state == replicationCircuitOpen || existing.state == replicationCircuitHalfOpen {
+			updated, transitioned := hatReplication.RecordSuccess(replicationBreakerSnapshot(existing), now)
+			if transitioned {
 				replicator.recordReplicationCircuitTransition(target, replicationCircuitClosed)
 			}
-			existing.state = replicationCircuitClosed
-			existing.failures = 0
-			existing.openedAt = nil
-			existing.openUntil = nil
-			existing.lastSuccessAt = cloneTimePtr(&now)
-			existing.lastFailureReason = ""
+			existing = replicationBreakerState(updated)
 			if existing.lastFailureAt == nil {
 				delete(replicator.breakers, node)
 			} else {
@@ -3557,19 +3555,13 @@ func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, at
 	}
 
 	state := replicator.breakers[node]
-	previousState := state.state
-	state.failures++
-	state.lastFailureAt = cloneTimePtr(&now)
-	state.lastFailureReason = replicationTargetFailureReason(result)
-	if attemptState == replicationCircuitHalfOpen || state.failures >= replicator.breakerFailures {
-		openUntil := now.Add(replicator.breakerCooldown)
-		state.state = replicationCircuitOpen
-		state.openedAt = cloneTimePtr(&now)
-		state.openUntil = cloneTimePtr(&openUntil)
+	updated, transitioned := hatReplication.RecordFailure(replicationBreakerSnapshot(state), replicationBreakerConfig(replicator), hatReplication.CircuitState(attemptState), replicationTargetFailureReason(result), now)
+	state = replicationBreakerState(updated)
+	if state.state == replicationCircuitOpen {
 		result.CircuitOpen = true
 		result.CircuitState = replicationCircuitOpen
-		result.CircuitOpenUntil = cloneTimePtr(&openUntil)
-		if previousState != replicationCircuitOpen {
+		result.CircuitOpenUntil = cloneTimePtr(state.openUntil)
+		if transitioned {
 			replicator.recordReplicationCircuitTransition(target, replicationCircuitOpen)
 		}
 	} else {
@@ -3578,6 +3570,18 @@ func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, at
 	}
 	replicator.breakers[node] = state
 	return result
+}
+
+func replicationBreakerConfig(replicator *HTTPReplicator) hatReplication.CircuitBreakerConfig {
+	return hatReplication.CircuitBreakerConfig{Failures: replicator.breakerFailures, Cooldown: replicator.breakerCooldown}
+}
+
+func replicationBreakerSnapshot(state replicationCircuitBreakerState) hatReplication.CircuitBreakerSnapshot {
+	return hatReplication.CircuitBreakerSnapshot{State: hatReplication.CircuitState(state.state), Failures: state.failures, OpenedAt: cloneTimePtr(state.openedAt), OpenUntil: cloneTimePtr(state.openUntil), LastFailureAt: cloneTimePtr(state.lastFailureAt), LastSuccessAt: cloneTimePtr(state.lastSuccessAt), LastFailureReason: state.lastFailureReason}
+}
+
+func replicationBreakerState(snapshot hatReplication.CircuitBreakerSnapshot) replicationCircuitBreakerState {
+	return replicationCircuitBreakerState{state: string(snapshot.State), failures: snapshot.Failures, openedAt: cloneTimePtr(snapshot.OpenedAt), openUntil: cloneTimePtr(snapshot.OpenUntil), lastFailureAt: cloneTimePtr(snapshot.LastFailureAt), lastSuccessAt: cloneTimePtr(snapshot.LastSuccessAt), lastFailureReason: snapshot.LastFailureReason}
 }
 
 func (replicator *HTTPReplicator) replicationCircuitBreakerEnabled() bool {
