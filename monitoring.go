@@ -136,6 +136,14 @@ func (resolver monitoringSQLResolver) ResolveSQLIndexedRangeSource(name, key, fi
 	return indexed.ResolveSQLIndexedRangeSource(name, key, field, operator, value)
 }
 
+func (resolver monitoringSQLResolver) ResolveSQLTextSource(name, key, field, query string) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(SQLTextIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLTextSource(name, key, field, query)
+}
+
 func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
 	indexed, ok := resolver.source.(SQLCompositeIndexedSourceResolver)
 	if !ok {

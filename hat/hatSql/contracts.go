@@ -77,6 +77,13 @@ type RangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]Row, bool, error)
 }
 
+// TextIndexedSourceResolver optionally resolves an AND token query against a
+// configured text field. Implementations must return only candidate rows; the
+// executor evaluates CONTAINS again before returning results.
+type TextIndexedSourceResolver interface {
+	ResolveSQLTextSource(name, key, field, query string) ([]Row, bool, error)
+}
+
 // OrderedSourceResolver optionally reads one source field in SQL ORDER BY order.
 type OrderedSourceResolver interface {
 	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]Row, bool, error)

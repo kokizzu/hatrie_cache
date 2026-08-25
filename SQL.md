@@ -699,6 +699,32 @@ resolver sources. This is incremental invalidation and recomputation, not
 row-delta maintenance: a changed dependency reruns the affected view query.
 `Get` returns an independent snapshot, safe for callers to inspect or modify.
 
+### Full-text token indexes
+
+For whole-token text search, create an optional index and use
+`CONTAINS(field, 'token words')`. Both the index and query normalize text to
+case-insensitive Unicode letter-or-number tokens. Every query token must be
+present; punctuation and duplicate words are ignored. This differs from
+case-sensitive substring `LIKE` and intentionally avoids stemmers, prefixes,
+and fuzzy matching.
+
+```go
+if err := trie.CreateSQLJSONTextIndex("articles", "body"); err != nil {
+    return err
+}
+```
+
+```sql
+FROM CACHE('articles') AS article
+WHERE CONTAINS(article.body, 'go cache')
+SELECT article.id, article.title;
+```
+
+The index stores parsed source rows once and compact row-position posting lists
+per token, then intersects the smallest postings first. It is lazily refreshed
+when the source cache value changes. The normal `CONTAINS` predicate still runs
+after the probe, so the index only reduces work and cannot change results.
+
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses

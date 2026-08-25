@@ -31,6 +31,7 @@ type SQLStreamSourceResolver = hatSql.StreamSourceResolver
 type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
 type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
+type SQLTextIndexedSourceResolver = hatSql.TextIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = hatSql.CompositeIndexedSourceResolver
@@ -140,6 +141,11 @@ type sqlJSONFieldIndexEntry struct {
 	value interface{}
 	row   SQLRow
 }
+type sqlJSONTextIndex struct {
+	raw    string
+	rows   []SQLRow
+	tokens map[string][]int
+}
 type sqlJSONCompositeIndex struct {
 	raw    string
 	fields []string
@@ -160,6 +166,90 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	}
 	ht.sqlJSONIndexes[key][field] = &sqlJSONFieldIndex{}
 	return nil
+}
+
+// CreateSQLJSONTextIndex configures a token index for one string field in a
+// JSON object or array stored at key. Creation is online: source parsing and
+// tokenization are deferred until the first matching CONTAINS query.
+func (ht *HatTrie) CreateSQLJSONTextIndex(key, field string) error {
+	if ht == nil || key == "" || field == "" {
+		return fmt.Errorf("SQL JSON text index requires a cache key and field")
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONTextIndexes == nil {
+		ht.sqlJSONTextIndexes = map[string]map[string]*sqlJSONTextIndex{}
+	}
+	if ht.sqlJSONTextIndexes[key] == nil {
+		ht.sqlJSONTextIndexes[key] = map[string]*sqlJSONTextIndex{}
+	}
+	ht.sqlJSONTextIndexes[key][field] = &sqlJSONTextIndex{}
+	return nil
+}
+
+// ResolveSQLTextSource resolves the candidates for an AND token query against
+// an opt-in text index. The SQL executor re-evaluates CONTAINS for every row
+// returned here before publishing a result.
+func (ht *HatTrie) ResolveSQLTextSource(name, key, field, query string) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONTextIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONTextIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	tokens := hatSql.TextTokens(query)
+	if len(tokens) == 0 {
+		return []SQLRow{}, true, nil
+	}
+	postings := make([][]int, len(tokens))
+	for tokenIndex, token := range tokens {
+		posting := index.tokens[token]
+		if len(posting) == 0 {
+			return []SQLRow{}, true, nil
+		}
+		postings[tokenIndex] = posting
+	}
+	sort.Slice(postings, func(left, right int) bool { return len(postings[left]) < len(postings[right]) })
+	matched := append([]int(nil), postings[0]...)
+	for _, posting := range postings[1:] {
+		matched = intersectSQLTextPostings(matched, posting)
+		if len(matched) == 0 {
+			return []SQLRow{}, true, nil
+		}
+	}
+	rows := make([]SQLRow, len(matched))
+	for rowIndex, sourceIndex := range matched {
+		rows[rowIndex] = index.rows[sourceIndex]
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func intersectSQLTextPostings(left, right []int) []int {
+	result := left[:0]
+	leftIndex, rightIndex := 0, 0
+	for leftIndex < len(left) && rightIndex < len(right) {
+		switch {
+		case left[leftIndex] < right[rightIndex]:
+			leftIndex++
+		case left[leftIndex] > right[rightIndex]:
+			rightIndex++
+		default:
+			result = append(result, left[leftIndex])
+			leftIndex++
+			rightIndex++
+		}
+	}
+	return result
 }
 
 // SQLJSONIndexHealth refreshes and reports one configured field index. It is
@@ -591,6 +681,27 @@ func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data 
 	sort.SliceStable(index.ordered, func(i, j int) bool {
 		return hatSql.Compare(index.ordered[i].value, index.ordered[j].value) < 0
 	})
+	return nil
+}
+
+func refreshSQLJSONTextIndex(index *sqlJSONTextIndex, key, field string, data []byte) error {
+	if index.raw == string(data) {
+		return nil
+	}
+	rows, err := sqlJSONRows(key, data)
+	if err != nil {
+		return err
+	}
+	index.raw, index.rows, index.tokens = string(data), rows, map[string][]int{}
+	for rowIndex, row := range rows {
+		text, ok := row[field].(string)
+		if !ok {
+			continue
+		}
+		for _, token := range hatSql.TextTokens(text) {
+			index.tokens[token] = append(index.tokens[token], rowIndex)
+		}
+	}
 	return nil
 }
 

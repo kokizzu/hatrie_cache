@@ -5424,7 +5424,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return sqlExpr{}, err
 			}
-			expr := sqlExpr{kind: "func", name: upper, args: args}
+			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("OVER") {
 				p.next()
 				if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
@@ -7675,7 +7675,13 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 }
 
 func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics) ([]SQLRow, bool, error) {
-	if source.kind != "CACHE" || len(source.fieldTypes) != 0 || condition.kind != "binary" || condition.left == nil || condition.right == nil {
+	if source.kind != "CACHE" || len(source.fieldTypes) != 0 {
+		return nil, false, nil
+	}
+	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver); indexed || err != nil {
+		return rows, indexed, err
+	}
+	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
 	if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
@@ -7704,6 +7710,25 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		return resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
 	}
 	return nil, false, nil
+}
+
+func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+	if condition.kind != "func" || !strings.EqualFold(condition.name, "CONTAINS") || len(condition.args) != 2 {
+		return nil, false, nil
+	}
+	field, query := condition.args[0], condition.args[1]
+	if field.kind != "field" || field.qualifier != source.alias || query.kind != "literal" {
+		return nil, false, nil
+	}
+	text, ok := query.value.(string)
+	if !ok {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(TextIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLTextSource(source.kind, source.key, field.name, text)
 }
 
 // resolveSQLJoinPushedSource resolves and filters an INNER JOIN input before
@@ -9946,6 +9971,27 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return nil
 	case "func":
 		switch expr.name {
+		case "CONTAINS":
+			if len(expr.args) != 2 {
+				return sqlEvalError{err: fmt.Errorf("CONTAINS expects exactly two arguments"), token: expr.token}
+			}
+			value := evalSQLExpr(expr.args[0], group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			query := evalSQLExpr(expr.args[1], group, row)
+			if err := sqlExpressionError(query); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if value == nil || query == nil {
+				return nil
+			}
+			text, textOK := value.(string)
+			search, searchOK := query.(string)
+			if !textOK || !searchOK {
+				return sqlEvalError{err: fmt.Errorf("CONTAINS expects TEXT arguments"), token: expr.token}
+			}
+			return textContains(text, search)
 		case "COUNT":
 			if len(expr.args) == 0 || expr.args[0].kind == "star" {
 				return int64(len(group))
@@ -10324,7 +10370,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COUNT", "SUM", "AVG", "MIN", "MAX":
+	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX":
 		return true
 	}
 	return false

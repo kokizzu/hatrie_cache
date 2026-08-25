@@ -28,6 +28,55 @@ func TestSQLJSONIndexHealthRefreshesOnlineIndex(t *testing.T) {
 	}
 }
 
+func TestSQLJSONTextIndexAcceleratesTokenContains(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("articles", `[
+  {"id":1,"body":"Fast cache indexes for Go"},
+  {"id":2,"body":"A slow database migration"},
+  {"id":3,"body":"Go query planning and cache design"}
+]`)
+	if err := trie.CreateSQLJSONTextIndex("articles", "body"); err != nil {
+		t.Fatalf("CreateSQLJSONTextIndex() error = %v", err)
+	}
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('articles') AS article
+WHERE CONTAINS(article.body, 'go cache')
+SELECT article.id
+ORDER BY article.id`, trie)
+	if err != nil {
+		t.Fatalf("token query error = %v", err)
+	}
+	if !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(1)}, {"id": float64(3)}}) {
+		t.Fatalf("token query rows = %#v", result.Rows)
+	}
+	explained, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE FROM CACHE('articles') AS article
+WHERE CONTAINS(article.body, 'go cache')
+SELECT article.id
+ORDER BY article.id`, trie)
+	if err != nil {
+		t.Fatalf("token query EXPLAIN error = %v", err)
+	}
+	if len(explained.Rows) == 0 || explained.Rows[0]["node"] != "INDEX SCAN" {
+		t.Fatalf("token query plan = %#v, want INDEX SCAN", explained.Rows)
+	}
+	result, err = ExecuteSQLQuery(`
+FROM CACHE('articles') AS article
+WHERE CONTAINS(article.body, 'database')
+SELECT article.id`, trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(2)}}) {
+		t.Fatalf("single token query = %#v, %v", result, err)
+	}
+	_, err = ExecuteSQLQuery(`
+FROM CACHE('articles') AS article
+WHERE CONTAINS(article.id, '1')
+SELECT article.id`, trie)
+	if err == nil || !strings.Contains(err.Error(), "CONTAINS expects TEXT arguments") {
+		t.Fatalf("non-text token query error = %v", err)
+	}
+}
+
 func TestExecuteSQLQueryEmitsStructuredObservability(t *testing.T) {
 	t.Parallel()
 	var events []SQLQueryEvent
