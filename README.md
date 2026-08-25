@@ -479,6 +479,16 @@ in `BENCHMARK.md` from those artifacts.
 The [timed command benchmark helper audit](BENCHMARK.md#timed-command-benchmark-helper-overhead)
 removes caller-stack collection from successful timed operations while keeping
 failure attribution. This is a benchmark-harness correction, not a production speedup.
+
+Run the SQL execution suite to record result throughput, heap allocation,
+external spill bytes, and the `EXPLAIN ANALYZE` plan signature:
+
+```
+make bench-sql SQL_BENCH_ROWS=1000 SQL_BENCH_ITERATIONS=5 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+The JSON artifact is written to `build/benchmarks/sql-benchmark.json`; it has
+deterministic scenarios for scan, external sort, and external group aggregate.
 [`IMPROVEMENT_REPORT.md`](IMPROVEMENT_REPORT.md) consolidates the shipped
 feature commits, final before/after metrics, and measured tradeoffs.
 The one-table summary for all measured earlier and final architecture
