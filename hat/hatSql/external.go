@@ -5,9 +5,12 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/parquet-go/parquet-go"
 )
 
 // ExternalTable is an immutable external-table snapshot.
@@ -66,6 +69,52 @@ func (tables *ExternalTables) ImportJSON(name string, data []byte) error {
 		return err
 	}
 	return tables.Register(name, ExternalTable{Columns: externalTableRowColumns(rows), Rows: rows})
+}
+
+// ImportParquet parses a flat Parquet table and replaces name. Nested and
+// repeated schemas are rejected because SQL external tables expose one scalar
+// value per column. Parquet UTF-8/binary values become strings; primitive
+// numeric and boolean values retain their Go representations.
+func (tables *ExternalTables) ImportParquet(name string, data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("Parquet data is empty")
+	}
+	file, err := parquet.OpenFile(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("parse Parquet: %w", err)
+	}
+	columns, err := externalParquetColumns(file.Schema().Columns())
+	if err != nil {
+		return err
+	}
+	reader := parquet.NewRowGroupRowReader(parquet.MultiRowGroup(file.RowGroups()...))
+	defer reader.Close()
+	rows := make([]Row, 0)
+	buffer := make([]parquet.Row, 128)
+	for {
+		count, readErr := reader.ReadRows(buffer)
+		for _, parquetRow := range buffer[:count] {
+			row := make(Row, len(columns))
+			parquetRow.Range(func(columnIndex int, values []parquet.Value) bool {
+				if columnIndex >= len(columns) || len(values) == 0 {
+					return true
+				}
+				value := values[len(values)-1]
+				if !value.IsNull() {
+					row[columns[columnIndex]] = externalParquetValue(value)
+				}
+				return true
+			})
+			rows = append(rows, row)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read Parquet rows: %w", readErr)
+		}
+	}
+	return tables.Register(name, ExternalTable{Columns: columns, Rows: rows})
 }
 
 // Register replaces a table snapshot after validating its name and columns.
@@ -148,6 +197,51 @@ func (tables *ExternalTables) ExportJSON(name string) ([]byte, error) {
 	return json.Marshal(table.Rows)
 }
 
+// ExportParquet encodes one table as a flat Parquet document. Values are
+// serialized as optional UTF-8 text to retain arbitrary external-table values
+// without type inference; SQL callers can cast fields on read.
+func (tables *ExternalTables) ExportParquet(name string) ([]byte, error) {
+	table, ok := tables.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
+	}
+	group := make(parquet.Group, len(table.Columns))
+	for _, column := range table.Columns {
+		group[column] = parquet.Optional(parquet.String())
+	}
+	schema := parquet.NewSchema("external", group)
+	paths := schema.Columns()
+	columns, err := externalParquetColumns(paths)
+	if err != nil {
+		return nil, err
+	}
+	columnIndexes := make(map[string]int, len(columns))
+	for index, column := range columns {
+		columnIndexes[column] = index
+	}
+	rows := make([]parquet.Row, len(table.Rows))
+	for rowIndex, row := range table.Rows {
+		parquetRow := make(parquet.Row, len(columns))
+		for column, name := range columns {
+			value := parquet.NullValue().Level(0, 0, column)
+			if source, exists := row[name]; exists && source != nil {
+				value = parquet.ValueOf(fmt.Sprint(source)).Level(0, 1, columnIndexes[name])
+			}
+			parquetRow[column] = value
+		}
+		rows[rowIndex] = parquetRow
+	}
+	buffer := bytes.Buffer{}
+	writer := parquet.NewWriter(&buffer, schema)
+	if _, err := writer.WriteRows(rows); err != nil {
+		return nil, fmt.Errorf("write Parquet rows: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close Parquet writer: %w", err)
+	}
+	return buffer.Bytes(), nil
+}
+
 // ResolveSQLSource lets a registry be passed directly to query execution for
 // external-only queries. CACHE and KEYS require an application resolver.
 func (tables *ExternalTables) ResolveSQLSource(name string, key string) ([]Row, error) {
@@ -218,6 +312,44 @@ func externalTableHasColumn(columns []string, name string) bool {
 		}
 	}
 	return false
+}
+
+func externalParquetColumns(paths [][]string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("Parquet table has no columns")
+	}
+	columns := make([]string, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for index, path := range paths {
+		if len(path) != 1 || strings.TrimSpace(path[0]) == "" {
+			return nil, fmt.Errorf("Parquet external tables require flat scalar columns")
+		}
+		if _, exists := seen[path[0]]; exists {
+			return nil, fmt.Errorf("Parquet column %q is duplicated", path[0])
+		}
+		seen[path[0]] = struct{}{}
+		columns[index] = path[0]
+	}
+	return columns, nil
+}
+
+func externalParquetValue(value parquet.Value) interface{} {
+	switch value.Kind() {
+	case parquet.Boolean:
+		return value.Boolean()
+	case parquet.Int32:
+		return int64(value.Int32())
+	case parquet.Int64:
+		return value.Int64()
+	case parquet.Float:
+		return float64(value.Float())
+	case parquet.Double:
+		return value.Double()
+	case parquet.ByteArray, parquet.FixedLenByteArray:
+		return string(value.ByteArray())
+	default:
+		return value.String()
+	}
 }
 
 func cloneExternalTable(table ExternalTable) ExternalTable {

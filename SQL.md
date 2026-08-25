@@ -596,7 +596,7 @@ server and return rows; they never implicitly mutate cache values.
 | --- | --- |
 | `KEYS` | One row per cache entry: `key`, `type`, `ttl_ms`, `on_disk`, `size_bytes`, and `value_preview`. |
 | `CACHE('key')` | The JSON value stored at one cache key. A JSON array of objects produces one row per object; a JSON object produces one row with its fields. Scalars and arrays containing non-objects are rejected with an actionable error. |
-| `EXTERNAL('name')` | A caller-imported CSV or JSON table snapshot provided by an `ExternalSourceResolver`; it never opens a path or URL from SQL text. |
+| `EXTERNAL('name')` | A caller-imported CSV, JSON, or flat Parquet table snapshot provided by an `ExternalSourceResolver`; it never opens a path or URL from SQL text. |
 | `VALUES (...)` | Inline rows, primarily for CTEs, tests, and joining query parameters. |
 | `WITH name [(columns...)] AS (SELECT ... | VALUES ...)` | A named source scoped to one query. CTEs can reference earlier CTEs. |
 | `WITH RECURSIVE name [(columns...)] AS (seed UNION [ALL] recursive_term)` | A named hierarchy/sequence source. Each recursive iteration sees only rows from the previous iteration. |
@@ -700,9 +700,9 @@ resolver sources. This is incremental invalidation and recomputation, not
 row-delta maintenance: a changed dependency reruns the affected view query.
 `Get` returns an independent snapshot, safe for callers to inspect or modify.
 
-### External CSV and JSON tables
+### External CSV, JSON, and Parquet tables
 
-`hatSql.ExternalTables` imports caller-supplied CSV or JSON bytes into named,
+`hatSql.ExternalTables` imports caller-supplied CSV, JSON, or Parquet bytes into named,
 immutable snapshots. Query them with `EXTERNAL('name')`; SQL never receives a
 path or URL, so this facility cannot read arbitrary local files or make network
 requests. CSV requires a unique non-empty header row and preserves cells as
@@ -724,8 +724,11 @@ _ = result
 _ = csvBytes
 ```
 
-`ImportJSON`, `ExportJSON`, `ImportCSV`, and `ExportCSV` all clone input and
-output rows. Importing the same name replaces its complete snapshot, so a
+`ImportJSON`, `ExportJSON`, `ImportCSV`, `ExportCSV`, `ImportParquet`, and
+`ExportParquet` all clone input and output rows. Parquet import accepts flat
+scalar columns; nested/repeated schemas are rejected explicitly. Parquet export
+uses optional UTF-8 columns, so arbitrary row values round-trip as text and can
+be cast in SQL. Importing the same name replaces its complete snapshot, so a
 concurrent query observes either the old table or the new one, never a partial
 import.
 

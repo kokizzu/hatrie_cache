@@ -27,6 +27,20 @@ SELECT event.id`, tables, nil, hatSql.QueryOptions{})
 	if err != nil || string(exported) != "id,state\n1,open\n2,closed\n" {
 		t.Fatalf("ExportCSV() = %q, %v", exported, err)
 	}
+	parquetBytes, err := tables.ExportParquet("events")
+	if err != nil {
+		t.Fatalf("ExportParquet() error = %v", err)
+	}
+	if err := tables.ImportParquet("events_parquet", parquetBytes); err != nil {
+		t.Fatalf("ImportParquet() error = %v", err)
+	}
+	parquetTable, ok := tables.Get("events_parquet")
+	if !ok || !reflect.DeepEqual(parquetTable, hatSql.ExternalTable{
+		Columns: []string{"id", "state"},
+		Rows:    []hatSql.Row{{"id": "1", "state": "open"}, {"id": "2", "state": "closed"}},
+	}) {
+		t.Fatalf("Parquet table = %#v, %v", parquetTable, ok)
+	}
 	if err := tables.ImportJSON("profiles", []byte(`[{"id":1,"name":"Ada"}]`)); err != nil {
 		t.Fatalf("ImportJSON() error = %v", err)
 	}
