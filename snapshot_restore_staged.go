@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
+	"hatrie_cache/hat/hatPartition"
 )
 
 func (ht *HatTrie) loadSnapshotStaged(path string) (SnapshotMetadata, error) {
@@ -63,7 +63,7 @@ func newSnapshotRestoreStage(target *HatTrie) (*HatTrie, error) {
 		return stage, nil
 	}
 
-	set := &localPartitionSet{tries: make([]*HatTrie, 0, len(liveSet.tries)), mask: liveSet.mask}
+	set := &localPartitionSet{tries: make([]*HatTrie, 0, len(liveSet.tries))}
 	for _, child := range liveSet.tries {
 		stagedChild, err := newSnapshotRestoreTrie(child)
 		if err != nil {
@@ -145,7 +145,7 @@ func scanSnapshotIntoRestoreStage(file *os.File, stage *HatTrie, now time.Time) 
 		if err != nil || !active {
 			return err
 		}
-		partition := int(xxhash.Sum64String(operation.entry.Key) & set.mask)
+		partition := hatPartition.Index(operation.entry.Key, len(set.tries))
 		return pool.dispatch(partition, detachLocalPartitionRestoreOperation(operation))
 	})
 	if err := pool.finish(scanErr); err != nil {

@@ -15,7 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
+	"hatrie_cache/hat/hatPartition"
+
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -23,12 +24,11 @@ const (
 	// DefaultLocalPartitions preserves the single-trie behavior unless enabled.
 	DefaultLocalPartitions = 0
 	// MaxLocalPartitions bounds open C tries, backing pools, and disk directories.
-	MaxLocalPartitions = 256
+	MaxLocalPartitions = hatPartition.MaxCount
 )
 
 type localPartitionSet struct {
 	tries []*HatTrie
-	mask  uint64
 }
 
 // LocalPartitioningStats describes the optional in-process key partitions.
@@ -41,10 +41,7 @@ type LocalPartitioningStats struct {
 // ValidateLocalPartitions accepts zero (disabled) or a power of two from 2 to
 // 256. Power-of-two routing avoids division on every key operation.
 func ValidateLocalPartitions(count int) error {
-	if count < 0 || count == 1 || count > MaxLocalPartitions || (count != 0 && count&(count-1) != 0) {
-		return fmt.Errorf("hatriecache: local partitions must be zero or a power of two from 2 through %d", MaxLocalPartitions)
-	}
-	return nil
+	return hatPartition.Validate(count)
 }
 
 // ConfigureLocalPartitions enables independent in-process HAT tries. It is a
@@ -82,7 +79,7 @@ func (ht *HatTrie) ConfigureLocalPartitions(count int) error {
 		return errors.New("hatriecache: local partitions require disk storage")
 	}
 
-	set := &localPartitionSet{tries: make([]*HatTrie, 0, count), mask: uint64(count - 1)}
+	set := &localPartitionSet{tries: make([]*HatTrie, 0, count)}
 	partitionDir := filepath.Join(ht.disks.dir, "local-partitions")
 	for index := 0; index < count; index++ {
 		child, err := CreateHatTrieWithDiskDir(filepath.Join(partitionDir, fmt.Sprintf("%03d", index)), false)
@@ -147,7 +144,7 @@ func (ht *HatTrie) LocalPartitionForKey(key string) (int, bool, error) {
 	if set == nil {
 		return 0, false, nil
 	}
-	return int(xxhash.Sum64String(key) & set.mask), true, nil
+	return hatPartition.Index(key, len(set.tries)), true, nil
 }
 
 func (ht *HatTrie) localPartitionForKey(key string) *HatTrie {
@@ -158,7 +155,7 @@ func (ht *HatTrie) localPartitionForKey(key string) *HatTrie {
 	if set == nil {
 		return nil
 	}
-	return set.tries[xxhash.Sum64String(key)&set.mask]
+	return set.tries[hatPartition.Index(key, len(set.tries))]
 }
 
 func (ht *HatTrie) localPartitionSet() *localPartitionSet {
@@ -389,7 +386,7 @@ func (ht *HatTrie) executePartitionedPublicBatchCommand(request CacheCommandRequ
 	if request.Atomic {
 		partition := 0
 		for index, payload := range payloads {
-			candidate := int(xxhash.Sum64String(strings.TrimSpace(payload.Key)) & set.mask)
+			candidate := hatPartition.Index(strings.TrimSpace(payload.Key), len(set.tries))
 			if index == 0 {
 				partition = candidate
 				continue
@@ -409,7 +406,7 @@ func (ht *HatTrie) executePartitionedPublicBatchCommand(request CacheCommandRequ
 	}
 	groups := make([]partitionBatch, len(set.tries))
 	for index, payload := range payloads {
-		partition := int(xxhash.Sum64String(strings.TrimSpace(payload.Key)) & set.mask)
+		partition := hatPartition.Index(strings.TrimSpace(payload.Key), len(set.tries))
 		groups[partition].indexes = append(groups[partition].indexes, index)
 		groups[partition].requests = append(groups[partition].requests, payload)
 	}
@@ -453,7 +450,7 @@ func executePartitionedPublicCommandBatch(ctx context.Context, trie *HatTrie, re
 	if request.Atomic {
 		partition := 0
 		for index, payload := range payloads {
-			candidate := int(xxhash.Sum64String(strings.TrimSpace(payload.Key)) & set.mask)
+			candidate := hatPartition.Index(strings.TrimSpace(payload.Key), len(set.tries))
 			if index == 0 {
 				partition = candidate
 				continue
@@ -469,7 +466,7 @@ func executePartitionedPublicCommandBatch(ctx context.Context, trie *HatTrie, re
 	}
 	partition := -1
 	for _, payload := range payloads {
-		candidate := int(xxhash.Sum64String(strings.TrimSpace(payload.Key)) & set.mask)
+		candidate := hatPartition.Index(strings.TrimSpace(payload.Key), len(set.tries))
 		if partition == -1 {
 			partition = candidate
 		} else if partition != candidate {
@@ -768,7 +765,7 @@ func (ht *HatTrie) captureLocalPartitionMutationReplacements(set *localPartition
 			}
 			groups := make([][]string, len(set.tries))
 			for _, key := range keys[first:last] {
-				partition := int(xxhash.Sum64String(key) & set.mask)
+				partition := hatPartition.Index(key, len(set.tries))
 				groups[partition] = append(groups[partition], key)
 			}
 			for partition, partitionKeys := range groups {
@@ -851,7 +848,7 @@ func (ht *HatTrie) applyPartitionedSnapshotFile(file *os.File, metadata snapshot
 		if err := activeKeys.markSeen(operation.entry.Key); err != nil {
 			return err
 		}
-		partition := int(xxhash.Sum64String(operation.entry.Key) & set.mask)
+		partition := hatPartition.Index(operation.entry.Key, len(set.tries))
 		return pool.dispatch(partition, detachLocalPartitionRestoreOperation(operation))
 	})
 	applyErr = pool.finish(applyErr)
@@ -919,7 +916,7 @@ func loadLocalPartitionPersistentEntryData(trie *HatTrie, store persistentRefere
 		}
 		activeKeys = append(activeKeys, loadEntry.entry.Key)
 		result.KeysLoaded++
-		partition := int(xxhash.Sum64String(loadEntry.entry.Key) & set.mask)
+		partition := hatPartition.Index(loadEntry.entry.Key, len(set.tries))
 		work := localPartitionPersistentRestoreWork{load: loadEntry}
 		if loadEntry.reference {
 			work.recordBytes = len(data)
