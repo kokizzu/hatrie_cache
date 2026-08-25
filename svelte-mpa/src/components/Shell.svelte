@@ -1,11 +1,12 @@
 <script lang="ts">
   import { Activity, Database, Settings, TerminalSquare } from '@lucide/svelte';
 
-  export let active: 'dashboard' | 'keys' | 'commands' | 'admin';
+  export let active: 'dashboard' | 'keys' | 'sql' | 'commands' | 'admin';
 
   const nav = [
     { id: 'dashboard', href: '/', label: 'Dashboard', icon: Activity },
     { id: 'keys', href: '/keys.html', label: 'Keys', icon: Database },
+    { id: 'sql', href: '/sql.html', label: 'SQL', icon: TerminalSquare },
     { id: 'commands', href: '/commands.html', label: 'Commands', icon: TerminalSquare },
     { id: 'admin', href: '/admin.html', label: 'Admin', icon: Settings }
   ] as const;

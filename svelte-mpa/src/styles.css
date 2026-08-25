@@ -724,3 +724,16 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.sql-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; }
+.sql-editor textarea { width: 100%; box-sizing: border-box; min-height: 180px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sql-highlight { display: none; }
+.sql-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 14px; }
+.sql-history button { display: grid; grid-template-columns: 1fr auto; width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; padding: 10px 0; text-align: left; color: inherit; cursor: pointer; }
+.sql-history button small { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); margin-top: 4px; font-family: ui-monospace, monospace; }
+.sql-history button.failed strong, .sql-error { color: #b42318; }
+.sql-results, .sql-plan { margin-top: 16px; }
+.table-wrap { overflow: auto; }
+.table-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrap th, .table-wrap td { padding: 9px 12px; border-top: 1px solid var(--line); text-align: left; white-space: nowrap; }
+@media (max-width: 800px) { .sql-layout { grid-template-columns: 1fr; } }

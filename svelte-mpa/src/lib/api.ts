@@ -79,6 +79,22 @@ export type CommandResponse = {
   responses?: CommandResponse[];
 };
 
+export type SQLExplainStep = {
+  node: string;
+  detail: string;
+  estimated_rows?: number;
+  actual_input_rows?: number;
+  actual_output_rows?: number;
+  elapsed_ns?: number;
+};
+
+export type SQLQueryResult = {
+  query_id?: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  plan?: SQLExplainStep[];
+};
+
 export type StorageStatus = {
   configured?: boolean;
   leveldb_configured: boolean;
@@ -510,6 +526,10 @@ export async function loadEntries(prefix = '', limit = 0, afterKey = ''): Promis
 
 export async function runCommand(request: CommandRequest): Promise<CommandResponse> {
   return postJSON<CommandResponse>('/api/commands', request);
+}
+
+export async function runSQL(query: string, parameters: unknown[] = []): Promise<SQLQueryResult> {
+  return postJSON<SQLQueryResult>('/api/sql', { query, parameters });
 }
 
 export async function loadStorageStatus(): Promise<StorageStatus> {
