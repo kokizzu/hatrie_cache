@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
+
+	"hatrie_cache/hat/hatReplication"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -34,11 +34,11 @@ type ReplicationOutboxStore struct {
 	journal           *CommandJournal
 }
 
-type ReplicationOutboxCodec string
+type ReplicationOutboxCodec = hatReplication.OutboxCodec
 
 const (
-	ReplicationOutboxCodecBinary ReplicationOutboxCodec = "binary"
-	ReplicationOutboxCodecJSON   ReplicationOutboxCodec = "json"
+	ReplicationOutboxCodecBinary = hatReplication.OutboxCodecBinary
+	ReplicationOutboxCodecJSON   = hatReplication.OutboxCodecJSON
 )
 
 const DefaultReplicationOutboxBatchWindow = time.Millisecond
@@ -151,14 +151,7 @@ func OpenLevelDBReplicationOutboxWithOptions(path string, options ReplicationOut
 }
 
 func ParseReplicationOutboxCodec(value string) (ReplicationOutboxCodec, error) {
-	switch ReplicationOutboxCodec(strings.ToLower(strings.TrimSpace(value))) {
-	case "", ReplicationOutboxCodecBinary:
-		return ReplicationOutboxCodecBinary, nil
-	case ReplicationOutboxCodecJSON:
-		return ReplicationOutboxCodecJSON, nil
-	default:
-		return "", fmt.Errorf("hatriecache: unsupported replication outbox codec %q", value)
-	}
+	return hatReplication.ParseOutboxCodec(value)
 }
 
 // AttachJournal enables compact outbox references backed by exact replication

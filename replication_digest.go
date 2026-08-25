@@ -284,7 +284,7 @@ func (replicator *HTTPReplicator) syncAllMerkle(ctx context.Context, trie *HatTr
 	for _, target := range targets {
 		pageResult, response := replicator.executeReplicationDigestTargetPage(ctx, target, replicationMerkleRequest(routing, replicator.self, sourceSnapshot))
 		if !pageResult.OK {
-			if pageResult.unsupportedTypedReplication {
+			if pageResult.UnsupportedTypedReplication {
 				return ReplicationResult{}, false
 			}
 			result.Targets = append(result.Targets, pageResult)
@@ -546,7 +546,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		pageResult, response := replicator.executeReplicationDigestTargetPage(ctx, inventory.target, prefixDigestRequest(routing, replicator.self, inventory.prefix, afterKey, hasAfterKey, inventory))
 		lastDigestResult = pageResult
 		if !pageResult.OK {
-			if pageResult.unsupportedTypedReplication {
+			if pageResult.UnsupportedTypedReplication {
 				replicator.markReplicationDigestUnsupported(inventory.target, routing.fingerprint)
 				return replicator.syncDigestTargetFallback(ctx, trie, routing, inventory, grpcSession)
 			}
@@ -1347,7 +1347,7 @@ func (replicator *HTTPReplicator) executeReplicationDigestTargetPage(ctx context
 		result, response := replicator.postReplicationCommandResponse(ctx, target, request, func(message string) bool {
 			return message == "unsupported command" || message == "key is required"
 		})
-		if !result.unsupportedTypedReplication {
+		if !result.UnsupportedTypedReplication {
 			replicator.recordReplicationTargetLatency(target, time.Since(startedAt))
 		}
 		return replicator.afterReplicationTarget(target, state, result), response
