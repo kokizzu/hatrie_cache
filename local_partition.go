@@ -358,7 +358,7 @@ func localPartitionMonitoringEntriesPage(set *localPartitionSet, prefix string, 
 	}
 	if hasAfterKey {
 		response.AfterKey = afterKey
-		response.afterKeySet = true
+		response.AfterKeyPresent = true
 	}
 	start := 0
 	if hasAfterKey {
@@ -375,7 +375,7 @@ func localPartitionMonitoringEntriesPage(set *localPartitionSet, prefix string, 
 	}
 	if response.HasMore && len(response.Entries) > 0 {
 		response.NextAfterKey = response.Entries[len(response.Entries)-1].Key
-		response.nextAfterKeySet = true
+		response.NextAfterKeyPresent = true
 	}
 	return response
 }

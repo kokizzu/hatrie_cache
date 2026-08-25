@@ -22,15 +22,16 @@ import (
 
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatHttp"
+	"hatrie_cache/hat/hatMonitoring"
 	"hatrie_cache/internal/jsonwire"
 )
 
 const (
-	MonitoringAPIVersion                       = 1
+	MonitoringAPIVersion                       = hatMonitoring.APIVersion
 	maxCommandJournalTailResponseBytes         = 1 << 20
 	maxCommandJournalErrorResponseBytes        = 1 << 20
 	maxMonitoringJSONRequestBytes              = 1 << 20
-	maxMonitoringEntriesLimit                  = 100000
+	maxMonitoringEntriesLimit                  = hatMonitoring.MaxEntriesLimit
 	snapshotContentType                        = "application/vnd.hatrie-cache.snapshot"
 	checkpointContentType                      = "application/vnd.hatrie-cache.pebble-checkpoint"
 	journalRecoveryManifestContentType         = "application/vnd.hatrie-cache.recovery-manifest+json"
@@ -166,59 +167,9 @@ type preparedInternalReplicationPayload struct {
 	skipResponse *CacheCommandResponse
 }
 
-type MonitoringHealth struct {
-	Status          string `json:"status"`
-	Node            string `json:"node"`
-	APIVersion      int    `json:"api_version"`
-	Version         string `json:"version"`
-	UptimeSeconds   int64  `json:"uptime_seconds"`
-	MemoryBytes     uint64 `json:"memory_bytes"`
-	DiskSpillBytes  uint64 `json:"disk_spill_bytes"`
-	CleanersRunning int    `json:"cleaners_running"`
-	LocalPartitions int    `json:"local_partitions"`
-}
-
-type MonitoringEntry struct {
-	Key          string `json:"key"`
-	Type         string `json:"type"`
-	TTLMillis    *int64 `json:"ttl_ms"`
-	OnDisk       bool   `json:"on_disk"`
-	SizeBytes    int64  `json:"size_bytes"`
-	ValuePreview string `json:"value_preview"`
-}
-
-type MonitoringEntriesResponse struct {
-	Entries      []MonitoringEntry `json:"entries"`
-	Limit        uint64            `json:"limit,omitempty"`
-	HasMore      bool              `json:"has_more,omitempty"`
-	AfterKey     string            `json:"after_key,omitempty"`
-	NextAfterKey string            `json:"next_after_key,omitempty"`
-
-	afterKeySet     bool
-	nextAfterKeySet bool
-}
-
-func (response MonitoringEntriesResponse) MarshalJSON() ([]byte, error) {
-	type monitoringEntriesResponseJSON struct {
-		Entries      []MonitoringEntry `json:"entries"`
-		Limit        uint64            `json:"limit,omitempty"`
-		HasMore      bool              `json:"has_more,omitempty"`
-		AfterKey     *string           `json:"after_key,omitempty"`
-		NextAfterKey *string           `json:"next_after_key,omitempty"`
-	}
-	out := monitoringEntriesResponseJSON{
-		Entries: response.Entries,
-		Limit:   response.Limit,
-		HasMore: response.HasMore,
-	}
-	if response.afterKeySet || response.AfterKey != "" {
-		out.AfterKey = &response.AfterKey
-	}
-	if response.nextAfterKeySet || response.NextAfterKey != "" {
-		out.NextAfterKey = &response.NextAfterKey
-	}
-	return jsonwire.Marshal(out)
-}
+type MonitoringHealth = hatMonitoring.Health
+type MonitoringEntry = hatMonitoring.Entry
+type MonitoringEntriesResponse = hatMonitoring.EntriesResponse
 
 type replicationSyncRequest struct {
 	Prefix string `json:"prefix,omitempty"`
@@ -2940,7 +2891,7 @@ func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, hasAfte
 	}
 	if hasAfterKey {
 		response.AfterKey = afterKey
-		response.afterKeySet = true
+		response.AfterKeyPresent = true
 	}
 	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
 		if hasAfterKey && entry.Key <= afterKey {
@@ -2970,7 +2921,7 @@ func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, hasAfte
 	}
 	if response.HasMore && len(response.Entries) > 0 {
 		response.NextAfterKey = response.Entries[len(response.Entries)-1].Key
-		response.nextAfterKeySet = true
+		response.NextAfterKeyPresent = true
 	}
 	return response
 }
