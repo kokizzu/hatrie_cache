@@ -19,6 +19,7 @@ type SQLPreparedQueryCacheStats = hatSql.SQLPreparedQueryCacheStats
 type SQLPreparedQuery = hatSql.SQLPreparedQuery
 type SQLParameterType = hatSql.ParameterType
 type SQLParameterSpec = hatSql.ParameterSpec
+type SQLSpillFaults = hatSql.SQLSpillFaults
 type SQLDate = hatSql.SQLDate
 type SQLDecimal = hatSql.SQLDecimal
 type SQLUUID = hatSql.SQLUUID

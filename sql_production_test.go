@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -4764,6 +4766,88 @@ SELECT id, elapsed, payload,
 		t.Run(name, func(t *testing.T) {
 			if err := ValidateSQLQuery(query); err == nil {
 				t.Fatalf("ValidateSQLQuery(%s) error = nil", name)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySpillFaultInjectionCleansTemporaryFiles(t *testing.T) {
+	t.Parallel()
+	query := "FROM VALUES (3), (1), (2) AS values(id) SELECT id ORDER BY id"
+	for name, configure := range map[string]func(*SQLSpillFaults, context.CancelFunc){
+		"disk full": func(faults *SQLSpillFaults, _ context.CancelFunc) {
+			faults.BeforeCreate = func(kind string) error {
+				if kind == "sort" {
+					return syscall.ENOSPC
+				}
+				return nil
+			}
+		},
+		"interrupted write": func(faults *SQLSpillFaults, _ context.CancelFunc) {
+			faults.BeforeWrite = func(kind string, _ int) error {
+				if kind == "sort" {
+					return io.ErrUnexpectedEOF
+				}
+				return nil
+			}
+		},
+		"corrupt file": func(faults *SQLSpillFaults, _ context.CancelFunc) {
+			faults.BeforeRead = func(kind, path string) error {
+				if kind == "sort" {
+					return os.WriteFile(path, []byte("corrupt spill data"), 0o600)
+				}
+				return nil
+			}
+		},
+		"cancellation": func(faults *SQLSpillFaults, cancel context.CancelFunc) {
+			writes := 0
+			faults.BeforeWrite = func(kind string, _ int) error {
+				if kind == "sort" {
+					writes++
+					if writes == 1 {
+						cancel()
+					}
+				}
+				return nil
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			faults := &SQLSpillFaults{}
+			configure(faults, cancel)
+			_, err := ExecuteSQLQueryContext(ctx, query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+				MaxSortBytes:   1,
+				SpillDirectory: directory,
+				MaxSpillBytes:  1 << 20,
+				SpillFaults:    faults,
+			})
+			if err == nil {
+				t.Fatal("ExecuteSQLQueryContext(spill fault) error = nil")
+			}
+			switch name {
+			case "disk full":
+				if !errors.Is(err, syscall.ENOSPC) {
+					t.Fatalf("disk-full error = %v, want ENOSPC", err)
+				}
+			case "interrupted write":
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("interrupted-write error = %v, want unexpected EOF", err)
+				}
+			case "corrupt file":
+				if !strings.Contains(err.Error(), "read SQL sort spill file") {
+					t.Fatalf("corrupt-spill error = %v, want read diagnostic", err)
+				}
+			case "cancellation":
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled spill error = %v, want context.Canceled", err)
+				}
+			}
+			entries, readErr := os.ReadDir(directory)
+			if readErr != nil || len(entries) != 0 {
+				t.Fatalf("spill fault cleanup entries = %#v, %v; want no files", entries, readErr)
 			}
 		})
 	}

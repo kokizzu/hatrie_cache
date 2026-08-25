@@ -137,6 +137,15 @@ type SQLFunctionCall = FunctionCall
 type SQLFunctionError = FunctionError
 type SQLFunctionResolver = FunctionResolver
 
+// SQLSpillFaults injects a failure at an external-sort temporary I/O boundary.
+// BeforeRead may also safely replace the file at path to verify corrupt-spill
+// handling. Hooks must be concurrency-safe when a query uses Workers.
+type SQLSpillFaults struct {
+	BeforeCreate func(kind string) error
+	BeforeWrite  func(kind string, bytes int) error
+	BeforeRead   func(kind, path string) error
+}
+
 // FunctionRuntime evaluates a vectorized UDF implementation.
 type FunctionRuntime interface {
 	Evaluate([]FunctionCall) ([]interface{}, error)
@@ -169,8 +178,12 @@ type SQLQueryOptions struct {
 	// SpillDirectory and MaxSpillBytes opt into bounded temporary files for a
 	// sort that exceeds MaxSortBytes. Both must be set; the default remains a
 	// safe in-memory budget failure. Temporary files are removed before return.
-	SpillDirectory        string
-	MaxSpillBytes         int
+	SpillDirectory string
+	MaxSpillBytes  int
+	// SpillFaults is an optional per-query external-sort I/O hook. It exists
+	// for deterministic fault-injection and chaos tests; production callers
+	// normally leave it nil.
+	SpillFaults           *SQLSpillFaults
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
@@ -8325,15 +8338,47 @@ func sqlGroupedRowsBytes(groups [][]sqlExecRow) int {
 type sqlSpillBudgetWriter struct {
 	writer    io.Writer
 	available *int64
+	faults    *SQLSpillFaults
+	kind      string
 }
 
 func (writer sqlSpillBudgetWriter) Write(data []byte) (int, error) {
+	if writer.faults != nil && writer.faults.BeforeWrite != nil {
+		if err := writer.faults.BeforeWrite(writer.kind, len(data)); err != nil {
+			return 0, err
+		}
+	}
 	if int64(len(data)) > *writer.available {
 		return 0, errSQLSpillDiskBudget
 	}
 	written, err := writer.writer.Write(data)
 	*writer.available -= int64(written)
 	return written, err
+}
+
+func sqlSpillFaults(control *sqlExecutionControl) *SQLSpillFaults {
+	if control == nil {
+		return nil
+	}
+	return control.options.SpillFaults
+}
+
+func createSQLSortSpillFile(control *sqlExecutionControl, directory, pattern string) (*os.File, error) {
+	if faults := sqlSpillFaults(control); faults != nil && faults.BeforeCreate != nil {
+		if err := faults.BeforeCreate("sort"); err != nil {
+			return nil, err
+		}
+	}
+	return os.CreateTemp(directory, pattern)
+}
+
+func openSQLSortSpillFile(control *sqlExecutionControl, path string) (*os.File, error) {
+	if faults := sqlSpillFaults(control); faults != nil && faults.BeforeRead != nil {
+		if err := faults.BeforeRead("sort", path); err != nil {
+			return nil, err
+		}
+	}
+	return os.Open(path)
 }
 
 func sqlSpillOutputLess(left, right sqlSpillOutput, order []sqlOrder) bool {
@@ -8354,7 +8399,7 @@ func sqlSpillOutputBytes(record sqlSpillOutput) int {
 }
 
 func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int64, control *sqlExecutionControl) (sqlSpillRun, error) {
-	file, err := os.CreateTemp(directory, "hatrie-sql-sort-*")
+	file, err := createSQLSortSpillFile(control, directory, "hatrie-sql-sort-*")
 	if err != nil {
 		return sqlSpillRun{}, fmt.Errorf("create SQL sort spill file: %w", err)
 	}
@@ -8366,7 +8411,7 @@ func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available, faults: sqlSpillFaults(control), kind: "sort"})
 	for _, record := range records {
 		if err := control.check(); err != nil {
 			return sqlSpillRun{}, err
@@ -8397,8 +8442,8 @@ type sqlSpillReader struct {
 	done    bool
 }
 
-func openSQLSpillReader(run sqlSpillRun) (*sqlSpillReader, error) {
-	file, err := os.Open(run.path)
+func openSQLSpillReader(run sqlSpillRun, control *sqlExecutionControl) (*sqlSpillReader, error) {
+	file, err := openSQLSortSpillFile(control, run.path)
 	if err != nil {
 		return nil, fmt.Errorf("open SQL sort spill file: %w", err)
 	}
@@ -8437,7 +8482,7 @@ func closeSQLSpillReaders(readers []*sqlSpillReader) {
 func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory string, available *int64, control *sqlExecutionControl) (sqlSpillRun, error) {
 	readers := make([]*sqlSpillReader, len(runs))
 	for index, run := range runs {
-		reader, err := openSQLSpillReader(run)
+		reader, err := openSQLSpillReader(run, control)
 		if err != nil {
 			closeSQLSpillReaders(readers)
 			return sqlSpillRun{}, err
@@ -8445,7 +8490,7 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 		readers[index] = reader
 	}
 	defer closeSQLSpillReaders(readers)
-	file, err := os.CreateTemp(directory, "hatrie-sql-sort-merge-*")
+	file, err := createSQLSortSpillFile(control, directory, "hatrie-sql-sort-merge-*")
 	if err != nil {
 		return sqlSpillRun{}, fmt.Errorf("create SQL sort merge file: %w", err)
 	}
@@ -8457,7 +8502,7 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available, faults: sqlSpillFaults(control), kind: "sort"})
 	for {
 		if err := control.check(); err != nil {
 			return sqlSpillRun{}, err
@@ -8516,7 +8561,7 @@ func sqlMergeSpillRunsToVisit(runs []sqlSpillRun, order []sqlOrder, control *sql
 	}
 	readers := make([]*sqlSpillReader, len(runs))
 	for index, run := range runs {
-		reader, err := openSQLSpillReader(run)
+		reader, err := openSQLSpillReader(run, control)
 		if err != nil {
 			closeSQLSpillReaders(readers)
 			return err
