@@ -14,6 +14,9 @@ import (
 type SQLQueryOptions = hatSql.SQLQueryOptions
 type SQLPreparedQueryCache = hatSql.SQLPreparedQueryCache
 type SQLPreparedQueryCacheStats = hatSql.SQLPreparedQueryCacheStats
+type SQLPreparedQuery = hatSql.SQLPreparedQuery
+type SQLParameterType = hatSql.ParameterType
+type SQLParameterSpec = hatSql.ParameterSpec
 type SQLQueryRequest = hatSql.QueryRequest
 type SQLRow = hatSql.Row
 type SQLQueryResult = hatSql.QueryResult
@@ -37,8 +40,26 @@ type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 
+const (
+	SQLParameterAny       = hatSql.ParameterAny
+	SQLParameterText      = hatSql.ParameterText
+	SQLParameterNumber    = hatSql.ParameterNumber
+	SQLParameterInteger   = hatSql.ParameterInteger
+	SQLParameterDecimal   = hatSql.ParameterDecimal
+	SQLParameterBoolean   = hatSql.ParameterBoolean
+	SQLParameterDate      = hatSql.ParameterDate
+	SQLParameterTimestamp = hatSql.ParameterTimestamp
+	SQLParameterJSON      = hatSql.ParameterJSON
+)
+
 func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
 	return hatSql.NewSQLPreparedQueryCache(capacity)
+}
+
+// PrepareSQLQuery parses source once and binds a typed positional-parameter
+// schema to its immutable cached template.
+func PrepareSQLQuery(source string, parameters []SQLParameterSpec, cache *SQLPreparedQueryCache) (*SQLPreparedQuery, error) {
+	return hatSql.PrepareSQLQuery(source, parameters, cache)
 }
 
 func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult, error) {

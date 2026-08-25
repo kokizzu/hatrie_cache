@@ -590,6 +590,35 @@ join, subquery, window, or pagination state. `PreparedCache.Stats()` exposes
 entry, hit, and miss counts. A cache with capacity zero disables storage; a
 full cache evicts the least-recently-used template.
 
+### Typed prepared queries
+
+`PrepareSQLQuery` adds an explicit schema to the same immutable plan cache.
+It requires exactly one declaration for every positional slot through the
+largest `$n`, validates values before any source is resolved, and converts
+values using the SQL field rules. Supported types are `ANY`, `TEXT`, `NUMBER`,
+`INTEGER`, `DECIMAL`, `BOOLEAN`, `DATE`, `TIMESTAMP`, and `JSON`. Parameters
+are non-NULL by default; set `Nullable: true` for a SQL NULL parameter.
+
+```go
+prepared, err := hatriecache.PrepareSQLQuery(
+    "SELECT name FROM CACHE('users') WHERE score >= $1 AND active = $2",
+    []hatriecache.SQLParameterSpec{
+        {Type: hatriecache.SQLParameterInteger},
+        {Type: hatriecache.SQLParameterBoolean},
+    },
+    hatriecache.NewSQLPreparedQueryCache(128),
+)
+if err != nil {
+    return err
+}
+result, err := prepared.Execute(ctx, resolver, []interface{}{int64(10), true}, hatriecache.SQLQueryOptions{})
+```
+
+`DATE` accepts `YYYY-MM-DD`, `TIMESTAMP` accepts RFC3339/RFC3339Nano text or
+`time.Time`, and `DECIMAL` accepts decimal text or a numeric Go value. The
+schema is copied when prepared and `Parameters()` returns a copy, so callers
+cannot modify a query shared by concurrent requests.
+
 Create an optional JSON field index with
 `trie.CreateSQLJSONFieldIndex("users", "team_id")`. A matching qualified
 filter such as `WHERE users.team_id = 20` or `WHERE users.team_id >= 20` uses
