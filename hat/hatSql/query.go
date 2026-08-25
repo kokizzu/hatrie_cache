@@ -416,7 +416,7 @@ func sqlEvaluationFailure(err error) sqlEvalError {
 
 func sqlRuntimeDiagnostic(err error) error {
 	if failed, ok := err.(sqlEvalError); ok && failed.token.line > 0 {
-		return sqlTokenDiagnostic(failed.token, failed.err.Error())
+		return &Diagnostic{Code: ErrorType, Message: failed.err.Error(), Line: failed.token.line, Column: failed.token.column, EndColumn: failed.token.endColumn}
 	}
 	return err
 }
@@ -532,7 +532,10 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
-	defer func() { observation.finish(result, err, operatorSteps) }()
+	defer func() {
+		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
+		observation.finish(result, err, operatorSteps)
+	}()
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
@@ -551,7 +554,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		result, err = explainSQLQuery(query, resolver, control)
 		operatorSteps = result.Plan
 		result.QueryID = observation.id
-		return result, sqlRuntimeDiagnostic(err)
+		return result, err
 	}
 	var metrics *sqlExecutionMetrics
 	if observation.observer != nil || options.AdaptivePlanner != nil {
@@ -562,7 +565,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		operatorSteps = metrics.steps
 	}
 	result.QueryID = observation.id
-	return result, sqlRuntimeDiagnostic(err)
+	return result, err
 }
 
 // ExecuteQueryParameters executes source with positional parameters.
@@ -590,6 +593,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	observation := newSQLQueryObservation(options)
 	outputRows, outputColumns, resultBytes := 0, 0, 0
 	defer func() {
+		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		// A row callback may be backed by NDJSON, an SDK iterator, or an
 		// application sink. It is the one operator common to every streamed
 		// execution path, so record its exact completed payload counters even

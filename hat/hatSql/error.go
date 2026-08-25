@@ -3,6 +3,7 @@ package hatSql
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // ErrorCode is a stable class for programmatic SQL error handling.
@@ -62,4 +63,30 @@ func ErrorCodeOf(err error) ErrorCode {
 		return ErrorCanceled
 	}
 	return ErrorUnknown
+}
+
+// sqlClassifyError applies a stable code at a public execution boundary. It
+// leaves already classified errors and cancellation chains untouched, so
+// errors.Is and errors.As keep their normal behavior for callers.
+func sqlClassifyError(err error) error {
+	if err == nil || ErrorCodeOf(err) != ErrorUnknown {
+		return err
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "conflict"):
+		return WithErrorCode(ErrorConflict, err)
+	case strings.Contains(message, "budget"),
+		strings.Contains(message, "row limit"),
+		strings.Contains(message, "maximum"),
+		strings.Contains(message, "page_size"):
+		return WithErrorCode(ErrorCapacity, err)
+	case strings.Contains(message, "cannot convert"),
+		strings.Contains(message, "expects "),
+		strings.Contains(message, "cannot compare"),
+		strings.Contains(message, "must evaluate to"):
+		return WithErrorCode(ErrorType, err)
+	default:
+		return err
+	}
 }

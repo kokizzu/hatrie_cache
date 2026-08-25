@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -29,8 +30,8 @@ func (diagnostic *Diagnostic) Error() string {
 // FormatDiagnostic formats a Diagnostic with a Rust-style source span.
 // Non-SQL errors are returned unchanged.
 func FormatDiagnostic(source string, err error) string {
-	diagnostic, ok := err.(*Diagnostic)
-	if !ok || diagnostic == nil {
+	var diagnostic *Diagnostic
+	if !errors.As(err, &diagnostic) || diagnostic == nil {
 		if err == nil {
 			return ""
 		}

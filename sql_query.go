@@ -20,6 +20,8 @@ type SQLPreparedQuery = hatSql.SQLPreparedQuery
 type SQLParameterType = hatSql.ParameterType
 type SQLParameterSpec = hatSql.ParameterSpec
 type SQLSpillFaults = hatSql.SQLSpillFaults
+type SQLErrorCode = hatSql.ErrorCode
+type SQLCodedError = hatSql.CodedError
 type SQLDate = hatSql.SQLDate
 type SQLDecimal = hatSql.SQLDecimal
 type SQLUUID = hatSql.SQLUUID
@@ -135,6 +137,13 @@ type SQLJSONRangeStats struct {
 }
 
 const (
+	SQLErrorUnknown  = hatSql.ErrorUnknown
+	SQLErrorSyntax   = hatSql.ErrorSyntax
+	SQLErrorType     = hatSql.ErrorType
+	SQLErrorCapacity = hatSql.ErrorCapacity
+	SQLErrorConflict = hatSql.ErrorConflict
+	SQLErrorCanceled = hatSql.ErrorCanceled
+
 	SQLParameterAny       = hatSql.ParameterAny
 	SQLParameterText      = hatSql.ParameterText
 	SQLParameterNumber    = hatSql.ParameterNumber
@@ -148,6 +157,12 @@ const (
 	SQLParameterBinary    = hatSql.ParameterBinary
 	SQLParameterJSON      = hatSql.ParameterJSON
 )
+
+// SQLErrorCodeOf returns the stable class for an SQL API error.
+func SQLErrorCodeOf(err error) SQLErrorCode { return hatSql.ErrorCodeOf(err) }
+
+// WithSQLErrorCode preserves an error chain while attaching a stable class.
+func WithSQLErrorCode(code SQLErrorCode, err error) error { return hatSql.WithErrorCode(code, err) }
 
 func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
 	return hatSql.NewSQLPreparedQueryCache(capacity)

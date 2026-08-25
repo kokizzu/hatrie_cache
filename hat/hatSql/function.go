@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -33,8 +34,8 @@ func (err *FunctionError) Error() string {
 // FormatFunctionDiagnostic renders a FunctionError with its source location.
 // Other errors are returned unchanged.
 func FormatFunctionDiagnostic(definition FunctionDefinition, err error) string {
-	functionError, ok := err.(*FunctionError)
-	if !ok {
+	var functionError *FunctionError
+	if !errors.As(err, &functionError) || functionError == nil {
 		if err == nil {
 			return ""
 		}

@@ -100,7 +100,7 @@ func (query *SQLPreparedQuery) Parameters() []ParameterSpec {
 func (query *SQLPreparedQuery) Execute(ctx context.Context, resolver SQLSourceResolver, values []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
 	bound, err := query.bind(values)
 	if err != nil {
-		return SQLQueryResult{}, err
+		return SQLQueryResult{}, sqlClassifyError(err)
 	}
 	options.PreparedCache = query.cache
 	return ExecuteSQLQueryParameters(ctx, query.source, resolver, bound, options)
@@ -111,7 +111,7 @@ func (query *SQLPreparedQuery) Execute(ctx context.Context, resolver SQLSourceRe
 func (query *SQLPreparedQuery) ExecuteRows(ctx context.Context, resolver SQLSourceResolver, values []interface{}, options SQLQueryOptions, visit func([]string, SQLRow) error) error {
 	bound, err := query.bind(values)
 	if err != nil {
-		return err
+		return sqlClassifyError(err)
 	}
 	options.PreparedCache = query.cache
 	return ExecuteSQLQueryRows(ctx, query.source, resolver, bound, options, visit)
