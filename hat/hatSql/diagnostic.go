@@ -8,6 +8,7 @@ import (
 // Diagnostic describes a local SQL parse or compilation error. Positions are
 // one-based and point into the original query.
 type Diagnostic struct {
+	Code       ErrorCode
 	Message    string
 	Line       int
 	Column     int

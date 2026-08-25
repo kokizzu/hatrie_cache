@@ -58,7 +58,7 @@ func sqlTokenDiagnostic(token sqlToken, message string, suggestion ...string) er
 	if len(suggestion) > 0 {
 		value = suggestion[0]
 	}
-	return &Diagnostic{Message: message, Line: token.line, Column: token.column, EndColumn: token.endColumn, Suggestion: value}
+	return &Diagnostic{Code: ErrorSyntax, Message: message, Line: token.line, Column: token.column, EndColumn: token.endColumn, Suggestion: value}
 }
 
 func nearestSQLName(value string, candidates []string) string {
