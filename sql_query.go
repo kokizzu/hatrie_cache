@@ -20,6 +20,7 @@ type SQLPreparedQuery = hatSql.SQLPreparedQuery
 type SQLParameterType = hatSql.ParameterType
 type SQLParameterSpec = hatSql.ParameterSpec
 type SQLSpillFaults = hatSql.SQLSpillFaults
+type SQLCollation = hatSql.SQLCollation
 type SQLErrorCode = hatSql.ErrorCode
 type SQLCodedError = hatSql.CodedError
 type SQLDate = hatSql.SQLDate
@@ -143,6 +144,9 @@ const (
 	SQLErrorCapacity = hatSql.ErrorCapacity
 	SQLErrorConflict = hatSql.ErrorConflict
 	SQLErrorCanceled = hatSql.ErrorCanceled
+
+	SQLCollationBinary    = hatSql.SQLCollationBinary
+	SQLCollationUnicodeCI = hatSql.SQLCollationUnicodeCI
 
 	SQLParameterAny       = hatSql.ParameterAny
 	SQLParameterText      = hatSql.ParameterText

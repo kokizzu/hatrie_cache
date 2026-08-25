@@ -4771,6 +4771,50 @@ SELECT id, elapsed, payload,
 	}
 }
 
+func TestExecuteSQLQueryUnicodeCaseInsensitiveCollation(t *testing.T) {
+	t.Parallel()
+	options := SQLQueryOptions{Collation: SQLCollationUnicodeCI}
+	result, err := ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('Cafe\u0301'), ('B'), ('a') AS values(name) WHERE name IN ('CAFÉ') OR name LIKE 'CAFÉ' SELECT name", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation predicate error = %v", err)
+	}
+	if want := []SQLRow{{"name": "Cafe\u0301"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation predicate rows = %#v, want %#v", result.Rows, want)
+	}
+
+	result, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('B'), ('a') AS values(name) SELECT name ORDER BY name", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation order error = %v", err)
+	}
+	if want := []SQLRow{{"name": "a"}, {"name": "B"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation order rows = %#v, want %#v", result.Rows, want)
+	}
+
+	binaryResult, err := ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('B'), ('a') AS values(name) SELECT name ORDER BY name", SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("binary collation order error = %v", err)
+	}
+	if want := []SQLRow{{"name": "B"}, {"name": "a"}}; !reflect.DeepEqual(binaryResult.Rows, want) {
+		t.Fatalf("binary collation order rows = %#v, want %#v", binaryResult.Rows, want)
+	}
+
+	result, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('CAFÉ'), ('Cafe\u0301') AS values(name) GROUP BY name SELECT name, COUNT(*) AS total", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation group error = %v", err)
+	}
+	if want := []SQLRow{{"name": "CAFÉ", "total": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation group rows = %#v, want %#v", result.Rows, want)
+	}
+
+	result, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('CAFÉ') AS left_values(name) INNER JOIN VALUES ('Cafe\u0301') AS right_values(name) ON left_values.name = right_values.name SELECT left_values.name", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation join error = %v", err)
+	}
+	if want := []SQLRow{{"name": "CAFÉ"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation join rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQuerySpillFaultInjectionCleansTemporaryFiles(t *testing.T) {
 	t.Parallel()
 	query := "FROM VALUES (3), (1), (2) AS values(id) SELECT id ORDER BY id"

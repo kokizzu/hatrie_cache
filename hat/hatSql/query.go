@@ -183,7 +183,9 @@ type SQLQueryOptions struct {
 	// SpillFaults is an optional per-query external-sort I/O hook. It exists
 	// for deterministic fault-injection and chaos tests; production callers
 	// normally leave it nil.
-	SpillFaults           *SQLSpillFaults
+	SpillFaults *SQLSpillFaults
+	// Collation controls text comparisons. Empty keeps the binary default.
+	Collation             SQLCollation
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
@@ -550,6 +552,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if parseErr != nil {
 		return result, parseErr
 	}
+	applySQLQueryCollation(query, options.Collation)
 	if query.explain {
 		result, err = explainSQLQuery(query, resolver, control)
 		operatorSteps = result.Plan
@@ -622,6 +625,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err != nil {
 		return err
 	}
+	applySQLQueryCollation(query, options.Collation)
 	outputColumns = len(sqlColumns(query.selects))
 	return executeSQLQueryRowsParsed(ctx, query, resolver, control, func(columns []string, row SQLRow) error {
 		if err := visit(columns, row); err != nil {
@@ -4392,6 +4396,7 @@ type sqlOrder struct {
 	desc       bool
 	nullsFirst bool
 	nullsLast  bool
+	collation  SQLCollation
 }
 type sqlCaseWhen struct {
 	when sqlExpr
@@ -4405,6 +4410,7 @@ type sqlExpr struct {
 	cases                     []sqlCaseWhen
 	window                    *sqlWindow
 	token                     sqlToken
+	collation                 SQLCollation
 }
 
 // sqlParameter is retained only in an immutable parsed template when a
@@ -5908,6 +5914,9 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	}
 	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
+	}
+	if !options.Collation.valid() {
+		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	if options.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(ctx, options.Timeout)
@@ -7554,7 +7563,7 @@ func sqlOrderLess(order sqlOrder, left, right interface{}) (bool, bool) {
 	if (left == nil || right == nil) && left != right && (order.nullsFirst || order.nullsLast) {
 		return (left == nil) == order.nullsFirst, true
 	}
-	cmp := sqlCompare(left, right)
+	cmp := sqlCompareWithCollation(order.collation, left, right)
 	if cmp == 0 {
 		return false, false
 	}
@@ -9418,7 +9427,7 @@ func sqlExprReferencesOnlyAlias(expression sqlExpr, alias string) bool {
 }
 
 func sqlHashJoinFields(expression sqlExpr, leftAliases []string, rightAlias string) (string, string, string, bool) {
-	if expression.kind != "binary" || expression.op != "=" || expression.left == nil || expression.right == nil || expression.left.kind != "field" || expression.right.kind != "field" {
+	if expression.collation.normalized() != SQLCollationBinary || expression.kind != "binary" || expression.op != "=" || expression.left == nil || expression.right == nil || expression.left.kind != "field" || expression.right.kind != "field" {
 		return "", "", "", false
 	}
 	left := *expression.left
@@ -9540,7 +9549,7 @@ func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow,
 			if err := sqlExpressionError(value); err != nil {
 				return nil, err
 			}
-			parts[i] = fmt.Sprintf("%#v", value)
+			parts[i] = sqlCollationValueKey(expr.collation, value)
 		}
 		key := strings.Join(parts, "\x00")
 		if _, ok := groups[key]; !ok {
@@ -9573,7 +9582,7 @@ func groupSQLRowsOrdered(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlE
 			if err := sqlExpressionError(value); err != nil {
 				return nil, err
 			}
-			parts[expressionIndex] = fmt.Sprintf("%#v", value)
+			parts[expressionIndex] = sqlCollationValueKey(expr.collation, value)
 		}
 		key := strings.Join(parts, "\x00")
 		if index == 0 || key != previousKey {
@@ -10221,7 +10230,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvaluationFailure(err)
 			}
 			if expr.left != nil {
-				condition = sqlBinaryValue("=", operand, condition)
+				condition = sqlBinaryValueWithCollation("=", operand, condition, expr.collation)
 			}
 			if sqlTruthy(condition) {
 				value := evalSQLExpr(branch.then, group, row)
@@ -10339,7 +10348,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvaluationFailure(err)
 			}
 		}
-		return sqlInValue(expr.op, left, values)
+		return sqlInValueWithCollation(expr.op, left, values, expr.collation)
 	case "between":
 		left := evalSQLExpr(*expr.left, group, row)
 		if err := sqlExpressionError(left); err != nil {
@@ -10353,7 +10362,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		if err := sqlExpressionError(upper); err != nil {
 			return sqlEvaluationFailure(err)
 		}
-		return sqlBetweenValue(expr.op, left, lower, upper)
+		return sqlBetweenValueWithCollation(expr.op, left, lower, upper, expr.collation)
 	case "binary":
 		left := evalSQLExpr(*expr.left, group, row)
 		if err := sqlExpressionError(left); err != nil {
@@ -10369,7 +10378,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		if err := sqlExpressionError(right); err != nil {
 			return sqlEvaluationFailure(err)
 		}
-		return sqlBinaryValue(expr.op, left, right)
+		return sqlBinaryValueWithCollation(expr.op, left, right, expr.collation)
 	}
 	return nil
 }
@@ -10762,7 +10771,7 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 					continue
 				}
 				if operand != nil {
-					condition = sqlBinaryValue("=", operand[index], condition)
+					condition = sqlBinaryValueWithCollation("=", operand[index], condition, expr.collation)
 				}
 				if sqlTruthy(condition) {
 					indexes = append(indexes, index)
@@ -10840,7 +10849,7 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 				out[i] = sqlEvaluationFailure(err)
 				continue
 			}
-			out[i] = sqlBinaryValue(expr.op, left[i], right[i])
+			out[i] = sqlBinaryValueWithCollation(expr.op, left[i], right[i], expr.collation)
 		}
 		return out, nil
 	}
