@@ -887,6 +887,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	if handler.rejectSQLRBACHTTP(w, r, request) {
 		return
 	}
+	sources, _ := SQLQuerySourceNames(request.Query, request.Parameters)
 	if request.Stream {
 		if request.PageSize != 0 || request.Cursor != "" {
 			writeJSONStatus(w, http.StatusBadRequest, commandError("SQL streaming cannot be combined with cursor pagination"))
@@ -897,6 +898,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 			err = validateSQLQueryStreamable(query)
 		}
 		if err != nil {
+			handler.auditSQLQuery(r, request, sources, 0, false, http.StatusBadRequest, err.Error())
 			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
 			return
 		}
@@ -936,11 +938,13 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 			}{Type: "columns", Columns: SQLQueryColumns(query)})
 		}
 		if err != nil {
+			handler.auditSQLQuery(r, request, sources, rows, false, http.StatusBadRequest, err.Error())
 			_ = encoder.Encode(struct {
 				Type  string `json:"type"`
 				Error string `json:"error"`
 			}{Type: "error", Error: FormatSQLDiagnostic(request.Query, err)})
 		} else {
+			handler.auditSQLQuery(r, request, sources, rows, true, http.StatusOK, "")
 			_ = encoder.Encode(struct {
 				Type string `json:"type"`
 				Rows int    `json:"rows"`
@@ -960,6 +964,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		result, err = ExecuteSQLQueryParameters(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions)
 	}
 	if err != nil {
+		handler.auditSQLQuery(r, request, sources, 0, false, http.StatusBadRequest, err.Error())
 		var functionError *SQLFunctionError
 		if errors.As(err, &functionError) {
 			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLFunctionDiagnostic(functionError.Definition, err)))
@@ -968,6 +973,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
+	handler.auditSQLQuery(r, request, sources, len(result.Rows), true, http.StatusOK, "")
 	writeJSON(w, result)
 }
 
@@ -979,6 +985,18 @@ func (handler *MonitoringHandler) rejectSQLHTTP(w http.ResponseWriter, r *http.R
 	handler.auditHTTP(r, AuditEvent{Action: "sql.query", OK: false, Status: http.StatusTooManyRequests, Message: "SQL query rate limit exceeded"})
 	writeJSONStatus(w, http.StatusTooManyRequests, commandError("SQL query rate limit exceeded"))
 	return true
+}
+
+func (handler *MonitoringHandler) auditSQLQuery(r *http.Request, request SQLQueryRequest, sources []string, rows int, ok bool, status int, message string) {
+	details := map[string]interface{}{
+		"query":  request.Query,
+		"rows":   rows,
+		"stream": request.Stream,
+	}
+	if len(sources) > 0 {
+		details["sources"] = append([]string(nil), sources...)
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "sql.query", Command: "SQL", OK: ok, Status: status, Message: message, Details: details})
 }
 
 func monitoringSQLRateLimitKey(r *http.Request) string {
@@ -1068,6 +1086,7 @@ func (handler *MonitoringHandler) rejectCommandRBACHTTP(w http.ResponseWriter, r
 func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *http.Request, request SQLQueryRequest) bool {
 	sources, err := SQLQuerySourceNames(request.Query, request.Parameters)
 	if err != nil {
+		handler.auditSQLQuery(r, request, nil, 0, false, http.StatusBadRequest, err.Error())
 		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
 		return true
 	}
@@ -1088,7 +1107,7 @@ func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *ht
 			return false
 		}
 	}
-	handler.auditHTTP(r, AuditEvent{Action: "sql.query", Command: "SQL", OK: false, Status: http.StatusForbidden, Message: "forbidden by RBAC policy"})
+	handler.auditSQLQuery(r, request, sources, 0, false, http.StatusForbidden, "forbidden by RBAC policy")
 	writeJSONStatus(w, http.StatusForbidden, commandError("forbidden"))
 	return true
 }

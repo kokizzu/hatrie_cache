@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +159,34 @@ func TestMonitoringHandlerEnforcesRBACForCommandsAndSQLSources(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("multi-source SQL status = %d, want 403: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMonitoringSQLRouteAuditsSuccessfulAndFailedQueries(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"name":"Ivi"}]`)
+	logger := NewAuditLogger(nil)
+	handler := NewMonitoringHandler(trie, MonitoringOptions{AuditLog: logger}).Handler()
+
+	for _, query := range []string{
+		`FROM CACHE('people') AS p SELECT p.name`,
+		`FROM CACHE('people') AS p SELECT p.name LIMIT nope`,
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/sql", strings.NewReader(`{"query":`+strconv.Quote(query)+`}`)))
+	}
+	events, err := logger.Query(AuditQuery{Action: "sql.query"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("SQL audit events = %#v, want two", events)
+	}
+	if events[0].OK || events[0].Status != http.StatusBadRequest || events[0].Details["query"] != `FROM CACHE('people') AS p SELECT p.name LIMIT nope` {
+		t.Fatalf("failed SQL audit = %#v", events[0])
+	}
+	if !events[1].OK || events[1].Details["query"] != `FROM CACHE('people') AS p SELECT p.name` || events[1].Details["rows"] != 1 {
+		t.Fatalf("successful SQL audit = %#v", events[1])
 	}
 }
 
