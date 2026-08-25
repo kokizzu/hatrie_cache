@@ -2,9 +2,11 @@
 package hatAudit
 
 import (
+	"errors"
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,7 +54,7 @@ func OpenAuditLogger(path string) (*AuditLogger, error) {
 }
 
 func (logger *AuditLogger) Log(event AuditEvent) error {
-	if logger == nil || logger.writer == nil {
+	if logger == nil {
 		return nil
 	}
 	logger.mu.Lock()
@@ -65,12 +67,14 @@ func (logger *AuditLogger) Log(event AuditEvent) error {
 		copy(logger.recent, logger.recent[len(logger.recent)-MaxRecentAuditEvents:])
 		logger.recent = logger.recent[:MaxRecentAuditEvents]
 	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	if _, err := logger.writer.Write(append(data, '\n')); err != nil {
-		return err
+	if logger.writer != nil {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		if _, err := logger.writer.Write(append(data, '\n')); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -90,6 +94,34 @@ func (logger *AuditLogger) Recent(limit int) []AuditEvent {
 		return out[i].Time > out[j].Time
 	})
 	return out
+}
+
+// Query returns a newest-first independent copy of retained events that match
+// query. It never reads historical disk logs, keeping request latency bounded.
+func (logger *AuditLogger) Query(query Query) ([]AuditEvent, error) {
+	if logger == nil {
+		return nil, nil
+	}
+	if query.Limit < 0 || query.Limit > MaxRecentAuditEvents {
+		return nil, errors.New("hatriecache: audit query limit is invalid")
+	}
+	query.Action = strings.TrimSpace(query.Action)
+	query.Command = strings.TrimSpace(query.Command)
+	query.KeyPrefix = strings.TrimSpace(query.KeyPrefix)
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	out := make([]AuditEvent, 0, len(logger.recent))
+	for index := len(logger.recent) - 1; index >= 0; index-- {
+		event := logger.recent[index]
+		if !matchesQuery(event, query) {
+			continue
+		}
+		out = append(out, event)
+		if query.Limit > 0 && len(out) == query.Limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (logger *AuditLogger) Close() error {
