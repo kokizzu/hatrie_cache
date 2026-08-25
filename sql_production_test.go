@@ -4146,6 +4146,38 @@ FROM cycle SELECT value`, SQLSourceResolverFunc(nil), SQLQueryOptions{DetectRecu
 	}
 }
 
+func TestExecuteSQLQueryReusesMaterializedCTEAcrossReferences(t *testing.T) {
+	t.Parallel()
+	resolveCalls := 0
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		resolveCalls++
+		return []SQLRow{{"id": int64(1), "team": "core"}, {"id": int64(2), "team": "core"}}, nil
+	})
+	result, err := ExecuteSQLQuery(`
+WITH people AS (FROM CACHE('people') AS source SELECT source.id, source.team)
+FROM people AS left INNER JOIN people AS right ON left.team = right.team
+SELECT left.id AS left_id, right.id AS right_id
+ORDER BY left_id, right_id`, resolver)
+	if err != nil {
+		t.Fatalf("CTE reuse query error = %v", err)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("CTE source resolve calls = %d, want 1", resolveCalls)
+	}
+	want := []SQLRow{
+		{"left_id": int64(1), "right_id": int64(1)},
+		{"left_id": int64(1), "right_id": int64(2)},
+		{"left_id": int64(2), "right_id": int64(1)},
+		{"left_id": int64(2), "right_id": int64(2)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("CTE reuse rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
 	t.Parallel()
 	resolver := SQLSourceResolverFunc(nil)

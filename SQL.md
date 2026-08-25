@@ -617,6 +617,11 @@ Each HatTrie query holds one read snapshot across all of its `CACHE` and
 references use the same resolved rows; individual HatTrie reads remain
 concurrency-safe without holding its lock across query execution.
 
+Each non-recursive CTE is evaluated once, materialized in query-local state,
+and reused by every later reference, including self-joins. Recursive CTEs use
+their separately documented frontier iteration, depth budget, and optional
+cycle detection rather than re-executing the seed for each reference.
+
 ### Prepared-query cache
 
 Repeated dashboard queries can reuse an immutable parsed template while still
