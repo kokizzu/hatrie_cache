@@ -2880,7 +2880,7 @@ func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error
 	decoder.DisallowUnknownFields()
 	var tail CommandJournalTail
 	if err := decoder.Decode(&tail); err != nil {
-		if limitedReaderExceeded(limited) {
+		if hatHttp.LimitedReaderExceeded(limited) {
 			return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
 		}
 		return CommandJournalTail{}, err
@@ -2890,12 +2890,12 @@ func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if limitedReaderExceeded(limited) {
+		if hatHttp.LimitedReaderExceeded(limited) {
 			return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
 		}
 		return CommandJournalTail{}, errors.New("journal source returned invalid trailing JSON")
 	}
-	if limitedReaderExceeded(limited) {
+	if hatHttp.LimitedReaderExceeded(limited) {
 		return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
 	}
 	if tail.Entries == nil {
