@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"hatrie_cache/hat/hatSql"
+
+	jsonfast "github.com/goccy/go-json"
 )
 
 type SQLQueryOptions = hatSql.SQLQueryOptions
@@ -50,6 +54,46 @@ type SQLIndexValueEstimator = hatSql.IndexValueEstimator
 type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
+
+// SQLResultCache retains the root API while hatSql owns the portable cache
+// core. Its HatTrie adapter supplies the mutation epoch for invalidation.
+type SQLResultCache struct {
+	cache *hatSql.ResultCache
+}
+
+// NewSQLResultCache creates a bounded cache for default-option read queries.
+func NewSQLResultCache(capacity int) *SQLResultCache {
+	return &SQLResultCache{cache: hatSql.NewResultCache(capacity)}
+}
+
+// Execute runs a default-option read query and returns a cached result only if
+// the trie has not been mutated since that result was computed.
+func (cache *SQLResultCache) Execute(ctx context.Context, trie *HatTrie, source string, parameters []interface{}) (SQLQueryResult, error) {
+	if trie == nil {
+		return SQLQueryResult{}, ErrNilHatTrie
+	}
+	key, err := sqlResultCacheKey(source, parameters)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	var core *hatSql.ResultCache
+	if cache != nil {
+		core = cache.cache
+	}
+	return core.Execute(ctx, key, func() uint64 {
+		return atomic.LoadUint64(&trie.mutationEpoch)
+	}, func(ctx context.Context) (hatSql.QueryResult, error) {
+		return ExecuteSQLQueryParameters(ctx, source, trie, parameters, SQLQueryOptions{})
+	})
+}
+
+func sqlResultCacheKey(source string, parameters []interface{}) (string, error) {
+	encoded, err := jsonfast.Marshal(parameters)
+	if err != nil {
+		return "", errors.New("hatriecache: SQL result cache parameters are not serializable")
+	}
+	return source + "\x00" + string(encoded), nil
+}
 
 // CanonicalSQLSnapshot encodes a query result as stable JSON for regression
 // fixtures without volatile execution statistics.
