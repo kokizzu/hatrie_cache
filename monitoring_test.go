@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"hatrie_cache/hat/hatMonitoring"
 )
 
 func TestWriteJSONStatusWritesRequestedStatus(t *testing.T) {
@@ -149,13 +151,13 @@ func TestMonitoringProfileRequiresConfiguredOperatorAuth(t *testing.T) {
 
 func TestMonitoringProfileLimitedWriterStopsAtLimit(t *testing.T) {
 	var output bytes.Buffer
-	writer := &monitoringProfileLimitedWriter{writer: &output, remaining: 4}
+	writer := hatMonitoring.NewProfileLimitedWriter(&output, 4)
 	written, err := writer.Write([]byte("123456"))
-	if !errors.Is(err, errMonitoringProfileTooLarge) {
+	if !errors.Is(err, hatMonitoring.ErrProfileTooLarge) {
 		t.Fatalf("Write() error = %v, want profile too large", err)
 	}
-	if written != 4 || output.String() != "1234" || writer.remaining != 0 {
-		t.Fatalf("Write() = %d bytes, output %q, remaining %d", written, output.String(), writer.remaining)
+	if written != 4 || output.String() != "1234" || writer.Remaining() != 0 {
+		t.Fatalf("Write() = %d bytes, output %q, remaining %d", written, output.String(), writer.Remaining())
 	}
 }
 
@@ -218,10 +220,10 @@ func TestMonitoringCPUProfileRejectsConcurrencyAndReleasesOnCancellation(t *test
 	}()
 
 	deadline := time.Now().Add(time.Second)
-	for !monitoring.profileCapture.active.Load() && time.Now().Before(deadline) {
+	for !monitoring.profileCapture.Active() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if !monitoring.profileCapture.active.Load() {
+	if !monitoring.profileCapture.Active() {
 		cancel()
 		t.Fatal("CPU profile did not become active")
 	}
@@ -249,10 +251,10 @@ func TestMonitoringCPUProfileRejectsConcurrencyAndReleasesOnCancellation(t *test
 		t.Fatal("cancelled CPU profile did not return")
 	}
 	deadline = time.Now().Add(time.Second)
-	for monitoring.profileCapture.active.Load() && time.Now().Before(deadline) {
+	for monitoring.profileCapture.Active() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if monitoring.profileCapture.active.Load() {
+	if monitoring.profileCapture.Active() {
 		t.Fatal("cancelled CPU profile did not release capture guard")
 	}
 

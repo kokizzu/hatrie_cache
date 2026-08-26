@@ -128,7 +128,7 @@ type MonitoringHandler struct {
 	options               MonitoringOptions
 	authTokens            hatAuth.TokenSet
 	replicationAuthTokens hatAuth.TokenSet
-	profileCapture        *monitoringProfileCaptureState
+	profileCapture        *hatMonitoring.ProfileCapture
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
 	sqlFunctions          *SQLFunctionRegistry
@@ -335,9 +335,105 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 		sqlFunctions:          options.SQLFunctions,
 	}
 	if options.DiagnosticsProfiling {
-		handler.profileCapture = &monitoringProfileCaptureState{}
+		handler.profileCapture = &hatMonitoring.ProfileCapture{}
 	}
 	return handler
+}
+
+const (
+	monitoringProfileContentType  = "application/octet-stream"
+	monitoringProfileErrorTrailer = "X-Hatrie-Profile-Error"
+)
+
+func (handler *MonitoringHandler) handleProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if !handler.authTokens.Configured() {
+		writeJSONStatus(w, http.StatusServiceUnavailable, commandError("diagnostics profiling requires a monitoring operator auth token"))
+		return
+	}
+	request, ok := decodeMonitoringProfileRequest(w, r)
+	if !ok {
+		return
+	}
+	profileType, duration, err := hatMonitoring.ValidateProfileRequest(request)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	details := map[string]interface{}{"type": profileType}
+	if duration > 0 {
+		details["duration_millis"] = duration.Milliseconds()
+	}
+	if handler.options.RateLimiter != nil && !handler.options.RateLimiter.Allow(monitoringRateLimitKey(r)) {
+		handler.options.Metrics.RecordRateLimitRejection()
+		handler.auditHTTP(r, AuditEvent{Action: "profile.capture", OK: false, Status: http.StatusTooManyRequests, Message: "rate limit exceeded", Details: details})
+		writeJSONStatus(w, http.StatusTooManyRequests, commandError("rate limit exceeded"))
+		return
+	}
+	if !handler.profileCapture.TryStart() {
+		handler.auditHTTP(r, AuditEvent{Action: "profile.capture", OK: false, Status: http.StatusConflict, Message: "profile capture is already running", Details: details})
+		writeJSONStatus(w, http.StatusConflict, commandError("profile capture is already running"))
+		return
+	}
+	defer handler.profileCapture.Stop()
+
+	w.Header().Set("Content-Type", monitoringProfileContentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, profileType+".pprof"))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Trailer", monitoringProfileErrorTrailer)
+	limited := hatMonitoring.NewProfileLimitedWriter(w, hatMonitoring.MaxProfileBytes)
+	err = hatMonitoring.CaptureProfile(r.Context(), limited, profileType, duration)
+	status := http.StatusOK
+	if err != nil {
+		status = http.StatusInternalServerError
+		if errors.Is(err, hatMonitoring.ErrProfileTooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		} else if r.Context().Err() != nil && errors.Is(err, r.Context().Err()) {
+			status = http.StatusRequestTimeout
+		} else if strings.Contains(err.Error(), "CPU profiling already in use") {
+			status = http.StatusConflict
+		}
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "profile.capture", OK: err == nil, Status: status, Message: monitoringProfileErrorMessage(err), Details: details})
+	if err != nil && limited.Remaining() == hatMonitoring.MaxProfileBytes {
+		w.Header().Del("Trailer")
+		writeJSONStatus(w, status, commandError(err.Error()))
+	} else if err != nil {
+		w.Header().Set(monitoringProfileErrorTrailer, err.Error())
+	}
+}
+
+func decodeMonitoringProfileRequest(w http.ResponseWriter, r *http.Request) (hatMonitoring.ProfileRequest, bool) {
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return hatMonitoring.ProfileRequest{}, false
+	}
+	defer closeBody()
+	decoder.DisallowUnknownFields()
+	var request hatMonitoring.ProfileRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid profile request")
+		return hatMonitoring.ProfileRequest{}, false
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid profile request")
+		return hatMonitoring.ProfileRequest{}, false
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		return hatMonitoring.ProfileRequest{}, false
+	}
+	return request, true
+}
+
+func monitoringProfileErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func monitoringBuildVersion() string {
