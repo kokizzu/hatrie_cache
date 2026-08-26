@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"hatrie_cache/hat/hatDataStructure"
 	"hatrie_cache/hat/hatSql"
 
 	jsonfast "github.com/goccy/go-json"
@@ -54,6 +55,10 @@ type SQLIndexValueEstimator = hatSql.IndexValueEstimator
 type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
+type SQLConn = hatSql.Conn
+type SQLTimeSeriesOptions = hatSql.TimeSeriesOptions
+type SQLTimeSeriesResult = hatSql.TimeSeriesResult
+type SQLVectorMatch = hatSql.VectorMatch
 
 // SQLResultCache retains the root API while hatSql owns the portable cache
 // core. Its HatTrie adapter supplies the mutation epoch for invalidation.
@@ -93,6 +98,28 @@ func sqlResultCacheKey(source string, parameters []interface{}) (string, error) 
 		return "", errors.New("hatriecache: SQL result cache parameters are not serializable")
 	}
 	return source + "\x00" + string(encoded), nil
+}
+
+// NewSQLConn creates a connection to a hatrie-cache monitoring endpoint.
+func NewSQLConn(baseURL string, token string) *SQLConn {
+	return hatSql.NewConn(baseURL, token)
+}
+
+// QueryRows invokes visit once for each streamed SQL row.
+func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit func(T) error) (int, error) {
+	return hatSql.QueryRows(ctx, conn, query, visit)
+}
+
+// QuerySQLTimeSeries evaluates SQL once, then returns gap-aware buckets and
+// optional rolling means.
+func QuerySQLTimeSeries(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, queryOptions SQLQueryOptions, options SQLTimeSeriesOptions) (SQLTimeSeriesResult, error) {
+	return hatSql.QueryTimeSeries(ctx, source, resolver, parameters, queryOptions, options)
+}
+
+// SearchSQLVectorHybrid evaluates the SQL filter first, then ranks only the
+// vectors admitted by the filtered result.
+func SearchSQLVectorHybrid(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, index *hatDataStructure.VectorIndex, query []float32, limit int, idField string) ([]SQLVectorMatch, error) {
+	return hatSql.SearchVectorHybrid(ctx, source, resolver, parameters, options, index, query, limit, idField)
 }
 
 // CanonicalSQLSnapshot encodes a query result as stable JSON for regression
