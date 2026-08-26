@@ -17,6 +17,12 @@ import (
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
+func init() {
+	if err := hatGrpc.ConfigureBestSpeedCompression(); err != nil {
+		panic(err)
+	}
+}
+
 type CacheGRPCOptions struct {
 	NodeName                         string
 	AuthToken                        string
