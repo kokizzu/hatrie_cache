@@ -1,0 +1,212 @@
+package hatCache
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+func TestDeployTopologyExamplesAreValid(t *testing.T) {
+	fullReplica, err := LoadTopology("deploy/topology/full-replica.json")
+	if err != nil {
+		t.Fatalf("LoadTopology(full-replica) error = %v", err)
+	}
+	if fullReplica.Mode != TopologyModeFullReplica || len(fullReplica.Nodes) != 2 {
+		t.Fatalf("full replica topology = %#v, want two full-replica nodes", fullReplica)
+	}
+
+	sharded, err := LoadTopology("deploy/topology/sharded.json")
+	if err != nil {
+		t.Fatalf("LoadTopology(sharded) error = %v", err)
+	}
+	if sharded.Mode != TopologyModeSharded || sharded.BucketCount != 1024 || len(sharded.Shards) != 2 || len(sharded.BucketRanges) != 2 {
+		t.Fatalf("sharded topology = %#v, want two shards over 1024 buckets", sharded)
+	}
+	if sharded.BucketRanges[0].Start != 0 || sharded.BucketRanges[1].End != 1023 {
+		t.Fatalf("bucket ranges = %#v, want full 0..1023 coverage", sharded.BucketRanges)
+	}
+}
+
+func TestDeployServiceAndComposeExamplesExposeDurableRuntime(t *testing.T) {
+	service := readDeployExample(t, "deploy/systemd/hatrie-cache.service")
+	for _, token := range []string{
+		"-monitoring-server",
+		"-snapshot-path /var/lib/hatrie-cache/snapshot.hc",
+		"-snapshot-format gzip-best-binary",
+		"-journal-path /var/lib/hatrie-cache/commands.journal",
+		"-journal-format binary",
+		"-db-path /var/lib/hatrie-cache/cache.leveldb",
+		"-db-format binary",
+		"-db-sync-interval 30s",
+		"-db-compact-interval 10m",
+		"-db-hot-load",
+		"-audit-log-path /var/lib/hatrie-cache/audit.jsonl",
+		"-write-protection",
+		"Restart=on-failure",
+		"LimitNOFILE=1048576",
+	} {
+		if !strings.Contains(service, token) {
+			t.Fatalf("systemd example missing %q", token)
+		}
+	}
+
+	compose := readDeployExample(t, "deploy/docker-compose.yml")
+	for _, token := range []string{
+		"build:",
+		"dockerfile: Dockerfile",
+		"node-a:",
+		"node-b:",
+		"-monitoring-server",
+		"-journal-pull-source",
+		"http://node-a:8080",
+		"./topology/full-replica.json:/etc/hatrie-cache/topology.json:ro",
+		"node-a-data:",
+		"node-b-data:",
+	} {
+		if !strings.Contains(compose, token) {
+			t.Fatalf("compose example missing %q", token)
+		}
+	}
+}
+
+func TestProductionDockerfileAndBuildScript(t *testing.T) {
+	dockerfile := readDeployExample(t, "Dockerfile")
+	for _, token := range []string{
+		"FROM node:",
+		"FROM golang:",
+		"FROM debian:",
+		"org.opencontainers.image.title",
+		"org.opencontainers.image.revision",
+		"pnpm run build",
+		"CGO_ENABLED=1 go build",
+		"USER hatrie-cache",
+		"HEALTHCHECK",
+		"HATRIE_HEALTHCHECK_ADDR",
+		"MONITORING_AUTH_TOKEN",
+		"ENTRYPOINT [\"/usr/local/bin/hatrie-cache\"]",
+		"/var/lib/hatrie-cache",
+		"/app/svelte-mpa/dist",
+	} {
+		if !strings.Contains(dockerfile, token) {
+			t.Fatalf("Dockerfile missing %q", token)
+		}
+	}
+
+	script := readDeployExample(t, "scripts/docker-build.sh")
+	for _, token := range []string{
+		"DOCKER_IMAGE",
+		"DOCKER_BUILD_CONTEXT",
+		"DOCKER_PLATFORM",
+		"docker build",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("docker build script missing %q", token)
+		}
+	}
+
+	makefile := readDeployExample(t, "Makefile")
+	for _, token := range []string{
+		"docker-build:",
+		"DOCKER_BUILD_CONTEXT",
+		"./scripts/docker-build.sh",
+	} {
+		if !strings.Contains(makefile, token) {
+			t.Fatalf("Makefile missing docker build token %q", token)
+		}
+	}
+}
+
+func TestDockerBuildScriptSeparatesDaemonAndBuildContexts(t *testing.T) {
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "args")
+	contextPath := filepath.Join(tempDir, "daemon-context")
+	fakeDocker := filepath.Join(tempDir, "docker")
+	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\n"+
+		"printf '%s\\n' \"${DOCKER_CONTEXT-}\" > \"$CAPTURE_CONTEXT\"\n"+
+		"printf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	command := exec.Command("sh", "scripts/docker-build.sh")
+	command.Env = []string{
+		"PATH=" + tempDir + ":" + os.Getenv("PATH"),
+		"CAPTURE_ARGS=" + argsPath,
+		"CAPTURE_CONTEXT=" + contextPath,
+		"DOCKER_CONTEXT=remote-builder",
+		"DOCKER_BUILD_CONTEXT=fixture-context",
+		"DOCKER_IMAGE=fixture:image",
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("docker build script: %v: %s", err, output)
+	}
+
+	daemonContext, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read captured daemon context: %v", err)
+	}
+	if got := strings.TrimSpace(string(daemonContext)); got != "remote-builder" {
+		t.Fatalf("docker daemon context = %q, want remote-builder", got)
+	}
+
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read captured docker arguments: %v", err)
+	}
+	want := []string{"build", "-f", "Dockerfile", "-t", "fixture:image", "fixture-context"}
+	if got := strings.Split(strings.TrimSpace(string(args)), "\n"); !slices.Equal(got, want) {
+		t.Fatalf("docker arguments = %#v, want %#v", got, want)
+	}
+}
+
+func TestReadmeLinksDeployExamples(t *testing.T) {
+	readme := readDeployExample(t, "README.md")
+	for _, token := range []string{
+		"make docker-build",
+		"Dockerfile",
+		"deploy/systemd/hatrie-cache.service",
+		"deploy/topology/full-replica.json",
+		"deploy/topology/sharded.json",
+		"deploy/docker-compose.yml",
+		"deploy/docker-compose.production.yml",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README missing deploy example link %q", token)
+		}
+	}
+}
+
+func TestProductionComposeExampleHardensRuntime(t *testing.T) {
+	compose := readDeployExample(t, "deploy/docker-compose.production.yml")
+	for _, token := range []string{
+		"restart: unless-stopped",
+		"read_only: true",
+		"cap_drop:",
+		"no-new-privileges:true",
+		"MONITORING_AUTH_TOKEN",
+		"HATRIE_HEALTHCHECK_ADDR",
+		"/var/lib/hatrie-cache/cache.leveldb",
+		"-db-format",
+		"-db-sync-interval",
+		"-db-compact-interval",
+		"-db-hot-load=true",
+		"-snapshot-format",
+		"-journal-format",
+		"-write-protection=true",
+	} {
+		if !strings.Contains(compose, token) {
+			t.Fatalf("production compose missing %q", token)
+		}
+	}
+}
+
+func readDeployExample(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	return string(data)
+}

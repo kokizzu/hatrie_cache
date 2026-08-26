@@ -5,7 +5,7 @@ benchmark=${PRIORITY_QUEUE_SCALAR_BENCH:-^BenchmarkPriorityQueueScalarPush}
 benchtime=${BENCHTIME:-1s}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

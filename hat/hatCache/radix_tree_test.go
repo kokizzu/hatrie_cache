@@ -1,0 +1,577 @@
+package hatCache
+
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"testing"
+)
+
+func TestRadixTreePutGetDeleteAndPrefix(t *testing.T) {
+	tree := newRadixTreeData()
+	nested := Map{"role": "admin"}
+	if !tree.Put("user:100/profile", nested) {
+		t.Fatal("Put(user:100/profile) = false, want new insert")
+	}
+	nested["role"] = "caller"
+	if !tree.Put("user:100/session", "active") {
+		t.Fatal("Put(user:100/session) = false, want new insert")
+	}
+	if !tree.Put("user:101/profile", "viewer") {
+		t.Fatal("Put(user:101/profile) = false, want new insert")
+	}
+	if tree.Put("user:100/session", "idle") {
+		t.Fatal("Put(existing) = true, want replacement")
+	}
+
+	value, ok := tree.Get("user:100/profile")
+	if !ok || !reflect.DeepEqual(value, Map{"role": "admin"}) {
+		t.Fatalf("Get(user:100/profile) = %#v/%v, want stored clone", value, ok)
+	}
+	value.(Map)["role"] = "reader"
+	value, ok = tree.Get("user:100/profile")
+	if !ok || value.(Map)["role"] != "admin" {
+		t.Fatalf("Get after caller mutation = %#v/%v, want unchanged clone", value, ok)
+	}
+	if value, ok := tree.Get("user:100/session"); !ok || value != "idle" {
+		t.Fatalf("Get(user:100/session) = %#v/%v, want replacement", value, ok)
+	}
+
+	items := tree.ItemsWithPrefix("user:100/")
+	if got, want := radixTreeItemKeys(items), []string{"user:100/profile", "user:100/session"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ItemsWithPrefix(user:100/) keys = %#v, want %#v", got, want)
+	}
+	if !tree.Delete("user:100/profile") {
+		t.Fatal("Delete(user:100/profile) = false, want true")
+	}
+	if tree.Delete("user:100/profile") {
+		t.Fatal("Delete(user:100/profile again) = true, want false")
+	}
+	if _, ok := tree.Get("user:100/profile"); ok {
+		t.Fatal("deleted key still present")
+	}
+	if value, ok := tree.Get("user:100/session"); !ok || value != "idle" {
+		t.Fatalf("Get(user:100/session after delete) = %#v/%v, want retained sibling", value, ok)
+	}
+
+	info := tree.Info()
+	if info.Items != 2 || info.Nodes == 0 || info.Edges == 0 || info.LabelBytes == 0 || info.EncodedBytes == 0 {
+		t.Fatalf("Info() = %#v, want compact populated tree", info)
+	}
+}
+
+func TestRadixTreeContainsReportsMembershipWithoutValueAccess(t *testing.T) {
+	var empty radixTreeData
+	if empty.Contains("") || empty.Contains("missing") {
+		t.Fatal("empty tree Contains() = true, want false")
+	}
+
+	tree := newRadixTreeData()
+	if !tree.Put("", Map{"root": "value"}) || !tree.Put("user:100/profile", Map{"role": "admin"}) {
+		t.Fatal("Put() = false, want new entries")
+	}
+	for _, key := range []string{"", "user:100/profile"} {
+		if !tree.Contains(key) {
+			t.Fatalf("Contains(%q) = false, want true", key)
+		}
+	}
+	if tree.Contains("user:100/missing") {
+		t.Fatal("Contains(missing) = true, want false")
+	}
+}
+
+func TestRadixTreeInsertionOrderProducesCanonicalShape(t *testing.T) {
+	items := []RadixTreeItem{
+		{Key: "", Value: "root"},
+		{Key: "a", Value: "a"},
+		{Key: "ab", Value: "ab"},
+		{Key: "abc", Value: "abc"},
+		{Key: "abd", Value: "abd"},
+		{Key: "alpha", Value: "alpha"},
+		{Key: "alphabet", Value: "alphabet"},
+		{Key: "alpine", Value: "alpine"},
+		{Key: "b", Value: "b"},
+		{Key: "beta", Value: "beta"},
+		{Key: "betamax", Value: "betamax"},
+		{Key: "zeta", Value: "zeta"},
+	}
+	orders := [][]int{
+		{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+		{11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0},
+		{5, 9, 1, 11, 3, 7, 0, 10, 2, 8, 6, 4},
+		{3, 0, 8, 6, 10, 2, 11, 1, 9, 4, 7, 5},
+	}
+	build := func(order []int) radixTreeData {
+		tree := newRadixTreeData()
+		for _, index := range order {
+			item := items[index]
+			tree.Put(item.Key, item.Value)
+		}
+		return tree
+	}
+
+	baseline := build(orders[0])
+	for index, order := range orders[1:] {
+		candidate := build(order)
+		if !reflect.DeepEqual(candidate.root, baseline.root) {
+			t.Fatalf("order %d root differs from canonical baseline:\n candidate=%#v\n baseline=%#v", index+1, candidate.root, baseline.root)
+		}
+		if candidate.items != baseline.items {
+			t.Fatalf("order %d items = %d, want %d", index+1, candidate.items, baseline.items)
+		}
+		if got, want := candidate.Snapshot(), baseline.Snapshot(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("order %d snapshot = %#v, want %#v", index+1, got, want)
+		}
+		if got, want := candidate.Info(), baseline.Info(); got != want {
+			t.Fatalf("order %d info = %#v, want %#v", index+1, got, want)
+		}
+	}
+
+	replaced := build(orders[2])
+	for _, index := range orders[3] {
+		item := items[index]
+		replaced.Put(item.Key, "replacement:"+item.Value.(string))
+	}
+	replacementBaseline := newRadixTreeData()
+	for _, item := range items {
+		replacementBaseline.Put(item.Key, "replacement:"+item.Value.(string))
+	}
+	if !reflect.DeepEqual(replaced.root, replacementBaseline.root) {
+		t.Fatalf("replacement order root differs:\n candidate=%#v\n baseline=%#v", replaced.root, replacementBaseline.root)
+	}
+
+	entries := make(Map, len(items))
+	for _, item := range items {
+		entries[item.Key] = item.Value
+	}
+	bulk := newRadixTreeData()
+	if added := bulk.PutEntries(entries); added != len(entries) {
+		t.Fatalf("bulk added = %d, want %d", added, len(entries))
+	}
+	if !reflect.DeepEqual(bulk.root, baseline.root) {
+		t.Fatalf("bulk root differs from canonical baseline:\n candidate=%#v\n baseline=%#v", bulk.root, baseline.root)
+	}
+	for key, value := range entries {
+		entries[key] = "replacement:" + value.(string)
+	}
+	if added := bulk.PutEntries(entries); added != 0 {
+		t.Fatalf("bulk replacement added = %d, want 0", added)
+	}
+	if !reflect.DeepEqual(bulk.root, replacementBaseline.root) {
+		t.Fatalf("bulk replacement root differs:\n candidate=%#v\n baseline=%#v", bulk.root, replacementBaseline.root)
+	}
+}
+
+func TestRadixTreePutPlainStringPreservesPutBehavior(t *testing.T) {
+	var nilTree *radixTreeData
+	if nilTree.PutPlainString("key", "value") {
+		t.Fatal("nil PutPlainString() = true, want false")
+	}
+
+	tree := newRadixTreeData()
+	if !tree.PutPlainString("user:100/profile", "active") {
+		t.Fatal("PutPlainString(first) = false, want new insert")
+	}
+	if tree.PutPlainString("user:100/profile", "active") {
+		t.Fatal("PutPlainString(duplicate) = true, want replacement")
+	}
+	if tree.items != 1 {
+		t.Fatalf("items after duplicate = %d, want 1", tree.items)
+	}
+	if tree.PutPlainString("user:100/profile", "idle") {
+		t.Fatal("PutPlainString(replacement) = true, want false")
+	}
+	if value, ok := tree.Get("user:100/profile"); !ok || value != "idle" {
+		t.Fatalf("Get(user:100/profile) = %#v/%v, want idle/true", value, ok)
+	}
+
+	if !tree.PutPlainString("user:101/profile", "pending") {
+		t.Fatal("PutPlainString(split sibling) = false, want new insert")
+	}
+	if !tree.PutPlainString("user", "root") {
+		t.Fatal("PutPlainString(prefix parent) = false, want new insert")
+	}
+	if !tree.PutPlainString("", "empty-key") {
+		t.Fatal("PutPlainString(empty key) = false, want new insert")
+	}
+	if tree.items != 4 {
+		t.Fatalf("items after inserts = %d, want 4", tree.items)
+	}
+
+	if !tree.Put("structured", Map{"state": "nested"}) {
+		t.Fatal("Put(structured) = false, want new insert")
+	}
+	if tree.PutPlainString("structured", "flat") {
+		t.Fatal("PutPlainString(structured replacement) = true, want false")
+	}
+	if value, ok := tree.Get("structured"); !ok || value != "flat" {
+		t.Fatalf("Get(structured) = %#v/%v, want flat/true", value, ok)
+	}
+}
+
+func TestRadixTreePutPlainStringDuplicateDoesNotAllocate(t *testing.T) {
+	tree := newRadixTreeData()
+	if !tree.PutPlainString("user:100/profile", "active") {
+		t.Fatal("PutPlainString(first) = false, want new insert")
+	}
+	allocs := testing.AllocsPerRun(1000, func() {
+		if tree.PutPlainString("user:100/profile", "active") {
+			t.Fatal("PutPlainString(duplicate) = true, want false")
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("PutPlainString(duplicate) allocations = %v, want 0", allocs)
+	}
+}
+
+func TestRadixTreeSnapshotRoundTrip(t *testing.T) {
+	tree := newRadixTreeData()
+	tree.Put("asset:css", "main.css")
+	tree.Put("asset:js", json.Number("42"))
+	tree.Put("session", Map{"status": "active"})
+
+	snapshot := tree.Snapshot()
+	if got, want := radixTreeItemKeys(snapshot.Items), []string{"asset:css", "asset:js", "session"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Snapshot() keys = %#v, want %#v", got, want)
+	}
+	restored, err := newRadixTreeDataFromSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("newRadixTreeDataFromSnapshot() error = %v", err)
+	}
+	if got := restored.ItemsWithPrefix("asset:"); !reflect.DeepEqual(radixTreeItemKeys(got), []string{"asset:css", "asset:js"}) {
+		t.Fatalf("restored asset prefix keys = %#v, want asset keys", got)
+	}
+	if value, ok := restored.Get("asset:js"); !ok || value != json.Number("42") {
+		t.Fatalf("restored Get(asset:js) = %#v/%v, want json.Number", value, ok)
+	}
+}
+
+func TestRadixTreePrefixScanUsesBoundedCapacity(t *testing.T) {
+	tree := newRadixTreeData()
+	for idx := 0; idx < 200; idx++ {
+		tree.Put(fmt.Sprintf("cold:%03d", idx), idx)
+	}
+	tree.Put("hot:one", "value")
+
+	items := tree.ItemsWithPrefix("hot:")
+	if got, want := radixTreeItemKeys(items), []string{"hot:one"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ItemsWithPrefix(hot:) keys = %#v, want %#v", got, want)
+	}
+	if cap(items) > maxRadixTreePrefixScanCapacity {
+		t.Fatalf("ItemsWithPrefix(hot:) capacity = %d, want at most %d", cap(items), maxRadixTreePrefixScanCapacity)
+	}
+
+	snapshot := tree.Snapshot()
+	if len(snapshot.Items) != 201 {
+		t.Fatalf("Snapshot() items = %d, want 201", len(snapshot.Items))
+	}
+	if cap(snapshot.Items) != len(snapshot.Items) {
+		t.Fatalf("Snapshot() capacity = %d, want exact full-scan capacity %d", cap(snapshot.Items), len(snapshot.Items))
+	}
+}
+
+func TestRadixTreePlainPrefixJSONPreservesAllPlainEntries(t *testing.T) {
+	tree := newRadixTreeData()
+	for index := 0; index < 16; index++ {
+		key := fmt.Sprintf("session:%02d", index)
+		value := fmt.Sprintf("value-%02d", index)
+		if !tree.PutPlainString(key, value) {
+			t.Fatalf("PutPlainString(%q) = false, want new item", key)
+		}
+	}
+	data, ok := tree.plainItemsWithPrefixJSON("session:")
+	if !ok {
+		t.Fatal("plainItemsWithPrefixJSON() = false, want plain output")
+	}
+	var items []RadixTreeItem
+	if err := json.Unmarshal([]byte(data), &items); err != nil {
+		t.Fatalf("plainItemsWithPrefixJSON() JSON = %q, error = %v", data, err)
+	}
+	if len(items) != 16 {
+		t.Fatalf("plainItemsWithPrefixJSON() item count = %d, want 16", len(items))
+	}
+	for index, item := range items {
+		if want := fmt.Sprintf("session:%02d", index); item.Key != want {
+			t.Fatalf("item %d key = %q, want %q", index, item.Key, want)
+		}
+		if want := fmt.Sprintf("value-%02d", index); item.Value != want {
+			t.Fatalf("item %d value = %#v, want %q", index, item.Value, want)
+		}
+	}
+}
+
+func TestExecuteFastScanRadixTreeCommandUsesPlainStringPathAndFallsBack(t *testing.T) {
+	trie := newTestTrie(t)
+	if !trie.PutRadixTree("index", "session:1", "active") || !trie.PutRadixTree("index", "session:2", "idle") {
+		t.Fatal("PutRadixTree() failed")
+	}
+	response, handled := trie.executeFastScanRadixTreeCommand("index", "session:")
+	if !handled || !response.OK {
+		t.Fatalf("executeFastScanRadixTreeCommand() = %#v/%v, want handled success", response, handled)
+	}
+	var items []RadixTreeItem
+	if err := json.Unmarshal([]byte(response.Value), &items); err != nil {
+		t.Fatalf("fast prefix JSON error = %v", err)
+	}
+	if got, want := radixTreeItemKeys(items), []string{"session:1", "session:2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("fast prefix keys = %#v, want %#v", got, want)
+	}
+
+	trie.PutRadixTree("index", "session:3", Map{"state": "nested"})
+	if response, handled := trie.executeFastScanRadixTreeCommand("index", "session:"); handled {
+		t.Fatalf("nested fast scan = %#v/%v, want generic fallback", response, handled)
+	}
+	response = trie.ExecuteCommand(CacheCommandRequest{Command: "PREFIXRT", Key: "index", Subkey: "session:"})
+	if !response.OK {
+		t.Fatalf("PREFIXRT fallback response = %#v, want success", response)
+	}
+	if err := json.Unmarshal([]byte(response.Value), &items); err != nil || len(items) != 3 {
+		t.Fatalf("PREFIXRT fallback items = %#v error=%v, want three values", items, err)
+	}
+}
+
+func TestRadixTreeSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	if err := validateRadixTreeSnapshot(radixTreeSnapshot{
+		Count: 1,
+		Items: []RadixTreeItem{},
+	}); err == nil {
+		t.Fatal("validateRadixTreeSnapshot(count mismatch) error = nil, want error")
+	}
+	if err := validateRadixTreeSnapshot(radixTreeSnapshot{
+		Count: 2,
+		Items: []RadixTreeItem{
+			{Key: "b", Value: "second"},
+			{Key: "a", Value: "first"},
+		},
+	}); err == nil {
+		t.Fatal("validateRadixTreeSnapshot(unsorted) error = nil, want error")
+	}
+	if err := validateRadixTreeSnapshot(radixTreeSnapshot{
+		Count: 2,
+		Items: []RadixTreeItem{
+			{Key: "a", Value: "first"},
+			{Key: "a", Value: "duplicate"},
+		},
+	}); err == nil {
+		t.Fatal("validateRadixTreeSnapshot(duplicate) error = nil, want error")
+	}
+	if err := validateRadixTreeSnapshot(radixTreeSnapshot{
+		Count: 1,
+		Items: []RadixTreeItem{{Key: "a", Value: func() {}}},
+	}); err == nil {
+		t.Fatal("validateRadixTreeSnapshot(unsupported value) error = nil, want error")
+	}
+}
+
+func TestHatTrieRadixTreeOperations(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertRadixTree("index")
+	if hval := ht.Get("index"); !hval.IsRadixTree() {
+		t.Fatalf("UpsertRadixTree stored type %+v, want radix tree", hval)
+	}
+	idx := ht.Get("index").Index
+	if added := ht.PutRadixTree("index", "user:100", "active"); !added {
+		t.Fatal("PutRadixTree(new) = false, want true")
+	}
+	if added := ht.PutRadixTree("index", "user:101", "idle"); !added {
+		t.Fatal("PutRadixTree(second new) = false, want true")
+	}
+	if added := ht.PutRadixTree("index", "user:101", "away"); added {
+		t.Fatal("PutRadixTree(existing) = true, want false")
+	}
+	if value, ok := ht.GetRadixTree("index", "user:101"); !ok || value != "away" {
+		t.Fatalf("GetRadixTree(user:101) = %#v/%v, want away", value, ok)
+	}
+	if !ht.HasRadixTree("index", "user:100") {
+		t.Fatal("HasRadixTree(user:100) = false, want true")
+	}
+	items, ok := ht.ScanRadixTree("index", "user:")
+	if !ok || !reflect.DeepEqual(radixTreeItemKeys(items), []string{"user:100", "user:101"}) {
+		t.Fatalf("ScanRadixTree(user:) = %#v/%v, want two sorted users", items, ok)
+	}
+	if !ht.DeleteRadixTree("index", "user:100") {
+		t.Fatal("DeleteRadixTree(user:100) = false, want true")
+	}
+	if ht.HasRadixTree("index", "user:100") {
+		t.Fatal("HasRadixTree(user:100 after delete) = true, want false")
+	}
+	info, ok := ht.RadixTreeInfo("index")
+	if !ok || info.Items != 1 || info.Nodes == 0 {
+		t.Fatalf("RadixTreeInfo(index) = %#v/%v, want one item", info, ok)
+	}
+
+	ht.UpsertRadixTree("index")
+	if got := ht.Get("index"); !got.IsRadixTree() || got.Index != idx {
+		t.Fatalf("UpsertRadixTree replacement stored %+v, want same radix tree slot %d", got, idx)
+	}
+	if added := ht.PutRadixTree("auto", "key", "value"); !added {
+		t.Fatal("PutRadixTree(auto) = false, want true")
+	}
+	if !ht.Get("auto").IsRadixTree() {
+		t.Fatal("PutRadixTree on missing key did not create a radix tree")
+	}
+}
+
+func TestCheckedRadixTreeOperationsReturnValuesAndCopies(t *testing.T) {
+	ht := newTestTrie(t)
+
+	added, err := ht.PutRadixTreeChecked("index", "user:100/profile", Map{"status": "active"})
+	if err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(new) = %v/%v, want true/nil", added, err)
+	}
+	addedCount, err := ht.PutRadixTreeEntriesChecked("index", Map{
+		"asset:logo":       []byte("png"),
+		"user:101/profile": "pending",
+	})
+	if err != nil || addedCount != 2 {
+		t.Fatalf("PutRadixTreeEntriesChecked(new) = %d/%v, want 2/nil", addedCount, err)
+	}
+
+	value, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile")
+	if err != nil || !ok || !reflect.DeepEqual(value, Map{"status": "active"}) {
+		t.Fatalf("GetRadixTreeChecked(user:100/profile) = %#v/%v/%v, want stored map", value, ok, err)
+	}
+	value.(Map)["status"] = "changed"
+	if again, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok || again.(Map)["status"] != "active" {
+		t.Fatalf("GetRadixTreeChecked(after caller mutation) = %#v/%v/%v, want original map", again, ok, err)
+	}
+
+	items, ok, err := ht.ScanRadixTreeChecked("index", "user:")
+	if err != nil || !ok || !reflect.DeepEqual(radixTreeItemKeys(items), []string{"user:100/profile", "user:101/profile"}) {
+		t.Fatalf("ScanRadixTreeChecked(user:) = %#v/%v/%v, want sorted user keys", items, ok, err)
+	}
+	items[0].Value.(Map)["status"] = "scan"
+	if again, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok || again.(Map)["status"] != "active" {
+		t.Fatalf("GetRadixTreeChecked(after scan mutation) = %#v/%v/%v, want original map", again, ok, err)
+	}
+
+	hit, err := ht.HasRadixTreeChecked("index", "asset:logo")
+	if err != nil || !hit {
+		t.Fatalf("HasRadixTreeChecked(asset:logo) = %v/%v, want true/nil", hit, err)
+	}
+	info, ok, err := ht.RadixTreeInfoChecked("index")
+	if err != nil || !ok || info.Items != 3 || info.Nodes == 0 {
+		t.Fatalf("RadixTreeInfoChecked(index) = %#v/%v/%v, want populated tree", info, ok, err)
+	}
+	deleted, err := ht.DeleteRadixTreeChecked("index", "asset:logo")
+	if err != nil || !deleted {
+		t.Fatalf("DeleteRadixTreeChecked(asset:logo) = %v/%v, want true/nil", deleted, err)
+	}
+	hit, err = ht.HasRadixTreeChecked("index", "asset:logo")
+	if err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(asset:logo after delete) = %v/%v, want false/nil", hit, err)
+	}
+
+	ht.UpsertString("string", "value")
+	added, err = ht.PutRadixTreeChecked("string", "key", "value")
+	if err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(overwrite string) = %v/%v, want true/nil", added, err)
+	}
+	if hval := ht.Get("string"); !hval.IsRadixTree() {
+		t.Fatalf("PutRadixTreeChecked(overwrite string) stored %+v, want radix tree", hval)
+	}
+	if value, ok, err := ht.GetRadixTreeChecked("missing", "key"); err != nil || ok || value != nil {
+		t.Fatalf("GetRadixTreeChecked(missing) = %#v/%v/%v, want nil/false/nil", value, ok, err)
+	}
+	if items, ok, err := ht.ScanRadixTreeChecked("missing", ""); err != nil || ok || items != nil {
+		t.Fatalf("ScanRadixTreeChecked(missing) = %#v/%v/%v, want nil/false/nil", items, ok, err)
+	}
+}
+
+func TestRadixTreeReadOperationsRemainSafeDuringReplacement(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertRadixTree("index")
+	if !ht.PutRadixTree("index", "user:100/profile", Map{"status": "active"}) {
+		t.Fatal("PutRadixTree() = false, want insertion")
+	}
+
+	const iterations = 1_000
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for iteration := 0; iteration < iterations; iteration++ {
+			ht.PutRadixTree("index", "user:100/profile", Map{"status": "active", "version": iteration})
+		}
+	}()
+
+	for iteration := 0; iteration < iterations; iteration++ {
+		if _, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok {
+			t.Fatalf("GetRadixTreeChecked() = %v/%v, want value/true", err, ok)
+		}
+		if hit, err := ht.HasRadixTreeChecked("index", "user:100/profile"); err != nil || !hit {
+			t.Fatalf("HasRadixTreeChecked() = %v/%v, want true/nil", hit, err)
+		}
+		if items, ok, err := ht.ScanRadixTreeChecked("index", "user:"); err != nil || !ok || len(items) != 1 {
+			t.Fatalf("ScanRadixTreeChecked() = %d/%v/%v, want one item/true/nil", len(items), ok, err)
+		}
+		if info, ok, err := ht.RadixTreeInfoChecked("index"); err != nil || !ok || info.Items != 1 {
+			t.Fatalf("RadixTreeInfoChecked() = %#v/%v/%v, want one item/true/nil", info, ok, err)
+		}
+	}
+	<-done
+}
+
+func TestCheckedRadixTreeRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	if added, err := ht.PutRadixTreeChecked("index", "bad", unsupported); err == nil || added {
+		t.Fatalf("PutRadixTreeChecked(unsupported missing) = %v/%v, want false/error", added, err)
+	}
+	if hval := ht.Get("index"); !hval.Empty() {
+		t.Fatalf("PutRadixTreeChecked(unsupported missing) stored value %+v", hval)
+	}
+
+	if added, err := ht.PutRadixTreeChecked("index", "keep", "value"); err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(keep) = %v/%v, want true/nil", added, err)
+	}
+	if added, err := ht.PutRadixTreeChecked("index", "bad", unsupported); err == nil || added {
+		t.Fatalf("PutRadixTreeChecked(unsupported existing) = %v/%v, want false/error", added, err)
+	}
+	if got, ok, err := ht.GetRadixTreeChecked("index", "keep"); err != nil || !ok || got != "value" {
+		t.Fatalf("GetRadixTreeChecked(keep after rejected put) = %#v/%v/%v, want value/true/nil", got, ok, err)
+	}
+	if hit, err := ht.HasRadixTreeChecked("index", "bad"); err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(bad after rejected put) = %v/%v, want false/nil", hit, err)
+	}
+
+	if added, err := ht.PutRadixTreeEntriesChecked("index", Map{"new": "value", "bad": unsupported}); err == nil || added != 0 {
+		t.Fatalf("PutRadixTreeEntriesChecked(unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if hit, err := ht.HasRadixTreeChecked("index", "new"); err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(new after rejected batch) = %v/%v, want false/nil", hit, err)
+	}
+	if info, ok, err := ht.RadixTreeInfoChecked("index"); err != nil || !ok || info.Items != 1 {
+		t.Fatalf("RadixTreeInfoChecked(after rejected batch) = %#v/%v/%v, want one item", info, ok, err)
+	}
+
+	if added := ht.PutRadixTree("unchecked", "bad", unsupported); !added {
+		t.Fatal("PutRadixTree unchecked unsupported value = false, want legacy permissive insert")
+	}
+}
+
+func TestRadixTreeStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertRadixTree("index")
+	idx := ht.Get("index").Index
+	ht.UpsertString("index", "replacement")
+	if !radixTreeIndexReleased(ht, idx) {
+		t.Fatalf("overwritten radix tree index %d was not released", idx)
+	}
+	ht.UpsertRadixTree("new")
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("radix tree storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func radixTreeIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.radixTrees.array) || ht.radixTrees.reusables.Has(idx)
+}
+
+func radixTreeItemKeys(items []RadixTreeItem) []string {
+	keys := make([]string, len(items))
+	for idx, item := range items {
+		keys[idx] = item.Key
+	}
+	return keys
+}

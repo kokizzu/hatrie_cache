@@ -14,7 +14,7 @@ echo "Pebble backup benchmark: bench=$bench benchtime=$benchtime count=$count ke
 echo
 
 run_benchmark() {
-	HATRIE_BACKUP_BENCH_KEYS="$keys" go test . \
+	HATRIE_BACKUP_BENCH_KEYS="$keys" go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$bench" \
 		-benchmem \
@@ -27,7 +27,7 @@ if command -v /usr/bin/time >/dev/null 2>&1; then
 	benchmark_output=$(mktemp)
 	trap 'rm -f "$time_output" "$benchmark_output"' EXIT HUP INT TERM
 	/usr/bin/time -f '%M %e' -o "$time_output" sh -c '
-		HATRIE_BACKUP_BENCH_KEYS="$1" go test . -run "^$" -bench "$2" -benchmem -benchtime "$3" -count "$4"
+		HATRIE_BACKUP_BENCH_KEYS="$1" go test ./hat/hatCache -run "^$" -bench "$2" -benchmem -benchtime "$3" -count "$4"
 	' sh "$keys" "$bench" "$benchtime" "$count" >"$benchmark_output"
 	tee "$output" <"$benchmark_output"
 	set -- $(cat "$time_output")

@@ -5,7 +5,7 @@ benchmark=${QUANTILE_ADD_BENCH:-^BenchmarkQuantileSketchAddValidation$}
 benchtime=${BENCHTIME:-500ms}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

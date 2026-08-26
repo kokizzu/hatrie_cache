@@ -69,7 +69,7 @@ normalize_output_file() {
 	mv "$normalized_output_file" "$output_file"
 }
 
-go test -c -o "$binary" .
+go test -c -o "$binary" ./hat/hatCache
 
 emit 'HAT-trie benchmark: bench=%s benchtime=%s count=%s pipeline_ops=%s mixed_profile_ops=%s\n\n' "$bench" "${benchtime:-default}" "$count" "$pipeline_ops" "$mixed_profile_ops"
 

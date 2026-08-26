@@ -7,7 +7,7 @@ benchtime=${BENCHTIME:-10000x}
 alternating_benchtime=${RESERVOIR_BATCH_ALTERNATING_BENCHTIME:-100x}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$path_benchmark" \
 	-benchmem \
@@ -15,7 +15,7 @@ go test . \
 	-count="$count" \
 	-cpu=1
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$alternating_benchmark" \
 	-benchtime="$alternating_benchtime" \

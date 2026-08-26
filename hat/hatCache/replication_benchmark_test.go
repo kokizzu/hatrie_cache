@@ -1,0 +1,4385 @@
+package hatCache
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
+
+	"github.com/cespare/xxhash/v2"
+	"github.com/syndtr/goleveldb/leveldb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/test/bufconn"
+)
+
+var replicationOutboxBenchmarkData []byte
+var replicationGRPCStreamFlightBenchmarkSink *replicationGRPCStreamFlight
+
+func BenchmarkReplicationGRPCStreamCollectFlight(b *testing.B) {
+	for _, benchmark := range []struct {
+		name          string
+		jobCount      int
+		carryIndex    int
+		expectedCount int
+	}{
+		{name: "one", jobCount: 1, carryIndex: -1, expectedCount: 1},
+		{name: "two", jobCount: 2, carryIndex: -1, expectedCount: 2},
+		{name: "incompatible-carry", jobCount: 2, carryIndex: 1, expectedCount: 1},
+		{name: "two-then-queued-carry", jobCount: DefaultReplicationGRPCLiveBatchMaxCommands, carryIndex: 2, expectedCount: 2},
+		{name: "thirty-two", jobCount: DefaultReplicationGRPCLiveBatchMaxCommands, carryIndex: -1, expectedCount: DefaultReplicationGRPCLiveBatchMaxCommands},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			target := &replicationGRPCStreamTarget{
+				ctx:              context.Background(),
+				jobs:             make(chan *replicationGRPCStreamJob, benchmark.jobCount-1),
+				batchMaxCommands: DefaultReplicationGRPCLiveBatchMaxCommands,
+			}
+			jobs := make([]replicationGRPCStreamJob, benchmark.jobCount)
+			for idx := range jobs {
+				jobs[idx] = replicationGRPCStreamJob{
+					ctx:                 context.Background(),
+					source:              "source",
+					topologyFingerprint: "topology",
+					payloads: replicationSyncPayloadBatch{inline: []replicationSyncPayload{{
+						key: "key",
+					}}},
+				}
+			}
+			if benchmark.carryIndex >= 0 {
+				jobs[benchmark.carryIndex].source = "other-source"
+			}
+
+			b.ReportAllocs()
+			b.ReportMetric(float64(benchmark.jobCount), "jobs/op")
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				for jobIdx := 1; jobIdx < len(jobs); jobIdx++ {
+					target.jobs <- &jobs[jobIdx]
+				}
+				flight, carry, err := target.collectFlight(&jobs[0])
+				if err != nil || (carry != nil) != (benchmark.carryIndex >= 0) || len(flight.jobs) != benchmark.expectedCount {
+					b.Fatalf("collectFlight = %d jobs, carry %p, err %v", len(flight.jobs), carry, err)
+				}
+				for len(target.jobs) != 0 {
+					<-target.jobs
+				}
+				replicationGRPCStreamFlightBenchmarkSink = flight
+			}
+		})
+	}
+}
+
+func BenchmarkCacheGRPCServerApplyReplicationStreamBatch(b *testing.B) {
+	for _, entryCount := range []int{1, DefaultReplicationGRPCLiveBatchMaxCommands} {
+		b.Run(strconv.Itoa(entryCount), func(b *testing.B) {
+			topology := replicationTestTopology(b, "http://node-b")
+			target := CreateHatTrie()
+			b.Cleanup(target.Destroy)
+			server := NewCacheGRPCServer(target, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			})
+			source := CreateHatTrie()
+			b.Cleanup(source.Destroy)
+			batch := &hatriecachev1.ReplicationStreamBatch{
+				Source:              "node-a",
+				TopologyFingerprint: topology.Fingerprint(),
+				Keys:                make([]string, entryCount),
+				BinaryValues:        make([][]byte, entryCount),
+			}
+			for idx := 0; idx < entryCount; idx++ {
+				key := "stream:" + strconv.Itoa(idx)
+				source.UpsertString(key, "value")
+				payload, ok := replicationCommandPayload(source, key, replicationPayloadSet)
+				if !ok {
+					b.Fatalf("replicationCommandPayload(%s) ok = false", key)
+				}
+				batch.Keys[idx] = key
+				batch.BinaryValues[idx] = payload.BinaryValue
+			}
+
+			b.ReportAllocs()
+			b.ReportMetric(float64(entryCount), "entries/op")
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				batch.Sequence = uint64(idx + 1)
+				ack := server.applyReplicationStreamBatch(context.Background(), batch)
+				if !ack.GetOk() || ack.GetEntries() != uint64(entryCount) {
+					b.Fatalf("applyReplicationStreamBatch() = %#v, want success", ack)
+				}
+			}
+		})
+	}
+}
+
+type benchmarkGRPCWireStats struct {
+	outbound atomic.Int64
+	inbound  atomic.Int64
+}
+
+func (handler *benchmarkGRPCWireStats) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (handler *benchmarkGRPCWireStats) HandleRPC(_ context.Context, rpcStats stats.RPCStats) {
+	if payload, ok := rpcStats.(*stats.OutPayload); ok {
+		handler.outbound.Add(int64(payload.WireLength))
+	}
+	if payload, ok := rpcStats.(*stats.InPayload); ok {
+		handler.inbound.Add(int64(payload.WireLength))
+	}
+}
+
+func (handler *benchmarkGRPCWireStats) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+func (handler *benchmarkGRPCWireStats) HandleConn(context.Context, stats.ConnStats) {}
+
+type benchmarkCountingReadCloser struct {
+	io.ReadCloser
+	bytes *atomic.Int64
+}
+
+type benchmarkCountingResponseWriter struct {
+	http.ResponseWriter
+	bytes *atomic.Int64
+}
+
+func (writer benchmarkCountingResponseWriter) Write(data []byte) (int, error) {
+	n, err := writer.ResponseWriter.Write(data)
+	writer.bytes.Add(int64(n))
+	return n, err
+}
+
+func (reader benchmarkCountingReadCloser) Read(data []byte) (int, error) {
+	n, err := reader.ReadCloser.Read(data)
+	reader.bytes.Add(int64(n))
+	return n, err
+}
+
+func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
+	const keyCount = 10000
+	for _, tt := range []struct {
+		name     string
+		prefix   string
+		pageSize int
+	}{
+		{name: "Batched10k", prefix: "session:", pageSize: keyCount},
+		{name: "FullKeyspace10k", pageSize: keyCount},
+		{name: "Default1k", prefix: "session:", pageSize: defaultReplicationSyncKeyPageSize},
+		{name: "Unbatched10k", prefix: "session:", pageSize: 1},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			for i := 0; i < keyCount; i++ {
+				key := "session:" + strconv.Itoa(i)
+				trie.UpsertString(key, "value-"+strconv.Itoa(i))
+			}
+
+			var requests atomic.Int64
+			var wireBytes atomic.Int64
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/commands" {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
+				n, err := io.Copy(io.Discard, r.Body)
+				_ = r.Body.Close()
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				requests.Add(1)
+				wireBytes.Add(n)
+				writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+			}))
+			b.Cleanup(target.Close)
+
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a", Address: "http://127.0.0.1:1"},
+					{ID: "node-b", Address: target.URL},
+				},
+				Shards: []TopologyShard{
+					{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+				},
+			})
+			if err != nil {
+				b.Fatalf("NewTopologyStore() error = %v", err)
+			}
+			election := NewElectionStore(topology, ElectionOptions{})
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: election,
+				Client:   target.Client(),
+			})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result := replicator.syncAllPaged(context.Background(), trie, tt.prefix, tt.pageSize)
+				if result.Skipped || result.Entries != keyCount || len(result.Targets) == 0 {
+					b.Fatalf("syncAllPaged() = %#v, want %d synced entries", result, keyCount)
+				}
+				for _, targetResult := range result.Targets {
+					if !targetResult.OK {
+						b.Fatalf("syncAllPaged target = %#v, want ok", targetResult)
+					}
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationCompactBatchReceiver(b *testing.B) {
+	const keyCount = 10000
+	payloads := make([]replicationSyncPayload, keyCount)
+	for index := range payloads {
+		value, err := appendReplicationValueBinary(nil, snapshotEntry{Type: "string", String: "value-" + strconv.Itoa(index)})
+		if err != nil {
+			b.Fatalf("encode value %d: %v", index, err)
+		}
+		payloads[index] = replicationSyncPayload{key: fmt.Sprintf("session:%08d", index), binaryValue: value}
+	}
+	tenRequestRanges := make([][2]int, 0, 10)
+	for start := 0; start < keyCount; start += keyCount / 10 {
+		tenRequestRanges = append(tenRequestRanges, [2]int{start, start + keyCount/10})
+	}
+	fiveRequestRanges := make([][2]int, 0, 5)
+	for start := 0; start < keyCount; start += keyCount / 5 {
+		fiveRequestRanges = append(fiveRequestRanges, [2]int{start, start + keyCount/5})
+	}
+
+	for _, tt := range []struct {
+		name   string
+		ranges [][2]int
+	}{
+		{name: "OneRequest", ranges: [][2]int{{0, keyCount}}},
+		{name: "TwoRequests", ranges: [][2]int{{0, keyCount / 2}, {keyCount / 2, keyCount}}},
+		{name: "FiveRequests", ranges: fiveRequestRanges},
+		{name: "TenRequests", ranges: tenRequestRanges},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			compressed := make([][]byte, 0, len(tt.ranges))
+			totalWireBytes := 0
+			largestProtoBytes := 0
+			for _, bounds := range tt.ranges {
+				batch := replicationSyncPayloadBatch{inline: payloads[bounds[0]:bounds[1]]}
+				protoBytes := replicationSyncBatchProtoSizeBatch(batch, replicationSetCompactCommand, "node-a", math.MaxUint64, "fingerprint-a")
+				if protoBytes > largestProtoBytes {
+					largestProtoBytes = protoBytes
+				}
+				body, contentType, contentEncoding, err := replicationSyncBatchRequestBodyBatch(
+					batch, replicationSetCompactCommand, "node-a", math.MaxUint64, "fingerprint-a", 1,
+				)
+				if err != nil {
+					b.Fatalf("encode bounds %v: %v", bounds, err)
+				}
+				if contentType != commandWireContentTypeProtobuf || contentEncoding != "gzip" {
+					b.Fatalf("bounds %v content type/encoding = %q/%q, want protobuf/gzip", bounds, contentType, contentEncoding)
+				}
+				data, err := io.ReadAll(body)
+				if err != nil {
+					b.Fatalf("read bounds %v: %v", bounds, err)
+				}
+				compressed = append(compressed, data)
+				totalWireBytes += len(data)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				decoded := 0
+				for _, data := range compressed {
+					reader, err := gzip.NewReader(bytes.NewReader(data))
+					if err != nil {
+						b.Fatalf("open gzip body: %v", err)
+					}
+					request, err := decodeCommandRequestProto(reader, maxMonitoringJSONRequestBytes)
+					closeErr := reader.Close()
+					if err != nil {
+						b.Fatalf("decode compact request: %v", err)
+					}
+					if closeErr != nil {
+						b.Fatalf("close gzip body: %v", closeErr)
+					}
+					if normalizedCommand(request.Command) != replicationBatchEnvelopeCommand {
+						b.Fatalf("decoded command = %q, want %s", request.Command, replicationBatchEnvelopeCommand)
+					}
+					decoded += len(request.Batch)
+				}
+				if decoded != keyCount {
+					b.Fatalf("decoded commands = %d, want %d", decoded, keyCount)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalWireBytes), "wire_B/op")
+			b.ReportMetric(float64(largestProtoBytes), "largest_proto_B")
+		})
+	}
+}
+
+func BenchmarkHTTPReplicatorLegacyFallbackReaderPause(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	b.Cleanup(target.Close)
+	topology := replicationTestTopology(b, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	replicator.markReplicationDigestUnsupported(replicationRoutingNode(b, routing, "node-b"), routing.fingerprint)
+
+	var maxPause atomic.Int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		stop := make(chan struct{})
+		ready := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			close(ready)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				started := time.Now()
+				_ = trie.GetString("session:00000000")
+				updateAtomicMax(&maxPause, time.Since(started).Nanoseconds())
+			}
+		}()
+		<-ready
+		result := replicator.syncAllPaged(context.Background(), trie, "session:", keyCount)
+		close(stop)
+		<-done
+		if result.Skipped || result.Entries != keyCount || len(result.Targets) == 0 || !result.Targets[len(result.Targets)-1].OK {
+			b.Fatalf("syncAllPaged() = %#v, want successful legacy repair", result)
+		}
+	}
+	b.ReportMetric(keyCount, "keys/op")
+	b.ReportMetric(float64(maxPause.Load()), "max_read_pause_ns/op")
+}
+
+func BenchmarkReplicationFallbackScanReaderPause(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+
+	for _, test := range []struct {
+		name   string
+		shared bool
+	}{
+		{name: "Exclusive"},
+		{name: "Shared", shared: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			var maxPause atomic.Int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				stop := make(chan struct{})
+				ready := make(chan struct{})
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					close(ready)
+					for {
+						select {
+						case <-stop:
+							return
+						default:
+						}
+						started := time.Now()
+						_ = trie.GetString("session:00000000")
+						updateAtomicMax(&maxPause, time.Since(started).Nanoseconds())
+					}
+				}()
+				<-ready
+				cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: test.shared}
+				page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, keyCount, cursor, nil)
+				cursor.close(trie)
+				close(stop)
+				<-done
+				if err != nil || page.hasMore || page.scanned != keyCount {
+					b.Fatalf("fallback scan = %#v/%v, want %d entries", page, err, keyCount)
+				}
+			}
+			b.ReportMetric(float64(maxPause.Load()), "max_read_pause_ns/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationFallbackScanWriterPause(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+
+	for _, test := range []struct {
+		name   string
+		shared bool
+	}{
+		{name: "Exclusive"},
+		{name: "Shared", shared: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			var totalPause int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: test.shared}
+				scanStarted := make(chan struct{})
+				writerStarted := make(chan struct{})
+				writerPause := make(chan int64, 1)
+				go func() {
+					<-scanStarted
+					started := time.Now()
+					close(writerStarted)
+					trie.UpsertString("writer:key", "value")
+					writerPause <- time.Since(started).Nanoseconds()
+				}()
+				first := true
+				page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, keyCount, cursor, func(Entry) error {
+					if first {
+						first = false
+						close(scanStarted)
+						<-writerStarted
+						runtime.Gosched()
+					}
+					return nil
+				})
+				cursor.close(trie)
+				if err != nil || page.hasMore || page.scanned != keyCount {
+					b.Fatalf("fallback scan = %#v/%v, want %d entries", page, err, keyCount)
+				}
+				totalPause += <-writerPause
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalPause)/float64(b.N), "writer_pause_ns/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationFallbackStripedCounterScan(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	if err := trie.ConfigureCounterWriteStripes(64); err != nil {
+		b.Fatalf("ConfigureCounterWriteStripes() error = %v", err)
+	}
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%08d", index), int32(index))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+		page, err := replicationSyncEntriesPageWithCursor(trie, "counter:", "", false, keyCount, cursor, nil)
+		cursor.close(trie)
+		if err != nil || page.hasMore || page.scanned != keyCount {
+			b.Fatalf("striped counter scan = %#v/%v, want %d entries", page, err, keyCount)
+		}
+	}
+	b.ReportMetric(keyCount, "keys/op")
+}
+
+func BenchmarkHatTriePackedScanModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%08d", index), int32(index))
+	}
+
+	for _, test := range []struct {
+		name     string
+		keysOnly bool
+	}{
+		{name: "Values"},
+		{name: "KeysOnly", keysOnly: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				trie.mu.RLock()
+				var cursor *hatTrieScanCursor
+				var err error
+				if test.keysOnly {
+					cursor, err = trie.newPackedKeyOnlyScanCursorLocked("counter:", true)
+				} else {
+					cursor, err = trie.newPackedScanCursorLocked("counter:", true)
+				}
+				if err != nil {
+					trie.mu.RUnlock()
+					b.Fatal(err)
+				}
+				count := 0
+				for {
+					_, ok := cursor.currentLiveEntryLocked(trie, time.Time{})
+					if !ok {
+						break
+					}
+					count++
+					cursor.consume()
+				}
+				cursor.closeLocked(trie)
+				trie.mu.RUnlock()
+				if count != keyCount {
+					b.Fatalf("packed scan count = %d, want %d", count, keyCount)
+				}
+			}
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {
+	const keyCount = 1024
+	for _, tt := range []struct {
+		name        string
+		existingKey func(int) bool
+	}{
+		{name: "AllSet", existingKey: func(int) bool { return true }},
+		{name: "HalfDelete", existingKey: func(index int) bool { return index%2 == 0 }},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			changes := make([]replicationDigestChange, 0, keyCount)
+			for index := 0; index < keyCount; index++ {
+				key := fmt.Sprintf("session:%08d", index)
+				changes = append(changes, replicationDigestChange{key: key, delete: !tt.existingKey(index)})
+				if tt.existingKey(index) {
+					trie.UpsertString(key, "value-"+strconv.Itoa(index))
+				}
+			}
+
+			targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				_ = r.Body.Close()
+				writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+			}))
+			b.Cleanup(targetServer.Close)
+			topology := replicationTestTopology(b, targetServer.URL)
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   targetServer.Client(),
+			})
+			b.Cleanup(replicator.Close)
+			routing, ok := replicator.snapshotReplicationRouting()
+			if !ok {
+				b.Fatal("snapshotReplicationRouting() ok = false")
+			}
+			target := replicationRoutingNode(b, routing, "node-b")
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				targets, changed, deleted, _ := replicator.executeReplicationDigestChanges(
+					context.Background(), trie, routing, target, changes, nil, false,
+				)
+				if len(targets) != 1 || !targets[0].OK || changed+deleted != keyCount {
+					b.Fatalf("digest changes = %#v changed/deleted %d/%d", targets, changed, deleted)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationDigestSourceIteratorModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	value := strings.Repeat("v", 1024)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), value)
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   replicationRoutingNode(b, routing, "node-b"),
+		prefix:   "session:",
+		pageSize: defaultReplicationSyncKeyPageSize,
+	}
+
+	for _, tt := range []struct {
+		name string
+		new  func() *replicationDigestSourceIterator
+	}{
+		{
+			name: "DigestValues",
+			new: func() *replicationDigestSourceIterator {
+				iterator := newReplicationDigestSourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				iterator.prevalidateScope()
+				return iterator
+			},
+		},
+		{
+			name: "KeysOnly",
+			new: func() *replicationDigestSourceIterator {
+				iterator := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				iterator.prevalidateScope()
+				return iterator
+			},
+		},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				iterator := tt.new()
+				entries := 0
+				for {
+					_, ok, err := iterator.next()
+					if err != nil {
+						iterator.close()
+						b.Fatal(err)
+					}
+					if !ok {
+						break
+					}
+					entries++
+				}
+				iterator.close()
+				if entries != keyCount {
+					b.Fatalf("iterator entries = %d, want %d", entries, keyCount)
+				}
+			}
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   replicationRoutingNode(b, routing, "node-b"),
+		prefix:   "session:",
+		pageSize: keyCount,
+	}
+
+	b.Run("BufferedEntries", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			source.prevalidateScope()
+			source.entries = make([]replicationDigestSourceEntry, 0, replicationDigestInitialPageEntries)
+			changes := make([]replicationDigestChange, 0, keyCount)
+			for {
+				entry, ok, err := source.next()
+				if err != nil {
+					source.close()
+					b.Fatal(err)
+				}
+				if !ok {
+					break
+				}
+				changes = append(changes, replicationDigestChange{key: entry.key})
+			}
+			source.close()
+			if len(changes) != keyCount {
+				b.Fatalf("buffered changes = %d, want %d", len(changes), keyCount)
+			}
+		}
+		b.ReportMetric(keyCount, "keys/op")
+	})
+
+	b.Run("DirectChanges", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			source.prevalidateScope()
+			changes := make([]replicationDigestChange, 0, keyCount)
+			done := false
+			for !done {
+				var err error
+				changes, done, err = source.appendFallbackChanges(changes, keyCount)
+				if err != nil {
+					source.close()
+					b.Fatal(err)
+				}
+			}
+			source.close()
+			if len(changes) != keyCount {
+				b.Fatalf("direct changes = %d, want %d", len(changes), keyCount)
+			}
+		}
+		b.ReportMetric(keyCount, "keys/op")
+	})
+}
+
+func BenchmarkReplicationPackedFallbackPreparation(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value-a")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   replicationRoutingNode(b, routing, "node-b"),
+		prefix:   "session:",
+		pageSize: keyCount,
+	}
+
+	for _, test := range []struct {
+		name         string
+		mutate       bool
+		disableCarry bool
+	}{
+		{name: "LegacyLookup", disableCarry: true},
+		{name: "Unchanged"},
+		{name: "LegacyMutation", mutate: true, disableCarry: true},
+		{name: "MutationFallback", mutate: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			totalNativeBatches := 0
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				source.prevalidateScope()
+				source.cursor.disableValueCarry = test.disableCarry
+				arena := newReplicationSyncPayloadArena(keyCount)
+				done, err := source.appendFallbackKeys(arena, keyCount)
+				source.close()
+				if err != nil || !done {
+					b.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+				}
+				if test.mutate {
+					trie.UpsertString("session:00000000", fmt.Sprintf("value-%d", iteration&1))
+				}
+				group, changed, deleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+					trie, inventory.target, arena, routing.fingerprint,
+				)
+				if err != nil || changed != keyCount || deleted != 0 {
+					b.Fatalf("prepare packed fallback = %d/%d/%v", changed, deleted, err)
+				}
+				totalNativeBatches += nativeBatches
+				runtime.KeepAlive(group)
+			}
+			b.ReportMetric(float64(totalNativeBatches)/float64(b.N), "native_batches/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationPackedFallbackMutationPair(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value-a")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   replicationRoutingNode(b, routing, "node-b"),
+		prefix:   "session:",
+		pageSize: keyCount,
+	}
+	run := func(disableCarry bool, value string) time.Duration {
+		started := time.Now()
+		source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+		source.prevalidateScope()
+		source.cursor.disableValueCarry = disableCarry
+		arena := newReplicationSyncPayloadArena(keyCount)
+		done, err := source.appendFallbackKeys(arena, keyCount)
+		source.close()
+		if err != nil || !done {
+			b.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+		}
+		trie.UpsertString("session:00000000", value)
+		group, changed, deleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+			trie, inventory.target, arena, routing.fingerprint,
+		)
+		if err != nil || changed != keyCount || deleted != 0 || nativeBatches != 40 {
+			b.Fatalf("prepare packed fallback = %d/%d/%d/%v", changed, deleted, nativeBatches, err)
+		}
+		runtime.KeepAlive(group)
+		return time.Since(started)
+	}
+
+	var legacyTime time.Duration
+	var carryTime time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			legacyTime += run(true, "legacy")
+			carryTime += run(false, "carry")
+		} else {
+			carryTime += run(false, "carry")
+			legacyTime += run(true, "legacy")
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(legacyTime.Nanoseconds())/float64(b.N), "legacy_ns/op")
+	b.ReportMetric(float64(carryTime.Nanoseconds())/float64(b.N), "carry_ns/op")
+	b.ReportMetric(keyCount, "keys/path")
+}
+
+var benchmarkReplicationRouteSink uint32
+
+func BenchmarkReplicationScanRouteModes(b *testing.B) {
+	const keyCount = 10000
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	keys := make([]string, keyCount)
+	for index := range keys {
+		keys[index] = "session:" + strconv.Itoa(index)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		route func(string) (ElectionKeyRoute, bool)
+	}{
+		{name: "Generic", route: routing.routeForKey},
+		{name: "SingleShard", route: routing.replicationScanRouteForKey},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ReportMetric(keyCount, "routes/op")
+			var checksum uint32
+			for iteration := 0; iteration < b.N; iteration++ {
+				for _, key := range keys {
+					route, routed := tt.route(key)
+					if !routed {
+						b.Fatalf("route(%q) ok = false", key)
+					}
+					checksum += route.Route.Shard.ID + uint32(len(route.Route.Owners))
+				}
+			}
+			benchmarkReplicationRouteSink = checksum
+		})
+	}
+}
+
+func BenchmarkHatTrieScanOrderModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+	for _, sorted := range []bool{false, true} {
+		name := "Unordered"
+		if sorted {
+			name = "Ordered"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ReportMetric(keyCount, "keys/op")
+			for iteration := 0; iteration < b.N; iteration++ {
+				keys, err := trie.KeysWithPrefixChecked("session:", sorted)
+				if err != nil || len(keys) != keyCount {
+					b.Fatalf("KeysWithPrefixChecked(sorted=%v) = %d/%v, want %d", sorted, len(keys), err, keyCount)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
+	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
+	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)
+	trie, err := CreateHatTrieWithDiskDir(b.TempDir(), false)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(trie.Destroy)
+	if err := trie.ConfigureLocalPartitions(16); err != nil {
+		b.Fatal(err)
+	}
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("partition-cursor:%08d", index), "value")
+	}
+
+	for _, test := range []struct {
+		name   string
+		packed bool
+		page   func(*replicationSyncCursor, string, bool, func(Entry) error) (replicationSyncPage, error)
+	}{
+		{
+			name: "LegacyFullMaterialize",
+			page: func(_ *replicationSyncCursor, afterKey string, hasAfterKey bool, visit func(Entry) error) (replicationSyncPage, error) {
+				return legacyPartitionReplicationSyncEntriesPage(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, visit)
+			},
+		},
+		{
+			name: "PersistentCursor",
+			page: func(cursor *replicationSyncCursor, afterKey string, hasAfterKey bool, visit func(Entry) error) (replicationSyncPage, error) {
+				return replicationSyncEntriesPageWithCursor(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, cursor, visit)
+			},
+		},
+		{
+			name:   "PackedCursor",
+			packed: true,
+			page: func(cursor *replicationSyncCursor, afterKey string, hasAfterKey bool, visit func(Entry) error) (replicationSyncPage, error) {
+				return replicationSyncEntriesPageWithCursor(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, cursor, visit)
+			},
+		},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				cursor := &replicationSyncCursor{packedKeys: test.packed}
+				afterKey := ""
+				hasAfterKey := false
+				visited := 0
+				pages := 0
+				for {
+					page, err := test.page(cursor, afterKey, hasAfterKey, func(Entry) error {
+						visited++
+						return nil
+					})
+					if err != nil {
+						cursor.close(trie)
+						b.Fatal(err)
+					}
+					pages++
+					if !page.hasMore {
+						break
+					}
+					afterKey = page.nextAfterKey
+					hasAfterKey = true
+				}
+				cursor.close(trie)
+				if visited != keyCount {
+					b.Fatalf("visited %d keys, want %d", visited, keyCount)
+				}
+				b.ReportMetric(float64(pages), "pages/op")
+			}
+			b.ReportMetric(float64(keyCount), "keys/op")
+		})
+	}
+}
+
+func legacyPartitionReplicationSyncEntriesPage(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, visit func(Entry) error) (replicationSyncPage, error) {
+	entries, err := trie.EntriesWithPrefixChecked(prefix, true)
+	if err != nil {
+		return replicationSyncPage{}, err
+	}
+	start := 0
+	if hasAfterKey {
+		start = sort.Search(len(entries), func(index int) bool { return entries[index].Key > afterKey })
+	}
+	end := start + limit
+	if end > len(entries) {
+		end = len(entries)
+	}
+	page := replicationSyncPage{scanned: end - start, hasMore: end < len(entries)}
+	for _, entry := range entries[start:end] {
+		page.nextAfterKey = entry.Key
+		if visit != nil {
+			if err := visit(entry); err != nil {
+				return replicationSyncPage{}, err
+			}
+		}
+	}
+	return page, nil
+}
+
+func benchmarkPositiveEnvInt(b *testing.B, name string, fallback int) int {
+	b.Helper()
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		b.Fatalf("invalid %s %q", name, raw)
+	}
+	return value
+}
+
+func BenchmarkReplicationDigestIncremental(b *testing.B) {
+	const keyCount = 10000
+	for _, test := range []struct {
+		name          string
+		changedStride int
+		legacyTarget  bool
+	}{
+		{name: "Equal"},
+		{name: "OnePercentChanged", changedStride: 100},
+		{name: "LegacyFullFallback", legacyTarget: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			source := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(source.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			for idx := 0; idx < keyCount; idx++ {
+				key := "session:" + strconv.Itoa(idx)
+				value := replicationDigestBenchmarkValue(idx, 1)
+				source.UpsertString(key, value)
+				targetTrie.UpsertString(key, value)
+			}
+
+			var requests atomic.Int64
+			var wireBytes atomic.Int64
+			var targetHandler http.Handler
+			var topology *TopologyStore
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &wireBytes}
+				countingWriter := benchmarkCountingResponseWriter{ResponseWriter: w, bytes: &wireBytes}
+				if !test.legacyTarget {
+					targetHandler.ServeHTTP(countingWriter, r)
+					return
+				}
+				request, format, closeBody, ok := monitoringCommandRequest(countingWriter, r)
+				if !ok {
+					return
+				}
+				defer closeBody()
+				if normalizedCommand(request.Command) == replicationDigestCommand {
+					writeCommandResponseWire(countingWriter, r, http.StatusOK, commandError("unsupported command"), format)
+					return
+				}
+				response, _ := executeCacheCommand(r.Context(), targetTrie, request, commandExecutionOptions{
+					NodeName:          "node-b",
+					Topology:          topology,
+					ReplicationSafety: NewReplicationSafetyStore(),
+				})
+				writeCommandResponseWire(countingWriter, r, http.StatusOK, response, format)
+			}))
+			b.Cleanup(target.Close)
+			topology = replicationTestTopology(b, target.URL)
+			targetHandler = NewMonitoringHandler(targetTrie, MonitoringOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   target.Client(),
+			})
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if test.changedStride > 0 {
+					b.StopTimer()
+					for idx := 0; idx < keyCount; idx += test.changedStride {
+						targetTrie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 0))
+					}
+					b.StartTimer()
+				}
+				result := replicator.SyncAll(context.Background(), source, "session:")
+				if result.Skipped || len(result.Targets) == 0 {
+					b.Fatalf("SyncAll() = %#v, want successful digest sync", result)
+				}
+				wantChanged := 0
+				if test.legacyTarget {
+					wantChanged = keyCount
+				} else if test.changedStride > 0 {
+					wantChanged = keyCount / test.changedStride
+				}
+				if !strings.Contains(result.Reason, fmt.Sprintf("transferred %d, deleted 0", wantChanged)) {
+					b.Fatalf("SyncAll() = %#v, want %d changed", result, wantChanged)
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations/keyCount, "wire_B/key")
+		})
+	}
+}
+
+var benchmarkReplicationDigestInventoriesSink []replicationDigestTargetInventory
+var benchmarkReplicationDigestEntriesSink int
+
+func BenchmarkReplicationDigestInventoryPlanning10K(b *testing.B) {
+	const keyCount = 10_000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for idx := 0; idx < keyCount; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%05d", idx), "value")
+	}
+	for _, replicas := range []int{1, 2, 4} {
+		b.Run(fmt.Sprintf("Targets%d", replicas), func(b *testing.B) {
+			nodes := []TopologyNode{{ID: "node-a", Address: "http://node-a"}}
+			replicaIDs := make([]string, replicas)
+			for idx := range replicaIDs {
+				replicaIDs[idx] = fmt.Sprintf("node-%c", 'b'+idx)
+				nodes = append(nodes, TopologyNode{ID: replicaIDs[idx], Address: "http://" + replicaIDs[idx]})
+			}
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   nodes,
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: replicaIDs}},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			routing, ok := newReplicationRoutingSnapshot("node-a", topology, nil)
+			if !ok {
+				b.Fatal("newReplicationRoutingSnapshot() failed")
+			}
+			replicator := &HTTPReplicator{self: "node-a"}
+			singleTarget, single := singleReplicationDigestTarget(routing, "node-a")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				var inventories []replicationDigestTargetInventory
+				var entries int
+				if single {
+					inventories, entries, err = replicator.replicationDigestInventorySingleTarget(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing, singleTarget)
+				} else {
+					inventories, entries, err = replicator.replicationDigestInventories(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkReplicationDigestInventoriesSink = inventories
+				benchmarkReplicationDigestEntriesSink = entries
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationDigestInventorySingleTargetAlternating(b *testing.B) {
+	const keyCount = 10_000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for idx := 0; idx < keyCount; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%05d", idx), "value")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	routing, ok := newReplicationRoutingSnapshot("node-a", topology, nil)
+	if !ok {
+		b.Fatal("newReplicationRoutingSnapshot() failed")
+	}
+	target, single := singleReplicationDigestTarget(routing, "node-a")
+	if !single {
+		b.Fatal("singleReplicationDigestTarget() failed")
+	}
+	replicator := &HTTPReplicator{self: "node-a"}
+	var mapDuration, directDuration time.Duration
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		directFirst := iteration&1 != 0
+		for pass := 0; pass < 2; pass++ {
+			started := time.Now()
+			var inventories []replicationDigestTargetInventory
+			var entries int
+			var err error
+			if directFirst == (pass == 0) {
+				inventories, entries, err = replicator.replicationDigestInventorySingleTarget(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing, target)
+				directDuration += time.Since(started)
+			} else {
+				inventories, entries, err = replicator.replicationDigestInventories(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing)
+				mapDuration += time.Since(started)
+			}
+			if err != nil || entries != keyCount || len(inventories) != 1 {
+				b.Fatalf("inventory scan = %d entries/%d targets/%v", entries, len(inventories), err)
+			}
+			benchmarkReplicationDigestInventoriesSink = inventories
+			benchmarkReplicationDigestEntriesSink = entries
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/scan")
+	b.ReportMetric(float64(mapDuration.Nanoseconds())/float64(b.N), "map_ns/scan")
+}
+
+func BenchmarkReplicationMerkleIndexBuild(b *testing.B) {
+	const keyCount = 10000
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx := 0; idx < keyCount; idx++ {
+			trie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 1))
+		}
+		b.StartTimer()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		b.StopTimer()
+		if err != nil || snapshot.count != keyCount {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want %d entries", snapshot, err, keyCount)
+		}
+		retained := trie.replicationMerkleRetainedBytes()
+		trie.Destroy()
+		b.ReportMetric(float64(retained)/keyCount, "retained_B/key")
+	}
+	b.ReportAllocs()
+	b.ReportMetric(keyCount, "keys/op")
+}
+
+func BenchmarkReplicationMerkleEmptyIndexActivation(b *testing.B) {
+	var retained int
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie := CreateHatTrie()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		if err != nil || snapshot.count != 0 {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want empty snapshot", snapshot, err)
+		}
+		retained = trie.replicationMerkleRetainedBytes()
+		trie.Destroy()
+	}
+	b.ReportMetric(float64(retained), "retained_B/op")
+}
+
+func BenchmarkReplicationMerkleEmptySnapshot(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	var retained int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie.mu.Lock()
+		trie.replicationMerkle = nil
+		trie.mu.Unlock()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		if err != nil || snapshot.count != 0 {
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want empty snapshot", snapshot, err)
+		}
+		retained = trie.replicationMerkleRetainedBytes()
+	}
+	b.ReportMetric(float64(retained), "retained_B/op")
+}
+
+func BenchmarkReplicationMerkleEmptyIndexAllocation(b *testing.B) {
+	var index *replicationMerkleIndex
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		index = newReplicationMerkleIndex()
+	}
+	b.ReportMetric(float64(index.retainedBytes()), "retained_B/op")
+	runtime.KeepAlive(index)
+}
+
+func BenchmarkReplicationMerkleIndexInitializationPaired(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]uint64, keyCount)
+	for idx := range keys {
+		keys[idx] = xxhash.Sum64String("session:" + strconv.Itoa(idx))
+	}
+	build := func(lazy bool) *replicationMerkleIndex {
+		index := &replicationMerkleIndex{valid: true}
+		if !lazy {
+			index.table = newReplicationMerkleTable()
+		}
+		for idx, key := range keys {
+			index.set(key, uint64(idx+1))
+		}
+		return index
+	}
+	var eagerElapsed time.Duration
+	var lazyElapsed time.Duration
+	var index *replicationMerkleIndex
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			started := time.Now()
+			index = build(false)
+			eagerElapsed += time.Since(started)
+			started = time.Now()
+			index = build(true)
+			lazyElapsed += time.Since(started)
+			continue
+		}
+		started := time.Now()
+		index = build(true)
+		lazyElapsed += time.Since(started)
+		started = time.Now()
+		index = build(false)
+		eagerElapsed += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(eagerElapsed.Nanoseconds())/float64(b.N), "eager_ns/index")
+	b.ReportMetric(float64(lazyElapsed.Nanoseconds())/float64(b.N), "lazy_ns/index")
+	runtime.KeepAlive(index)
+}
+
+func BenchmarkReplicationMerkleNonemptySizeCheckPaired(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for idx := 0; idx < keyCount; idx++ {
+		trie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 1))
+	}
+	build := func(checkSize bool) *replicationMerkleIndex {
+		trie.mu.Lock()
+		defer trie.mu.Unlock()
+		if checkSize && trie.sizeLocked() == 0 {
+			b.Fatal("nonempty trie reported zero size")
+		}
+		index, err := trie.rebuildReplicationMerkleLocked()
+		if err != nil || index.count != keyCount {
+			b.Fatalf("rebuildReplicationMerkleLocked() = %#v/%v, want %d entries", index, err, keyCount)
+		}
+		return index
+	}
+	var baselineElapsed time.Duration
+	var checkedElapsed time.Duration
+	var index *replicationMerkleIndex
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			started := time.Now()
+			index = build(false)
+			baselineElapsed += time.Since(started)
+			started = time.Now()
+			index = build(true)
+			checkedElapsed += time.Since(started)
+			continue
+		}
+		started := time.Now()
+		index = build(true)
+		checkedElapsed += time.Since(started)
+		started = time.Now()
+		index = build(false)
+		baselineElapsed += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(baselineElapsed.Nanoseconds())/float64(b.N), "baseline_ns/index")
+	b.ReportMetric(float64(checkedElapsed.Nanoseconds())/float64(b.N), "checked_ns/index")
+	runtime.KeepAlive(index)
+}
+
+func BenchmarkReplicationMerkleTableOperations(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]uint64, keyCount)
+	missing := make([]uint64, keyCount)
+	for idx := range keys {
+		keys[idx] = xxhash.Sum64String("session:" + strconv.Itoa(idx))
+		missing[idx] = xxhash.Sum64String("missing:" + strconv.Itoa(idx))
+	}
+
+	b.Run("Build10K", func(b *testing.B) {
+		var retained int
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			table := newReplicationMerkleTable()
+			for idx, key := range keys {
+				table.set(key, uint64(idx+1))
+			}
+			retained = table.retainedBytes()
+		}
+		b.ReportMetric(float64(retained)/keyCount, "retained_B/key")
+	})
+
+	table := newReplicationMerkleTable()
+	for idx, key := range keys {
+		table.set(key, uint64(idx+1))
+	}
+	b.Run("Hit", func(b *testing.B) {
+		var value uint64
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			value, _ = table.get(keys[idx%keyCount])
+		}
+		if value == 0 {
+			b.Fatal("last table hit returned zero")
+		}
+	})
+	b.Run("Miss", func(b *testing.B) {
+		var found bool
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			_, found = table.get(missing[idx%keyCount])
+		}
+		if found {
+			b.Fatal("last table miss found a value")
+		}
+	})
+	b.Run("Update", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			table.set(keys[idx%keyCount], uint64(idx+1))
+		}
+	})
+	b.Run("DeleteReinsert", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			key := keys[idx%keyCount]
+			table.delete(key)
+			table.set(key, uint64(idx+1))
+		}
+	})
+}
+
+func BenchmarkReplicationMerkleWriteTracking(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]string, keyCount)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+	for _, active := range []bool{false, true} {
+		name := "Inactive"
+		if active {
+			name = "Active"
+		}
+		b.Run(name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			for idx, key := range keys {
+				trie.UpsertString(key, replicationDigestBenchmarkValue(idx, 1))
+			}
+			if active {
+				if _, err := trie.replicationMerkleSnapshot(); err != nil {
+					b.Fatal(err)
+				}
+				b.ReportMetric(float64(trie.replicationMerkleRetainedBytes())/keyCount, "retained_B/key")
+			}
+			values := [2]string{"updated-a", "updated-b"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				trie.UpsertString(keys[idx%len(keys)], values[idx&1])
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationMerkleChurnSnapshotCycle(b *testing.B) {
+	const (
+		keyCount      = 10000
+		mutationCount = 100000
+	)
+	keys := make([]string, keyCount)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx, key := range keys {
+			trie.UpsertString(key, replicationDigestBenchmarkValue(idx, 1))
+		}
+		if _, err := trie.replicationMerkleSnapshot(); err != nil {
+			trie.Destroy()
+			b.Fatal(err)
+		}
+
+		b.StartTimer()
+		for idx := 0; idx < mutationCount; idx++ {
+			trie.UpsertString(keys[idx%keyCount], "updated")
+		}
+		snapshot, err := trie.replicationMerkleSnapshot()
+		b.StopTimer()
+		if err != nil || snapshot.count != keyCount {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want %d entries", snapshot, err, keyCount)
+		}
+		trie.Destroy()
+	}
+	b.ReportAllocs()
+	b.ReportMetric(mutationCount, "writes/op")
+}
+
+func BenchmarkReplicationMerkleSnapshotAfterChurn(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]string, keyCount)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx, key := range keys {
+			trie.UpsertString(key, replicationDigestBenchmarkValue(idx, 1))
+		}
+		if _, err := trie.replicationMerkleSnapshot(); err != nil {
+			trie.Destroy()
+			b.Fatal(err)
+		}
+		for idx := 0; idx < keyCount; idx++ {
+			trie.UpsertString(keys[idx], "updated")
+		}
+
+		b.StartTimer()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		b.StopTimer()
+		if err != nil || snapshot.count != keyCount {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want %d entries", snapshot, err, keyCount)
+		}
+		trie.Destroy()
+	}
+	b.ReportAllocs()
+	b.ReportMetric(keyCount, "dirty_keys/op")
+}
+
+type replicationMerklePendingBenchmarkKey struct {
+	hash uint64
+	key  string
+}
+
+func BenchmarkReplicationMerklePendingDedup(b *testing.B) {
+	for _, cardinality := range []int{1, 4, 8, 16, 32, 64} {
+		keys := make([]string, cardinality)
+		hashes := make([]uint64, cardinality)
+		for idx := range keys {
+			keys[idx] = "session:" + strconv.Itoa(idx)
+			hashes[idx] = xxhash.Sum64String(keys[idx])
+		}
+		b.Run("Inline"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := make([]replicationMerklePendingBenchmarkKey, cardinality)
+			for idx := range pending {
+				pending[idx] = replicationMerklePendingBenchmarkKey{hash: hashes[idx], key: keys[idx]}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				hash := hashes[idx%cardinality]
+				for pendingIdx := range pending {
+					if pending[pendingIdx].hash == hash {
+						pending[pendingIdx].key = keys[idx%cardinality]
+						break
+					}
+				}
+			}
+		})
+		b.Run("Map"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := make(map[uint64]string, cardinality)
+			for idx := range keys {
+				pending[hashes[idx]] = keys[idx]
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				pending[hashes[idx%cardinality]] = keys[idx%cardinality]
+			}
+		})
+		b.Run("InlineString"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := append([]string(nil), keys...)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				key := keys[idx%cardinality]
+				for pendingIdx := range pending {
+					if pending[pendingIdx] == key {
+						pending[pendingIdx] = key
+						break
+					}
+				}
+			}
+		})
+		b.Run("MapString"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := make(map[string]struct{}, cardinality)
+			for idx := range keys {
+				pending[keys[idx]] = struct{}{}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				pending[keys[idx%cardinality]] = struct{}{}
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationMerkleIncremental(b *testing.B) {
+	const keyCount = 10000
+	for _, test := range []struct {
+		name          string
+		changedStride int
+	}{
+		{name: "Equal"},
+		{name: "OnePercentChanged", changedStride: 100},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			source := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(source.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			for idx := 0; idx < keyCount; idx++ {
+				key := "session:" + strconv.Itoa(idx)
+				value := replicationDigestBenchmarkValue(idx, 1)
+				source.UpsertString(key, value)
+				targetTrie.UpsertString(key, value)
+			}
+			if _, err := source.replicationMerkleSnapshot(); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := targetTrie.replicationMerkleSnapshot(); err != nil {
+				b.Fatal(err)
+			}
+
+			var requests atomic.Int64
+			var wireBytes atomic.Int64
+			var targetHandler http.Handler
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &wireBytes}
+				targetHandler.ServeHTTP(benchmarkCountingResponseWriter{ResponseWriter: w, bytes: &wireBytes}, r)
+			}))
+			b.Cleanup(target.Close)
+			topology := replicationTestTopology(b, target.URL)
+			targetHandler = NewMonitoringHandler(targetTrie, MonitoringOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   target.Client(),
+			})
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if test.changedStride > 0 {
+					b.StopTimer()
+					for idx := 0; idx < keyCount; idx += test.changedStride {
+						targetTrie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 0))
+					}
+					b.StartTimer()
+				}
+				result := replicator.SyncAll(context.Background(), source, "")
+				if result.Skipped || len(result.Targets) == 0 {
+					b.Fatalf("SyncAll() = %#v, want successful Merkle sync", result)
+				}
+				wantChanged := 0
+				if test.changedStride > 0 {
+					wantChanged = keyCount / test.changedStride
+				}
+				if !strings.Contains(result.Reason, fmt.Sprintf("transferred %d, deleted 0", wantChanged)) && !(wantChanged == 0 && strings.Contains(result.Reason, "merkle equal")) {
+					b.Fatalf("SyncAll() = %#v, want %d changed", result, wantChanged)
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
+			b.ReportMetric(float64(source.replicationMerkleRetainedBytes())/keyCount, "retained_B/key")
+		})
+	}
+}
+
+func BenchmarkReplicationOutboxEncoding(b *testing.B) {
+	record := newReplicationOutboxJob(replicationOutboxBenchmarkJob(1, 4096))
+	for _, codec := range []ReplicationOutboxCodec{ReplicationOutboxCodecJSON, ReplicationOutboxCodecBinary} {
+		b.Run(string(codec), func(b *testing.B) {
+			var data []byte
+			var err error
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if codec == ReplicationOutboxCodecJSON {
+					data, err = json.Marshal(record)
+				} else {
+					data, err = marshalReplicationOutboxJobBinary(record)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			replicationOutboxBenchmarkData = data
+			b.ReportMetric(float64(len(data)), "stored_B/op")
+		})
+	}
+}
+
+func BenchmarkReplicationOutboxDurableEnqueue(b *testing.B) {
+	const writers = 32
+	for _, test := range []struct {
+		name        string
+		codec       ReplicationOutboxCodec
+		batchWindow time.Duration
+	}{
+		{name: "JSONSyncEach", codec: ReplicationOutboxCodecJSON},
+		{name: "BinarySyncEach", codec: ReplicationOutboxCodecBinary},
+		{name: "BinaryGroupCommit", codec: ReplicationOutboxCodecBinary, batchWindow: DefaultReplicationOutboxBatchWindow},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			store, err := OpenLevelDBReplicationOutboxWithOptions(b.TempDir(), ReplicationOutboxOptions{
+				Codec:       test.codec,
+				BatchWindow: test.batchWindow,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { _ = store.Close() })
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				start := make(chan struct{})
+				errs := make(chan error, writers)
+				var group sync.WaitGroup
+				group.Add(writers)
+				for writer := 0; writer < writers; writer++ {
+					id := uint64(iteration*writers + writer + 1)
+					go func() {
+						defer group.Done()
+						<-start
+						errs <- store.putJob(replicationOutboxBenchmarkJob(id, 1024))
+					}()
+				}
+				close(start)
+				group.Wait()
+				close(errs)
+				for err := range errs {
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(writers, "jobs/op")
+			b.ReportMetric(float64(store.levelDBSyncWriteCount())/float64(b.N), "sync_writes/op")
+		})
+	}
+}
+
+func BenchmarkJournalBackedReplicationOutbox(b *testing.B) {
+	for _, journalBacked := range []bool{false, true} {
+		name := "LegacyFullOutbox"
+		if journalBacked {
+			name = "JournalReference"
+		}
+		b.Run(name, func(b *testing.B) {
+			dir := b.TempDir()
+			journal, err := OpenCommandJournalWithOptions(filepath.Join(dir, "commands.journal"), CommandJournalOptions{
+				Format:              CommandJournalFormatBinary,
+				GroupCommitMaxBatch: 1,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			outbox, err := OpenLevelDBReplicationOutboxWithOptions(filepath.Join(dir, "outbox"), ReplicationOutboxOptions{
+				Codec: ReplicationOutboxCodecBinary,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if journalBacked {
+				if err := outbox.AttachJournal(journal); err != nil {
+					b.Fatal(err)
+				}
+			}
+			request := CacheCommandRequest{Command: "SETSTR", Key: "benchmark:key", Value: strings.Repeat("payload-", 512)}
+			jobTemplate := replicationOutboxBenchmarkJob(1, 4096)
+			fullRecord := newReplicationOutboxJob(jobTemplate)
+			fullBytes, err := marshalReplicationOutboxJobBinary(fullRecord)
+			if err != nil {
+				b.Fatal(err)
+			}
+			journalEntry := commandJournalEntry{Version: commandJournalVersion, Sequence: 1, Request: request}
+			if journalBacked {
+				journalRecord := fullRecord
+				journalRecord.JournalSequence = 1
+				journalEntry.Outbox = &journalRecord
+			}
+			journalBytes, err := marshalCommandJournalEntry(journalEntry, CommandJournalFormatBinary)
+			if err != nil {
+				b.Fatal(err)
+			}
+			encodedBytes := len(journalBytes) + len(fullBytes)
+			if journalBacked {
+				referenceBytes, err := marshalReplicationOutboxJobBinary(replicationOutboxJob{ID: 1, JournalSequence: 1})
+				if err != nil {
+					b.Fatal(err)
+				}
+				encodedBytes = len(journalBytes) + len(referenceBytes)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				job := jobTemplate
+				job.id = uint64(iteration + 1)
+				journal.mu.Lock()
+				if journalBacked {
+					record := newReplicationOutboxJob(job)
+					_, sequence, err := journal.writeWithOutboxWithoutSyncLocked(request, &record)
+					job.journalSeq = sequence
+					if err == nil {
+						err = journal.syncLocked()
+					}
+					journal.mu.Unlock()
+					if err != nil {
+						b.Fatal(err)
+					}
+				} else {
+					_, err := journal.appendLocked(request)
+					journal.mu.Unlock()
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := outbox.putJob(job); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			if err := outbox.Close(); err != nil {
+				b.Fatal(err)
+			}
+			if err := journal.Close(); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportMetric(float64(encodedBytes), "encoded_B/op")
+			b.ReportMetric(float64(b.N+int(outbox.levelDBSyncWriteCount()))/float64(b.N), "sync_writes/op")
+			b.ReportMetric(float64(replicationBenchmarkDirectoryBytes(b, dir))/float64(b.N), "disk_B/op")
+		})
+	}
+}
+
+func replicationBenchmarkDirectoryBytes(b *testing.B, path string) int64 {
+	b.Helper()
+	var total int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	return total
+}
+
+func BenchmarkReplicationOutboxReplay10k(b *testing.B) {
+	const jobs = 10000
+	for _, codec := range []ReplicationOutboxCodec{ReplicationOutboxCodecJSON, ReplicationOutboxCodecBinary} {
+		b.Run(string(codec), func(b *testing.B) {
+			store, err := OpenLevelDBReplicationOutboxWithOptions(b.TempDir(), ReplicationOutboxOptions{Codec: codec})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { _ = store.Close() })
+			batch := new(leveldb.Batch)
+			storedBytes := 0
+			for id := 1; id <= jobs; id++ {
+				record := newReplicationOutboxJob(replicationOutboxBenchmarkJob(uint64(id), 1024))
+				data, err := store.marshalJob(record)
+				if err != nil {
+					b.Fatal(err)
+				}
+				storedBytes += len(data)
+				batch.Put(replicationOutboxLevelDBJobKey(uint64(id)), data)
+			}
+			if err := store.db.Write(batch, nil); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if restored := store.jobs(); len(restored) != jobs {
+					b.Fatalf("jobs() = %d, want %d", len(restored), jobs)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(jobs, "jobs/op")
+			b.ReportMetric(float64(storedBytes)/jobs, "stored_B/job")
+		})
+	}
+}
+
+func BenchmarkReplicationOutboxRestore100k(b *testing.B) {
+	const jobs = 100000
+	store, err := OpenLevelDBReplicationOutboxWithOptions(b.TempDir(), ReplicationOutboxOptions{
+		Codec:       ReplicationOutboxCodecBinary,
+		BatchWindow: 0,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = store.Close() })
+	batch := new(leveldb.Batch)
+	for id := 1; id <= jobs; id++ {
+		data, err := store.marshalJob(newReplicationOutboxJob(replicationOutboxBenchmarkJob(uint64(id), 64)))
+		if err != nil {
+			b.Fatal(err)
+		}
+		batch.Put(replicationOutboxLevelDBJobKey(uint64(id)), data)
+	}
+	if err := store.db.Write(batch, nil); err != nil {
+		b.Fatal(err)
+	}
+	batch.Reset()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+			Context:        ctx,
+			AsyncQueueSize: 1024,
+			AsyncOutbox:    store,
+		})
+		b.ReportMetric(float64(cap(replicator.queue)), "resident_jobs/op")
+		b.StopTimer()
+		replicator.Close()
+		b.StartTimer()
+	}
+	b.StopTimer()
+	b.ReportMetric(jobs, "durable_jobs/op")
+}
+
+func replicationOutboxBenchmarkJob(id uint64, valueBytes int) replicationJob {
+	return replicationJob{
+		id:     id,
+		result: ReplicationResult{Command: "SETBYTES", Key: fmt.Sprintf("session:%08d", id), Queued: true},
+		tasks: []replicationTask{{
+			target: TopologyNode{ID: "node-b", Address: "http://node-b:8080", GRPCAddress: "node-b:9090"},
+			payload: CacheCommandRequest{
+				Command:     replicationSetCompactCommand,
+				Key:         fmt.Sprintf("session:%08d", id),
+				BinaryValue: replicationOutboxBenchmarkValue(id, valueBytes),
+				Pairs: Map{
+					replicationMetaSourceNode:          "node-a",
+					replicationMetaSequence:            strconv.FormatUint(id, 10),
+					replicationMetaTopologyFingerprint: "benchmark-topology",
+				},
+			},
+		}},
+		enqueuedAt: time.Unix(1700000000, int64(id)).UTC(),
+	}
+}
+
+func replicationOutboxBenchmarkValue(seed uint64, size int) []byte {
+	value := make([]byte, size)
+	state := seed*0x9e3779b97f4a7c15 + 1
+	for index := range value {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		value[index] = byte(state)
+	}
+	return value
+}
+
+func replicationDigestBenchmarkValue(key int, version int) string {
+	data := make([]byte, 1024)
+	state := uint64(key+1)*0x9e3779b97f4a7c15 + uint64(version+1)
+	for idx := range data {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		data[idx] = byte(state)
+	}
+	return string(data)
+}
+
+func BenchmarkReplicationSyncTransport(b *testing.B) {
+	const keyCount = 10000
+	for _, transport := range []ReplicationTransport{ReplicationTransportHTTP, ReplicationTransportGRPCStream} {
+		b.Run(string(transport), func(b *testing.B) {
+			sourceTrie := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(sourceTrie.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			for idx := 0; idx < keyCount; idx++ {
+				sourceTrie.UpsertString("session:"+strconv.Itoa(idx), "value-"+strconv.Itoa(idx))
+			}
+
+			httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				b.Fatalf("HTTP listen: %v", err)
+			}
+			grpcListener := bufconn.Listen(testGRPCBufferSize)
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a", Address: "http://node-a"},
+					{ID: "node-b", Address: "http://" + httpListener.Addr().String(), GRPCAddress: "bufnet"},
+				},
+				Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			})
+			if err != nil {
+				b.Fatalf("NewTopologyStore() error = %v", err)
+			}
+
+			var httpRequests atomic.Int64
+			var httpWireBytes atomic.Int64
+			monitoring := NewMonitoringHandler(targetTrie, MonitoringOptions{
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			httpServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpRequests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &httpWireBytes}
+				monitoring.ServeHTTP(w, r)
+			})}
+			go func() { _ = httpServer.Serve(httpListener) }()
+			b.Cleanup(func() {
+				_ = httpServer.Close()
+				_ = httpListener.Close()
+			})
+
+			grpcServer := grpc.NewServer()
+			RegisterCacheGRPCServer(grpcServer, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}))
+			go func() { _ = grpcServer.Serve(grpcListener) }()
+			b.Cleanup(func() {
+				grpcServer.Stop()
+				_ = grpcListener.Close()
+			})
+
+			grpcWireStats := &benchmarkGRPCWireStats{}
+			options := HTTPReplicatorOptions{
+				Self:      "node-a",
+				Topology:  topology,
+				Election:  NewElectionStore(topology, ElectionOptions{}),
+				Transport: transport,
+			}
+			if transport == ReplicationTransportGRPCStream {
+				options.DisableHTTPFallback = true
+				options.GRPCDialOptions = []grpc.DialOption{
+					grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+						return grpcListener.Dial()
+					}),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithStatsHandler(grpcWireStats),
+				}
+			}
+			replicator := NewHTTPReplicator(options)
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				result := replicator.syncAllPaged(context.Background(), sourceTrie, "session:", defaultReplicationSyncKeyPageSize)
+				if result.Skipped || result.Entries != keyCount {
+					b.Fatalf("syncAllPaged() = %#v, want %d entries", result, keyCount)
+				}
+				for _, targetResult := range result.Targets {
+					if !targetResult.OK {
+						b.Fatalf("sync target = %#v, want ok", targetResult)
+					}
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(keyCount, "keys/op")
+			if transport == ReplicationTransportGRPCStream {
+				b.ReportMetric(float64(replicator.grpcStreamBatches.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(grpcWireStats.outbound.Load())/iterations, "wire_B/op")
+			} else {
+				b.ReportMetric(float64(httpRequests.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(httpWireBytes.Load())/iterations, "wire_B/op")
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationLiveTransport10K(b *testing.B) {
+	const operations = 10_000
+	callers := 32
+	if value := os.Getenv("HATRIE_BENCH_GRPC_LIVE_CALLERS"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 {
+			b.Fatalf("HATRIE_BENCH_GRPC_LIVE_CALLERS=%q must be a positive integer", value)
+		}
+		callers = parsed
+	}
+	batchMaxCommands := 0
+	if value := os.Getenv("HATRIE_BENCH_GRPC_LIVE_BATCH_MAX_COMMANDS"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 {
+			b.Fatalf("HATRIE_BENCH_GRPC_LIVE_BATCH_MAX_COMMANDS=%q must be a positive integer", value)
+		}
+		batchMaxCommands = parsed
+	}
+	batchWindow := time.Duration(0)
+	if value := os.Getenv("HATRIE_BENCH_GRPC_LIVE_BATCH_WINDOW"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed < 0 {
+			b.Fatalf("HATRIE_BENCH_GRPC_LIVE_BATCH_WINDOW=%q must be a non-negative duration", value)
+		}
+		batchWindow = parsed
+	}
+	for _, transport := range []ReplicationTransport{ReplicationTransportHTTP, ReplicationTransportGRPCStream} {
+		b.Run(string(transport), func(b *testing.B) {
+			sourceTrie := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(sourceTrie.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				b.Fatalf("HTTP listen: %v", err)
+			}
+			grpcListener := bufconn.Listen(testGRPCBufferSize)
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a", Address: "http://node-a"},
+					{ID: "node-b", Address: "http://" + httpListener.Addr().String(), GRPCAddress: "bufnet"},
+				},
+				Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			})
+			if err != nil {
+				b.Fatalf("NewTopologyStore() error = %v", err)
+			}
+
+			var httpRequests atomic.Int64
+			var httpWireBytes atomic.Int64
+			monitoring := NewMonitoringHandler(targetTrie, MonitoringOptions{
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			httpServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpRequests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &httpWireBytes}
+				monitoring.ServeHTTP(w, r)
+			})}
+			go func() { _ = httpServer.Serve(httpListener) }()
+			b.Cleanup(func() {
+				_ = httpServer.Close()
+				_ = httpListener.Close()
+			})
+
+			grpcServer := grpc.NewServer()
+			RegisterCacheGRPCServer(grpcServer, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}))
+			go func() { _ = grpcServer.Serve(grpcListener) }()
+			b.Cleanup(func() {
+				grpcServer.Stop()
+				_ = grpcListener.Close()
+			})
+
+			grpcWireStats := &benchmarkGRPCWireStats{}
+			options := HTTPReplicatorOptions{
+				Self:      "node-a",
+				Topology:  topology,
+				Election:  NewElectionStore(topology, ElectionOptions{}),
+				Transport: transport,
+			}
+			if transport == ReplicationTransportGRPCStream {
+				options.DisableHTTPFallback = true
+				options.GRPCStreamWindow = callers
+				options.GRPCLiveBatchMaxCommands = batchMaxCommands
+				options.GRPCLiveBatchWindow = batchWindow
+				options.GRPCDialOptions = []grpc.DialOption{
+					grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return grpcListener.Dial() }),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithStatsHandler(grpcWireStats),
+				}
+			}
+			replicator := NewHTTPReplicator(options)
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				var next atomic.Int64
+				var failed atomic.Bool
+				var workers sync.WaitGroup
+				workers.Add(callers)
+				for worker := 0; worker < callers; worker++ {
+					go func() {
+						defer workers.Done()
+						for {
+							idx := int(next.Add(1)) - 1
+							if idx >= operations {
+								return
+							}
+							key := fmt.Sprintf("live:%d:%05d", iteration, idx)
+							sourceTrie.UpsertString(key, "replicated-value")
+							result := replicator.ReplicateCommand(context.Background(), sourceTrie,
+								CacheCommandRequest{Command: "SETSTR", Key: key, Value: "replicated-value"}, CacheCommandResponse{OK: true})
+							if len(result.Targets) != 1 || !result.Targets[0].OK {
+								failed.Store(true)
+								return
+							}
+						}
+					}()
+				}
+				workers.Wait()
+				if failed.Load() {
+					b.Fatal("live replication failed")
+				}
+			}
+			b.StopTimer()
+			if got, want := len(targetTrie.EntriesWithPrefix("live:", false)), operations*b.N; got != want {
+				b.Fatalf("target entries = %d, want all %d live writes", got, want)
+			}
+			iterations := float64(b.N)
+			b.ReportMetric(operations, "commands/op")
+			b.ReportMetric(float64(callers), "callers/op")
+			if transport == ReplicationTransportGRPCStream {
+				b.ReportMetric(float64(replicator.grpcStreamBatches.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(grpcWireStats.outbound.Load())/iterations, "wire_B/op")
+			} else {
+				b.ReportMetric(float64(httpRequests.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(httpWireBytes.Load())/iterations, "wire_B/op")
+			}
+		})
+	}
+}
+
+func BenchmarkHTTPReplicatorTargetFanout(b *testing.B) {
+	const targetCount = 4
+	servers := make([]*httptest.Server, 0, targetCount)
+	groups := make([]replicationTaskGroup, 0, targetCount)
+	for idx := 0; idx < targetCount; idx++ {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			_ = r.Body.Close()
+			time.Sleep(2 * time.Millisecond)
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		}))
+		servers = append(servers, server)
+		groups = append(groups, replicationTaskGroup{
+			target:   TopologyNode{ID: "node-" + strconv.Itoa(idx), Address: server.URL},
+			payloads: []CacheCommandRequest{{Command: "INTERNALDEL", Key: "session:1"}},
+		})
+	}
+	b.Cleanup(func() {
+		for _, server := range servers {
+			server.Close()
+		}
+	})
+	for _, tt := range []struct {
+		name        string
+		maxInFlight int
+	}{
+		{name: "Serial", maxInFlight: 1},
+		{name: "Bounded4", maxInFlight: 4},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: servers[0].Client(), MaxInFlightTargets: tt.maxInFlight})
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				result := replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+				if len(result.Targets) != targetCount {
+					b.Fatalf("targets = %d, want %d", len(result.Targets), targetCount)
+				}
+				for _, target := range result.Targets {
+					if !target.OK {
+						b.Fatalf("target = %#v, want ok", target)
+					}
+				}
+			}
+			b.ReportMetric(targetCount, "targets/op")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingPlanning(b *testing.B) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+			{ID: "node-c", Address: "http://node-c"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+			{ID: 1, Primary: "node-b", Replicas: []string{"node-a", "node-c"}},
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Topology: topology, Election: election})
+	keys := make([]string, 10000)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+
+	b.Run("PerKeyDynamic", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			targets := 0
+			for _, key := range keys {
+				route, ok := replicator.routeForKey(key)
+				if !ok {
+					b.Fatal("routeForKey() failed")
+				}
+				targets += len(replicator.replicationTargets(route))
+			}
+			if targets == 0 {
+				b.Fatal("dynamic routing returned no targets")
+			}
+		}
+	})
+	b.Run("SnapshotPerPage", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			snapshot, ok := replicator.snapshotReplicationRouting()
+			if !ok {
+				b.Fatal("snapshotReplicationRouting() failed")
+			}
+			targets := 0
+			for _, key := range keys {
+				route, ok := snapshot.routeForKey(key)
+				if !ok {
+					b.Fatal("snapshot routeForKey() failed")
+				}
+				targets += len(snapshot.replicationTargets(route))
+			}
+			if targets == 0 {
+				b.Fatal("snapshot routing returned no targets")
+			}
+		}
+	})
+}
+
+func BenchmarkReplicationTargetSelection(b *testing.B) {
+	for _, ownerCount := range []int{2, 16, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			routing, route, _ := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			topology, err := NewTopologyStore(routing.topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			replicator := &HTTPReplicator{
+				self:     routing.self,
+				topology: topology,
+				election: NewElectionStore(topology, ElectionOptions{}),
+			}
+			for _, benchmark := range []struct {
+				name string
+				run  func() []TopologyNode
+			}{
+				{name: "MaterializedStatus", run: func() []TopologyNode {
+					return replicationTargetsMaterializedStatusControl(replicator, route)
+				}},
+				{name: "GenerationInactive", run: func() []TopologyNode {
+					return replicator.replicationTargets(route)
+				}},
+			} {
+				b.Run(benchmark.name, func(b *testing.B) {
+					b.ReportAllocs()
+					for idx := 0; idx < b.N; idx++ {
+						benchmarkReplicationTargetsSink = benchmark.run()
+					}
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationCommandTransportDispatch(b *testing.B) {
+	replicator := &HTTPReplicator{transport: ReplicationTransportHTTP}
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := CacheCommandRequest{Command: "GET", Key: "not-replicated"}
+	response := CacheCommandResponse{OK: true}
+	for _, benchmark := range []struct {
+		name string
+		run  func() ReplicationResult
+	}{
+		{name: "Established", run: func() ReplicationResult {
+			return replicateCommandEstablishedControl(replicator, context.Background(), trie, request, response)
+		}},
+		{name: "TransportDispatch", run: func() ReplicationResult {
+			return replicator.replicateCommand(context.Background(), trie, request, response)
+		}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationResultSink = benchmark.run()
+			}
+		})
+	}
+	b.Run("Alternating", func(b *testing.B) {
+		var establishedDuration, dispatchDuration time.Duration
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			dispatchFirst := iteration&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if dispatchFirst == (pass == 0) {
+					benchmarkReplicationResultSink = replicator.replicateCommand(context.Background(), trie, request, response)
+					dispatchDuration += time.Since(started)
+				} else {
+					benchmarkReplicationResultSink = replicateCommandEstablishedControl(replicator, context.Background(), trie, request, response)
+					establishedDuration += time.Since(started)
+				}
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(establishedDuration.Nanoseconds())/float64(b.N), "established_ns/command")
+		b.ReportMetric(float64(dispatchDuration.Nanoseconds())/float64(b.N), "dispatch_ns/command")
+	})
+}
+
+func BenchmarkLiveReplicationTargetPlanning(b *testing.B) {
+	for _, targetCount := range []int{1, 4, 16} {
+		b.Run(strconv.Itoa(targetCount)+"Targets", func(b *testing.B) {
+			nodes := make([]TopologyNode, targetCount+1)
+			replicas := make([]string, targetCount)
+			for idx := range nodes {
+				nodeID := fmt.Sprintf("node-%03d", idx)
+				nodes[idx] = TopologyNode{ID: nodeID, Address: "http://" + nodeID}
+				if idx > 0 {
+					replicas[idx-1] = nodeID
+				}
+			}
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-000",
+				Nodes:   nodes,
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-000", Replicas: replicas}},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			replicator := &HTTPReplicator{
+				self:     "node-000",
+				topology: topology,
+				election: NewElectionStore(topology, ElectionOptions{}),
+			}
+			request := CacheCommandRequest{Command: "SETSTR", Key: "live:route", Value: "value"}
+			response := CacheCommandResponse{OK: true}
+			for _, benchmark := range []struct {
+				name string
+				run  func() int
+			}{
+				{name: "Established", run: func() int {
+					_, _, targets, ok := replicator.planReplicationTargets(context.Background(), request, response)
+					if !ok {
+						return 0
+					}
+					return len(targets)
+				}},
+				{name: "DirectGeneration", run: func() int {
+					_, _, targets, ok := replicator.planLiveReplicationTargets(context.Background(), request, response)
+					if !ok {
+						return 0
+					}
+					if len(targets.multiple) != 0 {
+						return len(targets.multiple)
+					}
+					return 1
+				}},
+			} {
+				b.Run(benchmark.name, func(b *testing.B) {
+					b.ReportAllocs()
+					for idx := 0; idx < b.N; idx++ {
+						benchmarkReplicationTargetCountSink = benchmark.run()
+					}
+				})
+			}
+		})
+	}
+}
+
+var benchmarkReplicationTargetCountSink int
+
+func replicateCommandEstablishedControl(replicator *HTTPReplicator, ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	result, tasks := replicator.planReplication(ctx, trie, request, response)
+	if len(tasks) == 0 {
+		return result
+	}
+	return replicator.executeReplicationTasks(ctx, result, tasks)
+}
+
+var benchmarkReplicationRoutingSnapshotSink replicationRoutingSnapshot
+
+var benchmarkReplicationRoutingNodeMapSink map[string]TopologyNode
+
+func precomputedNormalizedReplicationTargetsOnlineControl(owners []string, nodes []TopologyNode, online map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self || online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := normalizedTopologyNode(nodes, nodeID)
+		if !ok {
+			continue
+		}
+		targets = append(targets, node)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
+}
+
+type replicationRoutingSnapshotOwnerSlicesControl struct {
+	topology    ClusterTopology
+	shards      []TopologyShard
+	online      map[string]bool
+	leaders     []ElectionLeader
+	owners      [][]string
+	targets     [][]TopologyNode
+	self        string
+	fingerprint string
+}
+
+var benchmarkReplicationRoutingOwnerSlicesSink replicationRoutingSnapshotOwnerSlicesControl
+
+func newReplicationRoutingSnapshotOwnerSlicesControl(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshotOwnerSlicesControl, bool) {
+	topology, fingerprint := topologyStore.replicationSnapshot()
+	snapshot := replicationRoutingSnapshotOwnerSlicesControl{
+		topology:    topology,
+		self:        self,
+		fingerprint: fingerprint,
+	}
+	if election != nil {
+		snapshot.online = election.activeNodesSnapshot(topology)
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := fullReplicaShard(topology)
+		if !ok {
+			return replicationRoutingSnapshotOwnerSlicesControl{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshotOwnerSlicesControl{}, false
+	}
+	snapshot.leaders = make([]ElectionLeader, len(snapshot.shards))
+	snapshot.owners = make([][]string, len(snapshot.shards))
+	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
+	for index, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.owners[index] = owners
+		snapshot.targets[index] = precomputedNormalizedReplicationTargetsOnlineControl(owners, topology.Nodes, snapshot.online, snapshot.self)
+		if election != nil {
+			snapshot.leaders[index] = electShardLeader(shard, snapshot.online)
+			continue
+		}
+		snapshot.leaders[index] = ElectionLeader{
+			Shard:      shard.ID,
+			Leader:     shard.Primary,
+			Available:  true,
+			Primary:    shard.Primary,
+			Candidates: owners,
+		}
+	}
+	return snapshot, true
+}
+
+func (snapshot replicationRoutingSnapshotOwnerSlicesControl) routeForKeyAndTargetsOwnerSlicesControl(key string) (ElectionKeyRoute, []TopologyNode, bool) {
+	if len(snapshot.shards) == 0 {
+		return ElectionKeyRoute{}, nil, false
+	}
+	mode := topologyMode(snapshot.topology.Mode)
+	shardIndex := 0
+	var bucket *uint32
+	if mode != TopologyModeFullReplica {
+		if snapshot.topology.BucketCount > 0 {
+			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
+			selected, ok := replicationRoutingShardIndexForBucket(snapshot.topology, value, snapshot.shards)
+			if !ok {
+				return ElectionKeyRoute{}, nil, false
+			}
+			shardIndex = selected
+			bucket = &value
+		} else {
+			shardIndex = hashKeyToShardIndex(key, len(snapshot.shards))
+		}
+	}
+	shard := snapshot.shards[shardIndex]
+	route := ElectionKeyRoute{
+		Key: key,
+		Route: TopologyRoute{
+			Key:    key,
+			Mode:   mode,
+			Bucket: bucket,
+			Shard:  shard,
+			Owners: snapshot.owners[shardIndex],
+		},
+		Leader: snapshot.leaders[shardIndex],
+	}
+	return route, snapshot.targets[shardIndex], true
+}
+
+func (snapshot replicationRoutingSnapshotOwnerSlicesControl) replicationScanRouteForKeyAndTargetsOwnerSlicesControl(key string) (ElectionKeyRoute, []TopologyNode, bool) {
+	if len(snapshot.shards) != 1 {
+		return snapshot.routeForKeyAndTargetsOwnerSlicesControl(key)
+	}
+	shard := snapshot.shards[0]
+	route := TopologyRoute{
+		Key:    key,
+		Mode:   topologyMode(snapshot.topology.Mode),
+		Shard:  shard,
+		Owners: snapshot.owners[0],
+	}
+	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[0]}, snapshot.targets[0], true
+}
+
+func BenchmarkReplicationRoutingLeaderCandidatesConstructionAlternating(b *testing.B) {
+	for _, withElection := range []bool{false, true} {
+		mode := "NoElection"
+		if withElection {
+			mode = "Election"
+		}
+		b.Run(mode, func(b *testing.B) {
+			for _, size := range []int{2, 4, 8, 16, 32, 64} {
+				b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+					store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+					if err != nil {
+						b.Fatal(err)
+					}
+					var election *ElectionStore
+					if withElection {
+						election = NewElectionStore(store, ElectionOptions{})
+						if err := election.MarkOffline(fmt.Sprintf("node-%03d", size-1)); err != nil {
+							b.Fatal(err)
+						}
+					}
+					var baselineDuration, candidateDuration time.Duration
+					b.ResetTimer()
+					for iteration := 0; iteration < b.N; iteration++ {
+						candidateFirst := iteration&1 != 0
+						for pass := 0; pass < 2; pass++ {
+							started := time.Now()
+							if candidateFirst == (pass == 0) {
+								snapshot, ok := newReplicationRoutingSnapshot("node-000", store, election)
+								candidateDuration += time.Since(started)
+								if !ok {
+									b.Fatal("routing snapshot construction failed")
+								}
+								benchmarkReplicationRoutingSnapshotSink = snapshot
+							} else {
+								snapshot, ok := newReplicationRoutingSnapshotOwnerSlicesControl("node-000", store, election)
+								baselineDuration += time.Since(started)
+								if !ok {
+									b.Fatal("routing snapshot construction failed")
+								}
+								benchmarkReplicationRoutingOwnerSlicesSink = snapshot
+							}
+						}
+					}
+					b.StopTimer()
+					b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "baseline_ns/snapshot")
+					b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "candidate_ns/snapshot")
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingLeaderCandidatesConstruction(b *testing.B) {
+	for _, withElection := range []bool{false, true} {
+		mode := "NoElection"
+		if withElection {
+			mode = "Election"
+		}
+		for _, size := range []int{2, 4, 8, 16, 32, 64} {
+			store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+			var election *ElectionStore
+			if withElection {
+				election = NewElectionStore(store, ElectionOptions{})
+			}
+			for _, candidate := range []bool{false, true} {
+				layout := "Baseline"
+				if candidate {
+					layout = "Candidate"
+				}
+				b.Run(mode+"/"+strconv.Itoa(size)+"Shards/"+layout, func(b *testing.B) {
+					b.ReportAllocs()
+					for iteration := 0; iteration < b.N; iteration++ {
+						if candidate {
+							snapshot, ok := newReplicationRoutingSnapshot("node-000", store, election)
+							if !ok {
+								b.Fatal("routing snapshot construction failed")
+							}
+							benchmarkReplicationRoutingSnapshotSink = snapshot
+						} else {
+							snapshot, ok := newReplicationRoutingSnapshotOwnerSlicesControl("node-000", store, election)
+							if !ok {
+								b.Fatal("routing snapshot construction failed")
+							}
+							benchmarkReplicationRoutingOwnerSlicesSink = snapshot
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkReplicationRoutingLeaderCandidatesRouteAlternating(b *testing.B) {
+	for _, withBucketRanges := range []bool{false, true} {
+		mode := "Hash"
+		if withBucketRanges {
+			mode = "BucketRanges"
+		}
+		b.Run(mode, func(b *testing.B) {
+			for _, size := range []int{2, 16, 64} {
+				b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+					topology := replicationRoutingBenchmarkTopology(size)
+					if withBucketRanges {
+						topology.BucketCount = uint32(size * 256)
+						topology.BucketRanges = make([]TopologyBucketRange, size)
+						for index := range topology.BucketRanges {
+							topology.BucketRanges[index] = TopologyBucketRange{
+								Start: uint32(index * 256), End: uint32((index+1)*256 - 1), Shard: uint32(index),
+							}
+						}
+					}
+					store, err := NewTopologyStore(topology)
+					if err != nil {
+						b.Fatal(err)
+					}
+					baseline, ok := newReplicationRoutingSnapshotOwnerSlicesControl("node-000", store, nil)
+					if !ok {
+						b.Fatal("baseline routing snapshot construction failed")
+					}
+					candidate, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+					if !ok {
+						b.Fatal("candidate routing snapshot construction failed")
+					}
+					keys := make([]string, 4096)
+					for index := range keys {
+						keys[index] = "session:" + strconv.Itoa(index)
+					}
+					var baselineDuration, candidateDuration time.Duration
+					b.ResetTimer()
+					for iteration := 0; iteration < b.N; iteration++ {
+						key := keys[iteration&(len(keys)-1)]
+						candidateFirst := iteration&1 != 0
+						for pass := 0; pass < 2; pass++ {
+							started := time.Now()
+							var route ElectionKeyRoute
+							var targets []TopologyNode
+							var routed bool
+							if candidateFirst == (pass == 0) {
+								route, targets, routed = candidate.routeForKeyAndTargets(key)
+								candidateDuration += time.Since(started)
+							} else {
+								route, targets, routed = baseline.routeForKeyAndTargetsOwnerSlicesControl(key)
+								baselineDuration += time.Since(started)
+							}
+							if !routed || len(targets) == 0 {
+								b.Fatal("route failed")
+							}
+							benchmarkReplicationRoutingRouteSink = route
+							benchmarkReplicationTargetsSink = targets
+						}
+					}
+					b.StopTimer()
+					b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "baseline_ns/route")
+					b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "candidate_ns/route")
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingLeaderCandidatesRoute(b *testing.B) {
+	for _, withBucketRanges := range []bool{false, true} {
+		mode := "Hash"
+		if withBucketRanges {
+			mode = "BucketRanges"
+		}
+		for _, size := range []int{2, 16, 64} {
+			topology := replicationRoutingBenchmarkTopology(size)
+			if withBucketRanges {
+				topology.BucketCount = uint32(size * 256)
+				topology.BucketRanges = make([]TopologyBucketRange, size)
+				for index := range topology.BucketRanges {
+					topology.BucketRanges[index] = TopologyBucketRange{
+						Start: uint32(index * 256), End: uint32((index+1)*256 - 1), Shard: uint32(index),
+					}
+				}
+			}
+			store, err := NewTopologyStore(topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			baseline, ok := newReplicationRoutingSnapshotOwnerSlicesControl("node-000", store, nil)
+			if !ok {
+				b.Fatal("baseline routing snapshot construction failed")
+			}
+			candidate, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+			if !ok {
+				b.Fatal("candidate routing snapshot construction failed")
+			}
+			keys := make([]string, 4096)
+			for index := range keys {
+				keys[index] = "session:" + strconv.Itoa(index)
+			}
+			for _, useCandidate := range []bool{false, true} {
+				layout := "Baseline"
+				if useCandidate {
+					layout = "Candidate"
+				}
+				b.Run(mode+"/"+strconv.Itoa(size)+"Shards/"+layout, func(b *testing.B) {
+					b.ReportAllocs()
+					for iteration := 0; iteration < b.N; iteration++ {
+						key := keys[iteration&(len(keys)-1)]
+						var route ElectionKeyRoute
+						var targets []TopologyNode
+						var routed bool
+						if useCandidate {
+							route, targets, routed = candidate.routeForKeyAndTargets(key)
+						} else {
+							route, targets, routed = baseline.routeForKeyAndTargetsOwnerSlicesControl(key)
+						}
+						if !routed || len(targets) == 0 {
+							b.Fatal("route failed")
+						}
+						benchmarkReplicationRoutingRouteSink = route
+						benchmarkReplicationTargetsSink = targets
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotConstruction(b *testing.B) {
+	for _, tt := range []struct {
+		name     string
+		topology ClusterTopology
+	}{
+		{
+			name: "SingleShardTwoNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   []TopologyNode{{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}},
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			},
+		},
+		{
+			name: "FourShardsFiveNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}, {ID: "node-c", Address: "http://node-c"},
+					{ID: "node-d", Address: "http://node-d"}, {ID: "node-e", Address: "http://node-e"},
+				},
+				Shards: []TopologyShard{
+					{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+					{ID: 1, Primary: "node-b", Replicas: []string{"node-c", "node-d"}},
+					{ID: 2, Primary: "node-c", Replicas: []string{"node-d", "node-e"}},
+					{ID: 3, Primary: "node-d", Replicas: []string{"node-e", "node-a"}},
+				},
+			},
+		},
+		{name: "SixtyFourShards", topology: replicationRoutingBenchmarkTopology(64)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			store, err := NewTopologyStore(tt.topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				snapshot, ok := newReplicationRoutingSnapshot("node-a", store, nil)
+				if !ok {
+					b.Fatal("newReplicationRoutingSnapshot() failed")
+				}
+				benchmarkReplicationRoutingSnapshotSink = snapshot
+			}
+		})
+	}
+}
+
+var benchmarkReplicationTargetsSink []TopologyNode
+
+var benchmarkReplicationRouteTargetSink bool
+
+func BenchmarkReplicationRouteTargetsNodeAlternating(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			routing, route, nodes := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			source := route.Route.Owners[0]
+			target := route.Route.Owners[len(route.Route.Owners)-1]
+			var materializedDuration, directDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				directFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if directFirst == (pass == 0) {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
+						directDuration += time.Since(started)
+					} else {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, nodes, route, source, target)
+						materializedDuration += time.Since(started)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/check")
+			b.ReportMetric(float64(materializedDuration.Nanoseconds())/float64(b.N), "materialized_ns/check")
+		})
+	}
+}
+
+func BenchmarkReplicationRouteTargetsNodeValidationAlternating(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			routing, route, nodes := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			source := route.Route.Owners[0]
+			target := route.Route.Owners[len(route.Route.Owners)-1]
+			var indexedDuration, normalizedDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				normalizedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if normalizedFirst == (pass == 0) {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
+						normalizedDuration += time.Since(started)
+					} else {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeIndexedControl(routing, nodes, route, source, target)
+						indexedDuration += time.Since(started)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(indexedDuration.Nanoseconds())/float64(b.N), "indexed_ns/check")
+			b.ReportMetric(float64(normalizedDuration.Nanoseconds())/float64(b.N), "normalized_ns/check")
+		})
+	}
+}
+
+func BenchmarkReplicationRouteTargetsNode(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		routing, route, nodes := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+		source := route.Route.Owners[0]
+		target := route.Route.Owners[len(route.Route.Owners)-1]
+		for _, direct := range []bool{false, true} {
+			name := "Materialized"
+			if direct {
+				name = "Direct"
+			}
+			b.Run(strconv.Itoa(ownerCount)+"Owners/"+name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					if direct {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
+					} else {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, nodes, route, source, target)
+					}
+				}
+			})
+		}
+	}
+}
+
+func replicationRouteTargetBenchmarkFixture(tb testing.TB, ownerCount int) (replicationRoutingSnapshot, ElectionKeyRoute, map[string]TopologyNode) {
+	tb.Helper()
+	nodes := make([]TopologyNode, ownerCount)
+	replicas := make([]string, 0, ownerCount-1)
+	for index := range nodes {
+		nodes[index] = TopologyNode{ID: fmt.Sprintf("node-%03d", index), Address: fmt.Sprintf("http://node-%03d", index)}
+		if index != 1 {
+			replicas = append(replicas, nodes[index].ID)
+		}
+	}
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    nodes[0].ID,
+		Nodes:   nodes,
+		Shards:  []TopologyShard{{ID: 7, Primary: nodes[1].ID, Replicas: replicas}},
+	})
+	if err != nil {
+		tb.Fatal(err)
+	}
+	routing, ok := newReplicationRoutingSnapshot(nodes[0].ID, topology, nil)
+	if !ok {
+		tb.Fatal("newReplicationRoutingSnapshot() failed")
+	}
+	shard := routing.shards[0]
+	return routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.leaders[0].Candidates}}, topologyNodesByID(routing.topology)
+}
+
+func BenchmarkPrecomputedReplicationTargetsDedupAlternating(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			nodes := make(map[string]TopologyNode, ownerCount)
+			owners := make([]string, ownerCount)
+			for index := range owners {
+				owners[index] = fmt.Sprintf("node-%03d", index)
+				nodes[owners[index]] = TopologyNode{ID: owners[index], Address: "http://" + owners[index]}
+			}
+			var directDuration, deduplicatingDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				directFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if directFirst == (pass == 0) {
+						benchmarkReplicationTargetsSink = precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, nil, "node-000")
+						directDuration += time.Since(started)
+					} else {
+						benchmarkReplicationTargetsSink = precomputedReplicationTargetsDeduplicatingControl(owners, nodes, nil, "node-000")
+						deduplicatingDuration += time.Since(started)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(deduplicatingDuration.Nanoseconds())/float64(b.N), "dedup_ns/targets")
+			b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/targets")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 64} {
+		b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+			store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+			var baselineDuration, candidateDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				candidateFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if candidateFirst == (pass == 0) {
+						snapshot, ok := newReplicationRoutingSnapshotUncheckedOwnersCandidate("node-000", store)
+						candidateDuration += time.Since(started)
+						if !ok {
+							b.Fatal("routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingSnapshotSink = snapshot
+					} else {
+						control, controlOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, nil)
+						baselineDuration += time.Since(started)
+						if !controlOK {
+							b.Fatal("routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingOwnerSlicesSink = control.snapshot
+						benchmarkReplicationRoutingNodeMapSink = control.nodes
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "baseline_ns/snapshot")
+			b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "candidate_ns/snapshot")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotSortedNodesAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+			store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+			var mapDuration, sortedDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				sortedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if sortedFirst == (pass == 0) {
+						snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+						sortedDuration += time.Since(started)
+						if !ok {
+							b.Fatal("routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingSnapshotSink = snapshot
+					} else {
+						control, controlOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, nil)
+						mapDuration += time.Since(started)
+						if !controlOK {
+							b.Fatal("routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingOwnerSlicesSink = control.snapshot
+						benchmarkReplicationRoutingNodeMapSink = control.nodes
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(mapDuration.Nanoseconds())/float64(b.N), "map_ns/snapshot")
+			b.ReportMetric(float64(sortedDuration.Nanoseconds())/float64(b.N), "sorted_ns/snapshot")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotNodeIndex(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, sortedNodes := range []bool{false, true} {
+			name := "Map"
+			if sortedNodes {
+				name = "SortedNodes"
+			}
+			b.Run(strconv.Itoa(size)+"Shards/"+name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					if sortedNodes {
+						snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+						if !ok {
+							b.Fatal("routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingSnapshotSink = snapshot
+					} else {
+						control, controlOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, nil)
+						if !controlOK {
+							b.Fatal("routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingOwnerSlicesSink = control.snapshot
+						benchmarkReplicationRoutingNodeMapSink = control.nodes
+					}
+				}
+			})
+		}
+	}
+}
+
+type replicationRoutingSnapshotShardMapsControl struct {
+	topology    ClusterTopology
+	shards      []TopologyShard
+	online      map[string]bool
+	leaders     map[uint32]ElectionLeader
+	owners      map[uint32][]string
+	targets     map[uint32][]TopologyNode
+	self        string
+	fingerprint string
+}
+
+func (snapshot replicationRoutingSnapshotShardMapsControl) routeForKey(key string) (ElectionKeyRoute, bool) {
+	if len(snapshot.shards) == 0 {
+		return ElectionKeyRoute{}, false
+	}
+	mode := topologyMode(snapshot.topology.Mode)
+	shard := snapshot.shards[0]
+	var bucket *uint32
+	if mode != TopologyModeFullReplica {
+		if snapshot.topology.BucketCount > 0 {
+			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
+			selected, ok := shardForBucket(snapshot.topology, value, snapshot.shards)
+			if !ok {
+				return ElectionKeyRoute{}, false
+			}
+			shard = selected
+			bucket = &value
+		} else {
+			shard = snapshot.shards[hashKeyToShardIndex(key, len(snapshot.shards))]
+		}
+	}
+	owners := snapshot.owners[shard.ID]
+	route := TopologyRoute{Key: key, Mode: mode, Bucket: bucket, Shard: shard, Owners: owners}
+	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, true
+}
+
+func (snapshot replicationRoutingSnapshotShardMapsControl) routeForKeyAndTargets(key string) (ElectionKeyRoute, []TopologyNode, bool) {
+	if len(snapshot.shards) == 0 {
+		return ElectionKeyRoute{}, nil, false
+	}
+	mode := topologyMode(snapshot.topology.Mode)
+	shard := snapshot.shards[0]
+	var bucket *uint32
+	if mode != TopologyModeFullReplica {
+		if snapshot.topology.BucketCount > 0 {
+			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
+			selected, ok := shardForBucket(snapshot.topology, value, snapshot.shards)
+			if !ok {
+				return ElectionKeyRoute{}, nil, false
+			}
+			shard = selected
+			bucket = &value
+		} else {
+			shard = snapshot.shards[hashKeyToShardIndex(key, len(snapshot.shards))]
+		}
+	}
+	owners := snapshot.owners[shard.ID]
+	route := TopologyRoute{Key: key, Mode: mode, Bucket: bucket, Shard: shard, Owners: owners}
+	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, snapshot.targets[shard.ID], true
+}
+
+func (snapshot replicationRoutingSnapshotShardMapsControl) replicationScanRouteForKeyAndTargets(key string) (ElectionKeyRoute, []TopologyNode, bool) {
+	if len(snapshot.shards) != 1 {
+		return snapshot.routeForKeyAndTargets(key)
+	}
+	shard := snapshot.shards[0]
+	owners := snapshot.owners[shard.ID]
+	route := TopologyRoute{
+		Key:    key,
+		Mode:   topologyMode(snapshot.topology.Mode),
+		Shard:  shard,
+		Owners: owners,
+	}
+	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, snapshot.targets[shard.ID], true
+}
+
+func newReplicationRoutingSnapshotShardMapsControl(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshotShardMapsControl, bool) {
+	if topologyStore == nil {
+		return replicationRoutingSnapshotShardMapsControl{}, false
+	}
+	topology, fingerprint := topologyStore.replicationSnapshot()
+	snapshot := replicationRoutingSnapshotShardMapsControl{
+		topology:    topology,
+		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
+		owners:      make(map[uint32][]string, len(topology.Shards)),
+		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
+		self:        self,
+		fingerprint: fingerprint,
+	}
+	if election != nil {
+		snapshot.online = election.activeNodesSnapshot(topology)
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := fullReplicaShard(topology)
+		if !ok {
+			return replicationRoutingSnapshotShardMapsControl{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshotShardMapsControl{}, false
+	}
+	for _, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.owners[shard.ID] = owners
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargetsOnlineControl(owners, topology.Nodes, snapshot.online, snapshot.self)
+		if election != nil {
+			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
+			continue
+		}
+		snapshot.leaders[shard.ID] = ElectionLeader{
+			Shard:      shard.ID,
+			Leader:     shard.Primary,
+			Available:  true,
+			Primary:    shard.Primary,
+			Candidates: owners,
+		}
+	}
+	return snapshot, true
+}
+
+var benchmarkReplicationRoutingShardMapsSink replicationRoutingSnapshotShardMapsControl
+
+func BenchmarkReplicationRoutingSnapshotShardSlicesAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+			store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+			var mapsDuration, slicesDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				slicesFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if slicesFirst == (pass == 0) {
+						snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+						slicesDuration += time.Since(started)
+						if !ok {
+							b.Fatal("slice routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingSnapshotSink = snapshot
+					} else {
+						snapshot, ok := newReplicationRoutingSnapshotShardMapsControl("node-000", store, nil)
+						mapsDuration += time.Since(started)
+						if !ok {
+							b.Fatal("map routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingShardMapsSink = snapshot
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(mapsDuration.Nanoseconds())/float64(b.N), "maps_ns/snapshot")
+			b.ReportMetric(float64(slicesDuration.Nanoseconds())/float64(b.N), "slices_ns/snapshot")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotShardSlices(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, slices := range []bool{false, true} {
+			name := "Maps"
+			if slices {
+				name = "Slices"
+			}
+			b.Run(strconv.Itoa(size)+"Shards/"+name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					if slices {
+						snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+						if !ok {
+							b.Fatal("slice routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingSnapshotSink = snapshot
+					} else {
+						snapshot, ok := newReplicationRoutingSnapshotShardMapsControl("node-000", store, nil)
+						if !ok {
+							b.Fatal("map routing snapshot construction failed")
+						}
+						benchmarkReplicationRoutingShardMapsSink = snapshot
+					}
+				}
+			})
+		}
+	}
+}
+
+var benchmarkReplicationRoutingRouteSink ElectionKeyRoute
+
+func (snapshot replicationRoutingSnapshot) routeForKeyAndTargetsBucketLinearControl(key string) (ElectionKeyRoute, []TopologyNode, bool) {
+	if len(snapshot.shards) == 0 {
+		return ElectionKeyRoute{}, nil, false
+	}
+	mode := topologyMode(snapshot.topology.Mode)
+	shardIndex := 0
+	var bucket *uint32
+	if mode != TopologyModeFullReplica {
+		if snapshot.topology.BucketCount > 0 {
+			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
+			selected, ok := replicationRoutingShardIndexForBucketLinearControl(snapshot.topology, value, snapshot.shards)
+			if !ok {
+				return ElectionKeyRoute{}, nil, false
+			}
+			shardIndex = selected
+			bucket = &value
+		} else {
+			shardIndex = hashKeyToShardIndex(key, len(snapshot.shards))
+		}
+	}
+	shard := snapshot.shards[shardIndex]
+	owners := snapshot.leaders[shardIndex].Candidates
+	route := ElectionKeyRoute{
+		Key: key,
+		Route: TopologyRoute{
+			Key:    key,
+			Mode:   mode,
+			Bucket: bucket,
+			Shard:  shard,
+			Owners: owners,
+		},
+		Leader: snapshot.leaders[shardIndex],
+	}
+	return route, snapshot.targets[shardIndex], true
+}
+
+func replicationRoutingShardIndexForBucketLinearControl(topology ClusterTopology, bucket uint32, shards []TopologyShard) (int, bool) {
+	for _, bucketRange := range topology.BucketRanges {
+		if bucket < bucketRange.Start || bucket > bucketRange.End {
+			continue
+		}
+		index := sort.Search(len(shards), func(index int) bool {
+			return shards[index].ID >= bucketRange.Shard
+		})
+		return index, index < len(shards) && shards[index].ID == bucketRange.Shard
+	}
+	if len(shards) == 0 {
+		return 0, false
+	}
+	return int(bucket % uint32(len(shards))), true
+}
+
+func BenchmarkReplicationRoutingBucketRangeSearchAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64, 128, 256} {
+		b.Run(strconv.Itoa(size)+"Ranges", func(b *testing.B) {
+			topology := replicationRoutingBenchmarkTopology(size)
+			topology.BucketCount = uint32(size * 256)
+			topology.BucketRanges = make([]TopologyBucketRange, size)
+			for index := range topology.BucketRanges {
+				topology.BucketRanges[index] = TopologyBucketRange{
+					Start: uint32(index * 256),
+					End:   uint32((index+1)*256 - 1),
+					Shard: uint32(index),
+				}
+			}
+			store, err := NewTopologyStore(topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+			if !ok {
+				b.Fatal("routing snapshot construction failed")
+			}
+			keys := make([]string, 4096)
+			for index := range keys {
+				keys[index] = "session:" + strconv.Itoa(index)
+			}
+			var linearDuration, searchDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				key := keys[iteration&(len(keys)-1)]
+				searchFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if searchFirst == (pass == 0) {
+						route, targets, routed := snapshot.routeForKeyAndTargets(key)
+						searchDuration += time.Since(started)
+						if !routed || len(targets) == 0 {
+							b.Fatal("search routing failed")
+						}
+						benchmarkReplicationRoutingRouteSink = route
+						benchmarkReplicationTargetsSink = targets
+					} else {
+						route, targets, routed := snapshot.routeForKeyAndTargetsBucketLinearControl(key)
+						linearDuration += time.Since(started)
+						if !routed || len(targets) == 0 {
+							b.Fatal("linear routing failed")
+						}
+						benchmarkReplicationRoutingRouteSink = route
+						benchmarkReplicationTargetsSink = targets
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(linearDuration.Nanoseconds())/float64(b.N), "linear_ns/route")
+			b.ReportMetric(float64(searchDuration.Nanoseconds())/float64(b.N), "search_ns/route")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingShardSlicesRouteOnlyAlternating(b *testing.B) {
+	for _, withBucketRanges := range []bool{false, true} {
+		mode := "Hash"
+		if withBucketRanges {
+			mode = "BucketRanges"
+		}
+		b.Run(mode, func(b *testing.B) {
+			for _, size := range []int{2, 16, 64} {
+				b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+					topology := replicationRoutingBenchmarkTopology(size)
+					if withBucketRanges {
+						topology.BucketCount = uint32(size * 256)
+						topology.BucketRanges = make([]TopologyBucketRange, size)
+						for index := range topology.BucketRanges {
+							topology.BucketRanges[index] = TopologyBucketRange{
+								Start: uint32(index * 256),
+								End:   uint32((index+1)*256 - 1),
+								Shard: uint32(index),
+							}
+						}
+					}
+					store, err := NewTopologyStore(topology)
+					if err != nil {
+						b.Fatal(err)
+					}
+					maps, ok := newReplicationRoutingSnapshotShardMapsControl("node-000", store, nil)
+					if !ok {
+						b.Fatal("map routing snapshot construction failed")
+					}
+					slices, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+					if !ok {
+						b.Fatal("slice routing snapshot construction failed")
+					}
+					keys := make([]string, 4096)
+					for index := range keys {
+						keys[index] = "session:" + strconv.Itoa(index)
+					}
+					var mapsDuration, slicesDuration time.Duration
+					b.ResetTimer()
+					for iteration := 0; iteration < b.N; iteration++ {
+						key := keys[iteration&(len(keys)-1)]
+						slicesFirst := iteration&1 != 0
+						for pass := 0; pass < 2; pass++ {
+							started := time.Now()
+							if slicesFirst == (pass == 0) {
+								route, routed := slices.routeForKey(key)
+								slicesDuration += time.Since(started)
+								if !routed {
+									b.Fatal("slice routing failed")
+								}
+								benchmarkReplicationRoutingRouteSink = route
+							} else {
+								route, routed := maps.routeForKey(key)
+								mapsDuration += time.Since(started)
+								if !routed {
+									b.Fatal("map routing failed")
+								}
+								benchmarkReplicationRoutingRouteSink = route
+							}
+						}
+					}
+					b.StopTimer()
+					b.ReportMetric(float64(mapsDuration.Nanoseconds())/float64(b.N), "maps_ns/route")
+					b.ReportMetric(float64(slicesDuration.Nanoseconds())/float64(b.N), "slices_ns/route")
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingShardSlicesAlternating(b *testing.B) {
+	for _, withBucketRanges := range []bool{false, true} {
+		mode := "Hash"
+		if withBucketRanges {
+			mode = "BucketRanges"
+		}
+		b.Run(mode, func(b *testing.B) {
+			for _, size := range []int{2, 4, 8, 16, 32, 64} {
+				b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+					topology := replicationRoutingBenchmarkTopology(size)
+					if withBucketRanges {
+						topology.BucketCount = uint32(size * 256)
+						topology.BucketRanges = make([]TopologyBucketRange, size)
+						for index := range topology.BucketRanges {
+							topology.BucketRanges[index] = TopologyBucketRange{
+								Start: uint32(index * 256),
+								End:   uint32((index+1)*256 - 1),
+								Shard: uint32(index),
+							}
+						}
+					}
+					store, err := NewTopologyStore(topology)
+					if err != nil {
+						b.Fatal(err)
+					}
+					maps, ok := newReplicationRoutingSnapshotShardMapsControl("node-000", store, nil)
+					if !ok {
+						b.Fatal("map routing snapshot construction failed")
+					}
+					slices, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+					if !ok {
+						b.Fatal("slice routing snapshot construction failed")
+					}
+					keys := make([]string, 4096)
+					for index := range keys {
+						keys[index] = "session:" + strconv.Itoa(index)
+					}
+					var mapsDuration, slicesDuration time.Duration
+					b.ResetTimer()
+					for iteration := 0; iteration < b.N; iteration++ {
+						key := keys[iteration&(len(keys)-1)]
+						slicesFirst := iteration&1 != 0
+						for pass := 0; pass < 2; pass++ {
+							started := time.Now()
+							if slicesFirst == (pass == 0) {
+								route, targets, routed := slices.routeForKeyAndTargets(key)
+								slicesDuration += time.Since(started)
+								if !routed || len(targets) == 0 {
+									b.Fatal("slice routing failed")
+								}
+								benchmarkReplicationRoutingRouteSink = route
+								benchmarkReplicationTargetsSink = targets
+							} else {
+								route, targets, routed := maps.routeForKeyAndTargets(key)
+								mapsDuration += time.Since(started)
+								if !routed || len(targets) == 0 {
+									b.Fatal("map routing failed")
+								}
+								benchmarkReplicationRoutingRouteSink = route
+								benchmarkReplicationTargetsSink = targets
+							}
+						}
+					}
+					b.StopTimer()
+					b.ReportMetric(float64(mapsDuration.Nanoseconds())/float64(b.N), "maps_ns/route")
+					b.ReportMetric(float64(slicesDuration.Nanoseconds())/float64(b.N), "slices_ns/route")
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingShardSlices(b *testing.B) {
+	for _, withBucketRanges := range []bool{false, true} {
+		mode := "Hash"
+		if withBucketRanges {
+			mode = "BucketRanges"
+		}
+		for _, size := range []int{2, 16, 64} {
+			topology := replicationRoutingBenchmarkTopology(size)
+			if withBucketRanges {
+				topology.BucketCount = uint32(size * 256)
+				topology.BucketRanges = make([]TopologyBucketRange, size)
+				for index := range topology.BucketRanges {
+					topology.BucketRanges[index] = TopologyBucketRange{
+						Start: uint32(index * 256),
+						End:   uint32((index+1)*256 - 1),
+						Shard: uint32(index),
+					}
+				}
+			}
+			store, err := NewTopologyStore(topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			maps, ok := newReplicationRoutingSnapshotShardMapsControl("node-000", store, nil)
+			if !ok {
+				b.Fatal("map routing snapshot construction failed")
+			}
+			slices, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+			if !ok {
+				b.Fatal("slice routing snapshot construction failed")
+			}
+			keys := make([]string, 4096)
+			for index := range keys {
+				keys[index] = "session:" + strconv.Itoa(index)
+			}
+			for _, useSlices := range []bool{false, true} {
+				layout := "Maps"
+				if useSlices {
+					layout = "Slices"
+				}
+				b.Run(mode+"/"+strconv.Itoa(size)+"Shards/"+layout, func(b *testing.B) {
+					b.ReportAllocs()
+					for iteration := 0; iteration < b.N; iteration++ {
+						key := keys[iteration&(len(keys)-1)]
+						if useSlices {
+							route, targets, routed := slices.routeForKeyAndTargets(key)
+							if !routed || len(targets) == 0 {
+								b.Fatal("slice routing failed")
+							}
+							benchmarkReplicationRoutingRouteSink = route
+							benchmarkReplicationTargetsSink = targets
+							continue
+						}
+						route, targets, routed := maps.routeForKeyAndTargets(key)
+						if !routed || len(targets) == 0 {
+							b.Fatal("map routing failed")
+						}
+						benchmarkReplicationRoutingRouteSink = route
+						benchmarkReplicationTargetsSink = targets
+					}
+				})
+			}
+		}
+	}
+}
+
+type replicationRoutingSnapshotNodeMapControl struct {
+	snapshot replicationRoutingSnapshotOwnerSlicesControl
+	nodes    map[string]TopologyNode
+}
+
+func newReplicationRoutingSnapshotNodeMapControl(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshotNodeMapControl, bool) {
+	topology, fingerprint := topologyStore.replicationSnapshot()
+	nodes := topologyNodesByID(topology)
+	snapshot := replicationRoutingSnapshotOwnerSlicesControl{
+		topology:    topology,
+		self:        self,
+		fingerprint: fingerprint,
+	}
+	if election != nil {
+		snapshot.online = election.activeNodesSnapshot(topology)
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := fullReplicaShard(topology)
+		if !ok {
+			return replicationRoutingSnapshotNodeMapControl{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshotNodeMapControl{}, false
+	}
+	snapshot.leaders = make([]ElectionLeader, len(snapshot.shards))
+	snapshot.owners = make([][]string, len(snapshot.shards))
+	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
+	for index, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.owners[index] = owners
+		snapshot.targets[index] = precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, snapshot.online, snapshot.self)
+		if election != nil {
+			snapshot.leaders[index] = electShardLeader(shard, snapshot.online)
+		} else {
+			snapshot.leaders[index] = ElectionLeader{
+				Shard:      shard.ID,
+				Leader:     shard.Primary,
+				Available:  true,
+				Primary:    shard.Primary,
+				Candidates: owners,
+			}
+		}
+	}
+	return replicationRoutingSnapshotNodeMapControl{snapshot: snapshot, nodes: nodes}, true
+}
+
+func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topologyStore *TopologyStore) (replicationRoutingSnapshot, bool) {
+	topology, fingerprint := topologyStore.replicationSnapshot()
+	nodes := topologyNodesByID(topology)
+	snapshot := replicationRoutingSnapshot{
+		topology:    topology,
+		self:        self,
+		fingerprint: fingerprint,
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := fullReplicaShard(topology)
+		if !ok {
+			return replicationRoutingSnapshot{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshot{}, false
+	}
+	snapshot.leaders = make([]ElectionLeader, len(snapshot.shards))
+	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
+	for index, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.targets[index] = precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, nodes, nil, snapshot.self)
+		snapshot.leaders[index] = ElectionLeader{
+			Shard:      shard.ID,
+			Leader:     shard.Primary,
+			Available:  true,
+			Primary:    shard.Primary,
+			Candidates: owners,
+		}
+	}
+	return snapshot, true
+}
+
+func replicationRoutingBenchmarkTopology(size int) ClusterTopology {
+	nodes := make([]TopologyNode, size)
+	shards := make([]TopologyShard, size)
+	for index := range nodes {
+		nodes[index] = TopologyNode{
+			ID:      fmt.Sprintf("node-%03d", index),
+			Address: fmt.Sprintf("http://node-%03d", index),
+		}
+	}
+	for index := range shards {
+		replicas := make([]string, 0, 2)
+		for offset := 1; offset <= 2 && offset < size; offset++ {
+			replicas = append(replicas, nodes[(index+offset)%size].ID)
+		}
+		shards[index] = TopologyShard{
+			ID:       uint32(index),
+			Primary:  nodes[index].ID,
+			Replicas: replicas,
+		}
+	}
+	return ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    nodes[0].ID,
+		Nodes:   nodes,
+		Shards:  shards,
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotFingerprintAlternating(b *testing.B) {
+	for _, tt := range []struct {
+		name     string
+		topology ClusterTopology
+	}{
+		{
+			name: "SingleShardTwoNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   []TopologyNode{{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}},
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			},
+		},
+		{
+			name: "FourShardsFiveNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}, {ID: "node-c", Address: "http://node-c"},
+					{ID: "node-d", Address: "http://node-d"}, {ID: "node-e", Address: "http://node-e"},
+				},
+				Shards: []TopologyShard{
+					{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+					{ID: 1, Primary: "node-b", Replicas: []string{"node-c", "node-d"}},
+					{ID: 2, Primary: "node-c", Replicas: []string{"node-d", "node-e"}},
+					{ID: 3, Primary: "node-d", Replicas: []string{"node-e", "node-a"}},
+				},
+			},
+		},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			store, err := NewTopologyStore(tt.topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			var cachedDuration, rehashDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				cachedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					snapshot, ok := newReplicationRoutingSnapshot("node-a", store, nil)
+					if !ok {
+						b.Fatal("newReplicationRoutingSnapshot() failed")
+					}
+					if cachedFirst == (pass == 0) {
+						cachedDuration += time.Since(started)
+					} else {
+						snapshot.fingerprint = snapshot.topology.Fingerprint()
+						rehashDuration += time.Since(started)
+					}
+					benchmarkReplicationRoutingSnapshotSink = snapshot
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(cachedDuration.Nanoseconds())/float64(b.N), "cached_ns/snapshot")
+			b.ReportMetric(float64(rehashDuration.Nanoseconds())/float64(b.N), "rehash_ns/snapshot")
+		})
+	}
+}
+
+func BenchmarkReplicationBatchMetadataWire(b *testing.B) {
+	const payloadCount = 10000
+	payloads := make([]CacheCommandRequest, payloadCount)
+	for idx := range payloads {
+		payloads[idx] = CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "session:" + strconv.Itoa(idx),
+			Value:   `{"type":"string","string":"value"}`,
+			Pairs: Map{
+				replicationMetaSourceNode:          "node-a",
+				replicationMetaSequence:            strconv.Itoa(idx + 1),
+				replicationMetaTopologyFingerprint: "fingerprint-a",
+			},
+		}
+	}
+
+	for _, tt := range []struct {
+		name  string
+		build func([]CacheCommandRequest) (CacheCommandRequest, error)
+	}{
+		{name: "LegacyPerItem", build: replicationBatchPayload},
+		{name: "SharedEnvelope", build: replicationBatchEnvelopePayload},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			request, err := tt.build(payloads)
+			if err != nil {
+				b.Fatal(err)
+			}
+			body, _, _, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			wireBytes, err := io.Copy(io.Discard, body)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if closer, ok := body.(io.Closer); ok {
+				_ = closer.Close()
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iter := 0; iter < b.N; iter++ {
+				request, err := tt.build(payloads)
+				if err != nil {
+					b.Fatal(err)
+				}
+				body, _, _, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := io.Copy(io.Discard, body); err != nil {
+					b.Fatal(err)
+				}
+				if closer, ok := body.(io.Closer); ok {
+					if err := closer.Close(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			b.ReportMetric(float64(wireBytes), "wire_B/op")
+		})
+	}
+}
+
+var benchmarkReplicationMetadataPairsSink Map
+
+func BenchmarkReplicationMetadataPairs(b *testing.B) {
+	const source = "node-a"
+	const sequence = uint64(42)
+	const fingerprint = "fingerprint-a"
+	for _, tt := range []struct {
+		name  string
+		build func(string, uint64, string) Map
+	}{
+		{name: "Production", build: replicationMetadataPairs},
+		{name: "Preallocated", build: replicationMetadataPairsPreallocatedControl},
+		{name: "Literal", build: replicationMetadataPairsLiteralControl},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationMetadataPairsSink = tt.build(source, sequence, fingerprint)
+			}
+		})
+	}
+}
+
+func replicationMetadataPairsPreallocatedControl(source string, sequence uint64, fingerprint string) Map {
+	pairs := make(Map, 3)
+	pairs[replicationMetaSourceNode] = source
+	pairs[replicationMetaSequence] = strconv.FormatUint(sequence, 10)
+	pairs[replicationMetaTopologyFingerprint] = fingerprint
+	return pairs
+}
+
+func replicationMetadataPairsLiteralControl(source string, sequence uint64, fingerprint string) Map {
+	return Map{
+		replicationMetaSourceNode:          source,
+		replicationMetaSequence:            strconv.FormatUint(sequence, 10),
+		replicationMetaTopologyFingerprint: fingerprint,
+	}
+}
+
+func BenchmarkReplicationSyncTargetPlanning(b *testing.B) {
+	const payloadCount = 10000
+	replicator := &HTTPReplicator{self: "node-a"}
+	targets := []TopologyNode{
+		{ID: "node-b", Address: "http://node-b"},
+		{ID: "node-c", Address: "http://node-c"},
+	}
+	payloads := make([]CacheCommandRequest, payloadCount)
+	for idx := range payloads {
+		payloads[idx] = CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "session:" + strconv.Itoa(idx),
+			Value:   `{"type":"string","string":"value"}`,
+		}
+	}
+
+	b.Run("TasksThenGroup", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			tasks := make([]replicationTask, 0, payloadCount*len(targets))
+			for _, payload := range payloads {
+				tasks = replicator.appendReplicationTasksForTargetsWithFingerprint(tasks, targets, payload, "fingerprint-a")
+			}
+			groups := groupReplicationTasksByTarget(tasks)
+			if len(groups) != len(targets) {
+				b.Fatalf("groups len = %d, want %d", len(groups), len(targets))
+			}
+		}
+	})
+	b.Run("DirectPreallocatedGroups", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			groups := make([]replicationTaskGroup, 0, len(targets))
+			indexes := make(map[TopologyNode]int, len(targets))
+			for _, payload := range payloads {
+				groups = replicator.appendReplicationPayloadToTargetGroups(groups, indexes, payloadCount, targets, payload, "fingerprint-a")
+			}
+			if len(groups) != len(targets) {
+				b.Fatalf("groups len = %d, want %d", len(groups), len(targets))
+			}
+		}
+	})
+}
+
+func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
+	for _, tt := range []struct {
+		name          string
+		uniqueTargets int
+		tasks         int
+	}{
+		{name: "TwoTargetsTwoTasks", uniqueTargets: 2, tasks: 2},
+		{name: "ThreeTargetsTwelveTasks", uniqueTargets: 3, tasks: 12},
+		{name: "FourTargetsSixteenTasks", uniqueTargets: 4, tasks: 16},
+		{name: "EightTargetsSixteenTasks", uniqueTargets: 8, tasks: 16},
+		{name: "EightTargetsSixtyFourTasks", uniqueTargets: 8, tasks: 64},
+		{name: "SixtyFourTargetsOneKTasks", uniqueTargets: 64, tasks: 1024},
+	} {
+		tasks := replicationGroupingBenchmarkTasks(tt.uniqueTargets, tt.tasks)
+		b.Run(tt.name+"/Production", func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups := groupReplicationTasksByTarget(tasks)
+				if len(groups) != tt.uniqueTargets {
+					b.Fatalf("groups len = %d, want %d", len(groups), tt.uniqueTargets)
+				}
+			}
+		})
+		b.Run(tt.name+"/MapOnly", func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups := groupReplicationTasksByTargetMap(tasks)
+				if len(groups) != tt.uniqueTargets {
+					b.Fatalf("groups len = %d, want %d", len(groups), tt.uniqueTargets)
+				}
+			}
+		})
+		b.Run(tt.name+"/LinearOnly", func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups, ok := groupReplicationTasksByTargetLinear(tasks, 0)
+				if !ok {
+					b.Fatal("groupReplicationTasksByTargetLinear() unexpectedly hit target limit")
+				}
+				if len(groups) != tt.uniqueTargets {
+					b.Fatalf("groups len = %d, want %d", len(groups), tt.uniqueTargets)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationGRPCStreamTargetKey(b *testing.B) {
+	for _, benchmark := range []struct {
+		name   string
+		target TopologyNode
+	}{
+		{name: "ID", target: TopologyNode{ID: "node-b", Address: "http://node-b"}},
+		{name: "Address", target: TopologyNode{Address: "http://node-b"}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationGRPCStreamTargetKeySink = grpcStreamTargetKey(benchmark.target)
+			}
+		})
+	}
+}
+
+var benchmarkReplicationGRPCStreamTargetKeySink = grpcStreamTargetKey(TopologyNode{})
+
+func BenchmarkReplicationGRPCStreamTargetLookup(b *testing.B) {
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	stringTargets := map[string]int{replicationTaskTargetKey(target): 1}
+	comparableTargets := map[replicationGRPCStreamTargetKey]int{grpcStreamTargetKey(target): 1}
+	for _, benchmark := range []struct {
+		name string
+		run  func() int
+	}{
+		{name: "ConcatenatedString", run: func() int {
+			return stringTargets[replicationTaskTargetKey(target)]
+		}},
+		{name: "ComparableFields", run: func() int {
+			return comparableTargets[grpcStreamTargetKey(target)]
+		}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationTargetCountSink = benchmark.run()
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationLastResultTimingOwnership(b *testing.B) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	finishedAt := startedAt.Add(25 * time.Millisecond)
+	result := ReplicationResult{
+		StartedAt:  &startedAt,
+		FinishedAt: &finishedAt,
+		Targets:    []ReplicationTargetResult{{Node: "node-b", OK: true, Status: 200}},
+	}
+	b.Run("Store", func(b *testing.B) {
+		replicator := &HTTPReplicator{}
+		b.ReportAllocs()
+		for idx := 0; idx < b.N; idx++ {
+			replicator.storeLastResult(result)
+		}
+	})
+	b.Run("Read", func(b *testing.B) {
+		replicator := &HTTPReplicator{}
+		replicator.storeLastResult(result)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			benchmarkReplicationResultSink = replicator.LastResult()
+		}
+	})
+	b.Run("StoreAlternating", func(b *testing.B) {
+		baseline := &HTTPReplicator{}
+		candidate := &HTTPReplicator{}
+		var baselineDuration, candidateDuration time.Duration
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			candidateFirst := idx&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					candidate.storeLastResult(result)
+					candidateDuration += time.Since(started)
+				} else {
+					storeLastResultClonedTimingControl(baseline, result)
+					baselineDuration += time.Since(started)
+				}
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "cloned_ns/store")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "retained_ns/store")
+	})
+	b.Run("ReadAlternating", func(b *testing.B) {
+		baseline := &HTTPReplicator{}
+		candidate := &HTTPReplicator{}
+		storeLastResultClonedTimingControl(baseline, result)
+		candidate.storeLastResult(result)
+		var baselineDuration, candidateDuration time.Duration
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			candidateFirst := idx&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					benchmarkReplicationResultSink = candidate.LastResult()
+					candidateDuration += time.Since(started)
+				} else {
+					benchmarkReplicationResultSink = baseline.LastResult()
+					baselineDuration += time.Since(started)
+				}
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "cloned_ns/read")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "retained_ns/read")
+	})
+}
+
+func storeLastResultClonedTimingControl(replicator *HTTPReplicator, result ReplicationResult) {
+	replicator.mu.Lock()
+	replicator.last = cloneReplicationResult(result)
+	replicator.mu.Unlock()
+}
+
+func BenchmarkReplicationLastResultTargetStore(b *testing.B) {
+	openUntil := time.Unix(1_700_000_000, 123).UTC()
+	for _, benchmark := range []struct {
+		name   string
+		result ReplicationResult
+	}{
+		{name: "Plain", result: ReplicationResult{Targets: []ReplicationTargetResult{{Node: "node-b", OK: true, Status: 200}}}},
+		{name: "CircuitOpen", result: ReplicationResult{Targets: []ReplicationTargetResult{{Node: "node-b", CircuitOpen: true, CircuitOpenUntil: &openUntil}}}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			replicator := &HTTPReplicator{}
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				replicator.storeLastResult(benchmark.result)
+			}
+		})
+	}
+}
+
+func BenchmarkFinishReplicationResultTiming(b *testing.B) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	b.ReportAllocs()
+	for idx := 0; idx < b.N; idx++ {
+		benchmarkReplicationResultSink = finishReplicationResult(ReplicationResult{}, startedAt)
+	}
+}
+
+func BenchmarkCloneReplicationResultTimingPresence(b *testing.B) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	finishedAt := startedAt.Add(25 * time.Millisecond)
+	for _, benchmark := range []struct {
+		name   string
+		result ReplicationResult
+	}{
+		{name: "None", result: ReplicationResult{}},
+		{name: "Started", result: ReplicationResult{StartedAt: &startedAt}},
+		{name: "Finished", result: ReplicationResult{FinishedAt: &finishedAt}},
+		{name: "Both", result: ReplicationResult{StartedAt: &startedAt, FinishedAt: &finishedAt}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationResultSink = cloneReplicationResult(benchmark.result)
+			}
+		})
+	}
+}
+
+func BenchmarkSplitReplicationTaskGroupByMaxBytes(b *testing.B) {
+	const payloadCount = 4096
+	const maxBytes = 16 << 10
+	group := replicationTaskGroup{
+		target:   TopologyNode{ID: "node-b", Address: "http://127.0.0.1/node-b"},
+		payloads: make([]CacheCommandRequest, 0, payloadCount),
+		keys:     make([]string, 0, payloadCount),
+	}
+	payloadBytes := make([]int, 0, payloadCount)
+	threshold := maxBytes + 1
+	for idx := 0; idx < payloadCount; idx++ {
+		key := "session:" + strconv.Itoa(idx)
+		payload := CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     key,
+			Value:   `{"type":"string","string":"value-` + strconv.Itoa(idx) + `"}`,
+		}
+		group.payloads = append(group.payloads, payload)
+		group.keys = append(group.keys, key)
+		payloadBytes = append(payloadBytes, estimatedReplicationRequestBytesWithin(payload, threshold))
+	}
+	groupWithBytes := group
+	groupWithBytes.payloadBytes = payloadBytes
+
+	for _, tt := range []struct {
+		name  string
+		group replicationTaskGroup
+	}{
+		{name: "EstimateInSplit", group: group},
+		{name: "CarriedPayloadBytes", group: groupWithBytes},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups := splitReplicationTaskGroupByMaxBytes(tt.group, maxBytes)
+				if len(groups) == 0 {
+					b.Fatal("splitReplicationTaskGroupByMaxBytes() returned no groups")
+				}
+			}
+		})
+	}
+}
+
+func replicationGroupingBenchmarkTasks(uniqueTargets int, taskCount int) []replicationTask {
+	tasks := make([]replicationTask, 0, taskCount)
+	for idx := 0; idx < taskCount; idx++ {
+		targetID := "node-" + strconv.Itoa(idx%uniqueTargets)
+		tasks = append(tasks, replicationTask{
+			target: TopologyNode{ID: targetID, Address: "http://127.0.0.1/" + targetID},
+			payload: CacheCommandRequest{
+				Command: "INTERNALSET",
+				Key:     "session:" + strconv.Itoa(idx),
+				Value:   `{"type":"string","string":"value"}`,
+			},
+		})
+	}
+	return tasks
+}

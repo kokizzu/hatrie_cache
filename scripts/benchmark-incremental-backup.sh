@@ -11,7 +11,7 @@ output="$artifact_dir/incremental-backup-repository.txt"
 mkdir -p "$artifact_dir"
 echo "Incremental backup benchmark: bench=$benchmark keys=$keys benchtime=$benchtime count=$count"
 echo
-HATRIE_BACKUP_BENCH_KEYS="$keys" go test . \
+HATRIE_BACKUP_BENCH_KEYS="$keys" go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

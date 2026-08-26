@@ -1,0 +1,5232 @@
+package hatCache
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+type sqlStreamingTestResolver struct {
+	rows           []SQLRow
+	resolveCalls   int
+	streamCalls    int
+	indexRows      []SQLRow
+	indexRowsByKey map[string][]SQLRow
+	indexCalls     int
+}
+
+type sqlMultiStreamingTestResolver struct {
+	sources      map[string][]SQLRow
+	resolveCalls int
+	streamCalls  int
+}
+
+func (resolver *sqlMultiStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	resolver.resolveCalls++
+	return nil, errors.New("set stream must not materialize a source")
+}
+
+func (resolver *sqlMultiStreamingTestResolver) StreamSQLSource(ctx context.Context, name, key string, visit func(SQLRow) error) error {
+	if name != "CACHE" {
+		return fmt.Errorf("stream source = %s, want CACHE", name)
+	}
+	rows, ok := resolver.sources[key]
+	if !ok {
+		return fmt.Errorf("stream key = %q, want configured source", key)
+	}
+	resolver.streamCalls++
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(cloneSQLRows([]SQLRow{row})[0]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type sqlOrderedStreamingTestResolver struct {
+	rows         []SQLRow
+	orderedCalls int
+}
+
+func (resolver *sqlOrderedStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	return nil, errors.New("indexed grouped stream must not materialize its source")
+}
+
+func (resolver *sqlOrderedStreamingTestResolver) StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error) {
+	if name != "CACHE" || key != "people" || field != "team" || desc || nullsFirst || !nullsLast {
+		return false, fmt.Errorf("ordered stream = %s(%q).%s desc=%t nulls=%t/%t", name, key, field, desc, nullsFirst, nullsLast)
+	}
+	resolver.orderedCalls++
+	for _, row := range resolver.rows {
+		if err := ctx.Err(); err != nil {
+			return true, err
+		}
+		if err := visit(cloneSQLRows([]SQLRow{row})[0]); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+type sqlStreamingFunctionTestResolver struct {
+	*sqlStreamingTestResolver
+	functions SQLFunctionResolver
+}
+
+func (resolver sqlStreamingFunctionTestResolver) EvaluateSQLFunction(name string, calls []SQLFunctionCall) ([]interface{}, error) {
+	return resolver.functions.EvaluateSQLFunction(name, calls)
+}
+
+type sqlSelectiveIndexTestResolver struct {
+	rows        []SQLRow
+	calls       []string
+	unavailable map[string]bool
+}
+
+type sqlSnapshotStreamingTestResolver struct {
+	locked, released bool
+}
+
+func (resolver *sqlSnapshotStreamingTestResolver) LockSQLSnapshot() func() {
+	resolver.locked = true
+	return func() { resolver.released = true }
+}
+
+func (resolver *sqlSnapshotStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	return nil, errors.New("streaming resolver must not materialize its source")
+}
+
+func (resolver *sqlSnapshotStreamingTestResolver) StreamSQLSource(_ context.Context, _ string, _ string, visit func(SQLRow) error) error {
+	if !resolver.locked {
+		return errors.New("streaming source was read without its snapshot lock")
+	}
+	return visit(SQLRow{"id": int64(1)})
+}
+
+func TestExecuteSQLQueryRowsHoldsAndReleasesSnapshot(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSnapshotStreamingTestResolver{}
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person SELECT person.id", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		if row["id"] != int64(1) {
+			return fmt.Errorf("row = %#v, want id 1", row)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streaming snapshot query: %v", err)
+	}
+	if !resolver.locked || !resolver.released {
+		t.Fatalf("streaming snapshot lifecycle locked=%t released=%t, want both true", resolver.locked, resolver.released)
+	}
+}
+
+func (resolver *sqlSelectiveIndexTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	return resolver.rows, nil
+}
+
+func (resolver *sqlSelectiveIndexTestResolver) ResolveSQLIndexedSource(_ string, _ string, field string, value interface{}) ([]SQLRow, bool, error) {
+	resolver.calls = append(resolver.calls, field)
+	if resolver.unavailable[field] {
+		return nil, false, nil
+	}
+	rows := make([]SQLRow, 0, len(resolver.rows))
+	for _, row := range resolver.rows {
+		if reflect.DeepEqual(row[field], value) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, true, nil
+}
+
+func (resolver *sqlSelectiveIndexTestResolver) SQLJSONIndexStats(_ string, fields ...string) (SQLJSONIndexStats, bool, error) {
+	if len(fields) != 1 {
+		return SQLJSONIndexStats{}, false, nil
+	}
+	field := fields[0]
+	switch field {
+	case "kind":
+		return SQLJSONIndexStats{Rows: 100, DistinctKeys: 2}, true, nil
+	case "id":
+		return SQLJSONIndexStats{Rows: 100, DistinctKeys: 100}, true, nil
+	default:
+		return SQLJSONIndexStats{}, false, nil
+	}
+}
+
+func TestExecuteSQLQueryChoosesMostSelectiveIndexedConjunct(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{rows: []SQLRow{
+		{"id": int64(7), "kind": "common"},
+		{"id": int64(8), "kind": "common"},
+	}}
+	result, err := ExecuteSQLQuery("FROM CACHE('events') AS event WHERE event.kind = 'common' AND event.id = 7 SELECT event.id", resolver)
+	if err != nil {
+		t.Fatalf("selective indexed query: %v", err)
+	}
+	if want := []SQLRow{{"id": int64(7)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("selective indexed rows = %#v, want %#v", result.Rows, want)
+	}
+	if want := []string{"id"}; !reflect.DeepEqual(resolver.calls, want) {
+		t.Fatalf("index probes = %#v, want most-selective %v", resolver.calls, want)
+	}
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReportsIndexEstimateError(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{rows: []SQLRow{
+		{"id": int64(7), "kind": "common"},
+		{"id": int64(8), "kind": "common"},
+	}}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.kind = 'common' SELECT event.id", resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX SCAN" {
+			if step.EstimatedRows == nil || *step.EstimatedRows != 50 || step.ActualOutputRows == nil || *step.ActualOutputRows != 2 || step.EstimateErrorRows == nil || *step.EstimateErrorRows != -48 {
+				t.Fatalf("index estimate step = %#v, want estimated/actual/error 50/2/-48", step)
+			}
+			for _, row := range result.Rows {
+				if row["node"] != "INDEX SCAN" {
+					continue
+				}
+				if percent, ok := row["estimate_error_percent"].(float64); !ok || percent != -96 {
+					t.Fatalf("index estimate row = %#v, want estimate_error_percent -96", row)
+				}
+				return
+			}
+			t.Fatalf("EXPLAIN ANALYZE rows = %#v, want INDEX SCAN output row", result.Rows)
+		}
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
+}
+
+func TestExecuteSQLQueryFallsBackWhenMostSelectiveIndexIsUnavailable(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{
+		rows:        []SQLRow{{"id": int64(7), "kind": "common"}, {"id": int64(8), "kind": "common"}},
+		unavailable: map[string]bool{"id": true},
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('events') AS event WHERE event.kind = 'common' AND event.id = 7 SELECT event.id", resolver)
+	if err != nil {
+		t.Fatalf("fallback indexed query: %v", err)
+	}
+	if want := []SQLRow{{"id": int64(7)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("fallback indexed rows = %#v, want %#v", result.Rows, want)
+	}
+	if want := []string{"id", "kind"}; !reflect.DeepEqual(resolver.calls, want) {
+		t.Fatalf("fallback index probes = %#v, want %v", resolver.calls, want)
+	}
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReportsIndexCandidateDecision(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlSelectiveIndexTestResolver{
+		rows:        []SQLRow{{"id": int64(7), "kind": "common"}},
+		unavailable: map[string]bool{"id": true},
+	}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('people') AS p WHERE p.kind = 'common' AND p.id = 7 SELECT p.id", resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range result.Plan {
+		if step.Node != "INDEX CANDIDATES" {
+			continue
+		}
+		if step.ActualInputRows == nil || *step.ActualInputRows != 2 || step.ActualOutputRows == nil || *step.ActualOutputRows != 1 || !strings.Contains(step.Detail, "p.id = 7 estimated_rows=1 estimated_cost=2 rejected: index unavailable") || !strings.Contains(step.Detail, `p.kind = "common" estimated_rows=50 estimated_cost=51 selected`) {
+			t.Fatalf("index candidate plan = %#v, want candidate estimates, cost, rejection, and selection", step)
+		}
+		return
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX CANDIDATES", result.Plan)
+}
+
+func TestSQLIndexedEqualityProbeCostSaturates(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	if got := sqlIndexedEqualityProbeCost(maxInt); got != maxInt {
+		t.Fatalf("sqlIndexedEqualityProbeCost(MaxInt) = %d, want %d", got, maxInt)
+	}
+}
+
+func (resolver *sqlStreamingTestResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || field != "id" {
+		return nil, false, fmt.Errorf("unexpected index source %s(%q).%s", name, key, field)
+	}
+	resolver.indexCalls++
+	if value == nil {
+		return nil, true, nil
+	}
+	indexedRows := resolver.indexRows
+	if resolver.indexRowsByKey != nil {
+		var ok bool
+		indexedRows, ok = resolver.indexRowsByKey[key]
+		if !ok {
+			return nil, false, nil
+		}
+	}
+	var rows []SQLRow
+	for _, row := range indexedRows {
+		if reflect.DeepEqual(row["id"], value) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, true, nil
+}
+
+func TestExecuteSQLQueryRowsStreamsChainedIndexedJoins(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{
+		rows: []SQLRow{{"id": int64(1), "team_id": int64(10)}, {"id": int64(2), "team_id": int64(20)}},
+		indexRowsByKey: map[string][]SQLRow{
+			"teams":  {{"id": int64(10), "group_id": int64(100)}, {"id": int64(20), "group_id": int64(200)}},
+			"groups": {{"id": int64(100), "name": "Core"}},
+		},
+	}
+	var got []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person INNER JOIN CACHE('teams') AS team ON person.team_id = team.id LEFT JOIN CACHE('groups') AS group ON team.group_id = group.id SELECT person.id, group.name AS group_name", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream chained indexed joins: %v", err)
+	}
+	if want := []SQLRow{{"id": int64(1), "group_name": "Core"}, {"id": int64(2), "group_name": nil}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stream chained indexed joins = %#v, want %#v", got, want)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 || resolver.indexCalls != 6 {
+		t.Fatalf("resolver calls materialized=%d stream=%d index=%d, want 0/1/6", resolver.resolveCalls, resolver.streamCalls, resolver.indexCalls)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsBoundedTopNOrdering(t *testing.T) {
+	t.Parallel()
+	query := "FROM VALUES (0, 3), (1, 1), (2, NULL), (3, 2), (4, 1), (5, 0) AS values(id, score) SELECT id, score ORDER BY score ASC NULLS LAST, id LIMIT 3 OFFSET 1"
+	want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{MaxResultBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("bounded top-N stream: %v", err)
+	}
+	if !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("bounded top-N rows = %#v, want %#v", got, want.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalSort(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"id": int64(1), "score": int64(4)}, {"id": int64(2), "score": int64(1)}, {"id": int64(3), "score": nil}, {"id": int64(4), "score": int64(3)}, {"id": int64(5), "score": int64(1)}, {"id": int64(6), "score": int64(2)}}
+	query := "FROM CACHE('people') AS person SELECT person.id, person.score ORDER BY person.score ASC NULLS LAST, person.id"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external sorted stream: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("external sort resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external sorted stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external sort leftovers = %#v, want none", entries)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalSortValues(t *testing.T) {
+	t.Parallel()
+
+	query := "FROM VALUES (1, 4), (2, 1), (3, NULL), (4, 3) AS person(id, score) SELECT person.id, person.score ORDER BY person.score DESC NULLS FIRST, person.id"
+	baseline, err := ExecuteSQLQuery(query, nil)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, nil, nil, SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external sorted VALUES stream: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external sorted VALUES rows = %#v, want %#v", got, baseline.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external sort leftovers = %#v, want none", entries)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalSortFallsBackWhenOrderedIndexMissing(t *testing.T) {
+	t.Parallel()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"score":4},{"id":2,"score":1},{"id":3,"score":null},{"id":4,"score":3}]`)
+	query := "FROM CACHE('people') AS person SELECT person.id, person.score ORDER BY person.score ASC NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, trie, nil, SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external sort fallback: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external sort fallback rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalDistinct(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"id": int64(1), "score": int64(2)}, {"id": int64(2), "score": int64(1)}, {"id": int64(3), "score": int64(2)}, {"id": int64(4), "score": nil}, {"id": int64(5), "score": int64(1)}, {"id": int64(6), "score": nil}, {"id": int64(7), "score": int64(3)}}
+	query := "FROM CACHE('people') AS person SELECT DISTINCT person.score AS value OFFSET 1 LIMIT 2"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external DISTINCT stream: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("external DISTINCT resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external DISTINCT rows = %#v, want %#v", got, baseline.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external DISTINCT leftovers = %#v, want none", entries)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalDistinctValues(t *testing.T) {
+	t.Parallel()
+
+	query := "FROM VALUES (2), (1), (2), (NULL), (1), (3) AS values(value) SELECT DISTINCT value OFFSET 1 LIMIT 2"
+	baseline, err := ExecuteSQLQuery(query, nil)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, nil, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external DISTINCT VALUES stream: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external DISTINCT VALUES rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalDistinctMergesOrdinalRuns(t *testing.T) {
+	t.Parallel()
+
+	rows := make([]SQLRow, 40)
+	for index := range rows {
+		rows[index] = SQLRow{"id": int64((index * 17) % len(rows))}
+	}
+	query := "FROM CACHE('people') AS person SELECT DISTINCT person.id AS value"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external DISTINCT ordinal merge: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external DISTINCT ordinal merge rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalGroupAggregate(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"team": "red", "score": int64(3)}, {"team": "blue", "score": int64(-2)}, {"team": "red", "score": int64(7)}, {"team": "blue", "score": int64(5)}, {"team": nil, "score": int64(1)}}
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total, AVG(person.score) AS average GROUP BY person.team ORDER BY person.team ASC NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got := []SQLRow{}
+	directory := t.TempDir()
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxGroupBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external grouped stream: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("external group resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external grouped rows = %#v, want %#v", got, baseline.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external group leftovers = %#v, want none", entries)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalGroupFallsBackWhenOrderedIndexMissing(t *testing.T) {
+	t.Parallel()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"team":"red","score":3},{"team":"blue","score":-2},{"team":"red","score":7},{"team":"blue","score":5},{"team":null,"score":1}]`)
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total GROUP BY person.team ORDER BY person.team ASC NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, trie, nil, SQLQueryOptions{MaxGroupBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external group fallback: %v", err)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("external group fallback rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalGroupCleansUpOnFailure(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"team": "red", "score": int64(3)}, {"team": "blue", "score": int64(1)}, {"team": "red", "score": int64(7)}}
+	query := "FROM CACHE('people') AS person SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total GROUP BY person.team ORDER BY person.team"
+	for _, test := range []struct {
+		name    string
+		options SQLQueryOptions
+		visit   func([]string, SQLRow) error
+		want    string
+	}{
+		{name: "callback", options: SQLQueryOptions{MaxGroupBytes: 1, MaxSpillBytes: 1 << 20}, visit: func([]string, SQLRow) error { return errors.New("stop grouped merge") }, want: "stop grouped merge"},
+		{name: "result budget", options: SQLQueryOptions{MaxGroupBytes: 1, MaxSpillBytes: 1 << 20, MaxResultBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "result byte budget"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			test.options.SpillDirectory = directory
+			err := ExecuteSQLQueryRows(context.Background(), query, &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}, nil, test.options, test.visit)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("external group error = %v, want %q", err, test.want)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external group leftovers = %#v, want none", entries)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalSetOperations(t *testing.T) {
+	t.Parallel()
+
+	sources := map[string][]SQLRow{
+		"left":  {{"value": int64(3)}, {"value": int64(1)}, {"value": int64(3)}, {"value": nil}, {"value": int64(2)}},
+		"right": {{"value": int64(2)}, {"value": nil}, {"value": int64(4)}, {"value": int64(2)}},
+	}
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" {
+			return nil, fmt.Errorf("source = %s, want CACHE", name)
+		}
+		return cloneSQLRows(sources[key]), nil
+	})
+	for _, operation := range []string{"UNION", "INTERSECT", "EXCEPT"} {
+		t.Run(operation, func(t *testing.T) {
+			query := "FROM CACHE('left') AS left_row SELECT left_row.value " + operation + " FROM CACHE('right') AS right_row SELECT right_row.value"
+			want, err := ExecuteSQLQuery(query, baseline)
+			if err != nil {
+				t.Fatalf("materialized baseline: %v", err)
+			}
+			resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{"left": cloneSQLRows(sources["left"]), "right": cloneSQLRows(sources["right"])}}
+			got := []SQLRow{}
+			directory := t.TempDir()
+			err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+				got = append(got, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("external %s stream: %v", operation, err)
+			}
+			if resolver.resolveCalls != 0 || resolver.streamCalls != 2 {
+				t.Fatalf("%s resolver calls materialized=%d streamed=%d, want 0/2", operation, resolver.resolveCalls, resolver.streamCalls)
+			}
+			if !reflect.DeepEqual(got, want.Rows) {
+				t.Fatalf("external %s rows = %#v, want %#v", operation, got, want.Rows)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external %s leftovers = %#v, want none", operation, entries)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalSetMergesOrdinalRuns(t *testing.T) {
+	t.Parallel()
+
+	left, right := make([]SQLRow, 40), make([]SQLRow, 40)
+	for index := range left {
+		left[index] = SQLRow{"value": int64((index * 17) % len(left))}
+		right[index] = SQLRow{"value": int64(40 + (index*19)%len(right))}
+	}
+	query := "FROM CACHE('left') AS left_row SELECT left_row.value UNION FROM CACHE('right') AS right_row SELECT right_row.value"
+	baseline := SQLSourceResolverFunc(func(_ string, key string) ([]SQLRow, error) {
+		if key == "left" {
+			return cloneSQLRows(left), nil
+		}
+		return cloneSQLRows(right), nil
+	})
+	want, err := ExecuteSQLQuery(query, baseline)
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{"left": cloneSQLRows(left), "right": cloneSQLRows(right)}}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("external set ordinal merge: %v", err)
+	}
+	if !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("external set ordinal merge rows = %#v, want %#v", got, want.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalDistinctRandomized(t *testing.T) {
+	t.Parallel()
+
+	random := rand.New(rand.NewSource(20260825))
+	for iteration := 0; iteration < 32; iteration++ {
+		rows := make([]SQLRow, 40)
+		for index := range rows {
+			rows[index] = SQLRow{"id": int64(index), "score": int64(random.Intn(21) - 10)}
+			if random.Intn(5) == 0 {
+				rows[index]["score"] = nil
+			}
+		}
+		query := fmt.Sprintf("FROM CACHE('people') AS person SELECT DISTINCT person.score AS value OFFSET %d LIMIT %d", random.Intn(8), 1+random.Intn(8))
+		baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+		if err != nil {
+			t.Fatalf("iteration %d materialized baseline: %v", iteration, err)
+		}
+		resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+		got := []SQLRow{}
+		directory := t.TempDir()
+		err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d external DISTINCT stream: %v", iteration, err)
+		}
+		if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+			t.Fatalf("iteration %d resolver calls materialized=%d streamed=%d, want 0/1", iteration, resolver.resolveCalls, resolver.streamCalls)
+		}
+		if !reflect.DeepEqual(got, baseline.Rows) {
+			t.Fatalf("iteration %d external DISTINCT rows = %#v, want %#v", iteration, got, baseline.Rows)
+		}
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("iteration %d external DISTINCT leftovers = %#v, want none", iteration, entries)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalDistinctCleansUpOnFailure(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"score": int64(3)}, {"score": int64(1)}, {"score": int64(3)}}
+	query := "FROM CACHE('people') AS person SELECT DISTINCT person.score AS value"
+	for _, test := range []struct {
+		name    string
+		options SQLQueryOptions
+		visit   func([]string, SQLRow) error
+		want    string
+	}{
+		{name: "callback", options: SQLQueryOptions{MaxSetBytes: 1, MaxSpillBytes: 1 << 20}, visit: func([]string, SQLRow) error { return errors.New("stop distinct merge") }, want: "stop distinct merge"},
+		{name: "disk budget", options: SQLQueryOptions{MaxSetBytes: 1, MaxSpillBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "spill disk budget"},
+		{name: "result budget", options: SQLQueryOptions{MaxSetBytes: 1, MaxSpillBytes: 1 << 20, MaxResultBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "result byte budget"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			test.options.SpillDirectory = directory
+			err := ExecuteSQLQueryRows(context.Background(), query, &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}, nil, test.options, test.visit)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("external DISTINCT error = %v, want %q", err, test.want)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external DISTINCT leftovers = %#v, want none", entries)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalSortRandomized(t *testing.T) {
+	t.Parallel()
+
+	random := rand.New(rand.NewSource(20260824))
+	for iteration := 0; iteration < 32; iteration++ {
+		rows := make([]SQLRow, 40)
+		for index := range rows {
+			rows[index] = SQLRow{"id": int64(index), "score": int64(random.Intn(9) - 4)}
+			if random.Intn(5) == 0 {
+				rows[index]["score"] = nil
+			}
+		}
+		descending := random.Intn(2) == 0
+		nullsFirst := random.Intn(2) == 0
+		order := "ASC NULLS LAST"
+		if descending {
+			order = "DESC NULLS LAST"
+		}
+		if nullsFirst {
+			order = strings.Replace(order, "NULLS LAST", "NULLS FIRST", 1)
+		}
+		query := fmt.Sprintf("FROM CACHE('people') AS person SELECT person.id AS item_id, person.score ORDER BY person.score %s, item_id OFFSET %d", order, random.Intn(8))
+		baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+		if err != nil {
+			t.Fatalf("iteration %d materialized baseline: %v", iteration, err)
+		}
+		resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+		got := []SQLRow{}
+		directory := t.TempDir()
+		err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d external sorted stream: %v", iteration, err)
+		}
+		if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+			t.Fatalf("iteration %d resolver calls materialized=%d streamed=%d, want 0/1", iteration, resolver.resolveCalls, resolver.streamCalls)
+		}
+		if !reflect.DeepEqual(got, baseline.Rows) {
+			t.Fatalf("iteration %d external sorted stream rows = %#v, want %#v", iteration, got, baseline.Rows)
+		}
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("iteration %d external sort leftovers = %#v, want none", iteration, entries)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsExternalSortCleansUpOnFailure(t *testing.T) {
+	t.Parallel()
+
+	rows := []SQLRow{{"id": int64(1), "score": int64(4)}, {"id": int64(2), "score": int64(1)}, {"id": int64(3), "score": int64(3)}}
+	query := "FROM CACHE('people') AS person SELECT person.id, person.score ORDER BY person.score, person.id"
+	for _, test := range []struct {
+		name    string
+		options SQLQueryOptions
+		visit   func([]string, SQLRow) error
+		want    string
+	}{
+		{name: "callback", options: SQLQueryOptions{MaxSortBytes: 1, MaxSpillBytes: 1 << 20}, visit: func([]string, SQLRow) error { return errors.New("stop external merge") }, want: "stop external merge"},
+		{name: "disk budget", options: SQLQueryOptions{MaxSortBytes: 1, MaxSpillBytes: 1}, visit: func([]string, SQLRow) error { return nil }, want: "spill disk budget"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			test.options.SpillDirectory = directory
+			err := ExecuteSQLQueryRows(context.Background(), query, &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}, nil, test.options, test.visit)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("external sort error = %v, want %q", err, test.want)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("external sort leftovers = %#v, want none", entries)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsUnionAll(t *testing.T) {
+	t.Parallel()
+	query := "FROM CACHE('people') AS left_person WHERE left_person.id >= 1 SELECT left_person.id AS id LIMIT 2 OFFSET 1 UNION ALL FROM CACHE('people') AS right_person WHERE right_person.id < 3 SELECT right_person.id AS id LIMIT 1 OFFSET 1"
+	baselineRows := []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}}
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return cloneSQLRows(baselineRows), nil
+	})
+	want, err := ExecuteSQLQuery(query, baseline)
+	if err != nil {
+		t.Fatalf("materialized UNION ALL baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(baselineRows)}
+	var columns []string
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed UNION ALL: %v", err)
+	}
+	if !reflect.DeepEqual(columns, want.Columns) || !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("streamed UNION ALL = %#v/%#v, want %#v/%#v", columns, got, want.Columns, want.Rows)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 2 {
+		t.Fatalf("UNION ALL resolver calls materialized=%d streamed=%d, want 0/2", resolver.resolveCalls, resolver.streamCalls)
+	}
+	union := strings.Replace(query, "UNION ALL", "UNION", 1)
+	err = ExecuteSQLQueryRows(context.Background(), union, resolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "set operations") {
+		t.Fatalf("streamed UNION error = %v, want set-operation materialization diagnostic", err)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsBoundedTopNProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260825))
+	for iteration := 0; iteration < 80; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for id := range values {
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(7) - 3)
+			}
+			values[id] = fmt.Sprintf("(%d, %s)", id, score)
+		}
+		descending := random.Intn(2) == 0
+		nullOrder := "NULLS LAST"
+		if random.Intn(2) == 0 {
+			nullOrder = "NULLS FIRST"
+		}
+		order := "ASC"
+		if descending {
+			order = "DESC"
+		}
+		limit := 1 + random.Intn(8)
+		offset := random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES %s AS values(id, score) SELECT id, score ORDER BY score %s %s, id LIMIT %d OFFSET %d", strings.Join(values, ", "), order, nullOrder, limit, offset)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized baseline: %v", iteration, err)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{MaxResultBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d bounded top-N stream: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d bounded top-N rows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedJoinsHonorMaxRows(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{
+		rows:      []SQLRow{{"id": int64(1), "team_id": int64(10)}},
+		indexRows: []SQLRow{{"id": int64(10), "name": "Core"}, {"id": int64(10), "name": "Backup"}},
+	}
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person JOIN CACHE('teams') AS team ON person.team_id = team.id SELECT person.id, team.name", resolver, nil, SQLQueryOptions{MaxRows: 1}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "SQL join exceeds the 1 row limit") {
+		t.Fatalf("streamed indexed join MaxRows error = %v, want join-row limit", err)
+	}
+	err = ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person JOIN CACHE('teams') AS team ON person.team_id = team.id SELECT person.id, team.name", resolver, nil, SQLQueryOptions{MaxJoinWork: 1}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "join work budget exceeded") {
+		t.Fatalf("streamed indexed join MaxJoinWork error = %v, want join-work limit", err)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedInnerAndLeftJoin(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, join string
+		want       []SQLRow
+	}{
+		{"inner", "JOIN", []SQLRow{{"id": int64(1), "team": "Core"}}},
+		{"left", "LEFT JOIN", []SQLRow{{"id": int64(1), "team": "Core"}, {"id": int64(2), "team": nil}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &sqlStreamingTestResolver{rows: []SQLRow{{"id": int64(1), "team_id": int64(10)}, {"id": int64(2), "team_id": int64(20)}}, indexRows: []SQLRow{{"id": int64(10), "name": "Core"}}}
+			var got []SQLRow
+			err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person "+test.join+" CACHE('teams') AS team ON person.team_id = team.id SELECT person.id, team.name AS team", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+				got = append(got, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("stream indexed %s join: %v", test.name, err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("stream indexed %s rows = %#v, want %#v", test.name, got, test.want)
+			}
+			if resolver.resolveCalls != 0 || resolver.streamCalls != 1 || resolver.indexCalls != 3 {
+				t.Fatalf("resolver calls materialized=%d stream=%d index=%d, want 0/1/3", resolver.resolveCalls, resolver.streamCalls, resolver.indexCalls)
+			}
+		})
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN FROM VALUES (1) AS values(value) WHERE value IN (1, 2) SELECT value", SQLSourceResolverFunc(nil))
+	if err != nil || len(explained.Plan) < 2 || explained.Plan[1].Detail != "value IN (1, 2)" {
+		t.Fatalf("IN EXPLAIN = %#v/%v, want readable membership filter", explained.Plan, err)
+	}
+}
+
+func (resolver *sqlStreamingTestResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
+	resolver.resolveCalls++
+	return nil, errors.New("materialized source resolution must not be used for a streamed query")
+}
+
+func (resolver *sqlStreamingTestResolver) StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error {
+	if name != "CACHE" || key != "people" {
+		return fmt.Errorf("stream source = %s(%q), want CACHE(people)", name, key)
+	}
+	resolver.streamCalls++
+	for _, row := range resolver.rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// These cases are the compact regression suite for the subset documented in
+// SQL.md. They deliberately cover semantics, not only successful parsing.
+func TestCompileSQLProductionScalarMatrix(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		source string
+		want   CacheCommandRequest
+	}{
+		{"SELECT exists FROM cache WHERE key = 'a'", CacheCommandRequest{Command: "EXISTS", Key: "a"}},
+		{"SELECT ttl FROM cache WHERE key = 'a'", CacheCommandRequest{Command: "TTL", Key: "a"}},
+		{"SELECT dump FROM cache WHERE key = 'a'", CacheCommandRequest{Command: "DUMP", Key: "a"}},
+		{"INSERT INTO cache (key, counter, ttl_seconds) VALUES ('a', -7, 4)", CacheCommandRequest{Command: "SETINTX", Key: "a", Value: "-7", TTLSeconds: int64Pointer(4)}},
+		{"INSERT INTO cache (key, value, unix_seconds) VALUES ('a', 'v', 99)", CacheCommandRequest{Command: "SETSTR", Key: "a", Value: "v", UnixSeconds: int64Pointer(99)}},
+		{"UPDATE cache SET ttl_seconds = 4 WHERE key = 'a'", CacheCommandRequest{Command: "EXPIRE", Key: "a", TTLSeconds: int64Pointer(4)}},
+		{"UPDATE cache SET unix_seconds = 99 WHERE key = 'a'", CacheCommandRequest{Command: "EXPIREAT", Key: "a", UnixSeconds: int64Pointer(99)}},
+		{"CALL GET('a')", CacheCommandRequest{Command: "GET", Key: "a"}},
+		{"CALL SETSTR('a', 'v')", CacheCommandRequest{Command: "SETSTR", Key: "a", Value: "v"}},
+	} {
+		got, err := CompileSQL(test.source)
+		if err != nil {
+			t.Fatalf("CompileSQL(%q) error = %v", test.source, err)
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("CompileSQL(%q) = %#v, want %#v", test.source, got, test.want)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsCompatibleSourceRows(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{rows: []SQLRow{
+		{"name": "Ari", "age": int64(12)},
+		{"name": "Bea", "age": int64(21)},
+		{"name": "Cai", "age": int64(34)},
+		{"name": "Dee", "age": int64(45)},
+	}}
+	var columns []string
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS p WHERE p.age >= 21 SELECT p.name, p.age + 1 AS next_age OFFSET 1 LIMIT 2", resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryRows() error = %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls = materialized:%d streamed:%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if want := []string{"name", "next_age"}; !reflect.DeepEqual(columns, want) {
+		t.Fatalf("columns = %#v, want %#v", columns, want)
+	}
+	if want := []SQLRow{{"name": "Cai", "next_age": int64(35)}, {"name": "Dee", "next_age": int64(46)}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows = %#v, want %#v", rows, want)
+	}
+	if err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS p SELECT p.name ORDER BY p.name", resolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil }); err == nil || !strings.Contains(err.Error(), "cannot stream") {
+		t.Fatalf("ordered ExecuteSQLQueryRows() error = %v, want a streamability error", err)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsTypedCacheFieldsWithMaterializedValidation(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{rows: []SQLRow{
+		{"id": float64(1), "joined_on": "2026-08-22"},
+		{"id": "not-an-integer", "joined_on": "2026-08-23"},
+	}}
+	query := "FROM CACHE('people') AS p(id INTEGER, joined_on DATE) SELECT p.id, p.joined_on LIMIT 1"
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), `CACHE("people") row 2 field "id" expects INTEGER, got TEXT`) {
+		t.Fatalf("typed streamed validation error = %v, want row 2 INTEGER diagnostic", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls = materialized:%d streamed:%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if want := []SQLRow{{"id": int64(1), "joined_on": sqlDate("2026-08-22")}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("typed streamed rows = %#v, want %#v", rows, want)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsScalarCustomFunctions(t *testing.T) {
+	t.Parallel()
+	functions := NewSQLFunctionRegistry()
+	if err := functions.Register(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value + 1"}); err != nil {
+		t.Fatalf("register custom function: %v", err)
+	}
+	streaming := &sqlStreamingTestResolver{rows: []SQLRow{{"age": int64(12)}, {"age": int64(21)}, {"age": int64(34)}}}
+	resolver := sqlStreamingFunctionTestResolver{sqlStreamingTestResolver: streaming, functions: functions}
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person WHERE plus_one(person.age) >= 22 SELECT plus_one(person.age) AS next_age", resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream scalar function query: %v", err)
+	}
+	if want := []SQLRow{{"next_age": int64(22)}, {"next_age": int64(35)}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("stream scalar function rows = %#v, want %#v", rows, want)
+	}
+	if streaming.resolveCalls != 0 || streaming.streamCalls != 1 {
+		t.Fatalf("stream scalar function resolver calls materialized=%d streamed=%d, want 0/1", streaming.resolveCalls, streaming.streamCalls)
+	}
+	badStreaming := &sqlStreamingTestResolver{rows: []SQLRow{{"age": "not-an-integer"}}}
+	badResolver := sqlStreamingFunctionTestResolver{sqlStreamingTestResolver: badStreaming, functions: functions}
+	err = ExecuteSQLQueryRows(context.Background(), "FROM CACHE('people') AS person SELECT plus_one(person.age) AS next_age", badResolver, nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil })
+	if err == nil {
+		t.Fatal("stream scalar function type error = nil, want function diagnostic")
+	}
+	formatted := FormatSQLFunctionDiagnostic(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value + 1"}, err)
+	for _, want := range []string{`argument "value" expects INTEGER, got TEXT`, "--> function plus_one:1:", "return value + 1"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("stream function diagnostic = %q, want %q", formatted, want)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsExternalUDFSortAndDistinct(t *testing.T) {
+	t.Parallel()
+	functions := NewSQLFunctionRegistry()
+	if err := functions.Register(SQLFunctionDefinition{Name: "plus_one", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value + 1"}); err != nil {
+		t.Fatalf("register custom function: %v", err)
+	}
+	for _, test := range []struct {
+		name, query string
+		options     SQLQueryOptions
+		want        []SQLRow
+	}{
+		{
+			name:    "external_sort",
+			query:   "FROM CACHE('people') AS person WHERE plus_one(person.age) >= 2 SELECT plus_one(person.age) AS next_age ORDER BY person.age DESC",
+			options: SQLQueryOptions{MaxSortBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20},
+			want:    []SQLRow{{"next_age": int64(4)}, {"next_age": int64(3)}, {"next_age": int64(2)}, {"next_age": int64(2)}},
+		},
+		{
+			name:    "external_distinct",
+			query:   "FROM CACHE('people') AS person SELECT DISTINCT plus_one(person.age) AS next_age",
+			options: SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20},
+			want:    []SQLRow{{"next_age": int64(2)}, {"next_age": int64(3)}, {"next_age": int64(4)}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			streaming := &sqlStreamingTestResolver{rows: []SQLRow{{"age": int64(1)}, {"age": int64(2)}, {"age": int64(1)}, {"age": int64(3)}}}
+			resolver := sqlStreamingFunctionTestResolver{sqlStreamingTestResolver: streaming, functions: functions}
+			var rows []SQLRow
+			err := ExecuteSQLQueryRows(context.Background(), test.query, resolver, nil, test.options, func(_ []string, row SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("stream external UDF query: %v", err)
+			}
+			if !reflect.DeepEqual(rows, test.want) {
+				t.Fatalf("stream external UDF rows = %#v, want %#v", rows, test.want)
+			}
+			if streaming.resolveCalls != 0 || streaming.streamCalls != 1 {
+				t.Fatalf("resolver calls materialized=%d streamed=%d, want 0/1", streaming.resolveCalls, streaming.streamCalls)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsGlobalAggregates(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"age": int64(12)}, {"age": int64(21)}, {"age": nil}, {"age": int64(34)}}
+	query := "FROM CACHE('people') AS person WHERE person.age >= 20 SELECT COUNT(*) AS total, SUM(person.age) AS sum_age, AVG(person.age) AS average_age, MIN(person.age) AS min_age, MAX(person.age) AS max_age"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream global aggregates: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("aggregate resolver calls = materialized:%d streamed:%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(columns, materialized.Columns) || !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("stream global aggregate = %#v/%#v, want %#v/%#v", columns, got, materialized.Columns, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedGroupedAggregates(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"team":"blue","score":3},{"team":"red","score":2},{"team":"blue","score":5},{"team":"red","score":7},{"team":null,"score":11}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "team"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('people') AS people GROUP BY people.team SELECT people.team, COUNT(*) AS members, SUM(people.score) AS total, AVG(people.score) AS average, MIN(people.score) AS minimum, MAX(people.score) AS maximum ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQueryContext(context.Background(), query, trie, SQLQueryOptions{MaxGroupBytes: 1})
+	if err != nil {
+		t.Fatalf("indexed aggregate baseline: %v", err)
+	}
+	columns := []string(nil)
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, trie, nil, SQLQueryOptions{MaxGroupBytes: 1}, func(actualColumns []string, row SQLRow) error {
+		columns = append([]string{}, actualColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream indexed grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(columns, baseline.Columns) || !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("stream indexed grouped aggregate = %#v/%#v, want %#v/%#v", columns, got, baseline.Columns, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsIndexedGroupedAggregateDoesNotMaterializeSource(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"team": "blue", "score": int64(3)}, {"team": "blue", "score": int64(5)}, {"team": "red", "score": int64(2)}, {"team": "red", "score": int64(7)}, {"team": nil, "score": int64(11)}}
+	query := "FROM CACHE('people') AS people GROUP BY people.team SELECT people.team, COUNT(*) AS members, SUM(people.score) AS total ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed aggregate baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed grouped stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed grouped stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedOrderWithoutLimit(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue"}, {"id": int64(1), "team": "blue"}, {"id": int64(3), "team": "red"}, {"id": int64(4), "team": nil}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed order baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed ordered stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed ordered stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedDistinctOrder(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue"}, {"id": int64(1), "team": "blue"}, {"id": int64(3), "team": "red"}, {"id": int64(4), "team": nil}, {"id": int64(5), "team": nil}}
+	query := "FROM CACHE('people') AS people SELECT DISTINCT people.team ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed DISTINCT baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed DISTINCT stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed DISTINCT stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedRankWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue"}, {"id": int64(1), "team": "blue"}, {"id": int64(3), "team": "red"}, {"id": int64(4), "team": nil}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team, ROW_NUMBER() OVER (ORDER BY people.team NULLS LAST) AS row_number, RANK() OVER (ORDER BY people.team NULLS LAST) AS rank, DENSE_RANK() OVER (ORDER BY people.team NULLS LAST) AS dense_rank ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed rank baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed rank stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed rank stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedLagWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue", "score": int64(3)}, {"id": int64(1), "team": "blue", "score": int64(5)}, {"id": int64(3), "team": "red", "score": int64(2)}, {"id": int64(4), "team": nil, "score": int64(7)}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team, LAG(people.score, 2, -1) OVER (ORDER BY people.team NULLS LAST) AS previous_score ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed LAG baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed LAG stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed LAG stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedLeadWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue", "score": int64(3)}, {"id": int64(1), "team": "blue", "score": int64(5)}, {"id": int64(3), "team": "red", "score": int64(2)}, {"id": int64(4), "team": nil, "score": int64(7)}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team, LEAD(people.score, 2, -1) OVER (ORDER BY people.team NULLS LAST) AS next_score ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed LEAD baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed LEAD stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed LEAD stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsIndexedRunningAggregateWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(2), "team": "blue", "score": int64(3)}, {"id": int64(1), "team": "blue", "score": int64(5)}, {"id": int64(3), "team": "red", "score": int64(2)}, {"id": int64(4), "team": nil, "score": int64(7)}}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team, SUM(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_sum, AVG(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_average, MIN(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_minimum, MAX(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_maximum ORDER BY people.team NULLS LAST"
+	baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("indexed running aggregate baseline: %v", err)
+	}
+	resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("indexed running aggregate stream: %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered source calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(got, baseline.Rows) {
+		t.Fatalf("indexed running aggregate stream rows = %#v, want %#v", got, baseline.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsIndexedOrderedStreamsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260903))
+	for iteration := 0; iteration < 64; iteration++ {
+		rows := make([]SQLRow, 0, 15)
+		id := int64(0)
+		for _, team := range []interface{}{"blue", "red", nil} {
+			for count := 0; count < random.Intn(6); count++ {
+				id++
+				score := interface{}(nil)
+				if random.Intn(4) != 0 {
+					score = int64(random.Intn(21) - 10)
+				}
+				rows = append(rows, SQLRow{"id": id, "team": team, "score": score})
+			}
+		}
+		if len(rows) == 0 {
+			rows = append(rows, SQLRow{"id": int64(1), "team": "blue", "score": int64(0)})
+		}
+		offset := random.Intn(6)
+		limit := 1 + random.Intn(8)
+		lagOffset := random.Intn(8)
+		leadOffset := random.Intn(8)
+		queries := []string{
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, people.score ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT DISTINCT people.team ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, ROW_NUMBER() OVER (ORDER BY people.team NULLS LAST) AS row_number, RANK() OVER (ORDER BY people.team NULLS LAST) AS rank, DENSE_RANK() OVER (ORDER BY people.team NULLS LAST) AS dense_rank ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, LAG(people.score, %d, -99) OVER (ORDER BY people.team NULLS LAST) AS previous_score ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", lagOffset, offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, LEAD(people.score, %d, -99) OVER (ORDER BY people.team NULLS LAST) AS next_score ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", leadOffset, offset, limit),
+			fmt.Sprintf("FROM CACHE('people') AS people SELECT people.id, people.team, SUM(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_sum, AVG(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_average, MIN(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_minimum, MAX(people.score) OVER (ORDER BY people.team NULLS LAST) AS running_maximum ORDER BY people.team NULLS LAST OFFSET %d LIMIT %d", offset, limit),
+		}
+		for _, query := range queries {
+			baseline, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+			if err != nil {
+				t.Fatalf("iteration %d materialized baseline: %v\nquery=%s", iteration, err, query)
+			}
+			resolver := &sqlOrderedStreamingTestResolver{rows: rows}
+			got := []SQLRow{}
+			err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+				got = append(got, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("iteration %d indexed stream: %v\nquery=%s", iteration, err, query)
+			}
+			if resolver.orderedCalls != 1 {
+				t.Fatalf("iteration %d ordered source calls = %d, want 1\nquery=%s", iteration, resolver.orderedCalls, query)
+			}
+			if !reflect.DeepEqual(got, baseline.Rows) {
+				t.Fatalf("iteration %d indexed stream = %#v, want %#v\nquery=%s", iteration, got, baseline.Rows, query)
+			}
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsGlobalAggregatesEmptyInput(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"age": nil}, {"age": int64(12)}}
+	query := "FROM CACHE('people') AS person WHERE person.age > 99 SELECT COUNT(*) AS total, COUNT(person.age) AS numeric_count, SUM(person.age) AS sum_age, AVG(person.age) AS average_age, MIN(person.age) AS min_age, MAX(person.age) AS max_age"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream empty global aggregates: %v", err)
+	}
+	if !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("stream empty global aggregate = %#v, want %#v", got, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsRunningWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{
+		{"id": int64(1), "score": int64(2)},
+		{"id": int64(2), "score": int64(-1)},
+		{"id": int64(3), "score": int64(4)},
+		{"id": int64(4), "score": int64(6)},
+	}
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.id, ROW_NUMBER() OVER () AS row_number, RANK() OVER () AS rank, DENSE_RANK() OVER () AS dense_rank, SUM(person.score) OVER () AS running_sum, AVG(person.score) OVER () AS running_average, MIN(person.score) OVER () AS running_minimum, MAX(person.score) OVER () AS running_maximum OFFSET 1 LIMIT 2"
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return cloneSQLRows(rows), nil
+	})
+	want, err := ExecuteSQLQuery(query, baseline)
+	if err != nil {
+		t.Fatalf("materialized running-window baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	got := []SQLRow{}
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed running windows: %v", err)
+	}
+	if !reflect.DeepEqual(columns, want.Columns) || !reflect.DeepEqual(got, want.Rows) {
+		t.Fatalf("streamed running windows = %#v/%#v, want %#v/%#v", columns, got, want.Columns, want.Rows)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("running-window resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsUnpartitionedLagWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(1), "score": int64(2)}, {"id": int64(2), "score": nil}, {"id": int64(3), "score": int64(7)}, {"id": int64(4), "score": int64(9)}}
+	query := "FROM CACHE('people') AS person SELECT person.id, LAG(person.score) OVER () AS previous_score, LAG(person.score, 2, -1) OVER () AS two_back_score OFFSET 1 LIMIT 3"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized LAG baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed LAG query: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("LAG resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(columns, materialized.Columns) || !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("streamed LAG = %#v/%#v, want %#v/%#v", columns, got, materialized.Columns, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsUnpartitionedLeadWindows(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{{"id": int64(1), "score": int64(2)}, {"id": int64(2), "score": nil}, {"id": int64(3), "score": int64(7)}, {"id": int64(4), "score": int64(9)}}
+	query := "FROM CACHE('people') AS person SELECT person.id, LEAD(person.score) OVER () AS next_score, LEAD(person.score, 2, -1) OVER () AS two_ahead_score OFFSET 1 LIMIT 3"
+	materialized, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) { return cloneSQLRows(rows), nil }))
+	if err != nil {
+		t.Fatalf("materialized LEAD baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	var columns []string
+	var got []SQLRow
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append([]string(nil), gotColumns...)
+		got = append(got, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed LEAD query: %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("LEAD resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if !reflect.DeepEqual(columns, materialized.Columns) || !reflect.DeepEqual(got, materialized.Rows) {
+		t.Fatalf("streamed LEAD = %#v/%#v, want %#v/%#v", columns, got, materialized.Columns, materialized.Rows)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsUnpartitionedLeadWindowsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260831))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for index := range values {
+			if random.Intn(4) == 0 {
+				values[index] = "NULL"
+			} else {
+				values[index] = strconv.Itoa(random.Intn(21) - 10)
+			}
+		}
+		leadOffset := random.Intn(7)
+		offset := random.Intn(5)
+		limit := 1 + random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES (%s) AS values(value) SELECT value, LEAD(value, %d, -99) OVER () AS following OFFSET %d LIMIT %d", strings.Join(values, "), ("), leadOffset, offset, limit)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized LEAD: %v\nquery=%s", iteration, err, query)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d streamed LEAD: %v\nquery=%s", iteration, err, query)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d streamed LEAD rows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsUnpartitionedLagWindowsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260830))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for index := range values {
+			if random.Intn(4) == 0 {
+				values[index] = "NULL"
+			} else {
+				values[index] = strconv.Itoa(random.Intn(21) - 10)
+			}
+		}
+		lagOffset := random.Intn(7)
+		offset := random.Intn(5)
+		limit := 1 + random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES (%s) AS values(value) SELECT value, LAG(value, %d, -99) OVER () AS prior OFFSET %d LIMIT %d", strings.Join(values, "), ("), lagOffset, offset, limit)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized LAG: %v\nquery=%s", iteration, err, query)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d streamed LAG: %v\nquery=%s", iteration, err, query)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d streamed LAG rows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsRunningWindowsProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260829))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(20))
+		for index := range values {
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(19) - 9)
+			}
+			values[index] = fmt.Sprintf("(%d, %s)", index, score)
+		}
+		limit := 1 + random.Intn(8)
+		offset := random.Intn(8)
+		query := fmt.Sprintf("FROM VALUES %s AS values(id, score) WHERE score IS NOT NULL SELECT id, ROW_NUMBER() OVER () AS row_number, RANK() OVER () AS rank, DENSE_RANK() OVER () AS dense_rank, SUM(score) OVER () AS running_sum, AVG(score) OVER () AS running_average, MIN(score) OVER () AS running_minimum, MAX(score) OVER () AS running_maximum OFFSET %d LIMIT %d", strings.Join(values, ", "), offset, limit)
+		want, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d materialized running-window baseline: %v", iteration, err)
+		}
+		got := []SQLRow{}
+		err = ExecuteSQLQueryRows(context.Background(), query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func(_ []string, row SQLRow) error {
+			got = append(got, row)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("iteration %d streamed running windows: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(got, want.Rows) {
+			t.Fatalf("iteration %d streamed running windows = %#v, want %#v\nquery=%s", iteration, got, want.Rows, query)
+		}
+	}
+}
+
+func TestSQLPreparedQueryCacheReusesImmutableTemplateAndBindsFreshParameters(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(2)
+	resolver := SQLSourceResolverFunc(func(name string, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}}, nil
+	})
+	query := "FROM CACHE($1) AS people WHERE people.id >= $2 SELECT people.id"
+	options := SQLQueryOptions{PreparedCache: cache}
+	first, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{"people", int64(2)}, options)
+	if err != nil || !reflect.DeepEqual(first.Rows, []SQLRow{{"id": int64(2)}, {"id": int64(3)}}) {
+		t.Fatalf("first cached query = %#v/%v", first, err)
+	}
+	second, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{"people", int64(3)}, options)
+	if err != nil || !reflect.DeepEqual(second.Rows, []SQLRow{{"id": int64(3)}}) {
+		t.Fatalf("second cached query = %#v/%v; cached template must not retain first parameters", second, err)
+	}
+	if stats := cache.Stats(); stats.Entries != 1 || stats.Misses != 1 || stats.Hits != 1 {
+		t.Fatalf("cache stats = %#v, want one entry, one miss, and one hit", stats)
+	}
+	if _, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{"people"}, options); err == nil || !strings.Contains(err.Error(), "parameter $2 has no supplied parameter") {
+		t.Fatalf("missing cached parameter error = %v, want precise parameter diagnostic", err)
+	}
+}
+
+func TestSQLPreparedQueryCacheBindsValuesAndNestedQueryParameters(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(2)
+	query := "FROM (FROM VALUES ($1), ($2) AS input(id) WHERE input.id >= $3 SELECT input.id) AS nested SELECT nested.id"
+	result, err := ExecuteSQLQueryParameters(context.Background(), query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) {
+		return nil, fmt.Errorf("resolver must not be called for VALUES")
+	}), []interface{}{int64(1), int64(3), int64(2)}, SQLQueryOptions{PreparedCache: cache})
+	if err != nil {
+		t.Fatalf("execute first values query: %v", err)
+	}
+	if got, want := result.Rows, []SQLRow{{"id": int64(3)}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first values rows = %#v, want %#v", got, want)
+	}
+	result, err = ExecuteSQLQueryParameters(context.Background(), query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) {
+		return nil, fmt.Errorf("resolver must not be called for VALUES")
+	}), []interface{}{int64(4), int64(5), int64(4)}, SQLQueryOptions{PreparedCache: cache})
+	if err != nil {
+		t.Fatalf("execute second values query: %v", err)
+	}
+	if got, want := result.Rows, []SQLRow{{"id": int64(4)}, {"id": int64(5)}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("second values rows = %#v, want %#v", got, want)
+	}
+}
+
+func TestSQLPreparedQueryCacheIsBoundedAndSafeForConcurrentBindings(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(1)
+	first := "FROM VALUES (1) AS first_row(id) SELECT first_row.id"
+	second := "FROM VALUES (2) AS second_row(id) SELECT second_row.id"
+	if _, err := parseSQLQueryWithCache(first, nil, cache); err != nil {
+		t.Fatalf("parse first query: %v", err)
+	}
+	if _, err := parseSQLQueryWithCache(second, nil, cache); err != nil {
+		t.Fatalf("parse second query: %v", err)
+	}
+	if _, err := parseSQLQueryWithCache(first, nil, cache); err != nil {
+		t.Fatalf("parse evicted first query: %v", err)
+	}
+	if got, want := cache.Stats(), (SQLPreparedQueryCacheStats{Entries: 1, Misses: 3}); got != want {
+		t.Fatalf("bounded cache stats = %#v, want %#v", got, want)
+	}
+
+	cache = NewSQLPreparedQueryCache(2)
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("unexpected source %s(%q)", name, key)
+		}
+		return []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}}, nil
+	})
+	query := "FROM CACHE('people') AS person WHERE person.id >= $1 SELECT person.id"
+	errors := make(chan error, 32)
+	for minimum := int64(1); minimum <= 32; minimum++ {
+		minimum := minimum
+		go func() {
+			result, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, []interface{}{minimum}, SQLQueryOptions{PreparedCache: cache})
+			if err != nil {
+				errors <- err
+				return
+			}
+			expected := []SQLRow{}
+			for id := minimum; id <= 3; id++ {
+				expected = append(expected, SQLRow{"id": id})
+			}
+			if !reflect.DeepEqual(result.Rows, expected) {
+				errors <- fmt.Errorf("minimum %d rows = %#v, want %#v", minimum, result.Rows, expected)
+				return
+			}
+			errors <- nil
+		}()
+	}
+	for count := 0; count < cap(errors); count++ {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stats := cache.Stats(); stats.Entries != 1 || stats.Hits != 31 || stats.Misses != 1 {
+		t.Fatalf("concurrent cache stats = %#v, want one miss and 31 hits", stats)
+	}
+}
+
+func TestSQLPreparedQueryCacheEvictsLeastRecentlyUsedTemplate(t *testing.T) {
+	t.Parallel()
+	cache := NewSQLPreparedQueryCache(2)
+	first := "FROM VALUES (1) AS first_row(id) SELECT first_row.id"
+	second := "FROM VALUES (2) AS second_row(id) SELECT second_row.id"
+	third := "FROM VALUES (3) AS third_row(id) SELECT third_row.id"
+	for _, query := range []string{first, second, first, third, first} {
+		if _, err := parseSQLQueryWithCache(query, nil, cache); err != nil {
+			t.Fatalf("parse cached query %q: %v", query, err)
+		}
+	}
+	if got, want := cache.Stats(), (SQLPreparedQueryCacheStats{Entries: 2, Hits: 2, Misses: 3}); got != want {
+		t.Fatalf("LRU cache stats = %#v, want %#v", got, want)
+	}
+}
+
+func TestExecuteSQLQueryReordersConnectedInnerHashJoinsByCardinality(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" {
+			return nil, fmt.Errorf("unexpected source %s", name)
+		}
+		switch key {
+		case "orders":
+			return []SQLRow{
+				{"id": int64(1), "member_id": int64(10)},
+				{"id": int64(2), "member_id": int64(20)},
+				{"id": int64(3), "member_id": int64(10)},
+			}, nil
+		case "members":
+			return []SQLRow{
+				{"id": int64(10), "group_id": int64(1), "name": "Ada"},
+				{"id": int64(20), "group_id": int64(1), "name": "Ivi"},
+			}, nil
+		case "groups":
+			return []SQLRow{{"id": int64(1), "name": "Core"}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected cache key %q", key)
+		}
+	})
+	query := "FROM CACHE('orders') AS orders JOIN CACHE('members') AS members ON orders.member_id = members.id JOIN CACHE('groups') AS groups ON members.group_id = groups.id SELECT orders.id, members.name AS member, groups.name AS group_name"
+	result, err := ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatalf("execute reordered join: %v", err)
+	}
+	if got, want := result.Rows, []SQLRow{
+		{"id": int64(1), "member": "Ada", "group_name": "Core"},
+		{"id": int64(2), "member": "Ivi", "group_name": "Core"},
+		{"id": int64(3), "member": "Ada", "group_name": "Core"},
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reordered rows = %#v, want %#v", got, want)
+	}
+	analysis, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, resolver)
+	if err != nil {
+		t.Fatalf("explain reordered join: %v", err)
+	}
+	for _, step := range analysis.Plan {
+		if step.Node == "JOIN REORDER" && strings.Contains(step.Detail, "groups") && strings.Contains(step.Detail, "1 row") {
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want JOIN REORDER beginning with the smallest source", analysis.Plan)
+}
+
+func TestCompileSQLProductionRejectsAmbiguousOrUnsafeForms(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{
+		"INSERT INTO cache (key, value, counter) VALUES ('a', 'v', 1)",
+		"INSERT INTO cache (key, value, ttl_seconds, unix_seconds) VALUES ('a', 'v', 1, 2)",
+		"CALL SETSTR(key => 'a', value => 'v', key => 'again')",
+		"CALL SETSTR('a', value => 'v')",
+		"CALL SETSTR(key => 'a', values => JSON '[1]')",
+		"CALL BATCH(key => 'a')",
+	} {
+		if _, err := CompileSQL(source); err == nil {
+			t.Fatalf("CompileSQL(%q) error = nil, want rejection", source)
+		}
+	}
+}
+
+func TestCompileSQLDottedCollectionAliases(t *testing.T) {
+	t.Parallel()
+	for source, want := range map[string]string{
+		"CALL CMS.CREATE(key => 'frequency', value => 1024, subkey => 4)": "CMS.CREATE",
+		"CALL CMS.ADD(key => 'frequency', value => 'home')":               "CMS.ADD",
+		"CALL TOPK.CREATE(key => 'popular', value => 100)":                "TOPK.CREATE",
+		"CALL BF.CREATE(key => 'seen', value => 1000)":                    "BF.CREATE",
+		"CALL RT.PUT(key => 'index', subkey => 'a', value => 'Ada')":      "RT.PUT",
+		"CALL FW.RANGE(key => 'scores', value => 2, subkey => 8)":         "FW.RANGE",
+	} {
+		request, err := CompileSQL(source)
+		if err != nil {
+			t.Fatalf("CompileSQL(%q) error = %v", source, err)
+		}
+		if request.Command != want {
+			t.Fatalf("CompileSQL(%q) command = %q, want %q", source, request.Command, want)
+		}
+	}
+	for alias := range dottedCommandAliases {
+		request, err := CompileSQL("CALL " + alias + "(key => 'x')")
+		if err != nil {
+			t.Fatalf("CompileSQL() did not accept dotted alias %q: %v", alias, err)
+		}
+		if request.Command != alias {
+			t.Fatalf("CompileSQL() command for dotted alias %q = %q", alias, request.Command)
+		}
+	}
+}
+
+func TestDottedCollectionAliasesNormalizeToExistingCommands(t *testing.T) {
+	t.Parallel()
+	for alias, want := range dottedCommandAliases {
+		if got := normalizedCommand(alias); got != want {
+			t.Fatalf("normalizedCommand(%q) = %q, want %q", alias, got, want)
+		}
+	}
+	for alias, want := range map[string]string{
+		"CMS.CREATE": "CREATECMS", "CMS.ADD": "ADDCMS", "TOPK.CREATE": "CREATETOPK", "TOPK.ADD": "ADDTOPK",
+		"BF.CREATE": "CREATEBF", "RT.PUT": "PUTRT", "FW.RANGE": "RANGEFW", "SET.ADD": "ADDSET",
+	} {
+		if got := normalizedCommand(alias); got != want {
+			t.Fatalf("normalizedCommand(%q) = %q, want %q", alias, got, want)
+		}
+	}
+}
+
+func TestExecuteSQLQueryUsesStandardBooleanPrecedence(t *testing.T) {
+	t.Parallel()
+
+	result, err := ExecuteSQLQuery(`
+FROM VALUES (1, FALSE, FALSE), (2, TRUE, FALSE), (3, FALSE, TRUE) AS values(id, b, c)
+WHERE id = 1 OR b = TRUE AND c = TRUE
+SELECT id
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id"}, Rows: []SQLRow{{"id": int64(1)}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("standard AND-before-OR result = %#v, want %#v", result, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsNotAndDistinct(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('a', TRUE), ('a', TRUE), ('b', FALSE), ('c', FALSE) AS values(label, disabled)
+WHERE NOT disabled
+SELECT DISTINCT label
+ORDER BY label DESC`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"label"}, Rows: []SQLRow{{"label": "c"}, {"label": "b"}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("NOT/DISTINCT result = %#v, want %#v", result, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsRightAndFullOuterJoin(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		switch key {
+		case "left":
+			return []SQLRow{{"id": int64(1), "left_value": "a"}, {"id": int64(2), "left_value": "b"}}, nil
+		case "right":
+			return []SQLRow{{"id": int64(2), "right_value": "x"}, {"id": int64(3), "right_value": "y"}}, nil
+		}
+		return nil, nil
+	})
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('left') AS l
+FULL OUTER JOIN CACHE('right') AS r ON l.id = r.id
+SELECT l.id AS left_id, r.id AS right_id, l.left_value, r.right_value
+ORDER BY right_id`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(FULL OUTER JOIN) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"left_id", "right_id", "left_value", "right_value"}, Rows: []SQLRow{
+		{"left_id": int64(1), "right_id": nil, "left_value": "a", "right_value": nil},
+		{"left_id": int64(2), "right_id": int64(2), "left_value": "b", "right_value": "x"},
+		{"left_id": nil, "right_id": int64(3), "left_value": nil, "right_value": "y"},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("FULL OUTER JOIN result = %#v, want %#v", result, want)
+	}
+	right, err := ExecuteSQLQuery(`FROM CACHE('left') AS l RIGHT JOIN CACHE('right') AS r ON l.id = r.id SELECT r.id ORDER BY r.id`, resolver)
+	if err != nil || !reflect.DeepEqual(right.Rows, []SQLRow{{"id": int64(2)}, {"id": int64(3)}}) {
+		t.Fatalf("RIGHT JOIN result = %#v, %v", right, err)
+	}
+}
+
+func TestExecuteSQLQueryUsesHashJoinForEqualityOuterJoins(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, join string
+		want       []SQLRow
+	}{
+		{"left", "LEFT JOIN", []SQLRow{{"left_id": int64(1), "right_id": nil}, {"left_id": int64(2), "right_id": int64(2)}}},
+		{"right", "RIGHT JOIN", []SQLRow{{"left_id": int64(2), "right_id": int64(2)}, {"left_id": nil, "right_id": int64(3)}}},
+		{"full", "FULL JOIN", []SQLRow{{"left_id": int64(1), "right_id": nil}, {"left_id": int64(2), "right_id": int64(2)}, {"left_id": nil, "right_id": int64(3)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := "FROM VALUES (1), (2) AS left_side(id) " + test.join + " VALUES (2), (3) AS right_side(id) ON left_side.id = right_side.id SELECT left_side.id AS left_id, right_side.id AS right_id"
+			result, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("%s outer join error = %v", test.name, err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("%s outer join rows = %#v, want %#v", test.name, result.Rows, test.want)
+			}
+			explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil))
+			if err != nil || explained.Stats == nil {
+				t.Fatalf("%s outer join explain/error/stats = %#v/%v/%#v", test.name, explained.Plan, err, explained.Stats)
+			}
+			for _, step := range explained.Plan {
+				if step.Node == "HASH JOIN" {
+					return
+				}
+			}
+			t.Fatalf("%s outer join plan = %#v, want HASH JOIN", test.name, explained.Plan)
+		})
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN FROM VALUES (2) AS values(value) WHERE value BETWEEN 1 AND 3 SELECT value", SQLSourceResolverFunc(nil))
+	if err != nil || len(explained.Plan) < 2 || explained.Plan[1].Detail != "value BETWEEN 1 AND 3" {
+		t.Fatalf("BETWEEN EXPLAIN = %#v/%v, want readable range filter", explained.Plan, err)
+	}
+}
+
+func TestExecuteSQLQueryJoinsMultipleSourceKindsInOnePipeline(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		switch key {
+		case "users":
+			return []SQLRow{
+				{"id": int64(1), "team_id": int64(10), "region_id": int64(100), "enabled": true},
+				{"id": int64(2), "team_id": int64(20), "region_id": int64(200), "enabled": true},
+				{"id": int64(3), "team_id": int64(30), "region_id": int64(100), "enabled": true},
+				{"id": int64(4), "team_id": int64(10), "region_id": int64(100), "enabled": false},
+			}, nil
+		case "regions":
+			return []SQLRow{
+				{"id": int64(100), "name": "APAC", "enabled": true},
+				{"id": int64(200), "name": "Europe", "enabled": false},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected source %s(%q)", name, key)
+		}
+	})
+
+	result, err := ExecuteSQLQuery(`
+WITH enabled_teams(id, name) AS (VALUES (10, 'Core'), (20, 'Edge'))
+FROM CACHE('users') AS u
+INNER JOIN enabled_teams AS t ON u.team_id = t.id
+LEFT JOIN (
+  FROM CACHE('regions') AS source
+  WHERE source.enabled = TRUE
+  SELECT source.id, source.name AS region
+) AS r ON u.region_id = r.id
+CROSS JOIN VALUES ('production') AS environment(name)
+WHERE u.enabled = TRUE
+SELECT u.id, t.name AS team, r.region, environment.name AS environment
+ORDER BY u.id`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(multiple source joins) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "team", "region", "environment"}, Rows: []SQLRow{
+		{"id": int64(1), "team": "Core", "region": "APAC", "environment": "production"},
+		{"id": int64(2), "team": "Edge", "region": nil, "environment": "production"},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("multiple source join result = %#v, want %#v", result, want)
+	}
+}
+
+func TestExecuteSQLQueryPushesBaseFilterIntoHashJoin(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (1), (2), (3) AS left_values(id)
+INNER JOIN VALUES (2), (3) AS right_values(id) ON left_values.id = right_values.id
+WHERE left_values.id = 2
+SELECT left_values.id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(2)}}; result.Stats == nil || result.Stats.OutputRows != len(want) {
+		t.Fatalf("EXPLAIN ANALYZE stats = %#v, want %#v", result.Stats, want)
+	}
+	var filterIndex, joinIndex = -1, -1
+	for index, step := range result.Plan {
+		switch step.Node {
+		case "FILTER":
+			if step.ActualInputRows != nil && step.ActualOutputRows != nil && *step.ActualInputRows == 3 && *step.ActualOutputRows == 1 {
+				filterIndex = index
+			}
+		case "HASH JOIN":
+			if step.ActualInputRows != nil && step.ActualOutputRows != nil && *step.ActualInputRows == 3 && *step.ActualOutputRows == 1 {
+				joinIndex = index
+			}
+		}
+	}
+	if filterIndex < 0 || joinIndex < 0 || filterIndex >= joinIndex {
+		t.Fatalf("plan = %#v, want base filter 3→1 before hash join 3→1", result.Plan)
+	}
+}
+
+func TestExecuteSQLQueryContextEnforcesBudgetsAndCancellation(t *testing.T) {
+	t.Parallel()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ExecuteSQLQueryContext(cancelled, "FROM VALUES (1) AS values(id) SELECT id", SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled query error = %v, want context.Canceled", err)
+	}
+
+	for _, test := range []struct {
+		name, source string
+		options      SQLQueryOptions
+		want         string
+	}{
+		{
+			name:    "join_work",
+			source:  "FROM VALUES (1), (2), (3) AS left_values(id) CROSS JOIN VALUES (1), (2), (3) AS right_values(id) SELECT left_values.id",
+			options: SQLQueryOptions{MaxJoinWork: 4},
+			want:    "join work budget",
+		},
+		{
+			name:    "result_bytes",
+			source:  "FROM VALUES ('this row is deliberately longer than the budget') AS values(value) SELECT value",
+			options: SQLQueryOptions{MaxResultBytes: 8},
+			want:    "result byte budget",
+		},
+		{
+			name:    "sort_bytes",
+			source:  "FROM VALUES ('long value'), ('another long value') AS values(value) SELECT value ORDER BY value",
+			options: SQLQueryOptions{MaxSortBytes: 8},
+			want:    "sort memory budget",
+		},
+		{
+			name:    "group_bytes",
+			source:  "FROM VALUES ('long value'), ('another long value') AS values(value) GROUP BY value SELECT value",
+			options: SQLQueryOptions{MaxGroupBytes: 8},
+			want:    "group memory budget",
+		},
+		{
+			name:    "set_bytes",
+			source:  "FROM VALUES ('long value') AS left_values(value) SELECT value UNION FROM VALUES ('another long value') AS right_values(value) SELECT value",
+			options: SQLQueryOptions{MaxSetBytes: 8},
+			want:    "set memory budget",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQueryContext(context.Background(), test.source, SQLSourceResolverFunc(nil), test.options)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ExecuteSQLQueryContext() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryObserverIncludesSafeOperatorCounters(t *testing.T) {
+	t.Parallel()
+	var events []SQLQueryEvent
+	result, err := ExecuteSQLQueryContext(context.Background(), "FROM VALUES (1), (2), (3) AS values(id) WHERE id > 1 SELECT id ORDER BY id", SQLSourceResolverFunc(nil), SQLQueryOptions{
+		QueryID: "operators-1",
+		Observer: SQLQueryObserverFunc(func(event SQLQueryEvent) {
+			events = append(events, event)
+		}),
+	})
+	if err != nil {
+		t.Fatalf("observed query: %v", err)
+	}
+	if len(result.Rows) != 2 || len(events) != 1 {
+		t.Fatalf("result/events = %#v/%#v, want two rows/one event", result.Rows, events)
+	}
+	if events[0].QueryID != "operators-1" || !events[0].OK {
+		t.Fatalf("event = %#v, want successful named event", events[0])
+	}
+	operators := map[string]SQLQueryOperator{}
+	for _, operator := range events[0].Operators {
+		operators[operator.Node] = operator
+	}
+	for _, node := range []string{"SCAN", "FILTER", "PROJECT", "SORT"} {
+		operator, ok := operators[node]
+		if !ok || operator.InputRows < 0 || operator.OutputRows < 0 || operator.ElapsedNanos < 0 {
+			t.Fatalf("event operators = %#v, want safe %s counter", events[0].Operators, node)
+		}
+	}
+	for _, node := range []string{"SCAN", "FILTER", "PROJECT"} {
+		operator := operators[node]
+		if operator.InputBytes == nil || operator.OutputBytes == nil || *operator.OutputBytes <= 0 {
+			t.Fatalf("event operators = %#v, want safe %s byte counters", events[0].Operators, node)
+		}
+	}
+}
+
+func TestExecuteSQLQueryRowsObserverReportsStreamedOutput(t *testing.T) {
+	t.Parallel()
+
+	events := []SQLQueryEvent{}
+	rows := []SQLRow{}
+	err := ExecuteSQLQueryRows(context.Background(), "FROM VALUES (1), (2) AS values(id) SELECT id", SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
+		QueryID: "stream-observer-1",
+		Observer: SQLQueryObserverFunc(func(event SQLQueryEvent) {
+			events = append(events, event)
+		}),
+	}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamed query: %v", err)
+	}
+	if got, want := rows, []SQLRow{{"id": int64(1)}, {"id": int64(2)}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("streamed rows = %#v, want %#v", got, want)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one event", events)
+	}
+	event := events[0]
+	if event.QueryID != "stream-observer-1" || !event.OK || event.OutputRows != 2 || event.OutputColumns != 1 || event.ResultBytes <= 0 {
+		t.Fatalf("stream event = %#v, want successful counted event", event)
+	}
+	streamOutput := SQLQueryOperator{}
+	foundStreamOutput := false
+	for _, operator := range event.Operators {
+		if operator.Node == "STREAM OUTPUT" {
+			streamOutput, foundStreamOutput = operator, true
+			break
+		}
+	}
+	if !foundStreamOutput || streamOutput.InputRows != 2 || streamOutput.OutputRows != 2 || streamOutput.OutputBytes == nil || *streamOutput.OutputBytes != event.ResultBytes || streamOutput.ElapsedNanos < 0 {
+		t.Fatalf("stream event operators = %#v, want measured STREAM OUTPUT counter", event.Operators)
+	}
+	events = nil
+	err = ExecuteSQLQueryRows(context.Background(), "FROM VALUES (1) AS values(id) SELECT id", SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
+		QueryID: "stream-observer-failure",
+		Observer: SQLQueryObserverFunc(func(event SQLQueryEvent) {
+			events = append(events, event)
+		}),
+	}, func([]string, SQLRow) error { return errors.New("stop stream") })
+	if err == nil || !strings.Contains(err.Error(), "stop stream") {
+		t.Fatalf("stream callback error = %v, want stop stream", err)
+	}
+	if len(events) != 1 || events[0].QueryID != "stream-observer-failure" || events[0].OK || events[0].OutputRows != 0 || !strings.Contains(events[0].Error, "stop stream") {
+		t.Fatalf("failed stream event = %#v, want failed zero-output event", events)
+	}
+}
+
+func TestExecuteSQLQueryRowsExplainsUnavailableGlobalStreaming(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		query string
+		want  string
+	}{
+		{query: "FROM VALUES (1), (1) AS values(id) SELECT DISTINCT id", want: "MaxSetBytes"},
+		{query: "FROM VALUES (2), (1) AS values(id) SELECT id ORDER BY id", want: "MaxSortBytes"},
+	} {
+		t.Run(test.want, func(t *testing.T) {
+			err := ExecuteSQLQueryRows(context.Background(), test.query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{}, func([]string, SQLRow) error { return nil })
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("stream error = %v, want guidance containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsChainedExternalSetOperations(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{
+		"left":   {{"value": int64(3)}, {"value": int64(1)}, {"value": int64(3)}},
+		"middle": {{"value": int64(2)}, {"value": int64(4)}, {"value": int64(2)}},
+		"right":  {{"value": int64(1)}, {"value": int64(4)}},
+	}}
+	directory := t.TempDir()
+	query := `FROM CACHE('left') AS left_row SELECT left_row.value
+UNION
+FROM CACHE('middle') AS middle_row SELECT middle_row.value
+EXCEPT
+FROM CACHE('right') AS right_row SELECT right_row.value`
+	var rows []SQLRow
+	err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{
+		MaxSetBytes:    1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	}, func(_ []string, row SQLRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream chained external set: %v", err)
+	}
+	if want := []SQLRow{{"value": int64(3)}, {"value": int64(1)}, {"value": int64(2)}}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("stream chained set rows = %#v, want %#v", rows, want)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 3 {
+		t.Fatalf("chained set resolver calls materialized=%d streamed=%d, want 0/3", resolver.resolveCalls, resolver.streamCalls)
+	}
+	if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
+		t.Fatalf("chained set spill cleanup = %#v/%v, want no files", entries, err)
+	}
+}
+
+func TestExecuteSQLQueryRowsStreamsChainedExternalSetSemantics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, first, second string
+		left, middle, right []SQLRow
+		want                []SQLRow
+	}{
+		{
+			name:  "except_of_union",
+			first: "EXCEPT", second: "UNION",
+			left:   []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(1)}},
+			middle: []SQLRow{{"value": int64(2)}, {"value": int64(3)}},
+			right:  []SQLRow{{"value": int64(3)}, {"value": int64(4)}, {"value": int64(4)}},
+			want:   []SQLRow{{"value": int64(1)}},
+		},
+		{
+			name:  "intersect_of_intersect_with_empty_right",
+			first: "INTERSECT", second: "INTERSECT",
+			left:   []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(1)}},
+			middle: []SQLRow{{"value": int64(1)}, {"value": int64(2)}},
+			right:  nil,
+			want:   nil,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{"left": test.left, "middle": test.middle, "right": test.right}}
+			query := "FROM CACHE('left') AS left_row SELECT left_row.value\n" + test.first + "\nFROM CACHE('middle') AS middle_row SELECT middle_row.value\n" + test.second + "\nFROM CACHE('right') AS right_row SELECT right_row.value"
+			var rows []SQLRow
+			err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}, func(_ []string, row SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("stream chained external set: %v", err)
+			}
+			if !reflect.DeepEqual(rows, test.want) {
+				t.Fatalf("stream chained set rows = %#v, want %#v", rows, test.want)
+			}
+			if resolver.resolveCalls != 0 || resolver.streamCalls != 3 {
+				t.Fatalf("chained set resolver calls materialized=%d streamed=%d, want 0/3", resolver.resolveCalls, resolver.streamCalls)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryRowsCleansChainedExternalSetSpillsOnDiskBudgetError(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	resolver := &sqlMultiStreamingTestResolver{sources: map[string][]SQLRow{
+		"left":   {{"value": "a very long left value"}},
+		"middle": {{"value": "a very long middle value"}},
+		"right":  {{"value": "a very long right value"}},
+	}}
+	query := "FROM CACHE('left') AS left_row SELECT left_row.value UNION FROM CACHE('middle') AS middle_row SELECT middle_row.value EXCEPT FROM CACHE('right') AS right_row SELECT right_row.value"
+	err := ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1}, func([]string, SQLRow) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("chained set disk budget error = %v, want spill disk budget", err)
+	}
+	if entries, readErr := os.ReadDir(directory); readErr != nil || len(entries) != 0 {
+		t.Fatalf("chained set failed spill cleanup = %#v/%v, want no files", entries, readErr)
+	}
+}
+
+func TestExecuteSQLQueryContextSpillsExternalSortWithinDiskBudget(t *testing.T) {
+	t.Parallel()
+	query := "FROM VALUES (3, DATE '2026-08-03'), (1, DATE '2026-08-01'), (2, DATE '2026-08-02'), (4, DATE '2026-08-04') AS values(id, occurred_on) SELECT id, occurred_on, CAST(id AS DECIMAL) AS amount ORDER BY occurred_on DESC, id"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	directory := t.TempDir()
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   64,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("spill sort: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("spill sort rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   64,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("explain spill sort: %v", err)
+	}
+	seen := false
+	for _, step := range explained.Plan {
+		seen = seen || step.Node == "EXTERNAL SORT"
+	}
+	if !seen {
+		t.Fatalf("spill sort plan = %#v, want EXTERNAL SORT", explained.Plan)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory retains temporary files: %#v", entries)
+	}
+	_, err = ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   64,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("spill disk budget error = %v, want spill disk budget", err)
+	}
+	entries, err = os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory after failure: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill failure retains temporary files: %#v", entries)
+	}
+}
+
+func TestExecuteSQLQueryContextSpillsSetOperationsWithinDiskBudget(t *testing.T) {
+	t.Parallel()
+	left := "FROM VALUES (1), (1), (2), (3) AS left_values(id) SELECT id"
+	right := "FROM VALUES (2), (3), (3), (4) AS right_values(id) SELECT id"
+	tests := []struct {
+		name, operation string
+		want            []SQLRow
+	}{
+		{"union", "UNION", []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)}, {"id": int64(4)}}},
+		{"intersect", "INTERSECT", []SQLRow{{"id": int64(2)}, {"id": int64(3)}}},
+		{"except", "EXCEPT", []SQLRow{{"id": int64(1)}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			query := left + " " + test.operation + " " + right
+			baseline, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+			if err != nil {
+				t.Fatalf("baseline %s: %v", test.operation, err)
+			}
+			if !reflect.DeepEqual(baseline.Rows, test.want) {
+				t.Fatalf("baseline %s rows = %#v, want %#v", test.operation, baseline.Rows, test.want)
+			}
+			directory := t.TempDir()
+			options := SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20}
+			got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), options)
+			if err != nil {
+				t.Fatalf("spill %s: %v", test.operation, err)
+			}
+			if !reflect.DeepEqual(got.Rows, baseline.Rows) {
+				t.Fatalf("spill %s rows = %#v, want %#v", test.operation, got.Rows, baseline.Rows)
+			}
+			explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil), options)
+			if err != nil {
+				t.Fatalf("explain spill %s: %v", test.operation, err)
+			}
+			seen := false
+			for _, step := range explained.Plan {
+				seen = seen || step.Node == "EXTERNAL SET"
+			}
+			if !seen {
+				t.Fatalf("spill %s plan = %#v, want EXTERNAL SET", test.operation, explained.Plan)
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatalf("read spill directory: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("spill %s retains temporary files: %#v", test.operation, entries)
+			}
+		})
+	}
+	t.Run("union_all_does_not_need_membership_budget", func(t *testing.T) {
+		query := left + " UNION ALL " + right
+		baseline, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+		if err != nil {
+			t.Fatalf("UNION ALL baseline: %v", err)
+		}
+		got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxSetBytes: 1})
+		if err != nil {
+			t.Fatalf("UNION ALL with set budget: %v", err)
+		}
+		if !reflect.DeepEqual(got.Rows, baseline.Rows) {
+			t.Fatalf("UNION ALL rows = %#v, want %#v", got.Rows, baseline.Rows)
+		}
+	})
+	t.Run("many_runs_and_disk_budget", func(t *testing.T) {
+		leftValues, rightValues := make([]string, 0, 80), make([]string, 0, 80)
+		for value := 0; value < 80; value++ {
+			leftValues = append(leftValues, fmt.Sprintf("(%d)", value))
+			rightValues = append(rightValues, fmt.Sprintf("(%d)", value+40))
+		}
+		directory := t.TempDir()
+		left := "FROM VALUES " + strings.Join(leftValues, ", ") + " AS left_values(id) SELECT id"
+		right := "FROM VALUES " + strings.Join(rightValues, ", ") + " AS right_values(id) SELECT id"
+		for _, operation := range []string{"UNION", "INTERSECT", "EXCEPT"} {
+			query := left + " " + operation + " " + right
+			baseline, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+			if err != nil {
+				t.Fatalf("many-run %s baseline: %v", operation, err)
+			}
+			got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1 << 20})
+			if err != nil {
+				t.Fatalf("many-run %s spill: %v", operation, err)
+			}
+			if !reflect.DeepEqual(got.Rows, baseline.Rows) {
+				t.Fatalf("many-run %s spill rows = %#v, want %#v", operation, got.Rows, baseline.Rows)
+			}
+		}
+		_, err := ExecuteSQLQueryContext(context.Background(), left+" UNION "+right, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxSetBytes: 1, SpillDirectory: directory, MaxSpillBytes: 1})
+		if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+			t.Fatalf("set spill disk budget error = %v, want spill disk budget", err)
+		}
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			t.Fatalf("read spill directory after failure: %v", err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("set spill failure retains temporary files: %#v", entries)
+		}
+	})
+}
+
+func TestExecuteSQLQueryContextSpillsDirectGroupedAggregatesWithinDiskBudget(t *testing.T) {
+	t.Parallel()
+	values := make([]string, 0, 60)
+	for id := 0; id < 60; id++ {
+		values = append(values, fmt.Sprintf("(%d, %d)", id%7, id-30))
+	}
+	query := "FROM VALUES " + strings.Join(values, ", ") + " AS values(team, score) SELECT team, COUNT(*) AS members, COUNT(score) AS scored_members, SUM(score) AS total, AVG(score) AS average, MIN(score) AS minimum, MAX(score) AS maximum GROUP BY team ORDER BY team ASC NULLS LAST"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	directory := t.TempDir()
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("spill grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("spill grouped aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("explain spill grouped aggregate: %v", err)
+	}
+	seen := false
+	for _, step := range explained.Plan {
+		seen = seen || step.Node == "EXTERNAL GROUP AGGREGATE"
+	}
+	if !seen {
+		t.Fatalf("spill grouped aggregate plan = %#v, want EXTERNAL GROUP AGGREGATE", explained.Plan)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory retains temporary files: %#v", entries)
+	}
+	_, err = ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "spill disk budget") {
+		t.Fatalf("group spill disk budget error = %v, want spill disk budget", err)
+	}
+	entries, err = os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory after failure: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("group spill failure retains temporary files: %#v", entries)
+	}
+}
+
+func TestExecuteSQLQueryContextStreamsSpilledDirectGroupedAggregates(t *testing.T) {
+	t.Parallel()
+	rows := []SQLRow{
+		{"team": "red", "score": int64(3)},
+		{"team": "blue", "score": int64(-2)},
+		{"team": "red", "score": int64(7)},
+		{"team": "blue", "score": int64(5)},
+		{"team": nil, "score": int64(1)},
+	}
+	query := "FROM CACHE('people') AS person WHERE person.score >= 0 SELECT person.team, COUNT(*) AS members, SUM(person.score) AS total, AVG(person.score) AS average GROUP BY person.team ORDER BY person.team ASC NULLS LAST"
+	baseline := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		return cloneSQLRows(rows), nil
+	})
+	want, err := ExecuteSQLQueryContext(context.Background(), query, baseline, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("materialized baseline: %v", err)
+	}
+	resolver := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("streamed spill grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("streamed spill grouped aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls materialized=%d streamed=%d, want 0/1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	explained, err := ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("explain streamed spill grouped aggregate: %v", err)
+	}
+	seenStream, seenFilter, seenAggregate := false, false, false
+	for _, step := range explained.Plan {
+		if step.Node == "STREAM SCAN" {
+			if step.ActualOutputRows == nil || *step.ActualOutputRows != len(rows) {
+				t.Fatalf("stream scan plan = %#v, want %d source rows", step, len(rows))
+			}
+			seenStream = true
+		}
+		if step.Node == "FILTER" {
+			if step.ActualInputRows == nil || *step.ActualInputRows != len(rows) || step.ActualOutputRows == nil || *step.ActualOutputRows != 4 {
+				t.Fatalf("stream filter plan = %#v, want 5 input and 4 output rows", step)
+			}
+			seenFilter = true
+		}
+		seenAggregate = seenAggregate || step.Node == "EXTERNAL GROUP AGGREGATE"
+	}
+	if !seenStream || !seenFilter || !seenAggregate {
+		t.Fatalf("streamed spill grouped aggregate plan = %#v, want STREAM SCAN, FILTER, and EXTERNAL GROUP AGGREGATE", explained.Plan)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 2 {
+		t.Fatalf("resolver calls after EXPLAIN materialized=%d streamed=%d, want 0/2", resolver.resolveCalls, resolver.streamCalls)
+	}
+	limited := &sqlStreamingTestResolver{rows: cloneSQLRows(rows)}
+	_, err = ExecuteSQLQueryContext(context.Background(), query, limited, SQLQueryOptions{
+		MaxRows:        len(rows) - 1,
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err == nil || !strings.Contains(err.Error(), "source \"person\" exceeds the 4 row limit") {
+		t.Fatalf("streamed spill MaxRows error = %v, want source row-limit diagnostic", err)
+	}
+	if limited.resolveCalls != 0 || limited.streamCalls != 1 {
+		t.Fatalf("limited resolver calls materialized=%d streamed=%d, want 0/1", limited.resolveCalls, limited.streamCalls)
+	}
+}
+
+func TestExecuteSQLQueryContextSpilledGroupAggregatePreservesFloatAdditionOrder(t *testing.T) {
+	t.Parallel()
+	values := make([]string, 0, 96)
+	for index := 0; index < 96; index++ {
+		score := "1"
+		switch index % 3 {
+		case 0:
+			score = "10000000000000000"
+		case 2:
+			score = "-10000000000000000"
+		}
+		values = append(values, "(0, "+score+")")
+	}
+	query := "FROM VALUES " + strings.Join(values, ", ") + " AS values(team, score) SELECT team, SUM(score) AS total, AVG(score) AS average GROUP BY team ORDER BY team"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("spill grouped aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("spill float aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+}
+
+func TestExecuteSQLQueryContextSpilledGroupAggregateProperty(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260827))
+	for iteration := 0; iteration < 40; iteration++ {
+		values := make([]string, 1+random.Intn(40))
+		for index := range values {
+			team := "NULL"
+			if random.Intn(4) != 0 {
+				team = strconv.Itoa(random.Intn(5) - 2)
+			}
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(13) - 6)
+			}
+			values[index] = "(" + team + ", " + score + ")"
+		}
+		direction := "ASC"
+		if random.Intn(2) == 0 {
+			direction = "DESC"
+		}
+		nulls := "NULLS LAST"
+		if random.Intn(2) == 0 {
+			nulls = "NULLS FIRST"
+		}
+		limit := 1 + random.Intn(6)
+		offset := random.Intn(5)
+		query := fmt.Sprintf("FROM VALUES %s AS values(team, score) SELECT team, COUNT(*) AS members, COUNT(score) AS scored_members, SUM(score) AS total, AVG(score) AS average, MIN(score) AS minimum, MAX(score) AS maximum GROUP BY team ORDER BY team %s %s LIMIT %d OFFSET %d", strings.Join(values, ", "), direction, nulls, limit, offset)
+		want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+		if err != nil {
+			t.Fatalf("iteration %d unbounded baseline: %v", iteration, err)
+		}
+		got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+			MaxGroupBytes:  1,
+			SpillDirectory: t.TempDir(),
+			MaxSpillBytes:  1 << 20,
+		})
+		if err != nil {
+			t.Fatalf("iteration %d spill grouped aggregate: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(got.Rows, want.Rows) {
+			t.Fatalf("iteration %d spill grouped aggregate rows = %#v, want %#v\nquery=%s", iteration, got.Rows, want.Rows, query)
+		}
+	}
+}
+
+func TestExecuteSQLQueryContextSpillSortPreservesStableOrderAcrossMergePasses(t *testing.T) {
+	t.Parallel()
+	values := make([]string, 0, 80)
+	for id := 0; id < 80; id++ {
+		values = append(values, fmt.Sprintf("(%d, %d)", id, id%4))
+	}
+	query := "FROM VALUES " + strings.Join(values, ", ") + " AS values(id, score) SELECT id, score ORDER BY score LIMIT 17 OFFSET 11"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	directory := t.TempDir()
+	got, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+		MaxSortBytes:   1,
+		SpillDirectory: directory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("many-run spill sort: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("many-run spill sort rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read spill directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory retains temporary files: %#v", entries)
+	}
+}
+
+func TestExecuteSQLQueryContextSpillSortPreservesNestedAndTypedValues(t *testing.T) {
+	t.Parallel()
+	timestamp := time.Date(2026, time.August, 24, 9, 10, 11, 12, time.UTC)
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("unexpected source %s(%q)", name, key)
+		}
+		return []SQLRow{
+			{"id": int64(2), "meta": map[string]interface{}{"tags": []interface{}{"beta", float64(2)}, "nested": map[string]interface{}{"active": true}}, "occurred_at": timestamp, "amount": json.Number("2.50")},
+			{"id": int64(1), "meta": map[string]interface{}{"tags": []interface{}{"alpha", float64(1)}, "nested": map[string]interface{}{"active": false}}, "occurred_at": timestamp.Add(-time.Hour), "amount": json.Number("1.25")},
+		}, nil
+	})
+	query := "FROM CACHE('people') AS person SELECT person.id, person.meta, person.occurred_at, person.amount ORDER BY person.id"
+	want, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{
+		MaxSortBytes:   1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("typed spill sort: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("typed spill sort rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+}
+
+func TestExecuteSQLQueryParametersBindTypedValuesAndDiagnosePositions(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("resolved %s(%q), want CACHE(people)", name, key)
+		}
+		return []SQLRow{{"id": int64(1), "name": "Ivi"}, {"id": int64(2), "name": "Lia"}}, nil
+	})
+	result, err := ExecuteSQLQueryParameters(context.Background(), `
+FROM CACHE($1) AS people
+WHERE people.id = $2
+SELECT people.name, $3 AS requested_name`, resolver, []interface{}{"people", int64(2), "Lia"}, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryParameters() error = %v", err)
+	}
+	if want := (SQLQueryResult{Columns: []string{"name", "requested_name"}, Rows: []SQLRow{{"name": "Lia", "requested_name": "Lia"}}}); !reflect.DeepEqual(result, want) {
+		t.Fatalf("parameterized result = %#v, want %#v", result, want)
+	}
+	for _, test := range []struct {
+		source, want string
+		column       int
+	}{
+		{"FROM VALUES ($0) AS values(value) SELECT value", "parameter indexes start at $1", 14},
+		{"FROM VALUES ($2) AS values(value) SELECT value", "no supplied parameter", 14},
+	} {
+		_, err := ExecuteSQLQueryParameters(context.Background(), test.source, SQLSourceResolverFunc(nil), []interface{}{"one"}, SQLQueryOptions{})
+		diagnostic, ok := err.(*SQLDiagnostic)
+		if !ok || !strings.Contains(diagnostic.Message, test.want) || diagnostic.Column != test.column {
+			t.Fatalf("parameter diagnostic = %#v, want %q at column %d", err, test.want, test.column)
+		}
+	}
+}
+
+func TestExecuteSQLQueryUsesOneSnapshotForRepeatedSources(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		calls++
+		if calls == 1 {
+			return []SQLRow{{"id": int64(1), "version": "first"}}, nil
+		}
+		return []SQLRow{{"id": int64(1), "version": "changed"}}, nil
+	})
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('users') AS left_users
+INNER JOIN CACHE('users') AS right_users ON left_users.id = right_users.id
+SELECT left_users.version AS left_version, right_users.version AS right_version`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("resolver calls = %d, want one snapshot read", calls)
+	}
+	if want := []SQLRow{{"left_version": "first", "right_version": "first"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("snapshot result = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQueryUsesThreeValuedNullLogic(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		op          string
+		left, right interface{}
+		want        interface{}
+	}{
+		{"=", nil, nil, nil}, {"<>", nil, int64(1), nil}, {"<", int64(1), nil, nil},
+		{"AND", true, nil, nil}, {"AND", false, nil, false}, {"OR", true, nil, true}, {"OR", false, nil, nil},
+	} {
+		if got := sqlBinaryValue(test.op, test.left, test.right); got != test.want {
+			t.Fatalf("%#v %s %#v = %#v, want %#v", test.left, test.op, test.right, got, test.want)
+		}
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRefreshesAndPlansIndexScan(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":10},{"id":2,"team_id":20},{"id":3,"team_id":20}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "team_id"); err != nil {
+		t.Fatalf("CreateSQLJSONFieldIndex() error = %v", err)
+	}
+	query := "EXPLAIN ANALYZE FROM CACHE('users') AS users WHERE users.team_id = 20 SELECT users.id ORDER BY users.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed query error = %v", err)
+	}
+	if result.Stats == nil || result.Stats.OutputRows != 2 || len(result.Plan) == 0 || result.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("indexed plan = %#v, stats = %#v", result.Plan, result.Stats)
+	}
+	trie.UpsertString("users", `[{"id":4,"team_id":20}]`)
+	result, err = ExecuteSQLQuery(query, trie)
+	if err != nil || result.Stats == nil || result.Stats.OutputRows != 1 {
+		t.Fatalf("refreshed indexed query = %#v, %v", result, err)
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexSupportsRangePredicates(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":10},{"id":2,"team_id":20},{"id":3,"team_id":30}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('users') AS users WHERE users.team_id >= 20 SELECT users.id ORDER BY users.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("range index query error = %v", err)
+	}
+	if want := []SQLRow{{"id": float64(2)}, {"id": float64(3)}}; !reflect.DeepEqual(result.Rows[:2], want) {
+		t.Fatalf("range index rows = %#v, want %#v", result.Rows[:2], want)
+	}
+	reversed, err := ExecuteSQLQuery("FROM CACHE('users') AS users WHERE 20 <= users.team_id SELECT users.id ORDER BY users.id", trie)
+	if err != nil || !reflect.DeepEqual(reversed.Rows, result.Rows) {
+		t.Fatalf("reversed range rows/error = %#v/%v, want %#v", reversed.Rows, err, result.Rows)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 || explained.Plan[0].Node != "INDEX SCAN" {
+		t.Fatalf("range index plan/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexSelectsConjunctivePredicate(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":20,"enabled":false},{"id":2,"team_id":20,"enabled":true},{"id":3,"team_id":30,"enabled":true}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(2)}}) {
+		t.Fatalf("conjunctive index rows/error = %#v/%v", result.Rows, err)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil {
+		t.Fatalf("conjunctive index plan/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX SCAN" {
+			return
+		}
+	}
+	t.Fatalf("conjunctive index plan = %#v, want INDEX SCAN", explained.Plan)
+}
+
+func TestHatTrieSQLCompositeJSONIndexPlansAndReportsStatistics(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"team_id":20,"enabled":true},{"id":2,"team_id":20,"enabled":false},{"id":3,"team_id":20,"enabled":true},{"id":4,"team_id":30,"enabled":true}]`)
+	if err := trie.CreateSQLJSONCompositeIndex("users", "team_id", "enabled"); err != nil {
+		t.Fatalf("CreateSQLJSONCompositeIndex() error = %v", err)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id ORDER BY users.id", trie)
+	if err != nil {
+		t.Fatalf("composite index query error = %v", err)
+	}
+	if !strings.Contains(fmt.Sprint(explained.Plan), "INDEX SCAN") {
+		t.Fatalf("composite index plan = %#v, want INDEX SCAN", explained.Plan)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id ORDER BY users.id", trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(1)}, {"id": float64(3)}}) {
+		t.Fatalf("composite index result = %#v, %v, want indexed ids 1 and 3", result, err)
+	}
+	stats, ok, err := trie.SQLJSONIndexStats("users", "team_id", "enabled")
+	if err != nil || !ok || stats.Rows != 4 || stats.DistinctKeys != 3 || stats.MinRowsPerKey != 1 || stats.MaxRowsPerKey != 2 || stats.AverageRowsPerKey != 4.0/3.0 || !reflect.DeepEqual(stats.Fields, []string{"team_id", "enabled"}) {
+		t.Fatalf("SQLJSONIndexStats() = %#v/%t/%v, want four rows and three composite keys", stats, ok, err)
+	}
+	trie.UpsertString("users", `[{"id":4,"team_id":20,"enabled":true}]`)
+	result, err = ExecuteSQLQuery("FROM CACHE('users') AS users WHERE users.team_id = 20 AND users.enabled = TRUE SELECT users.id", trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(4)}}) {
+		t.Fatalf("refreshed composite index result = %#v, %v, want the replacement row", result, err)
+	}
+	stats, ok, err = trie.SQLJSONIndexStats("users", "team_id", "enabled")
+	if err != nil || !ok || stats.Rows != 1 || stats.DistinctKeys != 1 || stats.MinRowsPerKey != 1 || stats.MaxRowsPerKey != 1 || stats.AverageRowsPerKey != 1 {
+		t.Fatalf("refreshed SQLJSONIndexStats() = %#v/%t/%v, want one row and one key", stats, ok, err)
+	}
+}
+
+func TestHatTrieSQLJSONIndexStatsExposeSkewAndExplainEstimate(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("events", `[{"id":1,"kind":"hot"},{"id":2,"kind":"hot"},{"id":3,"kind":"hot"},{"id":4,"kind":"hot"},{"id":5,"kind":"hot"},{"id":6,"kind":"warm"},{"id":7,"kind":"warm"},{"id":8,"kind":"cold"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("events", "kind"); err != nil {
+		t.Fatal(err)
+	}
+	stats, ok, err := trie.SQLJSONIndexStats("events", "kind")
+	if err != nil || !ok {
+		t.Fatalf("SQLJSONIndexStats() = %#v/%t/%v", stats, ok, err)
+	}
+	if stats.Rows != 8 || stats.DistinctKeys != 3 || stats.MinRowsPerKey != 1 || stats.MaxRowsPerKey != 5 || stats.AverageRowsPerKey != 8.0/3.0 {
+		t.Fatalf("SQLJSONIndexStats() = %#v, want rows=8 distinct=3 min=1 max=5 average=%v", stats, 8.0/3.0)
+	}
+	if want := []SQLJSONIndexFrequencyBucket{{RowsPerKey: 1, DistinctKeys: 1}, {RowsPerKey: 2, DistinctKeys: 1}, {RowsPerKey: 5, DistinctKeys: 1}}; !reflect.DeepEqual(stats.FrequencyHistogram, want) {
+		t.Fatalf("SQLJSONIndexStats().FrequencyHistogram = %#v, want %#v", stats.FrequencyHistogram, want)
+	}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.kind = 'hot' SELECT event.id", trie)
+	if err != nil || result.Stats == nil {
+		t.Fatalf("indexed EXPLAIN ANALYZE = %#v/%v/%#v", result.Plan, err, result.Stats)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX SCAN" {
+			if step.EstimatedRows == nil || *step.EstimatedRows != 5 || step.ActualOutputRows == nil || *step.ActualOutputRows != 5 || step.EstimateErrorRows == nil || *step.EstimateErrorRows != 0 {
+				t.Fatalf("indexed estimate/actual/error = %#v, want 5/5/0", step)
+			}
+			return
+		}
+	}
+	t.Fatalf("indexed EXPLAIN ANALYZE plan = %#v, want INDEX SCAN", result.Plan)
+}
+
+func TestHatTrieSQLJSONFieldIndexAvoidsSortForCompatibleOrder(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"age":2},{"id":2,"age":null},{"id":3},{"id":4,"age":1},{"id":5,"age":2}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS person SELECT person.id, person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SQLRow{
+		{"id": float64(2), "age": nil},
+		{"id": float64(3), "age": nil},
+		{"id": float64(1), "age": float64(2)},
+		{"id": float64(5), "age": float64(2)},
+		{"id": float64(4), "age": float64(1)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("ordered index rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('people') AS person SELECT person.id, person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, step := range explained.Plan {
+		seen[step.Node] = true
+	}
+	if !seen["INDEX ORDER SCAN"] || seen["SORT"] {
+		t.Fatalf("EXPLAIN ANALYZE nodes = %#v, want INDEX ORDER SCAN without SORT", explained.Plan)
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexAvoidsHashGroupingForCompatibleOrder(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"age":2},{"age":null},{},{"age":2},{"age":1}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS person SELECT person.age, COUNT(*) AS members GROUP BY person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SQLRow{
+		{"age": nil, "members": int64(2)},
+		{"age": float64(2), "members": int64(2)},
+		{"age": float64(1), "members": int64(1)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("ordered index groups = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('people') AS person SELECT person.age, COUNT(*) AS members GROUP BY person.age ORDER BY person.age DESC NULLS FIRST", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, step := range explained.Plan {
+		seen[step.Node] = true
+	}
+	if !seen["INDEX ORDER SCAN"] || !seen["INDEX GROUP AGGREGATE"] || seen["SORT"] {
+		t.Fatalf("EXPLAIN ANALYZE nodes = %#v, want INDEX ORDER SCAN + INDEX GROUP AGGREGATE without SORT", explained.Plan)
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderFastPathPreservesDistinctAndWindowSemantics(t *testing.T) {
+	t.Parallel()
+	data := `[{"id":1,"age":2,"team":1},{"id":2,"age":1,"team":1},{"id":1,"age":0,"team":1}]`
+	plain := newTestTrie(t)
+	plain.UpsertString("people", data)
+	indexed := newTestTrie(t)
+	indexed.UpsertString("people", data)
+	if err := indexed.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		"FROM CACHE('people') AS person SELECT DISTINCT person.id ORDER BY person.age",
+		"FROM CACHE('people') AS person SELECT person.id, ROW_NUMBER() OVER (ORDER BY person.team) AS position ORDER BY person.age",
+	} {
+		want, err := ExecuteSQLQuery(query, plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ExecuteSQLQuery(query, indexed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Rows, want.Rows) {
+			t.Fatalf("indexed result for %q = %#v, want non-index result %#v", query, got.Rows, want.Rows)
+		}
+		explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, indexed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, step := range explained.Plan {
+			if step.Node == "INDEX ORDER SCAN" {
+				t.Fatalf("EXPLAIN ANALYZE for %q used unsafe index ordering: %#v", query, explained.Plan)
+			}
+		}
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderedAggregationStreamsConstantState(t *testing.T) {
+	t.Parallel()
+	data := `[
+        {"age":1,"score":2},{"age":1,"score":4},{"age":1,"score":6},
+        {"age":2,"score":3},{"age":2,"score":9},{"age":3,"score":5},
+        {"age":3},{"score":7}
+    ]`
+	plain := newTestTrie(t)
+	trie := newTestTrie(t)
+	plain.UpsertString("people", data)
+	trie.UpsertString("people", data)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('people') AS person SELECT person.age, COUNT(*) AS members, COUNT(person.score) AS scored_members, SUM(person.score) AS total, AVG(person.score) AS average, MIN(person.score) AS minimum, MAX(person.score) AS maximum GROUP BY person.age ORDER BY person.age ASC NULLS LAST"
+	want, err := ExecuteSQLQuery(query, plain)
+	if err != nil {
+		t.Fatalf("unbounded baseline: %v", err)
+	}
+	got, err := ExecuteSQLQueryContext(context.Background(), query, trie, SQLQueryOptions{MaxGroupBytes: 1})
+	if err != nil {
+		t.Fatalf("streamed ordered aggregate: %v", err)
+	}
+	if !reflect.DeepEqual(got.Rows, want.Rows) {
+		t.Fatalf("streamed ordered aggregate rows = %#v, want %#v", got.Rows, want.Rows)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("explain streamed ordered aggregate: %v", err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX GROUP AGGREGATE" && strings.Contains(step.Detail, "streaming") {
+			return
+		}
+	}
+	t.Fatalf("streamed ordered aggregate plan = %#v, want streaming INDEX GROUP AGGREGATE", explained.Plan)
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderFastPathMatchesGeneralSortDifferential(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260824))
+	orders := []string{
+		"ORDER BY person.age",
+		"ORDER BY person.age DESC",
+		"ORDER BY person.age NULLS LAST",
+		"ORDER BY person.age DESC NULLS FIRST",
+	}
+	for iteration := 0; iteration < 48; iteration++ {
+		rows := make([]SQLRow, 1+random.Intn(12))
+		for index := range rows {
+			var age interface{}
+			switch random.Intn(5) {
+			case 0:
+				age = nil
+			case 1:
+				age = random.Intn(4)
+			case 2:
+				age = []string{"Ada", "Zed", "é"}[random.Intn(3)]
+			case 3:
+				age = random.Intn(2) == 0
+			default:
+				age = random.Intn(4)
+			}
+			rows[index] = SQLRow{"id": index, "age": age}
+		}
+		data, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain := newTestTrie(t)
+		plain.UpsertString("people", string(data))
+		indexed := newTestTrie(t)
+		indexed.UpsertString("people", string(data))
+		if err := indexed.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+			t.Fatal(err)
+		}
+		for _, order := range orders {
+			query := "FROM CACHE('people') AS person SELECT person.id, person.age " + order
+			want, err := ExecuteSQLQuery(query, plain)
+			if err != nil {
+				t.Fatalf("iteration %d plain %q: %v", iteration, order, err)
+			}
+			got, err := ExecuteSQLQuery(query, indexed)
+			if err != nil {
+				t.Fatalf("iteration %d indexed %q: %v", iteration, order, err)
+			}
+			if !reflect.DeepEqual(got.Rows, want.Rows) {
+				t.Fatalf("iteration %d indexed %q = %#v, want %#v", iteration, order, got.Rows, want.Rows)
+			}
+		}
+	}
+}
+
+func TestHatTrieSQLJSONFieldIndexOrderHandlesAllNulls(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"team_id":null},{"id":2,"team_id":null}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "team_id"); err != nil {
+		t.Fatal(err)
+	}
+	ordered, available, err := trie.ResolveSQLOrderedSource("CACHE", "people", "team_id", false, true, false)
+	if err != nil || !available {
+		t.Fatalf("all-null ordered index = %#v/%v, want available rows", ordered, err)
+	}
+	if want := []SQLRow{{"id": float64(1), "team_id": nil}, {"id": float64(2), "team_id": nil}}; !reflect.DeepEqual(ordered, want) {
+		t.Fatalf("all-null ordered index rows = %#v, want %#v", ordered, want)
+	}
+	query := "FROM CACHE('people') AS people SELECT people.id, people.team_id ORDER BY people.team_id NULLS FIRST"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("all-null indexed order query: %v", err)
+	}
+	want := []SQLRow{{"id": float64(1), "team_id": nil}, {"id": float64(2), "team_id": nil}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("all-null indexed order rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("all-null indexed order explain: %v", err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX ORDER SCAN" {
+			return
+		}
+	}
+	t.Fatalf("all-null indexed order plan = %#v, want INDEX ORDER SCAN", explained.Plan)
+}
+
+func TestHatTrieSQLJSONIndexValueEstimateUsesExactPostingCount(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("events", `[{"id":1,"kind":"hot"},{"id":2,"kind":"hot"},{"id":3,"kind":"hot"},{"id":4,"kind":"hot"},{"id":5,"kind":"hot"},{"id":6,"kind":"cold"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("events", "kind"); err != nil {
+		t.Fatal(err)
+	}
+	rows, known, available, err := trie.SQLJSONIndexValueEstimate("events", "kind", "hot")
+	if err != nil || !available || !known || rows != 5 {
+		t.Fatalf("SQLJSONIndexValueEstimate(hot) = %d/%t/%t/%v, want 5/true/true/nil", rows, known, available, err)
+	}
+	rows, known, available, err = trie.SQLJSONIndexValueEstimate("events", "kind", "missing")
+	if err != nil || !available || !known || rows != 0 {
+		t.Fatalf("SQLJSONIndexValueEstimate(missing) = %d/%t/%t/%v, want 0/true/true/nil", rows, known, available, err)
+	}
+	result, err := ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.kind = 'hot' SELECT event.id", trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX SCAN" && step.EstimatedRows != nil {
+			if *step.EstimatedRows != 5 {
+				t.Fatalf("hot INDEX SCAN estimate = %d, want exact 5", *step.EstimatedRows)
+			}
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN ANALYZE plan = %#v, want INDEX SCAN estimate", result.Plan)
+}
+
+func TestHatTrieSQLCompositeJSONIndexRejectsInvalidDefinitions(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	for _, fields := range [][]string{nil, {"team_id"}, {"", "enabled"}, {"team_id", "team_id"}} {
+		if err := trie.CreateSQLJSONCompositeIndex("users", fields...); err == nil {
+			t.Fatalf("CreateSQLJSONCompositeIndex(%q) succeeded, want validation error", fields)
+		}
+	}
+	var nilTrie *HatTrie
+	if err := nilTrie.CreateSQLJSONCompositeIndex("users", "team_id", "enabled"); err == nil {
+		t.Fatal("nil CreateSQLJSONCompositeIndex() succeeded, want validation error")
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexProbesInnerJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"name":"Ivi"},{"id":2,"name":"Lia"},{"id":3,"name":"Noe"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM VALUES (2), (3) AS wanted(id) INNER JOIN CACHE('users') AS users ON wanted.id = users.id SELECT users.name ORDER BY users.name"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed join error = %v", err)
+	}
+	if want := []SQLRow{{"name": "Lia"}, {"name": "Noe"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed join rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil || len(explained.Plan) == 0 {
+		t.Fatalf("indexed join explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	found := false
+	for _, step := range explained.Plan {
+		found = found || step.Node == "INDEX JOIN"
+	}
+	if !found {
+		t.Fatalf("indexed join plan = %#v, want INDEX JOIN", explained.Plan)
+	}
+}
+
+func TestHatTrieCompositeJSONIndexProbesMultiColumnInnerAndLeftJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("members", `[{"team_id":10,"role":"admin","name":"Ada"},{"team_id":10,"role":"viewer","name":"Bea"},{"team_id":20,"role":"admin","name":"Cai"}]`)
+	if err := trie.CreateSQLJSONCompositeIndex("members", "team_id", "role"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, join string
+		want       []SQLRow
+	}{
+		{"inner", "INNER JOIN", []SQLRow{{"team_id": int64(10), "role": "admin", "name": "Ada"}, {"team_id": int64(20), "role": "admin", "name": "Cai"}}},
+		{"left", "LEFT JOIN", []SQLRow{{"team_id": int64(10), "role": "admin", "name": "Ada"}, {"team_id": int64(10), "role": nil, "name": nil}, {"team_id": int64(20), "role": "admin", "name": "Cai"}, {"team_id": int64(30), "role": "admin", "name": nil}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := "FROM VALUES (10, 'admin'), (20, 'admin'), (30, 'admin'), (10, NULL) AS wanted(team_id, role) " + test.join + " CACHE('members') AS member ON wanted.team_id = member.team_id AND wanted.role = member.role SELECT wanted.team_id, wanted.role, member.name ORDER BY wanted.team_id"
+			result, err := ExecuteSQLQuery(query, trie)
+			if err != nil {
+				t.Fatalf("composite indexed %s join: %v", test.name, err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("composite indexed %s rows = %#v, want %#v", test.name, result.Rows, test.want)
+			}
+			explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+			if err != nil || explained.Stats == nil {
+				t.Fatalf("composite indexed %s explain/error/stats = %#v/%v/%#v", test.name, explained.Plan, err, explained.Stats)
+			}
+			for _, step := range explained.Plan {
+				if step.Node == "COMPOSITE INDEX JOIN" {
+					return
+				}
+			}
+			t.Fatalf("composite indexed %s plan = %#v, want COMPOSITE INDEX JOIN", test.name, explained.Plan)
+		})
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexProbesLeftJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM VALUES (1), (2) AS wanted(id) LEFT JOIN CACHE('users') AS users ON wanted.id = users.id SELECT wanted.id, users.name ORDER BY wanted.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed left join error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(1), "name": nil}, {"id": int64(2), "name": "Lia"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed left join rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil {
+		t.Fatalf("indexed left join explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX JOIN" {
+			return
+		}
+	}
+	t.Fatalf("indexed left join plan = %#v, want INDEX JOIN", explained.Plan)
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexProbesRangeInnerAndLeftJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"age":18,"name":"Ada"},{"age":21,"name":"Bea"},{"age":30,"name":"Cai"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		kind string
+		want []SQLRow
+	}{
+		{"INNER", []SQLRow{{"minimum": int64(20), "name": "Bea"}, {"minimum": int64(20), "name": "Cai"}}},
+		{"LEFT", []SQLRow{{"minimum": int64(20), "name": "Bea"}, {"minimum": int64(20), "name": "Cai"}, {"minimum": int64(40), "name": nil}}},
+	} {
+		t.Run(test.kind, func(t *testing.T) {
+			query := "FROM VALUES (20), (40) AS wanted(minimum) " + test.kind + " JOIN CACHE('people') AS person ON wanted.minimum <= person.age SELECT wanted.minimum, person.name ORDER BY wanted.minimum, person.name"
+			result, err := ExecuteSQLQuery(query, trie)
+			if err != nil || !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("range %s join = %#v/%v, want %#v", test.kind, result.Rows, err, test.want)
+			}
+			explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+			if err != nil || explained.Stats == nil || !strings.Contains(fmt.Sprint(explained.Plan), "RANGE INDEX JOIN") {
+				t.Fatalf("range %s explain = %#v/%v", test.kind, explained.Plan, err)
+			}
+		})
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexProbesRangeJoinWithAdditionalPredicate(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"age":18,"name":"Ada","enabled":true},{"age":21,"name":"Bea","enabled":false},{"age":30,"name":"Cai","enabled":true}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "age"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM VALUES (20), (40) AS wanted(minimum) LEFT JOIN CACHE('people') AS person ON wanted.minimum <= person.age AND person.enabled = TRUE SELECT wanted.minimum, person.name ORDER BY wanted.minimum"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SQLRow{{"minimum": int64(20), "name": "Cai"}, {"minimum": int64(40), "name": nil}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("range join with extra predicate = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "RANGE INDEX JOIN" {
+			return
+		}
+	}
+	t.Fatalf("range join with extra predicate plan = %#v, want RANGE INDEX JOIN", explained.Plan)
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexProbesRightJoin(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	query := "FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id, users.name ORDER BY wanted.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("indexed right join error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(1), "name": nil}, {"id": int64(2), "name": "Lia"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed right join rows = %#v, want %#v", result.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil || explained.Stats == nil {
+		t.Fatalf("indexed right join explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "INDEX RIGHT JOIN" {
+			return
+		}
+	}
+	t.Fatalf("indexed right join plan = %#v, want INDEX RIGHT JOIN", explained.Plan)
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRightJoinRespectsWhere(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id WHERE users.name = 'Lia' SELECT wanted.id", trie)
+	if err != nil {
+		t.Fatalf("right join with WHERE error = %v", err)
+	}
+	if want := []SQLRow{{"id": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("right join with WHERE rows = %#v, want %#v", result.Rows, want)
+	}
+	result, err = ExecuteSQLQuery("EXPLAIN ANALYZE FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id WHERE users.name = 'Lia' SELECT wanted.id", trie)
+	if err != nil || result.Stats == nil {
+		t.Fatalf("right join with WHERE explain/error/stats = %#v/%v/%#v", result.Plan, err, result.Stats)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "INDEX RIGHT JOIN" {
+			return
+		}
+	}
+	t.Fatalf("right join with WHERE plan = %#v, want INDEX RIGHT JOIN", result.Plan)
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRightJoinDoesNotMatchNulls(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":null,"name":"Null"},{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('users') AS users RIGHT JOIN VALUES (NULL), (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id, users.name ORDER BY wanted.id", trie)
+	if err != nil {
+		t.Fatalf("indexed right join with NULL error = %v", err)
+	}
+	if want := []SQLRow{{"id": nil, "name": nil}, {"id": int64(2), "name": "Lia"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("indexed right join with NULL rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestHatTrieOptionalSQLJSONFieldIndexRightJoinHonorsExecutionLimits(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":2,"name":"Lia"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("users", "id"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExecuteSQLQueryContext(context.Background(), "FROM CACHE('users') AS users RIGHT JOIN VALUES (1), (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id", trie, SQLQueryOptions{MaxRows: 1}); err == nil || !strings.Contains(err.Error(), `SQL source "wanted" exceeds the 1 row limit`) {
+		t.Fatalf("indexed right join MaxRows error = %v, want right-source limit", err)
+	}
+	if _, err := ExecuteSQLQueryContext(context.Background(), "FROM CACHE('users') AS users RIGHT JOIN VALUES (2) AS wanted(id) ON users.id = wanted.id SELECT wanted.id", trie, SQLQueryOptions{MaxJoinWork: 1}); err == nil || !strings.Contains(err.Error(), "join work budget exceeded") {
+		t.Fatalf("indexed right join MaxJoinWork error = %v, want join-work limit", err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsTimestampLiteralsAndDiagnostics(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES ('before', TIMESTAMP '2026-08-22T08:00:00Z'), ('after', TIMESTAMP '2026-08-22T10:00:00Z') AS events(label, occurred_at) WHERE occurred_at >= TIMESTAMP '2026-08-22T09:00:00Z' SELECT label", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("timestamp query error = %v", err)
+	}
+	if want := []SQLRow{{"label": "after"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("timestamp rows = %#v, want %#v", result.Rows, want)
+	}
+	if _, err := ExecuteSQLQuery("FROM VALUES (TIMESTAMP 'not-a-time') AS events(occurred_at) SELECT occurred_at", SQLSourceResolverFunc(nil)); err == nil || !strings.Contains(err.Error(), "RFC3339") {
+		t.Fatalf("invalid timestamp error = %v, want RFC3339 diagnostic", err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsDateLiteralsAndDiagnostics(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES ('before', DATE '2026-08-21'), ('after', DATE '2026-08-23') AS events(label, occurred_on) WHERE occurred_on > DATE '2026-08-22' SELECT label", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("date query error = %v", err)
+	}
+	if want := []SQLRow{{"label": "after"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("date rows = %#v, want %#v", result.Rows, want)
+	}
+	if _, err := ExecuteSQLQuery("FROM VALUES (DATE '2026-02-30') AS events(occurred_on) SELECT occurred_on", SQLSourceResolverFunc(nil)); err == nil || !strings.Contains(err.Error(), "YYYY-MM-DD") {
+		t.Fatalf("invalid date error = %v, want date diagnostic", err)
+	}
+}
+
+func TestExecuteSQLQueryDiagnosesIncompatibleLiteralComparisonTypes(t *testing.T) {
+	t.Parallel()
+	_, err := ExecuteSQLQuery("FROM VALUES (1) AS values(value) WHERE 1 = '1' SELECT value", SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "cannot compare NUMBER with TEXT") {
+		t.Fatalf("comparison error = %v, want NUMBER/TEXT diagnostic", err)
+	}
+	formatted := FormatSQLDiagnostic("FROM VALUES (1) AS values(value) WHERE 1 = '1' SELECT value", err)
+	if !strings.Contains(formatted, "query:1:") || !strings.Contains(formatted, "^") {
+		t.Fatalf("formatted comparison diagnostic = %q, want source span", formatted)
+	}
+}
+
+func TestExecuteSQLQueryUsesCaseSensitiveUTF8BinaryStringCollation(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES ('a'), ('Z'), ('é') AS values(value) SELECT value ORDER BY value", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []SQLRow{{"value": "Z"}, {"value": "a"}, {"value": "é"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("binary string order = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsExplicitNullOrder(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, order string
+		want        []SQLRow
+	}{
+		{"ascending_last", "value ASC NULLS LAST", []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": nil}}},
+		{"descending_first", "value DESC NULLS FIRST", []SQLRow{{"value": nil}, {"value": int64(2)}, {"value": int64(1)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (NULL), (2), (1) AS values(value) SELECT value ORDER BY "+test.order, SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("explicit null ordering: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("explicit null ordering rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryWindowOrderHonorsExplicitNullOrder(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, order string
+		want        []SQLRow
+	}{
+		{"last", "value NULLS LAST", []SQLRow{{"value": int64(1), "position": int64(1)}, {"value": int64(2), "position": int64(2)}, {"value": nil, "position": int64(3)}}},
+		{"first", "value NULLS FIRST", []SQLRow{{"value": nil, "position": int64(1)}, {"value": int64(1), "position": int64(2)}, {"value": int64(2), "position": int64(3)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (NULL), (2), (1) AS values(value) SELECT value, ROW_NUMBER() OVER (ORDER BY "+test.order+") AS position ORDER BY position", SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("window explicit null ordering: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("window explicit null ordering rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySupportsFetchFirst(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES (3), (1), (2) AS values(value) SELECT value ORDER BY value FETCH FIRST 2 ROWS ONLY", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("FETCH FIRST query: %v", err)
+	}
+	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("FETCH FIRST rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsInWithNullSemantics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, where string
+		want        []SQLRow
+	}{
+		{"match", "value IN (1, NULL)", []SQLRow{{"value": int64(1)}}},
+		{"not_in_null_is_unknown", "value NOT IN (1, NULL)", []SQLRow{}},
+		{"not_in_without_null", "value NOT IN (1, 3)", []SQLRow{{"value": int64(2)}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (1), (2), (NULL) AS values(value) WHERE "+test.where+" SELECT value ORDER BY value NULLS LAST", SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("IN query: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("IN rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySupportsBetweenWithNullSemantics(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, where string
+		want        []SQLRow
+	}{
+		{"inclusive", "value BETWEEN 2 AND 3", []SQLRow{{"value": int64(2)}, {"value": int64(3)}}},
+		{"not_between", "value NOT BETWEEN 2 AND 3", []SQLRow{{"value": int64(1)}}},
+		{"null_bound_is_unknown", "value BETWEEN 1 AND NULL", []SQLRow{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ExecuteSQLQuery("FROM VALUES (1), (2), (3), (NULL) AS values(value) WHERE "+test.where+" SELECT value ORDER BY value NULLS LAST", SQLSourceResolverFunc(nil))
+			if err != nil {
+				t.Fatalf("BETWEEN query: %v", err)
+			}
+			if !reflect.DeepEqual(result.Rows, test.want) {
+				t.Fatalf("BETWEEN rows = %#v, want %#v", result.Rows, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySupportsCaseExpressions(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("FROM VALUES (1), (2), (NULL) AS values(value) SELECT value, CASE WHEN value = 1 THEN 'one' WHEN value = 2 THEN 'two' ELSE 'other' END AS searched, CASE value WHEN 1 THEN 'one' WHEN NULL THEN 'null' ELSE 'other' END AS simple ORDER BY value NULLS LAST", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("CASE query: %v", err)
+	}
+	want := []SQLRow{
+		{"value": int64(1), "searched": "one", "simple": "one"},
+		{"value": int64(2), "searched": "two", "simple": "other"},
+		{"value": nil, "searched": "other", "simple": "other"},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("CASE rows = %#v, want %#v", result.Rows, want)
+	}
+	result, err = ExecuteSQLQuery("FROM VALUES (1) AS values(value) SELECT CASE WHEN value = 1 THEN 'selected' ELSE CAST('not a number' AS NUMBER) END AS value", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("CASE must evaluate only its selected branch: %v", err)
+	}
+	if want := []SQLRow{{"value": "selected"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("lazy CASE rows = %#v, want %#v", result.Rows, want)
+	}
+	functions := NewSQLFunctionRegistry()
+	if err := functions.Register(SQLFunctionDefinition{Name: "double_case", Arguments: []string{"value"}, ArgumentTypes: []string{"INTEGER"}, Language: "GO", Source: "return value * 2"}); err != nil {
+		t.Fatalf("register CASE function: %v", err)
+	}
+	result, err = ExecuteSQLQuery("FROM VALUES (1), (2) AS values(value) SELECT CASE WHEN value = 1 THEN double_case(value) ELSE double_case(0) END AS value ORDER BY value", sqlFunctionTestResolver{functions: functions})
+	if err != nil {
+		t.Fatalf("CASE custom function query: %v", err)
+	}
+	if want := []SQLRow{{"value": int64(0)}, {"value": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("CASE custom function rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestSQLGeneratedReferenceCasesForJoinsGroupsAndSets(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260822))
+	for iteration := 0; iteration < 96; iteration++ {
+		left, right := make([]int, 1+random.Intn(5)), make([]int, 1+random.Intn(5))
+		for index := range left {
+			left[index] = random.Intn(3)
+		}
+		for index := range right {
+			right[index] = random.Intn(3)
+		}
+		values := func(rows []int) string {
+			parts := make([]string, len(rows))
+			for i, value := range rows {
+				parts[i] = fmt.Sprintf("(%d)", value)
+			}
+			return strings.Join(parts, ", ")
+		}
+		query := "FROM VALUES " + values(left) + " AS left_values(id) INNER JOIN VALUES " + values(right) + " AS right_values(id) ON left_values.id = right_values.id SELECT left_values.id ORDER BY left_values.id"
+		got, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d join error = %v", iteration, err)
+		}
+		wantIDs := []int{}
+		for _, l := range left {
+			for _, r := range right {
+				if l == r {
+					wantIDs = append(wantIDs, l)
+				}
+			}
+		}
+		sort.Ints(wantIDs)
+		if len(got.Rows) != len(wantIDs) {
+			t.Fatalf("iteration %d join rows = %#v, want ids %#v", iteration, got.Rows, wantIDs)
+		}
+		for index, want := range wantIDs {
+			if got.Rows[index]["id"] != int64(want) {
+				t.Fatalf("iteration %d join row %d = %#v, want %d", iteration, index, got.Rows[index], want)
+			}
+		}
+
+		setQuery := "FROM VALUES " + values(left) + " AS a(id) SELECT id UNION FROM VALUES " + values(right) + " AS b(id) SELECT id"
+		setResult, err := ExecuteSQLQuery(setQuery, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		set := map[int]bool{}
+		setWant := []int{}
+		for _, value := range append(append([]int{}, left...), right...) {
+			if !set[value] {
+				set[value] = true
+				setWant = append(setWant, value)
+			}
+		}
+		if len(setResult.Rows) != len(setWant) {
+			t.Fatalf("iteration %d union rows = %#v, want %#v", iteration, setResult.Rows, setWant)
+		}
+		for index, want := range setWant {
+			if setResult.Rows[index]["id"] != int64(want) {
+				t.Fatalf("iteration %d union row = %#v, want %d", iteration, setResult.Rows[index], want)
+			}
+		}
+		groupResult, err := ExecuteSQLQuery("FROM VALUES "+values(left)+" AS values(id) GROUP BY id SELECT id, COUNT(*) AS count ORDER BY id", SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts := map[int]int{}
+		for _, value := range left {
+			counts[value]++
+		}
+		rowIndex := 0
+		for _, value := range []int{0, 1, 2} {
+			if counts[value] == 0 {
+				continue
+			}
+			row := groupResult.Rows[rowIndex]
+			if row["id"] != int64(value) || row["count"] != int64(counts[value]) {
+				t.Fatalf("iteration %d group row = %#v, want %d/%d", iteration, row, value, counts[value])
+			}
+			rowIndex++
+		}
+	}
+}
+
+func TestSQLGeneratedSQLiteNullPaginationDifferential(t *testing.T) {
+	t.Parallel()
+	random := rand.New(rand.NewSource(20260824))
+	for iteration := 0; iteration < 48; iteration++ {
+		values := make([]string, 1+random.Intn(8))
+		for index := range values {
+			if random.Intn(3) == 0 {
+				values[index] = "NULL"
+			} else {
+				values[index] = strconv.Itoa(random.Intn(5))
+			}
+		}
+		rows := strings.Join(func() []string {
+			out := make([]string, len(values))
+			for index, value := range values {
+				out[index] = "(" + value + ")"
+			}
+			return out
+		}(), ", ")
+		hatrieQuery := "WITH data(value) AS (VALUES " + rows + ") FROM data WHERE value IS NULL OR value BETWEEN 1 AND 3 SELECT value ORDER BY value NULLS LAST LIMIT 3 OFFSET 1"
+		got, err := ExecuteSQLQuery(hatrieQuery, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d HatTrie query: %v", iteration, err)
+		}
+		sqliteQuery := "WITH data(value) AS (VALUES " + rows + ") SELECT value FROM data WHERE value IS NULL OR value BETWEEN 1 AND 3 ORDER BY value NULLS LAST LIMIT 3 OFFSET 1"
+		output, err := exec.Command("sqlite3", "-json", ":memory:", sqliteQuery).Output()
+		if err != nil {
+			t.Fatalf("iteration %d SQLite query: %v", iteration, err)
+		}
+		if len(output) == 0 {
+			output = []byte("[]")
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("iteration %d decode SQLite JSON: %v", iteration, err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatalf("iteration %d encode HatTrie rows: %v", iteration, err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatalf("iteration %d decode HatTrie JSON: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("iteration %d null/pagination differential mismatch\nquery=%s\nhatrie=%#v\nsqlite=%#v", iteration, hatrieQuery, normalized, want)
+		}
+	}
+}
+
+func TestSQLGeneratedSQLiteDerivedExpressionDifferential(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 is required for differential testing")
+	}
+	random := rand.New(rand.NewSource(20260826))
+	for iteration := 0; iteration < 64; iteration++ {
+		values := make([]string, 1+random.Intn(12))
+		for id := range values {
+			raw := float64(random.Intn(17)-8) / 2
+			score := "NULL"
+			if random.Intn(4) != 0 {
+				score = strconv.Itoa(random.Intn(9) - 4)
+			}
+			values[id] = fmt.Sprintf("(%d, '%.2f', %s)", id, raw, score)
+		}
+		limit := 1 + random.Intn(6)
+		rows := strings.Join(values, ", ")
+		hatrieQuery := fmt.Sprintf("FROM (FROM VALUES %s AS source(id, raw, score) WHERE source.score IS NULL OR source.score BETWEEN -3 AND 3 SELECT source.id, source.raw, source.score) AS filtered WHERE CAST(filtered.raw AS NUMBER) BETWEEN -2.5 AND 2.5 AND (filtered.score IS NULL OR filtered.score IN (-2, -1, 0, 1, NULL)) SELECT filtered.id, filtered.raw, filtered.score, CASE WHEN filtered.score BETWEEN 1 AND 2 THEN 'middle' WHEN filtered.score IS NULL THEN 'missing' ELSE 'other' END AS bucket ORDER BY filtered.score DESC NULLS LAST, filtered.id FETCH FIRST %d ROWS ONLY", rows, limit)
+		got, err := ExecuteSQLQuery(hatrieQuery, SQLSourceResolverFunc(nil))
+		if err != nil {
+			t.Fatalf("iteration %d HatTrie query: %v\nquery=%s", iteration, err, hatrieQuery)
+		}
+		sqliteQuery := fmt.Sprintf("WITH source(id, raw, score) AS (VALUES %s), filtered AS (SELECT id, raw, score FROM source WHERE score IS NULL OR score BETWEEN -3 AND 3) SELECT id, raw, score, CASE WHEN score BETWEEN 1 AND 2 THEN 'middle' WHEN score IS NULL THEN 'missing' ELSE 'other' END AS bucket FROM filtered WHERE CAST(raw AS REAL) BETWEEN -2.5 AND 2.5 AND (score IS NULL OR score IN (-2, -1, 0, 1, NULL)) ORDER BY score DESC NULLS LAST, id LIMIT %d", rows, limit)
+		output, err := exec.Command("sqlite3", "-json", ":memory:", sqliteQuery).Output()
+		if err != nil {
+			t.Fatalf("iteration %d SQLite query: %v\nquery=%s", iteration, err, sqliteQuery)
+		}
+		if len(output) == 0 {
+			output = []byte("[]")
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("iteration %d decode SQLite JSON: %v", iteration, err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatalf("iteration %d encode HatTrie rows: %v", iteration, err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatalf("iteration %d decode HatTrie JSON: %v", iteration, err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("iteration %d derived/expression differential mismatch\nhatrie_query=%s\nsqlite_query=%s\nhatrie=%#v\nsqlite=%#v", iteration, hatrieQuery, sqliteQuery, normalized, want)
+		}
+	}
+}
+
+func TestExecuteSQLQuerySupportsPartitionedWindowFunctions(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('a', 2), ('a', 5), ('b', 3), ('b', 7) AS values(team, score)
+SELECT team, score,
+       ROW_NUMBER() OVER (PARTITION BY team ORDER BY score) AS row_number,
+       RANK() OVER (PARTITION BY team ORDER BY score) AS rank,
+       SUM(score) OVER (PARTITION BY team ORDER BY score) AS running_score
+ORDER BY team, score`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("window query error = %v", err)
+	}
+	want := []SQLRow{
+		{"team": "a", "score": int64(2), "row_number": int64(1), "rank": int64(1), "running_score": float64(2)},
+		{"team": "a", "score": int64(5), "row_number": int64(2), "rank": int64(2), "running_score": float64(7)},
+		{"team": "b", "score": int64(3), "row_number": int64(1), "rank": int64(1), "running_score": float64(3)},
+		{"team": "b", "score": int64(7), "row_number": int64(2), "rank": int64(2), "running_score": float64(10)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("window rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsDenseRankLagAndLeadWindows(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('a', 2), ('a', 2), ('a', 5), ('b', 3) AS values(team, score)
+SELECT team, score,
+       DENSE_RANK() OVER (PARTITION BY team ORDER BY score) AS dense_rank,
+       LAG(score) OVER (PARTITION BY team ORDER BY score) AS previous_score,
+       LEAD(score, 1, -1) OVER (PARTITION BY team ORDER BY score) AS next_score
+ORDER BY team, score`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("window query error = %v", err)
+	}
+	want := []SQLRow{
+		{"team": "a", "score": int64(2), "dense_rank": int64(1), "previous_score": nil, "next_score": int64(2)},
+		{"team": "a", "score": int64(2), "dense_rank": int64(1), "previous_score": int64(2), "next_score": int64(5)},
+		{"team": "a", "score": int64(5), "dense_rank": int64(2), "previous_score": int64(2), "next_score": int64(-1)},
+		{"team": "b", "score": int64(3), "dense_rank": int64(1), "previous_score": nil, "next_score": int64(-1)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("window rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsRecursiveCTEHierarchy(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+WITH RECURSIVE ancestors(node, parent, level) AS (
+  FROM VALUES (1, NULL, 0) AS seed(id, parent_id, depth) SELECT id, parent_id, depth
+  UNION ALL
+  FROM VALUES (2, 1), (3, 2) AS nodes(id, parent_id)
+  INNER JOIN ancestors AS previous ON nodes.parent_id = previous.node
+  SELECT nodes.id, nodes.parent_id, previous.level + 1 AS depth
+)
+FROM ancestors
+SELECT node, level
+ORDER BY node`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("recursive CTE error = %v", err)
+	}
+	if want := []SQLRow{{"node": int64(1), "level": int64(0)}, {"node": int64(2), "level": int64(1)}, {"node": int64(3), "level": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("recursive CTE rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQueryRecursiveCTESearchAndCycleColumns(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+WITH RECURSIVE walk(node, level) AS (
+  FROM VALUES (1, 0) AS seed(node, level) SELECT node, level
+  UNION ALL
+  FROM VALUES (2, 1), (1, 2) AS edges(node, parent)
+  INNER JOIN walk AS previous ON edges.parent = previous.node
+  SELECT edges.node, previous.level + 1 AS level
+)
+SEARCH BREADTH FIRST BY node SET search_order
+CYCLE node SET is_cycle
+FROM walk
+SELECT node, level, search_order, is_cycle
+ORDER BY search_order`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("recursive SEARCH/CYCLE query error = %v", err)
+	}
+	want := []SQLRow{
+		{"node": int64(1), "level": int64(0), "search_order": int64(1), "is_cycle": false},
+		{"node": int64(2), "level": int64(1), "search_order": int64(2), "is_cycle": false},
+		{"node": int64(1), "level": int64(2), "search_order": int64(3), "is_cycle": true},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("recursive SEARCH/CYCLE rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestSQLDifferentialAgainstSQLiteForJoinsGroupsAndWindows(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI is unavailable; install SQLite to run SQL differential cases")
+	}
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" {
+			return nil, fmt.Errorf("unexpected source %s", name)
+		}
+		switch key {
+		case "people":
+			return []SQLRow{{"id": int64(1), "team_id": int64(10), "score": int64(9)}, {"id": int64(2), "team_id": int64(10), "score": int64(7)}, {"id": int64(3), "team_id": int64(20), "score": int64(4)}}, nil
+		case "teams":
+			return []SQLRow{{"id": int64(10), "label": "Core"}}, nil
+		case "events":
+			return []SQLRow{{"id": int64(1), "occurred_at": "2026-08-21T23:00:00Z"}, {"id": int64(2), "occurred_at": "2026-08-22T09:00:00Z"}}, nil
+		case "left_side":
+			return []SQLRow{{"id": int64(1)}, {"id": int64(2)}}, nil
+		case "right_side":
+			return []SQLRow{{"id": int64(2)}, {"id": int64(3)}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected key %q", key)
+		}
+	})
+	setup := `CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); CREATE TABLE teams(id INTEGER, label TEXT); INSERT INTO teams VALUES(10,'Core'); CREATE TABLE events(id INTEGER, occurred_at TEXT); INSERT INTO events VALUES(1,'2026-08-21T23:00:00Z'),(2,'2026-08-22T09:00:00Z'); CREATE TABLE left_side(id INTEGER); INSERT INTO left_side VALUES(1),(2); CREATE TABLE right_side(id INTEGER); INSERT INTO right_side VALUES(2),(3);`
+	for _, test := range []struct{ name, hatrie, sqlite string }{
+		{"inner_filter", "SELECT p.id, t.label FROM CACHE('people') AS p JOIN CACHE('teams') AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id", "SELECT p.id, t.label FROM people AS p JOIN teams AS t ON p.team_id = t.id WHERE p.score >= 7 ORDER BY p.id"},
+		{"left_join", "SELECT p.id, t.label FROM CACHE('people') AS p LEFT JOIN CACHE('teams') AS t ON p.team_id = t.id ORDER BY p.id", "SELECT p.id, t.label FROM people AS p LEFT JOIN teams AS t ON p.team_id = t.id ORDER BY p.id"},
+		{"right_join", "SELECT l.id AS left_id, r.id AS right_id FROM CACHE('left_side') AS l RIGHT JOIN CACHE('right_side') AS r ON l.id = r.id ORDER BY r.id", "SELECT l.id AS left_id, r.id AS right_id FROM left_side AS l RIGHT JOIN right_side AS r ON l.id = r.id ORDER BY r.id"},
+		{"full_join", "SELECT l.id AS left_id, r.id AS right_id FROM CACHE('left_side') AS l FULL JOIN CACHE('right_side') AS r ON l.id = r.id ORDER BY COALESCE(l.id, r.id)", "SELECT l.id AS left_id, r.id AS right_id FROM left_side AS l FULL JOIN right_side AS r ON l.id = r.id ORDER BY COALESCE(l.id, r.id)"},
+		{"group", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM CACHE('people') AS p GROUP BY p.team_id ORDER BY p.team_id", "SELECT p.team_id, COUNT(*) AS count, SUM(p.score) AS total FROM people AS p GROUP BY p.team_id ORDER BY p.team_id"},
+		{"window", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM CACHE('people') AS p ORDER BY p.id", "SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.score DESC) AS position FROM people AS p ORDER BY p.id"},
+		{"timestamp", "SELECT e.id FROM CACHE('events') AS e WHERE CAST(e.occurred_at AS TIMESTAMP) >= TIMESTAMP '2026-08-22T00:00:00Z' ORDER BY e.id", "SELECT e.id FROM events AS e WHERE e.occurred_at >= '2026-08-22T00:00:00Z' ORDER BY e.id"},
+		{"recursive", "WITH RECURSIVE walk(value) AS (FROM VALUES (1) AS seed(value) SELECT value UNION ALL FROM walk AS previous WHERE previous.value < 3 SELECT previous.value + 1 AS value) FROM walk SELECT value ORDER BY value", "WITH RECURSIVE walk(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM walk WHERE value < 3) SELECT value FROM walk ORDER BY value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ExecuteSQLQuery(test.hatrie, resolver)
+			if err != nil {
+				t.Fatalf("hatrie query: %v", err)
+			}
+			output, err := exec.Command("sqlite3", "-json", ":memory:", setup+test.sqlite).Output()
+			if err != nil {
+				t.Fatalf("sqlite query: %v", err)
+			}
+			var want, normalized []map[string]interface{}
+			if err := json.Unmarshal(output, &want); err != nil {
+				t.Fatalf("decode sqlite JSON: %v", err)
+			}
+			encoded, err := json.Marshal(got.Rows)
+			if err != nil {
+				t.Fatalf("encode hatrie rows: %v", err)
+			}
+			if err := json.Unmarshal(encoded, &normalized); err != nil {
+				t.Fatalf("decode normalized hatrie rows: %v", err)
+			}
+			if !reflect.DeepEqual(normalized, want) {
+				t.Fatalf("SQLite differential mismatch\nhatrie=%#v\nsqlite=%#v", normalized, want)
+			}
+		})
+	}
+	t.Run("indexed_filter", func(t *testing.T) {
+		trie := newTestTrie(t)
+		trie.UpsertString("people", `[{"id":1,"team_id":10,"score":9},{"id":2,"team_id":10,"score":7},{"id":3,"team_id":20,"score":4}]`)
+		if err := trie.CreateSQLJSONFieldIndex("people", "team_id"); err != nil {
+			t.Fatal(err)
+		}
+		query := "FROM CACHE('people') AS p WHERE p.team_id = 10 SELECT p.id, p.score ORDER BY p.id"
+		got, err := ExecuteSQLQuery(query, trie)
+		if err != nil {
+			t.Fatalf("indexed Hatrie query: %v", err)
+		}
+		output, err := exec.Command("sqlite3", "-json", ":memory:", "CREATE TABLE people(id INTEGER, team_id INTEGER, score INTEGER); INSERT INTO people VALUES(1,10,9),(2,10,7),(3,20,4); SELECT p.id, p.score FROM people AS p WHERE p.team_id = 10 ORDER BY p.id").Output()
+		if err != nil {
+			t.Fatalf("indexed SQLite query: %v", err)
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("decode indexed SQLite JSON: %v", err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatalf("encode indexed Hatrie rows: %v", err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatalf("decode indexed Hatrie rows: %v", err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("indexed SQLite differential mismatch\nhatrie=%#v\nsqlite=%#v", normalized, want)
+		}
+		explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+		if err != nil || explained.Stats == nil {
+			t.Fatalf("indexed explain/error/stats = %#v/%v/%#v", explained.Plan, err, explained.Stats)
+		}
+		for _, step := range explained.Plan {
+			if step.Node == "INDEX SCAN" {
+				return
+			}
+		}
+		t.Fatalf("indexed differential plan = %#v, want INDEX SCAN", explained.Plan)
+	})
+	// SQLite establishes the unbounded cross-product cardinality; Hatrie's
+	// separate resource policy must then reject that same valid result before it
+	// exceeds the caller's configured row budget.
+	output, err := exec.Command("sqlite3", "-json", ":memory:", "SELECT a.value AS left_value, b.value AS right_value FROM (SELECT 1 AS value UNION ALL SELECT 2) AS a CROSS JOIN (SELECT 1 AS value UNION ALL SELECT 2) AS b").Output()
+	if err != nil {
+		t.Fatalf("sqlite resource baseline: %v", err)
+	}
+	var sqliteRows []map[string]interface{}
+	if err := json.Unmarshal(output, &sqliteRows); err != nil || len(sqliteRows) != 4 {
+		t.Fatalf("sqlite resource baseline rows = %#v, error = %v, want four rows", sqliteRows, err)
+	}
+	_, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES (1), (2) AS a(value) CROSS JOIN VALUES (1), (2) AS b(value) SELECT a.value AS left_value, b.value AS right_value", SQLSourceResolverFunc(nil), SQLQueryOptions{MaxRows: 3})
+	if err == nil || !strings.Contains(err.Error(), "row limit") {
+		t.Fatalf("bounded cross-product error = %v, want row-limit rejection", err)
+	}
+}
+
+func TestSQLGeneratedSQLiteCompositeIndexDifferential(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI is unavailable; install SQLite to run SQL differential cases")
+	}
+	random := rand.New(rand.NewSource(20260901))
+	for iteration := 0; iteration < 48; iteration++ {
+		rows := make([]SQLRow, 1+random.Intn(24))
+		sqliteValues := make([]string, len(rows))
+		for index := range rows {
+			teamID := random.Intn(4)
+			enabled := random.Intn(2) == 0
+			rows[index] = SQLRow{"id": index + 1, "team_id": teamID, "enabled": enabled}
+			enabledValue := 0
+			if enabled {
+				enabledValue = 1
+			}
+			sqliteValues[index] = fmt.Sprintf("(%d,%d,%d)", index+1, teamID, enabledValue)
+		}
+		data, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trie := newTestTrie(t)
+		trie.UpsertString("events", string(data))
+		if err := trie.CreateSQLJSONCompositeIndex("events", "team_id", "enabled"); err != nil {
+			t.Fatal(err)
+		}
+		teamID := random.Intn(4)
+		enabled := random.Intn(2) == 0
+		enabledSQL, enabledValue := "FALSE", 0
+		if enabled {
+			enabledSQL, enabledValue = "TRUE", 1
+		}
+		query := fmt.Sprintf("FROM CACHE('events') AS event WHERE event.team_id = %d AND event.enabled = %s SELECT event.id ORDER BY event.id", teamID, enabledSQL)
+		got, err := ExecuteSQLQuery(query, trie)
+		if err != nil {
+			t.Fatalf("iteration %d HatTrie query: %v\nquery=%s", iteration, err, query)
+		}
+		sqliteQuery := fmt.Sprintf("CREATE TABLE events(id INTEGER, team_id INTEGER, enabled INTEGER); INSERT INTO events VALUES %s; SELECT id FROM events WHERE team_id = %d AND enabled = %d ORDER BY id", strings.Join(sqliteValues, ","), teamID, enabledValue)
+		output, err := exec.Command("sqlite3", "-json", ":memory:", sqliteQuery).Output()
+		if err != nil {
+			t.Fatalf("iteration %d SQLite query: %v\nquery=%s", iteration, err, sqliteQuery)
+		}
+		if len(output) == 0 {
+			output = []byte("[]")
+		}
+		var want, normalized []map[string]interface{}
+		if err := json.Unmarshal(output, &want); err != nil {
+			t.Fatalf("iteration %d decode SQLite JSON: %v", iteration, err)
+		}
+		encoded, err := json.Marshal(got.Rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(encoded, &normalized); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(normalized, want) {
+			t.Fatalf("iteration %d composite-index SQLite mismatch\nhatrie_query=%s\nsqlite_query=%s\nhatrie=%#v\nsqlite=%#v", iteration, query, sqliteQuery, normalized, want)
+		}
+	}
+}
+
+func TestExecuteSQLQueryEnforcesRecursiveCTEDepthLimit(t *testing.T) {
+	t.Parallel()
+	_, err := ExecuteSQLQueryContext(context.Background(), `
+WITH RECURSIVE sequence(value) AS (
+  FROM VALUES (1) AS seed(value) SELECT value
+  UNION ALL
+  FROM sequence AS previous WHERE previous.value < 3 SELECT previous.value + 1 AS value
+)
+FROM sequence SELECT value`, SQLSourceResolverFunc(nil), SQLQueryOptions{MaxRecursionDepth: 1})
+	if err == nil || !strings.Contains(err.Error(), "recursion depth") || !strings.Contains(err.Error(), "maximum 1") {
+		t.Fatalf("recursive depth error = %v, want configured limit", err)
+	}
+}
+
+func TestExecuteSQLQueryDetectsRecursiveCTECycles(t *testing.T) {
+	t.Parallel()
+	_, err := ExecuteSQLQueryContext(context.Background(), `
+WITH RECURSIVE cycle(value) AS (
+  FROM VALUES (1) AS seed(value) SELECT value
+  UNION ALL
+  FROM cycle AS previous SELECT previous.value
+)
+FROM cycle SELECT value`, SQLSourceResolverFunc(nil), SQLQueryOptions{DetectRecursiveCycles: true})
+	if err == nil || !strings.Contains(err.Error(), "cycle") || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("recursive cycle error = %v, want cycle diagnostic", err)
+	}
+}
+
+func TestExecuteSQLQueryReusesMaterializedCTEAcrossReferences(t *testing.T) {
+	t.Parallel()
+	resolveCalls := 0
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		if name != "CACHE" || key != "people" {
+			return nil, fmt.Errorf("source = %s(%q), want CACHE(people)", name, key)
+		}
+		resolveCalls++
+		return []SQLRow{{"id": int64(1), "team": "core"}, {"id": int64(2), "team": "core"}}, nil
+	})
+	result, err := ExecuteSQLQuery(`
+WITH people AS (FROM CACHE('people') AS source SELECT source.id, source.team)
+FROM people AS left INNER JOIN people AS right ON left.team = right.team
+SELECT left.id AS left_id, right.id AS right_id
+ORDER BY left_id, right_id`, resolver)
+	if err != nil {
+		t.Fatalf("CTE reuse query error = %v", err)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("CTE source resolve calls = %d, want 1", resolveCalls)
+	}
+	want := []SQLRow{
+		{"left_id": int64(1), "right_id": int64(1)},
+		{"left_id": int64(1), "right_id": int64(2)},
+		{"left_id": int64(2), "right_id": int64(1)},
+		{"left_id": int64(2), "right_id": int64(2)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("CTE reuse rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQuerySupportsUnionAndUnionAll(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(nil)
+	union, err := ExecuteSQLQuery(`
+FROM VALUES (1), (2) AS left_values(value) SELECT value
+UNION
+FROM VALUES (2), (3) AS right_values(value) SELECT value`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(UNION) error = %v", err)
+	}
+	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(3)}}; !reflect.DeepEqual(union.Rows, want) {
+		t.Fatalf("UNION rows = %#v, want %#v", union.Rows, want)
+	}
+	all, err := ExecuteSQLQuery(`
+FROM VALUES (1), (2) AS left_values(value) SELECT value
+UNION ALL
+FROM VALUES (2), (3) AS right_values(value) SELECT value`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(UNION ALL) error = %v", err)
+	}
+	if want := []SQLRow{{"value": int64(1)}, {"value": int64(2)}, {"value": int64(2)}, {"value": int64(3)}}; !reflect.DeepEqual(all.Rows, want) {
+		t.Fatalf("UNION ALL rows = %#v, want %#v", all.Rows, want)
+	}
+	explained, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE FROM VALUES (1), (2), (2) AS left_values(value) SELECT value
+UNION
+FROM VALUES (2), (3), (3) AS right_values(value) SELECT value`, resolver)
+	if err != nil {
+		t.Fatalf("EXPLAIN ANALYZE UNION error = %v", err)
+	}
+	seenEarlyDedup := false
+	for _, step := range explained.Rows {
+		seenEarlyDedup = seenEarlyDedup || step["node"] == "SET" && strings.Contains(fmt.Sprint(step["detail"]), "early duplicate elimination")
+	}
+	if !seenEarlyDedup {
+		t.Fatalf("UNION plan = %#v, want early duplicate elimination", explained.Rows)
+	}
+	for operator, want := range map[string][]SQLRow{
+		"INTERSECT": {{"value": int64(2)}},
+		"EXCEPT":    {{"value": int64(1)}},
+	} {
+		result, err := ExecuteSQLQuery("FROM VALUES (1), (2) AS left_values(value) SELECT value "+operator+" FROM VALUES (2), (3) AS right_values(value) SELECT value", resolver)
+		if err != nil || !reflect.DeepEqual(result.Rows, want) {
+			t.Fatalf("%s result = %#v, %v; want %#v", operator, result, err, want)
+		}
+	}
+}
+
+func TestExecuteSQLQueryUnionAllDiagnosticsPointAtTheOffendingToken(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, source, message string
+		line, column          int
+	}{
+		{
+			name: "missing_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL`,
+			message: "UNION ALL requires a query after it",
+			line:    2,
+			column:  10,
+		},
+		{
+			name: "duplicate_all",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL ALL
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "ALL"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "semicolon_instead_of_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL;`,
+			message: "UNION ALL requires a query after it",
+			line:    2,
+			column:  10,
+		},
+		{
+			name: "derived_query_closes_after_all",
+			source: `FROM (
+  FROM VALUES (1) AS a(value) SELECT value
+  UNION ALL
+) AS derived
+SELECT value`,
+			message: "UNION ALL requires a query after it",
+			line:    4,
+			column:  1,
+		},
+		{
+			name: "repeated_union_operator",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL UNION
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "UNION"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "repeated_intersect_operator",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL INTERSECT
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "INTERSECT"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "repeated_except_operator",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL EXCEPT
+FROM VALUES (2) AS b(value) SELECT value`,
+			message: `unexpected "EXCEPT"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "punctuation_cannot_start_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL ,`,
+			message: `unexpected ","`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "literal_cannot_start_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL 1`,
+			message: `unexpected "1"`,
+			line:    2,
+			column:  11,
+		},
+		{
+			name: "incomplete_select_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL
+SELECT value`,
+			message: "query requires FROM",
+			line:    3,
+			column:  13,
+		},
+		{
+			name: "incomplete_from_right_query",
+			source: `FROM VALUES (1) AS a(value) SELECT value
+UNION ALL
+FROM VALUES (2) AS b(value)`,
+			message: "query requires SELECT",
+			line:    3,
+			column:  len("FROM VALUES (2) AS b(value)") + 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(test.source, SQLSourceResolverFunc(nil))
+			diagnostic, ok := err.(*SQLDiagnostic)
+			if !ok {
+				t.Fatalf("ExecuteSQLQuery() error = %T %[1]v, want SQLDiagnostic", err)
+			}
+			if !strings.Contains(diagnostic.Message, test.message) || diagnostic.Line != test.line || diagnostic.Column != test.column {
+				t.Fatalf("diagnostic = %#v, want message containing %q at %d:%d", diagnostic, test.message, test.line, test.column)
+			}
+			formatted := FormatSQLDiagnostic(test.source, err)
+			wantLocation := fmt.Sprintf("--> query:%d:%d", test.line, test.column)
+			if !strings.Contains(formatted, wantLocation) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want %q", formatted, wantLocation)
+			}
+			line := strings.Split(test.source, "\n")[test.line-1]
+			wantExcerpt := fmt.Sprintf("%d | %s\n  | %s^", test.line, line, strings.Repeat(" ", test.column-1))
+			if !strings.Contains(formatted, wantExcerpt) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want Rust-style excerpt %q", formatted, wantExcerpt)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryExplainDescribesWithoutReadingSources(t *testing.T) {
+	t.Parallel()
+	resolver := SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+		t.Fatalf("EXPLAIN unexpectedly resolved %s(%q)", name, key)
+		return nil, nil
+	})
+	result, err := ExecuteSQLQuery(`
+EXPLAIN
+FROM CACHE('must-not-be-read') AS people
+WHERE age >= 18
+SELECT name
+ORDER BY name
+LIMIT 2`, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN) error = %v", err)
+	}
+	if result.Stats != nil {
+		t.Fatalf("EXPLAIN stats = %#v, want nil without ANALYZE", result.Stats)
+	}
+	if want := []string{"node", "detail", "estimated_rows"}; !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("EXPLAIN columns = %#v, want %#v", result.Columns, want)
+	}
+	if want := []string{"SCAN", "FILTER", "PROJECT", "SORT", "LIMIT"}; len(result.Plan) != len(want) {
+		t.Fatalf("EXPLAIN plan = %#v, want %d steps", result.Plan, len(want))
+	} else {
+		for index, node := range want {
+			if result.Plan[index].Node != node {
+				t.Fatalf("EXPLAIN step %d = %#v, want node %q", index, result.Plan[index], node)
+			}
+		}
+	}
+	if len(result.Rows) != len(result.Plan) || result.Rows[0]["detail"] != `CACHE("must-not-be-read") AS people` {
+		t.Fatalf("EXPLAIN rows = %#v, want plan rows without source reads", result.Rows)
+	}
+}
+
+func TestExecuteSQLQueryExplainIdentifiesEqualityJoinCandidates(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery("EXPLAIN FROM VALUES (1) AS left_side(id) LEFT JOIN VALUES (1) AS right_side(id) ON left_side.id = right_side.id SELECT left_side.id", SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("EXPLAIN equality join: %v", err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "EQUALITY JOIN" && strings.Contains(step.Detail, "HASH JOIN") && strings.Contains(step.Detail, "LEFT JOIN") {
+			return
+		}
+	}
+	t.Fatalf("EXPLAIN equality join plan = %#v, want EQUALITY JOIN with HASH JOIN eligibility", result.Plan)
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReturnsMeasuredExecutionStats(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (3), (1), (2) AS values(value)
+WHERE value >= 2
+SELECT value
+ORDER BY value
+LIMIT 1`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN ANALYZE) error = %v", err)
+	}
+	if result.Stats == nil {
+		t.Fatal("EXPLAIN ANALYZE stats = nil")
+	}
+	if result.Stats.OutputRows != 1 || result.Stats.OutputColumns != 1 || result.Stats.ResultBytes <= 0 || result.Stats.PlanSteps != len(result.Plan) || result.Stats.ElapsedNanos < 0 {
+		t.Fatalf("EXPLAIN ANALYZE stats = %#v, plan = %#v", result.Stats, result.Plan)
+	}
+	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %#v", result.Columns, want)
+	}
+	last := result.Rows[len(result.Rows)-1]
+	if last["node"] != "ANALYZE" || last["actual_rows"] != 1 || last["elapsed_ns"] != result.Stats.ElapsedNanos {
+		t.Fatalf("EXPLAIN ANALYZE summary = %#v, stats = %#v", last, result.Stats)
+	}
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReportsOperatorByteFlow(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (1, 'discard'), (2, 'keep'), (3, 'also keep') AS values(id, label)
+WHERE id >= 2
+SELECT id, label`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("EXPLAIN ANALYZE byte flow: %v", err)
+	}
+	for _, column := range []string{"actual_input_bytes", "actual_output_bytes"} {
+		found := false
+		for _, got := range result.Columns {
+			found = found || got == column
+		}
+		if !found {
+			t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %q", result.Columns, column)
+		}
+	}
+	bytesByNode := map[string][2]int{}
+	for _, row := range result.Rows {
+		node, _ := row["node"].(string)
+		input, inputOK := row["actual_input_bytes"].(int)
+		output, outputOK := row["actual_output_bytes"].(int)
+		if inputOK && outputOK {
+			bytesByNode[node] = [2]int{input, output}
+		}
+	}
+	for _, node := range []string{"SCAN", "FILTER", "PROJECT"} {
+		flow, ok := bytesByNode[node]
+		if !ok || flow[1] <= 0 {
+			t.Fatalf("EXPLAIN ANALYZE byte flow = %#v, want non-empty %s output bytes", bytesByNode, node)
+		}
+	}
+	if scan, filter := bytesByNode["SCAN"], bytesByNode["FILTER"]; filter[0] != scan[1] || filter[1] >= filter[0] {
+		t.Fatalf("SCAN/FILTER bytes = %#v/%#v, want filter input equal scan output and fewer filtered bytes", scan, filter)
+	}
+}
+
+func TestExecuteSQLQueryExplainAnalyzeReportsPerOperatorStats(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+EXPLAIN ANALYZE
+FROM VALUES (1), (2), (3) AS left_values(id)
+INNER JOIN VALUES (2), (3), (4) AS right_values(id) ON left_values.id = right_values.id
+WHERE left_values.id >= 2
+SELECT COUNT(*) AS total
+ORDER BY total DESC
+LIMIT 1
+UNION ALL
+FROM VALUES (9) AS trailing(id)
+SELECT 1 AS total`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN ANALYZE) error = %v", err)
+	}
+	if result.Stats == nil || result.Stats.OutputRows != 2 {
+		t.Fatalf("EXPLAIN ANALYZE stats = %#v, want two output rows", result.Stats)
+	}
+	for _, node := range []string{"SCAN", "HASH JOIN", "FILTER", "AGGREGATE", "PROJECT", "SORT", "LIMIT", "SET"} {
+		var step *SQLExplainStep
+		for index := range result.Plan {
+			if result.Plan[index].Node == node {
+				step = &result.Plan[index]
+				break
+			}
+		}
+		if step == nil {
+			t.Fatalf("EXPLAIN ANALYZE plan = %#v, missing %s", result.Plan, node)
+		}
+		if step.ActualInputRows == nil || step.ActualOutputRows == nil || step.ElapsedNanos == nil {
+			t.Fatalf("EXPLAIN ANALYZE %s step = %#v, want input rows, output rows, and elapsed ns", node, step)
+		}
+	}
+	for _, want := range []struct {
+		node          string
+		input, output int
+	}{
+		{"HASH JOIN", 5, 2},
+		{"FILTER", 3, 2},
+		{"AGGREGATE", 2, 1},
+		{"SORT", 1, 1},
+		{"LIMIT", 1, 1},
+		{"SET", 2, 2},
+	} {
+		for _, step := range result.Plan {
+			if step.Node == want.node && step.ActualInputRows != nil && step.ActualOutputRows != nil && *step.ActualInputRows == want.input && *step.ActualOutputRows == want.output {
+				goto found
+			}
+		}
+		t.Fatalf("EXPLAIN ANALYZE plan = %#v, missing %s %d→%d", result.Plan, want.node, want.input, want.output)
+	found:
+	}
+}
+
+func TestExecuteSQLQueryExplainDiagnosticsPointAtTheOffendingToken(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, source, message string
+		line, column          int
+	}{
+		{"missing_query", "EXPLAIN", "EXPLAIN requires a query after it", 1, 8},
+		{"semicolon_instead_of_query", "EXPLAIN ;", "EXPLAIN requires a query after it", 1, 9},
+		{"analyze_missing_query", "EXPLAIN ANALYZE", "EXPLAIN ANALYZE requires a query after it", 1, 16},
+		{"repeated_analyze", "EXPLAIN ANALYZE ANALYZE FROM VALUES (1) AS a(value) SELECT value", `unexpected "ANALYZE"`, 1, 17},
+		{"from_without_select", "EXPLAIN FROM VALUES (1) AS a(value)", "query requires SELECT", 1, len("EXPLAIN FROM VALUES (1) AS a(value)") + 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(test.source, SQLSourceResolverFunc(nil))
+			diagnostic, ok := err.(*SQLDiagnostic)
+			if !ok {
+				t.Fatalf("ExecuteSQLQuery() error = %T %[1]v, want SQLDiagnostic", err)
+			}
+			if !strings.Contains(diagnostic.Message, test.message) || diagnostic.Line != test.line || diagnostic.Column != test.column {
+				t.Fatalf("diagnostic = %#v, want message containing %q at %d:%d", diagnostic, test.message, test.line, test.column)
+			}
+			formatted := FormatSQLDiagnostic(test.source, err)
+			wantLocation := fmt.Sprintf("--> query:%d:%d", test.line, test.column)
+			if !strings.Contains(formatted, wantLocation) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want %q", formatted, wantLocation)
+			}
+			line := strings.Split(test.source, "\n")[test.line-1]
+			wantExcerpt := fmt.Sprintf("%d | %s\n  | %s^", test.line, line, strings.Repeat(" ", test.column-1))
+			if !strings.Contains(formatted, wantExcerpt) {
+				t.Fatalf("FormatSQLDiagnostic() = %q, want Rust-style excerpt %q", formatted, wantExcerpt)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySupportsDerivedTableSubqueries(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM (
+  FROM VALUES ('a', 2), ('b', 5), ('c', 9) AS values(label, score)
+  WHERE score >= 5
+  SELECT label, score * 2 AS doubled
+) AS filtered
+WHERE doubled < 15
+SELECT label, doubled`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(derived table) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"label", "doubled"}, Rows: []SQLRow{{"label": "b", "doubled": int64(10)}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("derived-table result = %#v, want %#v", result, want)
+	}
+}
+
+func TestExecuteSQLQueryAggregateLimitOffsetAndNullMatrix(t *testing.T) {
+	t.Parallel()
+
+	result, err := ExecuteSQLQuery(`
+WITH data (team, score, note) AS (
+  VALUES ('a', 2, NULL), ('a', 4, 'x'), ('b', 3, 'y'), ('b', 9, 'z')
+)
+SELECT team, COUNT(score) AS n, SUM(score) AS total, AVG(score) AS avg, MIN(score) AS min, MAX(score) AS max
+FROM data
+WHERE note IS NULL OR note LIKE '%x%'
+GROUP BY team
+HAVING COUNT(*) >= 1
+ORDER BY total DESC
+LIMIT 1 OFFSET 0`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"team", "n", "total", "avg", "min", "max"}, Rows: []SQLRow{{
+		"team": "a", "n": int64(2), "total": float64(6), "avg": float64(3), "min": float64(2), "max": float64(4),
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("aggregate result = %#v, want %#v", result, want)
+	}
+}
+
+func TestHatTrieSQLSourceDataTypeMatrix(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("object", `{"name":"Ada","active":true,"age":37}`)
+	trie.UpsertString("array", `[{"name":"Ada"},{"name":"Lin","active":false}]`)
+	trie.UpsertString("scalar", `42`)
+	object, err := trie.ResolveSQLSource("CACHE", "object")
+	if err != nil || len(object) != 1 || object[0]["name"] != "Ada" || object[0]["active"] != true {
+		t.Fatalf("object source = %#v, %v", object, err)
+	}
+	array, err := trie.ResolveSQLSource("CACHE", "array")
+	if err != nil || len(array) != 2 || array[1]["active"] != false {
+		t.Fatalf("array source = %#v, %v", array, err)
+	}
+	if _, err := trie.ResolveSQLSource("CACHE", "scalar"); err == nil {
+		t.Fatal("scalar CACHE source error = nil, want JSON row-shape diagnostic")
+	}
+	keys, err := trie.ResolveSQLSource("KEYS", "")
+	if err != nil || len(keys) < 3 {
+		t.Fatalf("KEYS source = %#v, %v", keys, err)
+	}
+	for _, field := range []string{"key", "type", "ttl_ms", "on_disk", "size_bytes", "value_preview"} {
+		if _, ok := keys[0][field]; !ok {
+			t.Fatalf("KEYS row missing %q: %#v", field, keys[0])
+		}
+	}
+	if _, err := trie.ResolveSQLSource("UNKNOWN", ""); err == nil {
+		t.Fatal("unknown SQL source error = nil")
+	}
+}
+
+func TestExecuteSQLQueryCastsTypedValuesAndDiagnosesDynamicFailures(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('42', '2026-08-22', '2026-08-22T09:00:00Z', 1) AS values(raw_number, raw_date, raw_timestamp, raw_boolean)
+SELECT CAST(raw_number AS NUMBER) AS number_value,
+       CAST(raw_date AS DATE) AS date_value,
+       CAST(raw_timestamp AS TIMESTAMP) AS timestamp_value,
+       CAST(raw_boolean AS BOOLEAN) AS boolean_value`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(CAST) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"number_value", "date_value", "timestamp_value", "boolean_value"}, Rows: []SQLRow{{
+		"number_value": float64(42), "date_value": sqlDate("2026-08-22"),
+		"timestamp_value": mustSQLTimestamp(t, "2026-08-22T09:00:00Z"), "boolean_value": true,
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("CAST result = %#v, want %#v", result, want)
+	}
+
+	invalidCastQuery := "FROM VALUES ('not-a-number') AS values(raw) SELECT CAST(raw AS NUMBER)"
+	_, err = ExecuteSQLQuery(invalidCastQuery, SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "CAST cannot convert TEXT value") || !strings.Contains(err.Error(), "NUMBER") {
+		t.Fatalf("invalid dynamic CAST error = %v, want clear TEXT-to-NUMBER diagnostic", err)
+	}
+	diagnostic, ok := err.(*SQLDiagnostic)
+	if !ok || diagnostic.Line != 1 || diagnostic.Column != strings.Index(invalidCastQuery, "CAST")+1 {
+		t.Fatalf("invalid dynamic CAST diagnostic = %#v, want a source span at CAST", err)
+	}
+	if formatted := FormatSQLDiagnostic(invalidCastQuery, err); !strings.Contains(formatted, "error: CAST cannot convert TEXT value") || !strings.Contains(formatted, "--> query:1:") || !strings.Contains(formatted, "^") {
+		t.Fatalf("invalid dynamic CAST formatted diagnostic = %q, want Rust-style source excerpt", formatted)
+	}
+	_, err = ExecuteSQLQuery("FROM VALUES ('1') AS values(raw) SELECT CAST(raw AS BOOLEAN)", SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "CAST cannot convert TEXT value") || !strings.Contains(err.Error(), "BOOLEAN") {
+		t.Fatalf("ambiguous text-to-BOOLEAN CAST error = %v, want strict true/false diagnostic", err)
+	}
+
+	for name, query := range map[string]string{
+		"where":    "FROM VALUES ('not-a-number') AS values(raw) WHERE CAST(raw AS NUMBER) > 0 SELECT raw",
+		"is null":  "FROM VALUES ('not-a-number') AS values(raw) WHERE CAST(raw AS NUMBER) IS NULL SELECT raw",
+		"having":   "FROM VALUES ('not-a-number') AS values(raw) SELECT COUNT(*) HAVING CAST(raw AS NUMBER) > 0",
+		"group by": "FROM VALUES ('not-a-number') AS values(raw) GROUP BY CAST(raw AS NUMBER) SELECT COUNT(*)",
+		"order by": "FROM VALUES ('not-a-number') AS values(raw) SELECT raw ORDER BY CAST(raw AS NUMBER)",
+		"join on":  "FROM VALUES ('not-a-number') AS left_values(raw) INNER JOIN VALUES (1) AS right_values(id) ON CAST(left_values.raw AS NUMBER) = right_values.id SELECT right_values.id",
+		"window":   "FROM VALUES ('not-a-number') AS values(raw) SELECT ROW_NUMBER() OVER (ORDER BY CAST(raw AS NUMBER))",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ExecuteSQLQuery(query, SQLSourceResolverFunc(nil))
+			if err == nil || !strings.Contains(err.Error(), "CAST cannot convert TEXT value") {
+				t.Fatalf("%s dynamic CAST error = %v, want clear diagnostic", name, err)
+			}
+		})
+	}
+}
+
+func TestSQLCastSyntaxDiagnosticsIdentifyTheFault(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		source, want string
+	}{
+		{"FROM VALUES ('42') AS values(raw) SELECT CAST(raw NUMBER)", "expected AS"},
+		{"FROM VALUES ('42') AS values(raw) SELECT CAST(raw AS MONEY)", "unsupported CAST target"},
+		{"FROM VALUES ('42') AS values(raw) SELECT CAST(raw AS NUMBER", "expected )"},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			err := ValidateSQLQuery(test.source)
+			diagnostic, ok := err.(*SQLDiagnostic)
+			if !ok || !strings.Contains(diagnostic.Message, test.want) || diagnostic.Line != 1 || diagnostic.Column < 1 {
+				t.Fatalf("ValidateSQLQuery() error = %#v, want source-spanned diagnostic containing %q", err, test.want)
+			}
+			if formatted := FormatSQLDiagnostic(test.source, err); !strings.Contains(formatted, "--> query:1:") || !strings.Contains(formatted, "^") {
+				t.Fatalf("formatted CAST syntax diagnostic = %q, want Rust-style source excerpt", formatted)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryPreservesExactDecimalValues(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES ('2.30'), ('10.01'), ('2.3') AS values(raw)
+WHERE CAST(raw AS DECIMAL) < DECIMAL '3.00'
+SELECT CAST(raw AS DECIMAL) AS value
+ORDER BY CAST(raw AS DECIMAL)`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(DECIMAL) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"value"}, Rows: []SQLRow{{"value": sqlDecimal("2.30")}, {"value": sqlDecimal("2.3")}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("DECIMAL CAST result = %#v, want %#v", result, want)
+	}
+
+	result, err = ExecuteSQLQuery("FROM VALUES (DECIMAL '9007199254740993.000000000000000001') AS values(value) WHERE value > DECIMAL '9007199254740993' SELECT value", SQLSourceResolverFunc(nil))
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"value": sqlDecimal("9007199254740993.000000000000000001")}}) {
+		t.Fatalf("exact DECIMAL comparison = %#v, %v", result, err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsUUIDDurationAndBinaryValues(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES
+  (UUID '9F315BA2-1729-4C73-92F7-C3E046F8EAE3', DURATION '2h3m4s', BINARY 'Ynl0ZXM='),
+  (UUID '00000000-0000-4000-8000-000000000001', DURATION '1s', BINARY 'YQ==')
+AS values(id, elapsed, payload)
+WHERE id = UUID '9f315ba2-1729-4c73-92f7-c3e046f8eae3'
+  AND elapsed > DURATION '2h'
+  AND payload = BINARY 'Ynl0ZXM='
+SELECT id, elapsed, payload,
+       CAST(id AS TEXT) AS id_text,
+       CAST(elapsed AS TEXT) AS elapsed_text,
+       CAST(payload AS TEXT) AS payload_text`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(extended values) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "elapsed", "payload", "id_text", "elapsed_text", "payload_text"}, Rows: []SQLRow{{
+		"id": sqlUUID("9f315ba2-1729-4c73-92f7-c3e046f8eae3"), "elapsed": sqlDuration((2*time.Hour + 3*time.Minute + 4*time.Second).String()), "payload": []byte("bytes"),
+		"id_text": "9f315ba2-1729-4c73-92f7-c3e046f8eae3", "elapsed_text": "2h3m4s", "payload_text": "Ynl0ZXM=",
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("extended value result = %#v, want %#v", result, want)
+	}
+
+	for name, query := range map[string]string{
+		"UUID":     "FROM VALUES (UUID 'not-a-uuid') AS values(value) SELECT value",
+		"DURATION": "FROM VALUES (DURATION 'tomorrow') AS values(value) SELECT value",
+		"BINARY":   "FROM VALUES (BINARY 'not base64') AS values(value) SELECT value",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateSQLQuery(query); err == nil {
+				t.Fatalf("ValidateSQLQuery(%s) error = nil", name)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQueryUnicodeCaseInsensitiveCollation(t *testing.T) {
+	t.Parallel()
+	options := SQLQueryOptions{Collation: SQLCollationUnicodeCI}
+	result, err := ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('Cafe\u0301'), ('B'), ('a') AS values(name) WHERE name IN ('CAFÉ') OR name LIKE 'CAFÉ' SELECT name", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation predicate error = %v", err)
+	}
+	if want := []SQLRow{{"name": "Cafe\u0301"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation predicate rows = %#v, want %#v", result.Rows, want)
+	}
+
+	result, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('B'), ('a') AS values(name) SELECT name ORDER BY name", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation order error = %v", err)
+	}
+	if want := []SQLRow{{"name": "a"}, {"name": "B"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation order rows = %#v, want %#v", result.Rows, want)
+	}
+
+	binaryResult, err := ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('B'), ('a') AS values(name) SELECT name ORDER BY name", SQLSourceResolverFunc(nil), SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("binary collation order error = %v", err)
+	}
+	if want := []SQLRow{{"name": "B"}, {"name": "a"}}; !reflect.DeepEqual(binaryResult.Rows, want) {
+		t.Fatalf("binary collation order rows = %#v, want %#v", binaryResult.Rows, want)
+	}
+
+	result, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('CAFÉ'), ('Cafe\u0301') AS values(name) GROUP BY name SELECT name, COUNT(*) AS total", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation group error = %v", err)
+	}
+	if want := []SQLRow{{"name": "CAFÉ", "total": int64(2)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation group rows = %#v, want %#v", result.Rows, want)
+	}
+
+	result, err = ExecuteSQLQueryContext(context.Background(), "FROM VALUES ('CAFÉ') AS left_values(name) INNER JOIN VALUES ('Cafe\u0301') AS right_values(name) ON left_values.name = right_values.name SELECT left_values.name", SQLSourceResolverFunc(nil), options)
+	if err != nil {
+		t.Fatalf("unicode collation join error = %v", err)
+	}
+	if want := []SQLRow{{"name": "CAFÉ"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("unicode collation join rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQueryUnicodeCollationDeduplicatesDistinctAndSets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, query string
+		want        []SQLRow
+	}{
+		{
+			name:  "distinct",
+			query: "FROM VALUES ('CAFÉ'), ('Cafe\u0301') AS values(name) SELECT DISTINCT name",
+			want:  []SQLRow{{"name": "CAFÉ"}},
+		},
+		{
+			name:  "union",
+			query: "FROM VALUES ('CAFÉ') AS left_values(name) SELECT name UNION FROM VALUES ('Cafe\u0301') AS right_values(name) SELECT name",
+			want:  []SQLRow{{"name": "CAFÉ"}},
+		},
+		{
+			name:  "intersect",
+			query: "FROM VALUES ('CAFÉ') AS left_values(name) SELECT name INTERSECT FROM VALUES ('Cafe\u0301') AS right_values(name) SELECT name",
+			want:  []SQLRow{{"name": "CAFÉ"}},
+		},
+		{
+			name:  "except",
+			query: "FROM VALUES ('CAFÉ') AS left_values(name) SELECT name EXCEPT FROM VALUES ('Cafe\u0301') AS right_values(name) SELECT name",
+			want:  []SQLRow{},
+		},
+	}
+	for _, mode := range []struct {
+		name    string
+		options SQLQueryOptions
+	}{
+		{name: "memory", options: SQLQueryOptions{Collation: SQLCollationUnicodeCI}},
+		{name: "spill", options: SQLQueryOptions{Collation: SQLCollationUnicodeCI, MaxSetBytes: 1, SpillDirectory: t.TempDir(), MaxSpillBytes: 1 << 20}},
+	} {
+		for _, test := range tests {
+			t.Run(mode.name+"/"+test.name, func(t *testing.T) {
+				result, err := ExecuteSQLQueryContext(context.Background(), test.query, SQLSourceResolverFunc(nil), mode.options)
+				if err != nil {
+					t.Fatalf("unicode collation %s: %v", test.name, err)
+				}
+				if !reflect.DeepEqual(result.Rows, test.want) {
+					t.Fatalf("unicode collation %s rows = %#v, want %#v", test.name, result.Rows, test.want)
+				}
+			})
+		}
+	}
+	for _, test := range tests {
+		t.Run("streamed-spill/"+test.name, func(t *testing.T) {
+			rows := []SQLRow{}
+			err := ExecuteSQLQueryRows(context.Background(), test.query, SQLSourceResolverFunc(nil), nil, SQLQueryOptions{
+				Collation:      SQLCollationUnicodeCI,
+				MaxSetBytes:    1,
+				SpillDirectory: t.TempDir(),
+				MaxSpillBytes:  1 << 20,
+			}, func(_ []string, row SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("streamed unicode collation %s: %v", test.name, err)
+			}
+			if !reflect.DeepEqual(rows, test.want) {
+				t.Fatalf("streamed unicode collation %s rows = %#v, want %#v", test.name, rows, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteSQLQuerySpillFaultInjectionCleansTemporaryFiles(t *testing.T) {
+	t.Parallel()
+	query := "FROM VALUES (3), (1), (2) AS values(id) SELECT id ORDER BY id"
+	for name, configure := range map[string]func(*SQLSpillFaults, context.CancelFunc){
+		"disk full": func(faults *SQLSpillFaults, _ context.CancelFunc) {
+			faults.BeforeCreate = func(kind string) error {
+				if kind == "sort" {
+					return syscall.ENOSPC
+				}
+				return nil
+			}
+		},
+		"interrupted write": func(faults *SQLSpillFaults, _ context.CancelFunc) {
+			faults.BeforeWrite = func(kind string, _ int) error {
+				if kind == "sort" {
+					return io.ErrUnexpectedEOF
+				}
+				return nil
+			}
+		},
+		"corrupt file": func(faults *SQLSpillFaults, _ context.CancelFunc) {
+			faults.BeforeRead = func(kind, path string) error {
+				if kind == "sort" {
+					return os.WriteFile(path, []byte("corrupt spill data"), 0o600)
+				}
+				return nil
+			}
+		},
+		"cancellation": func(faults *SQLSpillFaults, cancel context.CancelFunc) {
+			writes := 0
+			faults.BeforeWrite = func(kind string, _ int) error {
+				if kind == "sort" {
+					writes++
+					if writes == 1 {
+						cancel()
+					}
+				}
+				return nil
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			faults := &SQLSpillFaults{}
+			configure(faults, cancel)
+			_, err := ExecuteSQLQueryContext(ctx, query, SQLSourceResolverFunc(nil), SQLQueryOptions{
+				MaxSortBytes:   1,
+				SpillDirectory: directory,
+				MaxSpillBytes:  1 << 20,
+				SpillFaults:    faults,
+			})
+			if err == nil {
+				t.Fatal("ExecuteSQLQueryContext(spill fault) error = nil")
+			}
+			switch name {
+			case "disk full":
+				if !errors.Is(err, syscall.ENOSPC) {
+					t.Fatalf("disk-full error = %v, want ENOSPC", err)
+				}
+			case "interrupted write":
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("interrupted-write error = %v, want unexpected EOF", err)
+				}
+			case "corrupt file":
+				if !strings.Contains(err.Error(), "read SQL sort spill file") {
+					t.Fatalf("corrupt-spill error = %v, want read diagnostic", err)
+				}
+			case "cancellation":
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled spill error = %v, want context.Canceled", err)
+				}
+			}
+			entries, readErr := os.ReadDir(directory)
+			if readErr != nil || len(entries) != 0 {
+				t.Fatalf("spill fault cleanup entries = %#v, %v; want no files", entries, readErr)
+			}
+		})
+	}
+}
+
+func TestHatTrieSQLTypedJSONFieldsSupportUUIDDurationAndBinary(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("sessions", `[{"id":"9F315BA2-1729-4C73-92F7-C3E046F8EAE3","elapsed":"2h3m4s","payload":"Ynl0ZXM="}]`)
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('sessions') AS sessions(id UUID, elapsed DURATION, payload BINARY)
+WHERE elapsed >= DURATION '2h'
+SELECT id, elapsed, payload`, trie)
+	if err != nil {
+		t.Fatalf("typed extended CACHE query error = %v", err)
+	}
+	want := []SQLRow{{
+		"id": sqlUUID("9f315ba2-1729-4c73-92f7-c3e046f8eae3"), "elapsed": sqlDuration((2*time.Hour + 3*time.Minute + 4*time.Second).String()), "payload": []byte("bytes"),
+	}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("typed extended CACHE result = %#v, want %#v", result.Rows, want)
+	}
+
+	prepared, err := PrepareSQLQuery("FROM VALUES ($1, $2, $3) AS values(id, elapsed, payload) SELECT id, elapsed, payload", []SQLParameterSpec{
+		{Type: SQLParameterUUID}, {Type: SQLParameterDuration}, {Type: SQLParameterBinary},
+	}, nil)
+	if err != nil {
+		t.Fatalf("PrepareSQLQuery(extended parameters) error = %v", err)
+	}
+	result, err = prepared.Execute(context.Background(), SQLSourceResolverFunc(nil), []interface{}{"9F315BA2-1729-4C73-92F7-C3E046F8EAE3", "2h3m4s", "Ynl0ZXM="}, SQLQueryOptions{})
+	if err != nil || !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("prepared extended value result = %#v, %v; want %#v", result.Rows, err, want)
+	}
+}
+
+func TestHatTrieSQLTypedJSONFieldsValidateAndConvertRows(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("users", `[{"id":1,"active":true,"name":"Ivi","score":1.5,"joined_on":"2026-08-22","changed_at":"2026-08-22T09:00:00Z","balance":"9007199254740993.000000000000000001","extra":{"source":"import"}}]`)
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('users') AS users(id INTEGER, active BOOLEAN, name TEXT, score NUMBER, joined_on DATE, changed_at TIMESTAMP, balance DECIMAL, extra JSON)
+WHERE users.joined_on = DATE '2026-08-22'
+SELECT users.id, users.active, users.name, users.score, users.joined_on, users.changed_at, users.balance, users.extra`, trie)
+	if err != nil {
+		t.Fatalf("typed CACHE query error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "active", "name", "score", "joined_on", "changed_at", "balance", "extra"}, Rows: []SQLRow{{
+		"id": int64(1), "active": true, "name": "Ivi", "score": float64(1.5), "joined_on": sqlDate("2026-08-22"),
+		"changed_at": mustSQLTimestamp(t, "2026-08-22T09:00:00Z"), "balance": sqlDecimal("9007199254740993.000000000000000001"), "extra": map[string]interface{}{"source": "import"},
+	}}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("typed CACHE result = %#v, want %#v", result, want)
+	}
+
+	trie.UpsertString("users", `[{"id":1},{"id":"not-an-integer"}]`)
+	invalidQuery := "FROM CACHE('users') AS users(id INTEGER) SELECT users.id"
+	_, err = ExecuteSQLQuery(invalidQuery, trie)
+	diagnostic, ok := err.(*SQLDiagnostic)
+	if !ok || !strings.Contains(diagnostic.Message, `CACHE("users") row 2 field "id" expects INTEGER, got TEXT`) || diagnostic.Column != strings.Index(invalidQuery, "INTEGER")+1 {
+		t.Fatalf("typed JSON field diagnostic = %#v, want source-spanned row/field/type error", err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsRowsWindowFramesAndMovingAggregates(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES (1, 10), (2, 20), (3, 30) AS values(id, amount)
+SELECT id,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS moving_sum,
+       AVG(amount) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS forward_avg,
+       MIN(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS local_min,
+       MAX(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS local_max
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(ROWS frame) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "moving_sum", "forward_avg", "local_min", "local_max"}, Rows: []SQLRow{
+		{"id": int64(1), "moving_sum": float64(10), "forward_avg": float64(15), "local_min": float64(10), "local_max": float64(20)},
+		{"id": int64(2), "moving_sum": float64(30), "forward_avg": float64(25), "local_min": float64(10), "local_max": float64(30)},
+		{"id": int64(3), "moving_sum": float64(50), "forward_avg": float64(30), "local_min": float64(20), "local_max": float64(30)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("ROWS frame result = %#v, want %#v", result, want)
+	}
+	invalidFrame := "FROM VALUES (1) AS values(value) SELECT SUM(value) OVER (ORDER BY value ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW)"
+	err = ValidateSQLQuery(invalidFrame)
+	diagnostic, ok := err.(*SQLDiagnostic)
+	if !ok || !strings.Contains(diagnostic.Message, "ROWS frame start must not follow its end") || diagnostic.Column < 1 {
+		t.Fatalf("invalid ROWS frame diagnostic = %#v, want source-spanned ordering error", err)
+	}
+}
+
+func TestExecuteSQLQuerySupportsRangeWindowFrames(t *testing.T) {
+	t.Parallel()
+	result, err := ExecuteSQLQuery(`
+FROM VALUES (1, 10), (2, 20), (4, 40) AS values(id, amount)
+SELECT id,
+       SUM(amount) OVER (ORDER BY id RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS nearby_sum
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(RANGE frame) error = %v", err)
+	}
+	want := SQLQueryResult{Columns: []string{"id", "nearby_sum"}, Rows: []SQLRow{
+		{"id": int64(1), "nearby_sum": float64(30)},
+		{"id": int64(2), "nearby_sum": float64(30)},
+		{"id": int64(4), "nearby_sum": float64(40)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("RANGE frame result = %#v, want %#v", result, want)
+	}
+
+	result, err = ExecuteSQLQuery(`
+FROM VALUES (1, 10), (1, 20), (2, 30) AS values(id, amount)
+SELECT id, SUM(amount) OVER (ORDER BY id RANGE BETWEEN CURRENT ROW AND CURRENT ROW) AS peer_sum
+ORDER BY id, amount`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(RANGE peer frame) error = %v", err)
+	}
+	want = SQLQueryResult{Columns: []string{"id", "peer_sum"}, Rows: []SQLRow{
+		{"id": int64(1), "peer_sum": float64(30)},
+		{"id": int64(1), "peer_sum": float64(30)},
+		{"id": int64(2), "peer_sum": float64(30)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("RANGE peer frame result = %#v, want %#v", result, want)
+	}
+
+	result, err = ExecuteSQLQuery(`
+FROM VALUES (1, 10), (2, 20), (4, 40) AS values(id, amount)
+SELECT id,
+       SUM(amount) OVER (ORDER BY id DESC RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS nearby_sum
+ORDER BY id`, SQLSourceResolverFunc(nil))
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(descending RANGE frame) error = %v", err)
+	}
+	want = SQLQueryResult{Columns: []string{"id", "nearby_sum"}, Rows: []SQLRow{
+		{"id": int64(1), "nearby_sum": float64(30)},
+		{"id": int64(2), "nearby_sum": float64(30)},
+		{"id": int64(4), "nearby_sum": float64(40)},
+	}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("descending RANGE frame result = %#v, want %#v", result, want)
+	}
+
+	_, err = ExecuteSQLQuery(`
+FROM VALUES (1, 1, 10) AS values(left_id, right_id, amount)
+SELECT SUM(amount) OVER (ORDER BY left_id, right_id RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS total`, SQLSourceResolverFunc(nil))
+	if err == nil || !strings.Contains(err.Error(), "RANGE frame requires exactly one ORDER BY expression") {
+		t.Fatalf("multi-column RANGE error = %v, want one-order diagnostic", err)
+	}
+}
+
+func mustSQLTimestamp(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+func TestHatrieTypesShareOneLogicalKeyNamespace(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	if err := trie.PutMapChecked("shared", "field", "map value"); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := trie.AddSetChecked("shared", "set member"); err != nil || added != 1 {
+		t.Fatalf("AddSetChecked() = (%d, %v), want (1, nil)", added, err)
+	}
+	if got := trie.GetMap("shared"); len(got) != 0 {
+		t.Fatalf("GetMap(shared) = %#v, want replaced map to be absent", got)
+	}
+	if got := trie.GetSet("shared"); len(got) != 1 || got[0] != "set member" {
+		t.Fatalf("GetSet(shared) = %#v, want set member", got)
+	}
+}
+
+func TestExecuteSQLQueryProductionRejectsStructuralErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{
+		"SELECT column1 FROM VALUES (1) SELECT column1",
+		"FROM VALUES (1) AS a JOIN VALUES (1) AS b SELECT *",
+		"FROM VALUES (1) AS a SELECT column1 LIMIT 1 LIMIT 1",
+		"FROM VALUES (1) AS a WHERE column1 = 1 WHERE column1 = 1 SELECT column1",
+	} {
+		if _, err := ExecuteSQLQuery(source, SQLSourceResolverFunc(nil)); err == nil {
+			t.Fatalf("ExecuteSQLQuery(%q) error = nil, want structural rejection", source)
+		}
+	}
+}
+
+func TestMonitoringSQLRoutesRejectMalformedRequests(t *testing.T) {
+	t.Parallel()
+
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()
+	for _, test := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodGet, "/api/sql", "", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/api/sql", "{", http.StatusBadRequest},
+		{http.MethodPost, "/api/sql", `{}`, http.StatusBadRequest},
+		{http.MethodGet, "/api/sql/functions", "", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/api/sql/functions", "{", http.StatusBadRequest},
+		{http.MethodPost, "/api/sql/functions", `{"name":"bad","arguments":["value"],"argument_types":["BOGUS"],"language":"LUA","source":"return value"}`, http.StatusBadRequest},
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+		handler.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("%s %s status = %d, want %d: %s", test.method, test.path, response.Code, test.want, response.Body.String())
+		}
+	}
+}
+
+func FuzzSQLParsersDoNotPanic(f *testing.F) {
+	for _, seed := range []string{
+		"SELECT value FROM cache WHERE key = 'x'",
+		"FROM VALUES (1) AS a SELECT column1",
+		"CALL SETSTR(key => 'x', value => 'y')",
+		"CREATE FUNCTION f(x INTEGER) LANGUAGE GO AS 'return x > 0'",
+		"'\\\"; SELECT *",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, source string) {
+		_, _ = CompileSQL(source)
+		_ = ValidateSQLQuery(source)
+		_, _ = CompileSQLFunction(source)
+	})
+}
+
+func FuzzExecuteSQLQueryDoesNotPanic(f *testing.F) {
+	for _, seed := range []string{
+		"FROM VALUES (1), (2) AS t(value) SELECT DISTINCT value",
+		"FROM VALUES (1) AS a(id) FULL JOIN VALUES (2) AS b(id) ON a.id = b.id SELECT a.id, b.id",
+		"FROM VALUES (1) AS a(value) SELECT value UNION FROM VALUES (1) AS b(value) SELECT value",
+		"FROM (FROM VALUES (1) AS a(value) SELECT value) AS derived SELECT value",
+		"SELECT FROM VALUES (1) AS a(value)",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, source string) {
+		_, _ = ExecuteSQLQuery(source, SQLSourceResolverFunc(func(name, key string) ([]SQLRow, error) {
+			if name == "CACHE" {
+				return []SQLRow{{"id": int64(1), "value": "seed"}}, nil
+			}
+			return nil, nil
+		}))
+	})
+}
+
+func FuzzSQLUDFDiagnosticsDoNotPanic(f *testing.F) {
+	for _, seed := range []struct{ source, message string }{
+		{"CREATE FUNCTION positive(value INTEGER) LANGUAGE GO AS 'return value > 0'", "runtime failure"},
+		{"CREATE FUNCTION text(value TEXT) LANGUAGE GO AS 'return value == value'", "unexpected type"},
+		{"CREATE FUNCTION malformed(value INTEGER) LANGUAGE GO AS 'return value'", "failed\nwith detail"},
+	} {
+		f.Add(seed.source, seed.message)
+	}
+	f.Fuzz(func(t *testing.T, source string, message string) {
+		definition, err := CompileSQLFunction(source)
+		if err != nil {
+			return
+		}
+		_ = FormatSQLFunctionDiagnostic(definition, errors.New(message))
+	})
+}

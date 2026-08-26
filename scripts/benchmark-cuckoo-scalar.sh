@@ -5,7 +5,7 @@ benchmark=${CUCKOO_SCALAR_BENCH:-^BenchmarkCuckooFilter(ScalarAddChecked|AddChec
 benchtime=${BENCHTIME:-1s}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

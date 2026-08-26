@@ -8,7 +8,7 @@ count=${COUNT:-7}
 output="$artifact_dir/scalar-native-batch.txt"
 
 mkdir -p "$artifact_dir"
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

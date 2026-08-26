@@ -14,7 +14,7 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-go test -c -o "$binary" .
+go test -c -o "$binary" ./hat/hatCache
 
 printf 'HAT-trie transport benchmark: bench=%s benchtime=%s count=%s\n\n' "$bench" "${benchtime:-default}" "$count"
 

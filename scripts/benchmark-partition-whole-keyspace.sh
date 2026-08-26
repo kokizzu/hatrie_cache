@@ -11,7 +11,7 @@ output="$artifact_dir/partition-whole-keyspace.txt"
 mkdir -p "$artifact_dir"
 echo "Partition whole-keyspace benchmark: bench=$benchmark keys=$keys benchtime=$benchtime count=$count"
 echo
-HATRIE_PARTITION_SCAN_BENCH_KEYS="$keys" go test . \
+HATRIE_PARTITION_SCAN_BENCH_KEYS="$keys" go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

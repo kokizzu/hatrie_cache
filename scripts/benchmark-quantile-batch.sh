@@ -11,7 +11,7 @@ candidate_binary=${QUANTILE_BATCH_CANDIDATE_BINARY:-}
 benchtime=${BENCHTIME:-500ms}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$path_benchmark" \
 	-benchmem \
@@ -19,7 +19,7 @@ go test . \
 	-count="$count" \
 	-cpu=1
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$alternating_benchmark" \
 	-benchtime="$alternating_benchtime" \

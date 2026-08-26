@@ -14,7 +14,7 @@ echo "Partition snapshot benchmark: bench=$benchmark keys=$keys partitions=$part
 echo
 HATRIE_BIG_WINS_KEYS="$keys" \
 HATRIE_BIG_WINS_SNAPSHOT_PARTITIONS="$partitions" \
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

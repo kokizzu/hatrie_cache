@@ -11,7 +11,7 @@ output="$artifact_dir/single-pass-atomic-restore.txt"
 mkdir -p "$artifact_dir"
 echo "Atomic restore benchmark: bench=$benchmark keys=$keys benchtime=$benchtime count=$count"
 echo
-HATRIE_BACKUP_BENCH_KEYS="$keys" go test . \
+HATRIE_BACKUP_BENCH_KEYS="$keys" go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

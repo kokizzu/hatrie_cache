@@ -9,7 +9,7 @@ count=${COUNT:-7}
 output="$artifact_dir/string-storage.txt"
 
 mkdir -p "$artifact_dir"
-HATRIE_STRING_STORAGE_KEYS="$keys" go test . \
+HATRIE_STRING_STORAGE_KEYS="$keys" go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

@@ -5,7 +5,7 @@ benchmark=${TOP_K_SCALAR_BENCH:-^BenchmarkTopKGenericScalarDispatch}
 benchtime=${BENCHTIME:-1s}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

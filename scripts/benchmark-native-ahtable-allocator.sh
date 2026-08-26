@@ -13,12 +13,12 @@ trap 'rm -f "$binary"' EXIT HUP INT TERM
 
 mkdir -p "$artifact_dir"
 gcc -O3 -std=c99 -Wall -Wextra \
-	-I"$root/luikore__hat-trie/src" \
+	-I"$root/hat/hatCache/luikore__hat-trie/src" \
 	-o "$binary" \
-	"$root/luikore__hat-trie/test/bench_ahtable_allocator.c" \
-	"$root/luikore__hat-trie/src/ahtable.c" \
-	"$root/luikore__hat-trie/src/misc.c" \
-	"$root/luikore__hat-trie/src/murmurhash3.c"
+	"$root/hat/hatCache/luikore__hat-trie/test/bench_ahtable_allocator.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/ahtable.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/misc.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/murmurhash3.c"
 
 : > "$output"
 run=1

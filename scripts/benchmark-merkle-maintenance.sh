@@ -9,13 +9,13 @@ count=${COUNT:-7}
 output="$artifact_dir/merkle-maintenance.txt"
 
 mkdir -p "$artifact_dir"
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench '^BenchmarkReplicationMerkleWriteTracking$' \
 	-benchmem \
 	-benchtime "$write_benchtime" \
 	-count "$count" | tee "$output"
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

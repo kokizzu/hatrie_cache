@@ -5,7 +5,7 @@ benchmark=${RESERVOIR_SMALL_BENCH:-^BenchmarkReservoirSampleSmallGetCommand$}
 benchtime=${BENCHTIME:-500000x}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

@@ -5,7 +5,7 @@ benchmark=${CMS_SCALAR_BENCH:-^BenchmarkCountMinSketch(ScalarAddChecked|AddCheck
 benchtime=${BENCHTIME:-1s}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

@@ -23,11 +23,11 @@ tar -xf "$archive" -C "$work"
 
 (
 	cd "$work"
-	env GOCACHE="$cache" go test -c -o "$fixture/before" .
+	env GOCACHE="$cache" go test -c -o "$fixture/before" ./hat/hatCache
 	"$fixture/before" -test.run=TestEmptyKeyIsCountedIterableAndDeletable -test.count=1 >/dev/null
-	sed -i 's/return T->m;/return T->m + 1;/' luikore__hat-trie/src/hat-trie.c
-	grep -q 'return T->m + 1;' luikore__hat-trie/src/hat-trie.c
-	env GOCACHE="$cache" go test -c -o "$fixture/after" .
+	sed -i 's/return T->m;/return T->m + 1;/' hat/hatCache/luikore__hat-trie/src/hat-trie.c
+	grep -q 'return T->m + 1;' hat/hatCache/luikore__hat-trie/src/hat-trie.c
+	env GOCACHE="$cache" go test -c -o "$fixture/after" ./hat/hatCache
 )
 
 if "$fixture/after" -test.run=TestEmptyKeyIsCountedIterableAndDeletable -test.count=1 >"$log" 2>&1; then

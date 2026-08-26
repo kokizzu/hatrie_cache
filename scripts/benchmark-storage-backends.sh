@@ -9,7 +9,7 @@ benchmark='^BenchmarkPersistentStorageBackend10k$'
 mkdir -p "$artifact_dir"
 test_binary="${TMPDIR:-/tmp}/hatrie-cache-storage-bench.$$"
 trap 'rm -f "$test_binary"' EXIT HUP INT TERM
-go test -c -o "$test_binary" .
+go test -c -o "$test_binary" ./hat/hatCache
 
 for backend in LevelDB Pebble; do
 	output="$artifact_dir/storage-${backend}.txt"

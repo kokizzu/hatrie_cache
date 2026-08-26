@@ -10,7 +10,7 @@ output="$artifact_dir/journal-tail-wire.txt"
 mkdir -p "$artifact_dir"
 echo "Journal tail wire benchmark: bench=$benchmark entries=10000 benchtime=$benchtime count=$count"
 echo
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

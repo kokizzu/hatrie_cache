@@ -10,7 +10,7 @@ output="$artifact_dir/journal-pull-batch-apply.txt"
 mkdir -p "$artifact_dir"
 echo "Journal pull batch apply benchmark: bench=$benchmark records=10000 benchtime=$benchtime count=$count"
 echo
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

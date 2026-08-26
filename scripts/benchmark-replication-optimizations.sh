@@ -13,25 +13,25 @@ output="$artifact_dir/$output_name"
 
 mkdir -p "$artifact_dir"
 {
-	go test . \
+	go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$split_benchmark" \
 		-benchmem \
 		-benchtime "$benchtime" \
 		-count "$count"
-	go test . \
+	go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$sync_benchmark" \
 		-benchmem \
 		-benchtime "$benchtime" \
 		-count "$count"
-	go test . \
+	go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$digest_benchmark" \
 		-benchmem \
 		-benchtime "$benchtime" \
 		-count "$count"
-	go test . \
+	go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$iterator_benchmark" \
 		-benchmem \

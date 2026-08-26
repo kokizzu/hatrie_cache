@@ -37,33 +37,33 @@ build_c_check() {
 	test_file=$2
 	shift 2
 	gcc $C_OPT_FLAGS -std=c99 -Wall -Wextra "$@" \
-		-I"$ROOT/luikore__hat-trie/src" \
+		-I"$ROOT/hat/hatCache/luikore__hat-trie/src" \
 		-o "$output" \
 		"$test_file" \
-		"$ROOT/luikore__hat-trie/test/str_map.c" \
-		"$ROOT/luikore__hat-trie/src/hat-trie.c" \
-		"$ROOT/luikore__hat-trie/src/ahtable.c" \
-		"$ROOT/luikore__hat-trie/src/misc.c" \
-		"$ROOT/luikore__hat-trie/src/murmurhash3.c" \
-		"$ROOT/native_command_batch.c"
+		"$ROOT/hat/hatCache/luikore__hat-trie/test/str_map.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/hat-trie.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/ahtable.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/misc.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/murmurhash3.c" \
+		"$ROOT/hat/hatCache/native_command_batch.c"
 }
 
 build_c_ahtable_check() {
 	output=$1
 	shift
 	gcc $C_OPT_FLAGS -std=c99 -Wall -Wextra "$@" \
-		-I"$ROOT/luikore__hat-trie/src" \
+		-I"$ROOT/hat/hatCache/luikore__hat-trie/src" \
 		-o "$output" \
-		"$ROOT/luikore__hat-trie/test/check_ahtable.c" \
-		"$ROOT/luikore__hat-trie/test/str_map.c" \
-		"$ROOT/luikore__hat-trie/src/ahtable.c" \
-		"$ROOT/luikore__hat-trie/src/misc.c" \
-		"$ROOT/luikore__hat-trie/src/murmurhash3.c"
+		"$ROOT/hat/hatCache/luikore__hat-trie/test/check_ahtable.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/test/str_map.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/ahtable.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/misc.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/src/murmurhash3.c"
 }
 
 build_c_check \
 	"$tmp_dir/check_hattrie" \
-	"$ROOT/luikore__hat-trie/test/check_hattrie.c"
+	"$ROOT/hat/hatCache/luikore__hat-trie/test/check_hattrie.c"
 
 build_c_ahtable_check "$tmp_dir/check_ahtable"
 
@@ -133,7 +133,7 @@ case "$SANITIZE_C" in
 		SAN_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 		build_c_check \
 			"$tmp_dir/check_hattrie_sanitize" \
-			"$ROOT/luikore__hat-trie/test/check_hattrie.c" \
+			"$ROOT/hat/hatCache/luikore__hat-trie/test/check_hattrie.c" \
 			$SAN_FLAGS
 		build_c_ahtable_check \
 			"$tmp_dir/check_ahtable_sanitize" \
@@ -157,7 +157,7 @@ if [ "$run_leak_sanitizer" = "1" ]; then
 	LEAK_FLAGS="-fsanitize=leak -fno-omit-frame-pointer"
 	build_c_check \
 		"$tmp_dir/check_hattrie_leak" \
-		"$ROOT/luikore__hat-trie/test/check_hattrie.c" \
+		"$ROOT/hat/hatCache/luikore__hat-trie/test/check_hattrie.c" \
 		$LEAK_FLAGS
 	build_c_ahtable_check \
 		"$tmp_dir/check_ahtable_leak" \

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-package=${PACKAGE:-.}
+package=${PACKAGE:-./hat/hatCache}
 count=${COUNT:-1}
 benchtime=${BENCHTIME:-}
 default_bench='Benchmark(CommandWire(JSON|Protobuf)$|CommandJournal(Encode|Decode)(Structured)?(JSON|Binary)$|SnapshotFormat(JSON|Binary|GzipJSON|GzipBestJSON|GzipBinary|GzipBestBinary|Structured(JSON|Binary|GzipBestJSON|GzipBestBinary))$|LevelDB(Save(Materialized|MaterializedJSON|StructuredMaterialized|StructuredMaterializedJSON|ColdReferences|ColdReferencesStatsChanged)$|Load(Materialized|MaterializedJSON|StructuredMaterialized|StructuredMaterializedJSON|ColdReferences)$))'

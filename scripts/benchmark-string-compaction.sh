@@ -13,7 +13,7 @@ output="$artifact_dir/string-compaction.txt"
 mkdir -p "$artifact_dir"
 {
 	echo "# String compaction"
-	HATRIE_STRING_STORAGE_KEYS="$keys" go test . \
+	HATRIE_STRING_STORAGE_KEYS="$keys" go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$compaction_benchmark" \
 		-benchmem \
@@ -21,7 +21,7 @@ mkdir -p "$artifact_dir"
 		-count "$count"
 	echo
 	echo "# Post-compaction forced GC"
-	HATRIE_STRING_STORAGE_KEYS="$keys" go test . \
+	HATRIE_STRING_STORAGE_KEYS="$keys" go test ./hat/hatCache \
 		-run '^$' \
 		-bench "$gc_benchmark" \
 		-benchmem \

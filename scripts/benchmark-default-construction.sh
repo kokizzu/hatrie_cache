@@ -5,7 +5,7 @@ benchmark=${DEFAULT_CONSTRUCTION_BENCH:-^BenchmarkHatTrieDefaultConstruction$}
 benchtime=${BENCHTIME:-10000x}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

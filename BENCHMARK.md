@@ -7,7 +7,7 @@ wire-protocol compatibility statement.
 
 Sources:
 
-- HAT-trie cache: [`command.go`](command.go), generated gRPC API, and README
+- HAT-trie cache: [`command.go`](hat/hatCache/command.go), generated gRPC API, and README
   command examples.
 - Redis: official command and data type docs at
   <https://redis.io/docs/latest/commands/> and

@@ -5,7 +5,7 @@ benchmark=${COUNT_MIN_ROWS_BENCH:-^BenchmarkCountMinSketch(DirectRows|JSONString
 benchtime=${BENCHTIME:-500ms}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

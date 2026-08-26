@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-package=${PACKAGE:-.}
+package=${PACKAGE:-./hat/hatCache}
 count=${COUNT:-1}
 benchtime=${BENCHTIME:-5x}
 bench=${JOURNAL_CATCHUP_BENCH:-BenchmarkJournalCatchUpDeltaVsFullSnapshot}

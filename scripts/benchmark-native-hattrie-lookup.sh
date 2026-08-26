@@ -23,13 +23,13 @@ esac
 
 mkdir -p "$artifact_dir"
 gcc -O3 -std=c99 -Wall -Wextra \
-	-I"$root/luikore__hat-trie/src" \
+	-I"$root/hat/hatCache/luikore__hat-trie/src" \
 	-o "$binary" \
-	"$root/luikore__hat-trie/test/bench_hattrie_lookup.c" \
-	"$root/luikore__hat-trie/src/hat-trie.c" \
-	"$root/luikore__hat-trie/src/ahtable.c" \
-	"$root/luikore__hat-trie/src/misc.c" \
-	"$root/luikore__hat-trie/src/murmurhash3.c"
+	"$root/hat/hatCache/luikore__hat-trie/test/bench_hattrie_lookup.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/hat-trie.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/ahtable.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/misc.c" \
+	"$root/hat/hatCache/luikore__hat-trie/src/murmurhash3.c"
 
 : > "$output"
 run=1

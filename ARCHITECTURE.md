@@ -1,15 +1,16 @@
 # Architecture
 
-`hatriecache` remains the cache-server package. It owns the C HAT-trie
-binding, command execution, snapshots, persistence, replication, monitoring,
-and SQL because those subsystems share cache values, locking, and durable wire
-formats.
+`hatriecache` is the root compatibility facade. The importable
+`hatrie_cache/hat/hatCache` package owns the C HAT-trie binding, command
+execution, snapshots, persistence, replication, monitoring, and SQL because
+those subsystems share cache values, locking, and durable wire formats.
 
 Independent components are published under `hat/hat[Name]` so applications can
 import them without starting the cache server:
 
 | Package | Responsibility | Root compatibility API |
 | --- | --- | --- |
+| `hatrie_cache/hat/hatCache` | Full cache-server implementation, including the HAT-trie binding, commands, storage, replication, monitoring, and SQL | Generated `hatriecache` aliases and forwarders preserve the root import path |
 | `hatrie_cache/hat/hatAuth` | Constant-time current/previous token validation and bearer parsing | Internal server call sites import it directly |
 | `hatrie_cache/hat/hatHttp` | HTTP gzip negotiation, `Vary` handling, and decoded request limits | Monitoring and command wire import it directly |
 | `hatrie_cache/hat/hatRate` | Bounded sharded token-bucket limiting | `hatriecache.RateLimiter` and `NewRateLimiter` aliases |

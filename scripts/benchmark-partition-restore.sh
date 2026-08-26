@@ -14,7 +14,7 @@ echo "Partition restore benchmark: bench=$benchmark keys=$keys partitions=$parti
 echo
 HATRIE_PARTITION_RESTORE_KEYS="$keys" \
 HATRIE_PARTITION_RESTORE_COUNT="$partitions" \
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

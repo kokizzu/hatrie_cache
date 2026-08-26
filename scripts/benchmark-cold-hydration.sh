@@ -8,7 +8,7 @@ count=${COUNT:-5}
 output="$artifact_dir/cold-reference-hydration.txt"
 
 mkdir -p "$artifact_dir"
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

@@ -14,7 +14,7 @@ echo "Partition replication cursor benchmark: bench=$benchmark keys=$keys page_s
 echo
 HATRIE_PARTITION_CURSOR_BENCH_KEYS="$keys" \
 HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE="$page_size" \
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

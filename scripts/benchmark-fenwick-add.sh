@@ -5,7 +5,7 @@ benchmark=${FENWICK_ADD_BENCH:-^BenchmarkFenwickTree(AddTraversal|FirstAdd)$}
 benchtime=${BENCHTIME:-500ms}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

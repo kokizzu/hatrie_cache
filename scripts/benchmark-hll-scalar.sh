@@ -5,7 +5,7 @@ benchmark=${HLL_SCALAR_BENCH:-^BenchmarkHyperLogLog(ScalarAddChecked|AddCheckedP
 benchtime=${BENCHTIME:-1s}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$benchmark" \
 	-benchmem \

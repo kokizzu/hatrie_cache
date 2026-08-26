@@ -9,7 +9,7 @@ count=${COUNT:-5}
 output="$artifact_dir/structured-protobuf-batch.txt"
 
 mkdir -p "$artifact_dir"
-HATRIE_BIG_WINS_OPS="$operations" go test . \
+HATRIE_BIG_WINS_OPS="$operations" go test ./hat/hatCache \
 	-run '^$' \
 	-bench "$benchmark" \
 	-benchmem \

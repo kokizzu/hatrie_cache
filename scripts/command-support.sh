@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-source_file=${1:-command.go}
+source_file=${1:-hat/hatCache/command.go}
 
 if [ ! -f "$source_file" ]; then
 	echo "command source not found: $source_file" >&2

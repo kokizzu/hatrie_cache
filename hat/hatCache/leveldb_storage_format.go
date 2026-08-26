@@ -1,0 +1,1467 @@
+package hatCache
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"hatrie_cache/hat/hatStorage"
+
+	json "github.com/goccy/go-json"
+)
+
+type StorageFormat = hatStorage.Format
+
+const (
+	StorageFormatJSON   = hatStorage.FormatJSON
+	StorageFormatBinary = hatStorage.FormatBinary
+)
+
+const DefaultStorageFormat = hatStorage.DefaultFormat
+
+var levelDBBinaryMagic = []byte{'h', 'c', 'd', 'b', 1}
+
+var errLevelDBBinaryRecordTooLarge = errors.New("hatriecache: binary leveldb entry is too large")
+
+func ParseStorageFormat(value string) (StorageFormat, error) {
+	return hatStorage.ParseFormat(value)
+}
+
+func marshalLevelDBEntry(entry snapshotEntry, format StorageFormat) ([]byte, error) {
+	switch format {
+	case StorageFormatJSON:
+		return marshalSnapshotEntryJSON(entry)
+	case StorageFormatBinary:
+		return marshalLevelDBEntryBinary(entry)
+	}
+	format, err := ParseStorageFormat(string(format))
+	if err != nil {
+		return nil, err
+	}
+	switch format {
+	case StorageFormatJSON:
+		return marshalSnapshotEntryJSON(entry)
+	case StorageFormatBinary:
+		return marshalLevelDBEntryBinary(entry)
+	default:
+		return nil, fmt.Errorf("hatriecache: unsupported storage format %q", format)
+	}
+}
+
+func levelDBEntryDataIsBinary(data []byte) bool {
+	return bytes.HasPrefix(data, levelDBBinaryMagic)
+}
+
+func rewriteLevelDBBinaryEntryMetadata(data []byte, key string, expiresAt *time.Time, stats *KeyStats) ([]byte, bool, error) {
+	valueEnd, ok, err := levelDBBinaryValueEndOffsetForKey(data, key)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	capacity, err := addLevelDBBinaryRecordSize(int64(valueEnd), int64(levelDBBinaryTimePtrSize(expiresAt)))
+	if err != nil {
+		return nil, true, err
+	}
+	capacity, err = addLevelDBBinaryRecordSize(capacity, int64(levelDBBinaryKeyStatsPtrSize(stats)))
+	if err != nil {
+		return nil, true, err
+	}
+	buf := make([]byte, 0, int(capacity))
+	buf = append(buf, data[:valueEnd]...)
+	writer := levelDBBinaryWriter{binaryFieldWriter: binaryFieldWriter{buf: buf}}
+	writer.writeTimePtr(expiresAt)
+	writer.writeKeyStatsPtr(stats)
+	return writer.bytes(), true, nil
+}
+
+func levelDBBinaryValueEndOffsetForKey(data []byte, key string) (int, bool, error) {
+	if !levelDBEntryDataIsBinary(data) {
+		return 0, false, nil
+	}
+	reader := levelDBBinaryReader{binaryFieldReader: newBinaryFieldReader(data[len(levelDBBinaryMagic):])}
+	entryKey, err := reader.readString()
+	if err != nil {
+		return 0, true, err
+	}
+	if entryKey != key {
+		return 0, true, fmt.Errorf("hatriecache: leveldb entry key mismatch: record has %q, want %q", entryKey, key)
+	}
+	entryType, err := reader.readString()
+	if err != nil {
+		return 0, true, err
+	}
+	if err := reader.skipSnapshotEntryValue(entryType); err != nil {
+		return 0, true, err
+	}
+	valueEnd := len(levelDBBinaryMagic) + reader.off
+	if _, err := reader.readTimePtr(); err != nil {
+		return 0, true, err
+	}
+	if _, err := reader.readKeyStatsPtr(); err != nil {
+		return 0, true, err
+	}
+	if !reader.done() {
+		return 0, true, errors.New("hatriecache: invalid trailing binary leveldb entry data")
+	}
+	return valueEnd, true, nil
+}
+
+func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
+	switch entry.Type {
+	case "map":
+		return marshalLevelDBCollectionEntryBinary(entry, entry.Map)
+	case "slice":
+		return marshalLevelDBCollectionEntryBinary(entry, entry.Slice)
+	case "set":
+		return marshalLevelDBCollectionEntryBinary(entry, entry.Set)
+	case "priority_queue":
+		return marshalLevelDBPriorityQueueEntryBinary(entry)
+	case "top_k":
+		if entry.TopK == nil {
+			return nil, errors.New("hatriecache: top-k snapshot is required")
+		}
+		return marshalLevelDBTopKEntryBinary(entry, *entry.TopK)
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return nil, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		return marshalLevelDBRadixTreeEntryBinary(entry, *entry.RadixTree)
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return nil, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		return marshalLevelDBReservoirSampleEntryBinary(entry, *entry.ReservoirSample)
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return nil, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		if !entry.XorFilter.Built {
+			return marshalLevelDBStagedXorFilterEntryBinary(entry, *entry.XorFilter)
+		}
+		return marshalLevelDBBuiltXorFilterEntryBinary(entry, *entry.XorFilter)
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return nil, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		return marshalLevelDBBloomFilterEntryBinary(entry, *entry.BloomFilter)
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return nil, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		return marshalLevelDBCountMinSketchEntryBinary(entry, *entry.CountMinSketch)
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return nil, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		return marshalLevelDBHyperLogLogEntryBinary(entry, *entry.HyperLogLog)
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return nil, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		return marshalLevelDBCuckooFilterEntryBinary(entry, *entry.CuckooFilter)
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return nil, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		return marshalLevelDBRoaringBitmapEntryBinary(entry, *entry.RoaringBitmap)
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return nil, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		return marshalLevelDBSparseBitsetEntryBinary(entry, *entry.SparseBitset)
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return nil, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		return marshalLevelDBFenwickTreeEntryBinary(entry, *entry.FenwickTree)
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return nil, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		return marshalLevelDBQuantileSketchEntryBinary(entry, *entry.QuantileSketch)
+	}
+	value, err := prepareLevelDBBinaryEntryValue(entry)
+	if err != nil {
+		return nil, err
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, value.encodedSize, entry.ExpiresAt, entry.Stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writePreparedSnapshotEntryValue(value)
+	writer.writeTimePtr(entry.ExpiresAt)
+	writer.writeKeyStatsPtr(entry.Stats)
+	return writer.bytes(), nil
+}
+
+func marshalLevelDBCollectionEntryBinary(entry snapshotEntry, value interface{}) ([]byte, error) {
+	prepared, _, err := prepareSnapshotDynamicValueBinary(value)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinarySize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinary(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBPriorityQueueEntryBinary(entry snapshotEntry) ([]byte, error) {
+	prepared, err := prepareSnapshotPriorityQueueItemsBinary(entry.PriorityQueue)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryPriorityQueueSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryPriorityQueue(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBTopKEntryBinary(entry snapshotEntry, snapshot topKSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotTopKBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryTopKSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryTopK(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBRadixTreeEntryBinary(entry snapshotEntry, snapshot radixTreeSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotRadixTreeBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryRadixTreeSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryRadixTree(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBReservoirSampleEntryBinary(entry snapshotEntry, snapshot reservoirSampleSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotReservoirSampleBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryReservoirSampleSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryReservoirSample(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBStagedXorFilterEntryBinary(entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotStagedXorFilterBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryStagedXorFilterSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryStagedXorFilter(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBBloomFilterEntryBinary(entry snapshotEntry, snapshot bloomFilterSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBBloomFilterEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	bits, err := snapshotBloomFilterRawBits(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryBloomFilterSize(snapshot, len(bits))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryBloomFilter(&writer.binaryFieldWriter, snapshot, bits)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBCountMinSketchEntryBinary(entry snapshotEntry, snapshot countMinSketchSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBCountMinSketchEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	counters, err := snapshotCountMinSketchRawCounters(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryCountMinSketchSize(snapshot, len(counters))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryCountMinSketch(&writer.binaryFieldWriter, snapshot, counters)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBHyperLogLogEntryBinary(entry snapshotEntry, snapshot hyperLogLogSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBHyperLogLogEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	registers, err := snapshotHyperLogLogRawRegisters(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryHyperLogLogSize(snapshot, len(registers))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryHyperLogLog(&writer.binaryFieldWriter, snapshot, registers)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBCuckooFilterEntryBinary(entry snapshotEntry, snapshot cuckooFilterSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBCuckooFilterEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	fingerprints, err := snapshotCuckooFilterRawFingerprints(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryCuckooFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryCuckooFilter(&writer.binaryFieldWriter, snapshot, fingerprints)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBBuiltXorFilterEntryBinary(entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBBuiltXorFilterEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	fingerprints, err := snapshotXorFilterRawFingerprints(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryXorFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryXorFilter(&writer.binaryFieldWriter, snapshot, fingerprints)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBRoaringBitmapEntryBinary(entry snapshotEntry, snapshot roaringBitmapSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBRoaringBitmapEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	containers, err := prepareSnapshotRoaringBitmapBinaryContainers(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryRoaringBitmapSize(snapshot, containers)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryRoaringBitmap(&writer.binaryFieldWriter, snapshot, containers)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBSparseBitsetEntryBinary(entry snapshotEntry, snapshot sparseBitsetSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBSparseBitsetEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
+	containers, err := prepareSnapshotSparseBitsetBinaryContainers(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinarySparseBitsetSize(snapshot, containers)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinarySparseBitset(&writer.binaryFieldWriter, snapshot, containers)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBFenwickTreeEntryBinary(entry snapshotEntry, snapshot fenwickTreeSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryFenwickTreeSize(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryFenwickTree(&writer.binaryFieldWriter, snapshot)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBQuantileSketchEntryBinary(entry snapshotEntry, snapshot quantileSketchSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryQuantileSketchSize(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryQuantileSketch(&writer.binaryFieldWriter, snapshot)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func newLevelDBDirectPayloadWriter(entry snapshotEntry, valueSize int) (levelDBBinaryWriter, error) {
+	payloadSize, err := snapshotValueBinaryAdd(len(snapshotValueBinaryMagic), valueSize)
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	encodedSize, err := binaryLengthPrefixedSize(int64(payloadSize))
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, encodedSize, entry.ExpiresAt, entry.Stats)
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeUvarint(uint64(payloadSize))
+	writer.buf = append(writer.buf, snapshotValueBinaryMagic...)
+	return writer, nil
+}
+
+func finishLevelDBDirectPayload(writer levelDBBinaryWriter, entry snapshotEntry) []byte {
+	writer.writeTimePtr(entry.ExpiresAt)
+	writer.writeKeyStatsPtr(entry.Stats)
+	return writer.bytes()
+}
+
+func marshalLevelDBStringEntryBinary(key string, value string) ([]byte, error) {
+	capacity, err := levelDBBinaryRecordCapacity(key, "string", int64(len(value)), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(key)
+	writer.writeString("string")
+	writer.writeString(value)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+	return writer.bytes(), nil
+}
+
+func marshalLevelDBBytesEntryBinary(key string, raw []byte, expiresAt *time.Time, stats *KeyStats) ([]byte, error) {
+	capacity, err := levelDBBinaryRecordCapacity(key, "bytes", int64(len(raw)), expiresAt, stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(key)
+	writer.writeString("bytes")
+	writer.writeBytes(raw)
+	writer.writeTimePtr(expiresAt)
+	writer.writeKeyStatsPtr(stats)
+	return writer.bytes(), nil
+}
+
+func marshalLevelDBBytesEntryBinaryFromReader(key string, rawSize int64, reader io.Reader, expiresAt *time.Time, stats *KeyStats) ([]byte, error) {
+	if rawSize < 0 {
+		return nil, errLevelDBBinaryRecordTooLarge
+	}
+	capacity, err := levelDBBinaryRecordCapacity(key, "bytes", rawSize, expiresAt, stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(key)
+	writer.writeString("bytes")
+	writer.writeUvarint(uint64(rawSize))
+	written, err := io.Copy(&writer, io.LimitReader(reader, rawSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if written != rawSize {
+		if written < rawSize {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return nil, errors.New("hatriecache: binary leveldb bytes changed while encoding")
+	}
+	writer.writeTimePtr(expiresAt)
+	writer.writeKeyStatsPtr(stats)
+	return writer.bytes(), nil
+}
+
+type levelDBBinaryWriter struct {
+	binaryFieldWriter
+}
+
+func newLevelDBBinaryWriterWithCapacity(capacity int) levelDBBinaryWriter {
+	return levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(levelDBBinaryMagic, capacity)}
+}
+
+func levelDBBinaryRecordCapacity(key string, entryType string, valueBytes int64, expiresAt *time.Time, stats *KeyStats) (int, error) {
+	if valueBytes < 0 {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	valueSize, err := binaryLengthPrefixedSize(valueBytes)
+	if err != nil {
+		return 0, err
+	}
+	return levelDBBinaryRecordCapacityForValue(key, entryType, valueSize, expiresAt, stats)
+}
+
+func levelDBBinaryRecordCapacityForValue(key string, entryType string, encodedValueBytes int64, expiresAt *time.Time, stats *KeyStats) (int, error) {
+	if encodedValueBytes < 0 {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	keySize, err := binaryLengthPrefixedSize(int64(len(key)))
+	if err != nil {
+		return 0, err
+	}
+	typeSize, err := binaryLengthPrefixedSize(int64(len(entryType)))
+	if err != nil {
+		return 0, err
+	}
+	total := int64(len(levelDBBinaryMagic))
+	for _, size := range []int64{
+		keySize,
+		typeSize,
+		encodedValueBytes,
+		int64(levelDBBinaryTimePtrSize(expiresAt)),
+		int64(levelDBBinaryKeyStatsPtrSize(stats)),
+	} {
+		var err error
+		total, err = addLevelDBBinaryRecordSize(total, size)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return int(total), nil
+}
+
+func binaryLengthPrefixedSize(payloadBytes int64) (int64, error) {
+	if payloadBytes < 0 {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	return addLevelDBBinaryRecordSize(int64(binaryUvarintSize(uint64(payloadBytes))), payloadBytes)
+}
+
+func addLevelDBBinaryRecordSize(left int64, right int64) (int64, error) {
+	max := int64(int(^uint(0) >> 1))
+	if right < 0 || left > max-right {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	return left + right, nil
+}
+
+func levelDBBinaryTimeSize(value time.Time) int {
+	if value.IsZero() {
+		return 1
+	}
+	return 1 + binaryVarintSize(value.UnixNano())
+}
+
+func levelDBBinaryTimePtrSize(value *time.Time) int {
+	if value == nil {
+		return 1
+	}
+	return 1 + binaryVarintSize(value.UnixNano())
+}
+
+func levelDBBinaryKeyStatsPtrSize(stats *KeyStats) int {
+	if stats == nil {
+		return 1
+	}
+	return 1 +
+		binaryUvarintSize(stats.Reads) +
+		binaryUvarintSize(stats.Hits) +
+		binaryUvarintSize(stats.Misses) +
+		binaryUvarintSize(stats.Writes) +
+		levelDBBinaryTimeSize(stats.LastHit) +
+		levelDBBinaryTimeSize(stats.LastMiss) +
+		levelDBBinaryTimeSize(stats.LastWrite) +
+		16
+}
+
+type levelDBBinaryPreparedValueKind uint8
+
+const (
+	levelDBBinaryPreparedCounter levelDBBinaryPreparedValueKind = iota + 1
+	levelDBBinaryPreparedString
+	levelDBBinaryPreparedBytes
+)
+
+type levelDBBinaryPreparedValue struct {
+	kind        levelDBBinaryPreparedValueKind
+	counter     int64
+	stringValue string
+	bytes       []byte
+	encodedSize int64
+}
+
+func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedValue, error) {
+	switch entry.Type {
+	case "counter":
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedCounter,
+			counter:     int64(entry.Counter),
+			encodedSize: int64(binaryVarintSize(int64(entry.Counter))),
+		}, nil
+	case "string":
+		size, err := binaryLengthPrefixedSize(int64(len(entry.String)))
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedString,
+			stringValue: entry.String,
+			encodedSize: size,
+		}, nil
+	case "bytes":
+		raw, err := snapshotEntryBytesValue(entry)
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		size, err := binaryLengthPrefixedSize(int64(len(raw)))
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedBytes,
+			bytes:       raw,
+			encodedSize: size,
+		}, nil
+	case "map":
+		return prepareLevelDBBinaryCollectionValue(entry.Map)
+	case "slice":
+		return prepareLevelDBBinaryCollectionValue(entry.Slice)
+	case "set":
+		return prepareLevelDBBinaryCollectionValue(entry.Set)
+	case "priority_queue":
+		return prepareLevelDBBinaryPriorityQueueValue(entry.PriorityQueue)
+	case "top_k":
+		if entry.TopK == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: top-k snapshot is required")
+		}
+		return prepareLevelDBBinaryTopKValue(*entry.TopK)
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		return prepareLevelDBBinaryRadixTreeValue(*entry.RadixTree)
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		return prepareLevelDBBinaryBloomFilterValue(*entry.BloomFilter)
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		return prepareLevelDBBinaryCountMinSketchValue(*entry.CountMinSketch)
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		return prepareLevelDBBinaryHyperLogLogValue(*entry.HyperLogLog)
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		return prepareLevelDBBinaryCuckooFilterValue(*entry.CuckooFilter)
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		return prepareLevelDBBinaryXorFilterValue(*entry.XorFilter)
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		return prepareLevelDBBinaryRoaringBitmapValue(*entry.RoaringBitmap)
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		return prepareLevelDBBinarySparseBitsetValue(*entry.SparseBitset)
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		return prepareLevelDBBinaryFenwickTreeValue(*entry.FenwickTree)
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		return prepareLevelDBBinaryQuantileSketchValue(*entry.QuantileSketch)
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		return prepareLevelDBBinaryReservoirSampleValue(*entry.ReservoirSample)
+	default:
+		return levelDBBinaryPreparedValue{}, fmt.Errorf("hatriecache: unsupported binary storage value type %q", entry.Type)
+	}
+}
+
+func prepareLevelDBBinaryCollectionValue(value interface{}) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotCollectionValueBinary(value)
+	return prepareLevelDBBinaryPayloadValue(value, payload, ok, err)
+}
+
+func prepareLevelDBBinaryPriorityQueueValue(items []priorityQueueItem) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotPriorityQueueValueBinary(items)
+	return prepareLevelDBBinaryPayloadValue(items, payload, ok, err)
+}
+
+func prepareLevelDBBinaryTopKValue(snapshot topKSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotTopKValueBinary(snapshot)
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
+}
+
+func prepareLevelDBBinaryRadixTreeValue(snapshot radixTreeSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotRadixTreeValueBinary(snapshot)
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
+}
+
+func prepareLevelDBBinaryBloomFilterValue(snapshot bloomFilterSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotBloomFilterValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryCountMinSketchValue(snapshot countMinSketchSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotCountMinSketchValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryHyperLogLogValue(snapshot hyperLogLogSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotHyperLogLogValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryCuckooFilterValue(snapshot cuckooFilterSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotCuckooFilterValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryXorFilterValue(snapshot xorFilterSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotXorFilterValueBinary(snapshot)
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
+}
+
+func prepareLevelDBBinaryRoaringBitmapValue(snapshot roaringBitmapSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotRoaringBitmapValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinarySparseBitsetValue(snapshot sparseBitsetSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotSparseBitsetValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryFenwickTreeValue(snapshot fenwickTreeSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotFenwickTreeValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryQuantileSketchValue(snapshot quantileSketchSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotQuantileSketchValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryReservoirSampleValue(snapshot reservoirSampleSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotReservoirSampleValueBinary(snapshot)
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
+}
+
+func prepareLevelDBBinaryPayloadValue(_ interface{}, binaryPayload []byte, binaryOK bool, binaryErr error) (levelDBBinaryPreparedValue, error) {
+	if binaryErr != nil {
+		return levelDBBinaryPreparedValue{}, binaryErr
+	}
+	if !binaryOK {
+		return levelDBBinaryPreparedValue{}, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return prepareLevelDBBytesPayload(binaryPayload)
+}
+
+func prepareLevelDBBytesPayload(payload []byte) (levelDBBinaryPreparedValue, error) {
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func (writer *levelDBBinaryWriter) writePreparedSnapshotEntryValue(value levelDBBinaryPreparedValue) {
+	switch value.kind {
+	case levelDBBinaryPreparedCounter:
+		writer.writeVarint(value.counter)
+	case levelDBBinaryPreparedString:
+		writer.writeString(value.stringValue)
+	case levelDBBinaryPreparedBytes:
+		writer.writeBytes(value.bytes)
+	}
+}
+
+func (writer *levelDBBinaryWriter) writeTime(value time.Time) {
+	if value.IsZero() {
+		writer.writeBool(false)
+		return
+	}
+	writer.writeBool(true)
+	writer.writeVarint(value.UnixNano())
+}
+
+func (writer *levelDBBinaryWriter) writeTimePtr(value *time.Time) {
+	if value == nil {
+		writer.writeBool(false)
+		return
+	}
+	writer.writeBool(true)
+	writer.writeVarint(value.UnixNano())
+}
+
+func (writer *levelDBBinaryWriter) writeKeyStatsPtr(stats *KeyStats) {
+	if stats == nil {
+		writer.writeBool(false)
+		return
+	}
+	writer.writeBool(true)
+	writer.writeUvarint(stats.Reads)
+	writer.writeUvarint(stats.Hits)
+	writer.writeUvarint(stats.Misses)
+	writer.writeUvarint(stats.Writes)
+	writer.writeTime(stats.LastHit)
+	writer.writeTime(stats.LastMiss)
+	writer.writeTime(stats.LastWrite)
+	writer.writeFloat64(stats.HitRate)
+	writer.writeFloat64(stats.CumulativeHitRate)
+}
+
+func marshalSnapshotEntryValueJSON(entry snapshotEntry) ([]byte, error) {
+	switch entry.Type {
+	case "map":
+		return json.Marshal(entry.Map)
+	case "slice":
+		return json.Marshal(entry.Slice)
+	case "set":
+		return json.Marshal(entry.Set)
+	case "priority_queue":
+		return json.Marshal(entry.PriorityQueue)
+	case "bloom_filter":
+		return json.Marshal(entry.BloomFilter)
+	case "count_min_sketch":
+		return json.Marshal(entry.CountMinSketch)
+	case "hyperloglog":
+		return json.Marshal(entry.HyperLogLog)
+	case "top_k":
+		return json.Marshal(entry.TopK)
+	case "cuckoo_filter":
+		return json.Marshal(entry.CuckooFilter)
+	case "roaring_bitmap":
+		return json.Marshal(entry.RoaringBitmap)
+	case "quantile_sketch":
+		return json.Marshal(entry.QuantileSketch)
+	case "fenwick_tree":
+		return json.Marshal(entry.FenwickTree)
+	case "sparse_bitset":
+		return json.Marshal(entry.SparseBitset)
+	case "reservoir_sample":
+		return json.Marshal(entry.ReservoirSample)
+	case "xor_filter":
+		return json.Marshal(entry.XorFilter)
+	case "radix_tree":
+		return json.Marshal(entry.RadixTree)
+	default:
+		return nil, errors.New("hatriecache: unsupported snapshot value type")
+	}
+}
+
+type levelDBBinaryReader struct {
+	binaryFieldReader
+}
+
+func unmarshalLevelDBEntryBinary(data []byte) (snapshotEntry, error) {
+	if !levelDBEntryDataIsBinary(data) {
+		return snapshotEntry{}, errors.New("hatriecache: invalid binary leveldb entry")
+	}
+	reader := levelDBBinaryReader{binaryFieldReader: newBinaryFieldReader(data[len(levelDBBinaryMagic):])}
+	key, err := reader.readString()
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	entryType, err := reader.readString()
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	entry := snapshotEntry{
+		Key:  key,
+		Type: entryType,
+	}
+	if err := reader.readSnapshotEntryValue(&entry); err != nil {
+		return snapshotEntry{}, err
+	}
+	entry.ExpiresAt, err = reader.readTimePtr()
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	entry.Stats, err = reader.readKeyStatsPtr()
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	if !reader.done() {
+		return snapshotEntry{}, errors.New("hatriecache: invalid trailing binary leveldb entry data")
+	}
+	return entry, nil
+}
+
+func (reader *levelDBBinaryReader) readTime() (time.Time, error) {
+	present, err := reader.readBool()
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !present {
+		return time.Time{}, nil
+	}
+	unixNano, err := reader.readVarint()
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, unixNano), nil
+}
+
+func (reader *levelDBBinaryReader) readTimePtr() (*time.Time, error) {
+	present, err := reader.readBool()
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
+	unixNano, err := reader.readVarint()
+	if err != nil {
+		return nil, err
+	}
+	value := time.Unix(0, unixNano)
+	return &value, nil
+}
+
+func (reader *levelDBBinaryReader) readKeyStatsPtr() (*KeyStats, error) {
+	present, err := reader.readBool()
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
+	stats := &KeyStats{}
+	if stats.Reads, err = reader.readUvarint(); err != nil {
+		return nil, err
+	}
+	if stats.Hits, err = reader.readUvarint(); err != nil {
+		return nil, err
+	}
+	if stats.Misses, err = reader.readUvarint(); err != nil {
+		return nil, err
+	}
+	if stats.Writes, err = reader.readUvarint(); err != nil {
+		return nil, err
+	}
+	if stats.LastHit, err = reader.readTime(); err != nil {
+		return nil, err
+	}
+	if stats.LastMiss, err = reader.readTime(); err != nil {
+		return nil, err
+	}
+	if stats.LastWrite, err = reader.readTime(); err != nil {
+		return nil, err
+	}
+	if stats.HitRate, err = reader.readFloat64(); err != nil {
+		return nil, err
+	}
+	if stats.CumulativeHitRate, err = reader.readFloat64(); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (reader *levelDBBinaryReader) readSnapshotEntryValue(entry *snapshotEntry) error {
+	switch entry.Type {
+	case "counter":
+		value, err := reader.readVarint()
+		if err != nil {
+			return err
+		}
+		if value < int64(-1<<31) || value > int64(1<<31-1) {
+			return errors.New("hatriecache: binary counter is outside int32 range")
+		}
+		entry.Counter = int32(value)
+	case "string":
+		value, err := reader.readString()
+		if err != nil {
+			return err
+		}
+		entry.String = value
+	case "bytes":
+		value, err := reader.readBytes()
+		if err != nil {
+			return err
+		}
+		entry.rawBytes = value
+	default:
+		payload, err := reader.readBytes()
+		if err != nil {
+			return err
+		}
+		return unmarshalSnapshotEntryValueJSON(payload, entry)
+	}
+	return nil
+}
+
+func (reader *levelDBBinaryReader) skipSnapshotEntryValue(entryType string) error {
+	switch entryType {
+	case "counter":
+		_, err := reader.readVarint()
+		return err
+	default:
+		_, err := reader.readBytes()
+		return err
+	}
+}
+
+func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
+	switch entry.Type {
+	case "map":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			m, ok := value.(Map)
+			if !ok {
+				return errors.New("hatriecache: binary map value is not an object")
+			}
+			entry.Map = m
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.Map)
+	case "slice":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			items, ok := value.(Slice)
+			if !ok {
+				return errors.New("hatriecache: binary slice value is not an array")
+			}
+			entry.Slice = items
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.Slice)
+	case "set":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			items, ok := value.(Slice)
+			if !ok {
+				return errors.New("hatriecache: binary set value is not an array")
+			}
+			entry.Set = Set(items)
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.Set)
+	case "priority_queue":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			items, ok := value.([]priorityQueueItem)
+			if !ok {
+				return errors.New("hatriecache: binary priority queue value is not a priority queue")
+			}
+			entry.PriorityQueue = items
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.PriorityQueue)
+	case "bloom_filter":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(bloomFilterSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary bloom filter value is not a bloom filter")
+			}
+			entry.BloomFilter = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.BloomFilter)
+	case "count_min_sketch":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(countMinSketchSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary count-min sketch value is not a count-min sketch")
+			}
+			entry.CountMinSketch = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.CountMinSketch)
+	case "hyperloglog":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(hyperLogLogSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary hyperloglog value is not a hyperloglog")
+			}
+			entry.HyperLogLog = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.HyperLogLog)
+	case "top_k":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(topKSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary top-k value is not a top-k snapshot")
+			}
+			entry.TopK = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.TopK)
+	case "cuckoo_filter":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(cuckooFilterSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary cuckoo filter value is not a cuckoo filter")
+			}
+			entry.CuckooFilter = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.CuckooFilter)
+	case "roaring_bitmap":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(roaringBitmapSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary roaring bitmap value is not a roaring bitmap")
+			}
+			entry.RoaringBitmap = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.RoaringBitmap)
+	case "quantile_sketch":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(quantileSketchSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary quantile sketch value is not a quantile sketch")
+			}
+			entry.QuantileSketch = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.QuantileSketch)
+	case "fenwick_tree":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(fenwickTreeSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary fenwick tree value is not a fenwick tree")
+			}
+			entry.FenwickTree = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.FenwickTree)
+	case "sparse_bitset":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(sparseBitsetSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary sparse bitset value is not a sparse bitset")
+			}
+			entry.SparseBitset = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.SparseBitset)
+	case "reservoir_sample":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(reservoirSampleSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary reservoir sample value is not a reservoir sample")
+			}
+			entry.ReservoirSample = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.ReservoirSample)
+	case "xor_filter":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(xorFilterSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary xor filter value is not an xor filter")
+			}
+			entry.XorFilter = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.XorFilter)
+	case "radix_tree":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(radixTreeSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary radix tree value is not a radix tree")
+			}
+			entry.RadixTree = &snapshot
+			return nil
+		}
+		return decodeLevelDBStorageJSON(data, &entry.RadixTree)
+	default:
+		return errors.New("hatriecache: unsupported snapshot value type")
+	}
+}
+
+func decodeLevelDBStorageJSON(data []byte, value interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("hatriecache: invalid storage JSON")
+		}
+		return err
+	}
+	return nil
+}
+
+func writeLevelDBRecordSnapshotJSON(writer io.Writer, key string, data []byte, prefix string) error {
+	if !levelDBEntryDataIsBinary(data) {
+		return writeSnapshotRawEntryJSON(writer, data, prefix)
+	}
+	entry, err := decodeLevelDBEntryForKey(key, data)
+	if err != nil {
+		return err
+	}
+	return writeSnapshotEntryFieldsJSON(writer, entry, prefix)
+}

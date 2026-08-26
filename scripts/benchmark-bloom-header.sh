@@ -7,7 +7,7 @@ layout_benchtime=${BLOOM_HEADER_LAYOUT_BENCHTIME:-1x}
 benchtime=${BENCHTIME:-500ms}
 count=${COUNT:-1}
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$layout_benchmark" \
 	-benchmem \
@@ -15,7 +15,7 @@ go test . \
 	-count="$count" \
 	-cpu=1
 
-go test . \
+go test ./hat/hatCache \
 	-run '^$' \
 	-bench="$operation_benchmark" \
 	-benchmem \
