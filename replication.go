@@ -146,6 +146,60 @@ type ReplicationDeadLetter = hatReplication.DeadLetter
 type ReplicationCircuitBreakerTarget = hatReplication.CircuitBreakerTarget
 type ReplicationQueueStats = hatReplication.QueueStats
 type ReplicationTargetResult = hatReplication.TargetResult
+type ReplicationMetricsSnapshot = hatReplication.MetricsSnapshot
+type ReplicationHistogramSnapshot = hatReplication.HistogramSnapshot
+type replicationMetrics = hatReplication.Metrics
+
+func (replicator *HTTPReplicator) recordReplicationTargetLatency(target TopologyNode, duration time.Duration) {
+	if replicator != nil {
+		replicator.metrics.ObserveTargetLatency(replicationMetricsTarget(target), duration)
+	}
+}
+
+func (replicator *HTTPReplicator) recordReplicationBatchSize(target TopologyNode, items int) {
+	if replicator != nil {
+		replicator.metrics.ObserveTargetBatchItems(replicationMetricsTarget(target), items)
+	}
+}
+
+func (replicator *HTTPReplicator) recordReplicationRetryDelay(duration time.Duration) {
+	if replicator != nil {
+		replicator.metrics.ObserveRetryDelay(duration)
+	}
+}
+
+func (replicator *HTTPReplicator) recordReplicationCircuitTransition(target TopologyNode, state string) {
+	if replicator != nil && strings.TrimSpace(state) != "" {
+		replicator.metrics.RecordCircuitTransition(replicationMetricsTarget(target), state)
+	}
+}
+
+// MetricsSnapshot returns an independent point-in-time transport metrics copy.
+func (replicator *HTTPReplicator) MetricsSnapshot() ReplicationMetricsSnapshot {
+	if replicator == nil {
+		return ReplicationMetricsSnapshot{}
+	}
+	return replicator.metrics.Snapshot()
+}
+
+func replicationMetricsTarget(target TopologyNode) string {
+	if value := strings.TrimSpace(target.ID); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(target.Address); value != "" {
+		return value
+	}
+	return "unknown"
+}
+
+func sortedReplicationMetricTargets[T any](values map[string]T) []string {
+	targets := make([]string, 0, len(values))
+	for target := range values {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	return targets
+}
 
 type replicationPayloadKind int
 
