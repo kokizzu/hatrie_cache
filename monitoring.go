@@ -22,7 +22,9 @@ import (
 
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatHttp"
+	"hatrie_cache/hat/hatMetrics"
 	"hatrie_cache/hat/hatMonitoring"
+	"hatrie_cache/hat/hatRate"
 	"hatrie_cache/hat/hatSchema"
 	"hatrie_cache/internal/jsonwire"
 )
@@ -43,6 +45,25 @@ const (
 
 var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal source response is too large")
 var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entries limit reached")
+
+// APIMetrics is retained at the root API for compatibility.
+type APIMetrics = hatMetrics.APIMetrics
+
+// APIMetricsSnapshot is retained at the root API for compatibility.
+type APIMetricsSnapshot = hatMetrics.APIMetricsSnapshot
+
+func NewAPIMetrics() *APIMetrics {
+	return hatMetrics.NewAPIMetrics()
+}
+
+// RateLimiter is the importable hatRate limiter retained under the root API
+// for compatibility with existing cache integrations.
+type RateLimiter = hatRate.RateLimiter
+
+// NewRateLimiter constructs a bounded token-bucket rate limiter.
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	return hatRate.NewRateLimiter(limit, window)
+}
 
 type MonitoringOptions struct {
 	NodeName                         string
