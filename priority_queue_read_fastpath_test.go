@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 var priorityQueuePopResponseBenchmarkSink string
@@ -154,7 +156,7 @@ func TestCommandFastPriorityQueueItemsJSONCapacityMatchesOutput(t *testing.T) {
 	if !ok {
 		t.Fatal("commandFastPriorityQueueItemsJSONCapacity() ok = false, want true")
 	}
-	want, err := jsonEncodedString(data.Items())
+	want, err := hatCodec.JSONEncodedString(data.Items())
 	if err != nil {
 		t.Fatalf("jsonEncodedString() error = %v", err)
 	}

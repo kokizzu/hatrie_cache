@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatCodec"
 	"hatrie_cache/hat/hatDataStructure"
 )
 
@@ -339,7 +340,7 @@ func (sample reservoirSampleData) Info() ReservoirSampleInfo {
 }
 
 func (sample reservoirSampleData) EncodedSize() int64 {
-	size, err := jsonEncodedSize(sample.Snapshot())
+	size, err := hatCodec.JSONEncodedSize(sample.Snapshot())
 	if err != nil {
 		return 0
 	}

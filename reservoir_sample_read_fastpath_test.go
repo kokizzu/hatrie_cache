@@ -3,6 +3,8 @@ package hatriecache
 import (
 	"reflect"
 	"testing"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 func TestReservoirSampleFastJSONMatchesGenericEncoding(t *testing.T) {
@@ -14,7 +16,7 @@ func TestReservoirSampleFastJSONMatchesGenericEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("commandFastReservoirSampleItemsJSON() error = %v", err)
 	}
-	want, err := jsonEncodedString([]ReservoirSampleItem{
+	want, err := hatCodec.JSONEncodedString([]ReservoirSampleItem{
 		{Value: "", Priority: 1, Sequence: 2},
 		{Value: "alpha / beta", Priority: ^uint64(0), Sequence: 3},
 	})
@@ -135,7 +137,7 @@ func TestExecuteExactFastCommandReservoirSampleGetDirectlyEncodesStructuredValue
 			if err != nil {
 				t.Fatalf("commandFastReservoirSampleItemsJSON(%#v) error = %v", value, err)
 			}
-			wantPayload, err := jsonEncodedString(publicItems)
+			wantPayload, err := hatCodec.JSONEncodedString(publicItems)
 			if err != nil {
 				t.Fatalf("jsonEncodedString(%#v) error = %v", value, err)
 			}

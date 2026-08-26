@@ -15,7 +15,8 @@ import them without starting the cache server:
 | `hatrie_cache/hat/hatRate` | Bounded sharded token-bucket limiting | `hatriecache.RateLimiter` and `NewRateLimiter` aliases |
 | `hatrie_cache/hat/hatAudit` | Concurrent JSONL audit logging and recent-event retention | `AuditEvent`, `AuditLogger`, and constructors alias it |
 | `hatrie_cache/hat/hatMetrics` | Atomic API audit, write-protection, and rate-limit counters | `APIMetrics`, `APIMetricsSnapshot`, and constructor aliases |
-| `hatrie_cache/hat/hatCodec` | Exact JSON encoded-size helpers used for request and response limits | Root JSON-size helpers delegate to it |
+| `hatrie_cache/hat/hatMonitoring` | Runtime profile request validation, bounded profile output, and process-wide capture coordination | Monitoring HTTP handler retains authentication, audit, and status mapping |
+| `hatrie_cache/hat/hatCodec` | Exact JSON encoded-size helpers used for request and response limits | Root serialization and persistence callers import it directly |
 | `hatrie_cache/hat/hatHash` | Allocation-free FNV-64 and JSON-string hash variants | Root compatibility wrappers serve Bloom, Count-Min, Cuckoo, HyperLogLog, and XOR structures |
 | `hatrie_cache/hat/hatStorage` | Storage backend and persistence-format identifiers, validation, compact reusable-index metadata, and generic tail trimming | Root storage pools and store lifecycles retain ownership; configuration aliases and vacancy tracking share the public model |
 | `hatrie_cache/hat/hatTopology` | Cluster topology model, validation, fingerprinting, routing, and atomic JSON persistence | Root aliases its model; `TopologyStore` retains synchronization and its normalized routing fast path |

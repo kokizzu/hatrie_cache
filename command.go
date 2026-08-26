@@ -12,6 +12,7 @@ import (
 
 	json "github.com/goccy/go-json"
 
+	"hatrie_cache/hat/hatCodec"
 	"hatrie_cache/hat/hatCommand"
 )
 
@@ -4227,31 +4228,31 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		}
 		return ht.sets.jsonString(hval.Index)
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
-		return jsonEncodedString(ht.priorityQueues.array[hval.Index].Items())
+		return hatCodec.JSONEncodedString(ht.priorityQueues.array[hval.Index].Items())
 	case DATAVALUE_TYPE_BLOOM_FILTER:
-		return jsonEncodedString(ht.bloomFilters.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.bloomFilters.array[hval.Index].Info())
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
-		return jsonEncodedString(ht.cuckooFilters.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.cuckooFilters.array[hval.Index].Info())
 	case DATAVALUE_TYPE_ROARING_BITMAP:
-		return jsonEncodedString(ht.roaringBitmaps.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.roaringBitmaps.array[hval.Index].Info())
 	case DATAVALUE_TYPE_SPARSE_BITSET:
-		return jsonEncodedString(ht.sparseBitsets.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.sparseBitsets.array[hval.Index].Info())
 	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
-		return jsonEncodedString(ht.countMinSketches.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.countMinSketches.array[hval.Index].Info())
 	case DATAVALUE_TYPE_HYPERLOGLOG:
-		return jsonEncodedString(ht.hyperLogLogs.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.hyperLogLogs.array[hval.Index].Info())
 	case DATAVALUE_TYPE_TOP_K:
-		return jsonEncodedString(ht.topKs.array[hval.Index].Items())
+		return hatCodec.JSONEncodedString(ht.topKs.array[hval.Index].Items())
 	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
-		return jsonEncodedString(ht.reservoirSamples.array[hval.Index].Items())
+		return hatCodec.JSONEncodedString(ht.reservoirSamples.array[hval.Index].Items())
 	case DATAVALUE_TYPE_XOR_FILTER:
-		return jsonEncodedString(ht.xorFilters.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.xorFilters.array[hval.Index].Info())
 	case DATAVALUE_TYPE_RADIX_TREE:
-		return jsonEncodedString(ht.radixTrees.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.radixTrees.array[hval.Index].Info())
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
-		return jsonEncodedString(ht.quantileSketches.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.quantileSketches.array[hval.Index].Info())
 	case DATAVALUE_TYPE_FENWICK_TREE:
-		return jsonEncodedString(ht.fenwickTrees.array[hval.Index].Info())
+		return hatCodec.JSONEncodedString(ht.fenwickTrees.array[hval.Index].Info())
 	default:
 		return "", nil
 	}
@@ -4977,7 +4978,7 @@ func commandScalarString(value interface{}) (string, error) {
 	case json.Number:
 		return v.String(), nil
 	default:
-		return jsonEncodedString(v)
+		return hatCodec.JSONEncodedString(v)
 	}
 }
 

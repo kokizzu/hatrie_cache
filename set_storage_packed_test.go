@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 func TestStringSetTransitionSequencePreservesBehavior(t *testing.T) {
@@ -208,7 +210,7 @@ func TestPackedStringSetCommandGetMatchesCanonicalJSON(t *testing.T) {
 			ht := newTestTrie(t)
 			ht.UpsertSet("set", test.values)
 
-			want, err := jsonEncodedString(ht.GetSet("set"))
+			want, err := hatCodec.JSONEncodedString(ht.GetSet("set"))
 			if err != nil {
 				t.Fatalf("jsonEncodedString() error = %v", err)
 			}

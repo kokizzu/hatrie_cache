@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 func TestSliceTransitionSequencePreservesBehavior(t *testing.T) {
@@ -291,7 +293,7 @@ func TestPackedSliceCommandGetMatchesCanonicalJSON(t *testing.T) {
 			ht := newTestTrie(t)
 			ht.UpsertSlice("slice", test.values)
 
-			want, err := jsonEncodedString(ht.GetSlice("slice"))
+			want, err := hatCodec.JSONEncodedString(ht.GetSlice("slice"))
 			if err != nil {
 				t.Fatalf("jsonEncodedString() error = %v", err)
 			}

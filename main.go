@@ -30,6 +30,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	json "github.com/goccy/go-json"
 	"github.com/kpango/fastime"
+	"hatrie_cache/hat/hatCodec"
 	"hatrie_cache/hat/hatStorage"
 )
 
@@ -1943,7 +1944,7 @@ func (ms *MapStorage) jsonString(idx int32) (string, error) {
 	if idx < 0 || int(idx) >= len(ms.array) || ms.reusables.Has(idx) {
 		return "", errors.New("hatriecache: map backing index is missing")
 	}
-	return jsonEncodedString(ms.array[idx])
+	return hatCodec.JSONEncodedString(ms.array[idx])
 }
 
 func (ms *MapStorage) jsonSize(idx int32) (int64, error) {
@@ -1957,7 +1958,7 @@ func (ms *MapStorage) jsonSize(idx int32) (int64, error) {
 	if idx < 0 || int(idx) >= len(ms.array) || ms.reusables.Has(idx) {
 		return 0, errors.New("hatriecache: map backing index is missing")
 	}
-	return jsonEncodedSize(ms.array[idx])
+	return hatCodec.JSONEncodedSize(ms.array[idx])
 }
 
 func (ms *MapStorage) clone(idx int32) (Map, bool) {
@@ -2797,7 +2798,7 @@ func (set *setData) Values() Set {
 
 func (set *setData) jsonString() (string, error) {
 	if set == nil || set.items == nil {
-		return jsonEncodedString(set.Values())
+		return hatCodec.JSONEncodedString(set.Values())
 	}
 	if len(set.items) == 0 {
 		return "[]", nil
@@ -3264,7 +3265,7 @@ func (ss *SetStorage) jsonString(idx int32) (string, error) {
 		if idx < 0 || int(idx) >= len(ss.array) || ss.reusables.Has(idx) {
 			return "", errors.New("hatriecache: set backing index is missing")
 		}
-		return jsonEncodedString(ss.array[idx].Values())
+		return hatCodec.JSONEncodedString(ss.array[idx].Values())
 	}
 	if !twoValuePool {
 		if poolIndex < 0 || int(poolIndex) >= len(ss.oneStrings) || ss.oneReusable.Has(poolIndex) {

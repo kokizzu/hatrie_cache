@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatCodec"
 )
 
 var (
@@ -466,7 +467,7 @@ func snapshotValueBinarySize(value interface{}) (int, bool, error) {
 	case uint64:
 		return 1 + binaryUvarintSize(v), true, nil
 	case float32, float64:
-		number, err := jsonEncodedString(v)
+		number, err := hatCodec.JSONEncodedString(v)
 		if err != nil {
 			return 0, false, nil
 		}
@@ -859,7 +860,7 @@ func writeSnapshotValueBinary(writer *binaryFieldWriter, value interface{}) bool
 		writer.buf = append(writer.buf, snapshotValueBinaryUnsigned)
 		writer.writeUvarint(v)
 	case float32, float64:
-		number, err := jsonEncodedString(v)
+		number, err := hatCodec.JSONEncodedString(v)
 		if err != nil {
 			return false
 		}

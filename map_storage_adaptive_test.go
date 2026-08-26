@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 func TestAdaptiveSmallMapPromotionAndReplacement(t *testing.T) {
@@ -127,7 +129,7 @@ func TestSmallMapJSONStringMatchesGenericEncoding(t *testing.T) {
 		if err != nil {
 			t.Fatalf("smallMapData.jsonString(%#v) error = %v", value, err)
 		}
-		want, err := jsonEncodedString(value)
+		want, err := hatCodec.JSONEncodedString(value)
 		if err != nil {
 			t.Fatalf("jsonEncodedString(%#v) error = %v", value, err)
 		}

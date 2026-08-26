@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	json "github.com/goccy/go-json"
+	"hatrie_cache/hat/hatCodec"
 	"hatrie_cache/hat/hatDataStructure"
 )
 
@@ -419,7 +420,7 @@ func (top topKData) Info() TopKInfo {
 }
 
 func (top topKData) EncodedSize() int64 {
-	size, err := jsonEncodedSize(top.Snapshot())
+	size, err := hatCodec.JSONEncodedSize(top.Snapshot())
 	if err != nil {
 		return 0
 	}

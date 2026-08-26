@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 func TestJSONEncodedSizeMatchesMarshal(t *testing.T) {
@@ -38,7 +40,7 @@ func TestJSONEncodedSizeMatchesMarshal(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Marshal() error = %v", err)
 			}
-			size, err := jsonEncodedSize(test.value)
+			size, err := hatCodec.JSONEncodedSize(test.value)
 			if err != nil {
 				t.Fatalf("jsonEncodedSize() error = %v", err)
 			}
@@ -81,7 +83,7 @@ func TestJSONEncodedStringMatchesMarshal(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Marshal() error = %v", err)
 			}
-			out, err := jsonEncodedString(test.value)
+			out, err := hatCodec.JSONEncodedString(test.value)
 			if err != nil {
 				t.Fatalf("jsonEncodedString() error = %v", err)
 			}
@@ -93,7 +95,7 @@ func TestJSONEncodedStringMatchesMarshal(t *testing.T) {
 }
 
 func TestJSONEncodedSizeReportsMarshalError(t *testing.T) {
-	_, err := jsonEncodedSize(map[string]interface{}{"bad": func() {}})
+	_, err := hatCodec.JSONEncodedSize(map[string]interface{}{"bad": func() {}})
 	if err == nil {
 		t.Fatal("jsonEncodedSize(unsupported value) error = nil, want error")
 	}
@@ -109,7 +111,7 @@ func TestJSONEncodedSizeWithin(t *testing.T) {
 		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	size, within, err := jsonEncodedSizeWithin(value, int64(len(data)))
+	size, within, err := hatCodec.JSONEncodedSizeWithin(value, int64(len(data)))
 	if err != nil {
 		t.Fatalf("jsonEncodedSizeWithin(exact) error = %v", err)
 	}
@@ -120,7 +122,7 @@ func TestJSONEncodedSizeWithin(t *testing.T) {
 		t.Fatalf("jsonEncodedSizeWithin(exact) size = %d, want %d", size, len(data))
 	}
 
-	size, within, err = jsonEncodedSizeWithin(value, int64(len(data)-1))
+	size, within, err = hatCodec.JSONEncodedSizeWithin(value, int64(len(data)-1))
 	if err != nil {
 		t.Fatalf("jsonEncodedSizeWithin(short) error = %v", err)
 	}
@@ -131,7 +133,7 @@ func TestJSONEncodedSizeWithin(t *testing.T) {
 		t.Fatalf("jsonEncodedSizeWithin(short) size = %d, want 0", size)
 	}
 
-	size, within, err = jsonEncodedSizeWithin(value, -1)
+	size, within, err = hatCodec.JSONEncodedSizeWithin(value, -1)
 	if err != nil {
 		t.Fatalf("jsonEncodedSizeWithin(negative) error = %v", err)
 	}
@@ -144,14 +146,14 @@ func TestJSONEncodedSizeWithin(t *testing.T) {
 }
 
 func TestJSONEncodedSizeWithinReportsMarshalError(t *testing.T) {
-	_, _, err := jsonEncodedSizeWithin(map[string]interface{}{"bad": func() {}}, 1024)
+	_, _, err := hatCodec.JSONEncodedSizeWithin(map[string]interface{}{"bad": func() {}}, 1024)
 	if err == nil {
 		t.Fatal("jsonEncodedSizeWithin(unsupported value) error = nil, want error")
 	}
 }
 
 func TestJSONEncodedStringReportsMarshalError(t *testing.T) {
-	_, err := jsonEncodedString(map[string]interface{}{"bad": func() {}})
+	_, err := hatCodec.JSONEncodedString(map[string]interface{}{"bad": func() {}})
 	if err == nil {
 		t.Fatal("jsonEncodedString(unsupported value) error = nil, want error")
 	}

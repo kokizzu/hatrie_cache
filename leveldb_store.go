@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"hatrie_cache/hat/hatCodec"
 	"hatrie_cache/hat/hatStorage"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -1207,13 +1208,13 @@ func (trie *HatTrie) levelDBHotValueBytesLocked(entry Entry) (int64, error) {
 	case DATAVALUE_TYPE_MAP:
 		return trie.maps.jsonSize(entry.Value.Index)
 	case DATAVALUE_TYPE_SLICE:
-		return jsonEncodedSize(trie.slices.values(entry.Value.Index))
+		return hatCodec.JSONEncodedSize(trie.slices.values(entry.Value.Index))
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return 0, nil
 	case DATAVALUE_TYPE_SET:
-		return jsonEncodedSize(trie.sets.values(entry.Value.Index))
+		return hatCodec.JSONEncodedSize(trie.sets.values(entry.Value.Index))
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
-		return jsonEncodedSize(trie.priorityQueues.array[entry.Value.Index].SnapshotItems())
+		return hatCodec.JSONEncodedSize(trie.priorityQueues.array[entry.Value.Index].SnapshotItems())
 	case DATAVALUE_TYPE_BLOOM_FILTER:
 		return trie.bloomFilters.array[entry.Value.Index].EncodedSize(), nil
 	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
@@ -1628,13 +1629,13 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		}
 		return 0, nil
 	case "map":
-		return jsonEncodedSize(entry.Map)
+		return hatCodec.JSONEncodedSize(entry.Map)
 	case "slice":
-		return jsonEncodedSize(entry.Slice)
+		return hatCodec.JSONEncodedSize(entry.Slice)
 	case "set":
-		return jsonEncodedSize(entry.Set)
+		return hatCodec.JSONEncodedSize(entry.Set)
 	case "priority_queue":
-		return jsonEncodedSize(entry.PriorityQueue)
+		return hatCodec.JSONEncodedSize(entry.PriorityQueue)
 	case "bloom_filter":
 		if entry.BloomFilter == nil {
 			return 0, errors.New("hatriecache: bloom filter snapshot is required")
@@ -1654,7 +1655,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.TopK == nil {
 			return 0, errors.New("hatriecache: top-k snapshot is required")
 		}
-		return jsonEncodedSize(entry.TopK)
+		return hatCodec.JSONEncodedSize(entry.TopK)
 	case "cuckoo_filter":
 		if entry.CuckooFilter == nil {
 			return 0, errors.New("hatriecache: cuckoo filter snapshot is required")
@@ -1696,7 +1697,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.QuantileSketch == nil {
 			return 0, errors.New("hatriecache: quantile sketch snapshot is required")
 		}
-		return jsonEncodedSize(entry.QuantileSketch)
+		return hatCodec.JSONEncodedSize(entry.QuantileSketch)
 	case "fenwick_tree":
 		if entry.FenwickTree == nil {
 			return 0, errors.New("hatriecache: fenwick tree snapshot is required")
@@ -1706,7 +1707,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.ReservoirSample == nil {
 			return 0, errors.New("hatriecache: reservoir sample snapshot is required")
 		}
-		return jsonEncodedSize(entry.ReservoirSample)
+		return hatCodec.JSONEncodedSize(entry.ReservoirSample)
 	case "xor_filter":
 		if entry.XorFilter == nil {
 			return 0, errors.New("hatriecache: xor filter snapshot is required")
@@ -1726,11 +1727,11 @@ func newXorFilterSizeFromSnapshot(snapshot xorFilterSnapshot) (int64, error) {
 	if snapshot.Built {
 		return validatedBase64DecodedSize(snapshot.Fingerprints)
 	}
-	return jsonEncodedSize(snapshot.Staged)
+	return hatCodec.JSONEncodedSize(snapshot.Staged)
 }
 
 func newRadixTreeSizeFromSnapshot(snapshot radixTreeSnapshot) (int64, error) {
-	return jsonEncodedSize(snapshot.Items)
+	return hatCodec.JSONEncodedSize(snapshot.Items)
 }
 
 func (trie *HatTrie) applyLevelDBReferenceLocked(store persistentReferenceStore, entry snapshotEntry, data []byte) (HatValue, error) {
