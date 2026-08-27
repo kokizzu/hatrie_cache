@@ -284,6 +284,18 @@ test-sql-parameterized-views:
 test-sql-grouping-sets:
 	sh ./scripts/test-sql-grouping-sets.sh
 
+test-sql-pivot:
+	sh ./scripts/test-sql-pivot.sh
+
+format-sql-pivot:
+	sh ./scripts/format-sql-pivot.sh
+
+review-sql-pivot:
+	sh ./scripts/review-sql-pivot.sh
+
+commit-sql-pivot:
+	sh ./scripts/commit-sql-pivot.sh
+
 format-sql-grouping-sets:
 	sh ./scripts/format-sql-grouping-sets.sh
 
