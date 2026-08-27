@@ -610,6 +610,42 @@ inspect-sql-bitmap-index-feature:
 commit-sql-bitmap-index-feature:
 	sh ./scripts/commit-sql-bitmap-index-feature.sh
 
+show-sql-approx-engine:
+	sh ./scripts/show-sql-approx-engine.sh
+
+test-sql-approx-aggregates:
+	sh ./scripts/test-sql-approx-aggregates.sh
+
+format-sql-approx-aggregates:
+	sh ./scripts/format-sql-approx-aggregates.sh
+
+benchmark-sql-approx-aggregates:
+	sh ./scripts/benchmark-sql-approx-aggregates.sh
+
+verify-sql-approx-feature:
+	sh ./scripts/verify-sql-approx-feature.sh
+
+inspect-sql-approx-feature:
+	sh ./scripts/inspect-sql-approx-feature.sh
+
+commit-sql-approx-feature:
+	sh ./scripts/commit-sql-approx-feature.sh
+
+push-sql-approx-feature:
+	sh ./scripts/push-sql-approx-feature.sh
+
+show-sql-function-dispatch:
+	sh ./scripts/show-sql-function-dispatch.sh
+
+show-sql-aggregate-docs:
+	sh ./scripts/show-sql-aggregate-docs.sh
+
+show-benchmark-sql-section:
+	sh ./scripts/show-benchmark-sql-section.sh
+
+show-new-packages:
+	sh ./scripts/show-new-packages.sh
+
 format-sql-plan-guards:
 	sh ./scripts/format-sql-plan-guards.sh
 

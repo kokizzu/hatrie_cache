@@ -118,6 +118,34 @@ monitoring HTTP API and native gRPC API. HTTP protobuf uses
 `CacheService.Command` or persistent `CacheService.CommandStream` RPC over a
 local bufconn listener.
 
+## SQL Approximate Aggregates
+
+The SQL aggregate benchmark executes one grouped query over 10,000 in-memory
+rows. It evaluates `APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, and
+`APPROX_TOP_K` together, with the default HyperLogLog precision, percentile
+epsilon, and a Top-K capacity of four. It measures the public SQL executor;
+there is no network transfer in this fixture.
+
+```sh
+make benchmark-sql-approx-aggregates
+```
+
+Five local samples on the AMD Ryzen 9 5950X produced:
+
+| Workload | Median time / query | Timed heap / query | Allocations / query | Wire bytes |
+| --- | ---: | ---: | ---: | ---: |
+| 10,000 rows, three approximate aggregates | 28.917 ms | 15,450,750 B | 270,083 | N/A, in-process |
+
+The aggregate state itself remains bounded per group: HyperLogLog register
+memory is fixed by precision, the quantile summary grows with its requested
+error bound rather than source-row count, and Top-K retains at most its chosen
+capacity. The measured heap includes existing SQL parsing, source wrapping,
+projection, result accounting, and JSON canonicalization of generic distinct
+and Top-K values; it is not the sketch-state size alone. There is no exact SQL
+`COUNT(DISTINCT ...)` counterpart in this command benchmark, so this row is a
+repeatable cost baseline rather than an invalid comparison to Redis or
+Tarantool's different query paths.
+
 ## Architectural Big-Wins Baseline
 
 Run the cross-cutting baseline before and after changes to locking, telemetry,

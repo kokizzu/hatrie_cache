@@ -10254,7 +10254,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -10354,6 +10354,8 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		switch expr.name {
 		case "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
 			return evalSQLJSONPathFunction(expr, group, row)
+		case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
+			return evalSQLApproximateAggregate(expr, group)
 		case "CONTAINS":
 			if len(expr.args) != 2 {
 				return sqlEvalError{err: fmt.Errorf("CONTAINS expects exactly two arguments"), token: expr.token}
@@ -10811,7 +10813,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
+	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
 		return true
 	}
 	return false

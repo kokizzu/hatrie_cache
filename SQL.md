@@ -341,6 +341,36 @@ Result:
 `MIN`, and `MAX` summarize each group. `HAVING` filters those finished groups;
 use `WHERE` to filter input rows before grouping.
 
+### Approximate aggregates
+
+Use bounded approximate aggregates for exploratory and dashboard queries where a
+small, controlled error is preferable to retaining all distinct values or all
+numeric samples in a group.
+
+```sql
+FROM CACHE('events') AS e
+SELECT e.region,
+       APPROX_COUNT_DISTINCT(e.visitor_id, 14) AS visitors,
+       APPROX_PERCENTILE(e.latency_ms, 0.95, 0.01) AS p95_latency_ms,
+       APPROX_TOP_K(e.state, 5) AS common_states
+GROUP BY e.region;
+```
+
+`APPROX_COUNT_DISTINCT(value [, precision])` uses HyperLogLog. Higher
+`precision` reduces relative error and increases its fixed register memory per
+group. `APPROX_PERCENTILE(value, quantile [, epsilon])` uses the quantile
+sketch: `quantile` is in `0..1`, and a smaller `epsilon` tightens rank error at
+the cost of a larger summary. `APPROX_TOP_K(value [, capacity])` uses a bounded
+Space-Saving summary. Its output is ordered `SQLApproxTopKItem` values with
+`value`, `estimate`, and an overcount `error` bound; memory is linear in
+`capacity`, which must be `1..65536`.
+
+All optional controls must be finite numeric literals or bound parameters. Null
+values are ignored. The percentile sketch also ignores non-numeric values, as
+the numeric aggregates do. These aggregates retain their bounded per-group
+state and currently use the general materialized grouping path, so ordinary
+query row, group-memory, timeout, and result-byte limits still apply.
+
 ### Inline rows, CTEs, distinct values, windows, and pagination
 
 `VALUES` supplies small rows directly in a query; `WITH` gives them a temporary
@@ -1129,7 +1159,8 @@ serialize as `YYYY-MM-DD`, and compare in chronological order.
       expressions.
 - [x] Searched and simple `CASE` expressions with lazy selected-branch
       evaluation and optional `ELSE`.
-- [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
+- [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
+      `APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, and `APPROX_TOP_K`.
 - [x] `ORDER BY ... ASC|DESC`, `LIMIT`, and `OFFSET`.
 - [x] `SELECT DISTINCT` after projection, before `ORDER BY`/`LIMIT`.
 - [x] `ROW_NUMBER`, `RANK`, `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD`
