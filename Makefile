@@ -721,6 +721,20 @@ commit-command-protocol:
 push-command-protocol:
 	sh ./scripts/push-command-protocol.sh
 
+test-sql-tooling:
+	sh ./scripts/test-sql-tooling.sh
+
+format-sql-tooling:
+	sh ./scripts/format-sql-tooling.sh
+
+commit-sql-tooling:
+	sh ./scripts/commit-sql-tooling.sh
+
+push-sql-tooling:
+	sh ./scripts/push-sql-tooling.sh
+
+
+
 
 
 commit-sql-improvement-goal-verification:
