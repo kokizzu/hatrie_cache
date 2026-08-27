@@ -56,6 +56,10 @@ func rewriteSQLExpr(expr sqlExpr) sqlExpr {
 		value := rewriteSQLExpr(*expr.right)
 		expr.right = &value
 	}
+	if expr.filter != nil {
+		filter := rewriteSQLExpr(*expr.filter)
+		expr.filter = &filter
+	}
 	expr.args = rewriteSQLExprs(expr.args)
 	for index := range expr.cases {
 		expr.cases[index].when = rewriteSQLExpr(expr.cases[index].when)

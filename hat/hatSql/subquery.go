@@ -108,6 +108,9 @@ func sqlExprHasSubqueryExpression(expr sqlExpr) bool {
 	if expr.right != nil && sqlExprHasSubqueryExpression(*expr.right) {
 		return true
 	}
+	if expr.filter != nil && sqlExprHasSubqueryExpression(*expr.filter) {
+		return true
+	}
 	for _, argument := range expr.args {
 		if sqlExprHasSubqueryExpression(argument) {
 			return true

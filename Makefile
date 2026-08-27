@@ -272,6 +272,9 @@ test-sql-correlated-subqueries:
 test-sql-lateral:
 	sh ./scripts/test-sql-lateral.sh
 
+test-sql-aggregate-filter:
+	sh ./scripts/test-sql-aggregate-filter.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -289,6 +292,15 @@ format-sql-correlated-subqueries:
 
 format-sql-lateral:
 	sh ./scripts/format-sql-lateral.sh
+
+format-sql-aggregate-filter:
+	sh ./scripts/format-sql-aggregate-filter.sh
+
+review-sql-aggregate-filter:
+	sh ./scripts/review-sql-aggregate-filter.sh
+
+commit-sql-aggregate-filter:
+	sh ./scripts/commit-sql-aggregate-filter.sh
 
 review-sql-lateral:
 	sh ./scripts/review-sql-lateral.sh

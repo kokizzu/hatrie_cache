@@ -4230,6 +4230,9 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 	if err := bindSQLExpr(expr.right, parameters); err != nil {
 		return err
 	}
+	if err := bindSQLExpr(expr.filter, parameters); err != nil {
+		return err
+	}
 	if expr.query != nil {
 		if err := bindSQLQuery(expr.query, parameters); err != nil {
 			return err
@@ -4383,6 +4386,10 @@ func cloneSQLExpr(source sqlExpr) sqlExpr {
 		}
 		copy.window = &window
 	}
+	if source.filter != nil {
+		filter := cloneSQLExpr(*source.filter)
+		copy.filter = &filter
+	}
 	return copy
 }
 
@@ -4461,6 +4468,7 @@ type sqlExpr struct {
 	cases                     []sqlCaseWhen
 	window                    *sqlWindow
 	query                     *sqlQuery
+	filter                    *sqlExpr
 	token                     sqlToken
 	collation                 SQLCollation
 }
@@ -5738,6 +5746,28 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 				return sqlExpr{}, err
 			}
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
+			if p.keyword("FILTER") {
+				switch upper {
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
+				default:
+					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
+				}
+				p.next()
+				if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+					return sqlExpr{}, err
+				}
+				if err := p.expectKeyword("WHERE"); err != nil {
+					return sqlExpr{}, err
+				}
+				filter, err := p.parseCondition()
+				if err != nil {
+					return sqlExpr{}, err
+				}
+				if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+					return sqlExpr{}, err
+				}
+				expr.filter = &filter
+			}
 			if p.keyword("OVER") {
 				p.next()
 				if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
@@ -10658,11 +10688,15 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			return textContains(text, search)
 		case "COUNT":
+			aggregateRows, err := sqlAggregateFilterRows(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
 			if len(expr.args) == 0 || expr.args[0].kind == "star" {
-				return int64(len(group))
+				return int64(len(aggregateRows))
 			}
 			var n int64
-			for _, r := range group {
+			for _, r := range aggregateRows {
 				value := evalSQLExpr(expr.args[0], []sqlExecRow{r}, r)
 				if err := sqlExpressionError(value); err != nil {
 					return sqlEvaluationFailure(err)
@@ -10673,8 +10707,12 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			return n
 		case "SUM", "AVG", "MIN", "MAX":
+			aggregateRows, err := sqlAggregateFilterRows(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
 			var values []float64
-			for _, r := range group {
+			for _, r := range aggregateRows {
 				value := evalSQLExpr(expr.args[0], []sqlExecRow{r}, r)
 				if err := sqlExpressionError(value); err != nil {
 					return sqlEvaluationFailure(err)
@@ -11472,6 +11510,9 @@ func visitSQLExpressionSubqueries(expr sqlExpr, visit func(*sqlQuery)) {
 	}
 	if expr.right != nil {
 		visitSQLExpressionSubqueries(*expr.right, visit)
+	}
+	if expr.filter != nil {
+		visitSQLExpressionSubqueries(*expr.filter, visit)
 	}
 	for _, argument := range expr.args {
 		visitSQLExpressionSubqueries(argument, visit)
