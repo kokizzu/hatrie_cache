@@ -87,6 +87,27 @@ range predicates on `JSON_VALUE(column, relative_path)` use it when the created
 absolute index path matches the column plus relative path. The full predicate
 is still evaluated after the probe, preserving SQL semantics.
 
+### Bitmap indexes for low-cardinality fields
+
+`CreateSQLJSONBitmapIndex` uses one native Roaring bitmap per distinct JSON
+value and a single source-row slice. It is intended for equality filters on
+small domains such as `state`, `enabled`, `region`, or `tier`; the optimizer
+uses its exact posting cardinality and `SQLJSONBitmapIndexHealth` reports its
+encoded bitmap bytes.
+
+```go
+trie.CreateSQLJSONBitmapIndex("jobs", "state")
+result, err := hatSql.ExecuteSQLQuery(
+	"FROM CACHE('jobs') AS job WHERE job.state = 'queued' SELECT job.id",
+	trie,
+)
+```
+
+Bitmap indexes are online and refreshed lazily after their cache value changes.
+They support equality only. Use `CreateSQLJSONFieldIndex` for range predicates,
+`ORDER BY`, or high-cardinality values where an ordered field index is more
+appropriate.
+
 ### Command SQL: create, read, change, expire, and delete
 
 The following session is intentionally small and sequential. Run each statement

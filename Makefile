@@ -592,6 +592,24 @@ inspect-sql-json-path-feature:
 commit-sql-json-path-feature:
 	sh ./scripts/commit-sql-json-path-feature.sh
 
+show-sql-bitmap-index-engine:
+	sh ./scripts/show-sql-bitmap-index-engine.sh
+
+test-sql-bitmap-indexes:
+	sh ./scripts/test-sql-bitmap-indexes.sh
+
+format-sql-bitmap-indexes:
+	sh ./scripts/format-sql-bitmap-indexes.sh
+
+verify-sql-bitmap-index-feature:
+	sh ./scripts/verify-sql-bitmap-index-feature.sh
+
+inspect-sql-bitmap-index-feature:
+	sh ./scripts/inspect-sql-bitmap-index-feature.sh
+
+commit-sql-bitmap-index-feature:
+	sh ./scripts/commit-sql-bitmap-index-feature.sh
+
 format-sql-plan-guards:
 	sh ./scripts/format-sql-plan-guards.sh
 

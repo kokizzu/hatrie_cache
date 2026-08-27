@@ -328,6 +328,27 @@ type sqlJSONCompositeIndex struct {
 	fields []string
 	rows   map[string][]SQLRow
 }
+type sqlJSONBitmapIndex struct {
+	raw      string
+	rows     []SQLRow
+	postings map[string]hatDataStructure.RoaringBitmap
+	nulls    []SQLRow
+}
+
+// SQLJSONBitmapIndexHealth reports the current in-memory size and shape of an
+// opt-in low-cardinality JSON bitmap index.
+type SQLJSONBitmapIndexHealth struct {
+	Key          string `json:"key"`
+	Field        string `json:"field"`
+	Rows         int    `json:"rows"`
+	IndexedRows  int    `json:"indexed_rows"`
+	NullRows     int    `json:"null_rows"`
+	DistinctKeys int    `json:"distinct_keys"`
+	SourceBytes  int    `json:"source_bytes"`
+	EncodedBytes uint64 `json:"encoded_bytes"`
+	Current      bool   `json:"current"`
+	Refreshed    bool   `json:"refreshed"`
+}
 
 func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	if ht == nil || key == "" || field == "" {
@@ -343,6 +364,56 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	}
 	ht.sqlJSONIndexes[key][field] = &sqlJSONFieldIndex{}
 	return nil
+}
+
+// CreateSQLJSONBitmapIndex configures an online equality index for a
+// low-cardinality JSON field. Each distinct value owns a compact Roaring bitmap
+// of source-row ordinals; range and ordered scans remain the responsibility of
+// CreateSQLJSONFieldIndex.
+func (ht *HatTrie) CreateSQLJSONBitmapIndex(key, field string) error {
+	if ht == nil || key == "" || field == "" {
+		return fmt.Errorf("SQL JSON bitmap index requires a cache key and field")
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONBitmapIndexes == nil {
+		ht.sqlJSONBitmapIndexes = map[string]map[string]*sqlJSONBitmapIndex{}
+	}
+	if ht.sqlJSONBitmapIndexes[key] == nil {
+		ht.sqlJSONBitmapIndexes[key] = map[string]*sqlJSONBitmapIndex{}
+	}
+	ht.sqlJSONBitmapIndexes[key][field] = &sqlJSONBitmapIndex{}
+	return nil
+}
+
+// SQLJSONBitmapIndexHealth refreshes and reports one configured bitmap index.
+func (ht *HatTrie) SQLJSONBitmapIndexHealth(key, field string) (SQLJSONBitmapIndexHealth, bool, error) {
+	if ht == nil || key == "" || field == "" {
+		return SQLJSONBitmapIndexHealth{}, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return SQLJSONBitmapIndexHealth{}, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONBitmapIndexes[key][field]
+	if index == nil {
+		return SQLJSONBitmapIndexHealth{}, false, nil
+	}
+	refreshed := index.raw != string(data)
+	if err := refreshSQLJSONBitmapIndex(index, key, field, data); err != nil {
+		return SQLJSONBitmapIndexHealth{}, false, err
+	}
+	health := SQLJSONBitmapIndexHealth{
+		Key: key, Field: field, Rows: len(index.rows), NullRows: len(index.nulls), DistinctKeys: len(index.postings),
+		SourceBytes: len(data), Current: index.raw == string(data), Refreshed: refreshed,
+	}
+	for _, bitmap := range index.postings {
+		health.IndexedRows += int(bitmap.Count())
+		health.EncodedBytes += uint64(bitmap.EncodedSize())
+	}
+	return health, true, nil
 }
 
 // CreateSQLJSONPathIndex configures an online equality and range index for a
@@ -513,6 +584,23 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if bitmap := ht.sqlJSONBitmapIndexes[key][field]; bitmap != nil {
+		if err := refreshSQLJSONBitmapIndex(bitmap, key, field, data); err != nil {
+			return nil, false, err
+		}
+		valueKey, ok := sqlIndexValueKey(value)
+		if !ok {
+			return []SQLRow{}, true, nil
+		}
+		ordinals := bitmap.postings[valueKey].Values()
+		rows := make([]SQLRow, 0, len(ordinals))
+		for _, ordinal := range ordinals {
+			if int(ordinal) < len(bitmap.rows) {
+				rows = append(rows, bitmap.rows[ordinal])
+			}
+		}
+		return hatSql.CloneRows(rows), true, nil
+	}
 	index := ht.sqlJSONIndexes[key][field]
 	if index == nil {
 		return nil, false, nil
@@ -622,6 +710,16 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if bitmap := ht.sqlJSONBitmapIndexes[key][field]; bitmap != nil {
+		if err := refreshSQLJSONBitmapIndex(bitmap, key, field, data); err != nil {
+			return 0, false, true, err
+		}
+		valueKey, ok := sqlIndexValueKey(value)
+		if !ok {
+			return 0, true, true, nil
+		}
+		return int(bitmap.postings[valueKey].Count()), true, true, nil
+	}
 	index := ht.sqlJSONIndexes[key][field]
 	if index == nil {
 		return 0, false, false, nil
@@ -931,6 +1029,47 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 	return true, emitNulls()
 }
 
+func refreshSQLJSONBitmapIndex(index *sqlJSONBitmapIndex, key, field string, data []byte) error {
+	if index.raw == string(data) {
+		return nil
+	}
+	rows, err := sqlJSONRows(key, data)
+	if err != nil {
+		return err
+	}
+	if uint64(len(rows)) > uint64(^uint32(0)) {
+		return fmt.Errorf("SQL JSON bitmap index supports at most %d rows", ^uint32(0))
+	}
+	index.raw, index.rows, index.postings, index.nulls = string(data), rows, map[string]hatDataStructure.RoaringBitmap{}, nil
+	for rowIndex, row := range rows {
+		value, exists, err := sqlJSONIndexRowValue(row, field)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			index.nulls = append(index.nulls, row)
+			continue
+		}
+		valueKey, ok := sqlIndexValueKey(value)
+		if !ok {
+			index.nulls = append(index.nulls, row)
+			continue
+		}
+		bitmap := index.postings[valueKey]
+		bitmap.Add(uint32(rowIndex))
+		index.postings[valueKey] = bitmap
+	}
+	return nil
+}
+
+func sqlJSONIndexRowValue(row SQLRow, field string) (interface{}, bool, error) {
+	if strings.HasPrefix(field, "$") {
+		return hatSql.JSONPathValue(row, field)
+	}
+	value, exists := row[field]
+	return value, exists, nil
+}
+
 func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data []byte) error {
 	if index.raw == string(data) {
 		return nil
@@ -941,17 +1080,13 @@ func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data 
 	}
 	index.raw, index.rows, index.ordered, index.nulls = string(data), map[string][]SQLRow{}, nil, nil
 	for _, row := range rows {
-		value := row[field]
-		if strings.HasPrefix(field, "$") {
-			var exists bool
-			value, exists, err = hatSql.JSONPathValue(row, field)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				index.nulls = append(index.nulls, row)
-				continue
-			}
+		value, exists, err := sqlJSONIndexRowValue(row, field)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			index.nulls = append(index.nulls, row)
+			continue
 		}
 		if valueKey, ok := sqlIndexValueKey(value); ok {
 			index.rows[valueKey] = append(index.rows[valueKey], row)
