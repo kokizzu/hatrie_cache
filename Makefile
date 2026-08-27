@@ -682,6 +682,15 @@ commit-sql-telemetry:
 push-sql-telemetry:
 	sh ./scripts/push-sql-telemetry.sh
 
+verify-sql-improvement-goal:
+	sh ./scripts/verify-sql-improvement-goal.sh
+
+commit-sql-improvement-goal-verification:
+	sh ./scripts/commit-sql-improvement-goal-verification.sh
+
+push-sql-improvement-goal-verification:
+	sh ./scripts/push-sql-improvement-goal-verification.sh
+
 show-sql-function-dispatch:
 	sh ./scripts/show-sql-function-dispatch.sh
 
