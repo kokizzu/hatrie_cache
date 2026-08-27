@@ -745,6 +745,18 @@ commit-cli-sql-repl:
 push-cli-sql-repl:
 	sh ./scripts/push-cli-sql-repl.sh
 
+test-sql-fixtures:
+	sh ./scripts/test-sql-fixtures.sh
+
+format-sql-fixtures:
+	sh ./scripts/format-sql-fixtures.sh
+
+commit-sql-fixtures:
+	sh ./scripts/commit-sql-fixtures.sh
+
+push-sql-fixtures:
+	sh ./scripts/push-sql-fixtures.sh
+
 
 
 

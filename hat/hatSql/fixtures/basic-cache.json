@@ -1,0 +1,15 @@
+{
+  "name": "basic-cache",
+  "query": "SELECT name FROM CACHE('users')",
+  "sources": {
+    "users": [
+      {"name": "Ada"},
+      {"name": "Lin"}
+    ]
+  },
+  "expected_columns": ["name"],
+  "expected_rows": [
+    {"name": "Ada"},
+    {"name": "Lin"}
+  ]
+}
