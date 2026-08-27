@@ -4304,6 +4304,8 @@ func cloneSQLQuery(source *sqlQuery) *sqlQuery {
 	}
 	query.where = cloneSQLExpr(source.where)
 	query.groupBy = cloneSQLExprs(source.groupBy)
+	query.groupingSets = cloneSQLGroupingSets(source.groupingSets)
+	query.groupingDimensions = cloneSQLExprs(source.groupingDimensions)
 	query.having = cloneSQLExpr(source.having)
 	query.orderBy = cloneSQLOrders(source.orderBy)
 	query.unions = make([]sqlUnion, len(source.unions))
@@ -4394,22 +4396,24 @@ func cloneSQLExpr(source sqlExpr) sqlExpr {
 }
 
 type sqlQuery struct {
-	ctes     []sqlCTE
-	selects  []sqlSelectItem
-	from     *sqlSource
-	joins    []sqlJoin
-	where    sqlExpr
-	groupBy  []sqlExpr
-	having   sqlExpr
-	orderBy  []sqlOrder
-	windows  map[string]sqlWindow
-	sample   *sqlTableSample
-	limit    int
-	offset   int
-	distinct bool
-	unions   []sqlUnion
-	explain  bool
-	analyze  bool
+	ctes               []sqlCTE
+	selects            []sqlSelectItem
+	from               *sqlSource
+	joins              []sqlJoin
+	where              sqlExpr
+	groupBy            []sqlExpr
+	groupingSets       [][]sqlExpr
+	groupingDimensions []sqlExpr
+	having             sqlExpr
+	orderBy            []sqlOrder
+	windows            map[string]sqlWindow
+	sample             *sqlTableSample
+	limit              int
+	offset             int
+	distinct           bool
+	unions             []sqlUnion
+	explain            bool
+	analyze            bool
 }
 type sqlUnion struct {
 	kind  string
@@ -4682,18 +4686,20 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			}
 			q.where = expr
 		case p.keyword("GROUP"):
-			if q.groupBy != nil {
+			if q.groupBy != nil || q.groupingSets != nil {
 				return nil, p.diagnostic(p.current(), "GROUP BY appears more than once")
 			}
 			p.next()
 			if err := p.expectKeyword("BY"); err != nil {
 				return nil, err
 			}
-			values, err := p.parseExprList()
+			values, sets, dimensions, err := p.parseSQLGroupingClause()
 			if err != nil {
 				return nil, err
 			}
 			q.groupBy = values
+			q.groupingSets = sets
+			q.groupingDimensions = dimensions
 		case p.keyword("HAVING"):
 			if q.having.kind != "" {
 				return nil, p.diagnostic(p.current(), "HAVING appears more than once")
@@ -4827,6 +4833,9 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 	}
 	if err := p.resolveSQLNamedWindows(q); err != nil {
 		return nil, err
+	}
+	if err := sqlExpandGroupingSets(q); err != nil {
+		return nil, p.diagnostic(p.current(), err.Error())
 	}
 	return q, nil
 }
@@ -6255,10 +6264,10 @@ func sqlSuspectedClauseTypo(value string) bool {
 }
 
 type sqlExecRow struct {
-	sources  map[string]SQLRow
-	order    []string
-	ordinals map[string]int
-	outer    *sqlExecRow
+	sources     map[string]SQLRow
+	order       []string
+	ordinals    map[string]int
+	outer       *sqlExecRow
 	environment *sqlEvalEnvironment
 }
 

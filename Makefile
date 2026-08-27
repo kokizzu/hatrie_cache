@@ -281,6 +281,12 @@ test-sql-named-windows:
 test-sql-parameterized-views:
 	sh ./scripts/test-sql-parameterized-views.sh
 
+test-sql-grouping-sets:
+	sh ./scripts/test-sql-grouping-sets.sh
+
+format-sql-grouping-sets:
+	sh ./scripts/format-sql-grouping-sets.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -1052,3 +1058,11 @@ frontend-smoke:
 
 frontend-backend-smoke:
 	./scripts/frontend-backend-smoke.sh
+report-package-layout:
+	sh ./scripts/report-package-layout.sh
+
+review-sql-grouping-sets:
+	sh ./scripts/review-sql-grouping-sets.sh
+
+commit-sql-grouping-sets:
+	sh ./scripts/commit-sql-grouping-sets.sh
