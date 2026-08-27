@@ -345,6 +345,16 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	return nil
 }
 
+// CreateSQLJSONPathIndex configures an online equality and range index for a
+// nested JSON path in a CACHE value, for example $.profile.city.
+func (ht *HatTrie) CreateSQLJSONPathIndex(key, path string) error {
+	normalized, err := hatSql.NormalizeJSONPath(path)
+	if err != nil {
+		return err
+	}
+	return ht.CreateSQLJSONFieldIndex(key, normalized)
+}
+
 // CreateSQLJSONTextIndex configures a token index for one string field in a
 // JSON object or array stored at key. Creation is online: source parsing and
 // tokenization are deferred until the first matching CONTAINS query.
@@ -931,9 +941,21 @@ func refreshSQLJSONFieldIndex(index *sqlJSONFieldIndex, key, field string, data 
 	}
 	index.raw, index.rows, index.ordered, index.nulls = string(data), map[string][]SQLRow{}, nil, nil
 	for _, row := range rows {
-		if valueKey, ok := sqlIndexValueKey(row[field]); ok {
+		value := row[field]
+		if strings.HasPrefix(field, "$") {
+			var exists bool
+			value, exists, err = hatSql.JSONPathValue(row, field)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				index.nulls = append(index.nulls, row)
+				continue
+			}
+		}
+		if valueKey, ok := sqlIndexValueKey(value); ok {
 			index.rows[valueKey] = append(index.rows[valueKey], row)
-			index.ordered = append(index.ordered, sqlJSONFieldIndexEntry{value: row[field], row: row})
+			index.ordered = append(index.ordered, sqlJSONFieldIndexEntry{value: value, row: row})
 		} else {
 			index.nulls = append(index.nulls, row)
 		}

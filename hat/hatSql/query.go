@@ -8024,6 +8024,10 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		rows, indexed, err = resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
 	} else if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
 		rows, indexed, err = resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+	} else if path, ok := sqlJSONPathIndexField(left, source.alias); ok && right.kind == "literal" {
+		rows, indexed, err = resolveSQLIndexedComparison(source, path, condition.op, right.value, resolver)
+	} else if path, ok := sqlJSONPathIndexField(right, source.alias); ok && left.kind == "literal" {
+		rows, indexed, err = resolveSQLIndexedComparison(source, path, sqlReverseComparison(condition.op), left.value, resolver)
 	} else {
 		return nil, false, nil
 	}
@@ -8031,6 +8035,21 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		metrics.adaptive.ObserveIndex(adaptiveKey, *adaptiveEstimate, len(rows))
 	}
 	return rows, indexed, err
+}
+
+func sqlJSONPathIndexField(expr sqlExpr, alias string) (string, bool) {
+	if expr.kind != "func" || !strings.EqualFold(expr.name, "JSON_VALUE") || len(expr.args) != 2 {
+		return "", false
+	}
+	field, path := expr.args[0], expr.args[1]
+	if field.kind != "field" || field.qualifier != alias || path.kind != "literal" {
+		return "", false
+	}
+	value, ok := path.value.(string)
+	if !ok {
+		return "", false
+	}
+	return sqlJSONPathWithField(field.name, value)
 }
 
 func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
@@ -10333,6 +10352,8 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return nil
 	case "func":
 		switch expr.name {
+		case "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
+			return evalSQLJSONPathFunction(expr, group, row)
 		case "CONTAINS":
 			if len(expr.args) != 2 {
 				return sqlEvalError{err: fmt.Errorf("CONTAINS expects exactly two arguments"), token: expr.token}
@@ -10790,7 +10811,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX":
+	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
 		return true
 	}
 	return false

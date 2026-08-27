@@ -67,6 +67,26 @@ creates a source of rows. `TABLE(...)` function arguments are constants or
 prepared parameters rather than row expressions, so a function cannot create
 an accidental nested scan for every input row.
 
+### JSON paths and nested indexes
+
+`JSON_VALUE(json, path)` returns a scalar, `JSON_QUERY(json, path)` returns an
+object or array, and `JSON_EXISTS(json, path)` reports whether a path exists.
+Paths start with `$` and support members and non-negative array indexes, such
+as `$.profile.city`, `$.tags[0]`, and `$['display-name']`.
+
+```go
+trie.CreateSQLJSONPathIndex("people", "$.profile.city")
+result, err := hatSql.ExecuteSQLQuery(
+	"FROM CACHE('people') AS p WHERE JSON_VALUE(p.profile, '$.city') = 'Singapore' SELECT p.id",
+	trie,
+)
+```
+
+The path index is lazy and refreshed when the cache value changes. Equality and
+range predicates on `JSON_VALUE(column, relative_path)` use it when the created
+absolute index path matches the column plus relative path. The full predicate
+is still evaluated after the probe, preserving SQL semantics.
+
 ### Command SQL: create, read, change, expire, and delete
 
 The following session is intentionally small and sequential. Run each statement

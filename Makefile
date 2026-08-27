@@ -574,6 +574,24 @@ commit-sql-table-function-feature:
 show-sql-source-model:
 	sh ./scripts/show-sql-source-model.sh
 
+show-sql-json-index-engine:
+	sh ./scripts/show-sql-json-index-engine.sh
+
+test-sql-json-paths:
+	sh ./scripts/test-sql-json-paths.sh
+
+format-sql-json-paths:
+	sh ./scripts/format-sql-json-paths.sh
+
+verify-sql-json-path-feature:
+	sh ./scripts/verify-sql-json-path-feature.sh
+
+inspect-sql-json-path-feature:
+	sh ./scripts/inspect-sql-json-path-feature.sh
+
+commit-sql-json-path-feature:
+	sh ./scripts/commit-sql-json-path-feature.sh
+
 format-sql-plan-guards:
 	sh ./scripts/format-sql-plan-guards.sh
 
