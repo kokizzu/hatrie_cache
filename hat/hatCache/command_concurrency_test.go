@@ -662,3 +662,43 @@ func TestExecuteCommandConcurrentStructureCreationIntegrity(t *testing.T) {
 		t.Fatalf("trie size after concurrent creates = %d, want %d", got, want)
 	}
 }
+
+func TestExecuteCommandConcurrentInternalReplicationIntegrity(t *testing.T) {
+	entries := commandConcurrencyWorkers * commandConcurrencyRounds
+	source := newTestTrie(t)
+	payloads := make([]string, entries)
+	for index := 0; index < entries; index++ {
+		key := "internal-" + strconv.Itoa(index)
+		value := "value-" + strconv.Itoa(index)
+		requireCommandOK(t, source, CacheCommandRequest{Command: "SET", Key: key, Value: value})
+		payloads[index] = requireCommandOK(t, source, CacheCommandRequest{Command: "DUMP", Key: key}).Value
+		if payloads[index] == "" {
+			t.Fatalf("DUMP(%q) returned an empty snapshot", key)
+		}
+	}
+
+	target := newTestTrie(t)
+	runConcurrentCommands(t, entries, func(index int) error {
+		key := "internal-" + strconv.Itoa(index)
+		if err := commandMustSucceed(target, CacheCommandRequest{Command: "INTERNALSET", Key: key, Value: payloads[index]}); err != nil {
+			return err
+		}
+		response := target.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: key})
+		if !response.OK || response.Value != "value-"+strconv.Itoa(index) {
+			return fmt.Errorf("GET(%q) after INTERNALSET: %#v", key, response)
+		}
+		return commandMustSucceed(target, CacheCommandRequest{Command: "DUMP", Key: key})
+	})
+	for index := 0; index < entries; index++ {
+		key := "internal-" + strconv.Itoa(index)
+		if value := target.GetString(key); value != "value-"+strconv.Itoa(index) {
+			t.Fatalf("INTERNALSET lost %q: got %q", key, value)
+		}
+	}
+	runConcurrentCommands(t, entries, func(index int) error {
+		return commandMustSucceed(target, CacheCommandRequest{Command: "INTERNALDEL", Key: "internal-" + strconv.Itoa(index)})
+	})
+	if size := target.Size(); size != 0 {
+		t.Fatalf("concurrent INTERNALDEL left %d entries", size)
+	}
+}
