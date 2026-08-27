@@ -4230,6 +4230,11 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 	if err := bindSQLExpr(expr.right, parameters); err != nil {
 		return err
 	}
+	if expr.query != nil {
+		if err := bindSQLQuery(expr.query, parameters); err != nil {
+			return err
+		}
+	}
 	for index := range expr.args {
 		if err := bindSQLExpr(&expr.args[index], parameters); err != nil {
 			return err
@@ -4359,6 +4364,9 @@ func cloneSQLExpr(source sqlExpr) sqlExpr {
 		copy.right = &right
 	}
 	copy.args = cloneSQLExprs(source.args)
+	if source.query != nil {
+		copy.query = cloneSQLQuery(source.query)
+	}
 	if source.cases != nil {
 		copy.cases = make([]sqlCaseWhen, len(source.cases))
 		for index, branch := range source.cases {
@@ -4451,6 +4459,7 @@ type sqlExpr struct {
 	args                      []sqlExpr
 	cases                     []sqlCaseWhen
 	window                    *sqlWindow
+	query                     *sqlQuery
 	token                     sqlToken
 	collation                 SQLCollation
 }
@@ -5256,6 +5265,21 @@ func (p *sqlQueryParser) parseNotCondition() (sqlExpr, error) {
 		}
 		return sqlExpr{kind: "unary", op: "!", left: &operand}, nil
 	}
+	if p.keyword("EXISTS") {
+		token := p.current()
+		p.next()
+		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+			return sqlExpr{}, err
+		}
+		query, err := p.parseQuery(true)
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlExpr{}, err
+		}
+		return sqlExpr{kind: "exists", query: query, token: token}, nil
+	}
 	return p.parseComparison()
 }
 func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
@@ -5505,6 +5529,16 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 	token := p.current()
 	if token.kind == sqlTokenLeftParen {
 		p.next()
+		if p.keyword("SELECT") || p.keyword("FROM") || p.keyword("WITH") {
+			query, err := p.parseQuery(true)
+			if err != nil {
+				return sqlExpr{}, err
+			}
+			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+				return sqlExpr{}, err
+			}
+			return sqlExpr{kind: "subquery", query: query, token: token}, nil
+		}
 		expression, err := p.parseCondition()
 		if err != nil {
 			return sqlExpr{}, err
@@ -6025,6 +6059,8 @@ type sqlExecRow struct {
 	sources  map[string]SQLRow
 	order    []string
 	ordinals map[string]int
+	outer    *sqlExecRow
+	environment *sqlEvalEnvironment
 }
 
 func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow) (SQLQueryResult, error) {
@@ -6364,6 +6400,10 @@ func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, 
 }
 
 func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) (SQLQueryResult, error) {
+	return executeSQLQueryWithMetricsOuter(q, resolver, ctes, metrics, control, nil)
+}
+
+func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -6401,7 +6441,12 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	var started time.Time
-	rows, reordered, err := executeSQLReorderedInnerHashJoins(q, resolver, ctes, metrics, control, maxRows)
+	var rows []sqlExecRow
+	reordered := false
+	var err error
+	if !sqlQueryHasSubqueryExpression(q) {
+		rows, reordered, err = executeSQLReorderedInnerHashJoins(q, resolver, ctes, metrics, control, maxRows)
+	}
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -6441,6 +6486,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 			metrics.recordScanRows(*q.from, base, started)
 		}
 		rows = wrapSQLSourceWorkers(*q.from, base, control.options.Workers)
+		sqlAttachSQLExecutionEnvironment(rows, outer, &sqlEvalEnvironment{resolver: resolver, ctes: ctes, metrics: metrics, control: control})
 		pushedWhere = q.where.kind != "" && sqlCanPushBaseWhere(q)
 		if pushedWhere {
 			started = time.Now()
@@ -8481,7 +8527,13 @@ func wrapSQLSourceWorkers(source sqlSource, rows []SQLRow, workers int) []sqlExe
 	return out
 }
 func mergeSQLRows(left, right sqlExecRow) sqlExecRow {
-	out := sqlExecRow{sources: map[string]SQLRow{}, order: append(append([]string{}, left.order...), right.order...), ordinals: map[string]int{}}
+	out := sqlExecRow{sources: map[string]SQLRow{}, order: append(append([]string{}, left.order...), right.order...), ordinals: map[string]int{}, outer: left.outer, environment: left.environment}
+	if out.outer == nil {
+		out.outer = right.outer
+	}
+	if out.environment == nil {
+		out.environment = right.environment
+	}
 	for k, v := range left.sources {
 		out.sources[k] = v
 	}
@@ -9586,6 +9638,9 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 }
 
 func sqlCanPushBaseWhere(query *sqlQuery) bool {
+	if sqlExprHasSubqueryExpression(query.where) {
+		return false
+	}
 	for _, join := range query.joins {
 		if join.kind != "INNER" && join.kind != "CROSS" {
 			return false
@@ -10456,6 +10511,10 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return expr.value
 	case "field":
 		return sqlField(row, expr.qualifier, expr.name)
+	case "exists":
+		return evalSQLExists(expr, row)
+	case "subquery":
+		return evalSQLScalarSubquery(expr, row)
 	case "cast":
 		if len(expr.args) != 1 {
 			token, _ := expr.value.(sqlToken)
@@ -10813,12 +10872,17 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 	return nil, fmt.Errorf("unsupported CAST target %q", target)
 }
 func sqlField(row sqlExecRow, qualifier, name string) interface{} {
-	if qualifier != "" {
-		return row.sources[qualifier][name]
-	}
-	for _, source := range row.order {
-		if value, ok := row.sources[source][name]; ok {
-			return value
+	for current := &row; current != nil; current = current.outer {
+		if qualifier != "" {
+			if source, ok := current.sources[qualifier]; ok {
+				return source[name]
+			}
+			continue
+		}
+		for _, source := range current.order {
+			if value, ok := current.sources[source][name]; ok {
+				return value
+			}
 		}
 	}
 	return nil
@@ -11318,9 +11382,42 @@ func QuerySourceNamesParameters(source string, parameters []interface{}) ([]stri
 		for _, union := range candidate.unions {
 			visitQuery(union.query)
 		}
+		for _, item := range candidate.selects {
+			visitSQLExpressionSubqueries(item.expr, visitQuery)
+		}
+		visitSQLExpressionSubqueries(candidate.where, visitQuery)
+		visitSQLExpressionSubqueries(candidate.having, visitQuery)
+		for _, expression := range candidate.groupBy {
+			visitSQLExpressionSubqueries(expression, visitQuery)
+		}
+		for _, order := range candidate.orderBy {
+			visitSQLExpressionSubqueries(order.expr, visitQuery)
+		}
+		for _, join := range candidate.joins {
+			visitSQLExpressionSubqueries(join.on, visitQuery)
+		}
 	}
 	visitQuery(query)
 	return names, nil
+}
+
+func visitSQLExpressionSubqueries(expr sqlExpr, visit func(*sqlQuery)) {
+	if expr.query != nil {
+		visit(expr.query)
+	}
+	if expr.left != nil {
+		visitSQLExpressionSubqueries(*expr.left, visit)
+	}
+	if expr.right != nil {
+		visitSQLExpressionSubqueries(*expr.right, visit)
+	}
+	for _, argument := range expr.args {
+		visitSQLExpressionSubqueries(argument, visit)
+	}
+	for _, branch := range expr.cases {
+		visitSQLExpressionSubqueries(branch.when, visit)
+		visitSQLExpressionSubqueries(branch.then, visit)
+	}
 }
 
 // ValidateSQLQueryStreamable reports whether query can emit rows incrementally.

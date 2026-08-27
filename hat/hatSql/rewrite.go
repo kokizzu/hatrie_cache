@@ -45,6 +45,9 @@ func rewriteSQLExprs(expressions []sqlExpr) []sqlExpr {
 }
 
 func rewriteSQLExpr(expr sqlExpr) sqlExpr {
+	if expr.query != nil {
+		rewriteSQLQuery(expr.query)
+	}
 	if expr.left != nil {
 		value := rewriteSQLExpr(*expr.left)
 		expr.left = &value

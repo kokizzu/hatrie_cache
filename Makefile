@@ -266,6 +266,9 @@ test-sql-time-zones:
 test-sql-rewrite:
 	sh ./scripts/test-sql-rewrite.sh
 
+test-sql-correlated-subqueries:
+	sh ./scripts/test-sql-correlated-subqueries.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -277,6 +280,15 @@ format-sql-time-zones:
 
 format-sql-rewrite:
 	sh ./scripts/format-sql-rewrite.sh
+
+format-sql-correlated-subqueries:
+	sh ./scripts/format-sql-correlated-subqueries.sh
+
+review-sql-correlated-subqueries:
+	sh ./scripts/review-sql-correlated-subqueries.sh
+
+commit-sql-correlated-subqueries:
+	sh ./scripts/commit-sql-correlated-subqueries.sh
 
 review-sql-rewrite:
 	sh ./scripts/review-sql-rewrite.sh
