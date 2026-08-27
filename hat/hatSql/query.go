@@ -4838,6 +4838,51 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 		}
 		return source, nil
 	}
+	if p.keyword("TABLE") {
+		p.next()
+		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+			return sqlSource{}, err
+		}
+		name, err := p.expectIdentifier("a table function name", nil)
+		if err != nil {
+			return sqlSource{}, err
+		}
+		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+			return sqlSource{}, err
+		}
+		arguments := make([]interface{}, 0)
+		if p.current().kind != sqlTokenRightParen {
+			for {
+				argument, err := p.parsePrimary()
+				if err != nil {
+					return sqlSource{}, err
+				}
+				switch argument.kind {
+				case "literal":
+					arguments = append(arguments, argument.value)
+				case "parameter":
+					arguments = append(arguments, sqlParameter{index: argument.value.(int), token: argument.token})
+				default:
+					return sqlSource{}, p.diagnostic(argument.token, "TABLE arguments must be literals or parameters")
+				}
+				if p.current().kind != sqlTokenComma {
+					break
+				}
+				p.next()
+			}
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlSource{}, err
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlSource{}, err
+		}
+		source := sqlSource{kind: "TABLE", key: name.text, values: [][]interface{}{arguments}}
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
+		return source, nil
+	}
 	if p.keyword("CACHE") {
 		p.next()
 		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
@@ -5884,7 +5929,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL":
+	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
@@ -7546,6 +7591,8 @@ func sqlExplainSource(source sqlSource) string {
 		detail = "CACHE(" + strconv.Quote(source.key) + ")"
 	case "EXTERNAL":
 		detail = "EXTERNAL(" + strconv.Quote(source.key) + ")"
+	case "TABLE":
+		detail = "TABLE(" + source.key + "(...))"
 	case "VALUES":
 		detail = "VALUES"
 	case "CTE":
@@ -7770,6 +7817,23 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		}
 		if control != nil {
 			control.sources[cacheKey] = cloneSQLRows(rows)
+		}
+		return rows, nil
+	case "TABLE":
+		if resolver == nil {
+			return nil, fmt.Errorf("TABLE(%q) requires a table function resolver", source.key)
+		}
+		table, ok := resolver.(TableFunctionResolver)
+		if !ok {
+			return nil, fmt.Errorf("TABLE(%q) requires a table function resolver", source.key)
+		}
+		arguments := []interface{}(nil)
+		if len(source.values) != 0 {
+			arguments = append(arguments, source.values[0]...)
+		}
+		rows, err := table.ResolveSQLTableFunction(source.key, arguments)
+		if err != nil {
+			return nil, err
 		}
 		return rows, nil
 	}

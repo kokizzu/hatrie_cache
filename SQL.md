@@ -34,6 +34,39 @@ Do not confuse `SELECT value FROM cache WHERE key = 'name'` with `SELECT ...
 FROM CACHE('users')`: the first is a command-SQL lookup of one cache key; the
 second is a relational query over JSON rows held in a cache value.
 
+### User-defined table functions
+
+Relational SQL can also read application-provided rows through
+`TABLE(function_name(args...))`. The resolver passed to `ExecuteSQLQuery` must
+implement `hatSql.TableFunctionResolver`; its `ResolveSQLTableFunction` method
+receives the function name and literal or `$1`-style prepared arguments, then
+returns `[]hatSql.SQLRow`. The returned rows continue through the ordinary
+relational engine, so filters, joins, grouping, ordering, limits, cancellation,
+and query budgets retain their normal behavior.
+
+```go
+type resolver struct{}
+
+func (resolver) ResolveSQLSource(kind, key string) ([]hatSql.SQLRow, error) {
+	return nil, nil
+}
+
+func (resolver) ResolveSQLTableFunction(name string, arguments []interface{}) ([]hatSql.SQLRow, error) {
+	return []hatSql.SQLRow{{"value": int64(10)}, {"value": int64(11)}}, nil
+}
+
+result, err := hatSql.ExecuteSQLQuery(
+	"FROM TABLE(series(2, 10)) AS item SELECT item.value ORDER BY item.value",
+	resolver{},
+)
+```
+
+Table functions are deliberately separate from scalar `FunctionResolver`: a
+scalar function produces one value for each input row, while a table function
+creates a source of rows. `TABLE(...)` function arguments are constants or
+prepared parameters rather than row expressions, so a function cannot create
+an accidental nested scan for every input row.
+
 ### Command SQL: create, read, change, expire, and delete
 
 The following session is intentionally small and sequential. Run each statement

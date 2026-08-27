@@ -556,6 +556,24 @@ show-sql-source-execution:
 test-sql-plan-guards:
 	sh ./scripts/test-sql-plan-guards.sh
 
+test-sql-table-functions:
+	sh ./scripts/test-sql-table-functions.sh
+
+format-sql-table-functions:
+	sh ./scripts/format-sql-table-functions.sh
+
+verify-sql-table-function-feature:
+	sh ./scripts/verify-sql-table-function-feature.sh
+
+inspect-sql-table-function-feature:
+	sh ./scripts/inspect-sql-table-function-feature.sh
+
+commit-sql-table-function-feature:
+	sh ./scripts/commit-sql-table-function-feature.sh
+
+show-sql-source-model:
+	sh ./scripts/show-sql-source-model.sh
+
 format-sql-plan-guards:
 	sh ./scripts/format-sql-plan-guards.sh
 
