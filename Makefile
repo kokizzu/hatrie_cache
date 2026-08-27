@@ -844,6 +844,16 @@ push-pebble-record-encryption:
 release-build:
 	sh ./scripts/release-build.sh
 
+.PHONY: verify-release-reproducibility
+verify-release-reproducibility:
+	sh ./scripts/verify-release-reproducibility.sh
+
+review-release-reproducibility:
+	sh ./scripts/review-release-reproducibility.sh
+
+commit-release-reproducibility:
+	sh ./scripts/commit-release-reproducibility.sh
+
 release-sbom:
 	sh ./scripts/release-sbom.sh
 

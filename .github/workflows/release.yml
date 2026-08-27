@@ -14,6 +14,7 @@ jobs:
         with:
           go-version: '1.26.5'
       - run: make release-build
+      - run: make verify-release-reproducibility
       - run: make release-sbom
       - run: make verify-vulnerabilities
       - uses: sigstore/cosign-installer@v3
