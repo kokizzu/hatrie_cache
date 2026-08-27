@@ -33,4 +33,4 @@ luikore__hat-trie/test-driver
 
 # Local generated artifacts
 build/
-
+dist/

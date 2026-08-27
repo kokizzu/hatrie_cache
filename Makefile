@@ -266,6 +266,12 @@ sql-language-server:
 review-sql-language-server:
 	sh ./scripts/review-sql-language-server.sh
 
+review-release-lsp-artifact:
+	sh ./scripts/review-release-lsp-artifact.sh
+
+commit-release-lsp-artifact:
+	sh ./scripts/commit-release-lsp-artifact.sh
+
 commit-sql-language-server:
 	sh ./scripts/commit-sql-language-server.sh
 
