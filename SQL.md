@@ -6,6 +6,21 @@ authenticated `/api/commands` request format. Read-only relational `SELECT`
 queries are validated locally and executed through the authenticated
 `/api/sql` endpoint against a cache snapshot.
 
+## Editor support
+
+Start the SQL language server over standard input/output with:
+
+```
+make sql-language-server
+```
+
+Configure an editor's Language Server Protocol client to use that command. It
+uses standard `Content-Length` JSON-RPC framing and supports `initialize`, full
+document `didOpen`/`didChange`/`didClose` synchronization, keyword completion,
+and parser-backed diagnostics with UTF-16 source ranges. It also supports the
+`textDocument/diagnostic` pull request. The process only analyzes SQL; it does
+not connect to a cache or execute queries.
+
 Executable production coverage is tracked in
 [SQL_TEST_MATRIX.md](SQL_TEST_MATRIX.md).
 
