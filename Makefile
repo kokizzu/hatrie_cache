@@ -1073,6 +1073,21 @@ frontend-backend-smoke:
 report-package-layout:
 	sh ./scripts/report-package-layout.sh
 
+audit-sql-improvements:
+	sh ./scripts/audit-sql-improvements.sh
+
+audit-sql-improvement-matrix:
+	sh ./scripts/audit-sql-improvements.sh matrix
+
+verify-sql-improvement-docs:
+	sh ./scripts/verify-sql-improvement-docs.sh
+
+review-sql-improvement-docs:
+	sh ./scripts/review-sql-improvement-docs.sh
+
+commit-sql-improvement-docs:
+	sh ./scripts/commit-sql-improvement-docs.sh
+
 review-sql-grouping-sets:
 	sh ./scripts/review-sql-grouping-sets.sh
 

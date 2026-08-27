@@ -356,6 +356,23 @@ Result:
 `MIN`, and `MAX` summarize each group. `HAVING` filters those finished groups;
 use `WHERE` to filter input rows before grouping.
 
+`FILTER (WHERE ...)` limits one aggregate without changing the rows seen by
+other aggregates. `ROLLUP`, `CUBE`, and `GROUPING SETS` produce subtotal and
+grand-total groups; dimensions absent from a grouping set project as `NULL`.
+
+```sql
+FROM VALUES ('east', 'book', 2), ('east', 'pen', 3), ('west', 'book', 5)
+  AS sales(region, product, amount)
+SELECT sales.region,
+       sales.product,
+       SUM(sales.amount) FILTER (WHERE sales.amount > 0) AS positive_total
+GROUP BY ROLLUP(sales.region, sales.product);
+```
+
+`CUBE(region, product)` produces every dimension subset. Use `GROUPING SETS
+((region), (product), ())` when only named subtotals are needed. `CUBE` is
+bounded to twelve dimensions to prevent an accidental exponential expansion.
+
 ### Approximate aggregates
 
 Use bounded approximate aggregates for exploratory and dashboard queries where a
@@ -436,6 +453,19 @@ after ordering; `OFFSET` skips rows before applying the limit. Window functions
 also include `ROW_NUMBER`, `DENSE_RANK`, `LAG`, `LEAD`, and numeric
 `SUM`/`AVG`/`MIN`/`MAX` frames.
 
+Reuse a window specification with `WINDOW name AS (...)` and `OVER name`:
+
+```sql
+FROM VALUES ('a', 10), ('a', 20), ('b', 5) AS scores(category, amount)
+SELECT category,
+       amount,
+       ROW_NUMBER() OVER ranked AS row_number,
+       LAG(amount, 1, 0) OVER ranked AS previous,
+       LEAD(amount, 1, 0) OVER ranked AS following
+WINDOW ranked AS (PARTITION BY category ORDER BY amount)
+ORDER BY category, amount;
+```
+
 Use a `ROWS BETWEEN … AND …` frame for moving aggregates. Bounds support
 `UNBOUNDED PRECEDING`, `n PRECEDING`, `CURRENT ROW`, `n FOLLOWING`, and
 `UNBOUNDED FOLLOWING`; a frame start may not follow its end.
@@ -485,7 +515,7 @@ the first side but not the second. These operations are read-only.
 | Inspect cache metadata | `FROM KEYS SELECT key, type, ttl_ms ORDER BY key` | One read-only row per cache key. |
 | Reuse a query | `WITH active AS (...) SELECT ... FROM active` | Named rows exist only for this query. |
 | Walk a hierarchy/sequence | `WITH RECURSIVE walk(...) AS (seed UNION ALL step) SELECT ...` | Repeats the recursive term within row/depth budgets; never mutates cache data. |
-| Query a query | `FROM (SELECT ... ) AS derived SELECT ...` | Derived table is read-only and uncorrelated. |
+| Query a query | `FROM (SELECT ... ) AS derived SELECT ...` | Derived table is read-only; prefix it with `LATERAL` to bind each left input row. |
 | Match text | `WHERE name LIKE 'Ad%'` | Keeps matching non-NULL strings; comparisons are case-sensitive UTF-8 binary. |
 | Match one of several values | `WHERE state IN ('open', 'paused')` | `NOT IN` is also supported; a list containing `NULL` follows SQL three-valued logic. |
 | Match an inclusive range | `WHERE score BETWEEN 60 AND 100` | `NOT BETWEEN` is supported; either null operand yields unknown. |
@@ -507,6 +537,52 @@ forms and joins without those indexes remain rejected with an explanatory error.
 
 The exact command and relational examples in this section are executed by
 `TestSQLGuideCommandExamples` and `TestSQLGuideRelationalExamples`.
+
+### Correlated, lateral, regex, and time-zone expressions
+
+`EXISTS (query)`, `NOT EXISTS (query)`, and scalar parenthesized subqueries
+may refer to columns from the enclosing row. A scalar subquery must return at
+most one row. `LATERAL (query) AS alias` evaluates a derived source separately
+for each left input row; use it with `CROSS JOIN` or an inner/left join.
+
+```sql
+FROM VALUES (1), (2) AS outer_rows(id)
+CROSS JOIN LATERAL (
+  FROM VALUES (1), (2), (3) AS inner_rows(value)
+  WHERE inner_rows.value <= outer_rows.id
+  SELECT inner_rows.value
+) AS expanded
+SELECT outer_rows.id, expanded.value
+ORDER BY outer_rows.id, expanded.value;
+```
+
+Text expressions support `value REGEXP pattern`, `value NOT REGEXP pattern`,
+`REGEXP_LIKE(value, pattern)`, and `REGEXP_EXTRACT(value, pattern [, group])`.
+Invalid patterns return a query diagnostic; extraction with no match returns
+`NULL`.
+
+```sql
+FROM CACHE('logs') AS src
+WHERE src.message REGEXP '^error'
+SELECT REGEXP_EXTRACT(src.detail, 'id=([0-9]+)', 1) AS id;
+```
+
+`PARSE_TIMESTAMP(text, zone)` interprets a local timestamp in an IANA time
+zone. `TIMESTAMP_ADD(timestamp, DURATION '90m')` and `TIMESTAMP_DIFF(end,
+start)` perform duration arithmetic, and `timestamp AT TIME ZONE 'Area/City'`
+changes its presentation location while preserving its instant. Unknown zones,
+malformed timestamps, and malformed durations are rejected.
+
+```sql
+FROM VALUES (1) AS src(n)
+SELECT TIMESTAMP_ADD(PARSE_TIMESTAMP('2026-08-22 09:30:00', 'Asia/Singapore'), DURATION '90m') AS later,
+       TIMESTAMP '2026-08-22T01:30:00Z' AT TIME ZONE 'Asia/Singapore' AS local_time;
+```
+
+The execution-local rewrite pass runs after parameter binding and before
+planning. It folds constant expressions, simplifies boolean predicates, and
+removes unused projections from derived sources without changing the submitted
+query text or result semantics.
 
 ### Explicit casts
 
@@ -813,7 +889,7 @@ server and return rows; they never implicitly mutate cache values.
 | `VALUES (...)` | Inline rows, primarily for CTEs, tests, and joining query parameters. |
 | `WITH name [(columns...)] AS (SELECT ... | VALUES ...)` | A named source scoped to one query. CTEs can reference earlier CTEs. |
 | `WITH RECURSIVE name [(columns...)] AS (seed UNION [ALL] recursive_term)` | A named hierarchy/sequence source. Each recursive iteration sees only rows from the previous iteration. |
-| `(SELECT ... | FROM ... SELECT ...) AS alias` | An uncorrelated, read-only derived-table source; it can appear in `FROM` or a join. |
+| `(SELECT ... | FROM ... SELECT ...) AS alias` | A read-only derived-table source; prefix it with `LATERAL` in a join to evaluate it per left input row. |
 
 `CACHE('key')` makes application-owned JSON cache values directly queryable
 without mirroring them into a second relational store. `KEYS` supplies the
@@ -917,6 +993,15 @@ the registry works equally with `CACHE`, `VALUES`, CTE, and application-defined
 resolver sources. This is incremental invalidation and recomputation, not
 row-delta maintenance: a changed dependency reruns the affected view query.
 `Get` returns an independent snapshot, safe for callers to inspect or modify.
+
+### Parameterized views
+
+`ParameterizedViews` caches immutable result snapshots by view name and bound
+parameter values. Create a `ParameterizedViewDefinition` with explicit
+dependencies, call `Query` with parameter values, and call `Invalidate` after
+a successful source change. Cache keys include the full parameter value list;
+returned results are defensive copies, and invalidation removes every cached
+parameter variant affected by the changed dependency.
 
 ### Query-result subscriptions
 
@@ -1159,10 +1244,12 @@ LIMIT 100;
       guarded by the query row limit and should include a terminating filter.
 - [x] `FROM` `KEYS`, `CACHE('key')`, CTE, and inline `VALUES` sources.
 - [x] Inner, `LEFT [OUTER] JOIN`, `RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`,
-      and `CROSS JOIN`; `ON` is mandatory except for CROSS JOIN.
+      `CROSS JOIN`, and per-row `LATERAL` derived sources; `ON` is mandatory
+      except for CROSS JOIN.
 - [x] Equality inner joins use a hash join; filters that reference only the
       initial source are applied before an inner/cross-join pipeline.
-- [x] `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IS [NOT] NULL`, and `LIKE`.
+- [x] `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IS [NOT] NULL`, `LIKE`,
+      `REGEXP`, `EXISTS`, `NOT EXISTS`, and scalar subqueries.
 
 Comparisons and `LIKE` involving `NULL` evaluate to SQL unknown (`NULL`), not
 true or false. `WHERE`/`HAVING` retain only true; `AND` and `OR` use the
@@ -1199,27 +1286,31 @@ serialize as `YYYY-MM-DD`, and compare in chronological order.
       expressions.
 - [x] Searched and simple `CASE` expressions with lazy selected-branch
       evaluation and optional `ELSE`.
-- [x] `GROUP BY` and `HAVING` with `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
+- [x] `GROUP BY`, `ROLLUP`, `CUBE`, `GROUPING SETS`, `HAVING`, and aggregate
+      `FILTER (WHERE ...)` with `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
       `APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, and `APPROX_TOP_K`.
 - [x] `ORDER BY ... ASC|DESC`, `LIMIT`, and `OFFSET`.
 - [x] `SELECT DISTINCT` after projection, before `ORDER BY`/`LIMIT`.
-- [x] `ROW_NUMBER`, `RANK`, `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD`
-      windows with `OVER (PARTITION BY ... ORDER BY ...)`. `LAG`/`LEAD`
-      accept an optional non-negative integer offset and default value.
+- [x] Named `WINDOW name AS (...)` specifications plus `ROW_NUMBER`, `RANK`,
+      `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD` windows with
+      `OVER (PARTITION BY ... ORDER BY ...)`. `LAG`/`LEAD` accept an optional
+      non-negative integer offset and default value.
 - [x] `UNION` (deduplicating) and `UNION ALL` (preserving duplicates) between
       queries with the same projected column names and order.
 - [x] `INTERSECT` and `EXCEPT` with SQL set (deduplicating) semantics.
 - [x] `EXPLAIN` for a stable, source-free physical plan and `EXPLAIN ANALYZE`
       for one measured execution plus final output statistics.
-- [x] Uncorrelated derived-table subqueries in `FROM` and joins.
+- [x] Correlated `EXISTS`, `NOT EXISTS`, and scalar subqueries, plus regular
+      and `LATERAL` derived-table sources.
+- [x] `REGEXP_LIKE`, `REGEXP_EXTRACT`, time-zone-aware timestamp parsing and
+      arithmetic, and a post-bind constant/predicate/projection rewrite pass.
 - [x] Stable source/VALUES/KEYS order before an explicit `ORDER BY`.
 - [x] A 100,000-row source/join limit prevents accidental cross-join explosions.
 
 Parenthesized boolean precedence and arithmetic expressions are supported.
-Correlated subqueries remain explicitly out of scope rather than accepted
-incorrectly. Recursive CTEs support direct self-reference only; mutual
-recursion and recursive terms with more than one set operation are rejected
-with an actionable diagnostic.
+Recursive CTEs support direct self-reference only; mutual recursion and
+recursive terms with more than one set operation are rejected with an
+actionable diagnostic.
 
 `SQLQueryOptions.MaxRecursionDepth` optionally limits recursive-term
 expansions; zero leaves recursion governed by the normal row and timeout
@@ -1559,6 +1650,30 @@ n, err := hatriecache.QueryRows[Row](ctx, conn, sql, func(row Row) error {
 - [x] Add generic `QueryRows[T]` with callback early exit.
 - [x] Add cancellation through `context.Context`, bounded error bodies, and
       server/client integration tests.
+
+`hatSql.PivotRows` and `hatSql.UnpivotRows` reshape analytics results without
+serializing them back through SQL. Pivot defaults to numeric `SUM` and also
+supports `AVG`, `MIN`, `MAX`, and `COUNT`; explicit `Values` controls the
+output columns, while omitted values are discovered in lexical order.
+
+```go
+wide, err := hatSql.PivotRows(rows, hatSql.PivotSpec{
+    GroupBy:     []string{"region"},
+    PivotColumn: "product",
+    ValueColumn: "amount",
+    Values:      []string{"book", "pen"},
+})
+long, err := hatSql.UnpivotRows(wide, hatSql.UnpivotSpec{
+    Columns:     []string{"book", "pen"},
+    NameColumn:  "product",
+    ValueColumn: "amount",
+})
+_ = long
+_ = err
+```
+
+Unpivot retains every non-pivot source column by default and omits null facts
+unless `IncludeNulls` is true. Neither helper mutates its input rows.
 
 ## Custom functions (last phase)
 
