@@ -757,6 +757,22 @@ commit-sql-fixtures:
 push-sql-fixtures:
 	sh ./scripts/push-sql-fixtures.sh
 
+test-sql-governance:
+	sh ./scripts/test-sql-governance.sh
+
+format-sql-governance:
+	sh ./scripts/format-sql-governance.sh
+
+commit-sql-governance:
+	sh ./scripts/commit-sql-governance.sh
+
+push-sql-governance:
+	sh ./scripts/push-sql-governance.sh
+
+amend-sql-governance:
+	sh ./scripts/amend-sql-governance.sh
+
+
 
 
 
