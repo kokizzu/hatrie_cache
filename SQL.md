@@ -1367,6 +1367,24 @@ covers the whole streamed execution. This remains present on an early callback
 failure so sinks can distinguish a failure before any delivered rows from one
 after partial output.
 
+`SQLTelemetry` is an opt-in `SQLQueryObserver` for application metrics. Attach
+it to `SQLQueryOptions.Observer`, then serve `PrometheusMetrics()` from an
+existing authenticated metrics endpoint or pass `OpenTelemetryMetrics()` to the
+OpenTelemetry SDK version chosen by the application. It exports query latency,
+errors/cancellations, slow queries, index use, external spill use, result bytes,
+and planner-visible operator working bytes. It never labels metrics with SQL
+text, cache keys, predicates, or result values. Working bytes are operator data
+flow, not process heap allocation.
+
+```go
+telemetry := hatSql.NewSQLTelemetry()
+result, err := hatSql.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
+    hatSql.SQLQueryOptions{Observer: telemetry})
+_ = result
+_ = err
+prometheusText := telemetry.PrometheusMetrics()
+```
+
 ```go
 result, err := hatriecache.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
     hatriecache.SQLQueryOptions{

@@ -661,6 +661,27 @@ commit-sql-table-sampling:
 push-sql-table-sampling:
 	sh ./scripts/push-sql-table-sampling.sh
 
+show-sql-telemetry-engine:
+	sh ./scripts/show-sql-telemetry-engine.sh
+
+test-sql-telemetry:
+	sh ./scripts/test-sql-telemetry.sh
+
+format-sql-telemetry:
+	sh ./scripts/format-sql-telemetry.sh
+
+verify-sql-telemetry:
+	sh ./scripts/verify-sql-telemetry.sh
+
+inspect-sql-telemetry:
+	sh ./scripts/inspect-sql-telemetry.sh
+
+commit-sql-telemetry:
+	sh ./scripts/commit-sql-telemetry.sh
+
+push-sql-telemetry:
+	sh ./scripts/push-sql-telemetry.sh
+
 show-sql-function-dispatch:
 	sh ./scripts/show-sql-function-dispatch.sh
 
