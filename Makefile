@@ -260,11 +260,23 @@ test-sql-language-server:
 test-sql-regex:
 	sh ./scripts/test-sql-regex.sh
 
+test-sql-time-zones:
+	sh ./scripts/test-sql-time-zones.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
 format-sql-regex:
 	sh ./scripts/format-sql-regex.sh
+
+format-sql-time-zones:
+	sh ./scripts/format-sql-time-zones.sh
+
+review-sql-time-zones:
+	sh ./scripts/review-sql-time-zones.sh
+
+commit-sql-time-zones:
+	sh ./scripts/commit-sql-time-zones.sh
 
 review-sql-regex:
 	sh ./scripts/review-sql-regex.sh

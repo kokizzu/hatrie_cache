@@ -5374,7 +5374,31 @@ func sqlLiteralTypeName(value interface{}) string {
 	}
 	return strings.ToUpper(fmt.Sprintf("%T", value))
 }
-func (p *sqlQueryParser) parseExpr() (sqlExpr, error) { return p.parseAdditiveExpr() }
+func (p *sqlQueryParser) parseExpr() (sqlExpr, error) { return p.parseTimeZoneExpr() }
+
+func (p *sqlQueryParser) parseTimeZoneExpr() (sqlExpr, error) {
+	left, err := p.parseAdditiveExpr()
+	if err != nil {
+		return sqlExpr{}, err
+	}
+	for p.keyword("AT") {
+		token := p.current()
+		p.next()
+		if err := p.expectKeyword("TIME"); err != nil {
+			return sqlExpr{}, err
+		}
+		if err := p.expectKeyword("ZONE"); err != nil {
+			return sqlExpr{}, err
+		}
+		zone, err := p.parsePrimary()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		previous := left
+		left = sqlExpr{kind: "timezone", left: &previous, right: &zone, token: token}
+	}
+	return left, nil
+}
 
 func (p *sqlQueryParser) parseAdditiveExpr() (sqlExpr, error) {
 	left, err := p.parseMultiplicativeExpr()
@@ -10442,6 +10466,8 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return sqlEvalError{err: err, token: token}
 		}
 		return converted
+	case "timezone":
+		return evalSQLTimeZoneExpr(expr, group, row)
 	case "case":
 		var operand interface{}
 		if expr.left != nil {
@@ -10476,6 +10502,8 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return nil
 	case "func":
 		switch expr.name {
+		case "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+			return evalSQLTimeFunction(expr, group, row)
 		case "REGEXP_LIKE", "REGEXP_EXTRACT":
 			return evalSQLRegexFunction(expr, group, row)
 		case "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
@@ -10942,7 +10970,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT":
+	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 		return true
 	}
 	return false
