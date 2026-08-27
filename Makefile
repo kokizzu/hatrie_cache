@@ -634,6 +634,33 @@ commit-sql-approx-feature:
 push-sql-approx-feature:
 	sh ./scripts/push-sql-approx-feature.sh
 
+show-sql-sampling-engine:
+	sh ./scripts/show-sql-sampling-engine.sh
+
+test-sql-table-sampling:
+	sh ./scripts/test-sql-table-sampling.sh
+
+show-sql-row-stream-fallback:
+	sh ./scripts/show-sql-row-stream-fallback.sh
+
+format-sql-table-sampling:
+	sh ./scripts/format-sql-table-sampling.sh
+
+benchmark-sql-table-sampling:
+	sh ./scripts/benchmark-sql-table-sampling.sh
+
+verify-sql-table-sampling:
+	sh ./scripts/verify-sql-table-sampling.sh
+
+inspect-sql-table-sampling:
+	sh ./scripts/inspect-sql-table-sampling.sh
+
+commit-sql-table-sampling:
+	sh ./scripts/commit-sql-table-sampling.sh
+
+push-sql-table-sampling:
+	sh ./scripts/push-sql-table-sampling.sh
+
 show-sql-function-dispatch:
 	sh ./scripts/show-sql-function-dispatch.sh
 

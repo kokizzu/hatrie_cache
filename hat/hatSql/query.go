@@ -643,6 +643,19 @@ func ExecuteQueryRows(ctx context.Context, source string, resolver SourceResolve
 }
 
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if query.sample != nil {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			return err
+		}
+		columns := sqlColumns(query.selects)
+		for _, row := range result.Rows {
+			if err := visit(columns, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if sqlExternalSetStreamable(query, control) {
 		return executeSQLExternalSetStream(ctx, query, resolver, control, visit)
 	}
@@ -1417,7 +1430,7 @@ func evalSQLStreamExpr(expr sqlExpr, row sqlExecRow, functions SQLFunctionResolv
 }
 
 func sqlQueryRowsBaseStreamable(query *sqlQuery) bool {
-	if query == nil || query.explain || len(query.unions) != 0 {
+	if query == nil || query.explain || query.sample != nil || len(query.unions) != 0 {
 		return false
 	}
 	if _, ok := sqlGlobalStreamAggregates(query); ok || sqlTopNStreamable(query) {
@@ -4349,6 +4362,7 @@ type sqlQuery struct {
 	groupBy  []sqlExpr
 	having   sqlExpr
 	orderBy  []sqlOrder
+	sample   *sqlTableSample
 	limit    int
 	offset   int
 	distinct bool
@@ -4600,6 +4614,18 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.joins = append(q.joins, join)
+		case p.keyword("TABLESAMPLE"):
+			if q.from == nil {
+				return nil, p.diagnostic(p.current(), "TABLESAMPLE requires FROM first")
+			}
+			if q.sample != nil {
+				return nil, p.diagnostic(p.current(), "TABLESAMPLE appears more than once")
+			}
+			sample, err := p.parseTableSample()
+			if err != nil {
+				return nil, err
+			}
+			q.sample = &sample
 		case p.keyword("WHERE"):
 			if q.where.kind != "" {
 				return nil, p.diagnostic(p.current(), "WHERE appears more than once")
@@ -5929,7 +5955,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
@@ -6157,7 +6183,7 @@ func (metrics *sqlExecutionMetrics) recordScanRows(source sqlSource, rows []SQLR
 // pushdown on the established executor: those forms have ordering or null
 // preservation semantics that must not be changed by a cost optimization.
 func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, maxRows int) ([]sqlExecRow, bool, error) {
-	if q.from == nil || len(q.joins) < 2 || q.where.kind != "" {
+	if q.from == nil || q.sample != nil || len(q.joins) < 2 || q.where.kind != "" {
 		return nil, false, nil
 	}
 	sources := []sqlSource{*q.from}
@@ -6328,7 +6354,7 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		started = time.Now()
 		base, ordered, err := resolveSQLOrderedSource(q, resolver)
 		indexed := ordered
-		if !indexed {
+		if !indexed && q.sample == nil {
 			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics)
 		}
 		if !indexed {
@@ -6339,6 +6365,11 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 		}
 		if len(base) > maxRows {
 			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
+		}
+		if q.sample != nil {
+			inputRows := len(base)
+			base = sqlSampleRows(base, *q.sample)
+			metrics.record("TABLESAMPLE", q.sample.detail(), inputRows, len(base), started)
 		}
 		if ordered {
 			metrics.record("INDEX ORDER SCAN", sqlExplainSource(*q.from)+" ORDER BY "+sqlExplainOrders(q.orderBy), 0, len(base), started)
@@ -8121,7 +8152,7 @@ func resolveSQLJoinPushedSource(source sqlSource, condition sqlExpr, resolver SQ
 // those forms need the established executor until their ordering proof is as
 // direct as this one-field case.
 func resolveSQLOrderedSource(q *sqlQuery, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
-	if q == nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || q.where.kind != "" || q.distinct || sqlQueryHasWindow(q) || len(q.joins) != 0 || len(q.unions) != 0 || len(q.orderBy) != 1 {
+	if q == nil || q.from == nil || q.sample != nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || q.where.kind != "" || q.distinct || sqlQueryHasWindow(q) || len(q.joins) != 0 || len(q.unions) != 0 || len(q.orderBy) != 1 {
 		return nil, false, nil
 	}
 	order := q.orderBy[0]

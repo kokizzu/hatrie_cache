@@ -371,6 +371,31 @@ the numeric aggregates do. These aggregates retain their bounded per-group
 state and currently use the general materialized grouping path, so ordinary
 query row, group-memory, timeout, and result-byte limits still apply.
 
+### Table sampling
+
+Sample the primary `FROM` source before `WHERE`, joins, grouping, and ordering:
+
+```sql
+FROM CACHE('events') AS e
+TABLESAMPLE BERNOULLI (10) REPEATABLE (42)
+WHERE e.occurred_at >= TIMESTAMP '2026-08-27T00:00:00Z'
+SELECT e.id, e.state;
+```
+
+`TABLESAMPLE BERNOULLI (percent) [REPEATABLE (seed)]` independently selects
+each source row with an integer percentage in `0..100`. `TABLESAMPLE RESERVOIR
+(count) [REPEATABLE (seed)]` selects exactly `count` rows when enough rows are
+available; `count` is `1..100000`. Both modes are deterministic for a seed;
+omitting `REPEATABLE` uses seed `0`. They preserve the selected source rows'
+original order, which keeps an unordered query reproducible.
+
+Sampling is attached to the primary `FROM` source, not individual join inputs.
+It deliberately bypasses index filter/order shortcuts and the row-streaming
+fast path so the complete source is selected before relational processing.
+`EXPLAIN ANALYZE` records a `TABLESAMPLE` operator. The existing source-row
+budget is checked before sampling, so a small requested sample cannot bypass a
+query's memory and safety limits.
+
 ### Inline rows, CTEs, distinct values, windows, and pagination
 
 `VALUES` supplies small rows directly in a query; `WITH` gives them a temporary

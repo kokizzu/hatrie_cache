@@ -146,6 +146,29 @@ and Top-K values; it is not the sketch-state size alone. There is no exact SQL
 repeatable cost baseline rather than an invalid comparison to Redis or
 Tarantool's different query paths.
 
+## SQL Table Sampling
+
+The public SQL executor samples a 10,000-row in-memory source with deterministic
+seed `7`. The fixture measures source selection plus the ordinary relational
+execution path; there is no network transfer.
+
+```sh
+make benchmark-sql-table-sampling
+```
+
+Five local samples on the AMD Ryzen 9 5950X produced:
+
+| Workload | Median time / query | Timed heap / query | Allocations / query | Output rows |
+| --- | ---: | ---: | ---: | ---: |
+| `TABLESAMPLE BERNOULLI (10)` | 3.941 ms | 4,877,448 B | 44,079 | About 1,000 |
+| `TABLESAMPLE RESERVOIR (100)` | 2.103 ms | 3,593,224 B | 22,433 | 100 |
+
+The current implementation materializes the bounded source before selection to
+guarantee sampling-before-filter semantics and reproducible source order. It
+therefore does not claim an index or row-streaming acceleration; the output-row
+count is the bandwidth reduction available to the caller after sampling, while
+the table measures the CPU and memory cost before transport.
+
 ## Architectural Big-Wins Baseline
 
 Run the cross-cutting baseline before and after changes to locking, telemetry,
