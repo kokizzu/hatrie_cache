@@ -496,6 +496,27 @@ benchmark-md:
 command-support:
 	./scripts/command-support.sh
 
+audit-sql-capabilities:
+	sh ./scripts/audit-sql-capabilities.sh
+
+audit-sql-migrations:
+	AUDIT_SQL_MODE=migrations sh ./scripts/audit-sql-capabilities.sh
+
+audit-sql-types:
+	AUDIT_SQL_MODE=types sh ./scripts/audit-sql-capabilities.sh
+
+audit-sql-constraints:
+	AUDIT_SQL_MODE=constraints sh ./scripts/audit-sql-capabilities.sh
+
+audit-sql-quality:
+	AUDIT_SQL_MODE=quality sh ./scripts/audit-sql-capabilities.sh
+
+audit-hatcache-boundaries:
+	sh ./scripts/audit-hatcache-boundaries.sh
+
+commit-sql-audit:
+	sh ./scripts/commit-sql-audit.sh
+
 run:
 	@CMD='$(CMD)' ./scripts/run.sh
 
