@@ -1,15 +1,16 @@
 package hatCache
 
 import (
-	"errors"
 	"os"
 	"strings"
 	"testing"
 )
 
-func TestLocalVerificationReplacesHostedWorkflow(t *testing.T) {
-	if _, err := os.Stat(".github/workflows/ci.yml"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("GitHub Actions workflow still exists or cannot be checked: %v", err)
+func TestLocalVerificationAndHostedWorkflowsExist(t *testing.T) {
+	for _, path := range []string{".github/workflows/ci.yml", ".github/workflows/release.yml"} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("Stat(%s) error = %v", path, err)
+		}
 	}
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {
