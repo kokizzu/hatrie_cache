@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"hatrie_cache/hat/hatCodec"
+
 	"github.com/cockroachdb/pebble"
 )
 
@@ -21,6 +23,7 @@ type PebbleStore struct {
 	path                string
 	db                  *pebble.DB
 	format              StorageFormat
+	recordCipher        *hatCodec.StreamCipher
 	activeGeneration    uint64
 	nextGeneration      uint64
 	generationSaveHook  func(string) error
@@ -40,6 +43,12 @@ func OpenPebbleStore(path string) (*PebbleStore, error) {
 
 // OpenPebbleStoreWithFormat opens a Pebble store with the selected record codec.
 func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore, error) {
+	return OpenPebbleStoreWithFormatAndCipher(path, format, nil)
+}
+
+// OpenPebbleStoreWithFormatAndCipher opens a store whose entry values are
+// authenticated and encrypted at rest when cipher is non-nil.
+func OpenPebbleStoreWithFormatAndCipher(path string, format StorageFormat, cipher *hatCodec.StreamCipher) (*PebbleStore, error) {
 	if path == "" {
 		return nil, errors.New("hatriecache: pebble path is required")
 	}
@@ -74,6 +83,7 @@ func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore,
 		path:             path,
 		db:               db,
 		format:           format,
+		recordCipher:     cipher,
 		activeGeneration: activeGeneration,
 		nextGeneration:   nextGeneration,
 	}, nil
@@ -428,6 +438,12 @@ func (store *PebbleStore) saveKeysWithOptionsAndJournalSequenceLocked(trie *HatT
 		if err != nil {
 			return err
 		}
+		if ok {
+			data, err = store.sealEntryData(key, data)
+			if err != nil {
+				return err
+			}
+		}
 		records = append(records, pebbleStoredRecord{key: key, data: data, ok: ok})
 	}
 	db, unlock, err := store.lockDB()
@@ -557,7 +573,7 @@ func (store *PebbleStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolicy
 	snapshot := db.NewSnapshot()
 	defer snapshot.Close()
 	return loadPersistentEntryData(trie, store, policy, func(visit func(snapshotEntry, []byte) error) error {
-		return scanPebbleSnapshotEntryData(snapshot, generation, visit)
+		return scanPebbleStoreSnapshotEntryData(store, snapshot, generation, visit)
 	})
 }
 
@@ -690,7 +706,7 @@ func (store *PebbleStore) entryData(key string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	defer unlock()
-	return pebbleEntryDataFromDB(db, store.activeGeneration, key)
+	return store.entryDataFromDB(db, store.activeGeneration, key)
 }
 
 func (store *PebbleStore) transformEntryData(key string, transformer persistentReferenceStoreEntryTransformer) ([]byte, bool, error) {
@@ -708,7 +724,11 @@ func (store *PebbleStore) transformEntryData(key string, transformer persistentR
 		return nil, false, err
 	}
 	defer closer.Close()
-	return transformer.transformPersistentReferenceEntry(data)
+	plain, err := store.openEntryData(key, data)
+	if err != nil {
+		return nil, false, err
+	}
+	return transformer.transformPersistentReferenceEntry(plain)
 }
 
 func (store *PebbleStore) lockDB() (*pebble.DB, func(), error) {
@@ -781,6 +801,52 @@ func pebbleEntryDataFromDB(db *pebble.DB, generation uint64, key string) ([]byte
 	return cloneBytes(data), true, nil
 }
 
+func (store *PebbleStore) entryDataFromDB(db *pebble.DB, generation uint64, key string) ([]byte, bool, error) {
+	data, ok, err := pebbleEntryDataFromDB(db, generation, key)
+	if err != nil || !ok {
+		return data, ok, err
+	}
+	data, err = store.openEntryData(key, data)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+func (store *PebbleStore) sealEntryData(key string, data []byte) ([]byte, error) {
+	return sealPersistentEntry(store.recordCipher, StorageBackendPebble, key, data)
+}
+
+func (store *PebbleStore) openEntryData(key string, data []byte) ([]byte, error) {
+	return openPersistentEntry(store.recordCipher, StorageBackendPebble, key, data)
+}
+
+func scanPebbleStoreSnapshotEntryData(store *PebbleStore, snapshot *pebble.Snapshot, generation uint64, visit func(snapshotEntry, []byte) error) error {
+	prefix := pebbleGenerationEntryPrefix(generation)
+	iterator, err := snapshot.NewIter(pebblePrefixIterOptions(prefix))
+	if err != nil {
+		return err
+	}
+	defer iterator.Close()
+	for valid := iterator.First(); valid; valid = iterator.Next() {
+		key := string(iterator.Key()[len(prefix):])
+		data, err := store.openEntryData(key, iterator.Value())
+		if err != nil {
+			return err
+		}
+		entry, err := decodeLevelDBEntryForKey(key, data)
+		if err != nil {
+			return err
+		}
+		if visit != nil {
+			if err := visit(entry, data); err != nil {
+				return err
+			}
+		}
+	}
+	return iterator.Error()
+}
+
 func scanPebbleSnapshotEntryData(snapshot *pebble.Snapshot, generation uint64, visit func(snapshotEntry, []byte) error) error {
 	prefix := pebbleGenerationEntryPrefix(generation)
 	iterator, err := snapshot.NewIter(pebblePrefixIterOptions(prefix))
@@ -844,7 +910,11 @@ func (trie *HatTrie) spillColdPebbleLocked(store *PebbleStore, db *pebble.DB, ge
 		if err != nil {
 			return err
 		}
-		if err := batch.Set(pebbleGenerationEntryKey(generation, candidate.key), data, nil); err != nil {
+		storedData, err := store.sealEntryData(candidate.key, data)
+		if err != nil {
+			return err
+		}
+		if err := batch.Set(pebbleGenerationEntryKey(generation, candidate.key), storedData, nil); err != nil {
 			return err
 		}
 		prepared = append(prepared, levelDBPreparedSpill{candidate: candidate, entry: entry, data: data})

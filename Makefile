@@ -814,6 +814,12 @@ commit-leveldb-record-encryption:
 push-leveldb-record-encryption:
 	sh ./scripts/push-leveldb-record-encryption.sh
 
+commit-pebble-record-encryption:
+	sh ./scripts/commit-pebble-record-encryption.sh
+
+push-pebble-record-encryption:
+	sh ./scripts/push-pebble-record-encryption.sh
+
 
 
 

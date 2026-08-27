@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"sort"
 
+	"hatrie_cache/hat/hatCodec"
+
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/objstorage/objstorageprovider"
 	"github.com/cockroachdb/pebble/sstable"
@@ -77,6 +79,7 @@ func (store *PebbleStore) saveGenerationLockedWithJournalSequence(trie *HatTrie,
 	store.nextGeneration++
 	path := store.path
 	format := store.format
+	recordCipher := store.recordCipher
 	store.mu.Unlock()
 
 	var sstPath string
@@ -84,7 +87,7 @@ func (store *PebbleStore) saveGenerationLockedWithJournalSequence(trie *HatTrie,
 	var err error
 	dirty := false
 	for attempt := 0; attempt < pebbleGenerationOptimisticAttempts; attempt++ {
-		sstPath, records, dirty, err = capturePebbleGenerationSST(trie, path, generation, format)
+		sstPath, records, dirty, err = capturePebbleGenerationSST(trie, path, generation, format, recordCipher)
 		if err != nil {
 			return err
 		}
@@ -98,11 +101,11 @@ func (store *PebbleStore) saveGenerationLockedWithJournalSequence(trie *HatTrie,
 			return spoolErr
 		}
 		defer spool.remove()
-		replacements, captureErr := capturePebbleRecordSpool(trie, format, spool)
+		replacements, captureErr := capturePebbleRecordSpool(trie, format, spool, recordCipher)
 		if captureErr != nil {
 			return captureErr
 		}
-		sstPath, records, err = buildPebbleGenerationSST(path, generation, format, spool, replacements)
+		sstPath, records, err = buildPebbleGenerationSST(path, generation, format, spool, replacements, recordCipher)
 	}
 	if sstPath != "" {
 		defer os.Remove(sstPath)
@@ -348,16 +351,24 @@ func (spool *pebbleRecordSpool) remove() {
 	_ = os.Remove(spool.path)
 }
 
-func capturePebbleRecordSpool(trie *HatTrie, format StorageFormat, spool *pebbleRecordSpool) (map[string]snapshotCaptureReplacement, error) {
+func capturePebbleRecordSpool(trie *HatTrie, format StorageFormat, spool *pebbleRecordSpool, cipher *hatCodec.StreamCipher) (map[string]snapshotCaptureReplacement, error) {
 	return capturePebbleRecords(trie, format, func(key string, data []byte) error {
-		return spool.append(key, data)
+		sealed, err := sealPersistentEntry(cipher, StorageBackendPebble, key, data)
+		if err != nil {
+			return err
+		}
+		return spool.append(key, sealed)
 	})
 }
 
-func capturePebbleGenerationSST(trie *HatTrie, dbPath string, generation uint64, format StorageFormat) (string, int, bool, error) {
+func capturePebbleGenerationSST(trie *HatTrie, dbPath string, generation uint64, format StorageFormat, cipher *hatCodec.StreamCipher) (string, int, bool, error) {
 	builder := &pebbleGenerationSSTBuilder{dbPath: dbPath, generation: generation}
 	replacements, err := capturePebbleRecords(trie, format, func(key string, data []byte) error {
-		return builder.write(key, data)
+		sealed, err := sealPersistentEntry(cipher, StorageBackendPebble, key, data)
+		if err != nil {
+			return err
+		}
+		return builder.write(key, sealed)
 	})
 	if err != nil {
 		builder.abort()
@@ -519,7 +530,7 @@ func pebbleSnapshotEntryData(entry snapshotEntry, format StorageFormat) ([]byte,
 	return marshalLevelDBEntry(entry, format)
 }
 
-func buildPebbleGenerationSST(dbPath string, generation uint64, format StorageFormat, spool *pebbleRecordSpool, replacements map[string]snapshotCaptureReplacement) (string, int, error) {
+func buildPebbleGenerationSST(dbPath string, generation uint64, format StorageFormat, spool *pebbleRecordSpool, replacements map[string]snapshotCaptureReplacement, cipher *hatCodec.StreamCipher) (string, int, error) {
 	if err := spool.rewind(); err != nil {
 		return "", 0, err
 	}
@@ -542,7 +553,11 @@ func buildPebbleGenerationSST(dbPath string, generation uint64, format StorageFo
 		if err != nil {
 			return err
 		}
-		return writeRecord(key, data)
+		sealed, err := sealPersistentEntry(cipher, StorageBackendPebble, key, data)
+		if err != nil {
+			return err
+		}
+		return writeRecord(key, sealed)
 	}
 
 	replacementIndex := 0
