@@ -860,6 +860,12 @@ release-sbom:
 verify-vulnerabilities:
 	sh ./scripts/verify-vulnerabilities.sh
 
+review-toolchain-security:
+	sh ./scripts/review-toolchain-security.sh
+
+commit-toolchain-security:
+	sh ./scripts/commit-toolchain-security.sh
+
 verify-long-running:
 	sh ./scripts/verify-long-running.sh
 

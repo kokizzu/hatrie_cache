@@ -1,6 +1,6 @@
 module hatrie_cache
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/aarzilli/golua v0.0.0-20250217091409-248753f411c4
