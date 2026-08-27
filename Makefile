@@ -802,6 +802,18 @@ commit-encrypted-spills:
 push-encrypted-spills:
 	sh ./scripts/push-encrypted-spills.sh
 
+test-persistent-encryption:
+	sh ./scripts/test-persistent-encryption.sh
+
+format-persistent-encryption:
+	sh ./scripts/format-persistent-encryption.sh
+
+commit-leveldb-record-encryption:
+	sh ./scripts/commit-leveldb-record-encryption.sh
+
+push-leveldb-record-encryption:
+	sh ./scripts/push-leveldb-record-encryption.sh
+
 
 
 

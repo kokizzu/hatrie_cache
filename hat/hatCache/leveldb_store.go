@@ -305,10 +305,11 @@ func sortedStringsContains(values []string, value string) bool {
 }
 
 type LevelDBStore struct {
-	mu     sync.RWMutex
-	path   string
-	db     *leveldb.DB
-	format StorageFormat
+	mu           sync.RWMutex
+	path         string
+	db           *leveldb.DB
+	format       StorageFormat
+	recordCipher *hatCodec.StreamCipher
 }
 
 func OpenLevelDBStore(path string) (*LevelDBStore, error) {
@@ -316,6 +317,12 @@ func OpenLevelDBStore(path string) (*LevelDBStore, error) {
 }
 
 func OpenLevelDBStoreWithFormat(path string, format StorageFormat) (*LevelDBStore, error) {
+	return OpenLevelDBStoreWithFormatAndCipher(path, format, nil)
+}
+
+// OpenLevelDBStoreWithFormatAndCipher opens a store whose entry values are
+// authenticated and encrypted at rest when cipher is non-nil.
+func OpenLevelDBStoreWithFormatAndCipher(path string, format StorageFormat, cipher *hatCodec.StreamCipher) (*LevelDBStore, error) {
 	if path == "" {
 		return nil, errors.New("hatriecache: leveldb path is required")
 	}
@@ -332,7 +339,7 @@ func OpenLevelDBStoreWithFormat(path string, format StorageFormat) (*LevelDBStor
 	if err != nil {
 		return nil, err
 	}
-	return &LevelDBStore{path: path, db: db, format: format}, nil
+	return &LevelDBStore{path: path, db: db, format: format, recordCipher: cipher}, nil
 }
 
 func (store *LevelDBStore) Close() error {
@@ -416,8 +423,12 @@ func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opt
 			batch.Delete(dbKey)
 			continue
 		}
+		storedData, err := store.sealEntryData(key, data)
+		if err != nil {
+			return err
+		}
 		if !compareBeforeWrite {
-			batch.Put(dbKey, data)
+			batch.Put(dbKey, storedData)
 			continue
 		}
 		existing, exists, err := store.entryDataFromDB(db, key)
@@ -425,7 +436,7 @@ func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opt
 			return err
 		}
 		if !exists || !bytes.Equal(existing, data) {
-			batch.Put(dbKey, data)
+			batch.Put(dbKey, storedData)
 		}
 	}
 	if batch.Len() > 0 {
@@ -509,8 +520,12 @@ func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []stri
 			batch.Delete(dbKey)
 			continue
 		}
+		storedData, err := store.sealEntryData(key, data)
+		if err != nil {
+			return err
+		}
 		if !compareBeforeWrite {
-			batch.Put(dbKey, data)
+			batch.Put(dbKey, storedData)
 			continue
 		}
 		existing, exists, err := store.entryDataFromDB(db, key)
@@ -518,7 +533,7 @@ func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []stri
 			return err
 		}
 		if !exists || !bytes.Equal(existing, data) {
-			batch.Put(dbKey, data)
+			batch.Put(dbKey, storedData)
 		}
 	}
 	batch.Put(persistentAppliedJournalSequenceKey, encodePersistentJournalSequence(sequence))
@@ -847,19 +862,27 @@ func levelDBDiffBatch(store *LevelDBStore, db *leveldb.DB, trie *HatTrie) (*leve
 
 	hasExisting := iterator.Next()
 	err := trie.scanLevelDBEntryDataForStore(store, db, store.format, func(key string, data []byte) error {
+		storedData, err := store.sealEntryData(key, data)
+		if err != nil {
+			return err
+		}
 		dbKey := levelDBKey(key)
 		for hasExisting && bytes.Compare(iterator.Key(), dbKey) < 0 {
 			batch.Delete(cloneBytes(iterator.Key()))
 			hasExisting = iterator.Next()
 		}
 		if hasExisting && bytes.Equal(iterator.Key(), dbKey) {
-			if !bytes.Equal(iterator.Value(), data) {
-				batch.Put(dbKey, data)
+			existing, err := store.openEntryData(key, iterator.Value())
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(existing, data) {
+				batch.Put(dbKey, storedData)
 			}
 			hasExisting = iterator.Next()
 			return nil
 		}
-		batch.Put(dbKey, data)
+		batch.Put(dbKey, storedData)
 		return nil
 	})
 	if err != nil {
@@ -1268,7 +1291,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	}
 	defer snapshot.Release()
 	return loadPersistentEntryData(trie, store, policy, func(visit func(snapshotEntry, []byte) error) error {
-		return scanLevelDBSnapshotEntryData(snapshot, visit)
+		return scanLevelDBStoreSnapshotEntryData(store, snapshot, visit)
 	})
 }
 
@@ -1379,10 +1402,32 @@ func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBL
 	}, true, nil
 }
 
-func scanLevelDBSnapshotEntryData(snapshot *leveldb.Snapshot, visit func(snapshotEntry, []byte) error) error {
+func scanLevelDBStoreSnapshotEntryData(store *LevelDBStore, snapshot *leveldb.Snapshot, visit func(snapshotEntry, []byte) error) error {
 	iterator := snapshot.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
 	defer iterator.Release()
 
+	for iterator.Next() {
+		key := string(iterator.Key()[len(levelDBEntryPrefix):])
+		data, err := store.openEntryData(key, iterator.Value())
+		if err != nil {
+			return err
+		}
+		entry, err := decodeLevelDBEntryForKey(key, data)
+		if err != nil {
+			return err
+		}
+		if visit != nil {
+			if err := visit(entry, data); err != nil {
+				return err
+			}
+		}
+	}
+	return iterator.Error()
+}
+
+func scanLevelDBSnapshotEntryData(snapshot *leveldb.Snapshot, visit func(snapshotEntry, []byte) error) error {
+	iterator := snapshot.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
+	defer iterator.Release()
 	for iterator.Next() {
 		key := string(iterator.Key()[len(levelDBEntryPrefix):])
 		data := iterator.Value()
@@ -1455,7 +1500,19 @@ func (store *LevelDBStore) entryDataFromDB(db *leveldb.DB, key string) ([]byte, 
 	if err != nil {
 		return nil, false, err
 	}
-	return cloneBytes(data), true, nil
+	data, err = store.openEntryData(key, data)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+func (store *LevelDBStore) sealEntryData(key string, data []byte) ([]byte, error) {
+	return sealPersistentEntry(store.recordCipher, StorageBackendLevelDB, key, data)
+}
+
+func (store *LevelDBStore) openEntryData(key string, data []byte) ([]byte, error) {
+	return openPersistentEntry(store.recordCipher, StorageBackendLevelDB, key, data)
 }
 
 func (store *LevelDBStore) lockDB() (*leveldb.DB, func(), error) {
