@@ -131,6 +131,7 @@ type SQLRangeIndexedSourceResolver = RangeIndexedSourceResolver
 type SQLOrderedSourceResolver = OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = OrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = CompositeIndexedSourceResolver
+type SQLSecondaryIndexedSourceResolver = SecondaryIndexedSourceResolver
 type SQLJSONIndexFrequencyBucket = JSONIndexFrequencyBucket
 type SQLJSONIndexStats = JSONIndexStats
 type SQLSourceResolverFunc = SourceResolverFunc
@@ -8377,6 +8378,23 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 			}
 		}
 	}
+	if indexed, ok := resolver.(SQLSecondaryIndexedSourceResolver); ok {
+		operation, fields, values := sqlSecondaryIndexedEqualities(source, condition)
+		if len(fields) >= 2 {
+			started := time.Now()
+			rows, available, err := indexed.ResolveSQLSecondaryIndexedSource(source.kind, source.key, operation, fields, values)
+			if available || err != nil {
+				if available && metrics != nil {
+					node := "INDEX INTERSECTION"
+					if operation == "OR" {
+						node = "INDEX UNION"
+					}
+					metrics.record(node, sqlExplainSource(source)+" fields="+strings.Join(fields, ","), len(fields), len(rows), started)
+				}
+				return rows, available, err
+			}
+		}
+	}
 	if condition.op == "AND" {
 		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver, metrics); indexed || err != nil {
 			return rows, indexed, err
@@ -8418,6 +8436,57 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		metrics.adaptive.ObserveIndex(adaptiveKey, *adaptiveEstimate, len(rows))
 	}
 	return rows, indexed, err
+}
+
+func sqlSecondaryIndexedEqualities(source sqlSource, condition sqlExpr) (string, []string, []interface{}) {
+	for _, operation := range []string{"AND", "OR"} {
+		fields := make([]string, 0, 2)
+		values := make([]interface{}, 0, 2)
+		valid := true
+		var collect func(sqlExpr)
+		collect = func(expression sqlExpr) {
+			if !valid {
+				return
+			}
+			if expression.kind == "binary" && expression.op == operation && expression.left != nil && expression.right != nil {
+				collect(*expression.left)
+				collect(*expression.right)
+				return
+			}
+			field, value, ok := sqlSecondaryIndexedEquality(source, expression)
+			if !ok {
+				valid = false
+				return
+			}
+			fields = append(fields, field)
+			values = append(values, value)
+		}
+		collect(condition)
+		if valid && len(fields) >= 2 {
+			return operation, fields, values
+		}
+	}
+	return "", nil, nil
+}
+
+func sqlSecondaryIndexedEquality(source sqlSource, condition sqlExpr) (string, interface{}, bool) {
+	if condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+		return "", nil, false
+	}
+	left, right := *condition.left, *condition.right
+	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
+		return left.name, right.value, true
+	}
+	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+		return right.name, left.value, true
+	}
+	if path, ok := sqlJSONPathIndexField(left, source.alias); ok && right.kind == "literal" {
+		return path, right.value, true
+	}
+	if path, ok := sqlJSONPathIndexField(right, source.alias); ok && left.kind == "literal" {
+		return path, left.value, true
+	}
+	return "", nil, false
 }
 
 func sqlJSONPathIndexField(expr sqlExpr, alias string) (string, bool) {

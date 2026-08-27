@@ -733,6 +733,18 @@ show-sql-bitmap-index-engine:
 test-sql-bitmap-indexes:
 	sh ./scripts/test-sql-bitmap-indexes.sh
 
+test-sql-secondary-indexes:
+	sh ./scripts/test-sql-secondary-indexes.sh
+
+format-sql-secondary-indexes:
+	sh ./scripts/format-sql-secondary-indexes.sh
+
+review-sql-secondary-indexes:
+	sh ./scripts/review-sql-secondary-indexes.sh
+
+commit-sql-secondary-indexes:
+	sh ./scripts/commit-sql-secondary-indexes.sh
+
 format-sql-bitmap-indexes:
 	sh ./scripts/format-sql-bitmap-indexes.sh
 
@@ -1075,6 +1087,21 @@ report-package-layout:
 
 audit-sql-improvements:
 	sh ./scripts/audit-sql-improvements.sh
+
+audit-query-performance-goal:
+	sh ./scripts/audit-query-performance-goal.sh
+
+audit-query-performance-details:
+	sh ./scripts/audit-query-performance-goal.sh details
+
+audit-query-performance-indexes:
+	sh ./scripts/audit-query-performance-goal.sh indexes
+
+audit-query-performance-planner:
+	sh ./scripts/audit-query-performance-goal.sh planner
+
+audit-query-performance-bitmap:
+	sh ./scripts/audit-query-performance-goal.sh bitmap
 
 audit-sql-improvement-matrix:
 	sh ./scripts/audit-sql-improvements.sh matrix

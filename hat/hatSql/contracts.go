@@ -105,6 +105,14 @@ type CompositeIndexedSourceResolver interface {
 	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error)
 }
 
+// SecondaryIndexedSourceResolver optionally combines equality postings from
+// independently configured secondary indexes. operation is either AND or OR;
+// implementations return only candidate rows and the executor re-evaluates the
+// complete predicate before publishing results.
+type SecondaryIndexedSourceResolver interface {
+	ResolveSQLSecondaryIndexedSource(name, key, operation string, fields []string, values []interface{}) ([]Row, bool, error)
+}
+
 // JSONIndexStatsResolver exposes exact current cardinality of a materialized
 // JSON index without exposing indexed values. It lets the optimizer compare a
 // hash build against index probes before materializing the right source.

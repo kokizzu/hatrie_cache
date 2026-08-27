@@ -615,6 +615,82 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	return hatSql.CloneRows(index.rows[valueKey]), true, nil
 }
 
+// ResolveSQLSecondaryIndexedSource combines exact bitmap postings for a
+// homogeneous equality predicate. It returns source-order candidate rows; the
+// SQL executor evaluates the original predicate again before returning data.
+func (ht *HatTrie) ResolveSQLSecondaryIndexedSource(name, key, operation string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(fields) != len(values) || len(fields) < 2 || operation != "AND" && operation != "OR" {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	indexes := make([]*sqlJSONBitmapIndex, len(fields))
+	postings := make([]hatDataStructure.RoaringBitmap, len(fields))
+	for index, field := range fields {
+		bitmap := ht.sqlJSONBitmapIndexes[key][field]
+		if bitmap == nil {
+			return nil, false, nil
+		}
+		if err := refreshSQLJSONBitmapIndex(bitmap, key, field, data); err != nil {
+			return nil, false, err
+		}
+		valueKey, ok := sqlIndexValueKey(values[index])
+		if !ok {
+			return []SQLRow{}, true, nil
+		}
+		indexes[index] = bitmap
+		postings[index] = bitmap.postings[valueKey]
+	}
+	ordinals := sqlSecondaryBitmapOrdinals(operation, postings)
+	rows := make([]SQLRow, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		if int(ordinal) < len(indexes[0].rows) {
+			rows = append(rows, indexes[0].rows[ordinal])
+		}
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func sqlSecondaryBitmapOrdinals(operation string, postings []hatDataStructure.RoaringBitmap) []uint32 {
+	if len(postings) == 0 {
+		return []uint32{}
+	}
+	if operation == "AND" {
+		base := 0
+		for index := 1; index < len(postings); index++ {
+			if postings[index].Count() < postings[base].Count() {
+				base = index
+			}
+		}
+		candidates := postings[base].Values()
+		matched := candidates[:0]
+		for _, ordinal := range candidates {
+			present := true
+			for index := range postings {
+				if index != base && !postings[index].Contains(ordinal) {
+					present = false
+					break
+				}
+			}
+			if present {
+				matched = append(matched, ordinal)
+			}
+		}
+		return matched
+	}
+	merged := hatDataStructure.NewRoaringBitmap()
+	for _, posting := range postings {
+		for _, ordinal := range posting.Values() {
+			merged.Add(ordinal)
+		}
+	}
+	return merged.Values()
+}
+
 // ResolveSQLCompositeIndexedSource uses the longest configured composite
 // index whose fields are all present in the supplied equality predicates.
 func (ht *HatTrie) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
