@@ -278,6 +278,9 @@ test-sql-aggregate-filter:
 test-sql-named-windows:
 	sh ./scripts/test-sql-named-windows.sh
 
+test-sql-parameterized-views:
+	sh ./scripts/test-sql-parameterized-views.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -301,6 +304,15 @@ format-sql-aggregate-filter:
 
 format-sql-named-windows:
 	sh ./scripts/format-sql-named-windows.sh
+
+format-sql-parameterized-views:
+	sh ./scripts/format-sql-parameterized-views.sh
+
+review-sql-parameterized-views:
+	sh ./scripts/review-sql-parameterized-views.sh
+
+commit-sql-parameterized-views:
+	sh ./scripts/commit-sql-parameterized-views.sh
 
 review-sql-named-windows:
 	sh ./scripts/review-sql-named-windows.sh
