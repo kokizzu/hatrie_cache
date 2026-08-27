@@ -820,6 +820,27 @@ commit-pebble-record-encryption:
 push-pebble-record-encryption:
 	sh ./scripts/push-pebble-record-encryption.sh
 
+release-build:
+	sh ./scripts/release-build.sh
+
+release-sbom:
+	sh ./scripts/release-sbom.sh
+
+verify-vulnerabilities:
+	sh ./scripts/verify-vulnerabilities.sh
+
+verify-long-running:
+	sh ./scripts/verify-long-running.sh
+
+format-release-tooling:
+	sh ./scripts/format-release-tooling.sh
+
+commit-release-ci:
+	sh ./scripts/commit-release-ci.sh
+
+push-release-ci:
+	sh ./scripts/push-release-ci.sh
+
 
 
 
