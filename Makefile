@@ -263,6 +263,9 @@ test-sql-regex:
 test-sql-time-zones:
 	sh ./scripts/test-sql-time-zones.sh
 
+test-sql-rewrite:
+	sh ./scripts/test-sql-rewrite.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -271,6 +274,15 @@ format-sql-regex:
 
 format-sql-time-zones:
 	sh ./scripts/format-sql-time-zones.sh
+
+format-sql-rewrite:
+	sh ./scripts/format-sql-rewrite.sh
+
+review-sql-rewrite:
+	sh ./scripts/review-sql-rewrite.sh
+
+commit-sql-rewrite:
+	sh ./scripts/commit-sql-rewrite.sh
 
 review-sql-time-zones:
 	sh ./scripts/review-sql-time-zones.sh

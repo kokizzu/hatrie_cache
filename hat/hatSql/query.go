@@ -4020,7 +4020,12 @@ func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLP
 	if err != nil {
 		return nil, err
 	}
-	return bindSQLQueryParameters(template, parameters)
+	query, err := bindSQLQueryParameters(template, parameters)
+	if err != nil {
+		return nil, err
+	}
+	rewriteSQLQuery(query)
+	return query, nil
 }
 
 func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
