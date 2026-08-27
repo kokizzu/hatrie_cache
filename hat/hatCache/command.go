@@ -84,6 +84,21 @@ func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int
 	hatCommand.WriteResponseWire(w, r, status, response, fallback)
 }
 
+func negotiateCommandProtocolHTTP(w http.ResponseWriter, r *http.Request) bool {
+	if _, err := hatCommand.NegotiateHTTPProtocol(r, w.Header(), hatCommand.SupportedProtocolVersions); err == nil {
+		return true
+	} else {
+		w.Header().Set(hatCommand.HeaderProtocolSupportedVersions, hatCommand.SupportedProtocolVersions.String())
+		w.Header().Add("Vary", hatCommand.HeaderProtocolVersion)
+		status := http.StatusBadRequest
+		if errors.Is(err, hatCommand.ErrIncompatibleProtocolVersion) {
+			status = http.StatusUpgradeRequired
+		}
+		http.Error(w, err.Error(), status)
+		return false
+	}
+}
+
 func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.CommandRequest, error) {
 	return hatCommand.RequestToProto(request)
 }

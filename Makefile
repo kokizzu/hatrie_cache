@@ -709,6 +709,19 @@ commit-command-concurrency:
 push-command-concurrency:
 	sh ./scripts/push-command-concurrency.sh
 
+test-command-protocol:
+	sh ./scripts/test-command-protocol.sh
+
+format-command-protocol:
+	sh ./scripts/format-command-protocol.sh
+
+commit-command-protocol:
+	sh ./scripts/commit-command-protocol.sh
+
+push-command-protocol:
+	sh ./scripts/push-command-protocol.sh
+
+
 
 commit-sql-improvement-goal-verification:
 	sh ./scripts/commit-sql-improvement-goal-verification.sh

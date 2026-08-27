@@ -1184,6 +1184,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		_ = r.Body.Close()
 		return
 	}
+	if !negotiateCommandProtocolHTTP(w, r) {
+		_ = r.Body.Close()
+		return
+	}
 
 	requestFormat, ok := monitoringCommandRequestFormat(w, r)
 	if !ok {
