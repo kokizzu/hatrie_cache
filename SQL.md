@@ -605,6 +605,24 @@ Strings use SQL single quotes; write one quote as `''`. SQL identifiers are
 case-insensitive. JSON payloads must be valid JSON and are decoded before the
 command is sent, so a malformed payload is diagnosed locally.
 
+## Plan regression guards
+
+Use `hatSql.VerifyPlanGuards` in a normal Go test to make a planner regression
+fail CI. Each guard executes the query through `EXPLAIN ANALYZE` and requires a
+plan node and optional detail substring. This keeps an intended index path
+explicit without matching unstable timing or row-count values.
+
+```go
+err := hatSql.VerifyPlanGuards(ctx, resolver, hatSql.SQLQueryOptions{}, []hatSql.PlanGuard{{
+    Name:        "people by id",
+    Query:       "FROM CACHE('people') AS p WHERE p.id = 7 SELECT p.name",
+    RequireNode: "INDEX SCAN",
+}})
+```
+
+On failure the error includes the guard name, missing requirement, and observed
+plan nodes, so the test makes the changed access path visible in CI output.
+
 ## Diagnostics
 
 Diagnostics include a one-based line and column, the source line, a caret span,

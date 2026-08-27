@@ -541,6 +541,27 @@ verify-sql-mutation-feature:
 commit-sql-mutation-feature:
 	sh ./scripts/commit-sql-mutation-feature.sh
 
+show-sql-relational-extension-points:
+	sh ./scripts/show-sql-relational-extension-points.sh
+
+check-next-sql-feature-symbols:
+	sh ./scripts/check-next-sql-feature-symbols.sh
+
+show-sql-source-parser:
+	sh ./scripts/show-sql-source-parser.sh
+
+show-sql-source-execution:
+	sh ./scripts/show-sql-source-execution.sh
+
+test-sql-plan-guards:
+	sh ./scripts/test-sql-plan-guards.sh
+
+format-sql-plan-guards:
+	sh ./scripts/format-sql-plan-guards.sh
+
+commit-sql-plan-guard:
+	sh ./scripts/commit-sql-plan-guard.sh
+
 format-sql-mutations:
 	sh ./scripts/format-sql-mutations.sh
 
