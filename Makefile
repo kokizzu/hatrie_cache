@@ -514,6 +514,9 @@ audit-sql-quality:
 audit-hatcache-boundaries:
 	sh ./scripts/audit-hatcache-boundaries.sh
 
+verify-sql-capabilities:
+	sh ./scripts/verify-sql-capabilities.sh
+
 commit-sql-audit:
 	sh ./scripts/commit-sql-audit.sh
 
