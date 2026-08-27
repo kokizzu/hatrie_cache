@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -13,12 +14,19 @@ import (
 // command SQL. Queries and staged writes run against a private snapshot; commit
 // is rejected if any live mutation occurred after that snapshot.
 type SQLTransaction struct {
-	mu       sync.Mutex
-	live     *HatTrie
+	mu         sync.Mutex
+	live       *HatTrie
+	snapshot   *HatTrie
+	epoch      uint64
+	staged     []CacheCommandRequest
+	savepoints []sqlTransactionSavepoint
+	closed     bool
+}
+
+type sqlTransactionSavepoint struct {
+	name     string
+	staged   int
 	snapshot *HatTrie
-	epoch    uint64
-	staged   []CacheCommandRequest
-	closed   bool
 }
 
 // BeginSQLTransaction captures a consistent private snapshot. A busy cache is
@@ -129,6 +137,124 @@ func (transaction *SQLTransaction) Rollback() error {
 	return nil
 }
 
+// Savepoint records the current staged-write boundary and a private snapshot.
+// RollbackTo restores that snapshot without discarding earlier transaction work.
+func (transaction *SQLTransaction) Savepoint(name string) error {
+	transaction.mu.Lock()
+	defer transaction.mu.Unlock()
+	if transaction.closed {
+		return fmt.Errorf("SQL transaction is closed")
+	}
+	name, err := normalizeSQLSavepointName(name)
+	if err != nil {
+		return err
+	}
+	for _, savepoint := range transaction.savepoints {
+		if savepoint.name == name {
+			return fmt.Errorf("SQL savepoint %q already exists", name)
+		}
+	}
+	snapshot, err := cloneSQLTransactionSnapshot(transaction.snapshot)
+	if err != nil {
+		return err
+	}
+	transaction.savepoints = append(transaction.savepoints, sqlTransactionSavepoint{name: name, staged: len(transaction.staged), snapshot: snapshot})
+	return nil
+}
+
+// RollbackTo restores a previously named savepoint and discards later writes
+// and savepoints while preserving the named savepoint for repeated rollback.
+func (transaction *SQLTransaction) RollbackTo(name string) error {
+	transaction.mu.Lock()
+	defer transaction.mu.Unlock()
+	if transaction.closed {
+		return fmt.Errorf("SQL transaction is closed")
+	}
+	name, err := normalizeSQLSavepointName(name)
+	if err != nil {
+		return err
+	}
+	index := -1
+	for position := len(transaction.savepoints) - 1; position >= 0; position-- {
+		if transaction.savepoints[position].name == name {
+			index = position
+			break
+		}
+	}
+	if index < 0 {
+		return fmt.Errorf("SQL savepoint %q does not exist", name)
+	}
+	restored, err := cloneSQLTransactionSnapshot(transaction.savepoints[index].snapshot)
+	if err != nil {
+		return err
+	}
+	transaction.snapshot.Destroy()
+	transaction.snapshot = restored
+	transaction.staged = transaction.staged[:transaction.savepoints[index].staged]
+	for position := index + 1; position < len(transaction.savepoints); position++ {
+		transaction.savepoints[position].snapshot.Destroy()
+	}
+	transaction.savepoints = transaction.savepoints[:index+1]
+	return nil
+}
+
+// ReleaseSavepoint deletes a named savepoint without changing staged writes.
+func (transaction *SQLTransaction) ReleaseSavepoint(name string) error {
+	transaction.mu.Lock()
+	defer transaction.mu.Unlock()
+	if transaction.closed {
+		return fmt.Errorf("SQL transaction is closed")
+	}
+	name, err := normalizeSQLSavepointName(name)
+	if err != nil {
+		return err
+	}
+	for position := len(transaction.savepoints) - 1; position >= 0; position-- {
+		if transaction.savepoints[position].name != name {
+			continue
+		}
+		transaction.savepoints[position].snapshot.Destroy()
+		copy(transaction.savepoints[position:], transaction.savepoints[position+1:])
+		transaction.savepoints[len(transaction.savepoints)-1] = sqlTransactionSavepoint{}
+		transaction.savepoints = transaction.savepoints[:len(transaction.savepoints)-1]
+		return nil
+	}
+	return fmt.Errorf("SQL savepoint %q does not exist", name)
+}
+
+func normalizeSQLSavepointName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("SQL savepoint name is required")
+	}
+	for index := 0; index < len(name); index++ {
+		value := name[index]
+		if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') || value == '_' {
+			continue
+		}
+		return "", fmt.Errorf("invalid SQL savepoint name %q", name)
+	}
+	return strings.ToLower(name), nil
+}
+
+func cloneSQLTransactionSnapshot(source *HatTrie) (*HatTrie, error) {
+	directory, err := os.MkdirTemp("", "hatrie-sql-savepoint-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(directory)
+	path := filepath.Join(directory, "snapshot.bin.gz")
+	if err := source.SaveSnapshotWithFormat(path, SnapshotFormatGzipBinary); err != nil {
+		return nil, err
+	}
+	clone := CreateHatTrie()
+	if err := clone.LoadSnapshot(path); err != nil {
+		clone.Destroy()
+		return nil, err
+	}
+	return clone, nil
+}
+
 func (transaction *SQLTransaction) closeLocked() {
 	if transaction.closed {
 		return
@@ -139,6 +265,12 @@ func (transaction *SQLTransaction) closeLocked() {
 		transaction.snapshot = nil
 	}
 	transaction.staged = nil
+	for index := range transaction.savepoints {
+		if transaction.savepoints[index].snapshot != nil {
+			transaction.savepoints[index].snapshot.Destroy()
+		}
+	}
+	transaction.savepoints = nil
 }
 
 func sqlTransactionWritableCommand(command string) bool {

@@ -514,6 +514,42 @@ audit-sql-quality:
 audit-hatcache-boundaries:
 	sh ./scripts/audit-hatcache-boundaries.sh
 
+audit-next-sql-improvements:
+	sh ./scripts/audit-next-sql-improvements.sh
+
+inspect-sql-engine:
+	sh ./scripts/inspect-sql-engine.sh
+
+show-sql-mutation-engine:
+	sh ./scripts/show-sql-mutation-engine.sh
+
+show-sql-mutation-tests:
+	sh ./scripts/show-sql-mutation-tests.sh
+
+show-hattrie-core:
+	sh ./scripts/show-hattrie-core.sh
+
+show-scalar-command-path:
+	sh ./scripts/show-scalar-command-path.sh
+
+test-sql-mutations:
+	sh ./scripts/test-sql-mutations.sh
+
+verify-sql-mutation-feature:
+	sh ./scripts/verify-sql-mutation-feature.sh
+
+commit-sql-mutation-feature:
+	sh ./scripts/commit-sql-mutation-feature.sh
+
+format-sql-mutations:
+	sh ./scripts/format-sql-mutations.sh
+
+show-sql-mutation-docs:
+	sh ./scripts/show-sql-mutation-docs.sh
+
+show-sql-keyword-inventory:
+	sh ./scripts/show-sql-keyword-inventory.sh
+
 verify-sql-capabilities:
 	sh ./scripts/verify-sql-capabilities.sh
 

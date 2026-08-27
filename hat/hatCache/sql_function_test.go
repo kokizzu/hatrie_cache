@@ -282,6 +282,7 @@ func TestSQLAcceptedKeywordInventory(t *testing.T) {
 		{"TTL_SECONDS_NAMED_FIELD", "command", "CALL SETSTRX(key => 'k', value => 'v', ttl_seconds => 1)"},
 		{"UNIX_SECONDS_NAMED_FIELD", "command", "CALL EXPIREAT(key => 'k', unix_seconds => 1)"},
 		{"JSON", "command", "CALL ADDSET(key => 'k', values => JSON '[\"v\"]')"},
+		{"SAVEPOINT_TO_RELEASE", "command", "BEGIN ATOMIC; SAVEPOINT checkpoint; ROLLBACK TO checkpoint; RELEASE SAVEPOINT checkpoint; COMMIT;"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -338,7 +339,7 @@ func TestSQLKeywordInventoryTracksEveryDirectParserLiteral(t *testing.T) {
 	// When a parser gains a new literal word, this test fails and requires both
 	// a named execution case above and a SQL_TEST_MATRIX.md update.
 	covered := map[string]struct{}{
-		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CASE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "ELSE": {}, "END": {}, "EXCEPT": {}, "EXPLAIN": {}, "FETCH": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "IN": {}, "INNER": {}, "INSERT": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "ONLY": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "THEN": {}, "TIMESTAMP": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHEN": {}, "WHERE": {}, "WITH": {},
+		"ALL": {}, "ANALYZE": {}, "AND": {}, "AS": {}, "ASC": {}, "BETWEEN": {}, "BREADTH": {}, "BY": {}, "CACHE": {}, "CASE": {}, "CREATE": {}, "CROSS": {}, "CURRENT": {}, "CYCLE": {}, "DATE": {}, "DESC": {}, "DISTINCT": {}, "ELSE": {}, "END": {}, "EXCEPT": {}, "EXPLAIN": {}, "FETCH": {}, "FIRST": {}, "FOLLOWING": {}, "FROM": {}, "FULL": {}, "FUNCTION": {}, "GROUP": {}, "HAVING": {}, "IN": {}, "INNER": {}, "INSERT": {}, "INTERSECT": {}, "INTO": {}, "IS": {}, "JOIN": {}, "KEY": {}, "KEYS": {}, "LANGUAGE": {}, "LAST": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {}, "NOT": {}, "NULL": {}, "NULLS": {}, "OFFSET": {}, "ON": {}, "ONLY": {}, "OR": {}, "ORDER": {}, "OUTER": {}, "OVER": {}, "PARTITION": {}, "PRECEDING": {}, "RECURSIVE": {}, "RIGHT": {}, "ROW": {}, "ROWS": {}, "SAVEPOINT": {}, "SEARCH": {}, "SELECT": {}, "SET": {}, "THEN": {}, "TIMESTAMP": {}, "TO": {}, "UNBOUNDED": {}, "UNION": {}, "VALUES": {}, "WHEN": {}, "WHERE": {}, "WITH": {},
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

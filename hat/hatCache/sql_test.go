@@ -125,6 +125,25 @@ func TestCompileSQLCompilesAtomicProgram(t *testing.T) {
 	}
 }
 
+func TestCompileSQLAtomicProgramSupportsSavepoints(t *testing.T) {
+	t.Parallel()
+	got, err := CompileSQL(`
+BEGIN ATOMIC;
+INSERT INTO cache (key, value) VALUES ('keep', 'first');
+SAVEPOINT before_discard;
+INSERT INTO cache (key, value) VALUES ('discard', 'second');
+ROLLBACK TO before_discard;
+RELEASE SAVEPOINT before_discard;
+COMMIT;`)
+	if err != nil {
+		t.Fatalf("CompileSQL() error = %v", err)
+	}
+	want := CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{{Command: "SETSTR", Key: "keep", Value: "first"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CompileSQL() = %#v, want %#v", got, want)
+	}
+}
+
 func TestExecuteSQLMutationSupportsInsertSelectAndExistingDML(t *testing.T) {
 	trie := newTestTrie(t)
 	result, err := ExecuteSQLMutation(context.Background(), trie, `
@@ -151,6 +170,86 @@ SELECT key, value`, nil, SQLQueryOptions{})
 	}
 	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "user:2"}); !got.OK || got.Value != "0" {
 		t.Fatalf("user:2 exists = %#v, want deleted", got)
+	}
+}
+
+func TestExecuteSQLMutationMergeConditionalAndReturning(t *testing.T) {
+	trie := newTestTrie(t)
+
+	result, err := ExecuteSQLMutation(context.Background(), trie, `
+MERGE INTO cache (key, value) VALUES ('profile:1', 'Ada')
+WHEN NOT MATCHED THEN INSERT
+RETURNING key, value, exists`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(MERGE insert) error = %v", err)
+	}
+	if result.Affected != 1 || !reflect.DeepEqual(result.Columns, []string{"key", "value", "exists"}) {
+		t.Fatalf("ExecuteSQLMutation(MERGE insert) = %#v", result)
+	}
+	if !reflect.DeepEqual(result.Rows, []SQLRow{{"key": "profile:1", "value": "Ada", "exists": true}}) {
+		t.Fatalf("MERGE INSERT RETURNING rows = %#v", result.Rows)
+	}
+
+	result, err = ExecuteSQLMutation(context.Background(), trie, `
+MERGE INTO cache (key, value) VALUES ('profile:1', 'ignored')
+WHEN NOT MATCHED THEN INSERT
+RETURNING key, value`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(MERGE no match) error = %v", err)
+	}
+	if result.Affected != 0 || len(result.Rows) != 0 {
+		t.Fatalf("MERGE no-match result = %#v", result)
+	}
+	if got := trie.GetString("profile:1"); got != "Ada" {
+		t.Fatalf("profile:1 after conditional insert = %q, want Ada", got)
+	}
+
+	result, err = ExecuteSQLMutation(context.Background(), trie, `
+MERGE INTO cache (key, value) VALUES ('profile:1', 'Grace')
+WHEN MATCHED THEN UPDATE
+RETURNING key, value`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(MERGE update) error = %v", err)
+	}
+	if result.Affected != 1 || !reflect.DeepEqual(result.Rows, []SQLRow{{"key": "profile:1", "value": "Grace"}}) {
+		t.Fatalf("MERGE UPDATE RETURNING = %#v", result)
+	}
+}
+
+func TestSQLTransactionSavepointsRollbackOnlyLaterWrites(t *testing.T) {
+	trie := newTestTrie(t)
+	transaction, err := BeginSQLTransaction(trie)
+	if err != nil {
+		t.Fatalf("BeginSQLTransaction() error = %v", err)
+	}
+	defer transaction.Rollback()
+
+	if _, err := transaction.Execute("INSERT INTO cache (key, value) VALUES ('keep', 'first')"); err != nil {
+		t.Fatalf("Execute(keep) error = %v", err)
+	}
+	if err := transaction.Savepoint("before_discard"); err != nil {
+		t.Fatalf("Savepoint() error = %v", err)
+	}
+	if _, err := transaction.Execute("INSERT INTO cache (key, value) VALUES ('discard', 'second')"); err != nil {
+		t.Fatalf("Execute(discard) error = %v", err)
+	}
+	if err := transaction.RollbackTo("before_discard"); err != nil {
+		t.Fatalf("RollbackTo() error = %v", err)
+	}
+	if err := transaction.ReleaseSavepoint("before_discard"); err != nil {
+		t.Fatalf("ReleaseSavepoint() error = %v", err)
+	}
+	if err := transaction.RollbackTo("before_discard"); err == nil {
+		t.Fatal("RollbackTo() accepted a released savepoint")
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if got := trie.GetString("keep"); got != "first" {
+		t.Fatalf("keep after savepoint commit = %q, want first", got)
+	}
+	if trie.Exists("discard") {
+		t.Fatal("discard exists after rollback to savepoint")
 	}
 }
 

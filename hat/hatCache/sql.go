@@ -19,6 +19,8 @@ type SQLDiagnostic = hatSql.Diagnostic
 type SQLMutationResult struct {
 	Affected int                  `json:"affected"`
 	Response CacheCommandResponse `json:"response"`
+	Columns  []string             `json:"columns,omitempty"`
+	Rows     []SQLRow             `json:"rows,omitempty"`
 }
 
 // ExecuteSQLMutation executes direct command-SQL mutations and INSERT ...
@@ -34,12 +36,45 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 	if err := ctx.Err(); err != nil {
 		return SQLMutationResult{}, err
 	}
-	insert, insertSelect, err := parseSQLInsertSelect(source)
+	mutationSource, returning, err := parseSQLMutationReturning(source)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	merge, mergeStatement, err := parseSQLMerge(mutationSource)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if mergeStatement {
+		if len(returning) > 0 && merge.condition == sqlMergeConditionNever {
+			return SQLMutationResult{}, fmt.Errorf("MERGE RETURNING requires a matched or not-matched action")
+		}
+		before, beforeOK, err := sqlMutationReturningRow(trie, merge.request.Key, returning)
+		if err != nil {
+			return SQLMutationResult{}, err
+		}
+		response, applied := trie.executeSQLMerge(merge.request, merge.condition)
+		if !response.OK {
+			return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
+		}
+		result := SQLMutationResult{Response: response}
+		if applied {
+			result.Affected = 1
+		}
+		return sqlMutationReturningResult(trie, result, merge.request, returning, before, beforeOK)
+	}
+	insert, insertSelect, err := parseSQLInsertSelect(mutationSource)
 	if err != nil {
 		return SQLMutationResult{}, err
 	}
 	if !insertSelect {
-		request, err := CompileSQL(source)
+		request, err := CompileSQL(mutationSource)
+		if err != nil {
+			return SQLMutationResult{}, err
+		}
+		if len(returning) > 0 && normalizedCommand(request.Command) == "BATCH" {
+			return SQLMutationResult{}, fmt.Errorf("RETURNING requires exactly one mutation statement")
+		}
+		before, beforeOK, err := sqlMutationReturningRow(trie, request.Key, returning)
 		if err != nil {
 			return SQLMutationResult{}, err
 		}
@@ -47,7 +82,10 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 		if !response.OK {
 			return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
 		}
-		return SQLMutationResult{Affected: sqlMutationAffected(request), Response: response}, nil
+		return sqlMutationReturningResult(trie, SQLMutationResult{Affected: sqlMutationAffected(request), Response: response}, request, returning, before, beforeOK)
+	}
+	if len(returning) > 0 {
+		return SQLMutationResult{}, fmt.Errorf("RETURNING is not supported for INSERT ... SELECT")
 	}
 	query, err := ExecuteSQLQueryParameters(ctx, insert.query, trie, parameters, options)
 	if err != nil {
@@ -78,6 +116,313 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 		return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
 	}
 	return SQLMutationResult{Affected: len(requests), Response: response}, nil
+}
+
+type sqlMergeCondition uint8
+
+const (
+	sqlMergeConditionAny sqlMergeCondition = iota
+	sqlMergeConditionMatched
+	sqlMergeConditionNotMatched
+	sqlMergeConditionNever
+)
+
+type sqlMerge struct {
+	request   CacheCommandRequest
+	condition sqlMergeCondition
+}
+
+func parseSQLMerge(source string) (sqlMerge, bool, error) {
+	tokens, err := lexSQL(source)
+	if err != nil {
+		return sqlMerge{}, false, err
+	}
+	if len(tokens) == 0 || tokens[0].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[0].text, "MERGE") {
+		return sqlMerge{}, false, nil
+	}
+	index := 1
+	if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[index].text, "INTO") {
+		return sqlMerge{}, true, sqlTokenDiagnostic(tokens[0], "MERGE requires INTO cache")
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[index].text, "CACHE") {
+		return sqlMerge{}, true, sqlTokenDiagnostic(tokens[index], "MERGE requires INTO cache")
+	}
+	when := len(tokens) - 1
+	depth := 0
+	for position, token := range tokens {
+		switch token.kind {
+		case sqlTokenLeftParen:
+			depth++
+		case sqlTokenRightParen:
+			depth--
+		case sqlTokenIdentifier:
+			if depth == 0 && strings.EqualFold(token.text, "WHEN") {
+				when = position
+				goto clauses
+			}
+		}
+	}
+
+clauses:
+	insertEnd, err := sqlTokenByteOffset(source, tokens[when])
+	if err != nil {
+		return sqlMerge{}, true, err
+	}
+	request, err := CompileSQL("INSERT" + source[len(tokens[0].text):insertEnd])
+	if err != nil {
+		return sqlMerge{}, true, err
+	}
+	if normalizedCommand(request.Command) == "BATCH" {
+		return sqlMerge{}, true, fmt.Errorf("MERGE accepts one VALUES row")
+	}
+	condition := sqlMergeConditionAny
+	seenMatched := false
+	seenNotMatched := false
+	for when < len(tokens)-1 {
+		if tokens[when].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[when].text, "WHEN") {
+			return sqlMerge{}, true, sqlTokenDiagnostic(tokens[when], "expected WHEN clause")
+		}
+		when++
+		notMatched := false
+		if when < len(tokens)-1 && tokens[when].kind == sqlTokenIdentifier && strings.EqualFold(tokens[when].text, "NOT") {
+			notMatched = true
+			when++
+		}
+		if when >= len(tokens)-1 || tokens[when].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[when].text, "MATCHED") {
+			return sqlMerge{}, true, sqlTokenDiagnostic(tokens[when], "expected MATCHED after WHEN")
+		}
+		when++
+		if when >= len(tokens)-1 || tokens[when].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[when].text, "THEN") {
+			return sqlMerge{}, true, sqlTokenDiagnostic(tokens[when], "expected THEN after WHEN MATCHED")
+		}
+		when++
+		if when >= len(tokens)-1 || tokens[when].kind != sqlTokenIdentifier {
+			return sqlMerge{}, true, sqlTokenDiagnostic(tokens[when], "expected INSERT or UPDATE after THEN")
+		}
+		action := strings.ToUpper(tokens[when].text)
+		when++
+		if notMatched {
+			if action != "INSERT" || seenNotMatched {
+				return sqlMerge{}, true, fmt.Errorf("MERGE WHEN NOT MATCHED requires one INSERT action")
+			}
+			seenNotMatched = true
+		} else {
+			if action != "UPDATE" || seenMatched {
+				return sqlMerge{}, true, fmt.Errorf("MERGE WHEN MATCHED requires one UPDATE action")
+			}
+			seenMatched = true
+		}
+	}
+	switch {
+	case seenMatched && seenNotMatched:
+		condition = sqlMergeConditionAny
+	case seenMatched:
+		condition = sqlMergeConditionMatched
+	case seenNotMatched:
+		condition = sqlMergeConditionNotMatched
+	}
+	return sqlMerge{request: request, condition: condition}, true, nil
+}
+
+func parseSQLMutationReturning(source string) (string, []string, error) {
+	tokens, err := lexSQL(source)
+	if err != nil || len(tokens) == 0 || tokens[0].kind != sqlTokenIdentifier {
+		return source, nil, err
+	}
+	switch strings.ToUpper(tokens[0].text) {
+	case "INSERT", "UPDATE", "DELETE", "MERGE":
+	default:
+		return source, nil, nil
+	}
+	depth := 0
+	for index, token := range tokens {
+		switch token.kind {
+		case sqlTokenLeftParen:
+			depth++
+		case sqlTokenRightParen:
+			depth--
+		case sqlTokenIdentifier:
+			if depth != 0 || !strings.EqualFold(token.text, "RETURNING") {
+				continue
+			}
+			offset, offsetErr := sqlTokenByteOffset(source, token)
+			if offsetErr != nil {
+				return source, nil, offsetErr
+			}
+			columns, parseErr := parseSQLReturningColumns(tokens[index+1:])
+			if parseErr != nil {
+				return source, nil, parseErr
+			}
+			return strings.TrimSpace(source[:offset]), columns, nil
+		}
+	}
+	return source, nil, nil
+}
+
+func parseSQLReturningColumns(tokens []sqlToken) ([]string, error) {
+	columns := make([]string, 0, 4)
+	for index := 0; index < len(tokens); {
+		token := tokens[index]
+		if token.kind == sqlTokenEOF {
+			break
+		}
+		if token.kind == sqlTokenSemicolon {
+			if index+1 != len(tokens)-1 {
+				return nil, sqlTokenDiagnostic(token, "RETURNING must end the statement")
+			}
+			break
+		}
+		if token.kind == sqlTokenStar {
+			if len(columns) != 0 || index+1 != len(tokens)-1 {
+				return nil, sqlTokenDiagnostic(token, "RETURNING * cannot be combined with other columns")
+			}
+			return []string{"key", "value", "exists", "ttl_seconds"}, nil
+		}
+		if token.kind != sqlTokenIdentifier {
+			return nil, sqlTokenDiagnostic(token, "expected a RETURNING column")
+		}
+		column := strings.ToLower(token.text)
+		switch column {
+		case "key", "value", "exists", "ttl_seconds":
+		default:
+			return nil, sqlTokenDiagnostic(token, "unsupported RETURNING column "+strconv.Quote(token.text))
+		}
+		for _, existing := range columns {
+			if existing == column {
+				return nil, sqlTokenDiagnostic(token, "duplicate RETURNING column "+strconv.Quote(token.text))
+			}
+		}
+		columns = append(columns, column)
+		index++
+		if index == len(tokens) || tokens[index].kind == sqlTokenEOF {
+			break
+		}
+		if tokens[index].kind != sqlTokenComma {
+			return nil, sqlTokenDiagnostic(tokens[index], "expected comma or end of RETURNING clause")
+		}
+		index++
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("RETURNING requires at least one column")
+	}
+	return columns, nil
+}
+
+func sqlMutationReturningRow(trie *HatTrie, key string, columns []string) (SQLRow, bool, error) {
+	if len(columns) == 0 {
+		return nil, false, nil
+	}
+	if key == "" {
+		return nil, false, fmt.Errorf("RETURNING requires a key-targeted mutation")
+	}
+	exists, err := trie.ExistsChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists {
+		return nil, false, nil
+	}
+	row := SQLRow{}
+	for _, column := range columns {
+		switch column {
+		case "key":
+			row[column] = key
+		case "exists":
+			row[column] = true
+		case "value":
+			response := trie.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: key})
+			if !response.OK {
+				return nil, false, fmt.Errorf("RETURNING value: %s", response.Message)
+			}
+			row[column] = response.Value
+		case "ttl_seconds":
+			response := trie.ExecuteCommand(CacheCommandRequest{Command: "TTL", Key: key})
+			if !response.OK {
+				return nil, false, fmt.Errorf("RETURNING ttl_seconds: %s", response.Message)
+			}
+			row[column] = response.Value
+		}
+	}
+	return row, true, nil
+}
+
+func sqlMutationReturningResult(trie *HatTrie, result SQLMutationResult, request CacheCommandRequest, columns []string, before SQLRow, beforeOK bool) (SQLMutationResult, error) {
+	if len(columns) == 0 || result.Affected == 0 {
+		return result, nil
+	}
+	result.Columns = append([]string(nil), columns...)
+	if normalizedCommand(request.Command) == "DEL" {
+		if beforeOK {
+			result.Rows = []SQLRow{before}
+		}
+		return result, nil
+	}
+	row, ok, err := sqlMutationReturningRow(trie, request.Key, columns)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if ok {
+		result.Rows = []SQLRow{row}
+	}
+	return result, nil
+}
+
+func (ht *HatTrie) executeSQLMerge(request CacheCommandRequest, condition sqlMergeCondition) (CacheCommandResponse, bool) {
+	if ht == nil {
+		return commandError(ErrNilHatTrie.Error()), false
+	}
+	if partition := ht.localPartitionForKey(request.Key); partition != nil {
+		return partition.executeSQLMerge(request, condition)
+	}
+	if err := validateKey(request.Key); err != nil {
+		return commandError(err.Error()), false
+	}
+	if request.TTLSeconds != nil || request.UnixSeconds != nil {
+		return commandError("conditional MERGE does not support expiration fields"), false
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	existing := ht.peekLocked(request.Key)
+	exists := !existing.Empty()
+	if (condition == sqlMergeConditionMatched && !exists) || (condition == sqlMergeConditionNotMatched && exists) {
+		return CacheCommandResponse{OK: true, Message: "merge condition not matched"}, false
+	}
+	rawPtr, previous, err := ht.upsertReplacementLocation(request.Key)
+	if err != nil {
+		return commandError(err.Error()), false
+	}
+	switch normalizedCommand(request.Command) {
+	case "SET", "SETSTR":
+		if previous.IsStringAtRaws() {
+			ht.strings.replaceActive(previous.Index, request.Value)
+			ht.clearExpirationLocked(request.Key)
+			previous.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+			*rawPtr = previous.toValue()
+		} else {
+			ht.returnStorage(previous)
+			ht.clearExpirationLocked(request.Key)
+			index := ht.strings.Add(request.Value)
+			*rawPtr = HatValue{Index: index, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
+		}
+		ht.recordWriteLocked(request.Key)
+		return CacheCommandResponse{OK: true, Message: "stored string"}, true
+	case "SETINT":
+		value, ok := parseCommandInt32(request.Value)
+		if !ok {
+			return commandError("value must be a 32-bit integer"), false
+		}
+		if !previous.IsCounter() {
+			ht.returnStorage(previous)
+		}
+		ht.clearExpirationLocked(request.Key)
+		*rawPtr = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
+		ht.recordWriteLocked(request.Key)
+		return CacheCommandResponse{OK: true, Message: "stored counter"}, true
+	default:
+		return commandError("MERGE supports string or counter values"), false
+	}
 }
 
 func sqlMutationAffected(request CacheCommandRequest) int {
@@ -360,15 +705,91 @@ func (parser *sqlParser) parseProgram() (CacheCommandRequest, error) {
 		}
 		parser.next()
 		requests := make([]CacheCommandRequest, 0, 1)
+		type atomicSavepoint struct {
+			name   string
+			offset int
+		}
+		savepoints := make([]atomicSavepoint, 0, 2)
 		for !(parser.current().kind == sqlTokenIdentifier && strings.EqualFold(parser.current().text, "COMMIT")) {
 			if parser.current().kind == sqlTokenEOF {
 				return CacheCommandRequest{}, parser.expected(parser.current(), "COMMIT to close BEGIN ATOMIC", []string{"COMMIT"})
 			}
-			request, err := parser.parseStatement()
-			if err != nil {
-				return CacheCommandRequest{}, err
+			token := parser.current()
+			switch {
+			case token.kind == sqlTokenIdentifier && strings.EqualFold(token.text, "SAVEPOINT"):
+				parser.next()
+				nameToken, err := parser.expectIdentifier("a savepoint name", nil)
+				if err != nil {
+					return CacheCommandRequest{}, err
+				}
+				name, err := normalizeSQLSavepointName(nameToken.text)
+				if err != nil {
+					return CacheCommandRequest{}, parser.diagnostic(nameToken, err.Error())
+				}
+				for _, savepoint := range savepoints {
+					if savepoint.name == name {
+						return CacheCommandRequest{}, parser.diagnostic(nameToken, "duplicate savepoint "+strconv.Quote(nameToken.text))
+					}
+				}
+				savepoints = append(savepoints, atomicSavepoint{name: name, offset: len(requests)})
+			case token.kind == sqlTokenIdentifier && strings.EqualFold(token.text, "ROLLBACK"):
+				parser.next()
+				if err := parser.expectKeyword("TO"); err != nil {
+					return CacheCommandRequest{}, err
+				}
+				nameToken, err := parser.expectIdentifier("a savepoint name", nil)
+				if err != nil {
+					return CacheCommandRequest{}, err
+				}
+				name, err := normalizeSQLSavepointName(nameToken.text)
+				if err != nil {
+					return CacheCommandRequest{}, parser.diagnostic(nameToken, err.Error())
+				}
+				position := -1
+				for index := len(savepoints) - 1; index >= 0; index-- {
+					if savepoints[index].name == name {
+						position = index
+						break
+					}
+				}
+				if position < 0 {
+					return CacheCommandRequest{}, parser.diagnostic(nameToken, "unknown savepoint "+strconv.Quote(nameToken.text))
+				}
+				requests = requests[:savepoints[position].offset]
+				savepoints = savepoints[:position+1]
+			case token.kind == sqlTokenIdentifier && strings.EqualFold(token.text, "RELEASE"):
+				parser.next()
+				if err := parser.expectKeyword("SAVEPOINT"); err != nil {
+					return CacheCommandRequest{}, err
+				}
+				nameToken, err := parser.expectIdentifier("a savepoint name", nil)
+				if err != nil {
+					return CacheCommandRequest{}, err
+				}
+				name, err := normalizeSQLSavepointName(nameToken.text)
+				if err != nil {
+					return CacheCommandRequest{}, parser.diagnostic(nameToken, err.Error())
+				}
+				position := -1
+				for index := len(savepoints) - 1; index >= 0; index-- {
+					if savepoints[index].name == name {
+						position = index
+						break
+					}
+				}
+				if position < 0 {
+					return CacheCommandRequest{}, parser.diagnostic(nameToken, "unknown savepoint "+strconv.Quote(nameToken.text))
+				}
+				copy(savepoints[position:], savepoints[position+1:])
+				savepoints[len(savepoints)-1] = atomicSavepoint{}
+				savepoints = savepoints[:len(savepoints)-1]
+			default:
+				request, err := parser.parseStatement()
+				if err != nil {
+					return CacheCommandRequest{}, err
+				}
+				requests = append(requests, request)
 			}
-			requests = append(requests, request)
 			if parser.current().kind != sqlTokenSemicolon {
 				return CacheCommandRequest{}, parser.expected(parser.current(), "a semicolon or COMMIT", []string{"COMMIT"})
 			}

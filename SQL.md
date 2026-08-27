@@ -27,7 +27,7 @@ different problems:
 
 | Mode | What it reads/writes | Statements |
 | --- | --- | --- |
-| **Command SQL** | One cache key at a time. It can create, replace, update, expire, and delete cache values. | `SELECT value|exists|ttl|dump FROM cache`, `INSERT`, `UPDATE`, `DELETE`, `CALL` |
+| **Command SQL** | One cache key at a time. It can create, replace, conditionally merge, update, expire, and delete cache values. | `SELECT value|exists|ttl|dump FROM cache`, `INSERT`, `MERGE`, `UPDATE`, `DELETE`, `CALL` |
 | **Relational SQL** | A read-only snapshot of JSON rows or cache metadata. It never changes a cache value. | `SELECT ... FROM CACHE(...)`, `KEYS`, `VALUES`, CTEs, joins, grouping, and related clauses |
 
 Do not confuse `SELECT value FROM cache WHERE key = 'name'` with `SELECT ...
@@ -82,6 +82,31 @@ SELECT exists FROM cache WHERE key = 'name';
 TTL. `INSERT` is a cache upsert, not a relational-table insert: inserting the
 same key again replaces its value. `UPDATE` also targets exactly one cache key
 because its `WHERE` clause must be `key = ...`.
+
+### Conditional `MERGE` and `RETURNING`
+
+`MERGE` provides an atomic, key-based conditional upsert. `WHEN NOT MATCHED`
+only writes a missing key, `WHEN MATCHED` only writes an existing key, and
+including both clauses performs an unconditional upsert. Conditional forms
+accept one scalar string or counter value; expiration fields are deliberately
+rejected because the condition and expiration must remain one native write.
+
+```sql
+MERGE INTO cache (key, value) VALUES ('profile:1', 'Ada')
+WHEN NOT MATCHED THEN INSERT
+RETURNING key, value, exists;
+
+MERGE INTO cache (key, value) VALUES ('profile:1', 'Grace')
+WHEN MATCHED THEN UPDATE
+RETURNING key, value;
+```
+
+`RETURNING` is available through `ExecuteSQLMutation` on a single direct
+`INSERT`, `MERGE`, `UPDATE`, or `DELETE`. It accepts `key`, `value`, `exists`,
+`ttl_seconds`, or `*`; an unmet conditional merge returns zero affected rows
+and no returned row. `DELETE ... RETURNING` captures its row before deletion.
+`INSERT ... SELECT RETURNING` is not supported because it may stage up to the
+atomic-batch limit of rows.
 
 ### `INSERT ... SELECT`
 
@@ -503,6 +528,22 @@ the live mutation epoch while applying the atomic batch; a concurrent write
 causes a conflict and publishes none of the staged commands. Transactions do
 not accept `INC`, reads through command SQL, or cross-partition writes.
 
+Atomic command programs also accept savepoints. They are resolved while the
+program is compiled, before the final atomic batch is executed:
+
+```sql
+BEGIN ATOMIC;
+INSERT INTO cache (key, value) VALUES ('keep', 'first');
+SAVEPOINT before_discard;
+INSERT INTO cache (key, value) VALUES ('discard', 'second');
+ROLLBACK TO before_discard;
+RELEASE SAVEPOINT before_discard;
+COMMIT;
+```
+
+`SQLTransaction.Savepoint`, `RollbackTo`, and `ReleaseSavepoint` provide the
+same behavior for multi-call snapshot transactions.
+
 | SQL form | Existing command request |
 | --- | --- |
 | `SELECT value FROM cache WHERE key = 'k'` | `GETSTR`, `key='k'` |
@@ -512,6 +553,7 @@ not accept `INC`, reads through command SQL, or cross-partition writes.
 | `INSERT INTO cache (key, value) VALUES ('k', 'v')` | `SETSTR`, `key='k'`, `value='v'` |
 | `INSERT INTO cache (key, value, ttl_seconds) VALUES ('k', 'v', 60)` | `SETSTRX`, `key='k'`, `value='v'`, `ttl_seconds=60` |
 | `INSERT INTO cache (key, counter) VALUES ('k', 7)` | `SETINT`, `key='k'`, `value='7'` |
+| `MERGE INTO cache (...) ... WHEN NOT MATCHED THEN INSERT` | conditional native `SETSTR` or `SETINT` |
 | `UPDATE cache SET value = 'v' WHERE key = 'k'` | `SETSTR`, `key='k'`, `value='v'` |
 | `UPDATE cache SET value = value + 2 WHERE key = 'k'` | `INC`, `key='k'`, `value='2'` |
 | `UPDATE cache SET ttl_seconds = 60 WHERE key = 'k'` | `EXPIRE`, `key='k'`, `ttl_seconds=60` |
@@ -541,14 +583,17 @@ positional rules.
 
 ```ebnf
 program       = { statement [ ";" ] } ;
-statement     = select | insert | update | delete | call ;
+statement     = select | insert | merge | update | delete | call ;
 select        = "SELECT" ("value" | "exists" | "ttl" | "dump")
                 "FROM" "cache" "WHERE" "key" "=" scalar ;
 insert        = "INSERT" "INTO" "cache" "(" columns ")"
                 "VALUES" "(" scalars ")" ;
 insert_select = "INSERT" "INTO" "cache" "(" columns ")" relational_query ;
+merge         = "MERGE" "INTO" "cache" "(" columns ")" "VALUES" "(" scalars ")"
+                [ "WHEN" [ "NOT" ] "MATCHED" "THEN" ( "INSERT" | "UPDATE" ) ] ;
 update        = "UPDATE" "cache" "SET" assignment "WHERE" "key" "=" scalar ;
 delete        = "DELETE" "FROM" "cache" "WHERE" "key" "=" scalar ;
+returning     = "RETURNING" ( "*" | identifier { "," identifier } ) ;
 call          = "CALL" identifier "(" [ arguments ] ")" ;
 arguments     = argument { "," argument } ;
 argument      = identifier "=>" literal | literal ;
