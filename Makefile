@@ -275,6 +275,9 @@ test-sql-lateral:
 test-sql-aggregate-filter:
 	sh ./scripts/test-sql-aggregate-filter.sh
 
+test-sql-named-windows:
+	sh ./scripts/test-sql-named-windows.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -295,6 +298,15 @@ format-sql-lateral:
 
 format-sql-aggregate-filter:
 	sh ./scripts/format-sql-aggregate-filter.sh
+
+format-sql-named-windows:
+	sh ./scripts/format-sql-named-windows.sh
+
+review-sql-named-windows:
+	sh ./scripts/review-sql-named-windows.sh
+
+commit-sql-named-windows:
+	sh ./scripts/commit-sql-named-windows.sh
 
 review-sql-aggregate-filter:
 	sh ./scripts/review-sql-aggregate-filter.sh

@@ -4402,6 +4402,7 @@ type sqlQuery struct {
 	groupBy  []sqlExpr
 	having   sqlExpr
 	orderBy  []sqlOrder
+	windows  map[string]sqlWindow
 	sample   *sqlTableSample
 	limit    int
 	offset   int
@@ -4467,6 +4468,7 @@ type sqlExpr struct {
 	args                      []sqlExpr
 	cases                     []sqlCaseWhen
 	window                    *sqlWindow
+	windowName                string
 	query                     *sqlQuery
 	filter                    *sqlExpr
 	token                     sqlToken
@@ -4702,6 +4704,37 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.having = expr
+		case p.keyword("WINDOW"):
+			if q.windows != nil {
+				return nil, p.diagnostic(p.current(), "WINDOW appears more than once")
+			}
+			p.next()
+			q.windows = make(map[string]sqlWindow)
+			for {
+				name, err := p.expectIdentifier("a window name", nil)
+				if err != nil {
+					return nil, err
+				}
+				key := strings.ToUpper(name.text)
+				if _, exists := q.windows[key]; exists {
+					return nil, p.diagnostic(name, "window "+name.text+" is declared more than once")
+				}
+				if err := p.expectKeyword("AS"); err != nil {
+					return nil, err
+				}
+				if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+					return nil, err
+				}
+				window, err := p.parseSQLWindowDefinition()
+				if err != nil {
+					return nil, err
+				}
+				q.windows[key] = window
+				if p.current().kind != sqlTokenComma {
+					break
+				}
+				p.next()
+			}
 		case p.keyword("ORDER"):
 			if q.orderBy != nil {
 				return nil, p.diagnostic(p.current(), "ORDER BY appears more than once")
@@ -4791,6 +4824,9 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 		}
 		union.query = right
 		q.unions = append(q.unions, union)
+	}
+	if err := p.resolveSQLNamedWindows(q); err != nil {
+		return nil, err
 	}
 	return q, nil
 }
@@ -5770,6 +5806,11 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			}
 			if p.keyword("OVER") {
 				p.next()
+				if p.current().kind == sqlTokenIdentifier {
+					expr.windowName = strings.ToUpper(p.current().text)
+					p.next()
+					return expr, nil
+				}
 				if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
 					return sqlExpr{}, err
 				}
@@ -5851,6 +5892,113 @@ func (p *sqlQueryParser) parseSQLWindowFrame(kind string) (sqlWindowFrame, error
 		return sqlWindowFrame{}, p.diagnostic(p.previous(), kind+" frame start must not follow its end")
 	}
 	return sqlWindowFrame{kind: kind, start: start, end: end}, nil
+}
+
+func (p *sqlQueryParser) parseSQLWindowDefinition() (sqlWindow, error) {
+	window := sqlWindow{}
+	if p.keyword("PARTITION") {
+		p.next()
+		if err := p.expectKeyword("BY"); err != nil {
+			return sqlWindow{}, err
+		}
+		values, err := p.parseExprList()
+		if err != nil {
+			return sqlWindow{}, err
+		}
+		window.partition = values
+	}
+	if p.keyword("ORDER") {
+		p.next()
+		if err := p.expectKeyword("BY"); err != nil {
+			return sqlWindow{}, err
+		}
+		values, err := p.parseOrder()
+		if err != nil {
+			return sqlWindow{}, err
+		}
+		window.order = values
+	}
+	if p.keyword("ROWS") || p.keyword("RANGE") {
+		frame, err := p.parseSQLWindowFrame(strings.ToUpper(p.current().text))
+		if err != nil {
+			return sqlWindow{}, err
+		}
+		window.frame = &frame
+	}
+	if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+		return sqlWindow{}, err
+	}
+	return window, nil
+}
+
+func (p *sqlQueryParser) resolveSQLNamedWindows(query *sqlQuery) error {
+	if query == nil {
+		return nil
+	}
+	var resolve func(*sqlExpr) error
+	resolve = func(expr *sqlExpr) error {
+		if expr == nil {
+			return nil
+		}
+		if expr.windowName != "" {
+			definition, ok := query.windows[expr.windowName]
+			if !ok {
+				return p.diagnostic(expr.token, "unknown window "+expr.windowName)
+			}
+			window := sqlWindow{partition: cloneSQLExprs(definition.partition), order: cloneSQLOrders(definition.order)}
+			if definition.frame != nil {
+				frame := *definition.frame
+				window.frame = &frame
+			}
+			expr.window = &window
+			expr.windowName = ""
+		}
+		if err := resolve(expr.left); err != nil {
+			return err
+		}
+		if err := resolve(expr.right); err != nil {
+			return err
+		}
+		if err := resolve(expr.filter); err != nil {
+			return err
+		}
+		for index := range expr.args {
+			if err := resolve(&expr.args[index]); err != nil {
+				return err
+			}
+		}
+		for index := range expr.cases {
+			if err := resolve(&expr.cases[index].when); err != nil {
+				return err
+			}
+			if err := resolve(&expr.cases[index].then); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for index := range query.selects {
+		if err := resolve(&query.selects[index].expr); err != nil {
+			return err
+		}
+	}
+	if err := resolve(&query.where); err != nil {
+		return err
+	}
+	if err := resolve(&query.having); err != nil {
+		return err
+	}
+	for index := range query.groupBy {
+		if err := resolve(&query.groupBy[index]); err != nil {
+			return err
+		}
+	}
+	for index := range query.orderBy {
+		if err := resolve(&query.orderBy[index].expr); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *sqlQueryParser) parseSQLWindowFrameBound(name string) (sqlWindowFrameBound, error) {
