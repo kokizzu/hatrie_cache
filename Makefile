@@ -772,6 +772,18 @@ push-sql-governance:
 amend-sql-governance:
 	sh ./scripts/amend-sql-governance.sh
 
+test-sql-storage-adapter:
+	sh ./scripts/test-sql-storage-adapter.sh
+
+format-sql-storage-adapter:
+	sh ./scripts/format-sql-storage-adapter.sh
+
+commit-sql-storage-adapter:
+	sh ./scripts/commit-sql-storage-adapter.sh
+
+push-sql-storage-adapter:
+	sh ./scripts/push-sql-storage-adapter.sh
+
 
 
 
