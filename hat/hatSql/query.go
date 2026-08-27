@@ -5289,6 +5289,14 @@ func (p *sqlQueryParser) parseComparison() (sqlExpr, error) {
 		}
 		return sqlExpr{kind: "in", op: map[bool]string{false: "IN", true: "NOT IN"}[notComparison], left: &left, args: values}, nil
 	}
+	if p.keyword("REGEXP") {
+		p.next()
+		right, err := p.parseExpr()
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		return sqlExpr{kind: "binary", op: map[bool]string{false: "REGEXP", true: "NOT REGEXP"}[notComparison], left: &left, right: &right}, nil
+	}
 	if p.keyword("BETWEEN") {
 		p.next()
 		lower, err := p.parseExpr()
@@ -10468,6 +10476,8 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return nil
 	case "func":
 		switch expr.name {
+		case "REGEXP_LIKE", "REGEXP_EXTRACT":
+			return evalSQLRegexFunction(expr, group, row)
 		case "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
 			return evalSQLJSONPathFunction(expr, group, row)
 		case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
@@ -10599,6 +10609,9 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		right := evalSQLExpr(*expr.right, group, row)
 		if err := sqlExpressionError(right); err != nil {
 			return sqlEvaluationFailure(err)
+		}
+		if expr.op == "REGEXP" || expr.op == "NOT REGEXP" {
+			return evalSQLRegexPredicate(left, right, expr.op, expr.token)
 		}
 		return sqlBinaryValueWithCollation(expr.op, left, right, expr.collation)
 	}
@@ -10929,7 +10942,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
+	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT":
 		return true
 	}
 	return false
@@ -11069,6 +11082,10 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 			}
 			if err := sqlExpressionError(right[i]); err != nil {
 				out[i] = sqlEvaluationFailure(err)
+				continue
+			}
+			if expr.op == "REGEXP" || expr.op == "NOT REGEXP" {
+				out[i] = evalSQLRegexPredicate(left[i], right[i], expr.op, expr.token)
 				continue
 			}
 			out[i] = sqlBinaryValueWithCollation(expr.op, left[i], right[i], expr.collation)

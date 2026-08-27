@@ -257,8 +257,20 @@ verify-go:
 test-sql-language-server:
 	sh ./scripts/test-sql-language-server.sh
 
+test-sql-regex:
+	sh ./scripts/test-sql-regex.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
+
+format-sql-regex:
+	sh ./scripts/format-sql-regex.sh
+
+review-sql-regex:
+	sh ./scripts/review-sql-regex.sh
+
+commit-sql-regex:
+	sh ./scripts/commit-sql-regex.sh
 
 sql-language-server:
 	sh ./scripts/sql-language-server.sh
