@@ -132,6 +132,7 @@ type SQLOrderedSourceResolver = OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = OrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = CompositeIndexedSourceResolver
 type SQLSecondaryIndexedSourceResolver = SecondaryIndexedSourceResolver
+type SQLCoveringIndexedSourceResolver = CoveringIndexedSourceResolver
 type SQLJSONIndexFrequencyBucket = JSONIndexFrequencyBucket
 type SQLJSONIndexStats = JSONIndexStats
 type SQLSourceResolverFunc = SourceResolverFunc
@@ -6666,7 +6667,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		base, ordered, err := resolveSQLOrderedSource(q, resolver)
 		indexed := ordered
 		if !indexed && q.sample == nil {
-			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics)
+			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
 		}
 		if !indexed {
 			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
@@ -8359,9 +8360,60 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 	return nil, false
 }
 
-func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics) ([]SQLRow, bool, error) {
+func sqlCoveringProjectionFields(query *sqlQuery) []string {
+	if query == nil || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.selects) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) {
+		return nil
+	}
+	filterField, _, ok := sqlCoveringIndexedEquality(*query.from, query.where)
+	if !ok {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	fields := make([]string, 0, len(query.selects)+1)
+	add := func(field string) {
+		if _, exists := seen[field]; !exists {
+			seen[field] = struct{}{}
+			fields = append(fields, field)
+		}
+	}
+	for _, item := range query.selects {
+		if item.expr.kind != "field" || item.expr.qualifier != query.from.alias {
+			return nil
+		}
+		add(item.expr.name)
+	}
+	add(filterField)
+	return fields
+}
+
+func sqlCoveringIndexedEquality(source sqlSource, condition sqlExpr) (string, interface{}, bool) {
+	if condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+		return "", nil, false
+	}
+	if condition.left.kind == "field" && condition.left.qualifier == source.alias && condition.right.kind == "literal" {
+		return condition.left.name, condition.right.value, true
+	}
+	if condition.right.kind == "field" && condition.right.qualifier == source.alias && condition.left.kind == "literal" {
+		return condition.right.name, condition.left.value, true
+	}
+	return "", nil, false
+}
+
+func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, coveringFields []string) ([]SQLRow, bool, error) {
 	if source.kind != "CACHE" || len(source.fieldTypes) != 0 {
 		return nil, false, nil
+	}
+	if indexed, ok := resolver.(SQLCoveringIndexedSourceResolver); ok && len(coveringFields) > 0 {
+		if field, value, matched := sqlCoveringIndexedEquality(source, condition); matched {
+			started := time.Now()
+			rows, available, err := indexed.ResolveSQLCoveringSource(source.kind, source.key, field, value, coveringFields)
+			if available || err != nil {
+				if available && metrics != nil {
+					metrics.record("COVERING INDEX SCAN", sqlExplainSource(source)+" field="+field, 0, len(rows), started)
+				}
+				return rows, available, err
+			}
+		}
 	}
 	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver); indexed || err != nil {
 		return rows, indexed, err
@@ -8399,10 +8451,10 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver, metrics); indexed || err != nil {
 			return rows, indexed, err
 		}
-		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver, metrics); indexed || err != nil {
+		if rows, indexed, err := resolveSQLIndexedSource(source, *condition.left, resolver, metrics, coveringFields); indexed || err != nil {
 			return rows, indexed, err
 		}
-		return resolveSQLIndexedSource(source, *condition.right, resolver, metrics)
+		return resolveSQLIndexedSource(source, *condition.right, resolver, metrics, coveringFields)
 	}
 	left, right := *condition.left, *condition.right
 	var adaptiveKey string
@@ -8529,7 +8581,7 @@ func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver S
 // semantic shortcut.
 func resolveSQLJoinPushedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, maxRows int) ([]SQLRow, error) {
 	started := time.Now()
-	rows, indexed, err := resolveSQLIndexedSource(source, condition, resolver, metrics)
+	rows, indexed, err := resolveSQLIndexedSource(source, condition, resolver, metrics, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8634,7 +8686,7 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 			details = append(details, fmt.Sprintf("%s estimated_rows=%d adaptive: scan selected after prior underestimate", sqlExplainExpression(candidate.condition), candidate.estimate))
 			continue
 		}
-		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver, metrics)
+		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver, metrics, nil)
 		if indexed || err != nil {
 			if err == nil {
 				details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d selected", sqlExplainExpression(candidate.condition), candidate.estimate, candidate.cost))

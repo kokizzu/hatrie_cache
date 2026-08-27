@@ -72,6 +72,13 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// CoveringIndexedSourceResolver optionally resolves an equality predicate from
+// an index that already contains every required output field. Implementations
+// must return rows containing only the requested fields and predicate field.
+type CoveringIndexedSourceResolver interface {
+	ResolveSQLCoveringSource(name, key, field string, value interface{}, fields []string) ([]Row, bool, error)
+}
+
 // RangeIndexedSourceResolver optionally resolves ordered comparisons through an index.
 type RangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]Row, bool, error)

@@ -334,6 +334,11 @@ type sqlJSONBitmapIndex struct {
 	postings map[string]hatDataStructure.RoaringBitmap
 	nulls    []SQLRow
 }
+type sqlJSONCoveringIndex struct {
+	raw     string
+	columns map[string]struct{}
+	rows    map[string][]SQLRow
+}
 
 // SQLJSONBitmapIndexHealth reports the current in-memory size and shape of an
 // opt-in low-cardinality JSON bitmap index.
@@ -383,6 +388,32 @@ func (ht *HatTrie) CreateSQLJSONBitmapIndex(key, field string) error {
 		ht.sqlJSONBitmapIndexes[key] = map[string]*sqlJSONBitmapIndex{}
 	}
 	ht.sqlJSONBitmapIndexes[key][field] = &sqlJSONBitmapIndex{}
+	return nil
+}
+
+// CreateSQLJSONCoveringIndex configures an equality index that retains only
+// field and columns. Queries whose predicate and projection are covered can
+// avoid materializing the source row.
+func (ht *HatTrie) CreateSQLJSONCoveringIndex(key, field string, columns ...string) error {
+	if ht == nil || key == "" || field == "" || len(columns) == 0 {
+		return fmt.Errorf("SQL JSON covering index requires a cache key, field, and columns")
+	}
+	covered := map[string]struct{}{field: {}}
+	for _, column := range columns {
+		if column == "" {
+			return fmt.Errorf("SQL JSON covering index columns must not be empty")
+		}
+		covered[column] = struct{}{}
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONCoveringIndexes == nil {
+		ht.sqlJSONCoveringIndexes = map[string]map[string]*sqlJSONCoveringIndex{}
+	}
+	if ht.sqlJSONCoveringIndexes[key] == nil {
+		ht.sqlJSONCoveringIndexes[key] = map[string]*sqlJSONCoveringIndex{}
+	}
+	ht.sqlJSONCoveringIndexes[key][field] = &sqlJSONCoveringIndex{columns: covered}
 	return nil
 }
 
@@ -606,6 +637,38 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		return nil, false, nil
 	}
 	if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok {
+		return []SQLRow{}, true, nil
+	}
+	return hatSql.CloneRows(index.rows[valueKey]), true, nil
+}
+
+// ResolveSQLCoveringSource returns equality candidates containing only fields
+// explicitly configured for a covering index. The SQL executor still evaluates
+// the predicate before publishing results.
+func (ht *HatTrie) ResolveSQLCoveringSource(name, key, field string, value interface{}, fields []string) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(fields) == 0 {
+		return nil, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONCoveringIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	for _, column := range fields {
+		if _, ok := index.columns[column]; !ok {
+			return nil, false, nil
+		}
+	}
+	if err := refreshSQLJSONCoveringIndex(index, key, field, data); err != nil {
 		return nil, false, err
 	}
 	valueKey, ok := sqlIndexValueKey(value)
@@ -1134,6 +1197,42 @@ func refreshSQLJSONBitmapIndex(index *sqlJSONBitmapIndex, key, field string, dat
 		bitmap := index.postings[valueKey]
 		bitmap.Add(uint32(rowIndex))
 		index.postings[valueKey] = bitmap
+	}
+	return nil
+}
+
+func refreshSQLJSONCoveringIndex(index *sqlJSONCoveringIndex, key, field string, data []byte) error {
+	if index.raw == string(data) {
+		return nil
+	}
+	rows, err := sqlJSONRows(key, data)
+	if err != nil {
+		return err
+	}
+	index.raw, index.rows = string(data), map[string][]SQLRow{}
+	for _, row := range rows {
+		value, exists, err := sqlJSONIndexRowValue(row, field)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		valueKey, ok := sqlIndexValueKey(value)
+		if !ok {
+			continue
+		}
+		covered := make(SQLRow, len(index.columns))
+		for column := range index.columns {
+			value, exists, err := sqlJSONIndexRowValue(row, column)
+			if err != nil {
+				return err
+			}
+			if exists {
+				covered[column] = value
+			}
+		}
+		index.rows[valueKey] = append(index.rows[valueKey], covered)
 	}
 	return nil
 }

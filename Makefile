@@ -1103,6 +1103,24 @@ audit-query-performance-planner:
 audit-query-performance-bitmap:
 	sh ./scripts/audit-query-performance-goal.sh bitmap
 
+audit-query-performance-covering:
+	sh ./scripts/audit-query-performance-goal.sh covering
+
+audit-query-performance-covering-inspect:
+	sh ./scripts/audit-query-performance-goal.sh covering-inspect
+
+test-sql-covering-indexes:
+	sh ./scripts/test-sql-covering-indexes.sh
+
+format-sql-covering-indexes:
+	sh ./scripts/format-sql-covering-indexes.sh
+
+review-sql-covering-indexes:
+	sh ./scripts/review-sql-covering-indexes.sh
+
+commit-sql-covering-indexes:
+	sh ./scripts/commit-sql-covering-indexes.sh
+
 audit-sql-improvement-matrix:
 	sh ./scripts/audit-sql-improvements.sh matrix
 

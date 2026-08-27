@@ -1,6 +1,24 @@
 #!/bin/sh
 set -eu
 
+if [ "${1:-}" = "covering-inspect" ]; then
+	printf '%s\n' 'Covering-index implementation anchors:'
+	rg -n -C 6 '^func resolveSQLIndexedSource|^func \(ht \*HatTrie\) ResolveSQLIndexedSource|^type sqlJSONBitmapIndex|^func \(ht \*HatTrie\) CreateSQLJSONBitmapIndex' ./hat/hatSql/query.go ./hat/hatCache/sql_query.go
+	printf '\n%s\n' 'Bitmap index lifecycle and lookup:'
+	sed -n '300,430p' ./hat/hatCache/sql_query.go
+	sed -n '577,720p' ./hat/hatCache/sql_query.go
+	printf '\n%s\n' 'Resolver contracts:'
+	sed -n '1,180p' ./hat/hatSql/contracts.go
+	printf '\n%s\n' 'Index resolver call sites:'
+	rg -n -C 10 'resolveSQLIndexedSource\(' ./hat/hatSql/query.go
+	sed -n '6650,6725p' ./hat/hatSql/query.go
+	printf '\n%s\n' 'HatTrie index fields:'
+	rg -n -C 6 'sqlJSONBitmapIndexes|sqlJSONCompositeIndexes|sqlIndexMu' ./hat/hatCache/*.go
+	printf '\n%s\n' 'Index refresh helpers:'
+	rg -n -C 8 '^func refreshSQLJSON(Bitmap|Field|Composite)Index|^func parseSQL' ./hat/hatCache/sql_query.go
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \
@@ -48,6 +66,15 @@ if [ "${1:-}" = "bitmap" ]; then
 	rg -n -C 3 'func \(.*RoaringBitmap.*\) (Intersect|Union|And|Or|Clone)' ./hat/hatDataStructure/roaring.go || true
 	printf '%s\n' '' 'SQL resolver interfaces:'
 	rg -n -C 8 'type .*Indexed.*Resolver|type .*SourceResolver' ./hat/hatSql/*.go
+	exit 0
+fi
+
+if [ "${1:-}" = "covering" ]; then
+	printf '%s\n' 'Covering-index references:'
+	rg -n -C 8 -i 'covering|projection|project' ./hat/hatCache/sql_query.go ./hat/hatSql/query.go ./hat/hatCache/*index*_test.go || true
+	printf '%s\n' '' 'Index source resolution and projection execution:'
+	sed -n '8360,8470p' ./hat/hatSql/query.go
+	sed -n '7100,7280p' ./hat/hatSql/query.go
 	exit 0
 fi
 
