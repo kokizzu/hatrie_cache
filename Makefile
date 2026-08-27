@@ -685,6 +685,31 @@ push-sql-telemetry:
 verify-sql-improvement-goal:
 	sh ./scripts/verify-sql-improvement-goal.sh
 
+show-concurrency-coverage:
+	sh ./scripts/show-concurrency-coverage.sh
+
+test-command-concurrency:
+	sh ./scripts/test-command-concurrency.sh
+
+test-command-concurrency-race:
+	sh ./scripts/test-command-concurrency-race.sh
+
+verify-command-concurrency:
+	sh ./scripts/verify-command-concurrency.sh
+
+format-command-concurrency:
+	sh ./scripts/format-command-concurrency.sh
+
+inspect-command-concurrency:
+	sh ./scripts/inspect-command-concurrency.sh
+
+commit-command-concurrency:
+	sh ./scripts/commit-command-concurrency.sh
+
+push-command-concurrency:
+	sh ./scripts/push-command-concurrency.sh
+
+
 commit-sql-improvement-goal-verification:
 	sh ./scripts/commit-sql-improvement-goal-verification.sh
 
