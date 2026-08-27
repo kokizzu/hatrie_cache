@@ -269,6 +269,9 @@ test-sql-rewrite:
 test-sql-correlated-subqueries:
 	sh ./scripts/test-sql-correlated-subqueries.sh
 
+test-sql-lateral:
+	sh ./scripts/test-sql-lateral.sh
+
 format-sql-language-server:
 	sh ./scripts/format-sql-language-server.sh
 
@@ -283,6 +286,15 @@ format-sql-rewrite:
 
 format-sql-correlated-subqueries:
 	sh ./scripts/format-sql-correlated-subqueries.sh
+
+format-sql-lateral:
+	sh ./scripts/format-sql-lateral.sh
+
+review-sql-lateral:
+	sh ./scripts/review-sql-lateral.sh
+
+commit-sql-lateral:
+	sh ./scripts/commit-sql-lateral.sh
 
 review-sql-correlated-subqueries:
 	sh ./scripts/review-sql-correlated-subqueries.sh

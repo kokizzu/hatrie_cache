@@ -46,6 +46,21 @@ func executeSQLExpressionSubquery(expr sqlExpr, row sqlExecRow) (SQLQueryResult,
 	return executeSQLQueryWithMetricsOuter(expr.query, row.environment.resolver, ctes, row.environment.metrics, row.environment.control, &outer)
 }
 
+func executeSQLLateralSource(source sqlSource, outer sqlExecRow, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) ([]SQLRow, error) {
+	if source.kind != "SUBQUERY" || source.query == nil {
+		return nil, fmt.Errorf("LATERAL requires a derived query source")
+	}
+	clonedCTEs := make(map[string][]SQLRow, len(ctes))
+	for name, rows := range ctes {
+		clonedCTEs[name] = rows
+	}
+	result, err := executeSQLQueryWithMetricsOuter(source.query, resolver, clonedCTEs, metrics, control, &outer)
+	if err != nil {
+		return nil, err
+	}
+	return result.Rows, nil
+}
+
 func sqlAttachSQLExecutionEnvironment(rows []sqlExecRow, outer *sqlExecRow, environment *sqlEvalEnvironment) {
 	for index := range rows {
 		rows[index].outer = outer

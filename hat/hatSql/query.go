@@ -4421,6 +4421,7 @@ type sqlCTE struct {
 }
 type sqlSource struct {
 	kind, key, alias string
+	lateral          bool
 	values           [][]interface{}
 	columns          []string
 	fieldTypes       map[string]sqlSourceFieldType
@@ -4872,6 +4873,26 @@ func (p *sqlQueryParser) parseValues() ([][]interface{}, error) {
 	return rows, nil
 }
 func (p *sqlQueryParser) parseSource() (sqlSource, error) {
+	if p.keyword("LATERAL") {
+		token := p.current()
+		p.next()
+		if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+			return sqlSource{}, err
+		}
+		query, err := p.parseQuery(true)
+		if err != nil {
+			return sqlSource{}, err
+		}
+		if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+			return sqlSource{}, err
+		}
+		source := sqlSource{kind: "SUBQUERY", query: query, lateral: true}
+		if err := p.parseAlias(&source); err != nil {
+			return sqlSource{}, err
+		}
+		_ = token
+		return source, nil
+	}
 	if p.current().kind == sqlTokenLeftParen {
 		p.next()
 		query, err := p.parseQuery(true)
@@ -6511,6 +6532,47 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		leftAliases := []string{q.from.alias}
 		for _, join := range q.joins {
 			started = time.Now()
+			if join.source.lateral {
+				if join.kind == "RIGHT" || join.kind == "FULL" {
+					return SQLQueryResult{}, fmt.Errorf("%s JOIN LATERAL is not supported", join.kind)
+				}
+				inputRows := len(rows)
+				next := make([]sqlExecRow, 0, len(rows))
+				for _, left := range rows {
+					rightRows, err := executeSQLLateralSource(join.source, left, resolver, ctes, metrics, control)
+					if err != nil {
+						return SQLQueryResult{}, err
+					}
+					matched := false
+					for _, candidate := range rightRows {
+						if err := control.addJoinWork(1); err != nil {
+							return SQLQueryResult{}, err
+						}
+						combined := mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}})
+						if join.kind != "CROSS" {
+							on := evalSQLExpr(join.on, []sqlExecRow{combined}, combined)
+							if err := sqlExpressionError(on); err != nil {
+								return SQLQueryResult{}, err
+							}
+							if !sqlTruthy(on) {
+								continue
+							}
+						}
+						matched = true
+						next = append(next, combined)
+						if len(next) > maxRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+						}
+					}
+					if join.kind == "LEFT" && !matched {
+						next = append(next, mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: {}}, order: []string{join.source.alias}}))
+					}
+				}
+				metrics.record("LATERAL JOIN", join.kind+" JOIN "+sqlExplainSource(join.source), inputRows, len(next), started)
+				rows = next
+				leftAliases = append(leftAliases, join.source.alias)
+				continue
+			}
 			leftQualifier, leftField, rightField, hashJoin := sqlHashJoinFields(join.on, leftAliases, join.source.alias)
 			rangeLeftQualifier, rangeLeftField, rangeRightField, rangeOperator, rangeJoin := sqlRangeJoinFields(join.on, leftAliases, join.source.alias)
 			leftQualifiers, leftFields, rightFields, compositeIndexJoin := sqlCompositeJoinFields(join.on, leftAliases, join.source.alias)
