@@ -3625,6 +3625,8 @@ func runSQL(ctx context.Context, client *http.Client, addr string, args []string
 	flags.SetOutput(cliWriter(stderr))
 	query := flags.String("query", "", "SQL query to compile and execute")
 	filePath := flags.String("file", "", "UTF-8 SQL file to compile and execute")
+	repl := flags.Bool("repl", false, "run an interactive multiline SQL shell")
+	historyPath := flags.String("history-file", "", "SQL REPL history file; defaults to the user home directory")
 	wireFormat := flags.String("wire-format", defaultCommandWireFormat, "command request wire format: auto, protobuf, or json")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -3632,6 +3634,9 @@ func runSQL(ctx context.Context, client *http.Client, addr string, args []string
 
 	provided := 0
 	source := ""
+	if *repl {
+		provided++
+	}
 	if strings.TrimSpace(*query) != "" {
 		provided++
 		source = *query
@@ -3645,6 +3650,12 @@ func runSQL(ctx context.Context, client *http.Client, addr string, args []string
 			return errors.New("sql accepts one positional query; quote multi-word SQL or use -query")
 		}
 		source = positional[0]
+	}
+	if *repl {
+		if provided != 1 {
+			return errors.New("sql -repl cannot be combined with -query, -file, or a positional query")
+		}
+		return runSQLREPL(ctx, client, addr, os.Stdin, stdout, stderr, *historyPath)
 	}
 	if provided != 1 {
 		return errors.New("sql requires exactly one of -query, -file, or one positional query")

@@ -733,6 +733,18 @@ commit-sql-tooling:
 push-sql-tooling:
 	sh ./scripts/push-sql-tooling.sh
 
+test-cli-sql-repl:
+	sh ./scripts/test-cli-sql-repl.sh
+
+format-cli-sql-repl:
+	sh ./scripts/format-cli-sql-repl.sh
+
+commit-cli-sql-repl:
+	sh ./scripts/commit-cli-sql-repl.sh
+
+push-cli-sql-repl:
+	sh ./scripts/push-cli-sql-repl.sh
+
 
 
 
