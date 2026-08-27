@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"hatrie_cache/hat/hatCodec"
 )
 
 type sqlToken = Token
@@ -184,6 +186,9 @@ type SQLQueryOptions struct {
 	// for deterministic fault-injection and chaos tests; production callers
 	// normally leave it nil.
 	SpillFaults *SQLSpillFaults
+	// SpillCipher encrypts temporary spill files with authenticated AES-GCM
+	// frames. Nil preserves the existing plaintext spill behavior.
+	SpillCipher *hatCodec.StreamCipher
 	// Collation controls text comparisons. Empty keeps the binary default.
 	Collation             SQLCollation
 	MaxRecursionDepth     int
@@ -283,8 +288,9 @@ type sqlSpillOutput struct {
 }
 
 type sqlSpillRun struct {
-	path  string
-	bytes int64
+	path   string
+	bytes  int64
+	cipher *hatCodec.StreamCipher
 }
 
 const maxSQLSpillMergeFanIn = 32
@@ -301,6 +307,7 @@ type sqlSpillHashPartition struct {
 	path    string
 	file    *os.File
 	encoder *gob.Encoder
+	cipher  *hatCodec.StreamCipher
 }
 
 func init() {
@@ -3611,11 +3618,11 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 			_ = os.Remove(path)
 		}
 	}()
-	leftParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-left-*", &available, paths)
+	leftParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-left-*", &available, paths, control)
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}
-	rightParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-right-*", &available, paths)
+	rightParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-right-*", &available, paths, control)
 	if err != nil {
 		closeSQLSpillHashPartitions(leftParts)
 		return SQLQueryResult{}, true, err
@@ -3699,7 +3706,7 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 				key, _ := sqlHashJoinKey(entry.Row[rightField])
 				buckets[key] = append(buckets[key], entry)
 			}
-			return visitSQLSpillHashPartition(leftParts[index].path, control, func(leftEntry sqlSpillHashInput) error {
+			return visitSQLSpillHashPartition(leftParts[index], control, func(leftEntry sqlSpillHashInput) error {
 				key, _ := sqlHashJoinKey(leftEntry.Row[leftField])
 				for _, rightEntry := range buckets[key] {
 					if err := control.addJoinWork(1); err != nil {
@@ -3734,7 +3741,7 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 		}
 		rightChunk := make([]sqlSpillHashInput, 0)
 		rightBytes := 0
-		err := visitSQLSpillHashPartition(rightParts[index].path, control, func(entry sqlSpillHashInput) error {
+		err := visitSQLSpillHashPartition(rightParts[index], control, func(entry sqlSpillHashInput) error {
 			entryBytes := sqlRowBytes(entry.Row) + 16
 			if len(rightChunk) > 0 && rightBytes+entryBytes > chunkLimit {
 				if err := processRightChunk(rightChunk); err != nil {
@@ -3766,7 +3773,7 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 	return SQLQueryResult{Columns: columns, Rows: rows}, true, nil
 }
 
-func newSQLSpillHashPartitions(directory, pattern string, available *int64, paths map[string]struct{}) ([]sqlSpillHashPartition, error) {
+func newSQLSpillHashPartitions(directory, pattern string, available *int64, paths map[string]struct{}, control *sqlExecutionControl) ([]sqlSpillHashPartition, error) {
 	partitions := make([]sqlSpillHashPartition, sqlSpillHashPartitions)
 	for index := range partitions {
 		file, err := os.CreateTemp(directory, pattern)
@@ -3774,8 +3781,15 @@ func newSQLSpillHashPartitions(directory, pattern string, available *int64, path
 			closeSQLSpillHashPartitions(partitions[:index])
 			return nil, fmt.Errorf("create SQL hash spill file: %w", err)
 		}
+		encoder, err := newSQLSpillEncoder(file, available, control, "hash")
+		if err != nil {
+			_ = file.Close()
+			_ = os.Remove(file.Name())
+			closeSQLSpillHashPartitions(partitions[:index])
+			return nil, err
+		}
 		paths[file.Name()] = struct{}{}
-		partitions[index] = sqlSpillHashPartition{path: file.Name(), file: file, encoder: gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})}
+		partitions[index] = sqlSpillHashPartition{path: file.Name(), file: file, encoder: encoder, cipher: sqlSpillCipher(control)}
 	}
 	return partitions, nil
 }
@@ -3803,13 +3817,16 @@ func closeSQLSpillHashPartitions(partitions []sqlSpillHashPartition) error {
 	return first
 }
 
-func readSQLSpillHashPartition(path string, control *sqlExecutionControl) ([]sqlSpillHashInput, error) {
-	file, err := os.Open(path)
+func readSQLSpillHashPartition(partition sqlSpillHashPartition, control *sqlExecutionControl) ([]sqlSpillHashInput, error) {
+	file, err := os.Open(partition.path)
 	if err != nil {
 		return nil, fmt.Errorf("open SQL hash spill partition: %w", err)
 	}
 	defer file.Close()
-	decoder := gob.NewDecoder(file)
+	decoder, err := newSQLSpillDecoder(file, partition.cipher, "hash")
+	if err != nil {
+		return nil, err
+	}
 	entries := []sqlSpillHashInput{}
 	for {
 		if err := control.check(); err != nil {
@@ -3826,13 +3843,16 @@ func readSQLSpillHashPartition(path string, control *sqlExecutionControl) ([]sql
 	}
 }
 
-func visitSQLSpillHashPartition(path string, control *sqlExecutionControl, visit func(sqlSpillHashInput) error) error {
-	file, err := os.Open(path)
+func visitSQLSpillHashPartition(partition sqlSpillHashPartition, control *sqlExecutionControl, visit func(sqlSpillHashInput) error) error {
+	file, err := os.Open(partition.path)
 	if err != nil {
 		return fmt.Errorf("open SQL hash spill partition: %w", err)
 	}
 	defer file.Close()
-	decoder := gob.NewDecoder(file)
+	decoder, err := newSQLSpillDecoder(file, partition.cipher, "hash")
+	if err != nil {
+		return err
+	}
 	for {
 		if err := control.check(); err != nil {
 			return err
@@ -8509,6 +8529,37 @@ func sqlSpillFaults(control *sqlExecutionControl) *SQLSpillFaults {
 	return control.options.SpillFaults
 }
 
+func sqlSpillCipher(control *sqlExecutionControl) *hatCodec.StreamCipher {
+	if control == nil {
+		return nil
+	}
+	return control.options.SpillCipher
+}
+
+func newSQLSpillEncoder(file *os.File, available *int64, control *sqlExecutionControl, kind string) (*gob.Encoder, error) {
+	writer := sqlSpillBudgetWriter{writer: file, available: available, faults: sqlSpillFaults(control), kind: kind}
+	cipher := sqlSpillCipher(control)
+	if cipher == nil {
+		return gob.NewEncoder(writer), nil
+	}
+	encrypted, err := cipher.NewWriter(writer, []byte("hatrie/sql-spill/"+kind))
+	if err != nil {
+		return nil, fmt.Errorf("initialize encrypted SQL %s spill: %w", kind, err)
+	}
+	return gob.NewEncoder(encrypted), nil
+}
+
+func newSQLSpillDecoder(file *os.File, cipher *hatCodec.StreamCipher, kind string) (*gob.Decoder, error) {
+	if cipher == nil {
+		return gob.NewDecoder(file), nil
+	}
+	decrypted, err := cipher.NewReader(file, []byte("hatrie/sql-spill/"+kind))
+	if err != nil {
+		return nil, fmt.Errorf("initialize encrypted SQL %s spill reader: %w", kind, err)
+	}
+	return gob.NewDecoder(decrypted), nil
+}
+
 func createSQLSortSpillFile(control *sqlExecutionControl, directory, pattern string) (*os.File, error) {
 	if faults := sqlSpillFaults(control); faults != nil && faults.BeforeCreate != nil {
 		if err := faults.BeforeCreate("sort"); err != nil {
@@ -8549,7 +8600,7 @@ func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int
 	if err != nil {
 		return sqlSpillRun{}, fmt.Errorf("create SQL sort spill file: %w", err)
 	}
-	run := sqlSpillRun{path: file.Name()}
+	run := sqlSpillRun{path: file.Name(), cipher: sqlSpillCipher(control)}
 	remove := true
 	defer func() {
 		if remove {
@@ -8557,7 +8608,10 @@ func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available, faults: sqlSpillFaults(control), kind: "sort"})
+	encoder, err := newSQLSpillEncoder(file, available, control, "sort")
+	if err != nil {
+		return sqlSpillRun{}, err
+	}
 	for _, record := range records {
 		if err := control.check(); err != nil {
 			return sqlSpillRun{}, err
@@ -8593,7 +8647,12 @@ func openSQLSpillReader(run sqlSpillRun, control *sqlExecutionControl) (*sqlSpil
 	if err != nil {
 		return nil, fmt.Errorf("open SQL sort spill file: %w", err)
 	}
-	reader := &sqlSpillReader{file: file, decoder: gob.NewDecoder(file)}
+	decoder, err := newSQLSpillDecoder(file, run.cipher, "sort")
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	reader := &sqlSpillReader{file: file, decoder: decoder}
 	if err := reader.next(); err != nil {
 		_ = file.Close()
 		return nil, err
@@ -8640,7 +8699,7 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 	if err != nil {
 		return sqlSpillRun{}, fmt.Errorf("create SQL sort merge file: %w", err)
 	}
-	run := sqlSpillRun{path: file.Name()}
+	run := sqlSpillRun{path: file.Name(), cipher: sqlSpillCipher(control)}
 	remove := true
 	defer func() {
 		if remove {
@@ -8648,7 +8707,10 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available, faults: sqlSpillFaults(control), kind: "sort"})
+	encoder, err := newSQLSpillEncoder(file, available, control, "sort")
+	if err != nil {
+		return sqlSpillRun{}, err
+	}
 	for {
 		if err := control.check(); err != nil {
 			return sqlSpillRun{}, err
@@ -8888,7 +8950,7 @@ func sqlWriteSpillSetRun(directory string, records []sqlSpillSetRecord, availabl
 	if err != nil {
 		return sqlSpillRun{}, fmt.Errorf("create SQL set spill file: %w", err)
 	}
-	run := sqlSpillRun{path: file.Name()}
+	run := sqlSpillRun{path: file.Name(), cipher: sqlSpillCipher(control)}
 	remove := true
 	defer func() {
 		if remove {
@@ -8896,7 +8958,10 @@ func sqlWriteSpillSetRun(directory string, records []sqlSpillSetRecord, availabl
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	encoder, err := newSQLSpillEncoder(file, available, control, "set")
+	if err != nil {
+		return sqlSpillRun{}, err
+	}
 	for _, record := range records {
 		if err := control.check(); err != nil {
 			return sqlSpillRun{}, err
@@ -8925,7 +8990,12 @@ func openSQLSpillSetReader(run sqlSpillRun) (*sqlSpillSetReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open SQL set spill file: %w", err)
 	}
-	reader := &sqlSpillSetReader{file: file, decoder: gob.NewDecoder(file)}
+	decoder, err := newSQLSpillDecoder(file, run.cipher, "set")
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	reader := &sqlSpillSetReader{file: file, decoder: decoder}
 	if err := reader.next(); err != nil {
 		_ = file.Close()
 		return nil, err
@@ -9001,7 +9071,7 @@ func sqlMergeSpillSetRunsToRun(runs []sqlSpillRun, directory string, available *
 	if err != nil {
 		return sqlSpillRun{}, fmt.Errorf("create SQL set merge file: %w", err)
 	}
-	run := sqlSpillRun{path: file.Name()}
+	run := sqlSpillRun{path: file.Name(), cipher: sqlSpillCipher(control)}
 	remove := true
 	defer func() {
 		if remove {
@@ -9009,7 +9079,10 @@ func sqlMergeSpillSetRunsToRun(runs []sqlSpillRun, directory string, available *
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	encoder, err := newSQLSpillEncoder(file, available, control, "set")
+	if err != nil {
+		return sqlSpillRun{}, err
+	}
 	for {
 		record, ok, err := sqlNextRawSpillSet(readers, control)
 		if err != nil {
@@ -9198,8 +9271,9 @@ type sqlSpillGroupRecord struct {
 }
 
 type sqlSpillGroupRun struct {
-	path  string
-	bytes int64
+	path   string
+	bytes  int64
+	cipher *hatCodec.StreamCipher
 }
 
 type sqlSpillGroupReader struct {
@@ -9291,7 +9365,7 @@ func sqlWriteSpillGroupRun(directory string, records []sqlSpillGroupRecord, avai
 	if err != nil {
 		return sqlSpillGroupRun{}, fmt.Errorf("create SQL group spill file: %w", err)
 	}
-	run := sqlSpillGroupRun{path: file.Name()}
+	run := sqlSpillGroupRun{path: file.Name(), cipher: sqlSpillCipher(control)}
 	remove := true
 	defer func() {
 		if remove {
@@ -9299,7 +9373,10 @@ func sqlWriteSpillGroupRun(directory string, records []sqlSpillGroupRecord, avai
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	encoder, err := newSQLSpillEncoder(file, available, control, "group")
+	if err != nil {
+		return sqlSpillGroupRun{}, err
+	}
 	for _, record := range records {
 		if err := control.check(); err != nil {
 			return sqlSpillGroupRun{}, err
@@ -9328,7 +9405,12 @@ func openSQLSpillGroupReader(run sqlSpillGroupRun) (*sqlSpillGroupReader, error)
 	if err != nil {
 		return nil, fmt.Errorf("open SQL group spill file: %w", err)
 	}
-	reader := &sqlSpillGroupReader{file: file, decoder: gob.NewDecoder(file)}
+	decoder, err := newSQLSpillDecoder(file, run.cipher, "group")
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	reader := &sqlSpillGroupReader{file: file, decoder: decoder}
 	if err := reader.next(); err != nil {
 		_ = file.Close()
 		return nil, err
@@ -9427,7 +9509,7 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 	if err != nil {
 		return sqlSpillGroupRun{}, fmt.Errorf("create SQL group merge file: %w", err)
 	}
-	run := sqlSpillGroupRun{path: file.Name()}
+	run := sqlSpillGroupRun{path: file.Name(), cipher: sqlSpillCipher(control)}
 	remove := true
 	defer func() {
 		if remove {
@@ -9435,7 +9517,10 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 			_ = os.Remove(run.path)
 		}
 	}()
-	encoder := gob.NewEncoder(sqlSpillBudgetWriter{writer: file, available: available})
+	encoder, err := newSQLSpillEncoder(file, available, control, "group")
+	if err != nil {
+		return sqlSpillGroupRun{}, err
+	}
 	for {
 		record, ok, err := sqlNextRawSpillGroup(readers, order, control)
 		if err != nil {

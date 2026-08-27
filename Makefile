@@ -784,6 +784,24 @@ commit-sql-storage-adapter:
 push-sql-storage-adapter:
 	sh ./scripts/push-sql-storage-adapter.sh
 
+test-stream-cipher:
+	sh ./scripts/test-stream-cipher.sh
+
+format-stream-cipher:
+	sh ./scripts/format-stream-cipher.sh
+
+test-sql-spill-encryption:
+	sh ./scripts/test-sql-spill-encryption.sh
+
+format-sql-spill-encryption:
+	sh ./scripts/format-sql-spill-encryption.sh
+
+commit-encrypted-spills:
+	sh ./scripts/commit-encrypted-spills.sh
+
+push-encrypted-spills:
+	sh ./scripts/push-encrypted-spills.sh
+
 
 
 
