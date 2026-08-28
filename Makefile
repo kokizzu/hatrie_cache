@@ -1345,6 +1345,19 @@ review-sql-driver-iterator:
 
 commit-sql-driver-iterator:
 	sh ./scripts/commit-sql-driver-iterator.sh
+
+test-namespace-lifecycle:
+	sh ./scripts/test-namespace-lifecycle.sh
+
+format-namespace-lifecycle:
+	sh ./scripts/format-namespace-lifecycle.sh
+
+review-namespace-lifecycle:
+	sh ./scripts/review-namespace-lifecycle.sh
+
+commit-namespace-lifecycle:
+	sh ./scripts/commit-namespace-lifecycle.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
