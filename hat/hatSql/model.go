@@ -27,16 +27,24 @@ type QueryResult struct {
 
 // ExplainStep is one stable operation in an EXPLAIN plan.
 type ExplainStep struct {
-	Node                 string   `json:"node"`
-	Detail               string   `json:"detail"`
-	EstimatedRows        *int     `json:"estimated_rows,omitempty"`
-	ActualInputRows      *int     `json:"actual_input_rows,omitempty"`
-	ActualOutputRows     *int     `json:"actual_output_rows,omitempty"`
-	ActualInputBytes     *int     `json:"actual_input_bytes,omitempty"`
-	ActualOutputBytes    *int     `json:"actual_output_bytes,omitempty"`
-	EstimateErrorRows    *int     `json:"estimate_error_rows,omitempty"`
-	EstimateErrorPercent *float64 `json:"estimate_error_percent,omitempty"`
-	ElapsedNanos         *int64   `json:"elapsed_ns,omitempty"`
+	Node                 string          `json:"node"`
+	Detail               string          `json:"detail"`
+	Lineage              []ColumnLineage `json:"lineage,omitempty"`
+	EstimatedRows        *int            `json:"estimated_rows,omitempty"`
+	ActualInputRows      *int            `json:"actual_input_rows,omitempty"`
+	ActualOutputRows     *int            `json:"actual_output_rows,omitempty"`
+	ActualInputBytes     *int            `json:"actual_input_bytes,omitempty"`
+	ActualOutputBytes    *int            `json:"actual_output_bytes,omitempty"`
+	EstimateErrorRows    *int            `json:"estimate_error_rows,omitempty"`
+	EstimateErrorPercent *float64        `json:"estimate_error_percent,omitempty"`
+	ElapsedNanos         *int64          `json:"elapsed_ns,omitempty"`
+}
+
+// ColumnLineage identifies the source fields contributing to one projected
+// output column. Derived expressions can list more than one source field.
+type ColumnLineage struct {
+	Output       string   `json:"output"`
+	SourceFields []string `json:"source_fields"`
 }
 
 // QueryStats describes the measured execution emitted by EXPLAIN ANALYZE.

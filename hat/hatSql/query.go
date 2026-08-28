@@ -8210,7 +8210,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 	if query.having.kind != "" {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "HAVING", Detail: sqlExplainExpression(query.having)})
 	}
-	*steps = append(*steps, SQLExplainStep{Node: prefix + "PROJECT", Detail: sqlExplainSelects(query.selects)})
+	*steps = append(*steps, SQLExplainStep{Node: prefix + "PROJECT", Detail: sqlExplainSelects(query.selects), Lineage: sqlExplainLineage(query.selects)})
 	if query.distinct {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "DISTINCT", Detail: "deduplicate projected rows"})
 	}
@@ -11237,6 +11237,44 @@ func sqlColumns(items []sqlSelectItem) []string {
 		}
 	}
 	return out
+}
+
+func sqlExplainLineage(items []sqlSelectItem) []ColumnLineage {
+	columns := sqlColumns(items)
+	lineage := make([]ColumnLineage, len(items))
+	for index, item := range items {
+		fields := make(map[string]struct{})
+		sqlCollectLineageFields(&item.expr, fields)
+		values := make([]string, 0, len(fields))
+		for field := range fields {
+			values = append(values, field)
+		}
+		sort.Strings(values)
+		lineage[index] = ColumnLineage{Output: columns[index], SourceFields: values}
+	}
+	return lineage
+}
+
+func sqlCollectLineageFields(expr *sqlExpr, fields map[string]struct{}) {
+	if expr == nil {
+		return
+	}
+	if expr.left == nil && expr.right == nil && len(expr.args) == 0 && expr.name != "" {
+		name := expr.name
+		if expr.qualifier != "" {
+			name = expr.qualifier + "." + name
+		}
+		fields[name] = struct{}{}
+	}
+	sqlCollectLineageFields(expr.left, fields)
+	sqlCollectLineageFields(expr.right, fields)
+	for index := range expr.args {
+		sqlCollectLineageFields(&expr.args[index], fields)
+	}
+	for index := range expr.cases {
+		sqlCollectLineageFields(&expr.cases[index].when, fields)
+		sqlCollectLineageFields(&expr.cases[index].then, fields)
+	}
 }
 func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 	switch expr.kind {

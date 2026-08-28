@@ -1385,6 +1385,18 @@ commit-external-quality:
 test-query-template-assertions:
 	sh ./scripts/test-query-template-assertions.sh
 
+test-explain-lineage:
+	sh ./scripts/test-explain-lineage.sh
+
+format-explain-lineage:
+	sh ./scripts/format-explain-lineage.sh
+
+review-explain-lineage:
+	sh ./scripts/review-explain-lineage.sh
+
+commit-explain-lineage:
+	sh ./scripts/commit-explain-lineage.sh
+
 format-query-template-assertions:
 	sh ./scripts/format-query-template-assertions.sh
 
@@ -1393,6 +1405,7 @@ review-query-template-assertions:
 
 commit-query-template-assertions:
 	sh ./scripts/commit-query-template-assertions.sh
+
 
 
 audit-time-partition-state:
