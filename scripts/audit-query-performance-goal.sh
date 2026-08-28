@@ -25,6 +25,26 @@ if [ "${1:-}" = "maintenance-inspect" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "spill-inspect" ]; then
+	printf '%s\n' 'Spill, join, Bloom, and compression references:'
+	rg -n -C 8 'newSQLSpill(Encoder|Decoder)|type sqlSpill|HASH JOIN|hashJoin|func .*Join' ./hat/hatSql/query.go
+	rg -n -C 4 -i 'bloom|compress' ./hat/hatSql ./hat/hatCache/*sql*_test.go || true
+	printf '\n%s\n' 'Query spill options:'
+	rg -n -C 10 'type SQLQueryOptions|SpillCipher|MaxSpillBytes' ./hat/hatSql/*.go
+	exit 0
+fi
+
+if [ "${1:-}" = "spill-codec-inspect" ]; then
+	printf '%s\n' 'Spill options and codec call sites:'
+	rg -n -C 12 'type SQLQueryOptions|SpillCipher|newSQLSpillEncoder\(' ./hat/hatSql/*.go
+	exit 0
+fi
+
+if [ "${1:-}" = "spill-run-inspect" ]; then
+	rg -n -C 5 'run := sqlSpill(Run|GroupRun)|file.Close\(\)|closeSQLSpillHashPartitions' ./hat/hatSql/query.go
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \

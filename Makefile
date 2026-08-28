@@ -1112,6 +1112,27 @@ audit-query-performance-covering-inspect:
 audit-query-performance-maintenance-inspect:
 	sh ./scripts/audit-query-performance-goal.sh maintenance-inspect
 
+audit-query-performance-spill-inspect:
+	sh ./scripts/audit-query-performance-goal.sh spill-inspect
+
+audit-query-performance-spill-codec-inspect:
+	sh ./scripts/audit-query-performance-goal.sh spill-codec-inspect
+
+audit-query-performance-spill-run-inspect:
+	sh ./scripts/audit-query-performance-goal.sh spill-run-inspect
+
+test-sql-spill-compression:
+	sh ./scripts/test-sql-spill-compression.sh
+
+format-sql-spill-compression:
+	sh ./scripts/format-sql-spill-compression.sh
+
+review-sql-spill-compression:
+	sh ./scripts/review-sql-spill-compression.sh
+
+commit-sql-spill-compression:
+	sh ./scripts/commit-sql-spill-compression.sh
+
 test-sql-index-maintenance:
 	sh ./scripts/test-sql-index-maintenance.sh
 
