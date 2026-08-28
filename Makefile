@@ -1229,6 +1229,24 @@ commit-sql-group-skew:
 audit-aggregate-skew-implementation:
 	sh ./scripts/audit-query-performance-goal.sh aggregate-skew-implementation
 
+audit-sql-catalog-overview:
+	sh ./scripts/audit-sql-catalog-goal.sh overview
+
+audit-sql-catalog-contracts:
+	sh ./scripts/audit-sql-catalog-goal.sh contracts
+
+test-sql-explain-format:
+	sh ./scripts/test-sql-explain-format.sh
+
+format-sql-explain-format:
+	sh ./scripts/format-sql-explain-format.sh
+
+review-sql-explain-format:
+	sh ./scripts/review-sql-explain-format.sh
+
+commit-sql-explain-format:
+	sh ./scripts/commit-sql-explain-format.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
