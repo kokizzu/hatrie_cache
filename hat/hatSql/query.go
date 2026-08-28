@@ -181,6 +181,11 @@ type SQLQueryOptions struct {
 	Workers       int
 	MaxSortBytes  int
 	MaxGroupBytes int
+	// MaxGroupRowsPerKey rejects a GROUP BY value once it receives more than
+	// this many input rows. Zero preserves the existing unbounded behavior.
+	// It is an opt-in skew guard for workloads where one key must not dominate
+	// aggregate CPU, memory, or spill work.
+	MaxGroupRowsPerKey int
 	// MaxSetBytes bounds one in-memory distinct UNION, INTERSECT, or EXCEPT
 	// operation.
 	// When combined with SpillDirectory and MaxSpillBytes, oversized distinct
@@ -7372,6 +7377,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
+	if control != nil {
+		if err := sqlCheckGroupRowsPerKey(groups, control.options.MaxGroupRowsPerKey); err != nil {
+			return SQLQueryResult{}, err
+		}
+	}
 	if control != nil && control.options.MaxGroupBytes > 0 && sqlGroupedRowsBytes(groups) > control.options.MaxGroupBytes {
 		return SQLQueryResult{}, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
 	}
@@ -10538,6 +10548,18 @@ func groupSQLRowsOrdered(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlE
 	return out, nil
 }
 
+func sqlCheckGroupRowsPerKey(groups [][]sqlExecRow, maximum int) error {
+	if maximum <= 0 {
+		return nil
+	}
+	for _, group := range groups {
+		if len(group) > maximum {
+			return fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", len(group), maximum)
+		}
+	}
+	return nil
+}
+
 type sqlOrderedGroupProjection struct {
 	column    string
 	group     bool
@@ -10680,6 +10702,7 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	started := time.Now()
 	groupCount := 0
+	groupRows := 0
 	position := 0
 	var key string
 	var groupValue interface{}
@@ -10724,6 +10747,11 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 				}
 			}
 			groupCount++
+			groupRows = 0
+		}
+		groupRows++
+		if control != nil && control.options.MaxGroupRowsPerKey > 0 && groupRows > control.options.MaxGroupRowsPerKey {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", groupRows, control.options.MaxGroupRowsPerKey)
 		}
 		for index, projection := range projections {
 			if projection.aggregate == nil {
@@ -10924,6 +10952,10 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 	}
 	started := time.Now()
 	inputRows := 0
+	groupRows := map[string]int(nil)
+	if control.options.MaxGroupRowsPerKey > 0 {
+		groupRows = map[string]int{}
+	}
 	err := stream(func(row sqlExecRow) error {
 		if err := control.check(); err != nil {
 			return err
@@ -10933,6 +10965,12 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 			return err
 		}
 		key := fmt.Sprintf("%#v", value)
+		if groupRows != nil {
+			groupRows[key]++
+			if groupRows[key] > control.options.MaxGroupRowsPerKey {
+				return fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", groupRows[key], control.options.MaxGroupRowsPerKey)
+			}
+		}
 		record := sqlSpillGroupRecord{Key: key, Value: value, Ordinal: inputRows, Aggregates: make([]sqlSpillGroupAggregate, len(projections))}
 		for index, projection := range projections {
 			if projection.aggregate != nil {

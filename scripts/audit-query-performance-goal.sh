@@ -176,6 +176,20 @@ if [ "${1:-}" = "time-series-bucket-contract" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "aggregate-skew-seams" ]; then
+	printf '%s\n' '=== query options and aggregation materialization ==='
+	rg -n -C 5 'type QueryOptions struct|type SQLQueryOptions' ./hat/hatSql
+	rg -n -C 8 'groups :=|groupRows|GROUP BY|groupBy' ./hat/hatSql/query.go
+	exit 0
+fi
+
+if [ "${1:-}" = "aggregate-skew-implementation" ]; then
+	sed -n '165,240p' ./hat/hatSql/query.go
+	sed -n '7325,7385p' ./hat/hatSql/query.go
+	sed -n '10670,10750p' ./hat/hatSql/query.go
+	exit 0
+fi
+
 if [ "${1:-}" = "time-partition-state" ]; then
 	rg -n -C 10 'sqlIndexMu|sqlJSONIndexes|CreateHatTrie' ./hat/hatCache/main.go
 	sed -n '3772,3855p' ./hat/hatCache/main.go

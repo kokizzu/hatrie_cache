@@ -1208,6 +1208,27 @@ commit-sql-time-partition-pruning:
 audit-time-series-bucket-contract:
 	sh ./scripts/audit-query-performance-goal.sh time-series-bucket-contract
 
+audit-aggregate-skew-seams:
+	sh ./scripts/audit-query-performance-goal.sh aggregate-skew-seams
+
+test-sql-group-skew:
+	sh ./scripts/test-sql-group-skew.sh
+
+format-sql-group-skew:
+	sh ./scripts/format-sql-group-skew.sh
+
+benchmark-sql-group-skew:
+	sh ./scripts/benchmark-sql-group-skew.sh
+
+review-sql-group-skew:
+	sh ./scripts/review-sql-group-skew.sh
+
+commit-sql-group-skew:
+	sh ./scripts/commit-sql-group-skew.sh
+
+audit-aggregate-skew-implementation:
+	sh ./scripts/audit-query-performance-goal.sh aggregate-skew-implementation
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
