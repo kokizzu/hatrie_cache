@@ -1527,6 +1527,14 @@ _ = result
 _ = err
 ```
 
+### Catalog metadata
+
+Wrap a resolver with `hatSql.CatalogResolver` to expose immutable catalog data
+through `CACHE('information_schema.namespaces')`, `.sources`, `.fields`, and
+`.indexes`. Catalog rows can be filtered, ordered, and projected like any other
+source. `SHOW NAMESPACES`, `SHOW SOURCES`, `SHOW INDEXES`, and `DESCRIBE name`
+compile to those same catalog queries; `DESCRIBE` accepts a simple source name.
+
 ### NULL and three-valued logic
 
 SQL predicates use `TRUE`, `FALSE`, and `NULL` (unknown). `WHERE`, `HAVING`,

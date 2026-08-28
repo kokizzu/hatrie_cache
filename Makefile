@@ -1289,6 +1289,18 @@ review-sql-null-semantics:
 commit-sql-null-semantics:
 	sh ./scripts/commit-sql-null-semantics.sh
 
+test-sql-catalog:
+	sh ./scripts/test-sql-catalog.sh
+
+format-sql-catalog:
+	sh ./scripts/format-sql-catalog.sh
+
+review-sql-catalog:
+	sh ./scripts/review-sql-catalog.sh
+
+commit-sql-catalog:
+	sh ./scripts/commit-sql-catalog.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 

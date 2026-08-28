@@ -4110,6 +4110,11 @@ func parseSQLQueryParameters(source string, parameters []interface{}) (*sqlQuery
 }
 
 func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLPreparedQueryCache) (*sqlQuery, error) {
+	compiled, err := CompileSQLShortcut(source)
+	if err != nil {
+		return nil, err
+	}
+	source = compiled
 	if cache == nil {
 		cache = defaultSQLPreparedQueryCache
 	}
