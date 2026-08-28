@@ -1538,6 +1538,18 @@ review-sql-sequence:
 commit-sql-sequence:
 	sh ./scripts/commit-sql-sequence.sh
 
+test-sql-rollup:
+	sh ./scripts/test-sql-rollup.sh
+
+format-sql-rollup:
+	sh ./scripts/format-sql-rollup.sh
+
+review-sql-rollup:
+	sh ./scripts/review-sql-rollup.sh
+
+commit-sql-rollup:
+	sh ./scripts/commit-sql-rollup.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
