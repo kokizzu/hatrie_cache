@@ -1445,6 +1445,18 @@ review-sql-events:
 commit-sql-events:
 	sh ./scripts/commit-sql-events.sh
 
+test-import-diff:
+	sh ./scripts/test-import-diff.sh
+
+format-import-diff:
+	sh ./scripts/format-import-diff.sh
+
+review-import-diff:
+	sh ./scripts/review-import-diff.sh
+
+commit-import-diff:
+	sh ./scripts/commit-import-diff.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
