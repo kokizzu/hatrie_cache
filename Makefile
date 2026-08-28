@@ -1550,6 +1550,21 @@ review-sql-rollup:
 commit-sql-rollup:
 	sh ./scripts/commit-sql-rollup.sh
 
+test-sql-approximate-aggregates:
+	sh ./scripts/test-sql-approximate-aggregates.sh
+
+test-sql-interval-join:
+	sh ./scripts/test-sql-interval-join.sh
+
+format-sql-interval-join:
+	sh ./scripts/format-sql-interval-join.sh
+
+review-sql-interval-join:
+	sh ./scripts/review-sql-interval-join.sh
+
+commit-sql-interval-join:
+	sh ./scripts/commit-sql-interval-join.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

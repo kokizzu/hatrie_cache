@@ -34,3 +34,7 @@ sed -n '1,220p' scripts/commit-temporal-analytics.sh
 printf '\n=== external quality implementation and regression test ===\n'
 sed -n '1,260p' hat/hatSql/external_quality.go
 sed -n '1,260p' hat/hatSql/external_quality_test.go
+
+printf '\n=== approximate aggregate implementation and regression tests ===\n'
+sed -n '1,300p' hat/hatSql/approx_aggregate.go
+sed -n '1,320p' hat/hatSql/approx_aggregate_test.go
