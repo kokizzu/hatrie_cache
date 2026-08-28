@@ -1310,6 +1310,8 @@ format-sql-session:
 commit-sql-session:
 	sh ./scripts/commit-sql-session.sh
 
+commit-sql-views:
+	sh ./scripts/commit-sql-views.sh
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 

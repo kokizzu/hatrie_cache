@@ -1527,6 +1527,16 @@ _ = result
 _ = err
 ```
 
+### Session objects and views
+
+`NewSQLSession(baseResolver)` creates an isolated resolver for temporary tables,
+named result snapshots, and views. `CreateTemporaryTable` and
+`StoreNamedResult` copy their rows and expose them only through that session's
+`CACHE('name')` sources. `CreateView(name, query)` stores a lazy query
+definition. It records cache-source dependencies across joins, CTEs, unions,
+and subqueries, and rejects direct or indirect cycles without replacing an
+existing valid view.
+
 ### Catalog metadata
 
 Wrap a resolver with `hatSql.CatalogResolver` to expose immutable catalog data
