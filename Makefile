@@ -1397,6 +1397,18 @@ review-explain-lineage:
 commit-explain-lineage:
 	sh ./scripts/commit-explain-lineage.sh
 
+test-seeded-mutation-workloads:
+	sh ./scripts/test-seeded-mutation-workloads.sh
+
+format-seeded-mutation-workloads:
+	sh ./scripts/format-seeded-mutation-workloads.sh
+
+review-seeded-mutation-workloads:
+	sh ./scripts/review-seeded-mutation-workloads.sh
+
+commit-seeded-mutation-workloads:
+	sh ./scripts/commit-seeded-mutation-workloads.sh
+
 format-query-template-assertions:
 	sh ./scripts/format-query-template-assertions.sh
 
