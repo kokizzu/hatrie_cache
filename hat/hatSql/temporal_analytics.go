@@ -64,7 +64,7 @@ func (watermark *Watermark) Observe(at time.Time) bool {
 		watermark.latest = at
 		return false
 	}
-	return at.Before(watermark.latest.Add(-watermark.allowed))
+	return !at.After(watermark.latest.Add(-watermark.allowed))
 }
 
 type TimedRow struct {

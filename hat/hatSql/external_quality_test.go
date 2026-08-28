@@ -18,7 +18,7 @@ func TestCopyCSVValidatesQuarantinesAndAddsProvenance(t *testing.T) {
 	if report.Accepted != 1 || report.Rejected != 2 || len(report.Validation) != 2 {
 		t.Fatalf("report = %#v", report)
 	}
-	if got := string(report.ErrorCSV); !strings.Contains(got, "2,total,expected integer") || !strings.Contains(got, "3,id,required value is missing") {
+	if got := string(report.ErrorCSV); !strings.Contains(got, "3,total,expected integer") || !strings.Contains(got, "4,id,required value is missing") {
 		t.Fatalf("error CSV = %q", got)
 	}
 	accepted, ok := tables.Get("orders")

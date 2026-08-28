@@ -1496,6 +1496,24 @@ commit-sql-improvements-100:
 audit-analytics-goal:
 	sh ./scripts/audit-analytics-goal.sh
 
+inspect-temporal-analytics-goal:
+	sh ./scripts/inspect-temporal-analytics-goal.sh
+
+test-sql-geospatial:
+	sh ./scripts/test-sql-geospatial.sh
+
+test-sql-external-quality:
+	sh ./scripts/test-sql-external-quality.sh
+
+format-sql-geospatial:
+	sh ./scripts/format-sql-geospatial.sh
+
+review-sql-geospatial:
+	sh ./scripts/review-sql-geospatial.sh
+
+commit-sql-geospatial:
+	sh ./scripts/commit-sql-geospatial.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
