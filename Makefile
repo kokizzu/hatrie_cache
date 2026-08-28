@@ -1409,6 +1409,21 @@ review-seeded-mutation-workloads:
 commit-seeded-mutation-workloads:
 	sh ./scripts/commit-seeded-mutation-workloads.sh
 
+test-sql-extensions:
+	sh ./scripts/test-sql-extensions.sh
+
+format-sql-extensions:
+	sh ./scripts/format-sql-extensions.sh
+
+review-sql-extensions:
+	sh ./scripts/review-sql-extensions.sh
+
+commit-sql-extensions:
+	sh ./scripts/commit-sql-extensions.sh
+
+audit-extensibility-goal:
+	sh ./scripts/audit-extensibility-goal.sh
+
 format-query-template-assertions:
 	sh ./scripts/format-query-template-assertions.sh
 
