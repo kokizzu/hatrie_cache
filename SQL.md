@@ -1491,6 +1491,27 @@ _ = err
 prometheusText := telemetry.PrometheusMetrics()
 ```
 
+`SQLSlowQueryRecorder` retains an oldest-first bounded history for later
+inspection. It records only queries whose elapsed duration reaches
+`SlowQueryThreshold`; set both the recorder and a positive threshold. A sample
+contains the request ID, a per-recorder keyed statement fingerprint, one
+`[redacted]` marker per bound parameter, output row/byte counters, status, and
+the privacy-safe operator plan. It never retains SQL text, source names,
+predicates, result values, bound values, or error text. New samples evict the
+oldest when the configured capacity is full.
+
+```go
+slowQueries := hatSql.NewSQLSlowQueryRecorder(128)
+_, err := hatSql.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
+    hatSql.SQLQueryOptions{
+        SlowQueryThreshold: 200 * time.Millisecond,
+        SlowQueryRecorder:  slowQueries,
+    })
+samples := slowQueries.Samples()
+_ = err
+_ = samples
+```
+
 ```go
 result, err := hatriecache.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
     hatriecache.SQLQueryOptions{

@@ -1247,6 +1247,24 @@ review-sql-explain-format:
 commit-sql-explain-format:
 	sh ./scripts/commit-sql-explain-format.sh
 
+audit-slow-query-contract:
+	sh ./scripts/audit-sql-catalog-goal.sh slow-query
+
+audit-package-layout:
+	sh ./scripts/audit-sql-catalog-goal.sh packages
+
+test-sql-slow-query-samples:
+	sh ./scripts/test-sql-slow-query-samples.sh
+
+format-sql-slow-query-samples:
+	sh ./scripts/format-sql-slow-query-samples.sh
+
+review-sql-slow-query-samples:
+	sh ./scripts/review-sql-slow-query-samples.sh
+
+commit-sql-slow-query-samples:
+	sh ./scripts/commit-sql-slow-query-samples.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 

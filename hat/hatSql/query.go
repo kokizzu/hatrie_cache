@@ -221,6 +221,9 @@ type SQLQueryOptions struct {
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
+	// SlowQueryRecorder retains privacy-safe samples only for queries that
+	// meet SlowQueryThreshold. Nil disables sample retention.
+	SlowQueryRecorder *SQLSlowQueryRecorder
 }
 
 // QueryOptions bounds one query. It is the package-native name for
@@ -477,29 +480,31 @@ var sqlQueryIDSequence atomic.Uint64
 type sqlQueryObservation struct {
 	id        string
 	observer  SQLQueryObserver
+	recorder  *SQLSlowQueryRecorder
 	started   time.Time
 	threshold time.Duration
 }
 
 func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 	id := strings.TrimSpace(options.QueryID)
-	if id == "" && options.Observer != nil {
+	if id == "" && (options.Observer != nil || options.SlowQueryRecorder != nil) {
 		id = fmt.Sprintf("sql-%d", sqlQueryIDSequence.Add(1))
 	}
 	return sqlQueryObservation{
 		id:        id,
 		observer:  options.Observer,
+		recorder:  options.SlowQueryRecorder,
 		started:   time.Now(),
 		threshold: options.SlowQueryThreshold,
 	}
 }
 
-func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep) {
-	observation.finishSummary(len(result.Rows), len(result.Columns), sqlRowsBytes(result.Rows), err, steps)
+func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
+	observation.finishSummary(len(result.Rows), len(result.Columns), sqlRowsBytes(result.Rows), err, steps, source, parameters)
 }
 
-func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, resultBytes int, err error, steps []SQLExplainStep) {
-	if observation.observer == nil {
+func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, resultBytes int, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
+	if observation.observer == nil && observation.recorder == nil {
 		return
 	}
 	event := SQLQueryEvent{
@@ -519,7 +524,10 @@ func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, 
 		}
 	}
 	event.Operators = sqlQueryOperators(steps)
-	observation.observer.ObserveSQLQuery(event)
+	if observation.observer != nil {
+		observation.observer.ObserveSQLQuery(event)
+	}
+	observation.recorder.record(event, source, parameters)
 }
 
 func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
@@ -563,7 +571,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	result.QueryID = observation.id
 	defer func() {
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
-		observation.finish(result, err, operatorSteps)
+		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
 	release := lockSQLSnapshot(resolver)
 	defer release()
@@ -587,7 +595,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, err
 	}
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || options.AdaptivePlanner != nil {
+	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
@@ -636,7 +644,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 			ActualOutputBytes: &resultBytes,
 			ElapsedNanos:      &elapsed,
 		}}
-		observation.finishSummary(outputRows, outputColumns, resultBytes, err, steps)
+		observation.finishSummary(outputRows, outputColumns, resultBytes, err, steps, source, parameters)
 	}()
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
@@ -3949,7 +3957,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
-	defer func() { observation.finish(result, err, operatorSteps) }()
+	defer func() { observation.finish(result, err, operatorSteps, source, parameters) }()
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	if pageSize <= 0 {
@@ -3998,7 +4006,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	}
 	query.limit = fetch
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil {
+	if observation.observer != nil || observation.recorder != nil {
 		metrics = &sqlExecutionMetrics{}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)

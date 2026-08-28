@@ -12,6 +12,15 @@ contracts)
 	printf '%s\n' '=== parser and session keywords ==='
 	rg -n -C 4 'keyword\("(CREATE|VIEW|SHOW|DESCRIBE|TEMP|DEFAULT|GENERATED|IDENTITY)' ./hat/hatSql/query.go || true
 	;;
+slow-query)
+	printf '%s\n' '=== query event and execution observation ==='
+	sed -n '1,75p' ./hat/hatSql/contracts.go
+	sed -n '470,530p' ./hat/hatSql/query.go
+	;;
+packages)
+	printf '%s\n' '=== package directories ==='
+	find . -type f -name '*.go' -not -path './vendor/*' -exec dirname {} \; | sort -u
+	;;
 *)
 	printf '%s\n' "unknown SQL catalog audit mode: ${1:-}" >&2
 	exit 2
