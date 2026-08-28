@@ -1370,6 +1370,19 @@ review-integrity-repair:
 commit-integrity-repair:
 	sh ./scripts/commit-integrity-repair.sh
 
+test-external-quality:
+	sh ./scripts/test-external-quality.sh
+
+format-external-quality:
+	sh ./scripts/format-external-quality.sh
+
+review-external-quality:
+	sh ./scripts/review-external-quality.sh
+
+commit-external-quality:
+	sh ./scripts/commit-external-quality.sh
+
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
