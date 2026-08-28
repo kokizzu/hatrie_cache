@@ -1526,6 +1526,18 @@ review-sql-graph:
 commit-sql-graph:
 	sh ./scripts/commit-sql-graph.sh
 
+test-sql-sequence:
+	sh ./scripts/test-sql-sequence.sh
+
+format-sql-sequence:
+	sh ./scripts/format-sql-sequence.sh
+
+review-sql-sequence:
+	sh ./scripts/review-sql-sequence.sh
+
+commit-sql-sequence:
+	sh ./scripts/commit-sql-sequence.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
