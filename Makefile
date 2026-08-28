@@ -1514,6 +1514,18 @@ review-sql-geospatial:
 commit-sql-geospatial:
 	sh ./scripts/commit-sql-geospatial.sh
 
+test-sql-graph:
+	sh ./scripts/test-sql-graph.sh
+
+format-sql-graph:
+	sh ./scripts/format-sql-graph.sh
+
+review-sql-graph:
+	sh ./scripts/review-sql-graph.sh
+
+commit-sql-graph:
+	sh ./scripts/commit-sql-graph.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
