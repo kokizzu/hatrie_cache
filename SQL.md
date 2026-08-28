@@ -1608,6 +1608,38 @@ Streaming acquires the same resolver snapshot lock as materialized and paged
 queries, and releases it after the final callback or error. A streamed source
 therefore cannot observe a different cache snapshot halfway through one query.
 
+### Diagnostic index hints
+
+`SQLQueryOptions.IndexHint` is an opt-in, per-query diagnostic override for
+investigating a plan. It never creates, changes, or persists an index. Leave it
+at its zero value for normal planning.
+
+`SQLIndexHintForbid` prevents a named field index from being selected while
+allowing other eligible field indexes. `SQLIndexHintForce` requires a compatible
+predicate and an available field/range index; it returns an error rather than
+silently scanning. An optional `Source` limits the override to one SQL source
+alias. Force mode performs an additional index-availability probe, so it is for
+short-lived diagnosis, not permanent plan control.
+Cursor-page execution supports the same override. `ExecuteSQLQueryRows` rejects
+it rather than silently applying a different streaming plan.
+
+```go
+result, err := hatSql.ExecuteSQLQueryParameters(ctx, sql, resolver, args,
+    hatSql.SQLQueryOptions{
+        IndexHint: hatSql.SQLIndexHint{
+            Source: "orders",
+            Field:  "customer_id",
+            Mode:   hatSql.SQLIndexHintForce,
+        },
+    })
+_ = result
+_ = err
+```
+
+The executed operator list labels a forced probe `FORCED INDEX SCAN`, making it
+straightforward to compare with the default plan through `EXPLAIN ANALYZE` or a
+query observer.
+
 ### `EXPLAIN` and `EXPLAIN ANALYZE`
 
 Prefix any relational query with `EXPLAIN` to inspect its plan without reading

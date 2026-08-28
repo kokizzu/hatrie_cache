@@ -221,6 +221,9 @@ type SQLQueryOptions struct {
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
+	// IndexHint is a diagnostic-only FORCE or FORBID override for one index
+	// field. The default leaves planner selection unchanged.
+	IndexHint SQLIndexHint
 	// SlowQueryRecorder retains privacy-safe samples only for queries that
 	// meet SlowQueryThreshold. Nil disables sample retention.
 	SlowQueryRecorder *SQLSlowQueryRecorder
@@ -587,16 +590,25 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if parseErr != nil {
 		return result, parseErr
 	}
+	if err = options.IndexHint.validate(); err != nil {
+		return result, err
+	}
 	applySQLQueryCollation(query, options.Collation)
+	query.indexHint = options.IndexHint
 	if query.explain {
 		result, err = explainSQLQuery(query, resolver, control)
 		operatorSteps = result.Plan
 		result.QueryID = observation.id
 		return result, err
 	}
+	if options.IndexHint.Mode == SQLIndexHintForce && query.from != nil && options.IndexHint.applies(*query.from) {
+		if _, _, err = resolveSQLForcedIndex(*query.from, query.where, resolver, nil, options.IndexHint); err != nil {
+			return result, err
+		}
+	}
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil {
-		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner}
+	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" {
+		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if metrics != nil {
@@ -659,6 +671,12 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
 	if err != nil {
 		return err
+	}
+	if err := options.IndexHint.validate(); err != nil {
+		return err
+	}
+	if options.IndexHint.Mode != "" {
+		return fmt.Errorf("SQL index hints are not supported by streamed SQL rows")
 	}
 	applySQLQueryCollation(query, options.Collation)
 	outputColumns = len(sqlColumns(query.selects))
@@ -3975,8 +3993,17 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	if parseErr != nil {
 		return result, parseErr
 	}
+	if err = options.IndexHint.validate(); err != nil {
+		return result, err
+	}
+	query.indexHint = options.IndexHint
 	if query.explain {
 		return result, fmt.Errorf("EXPLAIN does not support cursor pagination")
+	}
+	if options.IndexHint.Mode == SQLIndexHintForce && query.from != nil && options.IndexHint.applies(*query.from) {
+		if _, _, err = resolveSQLForcedIndex(*query.from, query.where, resolver, nil, options.IndexHint); err != nil {
+			return result, err
+		}
 	}
 	fingerprint, fingerprintErr := sqlCursorFingerprint(source, parameters)
 	if fingerprintErr != nil {
@@ -4006,8 +4033,8 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	}
 	query.limit = fetch
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil {
-		metrics = &sqlExecutionMetrics{}
+	if observation.observer != nil || observation.recorder != nil || options.IndexHint.Mode != "" {
+		metrics = &sqlExecutionMetrics{indexHint: options.IndexHint}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if metrics != nil {
@@ -4466,6 +4493,7 @@ func cloneSQLExpr(source sqlExpr) sqlExpr {
 }
 
 type sqlQuery struct {
+	indexHint          SQLIndexHint
 	ctes               []sqlCTE
 	selects            []sqlSelectItem
 	from               *sqlSource
@@ -6488,8 +6516,9 @@ func sqlSaturatingMultiply(left, right int) int {
 }
 
 type sqlExecutionMetrics struct {
-	steps    []SQLExplainStep
-	adaptive *AdaptivePlanner
+	steps     []SQLExplainStep
+	adaptive  *AdaptivePlanner
+	indexHint SQLIndexHint
 }
 
 func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outputRows int, started time.Time) {
@@ -6678,6 +6707,9 @@ func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, 
 }
 
 func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) (SQLQueryResult, error) {
+	if metrics != nil && q.indexHint.Mode != "" {
+		metrics.indexHint = q.indexHint
+	}
 	return executeSQLQueryWithMetricsOuter(q, resolver, ctes, metrics, control, nil)
 }
 
@@ -6886,7 +6918,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		base, ordered, err := resolveSQLOrderedSource(q, resolver)
 		indexed := ordered
 		if !indexed && q.sample == nil {
-			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
+			if q.indexHint.Mode == SQLIndexHintForce && q.indexHint.applies(*q.from) {
+				base, indexed, err = resolveSQLForcedIndex(*q.from, q.where, resolver, metrics, q.indexHint)
+			} else {
+				base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
+			}
 		}
 		if !indexed && q.sample == nil {
 			if result, handled, err := executeSQLColumnarScan(q, resolver, control, metrics, outer); handled {
@@ -8632,19 +8668,25 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if source.kind != "CACHE" || len(source.fieldTypes) != 0 {
 		return nil, false, nil
 	}
+	hint := sqlIndexHintForSource(metrics, source)
+	if hint.Mode == SQLIndexHintForce {
+		return resolveSQLForcedIndex(source, condition, resolver, metrics, hint)
+	}
 	if indexed, ok := resolver.(SQLCoveringIndexedSourceResolver); ok && len(coveringFields) > 0 {
 		if field, value, matched := sqlCoveringIndexedEquality(source, condition); matched {
-			started := time.Now()
-			rows, available, err := indexed.ResolveSQLCoveringSource(source.kind, source.key, field, value, coveringFields)
-			if available || err != nil {
-				if available && metrics != nil {
-					metrics.record("COVERING INDEX SCAN", sqlExplainSource(source)+" field="+field, 0, len(rows), started)
+			if hint.allowsField(source, field) {
+				started := time.Now()
+				rows, available, err := indexed.ResolveSQLCoveringSource(source.kind, source.key, field, value, coveringFields)
+				if available || err != nil {
+					if available && metrics != nil {
+						metrics.record("COVERING INDEX SCAN", sqlExplainSource(source)+" field="+field, 0, len(rows), started)
+					}
+					return rows, available, err
 				}
-				return rows, available, err
 			}
 		}
 	}
-	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver); indexed || err != nil {
+	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
@@ -8652,7 +8694,7 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	}
 	if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
 		fields, values := sqlCompositeIndexedEqualities(source, condition)
-		if len(fields) >= 2 {
+		if len(fields) >= 2 && sqlIndexHintAllowsFields(hint, source, fields) {
 			rows, available, err := indexed.ResolveSQLCompositeIndexedSource(source.kind, source.key, fields, values)
 			if available || err != nil {
 				return rows, available, err
@@ -8661,7 +8703,7 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	}
 	if indexed, ok := resolver.(SQLSecondaryIndexedSourceResolver); ok {
 		operation, fields, values := sqlSecondaryIndexedEqualities(source, condition)
-		if len(fields) >= 2 {
+		if len(fields) >= 2 && sqlIndexHintAllowsFields(hint, source, fields) {
 			started := time.Now()
 			rows, available, err := indexed.ResolveSQLSecondaryIndexedSource(source.kind, source.key, operation, fields, values)
 			if available || err != nil {
@@ -8703,9 +8745,13 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	var indexed bool
 	var err error
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
-		rows, indexed, err = resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
+		if hint.allowsField(source, left.name) {
+			rows, indexed, err = resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
+		}
 	} else if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
-		rows, indexed, err = resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+		if hint.allowsField(source, right.name) {
+			rows, indexed, err = resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+		}
 	} else if path, ok := sqlJSONPathIndexField(left, source.alias); ok && right.kind == "literal" {
 		rows, indexed, err = resolveSQLIndexedComparison(source, path, condition.op, right.value, resolver)
 	} else if path, ok := sqlJSONPathIndexField(right, source.alias); ok && left.kind == "literal" {
@@ -8785,12 +8831,15 @@ func sqlJSONPathIndexField(expr sqlExpr, alias string) (string, bool) {
 	return sqlJSONPathWithField(field.name, value)
 }
 
-func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, hint SQLIndexHint) ([]SQLRow, bool, error) {
 	if condition.kind != "func" || !strings.EqualFold(condition.name, "CONTAINS") || len(condition.args) != 2 {
 		return nil, false, nil
 	}
 	field, query := condition.args[0], condition.args[1]
 	if field.kind != "field" || field.qualifier != source.alias || query.kind != "literal" {
+		return nil, false, nil
+	}
+	if !hint.allowsField(source, field.name) {
 		return nil, false, nil
 	}
 	text, ok := query.value.(string)

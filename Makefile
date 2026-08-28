@@ -1265,6 +1265,18 @@ review-sql-slow-query-samples:
 commit-sql-slow-query-samples:
 	sh ./scripts/commit-sql-slow-query-samples.sh
 
+test-sql-index-hints:
+	sh ./scripts/test-sql-index-hints.sh
+
+format-sql-index-hints:
+	sh ./scripts/format-sql-index-hints.sh
+
+review-sql-index-hints:
+	sh ./scripts/review-sql-index-hints.sh
+
+commit-sql-index-hints:
+	sh ./scripts/commit-sql-index-hints.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
