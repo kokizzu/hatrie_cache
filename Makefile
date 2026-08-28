@@ -1469,6 +1469,21 @@ review-sql-contract-harness:
 commit-sql-contract-harness:
 	sh ./scripts/commit-sql-contract-harness.sh
 
+test-temporal-analytics:
+	sh ./scripts/test-temporal-analytics.sh
+
+format-temporal-analytics:
+	sh ./scripts/format-temporal-analytics.sh
+
+review-temporal-analytics:
+	sh ./scripts/review-temporal-analytics.sh
+
+commit-temporal-analytics:
+	sh ./scripts/commit-temporal-analytics.sh
+
+audit-analytics-goal:
+	sh ./scripts/audit-analytics-goal.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
