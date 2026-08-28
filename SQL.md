@@ -1527,6 +1527,15 @@ _ = result
 _ = err
 ```
 
+### Materialized schema sources
+
+`hatSchema.MaterializedSource` is the write-time companion for SQL sources
+that need defaults, identity fields, generated values, and indexed lookup. On
+`Insert`, defaults and identities are applied first, generated functions see
+that finalized row, then every declared index is updated from the same result.
+`hatSchema.SQLResolverAdapter` exposes these sources to `hatSql`, including
+generated-field equality indexes, without creating a package import cycle.
+
 ### Session objects and views
 
 `NewSQLSession(baseResolver)` creates an isolated resolver for temporary tables,

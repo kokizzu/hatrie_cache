@@ -1312,6 +1312,15 @@ commit-sql-session:
 
 commit-sql-views:
 	sh ./scripts/commit-sql-views.sh
+
+test-schema-materialized:
+	sh ./scripts/test-schema-materialized.sh
+
+format-schema-materialized:
+	sh ./scripts/format-schema-materialized.sh
+
+commit-schema-materialized:
+	sh ./scripts/commit-schema-materialized.sh
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
