@@ -13,6 +13,7 @@ type DerivedColumn struct {
 	Name      string
 	Default   interface{}
 	Identity  bool
+	Sequence  string
 	Generated GeneratedValue
 	Indexed   bool
 }
@@ -80,9 +81,13 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		if _, exists := materialized[column.Name]; !exists && column.Default != nil {
 			materialized[column.Name] = column.Default
 		}
-		if _, exists := materialized[column.Name]; !exists && column.Identity {
-			source.nextID[column.Name]++
-			materialized[column.Name] = source.nextID[column.Name]
+		if _, exists := materialized[column.Name]; !exists && (column.Identity || column.Sequence != "") {
+			sequence := column.Name
+			if column.Sequence != "" {
+				sequence = column.Sequence
+			}
+			source.nextID[sequence]++
+			materialized[column.Name] = source.nextID[sequence]
 		}
 	}
 	for _, column := range source.columns {

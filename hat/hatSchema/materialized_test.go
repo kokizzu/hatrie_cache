@@ -34,3 +34,15 @@ func TestMaterializedSourceSQLResolverUsesGeneratedIndex(t *testing.T) {
 		t.Fatalf("SQL query = %#v, %v", result, err)
 	}
 }
+
+func TestMaterializedSourceNamedSequence(t *testing.T) {
+	source := NewMaterializedSource([]DerivedColumn{{Name: "id", Sequence: "orders"}})
+	first, err := source.Insert(Row{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := source.Insert(Row{})
+	if err != nil || first["id"] != int64(1) || second["id"] != int64(2) {
+		t.Fatalf("sequence rows = %#v %#v, %v", first, second, err)
+	}
+}
