@@ -1481,6 +1481,18 @@ review-temporal-analytics:
 commit-temporal-analytics:
 	sh ./scripts/commit-temporal-analytics.sh
 
+audit-sql-improvements-100:
+	sh ./scripts/audit-sql-improvements-100.sh
+
+verify-sql-improvements-100:
+	sh ./scripts/verify-sql-improvements-100.sh
+
+review-sql-improvements-100:
+	sh ./scripts/review-sql-improvements-100.sh
+
+commit-sql-improvements-100:
+	sh ./scripts/commit-sql-improvements-100.sh
+
 audit-analytics-goal:
 	sh ./scripts/audit-analytics-goal.sh
 
