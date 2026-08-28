@@ -3691,6 +3691,7 @@ type HatTrie struct {
 	sqlJSONIndexMaintenance    map[string]map[string]*sqlJSONIndexMaintenance
 	sqlJSONIndexRebuildPending map[string]map[string]bool
 	sqlJSONIndexRebuildQueue   []sqlJSONIndexRebuildRequest
+	sqlTimePartitions          map[string][]SQLTimePartition
 	telemetryMu                sync.Mutex
 	snapshotCaptureMu          sync.Mutex
 	replicationReadOnlyScanMu  sync.Mutex

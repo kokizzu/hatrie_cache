@@ -1190,6 +1190,27 @@ review-mixed-workload-corpus:
 commit-mixed-workload-corpus:
 	sh ./scripts/commit-mixed-workload-corpus.sh
 
+audit-time-series-pruning-seams:
+	sh ./scripts/audit-query-performance-goal.sh time-series-pruning-seams
+
+test-sql-time-partition-pruning:
+	sh ./scripts/test-sql-time-partition-pruning.sh
+
+format-sql-time-partition-pruning:
+	sh ./scripts/format-sql-time-partition-pruning.sh
+
+review-sql-time-partition-pruning:
+	sh ./scripts/review-sql-time-partition-pruning.sh
+
+commit-sql-time-partition-pruning:
+	sh ./scripts/commit-sql-time-partition-pruning.sh
+
+audit-time-series-bucket-contract:
+	sh ./scripts/audit-query-performance-goal.sh time-series-bucket-contract
+
+audit-time-partition-state:
+	sh ./scripts/audit-query-performance-goal.sh time-partition-state
+
 audit-query-performance-columnar-implementation-seams:
 	sh ./scripts/audit-query-performance-goal.sh columnar-implementation-seams
 

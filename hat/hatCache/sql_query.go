@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"hatrie_cache/hat/hatDataStructure"
 	"hatrie_cache/hat/hatSql"
@@ -116,7 +117,116 @@ func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit fu
 // QuerySQLTimeSeries evaluates SQL once, then returns gap-aware buckets and
 // optional rolling means.
 func QuerySQLTimeSeries(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, queryOptions SQLQueryOptions, options SQLTimeSeriesOptions) (SQLTimeSeriesResult, error) {
+	if trie, ok := resolver.(*HatTrie); ok {
+		resolver = sqlTimePartitionResolver{base: resolver, trie: trie, start: options.Start, end: options.End}
+	}
 	return hatSql.QueryTimeSeries(ctx, source, resolver, parameters, queryOptions, options)
+}
+
+// SQLTimePartition maps one logical CACHE source to a physical cache key for
+// a half-open UTC time range.
+type SQLTimePartition struct {
+	Key   string    `json:"key"`
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+// SQLTimePartitionPruningPlan reports the physical CACHE keys selected for a
+// time-series query. A configured source with no overlapping keys is still a
+// successful pruning decision and resolves to an empty source.
+type SQLTimePartitionPruningPlan struct {
+	Key        string    `json:"key"`
+	Start      time.Time `json:"start"`
+	End        time.Time `json:"end"`
+	Partitions int       `json:"partitions"`
+	Keys       []string  `json:"keys"`
+}
+
+// ConfigureSQLTimePartitions configures non-overlapping physical CACHE keys
+// for one logical time-series source. It is in-memory configuration, like SQL
+// JSON indexes, and is intentionally opt-in.
+func (ht *HatTrie) ConfigureSQLTimePartitions(key string, partitions []SQLTimePartition) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("SQL time partitions require a logical cache key")
+	}
+	configured := make([]SQLTimePartition, len(partitions))
+	for index, partition := range partitions {
+		partition.Key = strings.TrimSpace(partition.Key)
+		partition.Start = partition.Start.UTC()
+		partition.End = partition.End.UTC()
+		if partition.Key == "" || partition.Start.IsZero() || partition.End.IsZero() || !partition.Start.Before(partition.End) {
+			return fmt.Errorf("SQL time partition %d requires a key and increasing start/end range", index)
+		}
+		configured[index] = partition
+	}
+	sort.Slice(configured, func(left, right int) bool { return configured[left].Start.Before(configured[right].Start) })
+	for index := 1; index < len(configured); index++ {
+		if configured[index].Start.Before(configured[index-1].End) {
+			return fmt.Errorf("SQL time partitions %q and %q overlap", configured[index-1].Key, configured[index].Key)
+		}
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlTimePartitions == nil {
+		ht.sqlTimePartitions = map[string][]SQLTimePartition{}
+	}
+	ht.sqlTimePartitions[key] = configured
+	return nil
+}
+
+// SQLTimePartitionPruningPlan returns physical cache keys whose configured
+// ranges overlap [start,end). It reports available=false for unconfigured
+// logical keys and invalid windows.
+func (ht *HatTrie) SQLTimePartitionPruningPlan(key string, start, end time.Time) (SQLTimePartitionPruningPlan, bool) {
+	if ht == nil || start.IsZero() || end.IsZero() || !start.Before(end) {
+		return SQLTimePartitionPruningPlan{}, false
+	}
+	key = strings.TrimSpace(key)
+	start, end = start.UTC(), end.UTC()
+	ht.sqlIndexMu.RLock()
+	partitions, available := ht.sqlTimePartitions[key]
+	plan := SQLTimePartitionPruningPlan{Key: key, Start: start, End: end, Partitions: len(partitions)}
+	if available {
+		for _, partition := range partitions {
+			if partition.Start.Before(end) && start.Before(partition.End) {
+				plan.Keys = append(plan.Keys, partition.Key)
+			}
+		}
+	}
+	ht.sqlIndexMu.RUnlock()
+	return plan, available
+}
+
+type sqlTimePartitionResolver struct {
+	base       SQLSourceResolver
+	trie       *HatTrie
+	start, end time.Time
+}
+
+func (resolver sqlTimePartitionResolver) ResolveSQLSource(name, key string) ([]SQLRow, error) {
+	if resolver.base == nil || resolver.trie == nil || !strings.EqualFold(strings.TrimSpace(name), "CACHE") {
+		if resolver.base == nil {
+			return nil, nil
+		}
+		return resolver.base.ResolveSQLSource(name, key)
+	}
+	plan, available := resolver.trie.SQLTimePartitionPruningPlan(key, resolver.start, resolver.end)
+	if !available {
+		return resolver.base.ResolveSQLSource(name, key)
+	}
+	rows := []SQLRow{}
+	for _, partitionKey := range plan.Keys {
+		partitionRows, err := resolver.base.ResolveSQLSource(name, partitionKey)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, partitionRows...)
+	}
+	return rows, nil
 }
 
 // SearchSQLVectorHybrid evaluates the SQL filter first, then ranks only the

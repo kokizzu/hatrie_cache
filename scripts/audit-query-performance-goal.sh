@@ -165,6 +165,23 @@ if [ "${1:-}" = "mixed-workload-benchmarks" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "time-series-pruning-seams" ]; then
+	printf '%s\n' '=== time-series execution flow ==='
+	rg -n -C 12 'func QuerySQLTimeSeries|type TimeSeriesOptions|func .*TimeSeries' ./hat/hatSql ./hat/hatCache
+	exit 0
+fi
+
+if [ "${1:-}" = "time-series-bucket-contract" ]; then
+	rg -n -C 8 'type TimeSeriesBucket struct|type TimeSeriesPoint struct' ./hat/hatDataStructure
+	exit 0
+fi
+
+if [ "${1:-}" = "time-partition-state" ]; then
+	rg -n -C 10 'sqlIndexMu|sqlJSONIndexes|CreateHatTrie' ./hat/hatCache/main.go
+	sed -n '3772,3855p' ./hat/hatCache/main.go
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \
