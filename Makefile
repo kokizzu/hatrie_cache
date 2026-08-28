@@ -1565,6 +1565,18 @@ review-sql-interval-join:
 commit-sql-interval-join:
 	sh ./scripts/commit-sql-interval-join.sh
 
+benchmark-sql-analytics-goal:
+	sh ./scripts/benchmark-sql-analytics-goal.sh
+
+format-sql-analytics-benchmarks:
+	sh ./scripts/format-sql-analytics-benchmarks.sh
+
+review-sql-analytics-benchmarks:
+	sh ./scripts/review-sql-analytics-benchmarks.sh
+
+commit-sql-analytics-benchmarks:
+	sh ./scripts/commit-sql-analytics-benchmarks.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

@@ -86,6 +86,16 @@ func (graph *KeyGraph) Traverse(root string, maxDepth int) ([]GraphTraversal, er
 		if current.Depth == maxDepth {
 			continue
 		}
+		adjacent := graph.outbound[current.Node]
+		if len(adjacent) == 1 {
+			for neighbor := range adjacent {
+				if _, seen := visited[neighbor]; !seen {
+					visited[neighbor] = struct{}{}
+					queue = append(queue, GraphTraversal{Node: neighbor, Depth: current.Depth + 1})
+				}
+			}
+			continue
+		}
 		neighbors := graph.sortedNeighborsLocked(current.Node)
 		for _, neighbor := range neighbors {
 			if _, seen := visited[neighbor]; seen {
@@ -119,6 +129,16 @@ func (graph *KeyGraph) ShortestPath(from, to string, maxDepth int) ([]string, bo
 			return graph.pathLocked(parents, to), true, nil
 		}
 		if current.Depth == maxDepth {
+			continue
+		}
+		adjacent := graph.outbound[current.Node]
+		if len(adjacent) == 1 {
+			for neighbor := range adjacent {
+				if _, seen := parents[neighbor]; !seen {
+					parents[neighbor] = current.Node
+					queue = append(queue, GraphTraversal{Node: neighbor, Depth: current.Depth + 1})
+				}
+			}
 			continue
 		}
 		for _, neighbor := range graph.sortedNeighborsLocked(current.Node) {
