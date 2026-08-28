@@ -3688,6 +3688,9 @@ type HatTrie struct {
 	sqlJSONCoveringIndexes     map[string]map[string]*sqlJSONCoveringIndex
 	sqlJSONTextIndexes         map[string]map[string]*sqlJSONTextIndex
 	sqlJSONCompositeIndexes    map[string]map[string]*sqlJSONCompositeIndex
+	sqlJSONIndexMaintenance    map[string]map[string]*sqlJSONIndexMaintenance
+	sqlJSONIndexRebuildPending map[string]map[string]bool
+	sqlJSONIndexRebuildQueue   []sqlJSONIndexRebuildRequest
 	telemetryMu                sync.Mutex
 	snapshotCaptureMu          sync.Mutex
 	replicationReadOnlyScanMu  sync.Mutex

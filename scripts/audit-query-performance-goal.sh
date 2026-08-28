@@ -19,6 +19,12 @@ if [ "${1:-}" = "covering-inspect" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "maintenance-inspect" ]; then
+	printf '%s\n' 'Index maintenance and health references:'
+	rg -n -C 8 -i 'refresh.*index|index.*health|rebuild|maintenance|stale' ./hat/hatCache/sql_query.go ./hat/hatCache/*index*_test.go
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \

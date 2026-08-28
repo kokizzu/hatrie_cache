@@ -339,6 +339,29 @@ type sqlJSONCoveringIndex struct {
 	columns map[string]struct{}
 	rows    map[string][]SQLRow
 }
+type sqlJSONIndexMaintenance struct {
+	scheduled uint64
+	runs      uint64
+	rebuilds  uint64
+}
+type sqlJSONIndexRebuildRequest struct {
+	key   string
+	field string
+}
+
+// SQLJSONIndexMaintenanceStats reports lifecycle state without exposing source
+// values or indexed keys.
+type SQLJSONIndexMaintenanceStats struct {
+	Key         string `json:"key"`
+	Field       string `json:"field"`
+	Configured  int    `json:"configured"`
+	SourceBytes int    `json:"source_bytes"`
+	Current     bool   `json:"current"`
+	Pending     bool   `json:"pending"`
+	Scheduled   uint64 `json:"scheduled"`
+	Runs        uint64 `json:"runs"`
+	Rebuilds    uint64 `json:"rebuilds"`
+}
 
 // SQLJSONBitmapIndexHealth reports the current in-memory size and shape of an
 // opt-in low-cardinality JSON bitmap index.
@@ -415,6 +438,217 @@ func (ht *HatTrie) CreateSQLJSONCoveringIndex(key, field string, columns ...stri
 	}
 	ht.sqlJSONCoveringIndexes[key][field] = &sqlJSONCoveringIndex{columns: covered}
 	return nil
+}
+
+// ScheduleSQLJSONIndexRebuild queues one configured field for an explicit
+// rebuild. Duplicate requests are coalesced until the queued request runs.
+func (ht *HatTrie) ScheduleSQLJSONIndexRebuild(key, field string) error {
+	if ht == nil || key == "" || field == "" {
+		return fmt.Errorf("SQL JSON index rebuild requires a cache key and field")
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if !ht.sqlJSONIndexConfiguredLocked(key, field) {
+		return fmt.Errorf("SQL JSON index %q on %q is not configured", field, key)
+	}
+	if ht.sqlJSONIndexRebuildPending == nil {
+		ht.sqlJSONIndexRebuildPending = map[string]map[string]bool{}
+	}
+	if ht.sqlJSONIndexRebuildPending[key] == nil {
+		ht.sqlJSONIndexRebuildPending[key] = map[string]bool{}
+	}
+	if ht.sqlJSONIndexRebuildPending[key][field] {
+		return nil
+	}
+	ht.sqlJSONIndexRebuildPending[key][field] = true
+	ht.sqlJSONIndexRebuildQueue = append(ht.sqlJSONIndexRebuildQueue, sqlJSONIndexRebuildRequest{key: key, field: field})
+	ht.sqlJSONIndexMaintenanceLocked(key, field).scheduled++
+	return nil
+}
+
+// RunScheduledSQLJSONIndexRebuilds processes up to limit queued requests. A
+// non-positive limit processes every currently queued request. Failed requests
+// remain pending so an operator can retry after fixing the source issue.
+func (ht *HatTrie) RunScheduledSQLJSONIndexRebuilds(limit int) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+	processed := 0
+	for limit <= 0 || processed < limit {
+		ht.sqlIndexMu.Lock()
+		if len(ht.sqlJSONIndexRebuildQueue) == 0 {
+			ht.sqlIndexMu.Unlock()
+			return processed, nil
+		}
+		request := ht.sqlJSONIndexRebuildQueue[0]
+		ht.sqlJSONIndexRebuildQueue[0] = sqlJSONIndexRebuildRequest{}
+		ht.sqlJSONIndexRebuildQueue = ht.sqlJSONIndexRebuildQueue[1:]
+		delete(ht.sqlJSONIndexRebuildPending[request.key], request.field)
+		ht.sqlIndexMu.Unlock()
+
+		data, err := ht.GetBytesChecked(request.key)
+		if err != nil {
+			ht.sqlIndexMu.Lock()
+			ht.sqlJSONIndexRebuildQueue = append([]sqlJSONIndexRebuildRequest{request}, ht.sqlJSONIndexRebuildQueue...)
+			if ht.sqlJSONIndexRebuildPending[request.key] == nil {
+				ht.sqlJSONIndexRebuildPending[request.key] = map[string]bool{}
+			}
+			ht.sqlJSONIndexRebuildPending[request.key][request.field] = true
+			ht.sqlIndexMu.Unlock()
+			return processed, err
+		}
+
+		ht.sqlIndexMu.Lock()
+		rebuilt, err := ht.refreshSQLJSONIndexesLocked(request.key, request.field, data)
+		if err != nil {
+			ht.sqlJSONIndexRebuildQueue = append([]sqlJSONIndexRebuildRequest{request}, ht.sqlJSONIndexRebuildQueue...)
+			if ht.sqlJSONIndexRebuildPending[request.key] == nil {
+				ht.sqlJSONIndexRebuildPending[request.key] = map[string]bool{}
+			}
+			ht.sqlJSONIndexRebuildPending[request.key][request.field] = true
+			ht.sqlIndexMu.Unlock()
+			return processed, err
+		}
+		maintenance := ht.sqlJSONIndexMaintenanceLocked(request.key, request.field)
+		maintenance.runs++
+		maintenance.rebuilds += uint64(rebuilt)
+		ht.sqlIndexMu.Unlock()
+		processed++
+	}
+	return processed, nil
+}
+
+// SQLJSONIndexMaintenanceStats reports whether the configured indexes are
+// current with the CACHE value and whether an explicit rebuild is pending.
+func (ht *HatTrie) SQLJSONIndexMaintenanceStats(key, field string) (SQLJSONIndexMaintenanceStats, bool, error) {
+	if ht == nil || key == "" || field == "" {
+		return SQLJSONIndexMaintenanceStats{}, false, nil
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return SQLJSONIndexMaintenanceStats{}, false, err
+	}
+	raw := string(data)
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	configured, current := ht.sqlJSONIndexCurrentLocked(key, field, raw)
+	if configured == 0 {
+		return SQLJSONIndexMaintenanceStats{}, false, nil
+	}
+	maintenance := ht.sqlJSONIndexMaintenanceLocked(key, field)
+	return SQLJSONIndexMaintenanceStats{
+		Key: key, Field: field, Configured: configured, SourceBytes: len(data), Current: current,
+		Pending: ht.sqlJSONIndexRebuildPending[key][field], Scheduled: maintenance.scheduled,
+		Runs: maintenance.runs, Rebuilds: maintenance.rebuilds,
+	}, true, nil
+}
+
+func (ht *HatTrie) sqlJSONIndexMaintenanceLocked(key, field string) *sqlJSONIndexMaintenance {
+	if ht.sqlJSONIndexMaintenance == nil {
+		ht.sqlJSONIndexMaintenance = map[string]map[string]*sqlJSONIndexMaintenance{}
+	}
+	if ht.sqlJSONIndexMaintenance[key] == nil {
+		ht.sqlJSONIndexMaintenance[key] = map[string]*sqlJSONIndexMaintenance{}
+	}
+	if ht.sqlJSONIndexMaintenance[key][field] == nil {
+		ht.sqlJSONIndexMaintenance[key][field] = &sqlJSONIndexMaintenance{}
+	}
+	return ht.sqlJSONIndexMaintenance[key][field]
+}
+
+func sqlJSONCompositeIndexContains(index *sqlJSONCompositeIndex, field string) bool {
+	for _, candidate := range index.fields {
+		if candidate == field {
+			return true
+		}
+	}
+	return false
+}
+
+func (ht *HatTrie) sqlJSONIndexConfiguredLocked(key, field string) bool {
+	configured, _ := ht.sqlJSONIndexCurrentLocked(key, field, "")
+	return configured > 0
+}
+
+func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field, raw string) (int, bool) {
+	configured, current := 0, true
+	if index := ht.sqlJSONIndexes[key][field]; index != nil {
+		configured++
+		current = current && index.raw == raw
+	}
+	if index := ht.sqlJSONBitmapIndexes[key][field]; index != nil {
+		configured++
+		current = current && index.raw == raw
+	}
+	if index := ht.sqlJSONCoveringIndexes[key][field]; index != nil {
+		configured++
+		current = current && index.raw == raw
+	}
+	if index := ht.sqlJSONTextIndexes[key][field]; index != nil {
+		configured++
+		current = current && index.raw == raw
+	}
+	for _, index := range ht.sqlJSONCompositeIndexes[key] {
+		if sqlJSONCompositeIndexContains(index, field) {
+			configured++
+			current = current && index.raw == raw
+		}
+	}
+	return configured, current
+}
+
+func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field string, data []byte) (int, error) {
+	raw := string(data)
+	rebuilt := 0
+	if index := ht.sqlJSONIndexes[key][field]; index != nil {
+		changed := index.raw != raw
+		if err := refreshSQLJSONFieldIndex(index, key, field, data); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	if index := ht.sqlJSONBitmapIndexes[key][field]; index != nil {
+		changed := index.raw != raw
+		if err := refreshSQLJSONBitmapIndex(index, key, field, data); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	if index := ht.sqlJSONCoveringIndexes[key][field]; index != nil {
+		changed := index.raw != raw
+		if err := refreshSQLJSONCoveringIndex(index, key, field, data); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	if index := ht.sqlJSONTextIndexes[key][field]; index != nil {
+		changed := index.raw != raw
+		if err := refreshSQLJSONTextIndex(index, key, field, data); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	for _, index := range ht.sqlJSONCompositeIndexes[key] {
+		if !sqlJSONCompositeIndexContains(index, field) {
+			continue
+		}
+		changed := index.raw != raw
+		if err := refreshSQLJSONCompositeIndex(index, key, data); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	return rebuilt, nil
 }
 
 // SQLJSONBitmapIndexHealth refreshes and reports one configured bitmap index.

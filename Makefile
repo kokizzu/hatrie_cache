@@ -1109,6 +1109,21 @@ audit-query-performance-covering:
 audit-query-performance-covering-inspect:
 	sh ./scripts/audit-query-performance-goal.sh covering-inspect
 
+audit-query-performance-maintenance-inspect:
+	sh ./scripts/audit-query-performance-goal.sh maintenance-inspect
+
+test-sql-index-maintenance:
+	sh ./scripts/test-sql-index-maintenance.sh
+
+format-sql-index-maintenance:
+	sh ./scripts/format-sql-index-maintenance.sh
+
+review-sql-index-maintenance:
+	sh ./scripts/review-sql-index-maintenance.sh
+
+commit-sql-index-maintenance:
+	sh ./scripts/commit-sql-index-maintenance.sh
+
 test-sql-covering-indexes:
 	sh ./scripts/test-sql-covering-indexes.sh
 
