@@ -1382,6 +1382,18 @@ review-external-quality:
 commit-external-quality:
 	sh ./scripts/commit-external-quality.sh
 
+test-query-template-assertions:
+	sh ./scripts/test-query-template-assertions.sh
+
+format-query-template-assertions:
+	sh ./scripts/format-query-template-assertions.sh
+
+review-query-template-assertions:
+	sh ./scripts/review-query-template-assertions.sh
+
+commit-query-template-assertions:
+	sh ./scripts/commit-query-template-assertions.sh
+
 
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
