@@ -1527,6 +1527,26 @@ _ = result
 _ = err
 ```
 
+### NULL and three-valued logic
+
+SQL predicates use `TRUE`, `FALSE`, and `NULL` (unknown). `WHERE`, `HAVING`,
+and join predicates keep only `TRUE`; both `FALSE` and `NULL` do not match.
+`NULL AND FALSE` is `FALSE`, `NULL AND TRUE` is `NULL`, `NULL OR TRUE` is
+`TRUE`, and `NULL OR FALSE` is `NULL`. Use `IS NULL` or `IS NOT NULL` for
+null tests because comparisons such as `field = NULL` evaluate to `NULL`.
+
+`CASE` evaluates `WHEN` clauses in order and evaluates only the selected result
+expression. `COALESCE(a, b, ...)` returns the first non-NULL value, and
+`NULLIF(a, b)` returns NULL only when SQL equality says `a` and `b` are equal;
+otherwise it returns `a`. This includes `NULLIF(a, NULL)`, which returns `a`.
+
+```sql
+FROM VALUES (NULL, 2) AS values(a, b)
+SELECT COALESCE(a, b) AS fallback,
+       NULLIF(b, 2) AS absent,
+       CASE WHEN a IS NULL THEN 'empty' ELSE 'present' END AS label
+```
+
 ### Positional parameters
 
 Pass values separately from SQL with one-based `$1`, `$2`, … placeholders.

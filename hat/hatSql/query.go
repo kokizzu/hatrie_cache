@@ -11294,6 +11294,39 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return nil
 	case "func":
 		switch expr.name {
+		case "COALESCE":
+			if len(expr.args) == 0 {
+				return sqlEvalError{err: fmt.Errorf("COALESCE expects at least one argument"), token: expr.token}
+			}
+			for _, argument := range expr.args {
+				value := evalSQLExpr(argument, group, row)
+				if err := sqlExpressionError(value); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				if value != nil {
+					return value
+				}
+			}
+			return nil
+		case "NULLIF":
+			if len(expr.args) != 2 {
+				return sqlEvalError{err: fmt.Errorf("NULLIF expects exactly two arguments"), token: expr.token}
+			}
+			left := evalSQLExpr(expr.args[0], group, row)
+			if err := sqlExpressionError(left); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if left == nil {
+				return nil
+			}
+			right := evalSQLExpr(expr.args[1], group, row)
+			if err := sqlExpressionError(right); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if sqlBinaryValueWithCollation("=", left, right, expr.collation) == true {
+				return nil
+			}
+			return left
 		case "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 			return evalSQLTimeFunction(expr, group, row)
 		case "REGEXP_LIKE", "REGEXP_EXTRACT":
@@ -11775,7 +11808,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+	case "COALESCE", "NULLIF", "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 		return true
 	}
 	return false

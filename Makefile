@@ -1277,6 +1277,18 @@ review-sql-index-hints:
 commit-sql-index-hints:
 	sh ./scripts/commit-sql-index-hints.sh
 
+test-sql-null-semantics:
+	sh ./scripts/test-sql-null-semantics.sh
+
+format-sql-null-semantics:
+	sh ./scripts/format-sql-null-semantics.sh
+
+review-sql-null-semantics:
+	sh ./scripts/review-sql-null-semantics.sh
+
+commit-sql-null-semantics:
+	sh ./scripts/commit-sql-null-semantics.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
