@@ -1457,6 +1457,18 @@ review-import-diff:
 commit-import-diff:
 	sh ./scripts/commit-import-diff.sh
 
+test-sql-contract-harness:
+	sh ./scripts/test-sql-contract-harness.sh
+
+format-sql-contract-harness:
+	sh ./scripts/format-sql-contract-harness.sh
+
+review-sql-contract-harness:
+	sh ./scripts/review-sql-contract-harness.sh
+
+commit-sql-contract-harness:
+	sh ./scripts/commit-sql-contract-harness.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
