@@ -57,3 +57,17 @@ func TestSQLSessionViewsResolveAndRejectCycles(t *testing.T) {
 		t.Fatalf("cycle rejection did not preserve prior view: %#v, %v", result, err)
 	}
 }
+
+func TestSQLSessionExecuteCreatesTemporaryTablesAndViews(t *testing.T) {
+	session := NewSQLSession(nil)
+	if _, err := session.Execute(context.Background(), `CREATE TEMP TABLE people AS FROM VALUES ('Ada') AS rows(name) SELECT name`, nil, SQLQueryOptions{}); err != nil {
+		t.Fatalf("CREATE TEMP TABLE error = %v", err)
+	}
+	if _, err := session.Execute(context.Background(), `CREATE VIEW names AS FROM CACHE('people') SELECT name`, nil, SQLQueryOptions{}); err != nil {
+		t.Fatalf("CREATE VIEW error = %v", err)
+	}
+	result, err := session.Execute(context.Background(), `FROM CACHE('names') SELECT name`, nil, SQLQueryOptions{})
+	if err != nil || len(result.Rows) != 1 || result.Rows[0]["name"] != "Ada" {
+		t.Fatalf("created view = %#v, %v", result, err)
+	}
+}

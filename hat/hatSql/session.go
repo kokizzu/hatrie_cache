@@ -172,7 +172,46 @@ func sqlQueryCacheDependencies(query *sqlQuery) []string {
 }
 
 func (session *SQLSession) Execute(ctx context.Context, source string, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE VIEW"); matched {
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		return SQLQueryResult{}, session.CreateView(name, query)
+	}
+	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE TEMP TABLE"); matched {
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		result, err := ExecuteSQLQueryParameters(ctx, query, session, parameters, options)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		return SQLQueryResult{}, session.CreateTemporaryTable(name, result.Rows)
+	}
 	return ExecuteSQLQueryParameters(ctx, source, session, parameters, options)
+}
+
+func sqlSessionCreateStatement(source, prefix string) (string, string, bool, error) {
+	trimmed := strings.TrimSpace(source)
+	upper := strings.ToUpper(trimmed)
+	prefixUpper := prefix + " "
+	if !strings.HasPrefix(upper, prefixUpper) {
+		return "", "", false, nil
+	}
+	rest := strings.TrimSpace(trimmed[len(prefix):])
+	separator := strings.Index(strings.ToUpper(rest), " AS ")
+	if separator < 1 {
+		return "", "", true, fmt.Errorf("%s requires a name and AS query", prefix)
+	}
+	name := strings.TrimSpace(rest[:separator])
+	query := strings.TrimSpace(rest[separator+4:])
+	if _, err := sessionObjectName(name); err != nil || query == "" {
+		if err != nil {
+			return "", "", true, err
+		}
+		return "", "", true, fmt.Errorf("%s requires a query after AS", prefix)
+	}
+	return name, query, true, nil
 }
 
 func sessionObjectName(name string) (string, error) {
