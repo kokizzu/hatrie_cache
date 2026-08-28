@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"hatrie_cache/hat/hatCodec"
+	"hatrie_cache/hat/hatDataStructure"
 )
 
 type sqlToken = Token
@@ -168,7 +169,10 @@ type SQLQueryOptions struct {
 	// SpillDirectory and MaxSpillBytes it enables a streamed spill hash join
 	// for a direct two-source INNER equality join. Zero keeps the existing
 	// in-memory join behavior.
-	MaxJoinBytes   int
+	MaxJoinBytes int
+	// SpillBloom enables compact per-partition Bloom filters for spill hash
+	// joins. It can skip partition pairs that cannot share a join key.
+	SpillBloom     bool
 	MaxResultBytes int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
@@ -316,6 +320,7 @@ type sqlSpillHashPartition struct {
 	encoder    *sqlSpillEncoder
 	cipher     *hatCodec.StreamCipher
 	compressed bool
+	bloom      hatDataStructure.BloomFilter
 }
 
 func init() {
@@ -3649,7 +3654,11 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 		if !ok {
 			return nil
 		}
-		return writeSQLSpillHashInput(leftParts[sqlSpillHashPartitionIndex(key)], sqlSpillHashInput{Row: row, Ordinal: ordinal})
+		partition := sqlSpillHashPartitionIndex(key)
+		if control.options.SpillBloom {
+			leftParts[partition].bloom.AddJSONString(key)
+		}
+		return writeSQLSpillHashInput(leftParts[partition], sqlSpillHashInput{Row: row, Ordinal: ordinal})
 	}); err != nil {
 		closeSQLSpillHashPartitions(leftParts)
 		closeSQLSpillHashPartitions(rightParts)
@@ -3668,7 +3677,11 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 		if !ok {
 			return nil
 		}
-		return writeSQLSpillHashInput(rightParts[sqlSpillHashPartitionIndex(key)], sqlSpillHashInput{Row: row, Ordinal: ordinal})
+		partition := sqlSpillHashPartitionIndex(key)
+		if control.options.SpillBloom {
+			rightParts[partition].bloom.AddJSONString(key)
+		}
+		return writeSQLSpillHashInput(rightParts[partition], sqlSpillHashInput{Row: row, Ordinal: ordinal})
 	}); err != nil {
 		closeSQLSpillHashPartitions(leftParts)
 		closeSQLSpillHashPartitions(rightParts)
@@ -3707,6 +3720,9 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 	for index := range leftParts {
 		if err := control.check(); err != nil {
 			return SQLQueryResult{}, true, err
+		}
+		if control.options.SpillBloom && !sqlBloomFiltersMayIntersect(leftParts[index].bloom, rightParts[index].bloom) {
+			continue
 		}
 		processRightChunk := func(right []sqlSpillHashInput) error {
 			buckets := make(map[string][]sqlSpillHashInput, len(right))
@@ -3781,6 +3797,19 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 	return SQLQueryResult{Columns: columns, Rows: rows}, true, nil
 }
 
+func sqlBloomFiltersMayIntersect(left, right hatDataStructure.BloomFilter) bool {
+	leftWords, rightWords := left.RawWords(), right.RawWords()
+	if len(leftWords) == 0 || len(rightWords) == 0 {
+		return false
+	}
+	for index := range leftWords {
+		if leftWords[index]&rightWords[index] != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func newSQLSpillHashPartitions(directory, pattern string, available *int64, paths map[string]struct{}, control *sqlExecutionControl) ([]sqlSpillHashPartition, error) {
 	partitions := make([]sqlSpillHashPartition, sqlSpillHashPartitions)
 	for index := range partitions {
@@ -3797,7 +3826,19 @@ func newSQLSpillHashPartitions(directory, pattern string, available *int64, path
 			return nil, err
 		}
 		paths[file.Name()] = struct{}{}
-		partitions[index] = sqlSpillHashPartition{path: file.Name(), file: file, encoder: encoder, cipher: sqlSpillCipher(control), compressed: control != nil && control.options.CompressSpill}
+		partition := sqlSpillHashPartition{path: file.Name(), file: file, encoder: encoder, cipher: sqlSpillCipher(control), compressed: control != nil && control.options.CompressSpill}
+		if control != nil && control.options.SpillBloom {
+			filter, err := hatDataStructure.NewBloomFilter(uint64(max(1, control.maxRows/sqlSpillHashPartitions)), 0.01)
+			if err != nil {
+				_ = encoder.Close()
+				_ = file.Close()
+				_ = os.Remove(file.Name())
+				closeSQLSpillHashPartitions(partitions[:index])
+				return nil, fmt.Errorf("initialize SQL hash spill Bloom filter: %w", err)
+			}
+			partition.bloom = filter
+		}
+		partitions[index] = partition
 	}
 	return partitions, nil
 }

@@ -1121,8 +1121,23 @@ audit-query-performance-spill-codec-inspect:
 audit-query-performance-spill-run-inspect:
 	sh ./scripts/audit-query-performance-goal.sh spill-run-inspect
 
+audit-query-performance-bloom-inspect:
+	sh ./scripts/audit-query-performance-goal.sh bloom-inspect
+
 test-sql-spill-compression:
 	sh ./scripts/test-sql-spill-compression.sh
+
+test-sql-spill-bloom:
+	sh ./scripts/test-sql-spill-bloom.sh
+
+format-sql-spill-bloom:
+	sh ./scripts/format-sql-spill-bloom.sh
+
+review-sql-spill-bloom:
+	sh ./scripts/review-sql-spill-bloom.sh
+
+commit-sql-spill-bloom:
+	sh ./scripts/commit-sql-spill-bloom.sh
 
 format-sql-spill-compression:
 	sh ./scripts/format-sql-spill-compression.sh

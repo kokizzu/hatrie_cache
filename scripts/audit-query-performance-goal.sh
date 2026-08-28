@@ -45,6 +45,12 @@ if [ "${1:-}" = "spill-run-inspect" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "bloom-inspect" ]; then
+	rg -n -C 8 -i 'type .*Bloom|func .*Bloom|New.*Bloom' ./hat/hatDataStructure ./hat/hatSql ./hat/hatCache
+	sed -n '3607,3778p' ./hat/hatSql/query.go
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \
