@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -42,6 +43,8 @@ type SQLQueryObserverFunc = hatSql.QueryObserverFunc
 type SQLQueryEvent = hatSql.QueryEvent
 type SQLQueryOperator = hatSql.QueryOperator
 type SQLSourceResolver = hatSql.SourceResolver
+type SQLColumnarBatch = hatSql.ColumnarBatch
+type SQLColumnarSourceResolver = hatSql.ColumnarSourceResolver
 type SQLStreamSourceResolver = hatSql.StreamSourceResolver
 type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
@@ -1577,6 +1580,60 @@ func sqlJSONRows(key string, data []byte) ([]SQLRow, error) {
 	}
 	return nil, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
 }
+
+func sqlJSONColumnarBatch(key string, data []byte, fields []string) (hatSql.ColumnarBatch, error) {
+	batch := hatSql.ColumnarBatch{Columns: make(map[string][]interface{}, len(fields))}
+	unique := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if field == "" {
+			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) columnar field cannot be empty", key)
+		}
+		if _, exists := batch.Columns[field]; !exists {
+			batch.Columns[field] = make([]interface{}, 0)
+			unique = append(unique, field)
+		}
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return batch, nil
+	}
+	appendRow := func(row SQLRow) {
+		for _, field := range unique {
+			batch.Columns[field] = append(batch.Columns[field], row[field])
+		}
+		batch.Rows++
+	}
+	switch trimmed[0] {
+	case '{':
+		var row SQLRow
+		if err := json.Unmarshal(trimmed, &row); err != nil {
+			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+		}
+		appendRow(row)
+		return batch, nil
+	case '[':
+		decoder := json.NewDecoder(bytes.NewReader(trimmed))
+		if _, err := decoder.Token(); err != nil {
+			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+		}
+		for decoder.More() {
+			var row SQLRow
+			if err := decoder.Decode(&row); err != nil {
+				return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+			}
+			appendRow(row)
+		}
+		if _, err := decoder.Token(); err != nil {
+			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+		}
+		return batch, nil
+	default:
+		return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
+	}
+}
 func sqlIndexValueKey(value interface{}) (string, bool) {
 	if value == nil {
 		return "", false
@@ -1626,6 +1683,31 @@ func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
 	default:
 		return nil, fmt.Errorf("unknown SQL source %q", name)
 	}
+}
+
+// ResolveSQLColumnarSource exposes only requested CACHE JSON fields in
+// field-aligned slices. It avoids retaining full source rows for simple
+// analytics scans; unsupported sources return available=false.
+func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (hatSql.ColumnarBatch, bool, error) {
+	if ht == nil {
+		return hatSql.ColumnarBatch{}, false, ErrNilHatTrie
+	}
+	if name != "CACHE" {
+		return hatSql.ColumnarBatch{}, false, nil
+	}
+	plan, err := ht.SQLPartitionPruningPlan(name, key)
+	if err != nil {
+		return hatSql.ColumnarBatch{}, false, err
+	}
+	if plan.Pruned {
+		return ht.localPartitionSet().tries[plan.Partition].ResolveSQLColumnarSource(name, key, fields)
+	}
+	data, err := ht.GetBytesChecked(key)
+	if err != nil {
+		return hatSql.ColumnarBatch{}, false, err
+	}
+	batch, err := sqlJSONColumnarBatch(key, data, fields)
+	return batch, true, err
 }
 
 // StreamSQLSource visits CACHE JSON object rows incrementally. KEYS is not

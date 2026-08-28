@@ -1124,6 +1124,45 @@ audit-query-performance-spill-run-inspect:
 audit-query-performance-bloom-inspect:
 	sh ./scripts/audit-query-performance-goal.sh bloom-inspect
 
+audit-query-performance-columnar-inspect:
+	sh ./scripts/audit-query-performance-goal.sh columnar-inspect
+
+audit-query-performance-columnar-seams:
+	sh ./scripts/audit-query-performance-goal.sh columnar-seams
+
+audit-query-performance-columnar-contracts:
+	sh ./scripts/audit-query-performance-goal.sh columnar-contracts
+
+audit-query-performance-columnar-tests:
+	sh ./scripts/audit-query-performance-goal.sh columnar-tests
+
+test-sql-columnar-scans:
+	sh ./scripts/test-sql-columnar-scans.sh
+
+format-sql-columnar-scans:
+	sh ./scripts/format-sql-columnar-scans.sh
+
+benchmark-sql-columnar-scans:
+	sh ./scripts/benchmark-sql-columnar-scans.sh
+
+review-sql-columnar-scans:
+	sh ./scripts/review-sql-columnar-scans.sh
+
+commit-sql-columnar-scans:
+	sh ./scripts/commit-sql-columnar-scans.sh
+
+audit-query-performance-columnar-implementation-seams:
+	sh ./scripts/audit-query-performance-goal.sh columnar-implementation-seams
+
+audit-query-performance-columnar-ast:
+	sh ./scripts/audit-query-performance-goal.sh columnar-ast
+
+audit-query-performance-columnar-build-failure:
+	sh ./scripts/audit-query-performance-goal.sh columnar-build-failure
+
+audit-query-performance-columnar-benchmark-fixture:
+	sh ./scripts/audit-query-performance-goal.sh columnar-benchmark-fixture
+
 test-sql-spill-compression:
 	sh ./scripts/test-sql-spill-compression.sh
 

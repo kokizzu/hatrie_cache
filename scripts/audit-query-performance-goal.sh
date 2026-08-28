@@ -51,6 +51,72 @@ if [ "${1:-}" = "bloom-inspect" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "columnar-inspect" ]; then
+	printf '%s\n' '=== batch expression evaluation ==='
+	rg -n -C 4 'evalSQLExprBatch|sql.*Batch|batch.*SQL' ./hat/hatSql/query.go ./hat/hatSql/*test.go
+	printf '%s\n' '=== source resolution and row construction ==='
+	rg -n -C 4 'ResolveSQLSource|StreamSQLSource|sqlJSONRows|SQLJSON' ./hat/hatSql/query.go ./hat/hatCache/sql_query.go
+	printf '%s\n' '=== projection, ordering, and row identity ==='
+	rg -n -C 4 'projection|Projection|ordinal|rowID|rowId|sourceKey' ./hat/hatSql/query.go ./hat/hatSql/*test.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-seams" ]; then
+	printf '%s\n' '=== primary source planning ==='
+	sed -n '6680,6775p' ./hat/hatSql/query.go
+	printf '%s\n' '=== index and source resolver contracts ==='
+	sed -n '8280,8500p' ./hat/hatSql/query.go
+	printf '%s\n' '=== scan row envelopes ==='
+	sed -n '8880,8975p' ./hat/hatSql/query.go
+	printf '%s\n' '=== cache JSON source implementation ==='
+	rg -n -C 8 'ResolveSQLSource|StreamSQLSource|sqlJSONRows' ./hat/hatCache/sql_query.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-contracts" ]; then
+	printf '%s\n' '=== exported resolver contracts ==='
+	rg -n -C 3 '^type SQL.*(SourceResolver|Resolver)' ./hat/hatSql/query.go
+	printf '%s\n' '=== ordered and streamed execution gates ==='
+	rg -n -C 4 'executeSQLStreamed|resolveSQLOrderedSource|OrderedStream' ./hat/hatSql/query.go
+	printf '%s\n' '=== cache resolver methods ==='
+	rg -n -C 2 '^func \(ht \*HatTrie\) (ResolveSQL|StreamSQL)' ./hat/hatCache/sql_query.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-tests" ]; then
+	printf '%s\n' '=== covering index test conventions ==='
+	sed -n '1,240p' ./hat/hatCache/sql_covering_index_test.go
+	printf '%s\n' '=== index maintenance test conventions ==='
+	sed -n '1,180p' ./hat/hatCache/sql_index_maintenance_test.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-implementation-seams" ]; then
+	printf '%s\n' '=== resolver definitions ==='
+	rg -n -C 6 '^type (SourceResolver|StreamSourceResolver|OrderedSourceResolver|CoveringIndexedSourceResolver) interface' ./hat/hatSql
+	printf '%s\n' '=== materialized executor entry and final projection ==='
+	rg -n -C 10 '^func executeSQLQueryWithMetricsOuter|^func sqlProject' ./hat/hatSql/query.go
+	printf '%s\n' '=== cache SQL imports and JSON decoding ==='
+	sed -n '1,95p' ./hat/hatCache/sql_query.go
+	sed -n '1560,1630p' ./hat/hatCache/sql_query.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-ast" ]; then
+	rg -n -C 8 '^type (sqlQuery|sqlExpr|sqlSelect|sqlSource) struct' ./hat/hatSql/query.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-build-failure" ]; then
+	sed -n '6750,6805p' ./hat/hatSql/query.go
+	exit 0
+fi
+
+if [ "${1:-}" = "columnar-benchmark-fixture" ]; then
+	rg -n -C 4 '^func newTestTrie|^func New|^func \(.*HatTrie.*Close' ./hat/hatCache/*_test.go ./hat/hatCache/main.go
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \

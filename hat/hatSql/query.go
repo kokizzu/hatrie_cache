@@ -126,6 +126,8 @@ type SQLQueryResult = QueryResult
 type SQLExplainStep = ExplainStep
 type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
+type SQLColumnarBatch = ColumnarBatch
+type SQLColumnarSourceResolver = ColumnarSourceResolver
 type SQLStreamSourceResolver = StreamSourceResolver
 type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
@@ -6666,6 +6668,157 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	return executeSQLQueryWithMetricsOuter(q, resolver, ctes, metrics, control, nil)
 }
 
+// executeSQLColumnarScan keeps predicate columns separate from projected
+// columns. It only accepts a single-source field projection with a simple
+// field/literal predicate, so every other query keeps the general executor.
+func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
+	columnar, ok := resolver.(SQLColumnarSourceResolver)
+	if !ok || !sqlCanColumnarScan(q, outer) {
+		return SQLQueryResult{}, false, nil
+	}
+	fields, predicateFields, projectionFields, ok := sqlColumnarScanFields(q)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	started := time.Now()
+	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
+	if err != nil || !available {
+		return SQLQueryResult{}, available, err
+	}
+	if batch.Rows < 0 {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned a negative row count", q.from.key)
+	}
+	if control != nil && batch.Rows > control.maxRows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, control.maxRows)
+	}
+	for _, field := range fields {
+		if len(batch.Columns[field]) != batch.Rows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, len(batch.Columns[field]), field, batch.Rows)
+		}
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
+	}
+
+	matched := make([]int, 0, batch.Rows)
+	if q.where.kind == "" {
+		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+			matched = append(matched, rowIndex)
+		}
+	} else {
+		filterStarted := time.Now()
+		rows := make([]sqlExecRow, batch.Rows)
+		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+			row := SQLRow{}
+			for _, field := range predicateFields {
+				row[field] = batch.Columns[field][rowIndex]
+			}
+			rows[rowIndex] = sqlExecRow{sources: map[string]SQLRow{q.from.alias: row}, order: []string{q.from.alias}, ordinals: map[string]int{q.from.alias: rowIndex}}
+		}
+		values, err := evalSQLExprBatch(q.where, rows, nil)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		for rowIndex, value := range values {
+			if err := sqlExpressionError(value); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			if sqlTruthy(value) {
+				matched = append(matched, rowIndex)
+			}
+		}
+		if metrics != nil {
+			metrics.record("COLUMNAR FILTER", sqlExplainExpression(q.where), batch.Rows, len(matched), filterStarted)
+		}
+	}
+
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	materializeStarted := time.Now()
+	for position, rowIndex := range matched {
+		if position < q.offset {
+			continue
+		}
+		if q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range q.selects {
+			row[result.Columns[selectIndex]] = batch.Columns[item.expr.name][rowIndex]
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	if metrics != nil {
+		metrics.record("LATE MATERIALIZATION", strings.Join(projectionFields, ","), len(matched), len(result.Rows), materializeStarted)
+	}
+	return result, true, nil
+}
+
+func sqlCanColumnarScan(q *sqlQuery, outer *sqlExecRow) bool {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+		return false
+	}
+	for _, item := range q.selects {
+		if item.expr.kind != "field" || (item.expr.qualifier != "" && item.expr.qualifier != q.from.alias) {
+			return false
+		}
+	}
+	return q.where.kind == "" || sqlColumnarPredicateFields(q.where, q.from.alias, nil)
+}
+
+func sqlColumnarScanFields(q *sqlQuery) (fields, predicateFields, projectionFields []string, ok bool) {
+	if q == nil || q.from == nil {
+		return nil, nil, nil, false
+	}
+	seen := map[string]bool{}
+	add := func(field string) {
+		if !seen[field] {
+			seen[field] = true
+			fields = append(fields, field)
+		}
+	}
+	predicateSet := map[string]bool{}
+	if q.where.kind != "" {
+		if !sqlColumnarPredicateFields(q.where, q.from.alias, nil) {
+			return nil, nil, nil, false
+		}
+		sqlColumnarPredicateFields(q.where, q.from.alias, func(field string) {
+			if !predicateSet[field] {
+				predicateSet[field] = true
+				predicateFields = append(predicateFields, field)
+				add(field)
+			}
+		})
+	}
+	for _, item := range q.selects {
+		field := item.expr.name
+		projectionFields = append(projectionFields, field)
+		add(field)
+	}
+	return fields, predicateFields, projectionFields, true
+}
+
+func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bool {
+	switch expr.kind {
+	case "literal":
+		return true
+	case "field":
+		if expr.qualifier != "" && expr.qualifier != alias {
+			return false
+		}
+		if add != nil {
+			add(expr.name)
+		}
+		return true
+	case "binary":
+		if expr.left == nil || !sqlColumnarPredicateFields(*expr.left, alias, add) {
+			return false
+		}
+		return expr.right == nil || sqlColumnarPredicateFields(*expr.right, alias, add)
+	default:
+		return false
+	}
+}
+
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
@@ -6721,6 +6874,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		indexed := ordered
 		if !indexed && q.sample == nil {
 			base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
+		}
+		if !indexed && q.sample == nil {
+			if result, handled, err := executeSQLColumnarScan(q, resolver, control, metrics, outer); handled {
+				return result, err
+			}
 		}
 		if !indexed {
 			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)

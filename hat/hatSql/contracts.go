@@ -49,6 +49,20 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// ColumnarBatch stores one source scan as field-aligned value slices. Every
+// requested column must contain Rows values; absent JSON fields are nil.
+type ColumnarBatch struct {
+	Columns map[string][]interface{}
+	Rows    int
+}
+
+// ColumnarSourceResolver optionally supplies selected source fields in
+// columnar form. The SQL executor uses it only for a narrow single-source scan
+// whose predicate and projection can retain the established row semantics.
+type ColumnarSourceResolver interface {
+	ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
+}
+
 // SourceResolverFunc adapts a function into SourceResolver.
 type SourceResolverFunc func(name string, key string) ([]Row, error)
 
