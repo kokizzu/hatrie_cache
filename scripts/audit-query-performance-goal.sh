@@ -117,6 +117,54 @@ if [ "${1:-}" = "columnar-benchmark-fixture" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "persisted-compression" ]; then
+	printf '%s\n' '=== persisted compression and codec files ==='
+	rg -l -i 'compress|codec|marshal|snapshot' ./hat/hatStorage ./hat/hatSnapshot ./hat/hatJournal ./hat/hatCache --glob '*.go'
+	printf '%s\n' '=== durable storage compression references ==='
+	rg -n -C 3 -i 'compress|codec|gzip|snappy|zstd' ./hat/hatStorage ./hat/hatSnapshot ./hat/hatJournal --glob '*.go'
+	exit 0
+fi
+
+if [ "${1:-}" = "persisted-compression-storage-seams" ]; then
+	printf '%s\n' '=== snapshot format and compression contract ==='
+	sed -n '1,260p' ./hat/hatSnapshot/snapshot.go
+	printf '%s\n' '=== persistent backend format and value envelope ==='
+	rg -n -C 6 -i 'format|encode|decode|marshal|unmarshal|compress|encryption' ./hat/hatCache/leveldb_storage_format.go ./hat/hatCache/leveldb_store.go ./hat/hatCache/pebble_store.go ./hat/hatCache/storage_backend.go ./hat/hatCache/persistent_encryption.go
+	exit 0
+fi
+
+if [ "${1:-}" = "partition-pruning" ]; then
+	printf '%s\n' '=== partition pruning API and tests ==='
+	rg -n -C 5 'SQLPartitionPruningPlan|Partition.*Prun|partition.*prun' ./hat/hatCache --glob '*.go'
+	exit 0
+fi
+
+if [ "${1:-}" = "hot-key-skew" ]; then
+	printf '%s\n' '=== skew and hot-key stats ==='
+	rg -n -C 5 -i 'skew|hot.key|frequency|dominant' ./hat/hatCache/sql_query.go ./hat/hatSql/query.go ./hat/hatCache/*test.go ./hat/hatSql/*test.go
+	exit 0
+fi
+
+if [ "${1:-}" = "aggregate-skew" ]; then
+	printf '%s\n' '=== grouped aggregate state and spill control ==='
+	rg -n -C 5 'grouped|groupBy|SpillGroup|GroupAggregate|max.*[Gg]roup|group.*[Ll]imit' ./hat/hatSql/query.go ./hat/hatSql/contracts.go
+	exit 0
+fi
+
+if [ "${1:-}" = "time-partitioning" ]; then
+	printf '%s\n' '=== time-series and partition public API ==='
+	rg -n -C 5 'TimeSeries|time.series|ConfigureLocalPartitions|LocalPartition' ./hat/hatCache ./hat/hatPartition --glob '*.go'
+	exit 0
+fi
+
+if [ "${1:-}" = "mixed-workload-benchmarks" ]; then
+	printf '%s\n' '=== benchmark commands and workload fixtures ==='
+	sed -n '1,260p' ./cmd/hatrie-sqlbench/main.go
+	sed -n '1,180p' ./cmd/hatrie-sqlbench/main_test.go
+	rg -n -C 4 -i 'mixed|workload|read.write' ./hat/hatCache --glob '*benchmark_test.go'
+	exit 0
+fi
+
 if [ "${1:-}" = "details" ]; then
 	printf '%s\n' 'SQL execution and index paths:'
 	rg -n -C 3 -i 'bitmap|intersection|covering|column|late material|partition|skew|hot.key|rebuild' \

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"hatrie_cache/hat/hatCache"
 	"hatrie_cache/hat/hatSql"
 )
 
@@ -25,18 +26,20 @@ type report struct {
 }
 
 type scenarioResult struct {
-	Name           string   `json:"name"`
-	Rows           int      `json:"rows"`
-	Iterations     int      `json:"iterations"`
-	ElapsedNanos   int64    `json:"elapsed_nanos"`
-	RowsPerSecond  float64  `json:"rows_per_second"`
-	BytesAllocated uint64   `json:"bytes_allocated"`
-	Allocations    uint64   `json:"allocations"`
-	BytesPerRun    float64  `json:"bytes_per_run"`
-	AllocsPerRun   float64  `json:"allocations_per_run"`
-	SpillBytes     int64    `json:"spill_bytes"`
-	PlanSignature  string   `json:"plan_signature"`
-	Plan           []string `json:"plan"`
+	Name                string   `json:"name"`
+	Rows                int      `json:"rows"`
+	Iterations          int      `json:"iterations"`
+	Operations          int      `json:"operations"`
+	ElapsedNanos        int64    `json:"elapsed_nanos"`
+	RowsPerSecond       float64  `json:"rows_per_second"`
+	OperationsPerSecond float64  `json:"operations_per_second"`
+	BytesAllocated      uint64   `json:"bytes_allocated"`
+	Allocations         uint64   `json:"allocations"`
+	BytesPerRun         float64  `json:"bytes_per_run"`
+	AllocsPerRun        float64  `json:"allocations_per_run"`
+	SpillBytes          int64    `json:"spill_bytes"`
+	PlanSignature       string   `json:"plan_signature"`
+	Plan                []string `json:"plan"`
 }
 
 type scenario struct {
@@ -95,6 +98,11 @@ func run(ctx context.Context, rows, iterations int) (report, error) {
 		}
 		output.Results = append(output.Results, measured)
 	}
+	mixed, err := runMixedCacheScenario(ctx, iterations)
+	if err != nil {
+		return report{}, fmt.Errorf("mixed_cache: %w", err)
+	}
+	output.Results = append(output.Results, mixed)
 	return output, nil
 }
 
@@ -136,6 +144,7 @@ func runScenario(ctx context.Context, scenario scenario, iterations int) (scenar
 		Name:           scenario.name,
 		Rows:           outputRows,
 		Iterations:     iterations,
+		Operations:     iterations,
 		ElapsedNanos:   elapsed.Nanoseconds(),
 		BytesAllocated: after.TotalAlloc - before.TotalAlloc,
 		Allocations:    after.Mallocs - before.Mallocs,
@@ -145,10 +154,97 @@ func runScenario(ctx context.Context, scenario scenario, iterations int) (scenar
 	}
 	if elapsed > 0 {
 		result.RowsPerSecond = float64(outputRows) / elapsed.Seconds()
+		result.OperationsPerSecond = float64(iterations) / elapsed.Seconds()
 	}
 	result.BytesPerRun = float64(result.BytesAllocated) / float64(iterations)
 	result.AllocsPerRun = float64(result.Allocations) / float64(iterations)
 	return result, nil
+}
+
+const mixedCacheOperationsPerIteration = 100
+
+func runMixedCacheScenario(ctx context.Context, iterations int) (scenarioResult, error) {
+	trie := hatCache.CreateHatTrie()
+	defer trie.Destroy()
+	for index := 0; index < 100; index++ {
+		trie.UpsertString("mixed:string:"+strconv.Itoa(index), "value")
+	}
+	trie.UpsertCounter("mixed:counter", 0)
+	trie.UpsertString("mixed:events", mixedCacheEvents())
+	query := "FROM CACHE('mixed:events') AS event WHERE event.bucket = 3 SELECT event.id"
+	analysis, err := hatSql.ExecuteSQLQueryContext(ctx, "EXPLAIN ANALYZE "+query, trie, hatSql.QueryOptions{})
+	if err != nil {
+		return scenarioResult{}, err
+	}
+	plan, spillBytes := summarizePlan(analysis.Plan)
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	started := time.Now()
+	outputRows := 0
+	for iteration := 0; iteration < iterations; iteration++ {
+		for index := 0; index < 80; index++ {
+			if response := trie.ExecuteCommand(hatCache.CacheCommandRequest{Command: "GET", Key: "mixed:string:" + strconv.Itoa(index)}); !response.OK {
+				return scenarioResult{}, fmt.Errorf("GET mixed:string:%d failed", index)
+			}
+		}
+		for index := 0; index < 5; index++ {
+			if response := trie.ExecuteCommand(hatCache.CacheCommandRequest{Command: "SETSTR", Key: "mixed:string:" + strconv.Itoa(index), Value: "value"}); !response.OK {
+				return scenarioResult{}, fmt.Errorf("SETSTR mixed:string:%d failed", index)
+			}
+		}
+		for index := 0; index < 5; index++ {
+			if response := trie.ExecuteCommand(hatCache.CacheCommandRequest{Command: "EXISTS", Key: "mixed:string:" + strconv.Itoa(index)}); !response.OK {
+				return scenarioResult{}, fmt.Errorf("EXISTS mixed:string:%d failed", index)
+			}
+		}
+		for index := 0; index < 5; index++ {
+			if response := trie.ExecuteCommand(hatCache.CacheCommandRequest{Command: "INC", Key: "mixed:counter", Value: "1"}); !response.OK {
+				return scenarioResult{}, fmt.Errorf("INC mixed:counter failed")
+			}
+		}
+		for index := 0; index < 5; index++ {
+			result, err := hatSql.ExecuteSQLQueryContext(ctx, query, trie, hatSql.QueryOptions{})
+			if err != nil {
+				return scenarioResult{}, err
+			}
+			outputRows += len(result.Rows)
+		}
+	}
+	elapsed := time.Since(started)
+	runtime.ReadMemStats(&after)
+	result := scenarioResult{
+		Name:           "mixed_cache",
+		Rows:           outputRows,
+		Iterations:     iterations,
+		Operations:     mixedCacheOperationsPerIteration * iterations,
+		ElapsedNanos:   elapsed.Nanoseconds(),
+		BytesAllocated: after.TotalAlloc - before.TotalAlloc,
+		Allocations:    after.Mallocs - before.Mallocs,
+		SpillBytes:     spillBytes,
+		Plan:           plan,
+		PlanSignature:  strings.Join(plan, " -> "),
+	}
+	if elapsed > 0 {
+		result.RowsPerSecond = float64(outputRows) / elapsed.Seconds()
+		result.OperationsPerSecond = float64(result.Operations) / elapsed.Seconds()
+	}
+	result.BytesPerRun = float64(result.BytesAllocated) / float64(iterations)
+	result.AllocsPerRun = float64(result.Allocations) / float64(iterations)
+	return result, nil
+}
+
+func mixedCacheEvents() string {
+	var builder strings.Builder
+	builder.WriteByte('[')
+	for index := 0; index < 64; index++ {
+		if index > 0 {
+			builder.WriteByte(',')
+		}
+		fmt.Fprintf(&builder, `{"id":%d,"bucket":%d,"payload":"analytics"}`, index, index%8)
+	}
+	builder.WriteByte(']')
+	return builder.String()
 }
 
 func summarizePlan(steps []hatSql.ExplainStep) ([]string, int64) {

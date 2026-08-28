@@ -13,16 +13,19 @@ func TestRunReportsThroughputAllocationSpillAndPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	if report.Schema != "hatrie-cache-sql-benchmark/v1" || len(report.Results) != 3 {
+	if report.Schema != "hatrie-cache-sql-benchmark/v1" || len(report.Results) != 4 {
 		t.Fatalf("report = %#v", report)
 	}
 	for _, result := range report.Results {
-		if result.Rows <= 0 || result.RowsPerSecond <= 0 || result.Allocations == 0 || result.BytesAllocated == 0 || result.PlanSignature == "" {
+		if result.Rows <= 0 || result.RowsPerSecond <= 0 || result.Operations <= 0 || result.OperationsPerSecond <= 0 || result.Allocations == 0 || result.BytesAllocated == 0 || result.PlanSignature == "" {
 			t.Fatalf("scenario %q = %#v, want measured throughput, allocation, and plan", result.Name, result)
 		}
 	}
 	if result := report.Results[1]; result.Name != "external_sort" || result.SpillBytes <= 0 || !strings.Contains(result.PlanSignature, "EXTERNAL SORT") {
 		t.Fatalf("sort result = %#v, want external spill plan", result)
+	}
+	if result := report.Results[3]; result.Name != "mixed_cache" || result.Rows <= 0 || !strings.Contains(result.PlanSignature, "COLUMNAR SCAN") {
+		t.Fatalf("mixed result = %#v, want measured mixed cache workload with columnar query plan", result)
 	}
 }
 

@@ -1151,6 +1151,45 @@ review-sql-columnar-scans:
 commit-sql-columnar-scans:
 	sh ./scripts/commit-sql-columnar-scans.sh
 
+audit-persisted-compression:
+	sh ./scripts/audit-query-performance-goal.sh persisted-compression
+
+audit-persisted-compression-storage-seams:
+	sh ./scripts/audit-query-performance-goal.sh persisted-compression-storage-seams
+
+audit-partition-pruning:
+	sh ./scripts/audit-query-performance-goal.sh partition-pruning
+
+audit-hot-key-skew:
+	sh ./scripts/audit-query-performance-goal.sh hot-key-skew
+
+audit-aggregate-skew:
+	sh ./scripts/audit-query-performance-goal.sh aggregate-skew
+
+audit-time-partitioning:
+	sh ./scripts/audit-query-performance-goal.sh time-partitioning
+
+audit-mixed-workload-benchmarks:
+	sh ./scripts/audit-query-performance-goal.sh mixed-workload-benchmarks
+
+benchmark-mixed-workload:
+	sh ./scripts/benchmark-mixed-workload.sh
+
+test-mixed-workload-corpus:
+	sh ./scripts/test-mixed-workload-corpus.sh
+
+format-mixed-workload-corpus:
+	sh ./scripts/format-mixed-workload-corpus.sh
+
+run-mixed-workload-corpus:
+	sh ./scripts/run-mixed-workload-corpus.sh
+
+review-mixed-workload-corpus:
+	sh ./scripts/review-mixed-workload-corpus.sh
+
+commit-mixed-workload-corpus:
+	sh ./scripts/commit-mixed-workload-corpus.sh
+
 audit-query-performance-columnar-implementation-seams:
 	sh ./scripts/audit-query-performance-goal.sh columnar-implementation-seams
 
