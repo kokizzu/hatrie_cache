@@ -1358,6 +1358,18 @@ review-namespace-lifecycle:
 commit-namespace-lifecycle:
 	sh ./scripts/commit-namespace-lifecycle.sh
 
+test-integrity-repair:
+	sh ./scripts/test-integrity-repair.sh
+
+format-integrity-repair:
+	sh ./scripts/format-integrity-repair.sh
+
+review-integrity-repair:
+	sh ./scripts/review-integrity-repair.sh
+
+commit-integrity-repair:
+	sh ./scripts/commit-integrity-repair.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
