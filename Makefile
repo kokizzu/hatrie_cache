@@ -1301,6 +1301,15 @@ review-sql-catalog:
 commit-sql-catalog:
 	sh ./scripts/commit-sql-catalog.sh
 
+test-sql-session:
+	sh ./scripts/test-sql-session.sh
+
+format-sql-session:
+	sh ./scripts/format-sql-session.sh
+
+commit-sql-session:
+	sh ./scripts/commit-sql-session.sh
+
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
