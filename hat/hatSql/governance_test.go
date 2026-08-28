@@ -85,3 +85,96 @@ func TestNamespaceQueryGovernorAdmitsNamespacesIndependently(t *testing.T) {
 		t.Fatal("first namespace query did not finish")
 	}
 }
+
+func TestNamespaceQueryGateAdmitsWaitersFIFO(t *testing.T) {
+	gate := newNamespaceQueryGate(1)
+	if err := gate.acquire(context.Background()); err != nil {
+		t.Fatalf("initial acquire() error = %v", err)
+	}
+
+	started := make(chan int, 2)
+	release := make(chan struct{})
+	for index := 1; index <= 2; index++ {
+		index := index
+		go func() {
+			if err := gate.acquire(context.Background()); err != nil {
+				return
+			}
+			started <- index
+			<-release
+			gate.release()
+		}()
+		waitForNamespaceGateWaiters(t, gate, index)
+	}
+
+	gate.release()
+	select {
+	case got := <-started:
+		if got != 1 {
+			t.Fatalf("first admitted waiter = %d, want 1", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first waiter was not admitted")
+	}
+	release <- struct{}{}
+	select {
+	case got := <-started:
+		if got != 2 {
+			t.Fatalf("second admitted waiter = %d, want 2", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second waiter was not admitted")
+	}
+	release <- struct{}{}
+}
+
+func TestNamespaceQueryGateSkipsCanceledWaiter(t *testing.T) {
+	gate := newNamespaceQueryGate(1)
+	if err := gate.acquire(context.Background()); err != nil {
+		t.Fatalf("initial acquire() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	canceled := make(chan error, 1)
+	go func() { canceled <- gate.acquire(ctx) }()
+	waitForNamespaceGateWaiters(t, gate, 1)
+	cancel()
+	select {
+	case err := <-canceled:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled acquire() error = %v, want context canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+
+	admitted := make(chan struct{})
+	go func() {
+		if err := gate.acquire(context.Background()); err == nil {
+			close(admitted)
+		}
+	}()
+	waitForNamespaceGateWaiters(t, gate, 1)
+	gate.release()
+	select {
+	case <-admitted:
+	case <-time.After(time.Second):
+		t.Fatal("live waiter was blocked behind canceled waiter")
+	}
+	gate.release()
+}
+
+func waitForNamespaceGateWaiters(t *testing.T, gate *namespaceQueryGate, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		gate.mu.Lock()
+		count := len(gate.waiters)
+		gate.mu.Unlock()
+		if count >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("waiting gate waiters = fewer than %d", want)
+}

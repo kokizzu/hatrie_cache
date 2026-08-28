@@ -1321,6 +1321,18 @@ format-schema-materialized:
 
 commit-schema-materialized:
 	sh ./scripts/commit-schema-materialized.sh
+
+test-hat-sql-governance:
+	sh ./scripts/test-hat-sql-governance.sh
+
+format-hat-sql-governance:
+	sh ./scripts/format-hat-sql-governance.sh
+
+review-fair-query-scheduling:
+	sh ./scripts/review-fair-query-scheduling.sh
+
+commit-fair-query-scheduling:
+	sh ./scripts/commit-fair-query-scheduling.sh
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 

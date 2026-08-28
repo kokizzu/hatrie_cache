@@ -110,7 +110,7 @@ type NamespaceQueryGovernor struct {
 	namespaces map[string]NamespaceResourceLimits
 
 	mu    sync.Mutex
-	gates map[string]chan struct{}
+	gates map[string]*namespaceQueryGate
 }
 
 // NewNamespaceQueryGovernor validates and copies the supplied static policies.
@@ -133,7 +133,7 @@ func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[
 	return &NamespaceQueryGovernor{
 		defaults:   defaults,
 		namespaces: copyNamespaces,
-		gates:      make(map[string]chan struct{}),
+		gates:      make(map[string]*namespaceQueryGate),
 	}, nil
 }
 
@@ -169,7 +169,7 @@ func (governor *NamespaceQueryGovernor) limitsFor(namespace string) NamespaceRes
 	return governor.defaults
 }
 
-func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits NamespaceResourceLimits) chan struct{} {
+func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits NamespaceResourceLimits) *namespaceQueryGate {
 	if limits.MaxConcurrentQueries == 0 {
 		return nil
 	}
@@ -178,7 +178,7 @@ func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits Namespa
 	if gate := governor.gates[namespace]; gate != nil {
 		return gate
 	}
-	gate := make(chan struct{}, limits.MaxConcurrentQueries)
+	gate := newNamespaceQueryGate(limits.MaxConcurrentQueries)
 	governor.gates[namespace] = gate
 	return gate
 }
@@ -198,12 +198,93 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 	limits := governor.limitsFor(namespace)
 	gate := governor.gateFor(namespace, limits)
 	if gate != nil {
-		select {
-		case gate <- struct{}{}:
-			defer func() { <-gate }()
-		case <-ctx.Done():
-			return SQLQueryResult{}, ctx.Err()
+		if err := gate.acquire(ctx); err != nil {
+			return SQLQueryResult{}, err
 		}
+		defer gate.release()
 	}
 	return ExecuteSQLQueryParameters(ctx, source, resolver, parameters, limits.Apply(options))
+}
+
+// namespaceQueryGate bounds one namespace while admitting waiters in arrival
+// order. A canceled waiter is removed before it can consume a released slot.
+type namespaceQueryGate struct {
+	mu       sync.Mutex
+	capacity int
+	running  int
+	waiters  []*namespaceQueryWaiter
+}
+
+type namespaceQueryWaiter struct {
+	ready     chan struct{}
+	granted   bool
+	cancelled bool
+}
+
+func newNamespaceQueryGate(capacity int) *namespaceQueryGate {
+	return &namespaceQueryGate{capacity: capacity}
+}
+
+func (gate *namespaceQueryGate) acquire(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	gate.mu.Lock()
+	if gate.running < gate.capacity && len(gate.waiters) == 0 {
+		gate.running++
+		gate.mu.Unlock()
+		return nil
+	}
+	waiter := &namespaceQueryWaiter{ready: make(chan struct{})}
+	gate.waiters = append(gate.waiters, waiter)
+	gate.mu.Unlock()
+
+	select {
+	case <-waiter.ready:
+		if err := ctx.Err(); err != nil {
+			gate.release()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		gate.mu.Lock()
+		if !waiter.granted {
+			waiter.cancelled = true
+			gate.removeWaiterLocked(waiter)
+			gate.mu.Unlock()
+			return ctx.Err()
+		}
+		gate.mu.Unlock()
+		gate.release()
+		return ctx.Err()
+	}
+}
+
+func (gate *namespaceQueryGate) release() {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	for len(gate.waiters) > 0 {
+		waiter := gate.waiters[0]
+		gate.waiters[0] = nil
+		gate.waiters = gate.waiters[1:]
+		if waiter.cancelled {
+			continue
+		}
+		waiter.granted = true
+		close(waiter.ready)
+		return
+	}
+	gate.running--
+}
+
+func (gate *namespaceQueryGate) removeWaiterLocked(target *namespaceQueryWaiter) {
+	for index, waiter := range gate.waiters {
+		if waiter != target {
+			continue
+		}
+		copy(gate.waiters[index:], gate.waiters[index+1:])
+		gate.waiters[len(gate.waiters)-1] = nil
+		gate.waiters = gate.waiters[:len(gate.waiters)-1]
+		return
+	}
 }
