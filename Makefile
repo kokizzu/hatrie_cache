@@ -1433,6 +1433,18 @@ review-virtual-sources:
 commit-virtual-sources:
 	sh ./scripts/commit-virtual-sources.sh
 
+test-sql-events:
+	sh ./scripts/test-sql-events.sh
+
+format-sql-events:
+	sh ./scripts/format-sql-events.sh
+
+review-sql-events:
+	sh ./scripts/review-sql-events.sh
+
+commit-sql-events:
+	sh ./scripts/commit-sql-events.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
