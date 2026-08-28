@@ -1421,6 +1421,18 @@ review-sql-extensions:
 commit-sql-extensions:
 	sh ./scripts/commit-sql-extensions.sh
 
+test-virtual-sources:
+	sh ./scripts/test-virtual-sources.sh
+
+format-virtual-sources:
+	sh ./scripts/format-virtual-sources.sh
+
+review-virtual-sources:
+	sh ./scripts/review-virtual-sources.sh
+
+commit-virtual-sources:
+	sh ./scripts/commit-virtual-sources.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
