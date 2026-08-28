@@ -1333,6 +1333,18 @@ review-fair-query-scheduling:
 
 commit-fair-query-scheduling:
 	sh ./scripts/commit-fair-query-scheduling.sh
+
+test-hat-sql-client:
+	sh ./scripts/test-hat-sql-client.sh
+
+format-hat-sql-client:
+	sh ./scripts/format-hat-sql-client.sh
+
+review-sql-driver-iterator:
+	sh ./scripts/review-sql-driver-iterator.sh
+
+commit-sql-driver-iterator:
+	sh ./scripts/commit-sql-driver-iterator.sh
 audit-time-partition-state:
 	sh ./scripts/audit-query-performance-goal.sh time-partition-state
 
