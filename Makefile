@@ -1670,6 +1670,24 @@ inspect-sql-source-ownership:
 inspect-sql-adaptive-storage:
 	sh ./scripts/inspect-sql-adaptive-storage.sh
 
+inspect-sql-execution-arena:
+	sh ./scripts/inspect-sql-execution-arena.sh
+
+format-sql-columnar-numeric-conjunction:
+	sh ./scripts/format-sql-columnar-numeric-conjunction.sh
+
+test-sql-columnar-numeric-conjunction:
+	sh ./scripts/test-sql-columnar-numeric-conjunction.sh
+
+benchmark-sql-columnar-numeric-conjunction:
+	sh ./scripts/benchmark-sql-columnar-numeric-conjunction.sh
+
+review-sql-columnar-numeric-conjunction:
+	sh ./scripts/review-sql-columnar-numeric-conjunction.sh
+
+commit-sql-columnar-numeric-conjunction:
+	sh ./scripts/commit-sql-columnar-numeric-conjunction.sh
+
 format-sql-adaptive-concurrency:
 	sh ./scripts/format-sql-adaptive-concurrency.sh
 

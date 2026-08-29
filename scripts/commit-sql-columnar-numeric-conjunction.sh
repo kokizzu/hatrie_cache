@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+git diff --check -- Makefile hat/hatSql/query.go hat/hatCache/sql_columnar_numeric_conjunction_test.go hat/hatCache/sql_columnar_numeric_conjunction_benchmark_test.go scripts/inspect-sql-execution-arena.sh scripts/format-sql-columnar-numeric-conjunction.sh scripts/test-sql-columnar-numeric-conjunction.sh scripts/benchmark-sql-columnar-numeric-conjunction.sh scripts/review-sql-columnar-numeric-conjunction.sh scripts/commit-sql-columnar-numeric-conjunction.sh
+git add -- Makefile hat/hatSql/query.go hat/hatCache/sql_columnar_numeric_conjunction_test.go hat/hatCache/sql_columnar_numeric_conjunction_benchmark_test.go scripts/inspect-sql-execution-arena.sh scripts/format-sql-columnar-numeric-conjunction.sh scripts/test-sql-columnar-numeric-conjunction.sh scripts/benchmark-sql-columnar-numeric-conjunction.sh scripts/review-sql-columnar-numeric-conjunction.sh scripts/commit-sql-columnar-numeric-conjunction.sh
+git commit --only -m 'perf: fuse SQL numeric columnar conjunctions' -- Makefile hat/hatSql/query.go hat/hatCache/sql_columnar_numeric_conjunction_test.go hat/hatCache/sql_columnar_numeric_conjunction_benchmark_test.go scripts/inspect-sql-execution-arena.sh scripts/format-sql-columnar-numeric-conjunction.sh scripts/test-sql-columnar-numeric-conjunction.sh scripts/benchmark-sql-columnar-numeric-conjunction.sh scripts/review-sql-columnar-numeric-conjunction.sh scripts/commit-sql-columnar-numeric-conjunction.sh
+git push origin master

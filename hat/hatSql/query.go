@@ -6768,12 +6768,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
-	} else if field, operator, value, numeric := sqlColumnarNumericPredicate(q.where, q.from.alias); numeric {
+	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
-			candidate, _ := batch.Value(field, rowIndex)
-			number, ok := sqlNumber(candidate)
-			return ok && sqlColumnarNumericMatches(number, operator, value)
+			for _, predicate := range predicates {
+				candidate, _ := batch.Value(predicate.field, rowIndex)
+				number, ok := sqlNumber(candidate)
+				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					return false
+				}
+			}
+			return true
 		})
 		if metrics != nil {
 			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
@@ -7122,6 +7127,34 @@ func sqlColumnarNumericPredicate(expr sqlExpr, alias string) (field, operator st
 		return expr.right.name, sqlReverseComparisonOperator(expr.op), value, ok && sqlColumnarNumericOperator(expr.op)
 	}
 	return "", "", 0, false
+}
+
+type sqlColumnarNumericFilter struct {
+	field    string
+	operator string
+	value    float64
+}
+
+// sqlColumnarNumericConjunction accepts a direct numeric predicate or an AND
+// tree composed entirely of direct numeric predicates.
+func sqlColumnarNumericConjunction(expr sqlExpr, alias string) ([]sqlColumnarNumericFilter, bool) {
+	predicates := make([]sqlColumnarNumericFilter, 0, 2)
+	var collect func(sqlExpr) bool
+	collect = func(current sqlExpr) bool {
+		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
+			return collect(*current.left) && collect(*current.right)
+		}
+		field, operator, value, ok := sqlColumnarNumericPredicate(current, alias)
+		if !ok {
+			return false
+		}
+		predicates = append(predicates, sqlColumnarNumericFilter{field: field, operator: operator, value: value})
+		return true
+	}
+	if !collect(expr) {
+		return nil, false
+	}
+	return predicates, len(predicates) > 0
 }
 
 func sqlColumnarDictionaryPredicate(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, string, string, SQLCollation, bool) {
