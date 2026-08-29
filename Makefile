@@ -847,6 +847,12 @@ test-sql-job-scheduler:
 deliver-sql-job-scheduler:
 	sh ./scripts/deliver-sql-job-scheduler.sh
 
+test-sql-alert-rules:
+	sh ./scripts/test-sql-alert-rules.sh
+
+deliver-sql-alert-rules:
+	sh ./scripts/deliver-sql-alert-rules.sh
+
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
