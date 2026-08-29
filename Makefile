@@ -853,6 +853,12 @@ test-sql-alert-rules:
 deliver-sql-alert-rules:
 	sh ./scripts/deliver-sql-alert-rules.sh
 
+test-sql-refresh-scheduler:
+	sh ./scripts/test-sql-refresh-scheduler.sh
+
+deliver-sql-refresh-scheduler:
+	sh ./scripts/deliver-sql-refresh-scheduler.sh
+
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
