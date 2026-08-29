@@ -1613,6 +1613,18 @@ review-sql-columnar-dictionary:
 commit-sql-columnar-dictionary:
 	sh ./scripts/commit-sql-columnar-dictionary.sh
 
+test-sql-cache-warming:
+	sh ./scripts/test-sql-cache-warming.sh
+
+format-sql-cache-warming:
+	sh ./scripts/format-sql-cache-warming.sh
+
+review-sql-cache-warming:
+	sh ./scripts/review-sql-cache-warming.sh
+
+commit-sql-cache-warming:
+	sh ./scripts/commit-sql-cache-warming.sh
+
 locate-columnar-builder:
 	sh ./scripts/locate-columnar-builder.sh
 
