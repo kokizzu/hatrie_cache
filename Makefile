@@ -2158,3 +2158,13 @@ deliver-sql-external-streaming:
 .PHONY: bench-sql-external-streaming
 bench-sql-external-streaming:
 	sh ./scripts/bench-sql-external-streaming.sh
+.PHONY: inspect-sql-indexes
+inspect-sql-indexes:
+	sh ./scripts/inspect-sql-indexes.sh
+.PHONY: bench-sql-typed-index-baseline
+bench-sql-typed-index-baseline:
+	sh ./scripts/bench-sql-typed-index-baseline.sh
+
+.PHONY: deliver-sql-typed-index-baseline
+deliver-sql-typed-index-baseline:
+	sh ./scripts/deliver-sql-typed-index-baseline.sh

@@ -18,8 +18,9 @@ It is a generic JSON field index. On a changed source value it reparses the
 JSON, constructs an equality map from canonical values to copied `SQLRow`s,
 and creates a sorted row slice for comparisons. That is a **full rebuild** on
 each changed JSON source. It already serves qualified equality/range `WHERE`
-predicates and indexed equality joins (inner and left), but the planner does not use it to
-stream `GROUP BY` or satisfy `ORDER BY`.
+predicates, indexed equality joins (inner and left), and compatible `ORDER BY`
+plans. It does not stream `GROUP BY` runs, and ordered paths still clone rows
+into a query result before `LIMIT` can reduce the working set.
 
 The generic index is a correct baseline, not the target for large or frequently
 updated data: it duplicates row maps, has `interface{}` comparison costs, and
@@ -213,6 +214,22 @@ last use, and planner counters. SQL `EXPLAIN` should show `TYPED INDEX SCAN`,
 `INDEX GROUP`, or `INDEX ORDER`, plus the fallback reason when it declines one.
 
 ## Benchmark and acceptance plan
+
+### Initial generic-index baseline
+
+`make bench-sql-typed-index-baseline` measures 100,000 numeric JSON rows on an
+AMD Ryzen 9 5950X. It compares the current generic field index to a resolver
+that intentionally exposes only full scans:
+
+| Query | Generic index | Full scan | Improvement |
+| --- | ---: | ---: | ---: |
+| selective numeric range | 635 us, 3.08 MB, 1,991 allocs | 315 ms, 232 MB, 3.40M allocs | 495x faster, 75.5x less allocated memory |
+| `ORDER BY id DESC LIMIT 10` | 192 ms, 177 MB, 2.00M allocs | 472 ms, 247 MB, 3.80M allocs | 2.45x faster, 1.40x less allocated memory |
+
+The generic index is therefore a strong correctness and range-query baseline.
+Its ordered path still materializes and clones a large row set, making ordered
+limit scans the first typed-index target. Re-run the benchmark on deployment
+hardware before making acceptance decisions.
 
 Measure the current generic index, a full scan, the HAT-trie string index, and
 the numeric/date sorted-vector index. Use 100k, 1m, and 10m rows; uniform and
