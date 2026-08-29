@@ -6922,7 +6922,7 @@ func (aggregate sqlColumnarNumericAggregate) result() interface{} {
 // expressions, grouping, and ordering so its result remains identical to the
 // general aggregate executor without building source-row maps.
 func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
-	aggregates, fields, predicateField, predicateOperator, predicateValue, ok := sqlColumnarNumericAggregates(q, outer)
+	aggregates, fields, predicates, ok := sqlColumnarNumericAggregates(q, outer)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
@@ -6954,19 +6954,24 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 				return SQLQueryResult{}, true, err
 			}
 		}
-		if predicateField != "" {
-			candidate, _ := batch.Value(predicateField, rowIndex)
+		matchedPredicate := true
+		for _, predicate := range predicates {
+			candidate, _ := batch.Value(predicate.field, rowIndex)
 			number, numeric := sqlNumber(candidate)
-			if !numeric || !sqlColumnarNumericMatches(number, predicateOperator, predicateValue) {
-				continue
+			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+				matchedPredicate = false
+				break
 			}
+		}
+		if !matchedPredicate {
+			continue
 		}
 		matched++
 		for index := range aggregates {
 			aggregates[index].add(batch, rowIndex)
 		}
 	}
-	if metrics != nil && predicateField != "" {
+	if metrics != nil && len(predicates) > 0 {
 		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 	}
 
@@ -6988,15 +6993,15 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	return result, true, nil
 }
 
-func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []sqlColumnarNumericAggregate, fields []string, predicateField, predicateOperator string, predicateValue float64, ok bool) {
+func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []sqlColumnarNumericAggregate, fields []string, predicates []sqlColumnarNumericFilter, ok bool) {
 	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
-		return nil, nil, "", "", 0, false
+		return nil, nil, nil, false
 	}
 	if q.where.kind != "" {
 		var numeric bool
-		predicateField, predicateOperator, predicateValue, numeric = sqlColumnarNumericPredicate(q.where, q.from.alias)
+		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
 		if !numeric {
-			return nil, nil, "", "", 0, false
+			return nil, nil, nil, false
 		}
 	}
 	seen := map[string]bool{}
@@ -7006,35 +7011,37 @@ func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []
 			fields = append(fields, field)
 		}
 	}
-	addField(predicateField)
+	for _, predicate := range predicates {
+		addField(predicate.field)
+	}
 	aggregates = make([]sqlColumnarNumericAggregate, len(q.selects))
 	for index, item := range q.selects {
 		expr := item.expr
 		if expr.kind != "func" || expr.window != nil || expr.filter != nil {
-			return nil, nil, "", "", 0, false
+			return nil, nil, nil, false
 		}
 		aggregate := sqlColumnarNumericAggregate{name: expr.name}
 		switch expr.name {
 		case "COUNT":
 			if len(expr.args) > 1 {
-				return nil, nil, "", "", 0, false
+				return nil, nil, nil, false
 			}
 			if len(expr.args) == 1 && expr.args[0].kind != "star" {
 				if !sqlColumnarAggregateField(expr.args[0], q.from.alias, &aggregate.field) {
-					return nil, nil, "", "", 0, false
+					return nil, nil, nil, false
 				}
 			}
 		case "SUM", "AVG", "MIN", "MAX":
 			if len(expr.args) != 1 || !sqlColumnarAggregateField(expr.args[0], q.from.alias, &aggregate.field) {
-				return nil, nil, "", "", 0, false
+				return nil, nil, nil, false
 			}
 		default:
-			return nil, nil, "", "", 0, false
+			return nil, nil, nil, false
 		}
 		addField(aggregate.field)
 		aggregates[index] = aggregate
 	}
-	return aggregates, fields, predicateField, predicateOperator, predicateValue, true
+	return aggregates, fields, predicates, true
 }
 
 func sqlColumnarAggregateField(expr sqlExpr, alias string, field *string) bool {

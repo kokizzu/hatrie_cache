@@ -1682,6 +1682,21 @@ commit-disable-github-ci:
 commit-repair-incomplete-sql-make-targets:
 	sh ./scripts/commit-repair-incomplete-sql-make-targets.sh
 
+format-sql-columnar-numeric-aggregate-conjunction:
+	sh ./scripts/format-sql-columnar-numeric-aggregate-conjunction.sh
+
+test-sql-columnar-numeric-aggregate-conjunction:
+	sh ./scripts/test-sql-columnar-numeric-aggregate-conjunction.sh
+
+benchmark-sql-columnar-numeric-aggregate-conjunction:
+	sh ./scripts/benchmark-sql-columnar-numeric-aggregate-conjunction.sh
+
+review-sql-columnar-numeric-aggregate-conjunction:
+	sh ./scripts/review-sql-columnar-numeric-aggregate-conjunction.sh
+
+commit-sql-columnar-numeric-aggregate-conjunction:
+	sh ./scripts/commit-sql-columnar-numeric-aggregate-conjunction.sh
+
 
 format-sql-columnar-numeric-conjunction:
 	sh ./scripts/format-sql-columnar-numeric-conjunction.sh
