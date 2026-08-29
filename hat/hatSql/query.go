@@ -6755,6 +6755,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 			matched = append(matched, rowIndex)
 		}
+	} else if field, operator, value, numeric := sqlColumnarNumericPredicate(q.where, q.from.alias); numeric {
+		filterStarted := time.Now()
+		for rowIndex, candidate := range batch.Columns[field] {
+			number, ok := sqlNumber(candidate)
+			if ok && sqlColumnarNumericMatches(number, operator, value) {
+				matched = append(matched, rowIndex)
+			}
+		}
+		if metrics != nil {
+			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, len(matched), filterStarted)
+		}
 	} else {
 		filterStarted := time.Now()
 		rows := make([]sqlExecRow, batch.Rows)
@@ -6867,6 +6878,65 @@ func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bo
 	default:
 		return false
 	}
+}
+
+// sqlColumnarNumericPredicate accepts only a direct numeric field/literal
+// comparison. This proof lets the columnar path avoid per-row maps while the
+// general vector evaluator remains authoritative for every wider SQL shape.
+func sqlColumnarNumericPredicate(expr sqlExpr, alias string) (field, operator string, value float64, ok bool) {
+	if expr.kind != "binary" || expr.left == nil || expr.right == nil {
+		return "", "", 0, false
+	}
+	if expr.left.kind == "field" && (expr.left.qualifier == "" || expr.left.qualifier == alias) && expr.right.kind == "literal" {
+		value, ok = sqlNumber(expr.right.value)
+		return expr.left.name, expr.op, value, ok && sqlColumnarNumericOperator(expr.op)
+	}
+	if expr.right.kind == "field" && (expr.right.qualifier == "" || expr.right.qualifier == alias) && expr.left.kind == "literal" {
+		value, ok = sqlNumber(expr.left.value)
+		return expr.right.name, sqlReverseComparisonOperator(expr.op), value, ok && sqlColumnarNumericOperator(expr.op)
+	}
+	return "", "", 0, false
+}
+
+func sqlColumnarNumericOperator(operator string) bool {
+	switch operator {
+	case "=", "!=", "<>", "<", "<=", ">", ">=":
+		return true
+	}
+	return false
+}
+
+func sqlReverseComparisonOperator(operator string) string {
+	switch operator {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	default:
+		return operator
+	}
+}
+
+func sqlColumnarNumericMatches(number float64, operator string, value float64) bool {
+	switch operator {
+	case "=":
+		return number == value
+	case "!=", "<>":
+		return number != value
+	case "<":
+		return number < value
+	case "<=":
+		return number <= value
+	case ">":
+		return number > value
+	case ">=":
+		return number >= value
+	}
+	return false
 }
 
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {

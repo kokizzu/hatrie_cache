@@ -58,3 +58,38 @@ func TestSQLColumnarScanFiltersBeforeProjectionMaterialization(t *testing.T) {
 	}
 	t.Fatalf("plan = %#v, want COLUMNAR SCAN", explained.Plan)
 }
+
+func TestSQLColumnarScanUsesNumericVectorFilter(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("metrics", `[
+  {"id":1,"value":10,"payload":"unselected payload one"},
+  {"id":2,"value":20,"payload":"unselected payload two"},
+  {"id":3,"value":30,"payload":"unselected payload three"}
+]`)
+	query := "FROM CACHE('metrics') AS metric WHERE metric.value >= 20 SELECT metric.id"
+	result, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if want := []SQLRow{{"id": float64(2)}, {"id": float64(3)}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("columnar rows = %#v, want %#v", result.Rows, want)
+	}
+	materialized, err := ExecuteSQLQuery(query, sqlRowsOnlyResolver{trie: trie})
+	if err != nil {
+		t.Fatalf("materialized ExecuteSQLQuery() error = %v", err)
+	}
+	if !reflect.DeepEqual(result, materialized) {
+		t.Fatalf("columnar result = %#v, materialized result = %#v", result, materialized)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN ANALYZE) error = %v", err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "COLUMNAR NUMERIC FILTER" {
+			return
+		}
+	}
+	t.Fatalf("plan = %#v, want COLUMNAR NUMERIC FILTER", explained.Plan)
+}

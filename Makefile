@@ -1577,6 +1577,33 @@ review-sql-analytics-benchmarks:
 commit-sql-analytics-benchmarks:
 	sh ./scripts/commit-sql-analytics-benchmarks.sh
 
+audit-execution-efficiency-goal:
+	sh ./scripts/audit-execution-efficiency-goal.sh
+
+inspect-execution-efficiency-goal:
+	sh ./scripts/inspect-execution-efficiency-goal.sh
+
+inspect-columnar-implementation:
+	sh ./scripts/inspect-columnar-implementation.sh
+
+inspect-sql-expression-model:
+	sh ./scripts/inspect-sql-expression-model.sh
+
+test-sql-columnar-scan:
+	sh ./scripts/test-sql-columnar-scan.sh
+
+benchmark-sql-columnar-scan:
+	sh ./scripts/benchmark-sql-columnar-scan.sh
+
+format-sql-columnar-numeric-filter:
+	sh ./scripts/format-sql-columnar-numeric-filter.sh
+
+review-sql-columnar-numeric-filter:
+	sh ./scripts/review-sql-columnar-numeric-filter.sh
+
+commit-sql-columnar-numeric-filter:
+	sh ./scripts/commit-sql-columnar-numeric-filter.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
