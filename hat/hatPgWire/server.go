@@ -263,7 +263,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				return err
 			}
 		case 'E':
-			portal, err := parseExecuteMessage(body)
+			portal, maxRows, err := parseExecuteMessage(body)
 			if err != nil {
 				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
 					return err
@@ -277,26 +277,35 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			var result QueryResult
-			if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
-				result, err = parameterizedHandler.QueryParameters(ctx, boundQuery.query, boundQuery.parameters)
-			} else if len(boundQuery.parameters) != 0 {
-				err = errors.New("PostgreSQL bind parameters require a parameterized query handler")
-			} else {
-				result, err = handler.Query(ctx, boundQuery.query)
-			}
-			if err == nil {
-				err = validateQueryResult(result)
-			}
-			if err != nil {
-				if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
-					return err
+			if !boundQuery.executed {
+				if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
+					boundQuery.result, err = parameterizedHandler.QueryParameters(ctx, boundQuery.query, boundQuery.parameters)
+				} else if len(boundQuery.parameters) != 0 {
+					err = errors.New("PostgreSQL bind parameters require a parameterized query handler")
+				} else {
+					boundQuery.result, err = handler.Query(ctx, boundQuery.query)
 				}
-				continue
+				if err == nil {
+					err = validateQueryResult(boundQuery.result)
+				}
+				if err != nil {
+					if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
+						return err
+					}
+					continue
+				}
+				boundQuery.executed = true
 			}
-			if err := writeQueryResult(connection, result); err != nil {
+			endRow := len(boundQuery.result.Rows)
+			if maxRows != 0 && uint64(endRow-boundQuery.nextRow) > uint64(maxRows) {
+				endRow = boundQuery.nextRow + int(maxRows)
+			}
+			complete := endRow == len(boundQuery.result.Rows)
+			if err := writeQueryResultRange(connection, boundQuery.result, boundQuery.nextRow, endRow, complete); err != nil {
 				return err
 			}
+			boundQuery.nextRow = endRow
+			portals[portal] = boundQuery
 		case 'C':
 			target, name, err := parseCloseMessage(body)
 			if err != nil {
@@ -346,6 +355,9 @@ type preparedStatement struct {
 type portalQuery struct {
 	query      string
 	parameters []interface{}
+	result     QueryResult
+	nextRow    int
+	executed   bool
 }
 
 func parseParseMessage(body []byte) (string, string, []uint32, error) {
@@ -422,12 +434,12 @@ func parseBindMessage(body []byte) (string, string, []interface{}, error) {
 	return portal, statement, parameters, nil
 }
 
-func parseExecuteMessage(body []byte) (string, error) {
+func parseExecuteMessage(body []byte) (string, uint32, error) {
 	portal, rest, ok := splitCString(body)
-	if !ok || len(rest) != 4 || binary.BigEndian.Uint32(rest) != 0 {
-		return "", errors.New("only unlimited execute is supported")
+	if !ok || len(rest) != 4 {
+		return "", 0, errors.New("invalid execute message")
 	}
-	return portal, nil
+	return portal, binary.BigEndian.Uint32(rest), nil
 }
 
 func parseCloseMessage(body []byte) (byte, string, error) {
@@ -618,15 +630,25 @@ func writeReadyForQuery(connection net.Conn) error {
 }
 
 func writeQueryResult(connection net.Conn, result QueryResult) error {
+	return writeQueryResultRange(connection, result, 0, len(result.Rows), true)
+}
+
+func writeQueryResultRange(connection net.Conn, result QueryResult, startRow int, endRow int, complete bool) error {
+	if startRow < 0 || endRow < startRow || endRow > len(result.Rows) {
+		return errors.New("invalid PostgreSQL result row range")
+	}
 	if len(result.Fields) > 0 {
 		if err := writeRowDescription(connection, result.Fields); err != nil {
 			return err
 		}
-		for _, row := range result.Rows {
+		for _, row := range result.Rows[startRow:endRow] {
 			if err := writeDataRow(connection, row); err != nil {
 				return err
 			}
 		}
+	}
+	if !complete {
+		return writeMessage(connection, 's', nil)
 	}
 	tag := result.CommandTag
 	if tag == "" {

@@ -336,6 +336,57 @@ func TestServeConnAcceptsFlushBeforeParse(t *testing.T) {
 	}
 }
 
+func TestServeConnFetchesPreparedPortalInRowLimitedBatches(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	calls := make(chan struct{}, 2)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			calls <- struct{}{}
+			first, second := "first", "second"
+			return hatPgWire.QueryResult{Fields: []hatPgWire.Field{{Name: "name"}}, Rows: [][]*string{{&first}, {&second}}}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("statement\x00SELECT name\x00"), 0, 0))
+	readBackendMessage(t, client)
+	bind := append([]byte("portal\x00statement\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x01"))
+	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
+		t.Fatalf("first Execute description = %q, want RowDescription", messageType)
+	}
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'D' || string(body[6:]) != "first" {
+		t.Fatalf("first Execute row = %q %q, want first", messageType, body)
+	}
+	if messageType, _ := readBackendMessage(t, client); messageType != 's' {
+		t.Fatalf("first Execute completion = %q, want PortalSuspended", messageType)
+	}
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x01"))
+	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
+		t.Fatalf("second Execute description = %q, want RowDescription", messageType)
+	}
+	messageType, body = readBackendMessage(t, client)
+	if messageType != 'D' || string(body[6:]) != "second" {
+		t.Fatalf("second Execute row = %q %q, want second", messageType, body)
+	}
+	if messageType, _ := readBackendMessage(t, client); messageType != 'C' {
+		t.Fatalf("second Execute completion = %q, want CommandComplete", messageType)
+	}
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("query executions = %d, want 1", len(calls))
+	}
+}
+
 type typedParameterizedQueryHandler struct {
 	parameters chan<- []interface{}
 }

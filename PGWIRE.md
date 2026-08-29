@@ -30,6 +30,10 @@ returns `NoData` until result-schema inference is available. The package does
 not terminate TLS, so use a TLS proxy or a protected local listener; an SSL
 request receives `N` to permit `sslmode=prefer` fallback.
 
+`Execute` accepts a nonzero row limit for cursor-style fetching. The result is
+materialized once per portal, each execute returns its next row range, and the
+server emits `PortalSuspended` until all rows have been returned.
+
 ## Embed A Listener
 
 ```go
