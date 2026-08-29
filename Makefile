@@ -1595,6 +1595,18 @@ test-sql-columnar-scan:
 benchmark-sql-columnar-scan:
 	sh ./scripts/benchmark-sql-columnar-scan.sh
 
+benchmark-sql-columnar-stream-materialization:
+	sh ./scripts/benchmark-sql-columnar-stream-materialization.sh
+
+format-sql-columnar-stream-materialization:
+	sh ./scripts/format-sql-columnar-stream-materialization.sh
+
+review-sql-columnar-stream-materialization:
+	sh ./scripts/review-sql-columnar-stream-materialization.sh
+
+commit-sql-columnar-stream-materialization:
+	sh ./scripts/commit-sql-columnar-stream-materialization.sh
+
 format-sql-columnar-numeric-filter:
 	sh ./scripts/format-sql-columnar-numeric-filter.sh
 

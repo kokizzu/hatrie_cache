@@ -113,6 +113,39 @@ func TestSQLColumnarScanUsesNumericVectorFilter(t *testing.T) {
 	t.Fatalf("plan = %#v, want COLUMNAR NUMERIC FILTER", explained.Plan)
 }
 
+func TestSQLColumnarScanStreamsDirectNumericMaterialization(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("metrics", `[
+  {"id":1,"value":10},
+  {"id":2,"value":20},
+  {"id":3,"value":30},
+  {"id":4,"value":40}
+]`)
+	query := "FROM CACHE('metrics') AS metric WHERE metric.value >= 20 SELECT metric.id LIMIT 1 OFFSET 1"
+	columnar, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := ExecuteSQLQuery(query, sqlRowsOnlyResolver{trie: trie})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(columnar, materialized) {
+		t.Fatalf("columnar result = %#v, materialized result = %#v", columnar, materialized)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "COLUMNAR STREAM MATERIALIZATION" {
+			return
+		}
+	}
+	t.Fatalf("plan = %#v, want COLUMNAR STREAM MATERIALIZATION", explained.Plan)
+}
+
 func TestSQLColumnarScanUsesNumericVectorAggregate(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

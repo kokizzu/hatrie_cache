@@ -6750,36 +6750,39 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
 
-	matched := make([]int, 0, batch.Rows)
 	if q.where.kind == "" {
-		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-			matched = append(matched, rowIndex)
+		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(int) bool { return true })
+		if metrics != nil {
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), started)
 		}
+		return result, true, nil
 	} else if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		code, found := sqlDictionaryCode(dictionary, value, collation)
-		for rowIndex, candidate := range dictionary.Codes {
-			if operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code) {
-				matched = append(matched, rowIndex)
-			}
-		}
+		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+			candidate := dictionary.Codes[rowIndex]
+			return operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code)
+		})
 		if metrics != nil {
-			metrics.record("COLUMNAR DICTIONARY FILTER", sqlExplainExpression(q.where), batch.Rows, len(matched), filterStarted)
+			metrics.record("COLUMNAR DICTIONARY FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
+		return result, true, nil
 	} else if field, operator, value, numeric := sqlColumnarNumericPredicate(q.where, q.from.alias); numeric {
 		filterStarted := time.Now()
-		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
 			candidate, _ := batch.Value(field, rowIndex)
 			number, ok := sqlNumber(candidate)
-			if ok && sqlColumnarNumericMatches(number, operator, value) {
-				matched = append(matched, rowIndex)
-			}
-		}
+			return ok && sqlColumnarNumericMatches(number, operator, value)
+		})
 		if metrics != nil {
-			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, len(matched), filterStarted)
+			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
+		return result, true, nil
 	} else {
 		filterStarted := time.Now()
+		matched := make([]int, 0, batch.Rows)
 		rows := make([]sqlExecRow, batch.Rows)
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 			row := SQLRow{}
@@ -6803,16 +6806,40 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		if metrics != nil {
 			metrics.record("COLUMNAR FILTER", sqlExplainExpression(q.where), batch.Rows, len(matched), filterStarted)
 		}
-	}
 
+		result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+		materializeStarted := time.Now()
+		for position, rowIndex := range matched {
+			if position < q.offset {
+				continue
+			}
+			if q.limit >= 0 && len(result.Rows) >= q.limit {
+				break
+			}
+			row := make(SQLRow, len(projectionFields))
+			for selectIndex, item := range q.selects {
+				row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+			}
+			result.Rows = append(result.Rows, row)
+		}
+		if metrics != nil {
+			metrics.record("LATE MATERIALIZATION", strings.Join(projectionFields, ","), len(matched), len(result.Rows), materializeStarted)
+		}
+		return result, true, nil
+	}
+}
+
+func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
-	materializeStarted := time.Now()
-	for position, rowIndex := range matched {
-		if position < q.offset {
+	matched := 0
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if !matches(rowIndex) {
 			continue
 		}
-		if q.limit >= 0 && len(result.Rows) >= q.limit {
-			break
+		position := matched
+		matched++
+		if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+			continue
 		}
 		row := make(SQLRow, len(projectionFields))
 		for selectIndex, item := range q.selects {
@@ -6820,10 +6847,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}
 		result.Rows = append(result.Rows, row)
 	}
-	if metrics != nil {
-		metrics.record("LATE MATERIALIZATION", strings.Join(projectionFields, ","), len(matched), len(result.Rows), materializeStarted)
-	}
-	return result, true, nil
+	return result, matched
 }
 
 type sqlColumnarNumericAggregate struct {
