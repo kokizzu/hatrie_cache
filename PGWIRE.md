@@ -29,6 +29,11 @@ emits only `DataRow` messages followed by `PortalSuspended` or
 the PostgreSQL v3 protocol and is covered by the local pgJDBC prepared-query
 integration test.
 
+After an error in `Parse`, `Bind`, `Describe`, `Execute`, `Close`, or another
+extended-query message, the server emits one `ErrorResponse`, discards later
+extended-query messages, and emits one `ReadyForQuery` only when it receives
+`Sync`. Simple-query errors remain immediately followed by `ReadyForQuery`.
+
 `Bind` supports PostgreSQL text-format values and SQL NULL. Declared `bool`,
 `int2`, `int4`, `int8`, `float4`, and `float8` parameters are converted to Go
 values before Hatrie SQL execution; text and unspecified OIDs stay strings.

@@ -140,6 +140,14 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 
 	prepared := make(map[string]preparedStatement)
 	portals := make(map[string]portalQuery)
+	discardUntilSync := false
+	writeExtendedError := func(code string, message string) error {
+		if err := writeError(connection, 'E', code, message); err != nil {
+			return err
+		}
+		discardUntilSync = true
+		return nil
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -147,6 +155,18 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		messageType, body, err := readFrontendMessage(connection, maxMessage)
 		if err != nil {
 			return err
+		}
+		if discardUntilSync {
+			switch messageType {
+			case 'X':
+				return nil
+			case 'S':
+				discardUntilSync = false
+				if err := writeReadyForQuery(connection); err != nil {
+					return err
+				}
+			}
+			continue
 		}
 		switch messageType {
 		case 'X':
@@ -199,13 +219,13 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		case 'P':
 			name, query, parameterTypes, err := parseParseMessage(body)
 			if err != nil {
-				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+				if err := writeExtendedError("08P01", err.Error()); err != nil {
 					return err
 				}
 				continue
 			}
 			if _, exists := prepared[name]; !exists && options.MaxPreparedStatements > 0 && len(prepared) >= options.MaxPreparedStatements {
-				if err := writeErrorAndReady(connection, "54000", "PostgreSQL prepared statement limit exceeded"); err != nil {
+				if err := writeExtendedError("54000", "PostgreSQL prepared statement limit exceeded"); err != nil {
 					return err
 				}
 				continue
@@ -217,33 +237,33 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		case 'B':
 			portal, statement, parameters, err := parseBindMessage(body)
 			if err != nil {
-				if err := writeErrorAndReady(connection, "0A000", err.Error()); err != nil {
+				if err := writeExtendedError("0A000", err.Error()); err != nil {
 					return err
 				}
 				continue
 			}
 			preparedQuery, ok := prepared[statement]
 			if !ok {
-				if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
+				if err := writeExtendedError("26000", "prepared statement does not exist"); err != nil {
 					return err
 				}
 				continue
 			}
 			if len(preparedQuery.parameterTypes) != 0 && len(parameters) != len(preparedQuery.parameterTypes) {
-				if err := writeErrorAndReady(connection, "08P01", "bind parameter count does not match prepared statement"); err != nil {
+				if err := writeExtendedError("08P01", "bind parameter count does not match prepared statement"); err != nil {
 					return err
 				}
 				continue
 			}
 			parameters, err = decodeTextParameters(parameters, preparedQuery.parameterTypes)
 			if err != nil {
-				if err := writeErrorAndReady(connection, "22P02", err.Error()); err != nil {
+				if err := writeExtendedError("22P02", err.Error()); err != nil {
 					return err
 				}
 				continue
 			}
 			if _, exists := portals[portal]; !exists && options.MaxPortals > 0 && len(portals) >= options.MaxPortals {
-				if err := writeErrorAndReady(connection, "54000", "PostgreSQL portal limit exceeded"); err != nil {
+				if err := writeExtendedError("54000", "PostgreSQL portal limit exceeded"); err != nil {
 					return err
 				}
 				continue
@@ -254,14 +274,14 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			}
 		case 'D':
 			if len(body) < 2 || (body[0] != 'S' && body[0] != 'P') {
-				if err := writeErrorAndReady(connection, "08P01", "invalid describe message"); err != nil {
+				if err := writeExtendedError("08P01", "invalid describe message"); err != nil {
 					return err
 				}
 				continue
 			}
 			name, err := requiredCString(body[1:])
 			if err != nil {
-				if err := writeErrorAndReady(connection, "08P01", "invalid describe message"); err != nil {
+				if err := writeExtendedError("08P01", "invalid describe message"); err != nil {
 					return err
 				}
 				continue
@@ -269,7 +289,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			if body[0] == 'S' {
 				statement, ok := prepared[name]
 				if !ok {
-					if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
+					if err := writeExtendedError("26000", "prepared statement does not exist"); err != nil {
 						return err
 					}
 					continue
@@ -283,13 +303,13 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			} else {
 				boundQuery, ok := portals[name]
 				if !ok {
-					if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+					if err := writeExtendedError("34000", "portal does not exist"); err != nil {
 						return err
 					}
 					continue
 				}
 				if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes); err != nil {
-					if err := writeErrorAndReady(connection, pgWireExecutionErrorCode(err), err.Error()); err != nil {
+					if err := writeExtendedError(pgWireExecutionErrorCode(err), err.Error()); err != nil {
 						return err
 					}
 					continue
@@ -306,20 +326,20 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		case 'E':
 			portal, maxRows, err := parseExecuteMessage(body)
 			if err != nil {
-				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+				if err := writeExtendedError("08P01", err.Error()); err != nil {
 					return err
 				}
 				continue
 			}
 			boundQuery, ok := portals[portal]
 			if !ok {
-				if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+				if err := writeExtendedError("34000", "portal does not exist"); err != nil {
 					return err
 				}
 				continue
 			}
 			if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes); err != nil {
-				if err := writeErrorAndReady(connection, pgWireExecutionErrorCode(err), err.Error()); err != nil {
+				if err := writeExtendedError(pgWireExecutionErrorCode(err), err.Error()); err != nil {
 					return err
 				}
 				continue
@@ -337,7 +357,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		case 'C':
 			target, name, err := parseCloseMessage(body)
 			if err != nil {
-				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+				if err := writeExtendedError("08P01", err.Error()); err != nil {
 					return err
 				}
 				continue
@@ -345,7 +365,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			switch target {
 			case 'S':
 				if _, ok := prepared[name]; !ok {
-					if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
+					if err := writeExtendedError("26000", "prepared statement does not exist"); err != nil {
 						return err
 					}
 					continue
@@ -353,7 +373,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				delete(prepared, name)
 			case 'P':
 				if _, ok := portals[name]; !ok {
-					if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+					if err := writeExtendedError("34000", "portal does not exist"); err != nil {
 						return err
 					}
 					continue
@@ -368,7 +388,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				return err
 			}
 		default:
-			if err := writeErrorAndReady(connection, "0A000", "PostgreSQL extended protocol is not supported"); err != nil {
+			if err := writeExtendedError("0A000", "PostgreSQL extended protocol is not supported"); err != nil {
 				return err
 			}
 		}

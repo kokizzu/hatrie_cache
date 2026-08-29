@@ -95,6 +95,7 @@ func TestServeConnLimitsPreparedStatements(t *testing.T) {
 	if messageType != 'E' || !strings.Contains(string(body), "54000") {
 		t.Fatalf("second Parse = %q %q, want program limit error", messageType, body)
 	}
+	writeFrontendMessage(t, client, 'S', nil)
 	readReadyForQuery(t, client)
 	writeFrontendMessage(t, client, 'X', nil)
 	if err := <-errCh; err != nil {
@@ -125,6 +126,7 @@ func TestServeConnLimitsPortals(t *testing.T) {
 	if messageType != 'E' || !strings.Contains(string(body), "54000") {
 		t.Fatalf("second Bind = %q %q, want program limit error", messageType, body)
 	}
+	writeFrontendMessage(t, client, 'S', nil)
 	readReadyForQuery(t, client)
 	writeFrontendMessage(t, client, 'X', nil)
 	if err := <-errCh; err != nil {
@@ -155,6 +157,7 @@ func TestServeConnLimitsPortalResultBytes(t *testing.T) {
 	if messageType != 'E' || !strings.Contains(string(body), "54000") {
 		t.Fatalf("Describe = %q %q, want program limit error", messageType, body)
 	}
+	writeFrontendMessage(t, client, 'S', nil)
 	readReadyForQuery(t, client)
 	writeFrontendMessage(t, client, 'X', nil)
 	if err := <-errCh; err != nil {
@@ -421,6 +424,54 @@ func TestServeConnClosesPreparedStatement(t *testing.T) {
 	if messageType != 'E' || !strings.Contains(string(body), "26000") {
 		t.Fatalf("Bind after Close = %q %q, want invalid statement", messageType, body)
 	}
+	writeFrontendMessage(t, client, 'S', nil)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnDiscardsExtendedMessagesUntilSyncAfterError(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+
+	bind := append([]byte("portal\x00missing\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'E' || !strings.Contains(string(body), "26000") {
+		t.Fatalf("Bind error = %q %q, want invalid statement error", messageType, body)
+	}
+	if err := client.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, 1)
+	if count, err := client.Read(response); err == nil || count != 0 {
+		t.Fatalf("extended response before Sync = %q %v, want none", response[:count], err)
+	}
+	if err := client.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	writeFrontendMessage(t, client, 'P', append([]byte("discarded\x00SELECT 1\x00"), 0, 0))
+	writeFrontendMessage(t, client, 'S', nil)
+	readReadyForQuery(t, client)
+
+	bind = append([]byte("portal\x00discarded\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	messageType, body = readBackendMessage(t, client)
+	if messageType != 'E' || !strings.Contains(string(body), "26000") {
+		t.Fatalf("Bind discarded statement = %q %q, want invalid statement error", messageType, body)
+	}
+	writeFrontendMessage(t, client, 'S', nil)
 	readReadyForQuery(t, client)
 	writeFrontendMessage(t, client, 'X', nil)
 	if err := <-errCh; err != nil {
