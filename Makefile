@@ -1682,6 +1682,21 @@ test-local-verification:
 commit-github-ci-disabled-policy:
 	sh ./scripts/commit-github-ci-disabled-policy.sh
 
+format-sql-columnar-single-source:
+	sh ./scripts/format-sql-columnar-single-source.sh
+
+test-sql-columnar-single-source:
+	sh ./scripts/test-sql-columnar-single-source.sh
+
+benchmark-sql-columnar-single-source:
+	sh ./scripts/benchmark-sql-columnar-single-source.sh
+
+review-sql-columnar-single-source:
+	sh ./scripts/review-sql-columnar-single-source.sh
+
+commit-sql-columnar-single-source:
+	sh ./scripts/commit-sql-columnar-single-source.sh
+
 commit-disable-github-ci:
 	sh ./scripts/commit-disable-github-ci.sh
 

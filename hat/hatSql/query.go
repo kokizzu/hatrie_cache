@@ -6364,8 +6364,14 @@ type sqlExecRow struct {
 	sources     map[string]SQLRow
 	order       []string
 	ordinals    map[string]int
+	singleAlias string
+	singleRow   SQLRow
 	outer       *sqlExecRow
 	environment *sqlEvalEnvironment
+}
+
+func newSQLSingleSourceExecRow(alias string, row SQLRow) sqlExecRow {
+	return sqlExecRow{singleAlias: alias, singleRow: row}
 }
 
 func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow) (SQLQueryResult, error) {
@@ -6790,11 +6796,11 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		matched := make([]int, 0, batch.Rows)
 		rows := make([]sqlExecRow, batch.Rows)
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-			row := SQLRow{}
+			row := make(SQLRow, len(predicateFields))
 			for _, field := range predicateFields {
 				row[field], _ = batch.Value(field, rowIndex)
 			}
-			rows[rowIndex] = sqlExecRow{sources: map[string]SQLRow{q.from.alias: row}, order: []string{q.from.alias}, ordinals: map[string]int{q.from.alias: rowIndex}}
+			rows[rowIndex] = newSQLSingleSourceExecRow(q.from.alias, row)
 		}
 		values, err := evalSQLExprBatch(q.where, rows, nil)
 		if err != nil {
@@ -12241,6 +12247,16 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 }
 func sqlField(row sqlExecRow, qualifier, name string) interface{} {
 	for current := &row; current != nil; current = current.outer {
+		if current.singleRow != nil {
+			if qualifier != "" && qualifier == current.singleAlias {
+				return current.singleRow[name]
+			}
+			if qualifier == "" {
+				if value, ok := current.singleRow[name]; ok {
+					return value
+				}
+			}
+		}
 		if qualifier != "" {
 			if source, ok := current.sources[qualifier]; ok {
 				return source[name]
