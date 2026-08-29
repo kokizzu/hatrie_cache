@@ -58,6 +58,14 @@ parameter vectors or materialized results.
 `ServerOptions.MaxPortalResultBytes` bounds the encoded field-name and text-cell
 payload retained by one materialized portal result.
 
+PostgreSQL wire cancellation is disabled by default. Create one
+`hatPgWire.CancelRegistry` per listener and pass that same registry through
+`ServerOptions.CancelRegistry` for every accepted connection. The server then
+publishes registered `BackendKeyData`; a second connection carrying a matching
+PostgreSQL `CancelRequest` cancels only the active handler call and returns
+SQLSTATE `57014`. A mismatched or expired key does nothing. Query handlers must
+honor their context for cancellation to take effect promptly.
+
 ## Compatibility Check
 
 `make test-pgwire-server` includes loopback integration tests with the stock
@@ -76,6 +84,7 @@ if err != nil {
 	return err
 }
 handler := hatSql.NewPgWireQueryHandler(sqlResolver, hatSql.QueryOptions{})
+cancelRegistry := hatPgWire.NewCancelRegistry()
 for {
 	connection, err := listener.Accept()
 	if err != nil {
@@ -85,6 +94,7 @@ for {
 		defer connection.Close()
 		_ = hatPgWire.ServeConn(context.Background(), connection, handler, hatPgWire.ServerOptions{
 			Authenticator: verifyPassword,
+			CancelRegistry: cancelRegistry,
 		})
 	}()
 }

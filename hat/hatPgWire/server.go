@@ -12,10 +12,12 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
 	protocolVersion3  = 196608
+	cancelRequestCode = 80877102
 	sslRequestCode    = 80877103
 	defaultMaxMessage = 16 << 20
 
@@ -47,6 +49,7 @@ type ServerOptions struct {
 	MaxPreparedStatements int
 	MaxPortals            int
 	MaxPortalResultBytes  int
+	CancelRegistry        *CancelRegistry
 }
 
 // Field describes a PostgreSQL text-format result column.
@@ -91,9 +94,6 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	if connection == nil {
 		return errors.New("PostgreSQL wire connection is nil")
 	}
-	if handler == nil {
-		return errors.New("PostgreSQL wire query handler is nil")
-	}
 	maxMessage := options.MaxMessageBytes
 	if maxMessage == 0 {
 		maxMessage = defaultMaxMessage
@@ -109,8 +109,16 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		}
 		startup, err = readStartup(connection, maxMessage)
 	}
+	var cancelRequest *cancelRequestError
+	if errors.As(err, &cancelRequest) {
+		options.CancelRegistry.Cancel(cancelRequest.processID, cancelRequest.secret)
+		return nil
+	}
 	if err != nil {
 		return err
+	}
+	if handler == nil {
+		return errors.New("PostgreSQL wire query handler is nil")
 	}
 	if options.Authenticator != nil {
 		if err := writeAuthenticationCleartextPassword(connection); err != nil {
@@ -131,10 +139,19 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			return writeFatalAndReturn(connection, "28P01", "password authentication failed")
 		}
 	}
+	processID, secret, err := randomBackendKey()
+	if err != nil {
+		return err
+	}
+	queryCanceler := &connectionQueryCanceler{}
+	if options.CancelRegistry != nil {
+		processID, secret = options.CancelRegistry.Register(queryCanceler.cancel)
+		defer options.CancelRegistry.Unregister(processID)
+	}
 	if err := writeAuthenticationOK(connection); err != nil {
 		return err
 	}
-	if err := writeStartupComplete(connection); err != nil {
+	if err := writeStartupComplete(connection, processID, secret); err != nil {
 		return err
 	}
 
@@ -200,12 +217,14 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			result, queryErr := handler.Query(ctx, query)
+			queryCtx, releaseQuery := queryCanceler.begin(ctx)
+			result, queryErr := handler.Query(queryCtx, query)
+			releaseQuery()
 			if queryErr == nil {
 				queryErr = validateQueryResult(result)
 			}
 			if queryErr != nil {
-				if err := writeErrorAndReady(connection, "XX000", queryErr.Error()); err != nil {
+				if err := writeErrorAndReady(connection, pgWireExecutionErrorCode(queryErr), queryErr.Error()); err != nil {
 					return err
 				}
 				continue
@@ -308,7 +327,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 					}
 					continue
 				}
-				if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes); err != nil {
+				if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes, queryCanceler); err != nil {
 					if err := writeExtendedError(pgWireExecutionErrorCode(err), err.Error()); err != nil {
 						return err
 					}
@@ -338,7 +357,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes); err != nil {
+			if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes, queryCanceler); err != nil {
 				if err := writeExtendedError(pgWireExecutionErrorCode(err), err.Error()); err != nil {
 					return err
 				}
@@ -413,9 +432,41 @@ type portalQuery struct {
 	executed   bool
 }
 
+type connectionQueryCanceler struct {
+	mu         sync.Mutex
+	generation uint64
+	cancelFunc context.CancelFunc
+}
+
+func (canceler *connectionQueryCanceler) begin(ctx context.Context) (context.Context, func()) {
+	queryCtx, cancel := context.WithCancel(ctx)
+	canceler.mu.Lock()
+	canceler.generation++
+	generation := canceler.generation
+	canceler.cancelFunc = cancel
+	canceler.mu.Unlock()
+	return queryCtx, func() {
+		canceler.mu.Lock()
+		if canceler.generation == generation {
+			canceler.cancelFunc = nil
+		}
+		canceler.mu.Unlock()
+		cancel()
+	}
+}
+
+func (canceler *connectionQueryCanceler) cancel() {
+	canceler.mu.Lock()
+	cancel := canceler.cancelFunc
+	canceler.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 var errPortalResultLimit = errors.New("PostgreSQL portal result byte limit exceeded")
 
-func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery, maxResultBytes int) error {
+func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery, maxResultBytes int, canceler *connectionQueryCanceler) error {
 	if portal.executed {
 		return nil
 	}
@@ -424,13 +475,15 @@ func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuer
 		portal.executed = true
 		return nil
 	}
+	queryCtx, releaseQuery := canceler.begin(ctx)
+	defer releaseQuery()
 	var err error
 	if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
-		portal.result, err = parameterizedHandler.QueryParameters(ctx, portal.query, portal.parameters)
+		portal.result, err = parameterizedHandler.QueryParameters(queryCtx, portal.query, portal.parameters)
 	} else if len(portal.parameters) != 0 {
 		err = errors.New("PostgreSQL bind parameters require a parameterized query handler")
 	} else {
-		portal.result, err = handler.Query(ctx, portal.query)
+		portal.result, err = handler.Query(queryCtx, portal.query)
 	}
 	if err != nil {
 		return err
@@ -446,6 +499,9 @@ func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuer
 }
 
 func pgWireExecutionErrorCode(err error) string {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "57014"
+	}
 	if errors.Is(err, errPortalResultLimit) {
 		return "54000"
 	}
@@ -630,6 +686,15 @@ func writeParameterDescription(connection net.Conn, parameterTypes []uint32) err
 
 var errSSLRequest = errors.New("PostgreSQL SSL request")
 
+type cancelRequestError struct {
+	processID uint32
+	secret    uint32
+}
+
+func (request *cancelRequestError) Error() string {
+	return "PostgreSQL cancel request"
+}
+
 func readStartup(connection net.Conn, maxMessage int) (Startup, error) {
 	length, err := readLength(connection)
 	if err != nil {
@@ -645,6 +710,12 @@ func readStartup(connection net.Conn, maxMessage int) (Startup, error) {
 	code := binary.BigEndian.Uint32(body[:4])
 	if code == sslRequestCode && len(body) == 4 {
 		return Startup{}, errSSLRequest
+	}
+	if code == cancelRequestCode && len(body) == 12 {
+		return Startup{}, &cancelRequestError{
+			processID: binary.BigEndian.Uint32(body[4:8]),
+			secret:    binary.BigEndian.Uint32(body[8:]),
+		}
 	}
 	if code != protocolVersion3 {
 		return Startup{}, fmt.Errorf("unsupported PostgreSQL protocol version %d", code)
@@ -703,7 +774,15 @@ func readLength(connection net.Conn) (int, error) {
 	return int(binary.BigEndian.Uint32(buffer[:])), nil
 }
 
-func writeStartupComplete(connection net.Conn) error {
+func randomBackendKey() (uint32, uint32, error) {
+	keyData := [8]byte{}
+	if _, err := rand.Read(keyData[:]); err != nil {
+		return 0, 0, err
+	}
+	return binary.BigEndian.Uint32(keyData[:4]), binary.BigEndian.Uint32(keyData[4:]), nil
+}
+
+func writeStartupComplete(connection net.Conn, processID uint32, secret uint32) error {
 	for key, value := range map[string]string{
 		"client_encoding":             "UTF8",
 		"server_version":              "16.0",
@@ -714,7 +793,8 @@ func writeStartupComplete(connection net.Conn) error {
 		}
 	}
 	keyData := make([]byte, 8)
-	_, _ = rand.Read(keyData)
+	binary.BigEndian.PutUint32(keyData[:4], processID)
+	binary.BigEndian.PutUint32(keyData[4:], secret)
 	if err := writeMessage(connection, 'K', keyData); err != nil {
 		return err
 	}

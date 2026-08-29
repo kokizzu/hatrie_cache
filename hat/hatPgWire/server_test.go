@@ -708,6 +708,84 @@ public final class PgWireJdbcClient {
 	}
 }
 
+func TestServeConnCancelsQueryViaPostgreSQLCancelRequest(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry := hatPgWire.NewCancelRegistry()
+	started := make(chan struct{}, 1)
+	serverErr := make(chan error, 2)
+	handler := hatPgWire.QueryHandlerFunc(func(queryCtx context.Context, query string) (hatPgWire.QueryResult, error) {
+		if query != "SELECT wait" {
+			return hatPgWire.QueryResult{}, nil
+		}
+		started <- struct{}{}
+		<-queryCtx.Done()
+		return hatPgWire.QueryResult{}, queryCtx.Err()
+	})
+	go func() {
+		for connectionCount := 0; connectionCount < 2; connectionCount++ {
+			connection, err := listener.Accept()
+			if err != nil {
+				serverErr <- err
+				return
+			}
+			go func() {
+				defer connection.Close()
+				serverErr <- hatPgWire.ServeConn(ctx, connection, handler, hatPgWire.ServerOptions{CancelRegistry: registry})
+			}()
+		}
+	}()
+
+	active, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Close()
+	writeStartup(t, active, "user", "analyst")
+	processID, secret := readBackendKeyData(t, active)
+	writeFrontendMessage(t, active, 'Q', []byte("SELECT wait\x00"))
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("query handler did not start")
+	}
+	cancelConnection, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCancelRequest(t, cancelConnection, processID, secret)
+	if err := cancelConnection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := active.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	messageType, body := readBackendMessage(t, active)
+	if err := active.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if messageType != 'E' || !strings.Contains(string(body), "57014") {
+		t.Fatalf("cancel response = %q %q, want SQLSTATE 57014", messageType, body)
+	}
+	readReadyForQuery(t, active)
+	writeFrontendMessage(t, active, 'Q', []byte("SELECT after cancellation\x00"))
+	if messageType, _ := readBackendMessage(t, active); messageType != 'C' {
+		t.Fatalf("query after cancellation = %q, want CommandComplete", messageType)
+	}
+	readReadyForQuery(t, active)
+	writeFrontendMessage(t, active, 'X', nil)
+	for resultCount := 0; resultCount < 2; resultCount++ {
+		if err := <-serverErr; err != nil {
+			t.Fatalf("ServeConn() error = %v", err)
+		}
+	}
+}
+
 func portFromAddress(t *testing.T, address string) string {
 	t.Helper()
 	_, port, err := net.SplitHostPort(address)
@@ -729,6 +807,41 @@ func (handler typedParameterizedQueryHandler) QueryParameters(_ context.Context,
 	handler.parameters <- append([]interface{}(nil), parameters...)
 	value := "42"
 	return hatPgWire.QueryResult{Fields: []hatPgWire.Field{{Name: "id", DataTypeOID: hatPgWire.OIDInt8}}, Rows: [][]*string{{&value}}}, nil
+}
+
+func writeCancelRequest(t *testing.T, connection net.Conn, processID uint32, secret uint32) {
+	t.Helper()
+	packet := make([]byte, 16)
+	binary.BigEndian.PutUint32(packet[:4], uint32(len(packet)))
+	binary.BigEndian.PutUint32(packet[4:8], 80877102)
+	binary.BigEndian.PutUint32(packet[8:12], processID)
+	binary.BigEndian.PutUint32(packet[12:], secret)
+	if _, err := connection.Write(packet); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readBackendKeyData(t *testing.T, connection net.Conn) (uint32, uint32) {
+	t.Helper()
+	for {
+		messageType, body := readBackendMessage(t, connection)
+		switch messageType {
+		case 'K':
+			if len(body) != 8 {
+				t.Fatalf("BackendKeyData length = %d, want 8", len(body))
+			}
+			processID := binary.BigEndian.Uint32(body[:4])
+			secret := binary.BigEndian.Uint32(body[4:])
+			for {
+				messageType, _ = readBackendMessage(t, connection)
+				if messageType == 'Z' {
+					return processID, secret
+				}
+			}
+		case 'Z':
+			t.Fatal("startup did not send BackendKeyData")
+		}
+	}
 }
 
 func writeSSLRequest(t *testing.T, connection net.Conn) {
