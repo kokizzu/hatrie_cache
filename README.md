@@ -12,6 +12,7 @@ security guidance before exposing it on a network.
 - New to the SQL interface: [SQL.md](SQL.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
+- OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)

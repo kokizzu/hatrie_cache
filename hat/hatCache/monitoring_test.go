@@ -2264,6 +2264,15 @@ func TestMonitoringGrafanaQueryAndSearch(t *testing.T) {
 	}
 }
 
+func TestMonitoringServesOpenAPIDocument(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"openapi":"3.1.0"`) || !strings.Contains(response.Body.String(), `"/api/sql"`) {
+		t.Fatalf("OpenAPI response = %d %q", response.Code, response.Body.String())
+	}
+}
+
 func TestMonitoringPreviousAuthTokensExpire(t *testing.T) {
 	ht := newTestTrie(t)
 	future := time.Now().Add(time.Hour)

@@ -474,6 +474,7 @@ func monitoringBuildVersion() string {
 func (handler *MonitoringHandler) Handler() http.Handler {
 	server := hatMonitoring.NewServer()
 	server.HandleFunc("/api/health", handler.handleHealth)
+	server.HandleFunc("/openapi.json", handler.handleOpenAPI)
 	server.HandleFunc("/api/config", handler.handleConfig)
 	server.HandleFunc("/api/stats", handler.handleStats)
 	server.HandleFunc("/api/entries", handler.handleEntries)
@@ -1152,6 +1153,42 @@ func (handler *MonitoringHandler) handleSQLCatalog(w http.ResponseWriter, r *htt
 		return
 	}
 	writeJSON(w, cloneSQLCatalog(handler.options.SQLCatalog))
+}
+
+func (handler *MonitoringHandler) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	writeJSON(w, monitoringOpenAPIDocument())
+}
+
+func monitoringOpenAPIDocument() map[string]interface{} {
+	jsonResponse := map[string]interface{}{
+		"description": "JSON response",
+		"content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
+	}
+	return map[string]interface{}{
+		"openapi": "3.1.0",
+		"info": map[string]interface{}{
+			"title":   "Hatrie Cache Monitoring API",
+			"version": "v1",
+		},
+		"paths": map[string]interface{}{
+			"/api/health": map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/entries": map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/sql": map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/commands": map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/grafana/search": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/grafana/query": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
+		},
+		"components": map[string]interface{}{
+			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},
+			"schemas": map[string]interface{}{
+				"SQLQueryRequest": map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "stream": map[string]interface{}{"type": "boolean"}}},
+			},
+		},
+	}
 }
 
 type grafanaSearchRequest struct {

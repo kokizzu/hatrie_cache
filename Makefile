@@ -2121,3 +2121,12 @@ test-grafana-integration:
 .PHONY: deliver-grafana-integration
 deliver-grafana-integration:
 	sh ./scripts/deliver-grafana-integration.sh
+.PHONY: audit-openapi-management
+audit-openapi-management:
+	sh ./scripts/audit-openapi-management.sh
+.PHONY: test-openapi-management
+test-openapi-management:
+	sh ./scripts/test-openapi-management.sh
+.PHONY: deliver-openapi-management
+deliver-openapi-management:
+	sh ./scripts/deliver-openapi-management.sh
