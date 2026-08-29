@@ -1685,6 +1685,24 @@ review-sql-result-cache-clone:
 commit-sql-result-cache-clone:
 	sh ./scripts/commit-sql-result-cache-clone.sh
 
+inspect-sql-prepared-cache:
+	sh ./scripts/inspect-sql-prepared-cache.sh
+
+test-sql-prepared-cache:
+	sh ./scripts/test-sql-prepared-cache.sh
+
+benchmark-sql-prepared-cache:
+	sh ./scripts/benchmark-sql-prepared-cache.sh
+
+format-sql-prepared-cache-lru:
+	sh ./scripts/format-sql-prepared-cache-lru.sh
+
+review-sql-prepared-cache-lru:
+	sh ./scripts/review-sql-prepared-cache-lru.sh
+
+commit-sql-prepared-cache-lru:
+	sh ./scripts/commit-sql-prepared-cache-lru.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

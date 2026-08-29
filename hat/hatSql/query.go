@@ -3,6 +3,7 @@ package hatSql
 import (
 	"compress/gzip"
 	"container/heap"
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -250,10 +251,15 @@ type PreparedQueryCacheStats = SQLPreparedQueryCacheStats
 type SQLPreparedQueryCache struct {
 	mu       sync.Mutex
 	capacity int
-	entries  map[string]*sqlQuery
-	order    []string
+	entries  map[string]sqlPreparedQueryCacheEntry
+	order    *list.List
 	hits     uint64
 	misses   uint64
+}
+
+type sqlPreparedQueryCacheEntry struct {
+	query *sqlQuery
+	order *list.Element
 }
 
 // PreparedQueryCache caches immutable parsed, unbound SQL templates.
@@ -262,7 +268,7 @@ type PreparedQueryCache = SQLPreparedQueryCache
 // NewSQLPreparedQueryCache creates a bounded parsed-template cache. A nonpositive
 // capacity disables storage while preserving syntax and binding behavior.
 func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
-	return &SQLPreparedQueryCache{capacity: capacity, entries: map[string]*sqlQuery{}}
+	return &SQLPreparedQueryCache{capacity: capacity, entries: map[string]sqlPreparedQueryCacheEntry{}, order: list.New()}
 }
 
 // NewPreparedQueryCache creates a bounded parsed-template cache.
@@ -4136,10 +4142,10 @@ func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	if query := cache.entries[source]; query != nil {
+	if entry, ok := cache.entries[source]; ok {
 		cache.hits++
-		cache.touch(source)
-		return query, nil
+		cache.order.MoveToBack(entry.order)
+		return entry.query, nil
 	}
 	query, err := parseSQLQueryTemplate(source)
 	if err != nil {
@@ -4147,25 +4153,13 @@ func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
 	}
 	cache.misses++
 	if len(cache.entries) >= cache.capacity {
-		evicted := cache.order[0]
-		cache.order = cache.order[1:]
+		oldest := cache.order.Front()
+		evicted := oldest.Value.(string)
+		cache.order.Remove(oldest)
 		delete(cache.entries, evicted)
 	}
-	cache.entries[source] = query
-	cache.order = append(cache.order, source)
+	cache.entries[source] = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(source)}
 	return query, nil
-}
-
-// touch moves a cached key to the newest position. The caller holds cache.mu.
-func (cache *SQLPreparedQueryCache) touch(source string) {
-	for index, entry := range cache.order {
-		if entry != source {
-			continue
-		}
-		copy(cache.order[index:], cache.order[index+1:])
-		cache.order[len(cache.order)-1] = source
-		return
-	}
 }
 
 func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
