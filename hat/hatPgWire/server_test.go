@@ -75,6 +75,32 @@ func TestServeConnRunsPostgreSQLSimpleQuery(t *testing.T) {
 	}
 }
 
+func TestServeConnLimitsPreparedStatements(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{MaxPreparedStatements: 1})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("one\x00SELECT 1\x00"), 0, 0))
+	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("two\x00SELECT 2\x00"), 0, 0))
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'E' || !strings.Contains(string(body), "54000") {
+		t.Fatalf("second Parse = %q %q, want program limit error", messageType, body)
+	}
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
 func TestServeConnAcceptsSessionSetupQuery(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()

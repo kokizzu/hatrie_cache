@@ -42,8 +42,9 @@ type Authenticator func(context.Context, Startup, string) error
 
 // ServerOptions configures one PostgreSQL wire connection.
 type ServerOptions struct {
-	Authenticator   Authenticator
-	MaxMessageBytes int
+	Authenticator         Authenticator
+	MaxMessageBytes       int
+	MaxPreparedStatements int
 }
 
 // Field describes a PostgreSQL text-format result column.
@@ -197,6 +198,12 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			name, query, parameterTypes, err := parseParseMessage(body)
 			if err != nil {
 				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, exists := prepared[name]; !exists && options.MaxPreparedStatements > 0 && len(prepared) >= options.MaxPreparedStatements {
+				if err := writeErrorAndReady(connection, "54000", "PostgreSQL prepared statement limit exceeded"); err != nil {
 					return err
 				}
 				continue

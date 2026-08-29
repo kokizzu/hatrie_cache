@@ -39,6 +39,10 @@ permit `sslmode=prefer` fallback.
 materialized once per portal, each execute returns its next row range, and the
 server emits `PortalSuspended` until all rows have been returned.
 
+`ServerOptions.MaxPreparedStatements` optionally bounds connection-local named
+and unnamed prepared statements. The default is unlimited for compatibility;
+set a finite value on network-facing listeners to limit retained query state.
+
 ## Compatibility Check
 
 `make test-pgwire-server` includes a loopback integration test with the stock
