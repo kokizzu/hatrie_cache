@@ -1751,6 +1751,22 @@ review-sql-execution-arena:
 commit-sql-execution-arena:
 	sh ./scripts/commit-sql-execution-arena.sh
 
+benchmark-sql-columnar-regexp:
+	sh ./scripts/benchmark-sql-columnar-regexp.sh
+
+format-sql-columnar-regexp:
+	sh ./scripts/format-sql-columnar-regexp.sh
+
+test-sql-columnar-regexp:
+	sh ./scripts/test-sql-columnar-regexp.sh
+
+review-sql-columnar-regexp:
+	sh ./scripts/review-sql-columnar-regexp.sh
+
+commit-sql-columnar-regexp:
+	sh ./scripts/commit-sql-columnar-regexp.sh
+
+
 
 
 commit-disable-github-ci:

@@ -5,6 +5,32 @@ import (
 	"regexp"
 )
 
+// sqlColumnarRegexpPredicate accepts a direct text field/literal REGEXP
+// comparison when every requested column value is text or NULL. Invalid and
+// mixed-type predicates stay on the general evaluator to preserve its errors.
+func sqlColumnarRegexpPredicate(expr sqlExpr, alias string, batch ColumnarBatch) (field string, expression *regexp.Regexp, inverted, ok bool) {
+	if expr.kind != "binary" || (expr.op != "REGEXP" && expr.op != "NOT REGEXP") || expr.left == nil || expr.right == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || expr.right.kind != "literal" {
+		return "", nil, false, false
+	}
+	pattern, text := expr.right.value.(string)
+	if !text {
+		return "", nil, false, false
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", nil, false, false
+	}
+	for row := 0; row < batch.Rows; row++ {
+		value, _ := batch.Value(expr.left.name, row)
+		if value != nil {
+			if _, text := value.(string); !text {
+				return "", nil, false, false
+			}
+		}
+	}
+	return expr.left.name, compiled, expr.op == "NOT REGEXP", true
+}
+
 func evalSQLRegexPredicate(left, right interface{}, op string, token sqlToken) interface{} {
 	if left == nil || right == nil {
 		return nil

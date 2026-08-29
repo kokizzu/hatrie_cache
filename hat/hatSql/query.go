@@ -6814,6 +6814,22 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if field, expression, inverted, regexp := sqlColumnarRegexpPredicate(q.where, q.from.alias, batch); regexp {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+			candidate, _ := batch.Value(field, rowIndex)
+			text, ok := candidate.(string)
+			if !ok {
+				return false
+			}
+			matched := expression.MatchString(text)
+			return matched != inverted
+		})
+		if metrics != nil {
+			metrics.record("COLUMNAR REGEXP FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
