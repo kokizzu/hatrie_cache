@@ -49,11 +49,86 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
-// ColumnarBatch stores one source scan as field-aligned value slices. Every
-// requested column must contain Rows values; absent JSON fields are nil.
+// DictionaryColumn stores repeated text values once and addresses them through
+// row-aligned codes. Values are ordered by first appearance for determinism.
+type DictionaryColumn struct {
+	Values []string
+	Codes  []uint32
+}
+
+// ColumnarBatch stores one source scan as field-aligned value slices or compact
+// dictionary columns. Every requested field must contain Rows values; absent
+// JSON fields are nil in a plain column and are not dictionary encoded.
 type ColumnarBatch struct {
-	Columns map[string][]interface{}
-	Rows    int
+	Columns      map[string][]interface{}
+	Dictionaries map[string]DictionaryColumn
+	Rows         int
+}
+
+// FieldRows reports the physical row count retained for one field.
+func (batch ColumnarBatch) FieldRows(field string) int {
+	if dictionary, ok := batch.Dictionaries[field]; ok {
+		return len(dictionary.Codes)
+	}
+	return len(batch.Columns[field])
+}
+
+// Value returns one logical field value regardless of its physical encoding.
+func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
+	if row < 0 {
+		return nil, false
+	}
+	if dictionary, ok := batch.Dictionaries[field]; ok {
+		if row >= len(dictionary.Codes) || int(dictionary.Codes[row]) >= len(dictionary.Values) {
+			return nil, false
+		}
+		return dictionary.Values[dictionary.Codes[row]], true
+	}
+	values, ok := batch.Columns[field]
+	if !ok || row >= len(values) {
+		return nil, false
+	}
+	return values[row], true
+}
+
+// EncodeRepeatedStrings replaces highly repetitive all-string columns with a
+// dictionary. The source value slice is released only when the encoded form is
+// smaller in cardinality and has enough rows to justify its code array.
+func (batch *ColumnarBatch) EncodeRepeatedStrings() {
+	if batch == nil || batch.Rows < 4 || batch.Columns == nil {
+		return
+	}
+	if batch.Dictionaries == nil {
+		batch.Dictionaries = make(map[string]DictionaryColumn)
+	}
+	for field, values := range batch.Columns {
+		if len(values) != batch.Rows {
+			continue
+		}
+		positions := make(map[string]uint32)
+		strings := make([]string, 0)
+		codes := make([]uint32, len(values))
+		allStrings := true
+		for index, value := range values {
+			text, ok := value.(string)
+			if !ok {
+				allStrings = false
+				break
+			}
+			code, found := positions[text]
+			if !found {
+				code = uint32(len(strings))
+				positions[text] = code
+				strings = append(strings, text)
+			}
+			codes[index] = code
+		}
+		if !allStrings || len(strings)*2 > len(values) {
+			continue
+		}
+		batch.Dictionaries[field] = DictionaryColumn{Values: strings, Codes: codes}
+		delete(batch.Columns, field)
+	}
 }
 
 // ColumnarSourceResolver optionally supplies selected source fields in

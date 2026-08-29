@@ -12,3 +12,4 @@ grep -n -E 'func (evalSQLAggregate|sqlQueryHasAggregate|evalSQLExprBatch)|type s
 sed -n '10900,11450p' hat/hatSql/query.go
 sed -n '1,260p' hat/hatCache/sql_query.go
 sed -n '1790,1900p' hat/hatCache/sql_query.go
+grep -R -n 'func sqlJSONColumnarBatch' hat/hatCache --include='*.go' || true

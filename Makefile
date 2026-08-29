@@ -1604,6 +1604,21 @@ review-sql-columnar-numeric-filter:
 commit-sql-columnar-numeric-filter:
 	sh ./scripts/commit-sql-columnar-numeric-filter.sh
 
+format-sql-columnar-dictionary:
+	sh ./scripts/format-sql-columnar-dictionary.sh
+
+review-sql-columnar-dictionary:
+	sh ./scripts/review-sql-columnar-dictionary.sh
+
+commit-sql-columnar-dictionary:
+	sh ./scripts/commit-sql-columnar-dictionary.sh
+
+locate-columnar-builder:
+	sh ./scripts/locate-columnar-builder.sh
+
+inspect-columnar-builder:
+	sh ./scripts/inspect-columnar-builder.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

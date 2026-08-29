@@ -1720,6 +1720,7 @@ func sqlJSONColumnarBatch(key string, data []byte, fields []string) (hatSql.Colu
 			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
 		}
 		appendRow(row)
+		batch.EncodeRepeatedStrings()
 		return batch, nil
 	case '[':
 		decoder := json.NewDecoder(bytes.NewReader(trimmed))
@@ -1739,6 +1740,7 @@ func sqlJSONColumnarBatch(key string, data []byte, fields []string) (hatSql.Colu
 		if err := decoder.Decode(&struct{}{}); err != io.EOF {
 			return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
 		}
+		batch.EncodeRepeatedStrings()
 		return batch, nil
 	default:
 		return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)

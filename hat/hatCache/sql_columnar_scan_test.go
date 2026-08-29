@@ -93,3 +93,50 @@ func TestSQLColumnarScanUsesNumericVectorFilter(t *testing.T) {
 	}
 	t.Fatalf("plan = %#v, want COLUMNAR NUMERIC FILTER", explained.Plan)
 }
+
+func TestSQLColumnarBatchDictionaryEncodesRepeatedStrings(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("states", `[
+  {"id":1,"state":"queued"},
+  {"id":2,"state":"running"},
+  {"id":3,"state":"queued"},
+  {"id":4,"state":"queued"},
+  {"id":5,"state":"running"},
+  {"id":6,"state":"queued"}
+]`)
+	batch, available, err := trie.ResolveSQLColumnarSource("CACHE", "states", []string{"state", "id"})
+	if err != nil || !available {
+		t.Fatalf("ResolveSQLColumnarSource() = %#v, %v, %v", batch, available, err)
+	}
+	dictionary, encoded := batch.Dictionaries["state"]
+	if !encoded || !reflect.DeepEqual(dictionary.Values, []string{"queued", "running"}) || !reflect.DeepEqual(dictionary.Codes, []uint32{0, 1, 0, 0, 1, 0}) {
+		t.Fatalf("state dictionary = %#v, encoded=%v", dictionary, encoded)
+	}
+	if _, retained := batch.Columns["state"]; retained {
+		t.Fatalf("dictionary state still retained a row value slice: %#v", batch.Columns)
+	}
+
+	query := "FROM CACHE('states') AS state WHERE state.state = 'queued' SELECT state.id"
+	columnar, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := ExecuteSQLQuery(query, sqlRowsOnlyResolver{trie: trie})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(columnar, materialized) {
+		t.Fatalf("dictionary columnar result = %#v, materialized = %#v", columnar, materialized)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "COLUMNAR DICTIONARY FILTER" {
+			return
+		}
+	}
+	t.Fatalf("plan = %#v, want COLUMNAR DICTIONARY FILTER", explained.Plan)
+}

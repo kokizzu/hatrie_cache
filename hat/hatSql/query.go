@@ -6742,8 +6742,8 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, control.maxRows)
 	}
 	for _, field := range fields {
-		if len(batch.Columns[field]) != batch.Rows {
-			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, len(batch.Columns[field]), field, batch.Rows)
+		if batch.FieldRows(field) != batch.Rows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
 	if metrics != nil {
@@ -6755,9 +6755,21 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 			matched = append(matched, rowIndex)
 		}
+	} else if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch); encoded {
+		filterStarted := time.Now()
+		code, found := sqlDictionaryCode(dictionary, value, collation)
+		for rowIndex, candidate := range dictionary.Codes {
+			if operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code) {
+				matched = append(matched, rowIndex)
+			}
+		}
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY FILTER", sqlExplainExpression(q.where), batch.Rows, len(matched), filterStarted)
+		}
 	} else if field, operator, value, numeric := sqlColumnarNumericPredicate(q.where, q.from.alias); numeric {
 		filterStarted := time.Now()
-		for rowIndex, candidate := range batch.Columns[field] {
+		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+			candidate, _ := batch.Value(field, rowIndex)
 			number, ok := sqlNumber(candidate)
 			if ok && sqlColumnarNumericMatches(number, operator, value) {
 				matched = append(matched, rowIndex)
@@ -6772,7 +6784,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 			row := SQLRow{}
 			for _, field := range predicateFields {
-				row[field] = batch.Columns[field][rowIndex]
+				row[field], _ = batch.Value(field, rowIndex)
 			}
 			rows[rowIndex] = sqlExecRow{sources: map[string]SQLRow{q.from.alias: row}, order: []string{q.from.alias}, ordinals: map[string]int{q.from.alias: rowIndex}}
 		}
@@ -6804,7 +6816,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}
 		row := make(SQLRow, len(projectionFields))
 		for selectIndex, item := range q.selects {
-			row[result.Columns[selectIndex]] = batch.Columns[item.expr.name][rowIndex]
+			row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -6896,6 +6908,37 @@ func sqlColumnarNumericPredicate(expr sqlExpr, alias string) (field, operator st
 		return expr.right.name, sqlReverseComparisonOperator(expr.op), value, ok && sqlColumnarNumericOperator(expr.op)
 	}
 	return "", "", 0, false
+}
+
+func sqlColumnarDictionaryPredicate(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, string, string, SQLCollation, bool) {
+	if expr.kind != "binary" || expr.left == nil || expr.right == nil {
+		return DictionaryColumn{}, "", "", "", false
+	}
+	field, operator := "", expr.op
+	var literal interface{}
+	if expr.left.kind == "field" && (expr.left.qualifier == "" || expr.left.qualifier == alias) && expr.right.kind == "literal" {
+		field, literal = expr.left.name, expr.right.value
+	} else if expr.right.kind == "field" && (expr.right.qualifier == "" || expr.right.qualifier == alias) && expr.left.kind == "literal" {
+		field, literal = expr.right.name, expr.left.value
+	}
+	value, stringLiteral := literal.(string)
+	if field == "" || !stringLiteral {
+		return DictionaryColumn{}, "", "", "", false
+	}
+	if operator != "=" && operator != "!=" && operator != "<>" {
+		return DictionaryColumn{}, "", "", "", false
+	}
+	dictionary, ok := batch.Dictionaries[field]
+	return dictionary, operator, value, expr.collation, ok
+}
+
+func sqlDictionaryCode(dictionary DictionaryColumn, value string, collation SQLCollation) (uint32, bool) {
+	for code, candidate := range dictionary.Values {
+		if sqlBinaryValueWithCollation("=", candidate, value, collation) == true {
+			return uint32(code), true
+		}
+	}
+	return 0, false
 }
 
 func sqlColumnarNumericOperator(operator string) bool {
