@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-gofmt -w hat/hatPgWire/cancel.go hat/hatPgWire/cancel_test.go hat/hatPgWire/server.go hat/hatPgWire/server_test.go hat/hatSql/pgwire.go hat/hatSql/pgwire_test.go
+gofmt -w hat/hatPgWire/cancel.go hat/hatPgWire/cancel_test.go hat/hatPgWire/metrics.go hat/hatPgWire/server.go hat/hatPgWire/server_test.go hat/hatSql/pgwire.go hat/hatSql/pgwire_test.go

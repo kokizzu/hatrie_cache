@@ -121,6 +121,32 @@ func TestServeConnUpgradesSSLRequestWithTLS(t *testing.T) {
 	}
 }
 
+func TestServeConnRecordsOptionalMetrics(t *testing.T) {
+	metrics := hatPgWire.NewServerMetrics()
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{CommandTag: "SELECT 0"}, nil
+		}), hatPgWire.ServerOptions{Metrics: metrics})
+	}()
+	writeStartup(t, client, "user", "analyst")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'Q', []byte("SELECT metrics\x00"))
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+	snapshot := metrics.Snapshot()
+	if snapshot.ConnectionsTotal != 1 || snapshot.ActiveConnections != 0 || snapshot.SimpleQueriesTotal != 1 || snapshot.FrontendMessagesTotal != 2 || snapshot.ErrorsTotal != 0 {
+		t.Fatalf("Snapshot() = %#v", snapshot)
+	}
+}
+
 func TestServeConnLimitsPreparedStatements(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
@@ -762,6 +788,7 @@ func TestServeConnCancelsQueryViaPostgreSQLCancelRequest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	registry := hatPgWire.NewCancelRegistry()
+	metrics := hatPgWire.NewServerMetrics()
 	started := make(chan struct{}, 1)
 	serverErr := make(chan error, 2)
 	handler := hatPgWire.QueryHandlerFunc(func(queryCtx context.Context, query string) (hatPgWire.QueryResult, error) {
@@ -781,7 +808,7 @@ func TestServeConnCancelsQueryViaPostgreSQLCancelRequest(t *testing.T) {
 			}
 			go func() {
 				defer connection.Close()
-				serverErr <- hatPgWire.ServeConn(ctx, connection, handler, hatPgWire.ServerOptions{CancelRegistry: registry})
+				serverErr <- hatPgWire.ServeConn(ctx, connection, handler, hatPgWire.ServerOptions{CancelRegistry: registry, Metrics: metrics})
 			}()
 		}
 	}()
@@ -828,6 +855,10 @@ func TestServeConnCancelsQueryViaPostgreSQLCancelRequest(t *testing.T) {
 		if err := <-serverErr; err != nil {
 			t.Fatalf("ServeConn() error = %v", err)
 		}
+	}
+	snapshot := metrics.Snapshot()
+	if snapshot.ConnectionsTotal != 1 || snapshot.ActiveConnections != 0 || snapshot.SimpleQueriesTotal != 2 || snapshot.ErrorsTotal != 1 || snapshot.CancelRequestsTotal != 1 {
+		t.Fatalf("Snapshot() = %#v", snapshot)
 	}
 }
 

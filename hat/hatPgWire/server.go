@@ -52,6 +52,7 @@ type ServerOptions struct {
 	MaxPortalResultBytes  int
 	CancelRegistry        *CancelRegistry
 	TLSConfig             *tls.Config
+	Metrics               *ServerMetrics
 }
 
 // Field describes a PostgreSQL text-format result column.
@@ -96,6 +97,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	if connection == nil {
 		return errors.New("PostgreSQL wire connection is nil")
 	}
+	metrics := options.Metrics
 	maxMessage := options.MaxMessageBytes
 	if maxMessage == 0 {
 		maxMessage = defaultMaxMessage
@@ -104,6 +106,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		return fmt.Errorf("PostgreSQL wire max message bytes %d is too small", maxMessage)
 	}
 
+	tlsEnabled := false
 	startup, err := readStartup(connection, maxMessage)
 	if err == errSSLRequest {
 		if options.TLSConfig == nil {
@@ -123,11 +126,13 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				return err
 			}
 			connection = tlsConnection
+			tlsEnabled = true
 		}
 		startup, err = readStartup(connection, maxMessage)
 	}
 	var cancelRequest *cancelRequestError
 	if errors.As(err, &cancelRequest) {
+		metrics.recordCancelRequest()
 		options.CancelRegistry.Cancel(cancelRequest.processID, cancelRequest.secret)
 		return nil
 	}
@@ -137,6 +142,8 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	if handler == nil {
 		return errors.New("PostgreSQL wire query handler is nil")
 	}
+	metrics.recordConnection(tlsEnabled)
+	defer metrics.recordConnectionClosed()
 	if options.Authenticator != nil {
 		if err := writeAuthenticationCleartextPassword(connection); err != nil {
 			return err
@@ -146,13 +153,16 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			return err
 		}
 		if messageType != 'p' {
+			metrics.recordError()
 			return writeFatalAndReturn(connection, "08P01", "expected password message")
 		}
 		password, err := requiredCString(body)
 		if err != nil {
+			metrics.recordError()
 			return writeFatalAndReturn(connection, "08P01", "invalid password message")
 		}
 		if err := options.Authenticator(ctx, startup, password); err != nil {
+			metrics.recordError()
 			return writeFatalAndReturn(connection, "28P01", "password authentication failed")
 		}
 	}
@@ -176,6 +186,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	portals := make(map[string]portalQuery)
 	discardUntilSync := false
 	writeExtendedError := func(code string, message string) error {
+		metrics.recordError()
 		if err := writeError(connection, 'E', code, message); err != nil {
 			return err
 		}
@@ -190,6 +201,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		if err != nil {
 			return err
 		}
+		metrics.recordFrontendMessage()
 		if discardUntilSync {
 			switch messageType {
 			case 'X':
@@ -211,11 +223,13 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		case 'Q':
 			query, err := requiredCString(body)
 			if err != nil {
+				metrics.recordError()
 				if err := writeErrorAndReady(connection, "08P01", "invalid query message"); err != nil {
 					return err
 				}
 				continue
 			}
+			metrics.recordSimpleQuery()
 			if strings.TrimSpace(query) == "" {
 				if err := writeMessage(connection, 'I', nil); err != nil {
 					return err
@@ -241,6 +255,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				queryErr = validateQueryResult(result)
 			}
 			if queryErr != nil {
+				metrics.recordError()
 				if err := writeErrorAndReady(connection, pgWireExecutionErrorCode(queryErr), queryErr.Error()); err != nil {
 					return err
 				}
@@ -344,7 +359,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 					}
 					continue
 				}
-				if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes, queryCanceler); err != nil {
+				if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes, queryCanceler, metrics); err != nil {
 					if err := writeExtendedError(pgWireExecutionErrorCode(err), err.Error()); err != nil {
 						return err
 					}
@@ -374,7 +389,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes, queryCanceler); err != nil {
+			if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes, queryCanceler, metrics); err != nil {
 				if err := writeExtendedError(pgWireExecutionErrorCode(err), err.Error()); err != nil {
 					return err
 				}
@@ -483,7 +498,7 @@ func (canceler *connectionQueryCanceler) cancel() {
 
 var errPortalResultLimit = errors.New("PostgreSQL portal result byte limit exceeded")
 
-func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery, maxResultBytes int, canceler *connectionQueryCanceler) error {
+func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery, maxResultBytes int, canceler *connectionQueryCanceler, metrics *ServerMetrics) error {
 	if portal.executed {
 		return nil
 	}
@@ -494,6 +509,7 @@ func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuer
 	}
 	queryCtx, releaseQuery := canceler.begin(ctx)
 	defer releaseQuery()
+	metrics.recordExtendedQuery()
 	var err error
 	if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
 		portal.result, err = parameterizedHandler.QueryParameters(queryCtx, portal.query, portal.parameters)

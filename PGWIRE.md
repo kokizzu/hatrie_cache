@@ -67,6 +67,12 @@ PostgreSQL `CancelRequest` cancels only the active handler call and returns
 SQLSTATE `57014`. A mismatched or expired key does nothing. Query handlers must
 honor their context for cancellation to take effect promptly.
 
+PGWire metrics are also disabled by default. Pass a shared
+`hatPgWire.NewServerMetrics()` through `ServerOptions.Metrics` to collect
+atomic snapshots of connections, active connections, TLS upgrades, frontend
+messages, simple and extended query executions, emitted errors, and cancel
+requests. A nil metrics option retains no metrics state.
+
 ## Compatibility Check
 
 `make test-pgwire-server` includes loopback integration tests with the stock

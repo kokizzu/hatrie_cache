@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-printf '%s\n' '== pgwire cancellation registry and startup protocol =='
-sed -n '1,220p' hat/hatPgWire/cancel.go
-sed -n '1,190p' hat/hatPgWire/server.go
-sed -n '650,770p' hat/hatPgWire/server.go
-sed -n '1,210p' hat/hatPgWire/cancel_test.go
+printf '%s\n' '== metrics and pgwire instrumentation surface =='
+rg --files hat/hatMetrics hat/hatPgWire
+rg -n -A35 -B8 'type .*Metrics|Metrics' hat/hatMetrics hat/hatPgWire
+printf '%s\n' '== pgwire formatter =='
+sed -n '1,160p' scripts/format-pgwire.sh
