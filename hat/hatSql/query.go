@@ -6390,6 +6390,29 @@ type sqlExecutionControl struct {
 	options  SQLQueryOptions
 	joinWork int
 	sources  map[string][]SQLRow
+	arena    sqlExecutionArena
+}
+
+// sqlExecutionArena reuses row backing only while one query is executing. Its
+// callers overwrite every active row; a smaller later scan clears only the
+// dropped tail so prior columnar batch references cannot survive there.
+type sqlExecutionArena struct {
+	columnarRowsBuffer []sqlExecRow
+	columnarRowsLength int
+}
+
+func (arena *sqlExecutionArena) acquireColumnarRows(rows int) []sqlExecRow {
+	if cap(arena.columnarRowsBuffer) < rows {
+		arena.columnarRowsBuffer = make([]sqlExecRow, rows)
+		arena.columnarRowsLength = rows
+		return arena.columnarRowsBuffer
+	}
+	if rows < arena.columnarRowsLength {
+		clear(arena.columnarRowsBuffer[rows:arena.columnarRowsLength])
+	}
+	arena.columnarRowsBuffer = arena.columnarRowsBuffer[:rows]
+	arena.columnarRowsLength = rows
+	return arena.columnarRowsBuffer
 }
 
 func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlExecutionControl, context.CancelFunc, error) {
@@ -6835,6 +6858,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		filterStarted := time.Now()
 		matched := make([]int, 0, batch.Rows)
 		rows := make([]sqlExecRow, batch.Rows)
+		if control != nil {
+			rows = control.arena.acquireColumnarRows(batch.Rows)
+		}
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 			rows[rowIndex] = newSQLColumnarSourceExecRow(q.from.alias, &batch, rowIndex)
 		}

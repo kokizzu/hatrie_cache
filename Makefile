@@ -1736,6 +1736,22 @@ review-sql-columnar-mixed-conjunction:
 commit-sql-columnar-mixed-conjunction:
 	sh ./scripts/commit-sql-columnar-mixed-conjunction.sh
 
+test-sql-execution-arena:
+	sh ./scripts/test-sql-execution-arena.sh
+
+benchmark-sql-execution-arena:
+	sh ./scripts/benchmark-sql-execution-arena.sh
+
+format-sql-execution-arena:
+	sh ./scripts/format-sql-execution-arena.sh
+
+review-sql-execution-arena:
+	sh ./scripts/review-sql-execution-arena.sh
+
+commit-sql-execution-arena:
+	sh ./scripts/commit-sql-execution-arena.sh
+
+
 
 commit-disable-github-ci:
 	sh ./scripts/commit-disable-github-ci.sh
