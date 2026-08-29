@@ -1631,6 +1631,24 @@ locate-columnar-builder:
 inspect-columnar-builder:
 	sh ./scripts/inspect-columnar-builder.sh
 
+inspect-columnar-dispatch:
+	sh ./scripts/inspect-columnar-dispatch.sh
+
+inspect-sql-columnar-tests:
+	sh ./scripts/inspect-sql-columnar-tests.sh
+
+inspect-sql-stream-aggregates:
+	sh ./scripts/inspect-sql-stream-aggregates.sh
+
+format-sql-columnar-numeric-aggregate:
+	sh ./scripts/format-sql-columnar-numeric-aggregate.sh
+
+review-sql-columnar-numeric-aggregate:
+	sh ./scripts/review-sql-columnar-numeric-aggregate.sh
+
+commit-sql-columnar-numeric-aggregate:
+	sh ./scripts/commit-sql-columnar-numeric-aggregate.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

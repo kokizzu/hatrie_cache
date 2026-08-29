@@ -6723,7 +6723,13 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 // field/literal predicate, so every other query keeps the general executor.
 func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
 	columnar, ok := resolver.(SQLColumnarSourceResolver)
-	if !ok || !sqlCanColumnarScan(q, outer) {
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	if result, handled, err := executeSQLColumnarNumericAggregate(q, columnar, control, metrics, outer); handled {
+		return result, true, err
+	}
+	if !sqlCanColumnarScan(q, outer) {
 		return SQLQueryResult{}, false, nil
 	}
 	fields, predicateFields, projectionFields, ok := sqlColumnarScanFields(q)
@@ -6824,6 +6830,196 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		metrics.record("LATE MATERIALIZATION", strings.Join(projectionFields, ","), len(matched), len(result.Rows), materializeStarted)
 	}
 	return result, true, nil
+}
+
+type sqlColumnarNumericAggregate struct {
+	name  string
+	field string
+	count int64
+	sum   float64
+	value float64
+	seen  bool
+}
+
+func (aggregate *sqlColumnarNumericAggregate) add(batch ColumnarBatch, rowIndex int) {
+	if aggregate.name == "COUNT" && aggregate.field == "" {
+		aggregate.count++
+		return
+	}
+	value, _ := batch.Value(aggregate.field, rowIndex)
+	if aggregate.name == "COUNT" {
+		if value != nil {
+			aggregate.count++
+		}
+		return
+	}
+	number, ok := sqlNumber(value)
+	if !ok {
+		return
+	}
+	if !aggregate.seen {
+		aggregate.count, aggregate.sum, aggregate.value, aggregate.seen = 1, number, number, true
+		return
+	}
+	aggregate.count++
+	switch aggregate.name {
+	case "SUM", "AVG":
+		aggregate.sum += number
+	case "MIN":
+		if number < aggregate.value {
+			aggregate.value = number
+		}
+	case "MAX":
+		if number > aggregate.value {
+			aggregate.value = number
+		}
+	}
+}
+
+func (aggregate sqlColumnarNumericAggregate) result() interface{} {
+	if aggregate.name == "COUNT" {
+		return aggregate.count
+	}
+	if !aggregate.seen {
+		return nil
+	}
+	switch aggregate.name {
+	case "SUM":
+		return aggregate.sum
+	case "AVG":
+		return aggregate.sum / float64(aggregate.count)
+	case "MIN", "MAX":
+		return aggregate.value
+	}
+	return nil
+}
+
+// executeSQLColumnarNumericAggregate evaluates the constant-state aggregate
+// subset directly against requested columns. The eligibility proof excludes
+// expressions, grouping, and ordering so its result remains identical to the
+// general aggregate executor without building source-row maps.
+func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
+	aggregates, fields, predicateField, predicateOperator, predicateValue, ok := sqlColumnarNumericAggregates(q, outer)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	started := time.Now()
+	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
+	if err != nil || !available {
+		return SQLQueryResult{}, available, err
+	}
+	if batch.Rows < 0 {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned a negative row count", q.from.key)
+	}
+	if control != nil && batch.Rows > control.maxRows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, control.maxRows)
+	}
+	for _, field := range fields {
+		if batch.FieldRows(field) != batch.Rows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
+		}
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
+	}
+
+	filterStarted := time.Now()
+	matched := 0
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if control != nil {
+			if err := control.check(); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+		}
+		if predicateField != "" {
+			candidate, _ := batch.Value(predicateField, rowIndex)
+			number, numeric := sqlNumber(candidate)
+			if !numeric || !sqlColumnarNumericMatches(number, predicateOperator, predicateValue) {
+				continue
+			}
+		}
+		matched++
+		for index := range aggregates {
+			aggregates[index].add(batch, rowIndex)
+		}
+	}
+	if metrics != nil && predicateField != "" {
+		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+	}
+
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	aggregateStarted := time.Now()
+	if q.offset == 0 && q.limit != 0 {
+		row := make(SQLRow, len(aggregates))
+		for index, aggregate := range aggregates {
+			row[result.Columns[index]] = aggregate.result()
+		}
+		if control != nil && control.options.MaxResultBytes > 0 && sqlRowBytes(row) > control.options.MaxResultBytes {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR NUMERIC AGGREGATE", sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
+	}
+	return result, true, nil
+}
+
+func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []sqlColumnarNumericAggregate, fields []string, predicateField, predicateOperator string, predicateValue float64, ok bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+		return nil, nil, "", "", 0, false
+	}
+	if q.where.kind != "" {
+		var numeric bool
+		predicateField, predicateOperator, predicateValue, numeric = sqlColumnarNumericPredicate(q.where, q.from.alias)
+		if !numeric {
+			return nil, nil, "", "", 0, false
+		}
+	}
+	seen := map[string]bool{}
+	addField := func(field string) {
+		if field != "" && !seen[field] {
+			seen[field] = true
+			fields = append(fields, field)
+		}
+	}
+	addField(predicateField)
+	aggregates = make([]sqlColumnarNumericAggregate, len(q.selects))
+	for index, item := range q.selects {
+		expr := item.expr
+		if expr.kind != "func" || expr.window != nil || expr.filter != nil {
+			return nil, nil, "", "", 0, false
+		}
+		aggregate := sqlColumnarNumericAggregate{name: expr.name}
+		switch expr.name {
+		case "COUNT":
+			if len(expr.args) > 1 {
+				return nil, nil, "", "", 0, false
+			}
+			if len(expr.args) == 1 && expr.args[0].kind != "star" {
+				if !sqlColumnarAggregateField(expr.args[0], q.from.alias, &aggregate.field) {
+					return nil, nil, "", "", 0, false
+				}
+			}
+		case "SUM", "AVG", "MIN", "MAX":
+			if len(expr.args) != 1 || !sqlColumnarAggregateField(expr.args[0], q.from.alias, &aggregate.field) {
+				return nil, nil, "", "", 0, false
+			}
+		default:
+			return nil, nil, "", "", 0, false
+		}
+		addField(aggregate.field)
+		aggregates[index] = aggregate
+	}
+	return aggregates, fields, predicateField, predicateOperator, predicateValue, true
+}
+
+func sqlColumnarAggregateField(expr sqlExpr, alias string, field *string) bool {
+	if expr.kind != "field" || expr.window != nil || (expr.qualifier != "" && expr.qualifier != alias) {
+		return false
+	}
+	*field = expr.name
+	return true
 }
 
 func sqlCanColumnarScan(q *sqlQuery, outer *sqlExecRow) bool {
