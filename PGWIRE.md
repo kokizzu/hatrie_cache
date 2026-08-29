@@ -35,6 +35,13 @@ permit `sslmode=prefer` fallback.
 materialized once per portal, each execute returns its next row range, and the
 server emits `PortalSuspended` until all rows have been returned.
 
+## Compatibility Check
+
+`make test-pgwire-server` includes a loopback integration test with the stock
+`psql` client when it is installed. Run `make check-pgwire-client-tools` to
+report local `psql` and Java tool availability before adding a JDBC or ODBC
+driver-specific integration test.
+
 ## Embed A Listener
 
 ```go

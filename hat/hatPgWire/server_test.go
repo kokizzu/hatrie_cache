@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -423,6 +425,50 @@ func TestServeConnDescribesBoundPortalResult(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("query executions = %d, want 1", len(calls))
 	}
+}
+
+func TestServeConnSupportsPSQLSimpleQuery(t *testing.T) {
+	if _, err := exec.LookPath("psql"); err != nil {
+		t.Skip("psql is not installed")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	serverErr := make(chan error, 1)
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer connection.Close()
+		serverErr <- hatPgWire.ServeConn(ctx, connection, hatSql.NewPgWireQueryHandler(nil, hatSql.QueryOptions{}), hatPgWire.ServerOptions{})
+	}()
+	command := exec.CommandContext(ctx, "psql", "--no-psqlrc", "--no-align", "--tuples-only", "-h", "127.0.0.1", "-p", portFromAddress(t, listener.Addr().String()), "-U", "analyst", "-d", "analytics", "-c", "FROM VALUES ('Ada') AS people(name) SELECT people.name")
+	command.Env = append(os.Environ(), "PGSSLMODE=disable", "PGCONNECT_TIMEOUT=3")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("psql error = %v, output = %s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != "Ada" {
+		t.Fatalf("psql output = %q, want Ada", output)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func portFromAddress(t *testing.T, address string) string {
+	t.Helper()
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
 }
 
 type typedParameterizedQueryHandler struct {

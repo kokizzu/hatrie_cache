@@ -2142,3 +2142,6 @@ deliver-notebook-integration:
 .PHONY: deliver-pgwire-extended
 deliver-pgwire-extended:
 	sh ./scripts/deliver-pgwire-extended.sh
+.PHONY: check-pgwire-client-tools
+check-pgwire-client-tools:
+	sh ./scripts/check-pgwire-client-tools.sh
