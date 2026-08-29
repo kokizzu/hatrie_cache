@@ -14,5 +14,5 @@ scripts/commit-sql-spill-parallel-merge.sh'
 
 git add -- $files
 git diff --cached --check
-git commit --only -m 'perf: parallelize SQL external sort merge passes' -- $files
+git commit --only -m 'perf: parallelize SQL spill group merge passes' -- $files
 git push origin master

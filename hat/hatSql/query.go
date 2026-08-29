@@ -10726,7 +10726,7 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 		}
 		if err := encoder.Encode(record); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillGroupRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging aggregate runs")
+				return sqlSpillGroupRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging aggregate runs: %w", errSQLSpillDiskBudget)
 			}
 			return sqlSpillGroupRun{}, fmt.Errorf("write SQL group merge file: %w", err)
 		}
@@ -10744,6 +10744,73 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 	run.bytes = info.Size()
 	remove = false
 	return run, nil
+}
+
+type sqlParallelGroupMergeResult struct {
+	index int
+	run   sqlSpillGroupRun
+	err   error
+}
+
+func sqlMergeSpillGroupPassParallel(runs []sqlSpillGroupRun, order sqlOrder, directory string, available *int64, control *sqlExecutionControl) (next []sqlSpillGroupRun, used bool, err error) {
+	if control == nil || control.options.Workers < 2 {
+		return nil, false, nil
+	}
+	groups := (len(runs) + maxSQLSpillMergeFanIn - 1) / maxSQLSpillMergeFanIn
+	if groups < 2 {
+		return nil, false, nil
+	}
+	workers := control.options.Workers
+	if workers > groups {
+		workers = groups
+	}
+	before := atomic.LoadInt64(available)
+	results := make([]sqlParallelGroupMergeResult, groups)
+	jobs := make(chan int)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range jobs {
+				start := index * maxSQLSpillMergeFanIn
+				end := start + maxSQLSpillMergeFanIn
+				if end > len(runs) {
+					end = len(runs)
+				}
+				merged, mergeErr := sqlMergeSpillGroupRunsToRun(runs[start:end], order, directory, available, control)
+				results[index] = sqlParallelGroupMergeResult{index: index, run: merged, err: mergeErr}
+			}
+		}()
+	}
+	for index := range results {
+		jobs <- index
+	}
+	close(jobs)
+	group.Wait()
+	var firstErr error
+	for _, result := range results {
+		if result.err != nil && firstErr == nil {
+			firstErr = result.err
+		}
+	}
+	if firstErr != nil {
+		for _, result := range results {
+			if result.err == nil && result.run.path != "" {
+				_ = os.Remove(result.run.path)
+			}
+		}
+		atomic.StoreInt64(available, before)
+		if errors.Is(firstErr, errSQLSpillDiskBudget) {
+			return nil, false, nil
+		}
+		return nil, false, firstErr
+	}
+	next = make([]sqlSpillGroupRun, len(results))
+	for _, result := range results {
+		next[result.index] = result.run
+	}
+	return next, true, nil
 }
 
 func sqlCanPushBaseWhere(query *sqlQuery) bool {
@@ -11468,6 +11535,27 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 		return SQLQueryResult{}, true, err
 	}
 	for len(runs) > maxSQLSpillMergeFanIn {
+		if next, parallel, mergeErr := sqlMergeSpillGroupPassParallel(runs, order, control.options.SpillDirectory, &available, control); mergeErr != nil {
+			return SQLQueryResult{}, true, mergeErr
+		} else if parallel {
+			for index, merged := range next {
+				paths[merged.path] = struct{}{}
+				start := index * maxSQLSpillMergeFanIn
+				end := start + maxSQLSpillMergeFanIn
+				if end > len(runs) {
+					end = len(runs)
+				}
+				for _, run := range runs[start:end] {
+					if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+						return SQLQueryResult{}, true, fmt.Errorf("remove SQL group spill file: %w", err)
+					}
+					delete(paths, run.path)
+					available += run.bytes
+				}
+			}
+			runs = next
+			continue
+		}
 		next := make([]sqlSpillGroupRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
 		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
 			end := start + maxSQLSpillMergeFanIn

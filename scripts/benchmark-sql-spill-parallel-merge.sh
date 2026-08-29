@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-go test ./hat/hatSql -run '^$' -bench '^BenchmarkSQLExternalSortParallelMerge$' -benchmem -count=1
+go test ./hat/hatSql -run '^$' -bench '^BenchmarkSQL(ExternalSort|SpillGroup)ParallelMerge$' -benchmem -count=1
