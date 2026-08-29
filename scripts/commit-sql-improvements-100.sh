@@ -1,8 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-make review-sql-improvements-100
-git add -- Makefile SQL_IMPROVEMENTS_100.md scripts/audit-sql-improvements-100.sh scripts/verify-sql-improvements-100.sh scripts/review-sql-improvements-100.sh scripts/commit-sql-improvements-100.sh
-git diff --cached --check
-git commit --only -m "docs: add SQL improvement backlog" -- Makefile SQL_IMPROVEMENTS_100.md scripts/audit-sql-improvements-100.sh scripts/verify-sql-improvements-100.sh scripts/review-sql-improvements-100.sh scripts/commit-sql-improvements-100.sh
-git push
+git diff --check -- SQL_IMPROVEMENTS_100.md scripts/audit-sql-improvements.sh scripts/inspect-sql-source-ownership.sh scripts/review-sql-improvements-100.sh scripts/commit-sql-improvements-100.sh Makefile
+git add -- SQL_IMPROVEMENTS_100.md scripts/audit-sql-improvements.sh scripts/inspect-sql-source-ownership.sh scripts/review-sql-improvements-100.sh scripts/commit-sql-improvements-100.sh Makefile
+git commit --only -m 'docs: add measured SQL improvement backlog' -- SQL_IMPROVEMENTS_100.md scripts/audit-sql-improvements.sh scripts/inspect-sql-source-ownership.sh scripts/review-sql-improvements-100.sh scripts/commit-sql-improvements-100.sh Makefile
+git push origin master

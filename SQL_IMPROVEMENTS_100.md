@@ -1,141 +1,139 @@
-# SQL Improvements: 100 Candidate Backlog
+# SQL Improvement Backlog: 100 Measured Candidates
 
-This source-based backlog was produced from `make audit-sql-improvements-100` on 2026-08-29. It is intentionally a candidate list, not a claim that every item is missing or appropriate for every deployment. Items are grouped so a future goal can select a coherent, testable slice rather than mixing unrelated changes.
+## Goal
 
-The current temporal and analytics goal remains active. The goal system cannot replace an unfinished goal, so the prioritized selection below is prepared as the next goal once the active work is complete.
+Evaluate these candidates in priority order with a focused regression test,
+baseline benchmark, smallest correct change, repeat benchmark, and broad
+verification. Keep only changes that improve the named workload without
+breaking result, NULL, collation, ordering, cancellation, spill-budget, or
+cleanup semantics.
 
-## Query Planning And Costing
+Items are candidates, not promises. `P0` means likely high return and ready for
+measurement; `P1` needs a workload gate; `P2` is useful only after profiling.
 
-1. **P0, medium:** Collect table row-count statistics so plans do not assume all sources cost the same.
-2. **P0, medium:** Collect per-column distinct-count statistics for join and grouping cardinality estimates.
-3. **P1, medium:** Record null fractions and value ranges for selectivity estimation.
-4. **P1, high:** Add histogram statistics for skewed numeric, date, and timestamp predicates.
-5. **P0, medium:** Choose join order by estimated cost instead of input order.
-6. **P0, medium:** Choose hash, nested-loop, or merge join from estimated rows and available ordering.
-7. **P1, medium:** Push predicates through derived tables and common table expressions when semantics permit.
-8. **P1, medium:** Push projection pruning into all source readers, not only direct cache scans.
-9. **P1, medium:** Rewrite decorrelatable subqueries into joins or semi-joins.
-10. **P1, low:** Include estimated versus actual rows and cost in EXPLAIN ANALYZE output.
+## Columnar And Expression Execution
 
-## Execution And Memory
+1. `P0` Vectorize numeric `BETWEEN` filters in `executeSQLColumnarScan`.
+2. `P0` Vectorize numeric `IN` predicates with a compact typed membership set.
+3. `P0` Vectorize `IS NULL` and `IS NOT NULL` over column presence bitmaps.
+4. `P0` Fuse conjunctions of direct numeric predicates into one scan.
+5. `P0` Fuse direct numeric predicates with projection and `LIMIT` stopping.
+6. `P0` Add direct columnar `COUNT(field)` null-aware aggregation.
+7. `P0` Add direct columnar `SUM`/`AVG` grouped by one dictionary field.
+8. `P0` Add direct columnar `MIN`/`MAX` grouped by one dictionary field.
+9. `P0` Add direct dictionary `IN` filtering without materialized rows.
+10. `P0` Add direct dictionary prefix filtering when binary collation permits.
+11. `P1` Evaluate simple arithmetic projection from numeric columns.
+12. `P1` Evaluate `CASE` on a direct numeric predicate in the column scan.
+13. `P1` Add a columnar boolean representation instead of interface values.
+14. `P1` Add typed int64, float64, timestamp, and date column vectors.
+15. `P1` Store nullable vectors as values plus a null bitmap.
+16. `P1` Add a selection-vector representation for generic vector predicates.
+17. `P1` Select a predicate order by vector statistics and selectivity.
+18. `P1` Push projection field collection before JSON batch decoding.
+19. `P1` Permit narrow direct scans for `OFFSET` plus `LIMIT` when ordered.
+20. `P2` Add SIMD only after scalar typed-vector baselines demonstrate a gap.
 
-11. **P0, medium:** Use vectorized expression evaluation for batches of rows.
-12. **P0, medium:** Reuse typed value buffers across executor operators to reduce per-row allocation.
-13. **P1, medium:** Add a memory-accounted hash aggregation that spills partitions before admission limits are exceeded.
-14. **P1, medium:** Add external merge sort for unbounded ORDER BY workloads.
-15. **P1, medium:** Partition oversized hash joins and spill deterministically.
-16. **P1, medium:** Support adaptive batch sizes based on row width and remaining query memory.
-17. **P2, high:** Parallelize independent scan, filter, and aggregate partitions with bounded worker pools.
-18. **P1, medium:** Add runtime filter propagation from hash joins to upstream scans.
-19. **P1, low:** Fuse filter and projection operators when no observable diagnostics are lost.
-20. **P2, medium:** Add cooperative yielding for long CPU-bound operators so cancellation latency stays bounded.
+## Source Decode, Representation, And Memory
 
-## Indexes And Access Paths
+21. `P0` Measure source-byte copying during `ResolveSQLColumnarSource`.
+22. `P0` Add an internal read-snapshot borrowed-byte contract if ownership is safe.
+23. `P0` Decode JSON only for fields referenced by the resolved query plan.
+24. `P0` Cache parsed column schema per source generation.
+25. `P0` Reuse JSON decoder scratch buffers within one query.
+26. `P1` Prefer a compact binary columnar source format for new SQL collections.
+27. `P1` Make source encoding selectable with JSON compatibility fallback.
+28. `P1` Store repeated string dictionaries in the persisted columnar format.
+29. `P1` Delta-code ordered int64/date/timestamp vectors where profitable.
+30. `P1` Bit-pack low-cardinality integers and booleans.
+31. `P1` Add a per-query arena for transient `sqlExecRow` and key buffers.
+32. `P1` Reuse projection row maps only on streaming APIs with clear ownership.
+33. `P1` Pre-size generic row maps from source schema width.
+34. `P1` Intern repeated field names and aliases in parsed plans.
+35. `P1` Cache canonical field lookup maps by source schema generation.
+36. `P2` Pool large scan buffers behind size caps and clear-reference tests.
+37. `P2` Add allocation telemetry per execution-plan node.
+38. `P2` Measure GC pause and retained heap for long columnar scans.
+39. `P2` Add an adaptive row/column threshold only with a stable workload signal.
+40. `P2` Compact sparse columns with offset tables after density profiling.
 
-21. **P0, high:** Add typed secondary indexes for integer, date, timestamp, and boolean equality/range predicates.
-22. **P0, high:** Add composite indexes with left-prefix matching for common multi-column filters and orderings.
-23. **P1, medium:** Add covering-index scans that avoid fetching base values for projected columns.
-24. **P1, medium:** Add partial indexes guarded by a stable predicate.
-25. **P1, medium:** Add expression indexes for normalized text, extracted JSON paths, and computed dates.
-26. **P1, medium:** Select an index automatically using statistics; retain hints only as an explicit override.
-27. **P1, medium:** Add index intersection for independent selective equality predicates.
-28. **P2, medium:** Add index union for OR predicates with duplicate elimination.
-29. **P1, high:** Add range-friendly time indexes for event-time scans and retention deletion.
-30. **P2, high:** Add full-text inverted indexes with explicit tokenizer and collation configuration.
+## Indexes, Predicate Pushdown, And Partitions
 
-## Relational Coverage
+41. `P0` Use typed numeric/date keys for range-index probes instead of text keys.
+42. `P0` Push conjunctions into composite-index prefix/range probes.
+43. `P0` Add cost comparison between index probe and direct columnar scan.
+44. `P0` Exploit covering indexes before fetching full source rows.
+45. `P0` Push `LIMIT` into ordered index scans.
+46. `P0` Reuse equality probe results across repeated join keys.
+47. `P1` Add selectivity statistics per secondary-index key.
+48. `P1` Add lightweight histograms for numeric range predicates.
+49. `P1` Add top-value statistics for skewed dictionary columns.
+50. `P1` Intersect bitmap indexes for multi-predicate filters.
+51. `P1` Union bitmap indexes for eligible `OR` predicates.
+52. `P1` Build dictionary-id bitmap indexes for low-cardinality strings.
+53. `P1` Add index-only `COUNT(*)` and `COUNT(field)` paths.
+54. `P1` Stream grouped aggregation from composite-index order.
+55. `P1` Stream `DISTINCT` from matching index order with `LIMIT` pushdown.
+56. `P1` Prune partitions using `IN`, `BETWEEN`, and conjunctions.
+57. `P1` Prune timestamp partitions after safe cast/literal normalization.
+58. `P1` Cache partition-boundary metadata by generation.
+59. `P2` Make index-maintenance batching aware of transaction commit groups.
+60. `P2` Add index-build throttling and progress telemetry for large collections.
 
-31. **P1, medium:** Support RIGHT JOIN by normalization to a tested equivalent plan.
-32. **P1, high:** Support FULL OUTER JOIN with correct null-extension and duplicate handling.
-33. **P1, medium:** Support USING and NATURAL join column coalescing with unambiguous output names.
-34. **P1, medium:** Add anti-join planning for NOT EXISTS and NOT IN with SQL null semantics.
-35. **P1, medium:** Add quantified comparisons: ANY, SOME, and ALL.
-36. **P2, medium:** Support recursive common table expressions with depth, row, and cycle limits.
-37. **P1, medium:** Support MERGE with deterministic matching and duplicate-match errors.
-38. **P1, medium:** Add RETURNING for mutations so callers avoid a follow-up read.
-39. **P2, medium:** Add updatable views with explicit eligibility rules.
-40. **P2, medium:** Support row-value constructors and multi-column comparisons.
+## Joins And Subqueries
 
-## Analytics And Windows
+61. `P0` Benchmark hash join build/probe side selection across skewed inputs.
+62. `P0` Base join choice on exact source count when inexpensive to obtain.
+63. `P0` Add a compact typed hash-key encoding for numeric and boolean joins.
+64. `P0` Reuse a build-side hash table for identical repeated subquery joins.
+65. `P0` Push single-alias `WHERE` terms below eligible inner joins.
+66. `P1` Push compatible predicates into outer joins without changing NULL semantics.
+67. `P1` Use index nested-loop joins for small outer inputs after cost comparison.
+68. `P1` Batch index probes for repeated outer join keys.
+69. `P1` Add a merge join when both sources are provably ordered on the join key.
+70. `P1` Add bloom prefiltering for in-memory hash joins with skew gates.
+71. `P1` Use partition-size histograms to tune spill hash join partition count.
+72. `P1` Dynamically split only oversized spill hash partitions.
+73. `P1` Compact join match tracking for left/right/full joins with bitsets.
+74. `P1` Avoid constructing empty alias maps repeatedly for unmatched outer rows.
+75. `P1` De-correlate eligible scalar correlated subqueries into joins.
+76. `P1` Cache uncorrelated scalar subquery results within an execution.
+77. `P2` Add batched lateral subquery evaluation for shared arguments.
+78. `P2` Add join-order dynamic programming only for a small, capped join count.
+79. `P2` Record actual versus estimated rows in `EXPLAIN ANALYZE` feedback.
+80. `P2` Use prior execution cardinality feedback only with generation invalidation.
 
-41. **P1, medium:** Implement missing standard window functions with shared frame evaluation.
-42. **P1, medium:** Support RANGE and GROUPS window frames with typed peer comparison.
-43. **P1, medium:** Support frame exclusion: CURRENT ROW, GROUP, and TIES.
-44. **P1, medium:** Add percentile_cont and percentile_disc exact aggregates.
-45. **P1, medium:** Add ordered-set aggregate syntax for percentile and mode functions.
-46. **P1, medium:** Add FILTER support consistently to all built-in aggregates and UDF aggregates.
-47. **P1, medium:** Optimize grouping sets, ROLLUP, and CUBE with shared partial aggregates.
-48. **P2, medium:** Add GROUPING and GROUPING_ID output for grouping-set disambiguation.
-49. **P1, medium:** Add top-k aggregate with deterministic tie handling.
-50. **P2, medium:** Add analytic covariance, correlation, regression, and standard-deviation functions.
+## Sort, Group, Distinct, Windows, And Spill
 
-## Temporal And Streaming SQL
+81. `P0` Replace `fmt.Sprintf` spill-size estimation with typed size accounting.
+82. `P0` Reuse sort-key buffers while building spill records.
+83. `P0` Use a bounded heap for `ORDER BY ... LIMIT` before creating full runs.
+84. `P0` Use Top-N selection for `ORDER BY ... OFFSET ... LIMIT` where bounded.
+85. `P0` Parallelize external set merge passes with the existing budget discipline.
+86. `P0` Add parallel spill hash partition encoding when source streaming allows it.
+87. `P1` Evaluate a typed spill codec against `gob` for CPU, bytes, and recovery.
+88. `P1` Select compression from observed spill entropy, not a fixed flag alone.
+89. `P1` Reuse compression buffers for successive spill files.
+90. `P1` Reduce set-operation double sorting when output order is not requested.
+91. `P1` Use incremental aggregation for sorted/grouped input before spill.
+92. `P1` Add dictionary-key group state instead of formatted composite string keys.
+93. `P1` Add partitioned in-memory aggregation for high-cardinality groups.
+94. `P1` Spill partial aggregate states using typed aggregate encodings.
+95. `P1` Use index order for window partition/order input more broadly.
+96. `P1` Stream bounded window frames with a ring buffer.
+97. `P1` Share sort order between compatible windows and final `ORDER BY`.
+98. `P2` Add radix sort for fixed-width numeric spill/order keys after benchmarks.
+99. `P2` Tune merge fan-in from file descriptor and storage throughput budgets.
+100. `P2` Add per-operator CPU, allocations, peak memory, spill bytes, and rows to `EXPLAIN ANALYZE`.
 
-51. **P0, medium:** Integrate temporal AS OF queries with parser, planner, and table sources rather than only the helper API.
-52. **P0, medium:** Integrate watermarks and late-event policy into streaming query execution.
-53. **P1, medium:** Add tumbling, hopping, and session SQL window syntax over event time.
-54. **P1, high:** Add stream-stream joins with bounded state and watermark-based eviction.
-55. **P1, medium:** Add temporal lookup joins against versioned dimension tables.
-56. **P1, medium:** Make event-time versus processing-time explicit in functions and diagnostics.
-57. **P1, medium:** Add late-event side outputs and replay-safe correction modes.
-58. **P2, high:** Add exactly-once checkpoint coordination for subscriptions and materialized streaming views.
-59. **P1, medium:** Add schedule-aware rollup refresh with idempotent watermark progress.
-60. **P1, medium:** Add queryable stream-state metrics: lag, state bytes, late rows, and watermark age.
+## First Measured Batch
 
-## Types, Expressions, And Semantics
+Start with items `2`, `4`, `7`, `9`, `21`, `23`, `41`, `43`, `45`, `61`,
+`63`, `65`, `81`, `83`, `85`, and `100`. They extend paths that already
+exist in `hat/hatSql/query.go` and `hat/hatCache/sql_query.go`, have focused
+test seams, and do not require a public SQL syntax change.
 
-61. **P1, low:** Add interval and period types with calendar-aware arithmetic.
-62. **P1, medium:** Add fixed-width decimal precision and scale enforcement at parse, bind, and arithmetic boundaries.
-63. **P1, medium:** Add UUID, IP address, and network containment functions with index-aware operators.
-64. **P1, medium:** Add array type, array functions, and ANY/ALL membership semantics.
-65. **P1, medium:** Add structured JSON constructors, mutation functions, and JSON_TABLE-style projection.
-66. **P1, medium:** Add generated columns with deterministic-expression validation.
-67. **P1, low:** Complete SQL three-valued logic tests across joins, subqueries, and set operations.
-68. **P2, medium:** Add locale-aware collations with version-pinned behavior for persisted indexes.
-69. **P1, low:** Add standards-compatible literal escaping and binary/hex literal forms.
-70. **P2, medium:** Add user-defined scalar type aliases with explicit cast rules.
-
-## Durability, Recovery, And Storage
-
-71. **P0, medium:** Define transactional atomicity for multi-row SQL mutations and make rollback behavior testable.
-72. **P0, medium:** Add write-ahead intent records for durable mutation recovery.
-73. **P1, medium:** Add crash-consistent secondary-index rebuild and validation tooling.
-74. **P1, medium:** Add online schema-change state transitions with resumable backfill.
-75. **P1, medium:** Add consistent read snapshots across all tables participating in a query.
-76. **P1, medium:** Add compaction-aware query pinning so readers retain the exact required files or generations.
-77. **P1, low:** Add backup manifests containing schema, version, checksum, and dependency order.
-78. **P1, medium:** Add point-in-time restore from snapshots plus mutation log segments.
-79. **P1, medium:** Add storage checksums and corruption quarantine before query execution reads damaged data.
-80. **P2, medium:** Add tiered hot/warm/cold storage policies with explicit query-latency reporting.
-
-## Security And Governance
-
-81. **P0, medium:** Enforce table, column, and function privileges at bind and execution time.
-82. **P0, medium:** Add row-level security predicates with policy recursion protection.
-83. **P1, medium:** Add masked or tokenized column projections for sensitive fields.
-84. **P1, low:** Add query result-size and export-rate limits per principal.
-85. **P1, medium:** Make audit events tamper-evident with a chained hash and durable sink acknowledgement.
-86. **P1, medium:** Add resource quotas by tenant, role, and workload class.
-87. **P1, medium:** Add explicit allowlists for external file paths, HTTP hosts, and plugin capabilities.
-88. **P1, low:** Redact literals and secret-bearing parameters in diagnostics, telemetry, and EXPLAIN output.
-89. **P2, medium:** Add signed policy bundles and rollout/rollback versioning.
-90. **P1, low:** Add security regression tests for privilege escalation through views, functions, and virtual sources.
-
-## Interfaces, Operations, And Developer Tooling
-
-91. **P0, medium:** Expose a stable wire protocol with typed parameters, streaming rows, cancellation, and structured errors.
-92. **P1, medium:** Add prepared-statement plan invalidation when schemas, indexes, functions, or policies change.
-93. **P1, low:** Add query-plan snapshots and golden tests for optimizer regression detection.
-94. **P1, medium:** Add deterministic fuzzing for parser, binder, planner, and executor equivalence properties.
-95. **P1, medium:** Add SQL logic-test compatibility runner for portable semantic coverage.
-96. **P1, medium:** Add differential tests against a reference engine for the supported SQL subset.
-97. **P1, low:** Add workload capture and replay with parameter redaction and stable fixtures.
-98. **P1, medium:** Add benchmark suites for each supported command, data shape, concurrency, allocation, and memory high-water mark.
-99. **P1, low:** Publish a machine-readable supported-SQL matrix linked to parser and execution tests.
-100. **P1, medium:** Add an operator handbook for diagnosing spills, plans, quotas, snapshots, replicas, backups, and recovery.
-
-## Recommended Next Goal
-
-Start with items 1, 2, 5, 6, 10, 12, 21, 22, 26, and 93. Together they form a bounded optimizer and typed-index goal: collect cheap statistics, plan joins and indexes from those statistics, remove avoidable executor allocations, and lock the behavior with plan snapshots. It is a high-leverage performance increment without introducing a new storage or distributed-system contract.
-
-Defer parallel execution, recursive CTEs, full-text search, exactly-once streaming, point-in-time restore, and fine-grained authorization to separate goals. Each changes a broad correctness or operational contract and should not be mixed with optimizer work.
+For each accepted item, record before/after `ns/op`, `B/op`, `allocs/op`,
+peak memory where relevant, output correctness coverage, and the workload
+shape. Reject it when the named workload regresses or its resource cost is not
+justified.

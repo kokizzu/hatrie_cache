@@ -1664,6 +1664,9 @@ commit-sql-columnar-numeric-aggregate:
 audit-sql-storage-allocation:
 	sh ./scripts/audit-sql-storage-allocation.sh
 
+inspect-sql-source-ownership:
+	sh ./scripts/inspect-sql-source-ownership.sh
+
 inspect-sql-index-keys:
 	sh ./scripts/inspect-sql-index-keys.sh
 
