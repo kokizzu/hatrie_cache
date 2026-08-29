@@ -1,6 +1,6 @@
 # PostgreSQL Wire Protocol
 
-`hat/hatPgWire` provides a dependency-free PostgreSQL v3 simple-query server
+`hat/hatPgWire` provides a dependency-free PostgreSQL v3 query server
 for existing PostgreSQL client libraries. It performs startup negotiation,
 answers an SSL negotiation request with `N` so `sslmode=prefer` clients can
 fall back to plain TCP, supports optional clear-text password authentication,
@@ -9,9 +9,25 @@ responses.
 
 The wire transport executes the Hatrie SQL dialect, not the full PostgreSQL SQL
 dialect. PostgreSQL clients such as `psql`, BI connectors, or driver-based
-tools must submit syntax supported by [SQL.md](SQL.md). Extended prepared-query
-messages are intentionally rejected with SQLSTATE `0A000`; they are a separate
-compatibility milestone required for JDBC and ODBC driver support.
+tools must submit syntax supported by [SQL.md](SQL.md).
+
+## Prepared Queries
+
+The server supports the PostgreSQL extended-query sequence `Parse`, `Bind`,
+`Describe`, `Execute`, and `Sync`. Parameters remain separate from SQL text and
+are forwarded to `hatSql` as positional `$1`, `$2`, and later values. This is
+the prepared-statement baseline required by JDBC and ODBC clients.
+
+`Bind` supports PostgreSQL text-format values and SQL NULL. Declared `bool`,
+`int2`, `int4`, `int8`, `float4`, and `float8` parameters are converted to Go
+values before Hatrie SQL execution; text and unspecified OIDs stay strings.
+Results are sent in PostgreSQL text format. Binary bind values or binary result
+formats receive SQLSTATE `0A000` rather than being interpreted incorrectly.
+
+`Describe Statement` returns the declared parameter OIDs; `Describe Portal`
+returns `NoData` until result-schema inference is available. The package does
+not terminate TLS, so use a TLS proxy or a protected local listener; an SSL
+request receives `N` to permit `sslmode=prefer` fallback.
 
 ## Embed A Listener
 

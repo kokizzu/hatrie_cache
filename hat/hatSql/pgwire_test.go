@@ -27,3 +27,17 @@ func TestPgWireQueryHandlerExecutesSQLResult(t *testing.T) {
 		t.Fatalf("row = %#v, want 1 Ada t", result.Rows[0])
 	}
 }
+
+func TestPgWireQueryHandlerExecutesBoundParameters(t *testing.T) {
+	handler := hatSql.NewPgWireQueryHandler(nil, hatSql.QueryOptions{})
+	result, err := handler.QueryParameters(context.Background(), `FROM VALUES ($1) AS values(name) SELECT name`, []interface{}{"Ada"})
+	if err != nil {
+		t.Fatalf("QueryParameters() error = %v", err)
+	}
+	if len(result.Fields) != 1 || result.Fields[0].Name != "name" || result.Fields[0].DataTypeOID != hatPgWire.OIDText {
+		t.Fatalf("fields = %#v", result.Fields)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0] == nil || *result.Rows[0][0] != "Ada" {
+		t.Fatalf("rows = %#v, want Ada", result.Rows)
+	}
+}

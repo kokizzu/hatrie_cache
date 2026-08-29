@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"hatrie_cache/hat/hatPgWire"
+	"hatrie_cache/hat/hatSql"
 )
 
 func TestServeConnRunsPostgreSQLSimpleQuery(t *testing.T) {
@@ -165,6 +166,121 @@ func TestServeConnRunsPostgreSQLExtendedQuery(t *testing.T) {
 	if err := <-errCh; err != nil {
 		t.Fatalf("ServeConn() error = %v", err)
 	}
+}
+
+func TestServeConnRunsPostgreSQLExtendedQueryWithTextParameter(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatSql.NewPgWireQueryHandler(nil, hatSql.QueryOptions{}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	parse := append([]byte("statement\x00FROM VALUES ($1) AS value(status) SELECT value.status\x00"), 0, 1, 0, 0, 0, hatPgWire.OIDText)
+	writeFrontendMessage(t, client, 'P', parse)
+	if messageType, _ := readBackendMessage(t, client); messageType != '1' {
+		t.Fatalf("Parse response = %q, want ParseComplete", messageType)
+	}
+	bind := []byte("portal\x00statement\x00\x00\x00\x00\x01\x00\x00\x00\x02ok\x00\x00")
+	writeFrontendMessage(t, client, 'B', bind)
+	if messageType, body := readBackendMessage(t, client); messageType != '2' {
+		t.Fatalf("Bind response = %q %q, want BindComplete", messageType, body)
+	}
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
+		t.Fatalf("Execute response = %q, want RowDescription", messageType)
+	}
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'D' || len(body) != 8 || binary.BigEndian.Uint16(body[:2]) != 1 || string(body[6:]) != "ok" {
+		t.Fatalf("data row = %q %v, want parameter value ok", messageType, body)
+	}
+	if messageType, _ := readBackendMessage(t, client); messageType != 'C' {
+		t.Fatalf("Execute completion = %q, want CommandComplete", messageType)
+	}
+	writeFrontendMessage(t, client, 'S', nil)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnDescribesPreparedParameterTypes(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	parse := append([]byte("statement\x00FROM VALUES ($1) AS value(status) SELECT value.status\x00"), 0, 1, 0, 0, 0, hatPgWire.OIDText)
+	writeFrontendMessage(t, client, 'P', parse)
+	if messageType, _ := readBackendMessage(t, client); messageType != '1' {
+		t.Fatalf("Parse response = %q, want ParseComplete", messageType)
+	}
+	writeFrontendMessage(t, client, 'D', []byte("Sstatement\x00"))
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 't' || len(body) != 6 || binary.BigEndian.Uint16(body[:2]) != 1 || binary.BigEndian.Uint32(body[2:]) != hatPgWire.OIDText {
+		t.Fatalf("parameter description = %q %v, want OIDText", messageType, body)
+	}
+	if messageType, _ := readBackendMessage(t, client); messageType != 'n' {
+		t.Fatalf("row description = %q, want NoData", messageType)
+	}
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnConvertsTypedTextParameter(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	parameters := make(chan []interface{}, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, typedParameterizedQueryHandler{parameters: parameters}, hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	parse := append([]byte("statement\x00FROM VALUES ($1) AS value(id) SELECT value.id\x00"), 0, 1, 0, 0, 0, 23)
+	writeFrontendMessage(t, client, 'P', parse)
+	readBackendMessage(t, client)
+	bind := []byte("portal\x00statement\x00\x00\x00\x00\x01\x00\x00\x00\x0242\x00\x00")
+	writeFrontendMessage(t, client, 'B', bind)
+	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	readBackendMessage(t, client)
+	readBackendMessage(t, client)
+	readBackendMessage(t, client)
+	values := <-parameters
+	if len(values) != 1 || values[0] != int64(42) {
+		t.Fatalf("bound values = %#v, want [int64(42)]", values)
+	}
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+type typedParameterizedQueryHandler struct {
+	parameters chan<- []interface{}
+}
+
+func (handler typedParameterizedQueryHandler) Query(context.Context, string) (hatPgWire.QueryResult, error) {
+	return hatPgWire.QueryResult{}, nil
+}
+
+func (handler typedParameterizedQueryHandler) QueryParameters(_ context.Context, _ string, parameters []interface{}) (hatPgWire.QueryResult, error) {
+	handler.parameters <- append([]interface{}(nil), parameters...)
+	value := "42"
+	return hatPgWire.QueryResult{Fields: []hatPgWire.Field{{Name: "id", DataTypeOID: hatPgWire.OIDInt8}}, Rows: [][]*string{{&value}}}, nil
 }
 
 func writeSSLRequest(t *testing.T, connection net.Conn) {

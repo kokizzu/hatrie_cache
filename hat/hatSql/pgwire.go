@@ -25,10 +25,25 @@ func NewPgWireQueryHandler(resolver SQLSourceResolver, options SQLQueryOptions) 
 
 // Query executes one SQL query and converts the result to PostgreSQL text rows.
 func (handler PgWireQueryHandler) Query(ctx context.Context, query string) (hatPgWire.QueryResult, error) {
-	result, err := ExecuteSQLQueryParameters(ctx, query, handler.Resolver, nil, handler.Options)
+	return handler.queryParameters(ctx, query, nil)
+}
+
+// QueryParameters executes one SQL extended query with positional values.
+// Values are passed directly to the SQL engine and are never interpolated into
+// the SQL text.
+func (handler PgWireQueryHandler) QueryParameters(ctx context.Context, query string, parameters []interface{}) (hatPgWire.QueryResult, error) {
+	return handler.queryParameters(ctx, query, parameters)
+}
+
+func (handler PgWireQueryHandler) queryParameters(ctx context.Context, query string, parameters []interface{}) (hatPgWire.QueryResult, error) {
+	result, err := ExecuteSQLQueryParameters(ctx, query, handler.Resolver, parameters, handler.Options)
 	if err != nil {
 		return hatPgWire.QueryResult{}, err
 	}
+	return pgWireQueryResult(result), nil
+}
+
+func pgWireQueryResult(result SQLQueryResult) hatPgWire.QueryResult {
 	fields := make([]hatPgWire.Field, len(result.Columns))
 	for columnIndex, column := range result.Columns {
 		fields[columnIndex] = hatPgWire.Field{Name: column, DataTypeOID: pgWireColumnType(result.Rows, column)}
@@ -44,7 +59,7 @@ func (handler PgWireQueryHandler) Query(ctx context.Context, query string) (hatP
 		}
 		rows[rowIndex] = values
 	}
-	return hatPgWire.QueryResult{Fields: fields, Rows: rows}, nil
+	return hatPgWire.QueryResult{Fields: fields, Rows: rows}
 }
 
 func pgWireColumnType(rows []Row, column string) uint32 {

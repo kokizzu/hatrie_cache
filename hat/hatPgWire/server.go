@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -19,8 +20,11 @@ const (
 	defaultMaxMessage = 16 << 20
 
 	OIDBool   = 16
+	OIDInt2   = 21
 	OIDInt8   = 20
+	OIDInt4   = 23
 	OIDText   = 25
+	OIDFloat4 = 700
 	OIDFloat8 = 701
 )
 
@@ -61,6 +65,14 @@ type QueryHandler interface {
 	Query(context.Context, string) (QueryResult, error)
 }
 
+// ParameterizedQueryHandler executes a PostgreSQL extended query with its
+// bound values kept separate from the SQL text. PostgreSQL text parameters are
+// represented as strings and SQL NULL is represented as nil.
+type ParameterizedQueryHandler interface {
+	QueryHandler
+	QueryParameters(context.Context, string, []interface{}) (QueryResult, error)
+}
+
 // QueryHandlerFunc adapts a function to QueryHandler.
 type QueryHandlerFunc func(context.Context, string) (QueryResult, error)
 
@@ -70,7 +82,8 @@ func (handler QueryHandlerFunc) Query(ctx context.Context, query string) (QueryR
 
 // ServeConn serves one PostgreSQL v3 connection until the client terminates,
 // the context is cancelled, or the connection fails. It supports startup,
-// optional clear-text password authentication, simple queries, and termination.
+// optional clear-text password authentication, simple queries, text-format
+// prepared queries, and termination.
 func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, options ServerOptions) error {
 	if connection == nil {
 		return errors.New("PostgreSQL wire connection is nil")
@@ -122,8 +135,8 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		return err
 	}
 
-	prepared := make(map[string]string)
-	portals := make(map[string]string)
+	prepared := make(map[string]preparedStatement)
+	portals := make(map[string]portalQuery)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -169,33 +182,46 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				return err
 			}
 		case 'P':
-			name, query, err := parseParseMessage(body)
+			name, query, parameterTypes, err := parseParseMessage(body)
 			if err != nil {
 				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
 					return err
 				}
 				continue
 			}
-			prepared[name] = query
+			prepared[name] = preparedStatement{query: query, parameterTypes: parameterTypes}
 			if err := writeMessage(connection, '1', nil); err != nil {
 				return err
 			}
 		case 'B':
-			portal, statement, err := parseBindMessage(body)
+			portal, statement, parameters, err := parseBindMessage(body)
 			if err != nil {
 				if err := writeErrorAndReady(connection, "0A000", err.Error()); err != nil {
 					return err
 				}
 				continue
 			}
-			query, ok := prepared[statement]
+			preparedQuery, ok := prepared[statement]
 			if !ok {
 				if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
 					return err
 				}
 				continue
 			}
-			portals[portal] = query
+			if len(parameters) != len(preparedQuery.parameterTypes) {
+				if err := writeErrorAndReady(connection, "08P01", "bind parameter count does not match prepared statement"); err != nil {
+					return err
+				}
+				continue
+			}
+			parameters, err = decodeTextParameters(parameters, preparedQuery.parameterTypes)
+			if err != nil {
+				if err := writeErrorAndReady(connection, "22P02", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			portals[portal] = portalQuery{query: preparedQuery.query, parameters: parameters}
 			if err := writeMessage(connection, '2', nil); err != nil {
 				return err
 			}
@@ -206,8 +232,29 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			if err := writeMessage(connection, 't', []byte{0, 0}); err != nil {
-				return err
+			name, err := requiredCString(body[1:])
+			if err != nil {
+				if err := writeErrorAndReady(connection, "08P01", "invalid describe message"); err != nil {
+					return err
+				}
+				continue
+			}
+			if body[0] == 'S' {
+				statement, ok := prepared[name]
+				if !ok {
+					if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
+						return err
+					}
+					continue
+				}
+				if err := writeParameterDescription(connection, statement.parameterTypes); err != nil {
+					return err
+				}
+			} else if _, ok := portals[name]; !ok {
+				if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+					return err
+				}
+				continue
 			}
 			if err := writeMessage(connection, 'n', nil); err != nil {
 				return err
@@ -220,14 +267,21 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			query, ok := portals[portal]
+			boundQuery, ok := portals[portal]
 			if !ok {
 				if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
 					return err
 				}
 				continue
 			}
-			result, err := handler.Query(ctx, query)
+			var result QueryResult
+			if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
+				result, err = parameterizedHandler.QueryParameters(ctx, boundQuery.query, boundQuery.parameters)
+			} else if len(boundQuery.parameters) != 0 {
+				err = errors.New("PostgreSQL bind parameters require a parameterized query handler")
+			} else {
+				result, err = handler.Query(ctx, boundQuery.query)
+			}
 			if err == nil {
 				err = validateQueryResult(result)
 			}
@@ -252,28 +306,88 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	}
 }
 
-func parseParseMessage(body []byte) (string, string, error) {
-	name, rest, ok := splitCString(body)
-	if !ok {
-		return "", "", errors.New("invalid parse message")
-	}
-	query, rest, ok := splitCString(rest)
-	if !ok || len(rest) < 2 || binary.BigEndian.Uint16(rest[:2]) != 0 {
-		return "", "", errors.New("only zero-parameter parse is supported")
-	}
-	return name, query, nil
+type preparedStatement struct {
+	query          string
+	parameterTypes []uint32
 }
 
-func parseBindMessage(body []byte) (string, string, error) {
+type portalQuery struct {
+	query      string
+	parameters []interface{}
+}
+
+func parseParseMessage(body []byte) (string, string, []uint32, error) {
+	name, rest, ok := splitCString(body)
+	if !ok {
+		return "", "", nil, errors.New("invalid parse message")
+	}
+	query, rest, ok := splitCString(rest)
+	if !ok || len(rest) < 2 {
+		return "", "", nil, errors.New("invalid parse message")
+	}
+	parameterCount := int(binary.BigEndian.Uint16(rest[:2]))
+	rest = rest[2:]
+	if len(rest) != parameterCount*4 {
+		return "", "", nil, errors.New("invalid parse parameter type list")
+	}
+	parameterTypes := make([]uint32, parameterCount)
+	for index := range parameterTypes {
+		parameterTypes[index] = binary.BigEndian.Uint32(rest[index*4:])
+	}
+	return name, query, parameterTypes, nil
+}
+
+func parseBindMessage(body []byte) (string, string, []interface{}, error) {
 	portal, rest, ok := splitCString(body)
 	if !ok {
-		return "", "", errors.New("invalid bind message")
+		return "", "", nil, errors.New("invalid bind message")
 	}
 	statement, rest, ok := splitCString(rest)
-	if !ok || len(rest) < 6 || binary.BigEndian.Uint16(rest[:2]) != 0 || binary.BigEndian.Uint16(rest[2:4]) != 0 || binary.BigEndian.Uint16(rest[4:6]) != 0 {
-		return "", "", errors.New("only zero-parameter text bind is supported")
+	if !ok || len(rest) < 2 {
+		return "", "", nil, errors.New("invalid bind message")
 	}
-	return portal, statement, nil
+	formatCount := int(binary.BigEndian.Uint16(rest[:2]))
+	rest = rest[2:]
+	if formatCount > 1 || len(rest) < formatCount*2 {
+		return "", "", nil, errors.New("only text bind parameter formats are supported")
+	}
+	if formatCount == 1 && binary.BigEndian.Uint16(rest[:2]) != 0 {
+		return "", "", nil, errors.New("only text bind parameter formats are supported")
+	}
+	rest = rest[formatCount*2:]
+	if len(rest) < 2 {
+		return "", "", nil, errors.New("invalid bind parameter count")
+	}
+	parameterCount := int(binary.BigEndian.Uint16(rest[:2]))
+	rest = rest[2:]
+	parameters := make([]interface{}, parameterCount)
+	for index := range parameters {
+		if len(rest) < 4 {
+			return "", "", nil, errors.New("invalid bind parameter value")
+		}
+		length := int(int32(binary.BigEndian.Uint32(rest[:4])))
+		rest = rest[4:]
+		if length == -1 {
+			continue
+		}
+		if length < 0 || len(rest) < length {
+			return "", "", nil, errors.New("invalid bind parameter value")
+		}
+		parameters[index] = string(rest[:length])
+		rest = rest[length:]
+	}
+	if len(rest) < 2 {
+		return "", "", nil, errors.New("invalid bind result format")
+	}
+	resultFormatCount := int(binary.BigEndian.Uint16(rest[:2]))
+	rest = rest[2:]
+	if resultFormatCount > 1 || len(rest) != resultFormatCount*2 {
+		return "", "", nil, errors.New("only text bind result formats are supported")
+	}
+	if resultFormatCount == 1 && binary.BigEndian.Uint16(rest) != 0 {
+		return "", "", nil, errors.New("only text bind result formats are supported")
+	}
+	return portal, statement, parameters, nil
 }
 
 func parseExecuteMessage(body []byte) (string, error) {
@@ -282,6 +396,70 @@ func parseExecuteMessage(body []byte) (string, error) {
 		return "", errors.New("only unlimited execute is supported")
 	}
 	return portal, nil
+}
+
+func decodeTextParameters(parameters []interface{}, parameterTypes []uint32) ([]interface{}, error) {
+	decoded := append([]interface{}(nil), parameters...)
+	for index, parameter := range decoded {
+		if parameter == nil {
+			continue
+		}
+		value, ok := parameter.(string)
+		if !ok {
+			return nil, errors.New("invalid text bind parameter")
+		}
+		switch parameterTypes[index] {
+		case OIDBool:
+			switch strings.ToLower(value) {
+			case "1", "t", "true":
+				decoded[index] = true
+			case "0", "f", "false":
+				decoded[index] = false
+			default:
+				return nil, fmt.Errorf("invalid PostgreSQL boolean parameter %q", value)
+			}
+		case OIDInt2:
+			parsed, err := strconv.ParseInt(value, 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("invalid PostgreSQL int2 parameter %q", value)
+			}
+			decoded[index] = parsed
+		case OIDInt4:
+			parsed, err := strconv.ParseInt(value, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid PostgreSQL int4 parameter %q", value)
+			}
+			decoded[index] = parsed
+		case OIDInt8:
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid PostgreSQL int8 parameter %q", value)
+			}
+			decoded[index] = parsed
+		case OIDFloat4:
+			parsed, err := strconv.ParseFloat(value, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid PostgreSQL float4 parameter %q", value)
+			}
+			decoded[index] = parsed
+		case OIDFloat8:
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid PostgreSQL float8 parameter %q", value)
+			}
+			decoded[index] = parsed
+		}
+	}
+	return decoded, nil
+}
+
+func writeParameterDescription(connection net.Conn, parameterTypes []uint32) error {
+	body := make([]byte, 2+len(parameterTypes)*4)
+	binary.BigEndian.PutUint16(body[:2], uint16(len(parameterTypes)))
+	for index, parameterType := range parameterTypes {
+		binary.BigEndian.PutUint32(body[2+index*4:], parameterType)
+	}
+	return writeMessage(connection, 't', body)
 }
 
 var errSSLRequest = errors.New("PostgreSQL SSL request")
