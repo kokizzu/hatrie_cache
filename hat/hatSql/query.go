@@ -6808,6 +6808,29 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if filters, vector := sqlColumnarVectorConjunction(q.where, q.from.alias); vector {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+			for _, filter := range filters {
+				candidate, _ := batch.Value(filter.field, rowIndex)
+				if filter.like {
+					if candidate == nil || !sqlLike(fmt.Sprint(candidate), filter.pattern) {
+						return false
+					}
+					continue
+				}
+				number, ok := sqlNumber(candidate)
+				if !ok || !sqlColumnarNumericMatches(number, filter.operator, filter.value) {
+					return false
+				}
+			}
+			return true
+		})
+		if metrics != nil {
+			metrics.record("COLUMNAR VECTOR FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else {
 		filterStarted := time.Now()
 		matched := make([]int, 0, batch.Rows)
@@ -7210,6 +7233,43 @@ func sqlColumnarLikePredicate(expr sqlExpr, alias string) (field, pattern string
 		return "", "", false
 	}
 	return expr.left.name, fmt.Sprint(expr.right.value), true
+}
+
+type sqlColumnarVectorFilter struct {
+	field    string
+	operator string
+	value    float64
+	pattern  string
+	like     bool
+}
+
+// sqlColumnarVectorConjunction accepts AND trees composed only of existing
+// numeric and LIKE vector leaves. Other SQL expressions keep the general
+// evaluator, which remains authoritative for their semantics.
+func sqlColumnarVectorConjunction(expr sqlExpr, alias string) ([]sqlColumnarVectorFilter, bool) {
+	if expr.kind != "binary" || expr.op != "AND" || expr.left == nil || expr.right == nil {
+		return nil, false
+	}
+	filters := make([]sqlColumnarVectorFilter, 0, 2)
+	var collect func(sqlExpr) bool
+	collect = func(current sqlExpr) bool {
+		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
+			return collect(*current.left) && collect(*current.right)
+		}
+		if field, operator, value, numeric := sqlColumnarNumericPredicate(current, alias); numeric {
+			filters = append(filters, sqlColumnarVectorFilter{field: field, operator: operator, value: value})
+			return true
+		}
+		field, pattern, like := sqlColumnarLikePredicate(current, alias)
+		if like {
+			filters = append(filters, sqlColumnarVectorFilter{field: field, pattern: pattern, like: true})
+		}
+		return like
+	}
+	if !collect(expr) {
+		return nil, false
+	}
+	return filters, len(filters) > 1
 }
 
 func sqlDictionaryCode(dictionary DictionaryColumn, value string, collation SQLCollation) (uint32, bool) {

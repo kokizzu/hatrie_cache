@@ -1721,6 +1721,21 @@ review-sql-columnar-like:
 commit-sql-columnar-like:
 	sh ./scripts/commit-sql-columnar-like.sh
 
+benchmark-sql-columnar-mixed-conjunction:
+	sh ./scripts/benchmark-sql-columnar-mixed-conjunction.sh
+
+format-sql-columnar-mixed-conjunction:
+	sh ./scripts/format-sql-columnar-mixed-conjunction.sh
+
+test-sql-columnar-mixed-conjunction:
+	sh ./scripts/test-sql-columnar-mixed-conjunction.sh
+
+review-sql-columnar-mixed-conjunction:
+	sh ./scripts/review-sql-columnar-mixed-conjunction.sh
+
+commit-sql-columnar-mixed-conjunction:
+	sh ./scripts/commit-sql-columnar-mixed-conjunction.sh
+
 
 commit-disable-github-ci:
 	sh ./scripts/commit-disable-github-ci.sh
