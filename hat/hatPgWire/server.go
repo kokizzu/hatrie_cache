@@ -168,6 +168,15 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
+			if isSessionSetupQuery(query) {
+				if err := writeQueryResult(connection, QueryResult{CommandTag: "SET"}); err != nil {
+					return err
+				}
+				if err := writeReadyForQuery(connection); err != nil {
+					return err
+				}
+				continue
+			}
 			result, queryErr := handler.Query(ctx, query)
 			if queryErr == nil {
 				queryErr = validateQueryResult(result)
@@ -211,7 +220,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			if len(parameters) != len(preparedQuery.parameterTypes) {
+			if len(preparedQuery.parameterTypes) != 0 && len(parameters) != len(preparedQuery.parameterTypes) {
 				if err := writeErrorAndReady(connection, "08P01", "bind parameter count does not match prepared statement"); err != nil {
 					return err
 				}
@@ -351,6 +360,11 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	}
 }
 
+func isSessionSetupQuery(query string) bool {
+	fields := strings.Fields(query)
+	return len(fields) > 0 && strings.EqualFold(fields[0], "SET")
+}
+
 type preparedStatement struct {
 	query          string
 	parameterTypes []uint32
@@ -366,6 +380,11 @@ type portalQuery struct {
 
 func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery) error {
 	if portal.executed {
+		return nil
+	}
+	if isSessionSetupQuery(portal.query) {
+		portal.result = QueryResult{CommandTag: "SET"}
+		portal.executed = true
 		return nil
 	}
 	var err error
@@ -489,7 +508,11 @@ func decodeTextParameters(parameters []interface{}, parameterTypes []uint32) ([]
 		if !ok {
 			return nil, errors.New("invalid text bind parameter")
 		}
-		switch parameterTypes[index] {
+		parameterType := uint32(0)
+		if index < len(parameterTypes) {
+			parameterType = parameterTypes[index]
+		}
+		switch parameterType {
 		case OIDBool:
 			switch strings.ToLower(value) {
 			case "1", "t", "true":

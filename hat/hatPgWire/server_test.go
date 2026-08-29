@@ -75,6 +75,35 @@ func TestServeConnRunsPostgreSQLSimpleQuery(t *testing.T) {
 	}
 }
 
+func TestServeConnAcceptsSessionSetupQuery(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	queries := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(_ context.Context, query string) (hatPgWire.QueryResult, error) {
+			queries <- query
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'Q', []byte("SET extra_float_digits = 3\x00"))
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'C' || string(body) != "SET\x00" {
+		t.Fatalf("session setup completion = %q %q, want SET", messageType, body)
+	}
+	readReadyForQuery(t, client)
+	if len(queries) != 0 {
+		t.Fatalf("session setup reached SQL handler: %q", <-queries)
+	}
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
 func TestServeConnAuthenticatesCleartextPassword(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()

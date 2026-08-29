@@ -11,6 +11,10 @@ The wire transport executes the Hatrie SQL dialect, not the full PostgreSQL SQL
 dialect. PostgreSQL clients such as `psql`, BI connectors, or driver-based
 tools must submit syntax supported by [SQL.md](SQL.md).
 
+PostgreSQL `SET` session setup statements are accepted as no-ops for client
+initialization compatibility; Hatrie does not persist PostgreSQL session
+settings between queries.
+
 ## Prepared Queries
 
 The server supports the PostgreSQL extended-query sequence `Parse`, `Bind`,
