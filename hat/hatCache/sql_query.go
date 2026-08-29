@@ -1747,8 +1747,16 @@ func sqlJSONColumnarBatch(key string, data []byte, fields []string) (hatSql.Colu
 	}
 }
 func sqlIndexValueKey(value interface{}) (string, bool) {
-	if value == nil {
+	switch value := value.(type) {
+	case nil:
 		return "", false
+	case string:
+		return "s:" + value, true
+	case bool:
+		if value {
+			return "b:1", true
+		}
+		return "b:0", true
 	}
 	encoded, err := json.Marshal(value)
 	return string(encoded), err == nil

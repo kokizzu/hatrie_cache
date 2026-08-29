@@ -1652,6 +1652,25 @@ commit-sql-columnar-numeric-aggregate:
 audit-sql-storage-allocation:
 	sh ./scripts/audit-sql-storage-allocation.sh
 
+inspect-sql-index-keys:
+	sh ./scripts/inspect-sql-index-keys.sh
+
+test-sql-index-keys:
+	sh ./scripts/test-sql-index-keys.sh
+
+benchmark-sql-index-keys:
+	sh ./scripts/benchmark-sql-index-keys.sh
+
+format-sql-index-keys:
+	sh ./scripts/format-sql-index-keys.sh
+
+review-sql-index-keys:
+	sh ./scripts/review-sql-index-keys.sh
+
+commit-sql-index-keys:
+	sh ./scripts/commit-sql-index-keys.sh
+
+
 format-sql-columnar-json-benchmark:
 	sh ./scripts/format-sql-columnar-json-benchmark.sh
 
