@@ -874,6 +874,12 @@ test-sql-index-usage:
 deliver-sql-index-intelligence:
 	sh ./scripts/deliver-sql-index-intelligence.sh
 
+test-sql-maintenance-window:
+	sh ./scripts/test-sql-maintenance-window.sh
+
+deliver-sql-maintenance-window:
+	sh ./scripts/deliver-sql-maintenance-window.sh
+
 
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
