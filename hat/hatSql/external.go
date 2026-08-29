@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -95,6 +100,57 @@ func (tables *ExternalTables) ImportNDJSON(name string, data []byte) error {
 		return fmt.Errorf("NDJSON requires at least one object record")
 	}
 	return tables.Register(name, ExternalTable{Columns: externalTableRowColumns(rows), Rows: rows})
+}
+
+// ImportArrow parses a flat Apache Arrow IPC stream and replaces name. Boolean,
+// float64, and UTF-8 columns are supported; nested and mixed-type columns are
+// rejected rather than coerced.
+func (tables *ExternalTables) ImportArrow(name string, data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("Arrow data is empty")
+	}
+	reader, err := ipc.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("parse Arrow IPC: %w", err)
+	}
+	defer reader.Release()
+	columns := make([]string, 0)
+	rows := make([]Row, 0)
+	for reader.Next() {
+		record := reader.Record()
+		if len(columns) == 0 {
+			columns = make([]string, record.NumCols())
+			for index := range columns {
+				columns[index] = record.Schema().Field(index).Name
+			}
+			if _, err := externalTableColumns(columns); err != nil {
+				return err
+			}
+		}
+		if record.NumCols() != int64(len(columns)) {
+			return fmt.Errorf("Arrow record has %d columns, want %d", record.NumCols(), len(columns))
+		}
+		for rowIndex := 0; rowIndex < int(record.NumRows()); rowIndex++ {
+			row := make(Row, len(columns))
+			for columnIndex, column := range columns {
+				value, exists, err := externalArrowValue(record.Column(columnIndex), rowIndex)
+				if err != nil {
+					return fmt.Errorf("Arrow column %q: %w", column, err)
+				}
+				if exists {
+					row[column] = value
+				}
+			}
+			rows = append(rows, row)
+		}
+	}
+	if err := reader.Err(); err != nil {
+		return fmt.Errorf("read Arrow IPC: %w", err)
+	}
+	if len(columns) == 0 {
+		return fmt.Errorf("Arrow IPC requires one record with columns")
+	}
+	return tables.Register(name, ExternalTable{Columns: columns, Rows: rows})
 }
 
 // ImportParquet parses a flat Parquet table and replaces name. Nested and
@@ -235,6 +291,47 @@ func (tables *ExternalTables) ExportNDJSON(name string) ([]byte, error) {
 		if err := encoder.Encode(row); err != nil {
 			return nil, err
 		}
+	}
+	return buffer.Bytes(), nil
+}
+
+// ExportArrow encodes one table as a flat Apache Arrow IPC stream. Each column
+// must contain only booleans, numbers, strings, or NULL values.
+func (tables *ExternalTables) ExportArrow(name string) ([]byte, error) {
+	table, ok := tables.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
+	}
+	types := make([]externalArrowType, len(table.Columns))
+	fields := make([]arrow.Field, len(table.Columns))
+	for index, column := range table.Columns {
+		kind, err := externalArrowColumnType(table.Rows, column)
+		if err != nil {
+			return nil, err
+		}
+		types[index] = kind
+		fields[index] = arrow.Field{Name: column, Type: kind.dataType(), Nullable: true}
+	}
+	schema := arrow.NewSchema(fields, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	for _, row := range table.Rows {
+		for index, column := range table.Columns {
+			value := row[column]
+			if err := types[index].append(builder.Field(index), value); err != nil {
+				return nil, fmt.Errorf("Arrow column %q: %w", column, err)
+			}
+		}
+	}
+	record := builder.NewRecord()
+	defer record.Release()
+	buffer := bytes.Buffer{}
+	writer := ipc.NewWriter(&buffer, ipc.WithSchema(schema))
+	if err := writer.Write(record); err != nil {
+		return nil, fmt.Errorf("write Arrow IPC: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close Arrow IPC: %w", err)
 	}
 	return buffer.Bytes(), nil
 }
@@ -391,6 +488,147 @@ func externalParquetValue(value parquet.Value) interface{} {
 		return string(value.ByteArray())
 	default:
 		return value.String()
+	}
+}
+
+type externalArrowType uint8
+
+const (
+	externalArrowBoolean externalArrowType = iota + 1
+	externalArrowFloat64
+	externalArrowString
+)
+
+func externalArrowColumnType(rows []Row, column string) (externalArrowType, error) {
+	kind := externalArrowType(0)
+	for _, row := range rows {
+		value, exists := row[column]
+		if !exists || value == nil {
+			continue
+		}
+		candidate, ok := externalArrowTypeOf(value)
+		if !ok {
+			return 0, fmt.Errorf("has unsupported value type %T", value)
+		}
+		if kind != 0 && kind != candidate {
+			return 0, fmt.Errorf("mixes incompatible value types")
+		}
+		kind = candidate
+	}
+	if kind == 0 {
+		return externalArrowString, nil
+	}
+	return kind, nil
+}
+
+func externalArrowTypeOf(value interface{}) (externalArrowType, bool) {
+	switch value.(type) {
+	case bool:
+		return externalArrowBoolean, true
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return externalArrowFloat64, true
+	case string, []byte:
+		return externalArrowString, true
+	default:
+		return 0, false
+	}
+}
+
+func (kind externalArrowType) dataType() arrow.DataType {
+	switch kind {
+	case externalArrowBoolean:
+		return arrow.FixedWidthTypes.Boolean
+	case externalArrowFloat64:
+		return arrow.PrimitiveTypes.Float64
+	default:
+		return arrow.BinaryTypes.String
+	}
+}
+
+func (kind externalArrowType) append(builder array.Builder, value interface{}) error {
+	if value == nil {
+		switch typed := builder.(type) {
+		case *array.BooleanBuilder:
+			typed.AppendNull()
+		case *array.Float64Builder:
+			typed.AppendNull()
+		case *array.StringBuilder:
+			typed.AppendNull()
+		default:
+			return errors.New("has unsupported Arrow builder")
+		}
+		return nil
+	}
+	switch kind {
+	case externalArrowBoolean:
+		value, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("has incompatible value type %T", value)
+		}
+		builder.(*array.BooleanBuilder).Append(value)
+	case externalArrowFloat64:
+		value, ok := externalArrowNumber(value)
+		if !ok {
+			return fmt.Errorf("has incompatible value type %T", value)
+		}
+		builder.(*array.Float64Builder).Append(value)
+	case externalArrowString:
+		switch value := value.(type) {
+		case string:
+			builder.(*array.StringBuilder).Append(value)
+		case []byte:
+			builder.(*array.StringBuilder).Append(string(value))
+		default:
+			return fmt.Errorf("has incompatible value type %T", value)
+		}
+	}
+	return nil
+}
+
+func externalArrowNumber(value interface{}) (float64, bool) {
+	switch value := value.(type) {
+	case int:
+		return float64(value), true
+	case int8:
+		return float64(value), true
+	case int16:
+		return float64(value), true
+	case int32:
+		return float64(value), true
+	case int64:
+		return float64(value), true
+	case uint:
+		return float64(value), true
+	case uint8:
+		return float64(value), true
+	case uint16:
+		return float64(value), true
+	case uint32:
+		return float64(value), true
+	case uint64:
+		return float64(value), true
+	case float32:
+		return float64(value), true
+	case float64:
+		return value, true
+	default:
+		return 0, false
+	}
+}
+
+func externalArrowValue(column arrow.Array, index int) (interface{}, bool, error) {
+	if column.IsNull(index) {
+		return nil, false, nil
+	}
+	switch column := column.(type) {
+	case *array.Boolean:
+		return column.Value(index), true, nil
+	case *array.Float64:
+		return column.Value(index), true, nil
+	case *array.String:
+		return column.Value(index), true, nil
+	default:
+		return nil, false, fmt.Errorf("has unsupported Arrow type %s", column.DataType())
 	}
 }
 

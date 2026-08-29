@@ -2097,3 +2097,18 @@ format-pgwire:
 .PHONY: deliver-pgwire
 deliver-pgwire:
 	sh ./scripts/deliver-pgwire.sh
+.PHONY: test-external-arrow
+test-external-arrow:
+	sh ./scripts/test-external-arrow.sh
+.PHONY: add-arrow-dependency
+add-arrow-dependency:
+	sh ./scripts/add-arrow-dependency.sh
+.PHONY: show-arrow-api
+show-arrow-api:
+	sh ./scripts/show-arrow-api.sh
+.PHONY: tidy-arrow-dependency
+tidy-arrow-dependency:
+	sh ./scripts/tidy-arrow-dependency.sh
+.PHONY: deliver-arrow-interchange
+deliver-arrow-interchange:
+	sh ./scripts/deliver-arrow-interchange.sh

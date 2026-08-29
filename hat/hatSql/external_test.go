@@ -82,3 +82,30 @@ func TestExternalTablesImportExportNDJSON(t *testing.T) {
 		t.Fatalf("failed import changed table = %#v, want %#v", afterFailure, table)
 	}
 }
+
+func TestExternalTablesImportExportArrow(t *testing.T) {
+	tables := hatSql.NewExternalTables()
+	if err := tables.ImportJSON("events", []byte(`[{"id":1,"active":true,"name":"Ada"},{"id":2,"active":false,"name":"Lin"}]`)); err != nil {
+		t.Fatalf("ImportJSON() error = %v", err)
+	}
+	data, err := tables.ExportArrow("events")
+	if err != nil {
+		t.Fatalf("ExportArrow() error = %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("ExportArrow() returned no IPC data")
+	}
+	if err := tables.ImportArrow("events_arrow", data); err != nil {
+		t.Fatalf("ImportArrow() error = %v", err)
+	}
+	table, ok := tables.Get("events_arrow")
+	if !ok || !reflect.DeepEqual(table, hatSql.ExternalTable{
+		Columns: []string{"active", "id", "name"},
+		Rows: []hatSql.Row{
+			{"id": float64(1), "active": true, "name": "Ada"},
+			{"id": float64(2), "active": false, "name": "Lin"},
+		},
+	}) {
+		t.Fatalf("Arrow table = %#v, %v", table, ok)
+	}
+}

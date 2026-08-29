@@ -1034,9 +1034,9 @@ state without an unbounded queue. `NotifyChanged` evaluates every affected
 query before publishing any of them; a query error preserves all last
 known-good snapshots. `Close` removes a subscription and closes its channel.
 
-### External CSV, JSON, NDJSON, and Parquet tables
+### External CSV, JSON, NDJSON, Parquet, and Arrow tables
 
-`hatSql.ExternalTables` imports caller-supplied CSV, JSON, NDJSON, or Parquet
+`hatSql.ExternalTables` imports caller-supplied CSV, JSON, NDJSON, Parquet, or Arrow IPC
 bytes into named, immutable snapshots. Query them with `EXTERNAL('name')`; SQL never receives a
 path or URL, so this facility cannot read arbitrary local files or make network
 requests. CSV requires a unique non-empty header row and preserves cells as
@@ -1067,6 +1067,12 @@ uses optional UTF-8 columns, so arbitrary row values round-trip as text and can
 be cast in SQL. Importing the same name replaces its complete snapshot, so a
 concurrent query observes either the old table or the new one, never a partial
 import.
+
+`ImportArrow` and `ExportArrow` use standard Arrow IPC streams for flat
+boolean, float64 numeric, UTF-8 string, and NULL columns. Nested, mixed-type,
+and unsupported Arrow columns fail explicitly rather than being silently
+coerced. Arrow is the efficient columnar interchange option; Parquet remains
+the durable data-lake format.
 
 ### Full-text token indexes
 
