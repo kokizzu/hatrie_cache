@@ -1667,6 +1667,24 @@ audit-sql-storage-allocation:
 inspect-sql-source-ownership:
 	sh ./scripts/inspect-sql-source-ownership.sh
 
+inspect-sql-adaptive-storage:
+	sh ./scripts/inspect-sql-adaptive-storage.sh
+
+format-sql-adaptive-concurrency:
+	sh ./scripts/format-sql-adaptive-concurrency.sh
+
+test-sql-adaptive-concurrency:
+	sh ./scripts/test-sql-adaptive-concurrency.sh
+
+benchmark-sql-adaptive-concurrency:
+	sh ./scripts/benchmark-sql-adaptive-concurrency.sh
+
+review-sql-adaptive-concurrency:
+	sh ./scripts/review-sql-adaptive-concurrency.sh
+
+commit-sql-adaptive-concurrency:
+	sh ./scripts/commit-sql-adaptive-concurrency.sh
+
 format-sql-columnar-raw-bytes:
 	sh ./scripts/format-sql-columnar-raw-bytes.sh
 
