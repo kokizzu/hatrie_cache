@@ -2161,6 +2161,38 @@ bench-sql-external-streaming:
 .PHONY: inspect-sql-indexes
 inspect-sql-indexes:
 	sh ./scripts/inspect-sql-indexes.sh
+
+.PHONY: inspect-allocation-path
+inspect-allocation-path:
+	sh ./scripts/inspect-allocation-path.sh
+
+.PHONY: test-memory-compaction-safety
+test-memory-compaction-safety:
+	sh ./scripts/test-memory-compaction-safety.sh
+
+.PHONY: format-memory-compaction-safety
+format-memory-compaction-safety:
+	sh ./scripts/format-memory-compaction-safety.sh
+
+.PHONY: inspect-memory-compaction-docs
+inspect-memory-compaction-docs:
+	sh ./scripts/inspect-memory-compaction-docs.sh
+
+.PHONY: bench-memory-compaction-safety
+bench-memory-compaction-safety:
+	sh ./scripts/bench-memory-compaction-safety.sh
+
+.PHONY: inspect-memory-compaction-benchmark
+inspect-memory-compaction-benchmark:
+	sh ./scripts/inspect-memory-compaction-benchmark.sh
+
+.PHONY: inspect-memory-compaction-safety
+inspect-memory-compaction-safety:
+	sh ./scripts/inspect-memory-compaction-safety.sh
+
+.PHONY: deliver-memory-compaction-safety
+deliver-memory-compaction-safety:
+	sh ./scripts/deliver-memory-compaction-safety.sh
 .PHONY: bench-sql-typed-index-baseline
 bench-sql-typed-index-baseline:
 	sh ./scripts/bench-sql-typed-index-baseline.sh

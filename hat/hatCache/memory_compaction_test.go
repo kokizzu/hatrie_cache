@@ -3,6 +3,7 @@ package hatCache
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -31,6 +32,32 @@ func BenchmarkCompactMemoryExpirationIndex10k(b *testing.B) {
 		if _, err := trie.CompactMemory(); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkCompactMemoryAdmission10k(b *testing.B) {
+	const keys = 10_000
+	for _, benchmark := range []struct {
+		name    string
+		options MemoryCompactionOptions
+	}{
+		{name: "default_budget"},
+		{name: "allow_unbounded", options: MemoryCompactionOptions{AllowUnbounded: true}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			defer trie.Destroy()
+			for index := 0; index < keys; index++ {
+				trie.UpsertString(fmt.Sprintf("key:%05d", index), "value")
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if _, err := trie.CompactMemoryWithOptions(benchmark.options); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -385,6 +412,41 @@ func TestCompactMemoryRestartsPagedCursorWithoutDuplicates(t *testing.T) {
 	}
 	if cursor.restarts != 1 {
 		t.Fatalf("cursor restarts = %d, want 1", cursor.restarts)
+	}
+}
+
+func TestCompactMemoryRefusesOverBudgetBeforeMutating(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("keep", "value")
+	trie.mu.RLock()
+	root := trie.root
+	trie.mu.RUnlock()
+
+	_, err := trie.CompactMemoryWithOptions(MemoryCompactionOptions{MaxTemporaryBytes: 1})
+	if !errors.Is(err, ErrMemoryCompactionBudgetExceeded) {
+		t.Fatalf("CompactMemoryWithOptions(over budget) error = %v, want ErrMemoryCompactionBudgetExceeded", err)
+	}
+	trie.mu.RLock()
+	unchanged := trie.root == root
+	trie.mu.RUnlock()
+	if !unchanged {
+		t.Fatal("over-budget compaction replaced the live root")
+	}
+	if got := trie.GetString("keep"); got != "value" {
+		t.Fatalf("value after rejected compaction = %q, want value", got)
+	}
+}
+
+func TestCompactMemoryReportsNativeTrieBytes(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("key", "value")
+
+	result, err := trie.CompactMemory()
+	if err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
+	if result.NativeTrieBytesBefore == 0 || result.NativeTrieBytesAfter == 0 {
+		t.Fatalf("native trie bytes = %d -> %d, want positive measurements", result.NativeTrieBytesBefore, result.NativeTrieBytesAfter)
 	}
 }
 

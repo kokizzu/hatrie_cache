@@ -486,6 +486,9 @@ func TestParseConfigMemoryCompactionDefaultsOffAndValidatesOverride(t *testing.T
 	if defaultCfg.memoryCompactionInterval != 0 {
 		t.Fatalf("default memory compaction interval = %s, want off", defaultCfg.memoryCompactionInterval)
 	}
+	if defaultCfg.memoryCompactionMaxTemporaryBytes != 0 {
+		t.Fatalf("default memory compaction maximum temporary bytes = %d, want safe library default", defaultCfg.memoryCompactionMaxTemporaryBytes)
+	}
 
 	compactingCfg, err := parseConfig([]string{"-memory-compaction-interval", "15m"}, &bytes.Buffer{})
 	if err != nil {
@@ -493,6 +496,13 @@ func TestParseConfigMemoryCompactionDefaultsOffAndValidatesOverride(t *testing.T
 	}
 	if compactingCfg.memoryCompactionInterval != 15*time.Minute {
 		t.Fatalf("memory compaction interval = %s, want 15m", compactingCfg.memoryCompactionInterval)
+	}
+	compactionBudgetCfg, err := parseConfig([]string{"-memory-compaction-max-temporary-bytes", "2147483648"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse memory compaction budget: %v", err)
+	}
+	if compactionBudgetCfg.memoryCompactionMaxTemporaryBytes != 2<<30 {
+		t.Fatalf("memory compaction maximum temporary bytes = %d, want %d", compactionBudgetCfg.memoryCompactionMaxTemporaryBytes, 2<<30)
 	}
 
 	if _, err := parseConfig([]string{"-memory-compaction-interval", "-1ns"}, &bytes.Buffer{}); err == nil {

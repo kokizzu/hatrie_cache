@@ -590,6 +590,12 @@ No hosted GitHub Actions workflow is checked in. Before pushing, run
 `make verify-local`; use `make bench-smoke BENCH_SMOKE_CHECK_THRESHOLDS=1` for
 the optional performance guard and `make docker-build` for the production image.
 
+On Linux hosts with `vm.overcommit_memory=2`, AddressSanitizer may be denied its
+large virtual shadow reservation. Kernel entries for the sanitizer binary such
+as `hatrie_cache_sa` and an approximately 14 TiB request are sanitizer setup,
+not a cache data allocation. `make verify-c` detects this mode and runs its
+leak-sanitizer fallback instead.
+
 ### Install And Build
 
 Runtime requirements:
@@ -1426,6 +1432,14 @@ since the previous pass:
 ```
 make monitoring-server MEMORY_COMPACTION_INTERVAL=15m
 ```
+
+Each pass is admitted before it allocates replacement pools or clones the
+native trie. The default additional-memory budget is 1 GiB; set
+`MEMORY_COMPACTION_MAX_TEMPORARY_BYTES` when a controlled maintenance window
+has more headroom. A value of `0` uses that safe default. The returned
+`MemoryCompactionResult` reports native-trie, typed-backing, and Merkle bytes
+before and after compaction. The background compactor remains off unless its
+interval is explicitly configured.
 
 `CompactMemory` provides the same operation directly to Go callers and returns
 before/after backing estimates. The operation preserves values, TTLs, global

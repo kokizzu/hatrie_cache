@@ -69,6 +69,7 @@ type config struct {
 	localPartitions                int
 	counterWriteStripes            int
 	memoryCompactionInterval       time.Duration
+	memoryCompactionMaxTemporaryBytes uint64
 	monitoringWebDir               string
 	sqlFunctionsPath               string
 	monitoringReadHeaderTimeout    time.Duration
@@ -309,7 +310,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	stopMemoryCompactor := func() {}
 	if cfg.memoryCompactionInterval > 0 {
-		stopMemoryCompactor = trie.StartMemoryCompactorContext(ctx, cfg.memoryCompactionInterval)
+		stopMemoryCompactor = trie.StartMemoryCompactorWithOptionsContext(ctx, cfg.memoryCompactionInterval, hatriecache.MemoryCompactionOptions{
+			MaxTemporaryBytes: cfg.memoryCompactionMaxTemporaryBytes,
+		})
 	}
 	defer stopMemoryCompactor()
 	stopDBSync := startPersistentStoreSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, levelDBSaveOptions(cfg), stderr, persistentStoreSaverOptions{
@@ -583,6 +586,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.localPartitions, "local-partitions", cfg.localPartitions, "independent in-process HAT tries; use 0 to disable")
 	flags.IntVar(&cfg.counterWriteStripes, "counter-write-stripes", cfg.counterWriteStripes, "existing-counter write lock stripes; use 0 to disable")
 	flags.DurationVar(&cfg.memoryCompactionInterval, "memory-compaction-interval", cfg.memoryCompactionInterval, "optional interval for rebuilding trie and typed pools after churn; use 0 to disable")
+	flags.Uint64Var(&cfg.memoryCompactionMaxTemporaryBytes, "memory-compaction-max-temporary-bytes", cfg.memoryCompactionMaxTemporaryBytes, "maximum additional bytes allowed for one memory compaction; use 0 for the safe default")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.StringVar(&cfg.sqlFunctionsPath, "sql-functions-path", cfg.sqlFunctionsPath, "optional path that persists registered SQL function definitions across restart")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
@@ -1165,6 +1169,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"local_partitions":                     cfg.localPartitions,
 		"counter_write_stripes":                cfg.counterWriteStripes,
 		"memory_compaction_interval":           cfg.memoryCompactionInterval.String(),
+		"memory_compaction_max_temporary_bytes": cfg.memoryCompactionMaxTemporaryBytes,
 		"monitoring_web_dir":                   cfg.monitoringWebDir,
 		"monitoring_read_header_timeout":       cfg.monitoringReadHeaderTimeout.String(),
 		"monitoring_idle_timeout":              cfg.monitoringIdleTimeout.String(),

@@ -99,6 +99,18 @@ void ahtable_free(ahtable_t* T)
 }
 
 
+size_t ahtable_memory_bytes(const ahtable_t* T)
+{
+    if (T == NULL) return 0;
+
+    size_t total = sizeof(ahtable_t);
+    total = size_add_or_die(total, array_bytes_or_die(T->n, sizeof(slot_t)));
+    total = size_add_or_die(total, array_bytes_or_die(T->n, sizeof(size_t)));
+    total = size_add_or_die(total, array_bytes_or_die(T->n, sizeof(size_t)));
+    return size_add_or_die(total, ahtable_slot_capacity_bytes(T));
+}
+
+
 size_t ahtable_size(const ahtable_t* T)
 {
     if (T == NULL) return 0;

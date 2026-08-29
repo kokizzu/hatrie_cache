@@ -168,6 +168,28 @@ hattrie_t* hattrie_create()
 }
 
 
+static size_t hattrie_node_memory_bytes(node_ptr node)
+{
+    if (*node.flag & NODE_TYPE_TRIE) {
+        size_t total = sizeof(trie_node_t);
+        size_t i;
+        for (i = 0; i < NODE_CHILDS; ++i) {
+            if (i > 0 && node.t->xs[i].t == node.t->xs[i - 1].t) continue;
+            total = size_add_or_die(total, hattrie_node_memory_bytes(node.t->xs[i]));
+        }
+        return total;
+    }
+    return ahtable_memory_bytes(node.b);
+}
+
+
+size_t hattrie_memory_bytes(const hattrie_t* T)
+{
+    if (T == NULL) return 0;
+    return size_add_or_die(sizeof(hattrie_t), hattrie_node_memory_bytes(T->root));
+}
+
+
 hattrie_t* hattrie_dup(const hattrie_t* T)
 {
     if (T == NULL) return NULL;

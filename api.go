@@ -89,6 +89,12 @@ type LocalPartitioningStats = core.LocalPartitioningStats
 type Map = core.Map
 type MapStorage = core.MapStorage
 type MemoryCompactionResult = core.MemoryCompactionResult
+type MemoryCompactionOptions = core.MemoryCompactionOptions
+
+const DefaultMemoryCompactionMaxTemporaryBytes = core.DefaultMemoryCompactionMaxTemporaryBytes
+
+var ErrMemoryCompactionBudgetExceeded = core.ErrMemoryCompactionBudgetExceeded
+
 type MonitoringEntriesResponse = core.MonitoringEntriesResponse
 type MonitoringEntry = core.MonitoringEntry
 type MonitoringHandler = core.MonitoringHandler

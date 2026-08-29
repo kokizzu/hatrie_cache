@@ -16,14 +16,30 @@ import (
 	"unsafe"
 )
 
-// MemoryCompactionResult reports deterministic backing-storage estimates. It
-// excludes allocator metadata, nested value payloads, and C allocator pages.
+// MemoryCompactionResult reports deterministic backing-storage estimates.
+// Native trie bytes include requested C allocations but exclude allocator pages;
+// backing estimates exclude nested value payloads and allocator metadata.
 type MemoryCompactionResult struct {
-	Entries            int    `json:"entries"`
-	BackingBytesBefore uint64 `json:"backing_bytes_before"`
-	BackingBytesAfter  uint64 `json:"backing_bytes_after"`
-	MerkleBytesBefore  uint64 `json:"merkle_bytes_before"`
-	MerkleBytesAfter   uint64 `json:"merkle_bytes_after"`
+	Entries               int    `json:"entries"`
+	NativeTrieBytesBefore uint64 `json:"native_trie_bytes_before"`
+	NativeTrieBytesAfter  uint64 `json:"native_trie_bytes_after"`
+	BackingBytesBefore    uint64 `json:"backing_bytes_before"`
+	BackingBytesAfter     uint64 `json:"backing_bytes_after"`
+	MerkleBytesBefore     uint64 `json:"merkle_bytes_before"`
+	MerkleBytesAfter      uint64 `json:"merkle_bytes_after"`
+}
+
+const DefaultMemoryCompactionMaxTemporaryBytes uint64 = 1 << 30
+
+var ErrMemoryCompactionBudgetExceeded = errors.New("hatriecache: memory compaction temporary-memory budget exceeded")
+
+// MemoryCompactionOptions bounds memory retained alongside the live trie while
+// compaction builds replacement backing stores and duplicates the native trie.
+// A zero MaxTemporaryBytes uses DefaultMemoryCompactionMaxTemporaryBytes.
+// AllowUnbounded is intended only for controlled maintenance windows.
+type MemoryCompactionOptions struct {
+	MaxTemporaryBytes uint64
+	AllowUnbounded    bool
 }
 
 type memoryCompactionPlan struct {
@@ -58,18 +74,26 @@ type memoryCompactionPlan struct {
 }
 
 // CompactMemory rebuilds the C trie and densely packs in-memory typed backing
-// pools. It preserves values and metadata while briefly blocking operations.
+// pools. It applies the default temporary-memory safety budget.
 func (ht *HatTrie) CompactMemory() (MemoryCompactionResult, error) {
+	return ht.CompactMemoryWithOptions(MemoryCompactionOptions{})
+}
+
+// CompactMemoryWithOptions rebuilds the C trie and densely packs in-memory
+// typed backing pools while applying an admission check before allocation.
+func (ht *HatTrie) CompactMemoryWithOptions(options MemoryCompactionOptions) (MemoryCompactionResult, error) {
 	if ht == nil {
 		return MemoryCompactionResult{}, ErrNilHatTrie
 	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		var total MemoryCompactionResult
 		results, err := runLocalPartitionTasks(partitions, func(child *HatTrie) (MemoryCompactionResult, error) {
-			return child.CompactMemory()
+			return child.CompactMemoryWithOptions(options)
 		})
 		for _, result := range results {
 			total.Entries += result.Entries
+			total.NativeTrieBytesBefore += result.NativeTrieBytesBefore
+			total.NativeTrieBytesAfter += result.NativeTrieBytesAfter
 			total.BackingBytesBefore += result.BackingBytesBefore
 			total.BackingBytesAfter += result.BackingBytesAfter
 			total.MerkleBytesBefore += result.MerkleBytesBefore
@@ -80,14 +104,25 @@ func (ht *HatTrie) CompactMemory() (MemoryCompactionResult, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	ht.ensureOpen()
-	return ht.compactMemoryLocked()
+	return ht.compactMemoryLocked(options)
 }
 
-func (ht *HatTrie) compactMemoryLocked() (MemoryCompactionResult, error) {
+func (ht *HatTrie) compactMemoryLocked(options MemoryCompactionOptions) (MemoryCompactionResult, error) {
 	result := MemoryCompactionResult{
-		Entries:            int(C.hattrie_size(ht.root)),
-		BackingBytesBefore: ht.memoryBackingBytesLocked(),
-		MerkleBytesBefore:  memoryMerkleBytes(ht.replicationMerkle),
+		Entries:               int(C.hattrie_size(ht.root)),
+		NativeTrieBytesBefore: uint64(C.hattrie_memory_bytes(ht.root)),
+		BackingBytesBefore:    ht.memoryBackingBytesLocked(),
+		MerkleBytesBefore:     memoryMerkleBytes(ht.replicationMerkle),
+	}
+	if !options.AllowUnbounded {
+		budget := options.MaxTemporaryBytes
+		if budget == 0 {
+			budget = DefaultMemoryCompactionMaxTemporaryBytes
+		}
+		required, overflow := ht.memoryCompactionTemporaryBytesLocked(result)
+		if overflow || required > budget {
+			return MemoryCompactionResult{}, fmt.Errorf("%w: requires at least %d bytes, budget is %d bytes", ErrMemoryCompactionBudgetExceeded, required, budget)
+		}
 	}
 	plan, err := ht.buildMemoryCompactionPlanLocked()
 	if err != nil {
@@ -135,8 +170,21 @@ func (ht *HatTrie) compactMemoryLocked() (MemoryCompactionResult, error) {
 	C.hattrie_free(oldRoot)
 
 	result.BackingBytesAfter = ht.memoryBackingBytesLocked()
+	result.NativeTrieBytesAfter = uint64(C.hattrie_memory_bytes(ht.root))
 	result.MerkleBytesAfter = memoryMerkleBytes(ht.replicationMerkle)
 	return result, nil
+}
+
+func (ht *HatTrie) memoryCompactionTemporaryBytesLocked(result MemoryCompactionResult) (uint64, bool) {
+	total, carry := bits.Add64(result.NativeTrieBytesBefore, result.BackingBytesBefore, 0)
+	if carry != 0 {
+		return 0, true
+	}
+	total, carry = bits.Add64(total, result.MerkleBytesBefore, 0)
+	if carry != 0 {
+		return 0, true
+	}
+	return total, false
 }
 
 func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, error) {
@@ -632,12 +680,18 @@ func reusableBackingBytes(indexes *reusableIndexes) uint64 {
 // StartMemoryCompactor starts an opt-in background compactor. It skips ticks
 // when the trie has not changed since the preceding compaction.
 func (ht *HatTrie) StartMemoryCompactor(interval time.Duration) func() {
-	return ht.StartMemoryCompactorContext(context.Background(), interval)
+	return ht.StartMemoryCompactorWithOptionsContext(context.Background(), interval, MemoryCompactionOptions{})
 }
 
 // StartMemoryCompactorContext runs CompactMemory periodically until stopped,
 // the context is canceled, or the trie is destroyed.
 func (ht *HatTrie) StartMemoryCompactorContext(ctx context.Context, interval time.Duration) func() {
+	return ht.StartMemoryCompactorWithOptionsContext(ctx, interval, MemoryCompactionOptions{})
+}
+
+// StartMemoryCompactorWithOptionsContext runs bounded compaction periodically
+// until stopped, the context is canceled, or the trie is destroyed.
+func (ht *HatTrie) StartMemoryCompactorWithOptionsContext(ctx context.Context, interval time.Duration, options MemoryCompactionOptions) func() {
 	if interval <= 0 {
 		panic("hatriecache: memory compactor interval must be positive")
 	}
@@ -657,7 +711,7 @@ func (ht *HatTrie) StartMemoryCompactorContext(ctx context.Context, interval tim
 		for {
 			select {
 			case <-ticker.C:
-				if !ht.compactMemoryIfChangedAndOpen() {
+				if !ht.compactMemoryIfChangedAndOpen(options) {
 					return
 				}
 			case <-ctx.Done():
@@ -675,10 +729,10 @@ func (ht *HatTrie) StartMemoryCompactorContext(ctx context.Context, interval tim
 	}
 }
 
-func (ht *HatTrie) compactMemoryIfChangedAndOpen() bool {
+func (ht *HatTrie) compactMemoryIfChangedAndOpen(options MemoryCompactionOptions) bool {
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (bool, error) {
-			return child.compactMemoryIfChangedAndOpen(), nil
+			return child.compactMemoryIfChangedAndOpen(options), nil
 		})
 		for _, open := range results {
 			if !open {
@@ -695,6 +749,6 @@ func (ht *HatTrie) compactMemoryIfChangedAndOpen() bool {
 	if ht.memoryCompactionEpoch == ht.mutationEpoch {
 		return true
 	}
-	_, _ = ht.compactMemoryLocked()
+	_, _ = ht.compactMemoryLocked(options)
 	return true
 }

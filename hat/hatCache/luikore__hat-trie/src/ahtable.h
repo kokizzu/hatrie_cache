@@ -61,6 +61,7 @@ size_t     ahtable_size   (const ahtable_t*); // Number of stored keys.
 size_t     ahtable_slot_used_bytes(const ahtable_t*);
 size_t     ahtable_slot_capacity_bytes(const ahtable_t*);
 size_t     ahtable_slot_reallocations(const ahtable_t*);
+size_t     ahtable_memory_bytes(const ahtable_t*);
 
 
 /** Find the given key in the table, inserting it if it does not exist, and

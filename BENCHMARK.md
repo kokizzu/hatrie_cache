@@ -465,6 +465,7 @@ make benchmark-sql-columnar-layout-cache
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Selective snapshot mutation maps](#selective-snapshot-mutation-maps), no-mutation tracking cycle | Eager reset/replacements: 177.4 ns; 160 heap B; 4 allocs | Allocate only after mutation: 65.44 ns; 64 heap B; 2 allocs | 2.71x faster, 2.50x lower heap, 2x fewer allocations | Initial dirty map stays eager so first concurrent mutation retains prior latency; one-mutation CPU is neutral within 0.6% |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
+| Current pass | [Bounded native compaction admission](#bounded-native-compaction-admission), 10k keys | Unbounded: 2,934,251 ns/op; 286,926 B/op; 10,022 allocs/op | Default 1 GiB budget: 2,860,842 ns/op; 286,926 B/op; 10,022 allocs/op | CPU-neutral, 2.5% faster in this sample; allocation-neutral | Refuses an over-budget clone before allocating; `AllowUnbounded` is only for controlled maintenance |
 | Current pass | [Single-pass expiration-index compaction](#single-pass-expiration-index-compaction), 10k expiring keys | Double map rebuild: 8.254 ms; 1,562,256 heap B; 10,095 allocs | Heap-authoritative rebuild: 6.120 ms; 1,125,320 heap B; 10,060 allocs | 1.35x faster, 1.39x lower heap, 35 fewer allocations | No measured tradeoff; `CompactMemory` policy, lock scope, TTL state, heap order, wire, and persistence are unchanged |
 | Current pass | [Linear expiration-index rebuild](#linear-expiration-index-rebuild), repeated 10k-TTL compaction | Heap `Push`: 6.033 ms; 1,125,278 heap B; 10,058 allocs | Clone plus direct positions: 5.964 ms; 1,125,278 heap B; 10,058 allocs | 1.01x faster with identical heap and allocations | No measured tradeoff; the right-sized heap, exact order, deadlines, index positions, and formats are unchanged |
 | Current pass | [Carried expiration update index](#carried-expiration-update-index), existing equal/later TTL | Validate then look up again: 209.5/204.4 ns | Reuse validated index: 166.2/171.4 ns | 1.26x/1.19x faster; public `TTLExpire` 1.126x faster | No measured tradeoff; first schedule/clear and the mixed-write profile are faster with heap/allocations unchanged; invalid metadata and failed native deletion retain the prior fallback |
@@ -6121,6 +6122,33 @@ are skipped. The peak during a rebuild temporarily includes both C tries,
 compaction remap arrays, and both generations of outer pool slices, so operators
 should schedule it with enough memory headroom and outside latency-sensitive
 windows.
+
+<a id="bounded-native-compaction-admission"></a>
+#### Bounded Native Compaction Admission
+
+The native trie allocator terminates the process if a clone allocation fails.
+Before building replacement pools or calling `hattrie_dup`, compaction now
+measures the native trie allocation plus the replacement typed-backing and
+Merkle estimates. The default 1 GiB additional-memory budget rejects an unsafe
+operation without changing the live root or values. `CompactMemoryWithOptions`
+permits a larger explicit limit; `AllowUnbounded` is reserved for controlled
+maintenance windows.
+
+```sh
+make bench-memory-compaction-safety
+```
+
+Five-run raw results on the Ryzen 9 5950X host:
+
+| 10k-key compaction | Median time | Cumulative heap | Allocations | Result |
+| --- | ---: | ---: | ---: | --- |
+| Default 1 GiB budget | 2,860,842 ns/op | 286,926 B/op | 10,022/op | Admitted safely |
+| Explicit unbounded maintenance | 2,934,251 ns/op | 286,926 B/op | 10,022/op | Control |
+
+The check is allocation-neutral and CPU-neutral within benchmark variation; the
+budgeted median was 2.5% faster in this sample. The safety value is avoiding a
+process-terminating native clone when the measured additional allocation exceeds
+the operator budget.
 
 <a id="single-pass-expiration-index-compaction"></a>
 #### Single-Pass Expiration-Index Compaction
