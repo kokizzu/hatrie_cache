@@ -39,8 +39,8 @@ server emits `PortalSuspended` until all rows have been returned.
 
 `make test-pgwire-server` includes a loopback integration test with the stock
 `psql` client when it is installed. Run `make check-pgwire-client-tools` to
-report local `psql` and Java tool availability before adding a JDBC or ODBC
-driver-specific integration test.
+report local `psql`, Java, and PostgreSQL JDBC JAR availability before adding a
+JDBC or ODBC driver-specific integration test.
 
 ## Embed A Listener
 
