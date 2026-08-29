@@ -2130,3 +2130,12 @@ test-openapi-management:
 .PHONY: deliver-openapi-management
 deliver-openapi-management:
 	sh ./scripts/deliver-openapi-management.sh
+.PHONY: audit-notebook-integration
+audit-notebook-integration:
+	sh ./scripts/audit-notebook-integration.sh
+.PHONY: test-notebook-integration
+test-notebook-integration:
+	sh ./scripts/test-notebook-integration.sh
+.PHONY: deliver-notebook-integration
+deliver-notebook-integration:
+	sh ./scripts/deliver-notebook-integration.sh

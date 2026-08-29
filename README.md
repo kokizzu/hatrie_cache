@@ -13,6 +13,7 @@ security guidance before exposing it on a network.
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
+- Reproducible Jupyter SQL analysis: [NOTEBOOK.md](NOTEBOOK.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
