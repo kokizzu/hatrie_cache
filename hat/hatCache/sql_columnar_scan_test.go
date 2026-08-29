@@ -11,6 +11,25 @@ func (resolver sqlRowsOnlyResolver) ResolveSQLSource(name, key string) ([]SQLRow
 	return resolver.trie.ResolveSQLSource(name, key)
 }
 
+func TestSQLJSONColumnarBatchKeepsRequestedFieldsAligned(t *testing.T) {
+	t.Parallel()
+	batch, err := sqlJSONColumnarBatch("metrics", []byte(`[
+  {"id":1,"name":"first","discard":{"deep":["value",{"nested":true}]}},
+  {"id":2,"name":null,"discard":[1,2,3]},
+  {"id":3,"discard":"unselected"}
+]`), []string{"name", "id", "name"})
+	if err != nil {
+		t.Fatalf("sqlJSONColumnarBatch() error = %v", err)
+	}
+	want := SQLColumnarBatch{Columns: map[string][]interface{}{
+		"id":   {float64(1), float64(2), float64(3)},
+		"name": {"first", nil, nil},
+	}, Rows: 3}
+	if !reflect.DeepEqual(batch, want) {
+		t.Fatalf("sqlJSONColumnarBatch() = %#v, want %#v", batch, want)
+	}
+}
+
 func TestSQLColumnarScanFiltersBeforeProjectionMaterialization(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

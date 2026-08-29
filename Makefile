@@ -1649,6 +1649,18 @@ review-sql-columnar-numeric-aggregate:
 commit-sql-columnar-numeric-aggregate:
 	sh ./scripts/commit-sql-columnar-numeric-aggregate.sh
 
+audit-sql-storage-allocation:
+	sh ./scripts/audit-sql-storage-allocation.sh
+
+format-sql-columnar-json-benchmark:
+	sh ./scripts/format-sql-columnar-json-benchmark.sh
+
+review-sql-columnar-json-benchmark:
+	sh ./scripts/review-sql-columnar-json-benchmark.sh
+
+commit-sql-columnar-json-benchmark:
+	sh ./scripts/commit-sql-columnar-json-benchmark.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

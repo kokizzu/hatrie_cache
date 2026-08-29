@@ -93,6 +93,25 @@ func BenchmarkSQLColumnarNumericAggregate(b *testing.B) {
 	})
 }
 
+func BenchmarkSQLJSONColumnarBatch(b *testing.B) {
+	trie, _ := benchmarkSQLColumnarJobs(b)
+	data, err := trie.GetBytesChecked("jobs")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		batch, err := sqlJSONColumnarBatch("jobs", data, []string{"id", "state"})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if batch.Rows != 4096 {
+			b.Fatalf("batch.Rows = %d, want 4096", batch.Rows)
+		}
+	}
+}
+
 type benchmarkColumnarResolver struct{ batch SQLColumnarBatch }
 
 func (resolver benchmarkColumnarResolver) ResolveSQLSource(string, string) ([]SQLRow, error) {
