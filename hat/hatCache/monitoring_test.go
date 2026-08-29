@@ -2246,6 +2246,24 @@ func TestMonitoringIdentityProviderProtectsAPI(t *testing.T) {
 	}
 }
 
+func TestMonitoringGrafanaQueryAndSearch(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{SQLCatalog: SQLCatalog{Namespaces: []string{"metrics", "profiles"}}}).Handler()
+
+	search := httptest.NewRequest(http.MethodPost, "/api/grafana/search", strings.NewReader(`{"target":"met"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, search)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"text":"metrics"`) {
+		t.Fatalf("Grafana search = %d %q", response.Code, response.Body.String())
+	}
+
+	query := httptest.NewRequest(http.MethodPost, "/api/grafana/query", strings.NewReader(`{"targets":[{"refId":"A","target":"FROM VALUES (1, 'Ada') AS people(id, name) SELECT people.id, people.name"}]}`))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, query)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"refId":"A"`) || !strings.Contains(response.Body.String(), `"Ada"`) {
+		t.Fatalf("Grafana query = %d %q", response.Code, response.Body.String())
+	}
+}
+
 func TestMonitoringPreviousAuthTokensExpire(t *testing.T) {
 	ht := newTestTrie(t)
 	future := time.Now().Add(time.Hour)

@@ -480,6 +480,8 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/sql", handler.handleSQL)
 	server.HandleFunc("/api/sql/catalog", handler.handleSQLCatalog)
 	server.HandleFunc("/api/sql/functions", handler.handleSQLFunctions)
+	server.HandleFunc("/api/grafana/search", handler.handleGrafanaSearch)
+	server.HandleFunc("/api/grafana/query", handler.handleGrafanaQuery)
 	server.HandleFunc("/api/commands", handler.handleCommands)
 	server.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	server.HandleFunc("/api/backup", handler.handleBackup)
@@ -1150,6 +1152,111 @@ func (handler *MonitoringHandler) handleSQLCatalog(w http.ResponseWriter, r *htt
 		return
 	}
 	writeJSON(w, cloneSQLCatalog(handler.options.SQLCatalog))
+}
+
+type grafanaSearchRequest struct {
+	Target string `json:"target"`
+}
+
+type grafanaSearchResult struct {
+	Text  string `json:"text"`
+	Value string `json:"value"`
+}
+
+type grafanaQueryRequest struct {
+	Targets []grafanaQueryTarget `json:"targets"`
+}
+
+type grafanaQueryTarget struct {
+	RefID  string `json:"refId"`
+	Target string `json:"target"`
+}
+
+type grafanaTableColumn struct {
+	Text string `json:"text"`
+	Type string `json:"type"`
+}
+
+type grafanaTableResult struct {
+	RefID   string               `json:"refId"`
+	Target  string               `json:"target"`
+	Type    string               `json:"type"`
+	Columns []grafanaTableColumn `json:"columns"`
+	Rows    [][]interface{}      `json:"rows"`
+}
+
+func (handler *MonitoringHandler) handleGrafanaSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	defer r.Body.Close()
+	var request grafanaSearchRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMonitoringJSONRequestBytes)).Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("invalid Grafana search request: "+err.Error()))
+		return
+	}
+	prefix := strings.ToLower(strings.TrimSpace(request.Target))
+	result := make([]grafanaSearchResult, 0, len(handler.options.SQLCatalog.Namespaces))
+	for _, namespace := range handler.options.SQLCatalog.Namespaces {
+		if prefix != "" && !strings.HasPrefix(strings.ToLower(namespace), prefix) {
+			continue
+		}
+		result = append(result, grafanaSearchResult{Text: namespace, Value: namespace})
+	}
+	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) handleGrafanaQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) || !handler.requireTrie(w) || handler.rejectSQLHTTP(w, r) {
+		return
+	}
+	defer r.Body.Close()
+	var request grafanaQueryRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMonitoringJSONRequestBytes)).Decode(&request); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("invalid Grafana query request: "+err.Error()))
+		return
+	}
+	if len(request.Targets) == 0 {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("Grafana query requires at least one target"))
+		return
+	}
+	results := make([]grafanaTableResult, 0, len(request.Targets))
+	resolver := monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions}
+	for _, target := range request.Targets {
+		sqlRequest := SQLQueryRequest{Query: strings.TrimSpace(target.Target)}
+		if sqlRequest.Query == "" {
+			writeJSONStatus(w, http.StatusBadRequest, commandError("Grafana target query is required"))
+			return
+		}
+		if handler.rejectSQLRBACHTTP(w, r, sqlRequest) {
+			return
+		}
+		result, err := ExecuteSQLQueryParameters(r.Context(), sqlRequest.Query, resolver, nil, handler.options.SQLQueryOptions)
+		if err != nil {
+			handler.auditSQLQuery(r, sqlRequest, nil, 0, false, http.StatusBadRequest, err.Error())
+			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(sqlRequest.Query, err)))
+			return
+		}
+		columns := make([]grafanaTableColumn, len(result.Columns))
+		for index, column := range result.Columns {
+			columns[index] = grafanaTableColumn{Text: column, Type: "string"}
+		}
+		rows := make([][]interface{}, len(result.Rows))
+		for rowIndex, row := range result.Rows {
+			rows[rowIndex] = make([]interface{}, len(result.Columns))
+			for columnIndex, column := range result.Columns {
+				rows[rowIndex][columnIndex] = row[column]
+			}
+		}
+		handler.auditSQLQuery(r, sqlRequest, nil, len(result.Rows), true, http.StatusOK, "")
+		results = append(results, grafanaTableResult{RefID: target.RefID, Target: target.Target, Type: "table", Columns: columns, Rows: rows})
+	}
+	writeJSON(w, results)
 }
 
 func cloneSQLCatalog(catalog SQLCatalog) SQLCatalog {

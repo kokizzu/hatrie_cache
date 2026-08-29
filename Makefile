@@ -2112,3 +2112,12 @@ tidy-arrow-dependency:
 .PHONY: deliver-arrow-interchange
 deliver-arrow-interchange:
 	sh ./scripts/deliver-arrow-interchange.sh
+.PHONY: audit-grafana-integration
+audit-grafana-integration:
+	sh ./scripts/audit-grafana-integration.sh
+.PHONY: test-grafana-integration
+test-grafana-integration:
+	sh ./scripts/test-grafana-integration.sh
+.PHONY: deliver-grafana-integration
+deliver-grafana-integration:
+	sh ./scripts/deliver-grafana-integration.sh
