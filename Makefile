@@ -2139,3 +2139,6 @@ test-notebook-integration:
 .PHONY: deliver-notebook-integration
 deliver-notebook-integration:
 	sh ./scripts/deliver-notebook-integration.sh
+.PHONY: deliver-pgwire-extended
+deliver-pgwire-extended:
+	sh ./scripts/deliver-pgwire-extended.sh

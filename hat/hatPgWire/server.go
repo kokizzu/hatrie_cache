@@ -122,6 +122,8 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		return err
 	}
 
+	prepared := make(map[string]string)
+	portals := make(map[string]string)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -166,12 +168,120 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			if err := writeReadyForQuery(connection); err != nil {
 				return err
 			}
+		case 'P':
+			name, query, err := parseParseMessage(body)
+			if err != nil {
+				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			prepared[name] = query
+			if err := writeMessage(connection, '1', nil); err != nil {
+				return err
+			}
+		case 'B':
+			portal, statement, err := parseBindMessage(body)
+			if err != nil {
+				if err := writeErrorAndReady(connection, "0A000", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			query, ok := prepared[statement]
+			if !ok {
+				if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
+					return err
+				}
+				continue
+			}
+			portals[portal] = query
+			if err := writeMessage(connection, '2', nil); err != nil {
+				return err
+			}
+		case 'D':
+			if len(body) < 2 || (body[0] != 'S' && body[0] != 'P') {
+				if err := writeErrorAndReady(connection, "08P01", "invalid describe message"); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := writeMessage(connection, 't', []byte{0, 0}); err != nil {
+				return err
+			}
+			if err := writeMessage(connection, 'n', nil); err != nil {
+				return err
+			}
+		case 'E':
+			portal, err := parseExecuteMessage(body)
+			if err != nil {
+				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			query, ok := portals[portal]
+			if !ok {
+				if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+					return err
+				}
+				continue
+			}
+			result, err := handler.Query(ctx, query)
+			if err == nil {
+				err = validateQueryResult(result)
+			}
+			if err != nil {
+				if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := writeQueryResult(connection, result); err != nil {
+				return err
+			}
+		case 'S':
+			if err := writeReadyForQuery(connection); err != nil {
+				return err
+			}
 		default:
 			if err := writeErrorAndReady(connection, "0A000", "PostgreSQL extended protocol is not supported"); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func parseParseMessage(body []byte) (string, string, error) {
+	name, rest, ok := splitCString(body)
+	if !ok {
+		return "", "", errors.New("invalid parse message")
+	}
+	query, rest, ok := splitCString(rest)
+	if !ok || len(rest) < 2 || binary.BigEndian.Uint16(rest[:2]) != 0 {
+		return "", "", errors.New("only zero-parameter parse is supported")
+	}
+	return name, query, nil
+}
+
+func parseBindMessage(body []byte) (string, string, error) {
+	portal, rest, ok := splitCString(body)
+	if !ok {
+		return "", "", errors.New("invalid bind message")
+	}
+	statement, rest, ok := splitCString(rest)
+	if !ok || len(rest) < 6 || binary.BigEndian.Uint16(rest[:2]) != 0 || binary.BigEndian.Uint16(rest[2:4]) != 0 || binary.BigEndian.Uint16(rest[4:6]) != 0 {
+		return "", "", errors.New("only zero-parameter text bind is supported")
+	}
+	return portal, statement, nil
+}
+
+func parseExecuteMessage(body []byte) (string, error) {
+	portal, rest, ok := splitCString(body)
+	if !ok || len(rest) != 4 || binary.BigEndian.Uint32(rest) != 0 {
+		return "", errors.New("only unlimited execute is supported")
+	}
+	return portal, nil
 }
 
 var errSSLRequest = errors.New("PostgreSQL SSL request")

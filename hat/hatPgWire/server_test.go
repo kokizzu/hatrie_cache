@@ -127,6 +127,46 @@ func TestServeConnRejectsInvalidCleartextPassword(t *testing.T) {
 	}
 }
 
+func TestServeConnRunsPostgreSQLExtendedQuery(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(_ context.Context, query string) (hatPgWire.QueryResult, error) {
+			value := "ok"
+			return hatPgWire.QueryResult{Fields: []hatPgWire.Field{{Name: "status"}}, Rows: [][]*string{{&value}}}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("statement\x00FROM VALUES ('ok') AS value(status) SELECT value.status\x00"), 0, 0))
+	if messageType, _ := readBackendMessage(t, client); messageType != '1' {
+		t.Fatalf("Parse response = %q, want ParseComplete", messageType)
+	}
+	bind := append([]byte("portal\x00statement\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	if messageType, body := readBackendMessage(t, client); messageType != '2' {
+		t.Fatalf("Bind response = %q %q, want BindComplete", messageType, body)
+	}
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
+		t.Fatalf("Execute response = %q, want RowDescription", messageType)
+	}
+	readBackendMessage(t, client)
+	if messageType, _ := readBackendMessage(t, client); messageType != 'C' {
+		t.Fatalf("Execute completion = %q, want CommandComplete", messageType)
+	}
+	writeFrontendMessage(t, client, 'S', nil)
+	if messageType, _ := readBackendMessage(t, client); messageType != 'Z' {
+		t.Fatalf("Sync response = %q, want ReadyForQuery", messageType)
+	}
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
 func writeSSLRequest(t *testing.T, connection net.Conn) {
 	t.Helper()
 	packet := make([]byte, 8)
