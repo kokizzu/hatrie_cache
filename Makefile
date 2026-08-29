@@ -1683,6 +1683,27 @@ commit-sql-columnar-json-benchmark:
 audit-sql-parallel-contention:
 	sh ./scripts/audit-sql-parallel-contention.sh
 
+inspect-sql-spill-budget:
+	sh ./scripts/inspect-sql-spill-budget.sh
+
+test-sql-spill-parallel-merge:
+	sh ./scripts/test-sql-spill-parallel-merge.sh
+
+benchmark-sql-spill-parallel-merge:
+	sh ./scripts/benchmark-sql-spill-parallel-merge.sh
+
+test-race-sql-spill-parallel-merge:
+	sh ./scripts/test-race-sql-spill-parallel-merge.sh
+
+format-sql-spill-parallel-merge:
+	sh ./scripts/format-sql-spill-parallel-merge.sh
+
+review-sql-spill-parallel-merge:
+	sh ./scripts/review-sql-spill-parallel-merge.sh
+
+commit-sql-spill-parallel-merge:
+	sh ./scripts/commit-sql-spill-parallel-merge.sh
+
 inspect-sql-cache-locks:
 	sh ./scripts/inspect-sql-cache-locks.sh
 

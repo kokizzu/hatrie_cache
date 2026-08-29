@@ -9559,11 +9559,20 @@ func (writer sqlSpillBudgetWriter) Write(data []byte) (int, error) {
 			return 0, err
 		}
 	}
-	if int64(len(data)) > *writer.available {
-		return 0, errSQLSpillDiskBudget
+	reserved := int64(len(data))
+	for {
+		available := atomic.LoadInt64(writer.available)
+		if reserved > available {
+			return 0, errSQLSpillDiskBudget
+		}
+		if atomic.CompareAndSwapInt64(writer.available, available, available-reserved) {
+			break
+		}
 	}
 	written, err := writer.writer.Write(data)
-	*writer.available -= int64(written)
+	if refund := reserved - int64(written); refund != 0 {
+		atomic.AddInt64(writer.available, refund)
+	}
 	return written, err
 }
 
@@ -9808,7 +9817,7 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 		}
 		if err := encoder.Encode(readers[best].current); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging sort runs")
+				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging sort runs: %w", errSQLSpillDiskBudget)
 			}
 			return sqlSpillRun{}, fmt.Errorf("write SQL sort merge file: %w", err)
 		}
@@ -9885,6 +9894,77 @@ func sqlMergeSpillRunsToVisit(runs []sqlSpillRun, order []sqlOrder, control *sql
 	return nil
 }
 
+type sqlParallelSortMergeResult struct {
+	index int
+	run   sqlSpillRun
+	err   error
+}
+
+// sqlMergeSpillSortPassParallel merges independent fan-in groups concurrently.
+// Each writer atomically reserves bytes from the shared spill budget. If the
+// temporary overlap itself reaches that cap, outputs are discarded and the
+// caller falls back to the established sequential pass.
+func sqlMergeSpillSortPassParallel(runs []sqlSpillRun, order []sqlOrder, directory string, available *int64, control *sqlExecutionControl) (next []sqlSpillRun, used bool, err error) {
+	if control == nil || control.options.Workers < 2 {
+		return nil, false, nil
+	}
+	groups := (len(runs) + maxSQLSpillMergeFanIn - 1) / maxSQLSpillMergeFanIn
+	if groups < 2 {
+		return nil, false, nil
+	}
+	workers := control.options.Workers
+	if workers > groups {
+		workers = groups
+	}
+	before := atomic.LoadInt64(available)
+	results := make([]sqlParallelSortMergeResult, groups)
+	jobs := make(chan int)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range jobs {
+				start := index * maxSQLSpillMergeFanIn
+				end := start + maxSQLSpillMergeFanIn
+				if end > len(runs) {
+					end = len(runs)
+				}
+				merged, mergeErr := sqlMergeSpillRunsToWriter(runs[start:end], order, directory, available, control)
+				results[index] = sqlParallelSortMergeResult{index: index, run: merged, err: mergeErr}
+			}
+		}()
+	}
+	for index := range results {
+		jobs <- index
+	}
+	close(jobs)
+	group.Wait()
+	var firstErr error
+	for _, result := range results {
+		if result.err != nil && firstErr == nil {
+			firstErr = result.err
+		}
+	}
+	if firstErr != nil {
+		for _, result := range results {
+			if result.err == nil && result.run.path != "" {
+				_ = os.Remove(result.run.path)
+			}
+		}
+		atomic.StoreInt64(available, before)
+		if errors.Is(firstErr, errSQLSpillDiskBudget) {
+			return nil, false, nil
+		}
+		return nil, false, firstErr
+	}
+	next = make([]sqlSpillRun, len(results))
+	for _, result := range results {
+		next[result.index] = result.run
+	}
+	return next, true, nil
+}
+
 func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory string, maxRunBytes, maxSpillBytes, offset, limit int, control *sqlExecutionControl) ([]SQLRow, int64, int, error) {
 	if directory == "" || maxSpillBytes <= 0 {
 		return nil, 0, 0, fmt.Errorf("SQL external sort requires SpillDirectory and MaxSpillBytes")
@@ -9938,6 +10018,27 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 		runs = append(runs, run)
 	}
 	for len(runs) > maxSQLSpillMergeFanIn {
+		if next, parallel, mergeErr := sqlMergeSpillSortPassParallel(runs, order, directory, &available, control); mergeErr != nil {
+			return nil, 0, 0, mergeErr
+		} else if parallel {
+			for index, merged := range next {
+				allPaths[merged.path] = struct{}{}
+				start := index * maxSQLSpillMergeFanIn
+				end := start + maxSQLSpillMergeFanIn
+				if end > len(runs) {
+					end = len(runs)
+				}
+				for _, run := range runs[start:end] {
+					if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+						return nil, 0, 0, fmt.Errorf("remove SQL sort spill file: %w", err)
+					}
+					delete(allPaths, run.path)
+					available += run.bytes
+				}
+			}
+			runs = next
+			continue
+		}
 		next := make([]sqlSpillRun, 0, (len(runs)+maxSQLSpillMergeFanIn-1)/maxSQLSpillMergeFanIn)
 		for start := 0; start < len(runs); start += maxSQLSpillMergeFanIn {
 			end := start + maxSQLSpillMergeFanIn
