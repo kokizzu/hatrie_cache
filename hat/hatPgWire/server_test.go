@@ -2,8 +2,14 @@ package hatPgWire_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/binary"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -71,6 +77,45 @@ func TestServeConnRunsPostgreSQLSimpleQuery(t *testing.T) {
 	}
 
 	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnUpgradesSSLRequestWithTLS(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	queries := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(ctx, server, hatPgWire.QueryHandlerFunc(func(_ context.Context, query string) (hatPgWire.QueryResult, error) {
+			queries <- query
+			return hatPgWire.QueryResult{CommandTag: "SELECT 0"}, nil
+		}), hatPgWire.ServerOptions{TLSConfig: &tls.Config{Certificates: []tls.Certificate{testTLSCertificate(t)}}})
+	}()
+	writeSSLRequest(t, client)
+	response := make([]byte, 1)
+	if _, err := io.ReadFull(client, response); err != nil || string(response) != "S" {
+		t.Fatalf("SSL request reply = %q, %v, want S", response, err)
+	}
+	tlsClient := tls.Client(client, &tls.Config{InsecureSkipVerify: true})
+	if err := tlsClient.HandshakeContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	writeStartup(t, tlsClient, "user", "analyst")
+	readBackendMessage(t, tlsClient)
+	readReadyForQuery(t, tlsClient)
+	writeFrontendMessage(t, tlsClient, 'Q', []byte("SELECT tls\x00"))
+	if query := <-queries; query != "SELECT tls" {
+		t.Fatalf("query = %q, want SELECT tls", query)
+	}
+	if messageType, _ := readBackendMessage(t, tlsClient); messageType != 'C' {
+		t.Fatalf("query completion = %q, want CommandComplete", messageType)
+	}
+	readReadyForQuery(t, tlsClient)
+	writeFrontendMessage(t, tlsClient, 'X', nil)
 	if err := <-errCh; err != nil {
 		t.Fatalf("ServeConn() error = %v", err)
 	}
@@ -842,6 +887,32 @@ func readBackendKeyData(t *testing.T, connection net.Conn) (uint32, uint32) {
 			t.Fatal("startup did not send BackendKeyData")
 		}
 	}
+}
+
+func testTLSCertificate(t *testing.T) tls.Certificate {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	certificateTemplate := x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "hatrie-cache-test"},
+		NotBefore:    now.Add(-time.Minute),
+		NotAfter:     now.Add(time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	certificate, err := x509.CreateCertificate(rand.Reader, &certificateTemplate, &certificateTemplate, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{certificate}, PrivateKey: privateKey}
 }
 
 func writeSSLRequest(t *testing.T, connection net.Conn) {

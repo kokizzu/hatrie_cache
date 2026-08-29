@@ -5,6 +5,7 @@ package hatPgWire
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -50,6 +51,7 @@ type ServerOptions struct {
 	MaxPortals            int
 	MaxPortalResultBytes  int
 	CancelRegistry        *CancelRegistry
+	TLSConfig             *tls.Config
 }
 
 // Field describes a PostgreSQL text-format result column.
@@ -103,9 +105,24 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	}
 
 	startup, err := readStartup(connection, maxMessage)
-	for err == errSSLRequest {
-		if err := writeRaw(connection, []byte{'N'}); err != nil {
-			return err
+	if err == errSSLRequest {
+		if options.TLSConfig == nil {
+			if err := writeRaw(connection, []byte{'N'}); err != nil {
+				return err
+			}
+		} else {
+			if err := writeRaw(connection, []byte{'S'}); err != nil {
+				return err
+			}
+			tlsConfig := options.TLSConfig.Clone()
+			if tlsConfig.MinVersion == 0 {
+				tlsConfig.MinVersion = tls.VersionTLS12
+			}
+			tlsConnection := tls.Server(connection, tlsConfig)
+			if err := tlsConnection.HandshakeContext(ctx); err != nil {
+				return err
+			}
+			connection = tlsConnection
 		}
 		startup, err = readStartup(connection, maxMessage)
 	}
