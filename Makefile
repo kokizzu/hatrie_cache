@@ -1709,6 +1709,19 @@ review-sql-columnar-shared-row:
 commit-sql-columnar-shared-row:
 	sh ./scripts/commit-sql-columnar-shared-row.sh
 
+format-sql-columnar-like:
+	sh ./scripts/format-sql-columnar-like.sh
+
+test-sql-columnar-like:
+	sh ./scripts/test-sql-columnar-like.sh
+
+review-sql-columnar-like:
+	sh ./scripts/review-sql-columnar-like.sh
+
+commit-sql-columnar-like:
+	sh ./scripts/commit-sql-columnar-like.sh
+
+
 commit-disable-github-ci:
 	sh ./scripts/commit-disable-github-ci.sh
 

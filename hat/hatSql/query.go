@@ -6780,6 +6780,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+			candidate, _ := batch.Value(field, rowIndex)
+			return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern)
+		})
+		if metrics != nil {
+			metrics.record("COLUMNAR LIKE FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
@@ -7192,6 +7203,13 @@ func sqlColumnarDictionaryPredicate(expr sqlExpr, alias string, batch ColumnarBa
 	}
 	dictionary, ok := batch.Dictionaries[field]
 	return dictionary, operator, value, expr.collation, ok
+}
+
+func sqlColumnarLikePredicate(expr sqlExpr, alias string) (field, pattern string, ok bool) {
+	if expr.kind != "binary" || expr.op != "LIKE" || expr.left == nil || expr.right == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || expr.right.kind != "literal" || expr.right.value == nil {
+		return "", "", false
+	}
+	return expr.left.name, fmt.Sprint(expr.right.value), true
 }
 
 func sqlDictionaryCode(dictionary DictionaryColumn, value string, collation SQLCollation) (uint32, bool) {

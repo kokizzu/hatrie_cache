@@ -1,0 +1,43 @@
+package hatCache
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestSQLColumnarScanUsesLikeFilter(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("jobs", `[
+  {"id":1,"state":"queued"},
+  {"id":2,"state":"running"},
+  {"id":3,"state":"queued-later"}
+]`)
+	query := "FROM CACHE('jobs') AS job WHERE job.state LIKE 'queued%' SELECT job.id"
+	columnar, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := ExecuteSQLQuery(query, sqlRowsOnlyResolver{trie: trie})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(columnar, materialized) {
+		t.Fatalf("columnar result = %#v, materialized result = %#v", columnar, materialized)
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sqlColumnarLikePlanHasNode(explained.Plan, "COLUMNAR LIKE FILTER") {
+		t.Fatalf("plan = %#v, want COLUMNAR LIKE FILTER", explained.Plan)
+	}
+}
+
+func sqlColumnarLikePlanHasNode(plan []SQLExplainStep, node string) bool {
+	for _, step := range plan {
+		if step.Node == node {
+			return true
+		}
+	}
+	return false
+}
