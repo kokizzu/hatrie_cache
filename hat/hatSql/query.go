@@ -222,6 +222,12 @@ type SQLQueryOptions struct {
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
+	// IndexAdvisor records candidate index fields only for observed slow scans.
+	// Nil preserves the existing privacy-safe telemetry-only behavior.
+	IndexAdvisor *SQLIndexAdvisor
+	// IndexUseRecorder records successful direct index selections for reports.
+	// Nil preserves the existing no-retention behavior.
+	IndexUseRecorder *SQLIndexUseRecorder
 	// IndexHint is a diagnostic-only FORCE or FORBID override for one index
 	// field. The default leaves planner selection unchanged.
 	IndexHint SQLIndexHint
@@ -613,10 +619,16 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		}
 	}
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" {
+	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
+	if options.IndexAdvisor != nil {
+		options.IndexAdvisor.observeSlowQuery(query, metrics, time.Since(observation.started), options.SlowQueryThreshold, err)
+	}
+	if options.IndexUseRecorder != nil {
+		options.IndexUseRecorder.observe(query, metrics, err)
+	}
 	if metrics != nil {
 		operatorSteps = metrics.steps
 	}

@@ -865,6 +865,16 @@ test-sql-retention:
 deliver-sql-retention:
 	sh ./scripts/deliver-sql-retention.sh
 
+test-sql-index-advisor:
+	sh ./scripts/test-sql-index-advisor.sh
+
+test-sql-index-usage:
+	sh ./scripts/test-sql-index-usage.sh
+
+deliver-sql-index-intelligence:
+	sh ./scripts/deliver-sql-index-intelligence.sh
+
+
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
