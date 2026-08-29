@@ -23,6 +23,12 @@ from SQL text and are forwarded to `hatSql` as positional `$1`, `$2`, and later
 values. Closing a statement or portal removes its connection-local state. This
 is the prepared-statement baseline required by JDBC and ODBC clients.
 
+`Describe Portal` emits the portal's `RowDescription`. Its later `Execute`
+emits only `DataRow` messages followed by `PortalSuspended` or
+`CommandComplete`; it never repeats the row description. This ordering matches
+the PostgreSQL v3 protocol and is covered by the local pgJDBC prepared-query
+integration test.
+
 `Bind` supports PostgreSQL text-format values and SQL NULL. Declared `bool`,
 `int2`, `int4`, `int8`, `float4`, and `float8` parameters are converted to Go
 values before Hatrie SQL execution; text and unspecified OIDs stay strings.
@@ -49,10 +55,13 @@ payload retained by one materialized portal result.
 
 ## Compatibility Check
 
-`make test-pgwire-server` includes a loopback integration test with the stock
-`psql` client when it is installed. Run `make check-pgwire-client-tools` to
-report local `psql`, Java/JDBC, and ODBC client availability before adding a
-driver-specific integration test.
+`make test-pgwire-server` includes loopback integration tests with the stock
+`psql` client and pgJDBC prepared statements when their local tools are
+available. The pgJDBC test uses the non-versioned local cache
+`$TMPDIR/hatrie_cache_pgwire_jdbc/postgresql-42.7.5.jar`; it skips when that
+driver is absent and never downloads a dependency. Run
+`make check-pgwire-client-tools` to report local `psql`, Java/JDBC, and ODBC
+client availability.
 
 ## Embed A Listener
 

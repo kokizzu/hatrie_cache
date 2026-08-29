@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -268,11 +269,14 @@ func TestServeConnRunsPostgreSQLExtendedQuery(t *testing.T) {
 	if messageType, body := readBackendMessage(t, client); messageType != '2' {
 		t.Fatalf("Bind response = %q %q, want BindComplete", messageType, body)
 	}
-	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	writeFrontendMessage(t, client, 'D', []byte("Pportal\x00"))
 	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
-		t.Fatalf("Execute response = %q, want RowDescription", messageType)
+		t.Fatalf("Describe portal response = %q, want RowDescription", messageType)
 	}
-	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	if messageType, _ := readBackendMessage(t, client); messageType != 'D' {
+		t.Fatalf("Execute response = %q, want DataRow", messageType)
+	}
 	if messageType, _ := readBackendMessage(t, client); messageType != 'C' {
 		t.Fatalf("Execute completion = %q, want CommandComplete", messageType)
 	}
@@ -306,10 +310,11 @@ func TestServeConnRunsPostgreSQLExtendedQueryWithTextParameter(t *testing.T) {
 	if messageType, body := readBackendMessage(t, client); messageType != '2' {
 		t.Fatalf("Bind response = %q %q, want BindComplete", messageType, body)
 	}
-	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	writeFrontendMessage(t, client, 'D', []byte("Pportal\x00"))
 	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
-		t.Fatalf("Execute response = %q, want RowDescription", messageType)
+		t.Fatalf("Describe portal response = %q, want RowDescription", messageType)
 	}
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
 	messageType, body := readBackendMessage(t, client)
 	if messageType != 'D' || len(body) != 8 || binary.BigEndian.Uint16(body[:2]) != 1 || string(body[6:]) != "ok" {
 		t.Fatalf("data row = %q %v, want parameter value ok", messageType, body)
@@ -373,8 +378,11 @@ func TestServeConnConvertsTypedTextParameter(t *testing.T) {
 	bind := []byte("portal\x00statement\x00\x00\x00\x00\x01\x00\x00\x00\x0242\x00\x00")
 	writeFrontendMessage(t, client, 'B', bind)
 	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'D', []byte("Pportal\x00"))
+	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
+		t.Fatalf("Describe portal response = %q, want RowDescription", messageType)
+	}
 	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
-	readBackendMessage(t, client)
 	readBackendMessage(t, client)
 	readBackendMessage(t, client)
 	values := <-parameters
@@ -473,10 +481,11 @@ func TestServeConnFetchesPreparedPortalInRowLimitedBatches(t *testing.T) {
 	bind := append([]byte("portal\x00statement\x00"), 0, 0, 0, 0, 0, 0)
 	writeFrontendMessage(t, client, 'B', bind)
 	readBackendMessage(t, client)
-	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x01"))
+	writeFrontendMessage(t, client, 'D', []byte("Pportal\x00"))
 	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
-		t.Fatalf("first Execute description = %q, want RowDescription", messageType)
+		t.Fatalf("portal description = %q, want RowDescription", messageType)
 	}
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x01"))
 	messageType, body := readBackendMessage(t, client)
 	if messageType != 'D' || string(body[6:]) != "first" {
 		t.Fatalf("first Execute row = %q %q, want first", messageType, body)
@@ -485,9 +494,6 @@ func TestServeConnFetchesPreparedPortalInRowLimitedBatches(t *testing.T) {
 		t.Fatalf("first Execute completion = %q, want PortalSuspended", messageType)
 	}
 	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x01"))
-	if messageType, _ := readBackendMessage(t, client); messageType != 'T' {
-		t.Fatalf("second Execute description = %q, want RowDescription", messageType)
-	}
 	messageType, body = readBackendMessage(t, client)
 	if messageType != 'D' || string(body[6:]) != "second" {
 		t.Fatalf("second Execute row = %q %q, want second", messageType, body)
@@ -530,9 +536,12 @@ func TestServeConnDescribesBoundPortalResult(t *testing.T) {
 		t.Fatalf("portal description = %q %q, want RowDescription for name", messageType, body)
 	}
 	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
-	readBackendMessage(t, client)
-	readBackendMessage(t, client)
-	readBackendMessage(t, client)
+	if messageType, _ := readBackendMessage(t, client); messageType != 'D' {
+		t.Fatalf("Execute response = %q, want DataRow", messageType)
+	}
+	if messageType, _ := readBackendMessage(t, client); messageType != 'C' {
+		t.Fatalf("Execute completion = %q, want CommandComplete", messageType)
+	}
 	writeFrontendMessage(t, client, 'X', nil)
 	if err := <-errCh; err != nil {
 		t.Fatalf("ServeConn() error = %v", err)
@@ -571,6 +580,77 @@ func TestServeConnSupportsPSQLSimpleQuery(t *testing.T) {
 	}
 	if strings.TrimSpace(string(output)) != "Ada" {
 		t.Fatalf("psql output = %q, want Ada", output)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnSupportsPgJDBCPreparedQuery(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("javac is not installed")
+	}
+	if _, err := exec.LookPath("java"); err != nil {
+		t.Skip("java is not installed")
+	}
+	jdbcJar := filepath.Join(os.TempDir(), "hatrie_cache_pgwire_jdbc", "postgresql-42.7.5.jar")
+	if _, err := os.Stat(jdbcJar); err != nil {
+		t.Skipf("pgJDBC driver is unavailable at %s", jdbcJar)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverErr := make(chan error, 1)
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer connection.Close()
+		serverErr <- hatPgWire.ServeConn(ctx, connection, hatSql.NewPgWireQueryHandler(nil, hatSql.QueryOptions{}), hatPgWire.ServerOptions{})
+	}()
+
+	workDir := t.TempDir()
+	sourcePath := filepath.Join(workDir, "PgWireJdbcClient.java")
+	source := `import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+
+public final class PgWireJdbcClient {
+  public static void main(String[] args) throws Exception {
+    String url = "jdbc:postgresql://127.0.0.1:" + args[0] + "/analytics?sslmode=disable&binaryTransfer=false";
+    try (Connection connection = DriverManager.getConnection(url, "analyst", "")) {
+      try (PreparedStatement statement = connection.prepareStatement("FROM VALUES (?) AS people(name) SELECT people.name")) {
+        statement.setString(1, "Ada");
+        try (ResultSet rows = statement.executeQuery()) {
+          if (!rows.next()) throw new IllegalStateException("expected one row");
+          System.out.print(rows.getString(1));
+        }
+      }
+    }
+  }
+}
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compile := exec.CommandContext(ctx, "javac", "-cp", jdbcJar, sourcePath)
+	if output, err := compile.CombinedOutput(); err != nil {
+		t.Fatalf("javac error = %v, output = %s", err, output)
+	}
+	run := exec.CommandContext(ctx, "java", "-cp", workDir+string(os.PathListSeparator)+jdbcJar, "PgWireJdbcClient", portFromAddress(t, listener.Addr().String()))
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pgJDBC error = %v, output = %s", err, output)
+	}
+	if string(output) != "Ada" {
+		t.Fatalf("pgJDBC output = %q, want Ada", output)
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatalf("ServeConn() error = %v", err)

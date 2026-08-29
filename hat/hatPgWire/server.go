@@ -329,7 +329,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				endRow = boundQuery.nextRow + int(maxRows)
 			}
 			complete := endRow == len(boundQuery.result.Rows)
-			if err := writeQueryResultRange(connection, boundQuery.result, boundQuery.nextRow, endRow, complete); err != nil {
+			if err := writeQueryResultRange(connection, boundQuery.result, boundQuery.nextRow, endRow, false, complete); err != nil {
 				return err
 			}
 			boundQuery.nextRow = endRow
@@ -721,21 +721,21 @@ func writeReadyForQuery(connection net.Conn) error {
 }
 
 func writeQueryResult(connection net.Conn, result QueryResult) error {
-	return writeQueryResultRange(connection, result, 0, len(result.Rows), true)
+	return writeQueryResultRange(connection, result, 0, len(result.Rows), true, true)
 }
 
-func writeQueryResultRange(connection net.Conn, result QueryResult, startRow int, endRow int, complete bool) error {
+func writeQueryResultRange(connection net.Conn, result QueryResult, startRow int, endRow int, includeRowDescription bool, complete bool) error {
 	if startRow < 0 || endRow < startRow || endRow > len(result.Rows) {
 		return errors.New("invalid PostgreSQL result row range")
 	}
-	if len(result.Fields) > 0 {
+	if includeRowDescription && len(result.Fields) > 0 {
 		if err := writeRowDescription(connection, result.Fields); err != nil {
 			return err
 		}
-		for _, row := range result.Rows[startRow:endRow] {
-			if err := writeDataRow(connection, row); err != nil {
-				return err
-			}
+	}
+	for _, row := range result.Rows[startRow:endRow] {
+		if err := writeDataRow(connection, row); err != nil {
+			return err
 		}
 	}
 	if !complete {

@@ -2145,3 +2145,6 @@ deliver-pgwire-extended:
 .PHONY: check-pgwire-client-tools
 check-pgwire-client-tools:
 	sh ./scripts/check-pgwire-client-tools.sh
+.PHONY: inspect-pgwire-protocol
+inspect-pgwire-protocol:
+	sh ./scripts/inspect-pgwire-protocol.sh
