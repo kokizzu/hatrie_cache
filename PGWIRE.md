@@ -44,6 +44,8 @@ and unnamed prepared statements. The default is unlimited for compatibility;
 set a finite value on network-facing listeners to limit retained query state.
 `ServerOptions.MaxPortals` similarly bounds bound portals and their retained
 parameter vectors or materialized results.
+`ServerOptions.MaxPortalResultBytes` bounds the encoded field-name and text-cell
+payload retained by one materialized portal result.
 
 ## Compatibility Check
 

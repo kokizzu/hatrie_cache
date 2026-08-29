@@ -46,6 +46,7 @@ type ServerOptions struct {
 	MaxMessageBytes       int
 	MaxPreparedStatements int
 	MaxPortals            int
+	MaxPortalResultBytes  int
 }
 
 // Field describes a PostgreSQL text-format result column.
@@ -287,8 +288,8 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 					}
 					continue
 				}
-				if err := executePortal(ctx, handler, &boundQuery); err != nil {
-					if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
+				if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes); err != nil {
+					if err := writeErrorAndReady(connection, pgWireExecutionErrorCode(err), err.Error()); err != nil {
 						return err
 					}
 					continue
@@ -317,8 +318,8 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			if err := executePortal(ctx, handler, &boundQuery); err != nil {
-				if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
+			if err := executePortal(ctx, handler, &boundQuery, options.MaxPortalResultBytes); err != nil {
+				if err := writeErrorAndReady(connection, pgWireExecutionErrorCode(err), err.Error()); err != nil {
 					return err
 				}
 				continue
@@ -392,7 +393,9 @@ type portalQuery struct {
 	executed   bool
 }
 
-func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery) error {
+var errPortalResultLimit = errors.New("PostgreSQL portal result byte limit exceeded")
+
+func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery, maxResultBytes int) error {
 	if portal.executed {
 		return nil
 	}
@@ -415,8 +418,33 @@ func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuer
 	if err := validateQueryResult(portal.result); err != nil {
 		return err
 	}
+	if maxResultBytes > 0 && portalResultBytes(portal.result) > maxResultBytes {
+		return errPortalResultLimit
+	}
 	portal.executed = true
 	return nil
+}
+
+func pgWireExecutionErrorCode(err error) string {
+	if errors.Is(err, errPortalResultLimit) {
+		return "54000"
+	}
+	return "XX000"
+}
+
+func portalResultBytes(result QueryResult) int {
+	bytes := 0
+	for _, field := range result.Fields {
+		bytes += len(field.Name)
+	}
+	for _, row := range result.Rows {
+		for _, value := range row {
+			if value != nil {
+				bytes += len(*value)
+			}
+		}
+	}
+	return bytes
 }
 
 func parseParseMessage(body []byte) (string, string, []uint32, error) {
