@@ -1557,6 +1557,34 @@ make monitoring-server GRPC_ADDR=0.0.0.0:9090 GRPC_TLS_CERT=server.pem GRPC_TLS_
 The matching JSON config keys are `grpc_tls_cert`, `grpc_tls_key`, and
 `grpc_client_ca`.
 
+### Pluggable Monitoring Identity
+
+`MONITORING_AUTH_TOKEN` remains the sane default for a standalone daemon. Go
+embedders can instead set `MonitoringOptions.IdentityProvider` to authenticate
+monitoring HTTP requests with their own local identity, OAuth/OIDC verifier, or
+trusted reverse-proxy boundary. The provider returns a principal string, which
+is then used by `RBACPolicy`; the access token itself is not used as the RBAC
+identity.
+
+```go
+handler := hatCache.NewMonitoringHandler(cache, hatCache.MonitoringOptions{
+	IdentityProvider: hatAuth.IdentityChain{Providers: []hatAuth.IdentityProvider{
+		hatAuth.OIDCIdentityFunc(verifyOIDCBearerToken),
+	}},
+	RBACPolicy: operatorPolicy,
+}).Handler()
+```
+
+`verifyOIDCBearerToken` must verify the issuer, audience, signature, expiry,
+and intended claims before returning its stable subject. To use a reverse
+proxy, configure `hatAuth.ReverseProxyIdentity{Header: "X-Forwarded-User"}`
+only on a listener where the proxy strips that header from public requests.
+For local bearer tokens, use the existing `MONITORING_AUTH_TOKEN` settings or
+`hatAuth.LocalTokenIdentity` in the provider chain. Provider order is the
+authentication precedence; an invalid provider result does not make the API
+public. Replication authentication stays separate and cannot grant general
+operator access.
+
 ### Credential And Certificate Rotation
 
 Previous operator and replication tokens are opt-in and must have an absolute

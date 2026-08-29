@@ -72,6 +72,9 @@ type MonitoringOptions struct {
 	AuthToken                        string
 	AuthPreviousToken                string
 	AuthPreviousExpiresAt            time.Time
+	// IdentityProvider optionally authenticates monitoring requests with an
+	// external identity system such as OIDC or a trusted reverse proxy.
+	IdentityProvider                 hatAuth.IdentityProvider
 	RBACPolicy                       hatAuth.Policy
 	DiagnosticsProfiling             bool
 	ReplicationAuthToken             string
@@ -128,6 +131,7 @@ type MonitoringHandler struct {
 	options               MonitoringOptions
 	authTokens            hatAuth.TokenSet
 	replicationAuthTokens hatAuth.TokenSet
+	identityProvider      hatAuth.IdentityProvider
 	profileCapture        *hatMonitoring.ProfileCapture
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
@@ -332,6 +336,7 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 		options:               options,
 		authTokens:            hatAuth.NewTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
 		replicationAuthTokens: hatAuth.NewTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
+		identityProvider:      options.IdentityProvider,
 		sqlFunctions:          options.SQLFunctions,
 	}
 	if options.DiagnosticsProfiling {
@@ -496,16 +501,16 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 		server.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
 	var out http.Handler = server.Handler()
-	if handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
-		out = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, out)
+	if handler.identityProvider != nil || handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
+		out = monitoringAuthHandler(handler.identityProvider, handler.authTokens, handler.replicationAuthTokens, out)
 	}
 	out = hatHttp.GzipHandler(out)
 	if handler.profileCapture == nil {
 		return out
 	}
 	var profileHandler http.Handler = http.HandlerFunc(handler.handleProfile)
-	if handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
-		profileHandler = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, profileHandler)
+	if handler.identityProvider != nil || handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
+		profileHandler = monitoringAuthHandler(handler.identityProvider, handler.authTokens, handler.replicationAuthTokens, profileHandler)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/profile" {
@@ -516,9 +521,23 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	})
 }
 
-func monitoringAuthHandler(tokens hatAuth.TokenSet, replicationTokens hatAuth.TokenSet, next http.Handler) http.Handler {
+type monitoringIdentityContextKey struct{}
+
+func monitoringAuthHandler(provider hatAuth.IdentityProvider, tokens hatAuth.TokenSet, replicationTokens hatAuth.TokenSet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestHasAuthToken(r, tokens) {
+		if !monitoringPathRequiresAuth(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if provider != nil {
+			identity, authenticated, err := provider.Authenticate(r.Context(), r)
+			identity = strings.TrimSpace(identity)
+			if err == nil && authenticated && identity != "" {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), monitoringIdentityContextKey{}, identity)))
+				return
+			}
+		}
+		if monitoringRequestHasAuthToken(r, tokens) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -526,12 +545,21 @@ func monitoringAuthHandler(tokens hatAuth.TokenSet, replicationTokens hatAuth.To
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !tokens.Configured() && !monitoringPathRequiresReplicationAuth(r) {
+		if provider == nil && !tokens.Configured() && !monitoringPathRequiresReplicationAuth(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		writeMonitoringUnauthorized(w)
 	})
+}
+
+func (handler *MonitoringHandler) monitoringRequestPrincipal(r *http.Request) string {
+	if r != nil {
+		if identity, ok := r.Context().Value(monitoringIdentityContextKey{}).(string); ok {
+			return identity
+		}
+	}
+	return monitoringRequestPrincipal(r, handler.authTokens)
 }
 
 func monitoringPathAcceptsReplicationAuth(r *http.Request) bool {
@@ -1239,7 +1267,7 @@ func (handler *MonitoringHandler) rejectCommandRBACHTTP(w http.ResponseWriter, r
 	if isInternalReplicationCommand(request) && monitoringReplicationRequestAuthorized(r, handler.replicationAuthTokens) {
 		return false
 	}
-	if handler.authorizeCommand(monitoringRequestPrincipal(r, handler.authTokens), request) {
+	if handler.authorizeCommand(handler.monitoringRequestPrincipal(r), request) {
 		return false
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "command", Command: normalizedCommand(request.Command), Key: strings.TrimSpace(request.Key), OK: false, Status: http.StatusForbidden, Message: "forbidden by RBAC policy"})
@@ -1254,7 +1282,7 @@ func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *ht
 		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
 		return true
 	}
-	principal := monitoringRequestPrincipal(r, handler.authTokens)
+	principal := handler.monitoringRequestPrincipal(r)
 	if len(sources) == 0 {
 		if handler.options.RBACPolicy.Authorize(principal, "SQL", "", "") {
 			return false

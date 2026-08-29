@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatMonitoring"
 )
 
@@ -2205,6 +2206,43 @@ func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	handler.ServeHTTP(resp, req)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("bearer token metrics status = %d, want 200", resp.Code)
+	}
+}
+
+func TestMonitoringIdentityProviderProtectsAPI(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		IdentityProvider: hatAuth.OIDCIdentityFunc(func(_ context.Context, token string) (string, bool, error) {
+			return "oidc-user", token == "valid-oidc-token", nil
+		}),
+		RBACPolicy: hatAuth.Policy{
+			Principals: map[string][]string{"oidc-user": {"reader"}},
+			Roles: []hatAuth.Role{{
+				Name:  "reader",
+				Rules: []hatAuth.Rule{{Commands: []string{"GETSTR"}}},
+			}},
+		},
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated health status = %d, want 401", resp.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer valid-oidc-token")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("OIDC-authenticated health status = %d, want 200", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"GETSTR","key":"missing"}`))
+	req.Header.Set("Authorization", "Bearer valid-oidc-token")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("OIDC RBAC command status = %d body %q, want 200", resp.Code, resp.Body.String())
 	}
 }
 

@@ -880,7 +880,6 @@ test-sql-maintenance-window:
 deliver-sql-maintenance-window:
 	sh ./scripts/deliver-sql-maintenance-window.sh
 
-
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
@@ -2071,3 +2070,12 @@ review-sql-grouping-sets:
 
 commit-sql-grouping-sets:
 	sh ./scripts/commit-sql-grouping-sets.sh
+.PHONY: test-auth-identity
+test-auth-identity:
+	sh ./scripts/test-auth-identity.sh
+.PHONY: test-monitoring-identity
+test-monitoring-identity:
+	sh ./scripts/test-monitoring-identity.sh
+.PHONY: deliver-pluggable-monitoring-identity
+deliver-pluggable-monitoring-identity:
+	sh ./scripts/deliver-pluggable-monitoring-identity.sh
