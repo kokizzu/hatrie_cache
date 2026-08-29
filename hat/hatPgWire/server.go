@@ -253,14 +253,31 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				if err := writeParameterDescription(connection, statement.parameterTypes); err != nil {
 					return err
 				}
-			} else if _, ok := portals[name]; !ok {
-				if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+				if err := writeMessage(connection, 'n', nil); err != nil {
 					return err
 				}
-				continue
-			}
-			if err := writeMessage(connection, 'n', nil); err != nil {
-				return err
+			} else {
+				boundQuery, ok := portals[name]
+				if !ok {
+					if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+						return err
+					}
+					continue
+				}
+				if err := executePortal(ctx, handler, &boundQuery); err != nil {
+					if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
+						return err
+					}
+					continue
+				}
+				portals[name] = boundQuery
+				if len(boundQuery.result.Fields) == 0 {
+					if err := writeMessage(connection, 'n', nil); err != nil {
+						return err
+					}
+				} else if err := writeRowDescription(connection, boundQuery.result.Fields); err != nil {
+					return err
+				}
 			}
 		case 'E':
 			portal, maxRows, err := parseExecuteMessage(body)
@@ -277,24 +294,11 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 				}
 				continue
 			}
-			if !boundQuery.executed {
-				if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
-					boundQuery.result, err = parameterizedHandler.QueryParameters(ctx, boundQuery.query, boundQuery.parameters)
-				} else if len(boundQuery.parameters) != 0 {
-					err = errors.New("PostgreSQL bind parameters require a parameterized query handler")
-				} else {
-					boundQuery.result, err = handler.Query(ctx, boundQuery.query)
+			if err := executePortal(ctx, handler, &boundQuery); err != nil {
+				if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
+					return err
 				}
-				if err == nil {
-					err = validateQueryResult(boundQuery.result)
-				}
-				if err != nil {
-					if err := writeErrorAndReady(connection, "XX000", err.Error()); err != nil {
-						return err
-					}
-					continue
-				}
-				boundQuery.executed = true
+				continue
 			}
 			endRow := len(boundQuery.result.Rows)
 			if maxRows != 0 && uint64(endRow-boundQuery.nextRow) > uint64(maxRows) {
@@ -358,6 +362,28 @@ type portalQuery struct {
 	result     QueryResult
 	nextRow    int
 	executed   bool
+}
+
+func executePortal(ctx context.Context, handler QueryHandler, portal *portalQuery) error {
+	if portal.executed {
+		return nil
+	}
+	var err error
+	if parameterizedHandler, ok := handler.(ParameterizedQueryHandler); ok {
+		portal.result, err = parameterizedHandler.QueryParameters(ctx, portal.query, portal.parameters)
+	} else if len(portal.parameters) != 0 {
+		err = errors.New("PostgreSQL bind parameters require a parameterized query handler")
+	} else {
+		portal.result, err = handler.Query(ctx, portal.query)
+	}
+	if err != nil {
+		return err
+	}
+	if err := validateQueryResult(portal.result); err != nil {
+		return err
+	}
+	portal.executed = true
+	return nil
 }
 
 func parseParseMessage(body []byte) (string, string, []uint32, error) {

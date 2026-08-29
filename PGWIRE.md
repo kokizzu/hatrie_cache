@@ -25,10 +25,11 @@ values before Hatrie SQL execution; text and unspecified OIDs stay strings.
 Results are sent in PostgreSQL text format. Binary bind values or binary result
 formats receive SQLSTATE `0A000` rather than being interpreted incorrectly.
 
-`Describe Statement` returns the declared parameter OIDs; `Describe Portal`
-returns `NoData` until result-schema inference is available. The package does
-not terminate TLS, so use a TLS proxy or a protected local listener; an SSL
-request receives `N` to permit `sslmode=prefer` fallback.
+`Describe Statement` returns the declared parameter OIDs. `Describe Portal`
+materializes and caches the portal result to return its row description, so the
+later `Execute` reuses the same result. The package does not terminate TLS, so
+use a TLS proxy or a protected local listener; an SSL request receives `N` to
+permit `sslmode=prefer` fallback.
 
 `Execute` accepts a nonzero row limit for cursor-style fetching. The result is
 materialized once per portal, each execute returns its next row range, and the

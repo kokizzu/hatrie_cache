@@ -387,6 +387,44 @@ func TestServeConnFetchesPreparedPortalInRowLimitedBatches(t *testing.T) {
 	}
 }
 
+func TestServeConnDescribesBoundPortalResult(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	calls := make(chan struct{}, 2)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			calls <- struct{}{}
+			value := "Ada"
+			return hatPgWire.QueryResult{Fields: []hatPgWire.Field{{Name: "name", DataTypeOID: hatPgWire.OIDText}}, Rows: [][]*string{{&value}}}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("statement\x00SELECT name\x00"), 0, 0))
+	readBackendMessage(t, client)
+	bind := append([]byte("portal\x00statement\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'D', []byte("Pportal\x00"))
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'T' || len(body) < 7 || binary.BigEndian.Uint16(body[:2]) != 1 || !strings.Contains(string(body), "name\x00") {
+		t.Fatalf("portal description = %q %q, want RowDescription for name", messageType, body)
+	}
+	writeFrontendMessage(t, client, 'E', []byte("portal\x00\x00\x00\x00\x00"))
+	readBackendMessage(t, client)
+	readBackendMessage(t, client)
+	readBackendMessage(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("query executions = %d, want 1", len(calls))
+	}
+}
+
 type typedParameterizedQueryHandler struct {
 	parameters chan<- []interface{}
 }
