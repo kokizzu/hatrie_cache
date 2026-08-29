@@ -46,13 +46,13 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 	entry, ok := cache.entries[key]
 	cache.mu.Unlock()
 	if ok && entry.epoch == before {
-		return cloneResultCacheResult(entry.result)
+		return cloneResultCacheResult(entry.result), nil
 	}
 	result, err := execute(ctx)
 	if err != nil || epoch() != before {
 		return result, err
 	}
-	stored, err := cloneResultCacheResult(result)
+	stored, err := snapshotResultCacheResult(result)
 	if err != nil {
 		return result, nil
 	}
@@ -70,7 +70,10 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 	return result, nil
 }
 
-func cloneResultCacheResult(result QueryResult) (QueryResult, error) {
+// snapshotResultCacheResult retains the existing JSON-shaped cache contract at
+// insertion time. Cached hits can then clone that normalized representation
+// structurally without reserializing the whole result.
+func snapshotResultCacheResult(result QueryResult) (QueryResult, error) {
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return QueryResult{}, err
@@ -80,4 +83,94 @@ func cloneResultCacheResult(result QueryResult) (QueryResult, error) {
 		return QueryResult{}, err
 	}
 	return out, nil
+}
+
+func cloneResultCacheResult(result QueryResult) QueryResult {
+	clone := result
+	clone.Columns = append([]string(nil), result.Columns...)
+	clone.Rows = make([]Row, len(result.Rows))
+	for rowIndex, row := range result.Rows {
+		clone.Rows[rowIndex] = cloneResultCacheRow(row)
+	}
+	clone.Plan = make([]ExplainStep, len(result.Plan))
+	for index, step := range result.Plan {
+		clone.Plan[index] = cloneResultCachePlanStep(step)
+	}
+	if result.Stats != nil {
+		stats := *result.Stats
+		clone.Stats = &stats
+	}
+	return clone
+}
+
+func cloneResultCacheRow(row Row) Row {
+	if row == nil {
+		return nil
+	}
+	clone := make(Row, len(row))
+	for key, value := range row {
+		clone[key] = cloneResultCacheValue(value)
+	}
+	return clone
+}
+
+func cloneResultCacheValue(value interface{}) interface{} {
+	switch value := value.(type) {
+	case Row:
+		return cloneResultCacheRow(value)
+	case map[string]interface{}:
+		clone := make(map[string]interface{}, len(value))
+		for key, child := range value {
+			clone[key] = cloneResultCacheValue(child)
+		}
+		return clone
+	case []interface{}:
+		clone := make([]interface{}, len(value))
+		for index, child := range value {
+			clone[index] = cloneResultCacheValue(child)
+		}
+		return clone
+	}
+	return value
+}
+
+func cloneResultCachePlanStep(step ExplainStep) ExplainStep {
+	clone := step
+	clone.Lineage = make([]ColumnLineage, len(step.Lineage))
+	for index, lineage := range step.Lineage {
+		clone.Lineage[index] = ColumnLineage{Output: lineage.Output, SourceFields: append([]string(nil), lineage.SourceFields...)}
+	}
+	clone.EstimatedRows = cloneResultCacheInt(step.EstimatedRows)
+	clone.ActualInputRows = cloneResultCacheInt(step.ActualInputRows)
+	clone.ActualOutputRows = cloneResultCacheInt(step.ActualOutputRows)
+	clone.ActualInputBytes = cloneResultCacheInt(step.ActualInputBytes)
+	clone.ActualOutputBytes = cloneResultCacheInt(step.ActualOutputBytes)
+	clone.EstimateErrorRows = cloneResultCacheInt(step.EstimateErrorRows)
+	clone.EstimateErrorPercent = cloneResultCacheFloat64(step.EstimateErrorPercent)
+	clone.ElapsedNanos = cloneResultCacheInt64(step.ElapsedNanos)
+	return clone
+}
+
+func cloneResultCacheInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneResultCacheFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneResultCacheInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }

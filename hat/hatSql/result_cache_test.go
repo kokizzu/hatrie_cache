@@ -36,3 +36,34 @@ func TestResultCacheInvalidatesByEpochAndReturnsIndependentResults(t *testing.T)
 		t.Fatalf("updated Execute() = %#v after %d calls, want id 2 after two calls", updated, calls)
 	}
 }
+
+func TestResultCacheHitClonesNestedRowsAndPlanPointers(t *testing.T) {
+	cache := NewResultCache(1)
+	actualRows := 1
+	execute := func(context.Context) (QueryResult, error) {
+		return QueryResult{
+			Columns: []string{"payload"},
+			Rows:    []Row{{"payload": map[string]interface{}{"items": []interface{}{map[string]interface{}{"name": "original"}}}}},
+			Plan:    []ExplainStep{{Node: "SCAN", ActualOutputRows: &actualRows}},
+		}, nil
+	}
+	if _, err := cache.Execute(context.Background(), "nested", func() uint64 { return 1 }, execute); err != nil {
+		t.Fatalf("seed Execute() error = %v", err)
+	}
+	first, err := cache.Execute(context.Background(), "nested", func() uint64 { return 1 }, execute)
+	if err != nil {
+		t.Fatalf("first cached Execute() error = %v", err)
+	}
+	first.Rows[0]["payload"].(map[string]interface{})["items"].([]interface{})[0].(map[string]interface{})["name"] = "changed"
+	*first.Plan[0].ActualOutputRows = 99
+	second, err := cache.Execute(context.Background(), "nested", func() uint64 { return 1 }, execute)
+	if err != nil {
+		t.Fatalf("second cached Execute() error = %v", err)
+	}
+	if got := second.Rows[0]["payload"].(map[string]interface{})["items"].([]interface{})[0].(map[string]interface{})["name"]; got != "original" {
+		t.Fatalf("cached nested value = %#v, want original", got)
+	}
+	if got := *second.Plan[0].ActualOutputRows; got != 1 {
+		t.Fatalf("cached plan output rows = %d, want 1", got)
+	}
+}

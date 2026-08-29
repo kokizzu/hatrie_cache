@@ -1661,6 +1661,30 @@ review-sql-columnar-json-benchmark:
 commit-sql-columnar-json-benchmark:
 	sh ./scripts/commit-sql-columnar-json-benchmark.sh
 
+audit-sql-parallel-contention:
+	sh ./scripts/audit-sql-parallel-contention.sh
+
+inspect-sql-cache-locks:
+	sh ./scripts/inspect-sql-cache-locks.sh
+
+inspect-sql-result-cache:
+	sh ./scripts/inspect-sql-result-cache.sh
+
+test-sql-result-cache:
+	sh ./scripts/test-sql-result-cache.sh
+
+benchmark-sql-result-cache:
+	sh ./scripts/benchmark-sql-result-cache.sh
+
+format-sql-result-cache-clone:
+	sh ./scripts/format-sql-result-cache-clone.sh
+
+review-sql-result-cache-clone:
+	sh ./scripts/review-sql-result-cache-clone.sh
+
+commit-sql-result-cache-clone:
+	sh ./scripts/commit-sql-result-cache-clone.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
