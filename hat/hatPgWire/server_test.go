@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"hatrie_cache/hat/hatPgWire"
 	"hatrie_cache/hat/hatSql"
@@ -262,6 +263,72 @@ func TestServeConnConvertsTypedTextParameter(t *testing.T) {
 	values := <-parameters
 	if len(values) != 1 || values[0] != int64(42) {
 		t.Fatalf("bound values = %#v, want [int64(42)]", values)
+	}
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnClosesPreparedStatement(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("statement\x00SELECT 1\x00"), 0, 0))
+	if messageType, _ := readBackendMessage(t, client); messageType != '1' {
+		t.Fatalf("Parse response = %q, want ParseComplete", messageType)
+	}
+	writeFrontendMessage(t, client, 'C', []byte("Sstatement\x00"))
+	if messageType, _ := readBackendMessage(t, client); messageType != '3' {
+		t.Fatalf("Close response = %q, want CloseComplete", messageType)
+	}
+	bind := append([]byte("portal\x00statement\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'E' || !strings.Contains(string(body), "26000") {
+		t.Fatalf("Bind after Close = %q %q, want invalid statement", messageType, body)
+	}
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
+func TestServeConnAcceptsFlushBeforeParse(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'H', nil)
+	if err := client.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, 1)
+	if _, err := client.Read(response); err == nil {
+		t.Fatalf("Flush response = %q, want no response", response)
+	}
+	if err := client.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	writeFrontendMessage(t, client, 'P', append([]byte("statement\x00SELECT 1\x00"), 0, 0))
+	if messageType, _ := readBackendMessage(t, client); messageType != '1' {
+		t.Fatalf("Parse after Flush = %q, want ParseComplete", messageType)
 	}
 	writeFrontendMessage(t, client, 'X', nil)
 	if err := <-errCh; err != nil {

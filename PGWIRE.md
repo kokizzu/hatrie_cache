@@ -14,9 +14,10 @@ tools must submit syntax supported by [SQL.md](SQL.md).
 ## Prepared Queries
 
 The server supports the PostgreSQL extended-query sequence `Parse`, `Bind`,
-`Describe`, `Execute`, and `Sync`. Parameters remain separate from SQL text and
-are forwarded to `hatSql` as positional `$1`, `$2`, and later values. This is
-the prepared-statement baseline required by JDBC and ODBC clients.
+`Describe`, `Execute`, `Close`, `Flush`, and `Sync`. Parameters remain separate
+from SQL text and are forwarded to `hatSql` as positional `$1`, `$2`, and later
+values. Closing a statement or portal removes its connection-local state. This
+is the prepared-statement baseline required by JDBC and ODBC clients.
 
 `Bind` supports PostgreSQL text-format values and SQL NULL. Declared `bool`,
 `int2`, `int4`, `int8`, `float4`, and `float8` parameters are converted to Go

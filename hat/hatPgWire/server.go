@@ -148,6 +148,9 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		switch messageType {
 		case 'X':
 			return nil
+		case 'H':
+			// Flush requests buffered output only; protocol responses remain unchanged.
+			continue
 		case 'Q':
 			query, err := requiredCString(body)
 			if err != nil {
@@ -294,6 +297,35 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			if err := writeQueryResult(connection, result); err != nil {
 				return err
 			}
+		case 'C':
+			target, name, err := parseCloseMessage(body)
+			if err != nil {
+				if err := writeErrorAndReady(connection, "08P01", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			switch target {
+			case 'S':
+				if _, ok := prepared[name]; !ok {
+					if err := writeErrorAndReady(connection, "26000", "prepared statement does not exist"); err != nil {
+						return err
+					}
+					continue
+				}
+				delete(prepared, name)
+			case 'P':
+				if _, ok := portals[name]; !ok {
+					if err := writeErrorAndReady(connection, "34000", "portal does not exist"); err != nil {
+						return err
+					}
+					continue
+				}
+				delete(portals, name)
+			}
+			if err := writeMessage(connection, '3', nil); err != nil {
+				return err
+			}
 		case 'S':
 			if err := writeReadyForQuery(connection); err != nil {
 				return err
@@ -396,6 +428,17 @@ func parseExecuteMessage(body []byte) (string, error) {
 		return "", errors.New("only unlimited execute is supported")
 	}
 	return portal, nil
+}
+
+func parseCloseMessage(body []byte) (byte, string, error) {
+	if len(body) < 2 || (body[0] != 'S' && body[0] != 'P') {
+		return 0, "", errors.New("invalid close message")
+	}
+	name, err := requiredCString(body[1:])
+	if err != nil {
+		return 0, "", errors.New("invalid close message")
+	}
+	return body[0], name, nil
 }
 
 func decodeTextParameters(parameters []interface{}, parameterTypes []uint32) ([]interface{}, error) {
