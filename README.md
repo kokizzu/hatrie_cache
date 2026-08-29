@@ -10,6 +10,7 @@ security guidance before exposing it on a network.
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
+- PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)

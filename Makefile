@@ -2085,3 +2085,15 @@ test-external-ndjson:
 .PHONY: deliver-external-ndjson
 deliver-external-ndjson:
 	sh ./scripts/deliver-external-ndjson.sh
+.PHONY: test-pgwire-server
+test-pgwire-server:
+	sh ./scripts/test-pgwire-server.sh
+.PHONY: test-pgwire-sql-adapter
+test-pgwire-sql-adapter:
+	sh ./scripts/test-pgwire-sql-adapter.sh
+.PHONY: format-pgwire
+format-pgwire:
+	sh ./scripts/format-pgwire.sh
+.PHONY: deliver-pgwire
+deliver-pgwire:
+	sh ./scripts/deliver-pgwire.sh
