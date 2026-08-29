@@ -2148,3 +2148,13 @@ check-pgwire-client-tools:
 .PHONY: inspect-pgwire-protocol
 inspect-pgwire-protocol:
 	sh ./scripts/inspect-pgwire-protocol.sh
+.PHONY: format-sql-external
+format-sql-external:
+	sh ./scripts/format-sql-external.sh
+
+.PHONY: deliver-sql-external-streaming
+deliver-sql-external-streaming:
+	sh ./scripts/deliver-sql-external-streaming.sh
+.PHONY: bench-sql-external-streaming
+bench-sql-external-streaming:
+	sh ./scripts/bench-sql-external-streaming.sh

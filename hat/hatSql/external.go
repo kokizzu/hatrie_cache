@@ -241,6 +241,16 @@ func (tables *ExternalTables) Get(name string) (ExternalTable, bool) {
 	return cloneExternalTable(table), true
 }
 
+func (tables *ExternalTables) exportTable(name string) (ExternalTable, bool) {
+	if tables == nil {
+		return ExternalTable{}, false
+	}
+	tables.mu.RLock()
+	table, ok := tables.tables[strings.TrimSpace(name)]
+	tables.mu.RUnlock()
+	return table, ok
+}
+
 // ExportCSV encodes the registered table in its declared column order.
 func (tables *ExternalTables) ExportCSV(name string) ([]byte, error) {
 	table, ok := tables.Get(name)
@@ -295,54 +305,89 @@ func (tables *ExternalTables) ExportNDJSON(name string) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+const externalExportBatchRows = 8192
+
 // ExportArrow encodes one table as a flat Apache Arrow IPC stream. Each column
 // must contain only booleans, numbers, strings, or NULL values.
 func (tables *ExternalTables) ExportArrow(name string) ([]byte, error) {
-	table, ok := tables.Get(name)
+	buffer := bytes.Buffer{}
+	if err := tables.WriteArrow(name, &buffer); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+// WriteArrow writes one table as a flat Apache Arrow IPC stream without
+// retaining the encoded payload in memory. Records are emitted in bounded
+// batches; source values remain subject to the table's immutable snapshot.
+func (tables *ExternalTables) WriteArrow(name string, destination io.Writer) error {
+	if destination == nil {
+		return errors.New("Arrow destination is nil")
+	}
+	table, ok := tables.exportTable(name)
 	if !ok {
-		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
+		return fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
 	}
 	types := make([]externalArrowType, len(table.Columns))
 	fields := make([]arrow.Field, len(table.Columns))
 	for index, column := range table.Columns {
 		kind, err := externalArrowColumnType(table.Rows, column)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		types[index] = kind
 		fields[index] = arrow.Field{Name: column, Type: kind.dataType(), Nullable: true}
 	}
 	schema := arrow.NewSchema(fields, nil)
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-	defer builder.Release()
-	for _, row := range table.Rows {
-		for index, column := range table.Columns {
-			value := row[column]
-			if err := types[index].append(builder.Field(index), value); err != nil {
-				return nil, fmt.Errorf("Arrow column %q: %w", column, err)
+	writer := ipc.NewWriter(destination, ipc.WithSchema(schema))
+	for start := 0; start < len(table.Rows) || (start == 0 && len(table.Rows) == 0); start += externalExportBatchRows {
+		end := start + externalExportBatchRows
+		if end > len(table.Rows) {
+			end = len(table.Rows)
+		}
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+		for _, row := range table.Rows[start:end] {
+			for index, column := range table.Columns {
+				if err := types[index].append(builder.Field(index), row[column]); err != nil {
+					builder.Release()
+					return fmt.Errorf("Arrow column %q: %w", column, err)
+				}
 			}
 		}
-	}
-	record := builder.NewRecord()
-	defer record.Release()
-	buffer := bytes.Buffer{}
-	writer := ipc.NewWriter(&buffer, ipc.WithSchema(schema))
-	if err := writer.Write(record); err != nil {
-		return nil, fmt.Errorf("write Arrow IPC: %w", err)
+		record := builder.NewRecord()
+		err := writer.Write(record)
+		record.Release()
+		builder.Release()
+		if err != nil {
+			return fmt.Errorf("write Arrow IPC: %w", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("close Arrow IPC: %w", err)
+		return fmt.Errorf("close Arrow IPC: %w", err)
 	}
-	return buffer.Bytes(), nil
+	return nil
 }
 
 // ExportParquet encodes one table as a flat Parquet document. Values are
 // serialized as optional UTF-8 text to retain arbitrary external-table values
 // without type inference; SQL callers can cast fields on read.
 func (tables *ExternalTables) ExportParquet(name string) ([]byte, error) {
-	table, ok := tables.Get(name)
+	buffer := bytes.Buffer{}
+	if err := tables.WriteParquet(name, &buffer); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+// WriteParquet writes one table as a flat Parquet document without retaining
+// the encoded payload or all converted Parquet rows in memory at once.
+func (tables *ExternalTables) WriteParquet(name string, destination io.Writer) error {
+	if destination == nil {
+		return errors.New("Parquet destination is nil")
+	}
+	table, ok := tables.exportTable(name)
 	if !ok {
-		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
+		return fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
 	}
 	group := make(parquet.Group, len(table.Columns))
 	for _, column := range table.Columns {
@@ -352,33 +397,38 @@ func (tables *ExternalTables) ExportParquet(name string) ([]byte, error) {
 	paths := schema.Columns()
 	columns, err := externalParquetColumns(paths)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	columnIndexes := make(map[string]int, len(columns))
 	for index, column := range columns {
 		columnIndexes[column] = index
 	}
-	rows := make([]parquet.Row, len(table.Rows))
-	for rowIndex, row := range table.Rows {
-		parquetRow := make(parquet.Row, len(columns))
-		for column, name := range columns {
-			value := parquet.NullValue().Level(0, 0, column)
-			if source, exists := row[name]; exists && source != nil {
-				value = parquet.ValueOf(fmt.Sprint(source)).Level(0, 1, columnIndexes[name])
-			}
-			parquetRow[column] = value
+	writer := parquet.NewWriter(destination, schema)
+	for start := 0; start < len(table.Rows); start += externalExportBatchRows {
+		end := start + externalExportBatchRows
+		if end > len(table.Rows) {
+			end = len(table.Rows)
 		}
-		rows[rowIndex] = parquetRow
-	}
-	buffer := bytes.Buffer{}
-	writer := parquet.NewWriter(&buffer, schema)
-	if _, err := writer.WriteRows(rows); err != nil {
-		return nil, fmt.Errorf("write Parquet rows: %w", err)
+		rows := make([]parquet.Row, 0, end-start)
+		for _, row := range table.Rows[start:end] {
+			parquetRow := make(parquet.Row, len(columns))
+			for column, name := range columns {
+				value := parquet.NullValue().Level(0, 0, column)
+				if source, exists := row[name]; exists && source != nil {
+					value = parquet.ValueOf(fmt.Sprint(source)).Level(0, 1, columnIndexes[name])
+				}
+				parquetRow[column] = value
+			}
+			rows = append(rows, parquetRow)
+		}
+		if _, err := writer.WriteRows(rows); err != nil {
+			return fmt.Errorf("write Parquet rows: %w", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("close Parquet writer: %w", err)
+		return fmt.Errorf("close Parquet writer: %w", err)
 	}
-	return buffer.Bytes(), nil
+	return nil
 }
 
 // ResolveSQLSource lets a registry be passed directly to query execution for

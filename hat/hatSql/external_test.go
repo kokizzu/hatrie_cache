@@ -1,7 +1,9 @@
 package hatSql_test
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"reflect"
 	"testing"
 
@@ -108,4 +110,78 @@ func TestExternalTablesImportExportArrow(t *testing.T) {
 	}) {
 		t.Fatalf("Arrow table = %#v, %v", table, ok)
 	}
+}
+
+func TestExternalTablesWriteArrowAndParquet(t *testing.T) {
+	tables := hatSql.NewExternalTables()
+	if err := tables.ImportJSON("events", []byte(`[{"id":1,"name":"Ada"},{"id":2,"name":"Lin"}]`)); err != nil {
+		t.Fatalf("ImportJSON() error = %v", err)
+	}
+	arrowBuffer := bytes.Buffer{}
+	if err := tables.WriteArrow("events", &arrowBuffer); err != nil {
+		t.Fatalf("WriteArrow() error = %v", err)
+	}
+	if err := tables.ImportArrow("events_arrow", arrowBuffer.Bytes()); err != nil {
+		t.Fatalf("ImportArrow() from WriteArrow() error = %v", err)
+	}
+	parquetBuffer := bytes.Buffer{}
+	if err := tables.WriteParquet("events", &parquetBuffer); err != nil {
+		t.Fatalf("WriteParquet() error = %v", err)
+	}
+	if err := tables.ImportParquet("events_parquet", parquetBuffer.Bytes()); err != nil {
+		t.Fatalf("ImportParquet() from WriteParquet() error = %v", err)
+	}
+	wantArrow := hatSql.ExternalTable{Columns: []string{"id", "name"}, Rows: []hatSql.Row{{"id": float64(1), "name": "Ada"}, {"id": float64(2), "name": "Lin"}}}
+	if table, ok := tables.Get("events_arrow"); !ok || !reflect.DeepEqual(table, wantArrow) {
+		t.Fatalf("events_arrow = %#v, %v", table, ok)
+	}
+	wantParquet := hatSql.ExternalTable{Columns: []string{"id", "name"}, Rows: []hatSql.Row{{"id": "1", "name": "Ada"}, {"id": "2", "name": "Lin"}}}
+	if table, ok := tables.Get("events_parquet"); !ok || !reflect.DeepEqual(table, wantParquet) {
+		t.Fatalf("events_parquet = %#v, %v", table, ok)
+	}
+}
+
+func BenchmarkExternalTablesExportTransfer(b *testing.B) {
+	tables := hatSql.NewExternalTables()
+	rows := make([]hatSql.Row, 10_000)
+	for index := range rows {
+		rows[index] = hatSql.Row{"id": int64(index), "name": "benchmark"}
+	}
+	if err := tables.Register("events", hatSql.ExternalTable{Columns: []string{"id", "name"}, Rows: rows}); err != nil {
+		b.Fatal(err)
+	}
+	b.Run("Arrow/ExportBytes", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			data, err := tables.ExportArrow("events")
+			if err != nil || len(data) == 0 {
+				b.Fatalf("ExportArrow() = %d bytes, %v", len(data), err)
+			}
+		}
+	})
+	b.Run("Arrow/WriteDiscard", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			if err := tables.WriteArrow("events", io.Discard); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("Parquet/ExportBytes", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			data, err := tables.ExportParquet("events")
+			if err != nil || len(data) == 0 {
+				b.Fatalf("ExportParquet() = %d bytes, %v", len(data), err)
+			}
+		}
+	})
+	b.Run("Parquet/WriteDiscard", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			if err := tables.WriteParquet("events", io.Discard); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

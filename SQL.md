@@ -1074,6 +1074,15 @@ and unsupported Arrow columns fail explicitly rather than being silently
 coerced. Arrow is the efficient columnar interchange option; Parquet remains
 the durable data-lake format.
 
+For large transfers, `WriteArrow(name, io.Writer)` and
+`WriteParquet(name, io.Writer)` write directly to the caller's destination.
+They retain the existing `ExportArrow` and `ExportParquet` byte-slice methods
+as compatibility wrappers, but avoid retaining a second complete encoded
+payload. Arrow records and converted Parquet rows are emitted in bounded
+8,192-row batches. The immutable source table remains resident until it is
+replaced or removed, so streaming controls transfer-side peak memory rather
+than changing external-table snapshot retention.
+
 ### Full-text token indexes
 
 For whole-token text search, create an optional index and use
