@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-for tool in psql java javac; do
+for tool in psql java javac isql odbcinst; do
 	if command -v "$tool" >/dev/null 2>&1; then
 		printf '%s: ' "$tool"
 		"$tool" --version
