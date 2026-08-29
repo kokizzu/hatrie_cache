@@ -42,6 +42,8 @@ server emits `PortalSuspended` until all rows have been returned.
 `ServerOptions.MaxPreparedStatements` optionally bounds connection-local named
 and unnamed prepared statements. The default is unlimited for compatibility;
 set a finite value on network-facing listeners to limit retained query state.
+`ServerOptions.MaxPortals` similarly bounds bound portals and their retained
+parameter vectors or materialized results.
 
 ## Compatibility Check
 

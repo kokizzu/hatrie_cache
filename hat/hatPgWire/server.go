@@ -45,6 +45,7 @@ type ServerOptions struct {
 	Authenticator         Authenticator
 	MaxMessageBytes       int
 	MaxPreparedStatements int
+	MaxPortals            int
 }
 
 // Field describes a PostgreSQL text-format result column.
@@ -236,6 +237,12 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 			parameters, err = decodeTextParameters(parameters, preparedQuery.parameterTypes)
 			if err != nil {
 				if err := writeErrorAndReady(connection, "22P02", err.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, exists := portals[portal]; !exists && options.MaxPortals > 0 && len(portals) >= options.MaxPortals {
+				if err := writeErrorAndReady(connection, "54000", "PostgreSQL portal limit exceeded"); err != nil {
 					return err
 				}
 				continue

@@ -101,6 +101,36 @@ func TestServeConnLimitsPreparedStatements(t *testing.T) {
 	}
 }
 
+func TestServeConnLimitsPortals(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- hatPgWire.ServeConn(context.Background(), server, hatPgWire.QueryHandlerFunc(func(context.Context, string) (hatPgWire.QueryResult, error) {
+			return hatPgWire.QueryResult{}, nil
+		}), hatPgWire.ServerOptions{MaxPortals: 1})
+	}()
+	writeStartup(t, client, "user", "analytics")
+	readBackendMessage(t, client)
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'P', append([]byte("statement\x00SELECT 1\x00"), 0, 0))
+	readBackendMessage(t, client)
+	bind := append([]byte("one\x00statement\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	readBackendMessage(t, client)
+	bind = append([]byte("two\x00statement\x00"), 0, 0, 0, 0, 0, 0)
+	writeFrontendMessage(t, client, 'B', bind)
+	messageType, body := readBackendMessage(t, client)
+	if messageType != 'E' || !strings.Contains(string(body), "54000") {
+		t.Fatalf("second Bind = %q %q, want program limit error", messageType, body)
+	}
+	readReadyForQuery(t, client)
+	writeFrontendMessage(t, client, 'X', nil)
+	if err := <-errCh; err != nil {
+		t.Fatalf("ServeConn() error = %v", err)
+	}
+}
+
 func TestServeConnAcceptsSessionSetupQuery(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
