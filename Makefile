@@ -841,6 +841,12 @@ benchmark-sql-columnar-layout-cache:
 deliver-sql-columnar-layout-cache:
 	sh ./scripts/deliver-sql-columnar-layout-cache.sh
 
+test-sql-job-scheduler:
+	sh ./scripts/test-sql-job-scheduler.sh
+
+deliver-sql-job-scheduler:
+	sh ./scripts/deliver-sql-job-scheduler.sh
+
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
