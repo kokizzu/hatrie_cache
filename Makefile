@@ -859,6 +859,12 @@ test-sql-refresh-scheduler:
 deliver-sql-refresh-scheduler:
 	sh ./scripts/deliver-sql-refresh-scheduler.sh
 
+test-sql-retention:
+	sh ./scripts/test-sql-retention.sh
+
+deliver-sql-retention:
+	sh ./scripts/deliver-sql-retention.sh
+
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
