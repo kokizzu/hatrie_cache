@@ -1697,6 +1697,18 @@ review-sql-columnar-single-source:
 commit-sql-columnar-single-source:
 	sh ./scripts/commit-sql-columnar-single-source.sh
 
+format-sql-columnar-shared-row:
+	sh ./scripts/format-sql-columnar-shared-row.sh
+
+test-sql-columnar-shared-row:
+	sh ./scripts/test-sql-columnar-shared-row.sh
+
+review-sql-columnar-shared-row:
+	sh ./scripts/review-sql-columnar-shared-row.sh
+
+commit-sql-columnar-shared-row:
+	sh ./scripts/commit-sql-columnar-shared-row.sh
+
 commit-disable-github-ci:
 	sh ./scripts/commit-disable-github-ci.sh
 

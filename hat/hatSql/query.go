@@ -6366,12 +6366,18 @@ type sqlExecRow struct {
 	ordinals    map[string]int
 	singleAlias string
 	singleRow   SQLRow
+	columnar    *ColumnarBatch
+	columnarRow int
 	outer       *sqlExecRow
 	environment *sqlEvalEnvironment
 }
 
 func newSQLSingleSourceExecRow(alias string, row SQLRow) sqlExecRow {
 	return sqlExecRow{singleAlias: alias, singleRow: row}
+}
+
+func newSQLColumnarSourceExecRow(alias string, batch *ColumnarBatch, row int) sqlExecRow {
+	return sqlExecRow{singleAlias: alias, columnar: batch, columnarRow: row}
 }
 
 func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow) (SQLQueryResult, error) {
@@ -6732,7 +6738,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if !sqlCanColumnarScan(q, outer) {
 		return SQLQueryResult{}, false, nil
 	}
-	fields, predicateFields, projectionFields, ok := sqlColumnarScanFields(q)
+	fields, _, projectionFields, ok := sqlColumnarScanFields(q)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
@@ -6796,11 +6802,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		matched := make([]int, 0, batch.Rows)
 		rows := make([]sqlExecRow, batch.Rows)
 		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-			row := make(SQLRow, len(predicateFields))
-			for _, field := range predicateFields {
-				row[field], _ = batch.Value(field, rowIndex)
-			}
-			rows[rowIndex] = newSQLSingleSourceExecRow(q.from.alias, row)
+			rows[rowIndex] = newSQLColumnarSourceExecRow(q.from.alias, &batch, rowIndex)
 		}
 		values, err := evalSQLExprBatch(q.where, rows, nil)
 		if err != nil {
@@ -12247,6 +12249,17 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 }
 func sqlField(row sqlExecRow, qualifier, name string) interface{} {
 	for current := &row; current != nil; current = current.outer {
+		if current.columnar != nil {
+			if qualifier != "" && qualifier == current.singleAlias {
+				value, _ := current.columnar.Value(name, current.columnarRow)
+				return value
+			}
+			if qualifier == "" {
+				if value, ok := current.columnar.Value(name, current.columnarRow); ok {
+					return value
+				}
+			}
+		}
 		if current.singleRow != nil {
 			if qualifier != "" && qualifier == current.singleAlias {
 				return current.singleRow[name]
