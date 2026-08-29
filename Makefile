@@ -832,6 +832,15 @@ push-sql-telemetry:
 verify-sql-improvement-goal:
 	sh ./scripts/verify-sql-improvement-goal.sh
 
+test-sql-columnar-layout-cache:
+	sh ./scripts/test-sql-columnar-layout-cache.sh
+
+benchmark-sql-columnar-layout-cache:
+	sh ./scripts/benchmark-sql-columnar-layout-cache.sh
+
+deliver-sql-columnar-layout-cache:
+	sh ./scripts/deliver-sql-columnar-layout-cache.sh
+
 show-concurrency-coverage:
 	sh ./scripts/show-concurrency-coverage.sh
 
@@ -1765,6 +1774,7 @@ review-sql-columnar-regexp:
 
 commit-sql-columnar-regexp:
 	sh ./scripts/commit-sql-columnar-regexp.sh
+
 
 
 

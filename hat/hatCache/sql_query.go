@@ -1815,6 +1815,10 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 	if name != "CACHE" {
 		return hatSql.ColumnarBatch{}, false, nil
 	}
+	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
+	if batch, cached := ht.sqlColumnarLayouts.lookup(layoutKey); cached {
+		return batch, true, nil
+	}
 	plan, err := ht.SQLPartitionPruningPlan(name, key)
 	if err != nil {
 		return hatSql.ColumnarBatch{}, false, err
@@ -1823,6 +1827,9 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 		return ht.localPartitionSet().tries[plan.Partition].ResolveSQLColumnarSource(name, key, fields)
 	}
 	if batch, handled, err := ht.sqlColumnarRawBytesBatch(key, fields); handled {
+		if err == nil {
+			ht.sqlColumnarLayouts.observe(layoutKey, batch)
+		}
 		return batch, true, err
 	}
 	data, err := ht.GetBytesChecked(key)
@@ -1830,6 +1837,9 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 		return hatSql.ColumnarBatch{}, false, err
 	}
 	batch, err := sqlJSONColumnarBatch(key, data, fields)
+	if err == nil {
+		ht.sqlColumnarLayouts.observe(layoutKey, batch)
+	}
 	return batch, true, err
 }
 

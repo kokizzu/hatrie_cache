@@ -288,6 +288,34 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Two-value small-set read](#collection-allocation-follow-up) | 155.5 ns; 48 B; 3 allocs | 54.46 ns; 32 B; 1 alloc | 2.86x faster, 1.50x lower heap, 3x fewer allocs | Promotes to a map at three entries |
 | Earlier | [Priority queue push+pop](#collection-allocation-follow-up) | 875.9 ns; 56 B; 3 allocs | 769.1 ns; 40 B; 2 allocs | 1.14x faster, 1.40x lower heap | Typed string fast path retains generic fallback |
 | Current pass | [Direct scalar priority-queue pushes](#direct-scalar-priority-queue-pushes), established string/structured and new string queues | Variadic item path: 156.6/212.4/600.1 ns | Direct scalar item: 146.7/206.2/585.6 ns | 1.07x/1.03x/1.02x faster; memory unchanged | No measured tradeoff; established and new 2/16/128-value controls are 1.01x-1.07x faster with identical memory |
+
+<a id="adaptive-columnar-layout-cache"></a>
+### Adaptive Columnar Layout Cache
+
+Simple `CACHE(...)` SQL scans already favor the columnar representation over
+row maps. Re-decoding the same scalar JSON fields for every analytical query
+was still the dominant remaining cost. The cache now promotes a field-set
+layout on its second observed read, then returns an independent batch copy for
+each later reader. Raw cache values remain authoritative, and all normal writes
+invalidate both retained layouts and observations for their keys.
+
+| Five-run median, 1,024 JSON rows, `id >= 512` projection | Decode every query | Observed columnar layout | Improvement |
+| --- | ---: | ---: | ---: |
+| CPU | 1,769,255 ns | 495,208 ns | 3.57x faster |
+| Cumulative allocation | 893,877 B | 340,761 B | 2.62x lower |
+| Allocations | 16,957 | 4,653 | 3.64x fewer |
+
+The retained cache is scalar-only, promotes after two matching reads, and is
+bounded to 32 layouts, 128 observations, and 4 MiB estimated retained data.
+Nested JSON keeps the existing uncached behavior. Copy-on-read prevents callers
+from mutating cached slices, and no wire format, persistence format, or
+cross-request global arena is introduced.
+
+Reproduce with:
+
+```sh
+make benchmark-sql-columnar-layout-cache
+```
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |
 | Current pass | [Stack-backed small priority-queue snapshot](#compact-priority-queue-items), 16 exact plain-string `GETPQ` items | Heap snapshot plus response: 1,925 ns; 1,472 B; 2 allocs | Stack snapshot plus final response: 1,461 ns; 576 B; 1 alloc | 1.32x faster; 2.56x lower heap; 2x fewer allocations | At most 16 private item headers use the stack; the 100-item generic control is neutral within 0.4%, with identical heap and allocations |

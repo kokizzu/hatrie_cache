@@ -3683,6 +3683,7 @@ type hatTrieAuxStorage struct {
 type HatTrie struct {
 	mu                         sync.RWMutex
 	sqlIndexMu                 sync.RWMutex
+	sqlColumnarLayouts         sqlColumnarLayoutCache
 	sqlJSONIndexes             map[string]map[string]*sqlJSONFieldIndex
 	sqlJSONBitmapIndexes       map[string]map[string]*sqlJSONBitmapIndex
 	sqlJSONCoveringIndexes     map[string]map[string]*sqlJSONCoveringIndex
@@ -4915,6 +4916,7 @@ func (ht *HatTrie) recordWriteBatchLocked(batch *batchTelemetry, keys ...string)
 }
 
 func (ht *HatTrie) recordWriteMutationLocked(keys ...string) {
+	ht.sqlColumnarLayouts.invalidate(keys...)
 	if ht.persistentDirtyTracker != nil {
 		for _, key := range keys {
 			ht.persistentDirtyTracker.Mark(key)
