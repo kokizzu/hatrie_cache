@@ -6,11 +6,12 @@ import (
 	"testing"
 )
 
-func TestLocalVerificationAndHostedWorkflowsExist(t *testing.T) {
-	for _, path := range []string{".github/workflows/ci.yml", ".github/workflows/release.yml"} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("Stat(%s) error = %v", path, err)
-		}
+func TestLocalVerificationAndHostedWorkflowPolicy(t *testing.T) {
+	if _, err := os.Stat(".github/workflows/release.yml"); err != nil {
+		t.Fatalf("Stat(.github/workflows/release.yml) error = %v", err)
+	}
+	if _, err := os.Stat(".github/workflows/ci.yml"); !os.IsNotExist(err) {
+		t.Fatalf("push/PR CI workflow must remain disabled, Stat(.github/workflows/ci.yml) error = %v", err)
 	}
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {
@@ -22,6 +23,8 @@ func TestLocalVerificationAndHostedWorkflowsExist(t *testing.T) {
 		"./scripts/verify-local.sh",
 		"bench-smoke:",
 		"./scripts/benchmark-smoke.sh",
+		"verify-github-ci-disabled:",
+		"./scripts/verify-github-ci-disabled.sh",
 	} {
 		if !strings.Contains(string(makefile), token) {
 			t.Fatalf("local Makefile verification missing %q", token)

@@ -1676,6 +1676,12 @@ inspect-sql-execution-arena:
 verify-github-ci-disabled:
 	sh ./scripts/verify-github-ci-disabled.sh
 
+test-local-verification:
+	sh ./scripts/test-local-verification.sh
+
+commit-github-ci-disabled-policy:
+	sh ./scripts/commit-github-ci-disabled-policy.sh
+
 commit-disable-github-ci:
 	sh ./scripts/commit-disable-github-ci.sh
 
