@@ -1034,10 +1034,10 @@ state without an unbounded queue. `NotifyChanged` evaluates every affected
 query before publishing any of them; a query error preserves all last
 known-good snapshots. `Close` removes a subscription and closes its channel.
 
-### External CSV, JSON, and Parquet tables
+### External CSV, JSON, NDJSON, and Parquet tables
 
-`hatSql.ExternalTables` imports caller-supplied CSV, JSON, or Parquet bytes into named,
-immutable snapshots. Query them with `EXTERNAL('name')`; SQL never receives a
+`hatSql.ExternalTables` imports caller-supplied CSV, JSON, NDJSON, or Parquet
+bytes into named, immutable snapshots. Query them with `EXTERNAL('name')`; SQL never receives a
 path or URL, so this facility cannot read arbitrary local files or make network
 requests. CSV requires a unique non-empty header row and preserves cells as
 text. JSON accepts an object or an array of objects and preserves JSON values.
@@ -1058,8 +1058,10 @@ _ = result
 _ = csvBytes
 ```
 
-`ImportJSON`, `ExportJSON`, `ImportCSV`, `ExportCSV`, `ImportParquet`, and
-`ExportParquet` all clone input and output rows. Parquet import accepts flat
+`ImportJSON`, `ExportJSON`, `ImportNDJSON`, `ExportNDJSON`, `ImportCSV`,
+`ExportCSV`, `ImportParquet`, and `ExportParquet` all clone input and output
+rows. NDJSON requires one JSON object per non-empty line; the complete document
+is validated before it replaces an existing table. Parquet import accepts flat
 scalar columns; nested/repeated schemas are rejected explicitly. Parquet export
 uses optional UTF-8 columns, so arbitrary row values round-trip as text and can
 be cast in SQL. Importing the same name replaces its complete snapshot, so a

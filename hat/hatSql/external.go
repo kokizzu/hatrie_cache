@@ -71,6 +71,32 @@ func (tables *ExternalTables) ImportJSON(name string, data []byte) error {
 	return tables.Register(name, ExternalTable{Columns: externalTableRowColumns(rows), Rows: rows})
 }
 
+// ImportNDJSON parses one JSON object per non-empty line and replaces name.
+// Values retain their JSON types for SQL comparison and casts. The existing
+// table remains unchanged when any record is invalid.
+func (tables *ExternalTables) ImportNDJSON(name string, data []byte) error {
+	lines := bytes.Split(data, []byte{'\n'})
+	rows := make([]Row, 0, len(lines))
+	for lineNumber, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var row Row
+		if err := json.Unmarshal(line, &row); err != nil {
+			return fmt.Errorf("parse NDJSON record %d: %w", lineNumber+1, err)
+		}
+		if row == nil {
+			return fmt.Errorf("NDJSON record %d must be an object", lineNumber+1)
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return fmt.Errorf("NDJSON requires at least one object record")
+	}
+	return tables.Register(name, ExternalTable{Columns: externalTableRowColumns(rows), Rows: rows})
+}
+
 // ImportParquet parses a flat Parquet table and replaces name. Nested and
 // repeated schemas are rejected because SQL external tables expose one scalar
 // value per column. Parquet UTF-8/binary values become strings; primitive
@@ -195,6 +221,22 @@ func (tables *ExternalTables) ExportJSON(name string) ([]byte, error) {
 		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
 	}
 	return json.Marshal(table.Rows)
+}
+
+// ExportNDJSON encodes the registered table as one JSON object per line.
+func (tables *ExternalTables) ExportNDJSON(name string) ([]byte, error) {
+	table, ok := tables.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
+	}
+	buffer := bytes.Buffer{}
+	encoder := json.NewEncoder(&buffer)
+	for _, row := range table.Rows {
+		if err := encoder.Encode(row); err != nil {
+			return nil, err
+		}
+	}
+	return buffer.Bytes(), nil
 }
 
 // ExportParquet encodes one table as a flat Parquet document. Values are

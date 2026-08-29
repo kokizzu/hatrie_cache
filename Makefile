@@ -2079,3 +2079,9 @@ test-monitoring-identity:
 .PHONY: deliver-pluggable-monitoring-identity
 deliver-pluggable-monitoring-identity:
 	sh ./scripts/deliver-pluggable-monitoring-identity.sh
+.PHONY: test-external-ndjson
+test-external-ndjson:
+	sh ./scripts/test-external-ndjson.sh
+.PHONY: deliver-external-ndjson
+deliver-external-ndjson:
+	sh ./scripts/deliver-external-ndjson.sh

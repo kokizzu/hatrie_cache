@@ -53,3 +53,32 @@ SELECT event.id`, tables, nil, hatSql.QueryOptions{})
 		t.Fatalf("ExportJSON() = %q, %v", jsonBytes, err)
 	}
 }
+
+func TestExternalTablesImportExportNDJSON(t *testing.T) {
+	tables := hatSql.NewExternalTables()
+	data := []byte("{\"id\":1,\"state\":\"open\"}\n{\"id\":2,\"state\":\"closed\"}\n")
+	if err := tables.ImportNDJSON("events", data); err != nil {
+		t.Fatalf("ImportNDJSON() error = %v", err)
+	}
+	table, ok := tables.Get("events")
+	if !ok || !reflect.DeepEqual(table, hatSql.ExternalTable{
+		Columns: []string{"id", "state"},
+		Rows: []hatSql.Row{
+			{"id": float64(1), "state": "open"},
+			{"id": float64(2), "state": "closed"},
+		},
+	}) {
+		t.Fatalf("NDJSON table = %#v, %v", table, ok)
+	}
+	exported, err := tables.ExportNDJSON("events")
+	if err != nil || string(exported) != string(data) {
+		t.Fatalf("ExportNDJSON() = %q, %v", exported, err)
+	}
+	if err := tables.ImportNDJSON("events", []byte("{\"id\":3}\ninvalid\n")); err == nil {
+		t.Fatal("ImportNDJSON() accepted malformed second record")
+	}
+	afterFailure, ok := tables.Get("events")
+	if !ok || !reflect.DeepEqual(afterFailure, table) {
+		t.Fatalf("failed import changed table = %#v, want %#v", afterFailure, table)
+	}
+}
