@@ -1822,12 +1822,36 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 	if plan.Pruned {
 		return ht.localPartitionSet().tries[plan.Partition].ResolveSQLColumnarSource(name, key, fields)
 	}
+	if batch, handled, err := ht.sqlColumnarRawBytesBatch(key, fields); handled {
+		return batch, true, err
+	}
 	data, err := ht.GetBytesChecked(key)
 	if err != nil {
 		return hatSql.ColumnarBatch{}, false, err
 	}
 	batch, err := sqlJSONColumnarBatch(key, data, fields)
 	return batch, true, err
+}
+
+// sqlColumnarRawBytesBatch decodes an in-memory raw value while its backing
+// storage is protected by ht.mu. The returned columnar batch is detached from
+// the raw bytes, so the lock is not retained after this method returns.
+func (ht *HatTrie) sqlColumnarRawBytesBatch(key string, fields []string) (hatSql.ColumnarBatch, bool, error) {
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, true)
+	if !fallback && err != nil {
+		ht.recordReadLocked(false, key)
+		ht.mu.RUnlock()
+		return hatSql.ColumnarBatch{}, true, err
+	}
+	if !fallback && hval.IsBytesAtRaws() && !hval.OnDisk() {
+		batch, decodeErr := sqlJSONColumnarBatch(key, ht.raws.array[hval.Index], fields)
+		ht.recordReadLocked(true, key)
+		ht.mu.RUnlock()
+		return batch, true, decodeErr
+	}
+	ht.mu.RUnlock()
+	return hatSql.ColumnarBatch{}, false, nil
 }
 
 // StreamSQLSource visits CACHE JSON object rows incrementally. KEYS is not

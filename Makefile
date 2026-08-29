@@ -1667,6 +1667,21 @@ audit-sql-storage-allocation:
 inspect-sql-source-ownership:
 	sh ./scripts/inspect-sql-source-ownership.sh
 
+format-sql-columnar-raw-bytes:
+	sh ./scripts/format-sql-columnar-raw-bytes.sh
+
+test-sql-columnar-raw-bytes:
+	sh ./scripts/test-sql-columnar-raw-bytes.sh
+
+benchmark-sql-columnar-raw-bytes:
+	sh ./scripts/benchmark-sql-columnar-raw-bytes.sh
+
+review-sql-columnar-raw-bytes:
+	sh ./scripts/review-sql-columnar-raw-bytes.sh
+
+commit-sql-columnar-raw-bytes:
+	sh ./scripts/commit-sql-columnar-raw-bytes.sh
+
 inspect-sql-index-keys:
 	sh ./scripts/inspect-sql-index-keys.sh
 
