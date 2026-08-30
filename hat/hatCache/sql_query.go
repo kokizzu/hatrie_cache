@@ -1494,8 +1494,9 @@ func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value inter
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if typed == nil && index == nil {
 		return 0, false, false, nil
 	}
 	if value == nil {
@@ -1504,6 +1505,27 @@ func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value inter
 	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
 	if err != nil {
 		return 0, false, true, err
+	}
+	if typed != nil {
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		needle, ok := sqlJSONTypedInt64Value(value)
+		if !ok {
+			return 0, true, true, nil
+		}
+		start, end := 0, len(typed.ordered)
+		switch operator {
+		case "<":
+			end = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value >= needle })
+		case "<=":
+			end = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value > needle })
+		case ">":
+			start = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value > needle })
+		case ">=":
+			start = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value >= needle })
+		default:
+			return 0, false, true, fmt.Errorf("unsupported SQL range operator %q", operator)
+		}
+		return end - start, true, true, nil
 	}
 	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
 		return 0, false, true, err

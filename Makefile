@@ -2298,6 +2298,10 @@ deliver-sql-typed-index-maintenance:
 deliver-sql-typed-index-stats:
 	sh ./scripts/deliver-sql-typed-index-stats.sh
 
+.PHONY: deliver-sql-typed-index-range-estimate
+deliver-sql-typed-index-range-estimate:
+	sh ./scripts/deliver-sql-typed-index-range-estimate.sh
+
 .PHONY: deliver-index-proposal-status
 deliver-index-proposal-status:
 	sh ./scripts/deliver-index-proposal-status.sh
