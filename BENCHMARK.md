@@ -13351,6 +13351,9 @@ complete JSON string on every indexed read. The counter is tracked only after
 an index is configured; it adds one `uint64` value plus the existing Go map
 entry per indexed source key, not per JSON row. Direct internal refresh helpers
 without a cache source retain raw-content comparison for compatibility.
+A successful write advances the generation even when an application re-upserts
+identical JSON, so that write-heavy idempotent pattern can cause one needless
+rebuild; read correctness is unchanged and ordinary indexed reads remain O(1).
 
 `TestSQLJSONIndexUsesSourceWriteGeneration` verifies that a replacement makes
 the index stale, and that resolving it publishes the same new generation. The

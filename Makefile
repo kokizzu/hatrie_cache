@@ -2273,6 +2273,9 @@ inspect-sql-index-generation-docs:
 deliver-sql-index-generation:
 	sh ./scripts/deliver-sql-index-generation.sh
 
+deliver-sql-index-generation-docs:
+	sh ./scripts/deliver-sql-index-generation-docs.sh
+
 .PHONY: bench-sql-index-snapshots
 bench-sql-index-snapshots:
 	sh ./scripts/bench-sql-index-snapshots.sh
