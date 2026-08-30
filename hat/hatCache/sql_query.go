@@ -1859,6 +1859,8 @@ func sqlIndexValueKey(value interface{}) (string, bool) {
 		return "b:0", true
 	case float64:
 		return sqlIndexFloatValueKey(value)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return sqlIndexIntegerValueKey(value)
 	}
 	encoded, err := json.Marshal(value)
 	return string(encoded), err == nil
@@ -1881,6 +1883,33 @@ func sqlIndexFloatValueKey(value float64) (string, bool) {
 		}
 	}
 	return encoded, true
+}
+
+func sqlIndexIntegerValueKey(value interface{}) (string, bool) {
+	switch value := value.(type) {
+	case int:
+		return strconv.FormatInt(int64(value), 10), true
+	case int8:
+		return strconv.FormatInt(int64(value), 10), true
+	case int16:
+		return strconv.FormatInt(int64(value), 10), true
+	case int32:
+		return strconv.FormatInt(int64(value), 10), true
+	case int64:
+		return strconv.FormatInt(value, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(value), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(value), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(value), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(value), 10), true
+	case uint64:
+		return strconv.FormatUint(value, 10), true
+	default:
+		return "", false
+	}
 }
 
 // ResolveSQLSource exposes a stable, read-only snapshot of cache data to SQL.

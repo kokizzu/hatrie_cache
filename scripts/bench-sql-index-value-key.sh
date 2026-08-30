@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-go test ./hat/hatCache -run '^$' -bench '^BenchmarkSQLIndexFloatValueKey$' -benchmem -count=3
+go test ./hat/hatCache -run '^$' -bench '^BenchmarkSQLIndex(Float|Integer)ValueKey$' -benchmem -count=3

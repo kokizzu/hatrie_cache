@@ -218,6 +218,7 @@ The same 100,000-row fixture on the AMD Ryzen 9 5950X produced:
 | Composite equality returning one row | 2.435 ms; 16,384,381 B; 7 allocs | 595.8 ns; 368 B; 5 allocs | 4,087.35x faster; 44,522.77x lower heap; two fewer allocations |
 | Uncached columnar parse of 20,000 JSON rows | 33.903 ms; 14,571,509 B; 320,052 allocs | 32.989 ms; 13,301,778 B; 320,052 allocs | 1.03x faster; 1.10x lower heap; same allocation count |
 | Common float64 JSON index-key encoding | 127.5 ns; 16 B; 2 allocs | 53.81 ns; 5 B; 1 alloc | 2.37x faster; 3.20x lower heap; one fewer allocation |
+| Common integer JSON index-key encoding | 96.86 ns; 16 B; 2 allocs | 26.69 ns; 5 B; 1 alloc | 3.63x faster; 3.20x lower heap; one fewer allocation |
 | Direct indexed equality returning one numeric row | 615.9 ns; 360 B; 5 allocs | 480.1 ns; 349 B; 4 allocs | 1.28x faster; 1.03x lower heap; one fewer allocation |
 
 The source snapshot remains valid after a replacement, covered by focused
