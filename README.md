@@ -68,6 +68,12 @@ materialized rows is 10.4x faster, retains 6.0x less transient heap, and uses
 over 3,300x fewer allocations; details are in
 [BENCHMARK.md](BENCHMARK.md#materialized-single-source-sql-envelopes).
 
+Normal SQL queries no longer serialize intermediate rows solely for metrics that
+are not being collected. `EXPLAIN ANALYZE` still records logical input and
+output bytes. A filtered 20,000-row materialized query is 3.8x faster with
+1.85x lower heap and 4.47x fewer allocations; see
+[BENCHMARK.md](BENCHMARK.md#metrics-disabled-sql-byte-accounting).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

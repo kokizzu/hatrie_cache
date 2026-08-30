@@ -13512,6 +13512,35 @@ make test-sql-single-source-envelope
 make benchmark-sql-single-source-envelope
 ```
 
+## Metrics-Disabled SQL Byte Accounting
+
+Normal SQL execution has no `sqlExecutionMetrics` instance. Previously, scan,
+filter, and projection paths still serialized logical rows to JSON before
+calling nil-safe metric methods, so every unobserved query paid for byte
+accounting. The executor now computes logical bytes only when metrics are
+enabled. Group-memory budget accounting remains unconditional because it is a
+query limit rather than observability. `EXPLAIN ANALYZE` retains input and
+output byte values.
+
+`BenchmarkSQLMetricsDisabledFilteredQuery` executes a normal filtered query
+over 20,000 already materialized three-field rows. It includes query parsing,
+filter evaluation, and projection. On an AMD Ryzen 9 5950X, five runs measured:
+
+| Metrics mode | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Unconditional byte serialization | 53.61 ms/op | 38,146,656 B/op | 672,600 allocs/op | Baseline |
+| Byte accounting only with metrics | 14.11 ms/op | 20,597,819 B/op | 150,623 allocs/op | 3.80x faster; 1.85x fewer bytes; 4.47x fewer allocations |
+
+`TestSQLMetricsByteAccountingRunsOnlyWhenMetricsAreEnabled` verifies that
+metrics-disabled execution receives no byte work while enabled metrics still
+record positive scan byte values. The broader SQL verifier covers query and
+`EXPLAIN ANALYZE` behavior.
+
+```sh
+make test-sql-metrics-byte-accounting
+make benchmark-sql-metrics-byte-accounting
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

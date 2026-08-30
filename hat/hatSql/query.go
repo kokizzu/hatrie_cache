@@ -6659,8 +6659,11 @@ func (metrics *sqlExecutionMetrics) recordScan(source sqlSource, outputRows int,
 }
 
 func (metrics *sqlExecutionMetrics) recordScanRows(source sqlSource, rows []SQLRow, started time.Time) {
+	if metrics == nil {
+		return
+	}
 	metrics.recordBytes("SCAN", sqlExplainSource(source), 0, len(rows), 0, sqlRowsBytes(rows), started)
-	if metrics == nil || source.kind != "VALUES" {
+	if source.kind != "VALUES" {
 		return
 	}
 	metrics.steps[len(metrics.steps)-1].EstimatedRows = sqlExplainIntPointer(len(source.values))
@@ -7516,7 +7519,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if pushedWhere {
 			started = time.Now()
 			inputRows := len(rows)
-			inputBytes := sqlExecRowsBytes(rows)
+			inputBytes := sqlMetricsExecRowsBytes(metrics, rows)
 			values, err := evalSQLExprBatch(q.where, rows, functions)
 			if err != nil {
 				return SQLQueryResult{}, err
@@ -7531,7 +7534,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				}
 			}
 			rows = filtered
-			metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
+			if metrics != nil {
+				metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
+			}
 		}
 		leftAliases := []string{q.from.alias}
 		for _, join := range q.joins {
@@ -7930,7 +7935,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	if q.where.kind != "" && !pushedWhere {
 		started = time.Now()
 		inputRows := len(rows)
-		inputBytes := sqlExecRowsBytes(rows)
+		inputBytes := sqlMetricsExecRowsBytes(metrics, rows)
 		values, err := evalSQLExprBatch(q.where, rows, functions)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -7945,7 +7950,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 		}
 		rows = filtered
-		metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
+		if metrics != nil {
+			metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
+		}
 	}
 	if indexOrdered {
 		result, handled, err := executeSQLOrderedGroupAggregate(q, rows, control, metrics)
@@ -8270,11 +8277,13 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			out[index].row[result.Columns[column]] = values[index]
 		}
 	}
-	projectedBytes := 0
-	for _, output := range out {
-		projectedBytes += sqlRowBytes(output.row)
+	if metrics != nil {
+		projectedBytes := 0
+		for _, output := range out {
+			projectedBytes += sqlRowBytes(output.row)
+		}
+		metrics.recordBytes("PROJECT", sqlExplainSelects(q.selects), len(groups), len(out), sqlGroupedRowsBytes(groups), projectedBytes, started)
 	}
-	metrics.recordBytes("PROJECT", sqlExplainSelects(q.selects), len(groups), len(out), sqlGroupedRowsBytes(groups), projectedBytes, started)
 	if q.distinct {
 		started = time.Now()
 		inputRows := len(out)
@@ -9862,6 +9871,13 @@ func sqlExecRowsBytes(rows []sqlExecRow) int {
 		total += sqlExecRowBytes(row)
 	}
 	return total
+}
+
+func sqlMetricsExecRowsBytes(metrics *sqlExecutionMetrics, rows []sqlExecRow) int {
+	if metrics == nil {
+		return -1
+	}
+	return sqlExecRowsBytes(rows)
 }
 
 func sqlExecRowBytes(row sqlExecRow) int {

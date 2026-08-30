@@ -2467,3 +2467,18 @@ inspect-sql-single-source-envelope-docs:
 
 deliver-sql-single-source-envelope:
 	sh ./scripts/deliver-sql-single-source-envelope.sh
+
+audit-sql-metrics-byte-accounting:
+	sh ./scripts/audit-sql-metrics-byte-accounting.sh
+
+test-sql-metrics-byte-accounting:
+	sh ./scripts/test-sql-metrics-byte-accounting.sh
+
+benchmark-sql-metrics-byte-accounting:
+	sh ./scripts/benchmark-sql-metrics-byte-accounting.sh
+
+inspect-sql-metrics-byte-docs:
+	sh ./scripts/inspect-sql-metrics-byte-docs.sh
+
+deliver-sql-metrics-byte-accounting:
+	sh ./scripts/deliver-sql-metrics-byte-accounting.sh
