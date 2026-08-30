@@ -2585,3 +2585,32 @@ ifneq (,$(filter deliver-sql-columnar-query-rows,$(MAKECMDGOALS)))
 deliver-sql-columnar-query-rows:
 	sh ./scripts/deliver-sql-columnar-query-rows.sh
 endif
+ifneq (,$(filter inspect-sql-condition-cache-integration,$(MAKECMDGOALS)))
+.PHONY: inspect-sql-condition-cache-integration
+inspect-sql-condition-cache-integration:
+	sh ./scripts/inspect-sql-condition-cache-integration.sh
+endif
+
+ifneq (,$(filter benchmark-sql-query-condition-cache,$(MAKECMDGOALS)))
+.PHONY: benchmark-sql-query-condition-cache
+benchmark-sql-query-condition-cache:
+	sh ./scripts/benchmark-sql-query-condition-cache.sh
+endif
+
+ifneq (,$(filter test-sql-query-condition-cache,$(MAKECMDGOALS)))
+.PHONY: test-sql-query-condition-cache
+test-sql-query-condition-cache:
+	sh ./scripts/test-sql-query-condition-cache.sh
+endif
+
+ifneq (,$(filter format-sql-query-condition-cache,$(MAKECMDGOALS)))
+.PHONY: format-sql-query-condition-cache
+format-sql-query-condition-cache:
+	sh ./scripts/format-sql-query-condition-cache.sh
+endif
+
+ifneq (,$(filter deliver-sql-query-condition-cache,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-query-condition-cache
+deliver-sql-query-condition-cache:
+	sh ./scripts/deliver-sql-query-condition-cache.sh
+endif

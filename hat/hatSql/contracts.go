@@ -145,6 +145,14 @@ type ColumnarSourceResolver interface {
 	ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
 }
 
+// SourceVersionResolver optionally identifies an immutable source snapshot.
+// The version must change whenever rows or values observable through the named
+// source change. The condition cache uses it to avoid stale predicate matches;
+// resolvers that cannot make this guarantee simply do not participate.
+type SourceVersionResolver interface {
+	SQLSourceVersion(name, key string) (version string, available bool, err error)
+}
+
 // SourceResolverFunc adapts a function into SourceResolver.
 type SourceResolverFunc func(name string, key string) ([]Row, error)
 

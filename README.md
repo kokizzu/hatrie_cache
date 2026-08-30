@@ -3214,3 +3214,23 @@ The current fast path preserves `WHERE`, `OFFSET`, `LIMIT`, cancellation,
 maximum-row, and result-byte-budget behavior. Its measured `20,000`-row filter
 workload is `2.22x` faster with unchanged callback-map allocation; see
 [BENCHMARK.md](BENCHMARK.md#sql-columnar-queryrows-streaming).
+
+### Versioned Condition Cache
+
+Repeated selective columnar `WHERE` predicates can reuse a bounded vector of
+matching row positions. It is off by default. Enable it only when the resolver
+also implements `hatSql.SourceVersionResolver` and returns a version that
+changes with every visible source mutation:
+
+```go
+cache := hatSql.NewSQLQueryConditionCache(128, 4_096)
+options := hatSql.SQLQueryOptions{ConditionCache: cache}
+```
+
+The executor checks that the version is stable before and after each columnar
+batch read. An unavailable or changing version bypasses the cache, preserving
+ordinary query execution. `maximumMatchedRows` bounds each retained selection;
+the payload limit is roughly `capacity * maximumMatchedRows * sizeof(int)`,
+plus small cache metadata. Cache hits remove predicate CPU, but do not reduce
+the source batch transfer because the current source snapshot is still read.
+See [BENCHMARK.md](BENCHMARK.md#versioned-columnar-condition-cache).

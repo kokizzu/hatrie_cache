@@ -13923,3 +13923,23 @@ remaining allocation is primarily the public `SQLRow` map passed to each
 callback invocation; it is not retained by the executor. Reproduce with
 `make benchmark-sql-query-rows-columnar` and inspect allocation ownership with
 `make profile-sql-query-rows-columnar`.
+
+## Versioned Columnar Condition Cache
+
+`BenchmarkSQLColumnarSelectiveFilter` selects `20` rows from a `20,000`-row
+columnar source using `WHERE score = 7`. The cache-hit case reuses the same
+source version; the cold case initializes and fills a bounded `1 x 64`
+selection cache. All cases read the same current columnar batch.
+
+| Workload | Median time | Cumulative allocation | Allocations | CPU improvement | Memory tradeoff |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No condition cache | 355.27 us | 11.05 KB | 68 | 1.00x | 1.00x |
+| Warm cache hit | 11.21 us | 11.01 KB | 68 | 31.69x | 1.00x |
+| Cold cache initialization | 441.37 us | 13.16 KB | 84 | 0.80x | 1.19x |
+
+The cache is disabled unless `SQLQueryOptions.ConditionCache` is configured
+and the resolver implements `SourceVersionResolver`. It stores only bounded
+row positions, rejects oversized matches, and bypasses itself when the source
+version changes during a batch read. It removes repeated predicate CPU but does
+not reduce source-batch bandwidth. Reproduce with
+`make benchmark-sql-query-condition-cache`.

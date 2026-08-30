@@ -213,6 +213,9 @@ type SQLQueryOptions struct {
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
 	PreparedCache         *SQLPreparedQueryCache
+	// ConditionCache optionally reuses bounded columnar WHERE match positions.
+	// It is disabled by default and is used only with a SourceVersionResolver.
+	ConditionCache *SQLQueryConditionCache
 	// AdaptivePlanner learns index candidate cardinality from prior queries.
 	// Nil preserves the deterministic estimate-only planner.
 	AdaptivePlanner *AdaptivePlanner
@@ -742,6 +745,10 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	if !ok {
 		return false, nil
 	}
+	conditionCache, conditionVersion, conditionCacheable, err := sqlColumnarConditionCacheVersion(query, resolver, control)
+	if err != nil {
+		return true, err
+	}
 	batch, available, err := columnar.ResolveSQLColumnarSource(query.from.kind, query.from.key, fields)
 	if err != nil || !available {
 		return available, err
@@ -758,10 +765,53 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 		}
 	}
 
-	functions, _ := resolver.(SQLFunctionResolver)
-	match := sqlColumnarQueryRowsMatcher(query, batch, functions)
 	columns := sqlColumns(query.selects)
 	matched, emitted, resultBytes := 0, 0, 0
+	emit := func(rowIndex int) error {
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range query.selects {
+			row[columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		if control != nil && control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		return visit(columns, row)
+	}
+	if conditionCacheable {
+		afterCache, afterVersion, afterCacheable, err := sqlColumnarConditionCacheVersion(query, resolver, control)
+		if err != nil {
+			return true, err
+		}
+		if afterCacheable && afterCache == conditionCache && afterVersion == conditionVersion {
+			matches, _, _, err := sqlColumnarConditionMatches(query, batch, resolver, control, conditionCache, conditionVersion)
+			if err != nil {
+				return true, err
+			}
+			for position, rowIndex := range matches {
+				if control != nil {
+					if err := control.check(); err != nil {
+						return true, err
+					}
+				}
+				if position < query.offset {
+					continue
+				}
+				if query.limit >= 0 && emitted >= query.limit {
+					break
+				}
+				if err := emit(rowIndex); err != nil {
+					return true, err
+				}
+			}
+			return true, nil
+		}
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	match := sqlColumnarQueryRowsMatcher(query, batch, functions)
 	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 		if control != nil {
 			if err := control.check(); err != nil {
@@ -783,18 +833,7 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 		if query.limit >= 0 && emitted >= query.limit {
 			break
 		}
-		row := make(SQLRow, len(projectionFields))
-		for selectIndex, item := range query.selects {
-			row[columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
-		}
-		if control != nil && control.options.MaxResultBytes > 0 {
-			resultBytes += sqlRowBytes(row)
-			if resultBytes > control.options.MaxResultBytes {
-				return true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
-			}
-		}
-		emitted++
-		if err := visit(columns, row); err != nil {
+		if err := emit(rowIndex); err != nil {
 			return true, err
 		}
 	}
@@ -7001,6 +7040,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
+	conditionCache, conditionVersion, conditionCacheable, err := sqlColumnarConditionCacheVersion(q, resolver, control)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
 	started := time.Now()
 	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
 	if err != nil || !available {
@@ -7015,6 +7058,28 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	for _, field := range fields {
 		if batch.FieldRows(field) != batch.Rows {
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
+		}
+	}
+	if conditionCacheable {
+		afterCache, afterVersion, afterCacheable, err := sqlColumnarConditionCacheVersion(q, resolver, control)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if afterCacheable && afterCache == conditionCache && afterVersion == conditionVersion {
+			matches, hit, _, err := sqlColumnarConditionMatches(q, batch, resolver, control, conditionCache, conditionVersion)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			result := sqlColumnarMaterializeMatches(q, batch, projectionFields, matches)
+			if metrics != nil {
+				node := "QUERY CONDITION CACHE MISS"
+				if hit {
+					node = "QUERY CONDITION CACHE HIT"
+				}
+				metrics.record(node, sqlExplainExpression(q.where), batch.Rows, len(matches), started)
+				metrics.record("LATE MATERIALIZATION", strings.Join(projectionFields, ","), len(matches), len(result.Rows), started)
+			}
+			return result, true, nil
 		}
 	}
 	if metrics != nil {
@@ -7173,6 +7238,73 @@ func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFi
 		result.Rows = append(result.Rows, row)
 	}
 	return result, matched
+}
+
+func sqlColumnarMaterializeMatches(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches []int) SQLQueryResult {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	for position, rowIndex := range matches {
+		if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+			continue
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range q.selects {
+			row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	return result
+}
+
+func sqlColumnarConditionCacheVersion(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (*SQLQueryConditionCache, string, bool, error) {
+	if query == nil || query.from == nil || query.where.kind == "" || control == nil || control.options.ConditionCache == nil || !control.options.ConditionCache.enabled() {
+		return nil, "", false, nil
+	}
+	versions, ok := resolver.(SourceVersionResolver)
+	if !ok {
+		return nil, "", false, nil
+	}
+	version, available, err := versions.SQLSourceVersion(query.from.kind, query.from.key)
+	if err != nil {
+		return nil, "", true, err
+	}
+	if !available || version == "" {
+		return nil, "", false, nil
+	}
+	return control.options.ConditionCache, version, true, nil
+}
+
+func sqlColumnarConditionMatches(query *sqlQuery, batch ColumnarBatch, resolver SQLSourceResolver, control *sqlExecutionControl, cache *SQLQueryConditionCache, version string) ([]int, bool, bool, error) {
+	if cache == nil || !cache.enabled() {
+		return nil, false, false, nil
+	}
+	key := sqlQueryConditionCacheKey{
+		sourceKind: query.from.kind,
+		sourceKey:  query.from.key,
+		version:    version,
+		predicate:  sqlExplainExpression(query.where),
+		collation:  sqlQueryCollation(query),
+		rows:       batch.Rows,
+	}
+	if matches, hit := cache.get(key); hit {
+		return matches, true, true, nil
+	}
+	functions, _ := resolver.(SQLFunctionResolver)
+	match := sqlColumnarQueryRowsMatcher(query, batch, functions)
+	matches := make([]int, 0)
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if err := control.check(); err != nil {
+			return nil, false, true, err
+		}
+		matched, err := match(rowIndex)
+		if err != nil {
+			return nil, false, true, err
+		}
+		if matched {
+			matches = append(matches, rowIndex)
+		}
+	}
+	cache.put(key, matches)
+	return matches, false, true, nil
 }
 
 type sqlColumnarNumericAggregate struct {
