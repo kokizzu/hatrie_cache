@@ -148,6 +148,14 @@ func (resolver monitoringSQLResolver) ResolveSQLSource(name string, key string) 
 	return resolver.source.ResolveSQLSource(name, key)
 }
 
+func (resolver monitoringSQLResolver) BorrowSQLSource(name string, key string) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(hatSql.BorrowedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.BorrowSQLSource(name, key)
+}
+
 func (resolver monitoringSQLResolver) StreamSQLSource(ctx context.Context, name string, key string, visit func(SQLRow) error) error {
 	streaming, ok := resolver.source.(SQLStreamSourceResolver)
 	if !ok {

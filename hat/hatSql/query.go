@@ -9003,12 +9003,24 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 				return validateSQLSourceFieldTypes(source, cloneSQLRows(rows))
 			}
 		}
-		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
+		var rows []SQLRow
+		borrowed := false
+		var err error
+		if resolver, ok := resolver.(BorrowedSourceResolver); ok {
+			rows, borrowed, err = resolver.BorrowSQLSource(source.kind, source.key)
+		}
+		if !borrowed && err == nil {
+			rows, err = resolver.ResolveSQLSource(source.kind, source.key)
+		}
 		if err != nil {
 			return nil, err
 		}
 		if control != nil {
-			control.sources[cacheKey] = cloneSQLRows(rows)
+			if borrowed {
+				control.sources[cacheKey] = rows
+			} else {
+				control.sources[cacheKey] = cloneSQLRows(rows)
+			}
 		}
 		return validateSQLSourceFieldTypes(source, rows)
 	case "EXTERNAL":

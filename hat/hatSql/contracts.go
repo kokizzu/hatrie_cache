@@ -49,6 +49,13 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// BorrowedSourceResolver optionally supplies an immutable source snapshot to
+// the SQL executor. Returned row maps must remain valid for the query and must
+// not be retained or mutated by the executor.
+type BorrowedSourceResolver interface {
+	BorrowSQLSource(name string, key string) ([]Row, bool, error)
+}
+
 // DictionaryColumn stores repeated text values once and addresses them through
 // row-aligned codes. Values are ordered by first appearance for determinism.
 type DictionaryColumn struct {

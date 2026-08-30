@@ -13541,6 +13541,32 @@ make test-sql-metrics-byte-accounting
 make benchmark-sql-metrics-byte-accounting
 ```
 
+## Borrowed SQL Source Snapshots
+
+`BorrowedSourceResolver` is an explicit opt-in contract for resolver-owned,
+immutable row snapshots. On first use, the execution-control cache can retain
+that snapshot directly instead of cloning every row map. Existing
+`SQLSourceResolver` implementations retain the prior clone-on-cache behavior.
+The built-in `HatTrie` source and the monitoring SQL proxy opt in; a repeated
+source use still receives a clone from the per-query snapshot cache.
+
+The same `BenchmarkSQLMetricsDisabledFilteredQuery` fixture, after the
+metrics-disabled byte-accounting optimization, measured:
+
+| Source snapshot path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Cloned first-use source | 14.11 ms/op | 20,597,819 B/op | 150,623 allocs/op | Baseline |
+| Borrowed immutable source | 10.46 ms/op | 13,692,804 B/op | 110,443 allocs/op | 1.35x faster; 1.50x fewer bytes; 1.36x fewer allocations |
+
+`TestSQLSourceResolverUsesBorrowedImmutableSnapshotWhenAvailable` confirms the
+executor selects the opt-in source and preserves query results. The full SQL
+verifier covers the fallback and built-in cache paths.
+
+```sh
+make test-sql-borrowed-source
+make benchmark-sql-metrics-byte-accounting
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

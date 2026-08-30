@@ -2925,6 +2925,13 @@ func (ht *HatTrie) ResolveSQLSource(name string, key string) ([]SQLRow, error) {
 	}
 }
 
+// BorrowSQLSource returns a newly decoded immutable query snapshot. The SQL
+// executor may read it directly but must not retain or mutate the row maps.
+func (ht *HatTrie) BorrowSQLSource(name string, key string) ([]SQLRow, bool, error) {
+	rows, err := ht.ResolveSQLSource(name, key)
+	return rows, err == nil, err
+}
+
 // ResolveSQLColumnarSource exposes only requested CACHE JSON fields in
 // field-aligned slices. It avoids retaining full source rows for simple
 // analytics scans; unsupported sources return available=false.

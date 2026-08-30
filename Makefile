@@ -1715,9 +1715,6 @@ commit-sql-columnar-numeric-aggregate:
 audit-sql-storage-allocation:
 	sh ./scripts/audit-sql-storage-allocation.sh
 
-inspect-sql-source-ownership:
-	sh ./scripts/inspect-sql-source-ownership.sh
-
 inspect-sql-adaptive-storage:
 	sh ./scripts/inspect-sql-adaptive-storage.sh
 
@@ -2482,3 +2479,15 @@ inspect-sql-metrics-byte-docs:
 
 deliver-sql-metrics-byte-accounting:
 	sh ./scripts/deliver-sql-metrics-byte-accounting.sh
+
+profile-sql-metrics-disabled-query:
+	sh ./scripts/profile-sql-metrics-disabled-query.sh
+
+test-sql-borrowed-source:
+	sh ./scripts/test-sql-borrowed-source.sh
+
+deliver-sql-borrowed-source:
+	sh ./scripts/deliver-sql-borrowed-source.sh
+
+inspect-sql-source-ownership:
+	sh ./scripts/inspect-sql-source-ownership.sh

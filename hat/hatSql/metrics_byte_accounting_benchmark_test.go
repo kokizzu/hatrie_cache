@@ -8,6 +8,10 @@ func (resolver sqlMetricsByteBenchmarkResolver) ResolveSQLSource(name, key strin
 	return resolver.rows, nil
 }
 
+func (resolver sqlMetricsByteBenchmarkResolver) BorrowSQLSource(name, key string) ([]Row, bool, error) {
+	return resolver.rows, true, nil
+}
+
 var sqlMetricsByteBenchmarkResult SQLQueryResult
 
 func BenchmarkSQLMetricsDisabledFilteredQuery(b *testing.B) {

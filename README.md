@@ -74,6 +74,12 @@ output bytes. A filtered 20,000-row materialized query is 3.8x faster with
 1.85x lower heap and 4.47x fewer allocations; see
 [BENCHMARK.md](BENCHMARK.md#metrics-disabled-sql-byte-accounting).
 
+Resolvers can now explicitly lend immutable source snapshots to SQL. The
+built-in cache and monitoring proxy opt in; existing resolvers keep their
+copying fallback. This removes a full first-use source clone, making the same
+20,000-row query 1.35x faster with 1.50x lower heap; see
+[BENCHMARK.md](BENCHMARK.md#borrowed-sql-source-snapshots).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
