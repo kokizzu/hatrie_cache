@@ -742,6 +742,10 @@ func (ht *HatTrie) sqlJSONIndexConfiguredLocked(key, field string) bool {
 
 func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field, raw string) (int, bool) {
 	configured, current := 0, true
+	if index := ht.sqlJSONTypedInt64Indexes[key][field]; index != nil {
+		configured++
+		current = current && index.raw == raw
+	}
 	if index := ht.sqlJSONIndexes[key][field]; index != nil {
 		configured++
 		current = current && index.raw == raw
@@ -778,6 +782,17 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, er
 		var err error
 		snapshot, err = ht.sqlJSONIndexSnapshotLocked(key, data)
 		return snapshot, err
+	}
+	if index := ht.sqlJSONTypedInt64Indexes[key][field]; index != nil {
+		changed := index.raw != raw
+		snapshot, err := loadSnapshot()
+		if err != nil {
+			return rebuilt, err
+		}
+		refreshSQLJSONTypedInt64Index(index, field, data, snapshot.rows)
+		if changed {
+			rebuilt++
+		}
 	}
 	if index := ht.sqlJSONIndexes[key][field]; index != nil {
 		changed := index.raw != raw

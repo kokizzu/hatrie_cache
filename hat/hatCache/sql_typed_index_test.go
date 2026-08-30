@@ -71,3 +71,23 @@ func TestSQLQueryUsesTypedInt64Order(t *testing.T) {
 		t.Fatal("compatible ORDER BY query did not build the typed index")
 	}
 }
+
+func TestSQLTypedInt64IndexParticipatesInScheduledMaintenance(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"age":21}]`)
+	if err := trie.CreateSQLTypedJSONIndex(SQLJSONIndexSpec{CacheKey: "people", Fields: []string{"age"}, Type: SQLIndexInt64}); err != nil {
+		t.Fatal(err)
+	}
+	if err := trie.ScheduleSQLJSONIndexRebuild("people", "age"); err != nil {
+		t.Fatalf("ScheduleSQLJSONIndexRebuild() error = %v", err)
+	}
+	processed, err := trie.RunScheduledSQLJSONIndexRebuilds(1)
+	if err != nil || processed != 1 {
+		t.Fatalf("RunScheduledSQLJSONIndexRebuilds() = %d, %v", processed, err)
+	}
+	status, available, err := trie.SQLJSONIndexMaintenanceStats("people", "age")
+	if err != nil || !available || !status.Current || status.Rebuilds != 1 {
+		t.Fatalf("SQLJSONIndexMaintenanceStats() = %#v, %v, %v", status, available, err)
+	}
+}

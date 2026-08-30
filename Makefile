@@ -2290,6 +2290,10 @@ deliver-sql-typed-index-order:
 deliver-sql-typed-index-stream:
 	sh ./scripts/deliver-sql-typed-index-stream.sh
 
+.PHONY: deliver-sql-typed-index-maintenance
+deliver-sql-typed-index-maintenance:
+	sh ./scripts/deliver-sql-typed-index-maintenance.sh
+
 .PHONY: deliver-index-proposal-status
 deliver-index-proposal-status:
 	sh ./scripts/deliver-index-proposal-status.sh
