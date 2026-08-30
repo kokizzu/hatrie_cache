@@ -223,6 +223,14 @@ a read-only view of the immutable string; no storage or wire representation
 changes. The general materialized SQL executor can still allocate independently
 of the index probe.
 
+`make bench-sql-index-freshness-identity` also evaluated replacing the current
+content comparison with immutable-string pointer identity. It is intentionally
+not used: cache-string same-storage equality is already 2.579 ns/op versus
+1.838 ns/op for identity, while an equal-content replacement costs 107.200 us
+with the current correct comparison but would be treated as changed by identity
+and force a full index rebuild. The negligible steady-state saving is not worth
+that write-path regression.
+
 ## Architectural Big-Wins Baseline
 
 Run the cross-cutting baseline before and after changes to locking, telemetry,

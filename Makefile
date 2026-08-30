@@ -2230,6 +2230,14 @@ test-sql-secondary-index-source:
 bench-sql-secondary-index-source:
 	sh ./scripts/bench-sql-secondary-index-source.sh
 
+.PHONY: bench-sql-index-freshness-identity
+bench-sql-index-freshness-identity:
+	sh ./scripts/bench-sql-index-freshness-identity.sh
+
+.PHONY: deliver-sql-index-freshness-benchmark
+deliver-sql-index-freshness-benchmark:
+	sh ./scripts/deliver-sql-index-freshness-benchmark.sh
+
 .PHONY: deliver-sql-secondary-index-source
 deliver-sql-secondary-index-source:
 	sh ./scripts/deliver-sql-secondary-index-source.sh

@@ -5,9 +5,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"hatrie_cache/hat/hatSql"
 )
+
+var sqlIndexFreshnessBenchmarkResult bool
+
+func sqlIndexSameImmutableStorage(left, right string) bool {
+	return len(left) == len(right) && unsafe.StringData(left) == unsafe.StringData(right)
+}
 
 // sqlOrderedRowsOnlyResolver exposes the pre-streaming ordered-index contract.
 // It keeps the benchmark's materialized control on the same underlying index.
@@ -345,6 +352,29 @@ func BenchmarkSQLSecondaryIndexSource(b *testing.B) {
 				if err := benchmark.run(); err != nil {
 					b.Fatal(err)
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkSQLIndexFreshnessIdentity(b *testing.B) {
+	source := strings.Repeat(`{"id":1,"state":"ready"}`, 250_000)
+	clone := strings.Clone(source)
+	for _, benchmark := range []struct {
+		name string
+		left string
+		run  func(string, string) bool
+	}{
+		{"string_equality/same_storage", source, func(left, right string) bool { return left == right }},
+		{"identity/same_storage", source, sqlIndexSameImmutableStorage},
+		{"string_equality/equal_content_copy", clone, func(left, right string) bool { return left == right }},
+		{"identity/equal_content_copy", clone, sqlIndexSameImmutableStorage},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				sqlIndexFreshnessBenchmarkResult = benchmark.run(benchmark.left, source)
 			}
 		})
 	}
