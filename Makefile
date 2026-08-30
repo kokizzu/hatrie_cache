@@ -2206,6 +2206,14 @@ inspect-sql-index-rebuild:
 inspect-covering-source-benchmark:
 	sh ./scripts/inspect-covering-source-benchmark.sh
 
+.PHONY: inspect-next-sql-performance-opportunities
+inspect-next-sql-performance-opportunities:
+	sh ./scripts/inspect-next-sql-performance-opportunities.sh
+
+.PHONY: deliver-sql-performance-audit
+deliver-sql-performance-audit:
+	sh ./scripts/deliver-sql-performance-audit.sh
+
 .PHONY: deliver-sql-covering-source
 deliver-sql-covering-source:
 	sh ./scripts/deliver-sql-covering-source.sh
