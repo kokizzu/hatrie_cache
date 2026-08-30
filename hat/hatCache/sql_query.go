@@ -473,6 +473,15 @@ type sqlJSONTypedInt64Index struct {
 	nulls    []uint32
 	complete bool
 }
+
+type sqlJSONTypedInt64CompositeIndex struct {
+	sqlJSONIndexState
+	fields   []string
+	rows     []SQLRow
+	values   []int64
+	ordinals []uint32
+}
+
 type sqlJSONTypedInt64Entry struct {
 	value   int64
 	ordinal uint32
@@ -614,17 +623,39 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 }
 
 // CreateSQLTypedJSONIndex configures a compact opt-in typed JSON index. It is
-// disabled by default and currently supports one exact integral field.
+// disabled by default and supports exact integral fields, including an ordered
+// composite whose final field can serve a range predicate.
 func (ht *HatTrie) CreateSQLTypedJSONIndex(spec SQLJSONIndexSpec) error {
-	if ht == nil || spec.CacheKey == "" || len(spec.Fields) != 1 || spec.Fields[0] == "" {
-		return fmt.Errorf("typed SQL JSON index requires one cache key and field")
+	if ht == nil || spec.CacheKey == "" || len(spec.Fields) == 0 {
+		return fmt.Errorf("typed SQL JSON index requires a cache key and field")
 	}
 	if spec.Type != SQLIndexInt64 {
 		return fmt.Errorf("unsupported typed SQL JSON index type %q", spec.Type)
 	}
+	seen := make(map[string]struct{}, len(spec.Fields))
+	for _, field := range spec.Fields {
+		if field == "" {
+			return fmt.Errorf("typed SQL JSON index fields must not be empty")
+		}
+		if _, exists := seen[field]; exists {
+			return fmt.Errorf("typed SQL JSON index field %q is repeated", field)
+		}
+		seen[field] = struct{}{}
+	}
 	ht.registerSQLJSONIndexSource(spec.CacheKey)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if len(spec.Fields) > 1 {
+		if ht.sqlJSONTypedInt64CompositeIndexes == nil {
+			ht.sqlJSONTypedInt64CompositeIndexes = make(map[string]map[string]*sqlJSONTypedInt64CompositeIndex)
+		}
+		if ht.sqlJSONTypedInt64CompositeIndexes[spec.CacheKey] == nil {
+			ht.sqlJSONTypedInt64CompositeIndexes[spec.CacheKey] = make(map[string]*sqlJSONTypedInt64CompositeIndex)
+		}
+		fields := append([]string(nil), spec.Fields...)
+		ht.sqlJSONTypedInt64CompositeIndexes[spec.CacheKey][sqlJSONCompositeIndexIdentifier(fields)] = &sqlJSONTypedInt64CompositeIndex{fields: fields}
+		return nil
+	}
 	if ht.sqlJSONTypedInt64Indexes == nil {
 		ht.sqlJSONTypedInt64Indexes = make(map[string]map[string]*sqlJSONTypedInt64Index)
 	}
@@ -798,13 +829,17 @@ func (ht *HatTrie) sqlJSONIndexMaintenanceLocked(key, field string) *sqlJSONInde
 	return ht.sqlJSONIndexMaintenance[key][field]
 }
 
-func sqlJSONCompositeIndexContains(index *sqlJSONCompositeIndex, field string) bool {
-	for _, candidate := range index.fields {
+func sqlJSONIndexFieldsContain(fields []string, field string) bool {
+	for _, candidate := range fields {
 		if candidate == field {
 			return true
 		}
 	}
 	return false
+}
+
+func sqlJSONCompositeIndexContains(index *sqlJSONCompositeIndex, field string) bool {
+	return sqlJSONIndexFieldsContain(index.fields, field)
 }
 
 func (ht *HatTrie) sqlJSONIndexConfiguredLocked(key, field string) bool {
@@ -836,6 +871,12 @@ func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field string, source sqlJSONSo
 	}
 	for _, index := range ht.sqlJSONCompositeIndexes[key] {
 		if sqlJSONCompositeIndexContains(index, field) {
+			configured++
+			current = current && source.current(index.sqlJSONIndexState)
+		}
+	}
+	for _, index := range ht.sqlJSONTypedInt64CompositeIndexes[key] {
+		if sqlJSONIndexFieldsContain(index.fields, field) {
 			configured++
 			current = current && source.current(index.sqlJSONIndexState)
 		}
@@ -923,6 +964,22 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field string, source sqlJSON
 			return rebuilt, err
 		}
 		if err := refreshSQLJSONCompositeIndexSourceRows(index, source, snapshot.rows); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	for _, index := range ht.sqlJSONTypedInt64CompositeIndexes[key] {
+		if !sqlJSONIndexFieldsContain(index.fields, field) {
+			continue
+		}
+		changed := !source.current(index.sqlJSONIndexState)
+		snapshot, err := loadSnapshot()
+		if err != nil {
+			return rebuilt, err
+		}
+		if err := refreshSQLJSONTypedInt64CompositeIndexSource(index, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -1449,6 +1506,16 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if typed := ht.sqlJSONTypedInt64CompositeIndexes[key][sqlJSONCompositeIndexIdentifier(fields)]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+		if err != nil {
+			return SQLJSONIndexStats{}, false, err
+		}
+		if err := refreshSQLJSONTypedInt64CompositeIndexSource(typed, source, snapshot.rows); err != nil {
+			return SQLJSONIndexStats{}, false, err
+		}
+		return sqlJSONTypedInt64CompositeIndexStats(key, typed), true, nil
+	}
 	index := ht.sqlJSONCompositeIndexes[key][sqlJSONCompositeIndexIdentifier(fields)]
 	if index == nil {
 		return SQLJSONIndexStats{}, false, nil
@@ -2109,6 +2176,195 @@ func sqlJSONTypedInt64Value(value interface{}) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func refreshSQLJSONTypedInt64CompositeIndexSource(index *sqlJSONTypedInt64CompositeIndex, source sqlJSONSource, rows []SQLRow) error {
+	if source.current(index.sqlJSONIndexState) {
+		return nil
+	}
+	if len(index.fields) == 0 || uint64(len(rows)) > uint64(^uint32(0)) {
+		return fmt.Errorf("typed composite SQL JSON index has unsupported row count or fields")
+	}
+	if len(rows) > int(^uint(0)>>1)/len(index.fields) {
+		return fmt.Errorf("typed composite SQL JSON index value vector is too large")
+	}
+	values := make([]int64, len(rows)*len(index.fields))
+	ordinals := make([]uint32, 0, len(rows))
+	for ordinal, row := range rows {
+		valid := true
+		for fieldIndex, field := range index.fields {
+			value, exists, err := sqlJSONIndexRowValue(row, field)
+			if err != nil {
+				return err
+			}
+			integer, ok := sqlJSONTypedInt64Value(value)
+			if !exists || !ok {
+				valid = false
+				break
+			}
+			values[ordinal*len(index.fields)+fieldIndex] = integer
+		}
+		if valid {
+			ordinals = append(ordinals, uint32(ordinal))
+		}
+	}
+	sort.SliceStable(ordinals, func(left, right int) bool {
+		return sqlJSONTypedInt64CompositeCompare(index.fields, values, ordinals[left], ordinals[right]) < 0
+	})
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows, index.values, index.ordinals = rows, values, ordinals
+	return nil
+}
+
+func sqlJSONTypedInt64CompositeCompare(fields []string, values []int64, left, right uint32) int {
+	width := len(fields)
+	leftOffset, rightOffset := int(left)*width, int(right)*width
+	for fieldIndex := range fields {
+		if values[leftOffset+fieldIndex] < values[rightOffset+fieldIndex] {
+			return -1
+		}
+		if values[leftOffset+fieldIndex] > values[rightOffset+fieldIndex] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func sqlJSONTypedInt64CompositeIndexStats(key string, index *sqlJSONTypedInt64CompositeIndex) SQLJSONIndexStats {
+	stats := SQLJSONIndexStats{
+		Key:      key,
+		Fields:   append([]string(nil), index.fields...),
+		Rows:     len(index.ordinals),
+		NullRows: len(index.rows) - len(index.ordinals),
+	}
+	if len(index.ordinals) == 0 {
+		return stats
+	}
+	frequencies := make(map[int]int)
+	for start := 0; start < len(index.ordinals); {
+		end := start + 1
+		for end < len(index.ordinals) && sqlJSONTypedInt64CompositeCompare(index.fields, index.values, index.ordinals[start], index.ordinals[end]) == 0 {
+			end++
+		}
+		count := end - start
+		stats.DistinctKeys++
+		if stats.MinRowsPerKey == 0 || count < stats.MinRowsPerKey {
+			stats.MinRowsPerKey = count
+		}
+		if count > stats.MaxRowsPerKey {
+			stats.MaxRowsPerKey = count
+		}
+		frequencies[count]++
+		start = end
+	}
+	stats.AverageRowsPerKey = float64(stats.Rows) / float64(stats.DistinctKeys)
+	counts := make([]int, 0, len(frequencies))
+	for count := range frequencies {
+		counts = append(counts, count)
+	}
+	sort.Ints(counts)
+	stats.FrequencyHistogram = make([]SQLJSONIndexFrequencyBucket, 0, len(counts))
+	for _, count := range counts {
+		stats.FrequencyHistogram = append(stats.FrequencyHistogram, SQLJSONIndexFrequencyBucket{RowsPerKey: count, DistinctKeys: frequencies[count]})
+	}
+	return stats
+}
+
+// ResolveSQLCompositeIndexedRangeSource resolves equality predicates over a
+// typed composite prefix followed by a range predicate on its final field.
+func (ht *HatTrie) ResolveSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(equalityFields) == 0 || len(equalityFields) != len(equalityValues) || rangeField == "" || rangeValue == nil {
+		return nil, false, nil
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return nil, false, err
+	}
+	provided := make(map[string]int64, len(equalityFields))
+	for index, field := range equalityFields {
+		value, ok := sqlJSONTypedInt64Value(equalityValues[index])
+		if field == "" || !ok {
+			return nil, false, nil
+		}
+		provided[field] = value
+	}
+	rangeInteger, ok := sqlJSONTypedInt64Value(rangeValue)
+	if !ok {
+		return nil, false, nil
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	var selected *sqlJSONTypedInt64CompositeIndex
+	for _, candidate := range ht.sqlJSONTypedInt64CompositeIndexes[key] {
+		if len(candidate.fields) != len(equalityFields)+1 || candidate.fields[len(candidate.fields)-1] != rangeField {
+			continue
+		}
+		matches := true
+		for _, field := range candidate.fields[:len(candidate.fields)-1] {
+			if _, exists := provided[field]; !exists {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			selected = candidate
+			break
+		}
+	}
+	if selected == nil {
+		return nil, false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := refreshSQLJSONTypedInt64CompositeIndexSource(selected, source, snapshot.rows); err != nil {
+		return nil, false, err
+	}
+	prefix := make([]int64, len(selected.fields)-1)
+	for index, field := range selected.fields[:len(selected.fields)-1] {
+		prefix[index] = provided[field]
+	}
+	width := len(selected.fields)
+	comparePrefix := func(ordinal uint32) int {
+		offset := int(ordinal) * width
+		for index, value := range prefix {
+			if selected.values[offset+index] < value {
+				return -1
+			}
+			if selected.values[offset+index] > value {
+				return 1
+			}
+		}
+		return 0
+	}
+	start := sort.Search(len(selected.ordinals), func(index int) bool { return comparePrefix(selected.ordinals[index]) >= 0 })
+	end := start + sort.Search(len(selected.ordinals)-start, func(index int) bool { return comparePrefix(selected.ordinals[start+index]) > 0 })
+	if start == end {
+		return []SQLRow{}, true, nil
+	}
+	valueAt := func(index int) int64 { return selected.values[int(selected.ordinals[index])*width+width-1] }
+	rangeStart, rangeEnd := start, end
+	switch operator {
+	case "<":
+		rangeEnd = start + sort.Search(end-start, func(index int) bool { return valueAt(start+index) >= rangeInteger })
+	case "<=":
+		rangeEnd = start + sort.Search(end-start, func(index int) bool { return valueAt(start+index) > rangeInteger })
+	case ">":
+		rangeStart = start + sort.Search(end-start, func(index int) bool { return valueAt(start+index) > rangeInteger })
+	case ">=":
+		rangeStart = start + sort.Search(end-start, func(index int) bool { return valueAt(start+index) >= rangeInteger })
+	default:
+		return nil, false, nil
+	}
+	rows := make([]SQLRow, 0, rangeEnd-rangeStart)
+	for _, ordinal := range selected.ordinals[rangeStart:rangeEnd] {
+		rows = append(rows, selected.rows[ordinal])
+	}
+	return hatSql.CloneRows(rows), true, nil
 }
 
 func sqlJSONTypedInt64Rows(index *sqlJSONTypedInt64Index, ordinals []uint32) []SQLRow {

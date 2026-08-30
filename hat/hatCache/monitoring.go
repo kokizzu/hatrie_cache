@@ -26,6 +26,7 @@ import (
 	"hatrie_cache/hat/hatMonitoring"
 	"hatrie_cache/hat/hatRate"
 	"hatrie_cache/hat/hatSchema"
+	"hatrie_cache/hat/hatSql"
 	"hatrie_cache/internal/jsonwire"
 )
 
@@ -66,12 +67,12 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 }
 
 type MonitoringOptions struct {
-	NodeName                         string
-	Version                          string
-	WebDir                           string
-	AuthToken                        string
-	AuthPreviousToken                string
-	AuthPreviousExpiresAt            time.Time
+	NodeName              string
+	Version               string
+	WebDir                string
+	AuthToken             string
+	AuthPreviousToken     string
+	AuthPreviousExpiresAt time.Time
 	// IdentityProvider optionally authenticates monitoring requests with an
 	// external identity system such as OIDC or a trusted reverse proxy.
 	IdentityProvider                 hatAuth.IdentityProvider
@@ -196,6 +197,14 @@ func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedSource(name, key
 		return nil, false, nil
 	}
 	return indexed.ResolveSQLCompositeIndexedSource(name, key, fields, values)
+}
+
+func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(hatSql.CompositeRangeIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLCompositeIndexedRangeSource(name, key, equalityFields, equalityValues, rangeField, operator, rangeValue)
 }
 
 func (resolver monitoringSQLResolver) LockSQLSnapshot() func() {
@@ -1166,7 +1175,7 @@ func (handler *MonitoringHandler) handleOpenAPI(w http.ResponseWriter, r *http.R
 func monitoringOpenAPIDocument() map[string]interface{} {
 	jsonResponse := map[string]interface{}{
 		"description": "JSON response",
-		"content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
+		"content":     map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
 	}
 	return map[string]interface{}{
 		"openapi": "3.1.0",
@@ -1175,12 +1184,12 @@ func monitoringOpenAPIDocument() map[string]interface{} {
 			"version": "v1",
 		},
 		"paths": map[string]interface{}{
-			"/api/health": map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/entries": map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/sql": map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/commands": map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/health":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/entries":        map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/sql":            map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/commands":       map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
 			"/api/grafana/search": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/grafana/query": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
+			"/api/grafana/query":  map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
 		},
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},

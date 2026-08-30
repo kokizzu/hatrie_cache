@@ -9242,6 +9242,22 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
+	if indexed, ok := resolver.(CompositeRangeIndexedSourceResolver); ok {
+		fields, values, rangeField, operator, rangeValue, matched := sqlCompositeIndexedRange(source, condition)
+		if matched {
+			allFields := append(append([]string(nil), fields...), rangeField)
+			if sqlIndexHintAllowsFields(hint, source, allFields) {
+				started := time.Now()
+				rows, available, err := indexed.ResolveSQLCompositeIndexedRangeSource(source.kind, source.key, fields, values, rangeField, operator, rangeValue)
+				if available || err != nil {
+					if available && metrics != nil {
+						metrics.record("COMPOSITE RANGE INDEX SCAN", sqlExplainSource(source)+" fields="+strings.Join(allFields, ","), len(fields)+1, len(rows), started)
+					}
+					return rows, available, err
+				}
+			}
+		}
+	}
 	if indexed, ok := resolver.(SQLCompositeIndexedSourceResolver); ok {
 		fields, values := sqlCompositeIndexedEqualities(source, condition)
 		if len(fields) >= 2 && sqlIndexHintAllowsFields(hint, source, fields) {
@@ -9626,6 +9642,62 @@ func sqlCompositeIndexedEqualities(source sqlSource, condition sqlExpr) ([]strin
 		orderedValues[index] = values[field]
 	}
 	return fields, orderedValues
+}
+
+func sqlCompositeIndexedRange(source sqlSource, condition sqlExpr) ([]string, []interface{}, string, string, interface{}, bool) {
+	equalities := map[string]interface{}{}
+	rangeField, rangeOperator := "", ""
+	var rangeValue interface{}
+	valid := true
+	var collect func(sqlExpr)
+	collect = func(expression sqlExpr) {
+		if expression.kind != "binary" || expression.left == nil || expression.right == nil {
+			valid = false
+			return
+		}
+		if expression.op == "AND" {
+			collect(*expression.left)
+			collect(*expression.right)
+			return
+		}
+		left, right := *expression.left, *expression.right
+		field, operator, value, matched := "", expression.op, interface{}(nil), false
+		if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
+			field, value, matched = left.name, right.value, true
+		} else if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+			field, operator, value, matched = right.name, sqlReverseComparison(expression.op), left.value, true
+		}
+		if !matched {
+			valid = false
+			return
+		}
+		if operator == "=" {
+			equalities[field] = value
+			return
+		}
+		if rangeField != "" {
+			valid = false
+			return
+		}
+		rangeField, rangeOperator, rangeValue = field, operator, value
+	}
+	collect(condition)
+	if !valid || len(equalities) == 0 || rangeField == "" {
+		return nil, nil, "", "", nil, false
+	}
+	if _, overlaps := equalities[rangeField]; overlaps {
+		return nil, nil, "", "", nil, false
+	}
+	fields := make([]string, 0, len(equalities))
+	for field := range equalities {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	values := make([]interface{}, len(fields))
+	for index, field := range fields {
+		values[index] = equalities[field]
+	}
+	return fields, values, rangeField, rangeOperator, rangeValue, true
 }
 
 func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver) ([]SQLRow, bool, error) {

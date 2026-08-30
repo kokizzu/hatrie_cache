@@ -2306,6 +2306,12 @@ format-sql-bytes-source:
 deliver-sql-bytes-source:
 	sh ./scripts/deliver-sql-bytes-source.sh
 
+inspect-typed-composite-planner:
+	sh ./scripts/inspect-typed-composite-planner.sh
+
+test-sql-typed-composite:
+	sh ./scripts/test-sql-typed-composite.sh
+
 .PHONY: bench-sql-index-snapshots
 bench-sql-index-snapshots:
 	sh ./scripts/bench-sql-index-snapshots.sh
@@ -2420,3 +2426,20 @@ bench-sql-typed-index-baseline:
 .PHONY: deliver-sql-typed-index-baseline
 deliver-sql-typed-index-baseline:
 	sh ./scripts/deliver-sql-typed-index-baseline.sh
+inspect-sql-typed-composite-benchmark:
+	sh ./scripts/inspect-sql-typed-composite-benchmark.sh
+
+benchmark-sql-typed-composite:
+	sh ./scripts/benchmark-sql-typed-composite.sh
+
+inspect-sql-typed-composite-docs:
+	sh ./scripts/inspect-sql-typed-composite-docs.sh
+
+format-sql-typed-composite:
+	sh ./scripts/format-sql-typed-composite.sh
+
+status-sql-typed-composite:
+	sh ./scripts/status-sql-typed-composite.sh
+
+deliver-sql-typed-composite:
+	sh ./scripts/deliver-sql-typed-composite.sh

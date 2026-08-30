@@ -13445,6 +13445,39 @@ make test-sql-typed-index
 make bench-sql-typed-index
 ```
 
+## Typed Int64 Composite Equality-Prefix Range Index
+
+`SQLJSONIndexSpec{Fields: []string{"tenant_id", "created_at"}, Type:
+SQLIndexInt64}` configures an ordered two-field index. The planner uses it only
+when every prefix field has an equality predicate and the final field has one
+of `<`, `<=`, `>`, or `>=`; unsupported types and predicate shapes retain the
+normal correct scan. The public resolver and SQL planner both return cloned
+candidate rows, so callers cannot mutate shared index state. Scheduled rebuilds
+and `SQLJSONIndexStats` include every field of this index.
+
+The index retains one `int64` per indexed field and one `uint32` ordinal per
+source row, or `20 B` per fully valid two-field row before slice overhead. It
+also retains the shared decoded source snapshot. This is intentionally opt-in
+and disabled by default.
+
+`BenchmarkSQLTypedInt64CompositePrefixRange` ran five times on an AMD Ryzen 9
+5950X with 20,000 JSON rows and the selective query `tenant_id = 7 AND
+created_at >= 19000`. The index was warmed before timing.
+
+| Executor path | Median time | Allocated bytes | Allocations | Compared with scan |
+| --- | ---: | ---: | ---: | --- |
+| Normal scan | 582.6 us/op | 995,064 B/op | 118 allocs/op | Baseline |
+| Typed composite index | 41.5 us/op | 29,926 B/op | 420 allocs/op | 14.0x faster; 33.2x fewer bytes; 3.56x more allocations |
+
+The byte and latency savings are substantial for selective queries. The higher
+allocation count is a deliberate mutation-safety cost of cloning indexed
+candidates before SQL evaluation, so broad ranges can have a smaller benefit.
+
+```sh
+make test-sql-typed-composite
+make benchmark-sql-typed-composite
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

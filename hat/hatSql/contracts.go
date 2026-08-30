@@ -201,6 +201,12 @@ type CompositeIndexedSourceResolver interface {
 	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error)
 }
 
+// CompositeRangeIndexedSourceResolver optionally resolves equality predicates
+// over an index prefix followed by one ordered range predicate.
+type CompositeRangeIndexedSourceResolver interface {
+	ResolveSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]Row, bool, error)
+}
+
 // SecondaryIndexedSourceResolver optionally combines equality postings from
 // independently configured secondary indexes. operation is either AND or OR;
 // implementations return only candidate rows and the executor re-evaluates the

@@ -54,6 +54,13 @@ avoiding row decoding and posting allocation; set a custom budget with
 unlimited index build is intentional. Measurements and test commands are in
 [BENCHMARK.md](BENCHMARK.md#sql-index-admission-budget).
 
+An opt-in typed `SQLIndexInt64` index can now cover an equality prefix followed
+by a range on its final field, such as `tenant_id = 7 AND created_at >= 19000`.
+It uses a flat `int64` vector and `uint32` row ordinals rather than a per-row
+map index. On the measured selective 20,000-row executor query it is 14.0x
+faster and allocates 33.2x fewer bytes; the safety-preserving candidate-row
+clone increases allocation count. See [BENCHMARK.md](BENCHMARK.md#typed-int64-composite-equality-prefix-range-index).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

@@ -30,11 +30,14 @@ cannot know whether a field is an integer, date, datetime, string, or boolean.
 
 ## Implementation Status
 
-`SQLIndexInt64` is implemented as an opt-in, single-field typed index. It uses
-sorted `int64` values and row ordinals while retaining the source generation
-through the shared immutable index snapshot. Date, datetime, string, boolean,
-composite typed indexes, and incremental mutation support remain proposals and
-are not implemented.
+`SQLIndexInt64` is implemented as an opt-in typed index. A one-field index uses
+sorted `int64` values and row ordinals for equality, range, and ordered scans.
+An ordered multi-field index supports equality predicates over every prefix
+field plus one range predicate on its final field. Its flat `int64` vector and
+`uint32` row ordinals retain no per-row index objects, while source rows remain
+shared through the immutable index snapshot. Date, datetime, string, boolean,
+arbitrary composite predicate shapes, and incremental mutation support remain
+proposals and are not implemented.
 
 ## Goals
 
@@ -63,7 +66,7 @@ const (
 
 type SQLJSONIndexSpec struct {
     CacheKey string
-    Fields   []string // one field initially; ordered composite prefix later
+    Fields   []string // one field, or equality prefix followed by range field
     Type     SQLIndexType
 }
 
