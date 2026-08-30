@@ -12744,6 +12744,20 @@ func sqlBuiltinFunction(name string) bool {
 	return false
 }
 func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionResolver) ([]interface{}, error) {
+	switch expr.kind {
+	case "literal":
+		out := make([]interface{}, len(rows))
+		for index := range out {
+			out[index] = expr.value
+		}
+		return out, nil
+	case "field":
+		out := make([]interface{}, len(rows))
+		for index, row := range rows {
+			out[index] = sqlField(row, expr.qualifier, expr.name)
+		}
+		return out, nil
+	}
 	if expr.kind == "func" && !sqlBuiltinFunction(expr.name) {
 		if functions == nil {
 			return nil, fmt.Errorf("unknown SQL function %q", expr.name)

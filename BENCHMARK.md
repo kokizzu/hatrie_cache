@@ -13592,6 +13592,31 @@ make test-sql-metrics-byte-accounting
 make benchmark-sql-metrics-byte-accounting
 ```
 
+## Direct Batch SQL Leaves
+
+The vectorized evaluator previously delegated every field and literal expression
+to the generic one-row evaluator. A predicate such as `event.score >= 32`
+therefore allocated one temporary batch per source row. Field and literal nodes
+now fill their output vectors directly; binary and compound expressions retain
+the established evaluation semantics.
+
+After unobserved result-byte serialization was removed, the same
+`BenchmarkSQLMetricsDisabledFilteredQuery` fixture measured:
+
+| Batch leaf evaluation | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Generic one-row fallback | 6.55 ms/op | 12,707,208 B/op | 70,314 allocs/op | Baseline |
+| Direct field and literal vectors | 4.97 ms/op | 8,218,389 B/op | 30,231 allocs/op | 1.32x faster; 1.55x fewer bytes; 2.33x fewer allocations |
+
+`TestSQLBatchLeafPredicatePreservesNullAndLiteralValues` covers a field/literal
+predicate with a `NULL` input and verifies both filtering and projected literal
+values. The full SQL verifier covers compound expressions and query execution.
+
+```sh
+make test-sql-expression-batch
+make benchmark-sql-metrics-byte-accounting
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

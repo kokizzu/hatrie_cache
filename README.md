@@ -85,6 +85,11 @@ serializes final result rows solely to discard their byte count. Observed querie
 retain that value. The same normal query becomes 1.60x faster with 1.57x fewer
 allocations; see [BENCHMARK.md](BENCHMARK.md#unobserved-sql-result-bytes).
 
+Batch SQL evaluation now handles field and literal expressions directly instead
+of allocating a one-row evaluator batch for every source row. The same normal
+query is 1.32x faster, with 1.55x lower allocation and 2.33x fewer allocations;
+see [BENCHMARK.md](BENCHMARK.md#direct-batch-sql-leaves).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

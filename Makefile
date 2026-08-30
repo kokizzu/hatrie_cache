@@ -2497,3 +2497,20 @@ deliver-sql-unobserved-result-bytes:
 
 inspect-sql-source-ownership:
 	sh ./scripts/inspect-sql-source-ownership.sh
+ifneq (,$(filter inspect-sql-expression-batch,$(MAKECMDGOALS)))
+.PHONY: inspect-sql-expression-batch
+inspect-sql-expression-batch:
+	sh ./scripts/inspect-sql-expression-batch.sh
+endif
+
+ifneq (,$(filter test-sql-expression-batch,$(MAKECMDGOALS)))
+.PHONY: test-sql-expression-batch
+test-sql-expression-batch:
+	sh ./scripts/test-sql-expression-batch.sh
+endif
+
+ifneq (,$(filter deliver-sql-direct-batch-leaves,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-direct-batch-leaves
+deliver-sql-direct-batch-leaves:
+	sh ./scripts/deliver-sql-direct-batch-leaves.sh
+endif
