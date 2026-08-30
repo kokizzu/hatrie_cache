@@ -2234,6 +2234,22 @@ bench-sql-secondary-index-source:
 bench-sql-index-freshness-identity:
 	sh ./scripts/bench-sql-index-freshness-identity.sh
 
+.PHONY: inspect-sql-direct-string-source
+inspect-sql-direct-string-source:
+	sh ./scripts/inspect-sql-direct-string-source.sh
+
+.PHONY: test-sql-direct-string-source
+test-sql-direct-string-source:
+	sh ./scripts/test-sql-direct-string-source.sh
+
+.PHONY: bench-sql-columnar-string-source
+bench-sql-columnar-string-source:
+	sh ./scripts/bench-sql-columnar-string-source.sh
+
+.PHONY: deliver-sql-columnar-string-source
+deliver-sql-columnar-string-source:
+	sh ./scripts/deliver-sql-columnar-string-source.sh
+
 .PHONY: deliver-sql-index-freshness-benchmark
 deliver-sql-index-freshness-benchmark:
 	sh ./scripts/deliver-sql-index-freshness-benchmark.sh

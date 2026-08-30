@@ -1839,6 +1839,11 @@ func sqlJSONColumnarBatch(key string, data []byte, fields []string) (hatSql.Colu
 		return hatSql.ColumnarBatch{}, fmt.Errorf("CACHE(%q) must contain a JSON object or an array of JSON objects", key)
 	}
 }
+
+func sqlJSONColumnarBatchString(key, data string, fields []string) (hatSql.ColumnarBatch, error) {
+	return sqlJSONColumnarBatch(key, unsafe.Slice(unsafe.StringData(data), len(data)), fields)
+}
+
 func sqlIndexValueKey(value interface{}) (string, bool) {
 	switch value := value.(type) {
 	case nil:
@@ -1925,11 +1930,11 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 		}
 		return batch, true, err
 	}
-	data, err := ht.GetBytesChecked(key)
+	data, err := ht.sqlJSONSourceString(key)
 	if err != nil {
 		return hatSql.ColumnarBatch{}, false, err
 	}
-	batch, err := sqlJSONColumnarBatch(key, data, fields)
+	batch, err := sqlJSONColumnarBatchString(key, data, fields)
 	if err == nil {
 		ht.sqlColumnarLayouts.observe(layoutKey, batch)
 	}

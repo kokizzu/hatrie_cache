@@ -216,12 +216,17 @@ The same 100,000-row fixture on the AMD Ryzen 9 5950X produced:
 | Bitmap equality returning one row | 2.421 ms; 16,384,371 B; 7 allocs | 463.4 ns; 360 B; 5 allocs | 5,224.04x faster; 45,512.14x lower heap; two fewer allocations |
 | Text index lookup returning one row | 2.656 ms; 16,384,446 B; 10 allocs | 643.9 ns; 432 B; 8 allocs | 4,125.00x faster; 37,926.96x lower heap; two fewer allocations |
 | Composite equality returning one row | 2.435 ms; 16,384,381 B; 7 allocs | 595.8 ns; 368 B; 5 allocs | 4,087.35x faster; 44,522.77x lower heap; two fewer allocations |
+| Uncached columnar parse of 20,000 JSON rows | 33.903 ms; 14,571,509 B; 320,052 allocs | 32.989 ms; 13,301,778 B; 320,052 allocs | 1.03x faster; 1.10x lower heap; same allocation count |
 
 The source snapshot remains valid after a replacement, covered by focused
 generic, covering, bitmap, text, and composite-index tests. The parser receives
 a read-only view of the immutable string; no storage or wire representation
 changes. The general materialized SQL executor can still allocate independently
 of the index probe.
+
+The columnar result applies only to the uncached parser path. Materialized and
+streamed CACHE JSON reads were measured separately and retained their checked
+byte reads because they did not show a reliable latency gain.
 
 `make bench-sql-index-freshness-identity` also evaluated replacing the current
 content comparison with immutable-string pointer identity. It is intentionally
