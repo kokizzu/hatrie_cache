@@ -2198,6 +2198,18 @@ deliver-memory-compaction-safety:
 inspect-sql-materialized-order:
 	sh ./scripts/inspect-sql-materialized-order.sh
 
+.PHONY: inspect-sql-index-rebuild
+inspect-sql-index-rebuild:
+	sh ./scripts/inspect-sql-index-rebuild.sh
+
+.PHONY: test-sql-index-source-snapshot
+test-sql-index-source-snapshot:
+	sh ./scripts/test-sql-index-source-snapshot.sh
+
+.PHONY: deliver-sql-immutable-source
+deliver-sql-immutable-source:
+	sh ./scripts/deliver-sql-immutable-source.sh
+
 .PHONY: test-sql-materialized-order
 test-sql-materialized-order:
 	sh ./scripts/test-sql-materialized-order.sh

@@ -195,6 +195,30 @@ This preserves output order and result rows and preserves source-row budget
 failure. It does not change storage bytes, wire bytes, index build cost, or
 semantics for unsupported query plans.
 
+## SQL Immutable Index Source Snapshot
+
+Generic JSON field indexes now read cached string JSON through an immutable
+string snapshot. This removes the temporary full-document `[]byte` copy from
+the indexed equality, range, and ordered scan paths. Bytes, cold values, and
+the bitmap, text, covering, and composite indexes retain their existing
+checked source handling.
+
+```sh
+make bench-sql-typed-index-baseline
+```
+
+The same 100,000-row fixture on the AMD Ryzen 9 5950X produced:
+
+| Workload | Before | Final | Improvement |
+| --- | ---: | ---: | --- |
+| Generic indexed range query returning 10 rows | 820.841 us; 3,076,561 B; 1,991 allocs | 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation |
+| Direct indexed equality probe returning one row | N/A | 576.2 ns; 360 B; 5 allocs | Direct source lookup baseline for the current implementation |
+
+The source snapshot remains valid after a replacement, covered by a focused
+test. The parser receives a read-only view of the immutable string; no storage
+or wire representation changes. The general materialized SQL executor can
+still allocate independently of the index probe.
+
 ## Architectural Big-Wins Baseline
 
 Run the cross-cutting baseline before and after changes to locking, telemetry,
@@ -236,6 +260,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Pass | Implemented improvement | Baseline | Final | Improvement | Main tradeoff |
 | --- | --- | ---: | ---: | ---: | --- |
 | Earlier | [HTTP protobuf command wire](README.md#serialization-tradeoffs) | JSON: 15,012 ns; 3,185 wire B | Protobuf: 12,637 ns; 3,146 wire B | 1.19x faster, 1.2% smaller wire | Heap is 0.6% higher; complex values retain JSON fallback |
+| Current pass | [Immutable SQL index source snapshot](#sql-immutable-index-source-snapshot), 100k-row generic indexed range | Copied JSON source: 820.841 us; 3,076,561 B; 1,991 allocs | Immutable source string: 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation | Applies to generic field indexes backed by immutable cache strings; byte/cold and specialized index sources retain checked fallback handling |
 | Current pass | [Streamed indexed ORDER BY LIMIT materialization](#sql-indexed-order-by-limit-materialization), 100k JSON rows, `ORDER BY id DESC LIMIT 10` | Ordered-index source clone: 214.952 ms; 177,320,348 B; 2,000,123 allocs | Ordered-index stream: 40.286 ms; 63,705,298 B; 500,112 allocs | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations | Compatible direct-field, no-predicate, default-collation query shape only; it scans the whole source to retain `MaxRows` rejection semantics |
 | Current pass | [Bounded protobuf batch request reuse](#bounded-protobuf-batch-request-reuse), 16-command HTTP request | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2x fewer allocations | At most one fixed 128-byte pointer slice is retained per pooled parent; batches above 16 release their backing |
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |

@@ -38,8 +38,12 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 	if err := trie.CreateSQLJSONFieldIndex("events", "id"); err != nil {
 		b.Fatal(err)
 	}
+	equalityQuery := "FROM CACHE('events') AS event WHERE event.id = 99999 SELECT event.id"
 	rangeQuery := "FROM CACHE('events') AS event WHERE event.id >= 99900 AND event.id < 99910 SELECT event.id"
 	orderQuery := "FROM CACHE('events') AS event ORDER BY event.id DESC LIMIT 10 SELECT event.id"
+	if result, err := ExecuteSQLQuery(equalityQuery, trie); err != nil || len(result.Rows) != 1 {
+		b.Fatalf("indexed equality warmup = %#v, %v", result, err)
+	}
 	if result, err := ExecuteSQLQuery(rangeQuery, trie); err != nil || len(result.Rows) != 10 {
 		b.Fatalf("indexed range warmup = %#v, %v", result, err)
 	}
@@ -53,6 +57,8 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 		query    string
 		resolver SQLSourceResolver
 	}{
+		{name: "equality/indexed", query: equalityQuery, resolver: trie},
+		{name: "equality/full_scan", query: equalityQuery, resolver: fullScan},
 		{name: "range/indexed", query: rangeQuery, resolver: trie},
 		{name: "range/full_scan", query: rangeQuery, resolver: fullScan},
 		{name: "order_limit/streamed_index", query: orderQuery, resolver: trie},
@@ -69,4 +75,14 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 			}
 		})
 	}
+	b.Run("equality/direct_indexed_resolver", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			resolved, available, err := trie.ResolveSQLIndexedSource("CACHE", "events", "id", float64(rows-1))
+			if err != nil || !available || len(resolved) != 1 {
+				b.Fatalf("ResolveSQLIndexedSource() = %#v, %v, %v", resolved, available, err)
+			}
+		}
+	})
 }

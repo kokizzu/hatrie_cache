@@ -8,6 +8,25 @@ import (
 	"time"
 )
 
+func TestSQLJSONSourceStringSnapshotSurvivesReplacement(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"team":"blue"}]`)
+
+	before, err := trie.sqlJSONSourceString("people")
+	if err != nil {
+		t.Fatalf("sqlJSONSourceString() error = %v", err)
+	}
+	trie.UpsertString("people", `[{"id":2,"team":"red"}]`)
+	if before != `[{"id":1,"team":"blue"}]` {
+		t.Fatalf("old source snapshot = %q", before)
+	}
+	after, err := trie.sqlJSONSourceString("people")
+	if err != nil || after != `[{"id":2,"team":"red"}]` {
+		t.Fatalf("new source snapshot = %q, %v", after, err)
+	}
+}
+
 func TestSQLJSONIndexHealthRefreshesOnlineIndex(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("people", `[{"team":"core"},{"team":"core"},{"name":"missing"}]`)
