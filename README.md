@@ -3234,3 +3234,15 @@ the payload limit is roughly `capacity * maximumMatchedRows * sizeof(int)`,
 plus small cache metadata. Cache hits remove predicate CPU, but do not reduce
 the source batch transfer because the current source snapshot is still read.
 See [BENCHMARK.md](BENCHMARK.md#versioned-columnar-condition-cache).
+
+### Dictionary Grouped Aggregates
+
+For a dictionary-encoded text group field, the materialized executor directly
+handles one-field `GROUP BY` queries ordered by that same field, with `COUNT`,
+`SUM`, `AVG`, `MIN`, or `MAX` and optional direct numeric filters. It groups by
+compact dictionary code rather than source row maps or string hash keys.
+
+This path is deliberately limited to binary collation and falls back for
+Unicode case-insensitive ordering, expressions, multiple group fields,
+`HAVING`, and other SQL shapes. See
+[BENCHMARK.md](BENCHMARK.md#dictionary-columnar-grouped-aggregates).

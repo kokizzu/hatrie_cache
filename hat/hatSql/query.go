@@ -7030,6 +7030,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
+	if result, handled, err := executeSQLColumnarDictionaryGroupAggregate(q, columnar, control, metrics, outer); handled {
+		return result, true, err
+	}
 	if result, handled, err := executeSQLColumnarNumericAggregate(q, columnar, control, metrics, outer); handled {
 		return result, true, err
 	}
@@ -7314,6 +7317,177 @@ type sqlColumnarNumericAggregate struct {
 	sum   float64
 	value float64
 	seen  bool
+}
+
+type sqlColumnarDictionaryGroupProjection struct {
+	column    string
+	group     bool
+	aggregate *sqlColumnarNumericAggregate
+}
+
+// executeSQLColumnarDictionaryGroupAggregate groups low-cardinality text by
+// its dictionary code. It accepts only an ORDER BY on the grouped field, so a
+// byte-wise sort of dictionary values preserves the narrow SQL result order.
+func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
+	groupField, projections, fields, predicates, descending, ok := sqlColumnarDictionaryGroupAggregatePlan(q, outer)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	started := time.Now()
+	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
+	if err != nil || !available {
+		return SQLQueryResult{}, available, err
+	}
+	dictionary, encoded := batch.Dictionaries[groupField]
+	if !encoded {
+		return SQLQueryResult{}, false, nil
+	}
+	if batch.Rows < 0 {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned a negative row count", q.from.key)
+	}
+	if control != nil && batch.Rows > control.maxRows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, control.maxRows)
+	}
+	for _, field := range fields {
+		if batch.FieldRows(field) != batch.Rows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
+		}
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
+	}
+
+	states := make([][]sqlColumnarNumericAggregate, len(dictionary.Values))
+	groupRows := make([]int, len(dictionary.Values))
+	codes := make([]uint32, 0, len(dictionary.Values))
+	matched := 0
+	filterStarted := time.Now()
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if control != nil {
+			if err := control.check(); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+		}
+		matches := true
+		for _, predicate := range predicates {
+			candidate, _ := batch.Value(predicate.field, rowIndex)
+			number, numeric := sqlNumber(candidate)
+			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		code := dictionary.Codes[rowIndex]
+		if int(code) >= len(dictionary.Values) {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, groupField)
+		}
+		if states[code] == nil {
+			states[code] = make([]sqlColumnarNumericAggregate, len(projections))
+			for index, projection := range projections {
+				if projection.aggregate != nil {
+					states[code][index] = *projection.aggregate
+				}
+			}
+			codes = append(codes, code)
+		}
+		groupRows[code]++
+		if control != nil && control.options.MaxGroupRowsPerKey > 0 && groupRows[code] > control.options.MaxGroupRowsPerKey {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", groupRows[code], control.options.MaxGroupRowsPerKey)
+		}
+		matched++
+		for index, projection := range projections {
+			if projection.aggregate != nil {
+				states[code][index].add(batch, rowIndex)
+			}
+		}
+	}
+	if metrics != nil && len(predicates) > 0 {
+		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+	}
+	sort.Slice(codes, func(left, right int) bool {
+		if descending {
+			return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
+		}
+		return dictionary.Values[codes[left]] < dictionary.Values[codes[right]]
+	})
+
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	resultBytes := 0
+	aggregateStarted := time.Now()
+	for position, code := range codes {
+		if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+			continue
+		}
+		row := make(SQLRow, len(projections))
+		for index, projection := range projections {
+			if projection.group {
+				row[projection.column] = dictionary.Values[code]
+			} else {
+				row[projection.column] = states[code][index].result()
+			}
+		}
+		if control != nil && control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR DICTIONARY GROUP AGGREGATE", sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
+	}
+	return result, true, nil
+}
+
+func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (groupField string, projections []sqlColumnarDictionaryGroupProjection, fields []string, predicates []sqlColumnarNumericFilter, descending bool, ok bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
+		return "", nil, nil, nil, false, false
+	}
+	if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) || !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
+		return "", nil, nil, nil, false, false
+	}
+	if q.where.kind != "" {
+		var numeric bool
+		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
+		if !numeric {
+			return "", nil, nil, nil, false, false
+		}
+	}
+	ordered, valid := sqlOrderedGroupProjections(q)
+	if !valid {
+		return "", nil, nil, nil, false, false
+	}
+	seen := map[string]bool{}
+	addField := func(field string) {
+		if field != "" && !seen[field] {
+			seen[field] = true
+			fields = append(fields, field)
+		}
+	}
+	for _, predicate := range predicates {
+		addField(predicate.field)
+	}
+	addField(groupField)
+	projections = make([]sqlColumnarDictionaryGroupProjection, len(ordered))
+	for index, projection := range ordered {
+		candidate := sqlColumnarDictionaryGroupProjection{column: projection.column, group: projection.group}
+		if projection.aggregate != nil {
+			aggregate := sqlColumnarNumericAggregate{name: projection.aggregate.name}
+			if projection.aggregate.field.kind != "" {
+				if !sqlColumnarAggregateField(projection.aggregate.field, q.from.alias, &aggregate.field) {
+					return "", nil, nil, nil, false, false
+				}
+				addField(aggregate.field)
+			}
+			candidate.aggregate = &aggregate
+		}
+		projections[index] = candidate
+	}
+	return groupField, projections, fields, predicates, q.orderBy[0].desc, true
 }
 
 func (aggregate *sqlColumnarNumericAggregate) add(batch ColumnarBatch, rowIndex int) {

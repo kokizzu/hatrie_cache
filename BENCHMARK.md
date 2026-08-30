@@ -13943,3 +13943,21 @@ row positions, rejects oversized matches, and bypasses itself when the source
 version changes during a batch read. It removes repeated predicate CPU but does
 not reduce source-batch bandwidth. Reproduce with
 `make benchmark-sql-query-condition-cache`.
+
+## Dictionary Columnar Grouped Aggregates
+
+`BenchmarkSQLColumnarDictionaryGroupAggregate` groups `10,000` matching rows
+from a `20,000`-row source into `20` text groups using `GROUP BY team ORDER BY
+team`, `COUNT(*)`, and `SUM(score)`. The baseline resolves row maps; the
+optimized path uses dictionary-coded `team` values and numeric column slices.
+
+| Implementation | Median time | Cumulative allocation | Allocations | CPU improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Row-source grouped aggregate | 9.07 ms | 14.22 MB | 70,493 | 1.00x | 1.00x |
+| Dictionary columnar aggregate | 892.90 us | 18.54 KB | 157 | 10.15x | 766.9x lower |
+
+The optimized subset requires one dictionary-encoded text group field, binary
+`ORDER BY` on that field, and direct built-in numeric aggregates. It retains
+one fixed aggregate-state slice per dictionary value, not one state per source
+row, and falls back to the established executor for all other group semantics.
+Reproduce with `make benchmark-sql-columnar-group-aggregate`.

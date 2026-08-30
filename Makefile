@@ -2614,3 +2614,32 @@ ifneq (,$(filter deliver-sql-query-condition-cache,$(MAKECMDGOALS)))
 deliver-sql-query-condition-cache:
 	sh ./scripts/deliver-sql-query-condition-cache.sh
 endif
+ifneq (,$(filter inspect-sql-columnar-projection-aggregate,$(MAKECMDGOALS)))
+.PHONY: inspect-sql-columnar-projection-aggregate
+inspect-sql-columnar-projection-aggregate:
+	sh ./scripts/inspect-sql-columnar-projection-aggregate.sh
+endif
+
+ifneq (,$(filter test-sql-columnar-group-aggregate,$(MAKECMDGOALS)))
+.PHONY: test-sql-columnar-group-aggregate
+test-sql-columnar-group-aggregate:
+	sh ./scripts/test-sql-columnar-group-aggregate.sh
+endif
+
+ifneq (,$(filter benchmark-sql-columnar-group-aggregate,$(MAKECMDGOALS)))
+.PHONY: benchmark-sql-columnar-group-aggregate
+benchmark-sql-columnar-group-aggregate:
+	sh ./scripts/benchmark-sql-columnar-group-aggregate.sh
+endif
+
+ifneq (,$(filter format-sql-columnar-group-aggregate,$(MAKECMDGOALS)))
+.PHONY: format-sql-columnar-group-aggregate
+format-sql-columnar-group-aggregate:
+	sh ./scripts/format-sql-columnar-group-aggregate.sh
+endif
+
+ifneq (,$(filter deliver-sql-columnar-group-aggregate,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-columnar-group-aggregate
+deliver-sql-columnar-group-aggregate:
+	sh ./scripts/deliver-sql-columnar-group-aggregate.sh
+endif
