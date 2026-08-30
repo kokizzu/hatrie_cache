@@ -2282,6 +2282,10 @@ bench-sql-typed-index:
 deliver-sql-typed-index:
 	sh ./scripts/deliver-sql-typed-index.sh
 
+.PHONY: deliver-index-proposal-status
+deliver-index-proposal-status:
+	sh ./scripts/deliver-index-proposal-status.sh
+
 .PHONY: test-sql-direct-string-source
 test-sql-direct-string-source:
 	sh ./scripts/test-sql-direct-string-source.sh
