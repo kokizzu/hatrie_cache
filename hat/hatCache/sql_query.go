@@ -447,6 +447,16 @@ const (
 	SQLIndexInt64 SQLIndexType = "int64"
 )
 
+// DefaultSQLJSONIndexMaxSourceBytes bounds one automatic index rebuild before
+// decoding JSON. SetSQLJSONIndexAdmissionBudget can raise, lower, or disable it.
+const DefaultSQLJSONIndexMaxSourceBytes = 64 << 20
+
+// SQLJSONIndexAdmissionBudget bounds automatic work retained by an opt-in SQL
+// JSON index. A zero MaxSourceBytes explicitly disables the source-size gate.
+type SQLJSONIndexAdmissionBudget struct {
+	MaxSourceBytes int
+}
+
 // SQLJSONIndexSpec configures one opt-in typed JSON index. Type inference is
 // intentionally absent: callers must declare the one supported representation.
 type SQLJSONIndexSpec struct {
@@ -508,6 +518,32 @@ type sqlJSONSource struct {
 	raw        string
 	generation uint64
 	tracked    bool
+}
+
+var errSQLJSONIndexAdmissionDenied = fmt.Errorf("SQL JSON index source exceeds admission budget")
+
+// SetSQLJSONIndexAdmissionBudget changes the source-size gate for future
+// index refreshes. A zero MaxSourceBytes disables the gate explicitly.
+func (ht *HatTrie) SetSQLJSONIndexAdmissionBudget(budget SQLJSONIndexAdmissionBudget) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if budget.MaxSourceBytes < 0 {
+		return fmt.Errorf("SQL JSON index admission max source bytes must not be negative")
+	}
+	ht.sqlIndexMu.Lock()
+	ht.sqlJSONIndexAdmissionBudget = budget
+	ht.sqlJSONIndexAdmissionConfigured = true
+	ht.sqlIndexMu.Unlock()
+	return nil
+}
+
+func (ht *HatTrie) sqlJSONIndexSourceAdmittedLocked(source sqlJSONSource) bool {
+	maxBytes := DefaultSQLJSONIndexMaxSourceBytes
+	if ht.sqlJSONIndexAdmissionConfigured {
+		maxBytes = ht.sqlJSONIndexAdmissionBudget.MaxSourceBytes
+	}
+	return maxBytes == 0 || len(source.raw) <= maxBytes
 }
 
 func (source sqlJSONSource) current(state sqlJSONIndexState) bool {
@@ -979,6 +1015,9 @@ func (ht *HatTrie) ResolveSQLTextSource(name, key, field, query string) ([]SQLRo
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	if err := refreshSQLJSONTextIndexSourceRows(index, field, source, snapshot.rows); err != nil {
@@ -1120,6 +1159,9 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		}
 		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
 			return nil, false, err
 		}
 		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
@@ -1142,6 +1184,9 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		}
 		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
 			return nil, false, err
 		}
 		if err := refreshSQLJSONBitmapIndexSourceRows(bitmap, field, source, snapshot.rows); err != nil {
@@ -1175,6 +1220,9 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
@@ -1202,6 +1250,9 @@ func (ht *HatTrie) ResolveSQLCoveringSource(name, key, field string, value inter
 	defer ht.sqlIndexMu.Unlock()
 	index := ht.sqlJSONCoveringIndexes[key][field]
 	if index == nil {
+		return nil, false, nil
+	}
+	if !ht.sqlJSONIndexSourceAdmittedLocked(source) {
 		return nil, false, nil
 	}
 	for _, column := range fields {
@@ -1236,6 +1287,9 @@ func (ht *HatTrie) ResolveSQLSecondaryIndexedSource(name, key, operation string,
 	postings := make([]hatDataStructure.RoaringBitmap, len(fields))
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	for index, field := range fields {
@@ -1336,6 +1390,9 @@ func (ht *HatTrie) ResolveSQLCompositeIndexedSource(name, key string, fields []s
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	if err := refreshSQLJSONCompositeIndexSourceRows(selected, source, snapshot.rows); err != nil {
@@ -1713,6 +1770,9 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
 		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
 			return nil, false, err
 		}
 		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
@@ -1745,6 +1805,9 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
@@ -1794,6 +1857,9 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
 		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
 			return nil, false, err
 		}
 		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
@@ -1808,6 +1874,9 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
@@ -1865,6 +1934,9 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			ht.sqlIndexMu.Unlock()
+			if err == errSQLJSONIndexAdmissionDenied {
+				return false, nil
+			}
 			return false, err
 		}
 		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
@@ -1900,6 +1972,9 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		ht.sqlIndexMu.Unlock()
+		if err == errSQLJSONIndexAdmissionDenied {
+			return false, nil
+		}
 		return false, err
 	}
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
@@ -2365,6 +2440,9 @@ func (ht *HatTrie) sqlJSONIndexSnapshotLocked(key, data string) (*sqlJSONSourceS
 }
 
 func (ht *HatTrie) sqlJSONIndexSnapshotForSourceLocked(key string, source sqlJSONSource) (*sqlJSONSourceSnapshot, error) {
+	if !ht.sqlJSONIndexSourceAdmittedLocked(source) {
+		return nil, errSQLJSONIndexAdmissionDenied
+	}
 	if snapshot := ht.sqlJSONIndexSnapshots[key]; snapshot != nil && source.current(snapshot.sqlJSONIndexState) {
 		return snapshot, nil
 	}

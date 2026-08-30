@@ -41,6 +41,13 @@ JSON strings, the check is 38,563x faster with zero allocations; the counter
 is retained only per indexed source key. Details and commands are in
 [BENCHMARK.md](BENCHMARK.md#sql-index-source-write-generations).
 
+SQL JSON indexes also have a default `64 MiB` pre-decode source admission
+budget. Oversized configured indexes decline to the normal correct SQL scan,
+avoiding row decoding and posting allocation; set a custom budget with
+`SetSQLJSONIndexAdmissionBudget`, or use `MaxSourceBytes: 0` only when an
+unlimited index build is intentional. Measurements and test commands are in
+[BENCHMARK.md](BENCHMARK.md#sql-index-admission-budget).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

@@ -13372,6 +13372,30 @@ make test-sql-index-snapshots
 make bench-sql-index-generation
 ```
 
+## SQL Index Admission Budget
+
+Automatic SQL JSON index refreshes default to a `64 MiB` source-byte budget.
+The gate runs before JSON decoding, row-map creation, sorting, or posting-list
+allocation. A denied field, typed, bitmap, text, covering, composite, range,
+ordered, or streamed index reports itself unavailable, and SQL uses the normal
+correct source scan. `SetSQLJSONIndexAdmissionBudget` accepts a smaller or
+larger limit; `MaxSourceBytes: 0` explicitly disables the gate.
+
+`TestSQLJSONIndexAdmissionBudgetFallsBackToScan` covers every index resolver,
+the indexed SQL query fallback, and re-admission after raising the budget. The
+five-run denied-path benchmark used an 8 MiB JSON source with a 1-byte budget:
+
+| Operation | Time | Allocated bytes | Allocations | Result |
+| --- | ---: | ---: | ---: | --- |
+| Denied index resolver | 147.7 ns | 0 B | 0 | No JSON decode or index allocation |
+
+Reproduce it with:
+
+```sh
+make test-sql-index-admission
+make bench-sql-index-admission
+```
+
 ## Opt-In Typed Int64 SQL Index
 
 `CreateSQLTypedJSONIndex` enables one explicitly declared `SQLIndexInt64` field.

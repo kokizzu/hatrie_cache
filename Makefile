@@ -2276,6 +2276,21 @@ deliver-sql-index-generation:
 deliver-sql-index-generation-docs:
 	sh ./scripts/deliver-sql-index-generation-docs.sh
 
+inspect-sql-index-admission:
+	sh ./scripts/inspect-sql-index-admission.sh
+
+test-sql-index-admission:
+	sh ./scripts/test-sql-index-admission.sh
+
+bench-sql-index-admission:
+	sh ./scripts/bench-sql-index-admission.sh
+
+format-sql-index-admission:
+	sh ./scripts/format-sql-index-admission.sh
+
+deliver-sql-index-admission:
+	sh ./scripts/deliver-sql-index-admission.sh
+
 .PHONY: bench-sql-index-snapshots
 bench-sql-index-snapshots:
 	sh ./scripts/bench-sql-index-snapshots.sh
