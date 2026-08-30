@@ -1445,13 +1445,18 @@ func (ht *HatTrie) SQLJSONRangeStats(key, field string, bucketCount int) (SQLJSO
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if typed == nil && index == nil {
 		return SQLJSONRangeStats{}, false, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
 	if err != nil {
 		return SQLJSONRangeStats{}, false, err
+	}
+	if typed != nil {
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		return sqlJSONTypedInt64RangeStats(key, field, bucketCount, typed), true, nil
 	}
 	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
 		return SQLJSONRangeStats{}, false, err
@@ -1601,6 +1606,33 @@ func sqlJSONTypedInt64IndexStats(key string, fields []string, index *sqlJSONType
 	stats.FrequencyHistogram = make([]SQLJSONIndexFrequencyBucket, 0, len(counts))
 	for _, count := range counts {
 		stats.FrequencyHistogram = append(stats.FrequencyHistogram, SQLJSONIndexFrequencyBucket{RowsPerKey: count, DistinctKeys: frequencies[count]})
+	}
+	return stats
+}
+
+func sqlJSONTypedInt64RangeStats(key, field string, bucketCount int, index *sqlJSONTypedInt64Index) SQLJSONRangeStats {
+	stats := SQLJSONRangeStats{Key: key, Field: field, Rows: len(index.ordered), NullRows: len(index.nulls)}
+	if len(index.ordered) == 0 {
+		return stats
+	}
+	if bucketCount <= 0 {
+		bucketCount = 16
+	}
+	if bucketCount > len(index.ordered) {
+		bucketCount = len(index.ordered)
+	}
+	bucketSize := (len(index.ordered) + bucketCount - 1) / bucketCount
+	stats.Buckets = make([]SQLJSONRangeHistogramBucket, 0, bucketCount)
+	for start := 0; start < len(index.ordered); start += bucketSize {
+		end := start + bucketSize
+		if end > len(index.ordered) {
+			end = len(index.ordered)
+		}
+		stats.Buckets = append(stats.Buckets, SQLJSONRangeHistogramBucket{
+			Lower: index.ordered[start].value,
+			Upper: index.ordered[end-1].value,
+			Rows:  end - start,
+		})
 	}
 	return stats
 }

@@ -98,4 +98,8 @@ func TestSQLTypedInt64IndexParticipatesInScheduledMaintenance(t *testing.T) {
 	if err != nil || !available || !exact || rows != 1 {
 		t.Fatalf("SQLJSONRangeEstimate() = %d, %v, %v, %v", rows, exact, available, err)
 	}
+	rangeStats, available, err := trie.SQLJSONRangeStats("people", "age", 1)
+	if err != nil || !available || rangeStats.Rows != 1 || len(rangeStats.Buckets) != 1 {
+		t.Fatalf("SQLJSONRangeStats() = %#v, %v, %v", rangeStats, available, err)
+	}
 }
