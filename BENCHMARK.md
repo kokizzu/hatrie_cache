@@ -13372,6 +13372,32 @@ make test-sql-index-snapshots
 make bench-sql-index-generation
 ```
 
+## SQL In-Memory Byte Source View
+
+SQL index reads now borrow an in-memory `RAW_BYTES` value as a read-only string
+view while the cache read lock protects the slice header. Byte replacement
+publishes a new owned slice rather than mutating the old backing, and the
+captured source string keeps that prior backing alive for an in-flight index
+snapshot. The existing generation check detects replacement. Disk-backed byte
+values retain the checked copying fallback because their bytes are not held in
+the in-memory pool.
+
+`TestSQLJSONByteSourceUsesOwnedBackingAndGeneration` proves backing ownership
+and replacement correctness. The five-run source-read benchmark used a 16 KiB
+in-memory JSON byte value:
+
+| Source path | Time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Clone bytes and convert to string | 5.92 us | 36,864 B | 2 | Baseline |
+| Borrowed owned-byte view | 62.96 ns | 0 B | 0 | 94.0x faster; allocations eliminated |
+
+Reproduce it with:
+
+```sh
+make test-sql-bytes-source
+make bench-sql-bytes-source
+```
+
 ## SQL Index Admission Budget
 
 Automatic SQL JSON index refreshes default to a `64 MiB` source-byte budget.

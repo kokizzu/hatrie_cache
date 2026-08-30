@@ -41,6 +41,12 @@ JSON strings, the check is 38,563x faster with zero allocations; the counter
 is retained only per indexed source key. Details and commands are in
 [BENCHMARK.md](BENCHMARK.md#sql-index-source-write-generations).
 
+In-memory byte-backed SQL JSON sources now borrow their immutable owned backing
+instead of cloning bytes and converting them to a string. A 16 KiB source read
+is 94.0x faster with zero allocations; disk-backed values intentionally keep
+the checked copying path. Details are in
+[BENCHMARK.md](BENCHMARK.md#sql-in-memory-byte-source-view).
+
 SQL JSON indexes also have a default `64 MiB` pre-decode source admission
 budget. Oversized configured indexes decline to the normal correct SQL scan,
 avoiding row decoding and posting allocation; set a custom budget with

@@ -2426,6 +2426,13 @@ func (ht *HatTrie) sqlJSONSource(key string) (sqlJSONSource, error) {
 		ht.mu.RUnlock()
 		return sqlJSONSource{raw: value, generation: generation, tracked: tracked}, nil
 	}
+	if !fallback && err == nil && hval.IsBytesAtRaws() && !hval.OnDisk() {
+		value := ht.raws.array[hval.Index]
+		generation, tracked := ht.sqlJSONIndexSourceGenerations[key]
+		ht.recordReadLocked(true, key)
+		ht.mu.RUnlock()
+		return sqlJSONSource{raw: unsafe.String(unsafe.SliceData(value), len(value)), generation: generation, tracked: tracked}, nil
+	}
 	ht.mu.RUnlock()
 	data, err := ht.GetBytesChecked(key)
 	return sqlJSONSource{raw: string(data)}, err

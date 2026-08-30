@@ -2291,6 +2291,21 @@ format-sql-index-admission:
 deliver-sql-index-admission:
 	sh ./scripts/deliver-sql-index-admission.sh
 
+inspect-sql-bytes-source:
+	sh ./scripts/inspect-sql-bytes-source.sh
+
+test-sql-bytes-source:
+	sh ./scripts/test-sql-bytes-source.sh
+
+bench-sql-bytes-source:
+	sh ./scripts/bench-sql-bytes-source.sh
+
+format-sql-bytes-source:
+	sh ./scripts/format-sql-bytes-source.sh
+
+deliver-sql-bytes-source:
+	sh ./scripts/deliver-sql-bytes-source.sh
+
 .PHONY: bench-sql-index-snapshots
 bench-sql-index-snapshots:
 	sh ./scripts/bench-sql-index-snapshots.sh
