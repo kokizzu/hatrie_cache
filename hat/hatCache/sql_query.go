@@ -1378,9 +1378,32 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 		return 0, false, false, nil
 	}
 	ht.sqlIndexMu.Lock()
+	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	bitmap := ht.sqlJSONBitmapIndexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
+	if typed != nil {
+		data, err := ht.sqlJSONSourceString(key)
+		if err != nil {
+			return 0, false, false, err
+		}
+		ht.sqlIndexMu.Lock()
+		defer ht.sqlIndexMu.Unlock()
+		typed = ht.sqlJSONTypedInt64Indexes[key][field]
+		if typed == nil {
+			return 0, false, false, nil
+		}
+		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		if err != nil {
+			return 0, false, true, err
+		}
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		value, ok := sqlJSONTypedInt64Value(value)
+		if !ok {
+			return 0, true, true, nil
+		}
+		return len(typed.postings[value]), true, true, nil
+	}
 	if bitmap != nil {
 		data, err := ht.sqlJSONSourceString(key)
 		if err != nil {

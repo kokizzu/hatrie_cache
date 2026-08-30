@@ -2306,6 +2306,10 @@ deliver-sql-typed-index-range-estimate:
 deliver-sql-typed-index-range-stats:
 	sh ./scripts/deliver-sql-typed-index-range-stats.sh
 
+.PHONY: deliver-sql-typed-index-value-estimate
+deliver-sql-typed-index-value-estimate:
+	sh ./scripts/deliver-sql-typed-index-value-estimate.sh
+
 .PHONY: deliver-index-proposal-status
 deliver-index-proposal-status:
 	sh ./scripts/deliver-index-proposal-status.sh
