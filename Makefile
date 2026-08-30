@@ -2210,6 +2210,30 @@ inspect-covering-source-benchmark:
 inspect-next-sql-performance-opportunities:
 	sh ./scripts/inspect-next-sql-performance-opportunities.sh
 
+.PHONY: inspect-sql-secondary-index-source
+inspect-sql-secondary-index-source:
+	sh ./scripts/inspect-sql-secondary-index-source.sh
+
+.PHONY: inspect-sql-secondary-index-implementation
+inspect-sql-secondary-index-implementation:
+	sh ./scripts/inspect-sql-secondary-index-implementation.sh
+
+.PHONY: inspect-sql-typed-index-benchmark
+inspect-sql-typed-index-benchmark:
+	sh ./scripts/inspect-sql-typed-index-benchmark.sh
+
+.PHONY: test-sql-secondary-index-source
+test-sql-secondary-index-source:
+	sh ./scripts/test-sql-secondary-index-source.sh
+
+.PHONY: bench-sql-secondary-index-source
+bench-sql-secondary-index-source:
+	sh ./scripts/bench-sql-secondary-index-source.sh
+
+.PHONY: deliver-sql-secondary-index-source
+deliver-sql-secondary-index-source:
+	sh ./scripts/deliver-sql-secondary-index-source.sh
+
 .PHONY: deliver-sql-performance-audit
 deliver-sql-performance-audit:
 	sh ./scripts/deliver-sql-performance-audit.sh

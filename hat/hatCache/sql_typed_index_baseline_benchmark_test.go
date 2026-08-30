@@ -1,6 +1,7 @@
 package hatCache
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +27,133 @@ type sqlCopiedCoveringResolver struct{ trie *HatTrie }
 
 func (resolver sqlCopiedCoveringResolver) ResolveSQLSource(name, key string) ([]SQLRow, error) {
 	return resolver.trie.ResolveSQLSource(name, key)
+}
+
+// sqlCopiedSecondaryResolver retains the pre-immutable-source secondary index
+// paths. It is benchmark-only and keeps the same configured indexes as the
+// optimized resolver.
+type sqlCopiedSecondaryResolver struct{ trie *HatTrie }
+
+func (resolver sqlCopiedSecondaryResolver) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	data, err := resolver.trie.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	resolver.trie.sqlIndexMu.Lock()
+	defer resolver.trie.sqlIndexMu.Unlock()
+	index := resolver.trie.sqlJSONBitmapIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONBitmapIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok {
+		return []SQLRow{}, true, nil
+	}
+	ordinals := index.postings[valueKey].Values()
+	rows := make([]SQLRow, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		if int(ordinal) < len(index.rows) {
+			rows = append(rows, index.rows[ordinal])
+		}
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func (resolver sqlCopiedSecondaryResolver) ResolveSQLTextSource(name, key, field, query string) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	data, err := resolver.trie.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	resolver.trie.sqlIndexMu.Lock()
+	defer resolver.trie.sqlIndexMu.Unlock()
+	index := resolver.trie.sqlJSONTextIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONTextIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	tokens := hatSql.TextTokens(query)
+	if len(tokens) == 0 {
+		return []SQLRow{}, true, nil
+	}
+	postings := make([][]int, len(tokens))
+	for tokenIndex, token := range tokens {
+		posting := index.tokens[token]
+		if len(posting) == 0 {
+			return []SQLRow{}, true, nil
+		}
+		postings[tokenIndex] = posting
+	}
+	sort.Slice(postings, func(left, right int) bool { return len(postings[left]) < len(postings[right]) })
+	matched := append([]int(nil), postings[0]...)
+	for _, posting := range postings[1:] {
+		matched = intersectSQLTextPostings(matched, posting)
+		if len(matched) == 0 {
+			return []SQLRow{}, true, nil
+		}
+	}
+	rows := make([]SQLRow, len(matched))
+	for rowIndex, sourceIndex := range matched {
+		rows[rowIndex] = index.rows[sourceIndex]
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func (resolver sqlCopiedSecondaryResolver) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(fields) != len(values) || len(fields) < 2 {
+		return nil, false, nil
+	}
+	data, err := resolver.trie.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	provided := make(map[string]interface{}, len(fields))
+	for index, field := range fields {
+		provided[field] = values[index]
+	}
+	resolver.trie.sqlIndexMu.Lock()
+	defer resolver.trie.sqlIndexMu.Unlock()
+	var selected *sqlJSONCompositeIndex
+	for _, candidate := range resolver.trie.sqlJSONCompositeIndexes[key] {
+		if len(candidate.fields) <= 1 || selected != nil && len(candidate.fields) <= len(selected.fields) {
+			continue
+		}
+		available := true
+		for _, field := range candidate.fields {
+			if _, ok := provided[field]; !ok {
+				available = false
+				break
+			}
+		}
+		if available {
+			selected = candidate
+		}
+	}
+	if selected == nil {
+		return nil, false, nil
+	}
+	if err := refreshSQLJSONCompositeIndex(selected, key, data); err != nil {
+		return nil, false, err
+	}
+	lookup := make([]interface{}, len(selected.fields))
+	for index, field := range selected.fields {
+		lookup[index] = provided[field]
+	}
+	valueKey, ok := sqlJSONCompositeIndexValueKey(lookup)
+	if !ok {
+		return []SQLRow{}, true, nil
+	}
+	return hatSql.CloneRows(selected.rows[valueKey]), true, nil
 }
 
 func (resolver sqlCopiedCoveringResolver) ResolveSQLCoveringSource(name, key, field string, value interface{}, fields []string) ([]SQLRow, bool, error) {
@@ -137,4 +265,87 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkSQLSecondaryIndexSource(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	const rows = 100_000
+	var data strings.Builder
+	data.Grow(rows * 80)
+	data.WriteByte('[')
+	for index := 0; index < rows; index++ {
+		if index > 0 {
+			data.WriteByte(',')
+		}
+		state, body, team, enabled := "idle", "ordinary event", "core", "false"
+		if index == rows-1 {
+			state, body, team, enabled = "ready", "fast cache lookup", "edge", "true"
+		}
+		data.WriteString(`{"id":`)
+		data.WriteString(strconv.Itoa(index))
+		data.WriteString(`,"state":"`)
+		data.WriteString(state)
+		data.WriteString(`","body":"`)
+		data.WriteString(body)
+		data.WriteString(`","team":"`)
+		data.WriteString(team)
+		data.WriteString(`","enabled":`)
+		data.WriteString(enabled)
+		data.WriteByte('}')
+	}
+	data.WriteByte(']')
+	trie.UpsertString("events", data.String())
+	if err := trie.CreateSQLJSONBitmapIndex("events", "state"); err != nil {
+		b.Fatal(err)
+	}
+	if err := trie.CreateSQLJSONTextIndex("events", "body"); err != nil {
+		b.Fatal(err)
+	}
+	if err := trie.CreateSQLJSONCompositeIndex("events", "team", "enabled"); err != nil {
+		b.Fatal(err)
+	}
+	if resolved, available, err := trie.ResolveSQLIndexedSource("CACHE", "events", "state", "ready"); err != nil || !available || len(resolved) != 1 {
+		b.Fatalf("bitmap warmup = %d/%t/%v", len(resolved), available, err)
+	}
+	if resolved, available, err := trie.ResolveSQLTextSource("CACHE", "events", "body", "fast"); err != nil || !available || len(resolved) != 1 {
+		b.Fatalf("text warmup = %d/%t/%v", len(resolved), available, err)
+	}
+	if resolved, available, err := trie.ResolveSQLCompositeIndexedSource("CACHE", "events", []string{"team", "enabled"}, []interface{}{"edge", true}); err != nil || !available || len(resolved) != 1 {
+		b.Fatalf("composite warmup = %d/%t/%v", len(resolved), available, err)
+	}
+	copied := sqlCopiedSecondaryResolver{trie: trie}
+	for _, benchmark := range []struct {
+		name string
+		run  func() error
+	}{
+		{"bitmap/immutable_source", func() error {
+			_, _, err := trie.ResolveSQLIndexedSource("CACHE", "events", "state", "ready")
+			return err
+		}},
+		{"bitmap/copied_source", func() error {
+			_, _, err := copied.ResolveSQLIndexedSource("CACHE", "events", "state", "ready")
+			return err
+		}},
+		{"text/immutable_source", func() error { _, _, err := trie.ResolveSQLTextSource("CACHE", "events", "body", "fast"); return err }},
+		{"text/copied_source", func() error { _, _, err := copied.ResolveSQLTextSource("CACHE", "events", "body", "fast"); return err }},
+		{"composite/immutable_source", func() error {
+			_, _, err := trie.ResolveSQLCompositeIndexedSource("CACHE", "events", []string{"team", "enabled"}, []interface{}{"edge", true})
+			return err
+		}},
+		{"composite/copied_source", func() error {
+			_, _, err := copied.ResolveSQLCompositeIndexedSource("CACHE", "events", []string{"team", "enabled"}, []interface{}{"edge", true})
+			return err
+		}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if err := benchmark.run(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

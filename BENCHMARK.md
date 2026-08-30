@@ -197,11 +197,10 @@ semantics for unsupported query plans.
 
 ## SQL Immutable Index Source Snapshot
 
-Generic JSON field indexes now read cached string JSON through an immutable
-string snapshot. This removes the temporary full-document `[]byte` copy from
-the indexed equality, range, and ordered scan paths. Covering indexes use the
-same path. Bytes, cold values, and the bitmap, text, and composite indexes
-retain their existing checked source handling.
+Generic, covering, bitmap, text, and composite JSON indexes now read cached
+string JSON through an immutable string snapshot. This removes the temporary
+full-document `[]byte` copy from their indexed lookup and rebuild paths. Bytes
+and cold values retain their existing checked source handling.
 
 ```sh
 make bench-sql-typed-index-baseline
@@ -214,11 +213,15 @@ The same 100,000-row fixture on the AMD Ryzen 9 5950X produced:
 | Generic indexed range query returning 10 rows | 820.841 us; 3,076,561 B; 1,991 allocs | 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation |
 | Covering indexed equality returning one row | 944.496 us; 5,789,953 B; 69 allocs | 8.401 us; 5,776 B; 68 allocs | 112.43x faster; 1,002.42x lower heap; one fewer allocation |
 | Direct indexed equality probe returning one row | N/A | 576.2 ns; 360 B; 5 allocs | Direct source lookup baseline for the current implementation |
+| Bitmap equality returning one row | 2.421 ms; 16,384,371 B; 7 allocs | 463.4 ns; 360 B; 5 allocs | 5,224.04x faster; 45,512.14x lower heap; two fewer allocations |
+| Text index lookup returning one row | 2.656 ms; 16,384,446 B; 10 allocs | 643.9 ns; 432 B; 8 allocs | 4,125.00x faster; 37,926.96x lower heap; two fewer allocations |
+| Composite equality returning one row | 2.435 ms; 16,384,381 B; 7 allocs | 595.8 ns; 368 B; 5 allocs | 4,087.35x faster; 44,522.77x lower heap; two fewer allocations |
 
 The source snapshot remains valid after a replacement, covered by focused
-generic and covering-index tests. The parser receives a read-only view of the
-immutable string; no storage or wire representation changes. The general
-materialized SQL executor can still allocate independently of the index probe.
+generic, covering, bitmap, text, and composite-index tests. The parser receives
+a read-only view of the immutable string; no storage or wire representation
+changes. The general materialized SQL executor can still allocate independently
+of the index probe.
 
 ## Architectural Big-Wins Baseline
 
