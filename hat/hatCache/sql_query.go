@@ -1018,7 +1018,7 @@ func (ht *HatTrie) ResolveSQLCoveringSource(name, key, field string, value inter
 	if name != "CACHE" || len(fields) == 0 {
 		return nil, false, nil
 	}
-	data, err := ht.GetBytesChecked(key)
+	data, err := ht.sqlJSONSourceString(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1033,7 +1033,7 @@ func (ht *HatTrie) ResolveSQLCoveringSource(name, key, field string, value inter
 			return nil, false, nil
 		}
 	}
-	if err := refreshSQLJSONCoveringIndex(index, key, field, data); err != nil {
+	if err := refreshSQLJSONCoveringIndexString(index, key, field, data); err != nil {
 		return nil, false, err
 	}
 	valueKey, ok := sqlIndexValueKey(value)
@@ -1590,14 +1590,18 @@ func refreshSQLJSONBitmapIndex(index *sqlJSONBitmapIndex, key, field string, dat
 }
 
 func refreshSQLJSONCoveringIndex(index *sqlJSONCoveringIndex, key, field string, data []byte) error {
-	if index.raw == string(data) {
+	return refreshSQLJSONCoveringIndexString(index, key, field, string(data))
+}
+
+func refreshSQLJSONCoveringIndexString(index *sqlJSONCoveringIndex, key, field, data string) error {
+	if index.raw == data {
 		return nil
 	}
-	rows, err := sqlJSONRows(key, data)
+	rows, err := sqlJSONRowsString(key, data)
 	if err != nil {
 		return err
 	}
-	index.raw, index.rows = string(data), map[string][]SQLRow{}
+	index.raw, index.rows = data, map[string][]SQLRow{}
 	for _, row := range rows {
 		value, exists, err := sqlJSONIndexRowValue(row, field)
 		if err != nil {

@@ -2,6 +2,24 @@ package hatCache
 
 import "testing"
 
+func TestSQLJSONCoveringIndexRefreshesAfterStringReplacement(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("jobs", `[{"id":1,"state":"queued"}]`)
+	if err := trie.CreateSQLJSONCoveringIndex("jobs", "state", "id"); err != nil {
+		t.Fatal(err)
+	}
+	before, available, err := trie.ResolveSQLCoveringSource("CACHE", "jobs", "state", "queued", []string{"id", "state"})
+	if err != nil || !available || len(before) != 1 || before[0]["id"] != float64(1) {
+		t.Fatalf("initial ResolveSQLCoveringSource() = %#v, %v, %v", before, available, err)
+	}
+	trie.UpsertString("jobs", `[{"id":2,"state":"running"}]`)
+	after, available, err := trie.ResolveSQLCoveringSource("CACHE", "jobs", "state", "running", []string{"id", "state"})
+	if err != nil || !available || len(after) != 1 || after[0]["id"] != float64(2) {
+		t.Fatalf("refreshed ResolveSQLCoveringSource() = %#v, %v, %v", after, available, err)
+	}
+}
+
 func TestSQLJSONCoveringIndexProjectsWithoutSourceRows(t *testing.T) {
 	t.Parallel()
 	trie := newTestTrie(t)

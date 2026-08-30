@@ -2202,6 +2202,14 @@ inspect-sql-materialized-order:
 inspect-sql-index-rebuild:
 	sh ./scripts/inspect-sql-index-rebuild.sh
 
+.PHONY: inspect-covering-source-benchmark
+inspect-covering-source-benchmark:
+	sh ./scripts/inspect-covering-source-benchmark.sh
+
+.PHONY: deliver-sql-covering-source
+deliver-sql-covering-source:
+	sh ./scripts/deliver-sql-covering-source.sh
+
 .PHONY: test-sql-index-source-snapshot
 test-sql-index-source-snapshot:
 	sh ./scripts/test-sql-index-source-snapshot.sh

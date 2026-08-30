@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"hatrie_cache/hat/hatSql"
 )
 
 // sqlOrderedRowsOnlyResolver exposes the pre-streaming ordered-index contract.
@@ -16,6 +18,43 @@ func (resolver sqlOrderedRowsOnlyResolver) ResolveSQLSource(name, key string) ([
 
 func (resolver sqlOrderedRowsOnlyResolver) ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error) {
 	return resolver.trie.ResolveSQLOrderedSource(name, key, field, desc, nullsFirst, nullsLast)
+}
+
+// sqlCopiedCoveringResolver retains the pre-immutable-source covering path.
+// It uses the same configured index as the optimized resolver for comparison.
+type sqlCopiedCoveringResolver struct{ trie *HatTrie }
+
+func (resolver sqlCopiedCoveringResolver) ResolveSQLSource(name, key string) ([]SQLRow, error) {
+	return resolver.trie.ResolveSQLSource(name, key)
+}
+
+func (resolver sqlCopiedCoveringResolver) ResolveSQLCoveringSource(name, key, field string, value interface{}, fields []string) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(fields) == 0 {
+		return nil, false, nil
+	}
+	data, err := resolver.trie.GetBytesChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	resolver.trie.sqlIndexMu.Lock()
+	defer resolver.trie.sqlIndexMu.Unlock()
+	index := resolver.trie.sqlJSONCoveringIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	for _, column := range fields {
+		if _, ok := index.columns[column]; !ok {
+			return nil, false, nil
+		}
+	}
+	if err := refreshSQLJSONCoveringIndex(index, key, field, data); err != nil {
+		return nil, false, err
+	}
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok {
+		return []SQLRow{}, true, nil
+	}
+	return hatSql.CloneRows(index.rows[valueKey]), true, nil
 }
 
 func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
@@ -34,8 +73,15 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 		data.WriteString(`,"state":"ready"}`)
 	}
 	data.WriteByte(']')
-	trie.UpsertString("events", data.String())
+	source := data.String()
+	trie.UpsertString("events", source)
 	if err := trie.CreateSQLJSONFieldIndex("events", "id"); err != nil {
+		b.Fatal(err)
+	}
+	covering := CreateHatTrie()
+	b.Cleanup(covering.Destroy)
+	covering.UpsertString("events", source)
+	if err := covering.CreateSQLJSONCoveringIndex("events", "id", "id"); err != nil {
 		b.Fatal(err)
 	}
 	equalityQuery := "FROM CACHE('events') AS event WHERE event.id = 99999 SELECT event.id"
@@ -50,8 +96,12 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 	if result, err := ExecuteSQLQuery(orderQuery, trie); err != nil || len(result.Rows) != 10 {
 		b.Fatalf("indexed order warmup = %#v, %v", result, err)
 	}
+	if result, err := ExecuteSQLQuery(equalityQuery, covering); err != nil || len(result.Rows) != 1 {
+		b.Fatalf("covering equality warmup = %#v, %v", result, err)
+	}
 	fullScan := sqlRowsOnlyResolver{trie: trie}
 	materializedIndex := sqlOrderedRowsOnlyResolver{trie: trie}
+	copiedCovering := sqlCopiedCoveringResolver{trie: covering}
 	for _, benchmark := range []struct {
 		name     string
 		query    string
@@ -59,6 +109,8 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 	}{
 		{name: "equality/indexed", query: equalityQuery, resolver: trie},
 		{name: "equality/full_scan", query: equalityQuery, resolver: fullScan},
+		{name: "covering/equality_immutable_source", query: equalityQuery, resolver: covering},
+		{name: "covering/equality_copied_source", query: equalityQuery, resolver: copiedCovering},
 		{name: "range/indexed", query: rangeQuery, resolver: trie},
 		{name: "range/full_scan", query: rangeQuery, resolver: fullScan},
 		{name: "order_limit/streamed_index", query: orderQuery, resolver: trie},

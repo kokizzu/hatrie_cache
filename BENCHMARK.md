@@ -199,9 +199,9 @@ semantics for unsupported query plans.
 
 Generic JSON field indexes now read cached string JSON through an immutable
 string snapshot. This removes the temporary full-document `[]byte` copy from
-the indexed equality, range, and ordered scan paths. Bytes, cold values, and
-the bitmap, text, covering, and composite indexes retain their existing
-checked source handling.
+the indexed equality, range, and ordered scan paths. Covering indexes use the
+same path. Bytes, cold values, and the bitmap, text, and composite indexes
+retain their existing checked source handling.
 
 ```sh
 make bench-sql-typed-index-baseline
@@ -212,12 +212,13 @@ The same 100,000-row fixture on the AMD Ryzen 9 5950X produced:
 | Workload | Before | Final | Improvement |
 | --- | ---: | ---: | --- |
 | Generic indexed range query returning 10 rows | 820.841 us; 3,076,561 B; 1,991 allocs | 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation |
+| Covering indexed equality returning one row | 944.496 us; 5,789,953 B; 69 allocs | 8.401 us; 5,776 B; 68 allocs | 112.43x faster; 1,002.42x lower heap; one fewer allocation |
 | Direct indexed equality probe returning one row | N/A | 576.2 ns; 360 B; 5 allocs | Direct source lookup baseline for the current implementation |
 
-The source snapshot remains valid after a replacement, covered by a focused
-test. The parser receives a read-only view of the immutable string; no storage
-or wire representation changes. The general materialized SQL executor can
-still allocate independently of the index probe.
+The source snapshot remains valid after a replacement, covered by focused
+generic and covering-index tests. The parser receives a read-only view of the
+immutable string; no storage or wire representation changes. The general
+materialized SQL executor can still allocate independently of the index probe.
 
 ## Architectural Big-Wins Baseline
 
