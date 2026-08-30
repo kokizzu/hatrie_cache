@@ -20,3 +20,15 @@ func TestSQLMetricsByteAccountingRunsOnlyWhenMetricsAreEnabled(t *testing.T) {
 		t.Fatalf("recordScanRows() = %#v", metrics.steps)
 	}
 }
+
+func TestSQLObservationResultBytesRunOnlyWhenObserved(t *testing.T) {
+	t.Parallel()
+	rows := []Row{{"id": int64(1), "team": "core"}}
+	if got := (sqlQueryObservation{}).resultBytes(rows); got != -1 {
+		t.Fatalf("unobserved result bytes = %d, want -1", got)
+	}
+	observed := sqlQueryObservation{recorder: NewSQLSlowQueryRecorder(1)}
+	if got, want := observed.resultBytes(rows), sqlRowsBytes(rows); got != want || got <= 0 {
+		t.Fatalf("observed result bytes = %d, want %d", got, want)
+	}
+}

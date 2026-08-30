@@ -13567,6 +13567,31 @@ make test-sql-borrowed-source
 make benchmark-sql-metrics-byte-accounting
 ```
 
+## Unobserved SQL Result Bytes
+
+`sqlQueryObservation.finish` previously serialized every final result before
+checking whether a query observer or slow-query recorder was enabled. Normal
+queries now use an unavailable-byte sentinel and avoid that work; observed or
+recorded queries retain the exact result-byte value. This is separate from
+operator `EXPLAIN ANALYZE` byte accounting.
+
+After borrowing immutable source snapshots, the same
+`BenchmarkSQLMetricsDisabledFilteredQuery` fixture measured:
+
+| Query observation path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Unconditional result-byte serialization | 10.46 ms/op | 13,692,804 B/op | 110,443 allocs/op | Baseline |
+| Serialize only when observed | 6.55 ms/op | 12,707,208 B/op | 70,314 allocs/op | 1.60x faster; 1.08x fewer bytes; 1.57x fewer allocations |
+
+`TestSQLObservationResultBytesRunOnlyWhenObserved` verifies that unobserved
+queries skip byte serialization and recorder-backed observations retain positive
+byte values. The full SQL verifier covers observer, recorder, and result paths.
+
+```sh
+make test-sql-metrics-byte-accounting
+make benchmark-sql-metrics-byte-accounting
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

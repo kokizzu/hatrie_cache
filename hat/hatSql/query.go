@@ -515,7 +515,14 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 }
 
 func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
-	observation.finishSummary(len(result.Rows), len(result.Columns), sqlRowsBytes(result.Rows), err, steps, source, parameters)
+	observation.finishSummary(len(result.Rows), len(result.Columns), observation.resultBytes(result.Rows), err, steps, source, parameters)
+}
+
+func (observation sqlQueryObservation) resultBytes(rows []SQLRow) int {
+	if observation.observer == nil && observation.recorder == nil {
+		return -1
+	}
+	return sqlRowsBytes(rows)
 }
 
 func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, resultBytes int, err error, steps []SQLExplainStep, source string, parameters []interface{}) {

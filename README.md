@@ -80,6 +80,11 @@ copying fallback. This removes a full first-use source clone, making the same
 20,000-row query 1.35x faster with 1.50x lower heap; see
 [BENCHMARK.md](BENCHMARK.md#borrowed-sql-source-snapshots).
 
+When no query observer or slow-query recorder is configured, SQL no longer
+serializes final result rows solely to discard their byte count. Observed queries
+retain that value. The same normal query becomes 1.60x faster with 1.57x fewer
+allocations; see [BENCHMARK.md](BENCHMARK.md#unobserved-sql-result-bytes).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

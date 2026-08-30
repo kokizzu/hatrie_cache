@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-go test ./hat/hatSql -run '^TestSQLMetricsByteAccountingRunsOnlyWhenMetricsAreEnabled$' -count=1
+go test ./hat/hatSql -run '^(TestSQLMetricsByteAccountingRunsOnlyWhenMetricsAreEnabled|TestSQLObservationResultBytesRunOnlyWhenObserved)$' -count=1

@@ -2489,5 +2489,11 @@ test-sql-borrowed-source:
 deliver-sql-borrowed-source:
 	sh ./scripts/deliver-sql-borrowed-source.sh
 
+inspect-sql-observation:
+	sh ./scripts/inspect-sql-observation.sh
+
+deliver-sql-unobserved-result-bytes:
+	sh ./scripts/deliver-sql-unobserved-result-bytes.sh
+
 inspect-sql-source-ownership:
 	sh ./scripts/inspect-sql-source-ownership.sh
