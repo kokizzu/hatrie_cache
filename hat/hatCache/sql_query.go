@@ -50,6 +50,9 @@ type SQLSourceResolver = hatSql.SourceResolver
 type SQLColumnarBatch = hatSql.ColumnarBatch
 type SQLColumnarSourceResolver = hatSql.ColumnarSourceResolver
 type SQLBorrowedColumnarSourceResolver = hatSql.BorrowedColumnarSourceResolver
+type SQLColumnarNumericSegment = hatSql.ColumnarNumericSegment
+type SQLColumnarNumericSegments = hatSql.ColumnarNumericSegments
+type SQLSegmentedColumnarSourceResolver = hatSql.SegmentedColumnarSourceResolver
 type SQLStreamSourceResolver = hatSql.StreamSourceResolver
 type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
@@ -2937,29 +2940,37 @@ func (ht *HatTrie) BorrowSQLSource(name string, key string) ([]SQLRow, bool, err
 // field-aligned slices. It avoids retaining full source rows for simple
 // analytics scans; unsupported sources return available=false.
 func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (hatSql.ColumnarBatch, bool, error) {
-	return ht.resolveSQLColumnarSource(name, key, fields, false)
+	batch, _, available, err := ht.resolveSQLColumnarSource(name, key, fields, false)
+	return batch, available, err
 }
 
 // BorrowSQLColumnarSource exposes an immutable columnar batch to the SQL
 // executor. Callers must not retain or mutate its maps or slices.
 func (ht *HatTrie) BorrowSQLColumnarSource(name, key string, fields []string) (hatSql.ColumnarBatch, bool, error) {
+	batch, _, available, err := ht.resolveSQLColumnarSource(name, key, fields, true)
+	return batch, available, err
+}
+
+// BorrowSQLColumnarSourceSegments exposes an immutable cached batch with its
+// numeric min/max sidecar. Callers must not retain or mutate either value.
+func (ht *HatTrie) BorrowSQLColumnarSourceSegments(name, key string, fields []string) (hatSql.ColumnarBatch, *hatSql.ColumnarNumericSegments, bool, error) {
 	return ht.resolveSQLColumnarSource(name, key, fields, true)
 }
 
-func (ht *HatTrie) resolveSQLColumnarSource(name, key string, fields []string, borrow bool) (hatSql.ColumnarBatch, bool, error) {
+func (ht *HatTrie) resolveSQLColumnarSource(name, key string, fields []string, borrow bool) (hatSql.ColumnarBatch, *hatSql.ColumnarNumericSegments, bool, error) {
 	if ht == nil {
-		return hatSql.ColumnarBatch{}, false, ErrNilHatTrie
+		return hatSql.ColumnarBatch{}, nil, false, ErrNilHatTrie
 	}
 	if name != "CACHE" {
-		return hatSql.ColumnarBatch{}, false, nil
+		return hatSql.ColumnarBatch{}, nil, false, nil
 	}
 	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
-	if batch, cached := ht.sqlColumnarLayout(layoutKey, borrow); cached {
-		return batch, true, nil
+	if batch, segments, cached := ht.sqlColumnarLayout(layoutKey, borrow); cached {
+		return batch, segments, true, nil
 	}
 	plan, err := ht.SQLPartitionPruningPlan(name, key)
 	if err != nil {
-		return hatSql.ColumnarBatch{}, false, err
+		return hatSql.ColumnarBatch{}, nil, false, err
 	}
 	if plan.Pruned {
 		return ht.localPartitionSet().tries[plan.Partition].resolveSQLColumnarSource(name, key, fields, borrow)
@@ -2968,24 +2979,25 @@ func (ht *HatTrie) resolveSQLColumnarSource(name, key string, fields []string, b
 		if err == nil {
 			ht.sqlColumnarLayouts.observe(layoutKey, batch)
 		}
-		return batch, true, err
+		return batch, nil, true, err
 	}
 	data, err := ht.sqlJSONSourceString(key)
 	if err != nil {
-		return hatSql.ColumnarBatch{}, false, err
+		return hatSql.ColumnarBatch{}, nil, false, err
 	}
 	batch, err := sqlJSONColumnarBatchString(key, data, fields)
 	if err == nil {
 		ht.sqlColumnarLayouts.observe(layoutKey, batch)
 	}
-	return batch, true, err
+	return batch, nil, true, err
 }
 
-func (ht *HatTrie) sqlColumnarLayout(key sqlColumnarLayoutCacheKey, borrow bool) (hatSql.ColumnarBatch, bool) {
+func (ht *HatTrie) sqlColumnarLayout(key sqlColumnarLayoutCacheKey, borrow bool) (hatSql.ColumnarBatch, *hatSql.ColumnarNumericSegments, bool) {
 	if borrow {
-		return ht.sqlColumnarLayouts.borrow(key)
+		return ht.sqlColumnarLayouts.borrowSegments(key)
 	}
-	return ht.sqlColumnarLayouts.lookup(key)
+	batch, found := ht.sqlColumnarLayouts.lookup(key)
+	return batch, nil, found
 }
 
 // sqlColumnarRawBytesBatch decodes an in-memory raw value while its backing

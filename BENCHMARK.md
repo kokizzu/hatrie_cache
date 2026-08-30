@@ -399,9 +399,9 @@ contract only for its internal immutable layout cache; the existing public
 
 | Five-run median, warmed 20,000-row numeric aggregate | Defensive layout copy | Borrowed immutable layout | Improvement |
 | --- | ---: | ---: | ---: |
-| CPU | 543.576 us/op | 383.177 us/op | 1.42x faster |
-| Cumulative allocation | 331,949 B/op | 3,993 B/op | 83.13x lower |
-| Allocations | 25/op | 26/op | One additional small allocation; allocated bytes fall by 327,956 B/op |
+| CPU | 655.048 us/op | 384.659 us/op | 1.70x faster |
+| Cumulative allocation | 331,947 B/op | 3,865 B/op | 85.89x lower |
+| Allocations | 25/op | 22/op | Three fewer allocations; allocated bytes fall by 328,082 B/op |
 
 The borrowed batch remains valid only for the query and must not be retained or
 mutated. Normal writes invalidate the layout cache before a later query can
@@ -413,6 +413,31 @@ Reproduce with:
 
 ```sh
 make benchmark-sql-borrowed-columnar-source
+```
+
+### Numeric Segment Skip
+
+Promoted HatTrie layouts now retain min/max bounds for every 256-row scalar
+numeric segment. Direct numeric aggregate predicates use those immutable bounds
+to skip a segment only when it cannot contain a match. It applies to direct
+`COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` with numeric `WHERE` conjunctions;
+other SQL shapes retain the established executor.
+
+| Five-run median, warmed 20,000-row `COUNT(*)` | Borrowed full scan | Numeric segment skip | Improvement / tradeoff |
+| --- | ---: | ---: | ---: |
+| Clustered tail predicate, `id >= 19840` | 387.514 us/op; 3,857 B/op; 21 allocs/op | 12.174 us/op; 3,984 B/op; 25 allocs/op | 31.83x faster; 127 B/op and four allocations higher |
+| No-skip control, `id >= 0` | 420.975 us/op; 3,866 B/op; 22 allocs/op | 418.894 us/op; 3,994 B/op; 26 allocs/op | CPU neutral within measurement noise; 128 B/op and four allocations higher |
+
+The 20,000-row one-column fixture retains 79 bounds, estimated at 2,578 bytes
+or about 0.27% of its 960,004-byte cached layout. Segment sidecars count toward
+the existing 4 MiB adaptive-layout budget, are created only after the second
+matching read, and are invalidated with every ordinary source write. They do
+not affect storage, persistence, or wire formats.
+
+Reproduce with:
+
+```sh
+make benchmark-sql-columnar-segment-skip
 ```
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |

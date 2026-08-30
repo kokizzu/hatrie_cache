@@ -2651,3 +2651,11 @@ benchmark-sql-borrowed-columnar-source:
 	sh ./scripts/benchmark-sql-borrowed-columnar-source.sh
 deliver-sql-borrowed-columnar-source:
 	sh ./scripts/deliver-sql-borrowed-columnar-source.sh
+test-sql-columnar-segment-skip:
+	sh ./scripts/test-sql-columnar-segment-skip.sh
+format-sql-columnar-segment-skip:
+	sh ./scripts/format-sql-columnar-segment-skip.sh
+benchmark-sql-columnar-segment-skip:
+	sh ./scripts/benchmark-sql-columnar-segment-skip.sh
+deliver-sql-columnar-segment-skip:
+	sh ./scripts/deliver-sql-columnar-segment-skip.sh

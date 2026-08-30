@@ -3228,8 +3228,23 @@ callers that may mutate a returned batch.
 The borrowed batch must not be retained or mutated. Cache writes invalidate
 promoted layouts as before; this changes neither storage nor wire formats and
 adds no retained-cache budget. The warmed `20,000`-row aggregate benchmark is
-`1.42x` faster with `83.13x` lower allocated bytes. See
+`1.70x` faster with `85.89x` lower allocated bytes. See
 [BENCHMARK.md](BENCHMARK.md#borrowed-columnar-layouts).
+
+### Numeric Segment Skip
+
+Promoted HatTrie layouts additionally retain numeric min/max bounds for
+256-row blocks. Direct numeric aggregate queries with `COUNT`, `SUM`, `AVG`,
+`MIN`, or `MAX` use those bounds to avoid reading blocks that cannot satisfy
+their `WHERE` conjunction. The sidecar is automatic, remains within the
+existing 4 MiB adaptive-layout budget, and is invalidated with the layout on
+every source write.
+
+On a warmed 20,000-row clustered tail aggregate, this is `31.83x` faster. A
+no-skip control is CPU-neutral within measurement noise; it costs 128 B/op and
+four allocations per query, while the one-column retained sidecar is 2,578 B.
+Other SQL forms retain their existing execution paths. See
+[BENCHMARK.md](BENCHMARK.md#numeric-segment-skip).
 
 ### Versioned Condition Cache
 

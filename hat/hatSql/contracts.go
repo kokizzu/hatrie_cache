@@ -72,6 +72,21 @@ type ColumnarBatch struct {
 	Rows         int
 }
 
+// ColumnarNumericSegment stores the numeric value bounds for one contiguous
+// columnar row segment. Invalid segments contain no numeric values.
+type ColumnarNumericSegment struct {
+	Minimum float64
+	Maximum float64
+	Valid   bool
+}
+
+// ColumnarNumericSegments stores immutable numeric min/max sidecars for one
+// columnar batch. Segment i covers RowsPerSegment consecutive rows.
+type ColumnarNumericSegments struct {
+	RowsPerSegment int
+	Columns        map[string][]ColumnarNumericSegment
+}
+
 // FieldRows reports the physical row count retained for one field.
 func (batch ColumnarBatch) FieldRows(field string) int {
 	if dictionary, ok := batch.Dictionaries[field]; ok {
@@ -150,6 +165,13 @@ type ColumnarSourceResolver interface {
 // and must not be retained or mutated by the executor.
 type BorrowedColumnarSourceResolver interface {
 	BorrowSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
+}
+
+// SegmentedColumnarSourceResolver optionally supplies an immutable batch with
+// aligned numeric segment bounds. The executor uses the sidecar only for
+// direct numeric predicates and otherwise retains the ordinary batch path.
+type SegmentedColumnarSourceResolver interface {
+	BorrowSQLColumnarSourceSegments(name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }
 
 // SourceVersionResolver optionally identifies an immutable source snapshot.

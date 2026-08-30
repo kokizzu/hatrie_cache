@@ -130,6 +130,9 @@ type SQLSourceResolver = SourceResolver
 type SQLColumnarBatch = ColumnarBatch
 type SQLColumnarSourceResolver = ColumnarSourceResolver
 type SQLBorrowedColumnarSourceResolver = BorrowedColumnarSourceResolver
+type SQLColumnarNumericSegment = ColumnarNumericSegment
+type SQLColumnarNumericSegments = ColumnarNumericSegments
+type SQLSegmentedColumnarSourceResolver = SegmentedColumnarSourceResolver
 type SQLStreamSourceResolver = StreamSourceResolver
 type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
@@ -750,7 +753,7 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	if err != nil {
 		return true, err
 	}
-	batch, available, err := resolveSQLColumnarSource(columnar, query.from.kind, query.from.key, fields)
+	batch, _, available, err := resolveSQLColumnarSource(columnar, query.from.kind, query.from.key, fields)
 	if err != nil || !available {
 		return available, err
 	}
@@ -7049,7 +7052,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return SQLQueryResult{}, true, err
 	}
 	started := time.Now()
-	batch, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7335,7 +7338,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7554,7 +7557,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7575,31 +7578,55 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 
 	filterStarted := time.Now()
 	matched := 0
-	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-		if control != nil {
-			if err := control.check(); err != nil {
+	scannedRows := 0
+	scanRows := func(start, end int) error {
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if control != nil {
+				if err := control.check(); err != nil {
+					return err
+				}
+			}
+			scannedRows++
+			matchedPredicate := true
+			for _, predicate := range predicates {
+				candidate, _ := batch.Value(predicate.field, rowIndex)
+				number, numeric := sqlNumber(candidate)
+				if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					matchedPredicate = false
+					break
+				}
+			}
+			if !matchedPredicate {
+				continue
+			}
+			matched++
+			for index := range aggregates {
+				aggregates[index].add(batch, rowIndex)
+			}
+		}
+		return nil
+	}
+	if segments != nil && len(predicates) > 0 && segments.RowsPerSegment > 0 {
+		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
+			if !sqlColumnarNumericSegmentMayMatch(segments, start/segments.RowsPerSegment, predicates) {
+				continue
+			}
+			end := start + segments.RowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			if err := scanRows(start, end); err != nil {
 				return SQLQueryResult{}, true, err
 			}
 		}
-		matchedPredicate := true
-		for _, predicate := range predicates {
-			candidate, _ := batch.Value(predicate.field, rowIndex)
-			number, numeric := sqlNumber(candidate)
-			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-				matchedPredicate = false
-				break
-			}
-		}
-		if !matchedPredicate {
-			continue
-		}
-		matched++
-		for index := range aggregates {
-			aggregates[index].add(batch, rowIndex)
-		}
+	} else if err := scanRows(0, batch.Rows); err != nil {
+		return SQLQueryResult{}, true, err
 	}
 	if metrics != nil && len(predicates) > 0 {
-		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
+			metrics.record("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+		}
+		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
 
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
@@ -7618,6 +7645,41 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		metrics.record("COLUMNAR NUMERIC AGGREGATE", sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
 	}
 	return result, true, nil
+}
+
+func sqlColumnarNumericSegmentMayMatch(segments *ColumnarNumericSegments, segmentIndex int, predicates []sqlColumnarNumericFilter) bool {
+	if segments == nil || segmentIndex < 0 {
+		return true
+	}
+	for _, predicate := range predicates {
+		fieldSegments, available := segments.Columns[predicate.field]
+		if !available || segmentIndex >= len(fieldSegments) {
+			continue
+		}
+		segment := fieldSegments[segmentIndex]
+		if !segment.Valid || !sqlColumnarNumericSegmentMatches(segment, predicate) {
+			return false
+		}
+	}
+	return true
+}
+
+func sqlColumnarNumericSegmentMatches(segment ColumnarNumericSegment, predicate sqlColumnarNumericFilter) bool {
+	switch predicate.operator {
+	case "=":
+		return segment.Minimum <= predicate.value && predicate.value <= segment.Maximum
+	case "!=", "<>":
+		return segment.Minimum != predicate.value || segment.Maximum != predicate.value
+	case "<":
+		return segment.Minimum < predicate.value
+	case "<=":
+		return segment.Minimum <= predicate.value
+	case ">":
+		return segment.Maximum > predicate.value
+	case ">=":
+		return segment.Maximum >= predicate.value
+	}
+	return true
 }
 
 func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []sqlColumnarNumericAggregate, fields []string, predicates []sqlColumnarNumericFilter, ok bool) {
@@ -13690,12 +13752,19 @@ func Integer(value interface{}) (int64, bool) { return sqlInteger(value) }
 func BinaryValue(op string, left, right interface{}) interface{} {
 	return sqlBinaryValue(op, left, right)
 }
-func resolveSQLColumnarSource(resolver ColumnarSourceResolver, name, key string, fields []string) (ColumnarBatch, bool, error) {
+func resolveSQLColumnarSource(resolver ColumnarSourceResolver, name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error) {
+	if segmented, ok := resolver.(SegmentedColumnarSourceResolver); ok {
+		batch, segments, available, err := segmented.BorrowSQLColumnarSourceSegments(name, key, fields)
+		if err != nil || available {
+			return batch, segments, available, err
+		}
+	}
 	if borrowed, ok := resolver.(BorrowedColumnarSourceResolver); ok {
 		batch, available, err := borrowed.BorrowSQLColumnarSource(name, key, fields)
 		if err != nil || available {
-			return batch, available, err
+			return batch, nil, available, err
 		}
 	}
-	return resolver.ResolveSQLColumnarSource(name, key, fields)
+	batch, available, err := resolver.ResolveSQLColumnarSource(name, key, fields)
+	return batch, nil, available, err
 }

@@ -16,6 +16,20 @@ func (resolver sqlBorrowedColumnarBaselineResolver) ResolveSQLColumnarSource(nam
 	return resolver.trie.ResolveSQLColumnarSource(name, key, fields)
 }
 
+type sqlBorrowedColumnarImmutableResolver struct{ trie *HatTrie }
+
+func (resolver sqlBorrowedColumnarImmutableResolver) ResolveSQLSource(name, key string) ([]SQLRow, error) {
+	return resolver.trie.ResolveSQLSource(name, key)
+}
+
+func (resolver sqlBorrowedColumnarImmutableResolver) ResolveSQLColumnarSource(name, key string, fields []string) (SQLColumnarBatch, bool, error) {
+	return resolver.trie.ResolveSQLColumnarSource(name, key, fields)
+}
+
+func (resolver sqlBorrowedColumnarImmutableResolver) BorrowSQLColumnarSource(name, key string, fields []string) (SQLColumnarBatch, bool, error) {
+	return resolver.trie.BorrowSQLColumnarSource(name, key, fields)
+}
+
 var sqlBorrowedColumnarBenchmarkResult SQLQueryResult
 
 func BenchmarkSQLHatTrieBorrowedColumnarLayout(b *testing.B) {
@@ -41,6 +55,7 @@ func BenchmarkSQLHatTrieBorrowedColumnarLayout(b *testing.B) {
 		}
 	}
 	baseline := sqlBorrowedColumnarBaselineResolver{trie: trie}
+	borrowed := sqlBorrowedColumnarImmutableResolver{trie: trie}
 
 	b.Run("defensive_copy", func(b *testing.B) {
 		b.ReportAllocs()
@@ -57,7 +72,7 @@ func BenchmarkSQLHatTrieBorrowedColumnarLayout(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			result, err := ExecuteSQLQuery(query, trie)
+			result, err := ExecuteSQLQuery(query, borrowed)
 			if err != nil || len(result.Rows) != 1 || result.Rows[0]["total"] != int64(10000) {
 				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
 			}

@@ -36,6 +36,7 @@ type sqlColumnarLayoutCacheKey struct {
 
 type sqlColumnarLayoutCacheEntry struct {
 	batch    hatSql.ColumnarBatch
+	segments *hatSql.ColumnarNumericSegments
 	bytes    int
 	sequence uint64
 }
@@ -75,13 +76,18 @@ func (cache *sqlColumnarLayoutCache) lookup(key sqlColumnarLayoutCacheKey) (hatS
 }
 
 func (cache *sqlColumnarLayoutCache) borrow(key sqlColumnarLayoutCacheKey) (hatSql.ColumnarBatch, bool) {
+	batch, _, ok := cache.borrowSegments(key)
+	return batch, ok
+}
+
+func (cache *sqlColumnarLayoutCache) borrowSegments(key sqlColumnarLayoutCacheKey) (hatSql.ColumnarBatch, *hatSql.ColumnarNumericSegments, bool) {
 	cache.mu.RLock()
 	entry, ok := cache.entries[key]
 	cache.mu.RUnlock()
 	if ok {
 		cache.hits.Add(1)
 	}
-	return entry.batch, ok
+	return entry.batch, entry.segments, ok
 }
 
 func (cache *sqlColumnarLayoutCache) observe(key sqlColumnarLayoutCacheKey, batch hatSql.ColumnarBatch) {
@@ -90,6 +96,8 @@ func (cache *sqlColumnarLayoutCache) observe(key sqlColumnarLayoutCacheKey, batc
 		return
 	}
 	cached := cloneSQLColumnarBatch(batch)
+	segments, segmentBytes := sqlColumnarNumericSegments(cached)
+	bytes += segmentBytes
 
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -129,7 +137,7 @@ func (cache *sqlColumnarLayoutCache) observe(key sqlColumnarLayoutCacheKey, batc
 		return
 	}
 	cache.sequence++
-	cache.entries[key] = sqlColumnarLayoutCacheEntry{batch: cached, bytes: bytes, sequence: cache.sequence}
+	cache.entries[key] = sqlColumnarLayoutCacheEntry{batch: cached, segments: segments, bytes: bytes, sequence: cache.sequence}
 	cache.bytes += bytes
 }
 
@@ -221,4 +229,52 @@ func sqlColumnarLayoutCacheBytes(batch hatSql.ColumnarBatch) (int, bool) {
 		return 0, false
 	}
 	return bytes * 2, true
+}
+
+func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNumericSegments, int) {
+	const rowsPerSegment = 256
+	if batch.Rows < rowsPerSegment || len(batch.Columns) == 0 {
+		return nil, 0
+	}
+	columns := make(map[string][]hatSql.ColumnarNumericSegment)
+	bytes := 0
+	for field, values := range batch.Columns {
+		if len(values) != batch.Rows {
+			continue
+		}
+		segments := make([]hatSql.ColumnarNumericSegment, 0, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
+		numeric := false
+		for start := 0; start < batch.Rows; start += rowsPerSegment {
+			end := start + rowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			segment := hatSql.ColumnarNumericSegment{}
+			for _, value := range values[start:end] {
+				number, ok := hatSql.Number(value)
+				if !ok {
+					continue
+				}
+				if !segment.Valid {
+					segment.Minimum, segment.Maximum, segment.Valid = number, number, true
+				} else if number < segment.Minimum {
+					segment.Minimum = number
+				} else if number > segment.Maximum {
+					segment.Maximum = number
+				}
+			}
+			if segment.Valid {
+				numeric = true
+			}
+			segments = append(segments, segment)
+		}
+		if numeric {
+			columns[field] = segments
+			bytes += len(field) + 48 + len(segments)*32
+		}
+	}
+	if len(columns) == 0 {
+		return nil, 0
+	}
+	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns}, bytes
 }
