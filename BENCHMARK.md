@@ -13715,6 +13715,27 @@ make test-sql-expression-batch
 make benchmark-sql-query-rows-stream
 ```
 
+## Unobserved QueryRows Result Bytes
+
+`ExecuteSQLQueryRows` previously serialized each callback row to compute output
+bytes even when neither a query observer nor slow-query recorder was enabled.
+It now uses the existing unavailable-byte sentinel in that case; observed
+streams retain exact byte totals.
+
+After scalar QueryRows expressions, `BenchmarkSQLQueryRowsSimpleFilter` measured:
+
+| QueryRows result-byte accounting | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Unconditional callback-row serialization | 8.56 ms/op | 4,371,013 B/op | 60,372 allocs/op | Baseline |
+| Serialize only when observed | 4.40 ms/op | 3,384,418 B/op | 20,218 allocs/op | 1.94x faster; 1.29x fewer bytes; 2.99x fewer allocations |
+
+The existing observation-byte tests cover the shared sentinel contract; the full
+SQL verifier covers streamed callback behavior.
+
+```sh
+make benchmark-sql-query-rows-stream
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

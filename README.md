@@ -110,6 +110,11 @@ of allocating one-element batches; functions, CASE, aggregates, and subqueries
 retain batch evaluation. The same stream is 1.17x faster with 2.16x fewer
 allocations; see [BENCHMARK.md](BENCHMARK.md#scalar-queryrows-expressions).
 
+Unobserved `QueryRows` streams no longer serialize every callback row merely to
+discard its byte count. Observed streams retain exact byte accounting. The same
+stream is 1.94x faster with 2.99x fewer allocations; see
+[BENCHMARK.md](BENCHMARK.md#unobserved-queryrows-result-bytes).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

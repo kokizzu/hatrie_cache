@@ -2544,3 +2544,15 @@ ifneq (,$(filter deliver-sql-query-rows-scalar,$(MAKECMDGOALS)))
 deliver-sql-query-rows-scalar:
 	sh ./scripts/deliver-sql-query-rows-scalar.sh
 endif
+
+ifneq (,$(filter profile-sql-query-rows-stream,$(MAKECMDGOALS)))
+.PHONY: profile-sql-query-rows-stream
+profile-sql-query-rows-stream:
+	sh ./scripts/profile-sql-query-rows-stream.sh
+endif
+
+ifneq (,$(filter deliver-sql-query-rows-observation-bytes,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-query-rows-observation-bytes
+deliver-sql-query-rows-observation-bytes:
+	sh ./scripts/deliver-sql-query-rows-observation-bytes.sh
+endif

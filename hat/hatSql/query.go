@@ -671,7 +671,7 @@ var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
 // the source after LIMIT so declared-field diagnostics match materialization.
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) (err error) {
 	observation := newSQLQueryObservation(options)
-	outputRows, outputColumns, resultBytes := 0, 0, 0
+	outputRows, outputColumns, resultBytes := 0, 0, observation.resultBytes(nil)
 	defer func() {
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		// A row callback may be backed by NDJSON, an SDK iterator, or an
@@ -715,7 +715,9 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 			return err
 		}
 		outputRows++
-		resultBytes += sqlRowBytes(row)
+		if resultBytes >= 0 {
+			resultBytes += sqlRowBytes(row)
+		}
 		return nil
 	})
 }
