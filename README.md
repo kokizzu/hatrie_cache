@@ -90,6 +90,11 @@ of allocating a one-row evaluator batch for every source row. The same normal
 query is 1.32x faster, with 1.55x lower allocation and 2.33x fewer allocations;
 see [BENCHMARK.md](BENCHMARK.md#direct-batch-sql-leaves).
 
+Non-aggregate query rows now form one-row views over the execution input rather
+than allocating a new backing array per row. The same normal query is 1.23x
+faster, with 1.16x lower allocation and 1.50x fewer allocations; see
+[BENCHMARK.md](BENCHMARK.md#zero-copy-nonaggregate-sql-groups).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

@@ -13617,6 +13617,31 @@ make test-sql-expression-batch
 make benchmark-sql-metrics-byte-accounting
 ```
 
+## Zero-Copy Nonaggregate SQL Groups
+
+Non-aggregate queries use a one-row group for each input row so the existing
+projection, sort, distinct, and window machinery keeps one execution path. The
+previous group builder allocated a distinct one-element backing array for every
+row. It now creates a one-row view over the existing execution input, preserving
+the row order and values without per-row backing storage.
+
+After direct batch field and literal evaluation, the same
+`BenchmarkSQLMetricsDisabledFilteredQuery` fixture measured:
+
+| Nonaggregate group construction | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Per-row backing array | 4.97 ms/op | 8,218,389 B/op | 30,231 allocs/op | Baseline |
+| One-row input view | 4.05 ms/op | 7,094,137 B/op | 20,204 allocs/op | 1.23x faster; 1.16x fewer bytes; 1.50x fewer allocations |
+
+`TestSQLGroupRowsWithoutAggregatePreservesInputRows` verifies that every input
+row remains an independent, ordered one-row group. The full SQL verifier covers
+normal projection, aggregate, grouping, window, and result behavior.
+
+```sh
+make test-sql-expression-batch
+make benchmark-sql-metrics-byte-accounting
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

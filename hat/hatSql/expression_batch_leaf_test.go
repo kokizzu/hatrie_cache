@@ -18,3 +18,22 @@ func TestSQLBatchLeafPredicatePreservesNullAndLiteralValues(t *testing.T) {
 		t.Fatalf("row = %#v", row)
 	}
 }
+
+func TestSQLGroupRowsWithoutAggregatePreservesInputRows(t *testing.T) {
+	rows := []sqlExecRow{
+		newSQLSingleSourceExecRowAt("value", SQLRow{"id": int64(1)}, 0),
+		newSQLSingleSourceExecRowAt("value", SQLRow{"id": int64(2)}, 1),
+	}
+	groups, err := groupSQLRows(rows, nil, &sqlQuery{})
+	if err != nil {
+		t.Fatalf("groupSQLRows() error = %v", err)
+	}
+	if len(groups) != len(rows) {
+		t.Fatalf("groups = %d, want %d", len(groups), len(rows))
+	}
+	for index := range rows {
+		if len(groups[index]) != 1 || groups[index][0].singleRow["id"] != rows[index].singleRow["id"] {
+			t.Fatalf("group %d = %#v, want row %#v", index, groups[index], rows[index])
+		}
+	}
+}

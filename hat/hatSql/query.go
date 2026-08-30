@@ -11390,8 +11390,8 @@ func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow,
 	if len(by) == 0 {
 		if !sqlQueryHasAggregate(q) {
 			out := make([][]sqlExecRow, len(rows))
-			for i, row := range rows {
-				out[i] = []sqlExecRow{row}
+			for i := range rows {
+				out[i] = rows[i : i+1]
 			}
 			return out, nil
 		}

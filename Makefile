@@ -2514,3 +2514,9 @@ ifneq (,$(filter deliver-sql-direct-batch-leaves,$(MAKECMDGOALS)))
 deliver-sql-direct-batch-leaves:
 	sh ./scripts/deliver-sql-direct-batch-leaves.sh
 endif
+
+ifneq (,$(filter deliver-sql-zero-copy-groups,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-zero-copy-groups
+deliver-sql-zero-copy-groups:
+	sh ./scripts/deliver-sql-zero-copy-groups.sh
+endif
