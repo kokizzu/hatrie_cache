@@ -90,4 +90,8 @@ func TestSQLTypedInt64IndexParticipatesInScheduledMaintenance(t *testing.T) {
 	if err != nil || !available || !status.Current || status.Rebuilds != 1 {
 		t.Fatalf("SQLJSONIndexMaintenanceStats() = %#v, %v, %v", status, available, err)
 	}
+	stats, available, err := trie.SQLJSONIndexStats("people", "age")
+	if err != nil || !available || stats.Rows != 1 || stats.DistinctKeys != 1 {
+		t.Fatalf("SQLJSONIndexStats() = %#v, %v, %v", stats, available, err)
+	}
 }

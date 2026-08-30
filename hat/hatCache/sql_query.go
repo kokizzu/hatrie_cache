@@ -1328,6 +1328,14 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 		}
 		ht.sqlIndexMu.Lock()
 		defer ht.sqlIndexMu.Unlock()
+		if typed := ht.sqlJSONTypedInt64Indexes[key][fields[0]]; typed != nil {
+			snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+			if err != nil {
+				return SQLJSONIndexStats{}, false, err
+			}
+			refreshSQLJSONTypedInt64Index(typed, fields[0], data, snapshot.rows)
+			return sqlJSONTypedInt64IndexStats(key, fields, typed), true, nil
+		}
 		index := ht.sqlJSONIndexes[key][fields[0]]
 		if index == nil {
 			return SQLJSONIndexStats{}, false, nil
@@ -1514,6 +1522,41 @@ func sqlJSONIndexStats(key string, fields []string, postings map[string][]SQLRow
 	}
 	frequencies := make(map[int]int, len(postings))
 	for _, posting := range postings {
+		count := len(posting)
+		stats.Rows += count
+		if stats.MinRowsPerKey == 0 || count < stats.MinRowsPerKey {
+			stats.MinRowsPerKey = count
+		}
+		if count > stats.MaxRowsPerKey {
+			stats.MaxRowsPerKey = count
+		}
+		frequencies[count]++
+	}
+	if stats.DistinctKeys == 0 {
+		return stats
+	}
+	stats.AverageRowsPerKey = float64(stats.Rows) / float64(stats.DistinctKeys)
+	counts := make([]int, 0, len(frequencies))
+	for count := range frequencies {
+		counts = append(counts, count)
+	}
+	sort.Ints(counts)
+	stats.FrequencyHistogram = make([]SQLJSONIndexFrequencyBucket, 0, len(counts))
+	for _, count := range counts {
+		stats.FrequencyHistogram = append(stats.FrequencyHistogram, SQLJSONIndexFrequencyBucket{RowsPerKey: count, DistinctKeys: frequencies[count]})
+	}
+	return stats
+}
+
+func sqlJSONTypedInt64IndexStats(key string, fields []string, index *sqlJSONTypedInt64Index) SQLJSONIndexStats {
+	stats := SQLJSONIndexStats{
+		Key:          key,
+		Fields:       append([]string(nil), fields...),
+		DistinctKeys: len(index.postings),
+		NullRows:     len(index.nulls),
+	}
+	frequencies := make(map[int]int, len(index.postings))
+	for _, posting := range index.postings {
 		count := len(posting)
 		stats.Rows += count
 		if stats.MinRowsPerKey == 0 || count < stats.MinRowsPerKey {

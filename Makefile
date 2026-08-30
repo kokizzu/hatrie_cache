@@ -2294,6 +2294,10 @@ deliver-sql-typed-index-stream:
 deliver-sql-typed-index-maintenance:
 	sh ./scripts/deliver-sql-typed-index-maintenance.sh
 
+.PHONY: deliver-sql-typed-index-stats
+deliver-sql-typed-index-stats:
+	sh ./scripts/deliver-sql-typed-index-stats.sh
+
 .PHONY: deliver-index-proposal-status
 deliver-index-proposal-status:
 	sh ./scripts/deliver-index-proposal-status.sh
