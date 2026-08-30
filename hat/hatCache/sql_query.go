@@ -460,6 +460,8 @@ type sqlJSONTypedInt64Index struct {
 	rows     []SQLRow
 	postings map[int64][]uint32
 	ordered  []sqlJSONTypedInt64Entry
+	nulls    []uint32
+	complete bool
 }
 type sqlJSONTypedInt64Entry struct {
 	value   int64
@@ -1617,6 +1619,17 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		if err != nil {
+			return nil, false, err
+		}
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		if !typed.complete {
+			return nil, false, nil
+		}
+		return sqlJSONTypedInt64OrderedRows(typed, desc, nullsFirst, nullsLast), true, nil
+	}
 	index := ht.sqlJSONIndexes[key][field]
 	if index == nil {
 		return nil, false, nil
@@ -1758,19 +1771,27 @@ func refreshSQLJSONTypedInt64Index(index *sqlJSONTypedInt64Index, field, data st
 	}
 	postings := make(map[int64][]uint32)
 	ordered := make([]sqlJSONTypedInt64Entry, 0, len(rows))
+	nulls := make([]uint32, 0)
+	complete := true
 	for ordinal, row := range rows {
 		if uint64(ordinal) > uint64(^uint32(0)) {
 			break
 		}
-		value, ok := sqlJSONTypedInt64Value(row[field])
+		raw, exists := row[field]
+		if !exists || raw == nil {
+			nulls = append(nulls, uint32(ordinal))
+			continue
+		}
+		value, ok := sqlJSONTypedInt64Value(raw)
 		if !ok {
+			complete = false
 			continue
 		}
 		postings[value] = append(postings[value], uint32(ordinal))
 		ordered = append(ordered, sqlJSONTypedInt64Entry{value: value, ordinal: uint32(ordinal)})
 	}
 	sort.SliceStable(ordered, func(left, right int) bool { return ordered[left].value < ordered[right].value })
-	index.raw, index.rows, index.postings, index.ordered = data, rows, postings, ordered
+	index.raw, index.rows, index.postings, index.ordered, index.nulls, index.complete = data, rows, postings, ordered, nulls, complete
 }
 
 func sqlJSONTypedInt64Value(value interface{}) (int64, bool) {
@@ -1815,6 +1836,40 @@ func sqlJSONTypedInt64Rows(index *sqlJSONTypedInt64Index, ordinals []uint32) []S
 		}
 	}
 	return hatSql.CloneRows(rows)
+}
+
+func sqlJSONTypedInt64OrderedRows(index *sqlJSONTypedInt64Index, desc, nullsFirst, nullsLast bool) []SQLRow {
+	ordinals := make([]uint32, 0, len(index.ordered)+len(index.nulls))
+	forward := func() {
+		for _, entry := range index.ordered {
+			ordinals = append(ordinals, entry.ordinal)
+		}
+	}
+	backward := func() {
+		for end := len(index.ordered); end > 0; {
+			start := end - 1
+			for start > 0 && index.ordered[start-1].value == index.ordered[end-1].value {
+				start--
+			}
+			for _, entry := range index.ordered[start:end] {
+				ordinals = append(ordinals, entry.ordinal)
+			}
+			end = start
+		}
+	}
+	placeNullsFirst, _ := hatSql.OrderLess(desc, nullsFirst, nullsLast, nil, int64(0))
+	if placeNullsFirst {
+		ordinals = append(ordinals, index.nulls...)
+	}
+	if desc {
+		backward()
+	} else {
+		forward()
+	}
+	if !placeNullsFirst {
+		ordinals = append(ordinals, index.nulls...)
+	}
+	return sqlJSONTypedInt64Rows(index, ordinals)
 }
 
 func refreshSQLJSONBitmapIndex(index *sqlJSONBitmapIndex, key, field string, data []byte) error {

@@ -32,7 +32,23 @@ func TestSQLTypedInt64IndexAcceleratesEqualityRangeAndOrder(t *testing.T) {
 	if err != nil || !available || len(ranged) != 3 {
 		t.Fatalf("ResolveSQLIndexedRangeSource() = %#v, %v, %v", ranged, available, err)
 	}
+	ordered, available, err := trie.ResolveSQLOrderedSource("CACHE", "people", "age", false, false, false)
+	if err != nil || !available || len(ordered) != 4 || ordered[0]["id"] != float64(2) || ordered[3]["id"] != float64(1) {
+		t.Fatalf("ResolveSQLOrderedSource() = %#v, %v, %v", ordered, available, err)
+	}
 	if _, generic := trie.sqlJSONIndexes["people"]["age"]; generic {
 		t.Fatal("typed index unexpectedly configured a generic field index")
+	}
+}
+
+func TestSQLTypedInt64IndexDeclinesMixedValueOrder(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"age":21},{"id":2,"age":"unknown"}]`)
+	if err := trie.CreateSQLTypedJSONIndex(SQLJSONIndexSpec{CacheKey: "people", Fields: []string{"age"}, Type: SQLIndexInt64}); err != nil {
+		t.Fatal(err)
+	}
+	if _, available, err := trie.ResolveSQLOrderedSource("CACHE", "people", "age", false, false, false); err != nil || available {
+		t.Fatalf("ResolveSQLOrderedSource() = available %v, error %v, want unavailable fallback", available, err)
 	}
 }

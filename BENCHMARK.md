@@ -13346,7 +13346,9 @@ make bench-sql-index-snapshots
 
 `CreateSQLTypedJSONIndex` enables one explicitly declared `SQLIndexInt64` field.
 It stores exact integral JSON values in a sorted `int64` vector with `uint32`
-row ordinals, backed by the immutable source snapshot. Type inference remains
+row ordinals, backed by the immutable source snapshot. It supplies indexed
+equality, range, and complete one-field ordered scans; mixed non-NULL values
+decline the ordered plan and use the normal SQL fallback. Type inference remains
 off and the existing generic field index remains the default compatibility API.
 
 `TestSQLTypedInt64IndexAcceleratesEqualityRangeAndOrder` covers equality,
