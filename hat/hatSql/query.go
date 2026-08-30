@@ -6411,19 +6411,24 @@ func sqlSuspectedClauseTypo(value string) bool {
 }
 
 type sqlExecRow struct {
-	sources     map[string]SQLRow
-	order       []string
-	ordinals    map[string]int
-	singleAlias string
-	singleRow   SQLRow
-	columnar    *ColumnarBatch
-	columnarRow int
-	outer       *sqlExecRow
-	environment *sqlEvalEnvironment
+	sources       map[string]SQLRow
+	order         []string
+	ordinals      map[string]int
+	singleAlias   string
+	singleRow     SQLRow
+	singleOrdinal int
+	columnar      *ColumnarBatch
+	columnarRow   int
+	outer         *sqlExecRow
+	environment   *sqlEvalEnvironment
 }
 
 func newSQLSingleSourceExecRow(alias string, row SQLRow) sqlExecRow {
-	return sqlExecRow{singleAlias: alias, singleRow: row}
+	return newSQLSingleSourceExecRowAt(alias, row, 0)
+}
+
+func newSQLSingleSourceExecRowAt(alias string, row SQLRow, ordinal int) sqlExecRow {
+	return sqlExecRow{singleAlias: alias, singleRow: row, singleOrdinal: ordinal}
 }
 
 func newSQLColumnarSourceExecRow(alias string, batch *ColumnarBatch, row int) sqlExecRow {
@@ -9781,7 +9786,7 @@ func wrapSQLSourceWorkers(source sqlSource, rows []SQLRow, workers int) []sqlExe
 	out := make([]sqlExecRow, len(rows))
 	if workers < 2 || len(rows) < 2 {
 		for i, row := range rows {
-			out[i] = sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}, ordinals: map[string]int{source.alias: i}}
+			out[i] = newSQLSingleSourceExecRowAt(source.alias, row, i)
 		}
 		return out
 	}
@@ -9795,7 +9800,7 @@ func wrapSQLSourceWorkers(source sqlSource, rows []SQLRow, workers int) []sqlExe
 		go func() {
 			defer group.Done()
 			for index := range jobs {
-				out[index] = sqlExecRow{sources: map[string]SQLRow{source.alias: rows[index]}, order: []string{source.alias}, ordinals: map[string]int{source.alias: index}}
+				out[index] = newSQLSingleSourceExecRowAt(source.alias, rows[index], index)
 			}
 		}()
 	}
@@ -9807,25 +9812,28 @@ func wrapSQLSourceWorkers(source sqlSource, rows []SQLRow, workers int) []sqlExe
 	return out
 }
 func mergeSQLRows(left, right sqlExecRow) sqlExecRow {
-	out := sqlExecRow{sources: map[string]SQLRow{}, order: append(append([]string{}, left.order...), right.order...), ordinals: map[string]int{}, outer: left.outer, environment: left.environment}
+	out := sqlExecRow{sources: map[string]SQLRow{}, order: make([]string, 0, len(left.order)+len(right.order)+2), ordinals: map[string]int{}, outer: left.outer, environment: left.environment}
 	if out.outer == nil {
 		out.outer = right.outer
 	}
 	if out.environment == nil {
 		out.environment = right.environment
 	}
-	for k, v := range left.sources {
-		out.sources[k] = v
+	appendSources := func(row sqlExecRow) {
+		if row.singleRow != nil {
+			out.sources[row.singleAlias] = row.singleRow
+			out.order = append(out.order, row.singleAlias)
+			out.ordinals[row.singleAlias] = row.singleOrdinal
+			return
+		}
+		for _, alias := range row.order {
+			out.sources[alias] = row.sources[alias]
+			out.order = append(out.order, alias)
+			out.ordinals[alias] = row.ordinals[alias]
+		}
 	}
-	for k, v := range right.sources {
-		out.sources[k] = v
-	}
-	for alias, ordinal := range left.ordinals {
-		out.ordinals[alias] = ordinal
-	}
-	for alias, ordinal := range right.ordinals {
-		out.ordinals[alias] = ordinal
-	}
+	appendSources(left)
+	appendSources(right)
 	return out
 }
 
@@ -9851,9 +9859,18 @@ func sqlRowsBytes(rows []SQLRow) int {
 func sqlExecRowsBytes(rows []sqlExecRow) int {
 	total := 0
 	for _, row := range rows {
-		for _, source := range row.sources {
-			total += sqlRowBytes(source)
-		}
+		total += sqlExecRowBytes(row)
+	}
+	return total
+}
+
+func sqlExecRowBytes(row sqlExecRow) int {
+	if row.singleRow != nil {
+		return sqlRowBytes(row.singleRow)
+	}
+	total := 0
+	for _, source := range row.sources {
+		total += sqlRowBytes(source)
 	}
 	return total
 }
@@ -9862,9 +9879,7 @@ func sqlGroupedRowsBytes(groups [][]sqlExecRow) int {
 	total := 0
 	for _, group := range groups {
 		for _, row := range group {
-			for _, source := range row.sources {
-				total += sqlRowBytes(source)
-			}
+			total += sqlExecRowBytes(row)
 		}
 	}
 	return total

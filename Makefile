@@ -2452,3 +2452,18 @@ test-sql-composite-range-borrowed:
 
 deliver-sql-composite-range-borrowed:
 	sh ./scripts/deliver-sql-composite-range-borrowed.sh
+
+inspect-sql-single-source-envelopes:
+	sh ./scripts/inspect-sql-single-source-envelopes.sh
+
+test-sql-single-source-envelope:
+	sh ./scripts/test-sql-single-source-envelope.sh
+
+benchmark-sql-single-source-envelope:
+	sh ./scripts/benchmark-sql-single-source-envelope.sh
+
+inspect-sql-single-source-envelope-docs:
+	sh ./scripts/inspect-sql-single-source-envelope-docs.sh
+
+deliver-sql-single-source-envelope:
+	sh ./scripts/deliver-sql-single-source-envelope.sh

@@ -13483,6 +13483,35 @@ make test-sql-typed-composite
 make benchmark-sql-typed-composite
 ```
 
+## Materialized Single-Source SQL Envelopes
+
+The SQL executor already has a direct single-source row representation used by
+columnar paths. Materialized `CACHE`, `TABLE`, and external source rows now use
+that same representation instead of allocating a source map, source-order
+slice, and ordinal map for every row. `sqlField`, filtering, grouping, ordering,
+and projection read the direct row. `mergeSQLRows` converts it to the existing
+map representation only when a join combines sources, preserving join aliases
+and source ordinals. Logical-byte metrics account for both representations.
+
+`BenchmarkSQLMaterializedSingleSourceEnvelope` wraps 20,000 already
+materialized three-field rows, excluding source parsing and query execution. On
+an AMD Ryzen 9 5950X, five runs measured:
+
+| Envelope representation | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Source/order/ordinal maps per row | 5.85 ms/op | 12,520,507 B/op | 100,300 allocs/op | Baseline |
+| Direct single-source row | 564.5 us/op | 2,084,286 B/op | 30 allocs/op | 10.4x faster; 6.0x fewer bytes; 3,343x fewer allocations |
+
+`TestMaterializedSingleSourceEnvelopeRetainsFieldsMetricsAndJoinData` verifies
+qualified field access, logical-byte accounting, and subsequent join
+materialization. The full SQL verification suite also covers query filtering,
+grouping, ordering, and joins.
+
+```sh
+make test-sql-single-source-envelope
+make benchmark-sql-single-source-envelope
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

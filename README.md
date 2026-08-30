@@ -61,6 +61,13 @@ map index. On the measured selective 20,000-row executor query it is 14.3x
 faster and allocates 36.6x fewer bytes; result materialization still increases
 allocation count. See [BENCHMARK.md](BENCHMARK.md#typed-int64-composite-equality-prefix-range-index).
 
+Materialized single-source SQL execution now uses the executor's direct-row
+envelope instead of allocating source, order, and ordinal maps per row. Joins
+materialize those maps only when combining sources. Wrapping 20,000 already
+materialized rows is 10.4x faster, retains 6.0x less transient heap, and uses
+over 3,300x fewer allocations; details are in
+[BENCHMARK.md](BENCHMARK.md#materialized-single-source-sql-envelopes).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
