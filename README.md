@@ -28,6 +28,12 @@ keep backups outside the cache host.
 <details>
 <summary>Performance and implementation history (measured changes and rejected tradeoffs)</summary>
 
+JSON field, bitmap, text, and composite SQL indexes now share one immutable
+decoded source generation when they rebuild together. A 20,000-row four-index
+fixture is 2.55x faster, allocates 2.25x fewer bytes, and performs 2.80x fewer
+allocations than four independent decodes; details and the reproducible target
+are in [BENCHMARK.md](BENCHMARK.md#sql-shared-index-snapshots).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

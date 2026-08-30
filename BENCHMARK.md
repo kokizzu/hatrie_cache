@@ -13316,6 +13316,32 @@ make run CMD='go test . -run=TestExecuteCommandQuantileSketch -count=1'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandQuantileSketchEpsilon -benchtime=1s -count=7 -benchmem -cpu=1'
 ```
 
+## SQL Shared Index Snapshots
+
+JSON field, bitmap, text, and composite indexes retain complete source rows.
+Previously, rebuilding several such indexes for one changed JSON value decoded
+the same document once per index. They now use one immutable decoded snapshot
+per cache key and source generation. Covering indexes are deliberately excluded:
+they retain only projected fields, so retaining a full decoded snapshot for a
+covering-only configuration would increase memory.
+
+`TestSQLJSONIndexesShareSourceSnapshot` verifies shared row backing and that a
+replacement publishes a new immutable generation without mutating the prior
+one. On an AMD Ryzen 9 5950X, rebuilding field, bitmap, text, and two-column
+composite indexes from alternating 20,000-row JSON sources measured:
+
+| Rebuild design | Time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Independent document decode per index | 128.20 ms | 56.48 MB | 1,400,566 | Baseline |
+| Shared immutable snapshot | 50.31 ms | 25.05 MB | 500,507 | 2.55x faster; 2.25x fewer bytes; 2.80x fewer allocations |
+
+Reproduce the focused behavior check and benchmark with:
+
+```sh
+make test-sql-index-snapshots
+make bench-sql-index-snapshots
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

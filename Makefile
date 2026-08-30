@@ -2250,6 +2250,22 @@ bench-sql-index-value-key:
 deliver-sql-index-value-key:
 	sh ./scripts/deliver-sql-index-value-key.sh
 
+.PHONY: format-sql-index-snapshots
+format-sql-index-snapshots:
+	sh ./scripts/format-sql-index-snapshots.sh
+
+.PHONY: test-sql-index-snapshots
+test-sql-index-snapshots:
+	sh ./scripts/test-sql-index-snapshots.sh
+
+.PHONY: bench-sql-index-snapshots
+bench-sql-index-snapshots:
+	sh ./scripts/bench-sql-index-snapshots.sh
+
+.PHONY: deliver-sql-index-snapshots
+deliver-sql-index-snapshots:
+	sh ./scripts/deliver-sql-index-snapshots.sh
+
 .PHONY: test-sql-direct-string-source
 test-sql-direct-string-source:
 	sh ./scripts/test-sql-direct-string-source.sh
