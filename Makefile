@@ -2520,3 +2520,9 @@ ifneq (,$(filter deliver-sql-zero-copy-groups,$(MAKECMDGOALS)))
 deliver-sql-zero-copy-groups:
 	sh ./scripts/deliver-sql-zero-copy-groups.sh
 endif
+
+ifneq (,$(filter deliver-sql-simple-predicate-filter,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-simple-predicate-filter
+deliver-sql-simple-predicate-filter:
+	sh ./scripts/deliver-sql-simple-predicate-filter.sh
+endif

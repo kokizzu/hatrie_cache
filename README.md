@@ -95,6 +95,11 @@ than allocating a new backing array per row. The same normal query is 1.23x
 faster, with 1.16x lower allocation and 1.50x fewer allocations; see
 [BENCHMARK.md](BENCHMARK.md#zero-copy-nonaggregate-sql-groups).
 
+Simple field-versus-literal `WHERE` comparisons now filter directly instead of
+materializing three expression vectors. Other predicates retain the generic
+evaluator. The same normal query is 1.14x faster with 1.16x lower allocation;
+see [BENCHMARK.md](BENCHMARK.md#direct-simple-sql-predicates).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

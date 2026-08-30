@@ -7527,18 +7527,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			started = time.Now()
 			inputRows := len(rows)
 			inputBytes := sqlMetricsExecRowsBytes(metrics, rows)
-			values, err := evalSQLExprBatch(q.where, rows, functions)
+			filtered, err := filterSQLRows(q.where, rows, functions)
 			if err != nil {
 				return SQLQueryResult{}, err
-			}
-			filtered := rows[:0]
-			for index, row := range rows {
-				if err := sqlExpressionError(values[index]); err != nil {
-					return SQLQueryResult{}, err
-				}
-				if sqlTruthy(values[index]) {
-					filtered = append(filtered, row)
-				}
 			}
 			rows = filtered
 			if metrics != nil {
@@ -7943,18 +7934,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		started = time.Now()
 		inputRows := len(rows)
 		inputBytes := sqlMetricsExecRowsBytes(metrics, rows)
-		values, err := evalSQLExprBatch(q.where, rows, functions)
+		filtered, err := filterSQLRows(q.where, rows, functions)
 		if err != nil {
 			return SQLQueryResult{}, err
-		}
-		filtered := rows[:0]
-		for index, row := range rows {
-			if err := sqlExpressionError(values[index]); err != nil {
-				return SQLQueryResult{}, err
-			}
-			if sqlTruthy(values[index]) {
-				filtered = append(filtered, row)
-			}
 		}
 		rows = filtered
 		if metrics != nil {
@@ -12743,6 +12725,56 @@ func sqlBuiltinFunction(name string) bool {
 	}
 	return false
 }
+
+func filterSQLRows(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionResolver) ([]sqlExecRow, error) {
+	if field, literal, ok := sqlSimpleFieldLiteralPredicate(expr); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			left := sqlField(row, field.qualifier, field.name)
+			if err := sqlExpressionError(left); err != nil {
+				return nil, err
+			}
+			value := sqlBinaryValueWithCollation(expr.op, left, literal.value, expr.collation)
+			if err := sqlExpressionError(value); err != nil {
+				return nil, err
+			}
+			if sqlTruthy(value) {
+				filtered = append(filtered, row)
+			}
+		}
+		return filtered, nil
+	}
+	values, err := evalSQLExprBatch(expr, rows, functions)
+	if err != nil {
+		return nil, err
+	}
+	filtered := rows[:0]
+	for index, row := range rows {
+		if err := sqlExpressionError(values[index]); err != nil {
+			return nil, err
+		}
+		if sqlTruthy(values[index]) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
+}
+
+func sqlSimpleFieldLiteralPredicate(expr sqlExpr) (field sqlExpr, literal sqlExpr, ok bool) {
+	if expr.kind != "binary" || expr.left == nil || expr.right == nil {
+		return sqlExpr{}, sqlExpr{}, false
+	}
+	switch expr.op {
+	case "LIKE", "=", "!=", "<>", "<", "<=", ">", ">=":
+	default:
+		return sqlExpr{}, sqlExpr{}, false
+	}
+	if expr.left.kind == "field" && expr.right.kind == "literal" {
+		return *expr.left, *expr.right, true
+	}
+	return sqlExpr{}, sqlExpr{}, false
+}
+
 func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionResolver) ([]interface{}, error) {
 	switch expr.kind {
 	case "literal":

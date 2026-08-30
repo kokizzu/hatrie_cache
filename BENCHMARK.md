@@ -13642,6 +13642,31 @@ make test-sql-expression-batch
 make benchmark-sql-metrics-byte-accounting
 ```
 
+## Direct Simple SQL Predicates
+
+A common filter such as `event.score >= 32` previously allocated field, literal,
+and binary-result vectors before retaining matching rows. A guarded path now
+filters directly when the predicate is one supported comparison between a field
+and a literal. `LIKE`, equality, inequality, and ordered comparisons are
+covered; all other predicate shapes continue through `evalSQLExprBatch`.
+
+After zero-copy nonaggregate groups, the same
+`BenchmarkSQLMetricsDisabledFilteredQuery` fixture measured:
+
+| Filter evaluation | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Materialized expression vectors | 4.05 ms/op | 7,094,137 B/op | 20,204 allocs/op | Baseline |
+| Direct field/literal filter | 3.55 ms/op | 6,108,333 B/op | 20,177 allocs/op | 1.14x faster; 1.16x fewer bytes; allocation count unchanged |
+
+`TestSQLSimpleFieldLiteralPredicateMatchesBatchEvaluator` checks ordered
+comparison results, including `NULL`, against the vectorized evaluator, while
+the query-level predicate test exercises the executed fast path.
+
+```sh
+make test-sql-expression-batch
+make benchmark-sql-metrics-byte-accounting
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

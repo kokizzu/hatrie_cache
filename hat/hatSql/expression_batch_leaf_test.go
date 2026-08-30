@@ -37,3 +37,24 @@ func TestSQLGroupRowsWithoutAggregatePreservesInputRows(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLSimpleFieldLiteralPredicateMatchesBatchEvaluator(t *testing.T) {
+	expression := sqlExpr{
+		kind: "binary",
+		op:   ">=",
+		left: &sqlExpr{kind: "field", qualifier: "value", name: "score"},
+		right: &sqlExpr{kind: "literal", value: int64(2)},
+	}
+	rows := []sqlExecRow{
+		newSQLSingleSourceExecRowAt("value", SQLRow{"score": int64(1)}, 0),
+		newSQLSingleSourceExecRowAt("value", SQLRow{"score": nil}, 1),
+		newSQLSingleSourceExecRowAt("value", SQLRow{"score": int64(3)}, 2),
+	}
+	values, err := evalSQLExprBatch(expression, rows, nil)
+	if err != nil {
+		t.Fatalf("evalSQLExprBatch() error = %v", err)
+	}
+	if len(values) != 3 || values[0] != false || values[1] != nil || values[2] != true {
+		t.Fatalf("predicate values = %#v", values)
+	}
+}
