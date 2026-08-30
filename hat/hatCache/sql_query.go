@@ -49,6 +49,7 @@ type SQLQueryOperator = hatSql.QueryOperator
 type SQLSourceResolver = hatSql.SourceResolver
 type SQLColumnarBatch = hatSql.ColumnarBatch
 type SQLColumnarSourceResolver = hatSql.ColumnarSourceResolver
+type SQLBorrowedColumnarSourceResolver = hatSql.BorrowedColumnarSourceResolver
 type SQLStreamSourceResolver = hatSql.StreamSourceResolver
 type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
@@ -2936,6 +2937,16 @@ func (ht *HatTrie) BorrowSQLSource(name string, key string) ([]SQLRow, bool, err
 // field-aligned slices. It avoids retaining full source rows for simple
 // analytics scans; unsupported sources return available=false.
 func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (hatSql.ColumnarBatch, bool, error) {
+	return ht.resolveSQLColumnarSource(name, key, fields, false)
+}
+
+// BorrowSQLColumnarSource exposes an immutable columnar batch to the SQL
+// executor. Callers must not retain or mutate its maps or slices.
+func (ht *HatTrie) BorrowSQLColumnarSource(name, key string, fields []string) (hatSql.ColumnarBatch, bool, error) {
+	return ht.resolveSQLColumnarSource(name, key, fields, true)
+}
+
+func (ht *HatTrie) resolveSQLColumnarSource(name, key string, fields []string, borrow bool) (hatSql.ColumnarBatch, bool, error) {
 	if ht == nil {
 		return hatSql.ColumnarBatch{}, false, ErrNilHatTrie
 	}
@@ -2943,7 +2954,7 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 		return hatSql.ColumnarBatch{}, false, nil
 	}
 	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
-	if batch, cached := ht.sqlColumnarLayouts.lookup(layoutKey); cached {
+	if batch, cached := ht.sqlColumnarLayout(layoutKey, borrow); cached {
 		return batch, true, nil
 	}
 	plan, err := ht.SQLPartitionPruningPlan(name, key)
@@ -2951,7 +2962,7 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 		return hatSql.ColumnarBatch{}, false, err
 	}
 	if plan.Pruned {
-		return ht.localPartitionSet().tries[plan.Partition].ResolveSQLColumnarSource(name, key, fields)
+		return ht.localPartitionSet().tries[plan.Partition].resolveSQLColumnarSource(name, key, fields, borrow)
 	}
 	if batch, handled, err := ht.sqlColumnarRawBytesBatch(key, fields); handled {
 		if err == nil {
@@ -2968,6 +2979,13 @@ func (ht *HatTrie) ResolveSQLColumnarSource(name, key string, fields []string) (
 		ht.sqlColumnarLayouts.observe(layoutKey, batch)
 	}
 	return batch, true, err
+}
+
+func (ht *HatTrie) sqlColumnarLayout(key sqlColumnarLayoutCacheKey, borrow bool) (hatSql.ColumnarBatch, bool) {
+	if borrow {
+		return ht.sqlColumnarLayouts.borrow(key)
+	}
+	return ht.sqlColumnarLayouts.lookup(key)
 }
 
 // sqlColumnarRawBytesBatch decodes an in-memory raw value while its backing

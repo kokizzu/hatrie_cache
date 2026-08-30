@@ -2643,3 +2643,11 @@ ifneq (,$(filter deliver-sql-columnar-group-aggregate,$(MAKECMDGOALS)))
 deliver-sql-columnar-group-aggregate:
 	sh ./scripts/deliver-sql-columnar-group-aggregate.sh
 endif
+test-sql-borrowed-columnar-source:
+	sh ./scripts/test-sql-borrowed-columnar-source.sh
+format-sql-borrowed-columnar-source:
+	sh ./scripts/format-sql-borrowed-columnar-source.sh
+benchmark-sql-borrowed-columnar-source:
+	sh ./scripts/benchmark-sql-borrowed-columnar-source.sh
+deliver-sql-borrowed-columnar-source:
+	sh ./scripts/deliver-sql-borrowed-columnar-source.sh

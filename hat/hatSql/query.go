@@ -129,6 +129,7 @@ type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
 type SQLColumnarBatch = ColumnarBatch
 type SQLColumnarSourceResolver = ColumnarSourceResolver
+type SQLBorrowedColumnarSourceResolver = BorrowedColumnarSourceResolver
 type SQLStreamSourceResolver = StreamSourceResolver
 type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
@@ -749,7 +750,7 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	if err != nil {
 		return true, err
 	}
-	batch, available, err := columnar.ResolveSQLColumnarSource(query.from.kind, query.from.key, fields)
+	batch, available, err := resolveSQLColumnarSource(columnar, query.from.kind, query.from.key, fields)
 	if err != nil || !available {
 		return available, err
 	}
@@ -7048,7 +7049,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return SQLQueryResult{}, true, err
 	}
 	started := time.Now()
-	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
+	batch, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7334,7 +7335,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
+	batch, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7553,7 +7554,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, available, err := columnar.ResolveSQLColumnarSource(q.from.kind, q.from.key, fields)
+	batch, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -13688,4 +13689,13 @@ func Integer(value interface{}) (int64, bool) { return sqlInteger(value) }
 // BinaryValue evaluates one SQL binary operation using the query value rules.
 func BinaryValue(op string, left, right interface{}) interface{} {
 	return sqlBinaryValue(op, left, right)
+}
+func resolveSQLColumnarSource(resolver ColumnarSourceResolver, name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if borrowed, ok := resolver.(BorrowedColumnarSourceResolver); ok {
+		batch, available, err := borrowed.BorrowSQLColumnarSource(name, key, fields)
+		if err != nil || available {
+			return batch, available, err
+		}
+	}
+	return resolver.ResolveSQLColumnarSource(name, key, fields)
 }

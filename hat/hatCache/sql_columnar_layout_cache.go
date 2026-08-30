@@ -74,6 +74,16 @@ func (cache *sqlColumnarLayoutCache) lookup(key sqlColumnarLayoutCacheKey) (hatS
 	return entry.batch, ok
 }
 
+func (cache *sqlColumnarLayoutCache) borrow(key sqlColumnarLayoutCacheKey) (hatSql.ColumnarBatch, bool) {
+	cache.mu.RLock()
+	entry, ok := cache.entries[key]
+	cache.mu.RUnlock()
+	if ok {
+		cache.hits.Add(1)
+	}
+	return entry.batch, ok
+}
+
 func (cache *sqlColumnarLayoutCache) observe(key sqlColumnarLayoutCacheKey, batch hatSql.ColumnarBatch) {
 	bytes, cacheable := sqlColumnarLayoutCacheBytes(batch)
 	if !cacheable || bytes > sqlColumnarLayoutCacheMaxBytes {

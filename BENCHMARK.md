@@ -388,6 +388,32 @@ Reproduce with:
 ```sh
 make benchmark-sql-columnar-layout-cache
 ```
+
+### Borrowed Columnar Layouts
+
+The adaptive layout cache previously cloned its cached column slices for every
+SQL execution, even though the SQL executor only reads them. The executor now
+uses `BorrowedColumnarSourceResolver` when available. HatTrie implements this
+contract only for its internal immutable layout cache; the existing public
+`ResolveSQLColumnarSource` contract still returns an isolated copy.
+
+| Five-run median, warmed 20,000-row numeric aggregate | Defensive layout copy | Borrowed immutable layout | Improvement |
+| --- | ---: | ---: | ---: |
+| CPU | 543.576 us/op | 383.177 us/op | 1.42x faster |
+| Cumulative allocation | 331,949 B/op | 3,993 B/op | 83.13x lower |
+| Allocations | 25/op | 26/op | One additional small allocation; allocated bytes fall by 327,956 B/op |
+
+The borrowed batch remains valid only for the query and must not be retained or
+mutated. Normal writes invalidate the layout cache before a later query can
+borrow it. This adds no retained-cache budget, wire-format, or persistence
+tradeoff; resolvers that do not prove immutable batch ownership keep using the
+existing defensive-copy path.
+
+Reproduce with:
+
+```sh
+make benchmark-sql-borrowed-columnar-source
+```
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |
 | Current pass | [Stack-backed small priority-queue snapshot](#compact-priority-queue-items), 16 exact plain-string `GETPQ` items | Heap snapshot plus response: 1,925 ns; 1,472 B; 2 allocs | Stack snapshot plus final response: 1,461 ns; 576 B; 1 alloc | 1.32x faster; 2.56x lower heap; 2x fewer allocations | At most 16 private item headers use the stack; the 100-item generic control is neutral within 0.4%, with identical heap and allocations |

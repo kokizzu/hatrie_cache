@@ -145,6 +145,13 @@ type ColumnarSourceResolver interface {
 	ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
 }
 
+// BorrowedColumnarSourceResolver optionally supplies an immutable columnar
+// batch to the SQL executor. Returned slices must remain valid for the query
+// and must not be retained or mutated by the executor.
+type BorrowedColumnarSourceResolver interface {
+	BorrowSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
+}
+
 // SourceVersionResolver optionally identifies an immutable source snapshot.
 // The version must change whenever rows or values observable through the named
 // source change. The condition cache uses it to avoid stale predicate matches;

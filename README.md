@@ -3215,6 +3215,22 @@ maximum-row, and result-byte-budget behavior. Its measured `20,000`-row filter
 workload is `2.22x` faster with unchanged callback-map allocation; see
 [BENCHMARK.md](BENCHMARK.md#sql-columnar-queryrows-streaming).
 
+### Borrowed Immutable Layouts
+
+Resolvers that own an immutable `ColumnarBatch` for the lifetime of one query
+can additionally implement `hatSql.BorrowedColumnarSourceResolver`. The SQL
+executor then reads that batch directly and otherwise uses the existing
+`ColumnarSourceResolver` copy-returning method. `HatTrie` does this
+automatically after its adaptive scalar layout cache has promoted a repeated
+field set. Its public `ResolveSQLColumnarSource` method remains isolated for
+callers that may mutate a returned batch.
+
+The borrowed batch must not be retained or mutated. Cache writes invalidate
+promoted layouts as before; this changes neither storage nor wire formats and
+adds no retained-cache budget. The warmed `20,000`-row aggregate benchmark is
+`1.42x` faster with `83.13x` lower allocated bytes. See
+[BENCHMARK.md](BENCHMARK.md#borrowed-columnar-layouts).
+
 ### Versioned Condition Cache
 
 Repeated selective columnar `WHERE` predicates can reuse a bounded vector of
