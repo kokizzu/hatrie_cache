@@ -13691,6 +13691,30 @@ make test-sql-expression-batch
 make benchmark-sql-query-rows-stream
 ```
 
+## Scalar QueryRows Expressions
+
+`QueryRows` evaluates one source row at a time, but previously still created a
+one-element expression batch for ordinary field/literal predicates and scalar
+arithmetic. Pure field/literal binary trees now evaluate directly. Custom
+functions, CASE expressions, aggregates, subqueries, and unsupported operators
+retain the established batch path.
+
+After compact source envelopes, `BenchmarkSQLQueryRowsSimpleFilter` measured:
+
+| QueryRows expression evaluation | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| One-element batch evaluator | 10.05 ms/op | 5,499,875 B/op | 130,421 allocs/op | Baseline |
+| Scalar field/literal evaluator | 8.56 ms/op | 4,371,013 B/op | 60,372 allocs/op | 1.17x faster; 1.26x fewer bytes; 2.16x fewer allocations |
+
+`TestSQLStreamSimpleFieldLiteralExpressionMatchesBatch` compares scalar stream
+evaluation with the batch evaluator. Query-level coverage compares streamed and
+materialized filtered results.
+
+```sh
+make test-sql-expression-batch
+make benchmark-sql-query-rows-stream
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

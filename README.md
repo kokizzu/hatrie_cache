@@ -105,6 +105,11 @@ materialized scans, avoiding a map-backed envelope per streamed source row. Its
 20,000-row simple-filter stream is 1.38x faster with 1.99x lower allocation;
 see [BENCHMARK.md](BENCHMARK.md#compact-queryrows-source-envelopes).
 
+Pure field/literal expressions in `QueryRows` now use scalar evaluation instead
+of allocating one-element batches; functions, CASE, aggregates, and subqueries
+retain batch evaluation. The same stream is 1.17x faster with 2.16x fewer
+allocations; see [BENCHMARK.md](BENCHMARK.md#scalar-queryrows-expressions).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

@@ -2538,3 +2538,9 @@ ifneq (,$(filter deliver-sql-query-rows-envelope,$(MAKECMDGOALS)))
 deliver-sql-query-rows-envelope:
 	sh ./scripts/deliver-sql-query-rows-envelope.sh
 endif
+
+ifneq (,$(filter deliver-sql-query-rows-scalar,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-query-rows-scalar
+deliver-sql-query-rows-scalar:
+	sh ./scripts/deliver-sql-query-rows-scalar.sh
+endif

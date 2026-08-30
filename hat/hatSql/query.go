@@ -1499,6 +1499,13 @@ func sqlVisitExternalSetOutputRuns(runs []sqlSpillRun, columns []string, offset,
 // custom functions bounded while preserving their typed errors and CASE's lazy
 // branch semantics.
 func evalSQLStreamExpr(expr sqlExpr, row sqlExecRow, functions SQLFunctionResolver) (interface{}, error) {
+	if sqlStreamScalarExpr(expr) {
+		value := evalSQLExpr(expr, nil, row)
+		if err := sqlExpressionError(value); err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
 	values, err := evalSQLExprBatch(expr, []sqlExecRow{row}, functions)
 	if err != nil {
 		return nil, err
@@ -1510,6 +1517,28 @@ func evalSQLStreamExpr(expr sqlExpr, row sqlExecRow, functions SQLFunctionResolv
 		return nil, err
 	}
 	return values[0], nil
+}
+
+func sqlStreamScalarExpr(expr sqlExpr) bool {
+	switch expr.kind {
+	case "literal", "field":
+		return true
+	case "binary":
+		if expr.left == nil || !sqlStreamScalarExpr(*expr.left) {
+			return false
+		}
+		if expr.op == "IS NULL" || expr.op == "IS NOT NULL" {
+			return true
+		}
+		if expr.right == nil || !sqlStreamScalarExpr(*expr.right) {
+			return false
+		}
+		switch expr.op {
+		case "AND", "OR", "LIKE", "=", "!=", "<>", "<", "<=", ">", ">=", "+", "-", "*", "/", "%":
+			return true
+		}
+	}
+	return false
 }
 
 func sqlQueryRowsBaseStreamable(query *sqlQuery) bool {

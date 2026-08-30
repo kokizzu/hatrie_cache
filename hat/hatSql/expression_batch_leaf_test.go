@@ -89,3 +89,24 @@ func TestSQLQueryRowsMatchesMaterializedSimpleFilter(t *testing.T) {
 		t.Fatalf("streamed rows = %#v, want %#v", streamed, materialized.Rows)
 	}
 }
+
+func TestSQLStreamSimpleFieldLiteralExpressionMatchesBatch(t *testing.T) {
+	expression := sqlExpr{
+		kind: "binary",
+		op:   ">=",
+		left: &sqlExpr{kind: "field", qualifier: "event", name: "score"},
+		right: &sqlExpr{kind: "literal", value: int64(2)},
+	}
+	row := newSQLSingleSourceExecRow("event", SQLRow{"score": int64(3)})
+	streamed, err := evalSQLStreamExpr(expression, row, nil)
+	if err != nil {
+		t.Fatalf("evalSQLStreamExpr() error = %v", err)
+	}
+	batched, err := evalSQLExprBatch(expression, []sqlExecRow{row}, nil)
+	if err != nil {
+		t.Fatalf("evalSQLExprBatch() error = %v", err)
+	}
+	if len(batched) != 1 || streamed != batched[0] {
+		t.Fatalf("streamed = %#v, batched = %#v", streamed, batched)
+	}
+}
