@@ -100,6 +100,11 @@ materializing three expression vectors. Other predicates retain the generic
 evaluator. The same normal query is 1.14x faster with 1.16x lower allocation;
 see [BENCHMARK.md](BENCHMARK.md#direct-simple-sql-predicates).
 
+`QueryRows` now uses the compact single-source SQL envelope already used by
+materialized scans, avoiding a map-backed envelope per streamed source row. Its
+20,000-row simple-filter stream is 1.38x faster with 1.99x lower allocation;
+see [BENCHMARK.md](BENCHMARK.md#compact-queryrows-source-envelopes).
+
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with

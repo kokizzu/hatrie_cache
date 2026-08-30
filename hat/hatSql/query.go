@@ -913,7 +913,7 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		left := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		left := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		err := streamJoined(0, left)
 		if err == errSQLStreamLimitReached && len(query.from.fieldTypes) > 0 {
 			limitReached = true

@@ -13667,6 +13667,30 @@ make test-sql-expression-batch
 make benchmark-sql-metrics-byte-accounting
 ```
 
+## Compact QueryRows Source Envelopes
+
+The stream-compatible `QueryRows` executor previously created a map-backed
+execution envelope for every single-source input row, despite the materialized
+executor already having a compact single-source representation. Streamed scans
+now use that representation directly; joins continue to materialize their
+multi-source envelopes as before.
+
+`BenchmarkSQLQueryRowsSimpleFilter` streams 20,000 rows through a field/literal
+filter and a one-column projection:
+
+| QueryRows source envelope | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Per-row map envelope | 13.84 ms/op | 10,963,516 B/op | 190,612 allocs/op | Baseline |
+| Compact single-source envelope | 10.05 ms/op | 5,499,875 B/op | 130,421 allocs/op | 1.38x faster; 1.99x fewer bytes; 1.46x fewer allocations |
+
+`TestSQLQueryRowsMatchesMaterializedSimpleFilter` compares the streamed rows
+and columns with the materialized query result for the same filter.
+
+```sh
+make test-sql-expression-batch
+make benchmark-sql-query-rows-stream
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 

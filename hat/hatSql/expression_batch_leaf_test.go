@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+type sqlQueryRowsTestResolver struct{ rows []Row }
+
+func (resolver sqlQueryRowsTestResolver) ResolveSQLSource(name, key string) ([]Row, error) {
+	return resolver.rows, nil
+}
+
 func TestSQLBatchLeafPredicatePreservesNullAndLiteralValues(t *testing.T) {
 	result, err := ExecuteSQLQueryParameters(context.Background(), `FROM VALUES (1), (NULL), (3) AS values(score) WHERE score >= 2 SELECT score, 5 AS constant`, nil, nil, SQLQueryOptions{})
 	if err != nil {
@@ -56,5 +62,30 @@ func TestSQLSimpleFieldLiteralPredicateMatchesBatchEvaluator(t *testing.T) {
 	}
 	if len(values) != 3 || values[0] != false || values[1] != nil || values[2] != true {
 		t.Fatalf("predicate values = %#v", values)
+	}
+}
+
+func TestSQLQueryRowsMatchesMaterializedSimpleFilter(t *testing.T) {
+	resolver := sqlQueryRowsTestResolver{rows: []Row{{"id": int64(1), "score": int64(1)}, {"id": int64(2), "score": int64(2)}, {"id": int64(3), "score": int64(3)}}}
+	const query = "FROM CACHE('events') AS event WHERE event.score >= 2 SELECT event.id"
+	materialized, err := ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	var columns []string
+	streamed := make([]SQLRow, 0)
+	err = ExecuteSQLQueryRows(context.Background(), query, resolver, nil, SQLQueryOptions{}, func(gotColumns []string, row SQLRow) error {
+		columns = append(columns[:0], gotColumns...)
+		streamed = append(streamed, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryRows() error = %v", err)
+	}
+	if len(columns) != len(materialized.Columns) || columns[0] != materialized.Columns[0] {
+		t.Fatalf("columns = %#v, want %#v", columns, materialized.Columns)
+	}
+	if len(streamed) != len(materialized.Rows) || streamed[0]["id"] != materialized.Rows[0]["id"] || streamed[1]["id"] != materialized.Rows[1]["id"] {
+		t.Fatalf("streamed rows = %#v, want %#v", streamed, materialized.Rows)
 	}
 }

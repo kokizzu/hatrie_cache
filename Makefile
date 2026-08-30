@@ -2526,3 +2526,15 @@ ifneq (,$(filter deliver-sql-simple-predicate-filter,$(MAKECMDGOALS)))
 deliver-sql-simple-predicate-filter:
 	sh ./scripts/deliver-sql-simple-predicate-filter.sh
 endif
+
+ifneq (,$(filter benchmark-sql-query-rows-stream,$(MAKECMDGOALS)))
+.PHONY: benchmark-sql-query-rows-stream
+benchmark-sql-query-rows-stream:
+	sh ./scripts/benchmark-sql-query-rows-stream.sh
+endif
+
+ifneq (,$(filter deliver-sql-query-rows-envelope,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-query-rows-envelope
+deliver-sql-query-rows-envelope:
+	sh ./scripts/deliver-sql-query-rows-envelope.sh
+endif
