@@ -2443,3 +2443,12 @@ status-sql-typed-composite:
 
 deliver-sql-typed-composite:
 	sh ./scripts/deliver-sql-typed-composite.sh
+
+inspect-sql-indexed-row-ownership:
+	sh ./scripts/inspect-sql-indexed-row-ownership.sh
+
+test-sql-composite-range-borrowed:
+	sh ./scripts/test-sql-composite-range-borrowed.sh
+
+deliver-sql-composite-range-borrowed:
+	sh ./scripts/deliver-sql-composite-range-borrowed.sh

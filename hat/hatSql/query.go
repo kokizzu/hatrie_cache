@@ -9242,11 +9242,21 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
-	if indexed, ok := resolver.(CompositeRangeIndexedSourceResolver); ok {
-		fields, values, rangeField, operator, rangeValue, matched := sqlCompositeIndexedRange(source, condition)
-		if matched {
-			allFields := append(append([]string(nil), fields...), rangeField)
-			if sqlIndexHintAllowsFields(hint, source, allFields) {
+	fields, values, rangeField, operator, rangeValue, matched := sqlCompositeIndexedRange(source, condition)
+	if matched {
+		allFields := append(append([]string(nil), fields...), rangeField)
+		if sqlIndexHintAllowsFields(hint, source, allFields) {
+			if indexed, ok := resolver.(BorrowedCompositeRangeIndexedSourceResolver); ok {
+				started := time.Now()
+				rows, available, err := indexed.BorrowSQLCompositeIndexedRangeSource(source.kind, source.key, fields, values, rangeField, operator, rangeValue)
+				if available || err != nil {
+					if available && metrics != nil {
+						metrics.record("COMPOSITE RANGE INDEX SCAN", sqlExplainSource(source)+" fields="+strings.Join(allFields, ","), len(fields)+1, len(rows), started)
+					}
+					return rows, available, err
+				}
+			}
+			if indexed, ok := resolver.(CompositeRangeIndexedSourceResolver); ok {
 				started := time.Now()
 				rows, available, err := indexed.ResolveSQLCompositeIndexedRangeSource(source.kind, source.key, fields, values, rangeField, operator, rangeValue)
 				if available || err != nil {

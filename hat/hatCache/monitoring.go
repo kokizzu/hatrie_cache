@@ -207,6 +207,14 @@ func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedRangeSource(name
 	return indexed.ResolveSQLCompositeIndexedRangeSource(name, key, equalityFields, equalityValues, rangeField, operator, rangeValue)
 }
 
+func (resolver monitoringSQLResolver) BorrowSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(hatSql.BorrowedCompositeRangeIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.BorrowSQLCompositeIndexedRangeSource(name, key, equalityFields, equalityValues, rangeField, operator, rangeValue)
+}
+
 func (resolver monitoringSQLResolver) LockSQLSnapshot() func() {
 	if locker, ok := resolver.source.(SQLSnapshotLocker); ok {
 		return locker.LockSQLSnapshot()

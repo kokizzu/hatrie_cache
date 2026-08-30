@@ -13451,9 +13451,11 @@ make bench-sql-typed-index
 SQLIndexInt64}` configures an ordered two-field index. The planner uses it only
 when every prefix field has an equality predicate and the final field has one
 of `<`, `<=`, `>`, or `>=`; unsupported types and predicate shapes retain the
-normal correct scan. The public resolver and SQL planner both return cloned
-candidate rows, so callers cannot mutate shared index state. Scheduled rebuilds
-and `SQLJSONIndexStats` include every field of this index.
+normal correct scan. The public resolver returns cloned candidate rows, so
+callers cannot mutate shared index state. The SQL planner borrows read-only
+candidates from immutable index snapshots when its resolver explicitly supports
+that contract. Scheduled rebuilds and `SQLJSONIndexStats` include every field
+of this index.
 
 The index retains one `int64` per indexed field and one `uint32` ordinal per
 source row, or `20 B` per fully valid two-field row before slice overhead. It
@@ -13466,12 +13468,15 @@ created_at >= 19000`. The index was warmed before timing.
 
 | Executor path | Median time | Allocated bytes | Allocations | Compared with scan |
 | --- | ---: | ---: | ---: | --- |
-| Normal scan | 582.6 us/op | 995,064 B/op | 118 allocs/op | Baseline |
-| Typed composite index | 41.5 us/op | 29,926 B/op | 420 allocs/op | 14.0x faster; 33.2x fewer bytes; 3.56x more allocations |
+| Normal scan | 578.9 us/op | 995,065 B/op | 118 allocs/op | Baseline |
+| Typed composite index | 40.5 us/op | 27,172 B/op | 403 allocs/op | 14.3x faster; 36.6x fewer bytes; 3.42x more allocations |
 
-The byte and latency savings are substantial for selective queries. The higher
-allocation count is a deliberate mutation-safety cost of cloning indexed
-candidates before SQL evaluation, so broad ranges can have a smaller benefit.
+The byte and latency savings are substantial for selective queries. A previous
+internal executor path cloned the selected candidate maps, measuring `41.5
+us/op`, `29,926 B/op`, and `420 allocs/op`; borrowing read-only immutable rows
+improves that to `40.5 us/op`, `27,172 B/op`, and `403 allocs/op`. The public
+resolver still clones, so its callers retain mutation safety. Broad ranges can
+have a smaller benefit because the executor still builds row envelopes.
 
 ```sh
 make test-sql-typed-composite

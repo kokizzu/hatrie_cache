@@ -2273,6 +2273,16 @@ func sqlJSONTypedInt64CompositeIndexStats(key string, index *sqlJSONTypedInt64Co
 // ResolveSQLCompositeIndexedRangeSource resolves equality predicates over a
 // typed composite prefix followed by a range predicate on its final field.
 func (ht *HatTrie) ResolveSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]SQLRow, bool, error) {
+	return ht.resolveSQLCompositeIndexedRangeSource(name, key, equalityFields, equalityValues, rangeField, operator, rangeValue, true)
+}
+
+// BorrowSQLCompositeIndexedRangeSource exposes immutable index rows to the SQL
+// executor. Callers must not retain or mutate returned row maps.
+func (ht *HatTrie) BorrowSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]SQLRow, bool, error) {
+	return ht.resolveSQLCompositeIndexedRangeSource(name, key, equalityFields, equalityValues, rangeField, operator, rangeValue, false)
+}
+
+func (ht *HatTrie) resolveSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}, cloneRows bool) ([]SQLRow, bool, error) {
 	if name != "CACHE" || len(equalityFields) == 0 || len(equalityFields) != len(equalityValues) || rangeField == "" || rangeValue == nil {
 		return nil, false, nil
 	}
@@ -2364,7 +2374,10 @@ func (ht *HatTrie) ResolveSQLCompositeIndexedRangeSource(name, key string, equal
 	for _, ordinal := range selected.ordinals[rangeStart:rangeEnd] {
 		rows = append(rows, selected.rows[ordinal])
 	}
-	return hatSql.CloneRows(rows), true, nil
+	if cloneRows {
+		return hatSql.CloneRows(rows), true, nil
+	}
+	return rows, true, nil
 }
 
 func sqlJSONTypedInt64Rows(index *sqlJSONTypedInt64Index, ordinals []uint32) []SQLRow {

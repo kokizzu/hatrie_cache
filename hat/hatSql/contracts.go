@@ -207,6 +207,13 @@ type CompositeRangeIndexedSourceResolver interface {
 	ResolveSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]Row, bool, error)
 }
 
+// BorrowedCompositeRangeIndexedSourceResolver supplies read-only indexed
+// candidates to the SQL executor. Returned row maps must remain valid for the
+// query and must not be retained or mutated by the executor.
+type BorrowedCompositeRangeIndexedSourceResolver interface {
+	BorrowSQLCompositeIndexedRangeSource(name, key string, equalityFields []string, equalityValues []interface{}, rangeField, operator string, rangeValue interface{}) ([]Row, bool, error)
+}
+
 // SecondaryIndexedSourceResolver optionally combines equality postings from
 // independently configured secondary indexes. operation is either AND or OR;
 // implementations return only candidate rows and the executor re-evaluates the
