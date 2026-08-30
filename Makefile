@@ -832,6 +832,9 @@ push-sql-telemetry:
 verify-sql-improvement-goal:
 	sh ./scripts/verify-sql-improvement-goal.sh
 
+inspect-sql-index-freshness:
+	sh ./scripts/inspect-sql-index-freshness.sh
+
 test-sql-columnar-layout-cache:
 	sh ./scripts/test-sql-columnar-layout-cache.sh
 
@@ -2257,6 +2260,18 @@ format-sql-index-snapshots:
 .PHONY: test-sql-index-snapshots
 test-sql-index-snapshots:
 	sh ./scripts/test-sql-index-snapshots.sh
+
+bench-sql-index-generation:
+	sh ./scripts/bench-sql-index-generation.sh
+
+format-sql-index-generation:
+	sh ./scripts/format-sql-index-generation.sh
+
+inspect-sql-index-generation-docs:
+	sh ./scripts/inspect-sql-index-generation-docs.sh
+
+deliver-sql-index-generation:
+	sh ./scripts/deliver-sql-index-generation.sh
 
 .PHONY: bench-sql-index-snapshots
 bench-sql-index-snapshots:

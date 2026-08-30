@@ -53,3 +53,42 @@ func TestSQLJSONIndexesShareSourceSnapshot(t *testing.T) {
 		t.Fatalf("updated indexes did not retain the shared source rows")
 	}
 }
+
+func TestSQLJSONIndexUsesSourceWriteGeneration(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"name":"Ada"}]`)
+	if err := trie.CreateSQLJSONFieldIndex("people", "id"); err != nil {
+		t.Fatalf("CreateSQLJSONFieldIndex() error = %v", err)
+	}
+	if _, available, err := trie.ResolveSQLIndexedSource("CACHE", "people", "id", float64(1)); err != nil || !available {
+		t.Fatalf("initial ResolveSQLIndexedSource() = available %v, error %v", available, err)
+	}
+
+	trie.mu.RLock()
+	firstGeneration := trie.sqlJSONIndexSourceGenerations["people"]
+	trie.mu.RUnlock()
+	trie.sqlIndexMu.RLock()
+	firstIndexGeneration := trie.sqlJSONIndexes["people"]["id"].generation
+	trie.sqlIndexMu.RUnlock()
+	if firstGeneration != firstIndexGeneration {
+		t.Fatalf("initial source/index generation = %d/%d, want equal", firstGeneration, firstIndexGeneration)
+	}
+
+	trie.UpsertString("people", `[{"id":2,"name":"Grace"}]`)
+	trie.mu.RLock()
+	secondGeneration := trie.sqlJSONIndexSourceGenerations["people"]
+	trie.mu.RUnlock()
+	if secondGeneration <= firstGeneration {
+		t.Fatalf("source generation after replacement = %d, want greater than %d", secondGeneration, firstGeneration)
+	}
+	if _, available, err := trie.ResolveSQLIndexedSource("CACHE", "people", "id", float64(2)); err != nil || !available {
+		t.Fatalf("updated ResolveSQLIndexedSource() = available %v, error %v", available, err)
+	}
+	trie.sqlIndexMu.RLock()
+	secondIndexGeneration := trie.sqlJSONIndexes["people"]["id"].generation
+	trie.sqlIndexMu.RUnlock()
+	if secondIndexGeneration != secondGeneration {
+		t.Fatalf("updated index generation = %d, want %d", secondIndexGeneration, secondGeneration)
+	}
+}

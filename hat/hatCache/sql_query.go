@@ -425,7 +425,7 @@ func sqlBinaryValue(op string, left, right interface{}) interface{} {
 }
 
 type sqlJSONFieldIndex struct {
-	raw     string
+	sqlJSONIndexState
 	rows    map[string][]SQLRow
 	ordered []sqlJSONFieldIndexEntry
 	nulls   []SQLRow
@@ -435,7 +435,7 @@ type sqlJSONFieldIndexEntry struct {
 	row   SQLRow
 }
 type sqlJSONSourceSnapshot struct {
-	raw  string
+	sqlJSONIndexState
 	rows []SQLRow
 }
 
@@ -456,7 +456,7 @@ type SQLJSONIndexSpec struct {
 }
 
 type sqlJSONTypedInt64Index struct {
-	raw      string
+	sqlJSONIndexState
 	rows     []SQLRow
 	postings map[int64][]uint32
 	ordered  []sqlJSONTypedInt64Entry
@@ -468,23 +468,23 @@ type sqlJSONTypedInt64Entry struct {
 	ordinal uint32
 }
 type sqlJSONTextIndex struct {
-	raw    string
+	sqlJSONIndexState
 	rows   []SQLRow
 	tokens map[string][]int
 }
 type sqlJSONCompositeIndex struct {
-	raw    string
+	sqlJSONIndexState
 	fields []string
 	rows   map[string][]SQLRow
 }
 type sqlJSONBitmapIndex struct {
-	raw      string
+	sqlJSONIndexState
 	rows     []SQLRow
 	postings map[string]hatDataStructure.RoaringBitmap
 	nulls    []SQLRow
 }
 type sqlJSONCoveringIndex struct {
-	raw     string
+	sqlJSONIndexState
 	columns map[string]struct{}
 	rows    map[string][]SQLRow
 }
@@ -496,6 +496,39 @@ type sqlJSONIndexMaintenance struct {
 type sqlJSONIndexRebuildRequest struct {
 	key   string
 	field string
+}
+
+type sqlJSONIndexState struct {
+	raw        string
+	generation uint64
+	ready      bool
+}
+
+type sqlJSONSource struct {
+	raw        string
+	generation uint64
+	tracked    bool
+}
+
+func (source sqlJSONSource) current(state sqlJSONIndexState) bool {
+	if !state.ready {
+		return false
+	}
+	if source.tracked {
+		return state.generation == source.generation
+	}
+	return state.raw == source.raw
+}
+
+func (ht *HatTrie) registerSQLJSONIndexSource(key string) {
+	ht.mu.Lock()
+	if ht.sqlJSONIndexSourceGenerations == nil {
+		ht.sqlJSONIndexSourceGenerations = make(map[string]uint64)
+	}
+	if _, exists := ht.sqlJSONIndexSourceGenerations[key]; !exists {
+		ht.sqlJSONIndexSourceGenerations[key] = 0
+	}
+	ht.mu.Unlock()
 }
 
 // SQLJSONIndexMaintenanceStats reports lifecycle state without exposing source
@@ -531,6 +564,7 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 	if ht == nil || key == "" || field == "" {
 		return fmt.Errorf("SQL JSON index requires a cache key and field")
 	}
+	ht.registerSQLJSONIndexSource(key)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if ht.sqlJSONIndexes == nil {
@@ -552,6 +586,7 @@ func (ht *HatTrie) CreateSQLTypedJSONIndex(spec SQLJSONIndexSpec) error {
 	if spec.Type != SQLIndexInt64 {
 		return fmt.Errorf("unsupported typed SQL JSON index type %q", spec.Type)
 	}
+	ht.registerSQLJSONIndexSource(spec.CacheKey)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if ht.sqlJSONTypedInt64Indexes == nil {
@@ -572,6 +607,7 @@ func (ht *HatTrie) CreateSQLJSONBitmapIndex(key, field string) error {
 	if ht == nil || key == "" || field == "" {
 		return fmt.Errorf("SQL JSON bitmap index requires a cache key and field")
 	}
+	ht.registerSQLJSONIndexSource(key)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if ht.sqlJSONBitmapIndexes == nil {
@@ -598,6 +634,7 @@ func (ht *HatTrie) CreateSQLJSONCoveringIndex(key, field string, columns ...stri
 		}
 		covered[column] = struct{}{}
 	}
+	ht.registerSQLJSONIndexSource(key)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if ht.sqlJSONCoveringIndexes == nil {
@@ -656,7 +693,7 @@ func (ht *HatTrie) RunScheduledSQLJSONIndexRebuilds(limit int) (int, error) {
 		delete(ht.sqlJSONIndexRebuildPending[request.key], request.field)
 		ht.sqlIndexMu.Unlock()
 
-		data, err := ht.sqlJSONSourceString(request.key)
+		source, err := ht.sqlJSONSource(request.key)
 		if err != nil {
 			ht.sqlIndexMu.Lock()
 			ht.sqlJSONIndexRebuildQueue = append([]sqlJSONIndexRebuildRequest{request}, ht.sqlJSONIndexRebuildQueue...)
@@ -669,7 +706,7 @@ func (ht *HatTrie) RunScheduledSQLJSONIndexRebuilds(limit int) (int, error) {
 		}
 
 		ht.sqlIndexMu.Lock()
-		rebuilt, err := ht.refreshSQLJSONIndexesLocked(request.key, request.field, data)
+		rebuilt, err := ht.refreshSQLJSONIndexesLocked(request.key, request.field, source)
 		if err != nil {
 			ht.sqlJSONIndexRebuildQueue = append([]sqlJSONIndexRebuildRequest{request}, ht.sqlJSONIndexRebuildQueue...)
 			if ht.sqlJSONIndexRebuildPending[request.key] == nil {
@@ -694,20 +731,19 @@ func (ht *HatTrie) SQLJSONIndexMaintenanceStats(key, field string) (SQLJSONIndex
 	if ht == nil || key == "" || field == "" {
 		return SQLJSONIndexMaintenanceStats{}, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return SQLJSONIndexMaintenanceStats{}, false, err
 	}
-	raw := data
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
-	configured, current := ht.sqlJSONIndexCurrentLocked(key, field, raw)
+	configured, current := ht.sqlJSONIndexCurrentLocked(key, field, source)
 	if configured == 0 {
 		return SQLJSONIndexMaintenanceStats{}, false, nil
 	}
 	maintenance := ht.sqlJSONIndexMaintenanceLocked(key, field)
 	return SQLJSONIndexMaintenanceStats{
-		Key: key, Field: field, Configured: configured, SourceBytes: len(data), Current: current,
+		Key: key, Field: field, Configured: configured, SourceBytes: len(source.raw), Current: current,
 		Pending: ht.sqlJSONIndexRebuildPending[key][field], Scheduled: maintenance.scheduled,
 		Runs: maintenance.runs, Rebuilds: maintenance.rebuilds,
 	}, true, nil
@@ -736,43 +772,42 @@ func sqlJSONCompositeIndexContains(index *sqlJSONCompositeIndex, field string) b
 }
 
 func (ht *HatTrie) sqlJSONIndexConfiguredLocked(key, field string) bool {
-	configured, _ := ht.sqlJSONIndexCurrentLocked(key, field, "")
+	configured, _ := ht.sqlJSONIndexCurrentLocked(key, field, sqlJSONSource{})
 	return configured > 0
 }
 
-func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field, raw string) (int, bool) {
+func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field string, source sqlJSONSource) (int, bool) {
 	configured, current := 0, true
 	if index := ht.sqlJSONTypedInt64Indexes[key][field]; index != nil {
 		configured++
-		current = current && index.raw == raw
+		current = current && source.current(index.sqlJSONIndexState)
 	}
 	if index := ht.sqlJSONIndexes[key][field]; index != nil {
 		configured++
-		current = current && index.raw == raw
+		current = current && source.current(index.sqlJSONIndexState)
 	}
 	if index := ht.sqlJSONBitmapIndexes[key][field]; index != nil {
 		configured++
-		current = current && index.raw == raw
+		current = current && source.current(index.sqlJSONIndexState)
 	}
 	if index := ht.sqlJSONCoveringIndexes[key][field]; index != nil {
 		configured++
-		current = current && index.raw == raw
+		current = current && source.current(index.sqlJSONIndexState)
 	}
 	if index := ht.sqlJSONTextIndexes[key][field]; index != nil {
 		configured++
-		current = current && index.raw == raw
+		current = current && source.current(index.sqlJSONIndexState)
 	}
 	for _, index := range ht.sqlJSONCompositeIndexes[key] {
 		if sqlJSONCompositeIndexContains(index, field) {
 			configured++
-			current = current && index.raw == raw
+			current = current && source.current(index.sqlJSONIndexState)
 		}
 	}
 	return configured, current
 }
 
-func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, error) {
-	raw := data
+func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field string, source sqlJSONSource) (int, error) {
 	rebuilt := 0
 	var snapshot *sqlJSONSourceSnapshot
 	loadSnapshot := func() (*sqlJSONSourceSnapshot, error) {
@@ -780,27 +815,27 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, er
 			return snapshot, nil
 		}
 		var err error
-		snapshot, err = ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err = ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		return snapshot, err
 	}
 	if index := ht.sqlJSONTypedInt64Indexes[key][field]; index != nil {
-		changed := index.raw != raw
+		changed := !source.current(index.sqlJSONIndexState)
 		snapshot, err := loadSnapshot()
 		if err != nil {
 			return rebuilt, err
 		}
-		refreshSQLJSONTypedInt64Index(index, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(index, field, source, snapshot.rows)
 		if changed {
 			rebuilt++
 		}
 	}
 	if index := ht.sqlJSONIndexes[key][field]; index != nil {
-		changed := index.raw != raw
+		changed := !source.current(index.sqlJSONIndexState)
 		snapshot, err := loadSnapshot()
 		if err != nil {
 			return rebuilt, err
 		}
-		if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -808,12 +843,12 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, er
 		}
 	}
 	if index := ht.sqlJSONBitmapIndexes[key][field]; index != nil {
-		changed := index.raw != raw
+		changed := !source.current(index.sqlJSONIndexState)
 		snapshot, err := loadSnapshot()
 		if err != nil {
 			return rebuilt, err
 		}
-		if err := refreshSQLJSONBitmapIndexRows(index, field, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONBitmapIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -821,8 +856,8 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, er
 		}
 	}
 	if index := ht.sqlJSONCoveringIndexes[key][field]; index != nil {
-		changed := index.raw != raw
-		if err := refreshSQLJSONCoveringIndexString(index, key, field, data); err != nil {
+		changed := !source.current(index.sqlJSONIndexState)
+		if err := refreshSQLJSONCoveringIndexSource(index, key, field, source); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -830,12 +865,12 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, er
 		}
 	}
 	if index := ht.sqlJSONTextIndexes[key][field]; index != nil {
-		changed := index.raw != raw
+		changed := !source.current(index.sqlJSONIndexState)
 		snapshot, err := loadSnapshot()
 		if err != nil {
 			return rebuilt, err
 		}
-		if err := refreshSQLJSONTextIndexRows(index, field, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONTextIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -846,12 +881,12 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field, data string) (int, er
 		if !sqlJSONCompositeIndexContains(index, field) {
 			continue
 		}
-		changed := index.raw != raw
+		changed := !source.current(index.sqlJSONIndexState)
 		snapshot, err := loadSnapshot()
 		if err != nil {
 			return rebuilt, err
 		}
-		if err := refreshSQLJSONCompositeIndexRows(index, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONCompositeIndexSourceRows(index, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -866,7 +901,7 @@ func (ht *HatTrie) SQLJSONBitmapIndexHealth(key, field string) (SQLJSONBitmapInd
 	if ht == nil || key == "" || field == "" {
 		return SQLJSONBitmapIndexHealth{}, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return SQLJSONBitmapIndexHealth{}, false, err
 	}
@@ -876,17 +911,17 @@ func (ht *HatTrie) SQLJSONBitmapIndexHealth(key, field string) (SQLJSONBitmapInd
 	if index == nil {
 		return SQLJSONBitmapIndexHealth{}, false, nil
 	}
-	refreshed := index.raw != data
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	refreshed := !source.current(index.sqlJSONIndexState)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return SQLJSONBitmapIndexHealth{}, false, err
 	}
-	if err := refreshSQLJSONBitmapIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONBitmapIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return SQLJSONBitmapIndexHealth{}, false, err
 	}
 	health := SQLJSONBitmapIndexHealth{
 		Key: key, Field: field, Rows: len(index.rows), NullRows: len(index.nulls), DistinctKeys: len(index.postings),
-		SourceBytes: len(data), Current: index.raw == data, Refreshed: refreshed,
+		SourceBytes: len(source.raw), Current: source.current(index.sqlJSONIndexState), Refreshed: refreshed,
 	}
 	for _, bitmap := range index.postings {
 		health.IndexedRows += int(bitmap.Count())
@@ -912,6 +947,7 @@ func (ht *HatTrie) CreateSQLJSONTextIndex(key, field string) error {
 	if ht == nil || key == "" || field == "" {
 		return fmt.Errorf("SQL JSON text index requires a cache key and field")
 	}
+	ht.registerSQLJSONIndexSource(key)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if ht.sqlJSONTextIndexes == nil {
@@ -931,7 +967,7 @@ func (ht *HatTrie) ResolveSQLTextSource(name, key, field, query string) ([]SQLRo
 	if name != "CACHE" {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -941,11 +977,11 @@ func (ht *HatTrie) ResolveSQLTextSource(name, key, field, query string) ([]SQLRo
 	if index == nil {
 		return nil, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := refreshSQLJSONTextIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONTextIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
 	tokens := hatSql.TextTokens(query)
@@ -1000,7 +1036,7 @@ func (ht *HatTrie) SQLJSONIndexHealth(key, field string) (SQLJSONIndexHealth, bo
 	if ht == nil || key == "" || field == "" {
 		return SQLJSONIndexHealth{}, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return SQLJSONIndexHealth{}, false, err
 	}
@@ -1010,12 +1046,12 @@ func (ht *HatTrie) SQLJSONIndexHealth(key, field string) (SQLJSONIndexHealth, bo
 	if index == nil {
 		return SQLJSONIndexHealth{}, false, nil
 	}
-	refreshed := index.raw != data
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	refreshed := !source.current(index.sqlJSONIndexState)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return SQLJSONIndexHealth{}, false, err
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return SQLJSONIndexHealth{}, false, err
 	}
 	indexedRows := 0
@@ -1024,8 +1060,8 @@ func (ht *HatTrie) SQLJSONIndexHealth(key, field string) (SQLJSONIndexHealth, bo
 	}
 	return SQLJSONIndexHealth{
 		Key: key, Field: field, Rows: indexedRows + len(index.nulls), IndexedRows: indexedRows,
-		NullRows: len(index.nulls), DistinctKeys: len(index.rows), SourceBytes: len(data),
-		Current: index.raw == data, Refreshed: refreshed,
+		NullRows: len(index.nulls), DistinctKeys: len(index.rows), SourceBytes: len(source.raw),
+		Current: source.current(index.sqlJSONIndexState), Refreshed: refreshed,
 	}, true, nil
 }
 
@@ -1048,6 +1084,7 @@ func (ht *HatTrie) CreateSQLJSONCompositeIndex(key string, fields ...string) err
 	}
 	copyFields := append([]string(nil), fields...)
 	identifier := sqlJSONCompositeIndexIdentifier(copyFields)
+	ht.registerSQLJSONIndexSource(key)
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if ht.sqlJSONCompositeIndexes == nil {
@@ -1071,7 +1108,7 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	index := ht.sqlJSONIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
 	if typed != nil {
-		data, err := ht.sqlJSONSourceString(key)
+		source, err := ht.sqlJSONSource(key)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1081,11 +1118,11 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		if typed == nil {
 			return nil, false, nil
 		}
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return nil, false, err
 		}
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		value, ok := sqlJSONTypedInt64Value(value)
 		if !ok {
 			return []SQLRow{}, true, nil
@@ -1093,7 +1130,7 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		return sqlJSONTypedInt64Rows(typed, typed.postings[value]), true, nil
 	}
 	if bitmap != nil {
-		data, err := ht.sqlJSONSourceString(key)
+		source, err := ht.sqlJSONSource(key)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1103,11 +1140,11 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		if bitmap == nil {
 			return nil, false, nil
 		}
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return nil, false, err
 		}
-		if err := refreshSQLJSONBitmapIndexRows(bitmap, field, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONBitmapIndexSourceRows(bitmap, field, source, snapshot.rows); err != nil {
 			return nil, false, err
 		}
 		valueKey, ok := sqlIndexValueKey(value)
@@ -1126,7 +1163,7 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	if index == nil {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1136,11 +1173,11 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	if index == nil {
 		return nil, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
 	valueKey, ok := sqlIndexValueKey(value)
@@ -1157,7 +1194,7 @@ func (ht *HatTrie) ResolveSQLCoveringSource(name, key, field string, value inter
 	if name != "CACHE" || len(fields) == 0 {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1172,7 +1209,7 @@ func (ht *HatTrie) ResolveSQLCoveringSource(name, key, field string, value inter
 			return nil, false, nil
 		}
 	}
-	if err := refreshSQLJSONCoveringIndexString(index, key, field, data); err != nil {
+	if err := refreshSQLJSONCoveringIndexSource(index, key, field, source); err != nil {
 		return nil, false, err
 	}
 	valueKey, ok := sqlIndexValueKey(value)
@@ -1189,7 +1226,7 @@ func (ht *HatTrie) ResolveSQLSecondaryIndexedSource(name, key, operation string,
 	if name != "CACHE" || len(fields) != len(values) || len(fields) < 2 || operation != "AND" && operation != "OR" {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1197,7 +1234,7 @@ func (ht *HatTrie) ResolveSQLSecondaryIndexedSource(name, key, operation string,
 	defer ht.sqlIndexMu.Unlock()
 	indexes := make([]*sqlJSONBitmapIndex, len(fields))
 	postings := make([]hatDataStructure.RoaringBitmap, len(fields))
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1206,7 +1243,7 @@ func (ht *HatTrie) ResolveSQLSecondaryIndexedSource(name, key, operation string,
 		if bitmap == nil {
 			return nil, false, nil
 		}
-		if err := refreshSQLJSONBitmapIndexRows(bitmap, field, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONBitmapIndexSourceRows(bitmap, field, source, snapshot.rows); err != nil {
 			return nil, false, err
 		}
 		valueKey, ok := sqlIndexValueKey(values[index])
@@ -1268,7 +1305,7 @@ func (ht *HatTrie) ResolveSQLCompositeIndexedSource(name, key string, fields []s
 	if name != "CACHE" || len(fields) != len(values) || len(fields) < 2 {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1297,11 +1334,11 @@ func (ht *HatTrie) ResolveSQLCompositeIndexedSource(name, key string, fields []s
 	if selected == nil {
 		return nil, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := refreshSQLJSONCompositeIndexRows(selected, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONCompositeIndexSourceRows(selected, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
 	lookup := make([]interface{}, len(selected.fields))
@@ -1322,34 +1359,34 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 		return SQLJSONIndexStats{}, false, nil
 	}
 	if len(fields) == 1 {
-		data, err := ht.sqlJSONSourceString(key)
+		source, err := ht.sqlJSONSource(key)
 		if err != nil {
 			return SQLJSONIndexStats{}, false, err
 		}
 		ht.sqlIndexMu.Lock()
 		defer ht.sqlIndexMu.Unlock()
 		if typed := ht.sqlJSONTypedInt64Indexes[key][fields[0]]; typed != nil {
-			snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+			snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 			if err != nil {
 				return SQLJSONIndexStats{}, false, err
 			}
-			refreshSQLJSONTypedInt64Index(typed, fields[0], data, snapshot.rows)
+			refreshSQLJSONTypedInt64IndexSource(typed, fields[0], source, snapshot.rows)
 			return sqlJSONTypedInt64IndexStats(key, fields, typed), true, nil
 		}
 		index := ht.sqlJSONIndexes[key][fields[0]]
 		if index == nil {
 			return SQLJSONIndexStats{}, false, nil
 		}
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return SQLJSONIndexStats{}, false, err
 		}
-		if err := refreshSQLJSONFieldIndexRows(index, fields[0], data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONFieldIndexSourceRows(index, fields[0], source, snapshot.rows); err != nil {
 			return SQLJSONIndexStats{}, false, err
 		}
 		return sqlJSONIndexStats(key, fields, index.rows, len(index.nulls)), true, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return SQLJSONIndexStats{}, false, err
 	}
@@ -1359,11 +1396,11 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 	if index == nil {
 		return SQLJSONIndexStats{}, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return SQLJSONIndexStats{}, false, err
 	}
-	if err := refreshSQLJSONCompositeIndexRows(index, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONCompositeIndexSourceRows(index, source, snapshot.rows); err != nil {
 		return SQLJSONIndexStats{}, false, err
 	}
 	return sqlJSONIndexStats(key, index.fields, index.rows), true, nil
@@ -1383,7 +1420,7 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	index := ht.sqlJSONIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
 	if typed != nil {
-		data, err := ht.sqlJSONSourceString(key)
+		source, err := ht.sqlJSONSource(key)
 		if err != nil {
 			return 0, false, false, err
 		}
@@ -1393,11 +1430,11 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 		if typed == nil {
 			return 0, false, false, nil
 		}
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return 0, false, true, err
 		}
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		value, ok := sqlJSONTypedInt64Value(value)
 		if !ok {
 			return 0, true, true, nil
@@ -1405,7 +1442,7 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 		return len(typed.postings[value]), true, true, nil
 	}
 	if bitmap != nil {
-		data, err := ht.sqlJSONSourceString(key)
+		source, err := ht.sqlJSONSource(key)
 		if err != nil {
 			return 0, false, false, err
 		}
@@ -1415,11 +1452,11 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 		if bitmap == nil {
 			return 0, false, false, nil
 		}
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return 0, false, true, err
 		}
-		if err := refreshSQLJSONBitmapIndexRows(bitmap, field, data, snapshot.rows); err != nil {
+		if err := refreshSQLJSONBitmapIndexSourceRows(bitmap, field, source, snapshot.rows); err != nil {
 			return 0, false, true, err
 		}
 		valueKey, ok := sqlIndexValueKey(value)
@@ -1431,7 +1468,7 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	if index == nil {
 		return 0, false, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return 0, false, false, err
 	}
@@ -1441,11 +1478,11 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	if index == nil {
 		return 0, false, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return 0, false, true, err
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return 0, false, true, err
 	}
 	valueKey, ok := sqlIndexValueKey(value)
@@ -1462,7 +1499,7 @@ func (ht *HatTrie) SQLJSONRangeStats(key, field string, bucketCount int) (SQLJSO
 	if ht == nil || key == "" || field == "" {
 		return SQLJSONRangeStats{}, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return SQLJSONRangeStats{}, false, err
 	}
@@ -1473,15 +1510,15 @@ func (ht *HatTrie) SQLJSONRangeStats(key, field string, bucketCount int) (SQLJSO
 	if typed == nil && index == nil {
 		return SQLJSONRangeStats{}, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return SQLJSONRangeStats{}, false, err
 	}
 	if typed != nil {
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		return sqlJSONTypedInt64RangeStats(key, field, bucketCount, typed), true, nil
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return SQLJSONRangeStats{}, false, err
 	}
 	stats := SQLJSONRangeStats{Key: key, Field: field, Rows: len(index.ordered), NullRows: len(index.nulls)}
@@ -1516,7 +1553,7 @@ func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value inter
 	if ht == nil || key == "" || field == "" {
 		return 0, false, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return 0, false, false, err
 	}
@@ -1530,12 +1567,12 @@ func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value inter
 	if value == nil {
 		return 0, true, true, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return 0, false, true, err
 	}
 	if typed != nil {
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		needle, ok := sqlJSONTypedInt64Value(value)
 		if !ok {
 			return 0, true, true, nil
@@ -1555,7 +1592,7 @@ func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value inter
 		}
 		return end - start, true, true, nil
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return 0, false, true, err
 	}
 	start, end, ok := sqlJSONRangeBounds(index.ordered, operator, value)
@@ -1667,18 +1704,18 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	if name != "CACHE" || value == nil {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return nil, false, err
 		}
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		needle, ok := sqlJSONTypedInt64Value(value)
 		if !ok {
 			return []SQLRow{}, true, nil
@@ -1706,11 +1743,11 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	if index == nil {
 		return nil, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
 	start, end, ok := sqlJSONRangeBounds(index.ordered, operator, value)
@@ -1748,18 +1785,18 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 	if name != "CACHE" {
 		return nil, false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return nil, false, err
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			return nil, false, err
 		}
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		if !typed.complete {
 			return nil, false, nil
 		}
@@ -1769,11 +1806,11 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 	if index == nil {
 		return nil, false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
 	rows := make([]SQLRow, 0, len(index.ordered)+len(index.nulls))
@@ -1819,18 +1856,18 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 	if name != "CACHE" {
 		return false, nil
 	}
-	data, err := ht.sqlJSONSourceString(key)
+	source, err := ht.sqlJSONSource(key)
 	if err != nil {
 		return false, err
 	}
 	ht.sqlIndexMu.Lock()
 	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
-		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 		if err != nil {
 			ht.sqlIndexMu.Unlock()
 			return false, err
 		}
-		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
 		if !typed.complete {
 			ht.sqlIndexMu.Unlock()
 			return false, nil
@@ -1860,12 +1897,12 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		ht.sqlIndexMu.Unlock()
 		return false, nil
 	}
-	snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
 		ht.sqlIndexMu.Unlock()
 		return false, err
 	}
-	if err := refreshSQLJSONFieldIndexRows(index, field, data, snapshot.rows); err != nil {
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		ht.sqlIndexMu.Unlock()
 		return false, err
 	}
@@ -1932,7 +1969,11 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 }
 
 func refreshSQLJSONTypedInt64Index(index *sqlJSONTypedInt64Index, field, data string, rows []SQLRow) {
-	if index.raw == data {
+	refreshSQLJSONTypedInt64IndexSource(index, field, sqlJSONSource{raw: data}, rows)
+}
+
+func refreshSQLJSONTypedInt64IndexSource(index *sqlJSONTypedInt64Index, field string, source sqlJSONSource, rows []SQLRow) {
+	if source.current(index.sqlJSONIndexState) {
 		return
 	}
 	postings := make(map[int64][]uint32)
@@ -1957,7 +1998,8 @@ func refreshSQLJSONTypedInt64Index(index *sqlJSONTypedInt64Index, field, data st
 		ordered = append(ordered, sqlJSONTypedInt64Entry{value: value, ordinal: uint32(ordinal)})
 	}
 	sort.SliceStable(ordered, func(left, right int) bool { return ordered[left].value < ordered[right].value })
-	index.raw, index.rows, index.postings, index.ordered, index.nulls, index.complete = data, rows, postings, ordered, nulls, complete
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows, index.postings, index.ordered, index.nulls, index.complete = rows, postings, ordered, nulls, complete
 }
 
 func sqlJSONTypedInt64Value(value interface{}) (int64, bool) {
@@ -2058,7 +2100,11 @@ func refreshSQLJSONBitmapIndexString(index *sqlJSONBitmapIndex, key, field, data
 }
 
 func refreshSQLJSONBitmapIndexRows(index *sqlJSONBitmapIndex, field, data string, rows []SQLRow) error {
-	if index.raw == data {
+	return refreshSQLJSONBitmapIndexSourceRows(index, field, sqlJSONSource{raw: data}, rows)
+}
+
+func refreshSQLJSONBitmapIndexSourceRows(index *sqlJSONBitmapIndex, field string, source sqlJSONSource, rows []SQLRow) error {
+	if source.current(index.sqlJSONIndexState) {
 		return nil
 	}
 	if uint64(len(rows)) > uint64(^uint32(0)) {
@@ -2084,7 +2130,8 @@ func refreshSQLJSONBitmapIndexRows(index *sqlJSONBitmapIndex, field, data string
 		bitmap.Add(uint32(rowIndex))
 		postings[valueKey] = bitmap
 	}
-	index.raw, index.rows, index.postings, index.nulls = data, rows, postings, nulls
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows, index.postings, index.nulls = rows, postings, nulls
 	return nil
 }
 
@@ -2093,14 +2140,19 @@ func refreshSQLJSONCoveringIndex(index *sqlJSONCoveringIndex, key, field string,
 }
 
 func refreshSQLJSONCoveringIndexString(index *sqlJSONCoveringIndex, key, field, data string) error {
-	if index.raw == data {
+	return refreshSQLJSONCoveringIndexSource(index, key, field, sqlJSONSource{raw: data})
+}
+
+func refreshSQLJSONCoveringIndexSource(index *sqlJSONCoveringIndex, key, field string, source sqlJSONSource) error {
+	if source.current(index.sqlJSONIndexState) {
 		return nil
 	}
-	rows, err := sqlJSONRowsString(key, data)
+	rows, err := sqlJSONRowsString(key, source.raw)
 	if err != nil {
 		return err
 	}
-	index.raw, index.rows = data, map[string][]SQLRow{}
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows = map[string][]SQLRow{}
 	for _, row := range rows {
 		value, exists, err := sqlJSONIndexRowValue(row, field)
 		if err != nil {
@@ -2152,7 +2204,11 @@ func refreshSQLJSONFieldIndexString(index *sqlJSONFieldIndex, key, field, data s
 }
 
 func refreshSQLJSONFieldIndexRows(index *sqlJSONFieldIndex, field, data string, rows []SQLRow) error {
-	if index.raw == data {
+	return refreshSQLJSONFieldIndexSourceRows(index, field, sqlJSONSource{raw: data}, rows)
+}
+
+func refreshSQLJSONFieldIndexSourceRows(index *sqlJSONFieldIndex, field string, source sqlJSONSource, rows []SQLRow) error {
+	if source.current(index.sqlJSONIndexState) {
 		return nil
 	}
 	postings := make(map[string][]SQLRow)
@@ -2177,7 +2233,8 @@ func refreshSQLJSONFieldIndexRows(index *sqlJSONFieldIndex, field, data string, 
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return hatSql.Compare(ordered[i].value, ordered[j].value) < 0
 	})
-	index.raw, index.rows, index.ordered, index.nulls = data, postings, ordered, nulls
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows, index.ordered, index.nulls = postings, ordered, nulls
 	return nil
 }
 
@@ -2197,7 +2254,11 @@ func refreshSQLJSONTextIndexString(index *sqlJSONTextIndex, key, field, data str
 }
 
 func refreshSQLJSONTextIndexRows(index *sqlJSONTextIndex, field, data string, rows []SQLRow) error {
-	if index.raw == data {
+	return refreshSQLJSONTextIndexSourceRows(index, field, sqlJSONSource{raw: data}, rows)
+}
+
+func refreshSQLJSONTextIndexSourceRows(index *sqlJSONTextIndex, field string, source sqlJSONSource, rows []SQLRow) error {
+	if source.current(index.sqlJSONIndexState) {
 		return nil
 	}
 	tokens := make(map[string][]int)
@@ -2210,7 +2271,8 @@ func refreshSQLJSONTextIndexRows(index *sqlJSONTextIndex, field, data string, ro
 			tokens[token] = append(tokens[token], rowIndex)
 		}
 	}
-	index.raw, index.rows, index.tokens = data, rows, tokens
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows, index.tokens = rows, tokens
 	return nil
 }
 
@@ -2230,7 +2292,11 @@ func refreshSQLJSONCompositeIndexString(index *sqlJSONCompositeIndex, key, data 
 }
 
 func refreshSQLJSONCompositeIndexRows(index *sqlJSONCompositeIndex, data string, rows []SQLRow) error {
-	if index.raw == data {
+	return refreshSQLJSONCompositeIndexSourceRows(index, sqlJSONSource{raw: data}, rows)
+}
+
+func refreshSQLJSONCompositeIndexSourceRows(index *sqlJSONCompositeIndex, source sqlJSONSource, rows []SQLRow) error {
+	if source.current(index.sqlJSONIndexState) {
 		return nil
 	}
 	postings := make(map[string][]SQLRow)
@@ -2243,7 +2309,8 @@ func refreshSQLJSONCompositeIndexRows(index *sqlJSONCompositeIndex, data string,
 			postings[valueKey] = append(postings[valueKey], row)
 		}
 	}
-	index.raw, index.rows = data, postings
+	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
+	index.rows = postings
 	return nil
 }
 
@@ -2264,23 +2331,29 @@ func sqlJSONCompositeIndexValueKey(values []interface{}) (string, bool) {
 // avoids copying a potentially large JSON document on every indexed query.
 // Other value representations preserve the checked public byte-read fallback.
 func (ht *HatTrie) sqlJSONSourceString(key string) (string, error) {
+	source, err := ht.sqlJSONSource(key)
+	return source.raw, err
+}
+
+func (ht *HatTrie) sqlJSONSource(key string) (sqlJSONSource, error) {
 	if ht == nil {
-		return "", ErrNilHatTrie
+		return sqlJSONSource{}, ErrNilHatTrie
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
-		return partition.sqlJSONSourceString(key)
+		return partition.sqlJSONSource(key)
 	}
 	ht.mu.RLock()
 	hval, fallback, err := ht.readValueRLockedChecked(key, true)
 	if !fallback && err == nil && hval.IsStringAtRaws() {
 		value := ht.strings.Get(hval.Index)
+		generation, tracked := ht.sqlJSONIndexSourceGenerations[key]
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
-		return value, nil
+		return sqlJSONSource{raw: value, generation: generation, tracked: tracked}, nil
 	}
 	ht.mu.RUnlock()
 	data, err := ht.GetBytesChecked(key)
-	return string(data), err
+	return sqlJSONSource{raw: string(data)}, err
 }
 
 // sqlJSONIndexSnapshotLocked returns the one decoded JSON generation shared by
@@ -2288,17 +2361,21 @@ func (ht *HatTrie) sqlJSONSourceString(key string) (string, error) {
 // A replacement publishes a new snapshot, preserving rows still referenced by
 // indexes serving the preceding source generation.
 func (ht *HatTrie) sqlJSONIndexSnapshotLocked(key, data string) (*sqlJSONSourceSnapshot, error) {
-	if snapshot := ht.sqlJSONIndexSnapshots[key]; snapshot != nil && snapshot.raw == data {
+	return ht.sqlJSONIndexSnapshotForSourceLocked(key, sqlJSONSource{raw: data})
+}
+
+func (ht *HatTrie) sqlJSONIndexSnapshotForSourceLocked(key string, source sqlJSONSource) (*sqlJSONSourceSnapshot, error) {
+	if snapshot := ht.sqlJSONIndexSnapshots[key]; snapshot != nil && source.current(snapshot.sqlJSONIndexState) {
 		return snapshot, nil
 	}
-	rows, err := sqlJSONRowsString(key, data)
+	rows, err := sqlJSONRowsString(key, source.raw)
 	if err != nil {
 		return nil, err
 	}
 	if ht.sqlJSONIndexSnapshots == nil {
 		ht.sqlJSONIndexSnapshots = make(map[string]*sqlJSONSourceSnapshot)
 	}
-	snapshot := &sqlJSONSourceSnapshot{raw: data, rows: rows}
+	snapshot := &sqlJSONSourceSnapshot{sqlJSONIndexState: sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}, rows: rows}
 	ht.sqlJSONIndexSnapshots[key] = snapshot
 	return snapshot, nil
 }

@@ -13342,6 +13342,33 @@ make test-sql-index-snapshots
 make bench-sql-index-snapshots
 ```
 
+## SQL Index Source Write Generations
+
+Configured SQL JSON source keys retain a monotonic `uint64` write generation.
+Indexes, immutable decoded snapshots, maintenance checks, equality/range/order
+plans, and index statistics compare that generation instead of comparing the
+complete JSON string on every indexed read. The counter is tracked only after
+an index is configured; it adds one `uint64` value plus the existing Go map
+entry per indexed source key, not per JSON row. Direct internal refresh helpers
+without a cache source retain raw-content comparison for compatibility.
+
+`TestSQLJSONIndexUsesSourceWriteGeneration` verifies that a replacement makes
+the index stale, and that resolving it publishes the same new generation. The
+five-run benchmark compares separate but byte-identical 1 MiB JSON strings on
+an AMD Ryzen 9 5950X:
+
+| Freshness check | Time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Raw string equality | 18.51 us | 0 B | 0 | Baseline |
+| Source write generation | 0.48 ns | 0 B | 0 | 38,563x faster |
+
+Reproduce it with:
+
+```sh
+make test-sql-index-snapshots
+make bench-sql-index-generation
+```
+
 ## Opt-In Typed Int64 SQL Index
 
 `CreateSQLTypedJSONIndex` enables one explicitly declared `SQLIndexInt64` field.
