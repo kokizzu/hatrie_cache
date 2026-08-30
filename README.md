@@ -3203,3 +3203,14 @@ deleted index saved on another map
 - storing session keys
 - counting url hits, likes
 - caching 
+## Columnar SQL Streaming
+
+Resolvers that implement `hatSql.ColumnarSourceResolver` can stream simple
+single-source field projections through `ExecuteSQLQueryRows` without first
+creating source row maps or retaining a result slice. Unsupported SQL shapes
+and unavailable columnar sources retain the ordinary row-source fallback.
+
+The current fast path preserves `WHERE`, `OFFSET`, `LIMIT`, cancellation,
+maximum-row, and result-byte-budget behavior. Its measured `20,000`-row filter
+workload is `2.22x` faster with unchanged callback-map allocation; see
+[BENCHMARK.md](BENCHMARK.md#sql-columnar-queryrows-streaming).

@@ -13905,3 +13905,21 @@ HAT-trie cache does not provide these Tarantool-style primitives:
 
 HAT-trie cache instead focuses on a fixed cache command API with many built-in
 in-memory data structures and compact serialization/storage paths.
+## SQL Columnar `QueryRows` Streaming
+
+`BenchmarkSQLQueryRowsColumnarSimpleFilter` streams `10,000` selected rows from
+a `20,000`-row `CACHE` source with `WHERE score >= 50`. The baseline resolver
+provides row maps; the optimized path supplies the same data through
+`ColumnarSourceResolver`. Both invoke the same `ExecuteSQLQueryRows` callback
+and discard rows immediately.
+
+| Implementation | Median time | Cumulative allocation | Allocations | Time improvement | Allocation change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Row-source baseline | 4.93 ms | 3.36 MB | 20,027 | 1.00x | 1.00x |
+| Columnar stream | 2.22 ms | 3.36 MB | 20,024 | 2.22x | 1.00x |
+
+The stream avoids source-row map construction and result-slice retention. The
+remaining allocation is primarily the public `SQLRow` map passed to each
+callback invocation; it is not retained by the executor. Reproduce with
+`make benchmark-sql-query-rows-columnar` and inspect allocation ownership with
+`make profile-sql-query-rows-columnar`.

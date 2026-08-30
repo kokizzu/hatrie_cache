@@ -727,6 +727,143 @@ func ExecuteQueryRows(ctx context.Context, source string, resolver SourceResolve
 	return ExecuteSQLQueryRows(ctx, source, resolver, parameters, options, visit)
 }
 
+// executeSQLColumnarQueryRows streams the same narrow field-only scan accepted
+// by the materialized columnar executor. It retains the row callback contract
+// while avoiding source-row map construction and result-slice retention.
+func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) (bool, error) {
+	columnar, ok := resolver.(SQLColumnarSourceResolver)
+	if !ok || !sqlCanColumnarScan(query, nil) {
+		return false, nil
+	}
+	if query.limit == 0 {
+		return true, nil
+	}
+	fields, _, projectionFields, ok := sqlColumnarScanFields(query)
+	if !ok {
+		return false, nil
+	}
+	batch, available, err := columnar.ResolveSQLColumnarSource(query.from.kind, query.from.key, fields)
+	if err != nil || !available {
+		return available, err
+	}
+	if batch.Rows < 0 {
+		return true, fmt.Errorf("SQL columnar source %q returned a negative row count", query.from.key)
+	}
+	if control != nil && batch.Rows > control.maxRows {
+		return true, fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+	}
+	for _, field := range fields {
+		if batch.FieldRows(field) != batch.Rows {
+			return true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", query.from.key, batch.FieldRows(field), field, batch.Rows)
+		}
+	}
+
+	functions, _ := resolver.(SQLFunctionResolver)
+	match := sqlColumnarQueryRowsMatcher(query, batch, functions)
+	columns := sqlColumns(query.selects)
+	matched, emitted, resultBytes := 0, 0, 0
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if control != nil {
+			if err := control.check(); err != nil {
+				return true, err
+			}
+		}
+		matches, err := match(rowIndex)
+		if err != nil {
+			return true, err
+		}
+		if !matches {
+			continue
+		}
+		position := matched
+		matched++
+		if position < query.offset {
+			continue
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			break
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range query.selects {
+			row[columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		if control != nil && control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions SQLFunctionResolver) func(int) (bool, error) {
+	if query.where.kind == "" {
+		return func(int) (bool, error) { return true, nil }
+	}
+	if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(query.where, query.from.alias, batch); encoded {
+		code, found := sqlDictionaryCode(dictionary, value, collation)
+		return func(rowIndex int) (bool, error) {
+			candidate := dictionary.Codes[rowIndex]
+			return operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code), nil
+		}
+	}
+	if field, pattern, like := sqlColumnarLikePredicate(query.where, query.from.alias); like {
+		return func(rowIndex int) (bool, error) {
+			candidate, _ := batch.Value(field, rowIndex)
+			return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern), nil
+		}
+	}
+	if field, expression, inverted, regexp := sqlColumnarRegexpPredicate(query.where, query.from.alias, batch); regexp {
+		return func(rowIndex int) (bool, error) {
+			candidate, _ := batch.Value(field, rowIndex)
+			text, ok := candidate.(string)
+			return ok && expression.MatchString(text) != inverted, nil
+		}
+	}
+	if predicates, numeric := sqlColumnarNumericConjunction(query.where, query.from.alias); numeric {
+		return func(rowIndex int) (bool, error) {
+			for _, predicate := range predicates {
+				candidate, _ := batch.Value(predicate.field, rowIndex)
+				number, ok := sqlNumber(candidate)
+				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					return false, nil
+				}
+			}
+			return true, nil
+		}
+	}
+	if filters, vector := sqlColumnarVectorConjunction(query.where, query.from.alias); vector {
+		return func(rowIndex int) (bool, error) {
+			for _, filter := range filters {
+				candidate, _ := batch.Value(filter.field, rowIndex)
+				if filter.like {
+					if candidate == nil || !sqlLike(fmt.Sprint(candidate), filter.pattern) {
+						return false, nil
+					}
+					continue
+				}
+				number, ok := sqlNumber(candidate)
+				if !ok || !sqlColumnarNumericMatches(number, filter.operator, filter.value) {
+					return false, nil
+				}
+			}
+			return true, nil
+		}
+	}
+	return func(rowIndex int) (bool, error) {
+		value, err := evalSQLStreamExpr(query.where, newSQLColumnarSourceExecRow(query.from.alias, &batch, rowIndex), functions)
+		if err != nil {
+			return false, err
+		}
+		return sqlTruthy(value), nil
+	}
+}
+
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	if query.sample != nil {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
@@ -740,6 +877,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 			}
 		}
 		return nil
+	}
+	if handled, err := executeSQLColumnarQueryRows(query, resolver, control, visit); handled {
+		return err
 	}
 	if sqlExternalSetStreamable(query, control) {
 		return executeSQLExternalSetStream(ctx, query, resolver, control, visit)

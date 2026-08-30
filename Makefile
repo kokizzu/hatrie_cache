@@ -2556,3 +2556,32 @@ ifneq (,$(filter deliver-sql-query-rows-observation-bytes,$(MAKECMDGOALS)))
 deliver-sql-query-rows-observation-bytes:
 	sh ./scripts/deliver-sql-query-rows-observation-bytes.sh
 endif
+ifneq (,$(filter inspect-sql-columnar-scan,$(MAKECMDGOALS)))
+.PHONY: inspect-sql-columnar-scan
+inspect-sql-columnar-scan:
+	sh ./scripts/inspect-sql-columnar-scan.sh
+endif
+
+ifneq (,$(filter test-sql-columnar-query-rows,$(MAKECMDGOALS)))
+.PHONY: test-sql-columnar-query-rows
+test-sql-columnar-query-rows:
+	sh ./scripts/test-sql-columnar-query-rows.sh
+endif
+
+ifneq (,$(filter benchmark-sql-query-rows-columnar,$(MAKECMDGOALS)))
+.PHONY: benchmark-sql-query-rows-columnar
+benchmark-sql-query-rows-columnar:
+	sh ./scripts/benchmark-sql-query-rows-columnar.sh
+endif
+
+ifneq (,$(filter profile-sql-query-rows-columnar,$(MAKECMDGOALS)))
+.PHONY: profile-sql-query-rows-columnar
+profile-sql-query-rows-columnar:
+	sh ./scripts/profile-sql-query-rows-columnar.sh
+endif
+
+ifneq (,$(filter deliver-sql-columnar-query-rows,$(MAKECMDGOALS)))
+.PHONY: deliver-sql-columnar-query-rows
+deliver-sql-columnar-query-rows:
+	sh ./scripts/deliver-sql-columnar-query-rows.sh
+endif
