@@ -169,6 +169,32 @@ therefore does not claim an index or row-streaming acceleration; the output-row
 count is the bandwidth reduction available to the caller after sampling, while
 the table measures the CPU and memory cost before transport.
 
+## SQL Indexed ORDER BY LIMIT Materialization
+
+Compatible materialized queries now consume the ordered JSON field index without
+first cloning its complete ordered source. The fast path applies only to one
+indexed `ORDER BY`, direct field projections, a positive `LIMIT`, default
+collation, no `WHERE`, and no metrics observer. It continues scanning after the
+result limit so `MaxRows` still rejects an oversized source. Other SQL shapes
+keep the established materialized planner.
+
+```sh
+make bench-sql-typed-index-baseline
+```
+
+One local run on the AMD Ryzen 9 5950X used 100,000 JSON rows with
+`ORDER BY event.id DESC LIMIT 10`:
+
+| Resolver path | Time / query | Heap / query | Allocations / query | Improvement vs materialized index |
+| --- | ---: | ---: | ---: | --- |
+| Ordered index, legacy materialized source | 214.952 ms | 177,320,348 B | 2,000,123 | Baseline |
+| Ordered index, streamed materialized result | 40.286 ms | 63,705,298 B | 500,112 | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations |
+| Full scan | 601.872 ms | 247,418,580 B | 3,800,231 | 14.94x slower than streamed index |
+
+This preserves output order and result rows and preserves source-row budget
+failure. It does not change storage bytes, wire bytes, index build cost, or
+semantics for unsupported query plans.
+
 ## Architectural Big-Wins Baseline
 
 Run the cross-cutting baseline before and after changes to locking, telemetry,
@@ -210,6 +236,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Pass | Implemented improvement | Baseline | Final | Improvement | Main tradeoff |
 | --- | --- | ---: | ---: | ---: | --- |
 | Earlier | [HTTP protobuf command wire](README.md#serialization-tradeoffs) | JSON: 15,012 ns; 3,185 wire B | Protobuf: 12,637 ns; 3,146 wire B | 1.19x faster, 1.2% smaller wire | Heap is 0.6% higher; complex values retain JSON fallback |
+| Current pass | [Streamed indexed ORDER BY LIMIT materialization](#sql-indexed-order-by-limit-materialization), 100k JSON rows, `ORDER BY id DESC LIMIT 10` | Ordered-index source clone: 214.952 ms; 177,320,348 B; 2,000,123 allocs | Ordered-index stream: 40.286 ms; 63,705,298 B; 500,112 allocs | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations | Compatible direct-field, no-predicate, default-collation query shape only; it scans the whole source to retain `MaxRows` rejection semantics |
 | Current pass | [Bounded protobuf batch request reuse](#bounded-protobuf-batch-request-reuse), 16-command HTTP request | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2x fewer allocations | At most one fixed 128-byte pointer slice is retained per pooled parent; batches above 16 release their backing |
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |
 | Earlier | [Binary journal decode](README.md#serialization-tradeoffs) | JSON: 30,034 ns; 22,728 heap B; 29 allocs | Binary: 20,035 ns; 18,071 heap B; 25 allocs | 1.50x faster, 1.26x lower heap | Existing JSON remains a supported fallback |

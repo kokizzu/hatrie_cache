@@ -85,6 +85,47 @@ func (resolver *sqlOrderedStreamingTestResolver) StreamSQLOrderedSource(ctx cont
 	return true, nil
 }
 
+func TestExecuteSQLQueryUsesOrderedStreamForMaterializedResult(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlOrderedStreamingTestResolver{rows: []SQLRow{
+		{"id": int64(1), "team": "alpha"},
+		{"id": int64(2), "team": "beta"},
+		{"id": int64(3), "team": "gamma"},
+	}}
+
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS people SELECT people.id, people.team ORDER BY people.team NULLS LAST LIMIT 2", resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered stream calls = %d, want 1", resolver.orderedCalls)
+	}
+	if !reflect.DeepEqual(result.Columns, []string{"id", "team"}) {
+		t.Fatalf("columns = %#v, want id/team", result.Columns)
+	}
+	want := []SQLRow{{"id": int64(1), "team": "alpha"}, {"id": int64(2), "team": "beta"}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQueryOrderedStreamRetainsSourceRowBudget(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlOrderedStreamingTestResolver{rows: []SQLRow{
+		{"id": int64(1), "team": "alpha"},
+		{"id": int64(2), "team": "beta"},
+		{"id": int64(3), "team": "gamma"},
+	}}
+
+	_, err := ExecuteSQLQueryContext(context.Background(), "FROM CACHE('people') AS people SELECT people.id, people.team ORDER BY people.team NULLS LAST LIMIT 1", resolver, SQLQueryOptions{MaxRows: 2})
+	if err == nil || !strings.Contains(err.Error(), "exceeds the 2 row limit") {
+		t.Fatalf("ExecuteSQLQueryContext() error = %v, want source-row limit", err)
+	}
+	if resolver.orderedCalls != 1 {
+		t.Fatalf("ordered stream calls = %d, want 1", resolver.orderedCalls)
+	}
+}
+
 type sqlStreamingFunctionTestResolver struct {
 	*sqlStreamingTestResolver
 	functions SQLFunctionResolver

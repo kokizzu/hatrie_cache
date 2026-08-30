@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+// sqlOrderedRowsOnlyResolver exposes the pre-streaming ordered-index contract.
+// It keeps the benchmark's materialized control on the same underlying index.
+type sqlOrderedRowsOnlyResolver struct{ trie *HatTrie }
+
+func (resolver sqlOrderedRowsOnlyResolver) ResolveSQLSource(name, key string) ([]SQLRow, error) {
+	return resolver.trie.ResolveSQLSource(name, key)
+}
+
+func (resolver sqlOrderedRowsOnlyResolver) ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error) {
+	return resolver.trie.ResolveSQLOrderedSource(name, key, field, desc, nullsFirst, nullsLast)
+}
+
 func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 	trie := CreateHatTrie()
 	b.Cleanup(trie.Destroy)
@@ -35,6 +47,7 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 		b.Fatalf("indexed order warmup = %#v, %v", result, err)
 	}
 	fullScan := sqlRowsOnlyResolver{trie: trie}
+	materializedIndex := sqlOrderedRowsOnlyResolver{trie: trie}
 	for _, benchmark := range []struct {
 		name     string
 		query    string
@@ -42,7 +55,8 @@ func BenchmarkSQLTypedIndexBaseline(b *testing.B) {
 	}{
 		{name: "range/indexed", query: rangeQuery, resolver: trie},
 		{name: "range/full_scan", query: rangeQuery, resolver: fullScan},
-		{name: "order_limit/indexed", query: orderQuery, resolver: trie},
+		{name: "order_limit/streamed_index", query: orderQuery, resolver: trie},
+		{name: "order_limit/materialized_index", query: orderQuery, resolver: materializedIndex},
 		{name: "order_limit/full_scan", query: orderQuery, resolver: fullScan},
 	} {
 		b.Run(benchmark.name, func(b *testing.B) {

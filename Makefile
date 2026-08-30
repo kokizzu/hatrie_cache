@@ -2193,6 +2193,26 @@ inspect-memory-compaction-safety:
 .PHONY: deliver-memory-compaction-safety
 deliver-memory-compaction-safety:
 	sh ./scripts/deliver-memory-compaction-safety.sh
+
+.PHONY: inspect-sql-materialized-order
+inspect-sql-materialized-order:
+	sh ./scripts/inspect-sql-materialized-order.sh
+
+.PHONY: test-sql-materialized-order
+test-sql-materialized-order:
+	sh ./scripts/test-sql-materialized-order.sh
+
+.PHONY: deliver-sql-materialized-order
+deliver-sql-materialized-order:
+	sh ./scripts/deliver-sql-materialized-order.sh
+
+.PHONY: format-sql-materialized-order
+format-sql-materialized-order:
+	sh ./scripts/format-sql-materialized-order.sh
+
+.PHONY: inspect-sql-execution-budget
+inspect-sql-execution-budget:
+	sh ./scripts/inspect-sql-execution-budget.sh
 .PHONY: bench-sql-typed-index-baseline
 bench-sql-typed-index-baseline:
 	sh ./scripts/bench-sql-typed-index-baseline.sh

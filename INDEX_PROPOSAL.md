@@ -19,8 +19,9 @@ JSON, constructs an equality map from canonical values to copied `SQLRow`s,
 and creates a sorted row slice for comparisons. That is a **full rebuild** on
 each changed JSON source. It already serves qualified equality/range `WHERE`
 predicates, indexed equality joins (inner and left), and compatible `ORDER BY`
-plans. It does not stream `GROUP BY` runs, and ordered paths still clone rows
-into a query result before `LIMIT` can reduce the working set.
+plans. Compatible direct-field `ORDER BY ... LIMIT` materialized results now
+stream from the ordered index instead of cloning that complete source. It does
+not yet stream `GROUP BY` runs, and the generic index still duplicates row maps.
 
 The generic index is a correct baseline, not the target for large or frequently
 updated data: it duplicates row maps, has `interface{}` comparison costs, and

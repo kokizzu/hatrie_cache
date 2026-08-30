@@ -622,6 +622,11 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
+	if metrics == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
+		result, err = executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
+		result.QueryID = observation.id
+		return result, err
+	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if options.IndexAdvisor != nil {
 		options.IndexAdvisor.observeSlowQuery(query, metrics, time.Since(observation.started), options.SlowQueryThreshold, err)
@@ -2797,6 +2802,32 @@ func executeSQLIndexedGroupAggregateStream(ctx context.Context, query *sqlQuery,
 	return nil
 }
 
+// sqlIndexedMaterializedOrderStreamable proves that a materialized result can
+// retain only its LIMIT rows while the ordered source is drained for the
+// established source-row budget. Instrumented, filtered, and expression-based
+// queries retain the materialized executor so their existing plan semantics
+// and diagnostics are unchanged.
+func sqlIndexedMaterializedOrderStreamable(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
+	if query == nil || query.limit <= 0 || query.where.kind != "" || options.Collation != "" || !sqlIndexedOrderStreamable(query, resolver) {
+		return false
+	}
+	for _, item := range query.selects {
+		if item.expr.kind != "field" {
+			return false
+		}
+	}
+	return true
+}
+
+func executeSQLIndexedOrderMaterializedStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
+	result := SQLQueryResult{Columns: sqlColumns(query.selects)}
+	err := executeSQLIndexedOrderStreamWithLimitBehavior(ctx, query, resolver, control, false, func(_ []string, row SQLRow) error {
+		result.Rows = append(result.Rows, row)
+		return nil
+	})
+	return result, err
+}
+
 // sqlIndexedOrderStreamable proves the one-field indexed order that can be
 // emitted directly. Filtering preserves source order, while joins, DISTINCT,
 // grouped aggregates, windows, and expressions used as sort keys need a
@@ -2824,6 +2855,10 @@ func sqlIndexedOrderStreamable(query *sqlQuery, resolver SQLSourceResolver) bool
 // It keeps neither source rows nor sort candidates, so an unbounded ORDER BY
 // can be consumed through QueryRows as long as the index proves its order.
 func executeSQLIndexedOrderStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	return executeSQLIndexedOrderStreamWithLimitBehavior(ctx, query, resolver, control, true, visit)
+}
+
+func executeSQLIndexedOrderStreamWithLimitBehavior(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, stopAtLimit bool, visit func([]string, SQLRow) error) error {
 	streaming, ok := resolver.(SQLOrderedStreamSourceResolver)
 	if !ok {
 		return fmt.Errorf("SQL query cannot stream this ordered scan because the resolver has no ordered index stream")
@@ -2857,7 +2892,10 @@ func executeSQLIndexedOrderStream(ctx context.Context, query *sqlQuery, resolver
 			return nil
 		}
 		if query.limit >= 0 && emitted >= query.limit {
-			return errSQLStreamLimitReached
+			if stopAtLimit {
+				return errSQLStreamLimitReached
+			}
+			return nil
 		}
 		row := SQLRow{}
 		for index, item := range query.selects {
@@ -2877,7 +2915,7 @@ func executeSQLIndexedOrderStream(ctx context.Context, query *sqlQuery, resolver
 		if err := visit(columns, row); err != nil {
 			return err
 		}
-		if query.limit >= 0 && emitted >= query.limit {
+		if stopAtLimit && query.limit >= 0 && emitted >= query.limit {
 			return errSQLStreamLimitReached
 		}
 		return nil
