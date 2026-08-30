@@ -438,6 +438,33 @@ type sqlJSONSourceSnapshot struct {
 	raw  string
 	rows []SQLRow
 }
+
+// SQLIndexType declares the value representation for an opt-in typed JSON index.
+type SQLIndexType string
+
+const (
+	// SQLIndexInt64 stores exact integral JSON numbers in a compact ordered index.
+	SQLIndexInt64 SQLIndexType = "int64"
+)
+
+// SQLJSONIndexSpec configures one opt-in typed JSON index. Type inference is
+// intentionally absent: callers must declare the one supported representation.
+type SQLJSONIndexSpec struct {
+	CacheKey string
+	Fields   []string
+	Type     SQLIndexType
+}
+
+type sqlJSONTypedInt64Index struct {
+	raw      string
+	rows     []SQLRow
+	postings map[int64][]uint32
+	ordered  []sqlJSONTypedInt64Entry
+}
+type sqlJSONTypedInt64Entry struct {
+	value   int64
+	ordinal uint32
+}
 type sqlJSONTextIndex struct {
 	raw    string
 	rows   []SQLRow
@@ -511,6 +538,27 @@ func (ht *HatTrie) CreateSQLJSONFieldIndex(key, field string) error {
 		ht.sqlJSONIndexes[key] = map[string]*sqlJSONFieldIndex{}
 	}
 	ht.sqlJSONIndexes[key][field] = &sqlJSONFieldIndex{}
+	return nil
+}
+
+// CreateSQLTypedJSONIndex configures a compact opt-in typed JSON index. It is
+// disabled by default and currently supports one exact integral field.
+func (ht *HatTrie) CreateSQLTypedJSONIndex(spec SQLJSONIndexSpec) error {
+	if ht == nil || spec.CacheKey == "" || len(spec.Fields) != 1 || spec.Fields[0] == "" {
+		return fmt.Errorf("typed SQL JSON index requires one cache key and field")
+	}
+	if spec.Type != SQLIndexInt64 {
+		return fmt.Errorf("unsupported typed SQL JSON index type %q", spec.Type)
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONTypedInt64Indexes == nil {
+		ht.sqlJSONTypedInt64Indexes = make(map[string]map[string]*sqlJSONTypedInt64Index)
+	}
+	if ht.sqlJSONTypedInt64Indexes[spec.CacheKey] == nil {
+		ht.sqlJSONTypedInt64Indexes[spec.CacheKey] = make(map[string]*sqlJSONTypedInt64Index)
+	}
+	ht.sqlJSONTypedInt64Indexes[spec.CacheKey][spec.Fields[0]] = &sqlJSONTypedInt64Index{}
 	return nil
 }
 
@@ -1001,9 +1049,32 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		return nil, false, nil
 	}
 	ht.sqlIndexMu.Lock()
+	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	bitmap := ht.sqlJSONBitmapIndexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
+	if typed != nil {
+		data, err := ht.sqlJSONSourceString(key)
+		if err != nil {
+			return nil, false, err
+		}
+		ht.sqlIndexMu.Lock()
+		defer ht.sqlIndexMu.Unlock()
+		typed = ht.sqlJSONTypedInt64Indexes[key][field]
+		if typed == nil {
+			return nil, false, nil
+		}
+		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		if err != nil {
+			return nil, false, err
+		}
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		value, ok := sqlJSONTypedInt64Value(value)
+		if !ok {
+			return []SQLRow{}, true, nil
+		}
+		return sqlJSONTypedInt64Rows(typed, typed.postings[value]), true, nil
+	}
 	if bitmap != nil {
 		data, err := ht.sqlJSONSourceString(key)
 		if err != nil {
@@ -1465,6 +1536,35 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		if err != nil {
+			return nil, false, err
+		}
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		needle, ok := sqlJSONTypedInt64Value(value)
+		if !ok {
+			return []SQLRow{}, true, nil
+		}
+		start, end := 0, len(typed.ordered)
+		switch operator {
+		case "<":
+			end = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value >= needle })
+		case "<=":
+			end = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value > needle })
+		case ">":
+			start = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value > needle })
+		case ">=":
+			start = sort.Search(len(typed.ordered), func(index int) bool { return typed.ordered[index].value >= needle })
+		default:
+			return nil, false, nil
+		}
+		ordinals := make([]uint32, end-start)
+		for index, entry := range typed.ordered[start:end] {
+			ordinals[index] = entry.ordinal
+		}
+		return sqlJSONTypedInt64Rows(typed, ordinals), true, nil
+	}
 	index := ht.sqlJSONIndexes[key][field]
 	if index == nil {
 		return nil, false, nil
@@ -1650,6 +1750,71 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		return true, err
 	}
 	return true, emitNulls()
+}
+
+func refreshSQLJSONTypedInt64Index(index *sqlJSONTypedInt64Index, field, data string, rows []SQLRow) {
+	if index.raw == data {
+		return
+	}
+	postings := make(map[int64][]uint32)
+	ordered := make([]sqlJSONTypedInt64Entry, 0, len(rows))
+	for ordinal, row := range rows {
+		if uint64(ordinal) > uint64(^uint32(0)) {
+			break
+		}
+		value, ok := sqlJSONTypedInt64Value(row[field])
+		if !ok {
+			continue
+		}
+		postings[value] = append(postings[value], uint32(ordinal))
+		ordered = append(ordered, sqlJSONTypedInt64Entry{value: value, ordinal: uint32(ordinal)})
+	}
+	sort.SliceStable(ordered, func(left, right int) bool { return ordered[left].value < ordered[right].value })
+	index.raw, index.rows, index.postings, index.ordered = data, rows, postings, ordered
+}
+
+func sqlJSONTypedInt64Value(value interface{}) (int64, bool) {
+	switch value := value.(type) {
+	case int:
+		return int64(value), true
+	case int8:
+		return int64(value), true
+	case int16:
+		return int64(value), true
+	case int32:
+		return int64(value), true
+	case int64:
+		return value, true
+	case uint:
+		if uint64(value) <= math.MaxInt64 {
+			return int64(value), true
+		}
+	case uint8:
+		return int64(value), true
+	case uint16:
+		return int64(value), true
+	case uint32:
+		return int64(value), true
+	case uint64:
+		if value <= math.MaxInt64 {
+			return int64(value), true
+		}
+	case float64:
+		if !math.IsNaN(value) && !math.IsInf(value, 0) && math.Trunc(value) == value && value >= math.MinInt64 && value <= math.MaxInt64 {
+			return int64(value), true
+		}
+	}
+	return 0, false
+}
+
+func sqlJSONTypedInt64Rows(index *sqlJSONTypedInt64Index, ordinals []uint32) []SQLRow {
+	rows := make([]SQLRow, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		if int(ordinal) < len(index.rows) {
+			rows = append(rows, index.rows[ordinal])
+		}
+	}
+	return hatSql.CloneRows(rows)
 }
 
 func refreshSQLJSONBitmapIndex(index *sqlJSONBitmapIndex, key, field string, data []byte) error {

@@ -2266,6 +2266,22 @@ bench-sql-index-snapshots:
 deliver-sql-index-snapshots:
 	sh ./scripts/deliver-sql-index-snapshots.sh
 
+.PHONY: format-sql-typed-index
+format-sql-typed-index:
+	sh ./scripts/format-sql-typed-index.sh
+
+.PHONY: test-sql-typed-index
+test-sql-typed-index:
+	sh ./scripts/test-sql-typed-index.sh
+
+.PHONY: bench-sql-typed-index
+bench-sql-typed-index:
+	sh ./scripts/bench-sql-typed-index.sh
+
+.PHONY: deliver-sql-typed-index
+deliver-sql-typed-index:
+	sh ./scripts/deliver-sql-typed-index.sh
+
 .PHONY: test-sql-direct-string-source
 test-sql-direct-string-source:
 	sh ./scripts/test-sql-direct-string-source.sh

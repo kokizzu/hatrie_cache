@@ -27,6 +27,14 @@ The generic index is a correct baseline, not the target for large or frequently
 updated data: it duplicates row maps, has `interface{}` comparison costs, and
 cannot know whether a field is an integer, date, datetime, string, or boolean.
 
+## Implementation Status
+
+`SQLIndexInt64` is implemented as an opt-in, single-field typed index. It uses
+sorted `int64` values and row ordinals while retaining the source generation
+through the shared immutable index snapshot. Date, datetime, string, boolean,
+composite typed indexes, and incremental mutation support remain proposals and
+are not implemented.
+
 ## Goals
 
 - Retain exact SQL comparison, NULL, collation, and ordering semantics.

@@ -3685,6 +3685,7 @@ type HatTrie struct {
 	sqlIndexMu                 sync.RWMutex
 	sqlColumnarLayouts         sqlColumnarLayoutCache
 	sqlJSONIndexSnapshots      map[string]*sqlJSONSourceSnapshot
+	sqlJSONTypedInt64Indexes   map[string]map[string]*sqlJSONTypedInt64Index
 	sqlJSONIndexes             map[string]map[string]*sqlJSONFieldIndex
 	sqlJSONBitmapIndexes       map[string]map[string]*sqlJSONBitmapIndex
 	sqlJSONCoveringIndexes     map[string]map[string]*sqlJSONCoveringIndex

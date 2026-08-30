@@ -13342,6 +13342,27 @@ make test-sql-index-snapshots
 make bench-sql-index-snapshots
 ```
 
+## Opt-In Typed Int64 SQL Index
+
+`CreateSQLTypedJSONIndex` enables one explicitly declared `SQLIndexInt64` field.
+It stores exact integral JSON values in a sorted `int64` vector with `uint32`
+row ordinals, backed by the immutable source snapshot. Type inference remains
+off and the existing generic field index remains the default compatibility API.
+
+`TestSQLTypedInt64IndexAcceleratesEqualityRangeAndOrder` covers equality,
+range, SQL result ordering, and the absence of an implicit generic index. On a
+20,000-row rebuild fixture, it measured:
+
+| Index representation | Time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Generic field index | 31.66 ms | 14.36 MB | 340,163 | Baseline |
+| Typed `int64` index | 29.09 ms | 13.59 MB | 320,171 | 1.09x faster; 1.06x fewer bytes and allocations |
+
+```sh
+make test-sql-typed-index
+make bench-sql-typed-index
+```
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
