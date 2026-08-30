@@ -52,3 +52,22 @@ func TestSQLTypedInt64IndexDeclinesMixedValueOrder(t *testing.T) {
 		t.Fatalf("ResolveSQLOrderedSource() = available %v, error %v, want unavailable fallback", available, err)
 	}
 }
+
+func TestSQLQueryUsesTypedInt64Order(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"age":30},{"id":2,"age":18},{"id":3,"age":21}]`)
+	if err := trie.CreateSQLTypedJSONIndex(SQLJSONIndexSpec{CacheKey: "people", Fields: []string{"age"}, Type: SQLIndexInt64}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS person SELECT person.id ORDER BY person.age LIMIT 2", trie)
+	if err != nil || !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(2)}, {"id": float64(3)}}) {
+		t.Fatalf("ExecuteSQLQuery() = %#v, %v", result, err)
+	}
+	trie.sqlIndexMu.RLock()
+	raw := trie.sqlJSONTypedInt64Indexes["people"]["age"].raw
+	trie.sqlIndexMu.RUnlock()
+	if raw == "" {
+		t.Fatal("compatible ORDER BY query did not build the typed index")
+	}
+}

@@ -1689,6 +1689,37 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		return false, err
 	}
 	ht.sqlIndexMu.Lock()
+	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotLocked(key, data)
+		if err != nil {
+			ht.sqlIndexMu.Unlock()
+			return false, err
+		}
+		refreshSQLJSONTypedInt64Index(typed, field, data, snapshot.rows)
+		if !typed.complete {
+			ht.sqlIndexMu.Unlock()
+			return false, nil
+		}
+		rows := typed.rows
+		ordinals := sqlJSONTypedInt64OrderOrdinals(typed, desc, nullsFirst, nullsLast)
+		ht.sqlIndexMu.Unlock()
+		for _, ordinal := range ordinals {
+			if int(ordinal) >= len(rows) {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return true, err
+			}
+			copy := make(SQLRow, len(rows[ordinal]))
+			for name, value := range rows[ordinal] {
+				copy[name] = value
+			}
+			if err := visit(copy); err != nil {
+				return true, err
+			}
+		}
+		return true, nil
+	}
 	index := ht.sqlJSONIndexes[key][field]
 	if index == nil {
 		ht.sqlIndexMu.Unlock()
@@ -1839,6 +1870,10 @@ func sqlJSONTypedInt64Rows(index *sqlJSONTypedInt64Index, ordinals []uint32) []S
 }
 
 func sqlJSONTypedInt64OrderedRows(index *sqlJSONTypedInt64Index, desc, nullsFirst, nullsLast bool) []SQLRow {
+	return sqlJSONTypedInt64Rows(index, sqlJSONTypedInt64OrderOrdinals(index, desc, nullsFirst, nullsLast))
+}
+
+func sqlJSONTypedInt64OrderOrdinals(index *sqlJSONTypedInt64Index, desc, nullsFirst, nullsLast bool) []uint32 {
 	ordinals := make([]uint32, 0, len(index.ordered)+len(index.nulls))
 	forward := func() {
 		for _, entry := range index.ordered {
@@ -1869,7 +1904,7 @@ func sqlJSONTypedInt64OrderedRows(index *sqlJSONTypedInt64Index, desc, nullsFirs
 	if !placeNullsFirst {
 		ordinals = append(ordinals, index.nulls...)
 	}
-	return sqlJSONTypedInt64Rows(index, ordinals)
+	return ordinals
 }
 
 func refreshSQLJSONBitmapIndex(index *sqlJSONBitmapIndex, key, field string, data []byte) error {
