@@ -2238,6 +2238,18 @@ bench-sql-index-freshness-identity:
 inspect-sql-direct-string-source:
 	sh ./scripts/inspect-sql-direct-string-source.sh
 
+.PHONY: test-sql-index-value-key
+test-sql-index-value-key:
+	sh ./scripts/test-sql-index-value-key.sh
+
+.PHONY: bench-sql-index-value-key
+bench-sql-index-value-key:
+	sh ./scripts/bench-sql-index-value-key.sh
+
+.PHONY: deliver-sql-index-value-key
+deliver-sql-index-value-key:
+	sh ./scripts/deliver-sql-index-value-key.sh
+
 .PHONY: test-sql-direct-string-source
 test-sql-direct-string-source:
 	sh ./scripts/test-sql-direct-string-source.sh

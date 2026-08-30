@@ -8,6 +8,7 @@ gofmt -w \
 	hat/hatCache/sql_secondary_index_source_test.go \
 	hat/hatCache/sql_direct_string_source_test.go \
 	hat/hatCache/sql_direct_string_source_benchmark_test.go \
+	hat/hatCache/sql_index_value_key_benchmark_test.go \
 	hat/hatSql/query.go \
 	hat/hatCache/sql_production_test.go \
 	hat/hatCache/sql_typed_index_baseline_benchmark_test.go

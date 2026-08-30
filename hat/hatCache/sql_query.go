@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1855,9 +1857,30 @@ func sqlIndexValueKey(value interface{}) (string, bool) {
 			return "b:1", true
 		}
 		return "b:0", true
+	case float64:
+		return sqlIndexFloatValueKey(value)
 	}
 	encoded, err := json.Marshal(value)
 	return string(encoded), err == nil
+}
+
+func sqlIndexFloatValueKey(value float64) (string, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return "", false
+	}
+	format := byte('f')
+	abs := math.Abs(value)
+	if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+		format = 'e'
+	}
+	encoded := strconv.FormatFloat(value, format, -1, 64)
+	if format == 'e' && len(encoded) >= 4 {
+		zero := len(encoded) - 2
+		if encoded[zero] == '0' && (encoded[zero-1] == '+' || encoded[zero-1] == '-') {
+			encoded = encoded[:zero] + encoded[zero+1:]
+		}
+	}
+	return encoded, true
 }
 
 // ResolveSQLSource exposes a stable, read-only snapshot of cache data to SQL.
