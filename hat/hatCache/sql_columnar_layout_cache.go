@@ -70,6 +70,19 @@ func newSQLColumnarLayoutCacheKey(sourceKey string, fields []string) sqlColumnar
 	return sqlColumnarLayoutCacheKey{sourceKey: sourceKey, fields: builder.String()}
 }
 
+func sqlColumnarLayoutOrderFieldsKey(fields []string) string {
+	var builder strings.Builder
+	for index, field := range fields {
+		if index > 0 {
+			builder.WriteByte('|')
+		}
+		builder.WriteString(strconv.Itoa(len(field)))
+		builder.WriteByte(':')
+		builder.WriteString(field)
+	}
+	return builder.String()
+}
+
 func (cache *sqlColumnarLayoutCache) lookup(key sqlColumnarLayoutCacheKey) (hatSql.ColumnarBatch, bool) {
 	cache.mu.RLock()
 	entry, ok := cache.entries[key]
@@ -110,14 +123,22 @@ func (cache *sqlColumnarLayoutCache) has(key sqlColumnarLayoutCacheKey) bool {
 // The sort itself happens outside the cache lock because cached batches are
 // immutable; publication verifies that the layout was not invalidated first.
 func (cache *sqlColumnarLayoutCache) observeOrder(key sqlColumnarLayoutCacheKey, field string) ([]uint32, bool) {
-	orderKey := sqlColumnarLayoutOrderCacheKey{layout: key, field: field}
+	return cache.observeOrderFields(key, []string{field})
+}
+
+func (cache *sqlColumnarLayoutCache) observeOrderFields(key sqlColumnarLayoutCacheKey, fields []string) ([]uint32, bool) {
+	if len(fields) == 0 {
+		return nil, false
+	}
+	fieldKey := sqlColumnarLayoutOrderFieldsKey(fields)
+	orderKey := sqlColumnarLayoutOrderCacheKey{layout: key, field: fieldKey}
 	cache.mu.Lock()
 	entry, exists := cache.entries[key]
 	if !exists {
 		cache.mu.Unlock()
 		return nil, false
 	}
-	if order, ok := entry.orders[field]; ok {
+	if order, ok := entry.orders[fieldKey]; ok {
 		cache.mu.Unlock()
 		cache.hits.Add(1)
 		return order, true
@@ -141,7 +162,7 @@ func (cache *sqlColumnarLayoutCache) observeOrder(key sqlColumnarLayoutCacheKey,
 	batch, sequence := entry.batch, entry.sequence
 	cache.mu.Unlock()
 
-	order, bytes, ok := sqlColumnarLayoutOrder(batch, field)
+	order, bytes, ok := sqlColumnarLayoutOrderFields(batch, fields)
 	if !ok {
 		return nil, false
 	}
@@ -151,7 +172,7 @@ func (cache *sqlColumnarLayoutCache) observeOrder(key sqlColumnarLayoutCacheKey,
 	if !exists || entry.sequence != sequence {
 		return nil, false
 	}
-	if existing, ok := entry.orders[field]; ok {
+	if existing, ok := entry.orders[fieldKey]; ok {
 		cache.hits.Add(1)
 		return existing, true
 	}
@@ -161,7 +182,7 @@ func (cache *sqlColumnarLayoutCache) observeOrder(key sqlColumnarLayoutCacheKey,
 	if entry.orders == nil {
 		entry.orders = make(map[string][]uint32)
 	}
-	entry.orders[field] = order
+	entry.orders[fieldKey] = order
 	entry.bytes += bytes
 	cache.entries[key] = entry
 	cache.bytes += bytes
@@ -277,48 +298,58 @@ func cloneSQLColumnarBatch(batch hatSql.ColumnarBatch) hatSql.ColumnarBatch {
 }
 
 func sqlColumnarLayoutOrder(batch hatSql.ColumnarBatch, field string) ([]uint32, int, bool) {
-	if batch.Rows <= 0 || uint64(batch.Rows) > uint64(^uint32(0)) {
+	return sqlColumnarLayoutOrderFields(batch, []string{field})
+}
+
+func sqlColumnarLayoutOrderFields(batch hatSql.ColumnarBatch, fields []string) ([]uint32, int, bool) {
+	if batch.Rows <= 0 || len(fields) == 0 || uint64(batch.Rows) > uint64(^uint32(0)) {
 		return nil, 0, false
 	}
 	order := make([]uint32, batch.Rows)
-	kind := byte(0)
-	for row := 0; row < batch.Rows; row++ {
-		value, available := batch.Value(field, row)
-		if !available || value == nil {
-			return nil, 0, false
-		}
-		if _, ok := value.(string); ok {
-			if kind == 2 {
+	kinds := make([]byte, len(fields))
+	for fieldIndex, field := range fields {
+		for row := 0; row < batch.Rows; row++ {
+			value, available := batch.Value(field, row)
+			if !available || value == nil {
 				return nil, 0, false
 			}
-			kind = 1
-		} else if _, ok := hatSql.Number(value); ok {
-			if kind == 1 {
+			if _, ok := value.(string); ok {
+				if kinds[fieldIndex] == 2 {
+					return nil, 0, false
+				}
+				kinds[fieldIndex] = 1
+			} else if _, ok := hatSql.Number(value); ok {
+				if kinds[fieldIndex] == 1 {
+					return nil, 0, false
+				}
+				kinds[fieldIndex] = 2
+			} else {
 				return nil, 0, false
 			}
-			kind = 2
-		} else {
+		}
+		if kinds[fieldIndex] == 0 {
 			return nil, 0, false
 		}
-		order[row] = uint32(row)
 	}
-	if kind == 0 {
-		return nil, 0, false
+	for row := range order {
+		order[row] = uint32(row)
 	}
 	sort.Slice(order, func(left, right int) bool {
 		leftRow, rightRow := int(order[left]), int(order[right])
-		leftValue, _ := batch.Value(field, leftRow)
-		rightValue, _ := batch.Value(field, rightRow)
-		if kind == 1 {
-			leftText, rightText := leftValue.(string), rightValue.(string)
-			if leftText != rightText {
-				return leftText < rightText
-			}
-		} else {
-			leftNumber, _ := hatSql.Number(leftValue)
-			rightNumber, _ := hatSql.Number(rightValue)
-			if leftNumber != rightNumber {
-				return leftNumber < rightNumber
+		for fieldIndex, field := range fields {
+			leftValue, _ := batch.Value(field, leftRow)
+			rightValue, _ := batch.Value(field, rightRow)
+			if kinds[fieldIndex] == 1 {
+				leftText, rightText := leftValue.(string), rightValue.(string)
+				if leftText != rightText {
+					return leftText < rightText
+				}
+			} else {
+				leftNumber, _ := hatSql.Number(leftValue)
+				rightNumber, _ := hatSql.Number(rightValue)
+				if leftNumber != rightNumber {
+					return leftNumber < rightNumber
+				}
 			}
 		}
 		return leftRow < rightRow

@@ -2961,21 +2961,34 @@ func (ht *HatTrie) BorrowSQLColumnarSourceSegments(name, key string, fields []st
 // projection for an already-cached exact layout. It is populated only after
 // repeated compatible requests and is invalidated with its source layout.
 func (ht *HatTrie) BorrowSQLColumnarSourceOrder(name, key string, fields []string, orderField string) ([]uint32, bool, error) {
+	return ht.BorrowSQLColumnarSourceOrderFields(name, key, fields, []string{orderField})
+}
+
+// BorrowSQLColumnarSourceOrderFields returns an immutable ascending ordinal
+// projection for an already-cached exact layout and ordered field list. It is
+// populated only after repeated compatible requests and invalidated with its
+// source layout.
+func (ht *HatTrie) BorrowSQLColumnarSourceOrderFields(name, key string, fields, orderFields []string) ([]uint32, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
-	if name != "CACHE" || orderField == "" {
+	if name != "CACHE" || len(orderFields) == 0 {
 		return nil, false, nil
 	}
+	for _, field := range orderFields {
+		if field == "" {
+			return nil, false, nil
+		}
+	}
 	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
-	if order, available := ht.sqlColumnarLayouts.observeOrder(layoutKey, orderField); available {
+	if order, available := ht.sqlColumnarLayouts.observeOrderFields(layoutKey, orderFields); available {
 		return order, true, nil
 	}
 	plan, err := ht.SQLPartitionPruningPlan(name, key)
 	if err != nil || !plan.Pruned {
 		return nil, false, err
 	}
-	return ht.localPartitionSet().tries[plan.Partition].BorrowSQLColumnarSourceOrder(name, key, fields, orderField)
+	return ht.localPartitionSet().tries[plan.Partition].BorrowSQLColumnarSourceOrderFields(name, key, fields, orderFields)
 }
 
 // PreferSQLColumnarSource reports whether an immutable cached layout can serve

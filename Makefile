@@ -1244,6 +1244,10 @@ benchmark-sql-columnar-sorted-projection:
 format-sql-columnar-sorted-projection:
 	sh ./scripts/format-sql-columnar-sorted-projection.sh
 
+.PHONY: deliver-sql-columnar-composite-projection
+deliver-sql-columnar-composite-projection:
+	sh ./scripts/deliver-sql-columnar-composite-projection.sh
+
 stage-sql-columnar-sorted-projection:
 	sh ./scripts/stage-sql-columnar-sorted-projection.sh
 
