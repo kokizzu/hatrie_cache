@@ -14372,6 +14372,32 @@ eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
 dictionary/numeric conjunction output to row execution, includes an unknown
 list value, and verifies the specialized `EXPLAIN ANALYZE` node.
 
+## Columnar Dictionary Literal IN-Numeric Conjunction
+
+Direct field projections now evaluate one dictionary-encoded literal
+`IN (...)` predicate and one or more direct numeric predicates joined only by
+`AND` in a single streaming loop. Both conjunction orders are supported.
+`NOT IN`, `NULL`, nonliteral or mixed-type lists, expressions, and wider
+predicate shapes retain the existing generic columnar evaluator.
+
+```sh
+make test-sql-columnar-dictionary-in-numeric
+make benchmark-sql-columnar-dictionary-in-numeric
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with an
+eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
+'missing') AND score >= 800`, and `id, state` projection, yielding 1,000 rows:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing generic columnar filter | 10.35 ms/op | 10.13 MB/op | 68,678 allocs/op | Baseline |
+| Direct dictionary-code/numeric loop | 460.18 us/op | 390.61 KB/op | 3,347 allocs/op | 22.5x faster; 25.9x lower allocation volume; 20.5x fewer allocations |
+
+`TestSQLColumnarDictionaryLiteralINUsesNumericConjunction` compares both
+conjunction orders with row execution, includes an unknown list value, and
+verifies the specialized `EXPLAIN ANALYZE` node.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

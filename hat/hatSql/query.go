@@ -7176,6 +7176,26 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if dictionary, codes, predicates, mixed := sqlColumnarDictionaryLiteralINNumericConjunction(q.where, q.from.alias, batch); mixed {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			if !codes[dictionary.Codes[rowIndex]] {
+				return false
+			}
+			for _, predicate := range predicates {
+				value, _ := batch.Value(predicate.field, rowIndex)
+				number, ok := sqlNumber(value)
+				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					return false
+				}
+			}
+			return true
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY IN NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		code, found := sqlDictionaryCode(dictionary, value, collation)
@@ -7436,12 +7456,16 @@ func sqlColumnarDictionaryDistinctPlan(q *sqlQuery, outer *sqlExecRow) (field st
 		return "", nil, nil, false, false
 	}
 	if q.where.kind != "" {
-		dictionaryField, numericPredicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
-		literalINField, literalIN := sqlColumnarLiteralINFieldInConjunction(q.where, q.from.alias)
-		if !accepted || dictionaryField == "" || !literalIN || !strings.EqualFold(dictionaryField, field) || !strings.EqualFold(literalINField, field) {
-			return "", nil, nil, false, false
+		var numeric bool
+		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
+		if !numeric {
+			dictionaryField, numericPredicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
+			literalINField, literalIN := sqlColumnarLiteralINFieldInConjunction(q.where, q.from.alias)
+			if !accepted || dictionaryField == "" || !literalIN || !strings.EqualFold(dictionaryField, field) || !strings.EqualFold(literalINField, field) {
+				return "", nil, nil, false, false
+			}
+			predicates = numericPredicates
 		}
-		predicates = numericPredicates
 	}
 	seen := map[string]bool{}
 	addField := func(candidate string) {
@@ -7802,6 +7826,15 @@ func sqlColumnarDictionaryLiteralINPredicateInConjunction(expr sqlExpr, alias st
 		return sqlColumnarDictionaryLiteralINPredicateInConjunction(*expr.right, alias, batch)
 	}
 	return sqlColumnarDictionaryLiteralINPredicate(expr, alias, batch)
+}
+
+func sqlColumnarDictionaryLiteralINNumericConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (dictionary DictionaryColumn, codes []bool, predicates []sqlColumnarNumericFilter, ok bool) {
+	_, predicates, accepted := sqlColumnarTopNFilterPlan(expr, alias)
+	if !accepted || len(predicates) == 0 {
+		return DictionaryColumn{}, nil, nil, false
+	}
+	dictionary, codes, ok = sqlColumnarDictionaryLiteralINPredicateInConjunction(expr, alias, batch)
+	return dictionary, codes, predicates, ok
 }
 
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
