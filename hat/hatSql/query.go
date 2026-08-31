@@ -7768,13 +7768,12 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
-	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch)
+	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
 	filterCode, filterFound := uint32(0), false
-	if q.where.kind != "" && len(predicates) == 0 {
-		if !dictionaryFilter {
-			return SQLQueryResult{}, false, nil
-		}
+	if dictionaryFilter {
 		filterCode, filterFound = sqlDictionaryCode(filterDictionary, filterValue, filterCollation)
+	} else if q.where.kind != "" && len(predicates) == 0 {
+		return SQLQueryResult{}, false, nil
 	}
 	if metrics != nil {
 		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
@@ -7881,18 +7880,9 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 	if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) || !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
 		return "", nil, nil, nil, false, false
 	}
-	dictionaryField := ""
-	if q.where.kind != "" {
-		var numeric bool
-		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
-		if !numeric {
-			field, _, _, _, dictionary := sqlColumnarTopNDictionaryPredicate(q.where, q.from.alias)
-			if !dictionary {
-				return "", nil, nil, nil, false, false
-			}
-			predicates = nil
-			dictionaryField = field
-		}
+	dictionaryField, predicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
+	if !accepted {
+		return "", nil, nil, nil, false, false
 	}
 	ordered, valid := sqlOrderedGroupProjections(q)
 	if !valid {

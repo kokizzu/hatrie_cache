@@ -114,6 +114,35 @@ func TestSQLColumnarDictionaryGroupAggregateAfterDictionaryInequalityFilter(t *t
 	}
 }
 
+func TestSQLColumnarDictionaryGroupAggregateAfterDictionaryNumericFilter(t *testing.T) {
+	resolver := &sqlColumnarGroupAggregateResolver{batch: ColumnarBatch{
+		Columns: map[string][]interface{}{
+			"score": {int64(7), int64(10), int64(12), int64(20)},
+		},
+		Dictionaries: map[string]DictionaryColumn{
+			"team": {Values: []string{"ops", "core", "data"}, Codes: []uint32{0, 1, 2, 1}},
+		},
+		Rows: 4,
+	}}
+	result, err := ExecuteSQLQueryParameters(context.Background(), `
+		SELECT team, COUNT(*) AS total, SUM(score) AS sum
+		FROM CACHE('items')
+		WHERE team = 'core' AND score >= 10
+		GROUP BY team
+		ORDER BY team
+	`, resolver, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("columnar calls = %d, want 1", resolver.calls)
+	}
+	want := []SQLRow{{"team": "core", "total": int64(2), "sum": float64(30)}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 func TestSQLColumnarDictionaryGroupAggregateMatchesRowExecutor(t *testing.T) {
 	query := `
 		SELECT team, COUNT(*) AS total, SUM(score) AS sum, MIN(score) AS minimum, MAX(score) AS maximum

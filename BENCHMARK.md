@@ -14179,6 +14179,16 @@ same 20,000-row, 20-value dictionary source:
 
 The dictionary predicate is evaluated by code before aggregate state is
 allocated, so a selective filter retains state only for matching groups.
-Numeric/dictionary predicate combinations, expressions, non-binary collation,
-and wider group semantics retain the established executor. Reproduce with
+
+The same benchmark with `WHERE team = 'team-c' AND score >= 50` measured:
+
+| Implementation | Median time | Cumulative allocation | Allocations | CPU improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Row-source grouped aggregate | 8.86 ms | 11.50 MB | 41,274 | 1.00x | 1.00x |
+| Dictionary-numeric columnar aggregate | 576.43 us | 10.92 KB | 55 | 15.4x | 1,053.4x lower; 750.4x fewer allocations |
+
+The mixed path permits exactly one dictionary equality/inequality predicate
+with direct numeric comparisons joined only by `AND`. Expressions, non-binary
+collation, additional dictionary predicates, and wider group semantics retain
+the established executor. Reproduce with
 `make benchmark-sql-columnar-group-aggregate`.
