@@ -83,6 +83,32 @@ func sqlColumnarLayoutOrderFieldsKey(fields []string) string {
 	return builder.String()
 }
 
+func sqlColumnarLayoutDirectedOrderKey(fields []string, descending []bool) string {
+	length := len(descending) + 1
+	for _, field := range fields {
+		length += len(field) + len(strconv.Itoa(len(field))) + 1
+	}
+	var builder strings.Builder
+	builder.Grow(length)
+	for index, field := range fields {
+		if index > 0 {
+			builder.WriteByte('|')
+		}
+		builder.WriteString(strconv.Itoa(len(field)))
+		builder.WriteByte(':')
+		builder.WriteString(field)
+	}
+	builder.WriteByte('#')
+	for _, desc := range descending {
+		if desc {
+			builder.WriteByte('1')
+		} else {
+			builder.WriteByte('0')
+		}
+	}
+	return builder.String()
+}
+
 func (cache *sqlColumnarLayoutCache) lookup(key sqlColumnarLayoutCacheKey) (hatSql.ColumnarBatch, bool) {
 	cache.mu.RLock()
 	entry, ok := cache.entries[key]
@@ -127,10 +153,24 @@ func (cache *sqlColumnarLayoutCache) observeOrder(key sqlColumnarLayoutCacheKey,
 }
 
 func (cache *sqlColumnarLayoutCache) observeOrderFields(key sqlColumnarLayoutCacheKey, fields []string) ([]uint32, bool) {
+	return cache.observeOrderBy(key, fields, nil)
+}
+
+func (cache *sqlColumnarLayoutCache) observeOrderBy(key sqlColumnarLayoutCacheKey, fields []string, descending []bool) ([]uint32, bool) {
 	if len(fields) == 0 {
 		return nil, false
 	}
+	if len(descending) != 0 && len(descending) != len(fields) {
+		return nil, false
+	}
 	fieldKey := sqlColumnarLayoutOrderFieldsKey(fields)
+	directed := false
+	for _, desc := range descending {
+		directed = directed || desc
+	}
+	if directed {
+		fieldKey = sqlColumnarLayoutDirectedOrderKey(fields, descending)
+	}
 	orderKey := sqlColumnarLayoutOrderCacheKey{layout: key, field: fieldKey}
 	cache.mu.Lock()
 	entry, exists := cache.entries[key]
@@ -162,7 +202,7 @@ func (cache *sqlColumnarLayoutCache) observeOrderFields(key sqlColumnarLayoutCac
 	batch, sequence := entry.batch, entry.sequence
 	cache.mu.Unlock()
 
-	order, bytes, ok := sqlColumnarLayoutOrderFields(batch, fields)
+	order, bytes, ok := sqlColumnarLayoutOrderBy(batch, fields, descending)
 	if !ok {
 		return nil, false
 	}
@@ -302,7 +342,14 @@ func sqlColumnarLayoutOrder(batch hatSql.ColumnarBatch, field string) ([]uint32,
 }
 
 func sqlColumnarLayoutOrderFields(batch hatSql.ColumnarBatch, fields []string) ([]uint32, int, bool) {
+	return sqlColumnarLayoutOrderBy(batch, fields, nil)
+}
+
+func sqlColumnarLayoutOrderBy(batch hatSql.ColumnarBatch, fields []string, descending []bool) ([]uint32, int, bool) {
 	if batch.Rows <= 0 || len(fields) == 0 || uint64(batch.Rows) > uint64(^uint32(0)) {
+		return nil, 0, false
+	}
+	if len(descending) != 0 && len(descending) != len(fields) {
 		return nil, 0, false
 	}
 	order := make([]uint32, batch.Rows)
@@ -342,12 +389,18 @@ func sqlColumnarLayoutOrderFields(batch hatSql.ColumnarBatch, fields []string) (
 			if kinds[fieldIndex] == 1 {
 				leftText, rightText := leftValue.(string), rightValue.(string)
 				if leftText != rightText {
+					if len(descending) > 0 && descending[fieldIndex] {
+						return leftText > rightText
+					}
 					return leftText < rightText
 				}
 			} else {
 				leftNumber, _ := hatSql.Number(leftValue)
 				rightNumber, _ := hatSql.Number(rightValue)
 				if leftNumber != rightNumber {
+					if len(descending) > 0 && descending[fieldIndex] {
+						return leftNumber > rightNumber
+					}
 					return leftNumber < rightNumber
 				}
 			}

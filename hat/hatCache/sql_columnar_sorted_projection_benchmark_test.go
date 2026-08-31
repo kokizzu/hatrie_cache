@@ -144,4 +144,93 @@ func BenchmarkSQLHatTrieColumnarCompositeSortedProjection(b *testing.B) {
 			sqlColumnarSortedProjectionBenchmarkResult = result
 		}
 	})
+
+	mixedQuery := "FROM CACHE('jobs') AS job SELECT job.id, job.priority, job.score ORDER BY job.priority ASC, job.score DESC LIMIT 50"
+	b.Run("direct_mixed_direction_columnar_top_n", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			result, err := ExecuteSQLQuery(mixedQuery, baseline)
+			if err != nil || len(result.Rows) != 50 {
+				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
+			}
+			sqlColumnarSortedProjectionBenchmarkResult = result
+		}
+	})
+
+	for run := 0; run < sqlColumnarLayoutOrderCacheMinReads; run++ {
+		if _, err := ExecuteSQLQuery(mixedQuery, trie); err != nil {
+			b.Fatalf("directed projection warm-up run %d error = %v", run, err)
+		}
+	}
+	b.Run("warm_directed_composite_sorted_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			result, err := ExecuteSQLQuery(mixedQuery, trie)
+			if err != nil || len(result.Rows) != 50 {
+				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
+			}
+			sqlColumnarSortedProjectionBenchmarkResult = result
+		}
+	})
+}
+
+func BenchmarkSQLHatTrieColumnarDirectedCompositeSortedProjection(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	var data strings.Builder
+	data.Grow(840000)
+	data.WriteByte('[')
+	for row := 0; row < 20000; row++ {
+		if row > 0 {
+			data.WriteByte(',')
+		}
+		data.WriteString(`{"id":`)
+		data.WriteString(strconv.Itoa(row))
+		data.WriteString(`,"priority":`)
+		data.WriteString(strconv.Itoa((row * 7919) % 128))
+		data.WriteString(`,"score":`)
+		data.WriteString(strconv.Itoa((row * 2971) % 20000))
+		data.WriteByte('}')
+	}
+	data.WriteByte(']')
+	trie.UpsertString("jobs", data.String())
+	fields := []string{"priority", "score", "id"}
+	for warmup := 0; warmup < 2; warmup++ {
+		if _, available, err := trie.ResolveSQLColumnarSource("CACHE", "jobs", fields); err != nil || !available {
+			b.Fatalf("warm-up ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+		}
+	}
+	query := "FROM CACHE('jobs') AS job SELECT job.id, job.priority, job.score ORDER BY job.priority ASC, job.score DESC LIMIT 50"
+	baseline := sqlBorrowedColumnarImmutableResolver{trie: trie}
+
+	b.Run("direct_columnar_top_n", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			result, err := ExecuteSQLQuery(query, baseline)
+			if err != nil || len(result.Rows) != 50 {
+				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
+			}
+			sqlColumnarSortedProjectionBenchmarkResult = result
+		}
+	})
+
+	for run := 0; run < sqlColumnarLayoutOrderCacheMinReads; run++ {
+		if _, err := ExecuteSQLQuery(query, trie); err != nil {
+			b.Fatalf("directed projection warm-up run %d error = %v", run, err)
+		}
+	}
+	b.Run("warm_directed_composite_sorted_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			result, err := ExecuteSQLQuery(query, trie)
+			if err != nil || len(result.Rows) != 50 {
+				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
+			}
+			sqlColumnarSortedProjectionBenchmarkResult = result
+		}
+	})
 }

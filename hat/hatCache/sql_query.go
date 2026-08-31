@@ -2991,6 +2991,33 @@ func (ht *HatTrie) BorrowSQLColumnarSourceOrderFields(name, key string, fields, 
 	return ht.localPartitionSet().tries[plan.Partition].BorrowSQLColumnarSourceOrderFields(name, key, fields, orderFields)
 }
 
+// BorrowSQLColumnarSourceOrderBy returns an immutable ordinal projection for
+// an already-cached exact layout, ordered by each field's requested direction.
+// It is populated only after repeated compatible requests and invalidated with
+// its source layout.
+func (ht *HatTrie) BorrowSQLColumnarSourceOrderBy(name, key string, fields, orderFields []string, descending []bool) ([]uint32, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+	if name != "CACHE" || len(orderFields) == 0 || len(orderFields) != len(descending) {
+		return nil, false, nil
+	}
+	for _, field := range orderFields {
+		if field == "" {
+			return nil, false, nil
+		}
+	}
+	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
+	if order, available := ht.sqlColumnarLayouts.observeOrderBy(layoutKey, orderFields, descending); available {
+		return order, true, nil
+	}
+	plan, err := ht.SQLPartitionPruningPlan(name, key)
+	if err != nil || !plan.Pruned {
+		return nil, false, err
+	}
+	return ht.localPartitionSet().tries[plan.Partition].BorrowSQLColumnarSourceOrderBy(name, key, fields, orderFields, descending)
+}
+
 // PreferSQLColumnarSource reports whether an immutable cached layout can serve
 // the exact requested source fields without decoding. It only influences SQL
 // physical-plan selection; writes invalidate affected layouts first.

@@ -284,6 +284,14 @@ type CompositeSortedColumnarSourceResolver interface {
 	BorrowSQLColumnarSourceOrderFields(name, key string, fields, orderFields []string) ([]uint32, bool, error)
 }
 
+// DirectedCompositeSortedColumnarSourceResolver optionally supplies an
+// immutable row-ordinal projection for an exact ordered field list and its
+// direction per field. Callers must retain normal execution when a source
+// declines the request.
+type DirectedCompositeSortedColumnarSourceResolver interface {
+	BorrowSQLColumnarSourceOrderBy(name, key string, fields, orderFields []string, descending []bool) ([]uint32, bool, error)
+}
+
 // ColumnarSourcePreferenceResolver optionally prefers a direct columnar scan
 // for an exact source layout. It may return true only when the layout is
 // immutable for the query and already available without source decoding.

@@ -1241,6 +1241,14 @@ test-sql-columnar-sorted-projection:
 benchmark-sql-columnar-sorted-projection:
 	sh ./scripts/benchmark-sql-columnar-sorted-projection.sh
 
+.PHONY: benchmark-sql-columnar-directed-composite-projection
+benchmark-sql-columnar-directed-composite-projection:
+	sh ./scripts/benchmark-sql-columnar-directed-composite-projection.sh
+
+.PHONY: deliver-sql-columnar-directed-composite-projection
+deliver-sql-columnar-directed-composite-projection:
+	sh ./scripts/deliver-sql-columnar-directed-composite-projection.sh
+
 format-sql-columnar-sorted-projection:
 	sh ./scripts/format-sql-columnar-sorted-projection.sh
 

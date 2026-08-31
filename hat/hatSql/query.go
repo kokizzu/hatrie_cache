@@ -7584,6 +7584,40 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		}
 		return matches
 	}
+	if len(orderFields) > 1 && !sqlColumnarTopNUniformOrderDirection(q) {
+		if sorted, ok := columnar.(DirectedCompositeSortedColumnarSourceResolver); ok {
+			descending := make([]bool, len(q.orderBy))
+			for index, order := range q.orderBy {
+				descending[index] = order.desc
+			}
+			order, available, err := sorted.BorrowSQLColumnarSourceOrderBy(q.from.kind, q.from.key, fields, orderFields, descending)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			if available {
+				result := sqlColumnarDirectedCompositeSortedProjectionTopN(q, batch, projectionFields, order, matches)
+				if metrics != nil {
+					metrics.record("COLUMNAR DIRECTED COMPOSITE SORTED PROJECTION", sqlExplainOrders(q.orderBy), batch.Rows, len(result.Rows), started)
+				}
+				return result, true, nil
+			}
+		}
+	}
+	if len(orderFields) > 1 && sqlColumnarTopNUniformOrderDirection(q) {
+		if sorted, ok := columnar.(CompositeSortedColumnarSourceResolver); ok {
+			order, available, err := sorted.BorrowSQLColumnarSourceOrderFields(q.from.kind, q.from.key, fields, orderFields)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			if available {
+				result := sqlColumnarCompositeSortedProjectionTopN(q, batch, projectionFields, orderFields, order, matches)
+				if metrics != nil {
+					metrics.record("COLUMNAR COMPOSITE SORTED PROJECTION", sqlExplainOrders(q.orderBy), batch.Rows, len(result.Rows), started)
+				}
+				return result, true, nil
+			}
+		}
+	}
 	if len(orderFields) == 1 {
 		if sorted, ok := columnar.(SortedColumnarSourceResolver); ok {
 			order, available, err := sorted.BorrowSQLColumnarSourceOrder(q.from.kind, q.from.key, fields, orderFields[0])
@@ -7699,6 +7733,95 @@ func sqlColumnarSortedProjectionTopN(q *sqlQuery, batch ColumnarBatch, projectio
 		end = start
 	}
 	return result
+}
+
+func sqlColumnarCompositeSortedProjectionTopN(q *sqlQuery, batch ColumnarBatch, projectionFields, orderFields []string, order []uint32, matches func(int) bool) SQLQueryResult {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, q.limit)}
+	matched := 0
+	appendRow := func(rowIndex int) bool {
+		if !matches(rowIndex) {
+			return false
+		}
+		if matched < q.offset {
+			matched++
+			return false
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range q.selects {
+			row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		result.Rows = append(result.Rows, row)
+		matched++
+		return len(result.Rows) >= q.limit
+	}
+	if !q.orderBy[0].desc {
+		for _, ordinal := range order {
+			if appendRow(int(ordinal)) {
+				break
+			}
+		}
+		return result
+	}
+	for end := len(order); end > 0; {
+		start := end - 1
+		for start > 0 && sqlColumnarTopNOrderFieldsEqual(batch, orderFields, int(order[start-1]), int(order[start])) {
+			start--
+		}
+		for index := start; index < end; index++ {
+			if appendRow(int(order[index])) {
+				return result
+			}
+		}
+		end = start
+	}
+	return result
+}
+
+func sqlColumnarDirectedCompositeSortedProjectionTopN(q *sqlQuery, batch ColumnarBatch, projectionFields []string, order []uint32, matches func(int) bool) SQLQueryResult {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, q.limit)}
+	matched := 0
+	for _, ordinal := range order {
+		rowIndex := int(ordinal)
+		if !matches(rowIndex) {
+			continue
+		}
+		if matched < q.offset {
+			matched++
+			continue
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range q.selects {
+			row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		result.Rows = append(result.Rows, row)
+		matched++
+		if len(result.Rows) >= q.limit {
+			break
+		}
+	}
+	return result
+}
+
+func sqlColumnarTopNUniformOrderDirection(q *sqlQuery) bool {
+	if q == nil || len(q.orderBy) < 2 {
+		return false
+	}
+	descending := q.orderBy[0].desc
+	for _, order := range q.orderBy[1:] {
+		if order.desc != descending {
+			return false
+		}
+	}
+	return true
+}
+
+func sqlColumnarTopNOrderFieldsEqual(batch ColumnarBatch, fields []string, left, right int) bool {
+	for _, field := range fields {
+		if !sqlColumnarTopNOrderEqual(batch, field, left, right) {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlColumnarTopNOrderEqual(batch ColumnarBatch, field string, left, right int) bool {

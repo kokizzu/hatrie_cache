@@ -161,6 +161,39 @@ func TestHatTrieSQLColumnarCompositeSortedProjectionUsesWarmOrderAndInvalidates(
 	}
 }
 
+func TestHatTrieSQLColumnarDirectedCompositeSortedProjectionUsesWarmOrder(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("jobs", `[{"id":10,"priority":2,"score":1},{"id":11,"priority":1,"score":2},{"id":12,"priority":1,"score":1},{"id":13,"priority":2,"score":1}]`)
+	fields := []string{"priority", "score", "id"}
+	for warmup := 0; warmup < 2; warmup++ {
+		if _, available, err := trie.ResolveSQLColumnarSource("CACHE", "jobs", fields); err != nil || !available {
+			t.Fatalf("warm-up ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+		}
+	}
+	query := "FROM CACHE('jobs') AS job SELECT job.id, job.priority, job.score ORDER BY job.priority ASC, job.score DESC LIMIT 4"
+	want, err := ExecuteSQLQuery(query, sqlRowsOnlyResolver{trie: trie})
+	if err != nil {
+		t.Fatalf("row executor error = %v", err)
+	}
+	for run := 0; run < sqlColumnarLayoutOrderCacheMinReads; run++ {
+		got, err := ExecuteSQLQuery(query, trie)
+		if err != nil {
+			t.Fatalf("columnar query run %d error = %v", run, err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("columnar query run %d = %#v, want %#v", run, got, want)
+		}
+	}
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("EXPLAIN ANALYZE error = %v", err)
+	}
+	if !sqlColumnarSortedProjectionPlanHasNode(explained.Plan, "COLUMNAR DIRECTED COMPOSITE SORTED PROJECTION") {
+		t.Fatalf("plan = %#v, want COLUMNAR DIRECTED COMPOSITE SORTED PROJECTION", explained.Plan)
+	}
+}
+
 func sqlColumnarSortedProjectionPlanHasNode(plan []SQLExplainStep, node string) bool {
 	for _, step := range plan {
 		if step.Node == node {
