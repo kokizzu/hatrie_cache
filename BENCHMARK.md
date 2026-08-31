@@ -14291,6 +14291,33 @@ eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
 dictionary/numeric results to row execution, includes an unknown list value,
 and verifies the direct Top-N plan.
 
+## Columnar Numeric Aggregate Dictionary Literal IN
+
+Supported direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregates now accept
+a dictionary-encoded string literal `IN (...)` predicate without materializing
+per-row SQL expression state. Direct numeric predicates joined by `AND` retain
+their segment pruning and are evaluated in the same scan. `NOT IN`, `NULL`,
+nonliteral or mixed-type lists, and broader predicate shapes retain the normal
+executor.
+
+```sh
+make test-sql-columnar-aggregate-dictionary-in
+make benchmark-sql-columnar-aggregate-dictionary-in
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with an
+eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
+'missing')`, `COUNT(*)`, and `SUM(score)`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing aggregate executor | 30.29 ms/op | 16.99 MB/op | 277,483 allocs/op | Baseline |
+| Direct dictionary-code aggregate | 255.36 us/op | 10.85 KB/op | 155 allocs/op | 118.6x faster; 1,566.3x lower allocation volume; 1,790.2x fewer allocations |
+
+`TestSQLColumnarNumericAggregateUsesDictionaryLiteralIN` compares direct and
+dictionary/numeric conjunction results against the row executor, includes an
+unknown list value, and verifies the specialized `EXPLAIN ANALYZE` node.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or
