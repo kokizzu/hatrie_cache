@@ -2914,3 +2914,5 @@ benchmark-sql-columnar-string-bloom-segment:
 	sh ./scripts/benchmark-sql-columnar-string-bloom-segment.sh
 deliver-sql-columnar-string-bloom-segment:
 	sh ./scripts/deliver-sql-columnar-string-bloom-segment.sh
+deliver-sql-columnar-string-bloom-segment-benchmark-docs:
+	sh ./scripts/deliver-sql-columnar-string-bloom-segment-benchmark-docs.sh

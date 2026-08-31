@@ -500,8 +500,8 @@ unique `tag` strings and an equality probe for the final row:
 
 | Three-run median | Borrowed full scan | Bloom segment path | Improvement / tradeoff |
 | --- | ---: | ---: | ---: |
-| Selective `tag = 'tag-19999'` | 631.717 us/op; 3,659 B/op; 26 allocs/op | 97.532 us/op; 3,816 B/op; 32 allocs/op | 6.48x faster; about 160 B/op and six allocations higher |
-| No-skip control, one matching `common` tag per segment | 320.572 us/op; 32,025 B/op; 189 allocs/op | 320.730 us/op; 32,186 B/op; 195 allocs/op | CPU neutral within 0.1%; about 160 B/op and six allocations higher |
+| Selective `tag = 'tag-19999'` | 578.445 us/op; 3,658 B/op; 26 allocs/op | 95.280 us/op; 3,816 B/op; 32 allocs/op | 6.07x faster; about 160 B/op and six allocations higher |
+| No-skip control, one matching `common` tag per segment | 325.896 us/op; 32,025 B/op; 189 allocs/op | 306.124 us/op; 32,185 B/op; 195 allocs/op | 1.06x faster; about 160 B/op and six allocations higher |
 
 The fixture retains 79 filters, or 10,112 bytes of Bloom payload (about
 10,163 bytes including the sidecar entry estimate) for one hot high-cardinality
