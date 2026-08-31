@@ -7474,10 +7474,11 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		}
 	}
 	dictionary, dictionaryOperator, dictionaryValue, dictionaryCollation, dictionaryPredicate := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
+	dictionaryIN, dictionaryINCodes, dictionaryINPredicate := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	dictionaryCode, dictionaryFound := uint32(0), false
 	if dictionaryPredicate {
 		dictionaryCode, dictionaryFound = sqlDictionaryCode(dictionary, dictionaryValue, dictionaryCollation)
-	} else if q.where.kind != "" && len(predicates) == 0 {
+	} else if !dictionaryINPredicate && q.where.kind != "" && len(predicates) == 0 {
 		return SQLQueryResult{}, false, nil
 	}
 	capacity := sqlTopNStreamCapacity(q, control.maxRows)
@@ -7489,6 +7490,8 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		if dictionaryPredicate {
 			candidate := dictionary.Codes[rowIndex]
 			matches = dictionaryOperator == "=" && dictionaryFound && candidate == dictionaryCode || (dictionaryOperator == "!=" || dictionaryOperator == "<>") && (!dictionaryFound || candidate != dictionaryCode)
+		} else if dictionaryINPredicate {
+			matches = dictionaryINCodes[dictionaryIN.Codes[rowIndex]]
 		}
 		for _, predicate := range predicates {
 			value, _ := batch.Value(predicate.field, rowIndex)
@@ -7704,9 +7707,24 @@ func sqlColumnarTopNDictionaryPredicate(expr sqlExpr, alias string) (field, oper
 	return field, operator, value, expr.collation, true
 }
 
-// sqlColumnarTopNFilterPlan accepts one dictionary equality/inequality leaf
-// plus direct numeric comparisons joined only with AND. Wider predicates keep
-// the established executor.
+func sqlColumnarTopNDictionaryLiteralINPredicate(expr sqlExpr, alias string) (field string, ok bool) {
+	if expr.kind != "in" || expr.op != "IN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) == 0 {
+		return "", false
+	}
+	for _, argument := range expr.args {
+		if argument.kind != "literal" {
+			return "", false
+		}
+		if _, stringLiteral := argument.value.(string); !stringLiteral {
+			return "", false
+		}
+	}
+	return expr.left.name, true
+}
+
+// sqlColumnarTopNFilterPlan accepts one dictionary equality/inequality or
+// literal IN leaf plus direct numeric comparisons joined only with AND. Wider
+// predicates keep the established executor.
 func sqlColumnarTopNFilterPlan(expr sqlExpr, alias string) (dictionaryField string, predicates []sqlColumnarNumericFilter, ok bool) {
 	if expr.kind == "" {
 		return "", nil, true
@@ -7718,6 +7736,13 @@ func sqlColumnarTopNFilterPlan(expr sqlExpr, alias string) (dictionaryField stri
 			return collect(*current.left) && collect(*current.right)
 		}
 		if field, _, _, _, dictionary := sqlColumnarTopNDictionaryPredicate(current, alias); dictionary {
+			if dictionarySet {
+				return false
+			}
+			dictionaryField, dictionarySet = field, true
+			return true
+		}
+		if field, dictionary := sqlColumnarTopNDictionaryLiteralINPredicate(current, alias); dictionary {
 			if dictionarySet {
 				return false
 			}
@@ -7745,6 +7770,16 @@ func sqlColumnarDictionaryPredicateInConjunction(expr sqlExpr, alias string, bat
 		return sqlColumnarDictionaryPredicateInConjunction(*expr.right, alias, batch)
 	}
 	return sqlColumnarDictionaryPredicate(expr, alias, batch)
+}
+
+func sqlColumnarDictionaryLiteralINPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, []bool, bool) {
+	if expr.kind == "binary" && expr.op == "AND" && expr.left != nil && expr.right != nil {
+		if dictionary, codes, ok := sqlColumnarDictionaryLiteralINPredicateInConjunction(*expr.left, alias, batch); ok {
+			return dictionary, codes, true
+		}
+		return sqlColumnarDictionaryLiteralINPredicateInConjunction(*expr.right, alias, batch)
+	}
+	return sqlColumnarDictionaryLiteralINPredicate(expr, alias, batch)
 }
 
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {

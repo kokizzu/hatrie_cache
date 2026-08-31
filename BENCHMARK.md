@@ -14263,6 +14263,34 @@ eight-value dictionary-encoded `state` field and four requested values:
 row executor, includes an unknown list value, and verifies the specialized
 `EXPLAIN ANALYZE` node.
 
+## Columnar Top-N Dictionary Literal IN
+
+Bounded direct `ORDER BY ... LIMIT` queries now accept the same dictionary
+literal `IN (...)` predicate, optionally joined with existing direct numeric
+predicates. This keeps candidate selection in dictionary codes before the
+bounded Top-N heap. Repeated compatible single-order queries also compose with
+the existing warm sorted projection. `NOT IN`, `NULL`, expressions, mixed
+types, and wider predicates retain the ordinary executor.
+
+```sh
+make test-sql-columnar-topn-dictionary-in
+make benchmark-sql-columnar-topn-dictionary-in
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a warmed 20,000-row batch with an
+eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
+'missing')`, and `ORDER BY score DESC LIMIT 50`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing streaming Top-N | 46.63 ms/op | 19,025,876 B/op | 415,075 allocs/op | Baseline |
+| Direct dictionary-code Top-N | 536.66 us/op | 69,458 B/op | 5,247 allocs/op | 86.9x faster; 273.9x lower allocation volume; 79.1x fewer allocations |
+| Warm sorted projection with dictionary `IN` | 36.54 us/op | 23,360 B/op | 204 allocs/op | 1,276.9x faster; 814.5x lower allocation volume; 2,034.7x fewer allocations |
+
+`TestSQLColumnarTopNUsesDictionaryLiteralIN` compares direct and mixed
+dictionary/numeric results to row execution, includes an unknown list value,
+and verifies the direct Top-N plan.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

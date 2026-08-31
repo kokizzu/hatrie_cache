@@ -1265,6 +1265,21 @@ stage-sql-columnar-dictionary-in:
 commit-sql-columnar-dictionary-in:
 	sh ./scripts/commit-sql-columnar-dictionary-in.sh
 
+test-sql-columnar-topn-dictionary-in:
+	sh ./scripts/test-sql-columnar-topn-dictionary-in.sh
+
+benchmark-sql-columnar-topn-dictionary-in:
+	sh ./scripts/benchmark-sql-columnar-topn-dictionary-in.sh
+
+format-sql-columnar-topn-dictionary-in:
+	sh ./scripts/format-sql-columnar-topn-dictionary-in.sh
+
+stage-sql-columnar-topn-dictionary-in:
+	sh ./scripts/stage-sql-columnar-topn-dictionary-in.sh
+
+commit-sql-columnar-topn-dictionary-in:
+	sh ./scripts/commit-sql-columnar-topn-dictionary-in.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 
