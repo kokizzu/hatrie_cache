@@ -28,17 +28,19 @@ func BenchmarkExecuteSQLQueryColumnarTopN(b *testing.B) {
 	const count = 20_000
 	ids := make([]interface{}, count)
 	scores := make([]interface{}, count)
+	active := make([]interface{}, count)
 	rows := make([]SQLRow, count)
 	for index := range rows {
 		id, score := int64(index), int64((index*7)%count)
-		ids[index], scores[index] = id, score
-		rows[index] = SQLRow{"id": id, "score": score}
+		isActive := int64(index % 4)
+		ids[index], scores[index], active[index] = id, score, isActive
+		rows[index] = SQLRow{"id": id, "score": score, "active": isActive}
 	}
 	columnar := sqlColumnarTopNBenchmarkResolver{
-		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": ids, "score": scores}, Rows: count},
+		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": ids, "score": scores, "active": active}, Rows: count},
 		rows:  rows,
 	}
-	const query = "SELECT id FROM CACHE('items') ORDER BY score DESC LIMIT 50"
+	const query = "SELECT id FROM CACHE('items') WHERE active = 1 ORDER BY score DESC LIMIT 50"
 	for _, benchmark := range []struct {
 		name     string
 		resolver SQLSourceResolver

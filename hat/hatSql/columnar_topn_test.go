@@ -43,3 +43,22 @@ func TestExecuteSQLQueryColumnarTopNOffsetPastResult(t *testing.T) {
 		t.Fatalf("rows = %#v, want empty page", result.Rows)
 	}
 }
+
+func TestExecuteSQLQueryUsesColumnarTopNAfterNumericFilter(t *testing.T) {
+	resolver := &sqlColumnarQueryRowsResolver{batch: ColumnarBatch{
+		Columns: map[string][]interface{}{
+			"id":     {int64(1), int64(2), int64(3), int64(4)},
+			"score":  {int64(4), int64(9), int64(7), int64(8)},
+			"active": {int64(0), int64(1), int64(1), int64(0)},
+		},
+		Rows: 4,
+	}}
+	result, err := ExecuteSQLQueryParameters(context.Background(), "SELECT id FROM CACHE('items') WHERE active = 1 ORDER BY score DESC LIMIT 2", resolver, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryParameters() error = %v", err)
+	}
+	want := []SQLRow{{"id": int64(2)}, {"id": int64(3)}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", result.Rows, want)
+	}
+}

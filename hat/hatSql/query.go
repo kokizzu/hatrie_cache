@@ -7284,7 +7284,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 // unsupported predicates, expressions, null-order rules, and joins retain the
 // established executor.
 func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
-	fields, projectionFields, orderField, ok := sqlColumnarTopNPlan(q, outer)
+	fields, projectionFields, orderField, predicates, ok := sqlColumnarTopNPlan(q, outer)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
@@ -7311,6 +7311,18 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
 	heap.Init(&candidates)
 	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		matches := true
+		for _, predicate := range predicates {
+			value, _ := batch.Value(predicate.field, rowIndex)
+			number, numeric := sqlNumber(value)
+			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
 		value, _ := batch.Value(orderField, rowIndex)
 		number, numeric := sqlNumber(value)
 		if !numeric {
@@ -7351,12 +7363,19 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	return result, true, nil
 }
 
-func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFields []string, orderField string, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || q.limit <= 0 || q.where.kind != "" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
-		return nil, nil, "", false
+func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFields []string, orderField string, predicates []sqlColumnarNumericFilter, ok bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || q.limit <= 0 || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
+		return nil, nil, "", nil, false
 	}
 	if !sqlColumnarAggregateField(q.orderBy[0].expr, q.from.alias, &orderField) {
-		return nil, nil, "", false
+		return nil, nil, "", nil, false
+	}
+	if q.where.kind != "" {
+		var numeric bool
+		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
+		if !numeric {
+			return nil, nil, "", nil, false
+		}
 	}
 	seen := map[string]bool{}
 	add := func(field string) {
@@ -7366,15 +7385,18 @@ func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFiel
 		}
 	}
 	add(orderField)
+	for _, predicate := range predicates {
+		add(predicate.field)
+	}
 	for _, item := range q.selects {
 		field := ""
 		if !sqlColumnarAggregateField(item.expr, q.from.alias, &field) {
-			return nil, nil, "", false
+			return nil, nil, "", nil, false
 		}
 		projectionFields = append(projectionFields, field)
 		add(field)
 	}
-	return fields, projectionFields, orderField, true
+	return fields, projectionFields, orderField, predicates, true
 }
 
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
