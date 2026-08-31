@@ -1193,6 +1193,18 @@ test-sql-columnar-scans:
 test-sql-columnar-limit-pushdown:
 	sh ./scripts/test-sql-columnar-limit-pushdown.sh
 
+test-sql-columnar-topn:
+	sh ./scripts/test-sql-columnar-topn.sh
+
+benchmark-sql-columnar-topn:
+	sh ./scripts/benchmark-sql-columnar-topn.sh
+
+format-sql-columnar-topn:
+	sh ./scripts/format-sql-columnar-topn.sh
+
+deliver-sql-columnar-topn:
+	sh ./scripts/deliver-sql-columnar-topn.sh
+
 benchmark-sql-columnar-limit-pushdown:
 	sh ./scripts/benchmark-sql-columnar-limit-pushdown.sh
 
