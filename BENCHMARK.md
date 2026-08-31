@@ -14100,4 +14100,18 @@ The optimized subset requires one dictionary-encoded text group field, binary
 `ORDER BY` on that field, and direct built-in numeric aggregates. It retains
 one fixed aggregate-state slice per dictionary value, not one state per source
 row, and falls back to the established executor for all other group semantics.
-Reproduce with `make benchmark-sql-columnar-group-aggregate`.
+
+The same operator now also accepts one encoded binary-collated string equality
+or inequality predicate. Five local runs used `WHERE team = 'team-c'` on the
+same 20,000-row, 20-value dictionary source:
+
+| Implementation | Median time | Cumulative allocation | Allocations | CPU improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Row-source grouped aggregate | 6.75 ms | 9.47 MB | 43,058 | 1.00x | 1.00x |
+| Dictionary-filtered columnar aggregate | 143.32 us | 7.49 KB | 44 | 47.1x | 1,265.1x lower; 978.6x fewer allocations |
+
+The dictionary predicate is evaluated by code before aggregate state is
+allocated, so a selective filter retains state only for matching groups.
+Numeric/dictionary predicate combinations, expressions, non-binary collation,
+and wider group semantics retain the established executor. Reproduce with
+`make benchmark-sql-columnar-group-aggregate`.

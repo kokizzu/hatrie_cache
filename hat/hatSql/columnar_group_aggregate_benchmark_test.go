@@ -47,8 +47,8 @@ func BenchmarkSQLColumnarDictionaryGroupAggregate(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for iteration := 0; iteration < b.N; iteration++ {
-		result, err := ExecuteSQLQueryParameters(ctx, "SELECT team, COUNT(*) AS total, SUM(score) AS sum FROM CACHE('items') WHERE score >= 50 GROUP BY team ORDER BY team", resolver, nil, SQLQueryOptions{})
-		if err != nil || len(result.Rows) != groups {
+		result, err := ExecuteSQLQueryParameters(ctx, "SELECT team, COUNT(*) AS total, SUM(score) AS sum FROM CACHE('items') WHERE team = 'team-c' GROUP BY team ORDER BY team", resolver, nil, SQLQueryOptions{})
+		if err != nil || len(result.Rows) != 1 {
 			b.Fatalf("execute grouped aggregate: result=%#v err=%v", result, err)
 		}
 	}

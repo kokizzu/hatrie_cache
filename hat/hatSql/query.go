@@ -7280,7 +7280,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 }
 
 // executeSQLColumnarTopN keeps only the requested page while ranking one
-// numeric column. It is deliberately narrower than the general top-N stream:
+// numeric or string column. It is deliberately narrower than the general top-N stream:
 // unsupported predicates, expressions, null-order rules, and joins retain the
 // established executor.
 func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
@@ -7587,6 +7587,14 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch)
+	filterCode, filterFound := uint32(0), false
+	if q.where.kind != "" && len(predicates) == 0 {
+		if !dictionaryFilter {
+			return SQLQueryResult{}, false, nil
+		}
+		filterCode, filterFound = sqlDictionaryCode(filterDictionary, filterValue, filterCollation)
+	}
 	if metrics != nil {
 		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
@@ -7603,6 +7611,10 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			}
 		}
 		matches := true
+		if dictionaryFilter {
+			candidate := filterDictionary.Codes[rowIndex]
+			matches = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
+		}
 		for _, predicate := range predicates {
 			candidate, _ := batch.Value(predicate.field, rowIndex)
 			number, numeric := sqlNumber(candidate)
@@ -7638,8 +7650,12 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			}
 		}
 	}
-	if metrics != nil && len(predicates) > 0 {
-		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+	if metrics != nil && q.where.kind != "" {
+		filterName := "COLUMNAR NUMERIC FILTER"
+		if dictionaryFilter {
+			filterName = "COLUMNAR DICTIONARY FILTER"
+		}
+		metrics.record(filterName, sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 	}
 	sort.Slice(codes, func(left, right int) bool {
 		if descending {
@@ -7684,11 +7700,17 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 	if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) || !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
 		return "", nil, nil, nil, false, false
 	}
+	dictionaryField := ""
 	if q.where.kind != "" {
 		var numeric bool
 		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
 		if !numeric {
-			return "", nil, nil, nil, false, false
+			field, _, _, _, dictionary := sqlColumnarTopNDictionaryPredicate(q.where, q.from.alias)
+			if !dictionary {
+				return "", nil, nil, nil, false, false
+			}
+			predicates = nil
+			dictionaryField = field
 		}
 	}
 	ordered, valid := sqlOrderedGroupProjections(q)
@@ -7705,6 +7727,7 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 	for _, predicate := range predicates {
 		addField(predicate.field)
 	}
+	addField(dictionaryField)
 	addField(groupField)
 	projections = make([]sqlColumnarDictionaryGroupProjection, len(ordered))
 	for index, projection := range ordered {
