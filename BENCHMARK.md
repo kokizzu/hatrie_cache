@@ -14006,6 +14006,30 @@ callback invocation; it is not retained by the executor. Reproduce with
 `make benchmark-sql-query-rows-columnar` and inspect allocation ownership with
 `make profile-sql-query-rows-columnar`.
 
+## Columnar Dictionary DISTINCT
+
+For one dictionary-encoded text field, `SELECT DISTINCT field FROM CACHE(...)`
+with binary `ORDER BY` on that same field now scans used dictionary codes and
+sorts only distinct values. It avoids per-source-row materialization while
+retaining `LIMIT`, `OFFSET`, source-row validation, and result-byte budgets.
+
+```sh
+make test-sql-columnar-distinct
+make benchmark-sql-columnar-distinct
+```
+
+Five local runs on the AMD Ryzen 9 5950X use 20,000 rows with 20 repeated
+dictionary values and `SELECT DISTINCT team FROM CACHE('items') ORDER BY team`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| General row materialization | 17.68 ms/op | 20,421,541 B/op | 180,116 allocs/op | Baseline |
+| Columnar dictionary DISTINCT | 16.76 us/op | 9,672 B/op | 75 allocs/op | 1,054.8x faster; 2,111.4x lower allocation volume; 2,401.5x fewer allocations |
+
+The fast path is intentionally limited to one direct text field, `DISTINCT`, a
+matching binary `ORDER BY`, and no `WHERE`, aggregates, joins, windows, or
+set operations. Every other query retains the established executor.
+
 ## Columnar Top-N
 
 Supported materialized numeric or string `ORDER BY ... LIMIT` queries now rank the warmed

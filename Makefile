@@ -1196,6 +1196,18 @@ test-sql-columnar-limit-pushdown:
 test-sql-columnar-topn:
 	sh ./scripts/test-sql-columnar-topn.sh
 
+test-sql-columnar-distinct:
+	sh ./scripts/test-sql-columnar-distinct.sh
+
+benchmark-sql-columnar-distinct:
+	sh ./scripts/benchmark-sql-columnar-distinct.sh
+
+format-sql-columnar-distinct:
+	sh ./scripts/format-sql-columnar-distinct.sh
+
+deliver-sql-columnar-distinct:
+	sh ./scripts/deliver-sql-columnar-distinct.sh
+
 benchmark-sql-columnar-topn:
 	sh ./scripts/benchmark-sql-columnar-topn.sh
 

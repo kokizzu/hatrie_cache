@@ -7093,6 +7093,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if result, handled, err := executeSQLColumnarTopN(q, columnar, control, metrics, outer); handled {
 		return result, true, err
 	}
+	if result, handled, err := executeSQLColumnarDictionaryDistinct(q, columnar, control, metrics, outer); handled {
+		return result, true, err
+	}
 	if !sqlCanColumnarScan(q, outer) {
 		return SQLQueryResult{}, false, nil
 	}
@@ -7299,6 +7302,93 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}
 		return result, true, nil
 	}
+}
+
+// executeSQLColumnarDictionaryDistinct materializes the used values of one
+// encoded text column without building source-row maps for every input row.
+func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
+	field, descending, ok := sqlColumnarDictionaryDistinctPlan(q, outer)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	started := time.Now()
+	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, []string{field})
+	if err != nil || !available {
+		return SQLQueryResult{}, available, err
+	}
+	dictionary, encoded := batch.Dictionaries[field]
+	if !encoded {
+		return SQLQueryResult{}, false, nil
+	}
+	if batch.Rows < 0 {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned a negative row count", q.from.key)
+	}
+	if control != nil && batch.Rows > control.maxRows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, control.maxRows)
+	}
+	if batch.FieldRows(field) != batch.Rows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
+	}
+	used := make([]bool, len(dictionary.Values))
+	for _, code := range dictionary.Codes {
+		if int(code) >= len(dictionary.Values) {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, field)
+		}
+		used[code] = true
+	}
+	codes := make([]uint32, 0, len(dictionary.Values))
+	for code, present := range used {
+		if present {
+			codes = append(codes, uint32(code))
+		}
+	}
+	sort.Slice(codes, func(left, right int) bool {
+		if descending {
+			return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
+		}
+		return dictionary.Values[codes[left]] < dictionary.Values[codes[right]]
+	})
+
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(codes))}
+	resultBytes, position := 0, 0
+	lastValue, haveLastValue := "", false
+	for _, code := range codes {
+		value := dictionary.Values[code]
+		if haveLastValue && value == lastValue {
+			continue
+		}
+		lastValue, haveLastValue = value, true
+		if position < q.offset {
+			position++
+			continue
+		}
+		if q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		row := SQLRow{result.Columns[0]: value}
+		if control != nil && control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		result.Rows = append(result.Rows, row)
+		position++
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR DICTIONARY DISTINCT", field, batch.Rows, len(result.Rows), started)
+	}
+	return result, true, nil
+}
+
+func sqlColumnarDictionaryDistinctPlan(q *sqlQuery, outer *sqlExecRow) (field string, descending bool, ok bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || q.where.kind != "" || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || !q.distinct || len(q.selects) != 1 || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
+		return "", false, false
+	}
+	if !sqlColumnarAggregateField(q.selects[0].expr, q.from.alias, &field) || !sqlSameField(q.selects[0].expr, q.orderBy[0].expr) {
+		return "", false, false
+	}
+	return field, q.orderBy[0].desc, true
 }
 
 // executeSQLColumnarTopN keeps only the requested page while ranking one
