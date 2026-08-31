@@ -11,6 +11,7 @@ security guidance before exposing it on a network.
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
+- Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
@@ -75,6 +76,11 @@ persist a checkpoint only after a successful refresh, and offer a controlled
 rebuild boundary for journal compaction recovery. The measured 32-mutation
 grouped-aggregate workload is 32.6x faster than refreshing after every
 mutation; see [BENCHMARK.md](BENCHMARK.md#journal-driven-incremental-projections).
+
+Opt-in typed SQL tables store fixed schemas in primitive columns and maintain
+exact grouped `COUNT`/`SUM` from an ordered before/after changefeed. A measured
+one-row delta is 3,794x faster and allocates 4,843x less than rescanning the
+same 10,000-row table; see [TYPED_TABLES.md](TYPED_TABLES.md).
 
 Normal SQL queries no longer serialize intermediate rows solely for metrics that
 are not being collected. `EXPLAIN ANALYZE` still records logical input and

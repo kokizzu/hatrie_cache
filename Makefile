@@ -2966,6 +2966,37 @@ inspect-sql-stream-join:
 inspect-sql-journal-projection-runner:
 	sh ./scripts/inspect-sql-journal-projection-runner.sh
 
+.PHONY: inspect-sql-analytics-primitives test-sql-typed-table format-sql-typed-table benchmark-sql-typed-table test-race-sql-typed-table inspect-readme-sql-docs verify-sql-typed-table-docs audit-sql-typed-table-security inspect-sql-typed-table-delivery deliver-sql-typed-table
+inspect-sql-analytics-primitives:
+	sh ./scripts/inspect-sql-analytics-primitives.sh
+
+test-sql-typed-table:
+	sh ./scripts/test-sql-typed-table.sh
+
+format-sql-typed-table:
+	sh ./scripts/format-sql-typed-table.sh
+
+benchmark-sql-typed-table:
+	sh ./scripts/benchmark-sql-typed-table.sh
+
+test-race-sql-typed-table:
+	sh ./scripts/test-race-sql-typed-table.sh
+
+inspect-readme-sql-docs:
+	sh ./scripts/inspect-readme-sql-docs.sh
+
+verify-sql-typed-table-docs:
+	sh ./scripts/verify-sql-typed-table-docs.sh
+
+audit-sql-typed-table-security:
+	sh ./scripts/audit-sql-typed-table-security.sh
+
+inspect-sql-typed-table-delivery:
+	sh ./scripts/inspect-sql-typed-table-delivery.sh
+
+deliver-sql-typed-table:
+	sh ./scripts/deliver-sql-typed-table.sh
+
 format-sql-journal-projection-runner:
 	sh ./scripts/format-sql-journal-projection-runner.sh
 
