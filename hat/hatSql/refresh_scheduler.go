@@ -13,6 +13,13 @@ import (
 // injectable so callers can deterministically drive maintenance loops.
 type ManagedRefreshSchedulerOptions struct {
 	Now func() time.Time
+	// MaxRunsPerCycle caps due tasks run by one RunDue call. Zero keeps the
+	// existing unlimited deterministic behavior.
+	MaxRunsPerCycle int
+	// MaxCycleDuration bounds cooperative refresh work in one RunDue call.
+	// Zero keeps the existing unlimited behavior; callbacks receive a context
+	// deadline but remain responsible for honoring cancellation.
+	MaxCycleDuration time.Duration
 }
 
 // ManagedRefreshRun records one view or rollup refresh attempt.
@@ -26,9 +33,11 @@ type ManagedRefreshRun struct {
 // ManagedRefreshScheduler runs named materialized-view and rollup refreshes
 // at fixed intervals. One task never overlaps with itself.
 type ManagedRefreshScheduler struct {
-	mu    sync.RWMutex
-	now   func() time.Time
-	tasks map[string]managedRefreshTask
+	mu               sync.RWMutex
+	now              func() time.Time
+	maxRunsPerCycle  int
+	maxCycleDuration time.Duration
+	tasks            map[string]managedRefreshTask
 }
 
 type managedRefreshTask struct {
@@ -39,10 +48,21 @@ type managedRefreshTask struct {
 }
 
 func NewManagedRefreshScheduler(options ManagedRefreshSchedulerOptions) (*ManagedRefreshScheduler, error) {
+	if options.MaxRunsPerCycle < 0 {
+		return nil, fmt.Errorf("managed refresh max runs per cycle must not be negative")
+	}
+	if options.MaxCycleDuration < 0 {
+		return nil, fmt.Errorf("managed refresh max cycle duration must not be negative")
+	}
 	if options.Now == nil {
 		options.Now = func() time.Time { return time.Now().UTC() }
 	}
-	return &ManagedRefreshScheduler{now: options.Now, tasks: make(map[string]managedRefreshTask)}, nil
+	return &ManagedRefreshScheduler{
+		now:              options.Now,
+		maxRunsPerCycle:  options.MaxRunsPerCycle,
+		maxCycleDuration: options.MaxCycleDuration,
+		tasks:            make(map[string]managedRefreshTask),
+	}, nil
 }
 
 // AddMaterializedView registers a view refresh using the view's explicit
@@ -108,8 +128,22 @@ func (scheduler *ManagedRefreshScheduler) RunDue(ctx context.Context) ([]Managed
 	scheduler.mu.RUnlock()
 	sort.Strings(names)
 	runs := make([]ManagedRefreshRun, 0, len(names))
+	deadline := now.Add(scheduler.maxCycleDuration)
 	for _, name := range names {
-		run, err := scheduler.run(ctx, name, now)
+		if scheduler.maxRunsPerCycle > 0 && len(runs) >= scheduler.maxRunsPerCycle {
+			break
+		}
+		runContext := ctx
+		cancel := func() {}
+		if scheduler.maxCycleDuration > 0 {
+			remaining := deadline.Sub(scheduler.now())
+			if remaining <= 0 {
+				break
+			}
+			runContext, cancel = context.WithTimeout(ctx, remaining)
+		}
+		run, err := scheduler.run(runContext, name, now)
+		cancel()
 		if run.Name != "" {
 			runs = append(runs, run)
 		}

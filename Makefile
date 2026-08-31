@@ -2747,6 +2747,42 @@ deliver-sql-typed-arrangements-commit:
 deliver-sql-typed-arrangements-push:
 	sh ./scripts/deliver-sql-typed-arrangements.sh push
 
+.PHONY: test-sql-refresh-scheduler-budget
+test-sql-refresh-scheduler-budget:
+	sh ./scripts/test-sql-refresh-scheduler-budget.sh
+
+.PHONY: benchmark-sql-refresh-scheduler-budget
+benchmark-sql-refresh-scheduler-budget:
+	sh ./scripts/benchmark-sql-refresh-scheduler-budget.sh
+
+.PHONY: format-sql-refresh-scheduler-budget
+format-sql-refresh-scheduler-budget:
+	sh ./scripts/format-sql-refresh-scheduler-budget.sh
+
+.PHONY: verify-sql-refresh-scheduler-budget
+verify-sql-refresh-scheduler-budget:
+	sh ./scripts/verify-sql-refresh-scheduler-budget.sh
+
+.PHONY: test-race-sql-refresh-scheduler-budget
+test-race-sql-refresh-scheduler-budget:
+	sh ./scripts/test-race-sql-refresh-scheduler-budget.sh
+
+.PHONY: security-sql-refresh-scheduler-budget
+security-sql-refresh-scheduler-budget:
+	sh ./scripts/security-sql-refresh-scheduler-budget.sh
+
+.PHONY: inspect-sql-refresh-scheduler-budget
+inspect-sql-refresh-scheduler-budget:
+	sh ./scripts/inspect-sql-refresh-scheduler-budget.sh
+
+.PHONY: deliver-sql-refresh-scheduler-budget-commit
+deliver-sql-refresh-scheduler-budget-commit:
+	sh ./scripts/deliver-sql-refresh-scheduler-budget.sh commit
+
+.PHONY: deliver-sql-refresh-scheduler-budget-push
+deliver-sql-refresh-scheduler-budget-push:
+	sh ./scripts/deliver-sql-refresh-scheduler-budget.sh push
+
 
 
 deliver-sql-typed-composite:
