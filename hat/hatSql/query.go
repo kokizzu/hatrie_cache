@@ -8017,6 +8017,13 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
+	filterCode, filterFound := uint32(0), false
+	if dictionaryFilter {
+		filterCode, filterFound = sqlDictionaryCode(filterDictionary, filterValue, filterCollation)
+	} else if q.where.kind != "" && len(predicates) == 0 {
+		return SQLQueryResult{}, false, nil
+	}
 	if metrics != nil {
 		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
@@ -8033,6 +8040,10 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			}
 			scannedRows++
 			matchedPredicate := true
+			if dictionaryFilter {
+				candidate := filterDictionary.Codes[rowIndex]
+				matchedPredicate = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
+			}
 			for _, predicate := range predicates {
 				candidate, _ := batch.Value(predicate.field, rowIndex)
 				number, numeric := sqlNumber(candidate)
@@ -8067,11 +8078,15 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	} else if err := scanRows(0, batch.Rows); err != nil {
 		return SQLQueryResult{}, true, err
 	}
-	if metrics != nil && len(predicates) > 0 {
+	if metrics != nil && q.where.kind != "" {
+		filterName := "COLUMNAR NUMERIC FILTER"
+		if dictionaryFilter {
+			filterName = "COLUMNAR DICTIONARY NUMERIC FILTER"
+		}
 		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
 			metrics.record("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
 		}
-		metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
+		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
 
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
@@ -8087,7 +8102,11 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		result.Rows = append(result.Rows, row)
 	}
 	if metrics != nil {
-		metrics.record("COLUMNAR NUMERIC AGGREGATE", sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
+		aggregateName := "COLUMNAR NUMERIC AGGREGATE"
+		if dictionaryFilter {
+			aggregateName = "COLUMNAR DICTIONARY NUMERIC AGGREGATE"
+		}
+		metrics.record(aggregateName, sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
 	}
 	return result, true, nil
 }
@@ -8131,12 +8150,9 @@ func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []
 	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
 		return nil, nil, nil, false
 	}
-	if q.where.kind != "" {
-		var numeric bool
-		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
-		if !numeric {
-			return nil, nil, nil, false
-		}
+	dictionaryField, predicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
+	if !accepted {
+		return nil, nil, nil, false
 	}
 	seen := map[string]bool{}
 	addField := func(field string) {
@@ -8148,6 +8164,7 @@ func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []
 	for _, predicate := range predicates {
 		addField(predicate.field)
 	}
+	addField(dictionaryField)
 	aggregates = make([]sqlColumnarNumericAggregate, len(q.selects))
 	for index, item := range q.selects {
 		expr := item.expr

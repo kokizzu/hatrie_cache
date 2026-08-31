@@ -14006,6 +14006,31 @@ callback invocation; it is not retained by the executor. Reproduce with
 `make benchmark-sql-query-rows-columnar` and inspect allocation ownership with
 `make profile-sql-query-rows-columnar`.
 
+## Columnar Dictionary-Numeric Aggregates
+
+Constant-state numeric aggregates now accept one dictionary-encoded string
+equality/inequality predicate with direct numeric comparisons joined only by
+`AND`. They keep the numeric segment-skipping path and aggregate directly from
+column slices, avoiding row-map materialization.
+
+```sh
+make test-sql-columnar-numeric-aggregate-conjunction
+make benchmark-sql-columnar-numeric-aggregate-conjunction
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 4,096-row jobs source with
+`state = 'queued' AND id >= 1024 AND id < 2048` and `COUNT`, `SUM`, `AVG`,
+`MIN`, and `MAX` aggregates:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Cache-columnar fallback | 10.82 ms/op | 4,720,060 B/op | 81,046 allocs/op | Baseline |
+| Direct dictionary-numeric aggregate | 160.61 us/op | 15,880 B/op | 95 allocs/op | 67.4x faster; 297.2x lower allocation volume; 853.1x fewer allocations |
+
+The subset excludes expressions, grouping, ordering, non-binary collation,
+additional dictionary predicates, and wider SQL operators; those retain the
+general executor.
+
 ## Columnar Dictionary DISTINCT
 
 For one dictionary-encoded text field, `SELECT DISTINCT field FROM CACHE(...)`

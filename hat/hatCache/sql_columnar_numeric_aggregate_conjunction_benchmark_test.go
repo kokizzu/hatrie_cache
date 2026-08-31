@@ -4,7 +4,7 @@ import "testing"
 
 func BenchmarkSQLColumnarNumericAggregateConjunction(b *testing.B) {
 	trie, _ := benchmarkSQLColumnarJobs(b)
-	query := "FROM CACHE('jobs') AS job WHERE job.id >= 1024 AND job.id < 2048 SELECT COUNT(*) AS count, SUM(job.id) AS total, AVG(job.id) AS average, MIN(job.id) AS minimum, MAX(job.id) AS maximum"
+	query := "FROM CACHE('jobs') AS job WHERE job.state = 'queued' AND job.id >= 1024 AND job.id < 2048 SELECT COUNT(*) AS count, SUM(job.id) AS total, AVG(job.id) AS average, MIN(job.id) AS minimum, MAX(job.id) AS maximum"
 	b.Run("columnar", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
