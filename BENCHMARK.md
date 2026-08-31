@@ -14424,6 +14424,30 @@ eight-value dictionary-encoded `state`, `state = 'queued' OR state =
 execution, includes an unknown list value and literal-on-left equality, and
 verifies the specialized `EXPLAIN ANALYZE` node.
 
+## Columnar Dictionary LIKE
+
+Direct field projections now evaluate a direct `field LIKE 'pattern'` predicate
+once for each distinct value of a dictionary-encoded field, then filter rows by
+the resulting code table. Non-dictionary sources and non-direct `LIKE` shapes
+retain the established per-row evaluator.
+
+```sh
+make test-sql-columnar-dictionary-like
+make benchmark-sql-columnar-dictionary-like
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with an
+eight-value dictionary-encoded `state`, `state LIKE 'queue%'`, `id, state`
+projection, and `LIMIT 100`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing per-row LIKE filter | 93.45 us/op | 65.21 KB/op | 1,553 allocs/op | Baseline |
+| Direct dictionary-code LIKE filter | 34.41 us/op | 42.18 KB/op | 357 allocs/op | 2.7x faster; 1.5x lower allocation volume; 4.4x fewer allocations |
+
+`TestSQLColumnarDictionaryLikeUsesCodeFilter` compares output to row execution
+and verifies the specialized `EXPLAIN ANALYZE` node.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

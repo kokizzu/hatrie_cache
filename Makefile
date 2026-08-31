@@ -1354,6 +1354,22 @@ stage-sql-columnar-dictionary-or:
 
 commit-sql-columnar-dictionary-or:
 	sh ./scripts/commit-sql-columnar-dictionary-or.sh
+
+test-sql-columnar-dictionary-like:
+	sh ./scripts/test-sql-columnar-dictionary-like.sh
+
+benchmark-sql-columnar-dictionary-like:
+	sh ./scripts/benchmark-sql-columnar-dictionary-like.sh
+
+format-sql-columnar-dictionary-like:
+	sh ./scripts/format-sql-columnar-dictionary-like.sh
+
+stage-sql-columnar-dictionary-like:
+	sh ./scripts/stage-sql-columnar-dictionary-like.sh
+
+commit-sql-columnar-dictionary-like:
+	sh ./scripts/commit-sql-columnar-dictionary-like.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 

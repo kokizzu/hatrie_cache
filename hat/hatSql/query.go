@@ -7240,6 +7240,16 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if dictionary, codes, encoded := sqlColumnarDictionaryLikePredicate(q.where, q.from.alias, batch); encoded {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			return codes[dictionary.Codes[rowIndex]]
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY LIKE FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
@@ -7854,6 +7864,22 @@ func sqlColumnarDictionaryLiteralORPredicate(expr sqlExpr, alias string, batch C
 		if code, found := sqlDictionaryCode(dictionary, candidate.value, candidate.collation); found {
 			codes[code] = true
 		}
+	}
+	return dictionary, codes, true
+}
+
+func sqlColumnarDictionaryLikePredicate(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, []bool, bool) {
+	field, pattern, ok := sqlColumnarLikePredicate(expr, alias)
+	if !ok {
+		return DictionaryColumn{}, nil, false
+	}
+	dictionary, encoded := batch.Dictionaries[field]
+	if !encoded {
+		return DictionaryColumn{}, nil, false
+	}
+	codes := make([]bool, len(dictionary.Values))
+	for index, value := range dictionary.Values {
+		codes[index] = sqlLike(value, pattern)
 	}
 	return dictionary, codes, true
 }
