@@ -11,6 +11,7 @@ security guidance before exposing it on a network.
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
+- Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)

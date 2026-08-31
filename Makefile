@@ -2982,6 +2982,31 @@ format-sql-columnar-ngram:
 benchmark-sql-columnar-ngram:
 	sh ./scripts/benchmark-sql-columnar-ngram.sh
 
+inspect-sql-advisor-contracts:
+	sh ./scripts/inspect-sql-advisor-contracts.sh
+
+test-sql-projection-advisor:
+	sh ./scripts/test-sql-projection-advisor.sh
+
+format-sql-projection-advisor:
+	sh ./scripts/format-sql-projection-advisor.sh
+
+benchmark-sql-projection-advisor:
+	sh ./scripts/benchmark-sql-projection-advisor.sh
+
+test-race-sql-projection-advisor:
+	sh ./scripts/test-race-sql-projection-advisor.sh
+
+verify-sql-projection-advisor-docs:
+	sh ./scripts/verify-sql-projection-advisor-docs.sh
+
+audit-sql-projection-advisor-security:
+	sh ./scripts/audit-sql-projection-advisor-security.sh
+
+.PHONY: inspect-sql-advisor-contracts test-sql-projection-advisor format-sql-projection-advisor benchmark-sql-projection-advisor test-race-sql-projection-advisor verify-sql-projection-advisor-docs audit-sql-projection-advisor-security deliver-sql-projection-advisor
+deliver-sql-projection-advisor:
+	sh ./scripts/deliver-sql-projection-advisor.sh
+
 verify-sql-columnar-ngram-docs:
 	sh ./scripts/verify-sql-columnar-ngram-docs.sh
 

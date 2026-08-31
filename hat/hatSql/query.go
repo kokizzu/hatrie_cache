@@ -232,6 +232,10 @@ type SQLQueryOptions struct {
 	// IndexAdvisor records candidate index fields only for observed slow scans.
 	// Nil preserves the existing privacy-safe telemetry-only behavior.
 	IndexAdvisor *SQLIndexAdvisor
+	// ProjectionAdvisor records caller-labeled slow CACHE queries that may be
+	// suitable for an application-managed materialized projection. Nil keeps
+	// the existing query path and retains no recommendation state.
+	ProjectionAdvisor *SQLProjectionAdvisor
 	// IndexUseRecorder records successful direct index selections for reports.
 	// Nil preserves the existing no-retention behavior.
 	IndexUseRecorder *SQLIndexUseRecorder
@@ -651,6 +655,9 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if options.IndexAdvisor != nil {
 		options.IndexAdvisor.observeSlowQuery(query, metrics, time.Since(observation.started), options.SlowQueryThreshold, err)
+	}
+	if options.ProjectionAdvisor != nil {
+		options.ProjectionAdvisor.observeSlowQuery(query, options.QueryID, metrics, time.Since(observation.started), options.SlowQueryThreshold, err)
 	}
 	if options.IndexUseRecorder != nil {
 		options.IndexUseRecorder.observe(query, metrics, err)
