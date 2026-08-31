@@ -174,6 +174,14 @@ type SegmentedColumnarSourceResolver interface {
 	BorrowSQLColumnarSourceSegments(name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }
 
+// ColumnarSourcePreferenceResolver optionally prefers a direct columnar scan
+// for an exact source layout. It may return true only when the layout is
+// immutable for the query and already available without source decoding.
+// The preference changes the physical plan, never SQL result semantics.
+type ColumnarSourcePreferenceResolver interface {
+	PreferSQLColumnarSource(name, key string, fields []string) bool
+}
+
 // SourceVersionResolver optionally identifies an immutable source snapshot.
 // The version must change whenever rows or values observable through the named
 // source change. The condition cache uses it to avoid stale predicate matches;

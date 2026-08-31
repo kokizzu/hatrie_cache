@@ -90,6 +90,13 @@ func (cache *sqlColumnarLayoutCache) borrowSegments(key sqlColumnarLayoutCacheKe
 	return entry.batch, entry.segments, ok
 }
 
+func (cache *sqlColumnarLayoutCache) has(key sqlColumnarLayoutCacheKey) bool {
+	cache.mu.RLock()
+	_, ok := cache.entries[key]
+	cache.mu.RUnlock()
+	return ok
+}
+
 func (cache *sqlColumnarLayoutCache) observe(key sqlColumnarLayoutCacheKey, batch hatSql.ColumnarBatch) {
 	bytes, cacheable := sqlColumnarLayoutCacheBytes(batch)
 	if !cacheable || bytes > sqlColumnarLayoutCacheMaxBytes {

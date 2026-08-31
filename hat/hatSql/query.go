@@ -2390,6 +2390,12 @@ func sqlTopNMaterializedStreamable(query *sqlQuery, resolver SQLSourceResolver) 
 	if query.from.kind != "CACHE" {
 		return true
 	}
+	if preferred, ok := resolver.(ColumnarSourcePreferenceResolver); ok {
+		fields, _, _, _, columnar := sqlColumnarTopNPlan(query, nil)
+		if columnar && preferred.PreferSQLColumnarSource(query.from.kind, query.from.key, fields) {
+			return false
+		}
+	}
 	_, ok := resolver.(SQLStreamSourceResolver)
 	return ok
 }

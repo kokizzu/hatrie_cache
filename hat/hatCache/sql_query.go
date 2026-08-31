@@ -2957,6 +2957,24 @@ func (ht *HatTrie) BorrowSQLColumnarSourceSegments(name, key string, fields []st
 	return ht.resolveSQLColumnarSource(name, key, fields, true)
 }
 
+// PreferSQLColumnarSource reports whether an immutable cached layout can serve
+// the exact requested source fields without decoding. It only influences SQL
+// physical-plan selection; writes invalidate affected layouts first.
+func (ht *HatTrie) PreferSQLColumnarSource(name, key string, fields []string) bool {
+	if ht == nil || name != "CACHE" {
+		return false
+	}
+	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
+	if ht.sqlColumnarLayouts.has(layoutKey) {
+		return true
+	}
+	plan, err := ht.SQLPartitionPruningPlan(name, key)
+	if err != nil || !plan.Pruned {
+		return false
+	}
+	return ht.localPartitionSet().tries[plan.Partition].PreferSQLColumnarSource(name, key, fields)
+}
+
 func (ht *HatTrie) resolveSQLColumnarSource(name, key string, fields []string, borrow bool) (hatSql.ColumnarBatch, *hatSql.ColumnarNumericSegments, bool, error) {
 	if ht == nil {
 		return hatSql.ColumnarBatch{}, nil, false, ErrNilHatTrie

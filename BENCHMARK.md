@@ -14175,6 +14175,33 @@ lexicographic two-field ordering; and
 `TestExecuteSQLQueryColumnarTopNOffsetPastResult` verifies empty-page
 pagination without a slice-bound failure.
 
+## Warm Columnar Top-N Preference
+
+Normal materialized `ORDER BY ... LIMIT` queries keep the streaming Top-N path
+until the exact source-field layout has already been promoted into the bounded
+immutable columnar layout cache. A warm compatible layout then selects the
+existing columnar Top-N operator directly, avoiding source decoding and
+per-row map allocation. Cold queries and unsupported SQL shapes retain the
+established streaming behavior. Writes invalidate affected layouts before the
+next query, so this is a physical-plan change only.
+
+```sh
+make test-sql-columnar-topn-layout-preference
+make benchmark-sql-columnar-topn-layout-preference
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a warmed 4,096-row
+`id`/dictionary-encoded `state` batch with a numeric range predicate and
+`ORDER BY id DESC LIMIT 16`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing streaming Top-N | 7.99 ms/op | 3,164,613 B/op | 62,260 allocs/op | Baseline |
+| Preferred warm columnar Top-N | 229.20 us/op | 18,193 B/op | 379 allocs/op | 34.9x faster; 174.0x lower allocation volume; 164.3x fewer allocations |
+
+`TestHatTrieSQLColumnarTopNUsesWarmLayout` verifies both result ordering and
+that the normal materialized query borrows the warm immutable layout.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

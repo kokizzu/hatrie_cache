@@ -1220,6 +1220,21 @@ benchmark-sql-columnar-dictionary-group-order:
 commit-sql-columnar-dictionary-group-order:
 	sh ./scripts/commit-sql-columnar-dictionary-group-order.sh
 
+test-sql-columnar-topn-layout-preference:
+	sh ./scripts/test-sql-columnar-topn-layout-preference.sh
+
+benchmark-sql-columnar-topn-layout-preference:
+	sh ./scripts/benchmark-sql-columnar-topn-layout-preference.sh
+
+format-sql-columnar-topn-layout-preference:
+	sh ./scripts/format-sql-columnar-topn-layout-preference.sh
+
+stage-sql-columnar-topn-layout-preference:
+	sh ./scripts/stage-sql-columnar-topn-layout-preference.sh
+
+commit-sql-columnar-topn-layout-preference:
+	sh ./scripts/commit-sql-columnar-topn-layout-preference.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 
