@@ -481,6 +481,34 @@ the sidecar entry estimate). High-cardinality dictionaries, non-promoted
 layouts, and predicates outside the supported direct aggregate subset retain
 the existing scan without this metadata.
 
+### High-Cardinality String Bloom Segment Skip
+
+Promoted columnar layouts now add a fixed 1,024-bit Bloom filter for each
+256-row segment of an all-string plain column. A binary `field = 'literal'`
+scan skips a segment only on a Bloom miss, then retains the exact byte-wise
+comparison for every Bloom hit. Dictionary columns continue to use the smaller
+exact code-set sidecar above, while Unicode case-insensitive comparisons and
+wider predicates retain the established evaluator.
+
+```sh
+make test-sql-columnar-string-bloom-segment
+make benchmark-sql-columnar-string-bloom-segment
+```
+
+Three local runs on the AMD Ryzen 9 5950X use a warmed 20,000-row source with
+unique `tag` strings and an equality probe for the final row:
+
+| Three-run median | Borrowed full scan | Bloom segment path | Improvement / tradeoff |
+| --- | ---: | ---: | ---: |
+| Selective `tag = 'tag-19999'` | 631.717 us/op; 3,659 B/op; 26 allocs/op | 97.532 us/op; 3,816 B/op; 32 allocs/op | 6.48x faster; about 160 B/op and six allocations higher |
+| No-skip control, one matching `common` tag per segment | 320.572 us/op; 32,025 B/op; 189 allocs/op | 320.730 us/op; 32,186 B/op; 195 allocs/op | CPU neutral within 0.1%; about 160 B/op and six allocations higher |
+
+The fixture retains 79 filters, or 10,112 bytes of Bloom payload (about
+10,163 bytes including the sidecar entry estimate) for one hot high-cardinality
+field. These filters count toward the existing 4 MiB adaptive-layout budget,
+are created only after the second matching read, and are invalidated on every
+source write. They do not affect storage, persistence, or wire formats.
+
 Reproduce with:
 
 ```sh

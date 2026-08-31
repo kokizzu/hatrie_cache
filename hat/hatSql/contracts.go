@@ -80,14 +80,70 @@ type ColumnarNumericSegment struct {
 	Valid   bool
 }
 
+// ColumnarStringBloomSegment is a fixed 1,024-bit Bloom filter for one
+// contiguous string column segment. It has no false negatives and is used
+// only to bypass segments that cannot satisfy a binary string equality.
+type ColumnarStringBloomSegment struct {
+	Bits [16]uint64
+}
+
+type columnarStringBloomProbe [3]uint16
+
+// Add records one string in the segment Bloom filter.
+func (segment *ColumnarStringBloomSegment) Add(value string) {
+	if segment == nil {
+		return
+	}
+	for _, bit := range newColumnarStringBloomProbe(value) {
+		segment.Bits[bit>>6] |= uint64(1) << (bit & 63)
+	}
+}
+
+// MayContain reports whether a string may be present in this segment.
+func (segment ColumnarStringBloomSegment) MayContain(value string) bool {
+	return segment.mayContainProbe(newColumnarStringBloomProbe(value))
+}
+
+func (segment ColumnarStringBloomSegment) mayContainProbe(probe columnarStringBloomProbe) bool {
+	for _, bit := range probe {
+		if segment.Bits[bit>>6]&(uint64(1)<<(bit&63)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func newColumnarStringBloomProbe(value string) columnarStringBloomProbe {
+	first := columnarStringBloomHash(value)
+	second := first ^ first>>33
+	second *= 0xff51afd7ed558ccd
+	second ^= second >> 33
+	probe := columnarStringBloomProbe{}
+	for index := uint64(0); index < uint64(len(probe)); index++ {
+		probe[index] = uint16((first + index*second) & 1023)
+	}
+	return probe
+}
+
+func columnarStringBloomHash(value string) uint64 {
+	hash := uint64(1469598103934665603)
+	for index := 0; index < len(value); index++ {
+		hash ^= uint64(value[index])
+		hash *= 1099511628211
+	}
+	return hash
+}
+
 // ColumnarNumericSegments stores immutable segment sidecars for one columnar
 // batch. Columns holds numeric min/max bounds. DictionaryCodeSets holds exact
 // membership masks for dictionary columns with at most 64 distinct values.
+// StringBloomFilters holds fixed Bloom filters for all-string plain columns.
 // Segment i covers RowsPerSegment consecutive rows.
 type ColumnarNumericSegments struct {
 	RowsPerSegment     int
 	Columns            map[string][]ColumnarNumericSegment
 	DictionaryCodeSets map[string][]uint64
+	StringBloomFilters map[string][]ColumnarStringBloomSegment
 }
 
 // FieldRows reports the physical row count retained for one field.

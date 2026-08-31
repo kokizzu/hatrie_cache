@@ -2906,3 +2906,11 @@ deliver-sql-columnar-dictionary-segment-skip:
 	sh ./scripts/deliver-sql-columnar-dictionary-segment-skip.sh
 deliver-sql-columnar-dictionary-segment-benchmark-docs:
 	sh ./scripts/deliver-sql-columnar-dictionary-segment-benchmark-docs.sh
+test-sql-columnar-string-bloom-segment:
+	sh ./scripts/test-sql-columnar-string-bloom-segment.sh
+format-sql-columnar-string-bloom-segment:
+	sh ./scripts/format-sql-columnar-string-bloom-segment.sh
+benchmark-sql-columnar-string-bloom-segment:
+	sh ./scripts/benchmark-sql-columnar-string-bloom-segment.sh
+deliver-sql-columnar-string-bloom-segment:
+	sh ./scripts/deliver-sql-columnar-string-bloom-segment.sh

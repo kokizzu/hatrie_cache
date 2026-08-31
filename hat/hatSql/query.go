@@ -7119,7 +7119,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return SQLQueryResult{}, true, err
 	}
 	started := time.Now()
-	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7247,6 +7247,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR DICTIONARY LIKE FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
+	} else if field, value, equality := sqlColumnarStringEqualityPredicate(q.where, q.from.alias); equality {
+		filterStarted := time.Now()
+		result, matched, scanned := sqlColumnarStringBloomMaterialize(q, batch, projectionFields, segments, field, value, metrics != nil)
+		if metrics != nil {
+			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
+				metrics.record("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+			}
+			metrics.record("COLUMNAR STRING FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
@@ -7924,8 +7935,73 @@ func sqlColumnarDictionaryLiteralINNumericConjunction(expr sqlExpr, alias string
 	return dictionary, codes, predicates, ok
 }
 
+func sqlColumnarStringEqualityPredicate(expr sqlExpr, alias string) (field, value string, ok bool) {
+	if expr.kind != "binary" || expr.op != "=" || expr.collation.normalized() != SQLCollationBinary || expr.left == nil || expr.right == nil {
+		return "", "", false
+	}
+	if expr.left.kind == "field" && (expr.left.qualifier == "" || expr.left.qualifier == alias) && expr.right.kind == "literal" {
+		value, ok = expr.right.value.(string)
+		return expr.left.name, value, ok
+	}
+	if expr.right.kind == "field" && (expr.right.qualifier == "" || expr.right.qualifier == alias) && expr.left.kind == "literal" {
+		value, ok = expr.left.value.(string)
+		return expr.right.name, value, ok
+	}
+	return "", "", false
+}
+
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
 	return sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, matches, false)
+}
+
+// sqlColumnarStringBloomMaterialize scans only segments whose optional Bloom
+// filter might contain value. A filter miss is definitive; an unavailable
+// sidecar or Bloom hit retains the ordinary direct string comparison.
+func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field, value string, scanAll bool) (SQLQueryResult, int, int) {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	matched, scanned := 0, 0
+	rowsPerSegment := batch.Rows
+	filters := []ColumnarStringBloomSegment(nil)
+	if segments != nil && segments.RowsPerSegment > 0 {
+		rowsPerSegment = segments.RowsPerSegment
+		filters = segments.StringBloomFilters[field]
+	}
+	probe := newColumnarStringBloomProbe(value)
+	for start := 0; start < batch.Rows; start += rowsPerSegment {
+		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		segmentIndex := start / rowsPerSegment
+		if segmentIndex < len(filters) && !filters[segmentIndex].mayContainProbe(probe) {
+			continue
+		}
+		end := start + rowsPerSegment
+		if end > batch.Rows {
+			end = batch.Rows
+		}
+		scanned += end - start
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+				break
+			}
+			candidate, _ := batch.Value(field, rowIndex)
+			text, equal := candidate.(string)
+			if !equal || text != value {
+				continue
+			}
+			position := matched
+			matched++
+			if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+				continue
+			}
+			row := make(SQLRow, len(projectionFields))
+			for selectIndex, item := range q.selects {
+				row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+			}
+			result.Rows = append(result.Rows, row)
+		}
+	}
+	return result, matched, scanned
 }
 
 // sqlColumnarStreamMaterializeWithScan keeps complete match counts for

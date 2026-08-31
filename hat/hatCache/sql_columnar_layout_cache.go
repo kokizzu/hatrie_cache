@@ -372,6 +372,7 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 	}
 	columns := make(map[string][]hatSql.ColumnarNumericSegment)
 	dictionaryCodeSets := make(map[string][]uint64)
+	stringBloomFilters := make(map[string][]hatSql.ColumnarStringBloomSegment)
 	bytes := 0
 	for field, values := range batch.Columns {
 		if len(values) != batch.Rows {
@@ -408,6 +409,36 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 			bytes += len(field) + 48 + len(segments)*32
 		}
 	}
+	for field, values := range batch.Columns {
+		if len(values) != batch.Rows {
+			continue
+		}
+		filters := make([]hatSql.ColumnarStringBloomSegment, 0, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
+		stringsOnly := true
+		for start := 0; start < batch.Rows; start += rowsPerSegment {
+			end := start + rowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			filter := hatSql.ColumnarStringBloomSegment{}
+			for _, value := range values[start:end] {
+				text, ok := value.(string)
+				if !ok {
+					stringsOnly = false
+					break
+				}
+				filter.Add(text)
+			}
+			if !stringsOnly {
+				break
+			}
+			filters = append(filters, filter)
+		}
+		if stringsOnly {
+			stringBloomFilters[field] = filters
+			bytes += len(field) + 48 + len(filters)*128
+		}
+	}
 	for field, dictionary := range batch.Dictionaries {
 		if len(dictionary.Values) == 0 || len(dictionary.Values) > 64 || len(dictionary.Codes) != batch.Rows {
 			continue
@@ -437,8 +468,8 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 			bytes += len(field) + 48 + len(sets)*8
 		}
 	}
-	if len(columns) == 0 && len(dictionaryCodeSets) == 0 {
+	if len(columns) == 0 && len(dictionaryCodeSets) == 0 && len(stringBloomFilters) == 0 {
 		return nil, 0
 	}
-	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns, DictionaryCodeSets: dictionaryCodeSets}, bytes
+	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns, DictionaryCodeSets: dictionaryCodeSets, StringBloomFilters: stringBloomFilters}, bytes
 }
