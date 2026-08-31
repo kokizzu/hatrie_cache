@@ -2904,3 +2904,5 @@ benchmark-sql-columnar-dictionary-segment-skip:
 	sh ./scripts/benchmark-sql-columnar-segment-skip.sh
 deliver-sql-columnar-dictionary-segment-skip:
 	sh ./scripts/deliver-sql-columnar-dictionary-segment-skip.sh
+deliver-sql-columnar-dictionary-segment-benchmark-docs:
+	sh ./scripts/deliver-sql-columnar-dictionary-segment-benchmark-docs.sh

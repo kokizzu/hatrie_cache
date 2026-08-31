@@ -474,7 +474,7 @@ a warmed 20,000-row source whose final 160 rows have `state = 'hot'`:
 
 | Three-run median, `COUNT(*) WHERE state IN ('hot')` | Borrowed full scan | Dictionary segment skip | Improvement / tradeoff |
 | --- | ---: | ---: | ---: |
-| Selective two-value dictionary predicate | 111.286 us/op; 3,592 B/op; 24 allocs/op | 8.373 us/op; 3,592 B/op; 24 allocs/op | 13.29x faster; timed query heap and allocations unchanged |
+| Selective two-value dictionary predicate | 98.802 us/op; 3,592 B/op; 24 allocs/op | 8.769 us/op; 3,592 B/op; 24 allocs/op | 11.27x faster; timed query heap and allocations unchanged |
 
 This fixture adds 79 masks, or 632 bytes of payload (about 685 bytes including
 the sidecar entry estimate). High-cardinality dictionaries, non-promoted
