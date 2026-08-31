@@ -2711,6 +2711,44 @@ deliver-sql-projection-frontier-commit:
 deliver-sql-projection-frontier-push:
 	sh ./scripts/deliver-sql-projection-frontier.sh push
 
+.PHONY: test-sql-typed-arrangements
+test-sql-typed-arrangements:
+	sh ./scripts/test-sql-typed-arrangements.sh
+
+.PHONY: benchmark-sql-typed-arrangements
+benchmark-sql-typed-arrangements:
+	sh ./scripts/benchmark-sql-typed-arrangements.sh
+
+.PHONY: format-sql-typed-arrangements
+format-sql-typed-arrangements:
+	sh ./scripts/format-sql-typed-arrangements.sh
+
+.PHONY: verify-sql-typed-arrangements
+verify-sql-typed-arrangements:
+	sh ./scripts/verify-sql-typed-arrangements.sh
+
+.PHONY: test-race-sql-typed-arrangements
+test-race-sql-typed-arrangements:
+	sh ./scripts/test-race-sql-typed-arrangements.sh
+
+.PHONY: security-sql-typed-arrangements
+security-sql-typed-arrangements:
+	sh ./scripts/security-sql-typed-arrangements.sh
+
+.PHONY: inspect-sql-typed-arrangements
+inspect-sql-typed-arrangements:
+	sh ./scripts/inspect-sql-typed-arrangements.sh
+
+.PHONY: deliver-sql-typed-arrangements-commit
+deliver-sql-typed-arrangements-commit:
+	sh ./scripts/deliver-sql-typed-arrangements.sh commit
+
+.PHONY: deliver-sql-typed-arrangements-push
+deliver-sql-typed-arrangements-push:
+	sh ./scripts/deliver-sql-typed-arrangements.sh push
+
+
+
 deliver-sql-typed-composite:
 	sh ./scripts/deliver-sql-typed-composite.sh
 
