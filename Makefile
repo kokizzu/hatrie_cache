@@ -1370,6 +1370,21 @@ stage-sql-columnar-dictionary-like:
 commit-sql-columnar-dictionary-like:
 	sh ./scripts/commit-sql-columnar-dictionary-like.sh
 
+test-sql-columnar-dictionary-group-unordered:
+	sh ./scripts/test-sql-columnar-dictionary-group-unordered.sh
+
+benchmark-sql-columnar-dictionary-group-unordered:
+	sh ./scripts/benchmark-sql-columnar-dictionary-group-unordered.sh
+
+format-sql-columnar-dictionary-group-unordered:
+	sh ./scripts/format-sql-columnar-dictionary-group-unordered.sh
+
+stage-sql-columnar-dictionary-group-unordered:
+	sh ./scripts/stage-sql-columnar-dictionary-group-unordered.sh
+
+commit-sql-columnar-dictionary-group-unordered:
+	sh ./scripts/commit-sql-columnar-dictionary-group-unordered.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 

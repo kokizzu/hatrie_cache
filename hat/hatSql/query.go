@@ -8027,8 +8027,8 @@ type sqlColumnarDictionaryGroupProjection struct {
 }
 
 // executeSQLColumnarDictionaryGroupAggregate groups low-cardinality text by
-// its dictionary code. It accepts only an ORDER BY on the grouped field, so a
-// byte-wise sort of dictionary values preserves the narrow SQL result order.
+// its dictionary code. An ordered query sorts dictionary values; an unordered
+// query preserves first-seen group order, matching the general executor.
 // Direct numeric predicates use per-segment min/max metadata to bypass ranges
 // which cannot contribute to any group.
 func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
@@ -8161,19 +8161,21 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		}
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
-	sort.Slice(codes, func(left, right int) bool {
-		if orderProjection >= 0 {
-			leftValue := states[codes[left]][orderProjection].result()
-			rightValue := states[codes[right]][orderProjection].result()
-			if less, decided := sqlOrderLess(q.orderBy[0], leftValue, rightValue); decided {
-				return less
+	if len(q.orderBy) > 0 {
+		sort.Slice(codes, func(left, right int) bool {
+			if orderProjection >= 0 {
+				leftValue := states[codes[left]][orderProjection].result()
+				rightValue := states[codes[right]][orderProjection].result()
+				if less, decided := sqlOrderLess(q.orderBy[0], leftValue, rightValue); decided {
+					return less
+				}
 			}
-		}
-		if descending {
-			return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
-		}
-		return dictionary.Values[codes[left]] < dictionary.Values[codes[right]]
-	})
+			if descending {
+				return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
+			}
+			return dictionary.Values[codes[left]] < dictionary.Values[codes[right]]
+		})
+	}
 
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	resultBytes := 0
@@ -8209,7 +8211,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 }
 
 func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (groupField string, projections []sqlColumnarDictionaryGroupProjection, fields []string, predicates []sqlColumnarNumericFilter, descending bool, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) > 1 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.orderBy) == 1 && (q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast) || sqlQueryCollation(q) != SQLCollationBinary {
 		return "", nil, nil, nil, false, false
 	}
 	if !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
@@ -8224,18 +8226,22 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 		return "", nil, nil, nil, false, false
 	}
 	orderProjection := -1
-	if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) {
-		if q.limit < 0 || q.orderBy[0].expr.kind != "field" || q.orderBy[0].expr.qualifier != "" {
-			return "", nil, nil, nil, false, false
-		}
-		for index, projection := range ordered {
-			if projection.aggregate != nil && strings.EqualFold(projection.column, q.orderBy[0].expr.name) {
-				orderProjection = index
-				break
+	descending = false
+	if len(q.orderBy) == 1 {
+		descending = q.orderBy[0].desc
+		if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) {
+			if q.limit < 0 || q.orderBy[0].expr.kind != "field" || q.orderBy[0].expr.qualifier != "" {
+				return "", nil, nil, nil, false, false
 			}
-		}
-		if orderProjection < 0 {
-			return "", nil, nil, nil, false, false
+			for index, projection := range ordered {
+				if projection.aggregate != nil && strings.EqualFold(projection.column, q.orderBy[0].expr.name) {
+					orderProjection = index
+					break
+				}
+			}
+			if orderProjection < 0 {
+				return "", nil, nil, nil, false, false
+			}
 		}
 	}
 	seen := map[string]bool{}
@@ -8265,7 +8271,7 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 		}
 		projections[index] = candidate
 	}
-	return groupField, projections, fields, predicates, q.orderBy[0].desc, true
+	return groupField, projections, fields, predicates, descending, true
 }
 
 func (aggregate *sqlColumnarNumericAggregate) add(batch ColumnarBatch, rowIndex int) {

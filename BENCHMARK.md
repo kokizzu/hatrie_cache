@@ -14448,6 +14448,29 @@ projection, and `LIMIT 100`:
 `TestSQLColumnarDictionaryLikeUsesCodeFilter` compares output to row execution
 and verifies the specialized `EXPLAIN ANALYZE` node.
 
+## Columnar Dictionary GROUP BY Without ORDER BY
+
+Dictionary-key aggregates no longer require an `ORDER BY`. The direct path
+preserves first-seen dictionary-code order, matching the general executor, and
+does not sort groups when SQL does not request an order.
+
+```sh
+make test-sql-columnar-dictionary-group-unordered
+make benchmark-sql-columnar-dictionary-group-unordered
+```
+
+Five local runs on the AMD Ryzen 9 5950X use 20,000 rows with an eight-value
+dictionary-encoded `state`, `COUNT(*)`, and `SUM(value)` grouped by `state`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing group aggregate executor | 31.23 ms/op | 24.74 MB/op | 280,072 allocs/op | Baseline |
+| Direct dictionary-code aggregate | 719.96 us/op | 24.71 KB/op | 369 allocs/op | 43.4x faster; 1,001.2x lower allocation volume; 759.0x fewer allocations |
+
+`TestSQLColumnarDictionaryGroupAggregateWithoutOrder` compares result values
+and first-seen group order against row execution and verifies the specialized
+plan.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or
