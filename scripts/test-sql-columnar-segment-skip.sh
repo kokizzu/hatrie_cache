@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-go test ./hat/hatSql ./hat/hatCache -run '^(TestSQLColumnarNumericAggregateUsesSegmentedBatchWhenAvailable|TestHatTrieBorrowSQLColumnarSourceSegmentsPromotesAndInvalidates)$' -count=1
+go test ./hat/hatSql ./hat/hatCache -run '^(TestSQLColumnarNumericAggregateUsesSegmentedBatchWhenAvailable|TestSQLColumnarDictionarySegmentMasksPreservePredicateSemantics|TestHatTrieBorrowSQLColumnarSourceSegmentsPromotesAndInvalidates|TestHatTrieSQLColumnarDictionarySegmentSkipMatchesMaterializedQuery)$' -count=1

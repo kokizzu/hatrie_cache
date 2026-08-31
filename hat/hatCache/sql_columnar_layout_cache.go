@@ -367,10 +367,11 @@ func sqlColumnarLayoutCacheBytes(batch hatSql.ColumnarBatch) (int, bool) {
 
 func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNumericSegments, int) {
 	const rowsPerSegment = 256
-	if batch.Rows < rowsPerSegment || len(batch.Columns) == 0 {
+	if batch.Rows < rowsPerSegment || len(batch.Columns) == 0 && len(batch.Dictionaries) == 0 {
 		return nil, 0
 	}
 	columns := make(map[string][]hatSql.ColumnarNumericSegment)
+	dictionaryCodeSets := make(map[string][]uint64)
 	bytes := 0
 	for field, values := range batch.Columns {
 		if len(values) != batch.Rows {
@@ -407,8 +408,37 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 			bytes += len(field) + 48 + len(segments)*32
 		}
 	}
-	if len(columns) == 0 {
+	for field, dictionary := range batch.Dictionaries {
+		if len(dictionary.Values) == 0 || len(dictionary.Values) > 64 || len(dictionary.Codes) != batch.Rows {
+			continue
+		}
+		sets := make([]uint64, 0, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
+		valid := true
+		for start := 0; start < batch.Rows; start += rowsPerSegment {
+			end := start + rowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			set := uint64(0)
+			for _, code := range dictionary.Codes[start:end] {
+				if int(code) >= len(dictionary.Values) {
+					valid = false
+					break
+				}
+				set |= uint64(1) << code
+			}
+			if !valid {
+				break
+			}
+			sets = append(sets, set)
+		}
+		if valid {
+			dictionaryCodeSets[field] = sets
+			bytes += len(field) + 48 + len(sets)*8
+		}
+	}
+	if len(columns) == 0 && len(dictionaryCodeSets) == 0 {
 		return nil, 0
 	}
-	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns}, bytes
+	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns, DictionaryCodeSets: dictionaryCodeSets}, bytes
 }

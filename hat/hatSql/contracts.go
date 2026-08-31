@@ -80,11 +80,14 @@ type ColumnarNumericSegment struct {
 	Valid   bool
 }
 
-// ColumnarNumericSegments stores immutable numeric min/max sidecars for one
-// columnar batch. Segment i covers RowsPerSegment consecutive rows.
+// ColumnarNumericSegments stores immutable segment sidecars for one columnar
+// batch. Columns holds numeric min/max bounds. DictionaryCodeSets holds exact
+// membership masks for dictionary columns with at most 64 distinct values.
+// Segment i covers RowsPerSegment consecutive rows.
 type ColumnarNumericSegments struct {
-	RowsPerSegment int
-	Columns        map[string][]ColumnarNumericSegment
+	RowsPerSegment     int
+	Columns            map[string][]ColumnarNumericSegment
+	DictionaryCodeSets map[string][]uint64
 }
 
 // FieldRows reports the physical row count retained for one field.

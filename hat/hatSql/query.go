@@ -7392,7 +7392,7 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(candidateField), candidateField, batch.Rows)
 		}
 	}
-	filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
+	_, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	if q.where.kind != "" && !dictionaryINFilter && len(predicates) == 0 {
 		return SQLQueryResult{}, false, nil
 	}
@@ -7526,8 +7526,8 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
-	dictionary, dictionaryOperator, dictionaryValue, dictionaryCollation, dictionaryPredicate := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
-	dictionaryIN, dictionaryINCodes, dictionaryINPredicate := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
+	_, dictionary, dictionaryOperator, dictionaryValue, dictionaryCollation, dictionaryPredicate := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
+	_, dictionaryIN, dictionaryINCodes, dictionaryINPredicate := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	dictionaryCode, dictionaryFound := uint32(0), false
 	if dictionaryPredicate {
 		dictionaryCode, dictionaryFound = sqlDictionaryCode(dictionary, dictionaryValue, dictionaryCollation)
@@ -7884,24 +7884,35 @@ func sqlColumnarDictionaryLikePredicate(expr sqlExpr, alias string, batch Column
 	return dictionary, codes, true
 }
 
-func sqlColumnarDictionaryPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, string, string, SQLCollation, bool) {
+func sqlColumnarDictionaryPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (string, DictionaryColumn, string, string, SQLCollation, bool) {
 	if expr.kind == "binary" && expr.op == "AND" && expr.left != nil && expr.right != nil {
-		if dictionary, operator, value, collation, ok := sqlColumnarDictionaryPredicateInConjunction(*expr.left, alias, batch); ok {
-			return dictionary, operator, value, collation, true
+		if field, dictionary, operator, value, collation, ok := sqlColumnarDictionaryPredicateInConjunction(*expr.left, alias, batch); ok {
+			return field, dictionary, operator, value, collation, true
 		}
 		return sqlColumnarDictionaryPredicateInConjunction(*expr.right, alias, batch)
 	}
-	return sqlColumnarDictionaryPredicate(expr, alias, batch)
+	dictionary, operator, value, collation, ok := sqlColumnarDictionaryPredicate(expr, alias, batch)
+	if !ok || expr.left == nil || expr.right == nil {
+		return "", DictionaryColumn{}, "", "", "", false
+	}
+	if expr.left.kind == "field" {
+		return expr.left.name, dictionary, operator, value, collation, true
+	}
+	return expr.right.name, dictionary, operator, value, collation, true
 }
 
-func sqlColumnarDictionaryLiteralINPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, []bool, bool) {
+func sqlColumnarDictionaryLiteralINPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (string, DictionaryColumn, []bool, bool) {
 	if expr.kind == "binary" && expr.op == "AND" && expr.left != nil && expr.right != nil {
-		if dictionary, codes, ok := sqlColumnarDictionaryLiteralINPredicateInConjunction(*expr.left, alias, batch); ok {
-			return dictionary, codes, true
+		if field, dictionary, codes, ok := sqlColumnarDictionaryLiteralINPredicateInConjunction(*expr.left, alias, batch); ok {
+			return field, dictionary, codes, true
 		}
 		return sqlColumnarDictionaryLiteralINPredicateInConjunction(*expr.right, alias, batch)
 	}
-	return sqlColumnarDictionaryLiteralINPredicate(expr, alias, batch)
+	dictionary, codes, ok := sqlColumnarDictionaryLiteralINPredicate(expr, alias, batch)
+	if !ok || expr.left == nil {
+		return "", DictionaryColumn{}, nil, false
+	}
+	return expr.left.name, dictionary, codes, true
 }
 
 func sqlColumnarDictionaryLiteralINNumericConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (dictionary DictionaryColumn, codes []bool, predicates []sqlColumnarNumericFilter, ok bool) {
@@ -7909,7 +7920,7 @@ func sqlColumnarDictionaryLiteralINNumericConjunction(expr sqlExpr, alias string
 	if !accepted || len(predicates) == 0 {
 		return DictionaryColumn{}, nil, nil, false
 	}
-	dictionary, codes, ok = sqlColumnarDictionaryLiteralINPredicateInConjunction(expr, alias, batch)
+	_, dictionary, codes, ok = sqlColumnarDictionaryLiteralINPredicateInConjunction(expr, alias, batch)
 	return dictionary, codes, predicates, ok
 }
 
@@ -8063,8 +8074,8 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
-	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
-	filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
+	filterDictionaryField, filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
+	filterDictionaryINField, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	filterCode, filterFound := uint32(0), false
 	if dictionaryFilter {
 		filterCode, filterFound = sqlDictionaryCode(filterDictionary, filterValue, filterCollation)
@@ -8133,9 +8144,10 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		}
 		return nil
 	}
-	if segments != nil && len(predicates) > 0 && segments.RowsPerSegment > 0 {
+	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
 		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
-			if !sqlColumnarNumericSegmentMayMatch(segments, start/segments.RowsPerSegment, predicates) {
+			segmentIndex := start / segments.RowsPerSegment
+			if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
 				continue
 			}
 			end := start + segments.RowsPerSegment
@@ -8352,8 +8364,8 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
-	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
-	filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
+	filterDictionaryField, filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
+	filterDictionaryINField, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	filterCode, filterFound := uint32(0), false
 	if dictionaryFilter {
 		filterCode, filterFound = sqlDictionaryCode(filterDictionary, filterValue, filterCollation)
@@ -8400,9 +8412,10 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		}
 		return nil
 	}
-	if segments != nil && len(predicates) > 0 && segments.RowsPerSegment > 0 {
+	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
 		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
-			if !sqlColumnarNumericSegmentMayMatch(segments, start/segments.RowsPerSegment, predicates) {
+			segmentIndex := start / segments.RowsPerSegment
+			if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
 				continue
 			}
 			end := start + segments.RowsPerSegment
@@ -8466,6 +8479,39 @@ func sqlColumnarNumericSegmentMayMatch(segments *ColumnarNumericSegments, segmen
 		}
 	}
 	return true
+}
+
+func sqlColumnarDictionarySegmentMayMatch(segments *ColumnarNumericSegments, segmentIndex int, field, operator string, code uint32, found bool) bool {
+	if operator == "=" && !found {
+		return false
+	}
+	sets, available := segments.DictionaryCodeSets[field]
+	if !available || segmentIndex < 0 || segmentIndex >= len(sets) || int(code) >= 64 {
+		return true
+	}
+	target := uint64(1) << code
+	switch operator {
+	case "=":
+		return sets[segmentIndex]&target != 0
+	case "!=", "<>":
+		return !found || sets[segmentIndex]&^target != 0
+	default:
+		return true
+	}
+}
+
+func sqlColumnarDictionaryINSegmentMayMatch(segments *ColumnarNumericSegments, segmentIndex int, field string, codes []bool) bool {
+	sets, available := segments.DictionaryCodeSets[field]
+	if !available || segmentIndex < 0 || segmentIndex >= len(sets) || len(codes) > 64 {
+		return true
+	}
+	wanted := uint64(0)
+	for code, included := range codes {
+		if included {
+			wanted |= uint64(1) << code
+		}
+	}
+	return sets[segmentIndex]&wanted != 0
 }
 
 func sqlColumnarNumericSegmentMatches(segment ColumnarNumericSegment, predicate sqlColumnarNumericFilter) bool {

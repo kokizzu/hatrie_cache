@@ -446,13 +446,16 @@ Reproduce with:
 make benchmark-sql-borrowed-columnar-source
 ```
 
-### Numeric Segment Skip
+### Columnar Segment Skip Indexes
 
-Promoted HatTrie layouts now retain min/max bounds for every 256-row scalar
+Promoted HatTrie layouts retain min/max bounds for every 256-row scalar
 numeric segment. Direct numeric aggregate predicates use those immutable bounds
-to skip a segment only when it cannot contain a match. It applies to direct
-`COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` with numeric `WHERE` conjunctions;
-other SQL shapes retain the established executor.
+to skip a segment only when it cannot contain a match. Low-cardinality
+dictionary columns with at most 64 values also retain one exact 64-bit code-set
+per segment, allowing equality, inequality, and literal `IN` predicates to
+skip segments that cannot contribute a result. The paths apply to direct
+`COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` with supported predicates; other SQL
+shapes retain the established executor.
 
 | Five-run median, warmed 20,000-row `COUNT(*)` | Borrowed full scan | Numeric segment skip | Improvement / tradeoff |
 | --- | ---: | ---: | ---: |
@@ -464,6 +467,19 @@ or about 0.27% of its 960,004-byte cached layout. Segment sidecars count toward
 the existing 4 MiB adaptive-layout budget, are created only after the second
 matching read, and are invalidated with every ordinary source write. They do
 not affect storage, persistence, or wire formats.
+
+The dictionary sidecar uses one exact 64-bit mask per segment only when the
+dictionary has at most 64 values. Three local runs on the AMD Ryzen 9 5950X use
+a warmed 20,000-row source whose final 160 rows have `state = 'hot'`:
+
+| Three-run median, `COUNT(*) WHERE state IN ('hot')` | Borrowed full scan | Dictionary segment skip | Improvement / tradeoff |
+| --- | ---: | ---: | ---: |
+| Selective two-value dictionary predicate | 111.286 us/op; 3,592 B/op; 24 allocs/op | 8.373 us/op; 3,592 B/op; 24 allocs/op | 13.29x faster; timed query heap and allocations unchanged |
+
+This fixture adds 79 masks, or 632 bytes of payload (about 685 bytes including
+the sidecar entry estimate). High-cardinality dictionaries, non-promoted
+layouts, and predicates outside the supported direct aggregate subset retain
+the existing scan without this metadata.
 
 Reproduce with:
 

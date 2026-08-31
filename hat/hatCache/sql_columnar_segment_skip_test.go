@@ -1,6 +1,7 @@
 package hatCache
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,4 +43,56 @@ func TestHatTrieBorrowSQLColumnarSourceSegmentsPromotesAndInvalidates(t *testing
 	if err != nil || !available || segments != nil {
 		t.Fatalf("post-write BorrowSQLColumnarSourceSegments() segments = %#v, available = %t, error = %v", segments, available, err)
 	}
+}
+
+func TestHatTrieSQLColumnarDictionarySegmentSkipMatchesMaterializedQuery(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	var data strings.Builder
+	data.WriteByte('[')
+	for row := 0; row < 512; row++ {
+		if row > 0 {
+			data.WriteByte(',')
+		}
+		state := "cold"
+		if row >= 256 {
+			state = "hot"
+		}
+		data.WriteString(`{"state":"`)
+		data.WriteString(state)
+		data.WriteString(`","value":`)
+		data.WriteString(strconv.Itoa(row))
+		data.WriteByte('}')
+	}
+	data.WriteByte(']')
+	trie.UpsertString("events", data.String())
+
+	query := "FROM CACHE('events') AS event WHERE event.state IN ('hot') SELECT COUNT(*) AS total"
+	for warmup := 0; warmup < 2; warmup++ {
+		if _, err := ExecuteSQLQuery(query, trie); err != nil {
+			t.Fatalf("warm-up ExecuteSQLQuery() error = %v", err)
+		}
+	}
+	columnar, err := ExecuteSQLQuery(query, trie)
+	if err != nil {
+		t.Fatalf("columnar ExecuteSQLQuery() error = %v", err)
+	}
+	materialized, err := ExecuteSQLQuery(query, sqlRowsOnlyResolver{trie: trie})
+	if err != nil {
+		t.Fatalf("materialized ExecuteSQLQuery() error = %v", err)
+	}
+	if !reflect.DeepEqual(columnar, materialized) {
+		t.Fatalf("columnar result = %#v, materialized result = %#v", columnar, materialized)
+	}
+
+	explained, err := ExecuteSQLQuery("EXPLAIN ANALYZE "+query, trie)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery(EXPLAIN ANALYZE) error = %v", err)
+	}
+	for _, step := range explained.Plan {
+		if step.Node == "COLUMNAR SEGMENT SKIP" && step.ActualOutputRows != nil && *step.ActualOutputRows == 256 {
+			return
+		}
+	}
+	t.Fatalf("plan = %#v, want dictionary COLUMNAR SEGMENT SKIP of 256 rows", explained.Plan)
 }

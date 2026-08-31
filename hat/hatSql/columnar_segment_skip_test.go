@@ -55,3 +55,31 @@ func TestSQLColumnarNumericAggregateUsesSegmentedBatchWhenAvailable(t *testing.T
 		t.Fatalf("segmented batch mutated = %#v, want %#v", probe.batch, wantBatch)
 	}
 }
+
+func TestSQLColumnarDictionarySegmentMasksPreservePredicateSemantics(t *testing.T) {
+	t.Parallel()
+	segments := &ColumnarNumericSegments{
+		RowsPerSegment: 2,
+		DictionaryCodeSets: map[string][]uint64{
+			"state": {1, 2},
+		},
+	}
+	if sqlColumnarDictionarySegmentMayMatch(segments, 0, "state", "=", 1, true) {
+		t.Fatal("equality unexpectedly retained a segment without the target dictionary code")
+	}
+	if !sqlColumnarDictionarySegmentMayMatch(segments, 1, "state", "=", 1, true) {
+		t.Fatal("equality unexpectedly skipped a segment containing the target dictionary code")
+	}
+	if sqlColumnarDictionarySegmentMayMatch(segments, 0, "state", "!=", 0, true) {
+		t.Fatal("inequality unexpectedly retained a segment containing only the excluded dictionary code")
+	}
+	if !sqlColumnarDictionarySegmentMayMatch(segments, 1, "state", "!=", 0, true) {
+		t.Fatal("inequality unexpectedly skipped a segment containing another dictionary code")
+	}
+	if sqlColumnarDictionaryINSegmentMayMatch(segments, 0, "state", []bool{false, true}) {
+		t.Fatal("IN unexpectedly retained a segment disjoint from its dictionary codes")
+	}
+	if !sqlColumnarDictionaryINSegmentMayMatch(segments, 1, "state", []bool{false, true}) {
+		t.Fatal("IN unexpectedly skipped a segment containing a requested dictionary code")
+	}
+}

@@ -78,3 +78,55 @@ func BenchmarkSQLHatTrieColumnarSegmentSkip(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkSQLHatTrieColumnarDictionarySegmentSkip(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	var data strings.Builder
+	data.Grow(560000)
+	data.WriteByte('[')
+	for row := 0; row < 20000; row++ {
+		if row > 0 {
+			data.WriteByte(',')
+		}
+		state := "cold"
+		if row >= 19840 {
+			state = "hot"
+		}
+		data.WriteString(`{"state":"`)
+		data.WriteString(state)
+		data.WriteString(`"}`)
+	}
+	data.WriteByte(']')
+	trie.UpsertString("events", data.String())
+	query := "FROM CACHE('events') AS event WHERE event.state IN ('hot') SELECT COUNT(*) AS total"
+	for warmup := 0; warmup < 2; warmup++ {
+		if _, err := ExecuteSQLQuery(query, trie); err != nil {
+			b.Fatalf("warm-up ExecuteSQLQuery() error = %v", err)
+		}
+	}
+	borrowed := sqlBorrowedColumnarImmutableResolver{trie: trie}
+
+	b.Run("borrowed_full_scan", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			result, err := ExecuteSQLQuery(query, borrowed)
+			if err != nil || len(result.Rows) != 1 || result.Rows[0]["total"] != int64(160) {
+				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
+			}
+			sqlColumnarSegmentSkipBenchmarkResult = result
+		}
+	})
+	b.Run("dictionary_segment_pruned", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			result, err := ExecuteSQLQuery(query, trie)
+			if err != nil || len(result.Rows) != 1 || result.Rows[0]["total"] != int64(160) {
+				b.Fatalf("ExecuteSQLQuery() result = %#v, error = %v", result, err)
+			}
+			sqlColumnarSegmentSkipBenchmarkResult = result
+		}
+	})
+}
