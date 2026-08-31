@@ -14,6 +14,7 @@ security guidance before exposing it on a network.
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
+- ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)

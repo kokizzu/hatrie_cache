@@ -1,0 +1,60 @@
+# Query Engine Ideas: Adoption Status
+
+This matrix records the ClickHouse, Materialize, and Tarantool ideas assessed
+for `hatrie_cache`. An idea is adopted only when it preserves exact query or
+recovery behavior and either improves a measured workload or supplies an
+explicitly opt-in operational control.
+
+| Source | Idea | Status | Evidence |
+|---|---|---|---|
+| Materialize | Coordinated progress frontier | Adopted | `SQLProjectionRetentionFrontier` commits journal retention only after all configured runners succeed. [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md) |
+| Materialize | Shared arrangements | Adopted | `TypedTableAggregateArrangements` shares exact aggregate state among identical definitions. [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md) |
+| ClickHouse | Projection for repeated ordering | Already present | Immutable cached columnar ordinal projections are admitted after repeated reads and used by the exact Top-N/order path. |
+| ClickHouse | Granular skipping indexes | Already present | Numeric min/max, dictionary membership, string equality Bloom, and n-gram Bloom sidecars prune only impossible segments. |
+| Tarantool | Controlled cooperative maintenance | Adopted | `ManagedRefreshScheduler` now has opt-in count and duration cycle budgets. [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md) |
+| Tarantool | Consistent read snapshot | Already present at current boundary | `SnapshotLocker` gives resolvers a stable query lifetime without retaining historical row versions. |
+
+## Measured Results
+
+| Feature | Result |
+|---|---|
+| Shared typed aggregate arrangement, two consumers over 10,000 changes | 2.02x faster, 1.98x less heap, and 1.99x fewer allocations than two independent aggregates. |
+| Projection retention frontier commit | 207 ns median, 0 B/op, 0 allocs/op; background-only and opt-in. |
+| Refresh scheduler count budget | No measurable overhead over the default scheduler in the no-op refresh benchmark. |
+| Refresh scheduler duration budget | About 568 ns, 352 B, and 5 allocations per opt-in no-op cycle due to the cooperative timeout context. |
+
+## Deliberately Deferred
+
+### MVCC Typed-Table Versions
+
+Keeping historical versions for every typed-table write would make old-reader
+queries lock-free, but it also retains overwritten rows until all readers
+advance. This project currently has stable snapshot locking and immutable
+query-result publication. Without a workload showing reader lock contention,
+MVCC would add write and memory cost with no measured query win. It remains a
+separate proposal, not a default behavior.
+
+### Immutable Parts And Background Merge
+
+ClickHouse-style immutable parts would help append-heavy persistent analytic
+tables, but require a storage format, atomic manifest publication, merge
+budgeting, recovery checks, backup integration, and compaction benchmarking.
+`hatrie_cache` currently targets compact mutable cache and typed-table paths;
+adding a second storage engine now would increase recovery and backup
+complexity. Reconsider this only with an append-heavy persisted workload and
+a benchmark that includes write throughput, scan throughput, peak memory,
+crash recovery, backup, and restore.
+
+### More Generic SQL Rewrites
+
+The generic SQL executor intentionally does not infer that an arbitrary query
+equals a typed aggregate. Automatic rewrites risk semantic mismatches around
+filters, NULLs, aliases, ordering, and source versions. Existing exact
+columnar order projections and explicit typed aggregate arrangements provide
+the measurable benefit without guessing.
+
+## Re-evaluation Gate
+
+Do not implement a deferred item until a deterministic benchmark and
+regression suite demonstrate exact output equivalence, no unacceptable write
+or heap regression, and recovery behavior across compaction and restart.

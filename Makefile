@@ -2783,6 +2783,22 @@ deliver-sql-refresh-scheduler-budget-commit:
 deliver-sql-refresh-scheduler-budget-push:
 	sh ./scripts/deliver-sql-refresh-scheduler-budget.sh push
 
+.PHONY: verify-adopted-query-engine-ideas
+verify-adopted-query-engine-ideas:
+	sh ./scripts/verify-adopted-query-engine-ideas.sh
+
+.PHONY: inspect-adopted-query-engine-ideas
+inspect-adopted-query-engine-ideas:
+	sh ./scripts/inspect-adopted-query-engine-ideas.sh
+
+.PHONY: deliver-adopted-query-engine-ideas-commit
+deliver-adopted-query-engine-ideas-commit:
+	sh ./scripts/deliver-adopted-query-engine-ideas.sh commit
+
+.PHONY: deliver-adopted-query-engine-ideas-push
+deliver-adopted-query-engine-ideas-push:
+	sh ./scripts/deliver-adopted-query-engine-ideas.sh push
+
 
 
 deliver-sql-typed-composite:
