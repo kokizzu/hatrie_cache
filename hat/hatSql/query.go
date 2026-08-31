@@ -7540,7 +7540,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7635,35 +7635,61 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	}
 	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
 	heap.Init(&candidates)
-	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-		if !matches(rowIndex) {
-			continue
+	scanRows := func(start, end int) bool {
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if !matches(rowIndex) {
+				continue
+			}
+			candidate := sqlTopNStreamItem{ordinal: rowIndex}
+			if len(orderFields) == 1 {
+				key, ordered := sqlColumnarTopNOrderKey(batch, orderFields[0], rowIndex)
+				if !ordered {
+					return false
+				}
+				candidate.key = key
+			} else {
+				candidate.keys = make([]interface{}, len(orderFields))
+				for orderIndex, field := range orderFields {
+					key, ordered := sqlColumnarTopNOrderKey(batch, field, rowIndex)
+					if !ordered {
+						return false
+					}
+					candidate.keys[orderIndex] = key
+				}
+			}
+			if candidates.Len() < capacity {
+				heap.Push(&candidates, candidate)
+				continue
+			}
+			if sqlTopNStreamBefore(candidate, candidates.items[0], q.orderBy) {
+				candidates.items[0] = candidate
+				heap.Fix(&candidates, 0)
+			}
 		}
-		candidate := sqlTopNStreamItem{ordinal: rowIndex}
-		if len(orderFields) == 1 {
-			key, ordered := sqlColumnarTopNOrderKey(batch, orderFields[0], rowIndex)
-			if !ordered {
+		return true
+	}
+	skippedRows := 0
+	if len(orderFields) == 1 && segments != nil && segments.RowsPerSegment > 0 {
+		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
+			end := start + segments.RowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			if candidates.Len() == capacity {
+				if threshold, numeric := sqlNumber(candidates.items[0].key); numeric && !sqlColumnarTopNNumericSegmentMayBeat(segments, start/segments.RowsPerSegment, orderFields[0], q.orderBy[0].desc, threshold) {
+					skippedRows += end - start
+					continue
+				}
+			}
+			if !scanRows(start, end) {
 				return SQLQueryResult{}, false, nil
 			}
-			candidate.key = key
-		} else {
-			candidate.keys = make([]interface{}, len(orderFields))
-			for orderIndex, field := range orderFields {
-				key, ordered := sqlColumnarTopNOrderKey(batch, field, rowIndex)
-				if !ordered {
-					return SQLQueryResult{}, false, nil
-				}
-				candidate.keys[orderIndex] = key
-			}
 		}
-		if candidates.Len() < capacity {
-			heap.Push(&candidates, candidate)
-			continue
-		}
-		if sqlTopNStreamBefore(candidate, candidates.items[0], q.orderBy) {
-			candidates.items[0] = candidate
-			heap.Fix(&candidates, 0)
-		}
+	} else if !scanRows(0, batch.Rows) {
+		return SQLQueryResult{}, false, nil
+	}
+	if metrics != nil && skippedRows > 0 {
+		metrics.record("COLUMNAR TOP-N SEGMENT SKIP", sqlExplainOrders(q.orderBy), batch.Rows, skippedRows, started)
 	}
 	sort.SliceStable(candidates.items, func(left, right int) bool {
 		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], q.orderBy)
@@ -7822,6 +7848,24 @@ func sqlColumnarTopNOrderFieldsEqual(batch ColumnarBatch, fields []string, left,
 		}
 	}
 	return true
+}
+
+func sqlColumnarTopNNumericSegmentMayBeat(segments *ColumnarNumericSegments, segmentIndex int, field string, descending bool, threshold float64) bool {
+	if segments == nil || segmentIndex < 0 {
+		return true
+	}
+	fieldSegments, available := segments.Columns[field]
+	if !available || segmentIndex >= len(fieldSegments) {
+		return true
+	}
+	segment := fieldSegments[segmentIndex]
+	if !segment.Valid {
+		return true
+	}
+	if descending {
+		return segment.Maximum >= threshold
+	}
+	return segment.Minimum <= threshold
 }
 
 func sqlColumnarTopNOrderEqual(batch ColumnarBatch, field string, left, right int) bool {

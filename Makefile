@@ -1412,6 +1412,14 @@ deliver-sql-columnar-distinct:
 benchmark-sql-columnar-topn:
 	sh ./scripts/benchmark-sql-columnar-topn.sh
 
+.PHONY: benchmark-sql-columnar-topn-pruning
+benchmark-sql-columnar-topn-pruning:
+	sh ./scripts/benchmark-sql-columnar-topn-pruning.sh
+
+.PHONY: deliver-sql-columnar-topn-pruning
+deliver-sql-columnar-topn-pruning:
+	sh ./scripts/deliver-sql-columnar-topn-pruning.sh
+
 format-sql-columnar-topn:
 	sh ./scripts/format-sql-columnar-topn.sh
 

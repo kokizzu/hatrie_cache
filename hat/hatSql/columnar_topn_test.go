@@ -143,3 +143,53 @@ func TestExecuteSQLQueryUsesColumnarTopNForMultipleOrderFields(t *testing.T) {
 		t.Fatalf("rows = %#v, want %#v", result.Rows, want)
 	}
 }
+
+func TestExecuteSQLQueryUsesNumericSegmentTopNPruningWithoutSkippingTies(t *testing.T) {
+	for _, test := range []struct {
+		query    string
+		scores   []int64
+		segments []ColumnarNumericSegment
+		want     []SQLRow
+	}{
+		{
+			query:    "SELECT id FROM CACHE('items') ORDER BY score ASC LIMIT 2",
+			scores:   []int64{1, 1, 1, 1, 100, 101, 200, 200},
+			segments: []ColumnarNumericSegment{{Minimum: 1, Maximum: 1, Valid: true}, {Minimum: 1, Maximum: 1, Valid: true}, {Minimum: 100, Maximum: 101, Valid: true}, {Minimum: 200, Maximum: 200, Valid: true}},
+			want:     []SQLRow{{"id": int64(0)}, {"id": int64(1)}},
+		},
+		{
+			query:    "SELECT id FROM CACHE('items') ORDER BY score DESC LIMIT 2",
+			scores:   []int64{101, 100, 101, 100, 1, 1, 0, 0},
+			segments: []ColumnarNumericSegment{{Minimum: 100, Maximum: 101, Valid: true}, {Minimum: 100, Maximum: 101, Valid: true}, {Minimum: 1, Maximum: 1, Valid: true}, {Minimum: 0, Maximum: 0, Valid: true}},
+			want:     []SQLRow{{"id": int64(0)}, {"id": int64(2)}},
+		},
+	} {
+		ids := make([]interface{}, len(test.scores))
+		scores := make([]interface{}, len(test.scores))
+		for index, score := range test.scores {
+			ids[index], scores[index] = int64(index), score
+		}
+		probe := &sqlSegmentedColumnarSourceProbe{
+			batch:    ColumnarBatch{Columns: map[string][]interface{}{"id": ids, "score": scores}, Rows: len(test.scores)},
+			segments: &ColumnarNumericSegments{RowsPerSegment: 2, Columns: map[string][]ColumnarNumericSegment{"score": test.segments}},
+		}
+		result, err := ExecuteSQLQueryParameters(context.Background(), test.query, probe, nil, SQLQueryOptions{})
+		if err != nil {
+			t.Fatalf("ExecuteSQLQueryParameters(%q) error = %v", test.query, err)
+		}
+		if !reflect.DeepEqual(result.Rows, test.want) {
+			t.Fatalf("ExecuteSQLQueryParameters(%q) rows = %#v, want %#v", test.query, result.Rows, test.want)
+		}
+		explained, err := ExecuteSQLQueryParameters(context.Background(), "EXPLAIN ANALYZE "+test.query, probe, nil, SQLQueryOptions{})
+		if err != nil {
+			t.Fatalf("EXPLAIN ANALYZE %q error = %v", test.query, err)
+		}
+		found := false
+		for _, row := range explained.Rows {
+			found = found || row["node"] == "COLUMNAR TOP-N SEGMENT SKIP"
+		}
+		if !found {
+			t.Fatalf("EXPLAIN ANALYZE %q rows = %#v, want COLUMNAR TOP-N SEGMENT SKIP", test.query, explained.Rows)
+		}
+	}
+}
