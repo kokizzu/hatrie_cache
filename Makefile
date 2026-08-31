@@ -2916,3 +2916,30 @@ deliver-sql-columnar-string-bloom-segment:
 	sh ./scripts/deliver-sql-columnar-string-bloom-segment.sh
 deliver-sql-columnar-string-bloom-segment-benchmark-docs:
 	sh ./scripts/deliver-sql-columnar-string-bloom-segment-benchmark-docs.sh
+.PHONY: test-sql-incremental-projection
+test-sql-incremental-projection:
+	sh ./scripts/test-sql-incremental-projection.sh
+
+.PHONY: format-sql-incremental-projection
+format-sql-incremental-projection:
+	sh ./scripts/format-sql-incremental-projection.sh
+
+.PHONY: benchmark-sql-incremental-projection
+benchmark-sql-incremental-projection:
+	sh ./scripts/benchmark-sql-incremental-projection.sh
+
+.PHONY: verify-incremental-projection-docs
+verify-incremental-projection-docs:
+	sh ./scripts/verify-incremental-projection-docs.sh
+
+.PHONY: test-race-sql-incremental-projection
+test-race-sql-incremental-projection:
+	sh ./scripts/test-race-sql-incremental-projection.sh
+
+.PHONY: audit-sql-incremental-projection-security
+audit-sql-incremental-projection-security:
+	sh ./scripts/audit-sql-incremental-projection-security.sh
+
+.PHONY: deliver-sql-incremental-projection
+deliver-sql-incremental-projection:
+	sh ./scripts/deliver-sql-incremental-projection.sh

@@ -10,6 +10,7 @@ security guidance before exposing it on a network.
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
+- Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
@@ -67,6 +68,13 @@ materialize those maps only when combining sources. Wrapping 20,000 already
 materialized rows is 10.4x faster, retains 6.0x less transient heap, and uses
 over 3,300x fewer allocations; details are in
 [BENCHMARK.md](BENCHMARK.md#materialized-single-source-sql-envelopes).
+
+Journal-driven materialized-view runners are now an explicit opt-in. They
+coalesce a contiguous command-journal tail into one source-consistent refresh,
+persist a checkpoint only after a successful refresh, and offer a controlled
+rebuild boundary for journal compaction recovery. The measured 32-mutation
+grouped-aggregate workload is 32.6x faster than refreshing after every
+mutation; see [BENCHMARK.md](BENCHMARK.md#journal-driven-incremental-projections).
 
 Normal SQL queries no longer serialize intermediate rows solely for metrics that
 are not being collected. `EXPLAIN ANALYZE` still records logical input and

@@ -118,6 +118,34 @@ monitoring HTTP API and native gRPC API. HTTP protobuf uses
 `CacheService.Command` or persistent `CacheService.CommandStream` RPC over a
 local bufconn listener.
 
+## Journal-Driven Incremental Projections
+
+`IncrementalProjectionRunner` is disabled by default. When enabled through
+`SQLJournalProjectionRunner`, it reads a contiguous `CommandJournal` tail and
+coalesces all changed CACHE keys into one materialized-view refresh. This is
+source-consistent full-refresh coalescing, not a per-row JSON delta engine.
+
+`BenchmarkIncrementalProjectionCoalescedRefresh` compares a grouped
+`COUNT`/`SUM` materialized view over 10,000 rows. Each benchmark operation
+contains 32 ordered mutations to one `events` CACHE key. The baseline refreshes
+the view once per mutation; the candidate consumes the same 32 changes in one
+runner batch. Five samples on an AMD Ryzen 9 5950X produced these medians:
+
+| Workload | Median time / 32 changes | Timed heap / 32 changes | Allocations / 32 changes | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Refresh after every mutation | 262.241 ms | 412,101,609 B | 2,249,473 | baseline |
+| Coalesced journal batch | 8.040 ms | 12,880,118 B | 70,302 | 32.62x faster, 32.00x less heap, 32.00x fewer allocations |
+
+The gain comes from avoiding 31 repeated full scans. It applies only when a
+workload can tolerate a view being refreshed per bounded journal batch rather
+than synchronously after each mutation. The runner adds no journal read or
+refresh cost while disabled. Reproduce with:
+
+```sh
+make test-sql-incremental-projection
+make benchmark-sql-incremental-projection
+```
+
 ## SQL Approximate Aggregates
 
 The SQL aggregate benchmark executes one grouped query over 10,000 in-memory
