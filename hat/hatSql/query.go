@@ -7164,6 +7164,28 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if dictionary, operator, value, collation, predicates, mixed := sqlColumnarDictionaryNumericConjunction(q.where, q.from.alias, batch); mixed {
+		filterStarted := time.Now()
+		code, found := sqlDictionaryCode(dictionary, value, collation)
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			candidate := dictionary.Codes[rowIndex]
+			if !(operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code)) {
+				return false
+			}
+			for _, predicate := range predicates {
+				value, _ := batch.Value(predicate.field, rowIndex)
+				number, ok := sqlNumber(value)
+				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					return false
+				}
+			}
+			return true
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
@@ -8126,6 +8148,36 @@ func sqlColumnarDictionaryPredicate(expr sqlExpr, alias string, batch ColumnarBa
 	}
 	dictionary, ok := batch.Dictionaries[field]
 	return dictionary, operator, value, expr.collation, ok
+}
+
+// sqlColumnarDictionaryNumericConjunction accepts an AND tree with exactly one
+// encoded string equality/inequality predicate and one or more numeric leaves.
+// It avoids constructing per-row expression state for this common mixed filter.
+func sqlColumnarDictionaryNumericConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (dictionary DictionaryColumn, operator, value string, collation SQLCollation, predicates []sqlColumnarNumericFilter, ok bool) {
+	var dictionarySet bool
+	collect := func(sqlExpr) bool { return false }
+	collect = func(current sqlExpr) bool {
+		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
+			return collect(*current.left) && collect(*current.right)
+		}
+		if candidate, candidateOperator, candidateValue, candidateCollation, encoded := sqlColumnarDictionaryPredicate(current, alias, batch); encoded {
+			if dictionarySet {
+				return false
+			}
+			dictionary, operator, value, collation, dictionarySet = candidate, candidateOperator, candidateValue, candidateCollation, true
+			return true
+		}
+		field, numericOperator, numericValue, numeric := sqlColumnarNumericPredicate(current, alias)
+		if !numeric {
+			return false
+		}
+		predicates = append(predicates, sqlColumnarNumericFilter{field: field, operator: numericOperator, value: numericValue})
+		return true
+	}
+	if !collect(expr) || !dictionarySet || len(predicates) == 0 {
+		return DictionaryColumn{}, "", "", "", nil, false
+	}
+	return dictionary, operator, value, collation, predicates, true
 }
 
 func sqlColumnarLikePredicate(expr sqlExpr, alias string) (field, pattern string, ok bool) {

@@ -14037,6 +14037,26 @@ paths; `TestExecuteSQLQueryUsesColumnarTopNForDictionaryOrder` covers encoded
 string ordering; `TestExecuteSQLQueryColumnarTopNOffsetPastResult` verifies
 empty-page pagination without a slice-bound failure.
 
+## Columnar Dictionary-Numeric Conjunction
+
+Direct columnar projections with one dictionary-encoded string equality or
+inequality predicate plus one or more numeric predicates joined only with
+`AND` now evaluate those predicates without building per-row expression state.
+`LIKE` mixed predicates retain their existing vector path, while all other
+predicate shapes retain the general evaluator.
+
+`BenchmarkSQLColumnarMixedConjunction` uses a 4,096-row jobs source with
+`state = 'queued' AND id >= 1024`, projecting `id` and `name`:
+
+| Filter path | Median time | Cumulative allocation | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| General columnar expression evaluator | 1.70 ms/op | 2.28 MB/op | 9,051 allocs/op | Baseline |
+| Direct dictionary-numeric loop | 669.28 us/op | 859.46 KB/op | 4,777 allocs/op | 2.54x faster; 2.65x lower allocation volume; 1.89x fewer allocations |
+
+The output has many matching rows, so public result-row allocation remains the
+dominant cost after predicate evaluation. Reproduce with
+`make benchmark-sql-columnar-mixed-conjunction`.
+
 ## Columnar LIMIT Pushdown
 
 For supported columnar materialization, a metrics-disabled finite `LIMIT` now

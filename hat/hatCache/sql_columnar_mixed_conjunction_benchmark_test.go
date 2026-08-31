@@ -4,7 +4,7 @@ import "testing"
 
 func BenchmarkSQLColumnarMixedConjunction(b *testing.B) {
 	trie, _ := benchmarkSQLColumnarJobs(b)
-	query := "FROM CACHE('jobs') AS job WHERE job.state LIKE 'queued%' AND job.id >= 1024 SELECT job.id, job.name"
+	query := "FROM CACHE('jobs') AS job WHERE job.state = 'queued' AND job.id >= 1024 SELECT job.id, job.name"
 	b.ResetTimer()
 	for b.Loop() {
 		result, err := ExecuteSQLQuery(query, trie)
