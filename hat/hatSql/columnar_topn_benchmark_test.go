@@ -28,19 +28,22 @@ func BenchmarkExecuteSQLQueryColumnarTopN(b *testing.B) {
 	const count = 20_000
 	ids := make([]interface{}, count)
 	scores := make([]interface{}, count)
-	active := make([]interface{}, count)
 	rows := make([]SQLRow, count)
+	codes := make([]uint32, count)
 	for index := range rows {
 		id, score := int64(index), int64((index*7)%count)
-		isActive := int64(index % 4)
-		ids[index], scores[index], active[index] = id, score, isActive
-		rows[index] = SQLRow{"id": id, "score": score, "active": isActive}
+		state := "idle"
+		if index%4 == 1 {
+			state, codes[index] = "ready", 1
+		}
+		ids[index], scores[index] = id, score
+		rows[index] = SQLRow{"id": id, "score": score, "state": state}
 	}
 	columnar := sqlColumnarTopNBenchmarkResolver{
-		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": ids, "score": scores, "active": active}, Rows: count},
+		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": ids, "score": scores}, Dictionaries: map[string]DictionaryColumn{"state": {Values: []string{"idle", "ready"}, Codes: codes}}, Rows: count},
 		rows:  rows,
 	}
-	const query = "SELECT id FROM CACHE('items') WHERE active = 1 ORDER BY score DESC LIMIT 50"
+	const query = "SELECT id FROM CACHE('items') WHERE state = 'ready' ORDER BY score DESC LIMIT 50"
 	for _, benchmark := range []struct {
 		name     string
 		resolver SQLSourceResolver

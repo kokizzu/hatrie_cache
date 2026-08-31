@@ -7304,6 +7304,14 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	dictionary, dictionaryOperator, dictionaryValue, dictionaryCollation, dictionaryPredicate := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch)
+	dictionaryCode, dictionaryFound := uint32(0), false
+	if q.where.kind != "" && len(predicates) == 0 {
+		if !dictionaryPredicate {
+			return SQLQueryResult{}, false, nil
+		}
+		dictionaryCode, dictionaryFound = sqlDictionaryCode(dictionary, dictionaryValue, dictionaryCollation)
+	}
 	capacity := sqlTopNStreamCapacity(q, control.maxRows)
 	if capacity == 0 {
 		return SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}, true, nil
@@ -7312,6 +7320,10 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	heap.Init(&candidates)
 	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
 		matches := true
+		if dictionaryPredicate {
+			candidate := dictionary.Codes[rowIndex]
+			matches = dictionaryOperator == "=" && dictionaryFound && candidate == dictionaryCode || (dictionaryOperator == "!=" || dictionaryOperator == "<>") && (!dictionaryFound || candidate != dictionaryCode)
+		}
 		for _, predicate := range predicates {
 			value, _ := batch.Value(predicate.field, rowIndex)
 			number, numeric := sqlNumber(value)
@@ -7370,21 +7382,28 @@ func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFiel
 	if !sqlColumnarAggregateField(q.orderBy[0].expr, q.from.alias, &orderField) {
 		return nil, nil, "", nil, false
 	}
+	dictionaryField := ""
 	if q.where.kind != "" {
 		var numeric bool
 		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
 		if !numeric {
-			return nil, nil, "", nil, false
+			field, _, _, _, dictionary := sqlColumnarTopNDictionaryPredicate(q.where, q.from.alias)
+			if !dictionary {
+				return nil, nil, "", nil, false
+			}
+			predicates = nil
+			dictionaryField = field
 		}
 	}
 	seen := map[string]bool{}
 	add := func(field string) {
-		if !seen[field] {
+		if field != "" && !seen[field] {
 			seen[field] = true
 			fields = append(fields, field)
 		}
 	}
 	add(orderField)
+	add(dictionaryField)
 	for _, predicate := range predicates {
 		add(predicate.field)
 	}
@@ -7397,6 +7416,24 @@ func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFiel
 		add(field)
 	}
 	return fields, projectionFields, orderField, predicates, true
+}
+
+func sqlColumnarTopNDictionaryPredicate(expr sqlExpr, alias string) (field, operator, value string, collation SQLCollation, ok bool) {
+	if expr.kind != "binary" || expr.left == nil || expr.right == nil {
+		return "", "", "", "", false
+	}
+	operator = expr.op
+	var literal interface{}
+	if expr.left.kind == "field" && (expr.left.qualifier == "" || expr.left.qualifier == alias) && expr.right.kind == "literal" {
+		field, literal = expr.left.name, expr.right.value
+	} else if expr.right.kind == "field" && (expr.right.qualifier == "" || expr.right.qualifier == alias) && expr.left.kind == "literal" {
+		field, literal = expr.right.name, expr.left.value
+	}
+	value, ok = literal.(string)
+	if field == "" || !ok || operator != "=" && operator != "!=" && operator != "<>" {
+		return "", "", "", "", false
+	}
+	return field, operator, value, expr.collation, true
 }
 
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
