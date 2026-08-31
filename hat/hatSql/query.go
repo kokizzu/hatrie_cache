@@ -7933,10 +7933,11 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		}
 	}
 	filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
+	filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	filterCode, filterFound := uint32(0), false
 	if dictionaryFilter {
 		filterCode, filterFound = sqlDictionaryCode(filterDictionary, filterValue, filterCollation)
-	} else if q.where.kind != "" && len(predicates) == 0 {
+	} else if !dictionaryINFilter && q.where.kind != "" && len(predicates) == 0 {
 		return SQLQueryResult{}, false, nil
 	}
 	if metrics != nil {
@@ -7961,6 +7962,8 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			if dictionaryFilter {
 				candidate := filterDictionary.Codes[rowIndex]
 				matches = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
+			} else if dictionaryINFilter {
+				matches = filterDictionaryINCodes[filterDictionaryIN.Codes[rowIndex]]
 			}
 			for _, predicate := range predicates {
 				candidate, _ := batch.Value(predicate.field, rowIndex)
@@ -8019,6 +8022,8 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		filterName := "COLUMNAR NUMERIC FILTER"
 		if dictionaryFilter {
 			filterName = "COLUMNAR DICTIONARY FILTER"
+		} else if dictionaryINFilter {
+			filterName = "COLUMNAR DICTIONARY IN FILTER"
 		}
 		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
 			metrics.record("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)

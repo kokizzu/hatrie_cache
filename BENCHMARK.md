@@ -14318,6 +14318,33 @@ eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
 dictionary/numeric conjunction results against the row executor, includes an
 unknown list value, and verifies the specialized `EXPLAIN ANALYZE` node.
 
+## Columnar Dictionary Group Aggregate Literal IN
+
+Dictionary-key `GROUP BY` aggregates with an aggregate `ORDER BY ... LIMIT`
+now reuse literal `IN (...)` dictionary-code membership for an independent
+dictionary-encoded filter. Direct numeric predicates joined by `AND` retain
+their segment pruning. `NOT IN`, `NULL`, nonliteral or mixed-type lists, and
+wider predicate shapes retain the general aggregate/sort executor.
+
+```sh
+make test-sql-columnar-dictionary-group-in
+make benchmark-sql-columnar-dictionary-group-in
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with
+32 dictionary-encoded owners, an eight-value dictionary-encoded `state`,
+`state IN ('queued', 'running', 'missing')`, grouped `COUNT(*)` and
+`SUM(score)`, ordered by the aggregate with `LIMIT 8`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing group aggregate/sort executor | 41.24 ms/op | 20.54 MB/op | 379,663 allocs/op | Baseline |
+| Direct dictionary-code group aggregate | 298.80 us/op | 21.21 KB/op | 327 allocs/op | 138.0x faster; 968.4x lower allocation volume; 1,161.0x fewer allocations |
+
+`TestSQLColumnarDictionaryGroupAggregateUsesDictionaryLiteralIN` compares both
+direct and dictionary/numeric conjunction output to row execution, includes an
+unknown list value, and verifies the specialized group-order plan.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

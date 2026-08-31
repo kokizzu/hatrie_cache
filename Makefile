@@ -1295,6 +1295,21 @@ stage-sql-columnar-aggregate-dictionary-in:
 commit-sql-columnar-aggregate-dictionary-in:
 	sh ./scripts/commit-sql-columnar-aggregate-dictionary-in.sh
 
+test-sql-columnar-dictionary-group-in:
+	sh ./scripts/test-sql-columnar-dictionary-group-in.sh
+
+benchmark-sql-columnar-dictionary-group-in:
+	sh ./scripts/benchmark-sql-columnar-dictionary-group-in.sh
+
+format-sql-columnar-dictionary-group-in:
+	sh ./scripts/format-sql-columnar-dictionary-group-in.sh
+
+stage-sql-columnar-dictionary-group-in:
+	sh ./scripts/stage-sql-columnar-dictionary-group-in.sh
+
+commit-sql-columnar-dictionary-group-in:
+	sh ./scripts/commit-sql-columnar-dictionary-group-in.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 
