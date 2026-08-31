@@ -14345,6 +14345,33 @@ Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with
 direct and dictionary/numeric conjunction output to row execution, includes an
 unknown list value, and verifies the specialized group-order plan.
 
+## Columnar Dictionary DISTINCT Literal IN
+
+The direct dictionary `DISTINCT` path now accepts a literal `IN (...)` filter
+on the selected dictionary-encoded field, with optional direct numeric `AND`
+predicates. When no numeric predicate is present, it intersects dictionary
+codes directly rather than scanning rows. `NOT IN`, `NULL`, nonliteral or
+mixed-type lists, filters on other fields, and wider predicate shapes retain
+the general distinct executor.
+
+```sh
+make test-sql-columnar-distinct-in
+make benchmark-sql-columnar-distinct-in
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with an
+eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
+'missing')`, `SELECT DISTINCT state`, and binary ascending order:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing distinct executor | 24.17 ms/op | 17.65 MB/op | 215,086 allocs/op | Baseline |
+| Direct dictionary-code distinct | 6.74 us/op | 5.01 KB/op | 49 allocs/op | 3,584.6x faster; 3,525.2x lower allocation volume; 4,389.5x fewer allocations |
+
+`TestSQLColumnarDictionaryDistinctUsesDictionaryLiteralIN` compares direct and
+dictionary/numeric conjunction output to row execution, includes an unknown
+list value, and verifies the specialized `EXPLAIN ANALYZE` node.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

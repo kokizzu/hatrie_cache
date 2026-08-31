@@ -7352,24 +7352,32 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(candidateField), candidateField, batch.Rows)
 		}
 	}
+	filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
+	if q.where.kind != "" && !dictionaryINFilter && len(predicates) == 0 {
+		return SQLQueryResult{}, false, nil
+	}
 	used := make([]bool, len(dictionary.Values))
-	for rowIndex, code := range dictionary.Codes {
-		matches := true
-		for _, predicate := range predicates {
-			value, _ := batch.Value(predicate.field, rowIndex)
-			number, numeric := sqlNumber(value)
-			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-				matches = false
-				break
+	if dictionaryINFilter && len(predicates) == 0 {
+		copy(used, filterDictionaryINCodes)
+	} else {
+		for rowIndex, code := range dictionary.Codes {
+			matches := !dictionaryINFilter || filterDictionaryINCodes[filterDictionaryIN.Codes[rowIndex]]
+			for _, predicate := range predicates {
+				value, _ := batch.Value(predicate.field, rowIndex)
+				number, numeric := sqlNumber(value)
+				if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					matches = false
+					break
+				}
 			}
+			if !matches {
+				continue
+			}
+			if int(code) >= len(dictionary.Values) {
+				return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, field)
+			}
+			used[code] = true
 		}
-		if !matches {
-			continue
-		}
-		if int(code) >= len(dictionary.Values) {
-			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, field)
-		}
-		used[code] = true
 	}
 	codes := make([]uint32, 0, len(dictionary.Values))
 	for code, present := range used {
@@ -7412,7 +7420,7 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 	}
 	if metrics != nil {
 		node := "COLUMNAR DICTIONARY DISTINCT"
-		if len(predicates) > 0 {
+		if len(predicates) > 0 || dictionaryINFilter {
 			node = "COLUMNAR DICTIONARY DISTINCT FILTER"
 		}
 		metrics.record(node, field, batch.Rows, len(result.Rows), started)
@@ -7428,11 +7436,12 @@ func sqlColumnarDictionaryDistinctPlan(q *sqlQuery, outer *sqlExecRow) (field st
 		return "", nil, nil, false, false
 	}
 	if q.where.kind != "" {
-		var numeric bool
-		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
-		if !numeric {
+		dictionaryField, numericPredicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
+		literalINField, literalIN := sqlColumnarLiteralINFieldInConjunction(q.where, q.from.alias)
+		if !accepted || dictionaryField == "" || !literalIN || !strings.EqualFold(dictionaryField, field) || !strings.EqualFold(literalINField, field) {
 			return "", nil, nil, false, false
 		}
+		predicates = numericPredicates
 	}
 	seen := map[string]bool{}
 	addField := func(candidate string) {
@@ -7760,6 +7769,19 @@ func sqlColumnarTopNFilterPlan(expr sqlExpr, alias string) (dictionaryField stri
 		return "", nil, false
 	}
 	return dictionaryField, predicates, true
+}
+
+func sqlColumnarLiteralINFieldInConjunction(expr sqlExpr, alias string) (string, bool) {
+	if field, ok := sqlColumnarTopNDictionaryLiteralINPredicate(expr, alias); ok {
+		return field, true
+	}
+	if expr.kind != "binary" || expr.op != "AND" || expr.left == nil || expr.right == nil {
+		return "", false
+	}
+	if field, ok := sqlColumnarLiteralINFieldInConjunction(*expr.left, alias); ok {
+		return field, true
+	}
+	return sqlColumnarLiteralINFieldInConjunction(*expr.right, alias)
 }
 
 func sqlColumnarDictionaryPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, string, string, SQLCollation, bool) {
