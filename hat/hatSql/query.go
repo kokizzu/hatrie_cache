@@ -7144,7 +7144,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	}
 
 	if q.where.kind == "" {
-		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(int) bool { return true })
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(int) bool { return true }, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), started)
 		}
@@ -7152,10 +7152,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		code, found := sqlDictionaryCode(dictionary, value, collation)
-		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 			candidate := dictionary.Codes[rowIndex]
 			return operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code)
-		})
+		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR DICTIONARY FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -7163,10 +7163,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
 		filterStarted := time.Now()
-		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 			candidate, _ := batch.Value(field, rowIndex)
 			return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern)
-		})
+		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR LIKE FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -7174,7 +7174,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if field, expression, inverted, regexp := sqlColumnarRegexpPredicate(q.where, q.from.alias, batch); regexp {
 		filterStarted := time.Now()
-		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 			candidate, _ := batch.Value(field, rowIndex)
 			text, ok := candidate.(string)
 			if !ok {
@@ -7182,7 +7182,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			}
 			matched := expression.MatchString(text)
 			return matched != inverted
-		})
+		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR REGEXP FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -7190,7 +7190,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		filterStarted := time.Now()
-		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 			for _, predicate := range predicates {
 				candidate, _ := batch.Value(predicate.field, rowIndex)
 				number, ok := sqlNumber(candidate)
@@ -7199,7 +7199,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 				}
 			}
 			return true
-		})
+		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -7207,7 +7207,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if filters, vector := sqlColumnarVectorConjunction(q.where, q.from.alias); vector {
 		filterStarted := time.Now()
-		result, matched := sqlColumnarStreamMaterialize(q, batch, projectionFields, func(rowIndex int) bool {
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 			for _, filter := range filters {
 				candidate, _ := batch.Value(filter.field, rowIndex)
 				if filter.like {
@@ -7222,7 +7222,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 				}
 			}
 			return true
-		})
+		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR VECTOR FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -7277,9 +7277,18 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 }
 
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
+	return sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, matches, false)
+}
+
+// sqlColumnarStreamMaterializeWithScan keeps complete match counts for
+// instrumented plans while unobserved bounded reads stop after their page.
+func sqlColumnarStreamMaterializeWithScan(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool, scanAll bool) (SQLQueryResult, int) {
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	matched := 0
 	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
 		if !matches(rowIndex) {
 			continue
 		}

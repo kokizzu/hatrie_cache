@@ -1190,6 +1190,18 @@ audit-query-performance-columnar-tests:
 test-sql-columnar-scans:
 	sh ./scripts/test-sql-columnar-scans.sh
 
+test-sql-columnar-limit-pushdown:
+	sh ./scripts/test-sql-columnar-limit-pushdown.sh
+
+benchmark-sql-columnar-limit-pushdown:
+	sh ./scripts/benchmark-sql-columnar-limit-pushdown.sh
+
+format-sql-columnar-limit-pushdown:
+	sh ./scripts/format-sql-columnar-limit-pushdown.sh
+
+deliver-sql-columnar-limit-pushdown:
+	sh ./scripts/deliver-sql-columnar-limit-pushdown.sh
+
 format-sql-columnar-scans:
 	sh ./scripts/format-sql-columnar-scans.sh
 
