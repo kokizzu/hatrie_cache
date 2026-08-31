@@ -14398,6 +14398,32 @@ eight-value dictionary-encoded `state`, `state IN ('queued', 'running',
 conjunction orders with row execution, includes an unknown list value, and
 verifies the specialized `EXPLAIN ANALYZE` node.
 
+## Columnar Dictionary Equality OR
+
+Direct field projections now recognize an `OR` tree of two or more string
+equalities on one dictionary-encoded field and evaluate it as dictionary-code
+membership. Equality can place the string literal on either side. Mixed fields,
+non-equality predicates, non-string values, and other boolean shapes retain the
+generic columnar evaluator.
+
+```sh
+make test-sql-columnar-dictionary-or
+make benchmark-sql-columnar-dictionary-or
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row batch with an
+eight-value dictionary-encoded `state`, `state = 'queued' OR state =
+'running'`, `id, state` projection, and `LIMIT 100`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing generic columnar filter | 5.51 ms/op | 7.47 MB/op | 43,751 allocs/op | Baseline |
+| Direct dictionary-code OR filter | 33.57 us/op | 44.36 KB/op | 368 allocs/op | 164.3x faster; 168.3x lower allocation volume; 118.9x fewer allocations |
+
+`TestSQLColumnarDictionaryLiteralORUsesCodeFilter` compares output to row
+execution, includes an unknown list value and literal-on-left equality, and
+verifies the specialized `EXPLAIN ANALYZE` node.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

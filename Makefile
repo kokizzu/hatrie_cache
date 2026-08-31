@@ -1339,6 +1339,21 @@ stage-sql-columnar-dictionary-in-numeric:
 
 commit-sql-columnar-dictionary-in-numeric:
 	sh ./scripts/commit-sql-columnar-dictionary-in-numeric.sh
+
+test-sql-columnar-dictionary-or:
+	sh ./scripts/test-sql-columnar-dictionary-or.sh
+
+benchmark-sql-columnar-dictionary-or:
+	sh ./scripts/benchmark-sql-columnar-dictionary-or.sh
+
+format-sql-columnar-dictionary-or:
+	sh ./scripts/format-sql-columnar-dictionary-or.sh
+
+stage-sql-columnar-dictionary-or:
+	sh ./scripts/stage-sql-columnar-dictionary-or.sh
+
+commit-sql-columnar-dictionary-or:
+	sh ./scripts/commit-sql-columnar-dictionary-or.sh
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 

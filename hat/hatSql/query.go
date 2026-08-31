@@ -7176,6 +7176,16 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if dictionary, codes, encoded := sqlColumnarDictionaryLiteralORPredicate(q.where, q.from.alias, batch); encoded {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			return codes[dictionary.Codes[rowIndex]]
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY OR FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if dictionary, codes, predicates, mixed := sqlColumnarDictionaryLiteralINNumericConjunction(q.where, q.from.alias, batch); mixed {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
@@ -7806,6 +7816,46 @@ func sqlColumnarLiteralINFieldInConjunction(expr sqlExpr, alias string) (string,
 		return field, true
 	}
 	return sqlColumnarLiteralINFieldInConjunction(*expr.right, alias)
+}
+
+func sqlColumnarDictionaryLiteralORPredicate(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, []bool, bool) {
+	type literal struct {
+		value     string
+		collation SQLCollation
+	}
+	field := ""
+	literals := make([]literal, 0, 2)
+	collect := func(sqlExpr) bool { return false }
+	collect = func(current sqlExpr) bool {
+		if current.kind == "binary" && current.op == "OR" && current.left != nil && current.right != nil {
+			return collect(*current.left) && collect(*current.right)
+		}
+		candidateField, operator, value, collation, ok := sqlColumnarTopNDictionaryPredicate(current, alias)
+		if !ok || operator != "=" {
+			return false
+		}
+		if field == "" {
+			field = candidateField
+		} else if !strings.EqualFold(field, candidateField) {
+			return false
+		}
+		literals = append(literals, literal{value: value, collation: collation})
+		return true
+	}
+	if !collect(expr) || len(literals) < 2 {
+		return DictionaryColumn{}, nil, false
+	}
+	dictionary, encoded := batch.Dictionaries[field]
+	if !encoded {
+		return DictionaryColumn{}, nil, false
+	}
+	codes := make([]bool, len(dictionary.Values))
+	for _, candidate := range literals {
+		if code, found := sqlDictionaryCode(dictionary, candidate.value, candidate.collation); found {
+			codes[code] = true
+		}
+	}
+	return dictionary, codes, true
 }
 
 func sqlColumnarDictionaryPredicateInConjunction(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, string, string, SQLCollation, bool) {
