@@ -14045,10 +14045,11 @@ and all wider SQL shapes retain the established executor.
 ## Columnar Top-N
 
 Supported materialized numeric or string `ORDER BY ... LIMIT` queries now rank the warmed
-columnar batch directly. Direct numeric conjunctions and encoded dictionary
-equality/inequality `WHERE` predicates run before the bounded heap, so only
-matching row ordinals are retained. The operator keeps at most `LIMIT + OFFSET`
- candidates and materializes selected fields after sorting. It is limited to one
+columnar batch directly. Direct numeric conjunctions, encoded dictionary
+equality/inequality predicates, and one dictionary predicate combined with
+numeric comparisons run before the bounded heap, so only matching row ordinals
+are retained. The operator keeps at most `LIMIT + OFFSET`
+candidates and materializes selected fields after sorting. It is limited to one
 numeric or string order field, direct field projections, binary collation, those direct
 predicates, and no relational or aggregate operators;
 unavailable or wider shapes retain the general executor.
@@ -14066,12 +14067,22 @@ Five local runs on the AMD Ryzen 9 5950X use a warmed 20,000-row
 | Full row materialization and sort | 62.68 ms/op | 18,109,428 B/op | 100,032 allocs/op | Baseline |
 | Columnar dictionary bounded top-N | 1.79 ms/op | 346,024 B/op | 20,167 allocs/op | 35.1x faster; 52.3x lower allocation volume; 4.96x fewer allocations |
 
+The same benchmark with `WHERE team = 'team-2' AND score >= 10000 ORDER BY
+score DESC LIMIT 50` measured:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Full row materialization and sort | 8.65 ms/op | 11,499,130 B/op | 41,554 allocs/op | Baseline |
+| Columnar dictionary-numeric bounded top-N | 763.58 us/op | 34,768 B/op | 690 allocs/op | 11.3x faster; 330.7x lower allocation volume; 60.2x fewer allocations |
+
 `TestExecuteSQLQueryUsesColumnarTopN` verifies direct columnar selection and
 ordering; `TestExecuteSQLQueryUsesColumnarTopNAfterNumericFilter` and
 `TestExecuteSQLQueryUsesColumnarTopNAfterDictionaryFilter` verify the predicate
 paths; `TestExecuteSQLQueryUsesColumnarTopNForDictionaryOrder` covers encoded
-string ordering; `TestExecuteSQLQueryColumnarTopNOffsetPastResult` verifies
-empty-page pagination without a slice-bound failure.
+string ordering; `TestExecuteSQLQueryUsesColumnarTopNAfterDictionaryNumericFilter`
+covers the mixed dictionary/numeric predicate; and
+`TestExecuteSQLQueryColumnarTopNOffsetPastResult` verifies empty-page
+pagination without a slice-bound failure.
 
 ## Columnar Dictionary-Numeric Conjunction
 
