@@ -14050,7 +14050,7 @@ equality/inequality predicates, and one dictionary predicate combined with
 numeric comparisons run before the bounded heap, so only matching row ordinals
 are retained. The operator keeps at most `LIMIT + OFFSET`
 candidates and materializes selected fields after sorting. It is limited to one
-numeric or string order field, direct field projections, binary collation, those direct
+or more direct numeric/string order fields, direct field projections, binary collation, those direct
 predicates, and no relational or aggregate operators;
 unavailable or wider shapes retain the general executor.
 
@@ -14075,12 +14075,27 @@ score DESC LIMIT 50` measured:
 | Full row materialization and sort | 8.65 ms/op | 11,499,130 B/op | 41,554 allocs/op | Baseline |
 | Columnar dictionary-numeric bounded top-N | 763.58 us/op | 34,768 B/op | 690 allocs/op | 11.3x faster; 330.7x lower allocation volume; 60.2x fewer allocations |
 
+`ORDER BY team ASC, score DESC LIMIT 50` on a 20,000-row
+dictionary-encoded `team` batch measured:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Full row materialization and sort | 128.94 ms/op | 18,429,823 B/op | 100,034 allocs/op | Baseline |
+| Columnar multi-order bounded top-N | 3.67 ms/op | 1,146,396 B/op | 60,166 allocs/op | 35.1x faster; 16.1x lower allocation volume; 1.66x fewer allocations |
+
+Multi-order candidates retain one key slice per scanned row while comparing
+the lexicographic order, so allocation is higher than the single-key path but
+still materially below full materialization. Direct field keys and binary
+collation remain required.
+
 `TestExecuteSQLQueryUsesColumnarTopN` verifies direct columnar selection and
 ordering; `TestExecuteSQLQueryUsesColumnarTopNAfterNumericFilter` and
 `TestExecuteSQLQueryUsesColumnarTopNAfterDictionaryFilter` verify the predicate
 paths; `TestExecuteSQLQueryUsesColumnarTopNForDictionaryOrder` covers encoded
 string ordering; `TestExecuteSQLQueryUsesColumnarTopNAfterDictionaryNumericFilter`
 covers the mixed dictionary/numeric predicate; and
+`TestExecuteSQLQueryUsesColumnarTopNForMultipleOrderFields` covers
+lexicographic two-field ordering; and
 `TestExecuteSQLQueryColumnarTopNOffsetPastResult` verifies empty-page
 pagination without a slice-bound failure.
 

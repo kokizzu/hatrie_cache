@@ -7427,12 +7427,12 @@ func sqlColumnarDictionaryDistinctPlan(q *sqlQuery, outer *sqlExecRow) (field st
 	return field, fields, predicates, q.orderBy[0].desc, true
 }
 
-// executeSQLColumnarTopN keeps only the requested page while ranking one
-// numeric or string column. It is deliberately narrower than the general top-N stream:
+// executeSQLColumnarTopN keeps only the requested page while ranking direct
+// numeric or string fields. It is deliberately narrower than the general top-N stream:
 // unsupported predicates, expressions, null-order rules, and joins retain the
 // established executor.
 func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
-	fields, projectionFields, orderField, predicates, ok := sqlColumnarTopNPlan(q, outer)
+	fields, projectionFields, orderFields, predicates, ok := sqlColumnarTopNPlan(q, outer)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
@@ -7482,11 +7482,23 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		if !matches {
 			continue
 		}
-		key, ordered := sqlColumnarTopNOrderKey(batch, orderField, rowIndex)
-		if !ordered {
-			return SQLQueryResult{}, false, nil
+		candidate := sqlTopNStreamItem{ordinal: rowIndex}
+		if len(orderFields) == 1 {
+			key, ordered := sqlColumnarTopNOrderKey(batch, orderFields[0], rowIndex)
+			if !ordered {
+				return SQLQueryResult{}, false, nil
+			}
+			candidate.key = key
+		} else {
+			candidate.keys = make([]interface{}, len(orderFields))
+			for orderIndex, field := range orderFields {
+				key, ordered := sqlColumnarTopNOrderKey(batch, field, rowIndex)
+				if !ordered {
+					return SQLQueryResult{}, false, nil
+				}
+				candidate.keys[orderIndex] = key
+			}
 		}
-		candidate := sqlTopNStreamItem{key: key, ordinal: rowIndex}
 		if candidates.Len() < capacity {
 			heap.Push(&candidates, candidate)
 			continue
@@ -7533,16 +7545,23 @@ func sqlColumnarTopNOrderKey(batch ColumnarBatch, field string, rowIndex int) (i
 	return number, ok
 }
 
-func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFields []string, orderField string, predicates []sqlColumnarNumericFilter, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || q.limit <= 0 || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
-		return nil, nil, "", nil, false
+func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFields, orderFields []string, predicates []sqlColumnarNumericFilter, ok bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || q.limit <= 0 || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) == 0 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || sqlQueryCollation(q) != SQLCollationBinary {
+		return nil, nil, nil, nil, false
 	}
-	if !sqlColumnarAggregateField(q.orderBy[0].expr, q.from.alias, &orderField) {
-		return nil, nil, "", nil, false
+	for _, order := range q.orderBy {
+		if order.nullsFirst || order.nullsLast {
+			return nil, nil, nil, nil, false
+		}
+		field := ""
+		if !sqlColumnarAggregateField(order.expr, q.from.alias, &field) {
+			return nil, nil, nil, nil, false
+		}
+		orderFields = append(orderFields, field)
 	}
 	dictionaryField, predicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
 	if !accepted {
-		return nil, nil, "", nil, false
+		return nil, nil, nil, nil, false
 	}
 	seen := map[string]bool{}
 	add := func(field string) {
@@ -7551,7 +7570,9 @@ func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFiel
 			fields = append(fields, field)
 		}
 	}
-	add(orderField)
+	for _, field := range orderFields {
+		add(field)
+	}
 	add(dictionaryField)
 	for _, predicate := range predicates {
 		add(predicate.field)
@@ -7559,12 +7580,12 @@ func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFiel
 	for _, item := range q.selects {
 		field := ""
 		if !sqlColumnarAggregateField(item.expr, q.from.alias, &field) {
-			return nil, nil, "", nil, false
+			return nil, nil, nil, nil, false
 		}
 		projectionFields = append(projectionFields, field)
 		add(field)
 	}
-	return fields, projectionFields, orderField, predicates, true
+	return fields, projectionFields, orderFields, predicates, true
 }
 
 func sqlColumnarTopNDictionaryPredicate(expr sqlExpr, alias string) (field, operator, value string, collation SQLCollation, ok bool) {
