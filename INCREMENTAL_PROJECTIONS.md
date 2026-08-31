@@ -59,6 +59,37 @@ keeps one run bounded while still coalescing ordinary write bursts. The runner
 uses the journal sequence only after journaled commands have been applied to
 the cache source.
 
+## Optional Journal Retention Protection
+
+Snapshots normally compact journal records through the snapshot boundary. A
+projection that must survive snapshots while it is temporarily behind can opt
+in to a named journal watermark. This is off by default because retained log
+records consume disk space until the projection catches up.
+
+```go
+runner, err := hatCache.NewSQLJournalProjectionRunnerWithOptions(views, trie, hatSql.QueryOptions{}, hatCache.SQLJournalProjectionRunnerOptions{
+	Incremental: hatSql.IncrementalProjectionRunnerOptions{
+		Name:            "team_totals",
+		Enabled:         true,
+		CheckpointStore: checkpoints,
+	},
+	ProtectJournalRetention: true,
+})
+if err != nil {
+	return err
+}
+defer runner.RemoveJournalRetention(journal)
+```
+
+Before each enabled `RunOnce`, the runner registers its current checkpoint;
+after a successful refresh it advances the watermark. `CommandJournal` will
+not compact beyond the slowest active watermark. A protected runner therefore
+retains unapplied records across snapshots, while every existing constructor
+keeps the prior compaction behavior. Call `RemoveJournalRetention` when the
+runner is permanently stopped so an abandoned name cannot retain the journal.
+Protection is in-memory journal state; after a process restart the runner
+registers its durable checkpoint on its first enabled run.
+
 ## Checkpoints And Recovery
 
 `FileProjectionCheckpointStore` stores named checkpoints in an atomically
@@ -99,5 +130,6 @@ would skip mutations that the materialized view has not incorporated.
 
 ```sh
 make test-sql-incremental-projection
+make test-sql-projection-retention
 make benchmark-sql-incremental-projection
 ```

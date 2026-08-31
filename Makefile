@@ -2943,3 +2943,47 @@ audit-sql-incremental-projection-security:
 .PHONY: deliver-sql-incremental-projection
 deliver-sql-incremental-projection:
 	sh ./scripts/deliver-sql-incremental-projection.sh
+.PHONY: inspect-sql-stream-journal inspect-sql-stream-journal-impl inspect-sql-stream-table inspect-sql-stream-events inspect-sql-stream-segment inspect-sql-stream-join
+inspect-sql-stream-journal:
+	MODE=journal sh ./scripts/inspect-sql-stream-contracts.sh
+
+inspect-sql-stream-journal-impl:
+	MODE=journal-impl sh ./scripts/inspect-sql-stream-contracts.sh
+
+inspect-sql-stream-table:
+	MODE=table sh ./scripts/inspect-sql-stream-contracts.sh
+
+inspect-sql-stream-events:
+	MODE=events sh ./scripts/inspect-sql-stream-contracts.sh
+
+inspect-sql-stream-segment:
+	MODE=segment sh ./scripts/inspect-sql-stream-contracts.sh
+
+inspect-sql-stream-join:
+	MODE=join sh ./scripts/inspect-sql-stream-contracts.sh
+
+.PHONY: inspect-sql-stream-journal inspect-sql-stream-journal-impl inspect-sql-stream-table inspect-sql-stream-events inspect-sql-stream-segment inspect-sql-stream-join inspect-sql-journal-projection-runner format-sql-journal-projection-runner inspect-incremental-projection-docs inspect-sql-projection-retention-delivery test-sql-projection-retention test-race-sql-projection-retention format-sql-projection-retention deliver-sql-projection-retention
+inspect-sql-journal-projection-runner:
+	sh ./scripts/inspect-sql-journal-projection-runner.sh
+
+format-sql-journal-projection-runner:
+	sh ./scripts/format-sql-journal-projection-runner.sh
+
+inspect-incremental-projection-docs:
+	sh ./scripts/inspect-incremental-projection-docs.sh
+
+inspect-sql-projection-retention-delivery:
+	sh ./scripts/inspect-sql-projection-retention-delivery.sh
+
+test-sql-projection-retention:
+	sh ./scripts/test-sql-projection-retention.sh
+
+test-race-sql-projection-retention:
+	sh ./scripts/test-race-sql-projection-retention.sh
+
+.PHONY: format-sql-projection-retention
+format-sql-projection-retention:
+	sh ./scripts/format-sql-projection-retention.sh
+
+deliver-sql-projection-retention:
+	sh ./scripts/deliver-sql-projection-retention.sh

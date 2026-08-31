@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +150,15 @@ type CommandJournalPullResult struct {
 	WireFormat                string `json:"wire_format,omitempty"`
 }
 
+// CommandJournalProjectionWatermark reports one projection's durable progress.
+// Journal records at or before Sequence may be compacted; later records remain
+// retained until the projection advances or is explicitly removed.
+type CommandJournalProjectionWatermark struct {
+	Name     string `json:"name"`
+	Sequence uint64 `json:"sequence"`
+	Lag      uint64 `json:"lag"`
+}
+
 type commandJournalEntry struct {
 	Version    int                   `json:"version"`
 	Sequence   uint64                `json:"sequence"`
@@ -191,6 +201,7 @@ type CommandJournal struct {
 	writeHook             func([]byte) (int, error)
 	recordBatchChunkBytes int
 	outboxRetainFrom      uint64
+	projectionWatermarks  map[string]uint64
 }
 
 type commandJournalAppendState struct {
@@ -974,6 +985,90 @@ func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJou
 	return tail, nil
 }
 
+// SetProjectionWatermark records durable projection progress. Sequences may
+// only advance and cannot exceed the journal's current tail, which prevents a
+// projection from causing unprocessed records to be compacted.
+func (journal *CommandJournal) SetProjectionWatermark(name string, sequence uint64) error {
+	if journal == nil {
+		return ErrNilCommandJournal
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("hatriecache: projection watermark name is required")
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return ErrCommandJournalClosed
+	}
+	if sequence > journal.lastSequenceLocked() {
+		return fmt.Errorf("hatriecache: projection watermark %q sequence %d exceeds journal tail %d", name, sequence, journal.lastSequenceLocked())
+	}
+	if prior, exists := journal.projectionWatermarks[name]; exists && sequence < prior {
+		return fmt.Errorf("hatriecache: projection watermark %q cannot move backward from %d to %d", name, prior, sequence)
+	}
+	if journal.projectionWatermarks == nil {
+		journal.projectionWatermarks = make(map[string]uint64)
+	}
+	journal.projectionWatermarks[name] = sequence
+	return nil
+}
+
+// RemoveProjectionWatermark stops protecting journal history for name. It is
+// intentionally explicit because a removed projection may require a rebuild.
+func (journal *CommandJournal) RemoveProjectionWatermark(name string) bool {
+	if journal == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed || journal.projectionWatermarks == nil {
+		return false
+	}
+	if _, exists := journal.projectionWatermarks[name]; !exists {
+		return false
+	}
+	delete(journal.projectionWatermarks, name)
+	return true
+}
+
+// ProjectionWatermarks returns a sorted immutable status snapshot. Lag is the
+// number of journal sequences after the projection's durable checkpoint.
+func (journal *CommandJournal) ProjectionWatermarks() []CommandJournalProjectionWatermark {
+	if journal == nil {
+		return nil
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	watermarks := make([]CommandJournalProjectionWatermark, 0, len(journal.projectionWatermarks))
+	lastSequence := journal.lastSequenceLocked()
+	for name, sequence := range journal.projectionWatermarks {
+		lag := uint64(0)
+		if lastSequence > sequence {
+			lag = lastSequence - sequence
+		}
+		watermarks = append(watermarks, CommandJournalProjectionWatermark{Name: name, Sequence: sequence, Lag: lag})
+	}
+	sort.Slice(watermarks, func(left, right int) bool { return watermarks[left].Name < watermarks[right].Name })
+	return watermarks
+}
+
+func (journal *CommandJournal) projectionRetentionThroughLocked() (uint64, bool) {
+	var through uint64
+	found := false
+	for _, sequence := range journal.projectionWatermarks {
+		if !found || sequence < through {
+			through = sequence
+			found = true
+		}
+	}
+	return through, found
+}
+
 func (journal *CommandJournal) SaveSnapshot(trie *HatTrie, path string) error {
 	return journal.SaveSnapshotWithFormat(trie, path, DefaultSnapshotFormat)
 }
@@ -1348,6 +1443,9 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 	}
 	if journal.outboxRetainFrom > 0 && throughSequence >= journal.outboxRetainFrom {
 		throughSequence = journal.outboxRetainFrom - 1
+	}
+	if projectionThrough, protected := journal.projectionRetentionThroughLocked(); protected && throughSequence > projectionThrough {
+		throughSequence = projectionThrough
 	}
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err
