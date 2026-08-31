@@ -2995,6 +2995,14 @@ audit-sql-columnar-ngram-security:
 deliver-sql-columnar-ngram:
 	sh ./scripts/deliver-sql-columnar-ngram.sh
 
+.PHONY: audit-two-week-compatibility
+audit-two-week-compatibility:
+	sh ./scripts/audit-two-week-compatibility.sh
+
+.PHONY: deliver-two-week-compatibility-audit
+deliver-two-week-compatibility-audit:
+	sh ./scripts/deliver-two-week-compatibility-audit.sh
+
 test-sql-typed-table:
 	sh ./scripts/test-sql-typed-table.sh
 
