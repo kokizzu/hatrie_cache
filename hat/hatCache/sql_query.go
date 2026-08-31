@@ -2957,6 +2957,27 @@ func (ht *HatTrie) BorrowSQLColumnarSourceSegments(name, key string, fields []st
 	return ht.resolveSQLColumnarSource(name, key, fields, true)
 }
 
+// BorrowSQLColumnarSourceOrder returns an immutable ascending ordinal
+// projection for an already-cached exact layout. It is populated only after
+// repeated compatible requests and is invalidated with its source layout.
+func (ht *HatTrie) BorrowSQLColumnarSourceOrder(name, key string, fields []string, orderField string) ([]uint32, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+	if name != "CACHE" || orderField == "" {
+		return nil, false, nil
+	}
+	layoutKey := newSQLColumnarLayoutCacheKey(key, fields)
+	if order, available := ht.sqlColumnarLayouts.observeOrder(layoutKey, orderField); available {
+		return order, true, nil
+	}
+	plan, err := ht.SQLPartitionPruningPlan(name, key)
+	if err != nil || !plan.Pruned {
+		return nil, false, err
+	}
+	return ht.localPartitionSet().tries[plan.Partition].BorrowSQLColumnarSourceOrder(name, key, fields, orderField)
+}
+
 // PreferSQLColumnarSource reports whether an immutable cached layout can serve
 // the exact requested source fields without decoding. It only influences SQL
 // physical-plan selection; writes invalidate affected layouts first.

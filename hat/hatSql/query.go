@@ -7469,9 +7469,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	if capacity == 0 {
 		return SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}, true, nil
 	}
-	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
-	heap.Init(&candidates)
-	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+	matches := func(rowIndex int) bool {
 		matches := true
 		if dictionaryPredicate {
 			candidate := dictionary.Codes[rowIndex]
@@ -7481,11 +7479,30 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 			value, _ := batch.Value(predicate.field, rowIndex)
 			number, numeric := sqlNumber(value)
 			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-				matches = false
-				break
+				return false
 			}
 		}
-		if !matches {
+		return matches
+	}
+	if len(orderFields) == 1 {
+		if sorted, ok := columnar.(SortedColumnarSourceResolver); ok {
+			order, available, err := sorted.BorrowSQLColumnarSourceOrder(q.from.kind, q.from.key, fields, orderFields[0])
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			if available {
+				result := sqlColumnarSortedProjectionTopN(q, batch, projectionFields, orderFields[0], order, matches)
+				if metrics != nil {
+					metrics.record("COLUMNAR SORTED PROJECTION", sqlExplainOrders(q.orderBy), batch.Rows, len(result.Rows), started)
+				}
+				return result, true, nil
+			}
+		}
+	}
+	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
+	heap.Init(&candidates)
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if !matches(rowIndex) {
 			continue
 		}
 		candidate := sqlTopNStreamItem{ordinal: rowIndex}
@@ -7537,6 +7554,66 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		metrics.record("COLUMNAR TOP-N", sqlExplainOrders(q.orderBy), batch.Rows, len(result.Rows), started)
 	}
 	return result, true, nil
+}
+
+func sqlColumnarSortedProjectionTopN(q *sqlQuery, batch ColumnarBatch, projectionFields []string, orderField string, order []uint32, matches func(int) bool) SQLQueryResult {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, q.limit)}
+	matched := 0
+	appendRow := func(rowIndex int) bool {
+		if !matches(rowIndex) {
+			return false
+		}
+		if matched < q.offset {
+			matched++
+			return false
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range q.selects {
+			row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		result.Rows = append(result.Rows, row)
+		matched++
+		return len(result.Rows) >= q.limit
+	}
+	if !q.orderBy[0].desc {
+		for _, ordinal := range order {
+			if appendRow(int(ordinal)) {
+				break
+			}
+		}
+		return result
+	}
+	for end := len(order); end > 0; {
+		start := end - 1
+		for start > 0 {
+			if !sqlColumnarTopNOrderEqual(batch, orderField, int(order[start-1]), int(order[start])) {
+				break
+			}
+			start--
+		}
+		for index := start; index < end; index++ {
+			if appendRow(int(order[index])) {
+				return result
+			}
+		}
+		end = start
+	}
+	return result
+}
+
+func sqlColumnarTopNOrderEqual(batch ColumnarBatch, field string, left, right int) bool {
+	leftValue, leftAvailable := batch.Value(field, left)
+	rightValue, rightAvailable := batch.Value(field, right)
+	if !leftAvailable || !rightAvailable {
+		return false
+	}
+	if leftText, ok := leftValue.(string); ok {
+		rightText, ok := rightValue.(string)
+		return ok && leftText == rightText
+	}
+	leftNumber, leftNumeric := sqlNumber(leftValue)
+	rightNumber, rightNumeric := sqlNumber(rightValue)
+	return leftNumeric && rightNumeric && leftNumber == rightNumber
 }
 
 func sqlColumnarTopNOrderKey(batch ColumnarBatch, field string, rowIndex int) (interface{}, bool) {

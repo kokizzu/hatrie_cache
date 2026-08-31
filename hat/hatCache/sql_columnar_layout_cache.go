@@ -12,6 +12,7 @@ import (
 
 const (
 	sqlColumnarLayoutCacheMinReads      = 2
+	sqlColumnarLayoutOrderCacheMinReads = 8
 	sqlColumnarLayoutCacheMaxEntries    = 32
 	sqlColumnarLayoutCacheMaxBytes      = 4 << 20
 	sqlColumnarLayoutCacheMaxCandidates = 128
@@ -21,12 +22,13 @@ const (
 // observed repeated analytical reads. Raw cache values remain authoritative;
 // every write drops layouts for its affected keys.
 type sqlColumnarLayoutCache struct {
-	mu           sync.RWMutex
-	entries      map[sqlColumnarLayoutCacheKey]sqlColumnarLayoutCacheEntry
-	observations map[sqlColumnarLayoutCacheKey]uint8
-	bytes        int
-	sequence     uint64
-	hits         atomic.Uint64
+	mu                sync.RWMutex
+	entries           map[sqlColumnarLayoutCacheKey]sqlColumnarLayoutCacheEntry
+	observations      map[sqlColumnarLayoutCacheKey]uint8
+	orderObservations map[sqlColumnarLayoutOrderCacheKey]uint8
+	bytes             int
+	sequence          uint64
+	hits              atomic.Uint64
 }
 
 type sqlColumnarLayoutCacheKey struct {
@@ -37,8 +39,14 @@ type sqlColumnarLayoutCacheKey struct {
 type sqlColumnarLayoutCacheEntry struct {
 	batch    hatSql.ColumnarBatch
 	segments *hatSql.ColumnarNumericSegments
+	orders   map[string][]uint32
 	bytes    int
 	sequence uint64
+}
+
+type sqlColumnarLayoutOrderCacheKey struct {
+	layout sqlColumnarLayoutCacheKey
+	field  string
 }
 
 type sqlColumnarLayoutCacheStats struct {
@@ -95,6 +103,69 @@ func (cache *sqlColumnarLayoutCache) has(key sqlColumnarLayoutCacheKey) bool {
 	_, ok := cache.entries[key]
 	cache.mu.RUnlock()
 	return ok
+}
+
+// observeOrder returns an immutable ascending row-ordinal projection only
+// after the exact layout and requested order have each been observed twice.
+// The sort itself happens outside the cache lock because cached batches are
+// immutable; publication verifies that the layout was not invalidated first.
+func (cache *sqlColumnarLayoutCache) observeOrder(key sqlColumnarLayoutCacheKey, field string) ([]uint32, bool) {
+	orderKey := sqlColumnarLayoutOrderCacheKey{layout: key, field: field}
+	cache.mu.Lock()
+	entry, exists := cache.entries[key]
+	if !exists {
+		cache.mu.Unlock()
+		return nil, false
+	}
+	if order, ok := entry.orders[field]; ok {
+		cache.mu.Unlock()
+		cache.hits.Add(1)
+		return order, true
+	}
+	if cache.orderObservations == nil {
+		cache.orderObservations = make(map[sqlColumnarLayoutOrderCacheKey]uint8)
+	}
+	reads := cache.orderObservations[orderKey] + 1
+	if reads < sqlColumnarLayoutOrderCacheMinReads {
+		if len(cache.orderObservations) >= sqlColumnarLayoutCacheMaxCandidates {
+			for candidate := range cache.orderObservations {
+				delete(cache.orderObservations, candidate)
+				break
+			}
+		}
+		cache.orderObservations[orderKey] = reads
+		cache.mu.Unlock()
+		return nil, false
+	}
+	delete(cache.orderObservations, orderKey)
+	batch, sequence := entry.batch, entry.sequence
+	cache.mu.Unlock()
+
+	order, bytes, ok := sqlColumnarLayoutOrder(batch, field)
+	if !ok {
+		return nil, false
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	entry, exists = cache.entries[key]
+	if !exists || entry.sequence != sequence {
+		return nil, false
+	}
+	if existing, ok := entry.orders[field]; ok {
+		cache.hits.Add(1)
+		return existing, true
+	}
+	if cache.bytes+bytes > sqlColumnarLayoutCacheMaxBytes {
+		return nil, false
+	}
+	if entry.orders == nil {
+		entry.orders = make(map[string][]uint32)
+	}
+	entry.orders[field] = order
+	entry.bytes += bytes
+	cache.entries[key] = entry
+	cache.bytes += bytes
+	return order, true
 }
 
 func (cache *sqlColumnarLayoutCache) observe(key sqlColumnarLayoutCacheKey, batch hatSql.ColumnarBatch) {
@@ -154,6 +225,7 @@ func (cache *sqlColumnarLayoutCache) invalidate(sourceKeys ...string) {
 	if len(sourceKeys) == 0 {
 		clear(cache.entries)
 		clear(cache.observations)
+		clear(cache.orderObservations)
 		cache.bytes = 0
 		return
 	}
@@ -167,6 +239,11 @@ func (cache *sqlColumnarLayoutCache) invalidate(sourceKeys ...string) {
 		for key := range cache.observations {
 			if key.sourceKey == sourceKey {
 				delete(cache.observations, key)
+			}
+		}
+		for key := range cache.orderObservations {
+			if key.layout.sourceKey == sourceKey {
+				delete(cache.orderObservations, key)
 			}
 		}
 	}
@@ -197,6 +274,56 @@ func cloneSQLColumnarBatch(batch hatSql.ColumnarBatch) hatSql.ColumnarBatch {
 		}
 	}
 	return clone
+}
+
+func sqlColumnarLayoutOrder(batch hatSql.ColumnarBatch, field string) ([]uint32, int, bool) {
+	if batch.Rows <= 0 || uint64(batch.Rows) > uint64(^uint32(0)) {
+		return nil, 0, false
+	}
+	order := make([]uint32, batch.Rows)
+	kind := byte(0)
+	for row := 0; row < batch.Rows; row++ {
+		value, available := batch.Value(field, row)
+		if !available || value == nil {
+			return nil, 0, false
+		}
+		if _, ok := value.(string); ok {
+			if kind == 2 {
+				return nil, 0, false
+			}
+			kind = 1
+		} else if _, ok := hatSql.Number(value); ok {
+			if kind == 1 {
+				return nil, 0, false
+			}
+			kind = 2
+		} else {
+			return nil, 0, false
+		}
+		order[row] = uint32(row)
+	}
+	if kind == 0 {
+		return nil, 0, false
+	}
+	sort.Slice(order, func(left, right int) bool {
+		leftRow, rightRow := int(order[left]), int(order[right])
+		leftValue, _ := batch.Value(field, leftRow)
+		rightValue, _ := batch.Value(field, rightRow)
+		if kind == 1 {
+			leftText, rightText := leftValue.(string), rightValue.(string)
+			if leftText != rightText {
+				return leftText < rightText
+			}
+		} else {
+			leftNumber, _ := hatSql.Number(leftValue)
+			rightNumber, _ := hatSql.Number(rightValue)
+			if leftNumber != rightNumber {
+				return leftNumber < rightNumber
+			}
+		}
+		return leftRow < rightRow
+	})
+	return order, len(order) * 4, true
 }
 
 func sqlColumnarLayoutCacheBytes(batch hatSql.ColumnarBatch) (int, bool) {

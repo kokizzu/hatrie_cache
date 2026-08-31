@@ -174,6 +174,14 @@ type SegmentedColumnarSourceResolver interface {
 	BorrowSQLColumnarSourceSegments(name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }
 
+// SortedColumnarSourceResolver optionally supplies an immutable ascending row
+// ordinal projection for one exact cached columnar layout. Returned ordinals
+// must remain valid for the query and must not be retained or mutated by the
+// executor. Unavailable projections retain the ordinary columnar scan.
+type SortedColumnarSourceResolver interface {
+	BorrowSQLColumnarSourceOrder(name, key string, fields []string, orderField string) ([]uint32, bool, error)
+}
+
 // ColumnarSourcePreferenceResolver optionally prefers a direct columnar scan
 // for an exact source layout. It may return true only when the layout is
 // immutable for the query and already available without source decoding.

@@ -1235,6 +1235,21 @@ stage-sql-columnar-topn-layout-preference:
 commit-sql-columnar-topn-layout-preference:
 	sh ./scripts/commit-sql-columnar-topn-layout-preference.sh
 
+test-sql-columnar-sorted-projection:
+	sh ./scripts/test-sql-columnar-sorted-projection.sh
+
+benchmark-sql-columnar-sorted-projection:
+	sh ./scripts/benchmark-sql-columnar-sorted-projection.sh
+
+format-sql-columnar-sorted-projection:
+	sh ./scripts/format-sql-columnar-sorted-projection.sh
+
+stage-sql-columnar-sorted-projection:
+	sh ./scripts/stage-sql-columnar-sorted-projection.sh
+
+commit-sql-columnar-sorted-projection:
+	sh ./scripts/commit-sql-columnar-sorted-projection.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 

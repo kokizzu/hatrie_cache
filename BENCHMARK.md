@@ -14202,6 +14202,41 @@ Five local runs on the AMD Ryzen 9 5950X use a warmed 4,096-row
 `TestHatTrieSQLColumnarTopNUsesWarmLayout` verifies both result ordering and
 that the normal materialized query borrows the warm immutable layout.
 
+## Warm Columnar Sorted Projection
+
+Repeated direct single-field `ORDER BY ... LIMIT` reads can use a ClickHouse-
+style sorted projection: an immutable ascending vector of source row ordinals
+alongside an already-warm columnar layout. The executor traverses that vector
+and materializes only the requested page, rather than scanning every row with
+a bounded heap. It preserves input order for equal sort values in both
+directions, supports direct numeric or string fields under binary collation,
+and leaves multi-field, nullable, expression, and wider SQL ordering on the
+established Top-N executor.
+
+The projection is admitted after eight compatible requests, is charged to the
+existing `4 MiB` columnar-layout cache budget, and is invalidated with the
+source on every write. Its ordinal vector costs about four bytes per source
+row plus small map metadata. If there is insufficient remaining cache budget,
+the query retains the existing direct columnar Top-N path.
+
+```sh
+make test-sql-columnar-sorted-projection
+make benchmark-sql-columnar-sorted-projection
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a warmed 20,000-row numeric
+`score` layout with `ORDER BY score ASC LIMIT 50`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Direct columnar Top-N heap | 1.24 ms/op | 186,468 B/op | 20,170 allocs/op | Baseline |
+| Warm sorted projection | 18.46 us/op | 20,744 B/op | 134 allocs/op | 67.4x faster; 9.0x lower allocation volume; 150.5x fewer allocations |
+| One-time sorted-projection build | 9.40 ms | 83,845 B | 11 allocs | 7.6x one direct Top-N read; amortizes at about 15 total identical reads with eight-request admission |
+
+`TestHatTrieSQLColumnarSortedProjectionUsesWarmOrderAndInvalidates` compares
+the optimized path against row execution, verifies stable ties for ascending
+and descending order, checks `EXPLAIN ANALYZE`, and verifies write invalidation.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or
