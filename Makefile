@@ -1196,6 +1196,18 @@ test-sql-columnar-limit-pushdown:
 test-sql-columnar-topn:
 	sh ./scripts/test-sql-columnar-topn.sh
 
+format-sql-columnar-dictionary-group-segment:
+	sh ./scripts/format-sql-columnar-dictionary-group-segment.sh
+
+test-sql-columnar-dictionary-group-segment:
+	sh ./scripts/test-sql-columnar-dictionary-group-segment.sh
+
+benchmark-sql-columnar-dictionary-group-segment:
+	sh ./scripts/benchmark-sql-columnar-dictionary-group-segment.sh
+
+commit-sql-columnar-dictionary-group-segment:
+	sh ./scripts/commit-sql-columnar-dictionary-group-segment.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 

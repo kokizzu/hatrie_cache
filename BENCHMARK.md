@@ -14031,6 +14031,32 @@ The subset excludes expressions, grouping, ordering, non-binary collation,
 additional dictionary predicates, and wider SQL operators; those retain the
 general executor.
 
+## Columnar Dictionary Group Segment Skipping
+
+Dictionary-keyed `GROUP BY` aggregates with direct numeric predicates now use
+the existing 256-row numeric min/max segments after a columnar layout has been
+promoted into the layout cache. Segments whose range cannot match the predicate
+are not decoded or added to group state.
+
+```sh
+make test-sql-columnar-dictionary-group-segment
+make benchmark-sql-columnar-dictionary-group-segment
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a promoted 4,096-row `jobs`
+source with `id >= 3072 AND id < 3328`, dictionary `state` grouping, and
+`COUNT`, `SUM`, `MIN`, and `MAX` aggregates:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Full dictionary group scan | 187.53 us/op | 14,449 B/op | 85 allocs/op | Baseline |
+| Numeric segment skip | 53.01 us/op | 14,448 B/op | 85 allocs/op | 3.54x faster; allocation volume and count unchanged |
+
+The path is used only for the existing narrow dictionary grouping subset and
+direct numeric `AND` predicates. It has no new storage cost because it reuses
+the layout cache's existing min/max segments. Sources without a promoted,
+cacheable layout and unselective predicates retain the full scan path.
+
 ## Columnar Dictionary DISTINCT
 
 For one dictionary-encoded text field, `SELECT DISTINCT field FROM CACHE(...)`

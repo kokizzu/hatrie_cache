@@ -7764,13 +7764,15 @@ type sqlColumnarDictionaryGroupProjection struct {
 // executeSQLColumnarDictionaryGroupAggregate groups low-cardinality text by
 // its dictionary code. It accepts only an ORDER BY on the grouped field, so a
 // byte-wise sort of dictionary values preserves the narrow SQL result order.
+// Direct numeric predicates use per-segment min/max metadata to bypass ranges
+// which cannot contribute to any group.
 func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
 	groupField, projections, fields, predicates, descending, ok := sqlColumnarDictionaryGroupAggregatePlan(q, outer)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7804,59 +7806,83 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 	groupRows := make([]int, len(dictionary.Values))
 	codes := make([]uint32, 0, len(dictionary.Values))
 	matched := 0
+	scannedRows := 0
 	filterStarted := time.Now()
-	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-		if control != nil {
-			if err := control.check(); err != nil {
+	scanRows := func(start, end int) error {
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if control != nil {
+				if err := control.check(); err != nil {
+					return err
+				}
+			}
+			scannedRows++
+			matches := true
+			if dictionaryFilter {
+				candidate := filterDictionary.Codes[rowIndex]
+				matches = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
+			}
+			for _, predicate := range predicates {
+				candidate, _ := batch.Value(predicate.field, rowIndex)
+				number, numeric := sqlNumber(candidate)
+				if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+			code := dictionary.Codes[rowIndex]
+			if int(code) >= len(dictionary.Values) {
+				return fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, groupField)
+			}
+			if states[code] == nil {
+				states[code] = make([]sqlColumnarNumericAggregate, len(projections))
+				for index, projection := range projections {
+					if projection.aggregate != nil {
+						states[code][index] = *projection.aggregate
+					}
+				}
+				codes = append(codes, code)
+			}
+			groupRows[code]++
+			if control != nil && control.options.MaxGroupRowsPerKey > 0 && groupRows[code] > control.options.MaxGroupRowsPerKey {
+				return fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", groupRows[code], control.options.MaxGroupRowsPerKey)
+			}
+			matched++
+			for index, projection := range projections {
+				if projection.aggregate != nil {
+					states[code][index].add(batch, rowIndex)
+				}
+			}
+		}
+		return nil
+	}
+	if segments != nil && len(predicates) > 0 && segments.RowsPerSegment > 0 {
+		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
+			if !sqlColumnarNumericSegmentMayMatch(segments, start/segments.RowsPerSegment, predicates) {
+				continue
+			}
+			end := start + segments.RowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			if err := scanRows(start, end); err != nil {
 				return SQLQueryResult{}, true, err
 			}
 		}
-		matches := true
-		if dictionaryFilter {
-			candidate := filterDictionary.Codes[rowIndex]
-			matches = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
-		}
-		for _, predicate := range predicates {
-			candidate, _ := batch.Value(predicate.field, rowIndex)
-			number, numeric := sqlNumber(candidate)
-			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-				matches = false
-				break
-			}
-		}
-		if !matches {
-			continue
-		}
-		code := dictionary.Codes[rowIndex]
-		if int(code) >= len(dictionary.Values) {
-			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, groupField)
-		}
-		if states[code] == nil {
-			states[code] = make([]sqlColumnarNumericAggregate, len(projections))
-			for index, projection := range projections {
-				if projection.aggregate != nil {
-					states[code][index] = *projection.aggregate
-				}
-			}
-			codes = append(codes, code)
-		}
-		groupRows[code]++
-		if control != nil && control.options.MaxGroupRowsPerKey > 0 && groupRows[code] > control.options.MaxGroupRowsPerKey {
-			return SQLQueryResult{}, true, fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", groupRows[code], control.options.MaxGroupRowsPerKey)
-		}
-		matched++
-		for index, projection := range projections {
-			if projection.aggregate != nil {
-				states[code][index].add(batch, rowIndex)
-			}
-		}
+	} else if err := scanRows(0, batch.Rows); err != nil {
+		return SQLQueryResult{}, true, err
 	}
 	if metrics != nil && q.where.kind != "" {
 		filterName := "COLUMNAR NUMERIC FILTER"
 		if dictionaryFilter {
 			filterName = "COLUMNAR DICTIONARY FILTER"
 		}
-		metrics.record(filterName, sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
+			metrics.record("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+		}
+		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
 	sort.Slice(codes, func(left, right int) bool {
 		if descending {
