@@ -2675,6 +2675,42 @@ format-sql-typed-composite:
 status-sql-typed-composite:
 	sh ./scripts/status-sql-typed-composite.sh
 
+.PHONY: test-sql-projection-frontier
+test-sql-projection-frontier:
+	sh ./scripts/test-sql-projection-frontier.sh
+
+.PHONY: format-sql-projection-frontier
+format-sql-projection-frontier:
+	sh ./scripts/format-sql-projection-frontier.sh
+
+.PHONY: verify-sql-projection-frontier
+verify-sql-projection-frontier:
+	sh ./scripts/verify-sql-projection-frontier.sh
+
+.PHONY: benchmark-sql-projection-frontier
+benchmark-sql-projection-frontier:
+	sh ./scripts/benchmark-sql-projection-frontier.sh
+
+.PHONY: test-race-sql-projection-frontier
+test-race-sql-projection-frontier:
+	sh ./scripts/test-race-sql-projection-frontier.sh
+
+.PHONY: security-sql-projection-frontier
+security-sql-projection-frontier:
+	sh ./scripts/security-sql-projection-frontier.sh
+
+.PHONY: inspect-sql-projection-frontier
+inspect-sql-projection-frontier:
+	sh ./scripts/inspect-sql-projection-frontier.sh
+
+.PHONY: deliver-sql-projection-frontier-commit
+deliver-sql-projection-frontier-commit:
+	sh ./scripts/deliver-sql-projection-frontier.sh commit
+
+.PHONY: deliver-sql-projection-frontier-push
+deliver-sql-projection-frontier-push:
+	sh ./scripts/deliver-sql-projection-frontier.sh push
+
 deliver-sql-typed-composite:
 	sh ./scripts/deliver-sql-typed-composite.sh
 
