@@ -312,7 +312,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Streamed indexed ORDER BY LIMIT materialization](#sql-indexed-order-by-limit-materialization), 100k JSON rows, `ORDER BY id DESC LIMIT 10` | Ordered-index source clone: 214.952 ms; 177,320,348 B; 2,000,123 allocs | Ordered-index stream: 40.286 ms; 63,705,298 B; 500,112 allocs | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations | Compatible direct-field, no-predicate, default-collation query shape only; it scans the whole source to retain `MaxRows` rejection semantics |
 | Current pass | [Streamed non-indexed ORDER BY LIMIT materialization](#sql-non-indexed-order-by-limit-materialization), 20k JSON rows, `ORDER BY score DESC LIMIT 50` | Full materialized sort: 67.34 ms; 27,868,570 B; 320,052 allocs | Bounded top-N stream: 37.59 ms; 23,579,755 B; 360,084 allocs | 1.79x faster; 1.18x lower allocation volume | 12.5% more allocation events from streaming JSON decode; index, metrics, and unsupported query paths retain existing behavior |
 | Current pass | [Columnar LIMIT pushdown](#columnar-limit-pushdown), warmed 20k-row scan, `LIMIT 50` | Full predicate loop: 59.19 us; 17,832 B; 108 allocs | Stop after page: 10.19 us; 17,832 B; 108 allocs | 5.81x faster; same allocation volume and count | Applies only to metrics-disabled, supported columnar shapes; instrumented plans retain complete match counters |
-| Current pass | [Columnar top-N](#columnar-top-n), warmed 20k rows, `WHERE state = 'ready' ORDER BY score DESC LIMIT 50` | Full materialization: 19.20 ms; 11,265,205 B; 55,035 allocs | Columnar top-N: 0.63 ms; 67,288 B; 5,176 allocs | 30.7x faster; 167.4x lower allocation volume; 10.63x fewer allocations | One numeric order field, direct projections, binary collation, and direct numeric or dictionary equality predicates; all other queries retain the normal executor |
+| Current pass | [Columnar top-N](#columnar-top-n), warmed 20k rows, `ORDER BY team ASC LIMIT 50` | Full materialization: 62.68 ms; 18,109,428 B; 100,032 allocs | Columnar top-N: 1.79 ms; 346,024 B; 20,167 allocs | 35.1x faster; 52.3x lower allocation volume; 4.96x fewer allocations | One numeric or string order field, direct projections, binary collation, and direct numeric or dictionary equality predicates; all other queries retain the normal executor |
 | Current pass | [Bounded protobuf batch request reuse](#bounded-protobuf-batch-request-reuse), 16-command HTTP request | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2x fewer allocations | At most one fixed 128-byte pointer slice is retained per pooled parent; batches above 16 release their backing |
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |
 | Earlier | [Binary journal decode](README.md#serialization-tradeoffs) | JSON: 30,034 ns; 22,728 heap B; 29 allocs | Binary: 20,035 ns; 18,071 heap B; 25 allocs | 1.50x faster, 1.26x lower heap | Existing JSON remains a supported fallback |
@@ -14008,12 +14008,12 @@ callback invocation; it is not retained by the executor. Reproduce with
 
 ## Columnar Top-N
 
-Supported materialized numeric `ORDER BY ... LIMIT` queries now rank the warmed
+Supported materialized numeric or string `ORDER BY ... LIMIT` queries now rank the warmed
 columnar batch directly. Direct numeric conjunctions and encoded dictionary
 equality/inequality `WHERE` predicates run before the bounded heap, so only
 matching row ordinals are retained. The operator keeps at most `LIMIT + OFFSET`
-candidates and materializes selected fields after sorting. It is limited to one
-numeric order field, direct field projections, binary collation, those direct
+ candidates and materializes selected fields after sorting. It is limited to one
+numeric or string order field, direct field projections, binary collation, those direct
 predicates, and no relational or aggregate operators;
 unavailable or wider shapes retain the general executor.
 
@@ -14023,19 +14023,19 @@ make benchmark-sql-columnar-topn
 ```
 
 Five local runs on the AMD Ryzen 9 5950X use a warmed 20,000-row
-`id`/`score`/dictionary-encoded `state` batch with
-`WHERE state = 'ready' ORDER BY score DESC LIMIT 50`:
+`id`/dictionary-encoded `team` batch with `ORDER BY team ASC LIMIT 50`:
 
 | Executor path | Median time | Allocated bytes | Allocations | Improvement |
 | --- | ---: | ---: | ---: | --- |
-| Full row materialization and sort | 19.20 ms/op | 11,265,205 B/op | 55,035 allocs/op | Baseline |
-| Columnar filtered bounded top-N | 0.63 ms/op | 67,288 B/op | 5,176 allocs/op | 30.7x faster; 167.4x lower allocation volume; 10.63x fewer allocations |
+| Full row materialization and sort | 62.68 ms/op | 18,109,428 B/op | 100,032 allocs/op | Baseline |
+| Columnar dictionary bounded top-N | 1.79 ms/op | 346,024 B/op | 20,167 allocs/op | 35.1x faster; 52.3x lower allocation volume; 4.96x fewer allocations |
 
 `TestExecuteSQLQueryUsesColumnarTopN` verifies direct columnar selection and
 ordering; `TestExecuteSQLQueryUsesColumnarTopNAfterNumericFilter` and
 `TestExecuteSQLQueryUsesColumnarTopNAfterDictionaryFilter` verify the predicate
-paths; `TestExecuteSQLQueryColumnarTopNOffsetPastResult`
-verifies empty-page pagination without a slice-bound failure.
+paths; `TestExecuteSQLQueryUsesColumnarTopNForDictionaryOrder` covers encoded
+string ordering; `TestExecuteSQLQueryColumnarTopNOffsetPastResult` verifies
+empty-page pagination without a slice-bound failure.
 
 ## Columnar LIMIT Pushdown
 

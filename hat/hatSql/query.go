@@ -7335,12 +7335,11 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		if !matches {
 			continue
 		}
-		value, _ := batch.Value(orderField, rowIndex)
-		number, numeric := sqlNumber(value)
-		if !numeric {
+		key, ordered := sqlColumnarTopNOrderKey(batch, orderField, rowIndex)
+		if !ordered {
 			return SQLQueryResult{}, false, nil
 		}
-		candidate := sqlTopNStreamItem{key: number, ordinal: rowIndex}
+		candidate := sqlTopNStreamItem{key: key, ordinal: rowIndex}
 		if candidates.Len() < capacity {
 			heap.Push(&candidates, candidate)
 			continue
@@ -7373,6 +7372,18 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		metrics.record("COLUMNAR TOP-N", sqlExplainOrders(q.orderBy), batch.Rows, len(result.Rows), started)
 	}
 	return result, true, nil
+}
+
+func sqlColumnarTopNOrderKey(batch ColumnarBatch, field string, rowIndex int) (interface{}, bool) {
+	value, ok := batch.Value(field, rowIndex)
+	if !ok || value == nil {
+		return nil, false
+	}
+	if text, ok := value.(string); ok {
+		return text, true
+	}
+	number, ok := sqlNumber(value)
+	return number, ok
 }
 
 func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFields []string, orderField string, predicates []sqlColumnarNumericFilter, ok bool) {
