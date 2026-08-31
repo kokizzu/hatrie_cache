@@ -14027,8 +14027,20 @@ dictionary values and `SELECT DISTINCT team FROM CACHE('items') ORDER BY team`:
 | Columnar dictionary DISTINCT | 16.76 us/op | 9,672 B/op | 75 allocs/op | 1,054.8x faster; 2,111.4x lower allocation volume; 2,401.5x fewer allocations |
 
 The fast path is intentionally limited to one direct text field, `DISTINCT`, a
-matching binary `ORDER BY`, and no `WHERE`, aggregates, joins, windows, or
-set operations. Every other query retains the established executor.
+matching binary `ORDER BY`, optional direct numeric `WHERE` conjunctions, and
+no aggregates, joins, windows, or set operations. Every other query retains
+the established executor.
+
+The same 20,000-row fixture with `WHERE score >= 50` measured:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| General row materialization | 17.28 ms/op | 14,706,291 B/op | 110,087 allocs/op | Baseline |
+| Columnar dictionary DISTINCT with numeric filter | 458.19 us/op | 10,856 B/op | 80 allocs/op | 37.7x faster; 1,354.7x lower allocation volume; 1,376.1x fewer allocations |
+
+The filtered path evaluates only direct numeric comparisons while scanning
+dictionary codes. Dictionary predicates, mixed predicate types, expressions,
+and all wider SQL shapes retain the established executor.
 
 ## Columnar Top-N
 

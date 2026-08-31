@@ -7307,12 +7307,12 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 // executeSQLColumnarDictionaryDistinct materializes the used values of one
 // encoded text column without building source-row maps for every input row.
 func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
-	field, descending, ok := sqlColumnarDictionaryDistinctPlan(q, outer)
+	field, fields, predicates, descending, ok := sqlColumnarDictionaryDistinctPlan(q, outer)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, []string{field})
+	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -7326,11 +7326,25 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 	if control != nil && batch.Rows > control.maxRows {
 		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, control.maxRows)
 	}
-	if batch.FieldRows(field) != batch.Rows {
-		return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
+	for _, candidateField := range fields {
+		if batch.FieldRows(candidateField) != batch.Rows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(candidateField), candidateField, batch.Rows)
+		}
 	}
 	used := make([]bool, len(dictionary.Values))
-	for _, code := range dictionary.Codes {
+	for rowIndex, code := range dictionary.Codes {
+		matches := true
+		for _, predicate := range predicates {
+			value, _ := batch.Value(predicate.field, rowIndex)
+			number, numeric := sqlNumber(value)
+			if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
 		if int(code) >= len(dictionary.Values) {
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, field)
 		}
@@ -7376,19 +7390,41 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 		position++
 	}
 	if metrics != nil {
-		metrics.record("COLUMNAR DICTIONARY DISTINCT", field, batch.Rows, len(result.Rows), started)
+		node := "COLUMNAR DICTIONARY DISTINCT"
+		if len(predicates) > 0 {
+			node = "COLUMNAR DICTIONARY DISTINCT FILTER"
+		}
+		metrics.record(node, field, batch.Rows, len(result.Rows), started)
 	}
 	return result, true, nil
 }
 
-func sqlColumnarDictionaryDistinctPlan(q *sqlQuery, outer *sqlExecRow) (field string, descending bool, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || q.where.kind != "" || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || !q.distinct || len(q.selects) != 1 || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
-		return "", false, false
+func sqlColumnarDictionaryDistinctPlan(q *sqlQuery, outer *sqlExecRow) (field string, fields []string, predicates []sqlColumnarNumericFilter, descending bool, ok bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || !q.distinct || len(q.selects) != 1 || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
+		return "", nil, nil, false, false
 	}
 	if !sqlColumnarAggregateField(q.selects[0].expr, q.from.alias, &field) || !sqlSameField(q.selects[0].expr, q.orderBy[0].expr) {
-		return "", false, false
+		return "", nil, nil, false, false
 	}
-	return field, q.orderBy[0].desc, true
+	if q.where.kind != "" {
+		var numeric bool
+		predicates, numeric = sqlColumnarNumericConjunction(q.where, q.from.alias)
+		if !numeric {
+			return "", nil, nil, false, false
+		}
+	}
+	seen := map[string]bool{}
+	addField := func(candidate string) {
+		if candidate != "" && !seen[candidate] {
+			seen[candidate] = true
+			fields = append(fields, candidate)
+		}
+	}
+	addField(field)
+	for _, predicate := range predicates {
+		addField(predicate.field)
+	}
+	return field, fields, predicates, q.orderBy[0].desc, true
 }
 
 // executeSQLColumnarTopN keeps only the requested page while ranking one
