@@ -638,6 +638,13 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	}
 	if metrics == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		result, err = executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
+		if !errors.Is(err, errSQLOrderedSourceUnavailable) {
+			result.QueryID = observation.id
+			return result, err
+		}
+	}
+	if metrics == nil && sqlTopNMaterializedStreamable(query, resolver) {
+		result, err = executeSQLTopNMaterializedStream(ctx, query, resolver, control)
 		result.QueryID = observation.id
 		return result, err
 	}
@@ -660,7 +667,10 @@ func ExecuteQueryParameters(ctx context.Context, source string, resolver SourceR
 	return ExecuteSQLQueryParameters(ctx, source, resolver, parameters, options)
 }
 
-var errSQLStreamLimitReached = fmt.Errorf("SQL stream limit reached")
+var (
+	errSQLStreamLimitReached       = fmt.Errorf("SQL stream limit reached")
+	errSQLOrderedSourceUnavailable = fmt.Errorf("SQL ordered source unavailable")
+)
 
 // ExecuteSQLQueryRows evaluates a stream-compatible query and invokes visit as
 // each projected row becomes available. It never builds a result-row slice.
@@ -2199,11 +2209,18 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 
 type sqlTopNStreamItem struct {
 	row     SQLRow
+	key     interface{}
 	keys    []interface{}
 	ordinal int
 }
 
 func sqlTopNStreamBefore(left, right sqlTopNStreamItem, order []sqlOrder) bool {
+	if len(order) == 1 {
+		if less, decided := sqlOrderLess(order[0], left.key, right.key); decided {
+			return less
+		}
+		return left.ordinal < right.ordinal
+	}
 	for index, item := range order {
 		if less, decided := sqlOrderLess(item, left.keys[index], right.keys[index]); decided {
 			return less
@@ -2302,14 +2319,24 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 			}
 			row[columns[index]] = value
 		}
-		candidate := sqlTopNStreamItem{row: row, keys: make([]interface{}, len(query.orderBy)), ordinal: ordinal}
+		candidate := sqlTopNStreamItem{row: row, ordinal: ordinal}
 		ordinal++
-		for index, order := range query.orderBy {
-			value := evalOutputOrder(order.expr, row, []sqlExecRow{execRow})
+		orderGroup := [1]sqlExecRow{execRow}
+		if len(query.orderBy) == 1 {
+			value := evalOutputOrder(query.orderBy[0].expr, row, orderGroup[:])
 			if err := sqlExpressionError(value); err != nil {
 				return err
 			}
-			candidate.keys[index] = value
+			candidate.key = value
+		} else {
+			candidate.keys = make([]interface{}, len(query.orderBy))
+			for index, order := range query.orderBy {
+				value := evalOutputOrder(order.expr, row, orderGroup[:])
+				if err := sqlExpressionError(value); err != nil {
+					return err
+				}
+				candidate.keys[index] = value
+			}
 		}
 		if candidates.Len() < capacity {
 			heap.Push(&candidates, candidate)
@@ -2351,6 +2378,29 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 		}
 	}
 	return nil
+}
+
+// sqlTopNMaterializedStreamable permits the materialized API to reuse the
+// bounded top-N operator only when the resolver can stream CACHE rows. Regular
+// resolvers retain the established materialized execution path.
+func sqlTopNMaterializedStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if !sqlTopNStreamable(query) {
+		return false
+	}
+	if query.from.kind != "CACHE" {
+		return true
+	}
+	_, ok := resolver.(SQLStreamSourceResolver)
+	return ok
+}
+
+func executeSQLTopNMaterializedStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
+	result := SQLQueryResult{Columns: sqlColumns(query.selects), Rows: make([]SQLRow, 0, sqlTopNStreamCapacity(query, control.maxRows))}
+	err := executeSQLTopNStream(ctx, query, resolver, control, func(_ []string, row SQLRow) error {
+		result.Rows = append(result.Rows, row)
+		return nil
+	})
+	return result, err
 }
 
 // sqlExternalSortStreamable recognizes an unbounded direct-source ORDER BY
@@ -3150,7 +3200,7 @@ func executeSQLIndexedOrderStreamWithLimitBehavior(ctx context.Context, query *s
 		if sqlExternalSortStreamable(query, control) {
 			return executeSQLExternalSortStream(ctx, query, resolver, control, visit)
 		}
-		return fmt.Errorf("SQL query cannot stream this ordered scan because the ordered index is unavailable")
+		return fmt.Errorf("SQL query cannot stream this ordered scan because the ordered index is unavailable: %w", errSQLOrderedSourceUnavailable)
 	}
 	return nil
 }

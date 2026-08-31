@@ -126,6 +126,45 @@ func TestExecuteSQLQueryOrderedStreamRetainsSourceRowBudget(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryUsesTopNStreamForMaterializedResult(t *testing.T) {
+	t.Parallel()
+	resolver := &sqlStreamingTestResolver{rows: []SQLRow{
+		{"id": int64(1), "team": "alpha", "score": int64(4)},
+		{"id": int64(2), "team": "beta", "score": int64(9)},
+		{"id": int64(3), "team": "gamma", "score": int64(7)},
+		{"id": int64(4), "team": "delta", "score": int64(8)},
+		{"id": int64(5), "team": "epsilon", "score": int64(8)},
+	}}
+
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS people SELECT people.id, people.team ORDER BY people.score DESC, people.id ASC LIMIT 2 OFFSET 1", resolver)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	if resolver.resolveCalls != 0 || resolver.streamCalls != 1 {
+		t.Fatalf("resolver calls = resolve=%d stream=%d, want resolve=0 stream=1", resolver.resolveCalls, resolver.streamCalls)
+	}
+	want := []SQLRow{{"id": int64(4), "team": "delta"}, {"id": int64(5), "team": "epsilon"}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestExecuteSQLQueryTopNFallsBackWhenOrderIndexIsUnavailable(t *testing.T) {
+	t.Parallel()
+	trie := CreateHatTrie()
+	t.Cleanup(trie.Destroy)
+	trie.UpsertString("people", `[{"id":1,"score":4},{"id":2,"score":9},{"id":3,"score":7},{"id":4,"score":8}]`)
+
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS people SELECT people.id ORDER BY people.score DESC LIMIT 2 OFFSET 1", trie)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQuery() error = %v", err)
+	}
+	want := []SQLRow{{"id": float64(4)}, {"id": float64(3)}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
 type sqlStreamingFunctionTestResolver struct {
 	*sqlStreamingTestResolver
 	functions SQLFunctionResolver

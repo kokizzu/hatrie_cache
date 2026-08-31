@@ -2405,6 +2405,18 @@ deliver-sql-immutable-source:
 test-sql-materialized-order:
 	sh ./scripts/test-sql-materialized-order.sh
 
+.PHONY: benchmark-sql-materialized-topn
+benchmark-sql-materialized-topn:
+	sh ./scripts/benchmark-sql-materialized-topn.sh
+
+.PHONY: format-sql-materialized-topn
+format-sql-materialized-topn:
+	sh ./scripts/format-sql-materialized-topn.sh
+
+.PHONY: deliver-sql-materialized-topn
+deliver-sql-materialized-topn:
+	sh ./scripts/deliver-sql-materialized-topn.sh
+
 .PHONY: deliver-sql-materialized-order
 deliver-sql-materialized-order:
 	sh ./scripts/deliver-sql-materialized-order.sh

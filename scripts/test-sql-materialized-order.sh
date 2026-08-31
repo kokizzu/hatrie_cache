@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-go test ./hat/hatCache -run '^(TestExecuteSQLQueryUsesOrderedStreamForMaterializedResult|TestExecuteSQLQueryOrderedStreamRetainsSourceRowBudget)$' -count=1
+go test ./hat/hatCache -run '^(TestExecuteSQLQueryUsesOrderedStreamForMaterializedResult|TestExecuteSQLQueryOrderedStreamRetainsSourceRowBudget|TestExecuteSQLQueryUsesTopNStreamForMaterializedResult|TestExecuteSQLQueryTopNFallsBackWhenOrderIndexIsUnavailable)$' -count=1

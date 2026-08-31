@@ -195,6 +195,34 @@ This preserves output order and result rows and preserves source-row budget
 failure. It does not change storage bytes, wire bytes, index build cost, or
 semantics for unsupported query plans.
 
+## SQL Non-Indexed ORDER BY LIMIT Materialization
+
+When an uninstrumented materialized `CACHE` query has a finite `ORDER BY` and
+`LIMIT`, the executor now falls back to the existing bounded top-N stream when
+the optional ordered JSON index is unavailable. It retains only `LIMIT +
+OFFSET` projected candidates while scanning the source, rather than retaining
+and sorting every projected row. Available ordered indexes remain the preferred
+path; metrics, joins, aggregates, windows, `DISTINCT`, typed fields, custom
+functions, and unsupported query shapes retain the established executor.
+
+```sh
+make test-sql-materialized-order
+make benchmark-sql-materialized-topn
+```
+
+Five local runs on the AMD Ryzen 9 5950X used 20,000 JSON rows with
+`ORDER BY event.score DESC LIMIT 50` and no ordered index:
+
+| Executor path | Median time / query | Allocated bytes / query | Allocations / query | Improvement vs full materialization |
+| --- | ---: | ---: | ---: | --- |
+| Full materialized sort | 67.34 ms | 27,868,570 B | 320,052 | Baseline |
+| Streamed bounded top-N | 37.59 ms | 23,579,755 B | 360,084 | 1.79x faster; 1.18x lower allocation volume |
+
+The JSON stream decoder creates 12.5% more allocation events, but the retained
+top-N working set lowers total allocated bytes by 15.4% and reduces CPU by
+44.2%. The focused tests cover exact multi-column ordering, `OFFSET`, resolver
+stream selection, source-row limits, and the unavailable-index fallback.
+
 ## SQL Immutable Index Source Snapshot
 
 Generic, covering, bitmap, text, and composite JSON indexes now read cached
@@ -282,6 +310,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [HTTP protobuf command wire](README.md#serialization-tradeoffs) | JSON: 15,012 ns; 3,185 wire B | Protobuf: 12,637 ns; 3,146 wire B | 1.19x faster, 1.2% smaller wire | Heap is 0.6% higher; complex values retain JSON fallback |
 | Current pass | [Immutable SQL index source snapshot](#sql-immutable-index-source-snapshot), 100k-row generic indexed range | Copied JSON source: 820.841 us; 3,076,561 B; 1,991 allocs | Immutable source string: 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation | Applies to generic field indexes backed by immutable cache strings; byte/cold and specialized index sources retain checked fallback handling |
 | Current pass | [Streamed indexed ORDER BY LIMIT materialization](#sql-indexed-order-by-limit-materialization), 100k JSON rows, `ORDER BY id DESC LIMIT 10` | Ordered-index source clone: 214.952 ms; 177,320,348 B; 2,000,123 allocs | Ordered-index stream: 40.286 ms; 63,705,298 B; 500,112 allocs | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations | Compatible direct-field, no-predicate, default-collation query shape only; it scans the whole source to retain `MaxRows` rejection semantics |
+| Current pass | [Streamed non-indexed ORDER BY LIMIT materialization](#sql-non-indexed-order-by-limit-materialization), 20k JSON rows, `ORDER BY score DESC LIMIT 50` | Full materialized sort: 67.34 ms; 27,868,570 B; 320,052 allocs | Bounded top-N stream: 37.59 ms; 23,579,755 B; 360,084 allocs | 1.79x faster; 1.18x lower allocation volume | 12.5% more allocation events from streaming JSON decode; index, metrics, and unsupported query paths retain existing behavior |
 | Current pass | [Bounded protobuf batch request reuse](#bounded-protobuf-batch-request-reuse), 16-command HTTP request | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2x fewer allocations | At most one fixed 128-byte pointer slice is retained per pooled parent; batches above 16 release their backing |
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |
 | Earlier | [Binary journal decode](README.md#serialization-tradeoffs) | JSON: 30,034 ns; 22,728 heap B; 29 allocs | Binary: 20,035 ns; 18,071 heap B; 25 allocs | 1.50x faster, 1.26x lower heap | Existing JSON remains a supported fallback |
