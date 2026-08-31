@@ -12,3 +12,7 @@ printf '\n-- adaptive --\n'
 sed -n '1,300p' hat/hatSql/adaptive.go
 printf '\n-- index advisor --\n'
 sed -n '1,320p' hat/hatSql/index_advisor.go
+printf '\n-- columnar string dispatch --\n'
+sed -n '7180,8025p' hat/hatSql/query.go
+printf '\n-- segment construction --\n'
+rg -n -C 8 'StringBloomFilters|RowsPerSegment|ColumnarNumericSegments' hat/hatCache hat/hatSql --glob '*.go'

@@ -7263,12 +7263,23 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
 		filterStarted := time.Now()
-		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			candidate, _ := batch.Value(field, rowIndex)
-			return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern)
-		}, metrics != nil)
+		literal, useNGram := sqlColumnarLikeNGramLiteral(pattern)
+		var result SQLQueryResult
+		var matched, scanned int
+		if useNGram {
+			result, matched, scanned = sqlColumnarStringNGramMaterialize(q, batch, projectionFields, segments, field, pattern, literal, metrics != nil)
+		} else {
+			result, matched = sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+				candidate, _ := batch.Value(field, rowIndex)
+				return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern)
+			}, metrics != nil)
+			scanned = batch.Rows
+		}
 		if metrics != nil {
-			metrics.record("COLUMNAR LIKE FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			if skippedRows := batch.Rows - scanned; useNGram && skippedRows > 0 {
+				metrics.record("COLUMNAR NGRAM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+			}
+			metrics.record("COLUMNAR LIKE FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
@@ -7987,6 +7998,65 @@ func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			candidate, _ := batch.Value(field, rowIndex)
 			text, equal := candidate.(string)
 			if !equal || text != value {
+				continue
+			}
+			position := matched
+			matched++
+			if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+				continue
+			}
+			row := make(SQLRow, len(projectionFields))
+			for selectIndex, item := range q.selects {
+				row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+			}
+			result.Rows = append(result.Rows, row)
+		}
+	}
+	return result, matched, scanned
+}
+
+func sqlColumnarLikeNGramLiteral(pattern string) (string, bool) {
+	if len(pattern) < 5 || pattern[0] != '%' || pattern[len(pattern)-1] != '%' {
+		return "", false
+	}
+	literal := pattern[1 : len(pattern)-1]
+	if len(literal) < 3 || strings.ContainsAny(literal, "%_\\") {
+		return "", false
+	}
+	return literal, true
+}
+
+// sqlColumnarStringNGramMaterialize skips only segments whose trigrams prove
+// they cannot contain literal. The ordinary LIKE evaluator remains the final
+// authority, preserving false-positive and wildcard behavior.
+func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field, pattern, literal string, scanAll bool) (SQLQueryResult, int, int) {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	matched, scanned := 0, 0
+	rowsPerSegment := batch.Rows
+	filters := []ColumnarStringNGramBloomSegment(nil)
+	if segments != nil && segments.RowsPerSegment > 0 {
+		rowsPerSegment = segments.RowsPerSegment
+		filters = segments.StringNGramBloomFilters[field]
+	}
+	for start := 0; start < batch.Rows; start += rowsPerSegment {
+		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		segmentIndex := start / rowsPerSegment
+		if segmentIndex < len(filters) && !filters[segmentIndex].MayContainSubstring(literal) {
+			continue
+		}
+		end := start + rowsPerSegment
+		if end > batch.Rows {
+			end = batch.Rows
+		}
+		scanned += end - start
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+				break
+			}
+			candidate, _ := batch.Value(field, rowIndex)
+			if candidate == nil || !sqlLike(fmt.Sprint(candidate), pattern) {
 				continue
 			}
 			position := matched

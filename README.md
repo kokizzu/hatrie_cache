@@ -12,6 +12,7 @@ security guidance before exposing it on a network.
 - New to the SQL interface: [SQL.md](SQL.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
+- Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
@@ -76,6 +77,11 @@ persist a checkpoint only after a successful refresh, and offer a controlled
 rebuild boundary for journal compaction recovery. The measured 32-mutation
 grouped-aggregate workload is 32.6x faster than refreshing after every
 mutation; see [BENCHMARK.md](BENCHMARK.md#journal-driven-incremental-projections).
+
+Large warmed plain-string columnar layouts now use fixed n-gram Bloom sidecars
+for literal substring `LIKE` predicates. On a selective 20,000-row workload it
+is 263x faster with 232x less heap; see
+[COLUMNAR_NGRAMS.md](COLUMNAR_NGRAMS.md).
 
 Opt-in typed SQL tables store fixed schemas in primitive columns and maintain
 exact grouped `COUNT`/`SUM` from an ordered before/after changefeed. A measured

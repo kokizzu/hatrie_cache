@@ -134,16 +134,52 @@ func columnarStringBloomHash(value string) uint64 {
 	return hash
 }
 
+// ColumnarStringNGramBloomSegment is a fixed 1,024-bit Bloom filter over
+// three-byte string grams. It can exclude a segment for a literal substring
+// of at least three bytes without changing LIKE matching semantics.
+type ColumnarStringNGramBloomSegment struct {
+	Bits [16]uint64
+}
+
+// Add records every three-byte gram in value.
+func (segment *ColumnarStringNGramBloomSegment) Add(value string) {
+	if segment == nil {
+		return
+	}
+	for index := 0; index+3 <= len(value); index++ {
+		for _, bit := range newColumnarStringBloomProbe(value[index : index+3]) {
+			segment.Bits[bit>>6] |= uint64(1) << (bit & 63)
+		}
+	}
+}
+
+// MayContainSubstring reports whether a substring can be present. Inputs
+// shorter than three bytes are retained because this sidecar has no such gram.
+func (segment ColumnarStringNGramBloomSegment) MayContainSubstring(value string) bool {
+	if len(value) < 3 {
+		return true
+	}
+	for index := 0; index+3 <= len(value); index++ {
+		for _, bit := range newColumnarStringBloomProbe(value[index : index+3]) {
+			if segment.Bits[bit>>6]&(uint64(1)<<(bit&63)) == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // ColumnarNumericSegments stores immutable segment sidecars for one columnar
 // batch. Columns holds numeric min/max bounds. DictionaryCodeSets holds exact
 // membership masks for dictionary columns with at most 64 distinct values.
 // StringBloomFilters holds fixed Bloom filters for all-string plain columns.
 // Segment i covers RowsPerSegment consecutive rows.
 type ColumnarNumericSegments struct {
-	RowsPerSegment     int
-	Columns            map[string][]ColumnarNumericSegment
-	DictionaryCodeSets map[string][]uint64
-	StringBloomFilters map[string][]ColumnarStringBloomSegment
+	RowsPerSegment          int
+	Columns                 map[string][]ColumnarNumericSegment
+	DictionaryCodeSets      map[string][]uint64
+	StringBloomFilters      map[string][]ColumnarStringBloomSegment
+	StringNGramBloomFilters map[string][]ColumnarStringNGramBloomSegment
 }
 
 // FieldRows reports the physical row count retained for one field.

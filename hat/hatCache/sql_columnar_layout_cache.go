@@ -367,12 +367,14 @@ func sqlColumnarLayoutCacheBytes(batch hatSql.ColumnarBatch) (int, bool) {
 
 func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNumericSegments, int) {
 	const rowsPerSegment = 256
+	const nGramMinRows = 4096
 	if batch.Rows < rowsPerSegment || len(batch.Columns) == 0 && len(batch.Dictionaries) == 0 {
 		return nil, 0
 	}
 	columns := make(map[string][]hatSql.ColumnarNumericSegment)
 	dictionaryCodeSets := make(map[string][]uint64)
 	stringBloomFilters := make(map[string][]hatSql.ColumnarStringBloomSegment)
+	stringNGramBloomFilters := make(map[string][]hatSql.ColumnarStringNGramBloomSegment)
 	bytes := 0
 	for field, values := range batch.Columns {
 		if len(values) != batch.Rows {
@@ -414,6 +416,8 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 			continue
 		}
 		filters := make([]hatSql.ColumnarStringBloomSegment, 0, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
+		ngramFilters := make([]hatSql.ColumnarStringNGramBloomSegment, 0, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
+		buildNGrams := batch.Rows >= nGramMinRows
 		stringsOnly := true
 		for start := 0; start < batch.Rows; start += rowsPerSegment {
 			end := start + rowsPerSegment
@@ -421,6 +425,7 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 				end = batch.Rows
 			}
 			filter := hatSql.ColumnarStringBloomSegment{}
+			ngramFilter := hatSql.ColumnarStringNGramBloomSegment{}
 			for _, value := range values[start:end] {
 				text, ok := value.(string)
 				if !ok {
@@ -428,15 +433,25 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 					break
 				}
 				filter.Add(text)
+				if buildNGrams {
+					ngramFilter.Add(text)
+				}
 			}
 			if !stringsOnly {
 				break
 			}
 			filters = append(filters, filter)
+			if buildNGrams {
+				ngramFilters = append(ngramFilters, ngramFilter)
+			}
 		}
 		if stringsOnly {
 			stringBloomFilters[field] = filters
 			bytes += len(field) + 48 + len(filters)*128
+			if buildNGrams {
+				stringNGramBloomFilters[field] = ngramFilters
+				bytes += len(field) + 48 + len(ngramFilters)*128
+			}
 		}
 	}
 	for field, dictionary := range batch.Dictionaries {
@@ -468,8 +483,8 @@ func sqlColumnarNumericSegments(batch hatSql.ColumnarBatch) (*hatSql.ColumnarNum
 			bytes += len(field) + 48 + len(sets)*8
 		}
 	}
-	if len(columns) == 0 && len(dictionaryCodeSets) == 0 && len(stringBloomFilters) == 0 {
+	if len(columns) == 0 && len(dictionaryCodeSets) == 0 && len(stringBloomFilters) == 0 && len(stringNGramBloomFilters) == 0 {
 		return nil, 0
 	}
-	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns, DictionaryCodeSets: dictionaryCodeSets, StringBloomFilters: stringBloomFilters}, bytes
+	return &hatSql.ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: columns, DictionaryCodeSets: dictionaryCodeSets, StringBloomFilters: stringBloomFilters, StringNGramBloomFilters: stringNGramBloomFilters}, bytes
 }

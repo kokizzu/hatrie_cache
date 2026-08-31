@@ -2970,6 +2970,31 @@ inspect-sql-journal-projection-runner:
 inspect-sql-analytics-primitives:
 	sh ./scripts/inspect-sql-analytics-primitives.sh
 
+inspect-sql-columnar-string-path:
+	sh ./scripts/inspect-sql-columnar-string-path.sh
+
+test-sql-columnar-ngram:
+	sh ./scripts/test-sql-columnar-ngram.sh
+
+format-sql-columnar-ngram:
+	sh ./scripts/format-sql-columnar-ngram.sh
+
+benchmark-sql-columnar-ngram:
+	sh ./scripts/benchmark-sql-columnar-ngram.sh
+
+verify-sql-columnar-ngram-docs:
+	sh ./scripts/verify-sql-columnar-ngram-docs.sh
+
+test-race-sql-columnar-ngram:
+	sh ./scripts/test-race-sql-columnar-ngram.sh
+
+audit-sql-columnar-ngram-security:
+	sh ./scripts/audit-sql-columnar-ngram-security.sh
+
+.PHONY: inspect-sql-columnar-string-path test-sql-columnar-ngram format-sql-columnar-ngram benchmark-sql-columnar-ngram verify-sql-columnar-ngram-docs test-race-sql-columnar-ngram audit-sql-columnar-ngram-security deliver-sql-columnar-ngram
+deliver-sql-columnar-ngram:
+	sh ./scripts/deliver-sql-columnar-ngram.sh
+
 test-sql-typed-table:
 	sh ./scripts/test-sql-typed-table.sh
 
