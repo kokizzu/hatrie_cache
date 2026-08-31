@@ -1208,6 +1208,18 @@ benchmark-sql-columnar-dictionary-group-segment:
 commit-sql-columnar-dictionary-group-segment:
 	sh ./scripts/commit-sql-columnar-dictionary-group-segment.sh
 
+format-sql-columnar-dictionary-group-order:
+	sh ./scripts/format-sql-columnar-dictionary-group-order.sh
+
+test-sql-columnar-dictionary-group-order:
+	sh ./scripts/test-sql-columnar-dictionary-group-order.sh
+
+benchmark-sql-columnar-dictionary-group-order:
+	sh ./scripts/benchmark-sql-columnar-dictionary-group-order.sh
+
+commit-sql-columnar-dictionary-group-order:
+	sh ./scripts/commit-sql-columnar-dictionary-group-order.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 

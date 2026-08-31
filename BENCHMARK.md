@@ -14031,6 +14031,31 @@ The subset excludes expressions, grouping, ordering, non-binary collation,
 additional dictionary predicates, and wider SQL operators; those retain the
 general executor.
 
+## Columnar Dictionary Group Ordering
+
+Dictionary-keyed groups can now order by one projected numeric aggregate alias
+when a `LIMIT` is present. The executor aggregates from column slices, sorts
+only the dictionary group codes with the established SQL comparator, and then
+emits the requested page.
+
+```sh
+make test-sql-columnar-dictionary-group-order
+make benchmark-sql-columnar-dictionary-group-order
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 4,096-row source with 32
+dictionary states, `COUNT`, `SUM`, and `AVG`, ordered by the `SUM` alias with
+`LIMIT 8`:
+
+| Executor path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| General aggregate and sort | 7.38 ms/op | 5,109,196 B/op | 61,093 allocs/op | Baseline |
+| Direct dictionary group ordering | 294.39 us/op | 21,759 B/op | 372 allocs/op | 25.1x faster; 234.8x lower allocation volume; 164.2x fewer allocations |
+
+The subset excludes joins, CTEs, windows, `HAVING`, custom expressions,
+multiple order keys, explicit null placement, and unbounded aggregate ordering.
+Those queries retain the established general executor.
+
 ## Columnar Dictionary Group Segment Skipping
 
 Dictionary-keyed `GROUP BY` aggregates with direct numeric predicates now use

@@ -7758,6 +7758,7 @@ type sqlColumnarNumericAggregate struct {
 type sqlColumnarDictionaryGroupProjection struct {
 	column    string
 	group     bool
+	order     bool
 	aggregate *sqlColumnarNumericAggregate
 }
 
@@ -7770,6 +7771,13 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 	groupField, projections, fields, predicates, descending, ok := sqlColumnarDictionaryGroupAggregatePlan(q, outer)
 	if !ok {
 		return SQLQueryResult{}, false, nil
+	}
+	orderProjection := -1
+	for index, projection := range projections {
+		if projection.order {
+			orderProjection = index
+			break
+		}
 	}
 	started := time.Now()
 	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
@@ -7885,6 +7893,13 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
 	sort.Slice(codes, func(left, right int) bool {
+		if orderProjection >= 0 {
+			leftValue := states[codes[left]][orderProjection].result()
+			rightValue := states[codes[right]][orderProjection].result()
+			if less, decided := sqlOrderLess(q.orderBy[0], leftValue, rightValue); decided {
+				return less
+			}
+		}
 		if descending {
 			return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
 		}
@@ -7915,7 +7930,11 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		result.Rows = append(result.Rows, row)
 	}
 	if metrics != nil {
-		metrics.record("COLUMNAR DICTIONARY GROUP AGGREGATE", sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
+		aggregateName := "COLUMNAR DICTIONARY GROUP AGGREGATE"
+		if orderProjection >= 0 {
+			aggregateName = "COLUMNAR DICTIONARY GROUP ORDER"
+		}
+		metrics.record(aggregateName, sqlExplainSelects(q.selects), matched, len(result.Rows), aggregateStarted)
 	}
 	return result, true, nil
 }
@@ -7924,7 +7943,7 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 1 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast || sqlQueryCollation(q) != SQLCollationBinary {
 		return "", nil, nil, nil, false, false
 	}
-	if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) || !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
+	if !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
 		return "", nil, nil, nil, false, false
 	}
 	dictionaryField, predicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
@@ -7934,6 +7953,21 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 	ordered, valid := sqlOrderedGroupProjections(q)
 	if !valid {
 		return "", nil, nil, nil, false, false
+	}
+	orderProjection := -1
+	if !sqlSameField(q.groupBy[0], q.orderBy[0].expr) {
+		if q.limit < 0 || q.orderBy[0].expr.kind != "field" || q.orderBy[0].expr.qualifier != "" {
+			return "", nil, nil, nil, false, false
+		}
+		for index, projection := range ordered {
+			if projection.aggregate != nil && strings.EqualFold(projection.column, q.orderBy[0].expr.name) {
+				orderProjection = index
+				break
+			}
+		}
+		if orderProjection < 0 {
+			return "", nil, nil, nil, false, false
+		}
 	}
 	seen := map[string]bool{}
 	addField := func(field string) {
@@ -7949,7 +7983,7 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 	addField(groupField)
 	projections = make([]sqlColumnarDictionaryGroupProjection, len(ordered))
 	for index, projection := range ordered {
-		candidate := sqlColumnarDictionaryGroupProjection{column: projection.column, group: projection.group}
+		candidate := sqlColumnarDictionaryGroupProjection{column: projection.column, group: projection.group, order: index == orderProjection}
 		if projection.aggregate != nil {
 			aggregate := sqlColumnarNumericAggregate{name: projection.aggregate.name}
 			if projection.aggregate.field.kind != "" {
