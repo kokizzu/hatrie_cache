@@ -14237,6 +14237,32 @@ Five local runs on the AMD Ryzen 9 5950X use a warmed 20,000-row numeric
 the optimized path against row execution, verifies stable ties for ascending
 and descending order, checks `EXPLAIN ANALYZE`, and verifies write invalidation.
 
+## Columnar Dictionary Literal IN
+
+Low-cardinality dictionary fields now evaluate a direct literal string
+`IN (...)` predicate as a membership lookup on dictionary codes. The path
+accepts only one direct field and non-`NULL` string literals; `NOT IN`, `NULL`,
+expressions, mixed types, and wider predicates retain the established generic
+evaluator. The temporary membership table is one boolean per dictionary value,
+so it adds no persistent storage or configuration.
+
+```sh
+make test-sql-columnar-dictionary-in
+make benchmark-sql-columnar-dictionary-in
+```
+
+Five local runs on the AMD Ryzen 9 5950X use a 20,000-row jobs batch with an
+eight-value dictionary-encoded `state` field and four requested values:
+
+| Filter path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Generic literal `IN` evaluator | 30.78 ms/op | 18,939,778 B/op | 275,044 allocs/op | Baseline |
+| Dictionary-code literal `IN` | 2.01 ms/op | 2,907,837 B/op | 23,394 allocs/op | 15.3x faster; 6.5x lower allocation volume; 11.8x fewer allocations |
+
+`TestSQLColumnarScanUsesDictionaryLiteralIN` compares results to the ordinary
+row executor, includes an unknown list value, and verifies the specialized
+`EXPLAIN ANALYZE` node.
+
 ## Columnar Dictionary-Numeric Conjunction
 
 Direct columnar projections with one dictionary-encoded string equality or

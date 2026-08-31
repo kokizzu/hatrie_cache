@@ -858,6 +858,11 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 	if query.where.kind == "" {
 		return func(int) (bool, error) { return true, nil }
 	}
+	if dictionary, codes, encoded := sqlColumnarDictionaryLiteralINPredicate(query.where, query.from.alias, batch); encoded {
+		return func(rowIndex int) (bool, error) {
+			return codes[dictionary.Codes[rowIndex]], nil
+		}
+	}
 	if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(query.where, query.from.alias, batch); encoded {
 		code, found := sqlDictionaryCode(dictionary, value, collation)
 		return func(rowIndex int) (bool, error) {
@@ -7161,6 +7166,16 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), started)
 		}
 		return result, true, nil
+	} else if dictionary, codes, encoded := sqlColumnarDictionaryLiteralINPredicate(q.where, q.from.alias, batch); encoded {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			return codes[dictionary.Codes[rowIndex]]
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY IN FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		code, found := sqlDictionaryCode(dictionary, value, collation)
@@ -8407,6 +8422,22 @@ func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bo
 			return false
 		}
 		return expr.right == nil || sqlColumnarPredicateFields(*expr.right, alias, add)
+	case "in":
+		if expr.op != "IN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) == 0 {
+			return false
+		}
+		if add != nil {
+			add(expr.left.name)
+		}
+		for _, argument := range expr.args {
+			if argument.kind != "literal" {
+				return false
+			}
+			if _, ok := argument.value.(string); !ok {
+				return false
+			}
+		}
+		return true
 	default:
 		return false
 	}
@@ -8478,6 +8509,33 @@ func sqlColumnarDictionaryPredicate(expr sqlExpr, alias string, batch ColumnarBa
 	}
 	dictionary, ok := batch.Dictionaries[field]
 	return dictionary, operator, value, expr.collation, ok
+}
+
+// sqlColumnarDictionaryLiteralINPredicate recognizes one dictionary field IN
+// a literal non-NULL string list. Wider IN semantics retain the general
+// evaluator, including NOT IN and values that can evaluate to SQL UNKNOWN.
+func sqlColumnarDictionaryLiteralINPredicate(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, []bool, bool) {
+	if expr.kind != "in" || expr.op != "IN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) == 0 {
+		return DictionaryColumn{}, nil, false
+	}
+	dictionary, ok := batch.Dictionaries[expr.left.name]
+	if !ok {
+		return DictionaryColumn{}, nil, false
+	}
+	codes := make([]bool, len(dictionary.Values))
+	for _, argument := range expr.args {
+		if argument.kind != "literal" {
+			return DictionaryColumn{}, nil, false
+		}
+		value, ok := argument.value.(string)
+		if !ok {
+			return DictionaryColumn{}, nil, false
+		}
+		if code, found := sqlDictionaryCode(dictionary, value, expr.collation); found {
+			codes[code] = true
+		}
+	}
+	return dictionary, codes, true
 }
 
 // sqlColumnarDictionaryNumericConjunction accepts an AND tree with exactly one

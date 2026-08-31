@@ -1250,6 +1250,21 @@ stage-sql-columnar-sorted-projection:
 commit-sql-columnar-sorted-projection:
 	sh ./scripts/commit-sql-columnar-sorted-projection.sh
 
+test-sql-columnar-dictionary-in:
+	sh ./scripts/test-sql-columnar-dictionary-in.sh
+
+benchmark-sql-columnar-dictionary-in:
+	sh ./scripts/benchmark-sql-columnar-dictionary-in.sh
+
+format-sql-columnar-dictionary-in:
+	sh ./scripts/format-sql-columnar-dictionary-in.sh
+
+stage-sql-columnar-dictionary-in:
+	sh ./scripts/stage-sql-columnar-dictionary-in.sh
+
+commit-sql-columnar-dictionary-in:
+	sh ./scripts/commit-sql-columnar-dictionary-in.sh
+
 test-sql-columnar-distinct:
 	sh ./scripts/test-sql-columnar-distinct.sh
 
