@@ -3339,3 +3339,18 @@ deliver-sql-typed-minmax:
 	sh ./scripts/deliver-sql-typed-minmax.sh apply
 check-sql-typed-minmax-stage:
 	sh ./scripts/deliver-sql-typed-minmax.sh check
+test-sql-temporal-storage:
+	sh ./scripts/test-sql-temporal-storage.sh
+
+benchmark-sql-temporal-storage:
+	sh ./scripts/benchmark-sql-temporal-storage.sh
+verify-sql-temporal-storage:
+	sh ./scripts/verify-sql-temporal-storage.sh
+
+deliver-sql-temporal-storage-plan:
+	sh ./scripts/deliver-sql-temporal-storage-plan.sh
+
+deliver-sql-temporal-storage:
+	sh ./scripts/deliver-sql-temporal-storage.sh apply
+check-sql-temporal-storage-stage:
+	sh ./scripts/deliver-sql-temporal-storage.sh check

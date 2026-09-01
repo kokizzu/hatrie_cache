@@ -15,24 +15,27 @@ func NewTemporalTable() *TemporalTable {
 	return &TemporalTable{versions: make(map[string][]TemporalVersion)}
 }
 func (table *TemporalTable) Upsert(key string, at time.Time, row Row) {
-	table.versions[key] = append(table.versions[key], TemporalVersion{at, CloneRows([]Row{row})[0]})
-	sort.Slice(table.versions[key], func(i, j int) bool { return table.versions[key][i].At.Before(table.versions[key][j].At) })
+	versions := table.versions[key]
+	version := TemporalVersion{At: at, Row: CloneRows([]Row{row})[0]}
+	if len(versions) == 0 || !at.Before(versions[len(versions)-1].At) {
+		table.versions[key] = append(versions, version)
+		return
+	}
+	// Insert after equal timestamps so AS OF deterministically returns the
+	// latest write at that timestamp.
+	index := sort.Search(len(versions), func(index int) bool { return versions[index].At.After(at) })
+	versions = append(versions, TemporalVersion{})
+	copy(versions[index+1:], versions[index:])
+	versions[index] = version
+	table.versions[key] = versions
 }
 func (table *TemporalTable) AsOf(key string, at time.Time) (Row, bool) {
 	versions := table.versions[key]
-	var value Row
-	ok := false
-	for _, version := range versions {
-		if version.At.After(at) {
-			break
-		}
-		value = version.Row
-		ok = true
-	}
-	if !ok {
+	index := sort.Search(len(versions), func(index int) bool { return versions[index].At.After(at) })
+	if index == 0 {
 		return nil, false
 	}
-	return CloneRows([]Row{value})[0], true
+	return CloneRows([]Row{versions[index-1].Row})[0], true
 }
 func (table *TemporalTable) RetainAfter(at time.Time, verified bool) int {
 	if !verified {
