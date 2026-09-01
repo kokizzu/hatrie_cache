@@ -343,7 +343,7 @@ func typedTableJoinValue(values []TypedTableValue, field int) (string, bool) {
 	value := values[field]
 	switch value.Kind {
 	case TypedTableString:
-		return "s:" + value.String, true
+		return value.String, true
 	case TypedTableInt64:
 		return "i:" + strconv.FormatInt(value.Int64, 10), true
 	case TypedTableFloat64:

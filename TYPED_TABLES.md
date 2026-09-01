@@ -131,12 +131,14 @@ as it would without coalescing. Single-change calls retain the direct path.
 
 The arrangement stores the current source rows, join-key buckets, and a
 factorized structural pair of source keys for every match. It deliberately does
-not clone full row values or serialize pair keys per match; `Rows` resolves and
-independently clones values only for the caller's returned result. This is a
-substantial win for repeated incremental updates, but retained state is still
-proportional to result cardinality. Keep it out of the default path and do not
-use it for unbounded many-to-many joins unless a separate result-cardinality
-limit is enforced by the caller.
+not clone full row values or serialize pair keys per match; because the join
+requires matching physical key kinds, string key values are used directly
+without a redundant type prefix. `Rows` resolves and independently clones
+values only for the caller's returned result. This is a substantial win for
+repeated incremental updates, but retained state is still proportional to result
+cardinality. Keep it out of the default path and do not use it for unbounded
+many-to-many joins unless a separate result-cardinality limit is enforced by
+the caller.
 
 ## SQL Compatibility
 
@@ -191,8 +193,8 @@ of three runs as follows:
 | Full rescan aggregate, 10,000 rows | 2.82 ms | 4.64 MB | 49,745 |
 | Selective SQL query, 10,000 rows, rebuilding layout | 810 us | 652 KB | 19,785 |
 | Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
-| Incremental join update, 10,000 rows per side and 64 join keys | 15.2 us | 945 B | 7 |
-| Full join rebuild after that update | 1.33 s | 634 MB | 3,195,005 |
+| Incremental string-key join update, 10,000 rows per side and 64 join keys | 16.4 us | 1.0 KB | 5 |
+| Full string-key join rebuild after that update | 1.53 s | 634 MB | 3,175,006 |
 | Two separate same-key updates, 1,024 matching rows | 197 us | 192 KB | 32 |
 | One coalesced batch with those updates | 2.56 us | 344 B | 6 |
 | Fixed 256-row numeric segments, selective Top-N over 4,096 rows | 56.9 us | 29.4 KB | 436 |
@@ -212,13 +214,14 @@ workloads.
 For the intentionally high-fanout join fixture, applying one left-side update
 is about `87,800x` faster, uses about `671,000x` less allocated heap, and makes
 about `456,000x` fewer allocations than a full rebuild. Factorizing matched rows
-and using structural pair keys improves the original join implementation by
-about `3.4x` in update time, `36.7x` in allocated heap, and `68x` in
-allocations. The structural-key change alone improves the already factorized
-version by about `1.6x` in update time, `4.9x` in allocated heap, and `23x` in
-allocations. The full rebuild materializes roughly 1.56 million matching pairs;
-this demonstrates the incremental benefit, not a promise for a low-cardinality
-join.
+using structural pair keys improves the original join implementation by about
+`3.2x` in update time, `34.7x` in allocated heap, and `96x` in allocations.
+The structural-key change alone improves the already factorized version by
+about `1.6x` in update time, `4.9x` in allocated heap, and `23x` in allocations.
+Using direct string keys reduces the string-key delta path from 7 to 5
+allocations without changing equality semantics. The full rebuild materializes
+roughly 1.56 million matching pairs; this demonstrates the incremental benefit,
+not a promise for a low-cardinality join.
 
 For two consecutive updates of one key with 1,024 current matches, applying
 one batch is about `77x` faster, uses about `557x` less allocated heap, and

@@ -84,7 +84,7 @@ apply)
 	stage_makefile_targets
 	git add -- ADOPTED_QUERY_ENGINE_IDEAS.md TYPED_TABLES.md hat/hatSql/typed_table_join.go hat/hatSql/typed_table_join_arrangements.go hat/hatSql/typed_table_join_benchmark_test.go hat/hatSql/typed_table_join_coalescing_benchmark_test.go hat/hatSql/typed_table_join_test.go scripts/benchmark-sql-typed-table-join.sh scripts/benchmark-sql-typed-table-join-coalescing.sh scripts/deliver-sql-typed-table-join-arrangements.sh
 	git diff --cached --check
-	git commit -m "perf: coalesce repeated typed join changes"
+	git commit -m "perf: avoid typed join string key allocation"
 	git push origin master
 	;;
 unstage)

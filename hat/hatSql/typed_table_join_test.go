@@ -115,6 +115,20 @@ func TestTypedTableJoinKeepsDelimiterLikeKeysDistinct(t *testing.T) {
 	assertTypedTableJoinPairs(t, join.Rows(), "a:bc/a:bc", "a:bc/ab:c", "ab:c/a:bc", "ab:c/ab:c")
 }
 
+func TestTypedTableJoinRejectsMismatchedJoinKeyKinds(t *testing.T) {
+	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "left_string_key", Columns: []hatSql.TypedTableColumn{{Name: "key", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "right_bool_key", Columns: []hatSql.TypedTableColumn{{Name: "key", Kind: hatSql.TypedTableBool}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hatSql.NewTypedTableJoin(left, right, hatSql.TypedTableJoinDefinition{LeftField: "key", RightField: "key"}); err == nil {
+		t.Fatal("NewTypedTableJoin() error = nil, want mismatched-key-kind failure")
+	}
+}
+
 func TestTypedTableJoinCoalescesConsecutiveChangesForOneKey(t *testing.T) {
 	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "scores_coalesced", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
 	if err != nil {
