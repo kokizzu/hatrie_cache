@@ -3368,5 +3368,21 @@ deliver-sql-typed-distinct:
 	sh ./scripts/deliver-sql-typed-distinct.sh apply
 check-sql-typed-distinct-stage:
 	sh ./scripts/deliver-sql-typed-distinct.sh check
+
+test-sql-typed-dictionary-storage:
+	sh ./scripts/test-sql-typed-dictionary-storage.sh
+
+benchmark-sql-typed-dictionary-storage:
+	sh ./scripts/benchmark-sql-typed-dictionary-storage.sh
+verify-sql-typed-dictionary-storage:
+	sh ./scripts/verify-sql-typed-dictionary-storage.sh
+
+deliver-sql-typed-dictionary-storage-plan:
+	sh ./scripts/deliver-sql-typed-dictionary-storage-plan.sh
+
+deliver-sql-typed-dictionary-storage:
+	sh ./scripts/deliver-sql-typed-dictionary-storage.sh apply
+check-sql-typed-dictionary-storage-stage:
+	sh ./scripts/deliver-sql-typed-dictionary-storage.sh check
 check-sql-temporal-storage-stage:
 	sh ./scripts/deliver-sql-temporal-storage.sh check

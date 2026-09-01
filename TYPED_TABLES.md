@@ -45,6 +45,11 @@ _ = change
 unset. The table uses O(columns) swap-delete, so callers must use SQL `ORDER
 BY` when row order matters.
 
+For a repeated string column, set `DictionaryEncoded: true` on its
+`TypedTableColumn`. It is off by default. The table then retains compact codes
+and one copy of each live value; use it for low-cardinality values such as
+regions, states, or event kinds.
+
 ## Exact Delta Aggregates
 
 `TypedTableAggregate` consumes strictly ordered table changes. It maintains
