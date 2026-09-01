@@ -3325,3 +3325,17 @@ deliver-sql-borrowed-indexed-join:
 	sh ./scripts/deliver-sql-borrowed-indexed-join.sh apply
 check-sql-borrowed-indexed-join-stage:
 	sh ./scripts/deliver-sql-borrowed-indexed-join.sh check
+test-sql-typed-minmax:
+	sh ./scripts/test-sql-typed-minmax.sh
+benchmark-sql-typed-minmax:
+	sh ./scripts/benchmark-sql-typed-minmax.sh
+verify-sql-typed-minmax:
+	sh ./scripts/verify-sql-typed-minmax.sh
+
+deliver-sql-typed-minmax-plan:
+	sh ./scripts/deliver-sql-typed-minmax-plan.sh
+
+deliver-sql-typed-minmax:
+	sh ./scripts/deliver-sql-typed-minmax.sh apply
+check-sql-typed-minmax-stage:
+	sh ./scripts/deliver-sql-typed-minmax.sh check

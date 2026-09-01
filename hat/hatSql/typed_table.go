@@ -773,25 +773,36 @@ func typedTableValueInterface(value TypedTableValue) interface{} {
 }
 
 // TypedTableAggregateDefinition declares an exact changefeed aggregate. It
-// always emits count; SumField is optional and must be an int64 or float64
-// schema column.
+// always emits count; SumField, MinField, and MaxField are optional numeric
+// schema columns. Min and max retain per-group counted values so deletes and
+// updates remain exact.
 type TypedTableAggregateDefinition struct {
 	GroupBy  []string
 	SumField string
+	MinField string
+	MaxField string
 }
 
 type typedTableAggregateGroup struct {
-	values []TypedTableValue
-	count  int64
-	sum    float64
+	values    []TypedTableValue
+	count     int64
+	sum       float64
+	minValues map[TypedTableValue]int64
+	maxValues map[TypedTableValue]int64
+	minimum   TypedTableValue
+	maximum   TypedTableValue
+	hasMin    bool
+	hasMax    bool
 }
 
-// TypedTableAggregate maintains exact grouped COUNT and optional SUM results
-// from ordered TypedTableChange records without rescanning the table.
+// TypedTableAggregate maintains exact grouped COUNT and optional SUM, MIN, and
+// MAX results from ordered TypedTableChange records without rescanning the table.
 type TypedTableAggregate struct {
 	table      *TypedTable
 	groupBy    []int
 	sumField   int
+	minField   int
+	maxField   int
 	groups     map[string]typedTableAggregateGroup
 	checkpoint uint64
 }
@@ -803,7 +814,7 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	aggregate := &TypedTableAggregate{table: table, sumField: -1, groups: make(map[string]typedTableAggregateGroup)}
+	aggregate := &TypedTableAggregate{table: table, sumField: -1, minField: -1, maxField: -1, groups: make(map[string]typedTableAggregateGroup)}
 	seen := make(map[int]struct{}, len(definition.GroupBy))
 	for _, field := range definition.GroupBy {
 		index, exists := table.byName[strings.TrimSpace(field)]
@@ -822,6 +833,20 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 			return nil, fmt.Errorf("typed table aggregate sum field %q must be numeric", definition.SumField)
 		}
 		aggregate.sumField = index
+	}
+	if definition.MinField != "" {
+		index, exists := table.byName[strings.TrimSpace(definition.MinField)]
+		if !exists || (table.columns[index].kind != TypedTableInt64 && table.columns[index].kind != TypedTableFloat64) {
+			return nil, fmt.Errorf("typed table aggregate min field %q must be numeric", definition.MinField)
+		}
+		aggregate.minField = index
+	}
+	if definition.MaxField != "" {
+		index, exists := table.byName[strings.TrimSpace(definition.MaxField)]
+		if !exists || (table.columns[index].kind != TypedTableInt64 && table.columns[index].kind != TypedTableFloat64) {
+			return nil, fmt.Errorf("typed table aggregate max field %q must be numeric", definition.MaxField)
+		}
+		aggregate.maxField = index
 	}
 	return aggregate, nil
 }
@@ -863,7 +888,7 @@ func (aggregate *TypedTableAggregate) Checkpoint() uint64 {
 }
 
 // Rows returns a deterministic snapshot with group columns, count, and
-// optional sum. Rows with count zero are absent.
+// optional sum, min, and max. Rows with count zero are absent.
 func (aggregate *TypedTableAggregate) Rows() []Row {
 	if aggregate == nil {
 		return nil
@@ -876,13 +901,29 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 	rows := make([]Row, 0, len(keys))
 	for _, key := range keys {
 		group := aggregate.groups[key]
-		row := make(Row, len(aggregate.groupBy)+2)
+		rowFields := len(aggregate.groupBy) + 1
+		if aggregate.sumField >= 0 {
+			rowFields++
+		}
+		if aggregate.minField >= 0 {
+			rowFields++
+		}
+		if aggregate.maxField >= 0 {
+			rowFields++
+		}
+		row := make(Row, rowFields)
 		for index, column := range aggregate.groupBy {
 			row[aggregate.table.schema.Columns[column].Name] = typedTableValueInterface(group.values[index])
 		}
 		row["count"] = group.count
 		if aggregate.sumField >= 0 {
 			row["sum"] = group.sum
+		}
+		if group.hasMin {
+			row["min"] = typedTableValueInterface(group.minimum)
+		}
+		if group.hasMax {
+			row["max"] = typedTableValueInterface(group.maximum)
 		}
 		rows = append(rows, row)
 	}
@@ -898,6 +939,9 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	if delta > 0 && group.values == nil {
 		group.values = groupValues
 	}
+	if err := aggregate.checkExtrema(group, values, delta); err != nil {
+		return err
+	}
 	group.count += delta
 	if group.count < 0 {
 		return fmt.Errorf("typed table aggregate group count became negative")
@@ -910,12 +954,103 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 			group.sum += float64(delta) * values[aggregate.sumField].Float64
 		}
 	}
+	aggregate.adjustExtrema(&group, values, delta)
 	if group.count == 0 {
 		delete(aggregate.groups, key)
 		return nil
 	}
 	aggregate.groups[key] = group
 	return nil
+}
+
+func (aggregate *TypedTableAggregate) checkExtrema(group typedTableAggregateGroup, values []TypedTableValue, delta int64) error {
+	if delta >= 0 {
+		return nil
+	}
+	if aggregate.minField >= 0 {
+		if value, valid := typedTableAggregateExtremaValue(values[aggregate.minField]); valid && group.minValues[value] <= 0 {
+			return fmt.Errorf("typed table aggregate min value is absent")
+		}
+	}
+	if aggregate.maxField >= 0 && aggregate.maxField != aggregate.minField {
+		if value, valid := typedTableAggregateExtremaValue(values[aggregate.maxField]); valid && group.maxValues[value] <= 0 {
+			return fmt.Errorf("typed table aggregate max value is absent")
+		}
+	}
+	return nil
+}
+
+func (aggregate *TypedTableAggregate) adjustExtrema(group *typedTableAggregateGroup, values []TypedTableValue, delta int64) {
+	if aggregate.minField >= 0 {
+		if value, valid := typedTableAggregateExtremaValue(values[aggregate.minField]); valid {
+			group.minValues = typedTableAggregateAdjustValueCount(group.minValues, value, delta)
+			group.minimum, group.hasMin = typedTableAggregateUpdatedExtreme(group.minValues, group.minimum, group.hasMin, value, delta, true)
+		}
+	}
+	if aggregate.maxField >= 0 {
+		if aggregate.maxField == aggregate.minField {
+			group.maxValues = group.minValues
+			if value, valid := typedTableAggregateExtremaValue(values[aggregate.maxField]); valid {
+				group.maximum, group.hasMax = typedTableAggregateUpdatedExtreme(group.maxValues, group.maximum, group.hasMax, value, delta, false)
+			}
+			return
+		}
+		if value, valid := typedTableAggregateExtremaValue(values[aggregate.maxField]); valid {
+			group.maxValues = typedTableAggregateAdjustValueCount(group.maxValues, value, delta)
+			group.maximum, group.hasMax = typedTableAggregateUpdatedExtreme(group.maxValues, group.maximum, group.hasMax, value, delta, false)
+		}
+	}
+}
+
+func typedTableAggregateUpdatedExtreme(values map[TypedTableValue]int64, current TypedTableValue, found bool, changed TypedTableValue, delta int64, minimum bool) (TypedTableValue, bool) {
+	if delta > 0 && (!found || typedTableAggregateValueLess(changed, current) == minimum && changed != current) {
+		return changed, true
+	}
+	if delta < 0 && found && current == changed && values[changed] == 0 {
+		return typedTableAggregateExtreme(values, minimum)
+	}
+	return current, found
+}
+
+func typedTableAggregateExtremaValue(value TypedTableValue) (TypedTableValue, bool) {
+	if !value.Valid || value.Kind != TypedTableInt64 && value.Kind != TypedTableFloat64 || value.Kind == TypedTableFloat64 && math.IsNaN(value.Float64) {
+		return TypedTableValue{}, false
+	}
+	return value, true
+}
+
+func typedTableAggregateAdjustValueCount(values map[TypedTableValue]int64, value TypedTableValue, delta int64) map[TypedTableValue]int64 {
+	if values == nil {
+		values = make(map[TypedTableValue]int64)
+	}
+	values[value] += delta
+	if values[value] == 0 {
+		delete(values, value)
+	}
+	return values
+}
+
+func typedTableAggregateExtreme(values map[TypedTableValue]int64, minimum bool) (TypedTableValue, bool) {
+	var selected TypedTableValue
+	found := false
+	for value, count := range values {
+		if count <= 0 || !found {
+			selected, found = value, count > 0
+			continue
+		}
+		less := typedTableAggregateValueLess(value, selected)
+		if minimum && less || !minimum && !less && value != selected {
+			selected = value
+		}
+	}
+	return selected, found
+}
+
+func typedTableAggregateValueLess(left, right TypedTableValue) bool {
+	if left.Kind == TypedTableFloat64 {
+		return left.Float64 < right.Float64
+	}
+	return left.Int64 < right.Int64
 }
 
 func (aggregate *TypedTableAggregate) groupKey(values []TypedTableValue) (string, []TypedTableValue) {

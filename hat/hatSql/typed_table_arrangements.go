@@ -8,9 +8,10 @@ import (
 )
 
 // TypedTableAggregateArrangements shares exact TypedTableAggregate state among
-// consumers that use the same ordered GROUP BY and SUM definition. It does
-// not apply table changes automatically; callers retain control of checkpoint
-// scheduling and changefeed compaction.
+// consumers that use the same ordered GROUP BY, SUM, MIN, and MAX definition.
+// Min and max definitions retain counted numeric values. It does not apply
+// table changes automatically; callers retain control of checkpoint scheduling
+// and changefeed compaction.
 type TypedTableAggregateArrangements struct {
 	mu      sync.Mutex
 	table   *TypedTable
@@ -156,14 +157,18 @@ func typedTableAggregateArrangementKey(definition TypedTableAggregateDefinition)
 		builder.WriteByte('|')
 	}
 	builder.WriteByte(';')
-	if definition.SumField != "" {
-		builder.WriteByte('1')
-	} else {
-		builder.WriteByte('0')
+	for _, field := range []string{definition.SumField, definition.MinField, definition.MaxField} {
+		configured := field != ""
+		field = strings.TrimSpace(field)
+		if configured {
+			builder.WriteByte('1')
+		} else {
+			builder.WriteByte('0')
+		}
+		builder.WriteString(strconv.Itoa(len(field)))
+		builder.WriteByte(':')
+		builder.WriteString(field)
+		builder.WriteByte(';')
 	}
-	sumField := strings.TrimSpace(definition.SumField)
-	builder.WriteString(strconv.Itoa(len(sumField)))
-	builder.WriteByte(':')
-	builder.WriteString(sumField)
 	return builder.String()
 }
