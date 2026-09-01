@@ -3289,3 +3289,25 @@ unstage-sql-expression-index:
 	sh ./scripts/deliver-sql-expression-index.sh unstage
 check-sql-expression-index-stage:
 	sh ./scripts/deliver-sql-expression-index.sh check-stage
+.PHONY: test-race-sql-index-in
+test-race-sql-index-in:
+	sh ./scripts/test-race-sql-index-in.sh
+
+.PHONY: verify-sql-index-in
+verify-sql-index-in:
+	sh ./scripts/verify-sql-index-in.sh
+.PHONY: test-sql-index-in
+test-sql-index-in:
+	sh ./scripts/test-sql-index-in.sh
+.PHONY: benchmark-sql-index-in
+benchmark-sql-index-in:
+	sh ./scripts/benchmark-sql-index-in.sh
+.PHONY: deliver-sql-index-in-plan verify-sql-index-in-delivery deliver-sql-index-in check-sql-index-in-stage
+deliver-sql-index-in-plan:
+	sh ./scripts/deliver-sql-index-in.sh plan
+verify-sql-index-in-delivery:
+	sh ./scripts/deliver-sql-index-in.sh verify
+deliver-sql-index-in:
+	sh ./scripts/deliver-sql-index-in.sh apply
+check-sql-index-in-stage:
+	sh ./scripts/deliver-sql-index-in.sh check-stage

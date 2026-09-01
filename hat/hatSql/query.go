@@ -11035,6 +11035,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
+	if rows, indexed, err := resolveSQLIndexedLiteralINSource(source, condition, resolver, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
@@ -11143,6 +11146,45 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		metrics.adaptive.ObserveIndex(adaptiveKey, *adaptiveEstimate, len(rows))
 	}
 	return rows, indexed, err
+}
+
+// resolveSQLIndexedLiteralINSource unions disjoint equality postings for a
+// direct-field IN list. The full predicate remains evaluated after lookup, so
+// this affects candidate work only. Non-literal, non-binary-collation, and
+// unavailable-index forms retain the established scan path.
+func resolveSQLIndexedLiteralINSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, hint SQLIndexHint) ([]SQLRow, bool, error) {
+	if condition.kind != "in" || condition.op != "IN" || condition.left == nil || condition.left.kind != "field" || condition.left.qualifier != source.alias || condition.collation.normalized() != SQLCollationBinary {
+		return nil, false, nil
+	}
+	field := condition.left.name
+	if field == "" || !hint.allowsField(source, field) {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(SQLIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	seen := make(map[string]struct{}, len(condition.args))
+	rows := make([]SQLRow, 0)
+	for _, argument := range condition.args {
+		if argument.kind != "literal" {
+			return nil, false, nil
+		}
+		if argument.value == nil {
+			continue
+		}
+		key := fmt.Sprintf("%T:%#v", argument.value, argument.value)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates, available, err := indexed.ResolveSQLIndexedSource(source.kind, source.key, field, argument.value)
+		if err != nil || !available {
+			return nil, false, err
+		}
+		rows = append(rows, candidates...)
+	}
+	return rows, true, nil
 }
 
 func sqlLowerIndexField(expr sqlExpr, alias string) (string, bool) {
