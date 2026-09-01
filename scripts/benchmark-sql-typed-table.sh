@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-go test ./hat/hatSql -run '^$' -bench '^BenchmarkTypedTableAggregate$' -benchmem -count=3
+go test ./hat/hatSql -run '^$' -bench '^BenchmarkTypedTable' -benchmem -count=3

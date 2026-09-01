@@ -88,3 +88,127 @@ func TestTypedTableRejectsSchemaAndValueMismatches(t *testing.T) {
 		t.Fatal("Upsert() error = nil, want value-kind mismatch")
 	}
 }
+
+func TestTypedTableColumnarLayoutCacheInvalidatesBeforeMutation(t *testing.T) {
+	table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
+		Name: "events",
+		Columns: []hatSql.TypedTableColumn{
+			{Name: "team", Kind: hatSql.TypedTableString},
+			{Name: "points", Kind: hatSql.TypedTableInt64},
+		},
+		ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
+			Enabled:        true,
+			MaxBytes:       1 << 20,
+			MinReads:       2,
+			RowsPerSegment: 2,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		key    string
+		points int64
+	}{{key: "a", points: 3}, {key: "b", points: 9}, {key: "c", points: 15}} {
+		if _, err := table.Upsert(row.key, []hatSql.TypedTableValue{hatSql.TypedString("red"), hatSql.TypedInt64(row.points)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fields := []string{"team", "points"}
+	if _, _, available, err := table.BorrowSQLColumnarSourceSegments("CACHE", "events", fields); err != nil || available {
+		t.Fatalf("cold BorrowSQLColumnarSourceSegments() available = %t, error = %v", available, err)
+	}
+	if table.PreferSQLColumnarSource("CACHE", "events", fields) {
+		t.Fatal("cold layout unexpectedly preferred")
+	}
+	if _, available, err := table.ResolveSQLColumnarSource("CACHE", "events", fields); err != nil || !available {
+		t.Fatalf("first ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+	}
+	if _, _, available, err := table.BorrowSQLColumnarSourceSegments("CACHE", "events", fields); err != nil || available {
+		t.Fatalf("single-read BorrowSQLColumnarSourceSegments() available = %t, error = %v", available, err)
+	}
+	if _, available, err := table.ResolveSQLColumnarSource("CACHE", "events", fields); err != nil || !available {
+		t.Fatalf("second ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+	}
+	batch, segments, available, err := table.BorrowSQLColumnarSourceSegments("CACHE", "events", fields)
+	if err != nil || !available || segments == nil || segments.RowsPerSegment != 2 || len(segments.Columns["points"]) != 2 {
+		t.Fatalf("warm BorrowSQLColumnarSourceSegments() = %#v, %#v, %t, %v", batch, segments, available, err)
+	}
+	bounds := segments.Columns["points"]
+	if !bounds[0].Valid || bounds[0].Minimum != 3 || bounds[0].Maximum != 9 || !bounds[1].Valid || bounds[1].Minimum != 15 || bounds[1].Maximum != 15 {
+		t.Fatalf("points segment bounds = %#v", bounds)
+	}
+	if !table.PreferSQLColumnarSource("CACHE", "events", fields) {
+		t.Fatal("warm layout was not preferred")
+	}
+	beforeVersion, versioned, err := table.SQLSourceVersion("CACHE", "events")
+	if err != nil || !versioned || beforeVersion != "3" {
+		t.Fatalf("SQLSourceVersion() = %q, %t, %v", beforeVersion, versioned, err)
+	}
+
+	if _, err := table.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("blue"), hatSql.TypedInt64(21)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, available, err := table.BorrowSQLColumnarSourceSegments("CACHE", "events", fields); err != nil || available {
+		t.Fatalf("post-update BorrowSQLColumnarSourceSegments() available = %t, error = %v", available, err)
+	}
+	afterVersion, versioned, err := table.SQLSourceVersion("CACHE", "events")
+	if err != nil || !versioned || afterVersion != "4" || afterVersion == beforeVersion {
+		t.Fatalf("post-update SQLSourceVersion() = %q, %t, %v", afterVersion, versioned, err)
+	}
+	if _, available, err := table.ResolveSQLColumnarSource("CACHE", "events", fields); err != nil || !available {
+		t.Fatalf("post-update ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+	}
+	batch, available, err = table.ResolveSQLColumnarSource("CACHE", "events", fields)
+	points, pointsOK := batch.Value("points", 0)
+	if err != nil || !available || !pointsOK || points != int64(21) {
+		t.Fatalf("refreshed ResolveSQLColumnarSource() = %#v, %t, %v", batch, available, err)
+	}
+}
+
+func TestTypedTableColumnarLayoutCacheDefaultsOffAndHonorsByteBudget(t *testing.T) {
+	newTable := func(options hatSql.TypedTableColumnarCacheOptions) *hatSql.TypedTable {
+		table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
+			Name: "events",
+			Columns: []hatSql.TypedTableColumn{
+				{Name: "team", Kind: hatSql.TypedTableString},
+				{Name: "points", Kind: hatSql.TypedTableInt64},
+			},
+			ColumnarCache: options,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := table.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("red"), hatSql.TypedInt64(3)}); err != nil {
+			t.Fatal(err)
+		}
+		return table
+	}
+	fields := []string{"team", "points"}
+	for _, test := range []struct {
+		name    string
+		options hatSql.TypedTableColumnarCacheOptions
+	}{
+		{name: "default off"},
+		{name: "one byte cap", options: hatSql.TypedTableColumnarCacheOptions{Enabled: true, MaxBytes: 1, MinReads: 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			table := newTable(test.options)
+			for range 2 {
+				if _, available, err := table.ResolveSQLColumnarSource("CACHE", "events", fields); err != nil || !available {
+					t.Fatalf("ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+				}
+			}
+			if _, available, err := table.BorrowSQLColumnarSource("CACHE", "events", fields); err != nil || available {
+				t.Fatalf("BorrowSQLColumnarSource() available = %t, error = %v", available, err)
+			}
+			if table.PreferSQLColumnarSource("CACHE", "events", fields) {
+				t.Fatal("uncached layout unexpectedly preferred")
+			}
+			version, versioned, err := table.SQLSourceVersion("CACHE", "events")
+			if err != nil || versioned != test.options.Enabled || versioned && version != "1" || !versioned && version != "" {
+				t.Fatalf("SQLSourceVersion() = %q, %t, %v", version, versioned, err)
+			}
+		})
+	}
+}

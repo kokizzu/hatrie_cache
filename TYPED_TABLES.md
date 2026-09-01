@@ -19,6 +19,12 @@ table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
 		{Name: "team", Kind: hatSql.TypedTableString},
 		{Name: "points", Kind: hatSql.TypedTableInt64},
 	},
+	ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
+		Enabled:        true,
+		MaxBytes:       4 << 20,
+		MinReads:       2,
+		RowsPerSegment: 256,
+	},
 })
 if err != nil {
 	return err
@@ -83,6 +89,23 @@ The columnar resolver avoids building source row maps for the established
 single-source SQL fast path. Unsupported query shapes retain the existing row
 resolver behavior.
 
+### Optional Immutable Layout Cache
+
+`ColumnarCache` is disabled by default, so existing typed tables do not retain
+SQL layouts or change their read/write memory behavior. When enabled, the table
+admits an immutable columnar snapshot only after the same field set has been
+read `MinReads` times. Omitted or non-positive enabled values use sane defaults:
+`4 MiB` maximum retained layouts, `2` reads before admission, and `256` rows per
+numeric segment.
+
+The cache uses a byte-bounded least-recently-used eviction policy. A layout that
+does not fit `MaxBytes` remains a normal correct columnar scan. Every successful
+`Upsert` or `Delete` clears admitted layouts before the changed row is visible.
+Warm layouts implement the existing borrowed-layout, segmented-source,
+columnar-preference, and source-version contracts. This lets ordinary SQL reuse
+the established condition-cache, numeric segment pruning, and Top-N paths
+without changing query results.
+
 ## Tradeoff And Measurement
 
 The default remains the existing cache/row source. Use `TypedTable` only for a
@@ -97,11 +120,19 @@ of three runs as follows:
 | --- | ---: | ---: | ---: |
 | Exact aggregate, one changed row | 743 ns | 958 B | 8 |
 | Full rescan aggregate, 10,000 rows | 2.82 ms | 4.64 MB | 49,745 |
+| Selective SQL query, 10,000 rows, rebuilding layout | 810 us | 652 KB | 19,785 |
+| Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
 
 For this repeated-aggregate workload, delta maintenance is approximately
 `3,794x` faster, uses `4,843x` less heap, and performs `6,218x` fewer
 allocations. Those are workload-specific measurements, not a promise for
 ad-hoc SQL queries.
+
+For the repeated selective SQL query, the warmed layout is about `3.8x` faster,
+uses about `172x` less allocated heap, and performs about `707x` fewer
+allocations. The retained snapshot consumes part of `MaxBytes` and is discarded
+on every write, so leave the feature disabled for write-heavy or one-shot query
+workloads.
 
 ## Verification
 

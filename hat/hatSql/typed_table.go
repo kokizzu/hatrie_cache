@@ -31,12 +31,29 @@ type TypedTableColumn struct {
 	Kind TypedTableKind
 }
 
+const (
+	typedTableColumnarCacheDefaultMaxBytes       = 4 << 20
+	typedTableColumnarCacheDefaultMinReads       = 2
+	typedTableColumnarCacheDefaultRowsPerSegment = 256
+)
+
+// TypedTableColumnarCacheOptions configures the optional immutable SQL layout
+// cache. It is disabled by default so existing typed tables keep their current
+// memory behavior.
+type TypedTableColumnarCacheOptions struct {
+	Enabled        bool
+	MaxBytes       int
+	MinReads       int
+	RowsPerSegment int
+}
+
 // TypedTableSchema describes one compact table. Name is used as the SQL source
 // key, and SourceName defaults to CACHE for compatibility with cache SQL.
 type TypedTableSchema struct {
-	Name       string
-	SourceName string
-	Columns    []TypedTableColumn
+	Name          string
+	SourceName    string
+	Columns       []TypedTableColumn
+	ColumnarCache TypedTableColumnarCacheOptions
 }
 
 // TypedTableValue stores one scalar table value. A value with Valid false is
@@ -79,6 +96,22 @@ type typedTableColumnStorage struct {
 	floats  []float64
 	bools   []bool
 	valid   []bool
+}
+
+type typedTableColumnarLayout struct {
+	batch    ColumnarBatch
+	segments *ColumnarNumericSegments
+	bytes    int
+	touched  uint64
+}
+
+type typedTableColumnarCache struct {
+	mu           sync.Mutex
+	options      TypedTableColumnarCacheOptions
+	layouts      map[string]typedTableColumnarLayout
+	observations map[string]int
+	bytes        int
+	tick         uint64
 }
 
 func (storage *typedTableColumnStorage) append(value TypedTableValue) {
@@ -161,6 +194,7 @@ type TypedTable struct {
 	byName    map[string]int
 	keys      []string
 	positions map[string]int
+	columnar  typedTableColumnarCache
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -180,7 +214,15 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 	if len(schema.Columns) == 0 {
 		return nil, fmt.Errorf("typed table columns are required")
 	}
-	table := &TypedTable{schema: schema, byName: make(map[string]int, len(schema.Columns)), positions: make(map[string]int)}
+	schema.ColumnarCache = normalizeTypedTableColumnarCacheOptions(schema.ColumnarCache)
+	table := &TypedTable{
+		schema:    schema,
+		byName:    make(map[string]int, len(schema.Columns)),
+		positions: make(map[string]int),
+		columnar: typedTableColumnarCache{
+			options: schema.ColumnarCache,
+		},
+	}
 	table.columns = make([]typedTableColumnStorage, len(schema.Columns))
 	for index := range table.schema.Columns {
 		column := &table.schema.Columns[index]
@@ -200,6 +242,22 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 	return table, nil
 }
 
+func normalizeTypedTableColumnarCacheOptions(options TypedTableColumnarCacheOptions) TypedTableColumnarCacheOptions {
+	if !options.Enabled {
+		return TypedTableColumnarCacheOptions{}
+	}
+	if options.MaxBytes <= 0 {
+		options.MaxBytes = typedTableColumnarCacheDefaultMaxBytes
+	}
+	if options.MinReads <= 0 {
+		options.MinReads = typedTableColumnarCacheDefaultMinReads
+	}
+	if options.RowsPerSegment <= 0 {
+		options.RowsPerSegment = typedTableColumnarCacheDefaultRowsPerSegment
+	}
+	return options
+}
+
 // Upsert inserts or replaces a complete schema-ordered row and returns its
 // ordered changefeed record.
 func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTableChange, error) {
@@ -215,6 +273,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	if err := table.validateValues(values); err != nil {
 		return TypedTableChange{}, err
 	}
+	table.clearColumnarLayoutsLocked()
 	index, exists := table.positions[key]
 	change := TypedTableChange{Key: key, After: cloneTypedTableValues(values)}
 	if exists {
@@ -248,6 +307,7 @@ func (table *TypedTable) Delete(key string) (TypedTableChange, error) {
 	if !exists {
 		return TypedTableChange{}, fmt.Errorf("typed table key %q does not exist", key)
 	}
+	table.clearColumnarLayoutsLocked()
 	change := TypedTableChange{Operation: "DELETE", Key: key, Before: table.rowLocked(index)}
 	last := len(table.keys) - 1
 	if index != last {
@@ -331,20 +391,66 @@ func (table *TypedTable) ResolveSQLColumnarSource(name string, key string, field
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	batch := ColumnarBatch{Columns: make(map[string][]interface{}, len(fields)), Rows: len(table.keys)}
-	for _, field := range fields {
-		column, found := table.byName[field]
-		if !found {
-			continue
-		}
-		values := make([]interface{}, len(table.keys))
-		for row := range values {
-			values[row] = typedTableValueInterface(table.columns[column].value(row))
-		}
-		batch.Columns[field] = values
+	layoutKey := typedTableColumnarLayoutKey(fields)
+	if batch, found := table.lookupColumnarLayoutLocked(layoutKey); found {
+		return batch, true, nil
 	}
-	batch.EncodeRepeatedStrings()
+	batch := table.columnarBatchLocked(fields)
+	table.observeColumnarLayoutLocked(layoutKey, batch)
 	return batch, true, nil
+}
+
+// BorrowSQLColumnarSource returns a cached immutable layout after its repeated
+// field set has been admitted. Cold layouts retain ResolveSQLColumnarSource.
+func (table *TypedTable) BorrowSQLColumnarSource(name string, key string, fields []string) (ColumnarBatch, bool, error) {
+	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
+		return ColumnarBatch{}, false, nil
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	batch, found := table.lookupColumnarLayoutLocked(typedTableColumnarLayoutKey(fields))
+	return batch, found, nil
+}
+
+// BorrowSQLColumnarSourceSegments returns an immutable cached layout with
+// aligned numeric bounds. Cold or oversized layouts retain the normal scan.
+func (table *TypedTable) BorrowSQLColumnarSourceSegments(name string, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error) {
+	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	layout, found := table.lookupColumnarLayoutWithSegmentsLocked(typedTableColumnarLayoutKey(fields))
+	if !found {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	return layout.batch, layout.segments, true, nil
+}
+
+// PreferSQLColumnarSource reports whether an immutable cached layout can
+// serve the exact field set without rebuilding interface columns.
+func (table *TypedTable) PreferSQLColumnarSource(name string, key string, fields []string) bool {
+	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
+		return false
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	_, found := table.lookupColumnarLayoutLocked(typedTableColumnarLayoutKey(fields))
+	return found
+}
+
+// SQLSourceVersion identifies the current cached-table snapshot for safe
+// condition-cache reuse. Disabled layout caches retain prior resolver behavior.
+func (table *TypedTable) SQLSourceVersion(name string, key string) (string, bool, error) {
+	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
+		return "", false, nil
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	if !table.columnar.options.Enabled {
+		return "", false, nil
+	}
+	return strconv.FormatUint(table.sequence, 10), true, nil
 }
 
 // Rows returns independent row maps for diagnostics or row-resolver callers.
@@ -372,6 +478,206 @@ func (table *TypedTable) Schema() TypedTableSchema {
 	schema := table.schema
 	schema.Columns = append([]TypedTableColumn(nil), schema.Columns...)
 	return schema
+}
+
+func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {
+	batch := ColumnarBatch{Columns: make(map[string][]interface{}, len(fields)), Rows: len(table.keys)}
+	for _, field := range fields {
+		column, found := table.byName[field]
+		if !found {
+			continue
+		}
+		values := make([]interface{}, len(table.keys))
+		for row := range values {
+			values[row] = typedTableValueInterface(table.columns[column].value(row))
+		}
+		batch.Columns[field] = values
+	}
+	batch.EncodeRepeatedStrings()
+	return batch
+}
+
+func (table *TypedTable) lookupColumnarLayoutLocked(key string) (ColumnarBatch, bool) {
+	layout, found := table.lookupColumnarLayoutWithSegmentsLocked(key)
+	return layout.batch, found
+}
+
+func (table *TypedTable) lookupColumnarLayoutWithSegmentsLocked(key string) (typedTableColumnarLayout, bool) {
+	cache := &table.columnar
+	if !cache.options.Enabled {
+		return typedTableColumnarLayout{}, false
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	layout, found := cache.layouts[key]
+	if !found {
+		return typedTableColumnarLayout{}, false
+	}
+	cache.tick++
+	layout.touched = cache.tick
+	cache.layouts[key] = layout
+	return layout, true
+}
+
+func (table *TypedTable) observeColumnarLayoutLocked(key string, batch ColumnarBatch) {
+	cache := &table.columnar
+	if !cache.options.Enabled {
+		return
+	}
+	cache.mu.Lock()
+	if layout, found := cache.layouts[key]; found {
+		cache.tick++
+		layout.touched = cache.tick
+		cache.layouts[key] = layout
+		cache.mu.Unlock()
+		return
+	}
+	if cache.observations == nil {
+		cache.observations = make(map[string]int)
+	}
+	cache.observations[key]++
+	if cache.observations[key] < cache.options.MinReads {
+		cache.mu.Unlock()
+		return
+	}
+	delete(cache.observations, key)
+	cache.mu.Unlock()
+
+	segments := table.columnarNumericSegmentsLocked(batch)
+	bytes := typedTableColumnarBatchBytes(batch, segments)
+	if bytes > cache.options.MaxBytes {
+		return
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if layout, found := cache.layouts[key]; found {
+		cache.tick++
+		layout.touched = cache.tick
+		cache.layouts[key] = layout
+		return
+	}
+	for cache.bytes+bytes > cache.options.MaxBytes && len(cache.layouts) > 0 {
+		cache.evictOldestLocked()
+	}
+	if cache.bytes+bytes > cache.options.MaxBytes {
+		return
+	}
+	if cache.layouts == nil {
+		cache.layouts = make(map[string]typedTableColumnarLayout)
+	}
+	cache.tick++
+	cache.layouts[key] = typedTableColumnarLayout{batch: batch, segments: segments, bytes: bytes, touched: cache.tick}
+	cache.bytes += bytes
+}
+
+func (cache *typedTableColumnarCache) evictOldestLocked() {
+	var oldestKey string
+	var oldest typedTableColumnarLayout
+	for key, layout := range cache.layouts {
+		if oldestKey == "" || layout.touched < oldest.touched {
+			oldestKey, oldest = key, layout
+		}
+	}
+	if oldestKey == "" {
+		return
+	}
+	delete(cache.layouts, oldestKey)
+	cache.bytes -= oldest.bytes
+}
+
+func (table *TypedTable) clearColumnarLayoutsLocked() {
+	cache := &table.columnar
+	if !cache.options.Enabled {
+		return
+	}
+	cache.mu.Lock()
+	cache.layouts = nil
+	cache.observations = nil
+	cache.bytes = 0
+	cache.tick = 0
+	cache.mu.Unlock()
+}
+
+func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *ColumnarNumericSegments {
+	rowsPerSegment := table.columnar.options.RowsPerSegment
+	if rowsPerSegment <= 0 || batch.Rows == 0 {
+		return nil
+	}
+	segments := &ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: make(map[string][]ColumnarNumericSegment)}
+	for field := range batch.Columns {
+		column, found := table.byName[field]
+		if !found || table.columns[column].kind != TypedTableInt64 && table.columns[column].kind != TypedTableFloat64 {
+			continue
+		}
+		bounds := make([]ColumnarNumericSegment, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
+		for segment := range bounds {
+			start := segment * rowsPerSegment
+			end := start + rowsPerSegment
+			if end > batch.Rows {
+				end = batch.Rows
+			}
+			for row := start; row < end; row++ {
+				if !table.columns[column].valid[row] {
+					continue
+				}
+				value := 0.0
+				if table.columns[column].kind == TypedTableInt64 {
+					value = float64(table.columns[column].int64s[row])
+				} else {
+					value = table.columns[column].floats[row]
+				}
+				if math.IsNaN(value) {
+					bounds[segment].Valid = false
+					break
+				}
+				if !bounds[segment].Valid {
+					bounds[segment] = ColumnarNumericSegment{Minimum: value, Maximum: value, Valid: true}
+					continue
+				}
+				if value < bounds[segment].Minimum {
+					bounds[segment].Minimum = value
+				}
+				if value > bounds[segment].Maximum {
+					bounds[segment].Maximum = value
+				}
+			}
+		}
+		segments.Columns[field] = bounds
+	}
+	if len(segments.Columns) == 0 {
+		return nil
+	}
+	return segments
+}
+
+func typedTableColumnarLayoutKey(fields []string) string {
+	var builder strings.Builder
+	for _, field := range fields {
+		builder.WriteString(strconv.Itoa(len(field)))
+		builder.WriteByte(':')
+		builder.WriteString(field)
+	}
+	return builder.String()
+}
+
+func typedTableColumnarBatchBytes(batch ColumnarBatch, segments *ColumnarNumericSegments) int {
+	bytes := len(batch.Columns)*64 + len(batch.Dictionaries)*64
+	for _, values := range batch.Columns {
+		bytes += len(values) * 16
+	}
+	for _, dictionary := range batch.Dictionaries {
+		bytes += len(dictionary.Codes) * 4
+		for _, value := range dictionary.Values {
+			bytes += 16 + len(value)
+		}
+	}
+	if segments != nil {
+		bytes += len(segments.Columns) * 64
+		for _, values := range segments.Columns {
+			bytes += len(values) * 24
+		}
+	}
+	return bytes
 }
 
 func (table *TypedTable) validateValues(values []TypedTableValue) error {
