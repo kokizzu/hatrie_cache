@@ -1448,6 +1448,29 @@ func (ht *HatTrie) ResolveSQLCompositeIndexedSource(name, key string, fields []s
 	}
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	for _, candidate := range ht.sqlJSONPartialIndexes[key] {
+		lookup, lookupOK := provided[candidate.field]
+		condition, conditionOK := provided[candidate.conditionField]
+		conditionKey, keyed := sqlIndexValueKey(condition)
+		if !lookupOK || !conditionOK || !keyed || conditionKey != candidate.conditionKey {
+			continue
+		}
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		if err := refreshSQLJSONPartialIndexSource(candidate, source, snapshot.rows); err != nil {
+			return nil, false, err
+		}
+		lookupKey, ok := sqlIndexValueKey(lookup)
+		if !ok {
+			return []SQLRow{}, true, nil
+		}
+		return hatSql.CloneRows(candidate.rows[lookupKey]), true, nil
+	}
 	var selected *sqlJSONCompositeIndex
 	for _, candidate := range ht.sqlJSONCompositeIndexes[key] {
 		if len(candidate.fields) <= 1 || selected != nil && len(candidate.fields) <= len(selected.fields) {

@@ -3384,5 +3384,21 @@ deliver-sql-typed-dictionary-storage:
 	sh ./scripts/deliver-sql-typed-dictionary-storage.sh apply
 check-sql-typed-dictionary-storage-stage:
 	sh ./scripts/deliver-sql-typed-dictionary-storage.sh check
+
+test-sql-partial-index:
+	sh ./scripts/test-sql-partial-index.sh
+
+benchmark-sql-partial-index:
+	sh ./scripts/benchmark-sql-partial-index.sh
+verify-sql-partial-index:
+	sh ./scripts/verify-sql-partial-index.sh
+
+deliver-sql-partial-index-plan:
+	sh ./scripts/deliver-sql-partial-index-plan.sh
+
+deliver-sql-partial-index:
+	sh ./scripts/deliver-sql-partial-index.sh apply
+check-sql-partial-index-stage:
+	sh ./scripts/deliver-sql-partial-index.sh check
 check-sql-temporal-storage-stage:
 	sh ./scripts/deliver-sql-temporal-storage.sh check
