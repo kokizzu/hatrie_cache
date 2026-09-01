@@ -3,6 +3,7 @@ package hatSql_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"hatrie_cache/hat/hatSql"
@@ -163,6 +164,45 @@ func TestTypedTableColumnarLayoutCacheInvalidatesBeforeMutation(t *testing.T) {
 	points, pointsOK := batch.Value("points", 0)
 	if err != nil || !available || !pointsOK || points != int64(21) {
 		t.Fatalf("refreshed ResolveSQLColumnarSource() = %#v, %t, %v", batch, available, err)
+	}
+}
+
+func TestTypedTableAdaptiveSegmentsUseBoundedSmallerLayout(t *testing.T) {
+	table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
+		Name: "adaptive_events",
+		Columns: []hatSql.TypedTableColumn{
+			{Name: "team", Kind: hatSql.TypedTableString},
+			{Name: "points", Kind: hatSql.TypedTableInt64},
+		},
+		ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
+			Enabled:          true,
+			MaxBytes:         1 << 20,
+			MinReads:         2,
+			RowsPerSegment:   256,
+			AdaptiveSegments: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 1024; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("event-%d", index), []hatSql.TypedTableValue{hatSql.TypedString("blue"), hatSql.TypedInt64(int64(index))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fields := []string{"team", "points"}
+	for range 2 {
+		if _, available, err := table.ResolveSQLColumnarSource("CACHE", "adaptive_events", fields); err != nil || !available {
+			t.Fatalf("ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+		}
+	}
+	_, segments, available, err := table.BorrowSQLColumnarSourceSegments("CACHE", "adaptive_events", fields)
+	if err != nil || !available || segments == nil || segments.RowsPerSegment != 32 {
+		t.Fatalf("BorrowSQLColumnarSourceSegments() = %#v, %t, %v", segments, available, err)
+	}
+	result, err := hatSql.ExecuteQueryParameters(context.Background(), "FROM CACHE('adaptive_events') SELECT points WHERE points >= 1000", table, nil, hatSql.QueryOptions{})
+	if err != nil || len(result.Rows) != 24 || result.Rows[0]["points"] != int64(1000) {
+		t.Fatalf("adaptive typed-table query = %#v, %v", result, err)
 	}
 }
 

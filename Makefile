@@ -3177,6 +3177,26 @@ deliver-two-week-compatibility-audit:
 test-sql-typed-table:
 	sh ./scripts/test-sql-typed-table.sh
 
+.PHONY: benchmark-sql-typed-table-adaptive-segments
+benchmark-sql-typed-table-adaptive-segments:
+	sh ./scripts/benchmark-sql-typed-table-adaptive-segments.sh
+
+.PHONY: deliver-sql-typed-table-adaptive-segments
+deliver-sql-typed-table-adaptive-segments:
+	sh ./scripts/deliver-sql-typed-table-adaptive-segments.sh plan
+
+.PHONY: verify-sql-typed-table-adaptive-segments-delivery
+verify-sql-typed-table-adaptive-segments-delivery:
+	sh ./scripts/deliver-sql-typed-table-adaptive-segments.sh verify
+
+.PHONY: apply-sql-typed-table-adaptive-segments-delivery
+apply-sql-typed-table-adaptive-segments-delivery:
+	sh ./scripts/deliver-sql-typed-table-adaptive-segments.sh apply
+
+.PHONY: unstage-sql-typed-table-adaptive-segments-delivery
+unstage-sql-typed-table-adaptive-segments-delivery:
+	sh ./scripts/deliver-sql-typed-table-adaptive-segments.sh unstage
+
 .PHONY: benchmark-sql-typed-table-join
 benchmark-sql-typed-table-join:
 	sh ./scripts/benchmark-sql-typed-table-join.sh

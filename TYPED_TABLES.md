@@ -24,6 +24,7 @@ table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
 		MaxBytes:       4 << 20,
 		MinReads:       2,
 		RowsPerSegment: 256,
+		AdaptiveSegments: true,
 	},
 })
 if err != nil {
@@ -161,6 +162,13 @@ columnar-preference, and source-version contracts. This lets ordinary SQL reuse
 the established condition-cache, numeric segment pruning, and Top-N paths
 without changing query results.
 
+`AdaptiveSegments` is disabled by default. When enabled, `RowsPerSegment` is a
+maximum rather than a fixed size: a small immutable layout may use a bounded,
+smaller power-of-two segment to make selective numeric pruning more precise.
+It never chooses a size above the configured maximum. The tradeoff is retained
+min/max sidecar metadata, so use it for repeated selective numeric filters or
+Top-N queries, not broad scans or layouts that are near `MaxBytes`.
+
 ## Tradeoff And Measurement
 
 The default remains the existing cache/row source. Use `TypedTable` only for a
@@ -179,6 +187,8 @@ of three runs as follows:
 | Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
 | Incremental join update, 10,000 rows per side and 64 join keys | 24.2 us | 4.7 KB | 164 |
 | Full join rebuild after that update | 1.89 s | 705 MB | 4,757,518 |
+| Fixed 256-row numeric segments, selective Top-N over 4,096 rows | 56.9 us | 29.4 KB | 436 |
+| Adaptive segments (maximum 256), same Top-N | 44.7 us | 27.8 KB | 244 |
 
 For this repeated-aggregate workload, delta maintenance is approximately
 `3,794x` faster, uses `4,843x` less heap, and performs `6,218x` fewer
@@ -198,6 +208,12 @@ improves the prior join implementation by about `2.2x` in update time, `7.5x`
 in allocated heap, and `2.9x` in allocations. The full rebuild materializes
 roughly 1.56 million matching pairs; this demonstrates the incremental benefit,
 not a promise for a low-cardinality join.
+
+For the selective 4,096-row Top-N fixture, adaptive segments are about `1.27x`
+faster, use about `1.06x` less allocated heap, and make about `1.8x` fewer
+allocations. It uses 64 numeric segments instead of 16, which retains roughly
+`2.3 KB` of additional min/max sidecar metadata for two numeric columns. This
+is why the feature is opt-in.
 
 ## Verification
 

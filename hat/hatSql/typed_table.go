@@ -41,10 +41,11 @@ const (
 // cache. It is disabled by default so existing typed tables keep their current
 // memory behavior.
 type TypedTableColumnarCacheOptions struct {
-	Enabled        bool
-	MaxBytes       int
-	MinReads       int
-	RowsPerSegment int
+	Enabled          bool
+	MaxBytes         int
+	MinReads         int
+	RowsPerSegment   int
+	AdaptiveSegments bool
 }
 
 // TypedTableSchema describes one compact table. Name is used as the SQL source
@@ -600,6 +601,9 @@ func (table *TypedTable) clearColumnarLayoutsLocked() {
 
 func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *ColumnarNumericSegments {
 	rowsPerSegment := table.columnar.options.RowsPerSegment
+	if table.columnar.options.AdaptiveSegments {
+		rowsPerSegment = typedTableAdaptiveRowsPerSegment(rowsPerSegment, batch.Rows)
+	}
 	if rowsPerSegment <= 0 || batch.Rows == 0 {
 		return nil
 	}
@@ -648,6 +652,28 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 		return nil
 	}
 	return segments
+}
+
+// typedTableAdaptiveRowsPerSegment keeps a bounded number of smaller
+// power-of-two segments for selective queries without exceeding the configured
+// segment maximum. It is only used by the explicit opt-in cache option.
+func typedTableAdaptiveRowsPerSegment(maximum, rows int) int {
+	if maximum <= 0 || rows <= maximum {
+		return maximum
+	}
+	const minimum = 32
+	const targetSegments = 64
+	rowsPerSegment := (rows + targetSegments - 1) / targetSegments
+	if rowsPerSegment < minimum {
+		rowsPerSegment = minimum
+	}
+	for power := minimum; power < rowsPerSegment && power < maximum; power <<= 1 {
+		rowsPerSegment = power << 1
+	}
+	if rowsPerSegment > maximum {
+		return maximum
+	}
+	return rowsPerSegment
 }
 
 func typedTableColumnarLayoutKey(fields []string) string {
