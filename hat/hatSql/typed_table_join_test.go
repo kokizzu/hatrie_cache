@@ -91,6 +91,30 @@ func TestTypedTableJoinRowsAreIndependentlyOwned(t *testing.T) {
 	}
 }
 
+func TestTypedTableJoinKeepsDelimiterLikeKeysDistinct(t *testing.T) {
+	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "left_delimited", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "right_delimited", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"a:bc", "ab:c"} {
+		if _, err := left.Upsert(key, []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := right.Upsert(key, []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	join, err := hatSql.NewTypedTableJoin(left, right, hatSql.TypedTableJoinDefinition{LeftField: "team", RightField: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTypedTableJoinPairs(t, join.Rows(), "a:bc/a:bc", "a:bc/ab:c", "ab:c/a:bc", "ab:c/ab:c")
+}
+
 func TestTypedTableJoinDoesNotMatchNullKeys(t *testing.T) {
 	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "left_null_keys", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
 	if err != nil {

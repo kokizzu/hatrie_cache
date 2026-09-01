@@ -20,7 +20,7 @@ explicitly opt-in operational control.
 | Feature | Result |
 |---|---|
 | Shared typed aggregate arrangement, two consumers over 10,000 changes | 2.02x faster, 1.98x less heap, and 1.99x fewer allocations than two independent aggregates. |
-| Shared typed equi-join arrangement, one updated row with 10,000 rows per side and 64 join keys | About 24.2 us, 4.7 KB, and 164 allocations, versus a 1.89 s, 705 MB, 4,757,518-allocation full rebuild: about 78,200x faster, 151,000x less allocated heap, and 29,000x fewer allocations. Factorized pairs retain source keys rather than cloned row values. It is explicit because retained state grows with matching-pair cardinality. |
+| Shared typed equi-join arrangement, one updated row with 10,000 rows per side and 64 join keys | About 15.2 us, 945 B, and 7 allocations, versus a 1.33 s, 634 MB, 3,195,005-allocation full rebuild: about 87,800x faster, 671,000x less allocated heap, and 456,000x fewer allocations. Factorized structural pairs retain source keys without cloning row values or serializing pair identities. It is explicit because retained state grows with matching-pair cardinality. |
 | Projection retention frontier commit | 207 ns median, 0 B/op, 0 allocs/op; background-only and opt-in. |
 | Refresh scheduler count budget | No measurable overhead over the default scheduler in the no-op refresh benchmark. |
 | Refresh scheduler duration budget | About 568 ns, 352 B, and 5 allocations per opt-in no-op cycle due to the cooperative timeout context. |

@@ -124,13 +124,13 @@ further change application and returns no rows. Concurrent `Release` calls are
 safe and exactly one succeeds.
 
 The arrangement stores the current source rows, join-key buckets, and a
-factorized pair of source keys for every match. It deliberately does not clone
-full row values per match; `Rows` resolves and independently clones values only
-for the caller's returned result. This is a substantial win for repeated
-incremental updates, but retained state is still proportional to result
-cardinality. Keep it out of the default path and do not use it for unbounded
-many-to-many joins unless a separate result-cardinality limit is enforced by
-the caller.
+factorized structural pair of source keys for every match. It deliberately does
+not clone full row values or serialize pair keys per match; `Rows` resolves and
+independently clones values only for the caller's returned result. This is a
+substantial win for repeated incremental updates, but retained state is still
+proportional to result cardinality. Keep it out of the default path and do not
+use it for unbounded many-to-many joins unless a separate result-cardinality
+limit is enforced by the caller.
 
 ## SQL Compatibility
 
@@ -185,8 +185,8 @@ of three runs as follows:
 | Full rescan aggregate, 10,000 rows | 2.82 ms | 4.64 MB | 49,745 |
 | Selective SQL query, 10,000 rows, rebuilding layout | 810 us | 652 KB | 19,785 |
 | Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
-| Incremental join update, 10,000 rows per side and 64 join keys | 24.2 us | 4.7 KB | 164 |
-| Full join rebuild after that update | 1.89 s | 705 MB | 4,757,518 |
+| Incremental join update, 10,000 rows per side and 64 join keys | 15.2 us | 945 B | 7 |
+| Full join rebuild after that update | 1.33 s | 634 MB | 3,195,005 |
 | Fixed 256-row numeric segments, selective Top-N over 4,096 rows | 56.9 us | 29.4 KB | 436 |
 | Adaptive segments (maximum 256), same Top-N | 44.7 us | 27.8 KB | 244 |
 
@@ -202,12 +202,15 @@ on every write, so leave the feature disabled for write-heavy or one-shot query
 workloads.
 
 For the intentionally high-fanout join fixture, applying one left-side update
-is about `78,200x` faster, uses about `151,000x` less allocated heap, and makes
-about `29,000x` fewer allocations than a full rebuild. Factorizing matched rows
-improves the prior join implementation by about `2.2x` in update time, `7.5x`
-in allocated heap, and `2.9x` in allocations. The full rebuild materializes
-roughly 1.56 million matching pairs; this demonstrates the incremental benefit,
-not a promise for a low-cardinality join.
+is about `87,800x` faster, uses about `671,000x` less allocated heap, and makes
+about `456,000x` fewer allocations than a full rebuild. Factorizing matched rows
+and using structural pair keys improves the original join implementation by
+about `3.4x` in update time, `36.7x` in allocated heap, and `68x` in
+allocations. The structural-key change alone improves the already factorized
+version by about `1.6x` in update time, `4.9x` in allocated heap, and `23x` in
+allocations. The full rebuild materializes roughly 1.56 million matching pairs;
+this demonstrates the incremental benefit, not a promise for a low-cardinality
+join.
 
 For the selective 4,096-row Top-N fixture, adaptive segments are about `1.27x`
 faster, use about `1.06x` less allocated heap, and make about `1.8x` fewer

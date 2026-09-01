@@ -37,7 +37,7 @@ type TypedTableJoin struct {
 	leftCheckpoint, rightCheckpoint uint64
 	leftRows, rightRows         map[string][]TypedTableValue
 	leftIndex, rightIndex       map[string]map[string]struct{}
-	pairs                       map[string]typedTableJoinPair
+	pairs                       map[typedTableJoinPair]struct{}
 }
 
 // NewTypedTableJoin snapshots both current tables and begins tracking changes
@@ -63,7 +63,7 @@ func NewTypedTableJoin(left, right *TypedTable, definition TypedTableJoinDefinit
 	join := &TypedTableJoin{
 		left: left, right: right, definition: definition, leftField: leftField, rightField: rightField,
 		leftRows: map[string][]TypedTableValue{}, rightRows: map[string][]TypedTableValue{},
-		leftIndex: map[string]map[string]struct{}{}, rightIndex: map[string]map[string]struct{}{}, pairs: map[string]typedTableJoinPair{},
+		leftIndex: map[string]map[string]struct{}{}, rightIndex: map[string]map[string]struct{}{}, pairs: map[typedTableJoinPair]struct{}{},
 	}
 	join.leftRows, join.leftCheckpoint = typedTableJoinSnapshot(left)
 	join.rightRows, join.rightCheckpoint = typedTableJoinSnapshot(right)
@@ -185,7 +185,7 @@ func (join *TypedTableJoin) addLeft(key string, values []TypedTableValue) {
 	}
 	addTypedTableJoinIndex(join.leftIndex, valueKey, key)
 	for rightKey := range join.rightIndex[valueKey] {
-		join.pairs[typedTableJoinPairKey(key, rightKey)] = typedTableJoinPair{leftKey: key, rightKey: rightKey}
+		join.pairs[typedTableJoinPair{leftKey: key, rightKey: rightKey}] = struct{}{}
 	}
 }
 
@@ -193,7 +193,7 @@ func (join *TypedTableJoin) removeLeft(key string, values []TypedTableValue) {
 	valueKey, joined := typedTableJoinValue(values, join.leftField)
 	if joined {
 		for rightKey := range join.rightIndex[valueKey] {
-			delete(join.pairs, typedTableJoinPairKey(key, rightKey))
+			delete(join.pairs, typedTableJoinPair{leftKey: key, rightKey: rightKey})
 		}
 		removeTypedTableJoinIndex(join.leftIndex, valueKey, key)
 	}
@@ -209,7 +209,7 @@ func (join *TypedTableJoin) addRight(key string, values []TypedTableValue) {
 	}
 	addTypedTableJoinIndex(join.rightIndex, valueKey, key)
 	for leftKey := range join.leftIndex[valueKey] {
-		join.pairs[typedTableJoinPairKey(leftKey, key)] = typedTableJoinPair{leftKey: leftKey, rightKey: key}
+		join.pairs[typedTableJoinPair{leftKey: leftKey, rightKey: key}] = struct{}{}
 	}
 }
 
@@ -217,7 +217,7 @@ func (join *TypedTableJoin) removeRight(key string, values []TypedTableValue) {
 	valueKey, joined := typedTableJoinValue(values, join.rightField)
 	if joined {
 		for leftKey := range join.leftIndex[valueKey] {
-			delete(join.pairs, typedTableJoinPairKey(leftKey, key))
+			delete(join.pairs, typedTableJoinPair{leftKey: leftKey, rightKey: key})
 		}
 		removeTypedTableJoinIndex(join.rightIndex, valueKey, key)
 	}
@@ -262,10 +262,6 @@ func typedTableJoinValue(values []TypedTableValue, field int) (string, bool) {
 	return "", false
 }
 
-func typedTableJoinPairKey(left, right string) string {
-	return strconv.Itoa(len(left)) + ":" + left + right
-}
-
 // LeftCheckpoint and RightCheckpoint identify the latest applied source changes.
 func (join *TypedTableJoin) LeftCheckpoint() uint64 {
 	if join == nil { return 0 }
@@ -284,7 +280,7 @@ func (join *TypedTableJoin) Rows() []TypedTableJoinRow {
 	join.mu.RLock()
 	defer join.mu.RUnlock()
 	rows := make([]TypedTableJoinRow, 0, len(join.pairs))
-	for _, pair := range join.pairs {
+	for pair := range join.pairs {
 		left, leftFound := join.leftRows[pair.leftKey]
 		right, rightFound := join.rightRows[pair.rightKey]
 		if !leftFound || !rightFound {
