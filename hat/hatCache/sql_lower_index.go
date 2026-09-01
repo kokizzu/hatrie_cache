@@ -37,7 +37,7 @@ func (ht *HatTrie) CreateSQLJSONLowerIndex(key, field string) error {
 func (ht *HatTrie) resolveSQLJSONLowerIndexedSource(key, field string, value interface{}) ([]SQLRow, bool, error) {
 	text, ok := value.(string)
 	if !ok {
-		return []SQLRow{}, true, nil
+		return nil, false, nil
 	}
 	source, err := ht.sqlJSONSource(key)
 	if err != nil {

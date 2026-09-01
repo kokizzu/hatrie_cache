@@ -1,6 +1,7 @@
 package hatCache
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -71,5 +72,30 @@ func TestSQLJSONLowerIndexFallsBackForUnconfiguredAndMixedTypeSources(t *testing
 	_, err = ExecuteSQLQuery(query, mixed)
 	if err == nil || !strings.Contains(err.Error(), "LOWER expects a TEXT argument") {
 		t.Fatalf("mixed LOWER query error = %v, want type error", err)
+	}
+}
+
+func TestSQLJSONLowerIndexFallsBackForNonStringLiteral(t *testing.T) {
+	t.Parallel()
+	query := "FROM CACHE('people') AS person WHERE LOWER(person.name) = 123 SELECT person.id"
+	scan := newTestTrie(t)
+	scan.UpsertString("people", `[{"id":1,"name":"123"},{"id":2,"name":"other"}]`)
+	want, err := ExecuteSQLQuery(query, scan)
+	if err != nil {
+		t.Fatalf("scan LOWER query error = %v", err)
+	}
+
+	indexed := newTestTrie(t)
+	indexed.UpsertString("people", `[{"id":1,"name":"123"},{"id":2,"name":"other"}]`)
+	if err := indexed.CreateSQLJSONLowerIndex("people", "name"); err != nil {
+		t.Fatalf("CreateSQLJSONLowerIndex() error = %v", err)
+	}
+	_, available, err := indexed.ResolveSQLIndexedSource("CACHE", "people", hatSql.LowerIndexField("name"), float64(123))
+	if err != nil || available {
+		t.Fatalf("non-string lower index availability/error = %t/%v; want scan fallback", available, err)
+	}
+	got, err := ExecuteSQLQuery(query, indexed)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("indexed LOWER query = %#v, %v; want %#v", got, err, want)
 	}
 }

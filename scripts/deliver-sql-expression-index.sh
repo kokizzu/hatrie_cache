@@ -49,6 +49,9 @@ PATCH
 	;;
 apply)
 	git add -- ADOPTED_QUERY_ENGINE_IDEAS.md hat/hatCache/main.go hat/hatCache/sql_query.go hat/hatCache/sql_lower_index.go hat/hatCache/sql_lower_index_test.go hat/hatCache/sql_lower_index_benchmark_test.go hat/hatSql/expression_index.go hat/hatSql/query.go scripts/test-sql-expression-index.sh scripts/test-race-sql-expression-index.sh scripts/benchmark-sql-expression-index.sh scripts/verify-sql-expression-index.sh scripts/deliver-sql-expression-index.sh
+	if git grep --cached -q '^deliver-sql-expression-index:$' -- Makefile; then
+		:
+	else
 	git apply --cached <<'PATCH'
 diff --git a/Makefile b/Makefile
 --- a/Makefile
@@ -78,6 +81,7 @@ diff --git a/Makefile b/Makefile
 +check-sql-expression-index-stage:
 +	sh ./scripts/deliver-sql-expression-index.sh check-stage
 PATCH
+	fi
 	git diff --cached --check
 	git diff --cached --name-only
 	git commit -m 'feat: add SQL lower expression index'
