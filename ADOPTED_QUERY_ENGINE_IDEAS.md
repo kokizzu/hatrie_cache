@@ -12,6 +12,7 @@ explicitly opt-in operational control.
 | ClickHouse | Projection for repeated ordering | Adopted | Immutable cached ordinal projections serve repeated single-column and multi-column `ORDER BY` Top-N queries, including mixed directions, after repeated reads. |
 | ClickHouse | Dynamic Top-N data skipping | Adopted | Cached numeric segment min/max metadata skips only segments that cannot beat the bounded Top-N threshold; equal-boundary segments remain scanned to preserve stable ties. |
 | ClickHouse | Granular skipping indexes | Already present | Numeric min/max, dictionary membership, string equality Bloom, and n-gram Bloom sidecars prune only impossible segments. |
+| ClickHouse | Narrow expression index | Adopted | `CreateSQLJSONLowerIndex` is an explicit `LOWER(field) = literal` equality index. It uses the existing generation-aware JSON snapshot lifecycle and falls back to the SQL scan for source values that are not strings. |
 | Tarantool | Controlled cooperative maintenance | Adopted | `ManagedRefreshScheduler` now has opt-in count and duration cycle budgets. [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md) |
 | Tarantool | Consistent read snapshot | Already present at current boundary | `SnapshotLocker` gives resolvers a stable query lifetime without retaining historical row versions. |
 
@@ -29,6 +30,7 @@ explicitly opt-in operational control.
 | Mixed-direction composite columnar sorted projection, 20,000 rows and `LIMIT 50` | About 26.1 us, 21 KB, and 133 allocations when warm, versus about 3.21 ms, 986 KB, and 60,014 allocations for repeated heap Top-N: about 123x faster, 46x less heap, and 451x fewer allocations. Each distinct field/direction order is independently admitted after repeated reads and costs one 4-byte row ordinal per cached row within the same 4 MB bound. |
 | Numeric segment Top-N pruning, 20,000 rows and `LIMIT 50` | About 62.7 us, 28 KB, and 423 allocations with existing numeric segment metadata, versus about 1.25 ms, 186 KB, and 20,167 allocations without it: about 20x faster, 6.6x less heap, and 47.7x fewer allocations. It creates no additional metadata and falls back when a numeric sidecar is unavailable. |
 | Opt-in adaptive typed-table numeric segments, selective 4,096-row Top-N | About 44.7 us, 27.8 KB, and 244 allocations, versus fixed 256-row segments at 56.9 us, 29.4 KB, and 436 allocations: about 1.27x faster, 1.06x less allocated heap, and 1.8x fewer allocations. It retains roughly 2.3 KB more min/max sidecar metadata for two numeric columns, so defaults remain unchanged. |
+| Opt-in JSON `LOWER(name)` equality index, 10,000 rows and 100 matching rows | About 65.9 us, 110 KB, and 739 allocations, versus a 12.22 ms, 7.89 MB, and 135,246-allocation scan: about 185x faster, 72x less allocated heap, and 183x fewer allocations. It retains lowercase postings and the existing JSON source snapshot only after `CreateSQLJSONLowerIndex`; a missing index, admission denial, or non-string source value retains the ordinary scan and SQL error behavior. |
 
 ## Deliberately Deferred
 

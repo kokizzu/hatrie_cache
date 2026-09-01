@@ -861,6 +861,10 @@ func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field string, source sqlJSONSo
 		configured++
 		current = current && source.current(index.sqlJSONIndexState)
 	}
+	if index := ht.sqlJSONLowerIndexes[key][field]; index != nil {
+		configured++
+		current = current && source.current(index.sqlJSONIndexState)
+	}
 	if index := ht.sqlJSONBitmapIndexes[key][field]; index != nil {
 		configured++
 		current = current && source.current(index.sqlJSONIndexState)
@@ -919,6 +923,17 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field string, source sqlJSON
 		if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
+		if changed {
+			rebuilt++
+		}
+	}
+	if index := ht.sqlJSONLowerIndexes[key][field]; index != nil {
+		changed := !source.current(index.sqlJSONIndexState)
+		snapshot, err := loadSnapshot()
+		if err != nil {
+			return rebuilt, err
+		}
+		refreshSQLJSONLowerIndexSource(index, field, source, snapshot.rows)
 		if changed {
 			rebuilt++
 		}
@@ -1201,6 +1216,9 @@ func sqlJSONCompositeIndexIdentifier(fields []string) string { return strings.Jo
 func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
 	if name != "CACHE" {
 		return nil, false, nil
+	}
+	if lowerField, lower := hatSql.LowerIndexFieldName(field); lower {
+		return ht.resolveSQLJSONLowerIndexedSource(key, lowerField, value)
 	}
 	ht.sqlIndexMu.Lock()
 	typed := ht.sqlJSONTypedInt64Indexes[key][field]

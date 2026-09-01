@@ -11128,6 +11128,14 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		rows, indexed, err = resolveSQLIndexedComparison(source, path, condition.op, right.value, resolver)
 	} else if path, ok := sqlJSONPathIndexField(right, source.alias); ok && left.kind == "literal" {
 		rows, indexed, err = resolveSQLIndexedComparison(source, path, sqlReverseComparison(condition.op), left.value, resolver)
+	} else if field, ok := sqlLowerIndexField(left, source.alias); ok && right.kind == "literal" && condition.op == "=" {
+		if hint.allowsField(source, field) {
+			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, right.value, resolver)
+		}
+	} else if field, ok := sqlLowerIndexField(right, source.alias); ok && left.kind == "literal" && condition.op == "=" {
+		if hint.allowsField(source, field) {
+			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, left.value, resolver)
+		}
 	} else {
 		return nil, false, nil
 	}
@@ -11135,6 +11143,17 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		metrics.adaptive.ObserveIndex(adaptiveKey, *adaptiveEstimate, len(rows))
 	}
 	return rows, indexed, err
+}
+
+func sqlLowerIndexField(expr sqlExpr, alias string) (string, bool) {
+	if expr.kind != "func" || !strings.EqualFold(expr.name, "LOWER") || len(expr.args) != 1 {
+		return "", false
+	}
+	field := expr.args[0]
+	if field.kind != "field" || field.qualifier != alias || field.name == "" {
+		return "", false
+	}
+	return LowerIndexField(field.name), true
 }
 
 func sqlSecondaryIndexedEqualities(source sqlSource, condition sqlExpr) (string, []string, []interface{}) {
@@ -13966,6 +13985,22 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		return nil
 	case "func":
 		switch expr.name {
+		case "LOWER":
+			if len(expr.args) != 1 {
+				return sqlEvalError{err: fmt.Errorf("LOWER expects exactly one argument"), token: expr.token}
+			}
+			value := evalSQLExpr(expr.args[0], group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if value == nil {
+				return nil
+			}
+			text, ok := value.(string)
+			if !ok {
+				return sqlEvalError{err: fmt.Errorf("LOWER expects a TEXT argument"), token: expr.token}
+			}
+			return strings.ToLower(text)
 		case "COALESCE":
 			if len(expr.args) == 0 {
 				return sqlEvalError{err: fmt.Errorf("COALESCE expects at least one argument"), token: expr.token}
@@ -14501,7 +14536,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "NULLIF", "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 		return true
 	}
 	return false

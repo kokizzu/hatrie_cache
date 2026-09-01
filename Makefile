@@ -3266,3 +3266,26 @@ format-sql-projection-retention:
 
 deliver-sql-projection-retention:
 	sh ./scripts/deliver-sql-projection-retention.sh
+.PHONY: test-sql-expression-index
+test-sql-expression-index:
+	sh ./scripts/test-sql-expression-index.sh
+.PHONY: benchmark-sql-expression-index
+benchmark-sql-expression-index:
+	sh ./scripts/benchmark-sql-expression-index.sh
+.PHONY: test-race-sql-expression-index
+test-race-sql-expression-index:
+	sh ./scripts/test-race-sql-expression-index.sh
+.PHONY: verify-sql-expression-index
+verify-sql-expression-index:
+	sh ./scripts/verify-sql-expression-index.sh
+.PHONY: deliver-sql-expression-index-plan verify-sql-expression-index-delivery deliver-sql-expression-index unstage-sql-expression-index check-sql-expression-index-stage
+deliver-sql-expression-index-plan:
+	sh ./scripts/deliver-sql-expression-index.sh plan
+verify-sql-expression-index-delivery:
+	sh ./scripts/deliver-sql-expression-index.sh verify
+deliver-sql-expression-index:
+	sh ./scripts/deliver-sql-expression-index.sh apply
+unstage-sql-expression-index:
+	sh ./scripts/deliver-sql-expression-index.sh unstage
+check-sql-expression-index-stage:
+	sh ./scripts/deliver-sql-expression-index.sh check-stage

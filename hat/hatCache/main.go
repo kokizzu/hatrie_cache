@@ -3691,6 +3691,7 @@ type HatTrie struct {
 	sqlJSONTypedInt64Indexes          map[string]map[string]*sqlJSONTypedInt64Index
 	sqlJSONTypedInt64CompositeIndexes map[string]map[string]*sqlJSONTypedInt64CompositeIndex
 	sqlJSONIndexes                    map[string]map[string]*sqlJSONFieldIndex
+	sqlJSONLowerIndexes               map[string]map[string]*sqlJSONLowerIndex
 	sqlJSONBitmapIndexes              map[string]map[string]*sqlJSONBitmapIndex
 	sqlJSONCoveringIndexes            map[string]map[string]*sqlJSONCoveringIndex
 	sqlJSONTextIndexes                map[string]map[string]*sqlJSONTextIndex
