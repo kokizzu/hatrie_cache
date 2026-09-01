@@ -3177,6 +3177,26 @@ deliver-two-week-compatibility-audit:
 test-sql-typed-table:
 	sh ./scripts/test-sql-typed-table.sh
 
+.PHONY: benchmark-sql-typed-table-join
+benchmark-sql-typed-table-join:
+	sh ./scripts/benchmark-sql-typed-table-join.sh
+
+.PHONY: deliver-sql-typed-table-join-arrangements
+deliver-sql-typed-table-join-arrangements:
+	sh ./scripts/deliver-sql-typed-table-join-arrangements.sh plan
+
+.PHONY: verify-sql-typed-table-join-arrangements-delivery
+verify-sql-typed-table-join-arrangements-delivery:
+	sh ./scripts/deliver-sql-typed-table-join-arrangements.sh verify
+
+.PHONY: apply-sql-typed-table-join-arrangements-delivery
+apply-sql-typed-table-join-arrangements-delivery:
+	sh ./scripts/deliver-sql-typed-table-join-arrangements.sh apply
+
+.PHONY: unstage-sql-typed-table-join-arrangements-delivery
+unstage-sql-typed-table-join-arrangements-delivery:
+	sh ./scripts/deliver-sql-typed-table-join-arrangements.sh unstage
+
 format-sql-typed-table:
 	sh ./scripts/format-sql-typed-table.sh
 

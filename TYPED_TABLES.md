@@ -76,6 +76,58 @@ your consumer state before calling `CompactChangesThrough`; if `ChangesAfter`
 returns `ErrTypedTableChangesCompacted`, rebuild the aggregate from a trusted
 table snapshot.
 
+## Shared Incremental Equi-Joins
+
+`TypedTableJoin` maintains one exact inner equi-join between two distinct typed
+tables. It snapshots both inputs at construction, then applies each table's
+strictly ordered changes without rescanning either source. `NULL` and floating
+point `NaN` keys do not match; `-0` and `0` match. A change sequence gap is
+rejected, and an already applied sequence is idempotent.
+
+```go
+arrangements, err := hatSql.NewTypedTableJoinArrangements(scores, people)
+if err != nil {
+	return err
+}
+lease, err := arrangements.Acquire(hatSql.TypedTableJoinDefinition{
+	LeftField:  "team",
+	RightField: "team",
+})
+if err != nil {
+	return err
+}
+defer lease.Release()
+
+leftChanges, _, err := scores.ChangesAfter(lease.LeftCheckpoint(), 256)
+if err != nil {
+	return err
+}
+if err := lease.ApplyLeft(leftChanges); err != nil {
+	return err
+}
+rightChanges, _, err := people.ChangesAfter(lease.RightCheckpoint(), 256)
+if err != nil {
+	return err
+}
+if err := lease.ApplyRight(rightChanges); err != nil {
+	return err
+}
+rows := lease.Rows()
+_ = rows
+```
+
+`TypedTableJoinArrangements` reference-counts consumers of the same pair of
+tables and field definition, so identical readers share one maintained join.
+The arrangement is removed after its last `Release`; a released lease rejects
+further change application and returns no rows. Concurrent `Release` calls are
+safe and exactly one succeeds.
+
+The arrangement stores the current source rows, join-key buckets, and every
+matching key pair. This is a substantial win for repeated incremental updates,
+but its retained state is proportional to the result cardinality. Keep it out
+of the default path and do not use it for unbounded many-to-many joins unless a
+separate result-cardinality limit is enforced by the caller.
+
 ## SQL Compatibility
 
 The table implements both `SourceResolver` and `ColumnarSourceResolver`.
@@ -122,6 +174,8 @@ of three runs as follows:
 | Full rescan aggregate, 10,000 rows | 2.82 ms | 4.64 MB | 49,745 |
 | Selective SQL query, 10,000 rows, rebuilding layout | 810 us | 652 KB | 19,785 |
 | Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
+| Incremental join update, 10,000 rows per side and 64 join keys | 52.4 us | 34.7 KB | 478 |
+| Full join rebuild after that update | 2.14 s | 1.20 GB | 7,882,541 |
 
 For this repeated-aggregate workload, delta maintenance is approximately
 `3,794x` faster, uses `4,843x` less heap, and performs `6,218x` fewer
@@ -134,10 +188,17 @@ allocations. The retained snapshot consumes part of `MaxBytes` and is discarded
 on every write, so leave the feature disabled for write-heavy or one-shot query
 workloads.
 
+For the intentionally high-fanout join fixture, applying one left-side update
+is about `40,900x` faster, uses about `34,700x` less allocated heap, and makes
+about `16,500x` fewer allocations than a full rebuild. The full rebuild
+materializes roughly 1.56 million matching pairs; this demonstrates the
+incremental benefit, not a promise for a low-cardinality join.
+
 ## Verification
 
 ```sh
 make test-sql-typed-table
 make test-race-sql-typed-table
 make benchmark-sql-typed-table
+make benchmark-sql-typed-table-join
 ```
