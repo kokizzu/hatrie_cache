@@ -774,37 +774,50 @@ func typedTableValueInterface(value TypedTableValue) interface{} {
 
 // TypedTableAggregateDefinition declares an exact changefeed aggregate. It
 // always emits count; SumField, MinField, and MaxField are optional numeric
-// schema columns. Min and max retain per-group counted values so deletes and
-// updates remain exact.
+// schema columns. DistinctField is an optional scalar schema column. Min, max,
+// and distinct values retain per-group counts so deletes and updates remain
+// exact.
 type TypedTableAggregateDefinition struct {
-	GroupBy  []string
-	SumField string
-	MinField string
-	MaxField string
+	GroupBy       []string
+	SumField      string
+	MinField      string
+	MaxField      string
+	DistinctField string
+}
+
+type typedTableDistinctValue struct {
+	kind       TypedTableKind
+	stringValue string
+	int64Value  int64
+	floatBits   uint64
+	boolValue   bool
 }
 
 type typedTableAggregateGroup struct {
-	values    []TypedTableValue
-	count     int64
-	sum       float64
-	minValues map[TypedTableValue]int64
-	maxValues map[TypedTableValue]int64
-	minimum   TypedTableValue
-	maximum   TypedTableValue
-	hasMin    bool
-	hasMax    bool
+	values         []TypedTableValue
+	count          int64
+	sum            float64
+	minValues      map[TypedTableValue]int64
+	maxValues      map[TypedTableValue]int64
+	distinctValues map[typedTableDistinctValue]int64
+	minimum        TypedTableValue
+	maximum        TypedTableValue
+	hasMin         bool
+	hasMax         bool
 }
 
-// TypedTableAggregate maintains exact grouped COUNT and optional SUM, MIN, and
-// MAX results from ordered TypedTableChange records without rescanning the table.
+// TypedTableAggregate maintains exact grouped COUNT and optional SUM, MIN, MAX,
+// and COUNT DISTINCT results from ordered TypedTableChange records without
+// rescanning the table.
 type TypedTableAggregate struct {
-	table      *TypedTable
-	groupBy    []int
-	sumField   int
-	minField   int
-	maxField   int
-	groups     map[string]typedTableAggregateGroup
-	checkpoint uint64
+	table         *TypedTable
+	groupBy       []int
+	sumField      int
+	minField      int
+	maxField      int
+	distinctField int
+	groups        map[string]typedTableAggregateGroup
+	checkpoint    uint64
 }
 
 // NewTypedTableAggregate validates an exact delta aggregate for table.
@@ -814,7 +827,7 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	aggregate := &TypedTableAggregate{table: table, sumField: -1, minField: -1, maxField: -1, groups: make(map[string]typedTableAggregateGroup)}
+	aggregate := &TypedTableAggregate{table: table, sumField: -1, minField: -1, maxField: -1, distinctField: -1, groups: make(map[string]typedTableAggregateGroup)}
 	seen := make(map[int]struct{}, len(definition.GroupBy))
 	for _, field := range definition.GroupBy {
 		index, exists := table.byName[strings.TrimSpace(field)]
@@ -847,6 +860,13 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 			return nil, fmt.Errorf("typed table aggregate max field %q must be numeric", definition.MaxField)
 		}
 		aggregate.maxField = index
+	}
+	if definition.DistinctField != "" {
+		index, exists := table.byName[strings.TrimSpace(definition.DistinctField)]
+		if !exists {
+			return nil, fmt.Errorf("typed table aggregate distinct field %q does not exist", definition.DistinctField)
+		}
+		aggregate.distinctField = index
 	}
 	return aggregate, nil
 }
@@ -888,7 +908,7 @@ func (aggregate *TypedTableAggregate) Checkpoint() uint64 {
 }
 
 // Rows returns a deterministic snapshot with group columns, count, and
-// optional sum, min, and max. Rows with count zero are absent.
+// optional sum, min, max, and count_distinct. Rows with count zero are absent.
 func (aggregate *TypedTableAggregate) Rows() []Row {
 	if aggregate == nil {
 		return nil
@@ -911,6 +931,9 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 		if aggregate.maxField >= 0 {
 			rowFields++
 		}
+		if aggregate.distinctField >= 0 {
+			rowFields++
+		}
 		row := make(Row, rowFields)
 		for index, column := range aggregate.groupBy {
 			row[aggregate.table.schema.Columns[column].Name] = typedTableValueInterface(group.values[index])
@@ -925,6 +948,9 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 		if group.hasMax {
 			row["max"] = typedTableValueInterface(group.maximum)
 		}
+		if aggregate.distinctField >= 0 {
+			row["count_distinct"] = int64(len(group.distinctValues))
+		}
 		rows = append(rows, row)
 	}
 	return rows
@@ -938,6 +964,9 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	group := aggregate.groups[key]
 	if delta > 0 && group.values == nil {
 		group.values = groupValues
+	}
+	if err := aggregate.checkDistinct(group, values, delta); err != nil {
+		return err
 	}
 	if err := aggregate.checkExtrema(group, values, delta); err != nil {
 		return err
@@ -955,12 +984,61 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 		}
 	}
 	aggregate.adjustExtrema(&group, values, delta)
+	aggregate.adjustDistinct(&group, values, delta)
 	if group.count == 0 {
 		delete(aggregate.groups, key)
 		return nil
 	}
 	aggregate.groups[key] = group
 	return nil
+}
+
+func (aggregate *TypedTableAggregate) checkDistinct(group typedTableAggregateGroup, values []TypedTableValue, delta int64) error {
+	if delta >= 0 || aggregate.distinctField < 0 {
+		return nil
+	}
+	value, valid := typedTableAggregateDistinctValue(values[aggregate.distinctField])
+	if valid && group.distinctValues[value] <= 0 {
+		return fmt.Errorf("typed table aggregate distinct value is absent")
+	}
+	return nil
+}
+
+func (aggregate *TypedTableAggregate) adjustDistinct(group *typedTableAggregateGroup, values []TypedTableValue, delta int64) {
+	if aggregate.distinctField < 0 {
+		return
+	}
+	value, valid := typedTableAggregateDistinctValue(values[aggregate.distinctField])
+	if !valid {
+		return
+	}
+	if group.distinctValues == nil {
+		group.distinctValues = make(map[typedTableDistinctValue]int64)
+	}
+	group.distinctValues[value] += delta
+	if group.distinctValues[value] == 0 {
+		delete(group.distinctValues, value)
+	}
+}
+
+func typedTableAggregateDistinctValue(value TypedTableValue) (typedTableDistinctValue, bool) {
+	if !value.Valid {
+		return typedTableDistinctValue{}, false
+	}
+	distinct := typedTableDistinctValue{kind: value.Kind}
+	switch value.Kind {
+	case TypedTableString:
+		distinct.stringValue = value.String
+	case TypedTableInt64:
+		distinct.int64Value = value.Int64
+	case TypedTableFloat64:
+		distinct.floatBits = math.Float64bits(value.Float64)
+	case TypedTableBool:
+		distinct.boolValue = value.Bool
+	default:
+		return typedTableDistinctValue{}, false
+	}
+	return distinct, true
 }
 
 func (aggregate *TypedTableAggregate) checkExtrema(group typedTableAggregateGroup, values []TypedTableValue, delta int64) error {

@@ -48,13 +48,14 @@ BY` when row order matters.
 ## Exact Delta Aggregates
 
 `TypedTableAggregate` consumes strictly ordered table changes. It maintains
-grouped `count` and an optional numeric `sum` without rescanning all table
-rows.
+grouped `count`, optional numeric `sum`/`min`/`max`, and an optional exact
+`count_distinct` without rescanning all table rows.
 
 ```go
 aggregate, err := hatSql.NewTypedTableAggregate(table, hatSql.TypedTableAggregateDefinition{
 	GroupBy:  []string{"team"},
 	SumField: "points",
+	DistinctField: "player_id",
 })
 if err != nil {
 	return err
@@ -67,9 +68,14 @@ if err != nil {
 if err := aggregate.Apply(changes); err != nil {
 	return err
 }
-rows := aggregate.Rows() // team, count, sum
+rows := aggregate.Rows() // team, count, sum, count_distinct
 _ = rows
 ```
+
+`DistinctField` is disabled by default. When configured, it accepts any typed
+scalar column and retains one counter per distinct non-NULL value in each
+group. This makes inserts, updates, and deletes exact; choose it only when the
+avoided rescan cost is worth that bounded per-group state.
 
 Changes are idempotent at or below the aggregate checkpoint. A sequence gap is
 rejected rather than skipped. Keep a durable aggregate checkpoint alongside

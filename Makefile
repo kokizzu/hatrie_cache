@@ -3352,5 +3352,21 @@ deliver-sql-temporal-storage-plan:
 
 deliver-sql-temporal-storage:
 	sh ./scripts/deliver-sql-temporal-storage.sh apply
+
+test-sql-typed-distinct:
+	sh ./scripts/test-sql-typed-distinct.sh
+
+benchmark-sql-typed-distinct:
+	sh ./scripts/benchmark-sql-typed-distinct.sh
+verify-sql-typed-distinct:
+	sh ./scripts/verify-sql-typed-distinct.sh
+
+deliver-sql-typed-distinct-plan:
+	sh ./scripts/deliver-sql-typed-distinct-plan.sh
+
+deliver-sql-typed-distinct:
+	sh ./scripts/deliver-sql-typed-distinct.sh apply
+check-sql-typed-distinct-stage:
+	sh ./scripts/deliver-sql-typed-distinct.sh check
 check-sql-temporal-storage-stage:
 	sh ./scripts/deliver-sql-temporal-storage.sh check
