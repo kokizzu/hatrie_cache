@@ -331,6 +331,14 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// BorrowedIndexedSourceResolver optionally resolves equality predicates through
+// an immutable index posting list. The returned rows must stay valid for the
+// active SQL snapshot and callers must not mutate them. SQL uses this contract
+// for joins to avoid copying the same dimension rows for every probe.
+type BorrowedIndexedSourceResolver interface {
+	BorrowSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
+}
+
 // CoveringIndexedSourceResolver optionally resolves an equality predicate from
 // an index that already contains every required output field. Implementations
 // must return rows containing only the requested fields and predicate field.

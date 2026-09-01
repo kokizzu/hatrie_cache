@@ -3311,3 +3311,17 @@ deliver-sql-index-in:
 	sh ./scripts/deliver-sql-index-in.sh apply
 check-sql-index-in-stage:
 	sh ./scripts/deliver-sql-index-in.sh check-stage
+test-sql-borrowed-indexed-join:
+	sh ./scripts/test-sql-borrowed-indexed-join.sh
+benchmark-sql-borrowed-indexed-join:
+	sh ./scripts/benchmark-sql-borrowed-indexed-join.sh
+verify-sql-borrowed-indexed-join:
+	sh ./scripts/verify-sql-borrowed-indexed-join.sh
+
+deliver-sql-borrowed-indexed-join-plan:
+	sh ./scripts/deliver-sql-borrowed-indexed-join-plan.sh
+
+deliver-sql-borrowed-indexed-join:
+	sh ./scripts/deliver-sql-borrowed-indexed-join.sh apply
+check-sql-borrowed-indexed-join-stage:
+	sh ./scripts/deliver-sql-borrowed-indexed-join.sh check

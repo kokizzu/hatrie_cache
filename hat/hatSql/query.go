@@ -9505,12 +9505,35 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				}
 			}
 			if indexJoin && !rightPushed && !forceHashJoin && join.source.kind == "CACHE" {
-				if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
-					// Probe once with NULL to verify that the optional index exists and
-					// to surface malformed JSON even when every left key is NULL.
-					_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+				var resolveIndexed func(string, string, string, interface{}) ([]SQLRow, bool, error)
+				probed := false
+				available := false
+				if borrowed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
+					var err error
+					_, available, err = borrowed.BorrowSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
 					if err != nil {
 						return SQLQueryResult{}, err
+					}
+					probed = true
+					if available {
+						resolveIndexed = borrowed.BorrowSQLIndexedSource
+					}
+				}
+				if resolveIndexed == nil {
+					if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
+						resolveIndexed = indexed.ResolveSQLIndexedSource
+						probed = false
+					}
+				}
+				if resolveIndexed != nil {
+					// Probe once with NULL to verify that the optional index exists and
+					// to surface malformed JSON even when every left key is NULL.
+					if !probed {
+						var err error
+						_, available, err = resolveIndexed(join.source.kind, join.source.key, rightField, nil)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
 					}
 					if available {
 						inputRows := len(rows)
@@ -9522,7 +9545,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 								if err := control.addJoinWork(1); err != nil {
 									return SQLQueryResult{}, err
 								}
-								candidates, _, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, value)
+								candidates, _, err := resolveIndexed(join.source.kind, join.source.key, rightField, value)
 								if err != nil {
 									return SQLQueryResult{}, err
 								}
