@@ -115,6 +115,112 @@ func TestTypedTableJoinKeepsDelimiterLikeKeysDistinct(t *testing.T) {
 	assertTypedTableJoinPairs(t, join.Rows(), "a:bc/a:bc", "a:bc/ab:c", "ab:c/a:bc", "ab:c/ab:c")
 }
 
+func TestTypedTableJoinCoalescesConsecutiveChangesForOneKey(t *testing.T) {
+	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "scores_coalesced", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "people_coalesced", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("blue")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := right.Upsert("u", []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+		t.Fatal(err)
+	}
+	join, err := hatSql.NewTypedTableJoin(left, right, hatSql.TypedTableJoinDefinition{LeftField: "team", RightField: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("red")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("blue")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := join.ApplyLeft([]hatSql.TypedTableChange{first, last}); err != nil {
+		t.Fatal(err)
+	}
+	if join.LeftCheckpoint() != last.Sequence {
+		t.Fatalf("checkpoint = %d, want %d", join.LeftCheckpoint(), last.Sequence)
+	}
+	assertTypedTableJoinPairs(t, join.Rows())
+}
+
+func TestTypedTableJoinCoalescesConsecutiveRightChangesForOneKey(t *testing.T) {
+	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "scores_coalesced_right", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "people_coalesced_right", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := right.Upsert("u", []hatSql.TypedTableValue{hatSql.TypedString("blue")}); err != nil {
+		t.Fatal(err)
+	}
+	join, err := hatSql.NewTypedTableJoin(left, right, hatSql.TypedTableJoinDefinition{LeftField: "team", RightField: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := right.Upsert("u", []hatSql.TypedTableValue{hatSql.TypedString("red")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, err := right.Upsert("u", []hatSql.TypedTableValue{hatSql.TypedString("blue")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := join.ApplyRight([]hatSql.TypedTableChange{first, last}); err != nil {
+		t.Fatal(err)
+	}
+	if join.RightCheckpoint() != last.Sequence {
+		t.Fatalf("checkpoint = %d, want %d", join.RightCheckpoint(), last.Sequence)
+	}
+	assertTypedTableJoinPairs(t, join.Rows())
+}
+
+func TestTypedTableJoinCoalescedRunRetainsValidPrefixBeforeSequenceGap(t *testing.T) {
+	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "scores_coalesced_gap", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "people_coalesced_gap", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("blue")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := right.Upsert("u", []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+		t.Fatal(err)
+	}
+	join, err := hatSql.NewTypedTableJoin(left, right, hatSql.TypedTableJoinDefinition{LeftField: "team", RightField: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("red")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := first
+	invalid.Sequence += 2
+	if err := join.ApplyLeft([]hatSql.TypedTableChange{first, invalid}); err == nil {
+		t.Fatal("ApplyLeft() error = nil, want sequence gap")
+	}
+	if join.LeftCheckpoint() != first.Sequence {
+		t.Fatalf("checkpoint = %d, want %d", join.LeftCheckpoint(), first.Sequence)
+	}
+	assertTypedTableJoinPairs(t, join.Rows(), "a/u")
+}
+
 func TestTypedTableJoinDoesNotMatchNullKeys(t *testing.T) {
 	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "left_null_keys", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
 	if err != nil {

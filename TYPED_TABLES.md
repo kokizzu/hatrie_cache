@@ -123,6 +123,12 @@ The arrangement is removed after its last `Release`; a released lease rejects
 further change application and returns no rows. Concurrent `Release` calls are
 safe and exactly one succeeds.
 
+Within one `ApplyLeft` or `ApplyRight` batch, consecutive valid changes for the
+same primary key are coalesced to their final state. Each change is still
+validated in order and checkpoints advance through every sequence. If a later
+change is invalid or has a sequence gap, the valid prefix remains applied just
+as it would without coalescing. Single-change calls retain the direct path.
+
 The arrangement stores the current source rows, join-key buckets, and a
 factorized structural pair of source keys for every match. It deliberately does
 not clone full row values or serialize pair keys per match; `Rows` resolves and
@@ -187,6 +193,8 @@ of three runs as follows:
 | Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
 | Incremental join update, 10,000 rows per side and 64 join keys | 15.2 us | 945 B | 7 |
 | Full join rebuild after that update | 1.33 s | 634 MB | 3,195,005 |
+| Two separate same-key updates, 1,024 matching rows | 197 us | 192 KB | 32 |
+| One coalesced batch with those updates | 2.56 us | 344 B | 6 |
 | Fixed 256-row numeric segments, selective Top-N over 4,096 rows | 56.9 us | 29.4 KB | 436 |
 | Adaptive segments (maximum 256), same Top-N | 44.7 us | 27.8 KB | 244 |
 
@@ -212,6 +220,11 @@ allocations. The full rebuild materializes roughly 1.56 million matching pairs;
 this demonstrates the incremental benefit, not a promise for a low-cardinality
 join.
 
+For two consecutive updates of one key with 1,024 current matches, applying
+one batch is about `77x` faster, uses about `557x` less allocated heap, and
+makes about `5.3x` fewer allocations than applying each update separately. It
+does not add retained state and only changes work inside an explicit batch.
+
 For the selective 4,096-row Top-N fixture, adaptive segments are about `1.27x`
 faster, use about `1.06x` less allocated heap, and make about `1.8x` fewer
 allocations. It uses 64 numeric segments instead of 16, which retains roughly
@@ -225,4 +238,5 @@ make test-sql-typed-table
 make test-race-sql-typed-table
 make benchmark-sql-typed-table
 make benchmark-sql-typed-table-join
+make benchmark-sql-typed-table-join-coalescing
 ```

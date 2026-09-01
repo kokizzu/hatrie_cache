@@ -103,18 +103,67 @@ func (join *TypedTableJoin) ApplyLeft(changes []TypedTableChange) error {
 	}
 	join.mu.Lock()
 	defer join.mu.Unlock()
-	for _, change := range changes {
+	if len(changes) == 1 {
+		return join.applyLeftOneLocked(changes[0])
+	}
+	for index := 0; index < len(changes); {
+		change := changes[index]
 		if change.Sequence <= join.leftCheckpoint {
+			index++
 			continue
 		}
 		if change.Sequence != join.leftCheckpoint+1 {
 			return fmt.Errorf("typed table join left change sequence gap: got %d after %d", change.Sequence, join.leftCheckpoint)
 		}
-		if err := join.applyLeft(change); err != nil {
+		if err := typedTableJoinChange(change); err != nil {
 			return err
 		}
-		join.leftCheckpoint = change.Sequence
+		last := change
+		checkpoint := change.Sequence
+		index++
+		for index < len(changes) && changes[index].Key == change.Key {
+			next := changes[index]
+			if next.Sequence <= checkpoint {
+				index++
+				continue
+			}
+			if next.Sequence != checkpoint+1 {
+				if err := join.applyLeft(last); err != nil {
+					return err
+				}
+				join.leftCheckpoint = checkpoint
+				return fmt.Errorf("typed table join left change sequence gap: got %d after %d", next.Sequence, checkpoint)
+			}
+			if err := typedTableJoinChange(next); err != nil {
+				if applyErr := join.applyLeft(last); applyErr != nil {
+					return applyErr
+				}
+				join.leftCheckpoint = checkpoint
+				return err
+			}
+			last = next
+			checkpoint = next.Sequence
+			index++
+		}
+		if err := join.applyLeft(last); err != nil {
+			return err
+		}
+		join.leftCheckpoint = checkpoint
 	}
+	return nil
+}
+
+func (join *TypedTableJoin) applyLeftOneLocked(change TypedTableChange) error {
+	if change.Sequence <= join.leftCheckpoint {
+		return nil
+	}
+	if change.Sequence != join.leftCheckpoint+1 {
+		return fmt.Errorf("typed table join left change sequence gap: got %d after %d", change.Sequence, join.leftCheckpoint)
+	}
+	if err := join.applyLeft(change); err != nil {
+		return err
+	}
+	join.leftCheckpoint = change.Sequence
 	return nil
 }
 
@@ -125,18 +174,67 @@ func (join *TypedTableJoin) ApplyRight(changes []TypedTableChange) error {
 	}
 	join.mu.Lock()
 	defer join.mu.Unlock()
-	for _, change := range changes {
+	if len(changes) == 1 {
+		return join.applyRightOneLocked(changes[0])
+	}
+	for index := 0; index < len(changes); {
+		change := changes[index]
 		if change.Sequence <= join.rightCheckpoint {
+			index++
 			continue
 		}
 		if change.Sequence != join.rightCheckpoint+1 {
 			return fmt.Errorf("typed table join right change sequence gap: got %d after %d", change.Sequence, join.rightCheckpoint)
 		}
-		if err := join.applyRight(change); err != nil {
+		if err := typedTableJoinChange(change); err != nil {
 			return err
 		}
-		join.rightCheckpoint = change.Sequence
+		last := change
+		checkpoint := change.Sequence
+		index++
+		for index < len(changes) && changes[index].Key == change.Key {
+			next := changes[index]
+			if next.Sequence <= checkpoint {
+				index++
+				continue
+			}
+			if next.Sequence != checkpoint+1 {
+				if err := join.applyRight(last); err != nil {
+					return err
+				}
+				join.rightCheckpoint = checkpoint
+				return fmt.Errorf("typed table join right change sequence gap: got %d after %d", next.Sequence, checkpoint)
+			}
+			if err := typedTableJoinChange(next); err != nil {
+				if applyErr := join.applyRight(last); applyErr != nil {
+					return applyErr
+				}
+				join.rightCheckpoint = checkpoint
+				return err
+			}
+			last = next
+			checkpoint = next.Sequence
+			index++
+		}
+		if err := join.applyRight(last); err != nil {
+			return err
+		}
+		join.rightCheckpoint = checkpoint
 	}
+	return nil
+}
+
+func (join *TypedTableJoin) applyRightOneLocked(change TypedTableChange) error {
+	if change.Sequence <= join.rightCheckpoint {
+		return nil
+	}
+	if change.Sequence != join.rightCheckpoint+1 {
+		return fmt.Errorf("typed table join right change sequence gap: got %d after %d", change.Sequence, join.rightCheckpoint)
+	}
+	if err := join.applyRight(change); err != nil {
+		return err
+	}
+	join.rightCheckpoint = change.Sequence
 	return nil
 }
 

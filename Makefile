@@ -3201,6 +3201,10 @@ unstage-sql-typed-table-adaptive-segments-delivery:
 benchmark-sql-typed-table-join:
 	sh ./scripts/benchmark-sql-typed-table-join.sh
 
+.PHONY: benchmark-sql-typed-table-join-coalescing
+benchmark-sql-typed-table-join-coalescing:
+	sh ./scripts/benchmark-sql-typed-table-join-coalescing.sh
+
 .PHONY: deliver-sql-typed-table-join-arrangements
 deliver-sql-typed-table-join-arrangements:
 	sh ./scripts/deliver-sql-typed-table-join-arrangements.sh plan
