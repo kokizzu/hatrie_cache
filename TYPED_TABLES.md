@@ -122,11 +122,14 @@ The arrangement is removed after its last `Release`; a released lease rejects
 further change application and returns no rows. Concurrent `Release` calls are
 safe and exactly one succeeds.
 
-The arrangement stores the current source rows, join-key buckets, and every
-matching key pair. This is a substantial win for repeated incremental updates,
-but its retained state is proportional to the result cardinality. Keep it out
-of the default path and do not use it for unbounded many-to-many joins unless a
-separate result-cardinality limit is enforced by the caller.
+The arrangement stores the current source rows, join-key buckets, and a
+factorized pair of source keys for every match. It deliberately does not clone
+full row values per match; `Rows` resolves and independently clones values only
+for the caller's returned result. This is a substantial win for repeated
+incremental updates, but retained state is still proportional to result
+cardinality. Keep it out of the default path and do not use it for unbounded
+many-to-many joins unless a separate result-cardinality limit is enforced by
+the caller.
 
 ## SQL Compatibility
 
@@ -174,8 +177,8 @@ of three runs as follows:
 | Full rescan aggregate, 10,000 rows | 2.82 ms | 4.64 MB | 49,745 |
 | Selective SQL query, 10,000 rows, rebuilding layout | 810 us | 652 KB | 19,785 |
 | Same selective SQL query, warmed immutable layout | 215 us | 3.8 KB | 28 |
-| Incremental join update, 10,000 rows per side and 64 join keys | 52.4 us | 34.7 KB | 478 |
-| Full join rebuild after that update | 2.14 s | 1.20 GB | 7,882,541 |
+| Incremental join update, 10,000 rows per side and 64 join keys | 24.2 us | 4.7 KB | 164 |
+| Full join rebuild after that update | 1.89 s | 705 MB | 4,757,518 |
 
 For this repeated-aggregate workload, delta maintenance is approximately
 `3,794x` faster, uses `4,843x` less heap, and performs `6,218x` fewer
@@ -189,10 +192,12 @@ on every write, so leave the feature disabled for write-heavy or one-shot query
 workloads.
 
 For the intentionally high-fanout join fixture, applying one left-side update
-is about `40,900x` faster, uses about `34,700x` less allocated heap, and makes
-about `16,500x` fewer allocations than a full rebuild. The full rebuild
-materializes roughly 1.56 million matching pairs; this demonstrates the
-incremental benefit, not a promise for a low-cardinality join.
+is about `78,200x` faster, uses about `151,000x` less allocated heap, and makes
+about `29,000x` fewer allocations than a full rebuild. Factorizing matched rows
+improves the prior join implementation by about `2.2x` in update time, `7.5x`
+in allocated heap, and `2.9x` in allocations. The full rebuild materializes
+roughly 1.56 million matching pairs; this demonstrates the incremental benefit,
+not a promise for a low-cardinality join.
 
 ## Verification
 

@@ -59,6 +59,38 @@ func TestTypedTableJoinAppliesExactInsertUpdateAndDeleteChanges(t *testing.T) {
 	assertTypedTableJoinPairs(t, join.Rows(), "a/u", "b/u")
 }
 
+func TestTypedTableJoinRowsAreIndependentlyOwned(t *testing.T) {
+	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "scores_owned", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "people_owned", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := left.Upsert("a", []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := right.Upsert("u", []hatSql.TypedTableValue{hatSql.TypedString("red")}); err != nil {
+		t.Fatal(err)
+	}
+	join, err := hatSql.NewTypedTableJoin(left, right, hatSql.TypedTableJoinDefinition{LeftField: "team", RightField: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows := join.Rows()
+	rows[0].Left[0] = hatSql.TypedString("mutated")
+	rows[0].Right[0] = hatSql.TypedString("mutated")
+	fresh := join.Rows()
+	if got, want := fresh[0].Left[0].String, "red"; got != want {
+		t.Fatalf("fresh left value = %q, want %q", got, want)
+	}
+	if got, want := fresh[0].Right[0].String, "red"; got != want {
+		t.Fatalf("fresh right value = %q, want %q", got, want)
+	}
+}
+
 func TestTypedTableJoinDoesNotMatchNullKeys(t *testing.T) {
 	left, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{Name: "left_null_keys", Columns: []hatSql.TypedTableColumn{{Name: "team", Kind: hatSql.TypedTableString}}})
 	if err != nil {

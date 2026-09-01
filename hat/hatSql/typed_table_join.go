@@ -21,6 +21,11 @@ type TypedTableJoinRow struct {
 	Left, Right        []TypedTableValue
 }
 
+type typedTableJoinPair struct {
+	leftKey  string
+	rightKey string
+}
+
 // TypedTableJoin incrementally maintains exact inner equi-join results from
 // ordered changes. It is independent from SQL execution and lets consumers
 // share one arrangement rather than each rescan both input tables.
@@ -32,7 +37,7 @@ type TypedTableJoin struct {
 	leftCheckpoint, rightCheckpoint uint64
 	leftRows, rightRows         map[string][]TypedTableValue
 	leftIndex, rightIndex       map[string]map[string]struct{}
-	pairs                       map[string]TypedTableJoinRow
+	pairs                       map[string]typedTableJoinPair
 }
 
 // NewTypedTableJoin snapshots both current tables and begins tracking changes
@@ -58,7 +63,7 @@ func NewTypedTableJoin(left, right *TypedTable, definition TypedTableJoinDefinit
 	join := &TypedTableJoin{
 		left: left, right: right, definition: definition, leftField: leftField, rightField: rightField,
 		leftRows: map[string][]TypedTableValue{}, rightRows: map[string][]TypedTableValue{},
-		leftIndex: map[string]map[string]struct{}{}, rightIndex: map[string]map[string]struct{}{}, pairs: map[string]TypedTableJoinRow{},
+		leftIndex: map[string]map[string]struct{}{}, rightIndex: map[string]map[string]struct{}{}, pairs: map[string]typedTableJoinPair{},
 	}
 	join.leftRows, join.leftCheckpoint = typedTableJoinSnapshot(left)
 	join.rightRows, join.rightCheckpoint = typedTableJoinSnapshot(right)
@@ -180,7 +185,7 @@ func (join *TypedTableJoin) addLeft(key string, values []TypedTableValue) {
 	}
 	addTypedTableJoinIndex(join.leftIndex, valueKey, key)
 	for rightKey := range join.rightIndex[valueKey] {
-		join.pairs[typedTableJoinPairKey(key, rightKey)] = TypedTableJoinRow{LeftKey: key, RightKey: rightKey, Left: cloneTypedTableValues(values), Right: cloneTypedTableValues(join.rightRows[rightKey])}
+		join.pairs[typedTableJoinPairKey(key, rightKey)] = typedTableJoinPair{leftKey: key, rightKey: rightKey}
 	}
 }
 
@@ -204,7 +209,7 @@ func (join *TypedTableJoin) addRight(key string, values []TypedTableValue) {
 	}
 	addTypedTableJoinIndex(join.rightIndex, valueKey, key)
 	for leftKey := range join.leftIndex[valueKey] {
-		join.pairs[typedTableJoinPairKey(leftKey, key)] = TypedTableJoinRow{LeftKey: leftKey, RightKey: key, Left: cloneTypedTableValues(join.leftRows[leftKey]), Right: cloneTypedTableValues(values)}
+		join.pairs[typedTableJoinPairKey(leftKey, key)] = typedTableJoinPair{leftKey: leftKey, rightKey: key}
 	}
 }
 
@@ -279,9 +284,18 @@ func (join *TypedTableJoin) Rows() []TypedTableJoinRow {
 	join.mu.RLock()
 	defer join.mu.RUnlock()
 	rows := make([]TypedTableJoinRow, 0, len(join.pairs))
-	for _, row := range join.pairs {
-		row.Left, row.Right = cloneTypedTableValues(row.Left), cloneTypedTableValues(row.Right)
-		rows = append(rows, row)
+	for _, pair := range join.pairs {
+		left, leftFound := join.leftRows[pair.leftKey]
+		right, rightFound := join.rightRows[pair.rightKey]
+		if !leftFound || !rightFound {
+			continue
+		}
+		rows = append(rows, TypedTableJoinRow{
+			LeftKey:  pair.leftKey,
+			RightKey: pair.rightKey,
+			Left:     cloneTypedTableValues(left),
+			Right:    cloneTypedTableValues(right),
+		})
 	}
 	sort.Slice(rows, func(left, right int) bool { if rows[left].LeftKey != rows[right].LeftKey { return rows[left].LeftKey < rows[right].LeftKey }; return rows[left].RightKey < rows[right].RightKey })
 	return rows

@@ -8,6 +8,9 @@ stage_makefile_targets() {
 	desired=$(mktemp)
 	trap 'rm -f "$base" "$desired"' EXIT HUP INT TERM
 	git show :Makefile >"$base"
+	if grep -Fqx 'benchmark-sql-typed-table-join:' "$base"; then
+		return
+	fi
 	awk '
 		$0 == "test-sql-typed-table:" {
 			print
@@ -61,7 +64,7 @@ apply)
 	stage_makefile_targets
 	git add -- ADOPTED_QUERY_ENGINE_IDEAS.md TYPED_TABLES.md hat/hatSql/typed_table_join.go hat/hatSql/typed_table_join_arrangements.go hat/hatSql/typed_table_join_benchmark_test.go hat/hatSql/typed_table_join_test.go scripts/benchmark-sql-typed-table-join.sh scripts/deliver-sql-typed-table-join-arrangements.sh
 	git diff --cached --check
-	git commit -m "feat: add shared typed join arrangements"
+	git commit -m "perf: factorize typed join arrangement state"
 	git push origin master
 	;;
 unstage)
