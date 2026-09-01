@@ -13,7 +13,7 @@ explicitly opt-in operational control.
 | ClickHouse | Dynamic Top-N data skipping | Adopted | Cached numeric segment min/max metadata skips only segments that cannot beat the bounded Top-N threshold; equal-boundary segments remain scanned to preserve stable ties. |
 | ClickHouse | Granular skipping indexes | Already present | Numeric min/max, dictionary membership, string equality Bloom, and n-gram Bloom sidecars prune only impossible segments. |
 | ClickHouse | Narrow expression index | Adopted | `CreateSQLJSONLowerIndex` is an explicit `LOWER(field) = literal` equality index. It uses the existing generation-aware JSON snapshot lifecycle and falls back to the SQL scan for source values that are not strings. |
-| Materialize | Literal semi-join index union | Adopted | Direct-field `IN (literal, ...)` unions existing equality postings after duplicate-literal removal. `NOT IN`, subqueries, expressions, non-binary collations, and unavailable indexes retain the normal evaluator. |
+| Materialize | Literal semi-join index union | Adopted | Direct-field and `LOWER(direct field)` `IN (literal, ...)` predicates union existing equality postings after duplicate-literal removal. `NOT IN`, subqueries, other expressions, non-binary collations, and unavailable indexes retain the normal evaluator. |
 | Tarantool | Controlled cooperative maintenance | Adopted | `ManagedRefreshScheduler` now has opt-in count and duration cycle budgets. [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md) |
 | Tarantool | Consistent read snapshot | Already present at current boundary | `SnapshotLocker` gives resolvers a stable query lifetime without retaining historical row versions. |
 
@@ -33,6 +33,7 @@ explicitly opt-in operational control.
 | Opt-in adaptive typed-table numeric segments, selective 4,096-row Top-N | About 44.7 us, 27.8 KB, and 244 allocations, versus fixed 256-row segments at 56.9 us, 29.4 KB, and 436 allocations: about 1.27x faster, 1.06x less allocated heap, and 1.8x fewer allocations. It retains roughly 2.3 KB more min/max sidecar metadata for two numeric columns, so defaults remain unchanged. |
 | Opt-in JSON `LOWER(name)` equality index, 10,000 rows and 100 matching rows | About 65.9 us, 110 KB, and 739 allocations, versus a 12.22 ms, 7.89 MB, and 135,246-allocation scan: about 185x faster, 72x less allocated heap, and 183x fewer allocations. It retains lowercase postings and the existing JSON source snapshot only after `CreateSQLJSONLowerIndex`; a missing index, admission denial, non-string source value, or non-string predicate literal retains the ordinary scan and SQL behavior. |
 | JSON equality-index literal `IN`, 10,000 rows and 10 distinct literals | About 21.5 us, 18.2 KB, and 121 allocations, versus a 12.0 ms, 8.21 MB, and 90,066-allocation scan: about 557x faster, 452x less allocated heap, and 744x fewer allocations. Duplicate literals are removed before probing; full predicate evaluation preserves SQL null behavior. |
+| JSON `LOWER(name)` index literal `IN`, 10,000 rows and 3 normalized literals | About 235 us, 330 KB, and 2,334 allocations, versus a 14.0 ms, 8.13 MB, and 145,645-allocation scan: about 60x faster, 25x less allocated heap, and 62x fewer allocations. Duplicate literals are removed before probing; non-string literals retain the normal scan path. |
 
 ## Deliberately Deferred
 

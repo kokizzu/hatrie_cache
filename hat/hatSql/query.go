@@ -11149,14 +11149,20 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 }
 
 // resolveSQLIndexedLiteralINSource unions disjoint equality postings for a
-// direct-field IN list. The full predicate remains evaluated after lookup, so
-// this affects candidate work only. Non-literal, non-binary-collation, and
-// unavailable-index forms retain the established scan path.
+// direct field or LOWER(direct field) IN list. The full predicate remains
+// evaluated after lookup, so this affects candidate work only. Non-literal,
+// non-binary-collation, and unavailable-index forms retain the established
+// scan path.
 func resolveSQLIndexedLiteralINSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, hint SQLIndexHint) ([]SQLRow, bool, error) {
-	if condition.kind != "in" || condition.op != "IN" || condition.left == nil || condition.left.kind != "field" || condition.left.qualifier != source.alias || condition.collation.normalized() != SQLCollationBinary {
+	if condition.kind != "in" || condition.op != "IN" || condition.left == nil || condition.collation.normalized() != SQLCollationBinary {
 		return nil, false, nil
 	}
-	field := condition.left.name
+	field := ""
+	if condition.left.kind == "field" && condition.left.qualifier == source.alias {
+		field = condition.left.name
+	} else if lowerField, lower := sqlLowerIndexField(*condition.left, source.alias); lower {
+		field = lowerField
+	}
 	if field == "" || !hint.allowsField(source, field) {
 		return nil, false, nil
 	}

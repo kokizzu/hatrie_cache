@@ -53,3 +53,36 @@ func BenchmarkSQLJSONLowerIndexEquality(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSQLJSONLowerIndexLiteralIN(b *testing.B) {
+	const rows = 10_000
+	const query = "FROM CACHE('people') AS person WHERE LOWER(person.name) IN ('person-042', 'person-043', 'person-044') SELECT person.id"
+	source := benchmarkSQLJSONLowerIndexSource(rows)
+	for _, indexed := range []bool{false, true} {
+		name := "scan"
+		if indexed {
+			name = "lower_index_union"
+		}
+		b.Run(name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			trie.UpsertString("people", source)
+			if indexed {
+				if err := trie.CreateSQLJSONLowerIndex("people", "name"); err != nil {
+					b.Fatal(err)
+				}
+				if result, err := ExecuteSQLQuery(query, trie); err != nil || len(result.Rows) != rows/100*3 {
+					b.Fatalf("warm ExecuteSQLQuery() = %#v, %v", result, err)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				result, err := ExecuteSQLQuery(query, trie)
+				if err != nil || len(result.Rows) != rows/100*3 {
+					b.Fatalf("ExecuteSQLQuery() = %#v, %v", result, err)
+				}
+			}
+		})
+	}
+}

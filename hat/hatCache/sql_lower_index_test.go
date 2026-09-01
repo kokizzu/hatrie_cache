@@ -99,3 +99,20 @@ func TestSQLJSONLowerIndexFallsBackForNonStringLiteral(t *testing.T) {
 		t.Fatalf("indexed LOWER query = %#v, %v; want %#v", got, err, want)
 	}
 }
+
+func TestSQLJSONLowerIndexUsesIndexForLiteralIN(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("people", `[{"id":1,"name":"Ada"},{"id":2,"name":"Grace"},{"id":3,"name":"Other"}]`)
+	if err := trie.CreateSQLJSONLowerIndex("people", "name"); err != nil {
+		t.Fatalf("CreateSQLJSONLowerIndex() error = %v", err)
+	}
+	resolver := &sqlIndexINCountingResolver{HatTrie: trie}
+	result, err := ExecuteSQLQuery("FROM CACHE('people') AS person WHERE LOWER(person.name) IN ('ada', 'grace', 'ada') SELECT person.id ORDER BY person.id", resolver)
+	if err != nil || len(result.Rows) != 2 || result.Rows[0]["id"] != float64(1) || result.Rows[1]["id"] != float64(2) {
+		t.Fatalf("LOWER literal IN query = %#v, error %v", result, err)
+	}
+	if resolver.calls != 2 {
+		t.Fatalf("indexed LOWER literal IN probes = %d, want 2 distinct probes", resolver.calls)
+	}
+}
