@@ -58,6 +58,8 @@ const (
 	DefaultSegmentMaxBytes     int64         = 64 << 20
 	DefaultRetainedSegments                  = 16
 	MaxRetainedSegments                      = 1024
+	DefaultIdempotencyCapacity              = 0
+	MaxIdempotencyCapacity                   = 1 << 20
 )
 
 // Options configures journal encoding, durable group commit, and optional
@@ -68,6 +70,7 @@ type Options struct {
 	GroupCommitMaxBatch int
 	SegmentMaxBytes     int64
 	RetainedSegments    int
+	IdempotencyCapacity int
 }
 
 // ValidateOptions verifies journal options and returns a copy with a
@@ -97,6 +100,12 @@ func ValidateOptions(options Options) (Options, error) {
 	}
 	if options.SegmentMaxBytes > 0 && options.RetainedSegments == 0 {
 		return Options{}, errors.New("hatJournal: retained segments must be positive when segmentation is enabled")
+	}
+	if options.IdempotencyCapacity < 0 {
+		return Options{}, errors.New("hatJournal: idempotency capacity must be non-negative")
+	}
+	if options.IdempotencyCapacity > MaxIdempotencyCapacity {
+		return Options{}, fmt.Errorf("hatJournal: idempotency capacity must be <= %d", MaxIdempotencyCapacity)
 	}
 	options.Format = format
 	return options, nil

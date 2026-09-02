@@ -3,6 +3,7 @@ package hatCache
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -401,6 +402,94 @@ func TestCommandJournalRecordBatchSyncFailureDoesNotApply(t *testing.T) {
 	}
 	if tail, err := journal.Tail(0, 10); err != nil || len(tail.Entries) != 0 {
 		t.Fatalf("Tail() = %#v/%v, want empty journal", tail, err)
+	}
+}
+
+func TestCommandJournalIdempotencyReplicatedRecordIsRemembered(t *testing.T) {
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+		IdempotencyCapacity:  8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+
+	trie := newTestTrie(t)
+	request := CacheCommandRequest{
+		Command:        "INC",
+		Key:            "replicated-counter",
+		Value:          "1",
+		IdempotencyKey: "replicated-request-1",
+	}
+	applied, response := journal.executeJournalRecordsBatch(trie, []CommandJournalRecord{
+		{Sequence: 1, Request: request},
+	})
+	if applied != 1 || !response.OK {
+		t.Fatalf("executeJournalRecordsBatch() = %d/%#v, want one applied record", applied, response)
+	}
+
+	duplicate := journal.ExecuteCommand(trie, request)
+	if !duplicate.OK {
+		t.Fatalf("duplicate ExecuteCommand() = %#v, want success", duplicate)
+	}
+	if got := trie.GetCounter("replicated-counter"); got != 1 {
+		t.Fatalf("GetCounter(replicated-counter) = %d, want one increment", got)
+	}
+	if got := journal.Sequence(); got != 1 {
+		t.Fatalf("Sequence() = %d, want replicated record only", got)
+	}
+}
+
+func TestCommandJournalIdempotencyOutboxPathIsRemembered(t *testing.T) {
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+		IdempotencyCapacity:  8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox, err := OpenLevelDBReplicationOutboxWithOptions(filepath.Join(t.TempDir(), "outbox"), ReplicationOutboxOptions{
+		Codec:       ReplicationOutboxCodecBinary,
+		BatchWindow: 0,
+	})
+	if err != nil {
+		journal.Close()
+		t.Fatal(err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Context:       context.Background(),
+		AsyncQueueSize: 1,
+		AsyncOutbox:   outbox,
+		Journal:       journal,
+	})
+	defer func() {
+		replicator.Close()
+		outbox.Close()
+		journal.Close()
+	}()
+
+	trie := newTestTrie(t)
+	request := CacheCommandRequest{
+		Command:        "INC",
+		Key:            "outbox-counter",
+		Value:          "1",
+		IdempotencyKey: "outbox-request-1",
+	}
+	options := commandExecutionOptions{Journal: journal, Replicator: replicator}
+	response, stopped := executeCacheCommand(context.Background(), trie, request, options)
+	if stopped || !response.OK {
+		t.Fatalf("executeCacheCommand() = %#v/%t, want success", response, stopped)
+	}
+	duplicate, stopped := executeCacheCommand(context.Background(), trie, request, options)
+	if stopped || !duplicate.OK {
+		t.Fatalf("duplicate executeCacheCommand() = %#v/%t, want success", duplicate, stopped)
+	}
+	if got := trie.GetCounter("outbox-counter"); got != 1 {
+		t.Fatalf("GetCounter(outbox-counter) = %d, want one increment", got)
+	}
+	if got := journal.Sequence(); got != 1 {
+		t.Fatalf("Sequence() = %d, want one journal record", got)
 	}
 }
 

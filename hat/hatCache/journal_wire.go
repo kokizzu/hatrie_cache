@@ -17,7 +17,8 @@ const (
 
 const DefaultCommandJournalWireFormat = CommandJournalWireFormatBinary
 
-var commandJournalTailBinaryMagic = []byte{'h', 'c', 'j', 't', 1}
+var commandJournalTailBinaryMagic = []byte{'h', 'c', 'j', 't', 2}
+var commandJournalTailBinaryLegacyMagic = []byte{'h', 'c', 'j', 't', 1}
 
 func ParseCommandJournalWireFormat(value string) (CommandJournalWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -94,7 +95,7 @@ func decodeCommandJournalTailBinaryPullResponse(body io.Reader, optionalContentL
 }
 
 func decodeCommandJournalTailBinaryData(data []byte) (CommandJournalTail, error) {
-	tail, count, reader, err := commandJournalTailBinaryReader(data)
+	tail, count, reader, requestVersion, err := commandJournalTailBinaryReader(data)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
@@ -109,7 +110,7 @@ func decodeCommandJournalTailBinaryData(data []byte) (CommandJournalTail, error)
 		}
 		record := &tail.Entries[int(index)]
 		record.Sequence = sequence
-		if err := readCommandJournalRequestBinaryInto(&reader, commandJournalBinaryDynamicVersion, &record.Request); err != nil {
+		if err := readCommandJournalRequestBinaryInto(&reader, requestVersion, &record.Request); err != nil {
 			return CommandJournalTail{}, err
 		}
 	}
@@ -120,7 +121,7 @@ func decodeCommandJournalTailBinaryData(data []byte) (CommandJournalTail, error)
 }
 
 func decodeCommandJournalTailCompactBinaryData(data []byte) (CommandJournalTail, bool, error) {
-	tail, count, reader, err := commandJournalTailBinaryReader(data)
+	tail, count, reader, requestVersion, err := commandJournalTailBinaryReader(data)
 	if err != nil {
 		return CommandJournalTail{}, false, err
 	}
@@ -134,7 +135,7 @@ func decodeCommandJournalTailCompactBinaryData(data []byte) (CommandJournalTail,
 		if sequence == 0 {
 			return CommandJournalTail{}, false, errors.New("journal source returned an invalid binary tail sequence")
 		}
-		command, candidateFamily, key, value, ok, err := readCompactCommandJournalSetRequest(&reader)
+		command, candidateFamily, key, value, ok, err := readCompactCommandJournalSetRequest(&reader, requestVersion)
 		if err != nil {
 			return CommandJournalTail{}, false, err
 		}
@@ -159,7 +160,7 @@ func decodeCommandJournalTailCompactBinaryData(data []byte) (CommandJournalTail,
 	return tail, true, nil
 }
 
-func readCompactCommandJournalSetRequest(reader *binaryFieldReader) (compactCommandJournalSetCommand, compactCommandJournalSetCommand, string, string, bool, error) {
+func readCompactCommandJournalSetRequest(reader *binaryFieldReader, version uint64) (compactCommandJournalSetCommand, compactCommandJournalSetCommand, string, string, bool, error) {
 	command, err := reader.readString()
 	if err != nil {
 		return 0, 0, "", "", false, err
@@ -177,6 +178,13 @@ func readCompactCommandJournalSetRequest(reader *binaryFieldReader) (compactComm
 		return 0, 0, "", "", false, err
 	}
 	unsupported := subkey != ""
+	if version >= commandJournalBinaryIdempotencyVersion {
+		idempotencyKey, err := reader.readString()
+		if err != nil {
+			return 0, 0, "", "", false, err
+		}
+		unsupported = unsupported || idempotencyKey != ""
+	}
 	for index := 0; index < 3; index++ {
 		present, err := reader.readBool()
 		if err != nil {
@@ -212,30 +220,35 @@ func readCompactCommandJournalSetRequest(reader *binaryFieldReader) (compactComm
 	}
 }
 
-func commandJournalTailBinaryReader(data []byte) (CommandJournalTail, uint64, binaryFieldReader, error) {
-	if !bytes.HasPrefix(data, commandJournalTailBinaryMagic) {
-		return CommandJournalTail{}, 0, binaryFieldReader{}, errors.New("journal source returned an invalid binary tail")
+func commandJournalTailBinaryReader(data []byte) (CommandJournalTail, uint64, binaryFieldReader, uint64, error) {
+	magic := commandJournalTailBinaryLegacyMagic
+	requestVersion := uint64(commandJournalBinaryDynamicVersion)
+	if bytes.HasPrefix(data, commandJournalTailBinaryMagic) {
+		magic = commandJournalTailBinaryMagic
+		requestVersion = commandJournalBinaryIdempotencyVersion
+	} else if !bytes.HasPrefix(data, commandJournalTailBinaryLegacyMagic) {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, 0, errors.New("journal source returned an invalid binary tail")
 	}
-	reader := newBorrowingBinaryFieldReader(data[len(commandJournalTailBinaryMagic):])
+	reader := newBorrowingBinaryFieldReader(data[len(magic):])
 	lastSequence, err := reader.readUvarint()
 	if err != nil {
-		return CommandJournalTail{}, 0, binaryFieldReader{}, err
+		return CommandJournalTail{}, 0, binaryFieldReader{}, 0, err
 	}
 	compactedThrough, err := reader.readUvarint()
 	if err != nil {
-		return CommandJournalTail{}, 0, binaryFieldReader{}, err
+		return CommandJournalTail{}, 0, binaryFieldReader{}, 0, err
 	}
 	limit, err := reader.readUvarint()
 	if err != nil || limit > MaxCommandJournalTailLimit {
-		return CommandJournalTail{}, 0, binaryFieldReader{}, errors.New("journal source returned an invalid binary tail limit")
+		return CommandJournalTail{}, 0, binaryFieldReader{}, 0, errors.New("journal source returned an invalid binary tail limit")
 	}
 	hasMore, err := reader.readBool()
 	if err != nil {
-		return CommandJournalTail{}, 0, binaryFieldReader{}, err
+		return CommandJournalTail{}, 0, binaryFieldReader{}, 0, err
 	}
 	count, err := reader.readUvarint()
 	if err != nil || count > MaxCommandJournalTailLimit || count > limit || count > uint64(int(^uint(0)>>1)) {
-		return CommandJournalTail{}, 0, binaryFieldReader{}, errors.New("journal source returned an invalid binary tail entry count")
+		return CommandJournalTail{}, 0, binaryFieldReader{}, 0, errors.New("journal source returned an invalid binary tail entry count")
 	}
 	tail := CommandJournalTail{
 		LastSequence:     lastSequence,
@@ -244,7 +257,7 @@ func commandJournalTailBinaryReader(data []byte) (CommandJournalTail, uint64, bi
 		HasMore:          hasMore,
 		wireFormat:       CommandJournalWireFormatBinary,
 	}
-	return tail, count, reader, nil
+	return tail, count, reader, requestVersion, nil
 }
 
 func readCommandJournalTailBinaryBody(body io.Reader, contentLength int64) ([]byte, error) {

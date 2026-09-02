@@ -391,11 +391,12 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) Request
 		return Request{}
 	}
 	out := Request{
-		Command:     request.GetCommand(),
-		Key:         request.GetKey(),
-		Value:       request.GetValue(),
-		Subkey:      request.GetSubkey(),
-		BinaryValue: append([]byte(nil), request.GetBinaryValue()...),
+		Command:        request.GetCommand(),
+		Key:            request.GetKey(),
+		Value:          request.GetValue(),
+		Subkey:         request.GetSubkey(),
+		IdempotencyKey: request.GetIdempotencyKey(),
+		BinaryValue:    append([]byte(nil), request.GetBinaryValue()...),
 	}
 	if request.TtlSeconds != nil {
 		value := request.GetTtlSeconds()
@@ -492,14 +493,16 @@ func cacheCommandRequestToProto(request Request) (*hatriecachev1.CommandRequest,
 		return nil, err
 	}
 	out := &hatriecachev1.CommandRequest{
-		Command:     request.Command,
-		Key:         request.Key,
-		Value:       request.Value,
-		Subkey:      request.Subkey,
-		TtlSeconds:  request.TTLSeconds,
-		UnixSeconds: request.UnixSeconds,
-		Priority:    request.Priority,
-		Batch:       batch,
+		Command:        request.Command,
+		Key:            request.Key,
+		Value:          request.Value,
+		Subkey:         request.Subkey,
+		IdempotencyKey: request.IdempotencyKey,
+		BinaryValue:    append([]byte(nil), request.BinaryValue...),
+		TtlSeconds:     request.TTLSeconds,
+		UnixSeconds:    request.UnixSeconds,
+		Priority:       request.Priority,
+		Batch:          batch,
 	}
 	if len(request.Values) > 0 {
 		out.Values = make([]string, len(request.Values))
@@ -589,6 +592,7 @@ func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request Req
 	out.Key = request.Key
 	out.Value = request.Value
 	out.Subkey = request.Subkey
+	out.IdempotencyKey = request.IdempotencyKey
 	out.TtlSeconds = request.TTLSeconds
 	out.UnixSeconds = request.UnixSeconds
 	out.Priority = request.Priority

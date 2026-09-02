@@ -82,8 +82,9 @@ message CommandRequest {
   optional int64 ttl_seconds = 7;
   optional int64 unix_seconds = 8;
   optional int64 priority = 9;
-  repeated CommandRequest batch = 10;
-  bytes binary_value = 11;
+	repeated CommandRequest batch = 10;
+	bytes binary_value = 11;
+	string idempotency_key = 12;
 }
 
 message CommandResponse {

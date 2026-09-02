@@ -725,12 +725,16 @@ func TestParseConfigJournalGroupCommitDefaultsAndOverrides(t *testing.T) {
 	if defaultCfg.journalSegmentMaxBytes != hatriecache.DefaultCommandJournalSegmentMaxBytes || defaultCfg.journalRetainedSegments != hatriecache.DefaultCommandJournalRetainedSegments {
 		t.Fatalf("journal segment defaults = %d/%d, want %d/%d", defaultCfg.journalSegmentMaxBytes, defaultCfg.journalRetainedSegments, hatriecache.DefaultCommandJournalSegmentMaxBytes, hatriecache.DefaultCommandJournalRetainedSegments)
 	}
+	if defaultCfg.journalIdempotencyCapacity != hatriecache.DefaultCommandJournalIdempotencyCapacity {
+		t.Fatalf("journal idempotency default = %d, want %d", defaultCfg.journalIdempotencyCapacity, hatriecache.DefaultCommandJournalIdempotencyCapacity)
+	}
 
 	cfg, err := parseConfig([]string{
 		"-journal-group-commit-window", "250us",
 		"-journal-group-commit-max-batch", "32",
 		"-journal-segment-max-bytes", "1048576",
 		"-journal-retained-segments", "4",
+		"-journal-idempotency-capacity", "32",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig(group commit) error = %v", err)
@@ -740,6 +744,9 @@ func TestParseConfigJournalGroupCommitDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.journalSegmentMaxBytes != 1048576 || cfg.journalRetainedSegments != 4 {
 		t.Fatalf("journal segment config = %d/%d, want 1048576/4", cfg.journalSegmentMaxBytes, cfg.journalRetainedSegments)
+	}
+	if cfg.journalIdempotencyCapacity != 32 {
+		t.Fatalf("journal idempotency config = %d, want 32", cfg.journalIdempotencyCapacity)
 	}
 }
 
@@ -752,6 +759,8 @@ func TestParseConfigRejectsInvalidJournalGroupCommit(t *testing.T) {
 		{"-journal-retained-segments", "-1"},
 		{"-journal-retained-segments", strconv.Itoa(hatriecache.MaxCommandJournalRetainedSegments + 1)},
 		{"-journal-segment-max-bytes", "1", "-journal-retained-segments", "0"},
+		{"-journal-idempotency-capacity", "-1"},
+		{"-journal-idempotency-capacity", strconv.Itoa(hatriecache.MaxCommandJournalIdempotencyCapacity + 1)},
 	} {
 		if _, err := parseConfig(args, &bytes.Buffer{}); err == nil {
 			t.Fatalf("parseConfig(%v) error = nil, want journal group commit validation error", args)

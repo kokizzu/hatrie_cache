@@ -919,6 +919,22 @@ commit-command-protocol:
 push-command-protocol:
 	sh ./scripts/push-command-protocol.sh
 
+.PHONY: format-command-idempotency
+format-command-idempotency:
+	sh ./scripts/format-command-idempotency.sh
+
+.PHONY: test-command-journal-wire
+test-command-journal-wire:
+	sh ./scripts/test-command-journal-wire.sh
+
+.PHONY: test-idempotency-wire
+test-idempotency-wire:
+	sh ./scripts/test-idempotency-wire.sh
+
+.PHONY: test-journal-idempotency-config
+test-journal-idempotency-config:
+	sh ./scripts/test-journal-idempotency-config.sh
+
 test-sql-tooling:
 	sh ./scripts/test-sql-tooling.sh
 
@@ -3545,3 +3561,21 @@ commit-typed-table-arrangement-hydration:
 
 .PHONY: push-typed-table-arrangement-hydration
 push-typed-table-arrangement-hydration:
+
+test-command-idempotency:
+		bash scripts/test-command-idempotency.sh
+
+benchmark-command-idempotency:
+		bash scripts/benchmark-command-idempotency.sh
+
+inspect-command-idempotency:
+		bash scripts/deliver-command-idempotency.sh status
+
+deliver-command-idempotency:
+		bash scripts/deliver-command-idempotency.sh apply
+
+commit-command-idempotency:
+		bash scripts/deliver-command-idempotency.sh commit
+
+push-command-idempotency:
+		bash scripts/deliver-command-idempotency.sh push

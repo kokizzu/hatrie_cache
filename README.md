@@ -2035,6 +2035,23 @@ compact binary value codec when that is smaller than their JSON representation,
 and otherwise keep the JSON inner payload. Set `JOURNAL_FORMAT=json` to keep
 writing the previous JSON journal layout.
 
+Retry-safe command idempotency is opt-in. Pass
+`-journal-idempotency-capacity 1024` (or another bounded value) to remember
+successful keyed mutations and return duplicate responses without applying the
+mutation again. The default `0` disables this behavior and removes supplied
+keys before journaling. A request can carry `idempotency_key`, for example:
+
+```
+{"command":"INC","key":"views","value":"1","idempotency_key":"views-2026-09-02-0001"}
+```
+
+The same key must identify the same canonical request; a different request with
+that key is rejected. The journal stores keys and fingerprints when enabled,
+so protect journal files. Keep the command journal with snapshot backups when
+idempotency suppression must survive restore; a snapshot alone does not contain
+the complete bounded retry map. See [`BENCHMARK.md`](BENCHMARK.md#retry-safe-command-idempotency)
+for CPU, memory, and record-size measurements.
+
 Durable writes use group commit by default without delaying for a timer: the
 worker yields once, batches up to 64 already queued commands, writes them in
 order, and issues one `fsync`. Every successful command waits for that sync
@@ -2735,7 +2752,7 @@ topology owners.
 when journaling is configured. `POST /api/journal` pulls a remote journal tail
 from `source` and applies it locally.
 `POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
-`batch`, `subkey`, `pairs`,
+`batch`, `subkey`, `pairs`, `idempotency_key`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
 supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,

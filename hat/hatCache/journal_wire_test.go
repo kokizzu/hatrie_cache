@@ -84,6 +84,84 @@ func TestCommandJournalTailBinaryRoundTripAndRejectsTrailingData(t *testing.T) {
 	}
 }
 
+func TestCommandJournalTailBinaryRoundTripPreservesIdempotencyKey(t *testing.T) {
+	want := CommandJournalTail{
+		LastSequence: 1,
+		Limit:        1,
+		Entries: []CommandJournalRecord{{
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "INC", Key: "counter", Value: "1", IdempotencyKey: "retry-1"},
+		}},
+	}
+	data, err := marshalCommandJournalTailBinary(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeCommandJournalTailBinaryResponse(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.wireFormat = ""
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("binary tail with idempotency key = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommandJournalTailBinaryAcceptsLegacyEnvelope(t *testing.T) {
+	want := CommandJournalTail{
+		LastSequence: 1,
+		Limit:        1,
+		Entries: []CommandJournalRecord{{
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "SETINT", Key: "counter", Value: "1"},
+		}},
+	}
+	data, err := marshalLegacyCommandJournalTailBinaryForTest(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeCommandJournalTailBinaryResponse(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.wireFormat = ""
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy binary tail = %#v, want %#v", got, want)
+	}
+}
+
+func marshalLegacyCommandJournalTailBinaryForTest(tail CommandJournalTail) ([]byte, error) {
+	if tail.Limit < 0 || tail.Limit > MaxCommandJournalTailLimit || len(tail.Entries) > tail.Limit {
+		return nil, errors.New("hatriecache: invalid command journal tail size")
+	}
+	writer := newBinaryFieldWriter(commandJournalTailBinaryLegacyMagic, 128)
+	writer.writeUvarint(tail.LastSequence)
+	writer.writeUvarint(tail.CompactedThrough)
+	writer.writeUvarint(uint64(tail.Limit))
+	writer.writeBool(tail.HasMore)
+	writer.writeUvarint(uint64(len(tail.Entries)))
+	for _, record := range tail.Entries {
+		if record.Sequence == 0 {
+			return nil, errors.New("hatriecache: invalid command journal tail sequence")
+		}
+		values, pairs, err := marshalCommandJournalRequestBinaryDynamicFields(record.Request)
+		if err != nil {
+			return nil, err
+		}
+		writer.writeUvarint(record.Sequence)
+		writer.writeString(record.Request.Command)
+		writer.writeString(record.Request.Key)
+		writer.writeString(record.Request.Value)
+		writer.writeString(record.Request.Subkey)
+		writeCommandJournalOptionalInt64Binary(&writer, record.Request.Priority)
+		writeCommandJournalOptionalInt64Binary(&writer, record.Request.TTLSeconds)
+		writeCommandJournalOptionalInt64Binary(&writer, record.Request.UnixSeconds)
+		writer.writeBytes(values)
+		writer.writeBytes(pairs)
+	}
+	return writer.bytes(), nil
+}
+
 func TestCommandJournalTailStructuredBinaryMatchesBufferedEncoding(t *testing.T) {
 	structured := benchmarkCommandJournalStructuredEntry()
 	want := CommandJournalTail{
@@ -132,7 +210,7 @@ func marshalCommandJournalTailBinaryBufferedForTest(tail CommandJournalTail) ([]
 			return nil, err
 		}
 		writer.writeUvarint(record.Sequence)
-		if err := writeCommandJournalRequestBinaryFields(&writer, record.Request, values, pairs); err != nil {
+		if err := writeCommandJournalRequestBinaryFieldsWithIdempotency(&writer, record.Request, values, pairs); err != nil {
 			return nil, err
 		}
 	}

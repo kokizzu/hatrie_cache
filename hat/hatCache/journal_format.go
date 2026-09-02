@@ -194,6 +194,7 @@ func writePreparedCommandJournalEntryDirectBinaryPayload(writer *binaryFieldWrit
 	if err := writeCommandJournalRequestDirectBinaryFields(writer, entry.Request, fields.values, fields.pairs); err != nil {
 		return err
 	}
+	writer.writeBytes(entry.IdempotencyFingerprint)
 	writer.writeBytes(fields.outbox)
 	return nil
 }
@@ -203,6 +204,7 @@ func writeCommandJournalRequestDirectBinaryFields(writer *binaryFieldWriter, req
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
 	writer.writeString(request.Subkey)
+	writer.writeString(request.IdempotencyKey)
 	writeCommandJournalOptionalInt64Binary(writer, request.Priority)
 	writeCommandJournalOptionalInt64Binary(writer, request.TTLSeconds)
 	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
@@ -238,9 +240,10 @@ func writePreparedCommandJournalEntryBinaryPayload(writer *binaryFieldWriter, en
 	writer.writeUvarint(commandJournalBinaryPayloadVersion)
 	writer.writeUvarint(entry.Sequence)
 	writer.writeBool(entry.Checkpoint)
-	if err := writeCommandJournalRequestBinaryFields(writer, entry.Request, fields.values, fields.pairs); err != nil {
+	if err := writeCommandJournalRequestBinaryFieldsWithIdempotency(writer, entry.Request, fields.values, fields.pairs); err != nil {
 		return err
 	}
+	writer.writeBytes(entry.IdempotencyFingerprint)
 	writer.writeBytes(fields.outbox)
 	return nil
 }
@@ -261,8 +264,10 @@ func commandJournalEntryBinaryPayloadCapacity(entry commandJournalEntry, valuesB
 	if err != nil {
 		return 0, err
 	}
-	sizes := [4]int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize}
+	sizes := [5]int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize}
 	sizeCount := 3
+	sizes[sizeCount] = commandJournalBinaryBytesSize(len(entry.IdempotencyFingerprint))
+	sizeCount++
 	if includeOutbox {
 		sizes[sizeCount] = commandJournalBinaryBytesSize(outboxBytes)
 		sizeCount++
@@ -286,6 +291,7 @@ func commandJournalRequestBinarySize(request CacheCommandRequest, valuesBytes in
 		commandJournalBinaryStringSize(request.Key),
 		commandJournalBinaryStringSize(request.Value),
 		commandJournalBinaryStringSize(request.Subkey),
+		commandJournalBinaryStringSize(request.IdempotencyKey),
 		int64(commandJournalOptionalInt64BinarySize(request.Priority)),
 		int64(commandJournalOptionalInt64BinarySize(request.TTLSeconds)),
 		int64(commandJournalOptionalInt64BinarySize(request.UnixSeconds)),
@@ -361,6 +367,20 @@ func writeCommandJournalRequestBinaryFields(writer *binaryFieldWriter, request C
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
 	writer.writeString(request.Subkey)
+	writeCommandJournalOptionalInt64Binary(writer, request.Priority)
+	writeCommandJournalOptionalInt64Binary(writer, request.TTLSeconds)
+	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
+	writer.writeBytes(values)
+	writer.writeBytes(pairs)
+	return nil
+}
+
+func writeCommandJournalRequestBinaryFieldsWithIdempotency(writer *binaryFieldWriter, request CacheCommandRequest, values []byte, pairs []byte) error {
+	writer.writeString(request.Command)
+	writer.writeString(request.Key)
+	writer.writeString(request.Value)
+	writer.writeString(request.Subkey)
+	writer.writeString(request.IdempotencyKey)
 	writeCommandJournalOptionalInt64Binary(writer, request.Priority)
 	writeCommandJournalOptionalInt64Binary(writer, request.TTLSeconds)
 	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
@@ -458,7 +478,7 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 	if err != nil {
 		return commandJournalEntry{}, err
 	}
-	if version != commandJournalVersion && version != commandJournalBinaryDynamicVersion && version != commandJournalBinaryPayloadVersion {
+	if version != commandJournalVersion && version != commandJournalBinaryDynamicVersion && version != commandJournalBinaryOutboxVersion && version != commandJournalBinaryPayloadVersion {
 		return commandJournalEntry{}, errors.New("hatriecache: unsupported journal version")
 	}
 	if version > uint64(int(^uint(0)>>1)) {
@@ -476,8 +496,18 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 	if err != nil {
 		return commandJournalEntry{}, err
 	}
+	var idempotencyFingerprint []byte
+	if version >= commandJournalBinaryIdempotencyVersion {
+		idempotencyFingerprint, err = reader.readBytes()
+		if err != nil {
+			return commandJournalEntry{}, err
+		}
+		if len(idempotencyFingerprint) == 0 {
+			idempotencyFingerprint = nil
+		}
+	}
 	var outbox *replicationOutboxJob
-	if version >= commandJournalBinaryPayloadVersion {
+	if version >= commandJournalBinaryOutboxVersion {
 		data, err := reader.readBytes()
 		if err != nil {
 			return commandJournalEntry{}, err
@@ -494,11 +524,12 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 		return commandJournalEntry{}, errors.New("hatriecache: invalid trailing binary command journal payload data")
 	}
 	entry := commandJournalEntry{
-		Version:    commandJournalVersion,
-		Sequence:   sequence,
-		Checkpoint: checkpoint,
-		Request:    request,
-		Outbox:     outbox,
+		Version:                commandJournalVersion,
+		Sequence:               sequence,
+		Checkpoint:             checkpoint,
+		Request:                request,
+		IdempotencyFingerprint: idempotencyFingerprint,
+		Outbox:                 outbox,
 	}
 	if err := validateCommandJournalEntry(entry); err != nil {
 		return commandJournalEntry{}, err
@@ -543,6 +574,11 @@ func readCommandJournalRequestBinaryInto(reader *binaryFieldReader, version uint
 	}
 	if request.Subkey, err = reader.readString(); err != nil {
 		return err
+	}
+	if version >= commandJournalBinaryIdempotencyVersion {
+		if request.IdempotencyKey, err = reader.readString(); err != nil {
+			return err
+		}
 	}
 	if request.Priority, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
 		return err
@@ -628,6 +664,12 @@ func validateCommandJournalEntry(entry commandJournalEntry) error {
 	}
 	if entry.Sequence == 0 {
 		return errors.New("hatriecache: invalid journal sequence")
+	}
+	if err := validateCommandIdempotencyKey(entry.Request.IdempotencyKey); err != nil {
+		return err
+	}
+	if len(entry.IdempotencyFingerprint) != 0 && len(entry.IdempotencyFingerprint) != commandIdempotencyFingerprintSize {
+		return errors.New("hatriecache: invalid idempotency fingerprint")
 	}
 	return validateCommandJournalEntryRequest(entry)
 }

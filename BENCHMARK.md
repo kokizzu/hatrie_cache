@@ -14823,3 +14823,60 @@ fewer allocations for one-change maintenance. The tradeoff is retained
 changefeed history and explicit hydration scheduling. If history was compacted
 before the arrangement checkpoint, `Hydrate` returns
 `ErrTypedTableChangesCompacted`; it never produces a partial silent rebuild.
+
+## Retry-Safe Command Idempotency
+
+`CommandJournal` supports bounded request idempotency for retryable mutations.
+Set `-journal-idempotency-capacity N` to enable it; `0` is the default and
+disables deduplication. In disabled mode, caller-supplied idempotency keys are
+removed before a request is journaled. In enabled mode, the journal stores a
+bounded key/fingerprint/response entry: the same key and canonical request
+returns the original in-process response, while reusing a key for a different
+request returns a conflict. The oldest entries are evicted when the configured
+capacity is full.
+
+`make benchmark-command-idempotency` measures journal encoding, duplicate
+retry handling, and eight concurrent group-commit requests. The captured run
+used five samples of 100 iterations on Linux/AMD Ryzen 9 5950X. The normal
+target default remains 20 iterations; the recorded sample was run with the
+benchmark script's iteration override for a less noisy comparison.
+
+Raw five-sample output:
+
+| Workload | Time (ns/op) | Heap (B/op) | Allocs/op | Record bytes |
+| --- | --- | ---: | ---: | ---: |
+| Binary, unkeyed | 311.6; 157.2; 198.6; 223.0; 206.6 | 48 | 1 | 42 |
+| Binary, keyed | 169.8; 161.9; 153.5; 157.5; 204.0 | 96 | 1 | 89 |
+| JSON, unkeyed | 515.5; 263.8; 318.3; 281.0; 261.0 | 544 | 3 | 93 |
+| JSON, keyed | 469.4; 317.9; 389.3; 424.7; 417.1 | 880 | 3 | 202 |
+| Duplicate retry, capacity 0 | 4,314; 5,082; 4,371; 4,327; 4,870 | 256 | 2 | N/A |
+| Duplicate retry, capacity 16 | 1,188; 1,040; 1,177; 1,080; 1,100 | 256 | 2 | N/A |
+| Eight-command group, capacity 0 | 1,212,834; 753,739; 790,013; 760,399; 743,815 | 9,609; 9,255; 9,269; 9,190; 9,205 | 66; 64; 64; 64; 64 | N/A |
+| Eight-command group, capacity 16 | 763,601; 774,776; 1,089,509; 834,349; 702,113 | 14,067; 14,084; 14,108; 14,074; 14,092 | 90; 90; 90; 90; 90 | N/A |
+
+Median summary:
+
+| Measure | Capacity 0 | Capacity 16 | Result |
+| --- | ---: | ---: | --- |
+| Duplicate retry latency | 4,371 ns | 1,100 ns | 3.97x lower with deduplication |
+| Duplicate retry heap | 256 B | 256 B | Same measured heap |
+| Eight-command group latency | 760,399 ns | 774,776 ns | 1.02x higher with keyed state; effectively CPU-neutral amid filesystem sync jitter |
+| Eight-command group heap | 9,255 B | 14,084 B | 1.52x higher while retaining keyed state |
+| Eight-command group allocations | 64 | 90 | 1.41x higher while retaining keyed state |
+| Binary record size | 42 B | 89 B | 2.12x for this short keyed request |
+| JSON record size | 93 B | 202 B | 2.17x for this short keyed request |
+
+The binary format remains the default because it is about 2.27x smaller than
+keyed JSON in this fixture and has lower encoding heap. Both formats persist
+the key and fingerprint and reopen tests verify that a replayed duplicate does
+not mutate the cache or append another record. Old binary journal versions
+remain readable. After a restart, a recovered duplicate receives a stable
+generic acknowledgement rather than the original response object; an
+in-process duplicate returns the original response exactly.
+
+The idempotency map is bounded by the configured capacity, but a snapshot-only
+backup does not serialize the whole map. Back up the corresponding journal and
+retained segments when duplicate suppression must survive restore; otherwise
+keys older than the restored journal tail may be eligible again. Journal files
+contain caller keys and fingerprints when this opt-in feature is enabled and
+must be protected as sensitive data.

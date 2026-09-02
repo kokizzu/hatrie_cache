@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	commandJournalVersion              = 1
-	commandJournalBinaryPayloadVersion = 3
-	commandJournalBinaryDynamicVersion = 2
+	commandJournalVersion                  = 1
+	commandJournalBinaryDynamicVersion     = 2
+	commandJournalBinaryOutboxVersion      = 3
+	commandJournalBinaryPayloadVersion     = 4
+	commandJournalBinaryIdempotencyVersion = 4
 )
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
@@ -64,12 +66,14 @@ func ParseCommandJournalFormat(value string) (CommandJournalFormat, error) {
 }
 
 const (
-	DefaultJournalGroupCommitWindow       = hatJournal.DefaultGroupCommitWindow
-	DefaultJournalGroupCommitMaxBatch     = hatJournal.DefaultGroupCommitMaxBatch
-	MaxJournalGroupCommitBatch            = hatJournal.MaxGroupCommitBatch
-	DefaultCommandJournalSegmentMaxBytes  = hatJournal.DefaultSegmentMaxBytes
-	DefaultCommandJournalRetainedSegments = hatJournal.DefaultRetainedSegments
-	MaxCommandJournalRetainedSegments     = hatJournal.MaxRetainedSegments
+	DefaultJournalGroupCommitWindow          = hatJournal.DefaultGroupCommitWindow
+	DefaultJournalGroupCommitMaxBatch        = hatJournal.DefaultGroupCommitMaxBatch
+	MaxJournalGroupCommitBatch               = hatJournal.MaxGroupCommitBatch
+	DefaultCommandJournalSegmentMaxBytes     = hatJournal.DefaultSegmentMaxBytes
+	DefaultCommandJournalRetainedSegments    = hatJournal.DefaultRetainedSegments
+	MaxCommandJournalRetainedSegments        = hatJournal.MaxRetainedSegments
+	DefaultCommandJournalIdempotencyCapacity = hatJournal.DefaultIdempotencyCapacity
+	MaxCommandJournalIdempotencyCapacity     = hatJournal.MaxIdempotencyCapacity
 )
 
 // CommandJournalOptions is retained for compatibility. New integrations can
@@ -160,17 +164,19 @@ type CommandJournalProjectionWatermark struct {
 }
 
 type commandJournalEntry struct {
-	Version    int                   `json:"version"`
-	Sequence   uint64                `json:"sequence"`
-	Checkpoint bool                  `json:"checkpoint,omitempty"`
-	Request    CacheCommandRequest   `json:"request,omitempty"`
-	Outbox     *replicationOutboxJob `json:"outbox,omitempty"`
+	Version                int                   `json:"version"`
+	Sequence               uint64                `json:"sequence"`
+	Checkpoint             bool                  `json:"checkpoint,omitempty"`
+	Request                CacheCommandRequest   `json:"request,omitempty"`
+	IdempotencyFingerprint []byte                `json:"idempotency_fingerprint,omitempty"`
+	Outbox                 *replicationOutboxJob `json:"outbox,omitempty"`
 }
 
 type commandJournalJob struct {
 	trie           *HatTrie
 	request        CacheCommandRequest
 	journalRequest CacheCommandRequest
+	idempotency    commandIdempotencyCheck
 	operation      *snapshotOperation
 	prepared       bool
 	result         chan CacheCommandResponse
@@ -202,6 +208,7 @@ type CommandJournal struct {
 	recordBatchChunkBytes int
 	outboxRetainFrom      uint64
 	projectionWatermarks  map[string]uint64
+	idempotency           commandIdempotencyState
 }
 
 type commandJournalAppendState struct {
@@ -241,12 +248,25 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	}
 	var maxSequence uint64
 	var earliestOutboxSequence uint64
+	idempotency := newCommandIdempotencyState(options.IdempotencyCapacity)
 	validBytes, err := scanCommandJournalSet(path, options.SegmentMaxBytes > 0, func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
 		}
 		if entry.Outbox != nil && (earliestOutboxSequence == 0 || entry.Sequence < earliestOutboxSequence) {
 			earliestOutboxSequence = entry.Sequence
+		}
+		if !entry.Checkpoint && idempotency.enabled() && strings.TrimSpace(entry.Request.IdempotencyKey) != "" {
+			check, checkErr := newCommandIdempotencyCheck(entry.Request)
+			if checkErr != nil {
+				return checkErr
+			}
+			if len(entry.IdempotencyFingerprint) == commandIdempotencyFingerprintSize {
+				copy(check.fingerprint[:], entry.IdempotencyFingerprint)
+			} else {
+				return fmt.Errorf("hatriecache: idempotency journal entry %d has an invalid fingerprint", entry.Sequence)
+			}
+			idempotency.remember(check, recoveredCommandIdempotencyResponse(), entry.Sequence)
 		}
 		return nil
 	})
@@ -283,6 +303,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
 		outboxRetainFrom:      earliestOutboxSequence,
 		closeDone:             make(chan struct{}),
+		idempotency:           idempotency,
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
@@ -349,12 +370,17 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	if !commandShouldJournal(request) {
 		return trie.ExecuteCommand(request)
 	}
-	journalRequest := normalizeJournalRequest(request, trie.currentTime())
+	journalRequest := journal.normalizeJournalRequest(request, trie.currentTime())
 	if journal.groupCommitEnabled() {
+		check, err := journal.idempotencyCheck(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return journal.submitGroupCommit(&commandJournalJob{
 			trie:           trie,
 			request:        request,
 			journalRequest: journalRequest,
+			idempotency:    check,
 			result:         make(chan CacheCommandResponse, 1),
 		})
 	}
@@ -362,7 +388,16 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
-	appendState, err := journal.appendLocked(journalRequest)
+	check, err := journal.idempotencyCheck(request)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	if response, duplicate, err := journal.idempotency.lookup(check); err != nil {
+		return commandError(err.Error())
+	} else if duplicate {
+		return response
+	}
+	appendState, err := journal.appendLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(check))
 	if err != nil {
 		return commandError(err.Error())
 	}
@@ -371,8 +406,17 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 		if err := journal.rollbackAppendLocked(appendState); err != nil {
 			return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error())
 		}
+	} else {
+		journal.idempotency.remember(check, response, journal.lastSequenceLocked())
 	}
 	return response
+}
+
+func (journal *CommandJournal) idempotencyCheck(request CacheCommandRequest) (commandIdempotencyCheck, error) {
+	if journal == nil || !journal.idempotency.enabled() {
+		return commandIdempotencyCheck{}, nil
+	}
+	return newCommandIdempotencyCheck(request)
 }
 
 func (journal *CommandJournal) submitGroupCommit(job *commandJournalJob) CacheCommandResponse {
@@ -448,6 +492,14 @@ func (journal *CommandJournal) runGroupCommit() {
 func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
+	if journal.idempotency.enabled() {
+		for _, job := range batch {
+			if job.idempotency.enabled {
+				journal.processIdempotentGroupCommitLocked(batch)
+				return
+			}
+		}
+	}
 
 	pending := batch
 	for len(pending) > 0 {
@@ -540,6 +592,160 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 	}
 }
 
+type commandJournalIdempotentGroupEntry struct {
+	job      *commandJournalJob
+	check    commandIdempotencyCheck
+	aliases  []*commandJournalJob
+	sequence uint64
+}
+
+func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*commandJournalJob) {
+	entries := make([]commandJournalIdempotentGroupEntry, 0, len(batch))
+	pendingByKey := make(map[string]int, len(batch))
+	for _, job := range batch {
+		if response, duplicate, err := journal.idempotency.lookup(job.idempotency); err != nil {
+			job.result <- commandError(err.Error())
+			continue
+		} else if duplicate {
+			job.result <- response
+			continue
+		}
+		if job.idempotency.enabled {
+			if index, ok := pendingByKey[job.idempotency.key]; ok {
+				entry := &entries[index]
+				if entry.check.fingerprint != job.idempotency.fingerprint {
+					job.result <- commandError("hatriecache: idempotency key was reused with a different command")
+				} else {
+					entry.aliases = append(entry.aliases, job)
+				}
+				continue
+			}
+			pendingByKey[job.idempotency.key] = len(entries)
+		}
+		entries = append(entries, commandJournalIdempotentGroupEntry{
+			job:   job,
+			check: job.idempotency,
+		})
+	}
+	for len(entries) > 0 {
+		chunkBytes := journal.recordBatchChunkLimit()
+		batchState, err := journal.currentAppendStateLocked()
+		if err != nil {
+			completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+			return
+		}
+		recordSizes := make([]uint32, len(entries))
+		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacityFromIdempotentEntries(entries, chunkBytes))
+		for index := range entries {
+			entry := &entries[index]
+			sequence, nextErr := journal.nextAppendSequenceLocked()
+			if nextErr != nil {
+				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
+				completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+				return
+			}
+			entry.sequence = sequence
+			journalEntry := commandJournalEntry{
+				Version:                commandJournalVersion,
+				Sequence:               sequence,
+				Request:                entry.job.journalRequest,
+				IdempotencyFingerprint: commandIdempotencyFingerprintData(entry.check),
+			}
+			if commandJournalRecordBatchShouldFlush(encoded, journalEntry.Request, chunkBytes) {
+				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					err = journal.rollbackPreparedBatchLocked(batchState, err)
+					completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+					return
+				}
+				encoded = encoded[:0]
+			}
+			start := len(encoded)
+			encoded, err = appendCommandJournalRecord(encoded, journalEntry, journal.format)
+			if err != nil {
+				err = journal.rollbackPreparedBatchLocked(batchState, err)
+				completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+				return
+			}
+			recordSizes[index] = uint32(len(encoded) - start)
+			journal.markAppendedLocked(sequence)
+			if len(encoded) >= chunkBytes {
+				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					err = journal.rollbackPreparedBatchLocked(batchState, err)
+					completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+					return
+				}
+				encoded = encoded[:0]
+			}
+		}
+		if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+			err = journal.rollbackPreparedBatchLocked(batchState, err)
+			completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+			return
+		}
+		if err := journal.syncLocked(); err != nil {
+			err = journal.rollbackPreparedBatchLocked(batchState, err)
+			completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+			return
+		}
+
+		rejected := -1
+		rollbackOffset := batchState.offset
+		for index := range entries {
+			entry := &entries[index]
+			response := entry.job.execute()
+			if response.OK {
+				journal.idempotency.remember(entry.check, response, entry.sequence)
+				completeCommandJournalIdempotentGroupEntry(entry, response)
+				rollbackOffset += int64(recordSizes[index])
+				continue
+			}
+			rollbackState := commandJournalAppendState{
+				offset:       rollbackOffset,
+				nextSequence: batchState.nextSequence + uint64(index),
+			}
+			rollbackErr := journal.rollbackAppendLocked(rollbackState)
+			if rollbackErr != nil {
+				response = commandError(response.Message + "; failed to remove rejected journal entries: " + rollbackErr.Error())
+			}
+			completeCommandJournalIdempotentGroupEntry(entry, response)
+			rejected = index
+			if rollbackErr != nil {
+				completeCommandJournalIdempotentGroupEntries(entries[index+1:], commandError(rollbackErr.Error()))
+				return
+			}
+			break
+		}
+		if rejected < 0 {
+			return
+		}
+		entries = entries[rejected+1:]
+	}
+}
+
+func commandJournalRequestBatchInitialCapacityFromIdempotentEntries(entries []commandJournalIdempotentGroupEntry, chunkBytes int) int {
+	if len(entries) == 0 {
+		return 0
+	}
+	capacity := len(entries) * 96
+	if chunkBytes > 0 && capacity > chunkBytes {
+		capacity = chunkBytes
+	}
+	return capacity
+}
+
+func completeCommandJournalIdempotentGroupEntry(entry *commandJournalIdempotentGroupEntry, response CacheCommandResponse) {
+	entry.job.result <- response
+	for _, alias := range entry.aliases {
+		alias.result <- cloneCacheCommandResponse(response)
+	}
+}
+
+func completeCommandJournalIdempotentGroupEntries(entries []commandJournalIdempotentGroupEntry, response CacheCommandResponse) {
+	for index := range entries {
+		completeCommandJournalIdempotentGroupEntry(&entries[index], response)
+	}
+}
+
 func (job *commandJournalJob) execute() CacheCommandResponse {
 	if job.prepared {
 		return executePreparedInternalReplicationCommand(job.trie, job.request, job.operation)
@@ -591,6 +797,8 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		return 0, commandError(err.Error())
 	}
 	recordSizes := make([]uint32, len(records))
+	idempotencyChecks := make([]commandIdempotencyCheck, len(records))
+	idempotencySequences := make([]uint64, len(records))
 	chunkBytes := journal.recordBatchChunkLimit()
 	encoded := make([]byte, 0, commandJournalRecordBatchInitialCapacity(records, chunkBytes))
 	now := trie.currentTime()
@@ -602,7 +810,16 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		entry := commandJournalEntry{
 			Version:  commandJournalVersion,
 			Sequence: sequence,
-			Request:  normalizeJournalRequest(record.Request, now),
+			Request:  journal.normalizeJournalRequest(record.Request, now),
+		}
+		if journal.idempotency.enabled() {
+			check, err := newCommandIdempotencyCheck(entry.Request)
+			if err != nil {
+				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+			}
+			idempotencyChecks[idx] = check
+			idempotencySequences[idx] = sequence
+			entry.IdempotencyFingerprint = commandIdempotencyFingerprintData(check)
 		}
 		if commandJournalRecordBatchShouldFlush(encoded, entry.Request, chunkBytes) {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
@@ -639,11 +856,13 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 	for idx := 0; idx < len(records); {
 		if useScalarBatch {
 			if end, ok := journalScalarCommandBatchRun(records, idx); ok {
+				batchStart := idx
 				applied, response, used := trie.executeJournalScalarBatch(records[idx:end])
 				for batchEnd := idx + applied; used && idx < batchEnd; idx++ {
 					rollbackOffset += int64(recordSizes[idx])
 				}
 				if used {
+					journal.rememberJournalIdempotencyRange(idempotencyChecks, idempotencySequences, batchStart, batchStart+applied)
 					if response.OK {
 						continue
 					}
@@ -660,6 +879,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		}
 		response := trie.ExecuteCommand(records[idx].Request)
 		if response.OK {
+			journal.rememberJournalIdempotencyRange(idempotencyChecks, idempotencySequences, idx, idx+1, response)
 			rollbackOffset += int64(recordSizes[idx])
 			idx++
 			continue
@@ -674,6 +894,25 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		return idx, response
 	}
 	return len(records), CacheCommandResponse{OK: true}
+}
+
+func (journal *CommandJournal) rememberJournalIdempotencyRange(checks []commandIdempotencyCheck, sequences []uint64, start int, end int, response ...CacheCommandResponse) {
+	if journal == nil || !journal.idempotency.enabled() {
+		return
+	}
+	recordedResponse := CacheCommandResponse{OK: true}
+	if len(response) > 0 {
+		recordedResponse = response[0]
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end > len(checks) {
+		end = len(checks)
+	}
+	for index := start; index < end; index++ {
+		journal.idempotency.remember(checks[index], recordedResponse, sequences[index])
+	}
 }
 
 func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, records []compactCommandJournalRecord) (int, CacheCommandResponse) {
@@ -862,12 +1101,17 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 	if command == "INTERNALSET" && operation == nil {
 		return commandError("prepared internal set operation is required")
 	}
-	journalRequest := normalizeJournalRequest(request, trie.currentTime())
+	journalRequest := journal.normalizeJournalRequest(request, trie.currentTime())
 	if journal.groupCommitEnabled() {
+		check, err := journal.idempotencyCheck(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return journal.submitGroupCommit(&commandJournalJob{
 			trie:           trie,
 			request:        request,
 			journalRequest: journalRequest,
+			idempotency:    check,
 			operation:      operation,
 			prepared:       true,
 			result:         make(chan CacheCommandResponse, 1),
@@ -877,7 +1121,16 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
-	appendState, err := journal.appendLocked(journalRequest)
+	check, err := journal.idempotencyCheck(request)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	if response, duplicate, err := journal.idempotency.lookup(check); err != nil {
+		return commandError(err.Error())
+	} else if duplicate {
+		return response
+	}
+	appendState, err := journal.appendLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(check))
 	if err != nil {
 		return commandError(err.Error())
 	}
@@ -886,6 +1139,8 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 		if err := journal.rollbackAppendLocked(appendState); err != nil {
 			return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error())
 		}
+	} else {
+		journal.idempotency.remember(check, response, journal.lastSequenceLocked())
 	}
 	return response
 }
@@ -1243,7 +1498,11 @@ func (journal *CommandJournal) WithPersistenceBarrier(persist func(uint64) error
 }
 
 func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
-	appendState, err := journal.appendWithoutSyncLocked(request)
+	return journal.appendLockedWithIdempotency(request, nil)
+}
+
+func (journal *CommandJournal) appendLockedWithIdempotency(request CacheCommandRequest, fingerprint []byte) (commandJournalAppendState, error) {
+	appendState, err := journal.appendWithoutSyncLockedWithIdempotency(request, fingerprint)
 	if err != nil {
 		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
@@ -1272,20 +1531,32 @@ func (journal *CommandJournal) currentAppendStateLocked() (commandJournalAppendS
 }
 
 func (journal *CommandJournal) appendWithoutSyncLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
+	return journal.appendWithoutSyncLockedWithIdempotency(request, nil)
+}
+
+func (journal *CommandJournal) appendWithoutSyncLockedWithIdempotency(request CacheCommandRequest, fingerprint []byte) (commandJournalAppendState, error) {
 	appendState, err := journal.currentAppendStateLocked()
 	if err != nil {
 		return commandJournalAppendState{}, err
 	}
-	_, err = journal.writeWithoutSyncLocked(request)
+	_, err = journal.writeWithoutSyncLockedWithIdempotency(request, fingerprint)
 	return appendState, err
 }
 
 func (journal *CommandJournal) writeWithoutSyncLocked(request CacheCommandRequest) (int, error) {
-	n, _, err := journal.writeWithOutboxWithoutSyncLocked(request, nil)
+	return journal.writeWithoutSyncLockedWithIdempotency(request, nil)
+}
+
+func (journal *CommandJournal) writeWithoutSyncLockedWithIdempotency(request CacheCommandRequest, fingerprint []byte) (int, error) {
+	n, _, err := journal.writeWithOutboxWithoutSyncLockedAndIdempotency(request, nil, fingerprint)
 	return n, err
 }
 
 func (journal *CommandJournal) writeWithOutboxWithoutSyncLocked(request CacheCommandRequest, outbox *replicationOutboxJob) (int, uint64, error) {
+	return journal.writeWithOutboxWithoutSyncLockedAndIdempotency(request, outbox, nil)
+}
+
+func (journal *CommandJournal) writeWithOutboxWithoutSyncLockedAndIdempotency(request CacheCommandRequest, outbox *replicationOutboxJob, fingerprint []byte) (int, uint64, error) {
 	sequence, err := journal.nextAppendSequenceLocked()
 	if err != nil {
 		return 0, 0, err
@@ -1297,10 +1568,11 @@ func (journal *CommandJournal) writeWithOutboxWithoutSyncLocked(request CacheCom
 		outbox.JournalSequence = sequence
 	}
 	entry := commandJournalEntry{
-		Version:  commandJournalVersion,
-		Sequence: sequence,
-		Request:  request,
-		Outbox:   outbox,
+		Version:                commandJournalVersion,
+		Sequence:               sequence,
+		Request:                request,
+		IdempotencyFingerprint: append([]byte(nil), fingerprint...),
+		Outbox:                 outbox,
 	}
 	data, err := marshalCommandJournalEntry(entry, journal.format)
 	if err != nil {
@@ -1845,7 +2117,7 @@ func readCommandJournalTail(path string, afterSequence uint64, limit int) (Comma
 
 func validateCommandJournalEntryRequest(entry commandJournalEntry) error {
 	if entry.Checkpoint {
-		if commandJournalRequestEmpty(entry.Request) && entry.Outbox == nil {
+		if commandJournalRequestEmpty(entry.Request) && strings.TrimSpace(entry.Request.IdempotencyKey) == "" && entry.Outbox == nil {
 			return nil
 		}
 		return errors.New("hatriecache: command journal checkpoint cannot include a request or outbox job")
@@ -2053,6 +2325,7 @@ func commandBatchShouldJournal(request CacheCommandRequest) bool {
 func normalizeJournalRequest(request CacheCommandRequest, now time.Time) CacheCommandRequest {
 	command := strings.ToUpper(strings.TrimSpace(request.Command))
 	out := request
+	out.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
 	switch command {
 	case "SET", "SETSTR":
 		out.Command = command
@@ -2073,6 +2346,21 @@ func normalizeJournalRequest(request CacheCommandRequest, now time.Time) CacheCo
 		out.Command = command
 	}
 	return out
+}
+
+func (journal *CommandJournal) normalizeJournalRequest(request CacheCommandRequest, now time.Time) CacheCommandRequest {
+	out := normalizeJournalRequest(request, now)
+	if journal == nil || !journal.idempotency.enabled() {
+		clearJournalIdempotencyKeys(&out)
+	}
+	return out
+}
+
+func clearJournalIdempotencyKeys(request *CacheCommandRequest) {
+	request.IdempotencyKey = ""
+	for index := range request.Batch {
+		clearJournalIdempotencyKeys(&request.Batch[index])
+	}
 }
 
 func normalizeRelativeTTL(request *CacheCommandRequest, now time.Time) {

@@ -1712,24 +1712,26 @@ func (rollback *publicCommandBatchRollback) restore(trie *HatTrie) error {
 }
 
 type publicCommandBatchEffects struct {
-	journal           *CommandJournal
-	dirtyTracker      *LevelDBDirtyTracker
-	replicator        *HTTPReplicator
-	nodeName          string
-	election          *ElectionStore
-	enforceLeader     bool
-	appendStarted     bool
-	appended          bool
-	initialAppend     commandJournalAppendState
-	appendOffset      int64
-	rollback          publicCommandBatchRollback
-	dirtyRequests     []CacheCommandRequest
-	planned           plannedReplicationBatch
-	deferJournal      bool
-	journalRequests   []CacheCommandRequest
-	journalJob        replicationJob
-	batch             bool
-	infrastructureErr error
+	journal            *CommandJournal
+	dirtyTracker       *LevelDBDirtyTracker
+	replicator         *HTTPReplicator
+	nodeName           string
+	election           *ElectionStore
+	enforceLeader      bool
+	appendStarted      bool
+	appended           bool
+	initialAppend      commandJournalAppendState
+	appendOffset       int64
+	rollback           publicCommandBatchRollback
+	dirtyRequests      []CacheCommandRequest
+	planned            plannedReplicationBatch
+	deferJournal       bool
+	journalRequests    []CacheCommandRequest
+	journalIdempotency []int
+	idempotencyPending []commandIdempotencyPending
+	journalJob         replicationJob
+	batch              bool
+	infrastructureErr  error
 }
 
 func newPublicCommandBatchEffects(options commandExecutionOptions) *publicCommandBatchEffects {
@@ -1758,7 +1760,25 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 	deferredJournal := journaled && effects.deferJournal
 	var appendState commandJournalAppendState
 	var journalRequest CacheCommandRequest
+	var idempotency commandIdempotencyCheck
 	if journaled {
+		if effects.journal.idempotency.enabled() {
+			var err error
+			idempotency, err = newCommandIdempotencyCheck(request)
+			if err != nil {
+				return commandError(err.Error()), false
+			}
+			if response, duplicate, err := effects.journal.idempotency.lookup(idempotency); err != nil {
+				return commandError(err.Error()), false
+			} else if duplicate {
+				return response, false
+			}
+			if response, duplicate, err := lookupPendingCommandIdempotency(effects.idempotencyPending, idempotency); err != nil {
+				return commandError(err.Error()), false
+			} else if duplicate {
+				return response, false
+			}
+		}
 		key := strings.TrimSpace(request.Key)
 		if err := validateKey(key); err == nil {
 			var captureErr error
@@ -1774,7 +1794,7 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 				return commandError(captureErr.Error()), true
 			}
 		}
-		journalRequest = normalizeJournalRequest(request, trie.currentTime())
+		journalRequest = effects.journal.normalizeJournalRequest(request, trie.currentTime())
 		if !deferredJournal && !effects.appendStarted {
 			initial, err := effects.journal.currentAppendStateLocked()
 			if err != nil {
@@ -1791,7 +1811,7 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 				nextSequence:      effects.journal.nextSequence,
 				sequenceExhausted: effects.journal.sequenceExhausted,
 			}
-			n, err := effects.journal.writeWithoutSyncLocked(journalRequest)
+			n, err := effects.journal.writeWithoutSyncLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(idempotency))
 			effects.appendOffset += int64(n)
 			if err != nil {
 				err = effects.journal.rollbackFailedAppendLocked(appendState, err)
@@ -1816,6 +1836,18 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 		effects.appended = true
 		if deferredJournal {
 			effects.journalRequests = append(effects.journalRequests, journalRequest)
+			pendingIndex := -1
+			if idempotency.enabled {
+				effects.idempotencyPending = append(effects.idempotencyPending, commandIdempotencyPending{check: idempotency, response: response})
+				pendingIndex = len(effects.idempotencyPending) - 1
+			}
+			effects.journalIdempotency = append(effects.journalIdempotency, pendingIndex)
+		} else if idempotency.enabled {
+			effects.idempotencyPending = append(effects.idempotencyPending, commandIdempotencyPending{
+				check:    idempotency,
+				response: response,
+				sequence: effects.journal.lastSequenceLocked(),
+			})
 		}
 	}
 	if effects.dirtyTracker != nil {
@@ -1849,6 +1881,9 @@ func (effects *publicCommandBatchEffects) commitLocked(trie *HatTrie) error {
 	if err := effects.journal.syncLocked(); err != nil {
 		return effects.rollbackLocked(trie, err)
 	}
+	for _, pending := range effects.idempotencyPending {
+		effects.journal.idempotency.remember(pending.check, pending.response, pending.sequence)
+	}
 	return nil
 }
 
@@ -1879,7 +1914,12 @@ func (effects *publicCommandBatchEffects) appendDeferredJournalLocked() error {
 		if index == len(effects.journalRequests)-1 {
 			record = outbox
 		}
-		n, sequence, err := effects.journal.writeWithOutboxWithoutSyncLocked(request, record)
+		fingerprint := []byte(nil)
+		pendingIndex := effects.journalIdempotency[index]
+		if pendingIndex >= 0 {
+			fingerprint = commandIdempotencyFingerprintData(effects.idempotencyPending[pendingIndex].check)
+		}
+		n, sequence, err := effects.journal.writeWithOutboxWithoutSyncLockedAndIdempotency(request, record, fingerprint)
 		effects.appendOffset += int64(n)
 		if err != nil {
 			return effects.journal.rollbackFailedAppendLocked(initial, err)
@@ -1887,6 +1927,9 @@ func (effects *publicCommandBatchEffects) appendDeferredJournalLocked() error {
 		if record != nil {
 			effects.journalJob = record.replicationJob()
 			effects.journalJob.journalSeq = sequence
+		}
+		if pendingIndex >= 0 {
+			effects.idempotencyPending[pendingIndex].sequence = sequence
 		}
 	}
 	return nil
