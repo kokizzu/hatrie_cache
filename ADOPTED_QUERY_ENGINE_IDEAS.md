@@ -80,3 +80,16 @@ the measurable benefit without guessing.
 Do not implement another deferred item until a deterministic benchmark and
 regression suite demonstrate exact output equivalence, no unacceptable write
 or heap regression, and recovery behavior across compaction and restart.
+### Generic PREWHERE / late materialization
+
+Status: adopted automatically for simple single-source `CACHE` queries when
+the resolver implements `StreamSQLSource`. The predicate is evaluated while
+rows stream in, and only rows inside `OFFSET/LIMIT` receive retained projected
+maps. The source is still drained for resource-limit and late-error
+compatibility. Queries requiring joins, grouping, ordering, typed sources,
+subqueries, or custom functions retain the established executor.
+
+Measured with `make benchmark-sql-prewhere`: median 2.39x lower latency, 24.6x
+lower heap, and 2.00x fewer allocations on a 20,000-row selective projection
+benchmark. See [BENCHMARK.md](BENCHMARK.md#generic-prewhere--late-materialization)
+for raw samples and workload details.

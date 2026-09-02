@@ -3483,3 +3483,34 @@ format-sql-json-path-skip:
 test-race-sql-json-path-skip:
 	bash scripts/test-race-sql-json-path-skip.sh
 	sh ./scripts/deliver-sql-temporal-storage.sh check
+.PHONY: test-sql-prewhere
+test-sql-prewhere:
+	bash scripts/test-sql-prewhere.sh
+
+.PHONY: test-race-sql-prewhere
+test-race-sql-prewhere:
+	bash scripts/test-race-sql-prewhere.sh
+
+.PHONY: format-sql-prewhere
+format-sql-prewhere:
+	bash scripts/format-sql-prewhere.sh
+
+.PHONY: benchmark-sql-prewhere
+benchmark-sql-prewhere:
+	bash scripts/benchmark-sql-prewhere.sh
+
+.PHONY: check-sql-prewhere
+check-sql-prewhere:
+	bash scripts/check-sql-prewhere.sh
+
+.PHONY: deliver-sql-prewhere
+deliver-sql-prewhere:
+	bash scripts/deliver-sql-prewhere.sh
+
+.PHONY: commit-sql-prewhere
+commit-sql-prewhere:
+	bash scripts/deliver-sql-prewhere.sh commit
+
+.PHONY: push-sql-prewhere
+push-sql-prewhere:
+	bash scripts/deliver-sql-prewhere.sh push

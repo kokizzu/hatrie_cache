@@ -9276,6 +9276,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 		}
 		if !indexed {
+			if result, handled, err := executeSQLPrewhereScan(q, resolver, ctes, metrics, control, outer); handled {
+				return result, err
+			}
+		}
+		if !indexed {
 			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
 		}
 		if err != nil {

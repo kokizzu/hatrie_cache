@@ -14773,3 +14773,31 @@ The fixture uses 20,000 rows, 100 matching values clustered in the first
 segment, 256 rows per segment, and 512 bits per segment. Reproduce with
 `make test-sql-json-path-skip`, `make test-race-sql-json-path-skip`, and
 `make benchmark-sql-json-path-skip`.
+## Generic PREWHERE / Late Materialization
+
+Command: `make benchmark-sql-prewhere` (`BENCH_COUNT=5` by default). The
+benchmark compares the existing materialized `ResolveSQLSource` path with the
+automatic stream-capable path for the same query:
+
+```sql
+FROM CACHE('events') AS e
+WHERE e.keep = true
+SELECT e.id, e.category
+LIMIT 100
+```
+
+Fixture: 20,000 rows, 100 matching rows, and a 960-byte unprojected payload per
+row. The correctness-preserving stream path drains the source so `MaxRows` and
+late source errors remain enforced, but it does not clone the full source or
+retain non-output rows.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | --- | --- | --- |
+| Materialized | 8,053,879; 8,195,569; 8,532,682; 8,497,628; 8,628,462 | 9,382,330; 9,381,880; 9,383,920; 9,385,898; 9,383,944 | 80,780; 80,772; 80,795; 80,816; 80,795 |
+| Streamed PREWHERE | 3,551,274; 3,656,154; 3,560,749; 3,499,663; 3,440,852 | 381,846; 380,861; 383,352; 381,622; 380,591 | 40,484; 40,473; 40,500; 40,482; 40,470 |
+
+Median: 2.39x lower latency, 24.6x lower heap, and 2.00x fewer allocations.
+This is an in-process resolver benchmark; network, JSON decoding, and storage
+latencies are excluded.
