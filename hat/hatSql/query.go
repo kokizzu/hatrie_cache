@@ -236,6 +236,10 @@ type SQLQueryOptions struct {
 	// suitable for an application-managed materialized projection. Nil keeps
 	// the existing query path and retains no recommendation state.
 	ProjectionAdvisor *SQLProjectionAdvisor
+	// ProjectionCatalog optionally serves an exact, source-version-matched
+	// materialized result. Nil preserves the existing query path; entries that
+	// cannot prove source freshness are never selected.
+	ProjectionCatalog *MaterializedViews
 	// IndexUseRecorder records successful direct index selections for reports.
 	// Nil preserves the existing no-retention behavior.
 	IndexUseRecorder *SQLIndexUseRecorder
@@ -630,6 +634,21 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		operatorSteps = result.Plan
 		result.QueryID = observation.id
 		return result, err
+	}
+	if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
+		if control.options.MaxRows > 0 && len(projection.Rows) > control.options.MaxRows {
+			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.options.MaxRows)
+		}
+		if control.options.MaxResultBytes > 0 && sqlRowsBytes(projection.Rows) > control.options.MaxResultBytes {
+			return result, fmt.Errorf("SQL result exceeds the %d byte limit", control.options.MaxResultBytes)
+		}
+		if err = control.check(); err != nil {
+			return result, err
+		}
+		projection.QueryID = observation.id
+		result = projection
+		operatorSteps = projection.Plan
+		return result, nil
 	}
 	if options.IndexHint.Mode == SQLIndexHintForce && query.from != nil && options.IndexHint.applies(*query.from) {
 		if _, _, err = resolveSQLForcedIndex(*query.from, query.where, resolver, nil, options.IndexHint); err != nil {

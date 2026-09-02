@@ -3579,3 +3579,21 @@ commit-command-idempotency:
 
 push-command-idempotency:
 		bash scripts/deliver-command-idempotency.sh push
+
+test-sql-projection-selection:
+\tsh ./scripts/test-sql-projection-selection.sh
+
+benchmark-sql-projection-selection:
+\tsh ./scripts/benchmark-sql-projection-selection.sh
+
+format-sql-projection-selection:
+\tsh ./scripts/format-sql-projection-selection.sh
+
+deliver-transparent-projections:
+\tsh ./scripts/deliver-transparent-projections.sh apply
+
+commit-transparent-projections:
+\tsh ./scripts/deliver-transparent-projections.sh commit
+
+push-transparent-projections:
+\tsh ./scripts/deliver-transparent-projections.sh push

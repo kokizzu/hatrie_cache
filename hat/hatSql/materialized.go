@@ -40,8 +40,10 @@ type MaterializedViews struct {
 }
 
 type materializedView struct {
-	definition MaterializedViewDefinition
-	snapshot   MaterializedView
+	definition     MaterializedViewDefinition
+	snapshot       MaterializedView
+	sourceVersions map[string]string
+	collation      SQLCollation
 }
 
 // NewMaterializedViews creates an empty materialized-view registry.
@@ -59,7 +61,7 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 	if views == nil {
 		return MaterializedViewStatus{}, fmt.Errorf("materialized views are nil")
 	}
-	result, err := ExecuteQueryParameters(ctx, definition.Query, resolver, nil, options)
+	result, sourceVersions, err := executeMaterializedViewQuery(ctx, definition.Query, definition.Dependencies, resolver, options)
 	if err != nil {
 		return MaterializedViewStatus{}, err
 	}
@@ -76,7 +78,9 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 		RefreshedAt:  time.Now().UTC(),
 	}
 	views.views[definition.Name] = materializedView{
-		definition: definition,
+		definition:     definition,
+		collation:      normalizedMaterializedViewCollation(options.Collation),
+		sourceVersions: sourceVersions,
 		snapshot: MaterializedView{
 			Status: status,
 			Result: cloneQueryResult(result),
@@ -132,12 +136,14 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 	}
 
 	results := make(map[string]QueryResult, len(candidates))
+	versions := make(map[string]map[string]string, len(candidates))
 	for _, candidate := range candidates {
-		result, err := ExecuteQueryParameters(ctx, candidate.definition.Query, resolver, nil, options)
+		result, sourceVersions, err := executeMaterializedViewQuery(ctx, candidate.definition.Query, candidate.definition.Dependencies, resolver, options)
 		if err != nil {
 			return nil, fmt.Errorf("refresh materialized view %q: %w", candidate.definition.Name, err)
 		}
 		results[candidate.definition.Name] = cloneQueryResult(result)
+		versions[candidate.definition.Name] = sourceVersions
 	}
 
 	refreshedAt := time.Now().UTC()
@@ -150,12 +156,103 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 			continue
 		}
 		current.snapshot.Result = results[candidate.definition.Name]
+		current.sourceVersions = versions[candidate.definition.Name]
+		current.collation = normalizedMaterializedViewCollation(options.Collation)
 		current.snapshot.Status.Revision++
 		current.snapshot.Status.RefreshedAt = refreshedAt
 		views.views[candidate.definition.Name] = current
 		statuses = append(statuses, cloneMaterializedViewStatus(current.snapshot.Status))
 	}
 	return statuses, nil
+}
+
+func normalizedMaterializedViewCollation(collation SQLCollation) SQLCollation {
+	if collation == "" {
+		return SQLCollationBinary
+	}
+	return collation
+}
+
+func materializedViewSourceVersions(resolver SourceResolver, dependencies []string) map[string]string {
+	versions, ok := resolver.(SourceVersionResolver)
+	if !ok || len(dependencies) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(dependencies))
+	for _, dependency := range dependencies {
+		version, available, err := versions.SQLSourceVersion("CACHE", dependency)
+		if err != nil || !available || version == "" {
+			return nil
+		}
+		result[dependency] = version
+	}
+	return result
+}
+
+func executeMaterializedViewQuery(ctx context.Context, query string, dependencies []string, resolver SourceResolver, options QueryOptions) (QueryResult, map[string]string, error) {
+	before := materializedViewSourceVersions(resolver, dependencies)
+	queryOptions := options
+	queryOptions.ProjectionCatalog = nil
+	result, err := ExecuteQueryParameters(ctx, query, resolver, nil, queryOptions)
+	if err != nil {
+		return QueryResult{}, nil, err
+	}
+	after := materializedViewSourceVersions(resolver, dependencies)
+	if before != nil && after != nil && !sameMaterializedViewSourceVersions(before, after) {
+		return QueryResult{}, nil, fmt.Errorf("materialized view source changed during refresh")
+	}
+	return result, after, nil
+}
+
+func sameMaterializedViewSourceVersions(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func (views *MaterializedViews) lookupExact(query string, resolver SourceResolver, options QueryOptions) (QueryResult, bool) {
+	if views == nil || resolver == nil || strings.TrimSpace(query) == "" || options.IndexHint.Mode != "" {
+		return QueryResult{}, false
+	}
+	query = strings.TrimSpace(query)
+	requestedCollation := normalizedMaterializedViewCollation(options.Collation)
+	versions, versioned := resolver.(SourceVersionResolver)
+	if !versioned {
+		return QueryResult{}, false
+	}
+	views.mu.RLock()
+	names := make([]string, 0, len(views.views))
+	for name, view := range views.views {
+		if view.definition.Query == query && view.collation == requestedCollation && len(view.sourceVersions) == len(view.definition.Dependencies) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		view := views.views[name]
+		fresh := true
+		for _, dependency := range view.definition.Dependencies {
+			version, available, err := versions.SQLSourceVersion("CACHE", dependency)
+			if err != nil || !available || version == "" || version != view.sourceVersions[dependency] {
+				fresh = false
+				break
+			}
+		}
+		if fresh {
+			result := cloneQueryResult(view.snapshot.Result)
+			result.Plan = []ExplainStep{{Node: "PROJECTION HIT", Detail: name}}
+			views.mu.RUnlock()
+			return result, true
+		}
+	}
+	views.mu.RUnlock()
+	return QueryResult{}, false
 }
 
 func normalizeMaterializedViewDefinition(definition MaterializedViewDefinition) (MaterializedViewDefinition, error) {

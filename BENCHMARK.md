@@ -14880,3 +14880,27 @@ retained segments when duplicate suppression must survive restore; otherwise
 keys older than the restored journal tail may be eligible again. Journal files
 contain caller keys and fingerprints when this opt-in feature is enabled and
 must be protected as sensitive data.
+
+## Transparent Exact Projection Selection
+
+Command: `make benchmark-sql-projection-selection`.
+
+This benchmark compares the ordinary in-process SQL executor with an exact
+materialized-view hit. The projection catalog is enabled only for the second
+case. Both paths return cloned result rows; the projection path additionally
+checks the source version and replaces the retained plan with a stable hit
+marker.
+
+Raw output on Linux, AMD Ryzen 9 5950X:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | ---: | ---: | ---: |
+| Direct query | 4,672; 4,744; 4,672; 4,636; 4,788 | 7,488; 7,488; 7,488; 7,488; 7,488 | 45; 45; 45; 45; 45 |
+| Exact projection hit | 2,079; 2,214; 2,058; 2,104; 2,024 | 3,408; 3,408; 3,408; 3,408; 3,408 | 17; 17; 17; 17; 17 |
+
+The projection hit was about 2.25x faster, used about 2.20x less allocated
+heap, and made about 2.65x fewer allocations. These are medians from five
+benchmark samples. This is an in-process result materialization comparison; it
+excludes network and storage latency. The feature is opt-in and misses safely
+when source versions are unavailable or changed. See
+[TRANSPARENT_PROJECTIONS.md](TRANSPARENT_PROJECTIONS.md).
