@@ -221,6 +221,47 @@ write cost and retained memory. It is a consistency feature, not the default
 read optimization. Use the ordinary `TypedTable` path when current-state
 reads are sufficient.
 
+### Optional Lightweight Delete Patches
+
+`PatchParts` is disabled by default. When enabled, `Delete` records a compact
+per-row tombstone instead of shifting or swap-deleting the typed column slices.
+`Rows`, SQL row resolution, and columnar resolution skip tombstoned rows, and a
+reinsert of a tombstoned key has normal `INSERT` change semantics. Existing
+updates still use the ordinary typed-column update path.
+
+```go
+table, err := NewTypedTable(TypedTableSchema{
+    Name: "events",
+    PatchParts: TypedTablePatchOptions{
+        Enabled:        true,
+        MergeThreshold: 1024,
+    },
+    Columns: []TypedTableColumn{
+        {Name: "name", Kind: TypedTableString},
+        {Name: "score", Kind: TypedTableInt64},
+    },
+})
+if err != nil {
+    return err
+}
+if _, err := table.Delete("event-42"); err != nil {
+    return err
+}
+if err := table.CompactPatchParts(); err != nil {
+    return err
+}
+```
+
+`MergeThreshold` schedules one short-lived background compaction after that
+many tombstones accumulate. It defaults to `1024` when omitted or non-positive.
+Compaction is also available explicitly through `CompactPatchParts`, which is
+useful for maintenance windows and deterministic tests. Before compaction,
+the logical row count is already correct while deleted physical slots remain;
+compaction removes those slots and repairs key positions. The option is best
+for delete-heavy churn where avoiding row movement matters. It retains deleted
+slots until compaction, so use the default path or compact promptly when the
+table is memory-sensitive.
+
 ## Tradeoff And Measurement
 
 The default remains the existing cache/row source. Use `TypedTable` only for a
@@ -243,6 +284,26 @@ of three runs as follows:
 | One coalesced batch with those updates | 2.56 us | 344 B | 6 |
 | Fixed 256-row numeric segments, selective Top-N over 4,096 rows | 56.9 us | 29.4 KB | 436 |
 | Adaptive segments (maximum 256), same Top-N | 44.7 us | 27.8 KB | 244 |
+
+For five local `-benchtime=100ms` samples on the same AMD Ryzen 9 5950X, the
+opt-in delete-patch benchmark used 10,000 typed rows and a threshold above the
+fixture to prevent background work during the timed operation:
+
+| Workload | Median time | Heap/op | Allocs/op | Change |
+| --- | ---: | ---: | ---: | --- |
+| Physical delete followed by reinsert | 1.03 us | 1,177 B | 4 | Baseline |
+| Logical delete followed by reinsert | 0.89 us | 1,107 B | 4 | 1.16x faster; 5.9% less heap; allocation-neutral |
+| `Rows` after 50% physical deletes | 0.95 ms | 1,999,941 B | 19,873 | Baseline |
+| `Rows` after 50% logical deletes | 0.92 ms | 1,999,942 B | 19,873 | 1.03x faster; allocation-neutral |
+| Explicit compaction, 1,000 physical rows | 35.4 us | 0 B | 0 | Maintenance cost |
+| Explicit compaction, 10,000 physical rows | 0.52 ms | 0 B | 0 | Maintenance cost |
+
+The operation result is workload-specific: the delete/reinsert path was faster
+without adding allocations, while materialized reads were effectively equal.
+The logical path still retains tombstoned backing capacity until the table's
+normal storage lifecycle releases it, so this is a delete-movement optimization
+and not a promise of immediate heap reduction. Reproduce with
+`make benchmark-sql-typed-table-patch-parts`.
 
 For five local `-benchtime=1000x` samples, MVCC writes measured `483 ns`,
 `937 B`, and `6` allocations at the median versus `432 ns`, `793 B`, and `4`
@@ -295,5 +356,8 @@ make test-sql-typed-table-mvcc
 make test-race-sql-typed-table-mvcc
 make benchmark-sql-typed-table-mvcc
 make benchmark-sql-typed-table-join
-make benchmark-sql-typed-table-join-coalescing
+	make benchmark-sql-typed-table-join-coalescing
+	make test-sql-typed-table-patch-parts
+	make test-race-sql-typed-table
+	make benchmark-sql-typed-table-patch-parts
 ```

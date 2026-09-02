@@ -3440,4 +3440,30 @@ deliver-sql-partial-index:
 check-sql-partial-index-stage:
 	sh ./scripts/deliver-sql-partial-index.sh check
 check-sql-temporal-storage-stage:
+test-sql-typed-table-patch-parts:
+	bash scripts/test-sql-typed-table-patch-parts.sh
+
+.PHONY: format-sql-typed-table-patch-parts
+format-sql-typed-table-patch-parts:
+	bash scripts/format-sql-typed-table-patch-parts.sh
+
+.PHONY: deliver-sql-typed-table-patch-parts
+deliver-sql-typed-table-patch-parts:
+	bash scripts/deliver-sql-typed-table-patch-parts.sh apply
+
+.PHONY: check-sql-typed-table-patch-parts
+check-sql-typed-table-patch-parts:
+	bash scripts/deliver-sql-typed-table-patch-parts.sh check
+
+.PHONY: commit-sql-typed-table-patch-parts
+commit-sql-typed-table-patch-parts:
+	bash scripts/deliver-sql-typed-table-patch-parts.sh commit
+
+.PHONY: push-sql-typed-table-patch-parts
+push-sql-typed-table-patch-parts:
+	bash scripts/deliver-sql-typed-table-patch-parts.sh push
+
+.PHONY: benchmark-sql-typed-table-patch-parts
+benchmark-sql-typed-table-patch-parts:
+	bash scripts/benchmark-sql-typed-table-patch-parts.sh
 	sh ./scripts/deliver-sql-temporal-storage.sh check

@@ -56,6 +56,7 @@ type TypedTableSchema struct {
 	SourceName    string
 	Columns       []TypedTableColumn
 	ColumnarCache TypedTableColumnarCacheOptions
+	PatchParts    TypedTablePatchOptions
 	MVCC          TypedTableMVCCOptions
 }
 
@@ -284,14 +285,15 @@ func (storage *typedTableColumnStorage) releaseDictionaryValue(code uint32) {
 // TypedTable is a schema-checked row store with per-column primitive slices.
 // It is opt-in and implements the established source-resolver contracts.
 type TypedTable struct {
-	mu        sync.RWMutex
-	schema    TypedTableSchema
-	columns   []typedTableColumnStorage
-	byName    map[string]int
-	keys      []string
-	positions map[string]int
-	columnar  typedTableColumnarCache
-	mvcc      *typedTableMVCCState
+	mu         sync.RWMutex
+	schema     TypedTableSchema
+	columns    []typedTableColumnStorage
+	byName     map[string]int
+	keys       []string
+	positions  map[string]int
+	columnar   typedTableColumnarCache
+	patchParts *typedTablePatchState
+	mvcc       *typedTableMVCCState
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -312,6 +314,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		return nil, fmt.Errorf("typed table columns are required")
 	}
 	schema.ColumnarCache = normalizeTypedTableColumnarCacheOptions(schema.ColumnarCache)
+	schema.PatchParts = normalizeTypedTablePatchOptions(schema.PatchParts)
 	table := &TypedTable{
 		schema:    schema,
 		byName:    make(map[string]int, len(schema.Columns)),
@@ -319,6 +322,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		columnar: typedTableColumnarCache{
 			options: schema.ColumnarCache,
 		},
+		patchParts: newTypedTablePatchState(schema.PatchParts),
 	}
 	if schema.MVCC.Enabled {
 		table.mvcc = newTypedTableMVCCState()
@@ -380,9 +384,18 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	table.clearColumnarLayoutsLocked()
 	index, exists := table.positions[key]
 	change := TypedTableChange{Key: key, After: cloneTypedTableValues(values)}
-	if exists {
+	if exists && !table.typedTableRowDeletedLocked(index) {
 		change.Operation = "UPDATE"
 		change.Before = table.rowLocked(index)
+		for column := range table.columns {
+			table.columns[column].set(index, values[column])
+		}
+	} else if exists {
+		change.Operation = "INSERT"
+		if table.patchParts != nil {
+			table.patchParts.deleted[index] = false
+			table.patchParts.deletedCount--
+		}
 		for column := range table.columns {
 			table.columns[column].set(index, values[column])
 		}
@@ -391,6 +404,9 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		index = len(table.keys)
 		table.positions[key] = index
 		table.keys = append(table.keys, key)
+		if table.patchParts != nil {
+			table.patchParts.deleted = append(table.patchParts.deleted, false)
+		}
 		for column := range table.columns {
 			table.columns[column].append(values[column])
 		}
@@ -408,11 +424,17 @@ func (table *TypedTable) Delete(key string) (TypedTableChange, error) {
 	table.mu.Lock()
 	defer table.mu.Unlock()
 	index, exists := table.positions[key]
-	if !exists {
+	if !exists || table.typedTableRowDeletedLocked(index) {
 		return TypedTableChange{}, fmt.Errorf("typed table key %q does not exist", key)
 	}
 	table.clearColumnarLayoutsLocked()
 	change := TypedTableChange{Operation: "DELETE", Key: key, Before: table.rowLocked(index)}
+	if table.patchParts != nil {
+		table.patchParts.deleted[index] = true
+		table.patchParts.deletedCount++
+		table.scheduleTypedTablePatchCompactionLocked()
+		return table.appendChangeLocked(change), nil
+	}
 	last := len(table.keys) - 1
 	if index != last {
 		moved := table.keys[last]
@@ -564,10 +586,17 @@ func (table *TypedTable) Rows() []Row {
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	rows := make([]Row, len(table.keys))
-	for row := range rows {
+	activeRows := len(table.keys)
+	if table.patchParts != nil {
+		activeRows -= table.patchParts.deletedCount
+	}
+	rows := make([]Row, 0, activeRows)
+	for row := range table.keys {
+		if table.typedTableRowDeletedLocked(row) {
+			continue
+		}
 		values := table.rowLocked(row)
-		rows[row] = table.rowMapLocked(values)
+		rows = append(rows, table.rowMapLocked(values))
 	}
 	return rows
 }
@@ -585,15 +614,22 @@ func (table *TypedTable) Schema() TypedTableSchema {
 }
 
 func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {
-	batch := ColumnarBatch{Columns: make(map[string][]interface{}, len(fields)), Rows: len(table.keys)}
+	activeRows := len(table.keys)
+	if table.patchParts != nil {
+		activeRows -= table.patchParts.deletedCount
+	}
+	batch := ColumnarBatch{Columns: make(map[string][]interface{}, len(fields)), Rows: activeRows}
 	for _, field := range fields {
 		column, found := table.byName[field]
 		if !found {
 			continue
 		}
-		values := make([]interface{}, len(table.keys))
-		for row := range values {
-			values[row] = typedTableValueInterface(table.columns[column].value(row))
+		values := make([]interface{}, 0, activeRows)
+		for row := range table.keys {
+			if table.typedTableRowDeletedLocked(row) {
+				continue
+			}
+			values = append(values, typedTableValueInterface(table.columns[column].value(row)))
 		}
 		batch.Columns[field] = values
 	}

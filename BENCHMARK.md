@@ -14678,3 +14678,63 @@ with direct numeric comparisons joined only by `AND`. Expressions, non-binary
 collation, additional dictionary predicates, and wider group semantics retain
 the established executor. Reproduce with
 `make benchmark-sql-columnar-group-aggregate`.
+
+## Typed-Table Lightweight Delete Patches
+
+This feature is disabled by default. The benchmark compares the existing
+swap-delete implementation with the opt-in tombstone path on 10,000 typed rows.
+The delete/reinsert workload keeps the table at full logical cardinality. The
+read workload deletes half the keys before timing `Rows`; compaction is timed
+separately with setup and deletes outside the measured interval.
+
+Raw five-sample output from an AMD Ryzen 9 5950X, using
+`make benchmark-sql-typed-table-patch-parts` and `-benchtime=100ms`:
+
+```text
+BenchmarkTypedTableDeleteReinsert/PhysicalDelete-32  129526  1041 ns/op  1217 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/PhysicalDelete-32  169975  1030 ns/op  1177 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/PhysicalDelete-32  143533   990.3 ns/op 1117 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/PhysicalDelete-32  123224  1134 ns/op  1269 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/PhysicalDelete-32  135351  1013 ns/op  1172 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/LogicalDelete-32   185703   807.9 ns/op 1093 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/LogicalDelete-32   231372   892.6 ns/op  1102 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/LogicalDelete-32   180727   879.7 ns/op  1118 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/LogicalDelete-32   154831   947.8 ns/op  1273 B/op  4 allocs/op
+BenchmarkTypedTableDeleteReinsert/LogicalDelete-32   144949  1021 ns/op   1107 B/op  4 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/PhysicalDelete-32  124  938125 ns/op  1999941 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/PhysicalDelete-32  130  945609 ns/op  1999941 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/PhysicalDelete-32  100 1051743 ns/op  1999946 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/PhysicalDelete-32  118  969424 ns/op  1999943 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/PhysicalDelete-32  123  877825 ns/op  1999942 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/LogicalDelete-32   130  919721 ns/op  1999940 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/LogicalDelete-32   128  935318 ns/op  1999941 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/LogicalDelete-32   130  858920 ns/op  1999942 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/LogicalDelete-32   100 1073003 ns/op  1999944 B/op 19873 allocs/op
+BenchmarkTypedTableRowsAfterHalfDeletes/LogicalDelete-32   116  887229 ns/op  1999943 B/op 19873 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows1000-32  3644  35351 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows1000-32  3016  37201 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows1000-32  3321  36287 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows1000-32  3124  35098 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows1000-32  3594  34136 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows10000-32 234 485226 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows10000-32 230 493336 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows10000-32 232 532744 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows10000-32 216 522034 ns/op 0 B/op 0 allocs/op
+BenchmarkTypedTablePatchCompaction/Rows10000-32 222 522892 ns/op 0 B/op 0 allocs/op
+```
+
+Median summary:
+
+| Workload | Median time | Heap/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Physical delete + reinsert | 1.03 us | 1,177 B | 4 | Baseline |
+| Logical delete + reinsert | 0.89 us | 1,107 B | 4 | 1.16x faster; 5.9% less heap |
+| `Rows` after 50% physical deletes | 0.95 ms | 1,999,941 B | 19,873 | Baseline |
+| `Rows` after 50% logical deletes | 0.92 ms | 1,999,942 B | 19,873 | 1.03x faster; allocation-neutral |
+| Explicit compaction, 1,000 rows | 35.4 us | 0 B | 0 | Maintenance cost |
+| Explicit compaction, 10,000 rows | 0.52 ms | 0 B | 0 | Maintenance cost |
+
+The result supports keeping the option opt-in: it improves delete movement in
+this workload, while read throughput is effectively neutral and compaction is
+explicit maintenance work. Deleted backing capacity is not immediately
+released by the compaction pass.
