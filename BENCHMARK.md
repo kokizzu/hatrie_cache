@@ -14601,10 +14601,10 @@ Five local samples on an AMD Ryzen 9 5950X, using `-benchtime=1000x`, measured:
 
 | Workload | Time/op | Heap/op | Allocs/op | Change |
 | --- | ---: | ---: | ---: | --- |
-| Plain typed-table write | 406 ns | 793 B | 4 | Baseline |
-| MVCC typed-table write | 556 ns | 937 B | 6 | 1.37x slower; 18% more heap; 2 more allocations |
-| Plain current-state rows | 274 us | 462,146 B | 4,745 | Baseline |
-| MVCC current snapshot rows | 287 us | 462,594 B | 4,749 | 1.05x slower; 0.1% more heap; 4 more allocations |
+| Plain typed-table write | 432 ns | 793 B | 4 | Baseline |
+| MVCC typed-table write | 483 ns | 937 B | 6 | 1.12x slower; 18% more heap; 2 more allocations |
+| Plain current-state rows | 297 us | 462,147 B | 4,745 | Baseline |
+| MVCC current snapshot rows | 328 us | 462,594 B | 4,749 | 1.10x slower; 0.1% more heap; 4 more allocations |
 
 The MVCC gain is stable historical reads that do not observe subsequent
 writes, including while a writer advances the table. `SnapshotAt` rejects

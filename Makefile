@@ -3375,6 +3375,10 @@ format-sql-typed-table-mvcc:
 
 benchmark-sql-typed-table-mvcc:
 	bash scripts/benchmark-sql-typed-table-mvcc.sh
+deliver-query-engine-adoption-docs:
+	bash scripts/deliver-query-engine-adoption-docs.sh apply
+check-query-engine-adoption-docs-stage:
+	bash scripts/deliver-query-engine-adoption-docs.sh check
 	sh ./scripts/test-sql-temporal-storage.sh
 
 benchmark-sql-temporal-storage:

@@ -244,6 +244,13 @@ of three runs as follows:
 | Fixed 256-row numeric segments, selective Top-N over 4,096 rows | 56.9 us | 29.4 KB | 436 |
 | Adaptive segments (maximum 256), same Top-N | 44.7 us | 27.8 KB | 244 |
 
+For five local `-benchtime=1000x` samples, MVCC writes measured `483 ns`,
+`937 B`, and `6` allocations at the median versus `432 ns`, `793 B`, and `4`
+allocations for the plain table. Current-snapshot row materialization measured
+`328 us`, `462,594 B`, and `4,749` allocations versus `297 us`, `462,147 B`,
+and `4,745` allocations. The feature is therefore opt-in: its value is
+historical, lock-independent reads, not faster current-state scans.
+
 For this repeated-aggregate workload, delta maintenance is approximately
 `3,794x` faster, uses `4,843x` less heap, and performs `6,218x` fewer
 allocations. Those are workload-specific measurements, not a promise for

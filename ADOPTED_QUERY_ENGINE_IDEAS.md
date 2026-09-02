@@ -21,7 +21,8 @@ explicitly opt-in operational control.
 | ClickHouse | Narrow expression index | Adopted | `CreateSQLJSONLowerIndex` is an explicit `LOWER(field) = literal` equality index. It uses the existing generation-aware JSON snapshot lifecycle and falls back to the SQL scan for source values that are not strings. |
 | Materialize | Literal semi-join index union | Adopted | Direct-field and `LOWER(direct field)` `IN (literal, ...)` predicates union existing equality postings after duplicate-literal removal. `NOT IN`, subqueries, other expressions, non-binary collations, and unavailable indexes retain the normal evaluator. |
 | Tarantool | Controlled cooperative maintenance | Adopted | `ManagedRefreshScheduler` now has opt-in count and duration cycle budgets. [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md) |
-| Tarantool | Consistent read snapshot | Already present at current boundary | `SnapshotLocker` gives resolvers a stable query lifetime without retaining historical row versions. |
+| Tarantool | Consistent read snapshot | Adopted | `SnapshotLocker` gives resolvers a stable query lifetime, while opt-in `TypedTableMVCCOptions` adds immutable historical typed-table snapshots without changing the default mutable path. [TYPED_TABLES.md](TYPED_TABLES.md) |
+| ClickHouse/Tarantool | Immutable persistent parts / LSM storage | Adopted for persistent cache storage | `PebbleStore` uses Pebble's immutable SSTable and background-compaction path, with generation checkpoints, crash recovery, backup, and restore verification. |
 
 ## Measured Results
 
@@ -47,37 +48,20 @@ explicitly opt-in operational control.
 | JSON equality-index literal `IN`, 10,000 rows and 10 distinct literals | About 21.5 us, 18.2 KB, and 121 allocations, versus a 12.0 ms, 8.21 MB, and 90,066-allocation scan: about 557x faster, 452x less allocated heap, and 744x fewer allocations. Duplicate literals are removed before probing; full predicate evaluation preserves SQL null behavior. |
 | JSON `LOWER(name)` index literal `IN`, 10,000 rows and 3 normalized literals | About 235 us, 330 KB, and 2,334 allocations, versus a 14.0 ms, 8.13 MB, and 145,645-allocation scan: about 60x faster, 25x less allocated heap, and 62x fewer allocations. Duplicate literals are removed before probing; non-string literals retain the normal scan path. |
 
+| Opt-in typed-table MVCC snapshots, 1,000-row writes and current-snapshot reads | Median repeated writes measured 1.12x slower with 18% more heap and two additional allocations; current-snapshot row materialization was 1.10x slower with 0.1% more heap and four additional allocations. Historical reads are the benefit, so MVCC remains disabled by default. |
+
 ## Deliberately Deferred
 
-### Opt-in MVCC Typed-Table Snapshots
-
-`TypedTableMVCCOptions{Enabled: true}` adds immutable per-key version chains.
-`Snapshot` and `SnapshotAt` copy only the key/head pointers while holding the
-table read lock; subsequent row and columnar reads use immutable nodes without
-retaining that lock. `CompactMVCCThrough` rebuilds the retained current chain
-and rejects new snapshots older than the compaction boundary. Snapshots that
-were already published remain valid because compaction never mutates a
-published version node.
-
-The default remains disabled. On an AMD Ryzen 9 5950X, a 1,000-row benchmark
-measured median repeated writes at `556 ns`, `937 B`, and `6 allocations` with
-MVCC versus `406 ns`, `793 B`, and `4 allocations` without it: about `1.37x`
-slower, `18%` more heap, and two additional allocations. Current-snapshot row
-materialization measured `287 us`, `463 KB`, and `4,749 allocations` versus
-`274 us`, `462 KB`, and `4,745 allocations`: about `1.05x` slower and nearly
-allocation-neutral. The benefit is historical, lock-independent reads under
-writer contention, not faster sequential materialization.
-
-### Immutable Parts And Background Merge
+### Additional Typed-Table Immutable Parts And Background Merge
 
 ClickHouse-style immutable parts would help append-heavy persistent analytic
-tables, but require a storage format, atomic manifest publication, merge
-budgeting, recovery checks, backup integration, and compaction benchmarking.
-`hatrie_cache` currently targets compact mutable cache and typed-table paths;
-adding a second storage engine now would increase recovery and backup
-complexity. Reconsider this only with an append-heavy persisted workload and
-a benchmark that includes write throughput, scan throughput, peak memory,
-crash recovery, backup, and restore.
+typed tables, but the persistent cache already gets immutable SSTables and
+background compaction from `PebbleStore`. Adding a second in-memory typed-table
+storage engine would require a separate row format, atomic manifest
+publication, merge budgeting, recovery checks, backup integration, and
+compaction benchmarking. Reconsider this only with an append-heavy persisted
+typed-table workload and a benchmark that includes write throughput, scan
+throughput, peak memory, crash recovery, backup, and restore.
 
 ### More Generic SQL Rewrites
 
