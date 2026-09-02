@@ -7,6 +7,26 @@ import (
 	"sync"
 )
 
+const DefaultTypedTableArrangementHydrationBatch = 1024
+
+// TypedTableAggregateArrangementFreshness reports an arrangement checkpoint
+// against the current typed-table changefeed tail.
+type TypedTableAggregateArrangementFreshness struct {
+	Checkpoint     uint64 `json:"checkpoint"`
+	SourceSequence uint64 `json:"source_sequence"`
+	Stale          bool   `json:"stale"`
+}
+
+// TypedTableAggregateArrangementHydration reports one bounded changefeed
+// replay. Complete is false when another Hydrate call is required.
+type TypedTableAggregateArrangementHydration struct {
+	Before         uint64 `json:"before"`
+	After          uint64 `json:"after"`
+	SourceSequence uint64 `json:"source_sequence"`
+	Applied        int    `json:"applied"`
+	Complete       bool   `json:"complete"`
+}
+
 // TypedTableAggregateArrangements shares exact TypedTableAggregate state among
 // consumers that use the same ordered GROUP BY, SUM, MIN, MAX, and COUNT
 // DISTINCT definition. It does not apply table changes automatically; callers
@@ -95,6 +115,62 @@ func (arrangement *TypedTableAggregateArrangement) Checkpoint() uint64 {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	return entry.aggregate.Checkpoint()
+}
+
+// Freshness compares this arrangement with the source table's current change
+// sequence without changing arrangement state.
+func (arrangement *TypedTableAggregateArrangement) Freshness() (TypedTableAggregateArrangementFreshness, error) {
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return TypedTableAggregateArrangementFreshness{}, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	entry.aggregate.table.mu.RLock()
+	sourceSequence := entry.aggregate.table.sequence
+	entry.aggregate.table.mu.RUnlock()
+	checkpoint := entry.aggregate.checkpoint
+	return TypedTableAggregateArrangementFreshness{
+		Checkpoint:     checkpoint,
+		SourceSequence: sourceSequence,
+		Stale:          checkpoint < sourceSequence,
+	}, nil
+}
+
+// Hydrate replays up to limit retained source changes into this arrangement.
+// A zero limit uses DefaultTypedTableArrangementHydrationBatch. If the source
+// changelog has already been compacted past the arrangement checkpoint, the
+// existing ErrTypedTableChangesCompacted error is returned and no partial
+// rebuild is attempted.
+func (arrangement *TypedTableAggregateArrangement) Hydrate(limit int) (TypedTableAggregateArrangementHydration, error) {
+	if limit < 0 {
+		return TypedTableAggregateArrangementHydration{}, fmt.Errorf("typed table arrangement hydration batch cannot be negative")
+	}
+	if limit == 0 {
+		limit = DefaultTypedTableArrangementHydrationBatch
+	}
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return TypedTableAggregateArrangementHydration{}, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	before := entry.aggregate.checkpoint
+	changes, sourceSequence, err := entry.aggregate.table.ChangesAfter(before, limit)
+	if err != nil {
+		return TypedTableAggregateArrangementHydration{}, err
+	}
+	if err := entry.aggregate.Apply(changes); err != nil {
+		return TypedTableAggregateArrangementHydration{}, err
+	}
+	after := entry.aggregate.checkpoint
+	return TypedTableAggregateArrangementHydration{
+		Before:         before,
+		After:          after,
+		SourceSequence: sourceSequence,
+		Applied:        len(changes),
+		Complete:       after >= sourceSequence,
+	}, nil
 }
 
 // Rows returns a deterministic independent snapshot of the shared aggregate.

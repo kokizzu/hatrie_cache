@@ -14801,3 +14801,25 @@ Raw five-sample output on Linux, AMD Ryzen 9 5950X:
 Median: 2.39x lower latency, 24.6x lower heap, and 2.00x fewer allocations.
 This is an in-process resolver benchmark; network, JSON decoding, and storage
 latencies are excluded.
+
+## Typed Arrangement Hydration
+
+Command: `make benchmark-typed-table-arrangement-hydration`.
+
+The benchmark compares maintaining one already-built grouped aggregate after a
+single tail update with rebuilding the same aggregate from 10,000 retained
+changes. The hydration API replays only the bounded changefeed tail. The
+arrangement remains explicit and does not start a background worker.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X, 20 iterations per sample:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | --- | --- | --- |
+| Bounded hydration of one change | 1,105; 1,353; 1,332; 2,059; 1,348 | 400; 400; 400; 400; 400 | 7; 7; 7; 7; 7 |
+| Rebuild from 10,000 changes | 1,265,332; 1,239,686; 1,502,997; 1,431,362; 1,295,240 | 560,641; 560,641; 560,640; 560,640; 560,640 | 20,009; 20,009; 20,009; 20,009; 20,009 |
+
+Median: about 960x lower latency, 1,402x less allocated heap, and 2,858x
+fewer allocations for one-change maintenance. The tradeoff is retained
+changefeed history and explicit hydration scheduling. If history was compacted
+before the arrangement checkpoint, `Hydrate` returns
+`ErrTypedTableChangesCompacted`; it never produces a partial silent rebuild.

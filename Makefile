@@ -3514,3 +3514,34 @@ commit-sql-prewhere:
 .PHONY: push-sql-prewhere
 push-sql-prewhere:
 	bash scripts/deliver-sql-prewhere.sh push
+
+.PHONY: test-typed-table-arrangement-hydration
+test-typed-table-arrangement-hydration:
+	bash scripts/test-typed-table-arrangement-hydration.sh
+
+.PHONY: format-typed-table-arrangement-hydration
+format-typed-table-arrangement-hydration:
+	bash scripts/format-typed-table-arrangement-hydration.sh
+
+.PHONY: benchmark-typed-table-arrangement-hydration
+benchmark-typed-table-arrangement-hydration:
+	bash scripts/benchmark-typed-table-arrangement-hydration.sh
+
+.PHONY: test-race-typed-table-arrangement-hydration
+test-race-typed-table-arrangement-hydration:
+	bash scripts/test-race-typed-table-arrangement-hydration.sh
+
+.PHONY: check-typed-table-arrangement-hydration
+check-typed-table-arrangement-hydration:
+	bash scripts/check-typed-table-arrangement-hydration.sh
+
+.PHONY: deliver-typed-table-arrangement-hydration
+deliver-typed-table-arrangement-hydration:
+	bash scripts/deliver-typed-table-arrangement-hydration.sh apply
+
+.PHONY: commit-typed-table-arrangement-hydration
+commit-typed-table-arrangement-hydration:
+	bash scripts/deliver-typed-table-arrangement-hydration.sh commit
+
+.PHONY: push-typed-table-arrangement-hydration
+push-typed-table-arrangement-hydration:
