@@ -56,6 +56,7 @@ type TypedTableSchema struct {
 	SourceName    string
 	Columns       []TypedTableColumn
 	ColumnarCache TypedTableColumnarCacheOptions
+	MVCC          TypedTableMVCCOptions
 }
 
 // TypedTableValue stores one scalar table value. A value with Valid false is
@@ -290,6 +291,7 @@ type TypedTable struct {
 	keys      []string
 	positions map[string]int
 	columnar  typedTableColumnarCache
+	mvcc      *typedTableMVCCState
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -317,6 +319,9 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		columnar: typedTableColumnarCache{
 			options: schema.ColumnarCache,
 		},
+	}
+	if schema.MVCC.Enabled {
+		table.mvcc = newTypedTableMVCCState()
 	}
 	table.columns = make([]typedTableColumnStorage, len(schema.Columns))
 	for index := range table.schema.Columns {
@@ -839,6 +844,9 @@ func (table *TypedTable) appendChangeLocked(change TypedTableChange) TypedTableC
 	table.sequence++
 	change.Sequence = table.sequence
 	table.changes = append(table.changes, change)
+	if table.mvcc != nil {
+		table.mvcc.record(change)
+	}
 	return cloneTypedTableChange(change)
 }
 
@@ -884,7 +892,7 @@ type TypedTableAggregateDefinition struct {
 }
 
 type typedTableDistinctValue struct {
-	kind       TypedTableKind
+	kind        TypedTableKind
 	stringValue string
 	int64Value  int64
 	floatBits   uint64

@@ -188,6 +188,39 @@ It never chooses a size above the configured maximum. The tradeoff is retained
 min/max sidecar metadata, so use it for repeated selective numeric filters or
 Top-N queries, not broad scans or layouts that are near `MaxBytes`.
 
+### Optional MVCC Snapshots
+
+`MVCC` is disabled by default. Enable it only when readers need a historical
+view that remains stable while writers advance the table:
+
+```go
+table, err := NewTypedTable(TypedTableSchema{
+    Name: "users",
+    MVCC: TypedTableMVCCOptions{Enabled: true},
+    Columns: []TypedTableColumn{
+        {Name: "name", Kind: TypedTableString},
+        {Name: "score", Kind: TypedTableInt64},
+    },
+})
+change, err := table.Upsert("a", []TypedTableValue{
+    TypedString("old"), TypedInt64(1),
+})
+snapshot, err := table.SnapshotAt(change.Sequence)
+rows := snapshot.Rows()
+```
+
+`TypedTableSnapshot` implements `SourceResolver` and
+`ColumnarSourceResolver`, so it can be passed directly to the SQL executor.
+`SnapshotAt(0)` is an empty view. A sequence newer than the table or older than
+`CompactMVCCThrough` is rejected. Compaction is explicit and never mutates
+published snapshots; callers should release old snapshots by dropping their
+references so obsolete version chains can be reclaimed.
+
+The version chain stores a copy of each written value and therefore increases
+write cost and retained memory. It is a consistency feature, not the default
+read optimization. Use the ordinary `TypedTable` path when current-state
+reads are sufficient.
+
 ## Tradeoff And Measurement
 
 The default remains the existing cache/row source. Use `TypedTable` only for a
@@ -251,6 +284,9 @@ is why the feature is opt-in.
 make test-sql-typed-table
 make test-race-sql-typed-table
 make benchmark-sql-typed-table
+make test-sql-typed-table-mvcc
+make test-race-sql-typed-table-mvcc
+make benchmark-sql-typed-table-mvcc
 make benchmark-sql-typed-table-join
 make benchmark-sql-typed-table-join-coalescing
 ```

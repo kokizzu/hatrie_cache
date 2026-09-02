@@ -3340,6 +3340,41 @@ deliver-sql-typed-minmax:
 check-sql-typed-minmax-stage:
 	sh ./scripts/deliver-sql-typed-minmax.sh check
 test-sql-temporal-storage:
+audit-engine-surface:
+	bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-typed-table:
+	DETAIL=typed-table bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-storage:
+	DETAIL=storage bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-query:
+	DETAIL=query bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-typed-table-symbols:
+	DETAIL=typed-table-symbols bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-mvcc:
+	DETAIL=mvcc bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-mvcc-docs:
+	DETAIL=mvcc-docs bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-makefile:
+	DETAIL=makefile bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-delivery:
+	DETAIL=delivery bash scripts/audit-engine-surface.sh
+
+test-sql-typed-table-mvcc:
+	bash scripts/test-sql-typed-table-mvcc.sh
+
+format-sql-typed-table-mvcc:
+	bash scripts/format-sql-typed-table-mvcc.sh
+
+benchmark-sql-typed-table-mvcc:
+	bash scripts/benchmark-sql-typed-table-mvcc.sh
 	sh ./scripts/test-sql-temporal-storage.sh
 
 benchmark-sql-temporal-storage:

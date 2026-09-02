@@ -14590,6 +14590,33 @@ path visits only the page rows, while
 `TestSQLColumnarStreamMaterializeWithScanRetainsAllMatches` protects the
 instrumented full-count behavior.
 
+## Opt-in Typed-Table MVCC Snapshots
+
+`BenchmarkTypedTableMVCCWrite` compares the explicit historical-version write
+path with the unchanged plain table path. The row benchmark compares a
+current 1,000-row snapshot with the ordinary current-state `Rows` call; it is
+not a historical one-row comparison.
+
+Five local samples on an AMD Ryzen 9 5950X, using `-benchtime=1000x`, measured:
+
+| Workload | Time/op | Heap/op | Allocs/op | Change |
+| --- | ---: | ---: | ---: | --- |
+| Plain typed-table write | 406 ns | 793 B | 4 | Baseline |
+| MVCC typed-table write | 556 ns | 937 B | 6 | 1.37x slower; 18% more heap; 2 more allocations |
+| Plain current-state rows | 274 us | 462,146 B | 4,745 | Baseline |
+| MVCC current snapshot rows | 287 us | 462,594 B | 4,749 | 1.05x slower; 0.1% more heap; 4 more allocations |
+
+The MVCC gain is stable historical reads that do not observe subsequent
+writes, including while a writer advances the table. `SnapshotAt` rejects
+sequences below an explicit compaction boundary, and published snapshots stay
+correct after compaction. Reproduce with:
+
+```sh
+make test-sql-typed-table-mvcc
+make test-race-sql-typed-table-mvcc
+make benchmark-sql-typed-table-mvcc
+```
+
 ## Versioned Columnar Condition Cache
 
 `BenchmarkSQLColumnarSelectiveFilter` selects `20` rows from a `20,000`-row
