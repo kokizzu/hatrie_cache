@@ -3627,3 +3627,27 @@ commit-async-command:
 .PHONY: push-async-command
 push-async-command:
 \tsh ./scripts/deliver-async-command.sh push
+
+.PHONY: test-async-command
+test-async-command:
+\tsh ./scripts/test-async-command.sh
+
+.PHONY: format-async-command
+format-async-command:
+\tsh ./scripts/format-async-command.sh
+
+.PHONY: benchmark-async-command
+benchmark-async-command:
+\tsh ./scripts/benchmark-async-command.sh
+
+.PHONY: deliver-async-command
+deliver-async-command:
+\tsh ./scripts/deliver-async-command.sh apply
+
+.PHONY: commit-async-command
+commit-async-command:
+\tsh ./scripts/deliver-async-command.sh commit
+
+.PHONY: push-async-command
+push-async-command:
+\tsh ./scripts/deliver-async-command.sh push
