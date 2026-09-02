@@ -14927,3 +14927,37 @@ The median framed no-progress path is effectively allocation-neutral and about
 legacy CPU cost in this fixture, with no additional heap or allocation cost.
 Progress records carry frontier metadata only; data snapshots remain available
 through `Snapshot()`. See [SUBSCRIPTION_FRONTIERS.md](SUBSCRIPTION_FRONTIERS.md).
+
+## Asynchronous Journal Command Submission
+
+Command: `make benchmark-async-command`.
+
+This benchmark separates the caller-side admission benefit from durable
+end-to-end completion. It uses the existing synchronous group-commit execution,
+async submit followed by `Wait`, and async admission with a separate completion
+drainer. All paths use `GroupCommitMaxBatch=64` and `-cpu=4` parallel benchmark
+workers.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | --- | ---: | ---: |
+| Existing synchronous execute | 231,566; 226,339; 425,614; 416,150; 225,518 | 914; 914; 917; 918; 914 | 3; 3; 3; 3; 3 |
+| Async submit and wait | 231,864; 242,231; 239,027; 235,743; 245,418 | 949; 948; 951; 955; 960 | 3; 3; 3; 3; 3 |
+| Async admission, completion drained separately | 207,472; 15,369; 16,144; 15,228; 15,892 | 805; 821; 806; 806; 806 | 3; 3; 3; 3; 3 |
+
+Median summary:
+
+| Path | Median time | Median heap | Median allocations | Versus sync time |
+| --- | ---: | ---: | ---: | ---: |
+| Existing synchronous execute | 231,566 ns | 914 B | 3 | 1.00x |
+| Async submit and wait | 239,027 ns | 951 B | 3 | 1.03x |
+| Async admission, completion drained separately | 15,892 ns | 806 B | 3 | 0.07x |
+
+Async admission is about 14.57x lower caller-side latency, but its completion
+drainer is outside the timed region. It is not a 14.57x durable-storage
+throughput claim. End-to-end submit-plus-wait is about 1.03x slower than the
+existing path and uses about 4.0% more transient heap in this run. The feature
+decouples request latency from fsync and provides bounded backpressure; it does
+not make filesystem sync itself cheaper. See
+[ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md).

@@ -178,6 +178,7 @@ type commandJournalJob struct {
 	journalRequest CacheCommandRequest
 	idempotency    commandIdempotencyCheck
 	operation      *snapshotOperation
+	submission     *CommandJournalSubmission
 	prepared       bool
 	result         chan CacheCommandResponse
 }
@@ -565,7 +566,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 		for idx, job := range pending {
 			response := job.execute()
 			if response.OK {
-				job.result <- response
+				job.complete(response)
 				rollbackOffset += int64(recordSizes[idx])
 				continue
 			}
@@ -577,7 +578,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			if rollbackErr != nil {
 				response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
 			}
-			job.result <- response
+			job.complete(response)
 			rejected = idx
 			if rollbackErr != nil {
 				completeCommandJournalJobs(pending[idx+1:], commandError(rollbackErr.Error()))
@@ -604,17 +605,17 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 	pendingByKey := make(map[string]int, len(batch))
 	for _, job := range batch {
 		if response, duplicate, err := journal.idempotency.lookup(job.idempotency); err != nil {
-			job.result <- commandError(err.Error())
+			job.complete(commandError(err.Error()))
 			continue
 		} else if duplicate {
-			job.result <- response
+			job.complete(response)
 			continue
 		}
 		if job.idempotency.enabled {
 			if index, ok := pendingByKey[job.idempotency.key]; ok {
 				entry := &entries[index]
 				if entry.check.fingerprint != job.idempotency.fingerprint {
-					job.result <- commandError("hatriecache: idempotency key was reused with a different command")
+					job.complete(commandError("hatriecache: idempotency key was reused with a different command"))
 				} else {
 					entry.aliases = append(entry.aliases, job)
 				}
@@ -734,9 +735,9 @@ func commandJournalRequestBatchInitialCapacityFromIdempotentEntries(entries []co
 }
 
 func completeCommandJournalIdempotentGroupEntry(entry *commandJournalIdempotentGroupEntry, response CacheCommandResponse) {
-	entry.job.result <- response
+	entry.job.complete(response)
 	for _, alias := range entry.aliases {
-		alias.result <- cloneCacheCommandResponse(response)
+		alias.complete(cloneCacheCommandResponse(response))
 	}
 }
 
@@ -755,7 +756,7 @@ func (job *commandJournalJob) execute() CacheCommandResponse {
 
 func completeCommandJournalJobs(jobs []*commandJournalJob, response CacheCommandResponse) {
 	for _, job := range jobs {
-		job.result <- response
+		job.complete(response)
 	}
 }
 

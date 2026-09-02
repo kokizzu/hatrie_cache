@@ -24,12 +24,20 @@ security guidance before exposing it on a network.
 - Reproducible Jupyter SQL analysis: [NOTEBOOK.md](NOTEBOOK.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
+- Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
 - API and configuration examples: [Development](#development)
 
 The default process does not start the monitoring HTTP/2 or gRPC server. Enable
 it explicitly when needed, configure authentication before remote access, and
 keep backups outside the cache host.
+
+Embedded callers can opt into bounded asynchronous journal writes with
+`CommandJournal.SubmitAsyncCommand`. Admission is immediate while capacity is
+available; `Wait` or `Done` is the explicit durable-and-applied completion
+boundary. Existing synchronous command execution and all default configurations
+remain unchanged. See [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
+for backpressure, recovery, and measured tradeoffs.
 
 ## Performance and implementation history
 

@@ -3615,3 +3615,15 @@ commit-subscription-frontiers:
 
 push-subscription-frontiers:
 \tsh ./scripts/deliver-subscription-frontiers.sh push
+
+.PHONY: deliver-async-command
+deliver-async-command:
+\tsh ./scripts/deliver-async-command.sh apply
+
+.PHONY: commit-async-command
+commit-async-command:
+\tsh ./scripts/deliver-async-command.sh commit
+
+.PHONY: push-async-command
+push-async-command:
+\tsh ./scripts/deliver-async-command.sh push
