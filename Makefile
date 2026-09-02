@@ -3466,4 +3466,20 @@ push-sql-typed-table-patch-parts:
 .PHONY: benchmark-sql-typed-table-patch-parts
 benchmark-sql-typed-table-patch-parts:
 	bash scripts/benchmark-sql-typed-table-patch-parts.sh
+
+.PHONY: test-sql-json-path-skip
+test-sql-json-path-skip:
+	bash scripts/test-sql-json-path-skip.sh
+
+.PHONY: benchmark-sql-json-path-skip
+benchmark-sql-json-path-skip:
+	bash scripts/benchmark-sql-json-path-skip.sh
+
+.PHONY: format-sql-json-path-skip
+format-sql-json-path-skip:
+	bash scripts/format-sql-json-path-skip.sh
+
+.PHONY: test-race-sql-json-path-skip
+test-race-sql-json-path-skip:
+	bash scripts/test-race-sql-json-path-skip.sh
 	sh ./scripts/deliver-sql-temporal-storage.sh check

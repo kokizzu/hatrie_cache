@@ -14738,3 +14738,38 @@ The result supports keeping the option opt-in: it improves delete movement in
 this workload, while read throughput is effectively neutral and compaction is
 explicit maintenance work. Deleted backing capacity is not immediately
 released by the compaction pass.
+
+## JSON Path Skip Metadata
+
+This feature is disabled by default. It stores a bounded Bloom filter for each
+configured normalized JSON path and source segment. A matching segment returns
+candidate rows; the SQL executor still evaluates `JSON_VALUE` and the original
+predicate, so Bloom false positives are harmless.
+
+Raw five-sample output from an AMD Ryzen 9 5950X, using
+`make benchmark-sql-json-path-skip` and `-benchtime=100ms`:
+
+```text
+BenchmarkSQLJSONPathSkipEquality/FullJSONScan-32      4 31952959 ns/op 23950846 B/op 320271 allocs/op
+BenchmarkSQLJSONPathSkipEquality/FullJSONScan-32      4 31590077 ns/op 23948024 B/op 320267 allocs/op
+BenchmarkSQLJSONPathSkipEquality/FullJSONScan-32      4 32283916 ns/op 23946652 B/op 320265 allocs/op
+BenchmarkSQLJSONPathSkipEquality/FullJSONScan-32      3 33741993 ns/op 23946672 B/op 320266 allocs/op
+BenchmarkSQLJSONPathSkipEquality/FullJSONScan-32      4 32618102 ns/op 23946632 B/op 320265 allocs/op
+BenchmarkSQLJSONPathSkipEquality/PathSkipMetadata-32 18  6770246 ns/op  8234203 B/op  46337 allocs/op
+BenchmarkSQLJSONPathSkipEquality/PathSkipMetadata-32 18  7008344 ns/op  8234201 B/op  46337 allocs/op
+BenchmarkSQLJSONPathSkipEquality/PathSkipMetadata-32 18  7396064 ns/op  8234202 B/op  46337 allocs/op
+BenchmarkSQLJSONPathSkipEquality/PathSkipMetadata-32 26  6101985 ns/op  8234629 B/op  46337 allocs/op
+BenchmarkSQLJSONPathSkipEquality/PathSkipMetadata-32 24  5821900 ns/op  8234200 B/op  46337 allocs/op
+```
+
+Median summary:
+
+| Workload | Median time | Heap/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Full JSON scan | 32.28 ms | 23,946,652 B | 320,265 | Baseline |
+| Path skip metadata | 6.77 ms | 8,234,201 B | 46,337 | 4.77x faster; 2.91x less heap; 6.91x fewer allocations |
+
+The fixture uses 20,000 rows, 100 matching values clustered in the first
+segment, 256 rows per segment, and 512 bits per segment. Reproduce with
+`make test-sql-json-path-skip`, `make test-race-sql-json-path-skip`, and
+`make benchmark-sql-json-path-skip`.

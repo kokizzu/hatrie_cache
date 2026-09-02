@@ -24,6 +24,7 @@ explicitly opt-in operational control.
 | Tarantool | Consistent read snapshot | Adopted | `SnapshotLocker` gives resolvers a stable query lifetime, while opt-in `TypedTableMVCCOptions` adds immutable historical typed-table snapshots without changing the default mutable path. [TYPED_TABLES.md](TYPED_TABLES.md) |
 | ClickHouse/Tarantool | Immutable persistent parts / LSM storage | Adopted for persistent cache storage | `PebbleStore` uses Pebble's immutable SSTable and background-compaction path, with generation checkpoints, crash recovery, backup, and restore verification. |
 | ClickHouse | Lightweight delete patch parts | Adopted for opt-in typed tables | `TypedTablePatchOptions` records delete tombstones without moving typed rows, skips them in row and columnar SQL reads, and provides threshold-triggered or explicit compaction. Updates remain on the existing path and the feature is disabled by default. [TYPED_TABLES.md](TYPED_TABLES.md) |
+| ClickHouse | Dynamic JSON path skip metadata | Adopted for opt-in JSON sources | `CreateSQLJSONPathSkipIndex` stores bounded per-segment Bloom metadata for normalized nested paths. It prunes equality candidates while the SQL executor rechecks the original predicate, so false positives cannot change results. |
 
 ## Measured Results
 
@@ -51,6 +52,7 @@ explicitly opt-in operational control.
 
 | Opt-in typed-table MVCC snapshots, 1,000-row writes and current-snapshot reads | Median repeated writes measured 1.12x slower with 18% more heap and two additional allocations; current-snapshot row materialization was 1.10x slower with 0.1% more heap and four additional allocations. Historical reads are the benefit, so MVCC remains disabled by default. |
 | Opt-in typed-table lightweight delete patches, 10,000 rows | Delete followed by reinsert was 1.16x faster with 5.9% less heap and the same four allocations; 50%-deleted `Rows` was 1.03x faster with the same allocation profile. Explicit compaction cost 35.4 us for 1,000 rows and 0.52 ms for 10,000 rows. Tombstoned backing capacity remains until the normal storage lifecycle releases it, so this optimizes row movement rather than immediate heap reclamation. |
+| Opt-in JSON path skip metadata, 20,000 rows and 100 nested matches | Warmed nested equality execution was about 4.77x faster, used about 2.91x less allocated heap, and made about 6.91x fewer allocations than the full JSON scan. The index retains 512 bits per 256-row segment in this fixture and remains disabled unless configured. |
 
 ## Deliberately Deferred
 

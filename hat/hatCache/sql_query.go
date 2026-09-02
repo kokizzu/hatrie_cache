@@ -869,6 +869,10 @@ func (ht *HatTrie) sqlJSONIndexCurrentLocked(key, field string, source sqlJSONSo
 		configured++
 		current = current && source.current(index.sqlJSONIndexState)
 	}
+	if index := ht.sqlJSONPathSkipIndexes[key][field]; index != nil {
+		configured++
+		current = current && source.current(index.sqlJSONIndexState)
+	}
 	if index := ht.sqlJSONCoveringIndexes[key][field]; index != nil {
 		configured++
 		current = current && source.current(index.sqlJSONIndexState)
@@ -945,6 +949,19 @@ func (ht *HatTrie) refreshSQLJSONIndexesLocked(key, field string, source sqlJSON
 			return rebuilt, err
 		}
 		if err := refreshSQLJSONBitmapIndexSourceRows(index, field, source, snapshot.rows); err != nil {
+			return rebuilt, err
+		}
+		if changed {
+			rebuilt++
+		}
+	}
+	if index := ht.sqlJSONPathSkipIndexes[key][field]; index != nil {
+		changed := !source.current(index.sqlJSONIndexState)
+		snapshot, err := loadSnapshot()
+		if err != nil {
+			return rebuilt, err
+		}
+		if err := refreshSQLJSONPathSkipIndexSource(index, source, snapshot.rows); err != nil {
 			return rebuilt, err
 		}
 		if changed {
@@ -1224,6 +1241,7 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	bitmap := ht.sqlJSONBitmapIndexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
+	skip := ht.sqlJSONPathSkipIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
 	if typed != nil {
 		source, err := ht.sqlJSONSource(key)
@@ -1284,7 +1302,7 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		}
 		return hatSql.CloneRows(rows), true, nil
 	}
-	if index == nil {
+	if index == nil && skip == nil {
 		return nil, false, nil
 	}
 	source, err := ht.sqlJSONSource(key)
@@ -1295,7 +1313,22 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	defer ht.sqlIndexMu.Unlock()
 	index = ht.sqlJSONIndexes[key][field]
 	if index == nil {
-		return nil, false, nil
+		skip = ht.sqlJSONPathSkipIndexes[key][field]
+		if skip == nil {
+			return nil, false, nil
+		}
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		if err := refreshSQLJSONPathSkipIndexSource(skip, source, snapshot.rows); err != nil {
+			return nil, false, err
+		}
+		rows, available := sqlJSONPathSkipRows(skip, value)
+		return rows, available, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
 	if err != nil {
