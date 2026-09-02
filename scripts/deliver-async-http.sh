@@ -30,7 +30,7 @@ check_staged_scope() {
 	fi
 	while IFS= read -r staged_file; do
 		case "$staged_file" in
-		ADOPTED_QUERY_ENGINE_IDEAS.md|ASYNC_HTTP_COMMANDS.md|BENCHMARK.md|README.md|api.go|cmd/hatrie-cache/async_config_test.go|cmd/hatrie-cache/main.go|hat/hatCache/async_command.go|hat/hatCache/async_command_http.go|hat/hatCache/async_command_http_benchmark_test.go|hat/hatCache/async_command_http_test.go|hat/hatCache/journal.go|hat/hatCache/monitoring.go|scripts/benchmark-async-http.sh|scripts/deliver-async-http.sh|scripts/format-async-command.sh|scripts/monitoring-server.sh|scripts/test-async-http.sh)
+		ADOPTED_QUERY_ENGINE_IDEAS.md|ASYNC_HTTP_COMMANDS.md|BENCHMARK.md|Makefile|README.md|api.go|cmd/hatrie-cache/async_config_test.go|cmd/hatrie-cache/main.go|hat/hatCache/async_command.go|hat/hatCache/async_command_http.go|hat/hatCache/async_command_http_benchmark_test.go|hat/hatCache/async_command_http_test.go|hat/hatCache/journal.go|hat/hatCache/monitoring.go|scripts/benchmark-async-http.sh|scripts/deliver-async-http.sh|scripts/format-async-command.sh|scripts/monitoring-server.sh|scripts/test-async-http.sh)
 			;;
 		*)
 			printf 'refusing async HTTP delivery with unrelated staged path: %s\n' "$staged_file" >&2
@@ -51,41 +51,52 @@ stage_feature() {
 	trap 'rm -f "$head_makefile" "$wanted_makefile"' EXIT INT TERM
 	git show HEAD:Makefile > "$head_makefile"
 	awk '
+	FNR == NR {
+		if ($0 == "monitoring-server: export MONITORING_ASYNC_COMMANDS := $(MONITORING_ASYNC_COMMANDS)") {
+			has_exports = 1
+		}
+		if ($0 == ".PHONY: test-async-http") {
+			has_targets = 1
+		}
+		next
+	}
 	{
 		print
-		if ($0 == "monitoring-server: export DIAGNOSTICS_PROFILING := $(DIAGNOSTICS_PROFILING)") {
+		if (!has_exports && $0 == "monitoring-server: export DIAGNOSTICS_PROFILING := $(DIAGNOSTICS_PROFILING)") {
 			print "monitoring-server: export MONITORING_ASYNC_COMMANDS := $(MONITORING_ASYNC_COMMANDS)"
 			print "monitoring-server: export MONITORING_ASYNC_COMMAND_STATUS_CAPACITY := $(MONITORING_ASYNC_COMMAND_STATUS_CAPACITY)"
 			print "monitoring-server: export JOURNAL_IDEMPOTENCY_CAPACITY := $(JOURNAL_IDEMPOTENCY_CAPACITY)"
 		}
 	}
 	END {
-		print ""
-		print ".PHONY: test-async-http"
-		print "test-async-http:"
-		print "\tsh ./scripts/test-async-http.sh"
-		print ""
-		print ".PHONY: benchmark-async-http"
-		print "benchmark-async-http:"
-		print "\tsh ./scripts/benchmark-async-http.sh"
-		print ""
-		print ".PHONY: deliver-async-http"
-		print "deliver-async-http:"
-		print "\tsh ./scripts/deliver-async-http.sh apply"
-		print ""
-		print ".PHONY: check-async-http-stage"
-		print "check-async-http-stage:"
-		print "\tsh ./scripts/deliver-async-http.sh check"
-		print ""
-		print ".PHONY: commit-async-http"
-		print "commit-async-http:"
-		print "\tsh ./scripts/deliver-async-http.sh commit"
-		print ""
-		print ".PHONY: push-async-http"
-		print "push-async-http:"
-		print "\tsh ./scripts/deliver-async-http.sh push"
+		if (!has_targets) {
+			print ""
+			print ".PHONY: test-async-http"
+			print "test-async-http:"
+			print "\tsh ./scripts/test-async-http.sh"
+			print ""
+			print ".PHONY: benchmark-async-http"
+			print "benchmark-async-http:"
+			print "\tsh ./scripts/benchmark-async-http.sh"
+			print ""
+			print ".PHONY: deliver-async-http"
+			print "deliver-async-http:"
+			print "\tsh ./scripts/deliver-async-http.sh apply"
+			print ""
+			print ".PHONY: check-async-http-stage"
+			print "check-async-http-stage:"
+			print "\tsh ./scripts/deliver-async-http.sh check"
+			print ""
+			print ".PHONY: commit-async-http"
+			print "commit-async-http:"
+			print "\tsh ./scripts/deliver-async-http.sh commit"
+			print ""
+			print ".PHONY: push-async-http"
+			print "push-async-http:"
+			print "\tsh ./scripts/deliver-async-http.sh push"
+		}
 	}
-' "$head_makefile" > "$wanted_makefile"
+' "$head_makefile" "$head_makefile" > "$wanted_makefile"
 	wanted_blob=$(git hash-object -w "$wanted_makefile")
 	git update-index --add --cacheinfo "100644,$wanted_blob,Makefile"
 	git diff --cached --check
