@@ -125,7 +125,9 @@ case "$mode" in
     ;;
   push)
     stage_feature
-    git commit -m "$commit_message"
+    if ! git diff --cached --quiet; then
+      git commit -m "$commit_message"
+    fi
     git push
     ;;
   *)
