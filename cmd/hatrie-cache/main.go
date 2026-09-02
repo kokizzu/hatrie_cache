@@ -48,102 +48,104 @@ const (
 var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 
 type config struct {
-	configPath                        string
-	configProfile                     string
-	checkConfig                       bool
-	printConfig                       bool
-	monitoringServer                  bool
-	monitoringAddr                    string
-	monitoringTLSCert                 string
-	monitoringTLSKey                  string
-	monitoringAuthToken               string
-	monitoringAuthPreviousToken       string
-	monitoringAuthPreviousExpiry      time.Time
-	rbacPolicyPath                    string
-	diagnosticsProfiling              bool
-	auditLogPath                      string
-	writeProtection                   bool
-	rateLimit                         int
-	keyStatsMode                      string
-	keyStatsCapacity                  int
-	localPartitions                   int
-	counterWriteStripes               int
-	memoryCompactionInterval          time.Duration
-	memoryCompactionMaxTemporaryBytes uint64
-	monitoringWebDir                  string
-	sqlFunctionsPath                  string
-	monitoringReadHeaderTimeout       time.Duration
-	monitoringIdleTimeout             time.Duration
-	nodeID                            string
-	topologyPath                      string
-	electionTimeout                   time.Duration
-	replication                       bool
-	replicationMode                   string
-	replicationAsync                  bool
-	replicationQueueSize              int
-	replicationRetry                  time.Duration
-	replicationAttempts               uint
-	replicationDeadLetterLimit        int
-	replicationOutboxPath             string
-	replicationOutboxFormat           string
-	replicationOutboxCodec            string
-	replicationOutboxBatch            time.Duration
-	replicationCircuitFailures        int
-	replicationCircuitCooldown        time.Duration
-	replicationWireFormat             string
-	replicationTransport              string
-	replicationGRPCWindow             int
-	replicationGRPCBatchMax           int
-	replicationGRPCBatchWindow        time.Duration
-	replicationHTTPFallback           bool
-	replicationAuthToken              string
-	replicationAuthPreviousToken      string
-	replicationAuthPreviousExpiry     time.Time
-	replicationBatchMaxBytes          int
-	replicationMaxTargets             int
-	replicationSyncInterval           time.Duration
-	replicationSyncPrefix             string
-	enforceLeaderWrites               bool
-	grpcAddr                          string
-	grpcTLSCert                       string
-	grpcTLSKey                        string
-	grpcClientCA                      string
-	dbPath                            string
-	dbBackend                         string
-	dbFormat                          string
-	dbSyncInterval                    time.Duration
-	dbCompareBeforeWrite              string
-	dbCompactInterval                 time.Duration
-	dbCompactStartKey                 string
-	dbCompactLimitKey                 string
-	dbHotLoad                         bool
-	dbHotLoadMaxBytes                 int64
-	dbHotLoadMaxAge                   time.Duration
-	dbHotLoadMinHits                  uint64
-	dbMemoryCapBytes                  int64
-	dbRSSCapBytes                     int64
-	dbMemoryEvictInterval             time.Duration
-	dbMemoryEvictMinValueBytes        int64
-	snapshotPath                      string
-	snapshotInterval                  time.Duration
-	snapshotFormat                    string
-	journalPath                       string
-	journalFormat                     string
-	journalGroupCommitWindow          time.Duration
-	journalGroupCommitMaxBatch        int
-	journalSegmentMaxBytes            int64
-	journalRetainedSegments           int
-	journalIdempotencyCapacity        int
-	journalPullSource                 string
-	journalPullStatePath              string
-	journalPullInterval               time.Duration
-	journalPullTimeout                time.Duration
-	journalPullLimit                  uint64
-	journalPullMaxBatches             uint64
-	journalPullFullSyncFallback       bool
-	journalPullCheckpointBootstrap    bool
-	journalPullIncrementalRecovery    bool
-	journalPullWireFormat             string
+	configPath                           string
+	configProfile                        string
+	checkConfig                          bool
+	printConfig                          bool
+	monitoringServer                     bool
+	monitoringAddr                       string
+	monitoringTLSCert                    string
+	monitoringTLSKey                     string
+	monitoringAuthToken                  string
+	monitoringAuthPreviousToken          string
+	monitoringAuthPreviousExpiry         time.Time
+	monitoringAsyncCommands              bool
+	monitoringAsyncCommandStatusCapacity int
+	rbacPolicyPath                       string
+	diagnosticsProfiling                 bool
+	auditLogPath                         string
+	writeProtection                      bool
+	rateLimit                            int
+	keyStatsMode                         string
+	keyStatsCapacity                     int
+	localPartitions                      int
+	counterWriteStripes                  int
+	memoryCompactionInterval             time.Duration
+	memoryCompactionMaxTemporaryBytes    uint64
+	monitoringWebDir                     string
+	sqlFunctionsPath                     string
+	monitoringReadHeaderTimeout          time.Duration
+	monitoringIdleTimeout                time.Duration
+	nodeID                               string
+	topologyPath                         string
+	electionTimeout                      time.Duration
+	replication                          bool
+	replicationMode                      string
+	replicationAsync                     bool
+	replicationQueueSize                 int
+	replicationRetry                     time.Duration
+	replicationAttempts                  uint
+	replicationDeadLetterLimit           int
+	replicationOutboxPath                string
+	replicationOutboxFormat              string
+	replicationOutboxCodec               string
+	replicationOutboxBatch               time.Duration
+	replicationCircuitFailures           int
+	replicationCircuitCooldown           time.Duration
+	replicationWireFormat                string
+	replicationTransport                 string
+	replicationGRPCWindow                int
+	replicationGRPCBatchMax              int
+	replicationGRPCBatchWindow           time.Duration
+	replicationHTTPFallback              bool
+	replicationAuthToken                 string
+	replicationAuthPreviousToken         string
+	replicationAuthPreviousExpiry        time.Time
+	replicationBatchMaxBytes             int
+	replicationMaxTargets                int
+	replicationSyncInterval              time.Duration
+	replicationSyncPrefix                string
+	enforceLeaderWrites                  bool
+	grpcAddr                             string
+	grpcTLSCert                          string
+	grpcTLSKey                           string
+	grpcClientCA                         string
+	dbPath                               string
+	dbBackend                            string
+	dbFormat                             string
+	dbSyncInterval                       time.Duration
+	dbCompareBeforeWrite                 string
+	dbCompactInterval                    time.Duration
+	dbCompactStartKey                    string
+	dbCompactLimitKey                    string
+	dbHotLoad                            bool
+	dbHotLoadMaxBytes                    int64
+	dbHotLoadMaxAge                      time.Duration
+	dbHotLoadMinHits                     uint64
+	dbMemoryCapBytes                     int64
+	dbRSSCapBytes                        int64
+	dbMemoryEvictInterval                time.Duration
+	dbMemoryEvictMinValueBytes           int64
+	snapshotPath                         string
+	snapshotInterval                     time.Duration
+	snapshotFormat                       string
+	journalPath                          string
+	journalFormat                        string
+	journalGroupCommitWindow             time.Duration
+	journalGroupCommitMaxBatch           int
+	journalSegmentMaxBytes               int64
+	journalRetainedSegments              int
+	journalIdempotencyCapacity           int
+	journalPullSource                    string
+	journalPullStatePath                 string
+	journalPullInterval                  time.Duration
+	journalPullTimeout                   time.Duration
+	journalPullLimit                     uint64
+	journalPullMaxBatches                uint64
+	journalPullFullSyncFallback          bool
+	journalPullCheckpointBootstrap       bool
+	journalPullIncrementalRecovery       bool
+	journalPullWireFormat                string
 }
 
 func main() {
@@ -416,6 +418,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		AuthToken:                        cfg.monitoringAuthToken,
 		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
 		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		AsyncCommands:                    cfg.monitoringAsyncCommands,
+		AsyncCommandStatusCapacity:       cfg.monitoringAsyncCommandStatusCapacity,
 		RBACPolicy:                       rbacPolicy,
 		DiagnosticsProfiling:             cfg.diagnosticsProfiling,
 		ReplicationAuthToken:             cfg.replicationAuthToken,
@@ -578,6 +582,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.monitoringAuthPreviousToken, "monitoring-auth-previous-token", "", "previous monitoring bearer token accepted only until its expiry")
 	flags.Func("monitoring-auth-previous-token-expires-at", "absolute RFC3339 expiry for the previous monitoring bearer token", rfc3339TimeFlag(&cfg.monitoringAuthPreviousExpiry))
+	flags.BoolVar(&cfg.monitoringAsyncCommands, "monitoring-async-commands", cfg.monitoringAsyncCommands, "enable opt-in asynchronous HTTP command admission")
+	flags.IntVar(&cfg.monitoringAsyncCommandStatusCapacity, "monitoring-async-command-status-capacity", hatriecache.DefaultMonitoringAsyncCommandStatusCapacity, "maximum retained HTTP async command statuses")
 	flags.StringVar(&cfg.rbacPolicyPath, "rbac-policy", cfg.rbacPolicyPath, "optional JSON role-based access policy; requires monitoring authentication")
 	flags.BoolVar(&cfg.diagnosticsProfiling, "diagnostics-profiling", cfg.diagnosticsProfiling, "enable authenticated bounded runtime profile capture")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
@@ -685,6 +691,17 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.rbacPolicyPath != "" && cfg.monitoringAuthToken == "" {
 		return config{}, errors.New("RBAC policy requires -monitoring-auth-token")
+	}
+	if cfg.monitoringAsyncCommands {
+		if strings.TrimSpace(cfg.journalPath) == "" {
+			return config{}, errors.New("monitoring async commands require -journal-path")
+		}
+		if cfg.journalIdempotencyCapacity <= 0 {
+			return config{}, errors.New("monitoring async commands require -journal-idempotency-capacity greater than zero")
+		}
+		if cfg.journalGroupCommitMaxBatch <= 1 {
+			return config{}, errors.New("monitoring async commands require -journal-group-commit-max-batch greater than one")
+		}
 	}
 	if err := validatePreviousAuthToken("replication", cfg.replicationAuthToken, cfg.replicationAuthPreviousToken, cfg.replicationAuthPreviousExpiry, now); err != nil {
 		return config{}, err
@@ -1155,99 +1172,101 @@ func writeRedactedConfig(writer io.Writer, cfg config) error {
 
 func redactedConfig(cfg config) map[string]interface{} {
 	out := map[string]interface{}{
-		"config_path":                           cfg.configPath,
-		"config_profile":                        cfg.configProfile,
-		"check_config":                          cfg.checkConfig,
-		"print_config":                          cfg.printConfig,
-		"monitoring_server":                     cfg.monitoringServer,
-		"monitoring_addr":                       cfg.monitoringAddr,
-		"monitoring_tls_cert":                   cfg.monitoringTLSCert,
-		"monitoring_tls_key":                    cfg.monitoringTLSKey,
-		"monitoring_auth_token":                 redactedSecret(cfg.monitoringAuthToken),
-		"monitoring_auth_previous_token":        redactedSecret(cfg.monitoringAuthPreviousToken),
-		"rbac_policy":                           cfg.rbacPolicyPath,
-		"diagnostics_profiling":                 cfg.diagnosticsProfiling,
-		"audit_log_path":                        cfg.auditLogPath,
-		"write_protection":                      cfg.writeProtection,
-		"rate_limit":                            cfg.rateLimit,
-		"key_stats_mode":                        cfg.keyStatsMode,
-		"key_stats_capacity":                    cfg.keyStatsCapacity,
-		"local_partitions":                      cfg.localPartitions,
-		"counter_write_stripes":                 cfg.counterWriteStripes,
-		"memory_compaction_interval":            cfg.memoryCompactionInterval.String(),
-		"memory_compaction_max_temporary_bytes": cfg.memoryCompactionMaxTemporaryBytes,
-		"monitoring_web_dir":                    cfg.monitoringWebDir,
-		"monitoring_read_header_timeout":        cfg.monitoringReadHeaderTimeout.String(),
-		"monitoring_idle_timeout":               cfg.monitoringIdleTimeout.String(),
-		"node_id":                               cfg.nodeID,
-		"topology_path":                         cfg.topologyPath,
-		"election_timeout":                      cfg.electionTimeout.String(),
-		"replication":                           cfg.replication,
-		"replication_mode":                      cfg.replicationMode,
-		"replication_async":                     cfg.replicationAsync,
-		"replication_queue_size":                cfg.replicationQueueSize,
-		"replication_retry_interval":            cfg.replicationRetry.String(),
-		"replication_max_attempts":              cfg.replicationAttempts,
-		"replication_dead_letter_limit":         cfg.replicationDeadLetterLimit,
-		"replication_outbox_path":               cfg.replicationOutboxPath,
-		"replication_outbox_format":             cfg.replicationOutboxFormat,
-		"replication_outbox_codec":              cfg.replicationOutboxCodec,
-		"replication_outbox_batch_window":       cfg.replicationOutboxBatch.String(),
-		"replication_circuit_breaker_failures":  cfg.replicationCircuitFailures,
-		"replication_circuit_breaker_cooldown":  cfg.replicationCircuitCooldown.String(),
-		"replication_wire_format":               cfg.replicationWireFormat,
-		"replication_transport":                 cfg.replicationTransport,
-		"replication_grpc_window":               cfg.replicationGRPCWindow,
-		"replication_grpc_batch_max_commands":   cfg.replicationGRPCBatchMax,
-		"replication_grpc_batch_window":         cfg.replicationGRPCBatchWindow.String(),
-		"replication_http_fallback":             cfg.replicationHTTPFallback,
-		"replication_auth_token":                redactedSecret(cfg.replicationAuthToken),
-		"replication_auth_previous_token":       redactedSecret(cfg.replicationAuthPreviousToken),
-		"replication_batch_max_bytes":           cfg.replicationBatchMaxBytes,
-		"replication_max_in_flight_targets":     cfg.replicationMaxTargets,
-		"replication_sync_interval":             cfg.replicationSyncInterval.String(),
-		"replication_sync_prefix":               cfg.replicationSyncPrefix,
-		"enforce_leader_writes":                 cfg.enforceLeaderWrites,
-		"grpc_addr":                             cfg.grpcAddr,
-		"grpc_tls_cert":                         cfg.grpcTLSCert,
-		"grpc_tls_key":                          cfg.grpcTLSKey,
-		"grpc_client_ca":                        cfg.grpcClientCA,
-		"db_path":                               cfg.dbPath,
-		"db_backend":                            cfg.dbBackend,
-		"db_format":                             cfg.dbFormat,
-		"db_sync_interval":                      cfg.dbSyncInterval.String(),
-		"db_compare_before_write":               cfg.dbCompareBeforeWrite,
-		"db_compact_interval":                   cfg.dbCompactInterval.String(),
-		"db_compact_start_key":                  cfg.dbCompactStartKey,
-		"db_compact_limit_key":                  cfg.dbCompactLimitKey,
-		"db_hot_load":                           cfg.dbHotLoad,
-		"db_hot_load_max_bytes":                 cfg.dbHotLoadMaxBytes,
-		"db_hot_load_max_age":                   cfg.dbHotLoadMaxAge.String(),
-		"db_hot_load_min_hits":                  cfg.dbHotLoadMinHits,
-		"db_memory_cap_bytes":                   cfg.dbMemoryCapBytes,
-		"db_rss_cap_bytes":                      cfg.dbRSSCapBytes,
-		"db_memory_evict_interval":              cfg.dbMemoryEvictInterval.String(),
-		"db_memory_evict_min_value_bytes":       cfg.dbMemoryEvictMinValueBytes,
-		"snapshot_path":                         cfg.snapshotPath,
-		"snapshot_interval":                     cfg.snapshotInterval.String(),
-		"snapshot_format":                       cfg.snapshotFormat,
-		"journal_path":                          cfg.journalPath,
-		"journal_format":                        cfg.journalFormat,
-		"journal_group_commit_window":           cfg.journalGroupCommitWindow.String(),
-		"journal_group_commit_max_batch":        cfg.journalGroupCommitMaxBatch,
-		"journal_segment_max_bytes":             cfg.journalSegmentMaxBytes,
-		"journal_retained_segments":             cfg.journalRetainedSegments,
-		"journal_idempotency_capacity":          cfg.journalIdempotencyCapacity,
-		"journal_pull_source":                   cfg.journalPullSource,
-		"journal_pull_state_path":               cfg.journalPullStatePath,
-		"journal_pull_interval":                 cfg.journalPullInterval.String(),
-		"journal_pull_timeout":                  cfg.journalPullTimeout.String(),
-		"journal_pull_limit":                    cfg.journalPullLimit,
-		"journal_pull_max_batches":              cfg.journalPullMaxBatches,
-		"journal_pull_full_sync_fallback":       cfg.journalPullFullSyncFallback,
-		"journal_pull_checkpoint_bootstrap":     cfg.journalPullCheckpointBootstrap,
-		"journal_pull_incremental_recovery":     cfg.journalPullIncrementalRecovery,
-		"journal_pull_wire_format":              cfg.journalPullWireFormat,
+		"config_path":                              cfg.configPath,
+		"config_profile":                           cfg.configProfile,
+		"check_config":                             cfg.checkConfig,
+		"print_config":                             cfg.printConfig,
+		"monitoring_server":                        cfg.monitoringServer,
+		"monitoring_addr":                          cfg.monitoringAddr,
+		"monitoring_tls_cert":                      cfg.monitoringTLSCert,
+		"monitoring_tls_key":                       cfg.monitoringTLSKey,
+		"monitoring_auth_token":                    redactedSecret(cfg.monitoringAuthToken),
+		"monitoring_auth_previous_token":           redactedSecret(cfg.monitoringAuthPreviousToken),
+		"monitoring_async_commands":                cfg.monitoringAsyncCommands,
+		"monitoring_async_command_status_capacity": cfg.monitoringAsyncCommandStatusCapacity,
+		"rbac_policy":                              cfg.rbacPolicyPath,
+		"diagnostics_profiling":                    cfg.diagnosticsProfiling,
+		"audit_log_path":                           cfg.auditLogPath,
+		"write_protection":                         cfg.writeProtection,
+		"rate_limit":                               cfg.rateLimit,
+		"key_stats_mode":                           cfg.keyStatsMode,
+		"key_stats_capacity":                       cfg.keyStatsCapacity,
+		"local_partitions":                         cfg.localPartitions,
+		"counter_write_stripes":                    cfg.counterWriteStripes,
+		"memory_compaction_interval":               cfg.memoryCompactionInterval.String(),
+		"memory_compaction_max_temporary_bytes":    cfg.memoryCompactionMaxTemporaryBytes,
+		"monitoring_web_dir":                       cfg.monitoringWebDir,
+		"monitoring_read_header_timeout":           cfg.monitoringReadHeaderTimeout.String(),
+		"monitoring_idle_timeout":                  cfg.monitoringIdleTimeout.String(),
+		"node_id":                                  cfg.nodeID,
+		"topology_path":                            cfg.topologyPath,
+		"election_timeout":                         cfg.electionTimeout.String(),
+		"replication":                              cfg.replication,
+		"replication_mode":                         cfg.replicationMode,
+		"replication_async":                        cfg.replicationAsync,
+		"replication_queue_size":                   cfg.replicationQueueSize,
+		"replication_retry_interval":               cfg.replicationRetry.String(),
+		"replication_max_attempts":                 cfg.replicationAttempts,
+		"replication_dead_letter_limit":            cfg.replicationDeadLetterLimit,
+		"replication_outbox_path":                  cfg.replicationOutboxPath,
+		"replication_outbox_format":                cfg.replicationOutboxFormat,
+		"replication_outbox_codec":                 cfg.replicationOutboxCodec,
+		"replication_outbox_batch_window":          cfg.replicationOutboxBatch.String(),
+		"replication_circuit_breaker_failures":     cfg.replicationCircuitFailures,
+		"replication_circuit_breaker_cooldown":     cfg.replicationCircuitCooldown.String(),
+		"replication_wire_format":                  cfg.replicationWireFormat,
+		"replication_transport":                    cfg.replicationTransport,
+		"replication_grpc_window":                  cfg.replicationGRPCWindow,
+		"replication_grpc_batch_max_commands":      cfg.replicationGRPCBatchMax,
+		"replication_grpc_batch_window":            cfg.replicationGRPCBatchWindow.String(),
+		"replication_http_fallback":                cfg.replicationHTTPFallback,
+		"replication_auth_token":                   redactedSecret(cfg.replicationAuthToken),
+		"replication_auth_previous_token":          redactedSecret(cfg.replicationAuthPreviousToken),
+		"replication_batch_max_bytes":              cfg.replicationBatchMaxBytes,
+		"replication_max_in_flight_targets":        cfg.replicationMaxTargets,
+		"replication_sync_interval":                cfg.replicationSyncInterval.String(),
+		"replication_sync_prefix":                  cfg.replicationSyncPrefix,
+		"enforce_leader_writes":                    cfg.enforceLeaderWrites,
+		"grpc_addr":                                cfg.grpcAddr,
+		"grpc_tls_cert":                            cfg.grpcTLSCert,
+		"grpc_tls_key":                             cfg.grpcTLSKey,
+		"grpc_client_ca":                           cfg.grpcClientCA,
+		"db_path":                                  cfg.dbPath,
+		"db_backend":                               cfg.dbBackend,
+		"db_format":                                cfg.dbFormat,
+		"db_sync_interval":                         cfg.dbSyncInterval.String(),
+		"db_compare_before_write":                  cfg.dbCompareBeforeWrite,
+		"db_compact_interval":                      cfg.dbCompactInterval.String(),
+		"db_compact_start_key":                     cfg.dbCompactStartKey,
+		"db_compact_limit_key":                     cfg.dbCompactLimitKey,
+		"db_hot_load":                              cfg.dbHotLoad,
+		"db_hot_load_max_bytes":                    cfg.dbHotLoadMaxBytes,
+		"db_hot_load_max_age":                      cfg.dbHotLoadMaxAge.String(),
+		"db_hot_load_min_hits":                     cfg.dbHotLoadMinHits,
+		"db_memory_cap_bytes":                      cfg.dbMemoryCapBytes,
+		"db_rss_cap_bytes":                         cfg.dbRSSCapBytes,
+		"db_memory_evict_interval":                 cfg.dbMemoryEvictInterval.String(),
+		"db_memory_evict_min_value_bytes":          cfg.dbMemoryEvictMinValueBytes,
+		"snapshot_path":                            cfg.snapshotPath,
+		"snapshot_interval":                        cfg.snapshotInterval.String(),
+		"snapshot_format":                          cfg.snapshotFormat,
+		"journal_path":                             cfg.journalPath,
+		"journal_format":                           cfg.journalFormat,
+		"journal_group_commit_window":              cfg.journalGroupCommitWindow.String(),
+		"journal_group_commit_max_batch":           cfg.journalGroupCommitMaxBatch,
+		"journal_segment_max_bytes":                cfg.journalSegmentMaxBytes,
+		"journal_retained_segments":                cfg.journalRetainedSegments,
+		"journal_idempotency_capacity":             cfg.journalIdempotencyCapacity,
+		"journal_pull_source":                      cfg.journalPullSource,
+		"journal_pull_state_path":                  cfg.journalPullStatePath,
+		"journal_pull_interval":                    cfg.journalPullInterval.String(),
+		"journal_pull_timeout":                     cfg.journalPullTimeout.String(),
+		"journal_pull_limit":                       cfg.journalPullLimit,
+		"journal_pull_max_batches":                 cfg.journalPullMaxBatches,
+		"journal_pull_full_sync_fallback":          cfg.journalPullFullSyncFallback,
+		"journal_pull_checkpoint_bootstrap":        cfg.journalPullCheckpointBootstrap,
+		"journal_pull_incremental_recovery":        cfg.journalPullIncrementalRecovery,
+		"journal_pull_wire_format":                 cfg.journalPullWireFormat,
 	}
 	out["monitoring_auth_previous_token_expires_at"] = configTimeValue(cfg.monitoringAuthPreviousExpiry)
 	out["replication_auth_previous_token_expires_at"] = configTimeValue(cfg.replicationAuthPreviousExpiry)

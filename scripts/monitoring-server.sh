@@ -8,6 +8,8 @@ tls_key=${MONITORING_TLS_KEY:-}
 auth_token=${MONITORING_AUTH_TOKEN:-}
 auth_previous_token=${MONITORING_AUTH_PREVIOUS_TOKEN:-}
 auth_previous_token_expires_at=${MONITORING_AUTH_PREVIOUS_TOKEN_EXPIRES_AT:-}
+async_commands=${MONITORING_ASYNC_COMMANDS:-false}
+async_command_status_capacity=${MONITORING_ASYNC_COMMAND_STATUS_CAPACITY:-1024}
 diagnostics_profiling=${DIAGNOSTICS_PROFILING:-false}
 audit_log_path=${AUDIT_LOG_PATH:-}
 write_protection=${WRITE_PROTECTION:-false}
@@ -76,6 +78,7 @@ journal_path=${JOURNAL_PATH:-}
 journal_format=${JOURNAL_FORMAT:-binary}
 journal_group_commit_window=${JOURNAL_GROUP_COMMIT_WINDOW:-0}
 journal_group_commit_max_batch=${JOURNAL_GROUP_COMMIT_MAX_BATCH:-64}
+journal_idempotency_capacity=${JOURNAL_IDEMPOTENCY_CAPACITY:-0}
 journal_segment_max_bytes=${JOURNAL_SEGMENT_MAX_BYTES:-67108864}
 journal_retained_segments=${JOURNAL_RETAINED_SEGMENTS:-16}
 journal_pull_source=${JOURNAL_PULL_SOURCE:-}
@@ -98,6 +101,8 @@ set -- \
 	-monitoring-auth-token "$auth_token" \
 	-monitoring-auth-previous-token "$auth_previous_token" \
 	-monitoring-auth-previous-token-expires-at "$auth_previous_token_expires_at" \
+	-monitoring-async-commands="$async_commands" \
+	-monitoring-async-command-status-capacity "$async_command_status_capacity" \
 	-diagnostics-profiling="$diagnostics_profiling" \
 	-audit-log-path "$audit_log_path" \
 	-write-protection="$write_protection" \
@@ -162,6 +167,7 @@ set -- \
 	-journal-path "$journal_path" \
 	-journal-group-commit-window "$journal_group_commit_window" \
 	-journal-group-commit-max-batch "$journal_group_commit_max_batch" \
+	-journal-idempotency-capacity "$journal_idempotency_capacity" \
 	-journal-segment-max-bytes "$journal_segment_max_bytes" \
 	-journal-retained-segments "$journal_retained_segments" \
 	-journal-pull-source "$journal_pull_source" \

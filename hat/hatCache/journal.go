@@ -179,6 +179,7 @@ type commandJournalJob struct {
 	idempotency    commandIdempotencyCheck
 	operation      *snapshotOperation
 	submission     *CommandJournalSubmission
+	onComplete     func(CacheCommandResponse)
 	prepared       bool
 	result         chan CacheCommandResponse
 }

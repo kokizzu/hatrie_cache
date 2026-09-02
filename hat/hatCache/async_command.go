@@ -116,6 +116,10 @@ func (submission *CommandJournalSubmission) complete(response CacheCommandRespon
 // configured GroupCommitMaxBatch channel capacity and returns immediately when
 // that queue is full.
 func (journal *CommandJournal) SubmitAsyncCommand(trie *HatTrie, request CacheCommandRequest) (*CommandJournalSubmission, error) {
+	return journal.submitAsyncCommand(trie, request, nil)
+}
+
+func (journal *CommandJournal) submitAsyncCommand(trie *HatTrie, request CacheCommandRequest, onComplete func(CacheCommandResponse)) (*CommandJournalSubmission, error) {
 	if journal == nil {
 		return nil, ErrNilCommandJournal
 	}
@@ -143,6 +147,7 @@ func (journal *CommandJournal) SubmitAsyncCommand(trie *HatTrie, request CacheCo
 		journalRequest: journalRequest,
 		idempotency:    check,
 		submission:     submission,
+		onComplete:     onComplete,
 	}
 
 	journal.submitMu.RLock()
@@ -159,6 +164,9 @@ func (journal *CommandJournal) SubmitAsyncCommand(trie *HatTrie, request CacheCo
 }
 
 func (job *commandJournalJob) complete(response CacheCommandResponse) {
+	if job.onComplete != nil {
+		job.onComplete(response)
+	}
 	if job.submission != nil {
 		job.submission.complete(response)
 		return

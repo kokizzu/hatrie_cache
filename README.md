@@ -25,6 +25,7 @@ security guidance before exposing it on a network.
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
+- Opt-in asynchronous HTTP command admission and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
 - API and configuration examples: [Development](#development)
 
@@ -38,6 +39,13 @@ available; `Wait` or `Done` is the explicit durable-and-applied completion
 boundary. Existing synchronous command execution and all default configurations
 remain unchanged. See [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 for backpressure, recovery, and measured tradeoffs.
+
+HTTP clients can opt into the same bounded journal admission model with
+`X-Hatrie-Async: true` or `Prefer: respond-async`, then poll a completion
+record by idempotency key. The HTTP path is disabled by default and keeps the
+existing synchronous endpoint unchanged. See
+[ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md) for configuration, retries,
+security, and the replication compatibility guard.
 
 ## Performance and implementation history
 

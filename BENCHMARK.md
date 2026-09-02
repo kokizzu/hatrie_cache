@@ -14961,3 +14961,28 @@ existing path and uses about 4.0% more transient heap in this run. The feature
 decouples request latency from fsync and provides bounded backpressure; it does
 not make filesystem sync itself cheaper. See
 [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md).
+
+## Asynchronous HTTP Command Admission
+
+Command: `make benchmark-async-http`.
+
+This benchmark compares the existing synchronous HTTP command path, which
+waits for journal completion, with opt-in async HTTP admission. The async
+benchmark stops its timer after the `202` response and drains each command's
+completion before the next iteration, so the result measures caller-visible
+admission latency rather than durable storage throughput. The embedded
+async-submit-plus-wait benchmark above covers the end-to-end journal boundary.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X, with `BENCHTIME=100ms`:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | ---: | ---: | ---: |
+| Existing synchronous HTTP completion | 704,573; 721,623; 740,306; 718,372; 1,104,229 | 10,242; 10,243; 10,224; 10,217; 10,248 | 55; 55; 55; 55; 55 |
+| Async HTTP admission, completion drained outside timer | 27,673; 27,567; 28,541; 28,894; 28,935 | 9,985; 9,969; 9,985; 9,970; 9,959 | 55; 55; 55; 55; 55 |
+
+Median async admission was about 25.3x lower caller-side latency, used about
+2.5% less measured heap, and had the same allocation count. This is not a
+25.3x durable-write or network-throughput claim: completion work and journal
+sync still occur, and the caller must poll or otherwise observe the status.
+The async path's smaller JSON receipt also contributes to the measured HTTP
+allocation difference. See [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md).

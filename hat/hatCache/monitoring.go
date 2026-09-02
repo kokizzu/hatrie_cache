@@ -89,14 +89,18 @@ type MonitoringOptions struct {
 	SQLRateLimiter *RateLimiter
 	// SQLQueryOptions is enforced for every monitoring SQL request, including
 	// streaming and paginated reads. Zero keeps the engine defaults.
-	SQLQueryOptions                 SQLQueryOptions
-	Metrics                         *APIMetrics
-	StartAt                         time.Time
-	Snapshot                        func() error
-	LevelDBStore                    PersistentStore
-	LevelDBDirtyTracker             *LevelDBDirtyTracker
-	BackupSnapshotFormat            SnapshotFormat
-	Journal                         *CommandJournal
+	SQLQueryOptions      SQLQueryOptions
+	Metrics              *APIMetrics
+	StartAt              time.Time
+	Snapshot             func() error
+	LevelDBStore         PersistentStore
+	LevelDBDirtyTracker  *LevelDBDirtyTracker
+	BackupSnapshotFormat SnapshotFormat
+	Journal              *CommandJournal
+	// AsyncCommands enables the opt-in HTTP async command admission protocol.
+	// It is disabled by default and requires a journal with idempotency enabled.
+	AsyncCommands                   bool
+	AsyncCommandStatusCapacity      int
 	JournalRecoveryRepositoryPath   string
 	JournalRecoveryRepositoryRetain int
 	Topology                        *TopologyStore
@@ -137,6 +141,9 @@ type MonitoringHandler struct {
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
 	sqlFunctions          *SQLFunctionRegistry
+	asyncCommandsMu       sync.Mutex
+	asyncCommands         map[string]monitoringAsyncCommandEntry
+	asyncCommandOrder     []string
 }
 
 type monitoringSQLResolver struct {
@@ -356,6 +363,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.SQLFunctions == nil {
 		options.SQLFunctions = NewSQLFunctionRegistry()
 	}
+	if options.AsyncCommands {
+		options.AsyncCommandStatusCapacity = normalizeMonitoringAsyncCommandStatusCapacity(options.AsyncCommandStatusCapacity)
+	}
 	handler := &MonitoringHandler{
 		trie:                  trie,
 		options:               options,
@@ -363,6 +373,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 		replicationAuthTokens: hatAuth.NewTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
 		identityProvider:      options.IdentityProvider,
 		sqlFunctions:          options.SQLFunctions,
+	}
+	if options.AsyncCommands {
+		handler.asyncCommands = make(map[string]monitoringAsyncCommandEntry, options.AsyncCommandStatusCapacity)
 	}
 	if options.DiagnosticsProfiling {
 		handler.profileCapture = &hatMonitoring.ProfileCapture{}
@@ -509,6 +522,9 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/grafana/search", handler.handleGrafanaSearch)
 	server.HandleFunc("/api/grafana/query", handler.handleGrafanaQuery)
 	server.HandleFunc("/api/commands", handler.handleCommands)
+	if handler.options.AsyncCommands {
+		server.HandleFunc("/api/commands/status", handler.handleAsyncCommandStatus)
+	}
 	server.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	server.HandleFunc("/api/backup", handler.handleBackup)
 	server.HandleFunc("/api/backup/verify", handler.handleBackupVerify)
@@ -1185,13 +1201,24 @@ func (handler *MonitoringHandler) handleOpenAPI(w http.ResponseWriter, r *http.R
 		writeMethodNotAllowed(w)
 		return
 	}
-	writeJSON(w, monitoringOpenAPIDocument())
+	writeJSON(w, monitoringOpenAPIDocument(handler.options.AsyncCommands))
 }
 
-func monitoringOpenAPIDocument() map[string]interface{} {
+func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 	jsonResponse := map[string]interface{}{
 		"description": "JSON response",
 		"content":     map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
+	}
+	paths := map[string]interface{}{
+		"/api/health":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/entries":        map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/sql":            map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/commands":       map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/grafana/search": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/grafana/query":  map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
+	}
+	if asyncCommands {
+		paths["/api/commands/status"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncCommandStatus", "responses": map[string]interface{}{"200": jsonResponse}}}
 	}
 	return map[string]interface{}{
 		"openapi": "3.1.0",
@@ -1199,14 +1226,7 @@ func monitoringOpenAPIDocument() map[string]interface{} {
 			"title":   "Hatrie Cache Monitoring API",
 			"version": "v1",
 		},
-		"paths": map[string]interface{}{
-			"/api/health":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/entries":        map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/sql":            map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/commands":       map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/grafana/search": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
-			"/api/grafana/query":  map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
-		},
+		"paths": paths,
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},
 			"schemas": map[string]interface{}{
@@ -1377,6 +1397,12 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
+	asyncRequested := monitoringAsyncCommandRequested(r)
+	if asyncRequested && !handler.options.AsyncCommands {
+		_ = r.Body.Close()
+		writeJSONStatus(w, http.StatusConflict, commandError("async command submission is disabled"))
+		return
+	}
 	if !handler.requireTrie(w) {
 		_ = r.Body.Close()
 		return
@@ -1390,7 +1416,11 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	if _, ok := commandWireFormatFromAccept(r.Header.Get("Accept"), requestFormat); !ok {
+	responseFormat := requestFormat
+	if asyncRequested {
+		responseFormat = CommandWireFormatJSON
+	}
+	if _, ok := commandWireFormatFromAccept(r.Header.Get("Accept"), responseFormat); !ok {
 		_ = r.Body.Close()
 		w.Header().Add("Vary", "Accept")
 		http.Error(w, "no acceptable command response content type", http.StatusNotAcceptable)
@@ -1411,6 +1441,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		return
 	}
 	if handler.rejectDangerousCommandHTTP(w, r, request, requestFormat) {
+		return
+	}
+	if asyncRequested {
+		handler.handleAsyncCommandSubmission(w, r, request)
 		return
 	}
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
