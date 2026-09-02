@@ -15,12 +15,18 @@ type QuerySubscriptionDefinition struct {
 	Query        string
 	Parameters   []interface{}
 	Dependencies []string
+	AsOf         uint64
+	UpTo         uint64
+	EmitProgress bool
 }
 
 // QuerySubscriptionSnapshot is one immutable query-result version.
 type QuerySubscriptionSnapshot struct {
 	ID       uint64
 	Revision uint64
+	Frontier uint64
+	Progress bool
+	Complete bool
 	Result   QueryResult
 }
 
@@ -48,6 +54,35 @@ type QuerySubscriptions struct {
 	subs   map[uint64]*QuerySubscription
 }
 
+type historicalSubscriptionResolver struct {
+	resolver HistoricalSourceResolver
+	locker   SnapshotLocker
+	frontier uint64
+}
+
+func (resolver historicalSubscriptionResolver) ResolveSQLSource(name, key string) ([]Row, error) {
+	return resolver.resolver.ResolveSQLSourceAt(name, key, resolver.frontier)
+}
+
+func (resolver historicalSubscriptionResolver) LockSQLSnapshot() func() {
+	if resolver.locker != nil {
+		return resolver.locker.LockSQLSnapshot()
+	}
+	return func() {}
+}
+
+func querySubscriptionResolver(resolver SourceResolver, frontier uint64) (SourceResolver, error) {
+	if frontier == 0 {
+		return resolver, nil
+	}
+	historical, ok := resolver.(HistoricalSourceResolver)
+	if !ok {
+		return nil, fmt.Errorf("query subscription AS OF requires a historical source resolver")
+	}
+	locker, _ := resolver.(SnapshotLocker)
+	return historicalSubscriptionResolver{resolver: historical, locker: locker, frontier: frontier}, nil
+}
+
 // NewQuerySubscriptions creates a registry. buffer is the number of queued
 // snapshots per subscriber; a nonpositive value uses one latest-only slot.
 func NewQuerySubscriptions(buffer int) *QuerySubscriptions {
@@ -67,7 +102,11 @@ func (registry *QuerySubscriptions) Subscribe(ctx context.Context, definition Qu
 	if err != nil {
 		return nil, err
 	}
-	result, err := ExecuteQueryParameters(ctx, definition.Query, resolver, definition.Parameters, options)
+	queryResolver, err := querySubscriptionResolver(resolver, definition.AsOf)
+	if err != nil {
+		return nil, err
+	}
+	result, err := ExecuteQueryParameters(ctx, definition.Query, queryResolver, definition.Parameters, options)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +120,7 @@ func (registry *QuerySubscriptions) Subscribe(ctx context.Context, definition Qu
 		snapshot: QuerySubscriptionSnapshot{
 			ID:       registry.nextID,
 			Revision: 1,
+			Frontier: definition.AsOf,
 			Result:   cloneQueryResult(result),
 		},
 		updates: make(chan QuerySubscriptionSnapshot, registry.buffer),
@@ -94,6 +134,22 @@ func (registry *QuerySubscriptions) Subscribe(ctx context.Context, definition Qu
 // changed. It publishes only changed row snapshots and leaves all prior
 // snapshots untouched if any affected query fails.
 func (registry *QuerySubscriptions) NotifyChanged(ctx context.Context, changed []string, resolver SourceResolver, options QueryOptions) error {
+	return registry.notifyChangedAt(ctx, 0, changed, resolver, options)
+}
+
+// NotifyChangedAt advances subscriptions to a caller-supplied monotonically
+// increasing frontier. Events at or below AsOf are ignored. A bounded UpTo
+// subscription is completed at its upper frontier and no event after that
+// frontier is evaluated. EmitProgress publishes a coalesced progress snapshot
+// even when the query result did not change.
+func (registry *QuerySubscriptions) NotifyChangedAt(ctx context.Context, frontier uint64, changed []string, resolver SourceResolver, options QueryOptions) error {
+	if frontier == 0 {
+		return fmt.Errorf("query subscription frontier must be positive")
+	}
+	return registry.notifyChangedAt(ctx, frontier, changed, resolver, options)
+}
+
+func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontier uint64, changed []string, resolver SourceResolver, options QueryOptions) error {
 	if registry == nil {
 		return fmt.Errorf("query subscriptions are nil")
 	}
@@ -103,28 +159,75 @@ func (registry *QuerySubscriptions) NotifyChanged(ctx context.Context, changed [
 			changedSet[dependency] = struct{}{}
 		}
 	}
-	if len(changedSet) == 0 {
+	if len(changedSet) == 0 && frontier == 0 {
 		return nil
 	}
 
 	registry.mu.RLock()
 	subscriptions := make([]*QuerySubscription, 0, len(registry.subs))
 	for _, subscription := range registry.subs {
-		if querySubscriptionDependsOn(subscription.definition, changedSet) {
-			subscriptions = append(subscriptions, subscription)
-		}
+		subscriptions = append(subscriptions, subscription)
 	}
 	registry.mu.RUnlock()
-	results := make([]QueryResult, len(subscriptions))
-	for index, subscription := range subscriptions {
-		result, err := ExecuteQueryParameters(ctx, subscription.definition.Query, resolver, subscription.definition.Parameters, options)
+	type pendingSubscriptionUpdate struct {
+		subscription *QuerySubscription
+		result       QueryResult
+		hasResult    bool
+		frontier     uint64
+		complete     bool
+	}
+	updates := make([]pendingSubscriptionUpdate, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		currentFrontier, ok := subscription.currentFrontier()
+		if !ok {
+			continue
+		}
+		if frontier > 0 && frontier <= currentFrontier {
+			continue
+		}
+		effectiveFrontier := frontier
+		complete := false
+		if frontier > 0 && subscription.definition.UpTo > 0 && frontier >= subscription.definition.UpTo {
+			effectiveFrontier = subscription.definition.UpTo
+			complete = true
+		}
+		if frontier == 0 {
+			effectiveFrontier = currentFrontier
+		}
+		if frontier > 0 && subscription.definition.UpTo > 0 && frontier > subscription.definition.UpTo {
+			updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: true})
+			continue
+		}
+		if !querySubscriptionDependsOn(subscription.definition, changedSet) {
+			updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: complete})
+			continue
+		}
+		queryResolver := resolver
+		if frontier > 0 && subscription.definition.AsOf > 0 {
+			var queryErr error
+			queryResolver, queryErr = querySubscriptionResolver(resolver, effectiveFrontier)
+			if queryErr != nil {
+				return fmt.Errorf("refresh query subscription %d: %w", subscription.id, queryErr)
+			}
+		}
+		result, err := ExecuteQueryParameters(ctx, subscription.definition.Query, queryResolver, subscription.definition.Parameters, options)
 		if err != nil {
 			return fmt.Errorf("refresh query subscription %d: %w", subscription.id, err)
 		}
-		results[index] = cloneQueryResult(result)
+		updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, result: cloneQueryResult(result), hasResult: true, frontier: effectiveFrontier, complete: complete})
 	}
-	for index, subscription := range subscriptions {
-		subscription.publish(results[index])
+	for _, update := range updates {
+		if update.hasResult {
+			update.subscription.publishAt(update.result, update.frontier, update.complete)
+		} else {
+			update.subscription.advanceFrontier(update.frontier)
+		}
+		if update.subscription.definition.EmitProgress && frontier > 0 {
+			update.subscription.publishProgress(update.frontier, update.complete)
+		}
+		if update.complete {
+			update.subscription.complete()
+		}
 	}
 	return nil
 }
@@ -153,6 +256,18 @@ func (subscription *QuerySubscription) Snapshot() (QuerySubscriptionSnapshot, bo
 	return cloneQuerySubscriptionSnapshot(subscription.snapshot), true
 }
 
+func (subscription *QuerySubscription) currentFrontier() (uint64, bool) {
+	if subscription == nil {
+		return 0, false
+	}
+	subscription.mu.RLock()
+	defer subscription.mu.RUnlock()
+	if subscription.closed {
+		return 0, false
+	}
+	return subscription.snapshot.Frontier, true
+}
+
 // Close removes the subscription and closes its update channel.
 func (subscription *QuerySubscription) Close() {
 	if subscription == nil || subscription.registry == nil {
@@ -176,13 +291,28 @@ func (registry *QuerySubscriptions) remove(subscription *QuerySubscription) {
 }
 
 func (subscription *QuerySubscription) publish(result QueryResult) {
+	subscription.publishAt(result, 0, false)
+}
+
+func (subscription *QuerySubscription) publishAt(result QueryResult, frontier uint64, complete bool) {
 	subscription.mu.Lock()
 	defer subscription.mu.Unlock()
 	if subscription.closed || sameQuerySubscriptionResult(subscription.snapshot.Result, result) {
+		if !subscription.closed && frontier > subscription.snapshot.Frontier {
+			subscription.snapshot.Frontier = frontier
+		}
+		if !subscription.closed && complete {
+			subscription.snapshot.Complete = true
+		}
 		return
 	}
 	subscription.snapshot.Revision++
 	subscription.snapshot.Result = cloneQueryResult(result)
+	if frontier > subscription.snapshot.Frontier {
+		subscription.snapshot.Frontier = frontier
+	}
+	subscription.snapshot.Complete = complete
+	subscription.snapshot.Progress = false
 	update := cloneQuerySubscriptionSnapshot(subscription.snapshot)
 	select {
 	case subscription.updates <- update:
@@ -198,6 +328,60 @@ func (subscription *QuerySubscription) publish(result QueryResult) {
 	}
 }
 
+func (subscription *QuerySubscription) advanceFrontier(frontier uint64) {
+	if subscription == nil || frontier == 0 {
+		return
+	}
+	subscription.mu.Lock()
+	if !subscription.closed && frontier > subscription.snapshot.Frontier {
+		subscription.snapshot.Frontier = frontier
+	}
+	subscription.mu.Unlock()
+}
+
+func (subscription *QuerySubscription) publishProgress(frontier uint64, complete bool) {
+	if subscription == nil || frontier == 0 {
+		return
+	}
+	subscription.mu.Lock()
+	defer subscription.mu.Unlock()
+	if subscription.closed {
+		return
+	}
+	if frontier > subscription.snapshot.Frontier {
+		subscription.snapshot.Frontier = frontier
+	}
+	if complete {
+		subscription.snapshot.Complete = true
+	}
+	update := QuerySubscriptionSnapshot{
+		ID:       subscription.snapshot.ID,
+		Revision: subscription.snapshot.Revision,
+		Frontier: subscription.snapshot.Frontier,
+		Progress: true,
+		Complete: subscription.snapshot.Complete,
+	}
+	select {
+	case subscription.updates <- update:
+	default:
+		select {
+		case <-subscription.updates:
+		default:
+		}
+		select {
+		case subscription.updates <- update:
+		default:
+		}
+	}
+}
+
+func (subscription *QuerySubscription) complete() {
+	if subscription == nil || subscription.registry == nil {
+		return
+	}
+	subscription.registry.remove(subscription)
+}
+
 func normalizeQuerySubscriptionDefinition(definition QuerySubscriptionDefinition) (QuerySubscriptionDefinition, error) {
 	definition.Query = strings.TrimSpace(definition.Query)
 	if definition.Query == "" {
@@ -205,6 +389,9 @@ func normalizeQuerySubscriptionDefinition(definition QuerySubscriptionDefinition
 	}
 	if len(definition.Dependencies) == 0 {
 		return QuerySubscriptionDefinition{}, fmt.Errorf("query subscription dependencies are required")
+	}
+	if definition.UpTo > 0 && definition.AsOf > definition.UpTo {
+		return QuerySubscriptionDefinition{}, fmt.Errorf("query subscription AS OF must be <= UP TO")
 	}
 	dependencies := make([]string, 0, len(definition.Dependencies))
 	seen := make(map[string]struct{}, len(definition.Dependencies))

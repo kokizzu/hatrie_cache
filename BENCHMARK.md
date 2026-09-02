@@ -14904,3 +14904,26 @@ benchmark samples. This is an in-process result materialization comparison; it
 excludes network and storage latency. The feature is opt-in and misses safely
 when source versions are unavailable or changed. See
 [TRANSPARENT_PROJECTIONS.md](TRANSPARENT_PROJECTIONS.md).
+
+## Subscription Frontiers And Progress
+
+Command: `make benchmark-sql-subscription-frontier`.
+
+This benchmark measures the notification overhead of the old unframed API, the
+new numeric frontier without progress records, and the opt-in progress path.
+The workload uses one one-row query subscription and no changed dependency;
+the progress path emits a compact frontier-only record.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | ---: | ---: | ---: |
+| Legacy unframed no-op | 164.3; 160.9; 163.3; 162.9; 162.1 | 160; 160; 160; 160; 160 | 1; 1; 1; 1; 1 |
+| Framed frontier, no progress | 155.7; 153.1; 154.5; 152.9; 155.5 | 160; 160; 160; 160; 160 | 1; 1; 1; 1; 1 |
+| Framed progress | 208.1; 209.3; 207.5; 201.6; 200.9 | 160; 160; 160; 160; 160 | 1; 1; 1; 1; 1 |
+
+The median framed no-progress path is effectively allocation-neutral and about
+1.05x lower latency than the legacy path. Opt-in progress is about 1.27x the
+legacy CPU cost in this fixture, with no additional heap or allocation cost.
+Progress records carry frontier metadata only; data snapshots remain available
+through `Snapshot()`. See [SUBSCRIPTION_FRONTIERS.md](SUBSCRIPTION_FRONTIERS.md).

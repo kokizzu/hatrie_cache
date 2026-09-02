@@ -127,6 +127,7 @@ type SQLQueryResult = QueryResult
 type SQLExplainStep = ExplainStep
 type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
+type SQLHistoricalSourceResolver = HistoricalSourceResolver
 type SQLColumnarBatch = ColumnarBatch
 type SQLColumnarSourceResolver = ColumnarSourceResolver
 type SQLBorrowedColumnarSourceResolver = BorrowedColumnarSourceResolver

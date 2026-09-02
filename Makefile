@@ -3597,3 +3597,21 @@ commit-transparent-projections:
 
 push-transparent-projections:
 \tsh ./scripts/deliver-transparent-projections.sh push
+
+test-sql-subscription-frontier:
+\tsh ./scripts/test-sql-subscription-frontier.sh
+
+format-sql-subscription-frontier:
+\tsh ./scripts/format-sql-subscription-frontier.sh
+
+benchmark-sql-subscription-frontier:
+\tsh ./scripts/benchmark-sql-subscription-frontier.sh
+
+deliver-subscription-frontiers:
+\tsh ./scripts/deliver-subscription-frontiers.sh apply
+
+commit-subscription-frontiers:
+\tsh ./scripts/deliver-subscription-frontiers.sh commit
+
+push-subscription-frontiers:
+\tsh ./scripts/deliver-subscription-frontiers.sh push

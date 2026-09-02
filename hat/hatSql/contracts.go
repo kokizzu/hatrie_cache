@@ -49,6 +49,13 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// HistoricalSourceResolver optionally resolves a source at an immutable
+// sequence frontier. It is required for QuerySubscriptionDefinition.AsOf;
+// callers that only need live UpTo/progress delivery can use SourceResolver.
+type HistoricalSourceResolver interface {
+	ResolveSQLSourceAt(name string, key string, frontier uint64) ([]Row, error)
+}
+
 // BorrowedSourceResolver optionally supplies an immutable source snapshot to
 // the SQL executor. Returned row maps must remain valid for the query and must
 // not be retained or mutated by the executor.
