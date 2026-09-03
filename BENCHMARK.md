@@ -82,6 +82,30 @@ updates, 20 reads, and 10 counter increments per profile cycle. Redis uses an
 `EVAL` profile to keep the mix server-side; Tarantool runs the equivalent loop
 inside `scripts/tarantool-command-features.lua`.
 
+## On-Demand Runtime Memory Report
+
+`hatMonitoring.ReadMemoryReport` and `GET /api/memory` collect allocator,
+garbage-collector, and bounded runtime memory-class data only when requested.
+The normal cache read/write path does not call them. The focused benchmark is:
+
+```text
+make benchmark-memory-report
+```
+
+Five samples on an AMD Ryzen 9 5950X with Go 1.26.6 produced these medians:
+
+| Workload | Median time | Heap | Allocs | Comparison |
+| --- | ---: | ---: | ---: | ---: |
+| `runtime.ReadMemStats` baseline | 14.899 us | 0 B | 0 | baseline |
+| Full report before sample pooling | 15.789 us | 416 B | 1 | 1.06x time, 416 B/request |
+| Full report after sample pooling | 15.161 us | 0 B | 0 | 1.02x time, 0 B/request |
+
+The final report pays about 1.8% CPU over the bare `runtime.ReadMemStats`
+call while returning the additional allocator, GC, and memory-class values.
+The repeated 416-byte sample allocation was removed without adding any
+per-entry state. The raw samples and operational interpretation are in
+[MEMORY_REPORT.md](MEMORY_REPORT.md).
+
 Full HAT-trie command benchmark and command support extraction:
 
 ```

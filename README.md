@@ -15,6 +15,7 @@ security guidance before exposing it on a network.
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- Runtime allocator and GC diagnostics: [MEMORY_REPORT.md](MEMORY_REPORT.md)
 - Read-only hypothetical SQL index/projection cost analysis: [SQL_WHATIF.md](SQL_WHATIF.md)
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
@@ -2665,7 +2666,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 ```
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, `/api/storage`, `/api/storage/flush`, `/api/storage/compact`,
+`/api/memory`, `/api/entries`, `/api/storage`, `/api/storage/flush`,
+`/api/storage/compact`,
 `/api/audit`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`, plus
 Prometheus metrics at `/metrics`.
@@ -2682,6 +2684,10 @@ Prometheus also exports `hatrie_cache_replication_health_score`,
 `hatrie_cache_replication_queue_capacity`, and async queue counters such as
 `hatrie_cache_replication_queue_enqueued_total` and
 `hatrie_cache_replication_retried_total`.
+`GET /api/memory` is an authenticated, no-store, on-demand allocator and GC
+snapshot for diagnosing live heap, cumulative allocation churn, runtime
+memory classes, and GC pressure. It adds no work to ordinary cache operations;
+see [MEMORY_REPORT.md](MEMORY_REPORT.md) for fields and measurements.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
 responses include `has_more` and `next_after_key` for cursor paging with
 `after_key`. Empty keys are valid, so when `next_after_key` is empty and

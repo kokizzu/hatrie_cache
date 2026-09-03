@@ -268,6 +268,10 @@ type preparedInternalReplicationPayload struct {
 }
 
 type MonitoringHealth = hatMonitoring.Health
+
+// MonitoringMemoryReport is the on-demand runtime allocator snapshot exposed
+// by the monitoring API.
+type MonitoringMemoryReport = hatMonitoring.MemoryReport
 type MonitoringEntry = hatMonitoring.Entry
 type MonitoringEntriesResponse = hatMonitoring.EntriesResponse
 
@@ -523,6 +527,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/openapi.json", handler.handleOpenAPI)
 	server.HandleFunc("/api/config", handler.handleConfig)
 	server.HandleFunc("/api/stats", handler.handleStats)
+	server.HandleFunc("/api/memory", handler.handleMemory)
 	server.HandleFunc("/api/entries", handler.handleEntries)
 	server.HandleFunc("/api/sql", handler.handleSQL)
 	server.HandleFunc("/api/sql/catalog", handler.handleSQLCatalog)
@@ -804,6 +809,26 @@ func (handler *MonitoringHandler) handleStats(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, handler.trie.Stats())
+}
+
+func (handler *MonitoringHandler) handleMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, hatMonitoring.ReadMemoryReport())
+}
+
+// ReadMonitoringMemoryReport returns an on-demand runtime allocator snapshot.
+func ReadMonitoringMemoryReport() MonitoringMemoryReport {
+	return hatMonitoring.ReadMemoryReport()
 }
 
 func (handler *MonitoringHandler) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -1219,8 +1244,17 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 		"description": "JSON response",
 		"content":     map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
 	}
+	memoryResponse := map[string]interface{}{
+		"description": "Runtime allocator and garbage collector snapshot",
+		"content": map[string]interface{}{
+			"application/json": map[string]interface{}{
+				"schema": map[string]interface{}{"$ref": "#/components/schemas/MemoryReport"},
+			},
+		},
+	}
 	paths := map[string]interface{}{
 		"/api/health":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/memory":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getMemory", "responses": map[string]interface{}{"200": memoryResponse}}},
 		"/api/entries":        map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/sql":            map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/commands":       map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
@@ -1241,7 +1275,55 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},
 			"schemas": map[string]interface{}{
 				"SQLQueryRequest": map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
+				"MemoryReport":    monitoringMemoryReportOpenAPISchema(),
 			},
+		},
+	}
+}
+
+func monitoringMemoryReportOpenAPISchema() map[string]interface{} {
+	uint64Property := map[string]interface{}{"type": "integer", "format": "uint64"}
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"collected_at":              map[string]interface{}{"type": "string", "format": "date-time"},
+			"alloc_bytes":               uint64Property,
+			"total_alloc_bytes":         uint64Property,
+			"sys_bytes":                 uint64Property,
+			"lookups":                   uint64Property,
+			"mallocs":                   uint64Property,
+			"frees":                     uint64Property,
+			"heap_alloc_bytes":          uint64Property,
+			"heap_sys_bytes":            uint64Property,
+			"heap_idle_bytes":           uint64Property,
+			"heap_inuse_bytes":          uint64Property,
+			"heap_released_bytes":       uint64Property,
+			"heap_objects":              uint64Property,
+			"stack_inuse_bytes":         uint64Property,
+			"stack_sys_bytes":           uint64Property,
+			"mspan_inuse_bytes":         uint64Property,
+			"mspan_sys_bytes":           uint64Property,
+			"mcache_inuse_bytes":        uint64Property,
+			"mcache_sys_bytes":          uint64Property,
+			"buck_hash_sys_bytes":       uint64Property,
+			"gc_sys_bytes":              uint64Property,
+			"other_sys_bytes":           uint64Property,
+			"next_gc_bytes":             uint64Property,
+			"last_gc_unix_nano":         map[string]interface{}{"type": "integer", "format": "int64"},
+			"num_gc":                    map[string]interface{}{"type": "integer", "format": "uint32"},
+			"num_forced_gc":             map[string]interface{}{"type": "integer", "format": "uint32"},
+			"pause_total_ns":            uint64Property,
+			"gc_cpu_fraction":           map[string]interface{}{"type": "number"},
+			"go_mem_limit_bytes":        map[string]interface{}{"type": "integer", "format": "int64"},
+			"gogc_percent":              map[string]interface{}{"type": "integer", "format": "int64"},
+			"heap_objects_class_bytes":  uint64Property,
+			"heap_free_class_bytes":     uint64Property,
+			"heap_released_class_bytes": uint64Property,
+			"heap_unused_class_bytes":   uint64Property,
+			"metadata_class_bytes":      uint64Property,
+			"os_stacks_class_bytes":     uint64Property,
+			"other_class_bytes":         uint64Property,
+			"total_class_bytes":         uint64Property,
 		},
 	}
 }

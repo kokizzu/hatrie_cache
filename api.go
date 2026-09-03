@@ -526,3 +526,8 @@ type SQLKeysetPosition = core.SQLKeysetPosition
 
 var ExecuteQueryKeysetPage = core.ExecuteQueryKeysetPage
 var ExecuteSQLQueryKeysetPage = core.ExecuteSQLQueryKeysetPage
+
+
+type MonitoringMemoryReport = core.MonitoringMemoryReport
+
+var ReadMonitoringMemoryReport = core.ReadMonitoringMemoryReport

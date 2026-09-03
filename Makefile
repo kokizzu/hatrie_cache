@@ -3728,3 +3728,25 @@ commit-sql-keyset:
 
 push-sql-keyset:
 	sh ./scripts/deliver-sql-keyset.sh push
+
+
+format-memory-report:
+	bash scripts/format-memory-report.sh
+
+test-memory-report:
+	bash scripts/test-memory-report.sh
+
+benchmark-memory-report:
+	bash scripts/benchmark-memory-report.sh
+
+deliver-memory-report:
+	bash scripts/deliver-memory-report.sh apply
+
+check-memory-report-stage:
+	bash scripts/deliver-memory-report.sh check
+
+commit-memory-report:
+	bash scripts/deliver-memory-report.sh commit
+
+push-memory-report:
+	bash scripts/deliver-memory-report.sh push
