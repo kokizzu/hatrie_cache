@@ -3760,3 +3760,16 @@ test-sql-prefix-index:
 
 benchmark-sql-prefix-index:
 	bash scripts/benchmark-sql-prefix-index.sh
+
+
+deliver-sql-borrowed-prefix-index:
+	bash scripts/deliver-sql-borrowed-prefix-index.sh apply
+
+check-sql-borrowed-prefix-index-stage:
+	bash scripts/deliver-sql-borrowed-prefix-index.sh check
+
+commit-sql-borrowed-prefix-index:
+	bash scripts/deliver-sql-borrowed-prefix-index.sh commit
+
+push-sql-borrowed-prefix-index:
+	bash scripts/deliver-sql-borrowed-prefix-index.sh push

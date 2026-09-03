@@ -534,3 +534,5 @@ var ReadMonitoringMemoryReport = core.ReadMonitoringMemoryReport
 
 
 type SQLPrefixIndexedSourceResolver = core.SQLPrefixIndexedSourceResolver
+
+type SQLBorrowedPrefixIndexedSourceResolver = core.SQLBorrowedPrefixIndexedSourceResolver

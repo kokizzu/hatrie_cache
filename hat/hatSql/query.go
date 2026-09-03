@@ -138,6 +138,7 @@ type SQLStreamSourceResolver = StreamSourceResolver
 type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
 type SQLRangeIndexedSourceResolver = RangeIndexedSourceResolver
+type SQLBorrowedPrefixIndexedSourceResolver = BorrowedPrefixIndexedSourceResolver
 type SQLOrderedSourceResolver = OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = OrderedStreamSourceResolver
 type SQLKeysetPosition = KeysetPosition
@@ -11341,11 +11342,20 @@ func resolveSQLPrefixIndexedSource(source sqlSource, condition sqlExpr, resolver
 	if !ok {
 		return nil, false, nil
 	}
+	started := time.Now()
+	if borrowed, ok := resolver.(BorrowedPrefixIndexedSourceResolver); ok {
+		rows, available, err := borrowed.BorrowSQLPrefixSource(source.kind, source.key, condition.left.name, prefix)
+		if err != nil || available {
+			if available && metrics != nil {
+				metrics.record("INDEX PREFIX SCAN", sqlExplainSource(source)+" field="+condition.left.name, 0, len(rows), started)
+			}
+			return rows, available, err
+		}
+	}
 	indexed, ok := resolver.(PrefixIndexedSourceResolver)
 	if !ok {
 		return nil, false, nil
 	}
-	started := time.Now()
 	rows, available, err := indexed.ResolveSQLPrefixSource(source.kind, source.key, condition.left.name, prefix)
 	if available && metrics != nil {
 		metrics.record("INDEX PREFIX SCAN", sqlExplainSource(source)+" field="+condition.left.name, 0, len(rows), started)

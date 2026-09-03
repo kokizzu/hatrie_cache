@@ -365,6 +365,14 @@ type PrefixIndexedSourceResolver interface {
 	ResolveSQLPrefixSource(name, key, field, prefix string) ([]Row, bool, error)
 }
 
+// BorrowedPrefixIndexedSourceResolver optionally resolves a simple binary
+// collation LIKE prefix through an immutable ordered index without cloning row
+// maps. Returned rows must remain valid for the active SQL snapshot, and the
+// executor will not mutate them.
+type BorrowedPrefixIndexedSourceResolver interface {
+	BorrowSQLPrefixSource(name, key, field, prefix string) ([]Row, bool, error)
+}
+
 // TextIndexedSourceResolver optionally resolves an AND token query against a
 // configured text field. Implementations must return only candidate rows; the
 // executor evaluates CONTAINS again before returning results.

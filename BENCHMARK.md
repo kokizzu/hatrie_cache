@@ -92,7 +92,9 @@ The normal cache read/write path does not call them. The focused benchmark is:
 make benchmark-memory-report
 ```
 
-Five samples on an AMD Ryzen 9 5950X with Go 1.26.6 produced these medians:
+Five samples on an AMD Ryzen 9 5950X with Go 1.26.6 produced these medians.
+The cloned row path is the pre-optimization compatibility path; the direct
+HatTrie path now uses immutable borrowed candidates:
 
 | Workload | Median time | Heap | Allocs | Comparison |
 | --- | ---: | ---: | ---: | ---: |
@@ -122,12 +124,18 @@ Five samples on an AMD Ryzen 9 5950X with Go 1.26.6 produced these medians:
 
 | Workload | Median time | Heap | Allocs | Improvement vs scan |
 | --- | ---: | ---: | ---: | ---: |
-| Scan baseline | 13.734 ms | 9,922,038 B | 160,048 | 1.00x |
-| Ordered prefix index | 0.238 ms | 261,852 B | 2,530 | 57.7x faster, 37.9x less heap, 63.3x fewer allocs |
+| Scan baseline | 15.465 ms | 9,922,114 B | 160,048 | 1.00x |
+| Ordered prefix index, cloned candidates | 263.9 us | 261,849 B | 2,530 | 58.6x faster, 37.9x less heap, 63.3x fewer allocs |
+| Ordered prefix index, borrowed candidates | 137.6 us | 89,673 B | 1,529 | 112.4x faster, 110.6x less heap, 104.7x fewer allocs |
 
 The indexed path is explicit, binary-collation only, and still re-evaluates
 the original predicate. Mixed values and non-prefix patterns fall back to the
-scan path.
+scan path. Borrowing changes only the internal candidate-row ownership: it is
+selected through the optional `BorrowedPrefixIndexedSourceResolver` contract;
+resolvers that expose only `PrefixIndexedSourceResolver` retain cloned rows.
+Compared with the cloned indexed path, borrowing is 1.92x faster, uses 2.92x
+less heap, and performs 1.65x fewer allocations. It changes no storage, wire,
+or persistence format, so there is no bandwidth tradeoff.
 
 Full HAT-trie command benchmark and command support extraction:
 

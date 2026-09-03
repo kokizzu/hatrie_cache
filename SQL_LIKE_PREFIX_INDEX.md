@@ -35,3 +35,19 @@ replacement of the source cannot return stale candidates.
 
 The feature adds no new per-row structure beyond one boolean on the existing
 field-index state and does not change the default when no index is configured.
+
+## Borrowed Candidates
+
+Resolvers may additionally implement `BorrowedPrefixIndexedSourceResolver`:
+
+```go
+type BorrowedPrefixIndexedSourceResolver interface {
+	BorrowSQLPrefixSource(name, key, field, prefix string) ([]Row, bool, error)
+}
+```
+
+The SQL executor prefers this method when it reports an available immutable
+snapshot, avoiding a clone of each candidate row map. It never mutates or
+retains those maps beyond the query. If the borrowed method is unavailable,
+the executor falls back to `PrefixIndexedSourceResolver`; existing resolvers
+therefore keep their prior behavior and ownership guarantees.

@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+type sqlPrefixClonedResolver struct {
+	trie *HatTrie
+}
+
+func (resolver sqlPrefixClonedResolver) ResolveSQLSource(name, key string) ([]SQLRow, error) {
+	return resolver.trie.ResolveSQLSource(name, key)
+}
+
+func (resolver sqlPrefixClonedResolver) ResolveSQLPrefixSource(name, key, field, prefix string) ([]SQLRow, bool, error) {
+	return resolver.trie.ResolveSQLPrefixSource(name, key, field, prefix)
+}
+
 func BenchmarkSQLJSONLikePrefix(b *testing.B) {
 	data := sqlPrefixBenchmarkData(10000)
 	query := "FROM CACHE('people') AS person WHERE person.name LIKE 'alpha%' SELECT COUNT(*)"
@@ -22,6 +34,26 @@ func BenchmarkSQLJSONLikePrefix(b *testing.B) {
 		})
 		if _, err := ExecuteSQLQuery(query, resolver); err != nil {
 			b.Fatalf("baseline warmup error = %v", err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, err := ExecuteSQLQuery(query, resolver); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("ordered_prefix_index_cloned", func(b *testing.B) {
+		trie := CreateHatTrie()
+		b.Cleanup(trie.Destroy)
+		trie.UpsertString("people", data)
+		if err := trie.CreateSQLJSONFieldIndex("people", "name"); err != nil {
+			b.Fatalf("CreateSQLJSONFieldIndex() error = %v", err)
+		}
+		resolver := sqlPrefixClonedResolver{trie: trie}
+		if _, err := ExecuteSQLQuery(query, resolver); err != nil {
+			b.Fatalf("cloned indexed warmup error = %v", err)
 		}
 		b.ReportAllocs()
 		b.ResetTimer()

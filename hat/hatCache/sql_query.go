@@ -58,6 +58,7 @@ type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
 type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
 type SQLPrefixIndexedSourceResolver = hatSql.PrefixIndexedSourceResolver
+type SQLBorrowedPrefixIndexedSourceResolver = hatSql.BorrowedPrefixIndexedSourceResolver
 type SQLTextIndexedSourceResolver = hatSql.TextIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
@@ -2029,8 +2030,16 @@ func (ht *HatTrie) ResolveSQLPrefixSource(name, key, field, prefix string) ([]SQ
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
-	if !index.stringOnly {
+	rows, available := sqlJSONPrefixRows(index, prefix)
+	if !available {
 		return nil, false, nil
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func sqlJSONPrefixRows(index *sqlJSONFieldIndex, prefix string) ([]SQLRow, bool) {
+	if index == nil || !index.stringOnly {
+		return nil, false
 	}
 	start := sort.Search(len(index.ordered), func(position int) bool {
 		return index.ordered[position].value.(string) >= prefix
@@ -2046,7 +2055,7 @@ func (ht *HatTrie) ResolveSQLPrefixSource(name, key, field, prefix string) ([]SQ
 	for position, entry := range index.ordered[start:end] {
 		rows[position] = entry.row
 	}
-	return hatSql.CloneRows(rows), true, nil
+	return rows, true
 }
 
 func sqlJSONRangeBounds(ordered []sqlJSONFieldIndexEntry, operator string, value interface{}) (start, end int, ok bool) {
