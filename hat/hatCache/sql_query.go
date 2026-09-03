@@ -57,6 +57,7 @@ type SQLStreamSourceResolver = hatSql.StreamSourceResolver
 type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
 type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
+type SQLPrefixIndexedSourceResolver = hatSql.PrefixIndexedSourceResolver
 type SQLTextIndexedSourceResolver = hatSql.TextIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
@@ -460,9 +461,10 @@ func sqlBinaryValue(op string, left, right interface{}) interface{} {
 
 type sqlJSONFieldIndex struct {
 	sqlJSONIndexState
-	rows    map[string][]SQLRow
-	ordered []sqlJSONFieldIndexEntry
-	nulls   []SQLRow
+	rows       map[string][]SQLRow
+	ordered    []sqlJSONFieldIndexEntry
+	nulls      []SQLRow
+	stringOnly bool
 }
 type sqlJSONFieldIndexEntry struct {
 	value interface{}
@@ -1999,6 +2001,54 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 	return hatSql.CloneRows(rows), true, nil
 }
 
+// ResolveSQLPrefixSource uses the ordered representation of an opt-in JSON
+// field index for a simple binary-collation LIKE prefix. It declines mixed
+// typed fields because SQL LIKE stringifies values during evaluation; scanning
+// keeps those legacy coercion semantics exact.
+func (ht *HatTrie) ResolveSQLPrefixSource(name, key, field, prefix string) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		return nil, false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
+		return nil, false, err
+	}
+	if !index.stringOnly {
+		return nil, false, nil
+	}
+	start := sort.Search(len(index.ordered), func(position int) bool {
+		return index.ordered[position].value.(string) >= prefix
+	})
+	end := start
+	for end < len(index.ordered) {
+		if !strings.HasPrefix(index.ordered[end].value.(string), prefix) {
+			break
+		}
+		end++
+	}
+	rows := make([]SQLRow, end-start)
+	for position, entry := range index.ordered[start:end] {
+		rows[position] = entry.row
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
 func sqlJSONRangeBounds(ordered []sqlJSONFieldIndexEntry, operator string, value interface{}) (start, end int, ok bool) {
 	start, end = 0, len(ordered)
 	switch operator {
@@ -3012,6 +3062,7 @@ func refreshSQLJSONFieldIndexSourceRows(index *sqlJSONFieldIndex, field string, 
 	postings := make(map[string][]SQLRow)
 	ordered := make([]sqlJSONFieldIndexEntry, 0, len(rows))
 	var nulls []SQLRow
+	stringOnly := true
 	for _, row := range rows {
 		value, exists, err := sqlJSONIndexRowValue(row, field)
 		if err != nil {
@@ -3020,6 +3071,11 @@ func refreshSQLJSONFieldIndexSourceRows(index *sqlJSONFieldIndex, field string, 
 		if !exists {
 			nulls = append(nulls, row)
 			continue
+		}
+		if value != nil {
+			if _, ok := value.(string); !ok {
+				stringOnly = false
+			}
 		}
 		if valueKey, ok := sqlIndexValueKey(value); ok {
 			postings[valueKey] = append(postings[valueKey], row)
@@ -3032,7 +3088,7 @@ func refreshSQLJSONFieldIndexSourceRows(index *sqlJSONFieldIndex, field string, 
 		return hatSql.Compare(ordered[i].value, ordered[j].value) < 0
 	})
 	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
-	index.rows, index.ordered, index.nulls = postings, ordered, nulls
+	index.rows, index.ordered, index.nulls, index.stringOnly = postings, ordered, nulls, stringOnly
 	return nil
 }
 

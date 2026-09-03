@@ -531,3 +531,6 @@ var ExecuteSQLQueryKeysetPage = core.ExecuteSQLQueryKeysetPage
 type MonitoringMemoryReport = core.MonitoringMemoryReport
 
 var ReadMonitoringMemoryReport = core.ReadMonitoringMemoryReport
+
+
+type SQLPrefixIndexedSourceResolver = core.SQLPrefixIndexedSourceResolver

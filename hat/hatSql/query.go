@@ -186,7 +186,7 @@ type SQLQueryOptions struct {
 	// RuntimeJoinBloomFilter enables a selective in-memory Bloom filter for
 	// equality joins with a much larger probe side. It is disabled by default;
 	// balanced and hot-key joins retain the established map path.
-	MaxResultBytes         int
+	MaxResultBytes int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers       int
@@ -11085,6 +11085,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 			}
 		}
 	}
+	if rows, indexed, err := resolveSQLPrefixIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
@@ -11321,6 +11324,33 @@ func sqlJSONPathIndexField(expr sqlExpr, alias string) (string, bool) {
 		return "", false
 	}
 	return sqlJSONPathWithField(field.name, value)
+}
+
+func resolveSQLPrefixIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, hint SQLIndexHint) ([]SQLRow, bool, error) {
+	if condition.kind != "binary" || condition.op != "LIKE" || condition.left == nil || condition.right == nil || condition.left.kind != "field" || condition.left.qualifier != source.alias || condition.right.kind != "literal" || condition.right.value == nil || condition.collation.normalized() != SQLCollationBinary {
+		return nil, false, nil
+	}
+	if !hint.allowsField(source, condition.left.name) {
+		return nil, false, nil
+	}
+	pattern, ok := condition.right.value.(string)
+	if !ok {
+		return nil, false, nil
+	}
+	prefix, ok := sqlLikePrefix(pattern)
+	if !ok {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(PrefixIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	started := time.Now()
+	rows, available, err := indexed.ResolveSQLPrefixSource(source.kind, source.key, condition.left.name, prefix)
+	if available && metrics != nil {
+		metrics.record("INDEX PREFIX SCAN", sqlExplainSource(source)+" field="+condition.left.name, 0, len(rows), started)
+	}
+	return rows, available, err
 }
 
 func resolveSQLTextIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, hint SQLIndexHint) ([]SQLRow, bool, error) {
@@ -14610,6 +14640,17 @@ func sqlLike(value, pattern string) bool {
 		position += index + len(part)
 	}
 	return true
+}
+
+func sqlLikePrefix(pattern string) (string, bool) {
+	if !strings.HasSuffix(pattern, "%") {
+		return "", false
+	}
+	prefix := strings.TrimSuffix(pattern, "%")
+	if strings.ContainsAny(prefix, `%_\\`) {
+		return "", false
+	}
+	return prefix, true
 }
 
 func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool {

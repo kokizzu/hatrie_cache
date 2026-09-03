@@ -358,6 +358,13 @@ type RangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]Row, bool, error)
 }
 
+// PrefixIndexedSourceResolver optionally resolves a simple binary-collation
+// LIKE prefix through an ordered index. Implementations must return only
+// candidate rows; the executor evaluates LIKE again before publishing results.
+type PrefixIndexedSourceResolver interface {
+	ResolveSQLPrefixSource(name, key, field, prefix string) ([]Row, bool, error)
+}
+
 // TextIndexedSourceResolver optionally resolves an AND token query against a
 // configured text field. Implementations must return only candidate rows; the
 // executor evaluates CONTAINS again before returning results.

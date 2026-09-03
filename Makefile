@@ -3750,3 +3750,13 @@ commit-memory-report:
 
 push-memory-report:
 	bash scripts/deliver-memory-report.sh push
+
+
+format-sql-prefix-index:
+	bash scripts/format-sql-prefix-index.sh
+
+test-sql-prefix-index:
+	bash scripts/test-sql-prefix-index.sh
+
+benchmark-sql-prefix-index:
+	bash scripts/benchmark-sql-prefix-index.sh

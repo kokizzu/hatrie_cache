@@ -106,6 +106,29 @@ The repeated 416-byte sample allocation was removed without adding any
 per-entry state. The raw samples and operational interpretation are in
 [MEMORY_REPORT.md](MEMORY_REPORT.md).
 
+## JSON LIKE Prefix Index
+
+The prefix benchmark uses the same 10,000-row JSON source, a 5%-selective
+`LIKE 'alpha%'` predicate, and `COUNT(*)`. The scan baseline configures the
+same field index but hides optional index methods from the planner, preserving
+the pre-feature scan behavior. The indexed case uses the ordered field index
+after one warm refresh:
+
+```
+make benchmark-sql-prefix-index
+```
+
+Five samples on an AMD Ryzen 9 5950X with Go 1.26.6 produced these medians:
+
+| Workload | Median time | Heap | Allocs | Improvement vs scan |
+| --- | ---: | ---: | ---: | ---: |
+| Scan baseline | 13.734 ms | 9,922,038 B | 160,048 | 1.00x |
+| Ordered prefix index | 0.238 ms | 261,852 B | 2,530 | 57.7x faster, 37.9x less heap, 63.3x fewer allocs |
+
+The indexed path is explicit, binary-collation only, and still re-evaluates
+the original predicate. Mixed values and non-prefix patterns fall back to the
+scan path.
+
 Full HAT-trie command benchmark and command support extraction:
 
 ```
