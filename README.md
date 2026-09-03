@@ -15,6 +15,7 @@ security guidance before exposing it on a network.
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- Read-only hypothetical SQL index/projection cost analysis: [SQL_WHATIF.md](SQL_WHATIF.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
@@ -46,6 +47,12 @@ record by idempotency key. The HTTP path is disabled by default and keeps the
 existing synchronous endpoint unchanged. See
 [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md) for configuration, retries,
 security, and the replication compatibility guard.
+
+SQL tuning tools can call `hatSql.ExplainSQLWhatIf` to estimate the row, byte,
+memory, and mutation-maintenance cost of an equality, range, order, or group
+index before creating it. The API is read-only and does not alter normal SQL;
+provide `SQLWhatIfSourceStatisticsResolver` for the low-cost metadata path.
+See [SQL_WHATIF.md](SQL_WHATIF.md).
 
 ## Performance and implementation history
 

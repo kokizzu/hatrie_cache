@@ -65,11 +65,31 @@ type SQLJSONIndexStatsResolver = hatSql.JSONIndexStatsResolver
 type SQLIndexValueEstimator = hatSql.IndexValueEstimator
 type SQLJSONIndexFrequencyBucket = hatSql.JSONIndexFrequencyBucket
 type SQLJSONIndexStats = hatSql.JSONIndexStats
+type SQLWhatIfIndexKind = hatSql.SQLWhatIfIndexKind
+type SQLWhatIfIndex = hatSql.SQLWhatIfIndex
+type SQLWhatIfRequest = hatSql.SQLWhatIfRequest
+type SQLWhatIfFieldStatistics = hatSql.SQLWhatIfFieldStatistics
+type SQLWhatIfSourceStatistics = hatSql.SQLWhatIfSourceStatistics
+type SQLWhatIfSourceStatisticsResolver = hatSql.SQLWhatIfSourceStatisticsResolver
+type SQLWhatIfReport = hatSql.SQLWhatIfReport
 type SQLSourceResolverFunc = hatSql.SourceResolverFunc
 type SQLConn = hatSql.Conn
 type SQLTimeSeriesOptions = hatSql.TimeSeriesOptions
 type SQLTimeSeriesResult = hatSql.TimeSeriesResult
 type SQLVectorMatch = hatSql.VectorMatch
+
+const (
+	SQLWhatIfIndexEquality = hatSql.SQLWhatIfIndexEquality
+	SQLWhatIfIndexRange    = hatSql.SQLWhatIfIndexRange
+	SQLWhatIfIndexOrder    = hatSql.SQLWhatIfIndexOrder
+	SQLWhatIfIndexGroup    = hatSql.SQLWhatIfIndexGroup
+)
+
+// ExplainSQLWhatIf estimates one hypothetical index without changing the
+// normal SQL execution path or creating index state.
+func ExplainSQLWhatIf(ctx context.Context, request SQLWhatIfRequest, resolver SQLSourceResolver) (SQLWhatIfReport, error) {
+	return hatSql.ExplainSQLWhatIf(ctx, request, resolver)
+}
 
 // SQLResultCache retains the root API while hatSql owns the portable cache
 // core. Its HatTrie adapter supplies the mutation epoch for invalidation.

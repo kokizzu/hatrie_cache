@@ -3678,3 +3678,28 @@ commit-async-http:
 .PHONY: push-async-http
 push-async-http:
 	sh ./scripts/deliver-async-http.sh push
+
+
+gen-root-api:
+	sh ./scripts/generate-root-api.sh
+
+format-sql-whatif:
+	sh ./scripts/format-sql-whatif.sh
+
+test-sql-whatif:
+	sh ./scripts/test-sql-whatif.sh
+
+benchmark-sql-whatif:
+	sh ./scripts/benchmark-sql-whatif.sh
+
+verify-sql-whatif:
+	sh ./scripts/verify-sql-whatif.sh
+
+deliver-sql-whatif:
+	sh ./scripts/deliver-sql-whatif.sh apply
+
+commit-sql-whatif:
+	sh ./scripts/deliver-sql-whatif.sh commit
+
+push-sql-whatif:
+	sh ./scripts/deliver-sql-whatif.sh push

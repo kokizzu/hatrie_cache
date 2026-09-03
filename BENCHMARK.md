@@ -14986,3 +14986,29 @@ Median async admission was about 25.3x lower caller-side latency, used about
 sync still occur, and the caller must poll or otherwise observe the status.
 The async path's smaller JSON receipt also contributes to the measured HTTP
 allocation difference. See [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md).
+
+## SQL What-If Index Advisor
+
+Command: `make benchmark-sql-whatif`.
+
+This benchmark compares the explicit exact source-read fallback with the
+optional source-statistics path. The fallback computes exact matching rows from
+10,000 source rows. The statistics path estimates a numeric range over 100,000
+rows without resolving source rows.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X:
+
+```text
+BenchmarkExplainSQLWhatIf-32                   6.11-6.78 ms/op  2.725 MB/op  80,017 allocs/op
+BenchmarkExplainSQLWhatIfWithStatistics-32     2.24-2.41 us/op  3,472 B/op  19 allocs/op
+```
+
+| Path | Source rows | Median time | Median heap | Median allocations | Relative time | Relative heap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Exact fallback scan | 10,000 | 6.36 ms | 2.725 MB | 80,017 | 1.00x | 1.00x |
+| Statistics-only estimate | 100,000 | 2.29 us | 3,472 B | 19 | 2,774x lower | 785x lower |
+
+The paths measure different amounts of information: the fallback is exact for
+the current source snapshot, while the statistics path is an estimate and
+annotates the report accordingly. Neither path creates an index or changes
+normal SQL execution. See [SQL_WHATIF.md](SQL_WHATIF.md).

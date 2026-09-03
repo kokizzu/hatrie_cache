@@ -503,3 +503,19 @@ var WithSQLErrorCode = core.WithSQLErrorCode
 func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit func(T) error) (int, error) {
 	return core.QueryRows[T](ctx, conn, query, visit)
 }
+
+
+type SQLWhatIfFieldStatistics = core.SQLWhatIfFieldStatistics
+type SQLWhatIfIndex = core.SQLWhatIfIndex
+type SQLWhatIfIndexKind = core.SQLWhatIfIndexKind
+type SQLWhatIfReport = core.SQLWhatIfReport
+type SQLWhatIfRequest = core.SQLWhatIfRequest
+type SQLWhatIfSourceStatistics = core.SQLWhatIfSourceStatistics
+type SQLWhatIfSourceStatisticsResolver = core.SQLWhatIfSourceStatisticsResolver
+
+const SQLWhatIfIndexEquality = core.SQLWhatIfIndexEquality
+const SQLWhatIfIndexGroup = core.SQLWhatIfIndexGroup
+const SQLWhatIfIndexOrder = core.SQLWhatIfIndexOrder
+const SQLWhatIfIndexRange = core.SQLWhatIfIndexRange
+
+var ExplainSQLWhatIf = core.ExplainSQLWhatIf
