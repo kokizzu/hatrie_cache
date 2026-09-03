@@ -140,6 +140,8 @@ type SQLIndexedSourceResolver = IndexedSourceResolver
 type SQLRangeIndexedSourceResolver = RangeIndexedSourceResolver
 type SQLOrderedSourceResolver = OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = OrderedStreamSourceResolver
+type SQLKeysetPosition = KeysetPosition
+type SQLKeysetOrderedStreamSourceResolver = KeysetOrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = CompositeIndexedSourceResolver
 type SQLSecondaryIndexedSourceResolver = SecondaryIndexedSourceResolver
 type SQLCoveringIndexedSourceResolver = CoveringIndexedSourceResolver
@@ -180,8 +182,11 @@ type SQLQueryOptions struct {
 	MaxJoinBytes int
 	// SpillBloom enables compact per-partition Bloom filters for spill hash
 	// joins. It can skip partition pairs that cannot share a join key.
-	SpillBloom     bool
-	MaxResultBytes int
+	SpillBloom bool
+	// RuntimeJoinBloomFilter enables a selective in-memory Bloom filter for
+	// equality joins with a much larger probe side. It is disabled by default;
+	// balanced and hot-key joins retain the established map path.
+	MaxResultBytes         int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers       int

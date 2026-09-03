@@ -381,6 +381,22 @@ type OrderedStreamSourceResolver interface {
 	StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(Row) error) (bool, error)
 }
 
+// KeysetPosition identifies one row in an ordered source. Tie is a
+// source-defined stable position among equal values, and Valid distinguishes
+// the first page from a position whose order value is NULL.
+type KeysetPosition struct {
+	Value interface{} `json:"value,omitempty"`
+	Tie   uint64      `json:"tie"`
+	Valid bool        `json:"valid"`
+}
+
+// KeysetOrderedStreamSourceResolver optionally starts an ordered source after
+// a stable position. It is an opt-in extension; callers can keep using the
+// offset cursor when a source does not provide it.
+type KeysetOrderedStreamSourceResolver interface {
+	StreamSQLOrderedSourceAfter(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, after KeysetPosition, visit func(Row, KeysetPosition) error) (bool, error)
+}
+
 // CompositeIndexedSourceResolver optionally resolves multi-field equality predicates.
 type CompositeIndexedSourceResolver interface {
 	ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error)

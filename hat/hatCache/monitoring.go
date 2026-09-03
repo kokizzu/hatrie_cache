@@ -179,6 +179,14 @@ func (resolver monitoringSQLResolver) StreamSQLOrderedSource(ctx context.Context
 	return streaming.StreamSQLOrderedSource(ctx, name, key, field, desc, nullsFirst, nullsLast, visit)
 }
 
+func (resolver monitoringSQLResolver) StreamSQLOrderedSourceAfter(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, after hatSql.SQLKeysetPosition, visit func(SQLRow, hatSql.SQLKeysetPosition) error) (bool, error) {
+	streaming, ok := resolver.source.(hatSql.SQLKeysetOrderedStreamSourceResolver)
+	if !ok {
+		return false, nil
+	}
+	return streaming.StreamSQLOrderedSourceAfter(ctx, name, key, field, desc, nullsFirst, nullsLast, after, visit)
+}
+
 // ResolveSQLIndexedSource preserves optional source-index capability through
 // the monitoring wrapper so /api/sql receives the same planner choices as a
 // direct HatTrie query.
@@ -1100,7 +1108,7 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	}
 	sources, _ := SQLQuerySourceNames(request.Query, request.Parameters)
 	if request.Stream {
-		if request.PageSize != 0 || request.Cursor != "" {
+		if request.PageSize != 0 || request.Cursor != "" || request.Keyset {
 			writeJSONStatus(w, http.StatusBadRequest, commandError("SQL streaming cannot be combined with cursor pagination"))
 			return
 		}
@@ -1169,7 +1177,9 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	var result SQLQueryResult
 	var err error
 	resolver := monitoringSQLResolver{source: handler.trie, functions: handler.sqlFunctions}
-	if request.PageSize != 0 || request.Cursor != "" {
+	if request.Keyset {
+		result, err = ExecuteSQLQueryKeysetPage(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions, request.PageSize, request.Cursor)
+	} else if request.PageSize != 0 || request.Cursor != "" {
 		result, err = ExecuteSQLQueryPage(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions, request.PageSize, request.Cursor)
 	} else {
 		result, err = ExecuteSQLQueryParameters(r.Context(), request.Query, resolver, request.Parameters, handler.options.SQLQueryOptions)
@@ -1230,7 +1240,7 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},
 			"schemas": map[string]interface{}{
-				"SQLQueryRequest": map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "stream": map[string]interface{}{"type": "boolean"}}},
+				"SQLQueryRequest": map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
 			},
 		},
 	}
@@ -1369,6 +1379,7 @@ func (handler *MonitoringHandler) auditSQLQuery(r *http.Request, request SQLQuer
 		"query":  request.Query,
 		"rows":   rows,
 		"stream": request.Stream,
+		"keyset": request.Keyset,
 	}
 	if len(sources) > 0 {
 		details["sources"] = append([]string(nil), sources...)

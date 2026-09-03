@@ -3703,3 +3703,28 @@ commit-sql-whatif:
 
 push-sql-whatif:
 	sh ./scripts/deliver-sql-whatif.sh push
+
+
+format-sql-keyset:
+	sh ./scripts/format-sql-keyset.sh
+
+test-sql-keyset:
+	sh ./scripts/test-sql-keyset.sh
+
+benchmark-sql-keyset:
+	sh ./scripts/benchmark-sql-keyset.sh
+
+test-sql-keyset-hattrie:
+	sh ./scripts/test-sql-keyset-hattrie.sh
+
+benchmark-sql-keyset-hattrie:
+	sh ./scripts/benchmark-sql-keyset-hattrie.sh
+
+deliver-sql-keyset:
+	sh ./scripts/deliver-sql-keyset.sh apply
+
+commit-sql-keyset:
+	sh ./scripts/deliver-sql-keyset.sh commit
+
+push-sql-keyset:
+	sh ./scripts/deliver-sql-keyset.sh push

@@ -15012,3 +15012,32 @@ The paths measure different amounts of information: the fallback is exact for
 the current source snapshot, while the statistics path is an estimate and
 annotates the report accordingly. Neither path creates an index or changes
 normal SQL execution. See [SQL_WHATIF.md](SQL_WHATIF.md).
+
+## SQL Keyset Pagination
+
+Command: `make benchmark-sql-keyset-hattrie`.
+
+This benchmark compares the existing offset cursor with the explicit keyset
+cursor on the same warmed 100,000-row HatTrie JSON field index. It fetches page
+900 with page size 100, after preparing both cursors outside the timed region.
+Five samples were run on Linux with an AMD Ryzen 9 5950X.
+
+Raw output:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | ---: | ---: | ---: |
+| Offset | 46,637,998; 52,593,656; 47,095,340; 48,926,760; 48,599,445 | 86,430,559; 86,431,636; 86,430,888; 86,431,157; 86,430,585 | 400,062; 400,064; 400,063; 400,062; 400,062 |
+| Keyset | 57,857; 57,385; 59,517; 57,238; 58,087 | 103,830; 103,830; 103,829; 103,830; 103,830 | 741; 741; 741; 741; 741 |
+
+Median summary:
+
+| Path | Median time | Median heap | Median allocations | Relative to offset |
+| --- | ---: | ---: | ---: | ---: |
+| Offset cursor | 48.60 ms | 86.43 MB | 400,062 | 1.00x |
+| Keyset cursor | 57.86 us | 103.83 KB | 741 | 840x lower time, 832x lower heap, 540x fewer allocations |
+
+Keyset pagination is intended for callers walking ordered pages in sequence.
+Offset pagination remains the default for random page access and compatibility.
+The keyset API currently requires one direct ordered `CACHE` source backed by a
+generic JSON field index or typed `INT64` index. See
+[KEYSET_PAGINATION.md](KEYSET_PAGINATION.md).

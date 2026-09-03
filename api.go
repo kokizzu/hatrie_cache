@@ -519,3 +519,10 @@ const SQLWhatIfIndexOrder = core.SQLWhatIfIndexOrder
 const SQLWhatIfIndexRange = core.SQLWhatIfIndexRange
 
 var ExplainSQLWhatIf = core.ExplainSQLWhatIf
+
+
+type SQLKeysetOrderedStreamSourceResolver = core.SQLKeysetOrderedStreamSourceResolver
+type SQLKeysetPosition = core.SQLKeysetPosition
+
+var ExecuteQueryKeysetPage = core.ExecuteQueryKeysetPage
+var ExecuteSQLQueryKeysetPage = core.ExecuteSQLQueryKeysetPage

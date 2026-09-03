@@ -60,6 +60,8 @@ type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
 type SQLTextIndexedSourceResolver = hatSql.TextIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
+type SQLKeysetPosition = hatSql.KeysetPosition
+type SQLKeysetOrderedStreamSourceResolver = hatSql.KeysetOrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = hatSql.CompositeIndexedSourceResolver
 type SQLJSONIndexStatsResolver = hatSql.JSONIndexStatsResolver
 type SQLIndexValueEstimator = hatSql.IndexValueEstimator
@@ -411,6 +413,14 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 
 func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (SQLQueryResult, error) {
 	return hatSql.ExecuteSQLQueryPage(ctx, source, resolver, parameters, options, pageSize, cursor)
+}
+
+func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (SQLQueryResult, error) {
+	return hatSql.ExecuteSQLQueryKeysetPage(ctx, source, resolver, parameters, options, pageSize, cursor)
+}
+
+func ExecuteQueryKeysetPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (SQLQueryResult, error) {
+	return ExecuteSQLQueryKeysetPage(ctx, source, resolver, parameters, options, pageSize, cursor)
 }
 
 func ValidateSQLQuery(source string) error { return hatSql.ValidateSQLQuery(source) }
@@ -2147,7 +2157,12 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		return false, err
 	}
 	ordered, nulls := index.ordered, index.nulls
-	placeNullsFirst := false
+	placeNullsFirst := !desc
+	if nullsFirst {
+		placeNullsFirst = true
+	} else if nullsLast {
+		placeNullsFirst = false
+	}
 	if len(ordered) > 0 {
 		placeNullsFirst, _ = hatSql.OrderLess(desc, nullsFirst, nullsLast, nil, ordered[0].value)
 	}
@@ -2206,6 +2221,347 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		return true, err
 	}
 	return true, emitNulls()
+}
+
+// StreamSQLOrderedSourceAfter visits an indexed CACHE source after a stable
+// order position. It captures the existing immutable index slices while
+// locked, then releases the index before invoking the caller. Tie stores the
+// ordered-slice position, preserving stable order for duplicate values.
+func (ht *HatTrie) StreamSQLOrderedSourceAfter(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, after hatSql.SQLKeysetPosition, visit func(SQLRow, hatSql.SQLKeysetPosition) error) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+	if visit == nil {
+		return false, fmt.Errorf("SQL keyset row callback is required")
+	}
+	if name != "CACHE" {
+		return false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return false, err
+	}
+	ht.sqlIndexMu.Lock()
+	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+		if err != nil {
+			ht.sqlIndexMu.Unlock()
+			if err == errSQLJSONIndexAdmissionDenied {
+				return false, nil
+			}
+			return false, err
+		}
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
+		if !typed.complete {
+			ht.sqlIndexMu.Unlock()
+			return false, nil
+		}
+		rows := typed.rows
+		ordered := typed.ordered
+		nulls := typed.nulls
+		placeNullsFirst := !desc
+		if nullsFirst {
+			placeNullsFirst = true
+		} else if nullsLast {
+			placeNullsFirst = false
+		}
+		ht.sqlIndexMu.Unlock()
+
+		emit := func(entry sqlJSONTypedInt64Entry, orderIndex int) error {
+			if int(entry.ordinal) >= len(rows) {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			copy := make(SQLRow, len(rows[entry.ordinal]))
+			for name, item := range rows[entry.ordinal] {
+				copy[name] = item
+			}
+			return visit(copy, hatSql.SQLKeysetPosition{Value: entry.value, Tie: uint64(orderIndex), Valid: true})
+		}
+		emitNulls := func(start int) error {
+			if start < 0 {
+				start = 0
+			}
+			for index := start; index < len(nulls); index++ {
+				if int(nulls[index]) >= len(rows) {
+					continue
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				copy := make(SQLRow, len(rows[nulls[index]]))
+				for name, item := range rows[nulls[index]] {
+					copy[name] = item
+				}
+				if err := visit(copy, hatSql.SQLKeysetPosition{Tie: uint64(index), Valid: true}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		emitAscending := func(start, end int) error {
+			if start < 0 {
+				start = 0
+			}
+			if end > len(ordered) {
+				end = len(ordered)
+			}
+			for index := start; index < end; index++ {
+				if err := emit(ordered[index], index); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		emitDescending := func(end int) error {
+			for end > 0 {
+				start := end - 1
+				for start > 0 && ordered[start-1].value == ordered[end-1].value {
+					start--
+				}
+				if err := emitAscending(start, end); err != nil {
+					return err
+				}
+				end = start
+			}
+			return nil
+		}
+
+		if !after.Valid {
+			if placeNullsFirst {
+				if err := emitNulls(0); err != nil {
+					return true, err
+				}
+			}
+			var err error
+			if desc {
+				err = emitDescending(len(ordered))
+			} else {
+				err = emitAscending(0, len(ordered))
+			}
+			if err != nil {
+				return true, err
+			}
+			if !placeNullsFirst {
+				err = emitNulls(0)
+			}
+			return true, err
+		}
+		if after.Value == nil {
+			if after.Tie >= uint64(len(nulls)) {
+				return true, fmt.Errorf("SQL keyset cursor position is stale for NULL typed ordered source")
+			}
+			if !placeNullsFirst {
+				return true, nil
+			}
+			if err := emitNulls(int(after.Tie) + 1); err != nil {
+				return true, err
+			}
+			if desc {
+				err = emitDescending(len(ordered))
+			} else {
+				err = emitAscending(0, len(ordered))
+			}
+			return true, err
+		}
+		if after.Tie >= uint64(len(ordered)) {
+			return true, fmt.Errorf("SQL keyset cursor position is stale for typed ordered source")
+		}
+		afterValue := ordered[after.Tie].value
+		if hatSql.Compare(afterValue, after.Value) != 0 {
+			return true, fmt.Errorf("SQL keyset cursor value is stale for typed ordered source")
+		}
+		if !desc {
+			if err := emitAscending(int(after.Tie)+1, len(ordered)); err != nil {
+				return true, err
+			}
+			if !placeNullsFirst {
+				return true, emitNulls(0)
+			}
+			return true, nil
+		}
+		groupStart := sort.Search(len(ordered), func(index int) bool { return ordered[index].value >= afterValue })
+		groupEnd := sort.Search(len(ordered), func(index int) bool { return ordered[index].value > afterValue })
+		if int(after.Tie) < groupStart || int(after.Tie) >= groupEnd {
+			return true, fmt.Errorf("SQL keyset cursor position is stale for typed ordered source")
+		}
+		if err := emitAscending(int(after.Tie)+1, groupEnd); err != nil {
+			return true, err
+		}
+		if err := emitDescending(groupStart); err != nil {
+			return true, err
+		}
+		if !placeNullsFirst {
+			return true, emitNulls(0)
+		}
+		return true, nil
+	}
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil {
+		ht.sqlIndexMu.Unlock()
+		return false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		ht.sqlIndexMu.Unlock()
+		if err == errSQLJSONIndexAdmissionDenied {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
+		ht.sqlIndexMu.Unlock()
+		return false, err
+	}
+	ordered, nulls := index.ordered, index.nulls
+	placeNullsFirst := !desc
+	if nullsFirst {
+		placeNullsFirst = true
+	} else if nullsLast {
+		placeNullsFirst = false
+	}
+	if len(ordered) > 0 {
+		placeNullsFirst, _ = hatSql.OrderLess(desc, nullsFirst, nullsLast, nil, ordered[0].value)
+	}
+	ht.sqlIndexMu.Unlock()
+
+	emit := func(row SQLRow, value interface{}, tie uint64) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		copy := make(SQLRow, len(row))
+		for name, item := range row {
+			copy[name] = item
+		}
+		return visit(copy, hatSql.SQLKeysetPosition{Value: value, Tie: tie, Valid: true})
+	}
+	emitNulls := func(start int) error {
+		if start < 0 {
+			start = 0
+		}
+		for index := start; index < len(nulls); index++ {
+			if err := emit(nulls[index], nil, uint64(index)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	emitAscending := func(start, end int) error {
+		if start < 0 {
+			start = 0
+		}
+		if end > len(ordered) {
+			end = len(ordered)
+		}
+		for index := start; index < end; index++ {
+			entry := ordered[index]
+			if err := emit(entry.row, entry.value, uint64(index)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	emitDescending := func(end int) error {
+		for end > 0 {
+			start := end - 1
+			for start > 0 && hatSql.Compare(ordered[start-1].value, ordered[end-1].value) == 0 {
+				start--
+			}
+			if err := emitAscending(start, end); err != nil {
+				return err
+			}
+			end = start
+		}
+		return nil
+	}
+
+	if !after.Valid {
+		if placeNullsFirst {
+			if err := emitNulls(0); err != nil {
+				return true, err
+			}
+		}
+		if desc {
+			err = emitDescending(len(ordered))
+		} else {
+			err = emitAscending(0, len(ordered))
+		}
+		if err != nil {
+			return true, err
+		}
+		if !placeNullsFirst {
+			err = emitNulls(0)
+		}
+		return true, err
+	}
+
+	if after.Value == nil {
+		if after.Tie >= uint64(len(nulls)) {
+			return true, fmt.Errorf("SQL keyset cursor position is stale for NULL ordered source")
+		}
+		if !placeNullsFirst {
+			return true, nil
+		}
+		if err := emitNulls(int(after.Tie) + 1); err != nil {
+			return true, err
+		}
+		if desc {
+			err = emitDescending(len(ordered))
+		} else {
+			err = emitAscending(0, len(ordered))
+		}
+		return true, err
+	}
+	if len(ordered) == 0 {
+		return true, nil
+	}
+	if !desc {
+		if after.Tie >= uint64(len(ordered)) {
+			return true, fmt.Errorf("SQL keyset cursor position is stale for ordered source")
+		}
+		if hatSql.Compare(ordered[after.Tie].value, after.Value) != 0 {
+			return true, fmt.Errorf("SQL keyset cursor value is stale for ordered source")
+		}
+		start := int(after.Tie) + 1
+		if err := emitAscending(start, len(ordered)); err != nil {
+			return true, err
+		}
+		if !placeNullsFirst {
+			return true, emitNulls(0)
+		}
+		return true, nil
+	}
+	if after.Tie >= uint64(len(ordered)) {
+		return true, fmt.Errorf("SQL keyset cursor position is stale for ordered source")
+	}
+	groupStart := sort.Search(len(ordered), func(index int) bool {
+		return hatSql.Compare(ordered[index].value, after.Value) >= 0
+	})
+	groupEnd := sort.Search(len(ordered), func(index int) bool {
+		return hatSql.Compare(ordered[index].value, after.Value) > 0
+	})
+	if groupStart == groupEnd {
+		return true, fmt.Errorf("SQL keyset cursor value is stale for ordered source")
+	}
+	afterIndex := int(after.Tie)
+	if afterIndex < groupStart || afterIndex >= groupEnd {
+		return true, fmt.Errorf("SQL keyset cursor position is stale for ordered source")
+	}
+	if err := emitAscending(afterIndex+1, groupEnd); err != nil {
+		return true, err
+	}
+	if err := emitDescending(groupStart); err != nil {
+		return true, err
+	}
+	if !placeNullsFirst {
+		return true, emitNulls(0)
+	}
+	return true, nil
 }
 
 func refreshSQLJSONTypedInt64Index(index *sqlJSONTypedInt64Index, field, data string, rows []SQLRow) {

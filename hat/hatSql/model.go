@@ -8,6 +8,7 @@ type QueryRequest struct {
 	Parameters []interface{} `json:"parameters,omitempty"`
 	PageSize   int           `json:"page_size,omitempty"`
 	Cursor     string        `json:"cursor,omitempty"`
+	Keyset     bool          `json:"keyset,omitempty"`
 	Stream     bool          `json:"stream,omitempty"`
 }
 

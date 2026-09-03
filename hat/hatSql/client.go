@@ -37,6 +37,12 @@ func (conn *Conn) QueryPage(ctx context.Context, query string, parameters []inte
 	return conn.queryRequest(ctx, QueryRequest{Query: query, Parameters: parameters, PageSize: pageSize, Cursor: cursor})
 }
 
+// QueryKeysetPage obtains one ordered result page using an opaque keyset
+// cursor. The server only accepts this mode for a compatible ordered index.
+func (conn *Conn) QueryKeysetPage(ctx context.Context, query string, parameters []interface{}, pageSize int, cursor string) (QueryResult, error) {
+	return conn.queryRequest(ctx, QueryRequest{Query: query, Parameters: parameters, PageSize: pageSize, Cursor: cursor, Keyset: true})
+}
+
 func (conn *Conn) queryRequest(ctx context.Context, payload QueryRequest) (QueryResult, error) {
 	if conn == nil || strings.TrimSpace(conn.BaseURL) == "" {
 		return QueryResult{}, fmt.Errorf("SQL connection URL is required")
