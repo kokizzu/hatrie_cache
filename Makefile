@@ -4336,3 +4336,27 @@ commit-t051:
 push-t051:
 
 	bash ./scripts/push-t051.sh
+.PHONY: test-t046
+test-t046:
+	bash ./scripts/test-t046.sh
+.PHONY: format-t046
+format-t046:
+	bash ./scripts/format-t046.sh
+.PHONY: test-race-t046
+test-race-t046:
+	bash ./scripts/test-race-t046.sh
+.PHONY: vet-t046
+vet-t046:
+	bash ./scripts/vet-t046.sh
+.PHONY: review-t046
+review-t046:
+	bash ./scripts/review-t046.sh
+.PHONY: stage-t046
+stage-t046:
+	bash ./scripts/stage-t046.sh
+.PHONY: commit-t046
+commit-t046:
+	bash ./scripts/commit-t046.sh
+.PHONY: push-t046
+push-t046:
+	bash ./scripts/push-t046.sh

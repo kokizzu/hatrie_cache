@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -62,6 +63,16 @@ func cloneBackupPartitionMetadata(input *BackupPartitionMetadata) *BackupPartiti
 }
 
 func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
+	return CreateBackupBundleWithContext(context.Background(), path, trie, journal, options)
+}
+
+// CreateBackupBundleWithContext creates a snapshot or Pebble backup bundle
+// while honoring cancellation before publication and during payload transfer.
+func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
+	ctx = normalizeBackupContext(ctx)
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 	if path == "" {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup bundle path is required")
 	}
@@ -74,7 +85,7 @@ func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, opt
 	}
 	if mode == BackupModePebbleIncremental {
 		options.Mode = mode
-		return CreateIncrementalBackupRepository(path, trie, journal, options)
+		return CreateIncrementalBackupRepositoryWithContext(ctx, path, trie, journal, options)
 	}
 	if mode == BackupModeAuto {
 		mode = BackupModeSnapshot
@@ -107,6 +118,9 @@ func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, opt
 		return BackupBundleManifest{}, err
 	}
 	defer os.RemoveAll(tmpDir)
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 
 	if journal != nil {
 		journal.mu.Lock()
@@ -114,9 +128,12 @@ func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, opt
 		if journal.closed {
 			return BackupBundleManifest{}, ErrCommandJournalClosed
 		}
-		return createBackupBundleLocked(path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition, mode, options.PersistentStore)
+		if err := checkBackupContext(ctx); err != nil {
+			return BackupBundleManifest{}, err
+		}
+		return createBackupBundleLocked(ctx, path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition, mode, options.PersistentStore)
 	}
-	return createBackupBundleLocked(path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition, mode, options.PersistentStore)
+	return createBackupBundleLocked(ctx, path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition, mode, options.PersistentStore)
 }
 
 type backupBundlePayloadFile struct {
@@ -125,7 +142,10 @@ type backupBundlePayloadFile struct {
 	data []byte
 }
 
-func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata, mode BackupMode, persistentStore PersistentStore) (BackupBundleManifest, error) {
+func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata, mode BackupMode, persistentStore PersistentStore) (BackupBundleManifest, error) {
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 	files := make([]BackupBundleFile, 0)
 	payloads := make([]backupBundlePayloadFile, 0)
 	manifest := BackupBundleManifest{
@@ -141,6 +161,9 @@ func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journal
 		if err := trie.SaveSnapshotWithJournalSequenceAndFormat(snapshotPath, journalSequence, snapshotFormat); err != nil {
 			return BackupBundleManifest{}, err
 		}
+		if err := checkBackupContext(ctx); err != nil {
+			return BackupBundleManifest{}, err
+		}
 		snapshotFile, err := backupBundleFileInfo(backupBundleSnapshotPath, snapshotPath)
 		if err != nil {
 			return BackupBundleManifest{}, err
@@ -154,6 +177,9 @@ func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journal
 		store := persistentStore.(*PebbleStore)
 		checkpointPath := filepath.Join(tmpDir, backupBundleStorePath)
 		if err := store.SaveCheckpointWithJournalSequence(trie, checkpointPath, journalSequence); err != nil {
+			return BackupBundleManifest{}, err
+		}
+		if err := checkBackupContext(ctx); err != nil {
 			return BackupBundleManifest{}, err
 		}
 		checkpointFiles, checkpointPayloads, err := backupBundleDirectoryPayloads(backupBundleStorePath, checkpointPath)
@@ -176,6 +202,9 @@ func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journal
 
 	var journalData []byte
 	if includeJournal {
+		if err := checkBackupContext(ctx); err != nil {
+			return BackupBundleManifest{}, err
+		}
 		var journalBuffer bytes.Buffer
 		if journalSequence > 0 {
 			if err := writeCommandJournalEntry(&journalBuffer, commandJournalEntry{
@@ -202,9 +231,12 @@ func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journal
 		return BackupBundleManifest{}, err
 	}
 	manifestData = append(manifestData, '\n')
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 
 	if err := writeFileAtomicStream(path, func(writer io.Writer) error {
-		return writeBackupBundlePayloadTarGzip(writer, payloads, manifestData, createdAt)
+		return writeBackupBundlePayloadTarGzip(backupContextWriter{ctx: ctx, Writer: writer}, payloads, manifestData, createdAt)
 	}); err != nil {
 		return BackupBundleManifest{}, err
 	}

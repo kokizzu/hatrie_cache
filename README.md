@@ -3421,3 +3421,8 @@ Use `CloseWithContext(ctx)` when shutdown should wait for owned work to finish.
 If the context expires, it returns the context error without canceling or
 dropping the owned work, so the caller can retry with a longer deadline or
 choose the immediate `Close()` behavior.
+### Cancellable backup creation
+
+Use `CreateBackupBundleWithContext` or `CreateIncrementalBackupRepositoryWithContext` when an operator needs to cancel an online backup. The existing `CreateBackupBundle` and `CreateIncrementalBackupRepository` APIs remain available and use a background context.
+
+Cancellation is checked before repository or bundle publication and during payload transfer. The last published manifest and `latest` pointer remain authoritative; completed content-addressed objects may remain after cancellation and are reused by the next attempt. Pebble's internal checkpoint call is not interruptible mid-call, so cancellation is observed when that call returns.

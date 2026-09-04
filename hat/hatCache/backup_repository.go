@@ -1,6 +1,7 @@
 package hatCache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -36,6 +37,17 @@ type backupRepositoryDescriptor struct {
 var backupRepositoryLocks sync.Map
 
 func CreateIncrementalBackupRepository(path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
+	return CreateIncrementalBackupRepositoryWithContext(context.Background(), path, trie, journal, options)
+}
+
+// CreateIncrementalBackupRepositoryWithContext creates a content-addressed
+// incremental repository and stops before publication when ctx is canceled.
+// Objects copied before cancellation remain reusable by the next attempt.
+func CreateIncrementalBackupRepositoryWithContext(ctx context.Context, path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
+	ctx = normalizeBackupContext(ctx)
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup repository path is required")
@@ -78,17 +90,23 @@ func CreateIncrementalBackupRepository(path string, trie *HatTrie, journal *Comm
 		if journal.closed {
 			return BackupBundleManifest{}, ErrCommandJournalClosed
 		}
-		return createIncrementalBackupRepositoryLocked(path, trie, store, options.DirtyTracker, journal.lastSequenceLocked(), journal.format, true, partition, createdAt, retention)
+		if err := checkBackupContext(ctx); err != nil {
+			return BackupBundleManifest{}, err
+		}
+		return createIncrementalBackupRepositoryLocked(ctx, path, trie, store, options.DirtyTracker, journal.lastSequenceLocked(), journal.format, true, partition, createdAt, retention)
 	}
-	return createIncrementalBackupRepositoryLocked(path, trie, store, options.DirtyTracker, 0, "", false, partition, createdAt, retention)
+	return createIncrementalBackupRepositoryLocked(ctx, path, trie, store, options.DirtyTracker, 0, "", false, partition, createdAt, retention)
 }
 
-func createIncrementalBackupRepositoryLocked(path string, trie *HatTrie, store *PebbleStore, tracker *LevelDBDirtyTracker, journalSequence uint64, journalFormat CommandJournalFormat, includeJournal bool, partition *BackupPartitionMetadata, createdAt time.Time, retention int) (BackupBundleManifest, error) {
+func createIncrementalBackupRepositoryLocked(ctx context.Context, path string, trie *HatTrie, store *PebbleStore, tracker *LevelDBDirtyTracker, journalSequence uint64, journalFormat CommandJournalFormat, includeJournal bool, partition *BackupPartitionMetadata, createdAt time.Time, retention int) (BackupBundleManifest, error) {
 	mutexValue, _ := backupRepositoryLocks.LoadOrStore(path, &sync.Mutex{})
 	mutex := mutexValue.(*sync.Mutex)
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 	if err := ensureBackupRepository(path); err != nil {
 		return BackupBundleManifest{}, err
 	}
@@ -124,9 +142,15 @@ func createIncrementalBackupRepositoryLocked(path string, trie *HatTrie, store *
 	if err != nil {
 		return BackupBundleManifest{}, err
 	}
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 
 	files, payloads, err := backupBundleDirectoryPayloads(backupBundleStorePath, checkpointPath)
 	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if err := checkBackupContext(ctx); err != nil {
 		return BackupBundleManifest{}, err
 	}
 	markerName := backupBundleStorePath + storageBackendMarkerSuffix
@@ -162,7 +186,10 @@ func createIncrementalBackupRepositoryLocked(path string, trie *HatTrie, store *
 		manifest.Files = append(manifest.Files, backupBundleBytesInfo(backupBundleJournalPath, journalData))
 		payloads = append(payloads, backupBundlePayloadFile{name: backupBundleJournalPath, data: journalData})
 	}
-	if err := storeBackupRepositoryObjects(path, &manifest, payloads); err != nil {
+	if err := storeBackupRepositoryObjects(ctx, path, &manifest, payloads); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if err := checkBackupContext(ctx); err != nil {
 		return BackupBundleManifest{}, err
 	}
 	manifest.BackupID, err = backupRepositoryManifestID(manifest)
@@ -174,6 +201,9 @@ func createIncrementalBackupRepositoryLocked(path string, trie *HatTrie, store *
 		return BackupBundleManifest{}, err
 	}
 	manifestData = append(manifestData, '\n')
+	if err := checkBackupContext(ctx); err != nil {
+		return BackupBundleManifest{}, err
+	}
 	manifestPath := filepath.Join(path, backupRepositoryManifestsPath, manifest.BackupID+".json")
 	if err := writeFileAtomic(manifestPath, manifestData); err != nil {
 		return BackupBundleManifest{}, err
@@ -244,12 +274,15 @@ func backupRepositoryStoreIdentity(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func storeBackupRepositoryObjects(root string, manifest *BackupBundleManifest, payloads []backupBundlePayloadFile) error {
+func storeBackupRepositoryObjects(ctx context.Context, root string, manifest *BackupBundleManifest, payloads []backupBundlePayloadFile) error {
 	files := make(map[string]BackupBundleFile, len(manifest.Files))
 	for _, file := range manifest.Files {
 		files[file.Path] = file
 	}
 	for _, payload := range payloads {
+		if err := checkBackupContext(ctx); err != nil {
+			return err
+		}
 		file, ok := files[payload.name]
 		if !ok {
 			return fmt.Errorf("hatriecache: backup repository payload %s is undeclared", payload.name)
@@ -275,10 +308,10 @@ func storeBackupRepositoryObjects(root string, manifest *BackupBundleManifest, p
 					return err
 				}
 				defer source.Close()
-				_, err = io.Copy(writer, source)
+				_, err = io.Copy(backupContextWriter{ctx: ctx, Writer: writer}, backupContextReader{ctx: ctx, Reader: source})
 				return err
 			}
-			_, err := writer.Write(payload.data)
+			_, err := backupContextWriter{ctx: ctx, Writer: writer}.Write(payload.data)
 			return err
 		}); err != nil {
 			return err
