@@ -15349,6 +15349,26 @@ Raw samples:
 json: 1.631, 1.588, 1.608, 1.570, 1.595 ns/op; 0 B/op; 0 allocs/op
 pretty: 471.0, 455.0, 425.3, 454.9, 425.5 ns/op; 177 B/op; 3 allocs/op
 ~~~
+
+## Dead-Letter Queue Replay
+
+Command: make benchmark-dead-letter-queue.
+
+The benchmark keeps 128 failures resident and compares replay plus re-failure
+against an equivalent direct slice and DelayQueue control.
+
+| Implementation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| DeadLetterQueue | 259.1 | 236 | 0 |
+| Direct slice control | 224.2 | 211 | 0 |
+| Tradeoff | **1.16x higher CPU** | **25 more** | **same** |
+
+Raw samples:
+
+~~~text
+dead_letter_queue: 234.6, 263.6, 251.8, 259.1, 260.8 ns/op; 236 B/op; 0 allocs/op
+slice_reference: 222.8, 218.8, 224.2, 233.6, 227.4 ns/op; 211 B/op; 0 allocs/op
+~~~
 | Compact JSON passthrough | 1.595 | 0 | 0 |
 | Pretty JSON | 454.9 | 177 | 3 |
 | Tradeoff | **285x higher CPU** | **177 more** | **3 more** |

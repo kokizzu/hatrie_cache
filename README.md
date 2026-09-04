@@ -17,6 +17,7 @@ security guidance before exposing it on a network.
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
+- Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
 - ClickHouse-style opt-in two-level columnar aggregation: [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md)
 - ClickHouse-style SQL constant folding: [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md)

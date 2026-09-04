@@ -476,7 +476,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T110 Memory quotas and admission limits.
 - [ ] T111 Separate cache sizing from durable-storage sizing.
 - [ ] T112 Per-queue memory and latency metrics.
-- [ ] T113 Dead-letter queue with replay controls.
+- [x] T113 Dead-letter queue with replay controls - public generic bounded retention supports inspection, explicit replay deadlines, and discard; see [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md).
 - [ ] T114 Work stealing for independent queue workers.
 - [ ] T115 Cancellation-safe task ownership.
 

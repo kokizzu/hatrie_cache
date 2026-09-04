@@ -3989,3 +3989,34 @@ commit-cli-output:
 .PHONY: push-cli-output
 push-cli-output:
 	sh ./scripts/commit-cli-output.sh push
+.PHONY: test-dead-letter-queue
+test-dead-letter-queue:
+	sh ./scripts/test-dead-letter-queue.sh
+
+.PHONY: stage-dead-letter-queue
+stage-dead-letter-queue:
+	sh ./scripts/commit-dead-letter-queue.sh stage
+
+.PHONY: commit-dead-letter-queue
+commit-dead-letter-queue:
+	sh ./scripts/commit-dead-letter-queue.sh commit
+
+.PHONY: push-dead-letter-queue
+push-dead-letter-queue:
+	sh ./scripts/commit-dead-letter-queue.sh push
+
+.PHONY: format-dead-letter-queue
+format-dead-letter-queue:
+	sh ./scripts/format-dead-letter-queue.sh
+
+.PHONY: test-race-dead-letter-queue
+test-race-dead-letter-queue:
+	sh ./scripts/test-race-dead-letter-queue.sh
+
+.PHONY: vet-dead-letter-queue
+vet-dead-letter-queue:
+	sh ./scripts/vet-dead-letter-queue.sh
+
+.PHONY: benchmark-dead-letter-queue
+benchmark-dead-letter-queue:
+	sh ./scripts/benchmark-dead-letter-queue.sh
