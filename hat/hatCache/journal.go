@@ -72,6 +72,8 @@ const (
 	DefaultCommandJournalSegmentMaxBytes     = hatJournal.DefaultSegmentMaxBytes
 	DefaultCommandJournalRetainedSegments    = hatJournal.DefaultRetainedSegments
 	MaxCommandJournalRetainedSegments        = hatJournal.MaxRetainedSegments
+	DefaultCommandJournalRetainedBytes       = hatJournal.DefaultRetainedBytes
+	MaxCommandJournalRetainedBytes           = hatJournal.MaxRetainedBytes
 	DefaultCommandJournalIdempotencyCapacity = hatJournal.DefaultIdempotencyCapacity
 	MaxCommandJournalIdempotencyCapacity     = hatJournal.MaxIdempotencyCapacity
 )
@@ -200,6 +202,7 @@ type CommandJournal struct {
 	groupCommitMaxBatch   int
 	segmentMaxBytes       int64
 	retainedSegments      int
+	retainedBytes         int64
 	activeSegmentStart    uint64
 	groupCommitJobs       chan *commandJournalJob
 	groupCommitDone       chan struct{}
@@ -302,6 +305,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		retainedSegments:      options.RetainedSegments,
+		retainedBytes:         options.RetainedBytes,
 		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
 		outboxRetainFrom:      earliestOutboxSequence,
 		closeDone:             make(chan struct{}),

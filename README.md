@@ -12,6 +12,7 @@ security guidance before exposing it on a network.
 - New to the SQL interface: [SQL.md](SQL.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
+- Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
@@ -870,6 +871,11 @@ snapshot so rotation cannot move a segment between the two copies. Server-side
 atomic backup bundles do not need archived segments: they contain either a
 point-in-time snapshot or a native Pebble checkpoint plus a journal checkpoint
 at the same sequence.
+
+Archived segments can also be bounded by count and, explicitly, by total bytes.
+`JOURNAL_RETAINED_BYTES=0` is the default and preserves count-only retention;
+see [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md) before lowering history on a
+replicated or projection-backed deployment.
 
 ```
 make cli ARGS='snapshot'

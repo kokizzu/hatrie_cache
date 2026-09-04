@@ -58,7 +58,9 @@ const (
 	DefaultSegmentMaxBytes     int64         = 64 << 20
 	DefaultRetainedSegments                  = 16
 	MaxRetainedSegments                      = 1024
-	DefaultIdempotencyCapacity              = 0
+	DefaultRetainedBytes       int64         = 0
+	MaxRetainedBytes           int64         = 1 << 40
+	DefaultIdempotencyCapacity               = 0
 	MaxIdempotencyCapacity                   = 1 << 20
 )
 
@@ -70,6 +72,7 @@ type Options struct {
 	GroupCommitMaxBatch int
 	SegmentMaxBytes     int64
 	RetainedSegments    int
+	RetainedBytes       int64
 	IdempotencyCapacity int
 }
 
@@ -97,6 +100,12 @@ func ValidateOptions(options Options) (Options, error) {
 	}
 	if options.RetainedSegments > MaxRetainedSegments {
 		return Options{}, fmt.Errorf("hatJournal: retained segments must be <= %d", MaxRetainedSegments)
+	}
+	if options.RetainedBytes < 0 {
+		return Options{}, errors.New("hatJournal: retained bytes must be non-negative")
+	}
+	if options.RetainedBytes > MaxRetainedBytes {
+		return Options{}, fmt.Errorf("hatJournal: retained bytes must be <= %d", MaxRetainedBytes)
 	}
 	if options.SegmentMaxBytes > 0 && options.RetainedSegments == 0 {
 		return Options{}, errors.New("hatJournal: retained segments must be positive when segmentation is enabled")

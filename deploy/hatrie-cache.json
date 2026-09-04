@@ -21,6 +21,7 @@
   "journal_group_commit_max_batch": 64,
   "journal_segment_max_bytes": 67108864,
   "journal_retained_segments": 16,
+  "journal_retained_bytes": 0,
   "journal_pull_state_path": "data/commands.journal.pull_state.json",
   "db_path": "data/cache.leveldb",
   "db_backend": "auto",

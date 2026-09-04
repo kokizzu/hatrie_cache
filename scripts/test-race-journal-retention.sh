@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+go test -race . ./hat/hatJournal ./hat/hatCache ./cmd/hatrie-cache -run 'TestCommandJournalRetainedBytesConstants|TestValidateOptionsRetainedBytes|TestSegmentedCommandJournalRetainsWithinByteBudget|TestSegmentedCommandJournalPrunesOldestWholeSegments|TestSegmentedCommandJournalPinsUnacknowledgedOutboxRecords|TestParseConfigJournalGroupCommitDefaultsAndOverrides|TestParseConfigRejectsInvalidJournalGroupCommit' -count=1

@@ -81,6 +81,7 @@ journal_group_commit_max_batch=${JOURNAL_GROUP_COMMIT_MAX_BATCH:-64}
 journal_idempotency_capacity=${JOURNAL_IDEMPOTENCY_CAPACITY:-0}
 journal_segment_max_bytes=${JOURNAL_SEGMENT_MAX_BYTES:-67108864}
 journal_retained_segments=${JOURNAL_RETAINED_SEGMENTS:-16}
+journal_retained_bytes=${JOURNAL_RETAINED_BYTES:-0}
 journal_pull_source=${JOURNAL_PULL_SOURCE:-}
 journal_pull_state_path=${JOURNAL_PULL_STATE_PATH:-}
 journal_pull_interval=${JOURNAL_PULL_INTERVAL:-0}
@@ -170,6 +171,7 @@ set -- \
 	-journal-idempotency-capacity "$journal_idempotency_capacity" \
 	-journal-segment-max-bytes "$journal_segment_max_bytes" \
 	-journal-retained-segments "$journal_retained_segments" \
+	-journal-retained-bytes "$journal_retained_bytes" \
 	-journal-pull-source "$journal_pull_source" \
 	-journal-pull-state-path "$journal_pull_state_path" \
 	-journal-pull-interval "$journal_pull_interval" \

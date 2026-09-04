@@ -8882,6 +8882,48 @@ behind the restore cursor and preserve FIFO order. Queue status reports
 The legacy whole-file JSON backend also uses a bounded channel, but opening its
 JSON snapshot still materializes the complete file for compatibility.
 
+### Journal Byte-Budget Retention
+
+This benchmark measures the maintenance check that runs after journal rotation
+or when a segmented journal is opened. It compares the existing count-only
+policy with an enabled byte budget whose limit is above the fixture size, so no
+files are deleted during the measured loop. The byte-budget path stats every
+archived segment; the default path does not. It is therefore an operational
+cost measurement, not a per-command throughput claim.
+
+Command:
+
+```text
+make benchmark-journal-retention
+```
+
+Linux, AMD Ryzen 9 5950X, Go benchmark, `-benchtime=100ms -count=5`:
+
+| Policy | Median ns/op | Median B/op | Median allocs/op | Relative maintenance time |
+| --- | ---: | ---: | ---: | ---: |
+| Count only, byte budget disabled | 65,970 | 29,060 | 270 | 1.00x |
+| Byte budget enabled | 182,164 | 52,839 | 397 | 2.76x |
+
+Raw output:
+
+```text
+BenchmarkSegmentedCommandJournalRetention/CountOnly-32 1689 62627 ns/op 29064 B/op 270 allocs/op
+BenchmarkSegmentedCommandJournalRetention/CountOnly-32 1819 66446 ns/op 29061 B/op 270 allocs/op
+BenchmarkSegmentedCommandJournalRetention/CountOnly-32 1761 65970 ns/op 29058 B/op 270 allocs/op
+BenchmarkSegmentedCommandJournalRetention/CountOnly-32 1797 62742 ns/op 28050 B/op 270 allocs/op
+BenchmarkSegmentedCommandJournalRetention/CountOnly-32 1887 68403 ns/op 29060 B/op 270 allocs/op
+BenchmarkSegmentedCommandJournalRetention/ByteBudget-32 600 184635 ns/op 52832 B/op 397 allocs/op
+BenchmarkSegmentedCommandJournalRetention/ByteBudget-32 651 182164 ns/op 52859 B/op 397 allocs/op
+BenchmarkSegmentedCommandJournalRetention/ByteBudget-32 638 182387 ns/op 52806 B/op 397 allocs/op
+BenchmarkSegmentedCommandJournalRetention/ByteBudget-32 674 178120 ns/op 52839 B/op 397 allocs/op
+BenchmarkSegmentedCommandJournalRetention/ByteBudget-32 637 180417 ns/op 52865 B/op 397 allocs/op
+```
+
+The byte budget trades about 2.76x more maintenance time, 1.82x more
+temporary heap, and 1.47x more allocations for a deterministic disk bound.
+With the default `0`, this accounting is bypassed and existing behavior is
+preserved.
+
 ### Journal-Backed Replication Outbox
 
 With a binary command journal and LevelDB outbox configured together, each

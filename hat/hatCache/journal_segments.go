@@ -246,7 +246,7 @@ func (journal *CommandJournal) writeCheckpointWithoutSyncLocked(sequence uint64)
 }
 
 func (journal *CommandJournal) pruneSegmentsLocked() error {
-	if !journal.segmented() || journal.retainedSegments <= 0 {
+	if !journal.segmented() || (journal.retainedSegments <= 0 && journal.retainedBytes <= 0) {
 		return nil
 	}
 	segments, err := listCommandJournalSegments(journal.path)
@@ -254,10 +254,33 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 		return err
 	}
 	remove := len(segments) - journal.retainedSegments
-	if remove <= 0 {
-		return nil
+	if remove < 0 {
+		remove = 0
 	}
-	for _, segment := range segments[:remove] {
+	var sizes []int64
+	var totalBytes int64
+	if journal.retainedBytes > 0 {
+		sizes = make([]int64, len(segments))
+		for index, segment := range segments {
+			info, statErr := os.Stat(segment.path)
+			if statErr != nil {
+				return statErr
+			}
+			size := info.Size()
+			sizes[index] = size
+			if size > 0 && totalBytes > (1<<63-1)-size {
+				totalBytes = 1<<63 - 1
+			} else {
+				totalBytes += size
+			}
+		}
+	}
+	maxRemovable := len(segments) - 1
+	removed := 0
+	for index, segment := range segments {
+		if index >= maxRemovable || (remove <= 0 && (journal.retainedBytes <= 0 || totalBytes <= journal.retainedBytes)) {
+			break
+		}
 		if journal.outboxRetainFrom > 0 && segment.end >= journal.outboxRetainFrom {
 			break
 		}
@@ -267,6 +290,16 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 		if err := os.Remove(segment.path); err != nil {
 			return err
 		}
+		removed++
+		if remove > 0 {
+			remove--
+		}
+		if journal.retainedBytes > 0 {
+			totalBytes -= sizes[index]
+		}
+	}
+	if removed == 0 {
+		return nil
 	}
 	return syncDirectory(commandJournalSegmentDir(journal.path))
 }

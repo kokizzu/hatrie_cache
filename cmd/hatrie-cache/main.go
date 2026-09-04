@@ -135,6 +135,7 @@ type config struct {
 	journalGroupCommitMaxBatch           int
 	journalSegmentMaxBytes               int64
 	journalRetainedSegments              int
+	journalRetainedBytes                 int64
 	journalIdempotencyCapacity           int
 	journalPullSource                    string
 	journalPullStatePath                 string
@@ -541,6 +542,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		journalGroupCommitMaxBatch:     hatriecache.DefaultJournalGroupCommitMaxBatch,
 		journalSegmentMaxBytes:         hatriecache.DefaultCommandJournalSegmentMaxBytes,
 		journalRetainedSegments:        hatriecache.DefaultCommandJournalRetainedSegments,
+		journalRetainedBytes:           hatriecache.DefaultCommandJournalRetainedBytes,
 		journalIdempotencyCapacity:     hatriecache.DefaultCommandJournalIdempotencyCapacity,
 	}
 	configPath, err := configPathFromArgs(args)
@@ -658,6 +660,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.journalGroupCommitMaxBatch, "journal-group-commit-max-batch", cfg.journalGroupCommitMaxBatch, "maximum commands per durable journal group commit; use 1 for immediate fsync")
 	flags.Int64Var(&cfg.journalSegmentMaxBytes, "journal-segment-max-bytes", cfg.journalSegmentMaxBytes, "rotate the active journal after this many bytes at the next durable batch boundary; use 0 for one file")
 	flags.IntVar(&cfg.journalRetainedSegments, "journal-retained-segments", cfg.journalRetainedSegments, "maximum closed journal segments retained for incremental catch-up")
+	flags.Int64Var(&cfg.journalRetainedBytes, "journal-retained-bytes", cfg.journalRetainedBytes, "maximum total bytes for closed journal segments; use 0 to disable byte-budget pruning")
 	flags.IntVar(&cfg.journalIdempotencyCapacity, "journal-idempotency-capacity", cfg.journalIdempotencyCapacity, "bounded idempotency response entries; use 0 to disable retry deduplication")
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
@@ -851,6 +854,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.journalRetainedSegments < 0 || cfg.journalRetainedSegments > hatriecache.MaxCommandJournalRetainedSegments {
 		return config{}, fmt.Errorf("journal retained segments must be between 0 and %d", hatriecache.MaxCommandJournalRetainedSegments)
+	}
+	if cfg.journalRetainedBytes < 0 || cfg.journalRetainedBytes > hatriecache.MaxCommandJournalRetainedBytes {
+		return config{}, fmt.Errorf("journal retained bytes must be between 0 and %d", hatriecache.MaxCommandJournalRetainedBytes)
 	}
 	if cfg.journalSegmentMaxBytes > 0 && cfg.journalRetainedSegments == 0 {
 		return config{}, errors.New("journal retained segments must be positive when segmentation is enabled")
@@ -1256,6 +1262,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"journal_group_commit_max_batch":           cfg.journalGroupCommitMaxBatch,
 		"journal_segment_max_bytes":                cfg.journalSegmentMaxBytes,
 		"journal_retained_segments":                cfg.journalRetainedSegments,
+		"journal_retained_bytes":                   cfg.journalRetainedBytes,
 		"journal_idempotency_capacity":             cfg.journalIdempotencyCapacity,
 		"journal_pull_source":                      cfg.journalPullSource,
 		"journal_pull_state_path":                  cfg.journalPullStatePath,
@@ -1458,6 +1465,7 @@ func journalOptions(cfg config) hatriecache.CommandJournalOptions {
 		GroupCommitMaxBatch: cfg.journalGroupCommitMaxBatch,
 		SegmentMaxBytes:     cfg.journalSegmentMaxBytes,
 		RetainedSegments:    cfg.journalRetainedSegments,
+		RetainedBytes:       cfg.journalRetainedBytes,
 		IdempotencyCapacity: cfg.journalIdempotencyCapacity,
 	}
 }
@@ -2060,6 +2068,7 @@ func openJournalIfConfigured(path string, format hatriecache.CommandJournalForma
 		GroupCommitMaxBatch: hatriecache.DefaultJournalGroupCommitMaxBatch,
 		SegmentMaxBytes:     hatriecache.DefaultCommandJournalSegmentMaxBytes,
 		RetainedSegments:    hatriecache.DefaultCommandJournalRetainedSegments,
+		RetainedBytes:       hatriecache.DefaultCommandJournalRetainedBytes,
 		IdempotencyCapacity: hatriecache.DefaultCommandJournalIdempotencyCapacity,
 	})
 }
