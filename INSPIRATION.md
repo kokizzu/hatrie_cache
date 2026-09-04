@@ -408,7 +408,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T048 Replication sets and peer topology.
 - [ ] T049 Vector-clock exposure for every replica.
 - [x] T050 LSN or journal sequence exposure.
-- [ ] T051 Per-peer replication lag measurement.
+- [x] T051 Per-peer replication lag measurement: async queue status exposes source, acknowledged, and per-target lag sequences, with Prometheus gauges.
 - [x] T052 Relay reconnect and retry.
 - [x] T053 Bootstrap a node from a peer.
 - [ ] T054 Orphan replica detection and cleanup.

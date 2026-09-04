@@ -4274,3 +4274,65 @@ commit-t115:
 
 push-t115:
 	bash ./scripts/push-t115.sh
+
+.PHONY: test-t051
+
+test-t051:
+
+	bash ./scripts/test-t051.sh
+
+
+
+.PHONY: format-t051
+
+format-t051:
+
+	bash ./scripts/format-t051.sh
+
+
+
+.PHONY: test-race-t051
+
+test-race-t051:
+
+	bash ./scripts/test-race-t051.sh
+
+
+
+.PHONY: vet-t051
+
+vet-t051:
+
+	bash ./scripts/vet-t051.sh
+
+
+
+.PHONY: review-t051
+
+review-t051:
+
+	bash ./scripts/review-t051.sh
+
+
+
+.PHONY: stage-t051
+
+stage-t051:
+
+	bash ./scripts/stage-t051.sh
+
+
+
+.PHONY: commit-t051
+
+commit-t051:
+
+	bash ./scripts/commit-t051.sh
+
+
+
+.PHONY: push-t051
+
+push-t051:
+
+	bash ./scripts/push-t051.sh

@@ -922,6 +922,7 @@ func (replicator *HTTPReplicator) enqueueReplicationJob(job replicationJob) Repl
 		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
+	replicator.observeAsyncJob(job)
 	if replicator.asyncClosed() {
 		result.Reason = "replication queue is closed; job retained in durable journal backlog"
 		return result
@@ -1296,16 +1297,28 @@ func (replicator *HTTPReplicator) recordAsyncDroppedForTasks(tasks []replication
 	}
 }
 
-func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, retried bool) {
+func (replicator *HTTPReplicator) recordAsyncAttempt(job replicationJob, result ReplicationResult, retried bool) {
 	if replicator == nil || replicator.queue == nil {
 		return
 	}
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
+	sequence := replicationJobSequence(job)
+	if sequence > replicator.queueStats.SourceSequence {
+		replicator.queueStats.SourceSequence = sequence
+	}
 	replicator.queueStats.Attempts += uint64(len(result.Targets))
 	for _, target := range result.Targets {
 		if target.OK {
 			replicator.queueStats.Successes++
+			if target.Node != "" && sequence > 0 {
+				if replicator.queueStats.LastAcknowledgedSequenceByTarget == nil {
+					replicator.queueStats.LastAcknowledgedSequenceByTarget = map[string]uint64{}
+				}
+				if sequence > replicator.queueStats.LastAcknowledgedSequenceByTarget[target.Node] {
+					replicator.queueStats.LastAcknowledgedSequenceByTarget[target.Node] = sequence
+				}
+			}
 		} else {
 			replicator.queueStats.Failures++
 			if target.Node != "" {
@@ -1322,6 +1335,65 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, r
 		replicator.queueStats.LastRetryAt = cloneTimePtr(&now)
 		replicator.queueStats.LastRetryKey = result.Key
 	}
+	replicator.refreshReplicationLagLocked()
+}
+
+func (replicator *HTTPReplicator) observeAsyncJob(job replicationJob) {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	sequence := replicationJobSequence(job)
+	if sequence == 0 {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if sequence > replicator.queueStats.SourceSequence {
+		replicator.queueStats.SourceSequence = sequence
+	}
+	for _, target := range job.tasks {
+		if target.target.ID == "" {
+			continue
+		}
+		if replicator.queueStats.LastAcknowledgedSequenceByTarget == nil {
+			replicator.queueStats.LastAcknowledgedSequenceByTarget = map[string]uint64{}
+		}
+		if _, ok := replicator.queueStats.LastAcknowledgedSequenceByTarget[target.target.ID]; !ok {
+			replicator.queueStats.LastAcknowledgedSequenceByTarget[target.target.ID] = 0
+		}
+	}
+	replicator.refreshReplicationLagLocked()
+}
+
+func (replicator *HTTPReplicator) refreshReplicationLagLocked() {
+	if replicator == nil {
+		return
+	}
+	if len(replicator.queueStats.LastAcknowledgedSequenceByTarget) == 0 {
+		replicator.queueStats.ReplicationLagByTarget = nil
+		return
+	}
+	if replicator.queueStats.ReplicationLagByTarget == nil {
+		replicator.queueStats.ReplicationLagByTarget = make(map[string]uint64, len(replicator.queueStats.LastAcknowledgedSequenceByTarget))
+	}
+	for target, acknowledged := range replicator.queueStats.LastAcknowledgedSequenceByTarget {
+		lag := uint64(0)
+		if replicator.queueStats.SourceSequence > acknowledged {
+			lag = replicator.queueStats.SourceSequence - acknowledged
+		}
+		replicator.queueStats.ReplicationLagByTarget[target] = lag
+	}
+}
+
+func replicationJobSequence(job replicationJob) uint64 {
+	sequence := uint64(0)
+	for _, task := range job.tasks {
+		_, candidate, _ := replicationSafetyMetadata(task.payload)
+		if candidate > sequence {
+			sequence = candidate
+		}
+	}
+	return sequence
 }
 
 func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, attempts uint) (uint64, []ReplicationDeadLetter, bool) {
@@ -2164,7 +2236,7 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 		}
 		needsRetry := replicationNeedsRetry(result)
 		willRetry := needsRetry && attempt < attempts
-		replicator.recordAsyncAttempt(result, willRetry)
+		replicator.recordAsyncAttempt(job, result, willRetry)
 		deadSeq := uint64(0)
 		var deadLetters []ReplicationDeadLetter
 		deadLettersUpdated := false
@@ -2278,6 +2350,10 @@ func (replicator *HTTPReplicator) nextReplicationSequence() uint64 {
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
 	replicator.sequence++
+	if replicator.queue != nil && replicator.sequence > replicator.queueStats.SourceSequence {
+		replicator.queueStats.SourceSequence = replicator.sequence
+		replicator.refreshReplicationLagLocked()
+	}
 	return replicator.sequence
 }
 
@@ -4336,6 +4412,18 @@ func cloneReplicationQueueStats(stats ReplicationQueueStats) ReplicationQueueSta
 		out.FailuresByTarget = make(map[string]uint64, len(stats.FailuresByTarget))
 		for target, count := range stats.FailuresByTarget {
 			out.FailuresByTarget[target] = count
+		}
+	}
+	if stats.LastAcknowledgedSequenceByTarget != nil {
+		out.LastAcknowledgedSequenceByTarget = make(map[string]uint64, len(stats.LastAcknowledgedSequenceByTarget))
+		for target, sequence := range stats.LastAcknowledgedSequenceByTarget {
+			out.LastAcknowledgedSequenceByTarget[target] = sequence
+		}
+	}
+	if stats.ReplicationLagByTarget != nil {
+		out.ReplicationLagByTarget = make(map[string]uint64, len(stats.ReplicationLagByTarget))
+		for target, lag := range stats.ReplicationLagByTarget {
+			out.ReplicationLagByTarget[target] = lag
 		}
 	}
 	return out

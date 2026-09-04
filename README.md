@@ -3410,6 +3410,10 @@ loaded, replayed, or restored dataset that exceeds the configured limit.
 For library users, the same guard is available through
 `ConfigurePersistentStoreMaxBytes` and `EstimatePersistentStorageBytes`.
 
+### Per-Peer Replication Lag
+
+Async replication queue status includes `source_sequence`, `last_acknowledged_sequence_by_target`, and `replication_lag_by_target`. The Prometheus endpoint exposes the same data as `hatrie_cache_replication_source_sequence`, `hatrie_cache_replication_target_last_acknowledged_sequence`, and `hatrie_cache_replication_target_lag`, labeled by node and target.
+
 ### Graceful Async Replication Shutdown
 
 `HTTPReplicator.Close()` cancels queued and in-flight asynchronous replication.

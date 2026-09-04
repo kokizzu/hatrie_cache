@@ -920,11 +920,40 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_queue_oldest_age_millis", "Age of the oldest queued async replication job in milliseconds.", node, result.Queue.OldestQueuedAgeMillis)
 			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_in_flight_age_millis", "Age of the current in-flight async replication job in milliseconds.", node, result.Queue.InFlightAgeMillis)
 			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_last_retry_age_millis", "Age of the last async replication retry scheduling event in milliseconds.", node, result.Queue.LastRetryAgeMillis)
+			writePrometheusReplicationLag(&builder, node, *result.Queue)
 		}
 		writePrometheusReplicationCircuitBreakers(&builder, node, result.CircuitBreakers)
 		writePrometheusReplicationMetrics(&builder, node, handler.options.Replicator.MetricsSnapshot())
 	}
 	return builder.String()
+}
+
+func writePrometheusReplicationLag(builder *strings.Builder, node string, queue ReplicationQueueStats) {
+	writePrometheusGauge(builder, "hatrie_cache_replication_source_sequence", "Latest source replication sequence observed by the async replication queue.", node, queue.SourceSequence)
+	targets := make(map[string]struct{}, len(queue.LastAcknowledgedSequenceByTarget)+len(queue.ReplicationLagByTarget))
+	for target := range queue.LastAcknowledgedSequenceByTarget {
+		targets[target] = struct{}{}
+	}
+	for target := range queue.ReplicationLagByTarget {
+		targets[target] = struct{}{}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	ordered := make([]string, 0, len(targets))
+	for target := range targets {
+		ordered = append(ordered, target)
+	}
+	sort.Strings(ordered)
+	writePrometheusHelp(builder, "hatrie_cache_replication_target_last_acknowledged_sequence", "Latest source replication sequence acknowledged by each async replication target.")
+	writePrometheusType(builder, "hatrie_cache_replication_target_last_acknowledged_sequence", "gauge")
+	writePrometheusHelp(builder, "hatrie_cache_replication_target_lag", "Source replication sequences not yet acknowledged by each async replication target.")
+	writePrometheusType(builder, "hatrie_cache_replication_target_lag", "gauge")
+	for _, target := range ordered {
+		label := prometheusLabelValue(target)
+		fmt.Fprintf(builder, "hatrie_cache_replication_target_last_acknowledged_sequence{node=\"%s\",target=\"%s\"} %d\n", node, label, queue.LastAcknowledgedSequenceByTarget[target])
+		fmt.Fprintf(builder, "hatrie_cache_replication_target_lag{node=\"%s\",target=\"%s\"} %d\n", node, label, queue.ReplicationLagByTarget[target])
+	}
 }
 
 func (handler *MonitoringHandler) writePrometheusStorageMetrics(builder *strings.Builder, node string) {
