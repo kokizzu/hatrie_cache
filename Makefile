@@ -4440,3 +4440,19 @@ commit-t155:
 .PHONY: push-t155
 push-t155:
 	bash ./scripts/push-t155.sh
+
+.PHONY: review-t155-checklist
+review-t155-checklist:
+	bash ./scripts/review-t155-checklist.sh
+
+.PHONY: stage-t155-checklist
+stage-t155-checklist:
+	bash ./scripts/stage-t155-checklist.sh
+
+.PHONY: commit-t155-checklist
+commit-t155-checklist:
+	bash ./scripts/commit-t155-checklist.sh
+
+.PHONY: push-t155-checklist
+push-t155-checklist:
+	bash ./scripts/push-t155-checklist.sh
