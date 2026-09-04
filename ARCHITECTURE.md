@@ -23,7 +23,7 @@ import them without starting the cache server:
 | `hatrie_cache/hat/hatTopology` | Cluster topology model, validation, fingerprinting, routing, and atomic JSON persistence | Root aliases its model; `TopologyStore` retains synchronization and its normalized routing fast path |
 | `hatrie_cache/hat/hatMerkle` | Fixed 1,024-bucket mask selection and canonical inventory-mask wire encoding | Replication aliases `BucketMask`; mutable index/table ownership remains root-local |
 | `hatrie_cache/hat/hatBackup` | Backup mode, manifest, file checksum, and partition-coverage model | Root aliases the portable model; creation and staged recovery retain storage ownership |
-| `hatrie_cache/hat/hatDataStructure` | Standalone compact algorithms: Fenwick tree, Quantile Sketch, Roaring Bitmap, Sparse Bitset, HyperLogLog, Bloom Filter, and Cuckoo Filter shape calculation | Root keeps cache storage, generic JSON coercion, replication, and command adapters |
+| `hatrie_cache/hat/hatDataStructure` | Standalone compact algorithms: Fenwick tree, Quantile Sketch, Roaring Bitmap, Sparse Bitset, HyperLogLog, Bloom Filter, Token Bloom Filter, and Cuckoo Filter shape calculation | Root keeps cache storage, generic JSON coercion, replication, and command adapters |
 | `hatrie_cache/hat/hatSql` | SQL request/result wire model, HTTP client, lexer, parser/AST, prepared-query cache, generic read-only executor, resolver and observability contracts, diagnostics, and GO-UDF compiler | Root compatibility aliases preserve existing callers; `HatTrie` source/index resolution and monitoring adapters retain cache ownership |
 
 ## Importing a component

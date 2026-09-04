@@ -1,5 +1,21 @@
 # Benchmark
 
+## Token Bloom Filter
+
+The public token Bloom prefilter uses the existing compact Bloom bitset and
+scans Unicode word tokens without allocating a token slice. Five benchmark
+samples used `-benchtime=250ms` on an AMD Ryzen 9 5950X. The initial column is
+the implementation before the text scanner stopped repeating token validation.
+
+| Operation | Initial median | Final median | Improvement | Final heap / allocs |
+| --- | ---: | ---: | ---: | --- |
+| `ContainsAllTokens`, three tokens | 156.7 ns | 111.8 ns | 1.40x faster | 0 B/op, 0 allocs/op |
+| `ContainsAnyTokens`, two tokens | 94.51 ns | 80.47 ns | 1.17x faster | 0 B/op, 0 allocs/op |
+| `AddText`, five tokens | 277.8 ns | 277.4 ns | neutral | 0 B/op, 0 allocs/op |
+
+The filter is conservative and must be followed by an exact word predicate.
+See [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md).
+
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
 families. It is a benchmarked feature/command coverage report, not a

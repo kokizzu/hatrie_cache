@@ -4020,3 +4020,42 @@ vet-dead-letter-queue:
 .PHONY: benchmark-dead-letter-queue
 benchmark-dead-letter-queue:
 	sh ./scripts/benchmark-dead-letter-queue.sh
+.PHONY: audit-inspiration-unchecked
+audit-inspiration-unchecked:
+	sh ./scripts/audit-inspiration-unchecked.sh
+
+.PHONY: test-token-bloom
+test-token-bloom:
+	sh ./scripts/test-token-bloom.sh
+
+.PHONY: format-token-bloom
+format-token-bloom:
+	sh ./scripts/format-token-bloom.sh
+
+.PHONY: test-token-bloom-api
+test-token-bloom-api:
+	sh ./scripts/test-token-bloom-api.sh
+
+.PHONY: benchmark-token-bloom
+benchmark-token-bloom:
+	sh ./scripts/benchmark-token-bloom.sh
+
+.PHONY: test-race-token-bloom
+test-race-token-bloom:
+	sh ./scripts/test-race-token-bloom.sh
+
+.PHONY: vet-token-bloom
+vet-token-bloom:
+	sh ./scripts/vet-token-bloom.sh
+
+.PHONY: stage-token-bloom
+stage-token-bloom:
+	sh ./scripts/commit-token-bloom.sh stage
+
+.PHONY: commit-token-bloom
+commit-token-bloom:
+	sh ./scripts/commit-token-bloom.sh commit
+
+.PHONY: push-token-bloom
+push-token-bloom:
+	sh ./scripts/commit-token-bloom.sh push

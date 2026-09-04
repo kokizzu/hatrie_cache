@@ -63,7 +63,7 @@ name.
 - [x] C006 Min/max skipping over ordered blocks.
 - [x] C007 Set-style skipping for low-cardinality predicates.
 - [x] C008 Bloom-filter skipping for equality and membership predicates.
-- [ ] C009 Token Bloom filters for word-oriented search.
+- [x] C009 Token Bloom filters for word-oriented search - public allocation-free Unicode token sidecars reuse the compact Bloom snapshot format; [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md).
 - [x] C010 N-gram skipping for substring-oriented search.
 - [x] C011 PREWHERE-style early filtering.
 - [x] C012 Late materialization after filtering.

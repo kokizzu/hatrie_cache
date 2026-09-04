@@ -121,6 +121,7 @@ Output values are respectively `"admin"`, `"verify"`, `"1"`, and JSON
 | Data structure | Commands | Input | Output |
 | --- | --- | --- | --- |
 | Bloom filter | `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF` | Create expected count in `value`; optional false-positive rate in `subkey` or `pairs`; add `value`/`values`. | `HASBF` is `"1"`/`"0"` and may be a false positive; info is JSON. |
+| Token Bloom filter | `NewTokenBloomFilter`, `AddText`, `ContainsAllTokens`, `ContainsAnyTokens` | Import `hatrie_cache` or `hatrie_cache/hat/hatDataStructure`; add Unicode letter/digit text and use it as a conservative word-search prefilter. | Membership may be a false positive; empty `ContainsAllTokens` queries do not prune; snapshot uses the compact Bloom format. |
 | Cuckoo filter | `CREATECF`, `ADDCF`, `HASCF`, `DELCF`, `INFOCF` | Capacity in `value`, optional false-positive rate in `subkey`; add/delete `value`/`values`. | Membership is `"1"`/`"0"`; delete is supported; info is JSON. |
 | XOR filter | `CREATEXF`, `ADDXF`, `BUILDXF`, `HASXF`, `INFOXF` | Optional expected count in create `value`; add values; build before lookup. | Membership is `"1"`/`"0"` and may be a false positive; info reports build state. |
 | Count-Min Sketch | `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS` | Width in `value`, optional depth in `subkey`; increment item in `value`, optional count in `subkey`. | Estimate is a decimal approximate upper bound; info is JSON. |
