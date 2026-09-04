@@ -518,7 +518,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T149 Upgrade compatibility tests.
 - [ ] T150 Language-neutral client SDK coverage.
 - [x] T151 Online backup drill.
-- [ ] T152 Chaos tests for replication and recovery.
+- [x] T152 Chaos tests for replication and recovery.
 - [ ] T153 Load-shedding policy under memory pressure.
 - [x] T154 Automatic slow-command capture.
 - [ ] T155 Per-command allocation budgets.

@@ -4376,3 +4376,31 @@ commit-t154:
 .PHONY: push-t154
 push-t154:
 	bash ./scripts/push-t154.sh
+
+.PHONY: test-t152
+test-t152:
+	bash ./scripts/test-t152.sh
+
+.PHONY: format-t152
+format-t152:
+	bash ./scripts/format-t152.sh
+
+.PHONY: test-race-t152
+test-race-t152:
+	bash ./scripts/test-race-t152.sh
+
+.PHONY: review-t152
+review-t152:
+	bash ./scripts/review-t152.sh
+
+.PHONY: stage-t152
+stage-t152:
+	bash ./scripts/stage-t152.sh
+
+.PHONY: commit-t152
+commit-t152:
+	bash ./scripts/commit-t152.sh
+
+.PHONY: push-t152
+push-t152:
+	bash ./scripts/push-t152.sh
