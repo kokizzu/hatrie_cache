@@ -724,6 +724,42 @@ commit-sql-vectorized:
 push-sql-vectorized:
 	sh ./scripts/commit-sql-vectorized.sh push
 
+verify-inspiration:
+	sh ./scripts/verify-inspiration.sh
+
+test-sql-two-level:
+	sh ./scripts/test-sql-two-level.sh
+
+benchmark-sql-two-level:
+	sh ./scripts/benchmark-sql-two-level.sh
+
+format-sql-two-level:
+	sh ./scripts/format-sql-two-level.sh
+
+test-race-sql-two-level:
+	sh ./scripts/test-race-sql-two-level.sh
+
+vet-sql-two-level:
+	sh ./scripts/vet-sql-two-level.sh
+
+benchmark-sql-two-level-before:
+	sh ./scripts/benchmark-sql-two-level-before.sh
+
+benchmark-sql-two-level-long:
+	BENCHTIME=3s sh ./scripts/benchmark-sql-two-level.sh
+
+benchmark-sql-two-level-before-long:
+	BENCHTIME=3s sh ./scripts/benchmark-sql-two-level-before.sh
+
+stage-sql-two-level:
+	sh ./scripts/commit-sql-two-level.sh stage
+
+commit-sql-two-level:
+	sh ./scripts/commit-sql-two-level.sh commit
+
+push-sql-two-level:
+	sh ./scripts/commit-sql-two-level.sh push
+
 format-sql-hash-aggregate:
 	sh ./scripts/format-sql-hash-aggregate.sh
 

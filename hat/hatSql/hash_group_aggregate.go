@@ -79,6 +79,40 @@ func (aggregate *sqlOrderedAggregate) addValue(value interface{}) error {
 	return nil
 }
 
+func mergeSQLOrderedAggregate(destination *sqlOrderedAggregate, source sqlOrderedAggregate) {
+	if destination == nil || source.name == "" {
+		return
+	}
+	if destination.name == "COUNT" {
+		destination.count += source.count
+		return
+	}
+	if !source.seen {
+		return
+	}
+	if !destination.seen {
+		destination.seen = true
+		destination.sum = source.sum
+		destination.min = source.min
+		destination.max = source.max
+		destination.count = source.count
+		return
+	}
+	destination.count += source.count
+	switch destination.name {
+	case "SUM", "AVG":
+		destination.sum += source.sum
+	case "MIN":
+		if source.min < destination.min {
+			destination.min = source.min
+		}
+	case "MAX":
+		if source.max > destination.max {
+			destination.max = source.max
+		}
+	}
+}
+
 func executeSQLHashGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) error) error, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
 	if control != nil && control.options.MaxGroupBytes > 0 {
 		return SQLQueryResult{}, false, nil

@@ -2,10 +2,13 @@ package hatSql
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
 const sqlColumnarVectorGroupBlockRows = 1024
+const sqlColumnarVectorTwoLevelMinimumRows = 16 * sqlColumnarVectorGroupBlockRows
+const sqlColumnarVectorTwoLevelMaxWorkers = 16
 
 func sqlColumnarVectorGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (string, []sqlOrderedGroupProjection, []string, bool) {
 	if q == nil || outer != nil || q.explain || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.limitBy != nil || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || q.where.window != nil || sqlExprHasAggregate(q.where) || sqlExprHasWindow(q.where) {
@@ -118,69 +121,17 @@ func executeSQLColumnarVectorGroupAggregateBatch(q *sqlQuery, batch ColumnarBatc
 
 	started := time.Now()
 	match := sqlColumnarQueryRowsMatcher(q, batch, functions)
-	states := make([]sqlHashGroupAggregateState, 0)
-	indexes := make(map[string]int)
-	selectionCapacity := sqlColumnarVectorGroupBlockRows
-	if batch.Rows < selectionCapacity {
-		selectionCapacity = batch.Rows
+	twoLevelWorkers := sqlColumnarVectorTwoLevelWorkers(batch.Rows, functions, control, projections)
+	var states []sqlHashGroupAggregateState
+	var matched int
+	var err error
+	if twoLevelWorkers > 1 {
+		states, matched, err = executeSQLColumnarTwoLevelGroupStates(q, batch, projections, groupField, match, control, twoLevelWorkers)
+	} else {
+		states, matched, err = executeSQLColumnarSingleLevelGroupStates(q, batch, projections, groupField, match, control)
 	}
-	selection := make([]int, 0, selectionCapacity)
-	matched := 0
-	for blockStart := 0; blockStart < batch.Rows; blockStart += sqlColumnarVectorGroupBlockRows {
-		blockEnd := blockStart + sqlColumnarVectorGroupBlockRows
-		if blockEnd > batch.Rows {
-			blockEnd = batch.Rows
-		}
-		selection = selection[:0]
-		for rowIndex := blockStart; rowIndex < blockEnd; rowIndex++ {
-			if control != nil {
-				if err := control.check(); err != nil {
-					return SQLQueryResult{}, true, err
-				}
-			}
-			matches, err := match(rowIndex)
-			if err != nil {
-				return SQLQueryResult{}, true, err
-			}
-			if matches {
-				selection = append(selection, rowIndex)
-			}
-		}
-		for _, rowIndex := range selection {
-			groupValue, _ := batch.Value(groupField, rowIndex)
-			key := sqlCollationValueKey(q.groupBy[0].collation, groupValue)
-			stateIndex, exists := indexes[key]
-			if !exists {
-				stateIndex = len(states)
-				indexes[key] = stateIndex
-				state := sqlHashGroupAggregateState{value: groupValue, aggregates: make([]sqlOrderedAggregate, len(projections))}
-				for projectionIndex, projection := range projections {
-					if projection.aggregate != nil {
-						state.aggregates[projectionIndex] = *projection.aggregate
-					}
-				}
-				states = append(states, state)
-			}
-			state := &states[stateIndex]
-			state.rows++
-			if control != nil && control.options.MaxGroupRowsPerKey > 0 && state.rows > control.options.MaxGroupRowsPerKey {
-				return SQLQueryResult{}, true, fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", state.rows, control.options.MaxGroupRowsPerKey)
-			}
-			for projectionIndex, projection := range projections {
-				if projection.aggregate == nil {
-					continue
-				}
-				aggregate := &state.aggregates[projectionIndex]
-				value := interface{}(nil)
-				if aggregate.field.kind != "" {
-					value, _ = batch.Value(aggregate.field.name, rowIndex)
-				}
-				if err := aggregate.addValue(value); err != nil {
-					return SQLQueryResult{}, true, err
-				}
-			}
-			matched++
-		}
+	if err != nil {
+		return SQLQueryResult{}, true, err
 	}
 
 	columns := sqlColumns(q.selects)
@@ -217,11 +168,221 @@ func executeSQLColumnarVectorGroupAggregateBatch(q *sqlQuery, batch ColumnarBatc
 		position++
 	}
 	if metrics != nil {
-		metrics.record("COLUMNAR VECTOR GROUP AGGREGATE", sqlExplainExpressions(q.groupBy), batch.Rows, len(states), started)
+		node := "COLUMNAR VECTOR GROUP AGGREGATE"
+		detail := sqlExplainExpressions(q.groupBy)
+		if twoLevelWorkers > 1 {
+			node = "COLUMNAR TWO-LEVEL GROUP AGGREGATE"
+			detail = fmt.Sprintf("%s workers=%d matched=%d", detail, twoLevelWorkers, matched)
+		}
+		metrics.record(node, detail, batch.Rows, len(states), started)
 		metrics.record("PROJECT", sqlExplainSelects(q.selects), len(states), emitted, started)
 		if q.limit >= 0 || q.offset > 0 {
 			metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), len(states), emitted, started)
 		}
 	}
 	return result, true, nil
+}
+
+func sqlColumnarVectorTwoLevelWorkers(rows int, functions SQLFunctionResolver, control *sqlExecutionControl, projections []sqlOrderedGroupProjection) int {
+	if rows < sqlColumnarVectorTwoLevelMinimumRows || functions != nil || control == nil || control.options.Workers < 2 || !sqlColumnarTwoLevelAggregatesSupported(projections) {
+		return 1
+	}
+	workers := control.options.Workers
+	blocks := (rows + sqlColumnarVectorGroupBlockRows - 1) / sqlColumnarVectorGroupBlockRows
+	if workers > blocks {
+		workers = blocks
+	}
+	if workers > sqlColumnarVectorTwoLevelMaxWorkers {
+		workers = sqlColumnarVectorTwoLevelMaxWorkers
+	}
+	return workers
+}
+
+func sqlColumnarTwoLevelAggregatesSupported(projections []sqlOrderedGroupProjection) bool {
+	aggregateCount := 0
+	for _, projection := range projections {
+		if projection.aggregate == nil {
+			continue
+		}
+		aggregateCount++
+		switch projection.aggregate.name {
+		case "COUNT", "MIN", "MAX":
+		default:
+			return false
+		}
+	}
+	return aggregateCount >= 2
+}
+
+func executeSQLColumnarSingleLevelGroupStates(q *sqlQuery, batch ColumnarBatch, projections []sqlOrderedGroupProjection, groupField string, match func(int) (bool, error), control *sqlExecutionControl) ([]sqlHashGroupAggregateState, int, error) {
+	states := make([]sqlHashGroupAggregateState, 0)
+	indexes := make(map[string]int)
+	selectionCapacity := sqlColumnarVectorGroupBlockRows
+	if batch.Rows < selectionCapacity {
+		selectionCapacity = batch.Rows
+	}
+	selection := make([]int, 0, selectionCapacity)
+	matched := 0
+	for blockStart := 0; blockStart < batch.Rows; blockStart += sqlColumnarVectorGroupBlockRows {
+		blockEnd := blockStart + sqlColumnarVectorGroupBlockRows
+		if blockEnd > batch.Rows {
+			blockEnd = batch.Rows
+		}
+		selection = selection[:0]
+		for rowIndex := blockStart; rowIndex < blockEnd; rowIndex++ {
+			if control != nil {
+				if err := control.check(); err != nil {
+					return nil, matched, err
+				}
+			}
+			matches, err := match(rowIndex)
+			if err != nil {
+				return nil, matched, err
+			}
+			if matches {
+				selection = append(selection, rowIndex)
+			}
+		}
+		for _, rowIndex := range selection {
+			groupValue, _ := batch.Value(groupField, rowIndex)
+			key := sqlCollationValueKey(q.groupBy[0].collation, groupValue)
+			stateIndex, exists := indexes[key]
+			if !exists {
+				stateIndex = len(states)
+				indexes[key] = stateIndex
+				state := sqlHashGroupAggregateState{value: groupValue, aggregates: make([]sqlOrderedAggregate, len(projections))}
+				for projectionIndex, projection := range projections {
+					if projection.aggregate != nil {
+						state.aggregates[projectionIndex] = *projection.aggregate
+					}
+				}
+				states = append(states, state)
+			}
+			state := &states[stateIndex]
+			state.rows++
+			if control != nil && control.options.MaxGroupRowsPerKey > 0 && state.rows > control.options.MaxGroupRowsPerKey {
+				return nil, matched, fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", state.rows, control.options.MaxGroupRowsPerKey)
+			}
+			for projectionIndex, projection := range projections {
+				if projection.aggregate == nil {
+					continue
+				}
+				aggregate := &state.aggregates[projectionIndex]
+				value := interface{}(nil)
+				if aggregate.field.kind != "" {
+					value, _ = batch.Value(aggregate.field.name, rowIndex)
+				}
+				if err := aggregate.addValue(value); err != nil {
+					return nil, matched, err
+				}
+			}
+			matched++
+		}
+	}
+	return states, matched, nil
+}
+
+type sqlColumnarTwoLevelWorkerState struct {
+	states  []sqlHashGroupAggregateState
+	keys    []string
+	indexes map[string]int
+	matched int
+	err     error
+}
+
+func executeSQLColumnarTwoLevelGroupStates(q *sqlQuery, batch ColumnarBatch, projections []sqlOrderedGroupProjection, groupField string, match func(int) (bool, error), control *sqlExecutionControl, workers int) ([]sqlHashGroupAggregateState, int, error) {
+	local := make([]sqlColumnarTwoLevelWorkerState, workers)
+	var wait sync.WaitGroup
+	wait.Add(workers)
+	for workerIndex := 0; workerIndex < workers; workerIndex++ {
+		start := batch.Rows * workerIndex / workers
+		end := batch.Rows * (workerIndex + 1) / workers
+		go func(index, start, end int) {
+			defer wait.Done()
+			worker := &local[index]
+			worker.indexes = make(map[string]int)
+			for rowIndex := start; rowIndex < end; rowIndex++ {
+				if control != nil {
+					if err := control.check(); err != nil {
+						worker.err = err
+						return
+					}
+				}
+				matches, err := match(rowIndex)
+				if err != nil {
+					worker.err = err
+					return
+				}
+				if !matches {
+					continue
+				}
+				groupValue, _ := batch.Value(groupField, rowIndex)
+				key := sqlCollationValueKey(q.groupBy[0].collation, groupValue)
+				stateIndex, exists := worker.indexes[key]
+				if !exists {
+					stateIndex = len(worker.states)
+					worker.indexes[key] = stateIndex
+					state := sqlHashGroupAggregateState{value: groupValue, aggregates: make([]sqlOrderedAggregate, len(projections))}
+					for projectionIndex, projection := range projections {
+						if projection.aggregate != nil {
+							state.aggregates[projectionIndex] = *projection.aggregate
+						}
+					}
+					worker.states = append(worker.states, state)
+					worker.keys = append(worker.keys, key)
+				}
+				state := &worker.states[stateIndex]
+				state.rows++
+				for projectionIndex, projection := range projections {
+					if projection.aggregate == nil {
+						continue
+					}
+					aggregate := &state.aggregates[projectionIndex]
+					value := interface{}(nil)
+					if aggregate.field.kind != "" {
+						value, _ = batch.Value(aggregate.field.name, rowIndex)
+					}
+					if err := aggregate.addValue(value); err != nil {
+						worker.err = err
+						return
+					}
+				}
+				worker.matched++
+			}
+		}(workerIndex, start, end)
+	}
+	wait.Wait()
+
+	states := make([]sqlHashGroupAggregateState, 0)
+	indexes := make(map[string]int)
+	matched := 0
+	for workerIndex := range local {
+		worker := &local[workerIndex]
+		if worker.err != nil {
+			return nil, matched, worker.err
+		}
+		matched += worker.matched
+		for stateIndex, state := range worker.states {
+			key := worker.keys[stateIndex]
+			globalIndex, exists := indexes[key]
+			if !exists {
+				indexes[key] = len(states)
+				states = append(states, state)
+				continue
+			}
+			merged := &states[globalIndex]
+			merged.rows += state.rows
+			for projectionIndex := range merged.aggregates {
+				mergeSQLOrderedAggregate(&merged.aggregates[projectionIndex], state.aggregates[projectionIndex])
+			}
+		}
+	}
+	if control != nil && control.options.MaxGroupRowsPerKey > 0 {
+		for _, state := range states {
+			if state.rows > control.options.MaxGroupRowsPerKey {
+				return nil, matched, fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", state.rows, control.options.MaxGroupRowsPerKey)
+			}
+		}
+	}
+	return states, matched, nil
 }

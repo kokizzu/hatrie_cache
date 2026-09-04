@@ -1,0 +1,542 @@
+# Product Inspiration Checklist
+
+This is a working inventory of ideas that may be useful to `hatrie_cache` after
+comparing its current behavior with ClickHouse, Materialize, and Tarantool. It
+is intentionally broad: an unchecked item is a research candidate, not a
+promise to implement it.
+
+## How To Read This
+
+- `[x]` means the repository already has the capability, or a compatible local
+  equivalent, and the adoption matrix is the source of detail.
+- `[ ]` means it has not been adopted or has not yet been verified.
+- `[-]` means it is deliberately deferred because its semantics or operational
+  cost do not fit the current product.
+- Every implementation must have a focused regression test before the change,
+  a focused test after the change, a broader verification run, and a benchmark
+  when performance is the reason for adopting it.
+- Existing coverage is summarized in
+  [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md). This file is
+  the larger research backlog; it is not a second implementation matrix.
+
+## First Implemented Item
+
+`C073` was the first item selected for implementation in this goal:
+
+- ClickHouse-style two-level aggregation for high-cardinality columnar GROUP BY
+  queries when the caller explicitly enables more than one worker;
+- each worker builds a local aggregate state, then states are merged in first
+  input order so existing deterministic output remains intact;
+- the default sequential path remains unchanged when `Workers` is zero or one;
+- group limits, NULL handling, numeric aggregate semantics, cancellation, and
+  output byte limits must be preserved;
+- CPU time, allocations, retained memory, and result ordering must be measured
+  against the existing one-map path; the change is reverted if it regresses the
+  intended high-cardinality workload without an acceptable reason.
+
+The inspiration is ClickHouse query-result caching and its broader separation of
+query planning, execution, and reusable read state. The implementation will use
+the repository's existing version and snapshot contracts rather than weakening
+them. Relevant official material:
+
+- [ClickHouse query optimization guide](https://clickhouse.com/resources/engineering/clickhouse-query-optimisation-definitive-guide)
+- [ClickHouse vectorized query execution](https://clickhouse.com/resources/engineering/vectorized-query-execution)
+- [Materialize arrangements](https://materialize.com/docs/get-started/arrangements/)
+- [Materialize EXPLAIN plans](https://materialize.com/docs/sql/explain-plan/)
+- [Tarantool indexes](https://www.tarantool.io/en/doc/latest/platform/ddl_dml/indexes/)
+- [Tarantool replication information](https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_info/replication/)
+
+## ClickHouse Ideas
+
+The ClickHouse list is grouped by storage, execution, indexing, ingestion,
+operations, and distributed behavior. The checklist is deliberately specific so
+future work can be measured as a concrete behavior rather than as a product
+name.
+
+### Storage And Layout
+
+- [x] C001 Column-oriented storage for analytical values - local columnar tables cover the compatible case.
+- [x] C002 Read only referenced columns - SQL projection pruning is present.
+- [x] C003 Granule-sized reads - columnar blocks provide the current scan unit.
+- [ ] C004 Primary ordering chosen from common predicates - assess automatic order advice.
+- [ ] C005 Sparse primary-key index with mark pruning.
+- [x] C006 Min/max skipping over ordered blocks.
+- [x] C007 Set-style skipping for low-cardinality predicates.
+- [x] C008 Bloom-filter skipping for equality and membership predicates.
+- [ ] C009 Token Bloom filters for word-oriented search.
+- [x] C010 N-gram skipping for substring-oriented search.
+- [x] C011 PREWHERE-style early filtering.
+- [x] C012 Late materialization after filtering.
+- [x] C013 Vectorized block execution.
+- [x] C014 Selection vectors for filtered blocks.
+- [ ] C015 SIMD kernels for common numeric and string predicates.
+- [ ] C016 Pipeline stages with independently scheduled work.
+- [ ] C017 EXPLAIN PIPELINE output with stage and worker detail.
+- [x] C018 EXPLAIN output for the local SQL plan.
+- [x] C019 Version-aware bounded query-result cache - the generic epoch-validated `ResultCache` already exists; automatic SQL wiring remains a separate question.
+- [x] C020 Query-condition cache for reusable predicate state.
+- [x] C021 Explicit projections for reusable sorted or aggregated data.
+- [x] C022 Automatic selection of compatible projections.
+- [x] C023 Materialized projection maintenance.
+- [ ] C024 Refreshable materialized views with an explicit refresh policy.
+- [x] C025 Projection consistency checks against source versions.
+- [x] C026 Independent persistent data parts through the Pebble-backed path.
+- [x] C027 Part metadata and checksums.
+- [x] C028 Background merge and compaction.
+- [ ] C029 Vertical merge that reads only changed columns.
+- [ ] C030 Compact-part format selected by row count and width.
+- [ ] C031 ReplacingMergeTree-style latest-row replacement.
+- [ ] C032 CollapsingMergeTree-style sign-based row cancellation.
+- [ ] C033 SummingMergeTree-style merge-time summation.
+- [x] C034 Aggregating states for reusable grouped results.
+- [x] C035 Lightweight delete patch parts.
+- [ ] C036 Durable mutation queue with observable progress.
+- [x] C037 TTL expiration for supported values and records.
+- [ ] C038 TTL-driven rollup or recompression.
+- [x] C039 Partition pruning for local partitions.
+- [ ] C040 Sampling key with deterministic SAMPLE semantics across partitions.
+- [ ] C041 Multiple disk policies with placement rules.
+- [ ] C042 Hot, warm, and cold storage tiers.
+- [ ] C043 Remote object-store parts with local metadata.
+- [ ] C044 Zero-copy replication of immutable parts.
+- [ ] C045 Part-level cache admission and eviction policy.
+- [ ] C046 Read amplification accounting per part and column.
+- [ ] C047 Adaptive granule sizing from observed predicate selectivity.
+- [ ] C048 Compact numeric encodings selected from data statistics.
+- [x] C049 Low-cardinality dictionary encoding for typed string values.
+- [ ] C050 Shared JSON subcolumns for repeated paths.
+- [x] C051 JSON path indexing for supported predicates.
+- [ ] C052 Native array and nested-column physical layout.
+- [ ] C053 Bitmap-backed nullable columns.
+- [ ] C054 Fixed-width date and datetime encodings.
+- [ ] C055 Delta encoding for monotonically changing numeric columns.
+- [ ] C056 Double-delta encoding for timestamps.
+- [ ] C057 Gorilla-style floating-point encoding.
+- [x] C058 Configurable storage compression codecs.
+- [ ] C059 Codec selection from sampled column entropy.
+- [ ] C060 Compression ratio and decompression CPU accounting.
+
+### Query Execution And SQL
+
+- [x] C061 Parse, analyze, optimize, execute, and format as distinct phases.
+- [x] C062 Predicate pushdown into source scans.
+- [x] C063 Projection pruning through joins and aggregates.
+- [x] C064 Constant and literal normalization for reusable plans.
+- [ ] C065 Constant folding across all scalar expressions.
+- [ ] C066 Predicate reordering by estimated cost and selectivity.
+- [ ] C067 Common-subexpression elimination.
+- [ ] C068 Short-circuit evaluation for expensive predicates.
+- [x] C069 Expression indexes for supported scalar expressions.
+- [x] C070 Dynamic JSON skip metadata.
+- [x] C071 Hash aggregation.
+- [x] C072 Compact hash aggregation for small grouped states.
+- [x] C073 Two-level aggregation for high-cardinality grouped states - adopted explicitly for columnar inputs with `Workers >= 2`, at least two merge-safe `COUNT`/`MIN`/`MAX` states, and a 16,384-row threshold; benchmark and fallback rationale are in [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md).
+- [x] C074 External aggregation with a memory budget and spill path.
+- [x] C075 Ordered aggregation when input ordering makes it cheaper.
+- [x] C076 Approximate sketches for supported distinct and quantile queries.
+- [ ] C077 Aggregate combinators for reusable state, merge, and finalize phases.
+- [x] C078 Top-K aggregation.
+- [x] C079 Dynamic Top-N skipping.
+- [x] C080 LIMIT BY per-group limiting.
+- [ ] C081 WITH FILL and gap filling for ordered time series.
+- [x] C082 Window functions for the supported SQL subset.
+- [ ] C083 ArrayJoin-style row expansion.
+- [ ] C084 Array and map aggregate functions.
+- [x] C085 Hash joins.
+- [x] C086 Grace-hash or spillable joins.
+- [x] C087 Runtime Bloom filters for joins.
+- [ ] C088 Partial-merge joins for sorted sources.
+- [x] C089 Direct lookup joins through indexed sources.
+- [x] C090 Join reordering for compatible query shapes.
+- [ ] C091 Distributed joins with explicit data movement accounting.
+- [x] C092 Semi-join and anti-join execution where supported.
+- [ ] C093 Distributed partial aggregation followed by merge.
+- [x] C094 External sorting with bounded memory.
+- [x] C095 Sort and spill safety limits.
+- [x] C096 LIMIT and Top-N early termination.
+- [x] C097 Query cancellation through context propagation.
+- [x] C098 Query memory budgets and allocation reporting.
+- [x] C099 Query timeout and deadline enforcement.
+- [ ] C100 Query quotas by user, tenant, or source.
+- [ ] C101 Query result cache with explicit freshness and invalidation policy.
+- [ ] C102 Prepared-plan cache keyed by normalized SQL and schema version.
+- [ ] C103 Plan invalidation when an index or projection changes.
+- [ ] C104 Query result reuse across equivalent parameter bindings.
+- [ ] C105 Query fingerprinting independent of literal values.
+- [ ] C106 Workload classes with separate concurrency and memory budgets.
+- [ ] C107 Admission control before expensive scans.
+- [ ] C108 Kill-query command with an operator-visible reason.
+- [ ] C109 Per-operator CPU and row counters.
+- [ ] C110 Query pipeline trace export.
+
+### Ingestion, Formats, And Operations
+
+- [x] C111 Asynchronous inserts with bounded queues.
+- [x] C112 Wait-for-async-insert acknowledgement mode.
+- [x] C113 Idempotent insert deduplication.
+- [x] C114 Adaptive async-insert batching.
+- [ ] C115 Parallel input parsing with deterministic error reporting.
+- [x] C116 Binary wire format negotiation.
+- [ ] C117 RowBinary-compatible encoding.
+- [x] C118 JSON row encoding for compatibility paths.
+- [x] C119 Arrow-compatible column transfer.
+- [ ] C120 Parquet import and export.
+- [ ] C121 Native compressed block transfer with independent blocks.
+- [x] C122 Configurable wire compression.
+- [ ] C123 Compression level negotiation per client.
+- [ ] C124 Column statistics in wire metadata.
+- [ ] C125 Dictionary transfer reuse across batches.
+- [x] C126 Backup snapshots with checksums.
+- [x] C127 Incremental journal-backed backup.
+- [ ] C128 Object-store backup targets.
+- [x] C129 Restore verification for supported data types.
+- [x] C130 Recovery checkpoints and replay validation.
+- [x] C131 Metrics and health endpoints are opt-in.
+- [ ] C132 System tables for parts, mutations, and query history.
+- [ ] C133 Query log retention and sampling policy.
+- [ ] C134 OpenTelemetry spans for query phases.
+- [ ] C135 Trace IDs carried through remote work.
+- [ ] C136 Per-tenant resource quotas.
+- [x] C137 TLS, authentication, and authorization controls.
+- [x] C138 Operational config validation with sane defaults.
+- [x] C139 Regression and compatibility test matrix.
+- [x] C140 Benchmark reports with raw results and memory measurements.
+
+### Distributed And Replicated Behavior
+
+- [ ] C141 Distributed table abstraction over partitions.
+- [ ] C142 Automatic shard pruning from partition predicates.
+- [ ] C143 Parallel replicas for one query.
+- [ ] C144 Hedged reads for slow replicas.
+- [ ] C145 Remote read retries with bounded duplicate work.
+- [ ] C146 Distributed partial aggregation and final merge.
+- [ ] C147 Quorum inserts with explicit durability policy.
+- [ ] C148 Replicated part exchange with checksums.
+- [ ] C149 Replication queue introspection.
+- [ ] C150 Replica lag thresholds for read routing.
+- [ ] C151 Read-after-write consistency levels.
+- [ ] C152 Leader election independent from query workers.
+- [ ] C153 Metadata consensus for partition ownership.
+- [ ] C154 Rolling schema changes across replicas.
+- [ ] C155 Rolling binary upgrades with compatibility gates.
+- [ ] C156 Cross-region replication policy.
+- [ ] C157 Cross-region backup restore drill.
+- [ ] C158 Split-brain fencing.
+- [ ] C159 Failure-domain-aware replica placement.
+- [ ] C160 Query routing by region and locality.
+
+## Materialize Ideas
+
+Materialize contributes ideas about incremental dataflow, arrangements, logical
+time, and self-correcting results. Items marked adopted refer to local behavior
+with equivalent safety properties; they do not claim implementation parity with
+Materialize's Timely/Differential Dataflow runtime.
+
+### Dataflow, Arrangements, And Incremental Results
+
+- [x] M001 Incremental data-parallel dataflow for supported table paths.
+- [ ] M002 Generic `(data,time,diff)` multiset representation.
+- [ ] M003 Timely-style nested worker scopes.
+- [x] M004 Data-parallel map, filter, project, and reduce stages where supported.
+- [x] M005 Shared arrangements reused by multiple compatible queries.
+- [x] M006 Arrangement keys derived from indexed predicates.
+- [x] M007 Arrangement reuse across subscriptions and point reads.
+- [x] M008 Arrangement compaction for old versions.
+- [ ] M009 Consolidation of equal data and opposite diffs.
+- [x] M010 Reduce/group arrangements for typed tables.
+- [x] M011 Join arrangements for typed indexed tables.
+- [x] M012 Distinct arrangements for typed sources.
+- [x] M013 Top-K arrangements for ordered subscriptions.
+- [ ] M014 Lookup arrangements for external or remote sources.
+- [ ] M015 Delta joins that avoid repeated large-side scans.
+- [ ] M016 Linear joins with explicit maintained indexes.
+- [ ] M017 Semijoin reduction before maintaining a join.
+- [ ] M018 Monotonicity analysis for cheaper maintenance.
+- [x] M019 Key derivation for supported SQL predicates.
+- [x] M020 Key-aware planning and index selection.
+- [x] M021 Explicit logical timestamps in snapshots and subscriptions.
+- [x] M022 AS OF-style historical reads where the source supports them.
+- [x] M023 UP TO-style bounded subscription reads.
+- [x] M024 Since/read frontier tracking.
+- [x] M025 Upper/write frontier tracking.
+- [x] M026 Write progress tracking.
+- [x] M027 Read progress tracking.
+- [x] M028 Progress messages for streaming consumers.
+- [x] M029 SUBSCRIBE-style streaming results.
+- [x] M030 Snapshot-then-tail subscription startup.
+- [x] M031 Transaction-consistent snapshots.
+- [ ] M032 Strong consistency across all independent source partitions.
+- [ ] M033 Timestamp oracle for globally ordered writes.
+- [ ] M034 Epoch management for restarts and leases.
+- [x] M035 Self-correcting materialized results for typed arrangements.
+- [x] M036 Retractions and insertions on typed updates.
+- [ ] M037 Generic negative-diff support for every SQL operator.
+- [ ] M038 Generic multiset duplicate preservation across all operators.
+- [x] M039 Compaction constrained by active read frontiers.
+- [ ] M040 Append-only fast path selected from source metadata.
+- [ ] M041 Upsert-source semantics with key replacement.
+- [ ] M042 CDC envelope normalization.
+- [ ] M043 Kafka-style source offset tracking.
+- [ ] M044 Source transaction grouping.
+- [ ] M045 Exactly-once source ingestion.
+- [ ] M046 Sink progress and acknowledged frontiers.
+- [ ] M047 Exactly-once sink commits.
+- [x] M048 Backpressure for asynchronous producers and subscribers.
+- [x] M049 Operator cancellation through context propagation.
+- [ ] M050 Timely-style worker parallelism with deterministic merge.
+- [ ] M051 Compiled dataflow intermediate representation.
+- [ ] M052 Lowering SQL plans into reusable dataflow fragments.
+- [ ] M053 Extensible optimizer rule framework.
+- [x] M054 Predicate pushdown before arrangement maintenance.
+- [x] M055 Projection pruning before arrangement maintenance.
+- [x] M056 Join order selection for supported query shapes.
+- [x] M057 Filter-before-arrange planning.
+- [x] M058 Arrangement sharing.
+- [x] M059 Index selection from predicate shape.
+- [x] M060 View dependency graph and invalidation.
+- [x] M061 Incremental view maintenance for supported typed views.
+- [x] M062 Materialized view refresh and hydration state.
+- [x] M063 Non-materialized SQL views.
+- [ ] M064 Recursive dataflow maintenance.
+- [ ] M065 Incremental window-function maintenance.
+- [ ] M066 Incremental sort maintenance.
+- [x] M067 Top-K with offset for supported ordered paths.
+- [ ] M068 Differential group-by updates for generic SQL tables.
+- [ ] M069 Differential distinct updates for generic SQL tables.
+- [ ] M070 Monotone aggregate specialization.
+- [ ] M071 Late-data handling policy.
+- [ ] M072 Watermark propagation.
+- [ ] M073 Temporal joins.
+- [ ] M074 Interval joins.
+- [x] M075 Temporal filtering for supported typed paths.
+
+### Planning, Explainability, And Operations
+
+- [x] M076 Explain plan output.
+- [ ] M077 Explain arrangement ownership and reuse.
+- [ ] M078 Explain the full dataflow graph.
+- [x] M079 Explain keys and index characteristics.
+- [ ] M080 Explain optimizer notices and rejected alternatives.
+- [x] M081 Arrangement and source metrics for existing structures.
+- [x] M082 Operator-level row and latency metrics where instrumented.
+- [ ] M083 Per-source lag and frontier metrics.
+- [ ] M084 Per-operator retained-memory metrics.
+- [ ] M085 Per-collection size and compaction metrics.
+- [x] M086 Replica isolation for independent workloads.
+- [ ] M087 Deterministic replica replay checks.
+- [ ] M088 Read replicas with explicit staleness bounds.
+- [x] M089 Failover and recovery of supported replicas.
+- [ ] M090 Independent compute and storage scaling.
+- [x] M091 Durable persistent shards through the local storage layer.
+- [x] M092 Batched writes to durable storage.
+- [ ] M093 Generic persistent-shard compaction scheduling.
+- [ ] M094 Persistent-shard leases and fencing.
+- [x] M095 Snapshot hydration with progress reporting.
+- [ ] M096 Per-column dictionary compression for arrangements.
+- [ ] M097 Compressed arrangement batches.
+- [x] M098 Schema evolution with compatibility checks.
+- [x] M099 Zero-downtime migration and recovery documentation.
+- [x] M100 Backup and restore verification.
+- [x] M101 Audit and security controls.
+- [x] M102 Role-based access control.
+- [x] M103 Query timeout and cancellation.
+- [x] M104 Retry-safe idempotent writes.
+- [x] M105 Workload isolation and bounded queues.
+
+## Tarantool Ideas
+
+Tarantool contributes compact tuple/index layouts, operational replication
+signals, transactional APIs, and simple queue primitives. The sharding items
+remain unchecked or deferred because the current product direction favors
+explicit regional partitioning and simple backups over automatic sharding.
+
+### Tuples, Spaces, And Indexes
+
+- [x] T001 Compact in-memory tuple representation for hot records.
+- [x] T002 LSM-backed durable storage through the Pebble path.
+- [x] T003 Space-like named collections.
+- [x] T004 Typed tuple or row representation.
+- [x] T005 Primary-key index.
+- [x] T006 Ordered TREE index behavior.
+- [x] T007 HASH index behavior.
+- [ ] T008 RTREE spatial index.
+- [x] T009 Bitset and bitmap structures.
+- [x] T010 Functional indexes for supported expressions.
+- [ ] T011 Multikey indexes over array fields.
+- [x] T012 Partial equality indexes.
+- [x] T013 Covering indexes and borrowed postings.
+- [x] T014 Equality index iterators.
+- [x] T015 Ordered range iterators.
+- [x] T016 Partial-key search.
+- [x] T017 Explicit NULL index semantics.
+- [x] T018 Collation-aware string ordering.
+- [x] T019 Unique constraints and duplicate-key errors.
+- [ ] T020 Online secondary-index build.
+- [ ] T021 Online index alteration with progress.
+- [ ] T022 Index statistics for selectivity estimates.
+- [ ] T023 Persistent statistics refreshed from observed workloads.
+- [ ] T024 Automatic covering-index recommendation.
+- [ ] T025 Index build cancellation and resume.
+- [ ] T026 Index consistency checker independent of normal reads.
+
+### Transactions, WAL, Backup, And Recovery
+
+- [x] T027 Consistent read views.
+- [ ] T028 Public multi-operation transaction API.
+- [ ] T029 Atomic callback or box.atomic-style mutation.
+- [ ] T030 Configurable transaction isolation levels.
+- [ ] T031 Savepoints and partial rollback.
+- [x] T032 MVCC-style versioned reads for supported paths.
+- [x] T033 Write-ahead journal.
+- [x] T034 Durable snapshots.
+- [x] T035 Checkpoints.
+- [x] T036 Hot backup while serving reads and writes.
+- [x] T037 Incremental WAL/journal backup.
+- [x] T038 Backup checksums and manifest validation.
+- [x] T039 Restore validation across all supported data types.
+- [ ] T040 Configurable WAL retention policy with disk budget.
+- [ ] T041 WAL segment compression and independent verification.
+- [ ] T042 Recovery-time parallel replay.
+- [ ] T043 Recovery replay progress and ETA metrics.
+- [ ] T044 Recovery point selection by logical sequence.
+- [ ] T045 Crash-consistency fault injection.
+- [ ] T046 Online backup cancellation with resumable manifests.
+
+### Replication And Topology
+
+- [ ] T047 Synchronous replication with an explicit quorum.
+- [x] T048 Replication sets and peer topology.
+- [ ] T049 Vector-clock exposure for every replica.
+- [x] T050 LSN or journal sequence exposure.
+- [ ] T051 Per-peer replication lag measurement.
+- [x] T052 Relay reconnect and retry.
+- [x] T053 Bootstrap a node from a peer.
+- [ ] T054 Orphan replica detection and cleanup.
+- [x] T055 Idempotent journal replay.
+- [ ] T056 Deterministic conflict resolution for concurrent writers.
+- [x] T057 Election and failover behavior for supported topologies.
+- [ ] T058 Quorum reads and writes.
+- [x] T059 Read-only mode during failover.
+- [ ] T060 Replica health gate before serving stale-sensitive reads.
+- [ ] T061 Replication queue depth and error metrics.
+- [ ] T062 Replication bandwidth and compression metrics.
+- [ ] T063 Replication pause and resume controls.
+- [ ] T064 Rolling replica replacement.
+- [ ] T065 Failure-domain-aware replica placement.
+- [ ] T066 Cross-region replication with explicit RPO/RTO.
+- [ ] T067 Split-brain fencing token.
+- [ ] T068 Schema-change replication compatibility checks.
+- [ ] T069 Recovery rehearsal that compares checksums after replay.
+
+### Partitioning And Sharding
+
+- [-] T070 Automatic vshard-style routers - deferred in favor of explicit regional partitioning.
+- [-] T071 Storage replica sets behind stateless routers - deferred with automatic sharding.
+- [-] T072 Virtual buckets - deferred until backup and movement semantics are specified.
+- [-] T073 Automatic bucket rebalancing - deferred until operator controls are complete.
+- [-] T074 Router failover and discovery - deferred with automatic sharding.
+- [-] T075 Online partition migration - proposal required before implementation.
+- [ ] T076 Explicit region partition routing.
+- [ ] T077 Region-local backup and restore.
+- [ ] T078 Cross-region read policy.
+- [ ] T079 Partition ownership and fencing metadata.
+- [ ] T080 Partition split and merge tooling.
+- [ ] T081 Partition-local query planning.
+- [ ] T082 Partition pruning from region predicates.
+- [ ] T083 Cross-partition aggregate merge.
+- [ ] T084 Cross-partition ordered pagination.
+- [ ] T085 Partition health and lag dashboard.
+
+### Queues, Calls, And Runtime
+
+- [x] T086 Queue spaces for FIFO workloads.
+- [x] T087 FIFO queue operations.
+- [x] T088 Priority queue operations.
+- [ ] T089 Delay queue operations.
+- [x] T090 TTL queue expiration.
+- [x] T091 Scheduled refresh and maintenance tasks.
+- [ ] T092 Fiber-style cooperative scheduler.
+- [x] T093 Cooperative yielding in bounded worker loops.
+- [ ] T094 Channels for typed producer-consumer exchange.
+- [x] T095 Net.box-like binary client path.
+- [x] T096 IProto-like compact protocol path.
+- [x] T097 Prepared calls and prepared SQL statements.
+- [x] T098 Batched requests.
+- [x] T099 Request pipelining.
+- [x] T100 Streaming query results.
+- [x] T101 Response backpressure.
+- [x] T102 Stored functions/UDFs for supported languages.
+- [ ] T103 Native FFI extension boundary.
+- [x] T104 Sandboxed UDF execution.
+- [ ] T105 Hot module loading with version checks.
+- [x] T106 Triggers and update hooks for supported collections.
+- [x] T107 Replace hooks for journal and projection maintenance.
+- [ ] T108 Transactional trigger ordering guarantees.
+- [x] T109 Runtime configuration with validation.
+- [x] T110 Memory quotas and admission limits.
+- [ ] T111 Separate cache sizing from durable-storage sizing.
+- [ ] T112 Per-queue memory and latency metrics.
+- [ ] T113 Dead-letter queue with replay controls.
+- [ ] T114 Work stealing for independent queue workers.
+- [ ] T115 Cancellation-safe task ownership.
+
+### SQL, Security, And Operations
+
+- [x] T116 SQL over named collections.
+- [x] T117 Explain query plan output.
+- [x] T118 Parameter binding.
+- [x] T119 SQL views.
+- [ ] T120 SQL triggers with transaction semantics.
+- [ ] T121 Public SQL transaction commands.
+- [x] T122 UPSERT behavior.
+- [x] T123 REPLACE behavior.
+- [x] T124 DELETE behavior.
+- [x] T125 UPDATE behavior.
+- [ ] T126 RETURNING clauses.
+- [ ] T127 ON CONFLICT clauses.
+- [ ] T128 MERGE statements.
+- [x] T129 Common table expressions.
+- [ ] T130 Generated columns.
+- [x] T131 Typed constraints.
+- [ ] T132 Foreign-key enforcement.
+- [x] T133 JSON path access.
+- [ ] T134 Spatial predicates.
+- [x] T135 Replication and memory introspection.
+- [ ] T136 Fiber and scheduler introspection.
+- [x] T137 Health checks.
+- [x] T138 Topology introspection.
+- [x] T139 Hot-reloadable safe configuration.
+- [x] T140 Rolling restart procedures.
+- [x] T141 TLS and authentication.
+- [x] T142 Authorization and audit logging.
+- [x] T143 Rate limiting.
+- [x] T144 Resource isolation.
+- [ ] T145 Admin console with read-only diagnostics.
+- [ ] T146 Operator command idempotency keys.
+- [ ] T147 Structured error codes for automation.
+- [ ] T148 CLI output formats for scripts and humans.
+- [x] T149 Upgrade compatibility tests.
+- [ ] T150 Language-neutral client SDK coverage.
+- [x] T151 Online backup drill.
+- [ ] T152 Chaos tests for replication and recovery.
+- [ ] T153 Load-shedding policy under memory pressure.
+- [ ] T154 Automatic slow-command capture.
+- [ ] T155 Per-command allocation budgets.
+
+## Adoption Workflow
+
+For each future unchecked item:
+
+1. Verify that the capability is not already present under another local name.
+2. Record the workload, correctness contract, expected win, and operational
+   cost before coding.
+3. Add a focused failing test and run it through the repository Makefile.
+4. Implement the smallest compatible version with the default behavior unchanged
+   unless the measured result justifies a default change.
+5. Run focused tests, race tests where relevant, the full test suite, and a
+   repeatable benchmark with CPU, allocations, retained memory, and bandwidth.
+6. Keep the change only when correctness holds and the measured tradeoff is
+   acceptable; otherwise revert the feature and retain the regression test or
+   benchmark note as appropriate.
+7. Update this checklist and `ADOPTED_QUERY_ENGINE_IDEAS.md`, then commit and
+   push the completed feature as its own change.

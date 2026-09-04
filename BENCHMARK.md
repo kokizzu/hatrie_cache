@@ -15252,3 +15252,37 @@ It has no storage or wire-format cost. The path is automatic only for its
 proved shape; ordered or otherwise richer queries and active group-memory
 budgets retain the established executor. See
 [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md).
+
+## SQL Two-Level Columnar Aggregation
+
+Commands: `make benchmark-sql-two-level-before-long` and
+`make benchmark-sql-two-level-long`.
+
+This benchmark compares the committed pre-feature columnar grouped executor
+with the new explicit `Workers: 2` path. The query is a 32K-row single-source
+columnar `GROUP BY` with `COUNT(*)`, `MIN(value)`, and `MAX(value)`. The first
+fixture has 257 repeated groups; the second has 32K unique groups. Runs use
+`-benchmem` and `-benchtime=3s` on Linux with an AMD Ryzen 9 5950X.
+
+Raw output:
+
+```text
+before 257 groups single-level:  7955672 ns/op  1112618 B/op  36684 allocs/op
+before 257 groups Workers:2:     7977947 ns/op  1112638 B/op  36684 allocs/op
+after 257 groups single-level:   8358377 ns/op  1112626 B/op  36684 allocs/op
+after 257 groups Workers:2:      6036075 ns/op  1571464 B/op  37013 allocs/op
+before 32K groups single-level: 138002324 ns/op 77736813 B/op 524566 allocs/op
+before 32K groups Workers:2:    128673896 ns/op 77737372 B/op 524565 allocs/op
+after 32K groups single-level:  132753287 ns/op 77736755 B/op 524566 allocs/op
+after 32K groups Workers:2:     136583958 ns/op 91565670 B/op 524946 allocs/op
+```
+
+| Workload | Pre-feature control | Two-level path | Result |
+| --- | ---: | ---: | --- |
+| 32K rows, 257 groups | 7.978 ms; 1,112,638 B; 36,684 allocs | 6.036 ms; 1,571,464 B; 37,013 allocs | 1.32x faster; 1.41x allocation volume; 1.01x allocations |
+| 32K rows, 32K groups | 128.674 ms; 77,737,372 B; 524,565 allocs | 136.584 ms; 91,565,670 B; 524,946 allocs | 0.94x speed; 1.18x allocation volume; 1.00x allocations |
+
+The feature is opt-in through `SQLQueryOptions.Workers`; `Workers: 0/1`, small
+inputs, custom functions, and `SUM`/`AVG` retain the established path. See
+[SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md) for the correctness
+boundary and rollback rationale.
