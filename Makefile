@@ -694,6 +694,34 @@ test-sql-plan-guards:
 test-sql-limit-by:
 	sh ./scripts/test-sql-limit-by.sh
 
+test-sql-hash-aggregate:
+	sh ./scripts/test-sql-hash-aggregate.sh
+
+format-sql-hash-aggregate:
+	sh ./scripts/format-sql-hash-aggregate.sh
+
+benchmark-sql-hash-aggregate:
+	sh ./scripts/benchmark-sql-hash-aggregate.sh
+
+benchmark-sql-hash-aggregate-all:
+	HASH_AGGREGATE_BENCH_MODE=all sh ./scripts/benchmark-sql-hash-aggregate.sh
+
+.PHONY: verify-sql-hash-aggregate
+verify-sql-hash-aggregate:
+	sh ./scripts/verify-sql-hash-aggregate.sh
+
+.PHONY: stage-sql-hash-aggregate
+stage-sql-hash-aggregate:
+	sh ./scripts/commit-sql-hash-aggregate.sh stage
+
+.PHONY: commit-sql-hash-aggregate
+commit-sql-hash-aggregate:
+	sh ./scripts/commit-sql-hash-aggregate.sh commit
+
+.PHONY: push-sql-hash-aggregate
+push-sql-hash-aggregate:
+	sh ./scripts/commit-sql-hash-aggregate.sh push
+
 format-sql-limit-by:
 	sh ./scripts/format-sql-limit-by.sh
 

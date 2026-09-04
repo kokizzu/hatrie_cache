@@ -987,6 +987,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if handled, err := executeSQLColumnarQueryRows(query, resolver, control, visit); handled {
 		return err
 	}
+	if _, handled, err := executeSQLHashGroupAggregateStream(query, resolver, control, nil, visit); handled {
+		return err
+	}
 	if sqlExternalSetStreamable(query, control) {
 		return executeSQLExternalSetStream(ctx, query, resolver, control, visit)
 	}
@@ -9506,6 +9509,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, streamErr
 		}
 	}
+	if result, handled, streamErr := executeSQLHashGroupAggregateStream(q, resolver, control, metrics, nil); handled {
+		return result, streamErr
+	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	var started time.Time
 	var rows []sqlExecRow
@@ -10020,6 +10026,16 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if handled {
 			return result, nil
 		}
+	}
+	if result, handled, err := executeSQLHashGroupAggregateRows(q, func(consume func(sqlExecRow) error) error {
+		for _, row := range rows {
+			if err := consume(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, control, metrics, nil); handled {
+		return result, err
 	}
 	if control != nil && control.options.MaxGroupBytes > 0 && control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
 		result, handled, err := executeSQLSpilledGroupAggregate(q, rows, control, metrics)
@@ -13753,38 +13769,7 @@ func (aggregate *sqlOrderedAggregate) add(row sqlExecRow) error {
 	if err := sqlExpressionError(value); err != nil {
 		return err
 	}
-	if aggregate.name == "COUNT" {
-		if value != nil {
-			aggregate.count++
-		}
-		return nil
-	}
-	number, ok := sqlNumber(value)
-	if !ok {
-		return nil
-	}
-	if !aggregate.seen {
-		aggregate.seen = true
-		aggregate.sum = number
-		aggregate.min = number
-		aggregate.max = number
-		aggregate.count = 1
-		return nil
-	}
-	aggregate.count++
-	switch aggregate.name {
-	case "SUM", "AVG":
-		aggregate.sum += number
-	case "MIN":
-		if number < aggregate.min {
-			aggregate.min = number
-		}
-	case "MAX":
-		if number > aggregate.max {
-			aggregate.max = number
-		}
-	}
-	return nil
+	return aggregate.addValue(value)
 }
 
 func (aggregate *sqlOrderedAggregate) value() interface{} {

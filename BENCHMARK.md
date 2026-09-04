@@ -15162,3 +15162,33 @@ optimization, not a universal replacement: balanced matching joins pay the
 filter setup and callback cost. See
 [SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md) for the API, fallback
 rules, and correctness guarantees.
+
+## SQL Compact Hash Aggregation
+
+Command: `make benchmark-sql-hash-aggregate-all`.
+
+This benchmark uses 20,000 `CACHE` rows and 100 groups. The resolver supports
+ordinary materialization but not `StreamSQLSource`, so it measures the compact
+state after source materialization against the established row-retaining
+grouping path. The baseline adds `HAVING COUNT(*) > 0` only to keep it on the
+pre-optimization executor; the result is otherwise the same grouped aggregate.
+All runs use `-benchmem` on Linux with an AMD Ryzen 9 5950X.
+
+Raw five-sample output:
+
+```text
+BenchmarkSQLHashGroupAggregate/baseline-32       13,613,291  14,401,968  13,548,252  13,959,285  13,126,117 ns/op
+BenchmarkSQLHashGroupAggregate/hash-32            9,202,269   8,876,017   9,001,401   8,488,962   8,876,345 ns/op
+baseline allocation: 20,716,103 20,716,035 20,716,033 20,716,037 20,716,037 B/op; 101,844 allocs/op
+hash allocation:      9,484,164  9,484,095  9,484,033  9,483,977  9,484,069 B/op; 61,257 allocs/op
+```
+
+| Path | Median time | Median allocation volume | Median allocations | Relative to baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Established row-retaining grouping | 13.61 ms | 20.72 MB | 101,844 | 1.00x |
+| Compact hash state | 8.88 ms | 9.48 MB | 61,257 | 1.53x faster, 2.18x lower allocation volume, 1.66x fewer allocations |
+
+`B/op` is benchmark allocation volume, not resident RSS or retained heap after
+the query. The result is workload-specific: the optimization reduces temporary
+per-group row retention, while unsupported query shapes continue using the
+existing path. See [SQL_HASH_AGGREGATE.md](SQL_HASH_AGGREGATE.md).
