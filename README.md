@@ -3389,3 +3389,23 @@ new public API, storage format, wire format, or configuration flag. Details,
 fallback rules, raw samples, and tradeoffs are in
 [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md) and
 [BENCHMARK.md](BENCHMARK.md#columnar-vectorized-grouped-aggregates).
+
+### Separate Cache And Durable-Storage Sizing
+
+The daemon keeps the in-memory hot-value budget separate from the durable
+persistent-store budget. Both limits default to `0`, which means disabled.
+
+- `-cache-memory-cap-bytes`: estimated hot-value bytes used by periodic cold
+  eviction. The old `-db-memory-cap-bytes` flag remains as a legacy alias.
+- `-db-storage-max-bytes`: maximum logical serialized bytes accepted by
+  durable-store saves. It requires `-db-path`.
+
+The durable limit is measured as cache-key bytes plus encoded value bytes. It
+does not include LSM metadata, compaction amplification, filesystem blocks, or
+encryption framing, so it is an admission guard rather than a disk-usage
+prediction. Saves are rejected before they write when the estimate is over the
+limit; the in-memory mutation is not rolled back. Startup also rejects a
+loaded, replayed, or restored dataset that exceeds the configured limit.
+
+For library users, the same guard is available through
+`ConfigurePersistentStoreMaxBytes` and `EstimatePersistentStorageBytes`.

@@ -1324,6 +1324,46 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	}
 }
 
+func TestParseConfigSeparatesCacheAndStorageSizeLimits(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-cache-memory-cap-bytes", "4096",
+		"-db-storage-max-bytes", "8192",
+		"-db-path", t.TempDir(),
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.cacheMemoryCapBytes != 4096 || cfg.dbStorageMaxBytes != 8192 {
+		t.Fatalf("size limits = cache %d/storage %d, want 4096/8192", cfg.cacheMemoryCapBytes, cfg.dbStorageMaxBytes)
+	}
+	if cfg.dbMemoryCapBytes != 0 {
+		t.Fatalf("legacy db memory cap = %d, want unset when canonical cache flag is used", cfg.dbMemoryCapBytes)
+	}
+	redacted := redactedConfig(cfg)
+	if redacted["cache_memory_cap_bytes"] != int64(4096) || redacted["db_storage_max_bytes"] != int64(8192) {
+		t.Fatalf("redacted size limits = %#v, want canonical cache/storage values", redacted)
+	}
+}
+
+func TestParseConfigLegacyDBMemoryCapFeedsCacheLimit(t *testing.T) {
+	cfg, err := parseConfig([]string{"-db-memory-cap-bytes", "4096"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.dbMemoryCapBytes != 4096 || cfg.cacheMemoryCapBytes != 4096 {
+		t.Fatalf("legacy cache limit = db %d/cache %d, want both 4096", cfg.dbMemoryCapBytes, cfg.cacheMemoryCapBytes)
+	}
+}
+
+func TestParseConfigRejectsBothCacheMemoryFlags(t *testing.T) {
+	if _, err := parseConfig([]string{
+		"-cache-memory-cap-bytes", "4096",
+		"-db-memory-cap-bytes", "8192",
+	}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig() error = nil, want conflicting cache memory flags error")
+	}
+}
+
 func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1344,6 +1384,14 @@ func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 		{
 			name: "memory cap",
 			args: []string{"-db-memory-cap-bytes", "-1"},
+		},
+		{
+			name: "cache memory cap",
+			args: []string{"-cache-memory-cap-bytes", "-1"},
+		},
+		{
+			name: "storage max bytes",
+			args: []string{"-db-storage-max-bytes", "-1"},
 		},
 		{
 			name: "rss cap",

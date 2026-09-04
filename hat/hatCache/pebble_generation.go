@@ -66,6 +66,9 @@ func (store *PebbleStore) saveGenerationLocked(trie *HatTrie) error {
 }
 
 func (store *PebbleStore) saveGenerationLockedWithJournalSequence(trie *HatTrie, sequence *uint64) error {
+	if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
+		return err
+	}
 	store.mu.Lock()
 	if store.db == nil {
 		store.mu.Unlock()

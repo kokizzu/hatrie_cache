@@ -4223,3 +4223,30 @@ commit-t112:
 
 push-t112:
 	bash ./scripts/commit-t112.sh push
+
+test-t111:
+	bash ./scripts/test-t111.sh
+
+format-t111:
+	bash ./scripts/format-t111.sh
+
+benchmark-t111:
+	bash ./scripts/benchmark-t111.sh
+
+test-race-t111:
+	bash ./scripts/test-race-t111.sh
+
+vet-t111:
+	bash ./scripts/vet-t111.sh
+
+review-t111:
+	bash ./scripts/review-t111.sh
+
+stage-t111:
+	bash ./scripts/stage-t111.sh
+
+commit-t111:
+	bash ./scripts/commit-t111.sh
+
+push-t111:
+	bash ./scripts/push-t111.sh

@@ -474,7 +474,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T108 Transactional trigger ordering guarantees.
 - [x] T109 Runtime configuration with validation.
 - [x] T110 Memory quotas and admission limits.
-- [ ] T111 Separate cache sizing from durable-storage sizing.
+- [x] T111 Separate cache sizing from durable-storage sizing. Added independent `-cache-memory-cap-bytes` and `-db-storage-max-bytes` controls, with the old cache flag retained as a legacy alias; see the README and `BENCHMARK.md`.
 - [x] T112 Per-queue memory and latency metrics - async replication exposes estimated resident queued/in-flight payload bytes plus queue wait/service histograms through status and Prometheus; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
 - [x] T113 Dead-letter queue with replay controls - public generic bounded retention supports inspection, explicit replay deadlines, and discard; see [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md).
 - [ ] T114 Work stealing for independent queue workers.

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hatrie_cache/hat/hatCodec"
@@ -18,16 +19,17 @@ import (
 
 // PebbleStore persists HAT-trie records in a Pebble LSM database.
 type PebbleStore struct {
-	saveMu              sync.RWMutex
-	mu                  sync.RWMutex
-	path                string
-	db                  *pebble.DB
-	format              StorageFormat
-	recordCipher        *hatCodec.StreamCipher
-	activeGeneration    uint64
-	nextGeneration      uint64
-	generationSaveHook  func(string) error
-	checkpointAdoptHook func(string) error
+	saveMu                sync.RWMutex
+	mu                    sync.RWMutex
+	path                  string
+	db                    *pebble.DB
+	format                StorageFormat
+	recordCipher          *hatCodec.StreamCipher
+	activeGeneration      uint64
+	nextGeneration        uint64
+	generationSaveHook    func(string) error
+	checkpointAdoptHook   func(string) error
+	storageSizeLimitBytes atomic.Int64
 }
 
 type pebbleStoredRecord struct {
@@ -431,6 +433,11 @@ func (store *PebbleStore) saveKeysWithOptionsAndJournalSequenceLocked(trie *HatT
 	keys = normalizeLevelDBDirtyKeys(keys)
 	if len(keys) == 0 && sequence == nil {
 		return nil
+	}
+	if len(keys) > 0 {
+		if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
+			return err
+		}
 	}
 	records := make([]pebbleStoredRecord, 0, len(keys))
 	for _, key := range keys {

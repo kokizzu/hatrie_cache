@@ -122,7 +122,9 @@ type config struct {
 	dbHotLoadMaxBytes                    int64
 	dbHotLoadMaxAge                      time.Duration
 	dbHotLoadMinHits                     uint64
+	cacheMemoryCapBytes                  int64
 	dbMemoryCapBytes                     int64
+	dbStorageMaxBytes                    int64
 	dbRSSCapBytes                        int64
 	dbMemoryEvictInterval                time.Duration
 	dbMemoryEvictMinValueBytes           int64
@@ -248,6 +250,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	defer closeLevelDB(dbStore, stderr)
+	if err := hatriecache.ConfigurePersistentStoreMaxBytes(dbStore, cfg.dbStorageMaxBytes); err != nil {
+		return err
+	}
 	var levelDBDirtyTracker *hatriecache.LevelDBDirtyTracker
 	var appliedJournalSequence uint64
 	var hasAppliedJournalSequence bool
@@ -296,6 +301,15 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)); err != nil {
 				return err
 			}
+		}
+	}
+	if dbStore != nil && cfg.dbStorageMaxBytes > 0 {
+		estimated, err := trie.EstimatePersistentStorageBytes(storageFormat(cfg))
+		if err != nil {
+			return err
+		}
+		if estimated > cfg.dbStorageMaxBytes {
+			return fmt.Errorf("%w: startup dataset estimated=%d max=%d", hatriecache.ErrPersistentStorageSizeLimitExceeded, estimated, cfg.dbStorageMaxBytes)
 		}
 	}
 	if cfg.snapshotPath != "" {
@@ -451,7 +465,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer stopDBCompactor()
 	stopDBMemoryGovernor := startLevelDBMemoryGovernor(ctx, trie, dbStore, cfg.dbMemoryEvictInterval, levelDBMemoryGovernorOptions{
 		Spill: hatriecache.LevelDBSpillOptions{
-			MaxHotBytes:   cfg.dbMemoryCapBytes,
+			MaxHotBytes:   cfg.cacheMemoryCapBytes,
 			MinValueBytes: cfg.dbMemoryEvictMinValueBytes,
 		},
 		RSSCapBytes: uint64(cfg.dbRSSCapBytes),
@@ -647,7 +661,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for persistent-store hot-load")
 	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for persistent-store hot-load")
 	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for persistent-store hot-load")
+	flags.Int64Var(&cfg.cacheMemoryCapBytes, "cache-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic persistent-store cold eviction; use 0 to disable")
 	flags.Int64Var(&cfg.dbMemoryCapBytes, "db-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic persistent-store cold eviction; use 0 to disable")
+	flags.Int64Var(&cfg.dbStorageMaxBytes, "db-storage-max-bytes", 0, "maximum logical serialized bytes for durable persistent records; use 0 to disable")
 	flags.Int64Var(&cfg.dbRSSCapBytes, "db-rss-cap-bytes", 0, "process RSS bytes threshold that triggers periodic persistent-store cold eviction; use 0 to disable")
 	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic persistent-store cold eviction interval; use 0 to disable")
 	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for persistent-store cold eviction")
@@ -679,6 +695,18 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
+	}
+	if cfg.cacheMemoryCapBytes < 0 {
+		return config{}, errors.New("cache memory cap bytes must be non-negative")
+	}
+	if cfg.dbMemoryCapBytes < 0 {
+		return config{}, errors.New("db memory cap bytes must be non-negative")
+	}
+	if cfg.cacheMemoryCapBytes != 0 && cfg.dbMemoryCapBytes != 0 {
+		return config{}, errors.New("use only one of -cache-memory-cap-bytes or legacy -db-memory-cap-bytes")
+	}
+	if cfg.cacheMemoryCapBytes == 0 {
+		cfg.cacheMemoryCapBytes = cfg.dbMemoryCapBytes
 	}
 	cfg.monitoringAuthToken = strings.TrimSpace(cfg.monitoringAuthToken)
 	cfg.monitoringAuthPreviousToken = strings.TrimSpace(cfg.monitoringAuthPreviousToken)
@@ -766,8 +794,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.dbCompactInterval < 0 {
 		return config{}, errors.New("db compact interval must be non-negative")
 	}
-	if cfg.dbMemoryCapBytes < 0 {
-		return config{}, errors.New("db memory cap bytes must be non-negative")
+	if cfg.dbStorageMaxBytes < 0 {
+		return config{}, errors.New("db storage max bytes must be non-negative")
 	}
 	if cfg.dbRSSCapBytes < 0 {
 		return config{}, errors.New("db rss cap bytes must be non-negative")
@@ -778,11 +806,14 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.dbMemoryEvictMinValueBytes < 0 {
 		return config{}, errors.New("db memory evict min value bytes must be non-negative")
 	}
-	if cfg.dbMemoryEvictInterval > 0 && cfg.dbMemoryCapBytes == 0 && cfg.dbRSSCapBytes == 0 {
-		return config{}, errors.New("db memory evict interval requires positive -db-memory-cap-bytes or -db-rss-cap-bytes")
+	if cfg.dbMemoryEvictInterval > 0 && cfg.cacheMemoryCapBytes == 0 && cfg.dbRSSCapBytes == 0 {
+		return config{}, errors.New("db memory evict interval requires positive -cache-memory-cap-bytes or -db-rss-cap-bytes")
 	}
 	if cfg.dbMemoryEvictInterval > 0 && strings.TrimSpace(cfg.dbPath) == "" {
 		return config{}, errors.New("db memory eviction requires -db-path")
+	}
+	if cfg.dbStorageMaxBytes > 0 && strings.TrimSpace(cfg.dbPath) == "" {
+		return config{}, errors.New("db storage max bytes requires -db-path")
 	}
 	if cfg.replicationQueueSize < 0 {
 		return config{}, errors.New("replication queue size must be non-negative")
@@ -1249,7 +1280,9 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"db_hot_load_max_bytes":                    cfg.dbHotLoadMaxBytes,
 		"db_hot_load_max_age":                      cfg.dbHotLoadMaxAge.String(),
 		"db_hot_load_min_hits":                     cfg.dbHotLoadMinHits,
+		"cache_memory_cap_bytes":                   cfg.cacheMemoryCapBytes,
 		"db_memory_cap_bytes":                      cfg.dbMemoryCapBytes,
+		"db_storage_max_bytes":                     cfg.dbStorageMaxBytes,
 		"db_rss_cap_bytes":                         cfg.dbRSSCapBytes,
 		"db_memory_evict_interval":                 cfg.dbMemoryEvictInterval.String(),
 		"db_memory_evict_min_value_bytes":          cfg.dbMemoryEvictMinValueBytes,

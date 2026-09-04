@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hatrie_cache/hat/hatCodec"
@@ -305,11 +306,12 @@ func sortedStringsContains(values []string, value string) bool {
 }
 
 type LevelDBStore struct {
-	mu           sync.RWMutex
-	path         string
-	db           *leveldb.DB
-	format       StorageFormat
-	recordCipher *hatCodec.StreamCipher
+	mu                    sync.RWMutex
+	path                  string
+	db                    *leveldb.DB
+	format                StorageFormat
+	recordCipher          *hatCodec.StreamCipher
+	storageSizeLimitBytes atomic.Int64
 }
 
 func OpenLevelDBStore(path string) (*LevelDBStore, error) {
@@ -365,15 +367,17 @@ func (store *LevelDBStore) SaveWithJournalSequence(trie *HatTrie, sequence uint6
 }
 
 func (store *LevelDBStore) saveWithJournalSequence(trie *HatTrie, sequence *uint64) error {
+	if trie == nil {
+		return ErrNilHatTrie
+	}
+	if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
+		return err
+	}
 	db, unlock, err := store.lockDB()
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	if trie == nil {
-		return ErrNilHatTrie
-	}
-
 	batch, err := levelDBDiffBatch(store, db, trie)
 	if err != nil {
 		return err
@@ -394,6 +398,9 @@ func (store *LevelDBStore) SaveKeys(trie *HatTrie, keys []string) error {
 }
 
 func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, options LevelDBSaveOptions) error {
+	if trie == nil {
+		return ErrNilHatTrie
+	}
 	options, err := normalizeLevelDBSaveOptions(options)
 	if err != nil {
 		return err
@@ -403,13 +410,12 @@ func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opt
 		return err
 	}
 	defer unlock()
-	if trie == nil {
-		return ErrNilHatTrie
-	}
-
 	keys = normalizeLevelDBDirtyKeys(keys)
 	if len(keys) == 0 {
 		return nil
+	}
+	if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
+		return err
 	}
 	compareBeforeWrite := levelDBShouldCompareBeforeWrite(options.CompareBeforeWrite, len(keys))
 	batch := new(leveldb.Batch)
@@ -480,6 +486,9 @@ func (store *LevelDBStore) SaveDirtyWithJournalSequence(trie *HatTrie, tracker *
 }
 
 func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []string, options LevelDBSaveOptions, sequence uint64) error {
+	if trie == nil {
+		return ErrNilHatTrie
+	}
 	options, err := normalizeLevelDBSaveOptions(options)
 	if err != nil {
 		return err
@@ -489,10 +498,6 @@ func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []stri
 		return err
 	}
 	defer unlock()
-	if trie == nil {
-		return ErrNilHatTrie
-	}
-
 	keys = normalizeLevelDBDirtyKeys(keys)
 	if len(keys) == 0 {
 		data, getErr := db.Get(persistentAppliedJournalSequenceKey, nil)
@@ -506,6 +511,11 @@ func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []stri
 			}
 		} else if !errors.Is(getErr, leveldb.ErrNotFound) {
 			return getErr
+		}
+	}
+	if len(keys) > 0 {
+		if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
+			return err
 		}
 	}
 	compareBeforeWrite := levelDBShouldCompareBeforeWrite(options.CompareBeforeWrite, len(keys))

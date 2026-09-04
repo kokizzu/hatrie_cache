@@ -15530,3 +15530,26 @@ Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
 These are instrumentation costs, not application throughput improvements. The
 byte values are estimates of owned payload/metadata bytes, not exact Go heap or
 RSS measurements; disk-only durable backlog is intentionally excluded.
+
+<a id="separate-cache-and-durable-storage-sizing"></a>
+## Separate Cache And Durable-Storage Sizing
+
+Command: `make benchmark-t111`.
+
+This measures the logical-size admission check with 128 string entries. The
+default-disabled path is the normal runtime path; the enabled path intentionally
+walks and encodes the current dataset so it can reject a durable save before
+the backend write.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Benchmark | Samples ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Limit disabled | 1.633, 1.711, 1.756 | 0 | 0 |
+| Limit enabled | 236682, 258676, 279783 | 1,301,100-1,301,102 | 264 |
+
+The limit is opt-in because exact logical accounting is materially more
+expensive than the disabled branch. It trades CPU and transient allocations for
+bounded durable admission; it is not a throughput improvement. Physical LSM
+metadata, compaction amplification, filesystem blocks, and encryption framing
+remain outside the logical estimate.
