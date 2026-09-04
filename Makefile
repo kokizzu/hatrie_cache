@@ -4404,3 +4404,39 @@ commit-t152:
 .PHONY: push-t152
 push-t152:
 	bash ./scripts/push-t152.sh
+
+.PHONY: test-t155
+test-t155:
+	bash ./scripts/test-t155.sh
+
+.PHONY: format-t155
+format-t155:
+	bash ./scripts/format-t155.sh
+
+.PHONY: benchmark-t155
+benchmark-t155:
+	bash ./scripts/benchmark-t155.sh
+
+.PHONY: test-race-t155
+test-race-t155:
+	bash ./scripts/test-race-t155.sh
+
+.PHONY: vet-t155
+vet-t155:
+	bash ./scripts/vet-t155.sh
+
+.PHONY: review-t155
+review-t155:
+	bash ./scripts/review-t155.sh
+
+.PHONY: stage-t155
+stage-t155:
+	bash ./scripts/stage-t155.sh
+
+.PHONY: commit-t155
+commit-t155:
+	bash ./scripts/commit-t155.sh
+
+.PHONY: push-t155
+push-t155:
+	bash ./scripts/push-t155.sh

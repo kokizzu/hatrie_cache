@@ -15563,3 +15563,19 @@ Command: `make benchmark-t154` (`-count=3`, `-benchmem`).
 | capture enabled | 6,021-6,310 | 8,008 | 42 | 6,228 |
 
 The enabled ring added about 0.7% at the median in this sample, with no measured allocation increase. The feature is therefore disabled by the default zero threshold and should be enabled only when the diagnostics are needed.
+
+## T155 Command allocation budgets
+
+Command: `make benchmark-t155` (`-count=3`, `-benchmem`). These are test-time regression budgets; they do not add runtime work to the default command path.
+
+| command | ns/op range | B/op | allocs/op | budget allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| GET | 102.9-118.0 | 0 | 0 | 0 |
+| EXISTS | 101.1-107.1 | 0 | 0 | 0 |
+| EXPIRE | 193.0-197.2 | 0 | 0 | 0 |
+| SETSTR | 165.3-191.9 | 0 | 0 | 0 |
+| ADDSET | 63.64-69.92 | 0 | 0 | 0 |
+| HASSET | 77.98-82.83 | 0 | 0 | 0 |
+| INCRCMS | 164.8-184.4 | 7 | 1 | 1 |
+
+The focused test enforces these ceilings after warm-up and logs the measured allocation rate. `INCRCMS` intentionally keeps a one-allocation budget because the benchmark consistently observed `7 B/op`; it is not misreported as zero-allocation.
