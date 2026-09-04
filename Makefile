@@ -3332,6 +3332,27 @@ check-sql-index-in-stage:
 	sh ./scripts/deliver-sql-index-in.sh check-stage
 test-sql-borrowed-indexed-join:
 	sh ./scripts/test-sql-borrowed-indexed-join.sh
+
+test-sql-runtime-join-filter:
+	sh ./scripts/test-sql-runtime-join-filter.sh
+
+benchmark-sql-runtime-join-filter:
+	sh ./scripts/benchmark-sql-runtime-join-filter.sh
+
+format-sql-runtime-join-filter:
+	sh ./scripts/format-sql-runtime-join-filter.sh
+
+deliver-sql-runtime-join-filter:
+	sh ./scripts/deliver-sql-runtime-join-filter.sh apply
+
+check-sql-runtime-join-filter-stage:
+	sh ./scripts/deliver-sql-runtime-join-filter.sh check
+
+commit-sql-runtime-join-filter:
+	sh ./scripts/deliver-sql-runtime-join-filter.sh commit
+
+push-sql-runtime-join-filter:
+	sh ./scripts/deliver-sql-runtime-join-filter.sh push
 benchmark-sql-borrowed-indexed-join:
 	sh ./scripts/benchmark-sql-borrowed-indexed-join.sh
 verify-sql-borrowed-indexed-join:

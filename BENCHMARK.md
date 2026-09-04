@@ -15096,3 +15096,37 @@ Offset pagination remains the default for random page access and compatibility.
 The keyset API currently requires one direct ordered `CACHE` source backed by a
 generic JSON field index or typed `INT64` index. See
 [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md).
+
+## SQL Runtime Join Bloom Filter
+
+Command: `make benchmark-sql-runtime-join-filter`.
+
+This benchmark compares the established materialized hash join with the
+opt-in streaming runtime-filter path. Each sub-benchmark runs five samples with
+`-benchmem`: a selective 100,000-row probe side against 512 right rows, a
+balanced 1,024-row join where every key matches, and a 100,000-row hot-key join
+against one right row.
+
+Raw output from Linux on an AMD Ryzen 9 5950X:
+
+```text
+selective baseline:       30.942 ms, 29.877 ms, 29.633 ms, 30.780 ms, 30.079 ms; 48,130,114 B/op; 305,685 allocs/op
+selective runtime_filter: 10.373 ms, 10.131 ms, 11.116 ms, 10.839 ms,  9.699 ms;  3,435,487 B/op; 107,239 allocs/op
+balanced baseline:         1.467 ms,  1.488 ms,  1.505 ms,  1.594 ms,  1.477 ms;  2,289,646 B/op;  14,392 allocs/op
+balanced runtime_filter:   1.640 ms,  1.632 ms,  1.604 ms,  1.678 ms,  1.578 ms;  2,105,087 B/op;  15,441 allocs/op
+hot_key baseline:        120.723 ms, 116.845 ms, 115.143 ms, 120.044 ms, 116.542 ms; 194,770,444 B/op; 1,000,072 allocs/op
+hot_key runtime_filter:   80.930 ms,  84.724 ms,  86.046 ms,  87.793 ms,  88.012 ms; 124,503,616 B/op; 1,100,072 allocs/op
+```
+
+| Workload | Baseline median | Runtime-filter median | Relative time | Baseline heap | Runtime-filter heap | Relative heap | Baseline allocs | Runtime-filter allocs | Relative allocations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Selective, 100k left / 512 right | 30.079 ms | 10.373 ms | 2.90x faster | 48.130 MB | 3.435 MB | 14.01x lower | 305,685 | 107,239 | 2.85x fewer |
+| Balanced, 1k left / 1k right | 1.488 ms | 1.632 ms | 1.10x slower | 2.290 MB | 2.105 MB | 1.09x lower | 14,392 | 15,441 | 1.07x more |
+| Hot key, 100k left / 1 right | 116.845 ms | 86.046 ms | 1.36x faster | 194.770 MB | 124.504 MB | 1.56x lower | 1,000,072 | 1,100,072 | 1.10x more |
+
+The feature is disabled by default and only applies to direct streamable inner
+equality joins without an available equality index. It is a selective-path
+optimization, not a universal replacement: balanced matching joins pay the
+filter setup and callback cost. See
+[SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md) for the API, fallback
+rules, and correctness guarantees.

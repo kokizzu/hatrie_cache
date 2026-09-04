@@ -187,7 +187,8 @@ type SQLQueryOptions struct {
 	// RuntimeJoinBloomFilter enables a selective in-memory Bloom filter for
 	// equality joins with a much larger probe side. It is disabled by default;
 	// balanced and hot-key joins retain the established map path.
-	MaxResultBytes int
+	RuntimeJoinBloomFilter bool
+	MaxResultBytes         int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers       int
@@ -4212,6 +4213,180 @@ func sqlBloomFiltersMayIntersect(left, right hatDataStructure.BloomFilter) bool 
 		}
 	}
 	return false
+}
+
+const sqlRuntimeJoinFilterFalsePositiveRate = 0.01
+
+// sqlRuntimeJoinFilterStreamable limits the runtime-filter path to a direct
+// inner equality join whose result can be produced while each source row is
+// still in the resolver's streaming callback. The established materialized
+// executor remains authoritative for every other query shape.
+func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (bool, error) {
+	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+		return false, nil
+	}
+	join := query.joins[0]
+	if join.kind != "INNER" || join.source.lateral || query.from.kind != "CACHE" || join.source.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(join.source.fieldTypes) != 0 || len(query.selects) == 0 {
+		return false, nil
+	}
+	for _, selectItem := range query.selects {
+		if selectItem.expr.kind != "field" {
+			return false, nil
+		}
+	}
+	_, _, rightField, ok := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
+	if !ok {
+		return false, nil
+	}
+	if _, ok := resolver.(SQLStreamSourceResolver); !ok {
+		return false, nil
+	}
+	if indexed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
+		_, available, err := indexed.BorrowSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+		if err != nil {
+			return false, err
+		}
+		if available {
+			return false, nil
+		}
+	} else if indexed, ok := resolver.(IndexedSourceResolver); ok {
+		_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+		if err != nil {
+			return false, err
+		}
+		if available {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// executeSQLRuntimeJoinFilter builds the smaller right-side hash table from a
+// stream, then streams the left side through a bounded Bloom filter. A Bloom
+// miss is only a work skip; all rows that pass it still use the exact hash
+// bucket, so false positives cannot change SQL results. Non-eligible queries
+// return handled=false and use the established executor unchanged.
+func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	streamable, err := sqlRuntimeJoinFilterStreamable(query, resolver, control)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	if !streamable {
+		return SQLQueryResult{}, false, nil
+	}
+	join := query.joins[0]
+	_, leftField, rightField, _ := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
+	maxRows := maxSQLQueryRows
+	if control != nil {
+		maxRows = control.maxRows
+	}
+	ctx := context.Background()
+	if control != nil {
+		ctx = control.ctx
+	}
+
+	joinStarted := time.Now()
+	rightBuckets := make(map[string]sqlExecRow)
+	rightDuplicates := make(map[string][]sqlExecRow)
+	rightRows := 0
+	rightErr := streamSQLSourceRows(ctx, join.source, resolver, func(row SQLRow) error {
+		if err := control.addJoinWork(1); err != nil {
+			return err
+		}
+		if rightRows >= maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+		}
+		rightRows++
+		key, ok := sqlHashJoinKey(row[rightField])
+		if ok {
+			right := sqlExecRow{sources: map[string]SQLRow{join.source.alias: row}, order: []string{join.source.alias}}
+			if _, exists := rightBuckets[key]; exists {
+				rightDuplicates[key] = append(rightDuplicates[key], right)
+			} else {
+				rightBuckets[key] = right
+			}
+		}
+		return nil
+	})
+	if rightErr != nil {
+		return SQLQueryResult{}, true, rightErr
+	}
+
+	filterEnabled := len(rightBuckets) > 1
+	var filter hatDataStructure.BloomFilter
+	if filterEnabled {
+		filter, err = hatDataStructure.NewBloomFilter(uint64(len(rightBuckets)), sqlRuntimeJoinFilterFalsePositiveRate)
+		if err != nil {
+			return SQLQueryResult{}, true, fmt.Errorf("initialize SQL runtime join Bloom filter: %w", err)
+		}
+		for key := range rightBuckets {
+			filter.AddJSONString(key)
+		}
+	}
+
+	columns := sqlColumns(query.selects)
+	result := SQLQueryResult{Columns: columns}
+	evaluationGroup := make([]sqlExecRow, 1)
+	leftRows, filterProbes, filterSkipped := 0, 0, 0
+	leftErr := streamSQLSourceRows(ctx, *query.from, resolver, func(row SQLRow) error {
+		if leftRows >= maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, maxRows)
+		}
+		leftRows++
+		key, ok := sqlHashJoinKey(row[leftField])
+		if !ok {
+			return nil
+		}
+		if filterEnabled {
+			filterProbes++
+			if !filter.ContainsJSONString(key) {
+				filterSkipped++
+				return nil
+			}
+		}
+		candidate, exists := rightBuckets[key]
+		if !exists {
+			return nil
+		}
+		left := sqlExecRow{sources: map[string]SQLRow{query.from.alias: row}, order: []string{query.from.alias}}
+		duplicates := rightDuplicates[key]
+		for candidateIndex := -1; candidateIndex < len(duplicates); candidateIndex++ {
+			if candidateIndex >= 0 {
+				candidate = duplicates[candidateIndex]
+			}
+			if err := control.addJoinWork(1); err != nil {
+				return err
+			}
+			combined := mergeSQLRows(left, candidate)
+			projected := SQLRow{}
+			evaluationGroup[0] = combined
+			for index, selectItem := range query.selects {
+				value := evalSQLExpr(selectItem.expr, evaluationGroup, combined)
+				if err := sqlExpressionError(value); err != nil {
+					return err
+				}
+				projected[columns[index]] = value
+			}
+			result.Rows = append(result.Rows, projected)
+			if len(result.Rows) > maxRows {
+				return fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+			}
+		}
+		return nil
+	})
+	if leftErr != nil {
+		return SQLQueryResult{}, true, leftErr
+	}
+	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
+	if filterEnabled {
+		filterDetail := fmt.Sprintf("Bloom filter right_rows=%d right_keys=%d probes=%d skipped=%d false_positive_rate=%.2f%%", rightRows, len(rightBuckets), filterProbes, filterSkipped, sqlRuntimeJoinFilterFalsePositiveRate*100)
+		metrics.record("RUNTIME JOIN FILTER", filterDetail, leftRows, filterProbes-filterSkipped, joinStarted)
+	}
+	joinDetail := "INNER JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
+	metrics.record("HASH JOIN", joinDetail, leftRows+rightRows, len(result.Rows), joinStarted)
+	return result, true, nil
 }
 
 func newSQLSpillHashPartitions(directory, pattern string, available *int64, paths map[string]struct{}, control *sqlExecutionControl) ([]sqlSpillHashPartition, error) {
@@ -9265,6 +9440,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return SQLQueryResult{}, err
 		}
 		ctes[cte.name] = rows
+	}
+	if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
+		return result, runtimeErr
 	}
 	if result, handled, spillErr := executeSQLSpillHashJoin(q, resolver, control, metrics); handled {
 		return result, spillErr
