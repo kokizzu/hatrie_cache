@@ -997,6 +997,43 @@ func writePrometheusReplicationMetrics(builder *strings.Builder, node string, sn
 			}
 		}
 	}
+	if len(snapshot.TargetWireBytes) > 0 || len(snapshot.TargetWireRequests) > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_request_wire_bytes_total", "Total bytes sent for HTTP replication request bodies.")
+		writePrometheusType(builder, "hatrie_cache_replication_request_wire_bytes_total", "counter")
+		writePrometheusHelp(builder, "hatrie_cache_replication_request_wire_requests_total", "Total HTTP replication requests grouped by content encoding.")
+		writePrometheusType(builder, "hatrie_cache_replication_request_wire_requests_total", "counter")
+		targetSet := make(map[string]struct{}, len(snapshot.TargetWireBytes)+len(snapshot.TargetWireRequests))
+		for target := range snapshot.TargetWireBytes {
+			targetSet[target] = struct{}{}
+		}
+		for target := range snapshot.TargetWireRequests {
+			targetSet[target] = struct{}{}
+		}
+		targets := make([]string, 0, len(targetSet))
+		for target := range targetSet {
+			targets = append(targets, target)
+		}
+		sort.Strings(targets)
+		for _, target := range targets {
+			encodingSet := make(map[string]struct{}, len(snapshot.TargetWireBytes[target])+len(snapshot.TargetWireRequests[target]))
+			for encoding := range snapshot.TargetWireBytes[target] {
+				encodingSet[encoding] = struct{}{}
+			}
+			for encoding := range snapshot.TargetWireRequests[target] {
+				encodingSet[encoding] = struct{}{}
+			}
+			encodings := make([]string, 0, len(encodingSet))
+			for encoding := range encodingSet {
+				encodings = append(encodings, encoding)
+			}
+			sort.Strings(encodings)
+			for _, encoding := range encodings {
+				labels := fmt.Sprintf("node=\"%s\",target=\"%s\",encoding=\"%s\"", node, prometheusLabelValue(target), prometheusLabelValue(encoding))
+				fmt.Fprintf(builder, "hatrie_cache_replication_request_wire_bytes_total{%s} %d\n", labels, snapshot.TargetWireBytes[target][encoding])
+				fmt.Fprintf(builder, "hatrie_cache_replication_request_wire_requests_total{%s} %d\n", labels, snapshot.TargetWireRequests[target][encoding])
+			}
+		}
+	}
 }
 
 func writePrometheusTargetHistogram(builder *strings.Builder, name string, node string, target string, snapshot ReplicationHistogramSnapshot) {

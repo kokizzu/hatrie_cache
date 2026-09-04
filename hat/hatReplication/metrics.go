@@ -1,6 +1,7 @@
 package hatReplication
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,8 @@ type HistogramSnapshot = hatMetrics.HistogramSnapshot
 type MetricsSnapshot struct {
 	TargetLatencyMillis       map[string]HistogramSnapshot
 	TargetBatchItems          map[string]HistogramSnapshot
+	TargetWireBytes           map[string]map[string]uint64
+	TargetWireRequests        map[string]map[string]uint64
 	RetryDelayMillis          HistogramSnapshot
 	CircuitBreakerTransitions map[string]map[string]uint64
 }
@@ -29,6 +32,8 @@ type Metrics struct {
 	mu                 sync.Mutex
 	targetLatency      map[string]*hatMetrics.Histogram
 	targetBatchItems   map[string]*hatMetrics.Histogram
+	targetWireBytes    map[string]map[string]uint64
+	targetWireRequests map[string]map[string]uint64
 	retryDelayMillis   *hatMetrics.Histogram
 	breakerTransitions map[string]map[string]uint64
 }
@@ -51,6 +56,35 @@ func (metrics *Metrics) ObserveTargetBatchItems(target string, items int) {
 	metrics.mu.Lock()
 	defer metrics.mu.Unlock()
 	metrics.targetHistogramLocked(&metrics.targetBatchItems, target, targetBatchItemsBuckets).Observe(float64(items))
+}
+
+// ObserveTargetWireBytes records bytes sent for one request, grouped by
+// target and content encoding. An empty encoding is recorded as identity.
+func (metrics *Metrics) ObserveTargetWireBytes(target, encoding string, bytes uint64) {
+	if metrics == nil || strings.TrimSpace(target) == "" {
+		return
+	}
+	target = strings.TrimSpace(target)
+	encoding = strings.ToLower(strings.TrimSpace(encoding))
+	if encoding == "" {
+		encoding = "identity"
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if metrics.targetWireBytes == nil {
+		metrics.targetWireBytes = map[string]map[string]uint64{}
+	}
+	if metrics.targetWireBytes[target] == nil {
+		metrics.targetWireBytes[target] = map[string]uint64{}
+	}
+	metrics.targetWireBytes[target][encoding] += bytes
+	if metrics.targetWireRequests == nil {
+		metrics.targetWireRequests = map[string]map[string]uint64{}
+	}
+	if metrics.targetWireRequests[target] == nil {
+		metrics.targetWireRequests[target] = map[string]uint64{}
+	}
+	metrics.targetWireRequests[target][encoding]++
 }
 
 // ObserveRetryDelay records one asynchronous retry delay.
@@ -92,6 +126,8 @@ func (metrics *Metrics) Snapshot() MetricsSnapshot {
 	return MetricsSnapshot{
 		TargetLatencyMillis:       snapshotHistogramMap(metrics.targetLatency),
 		TargetBatchItems:          snapshotHistogramMap(metrics.targetBatchItems),
+		TargetWireBytes:           snapshotCounterMap(metrics.targetWireBytes),
+		TargetWireRequests:        snapshotCounterMap(metrics.targetWireRequests),
 		RetryDelayMillis:          snapshotHistogram(metrics.retryDelayMillis),
 		CircuitBreakerTransitions: snapshotTransitions(metrics.breakerTransitions),
 	}
@@ -136,6 +172,20 @@ func snapshotTransitions(source map[string]map[string]uint64) map[string]map[str
 		out[target] = make(map[string]uint64, len(transitions))
 		for state, count := range transitions {
 			out[target][state] = count
+		}
+	}
+	return out
+}
+
+func snapshotCounterMap(source map[string]map[string]uint64) map[string]map[string]uint64 {
+	if len(source) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]uint64, len(source))
+	for target, counters := range source {
+		out[target] = make(map[string]uint64, len(counters))
+		for label, value := range counters {
+			out[target][label] = value
 		}
 	}
 	return out

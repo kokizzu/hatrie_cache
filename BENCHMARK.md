@@ -15468,3 +15468,30 @@ slice_reference: 222.8, 218.8, 224.2, 233.6, 227.4 ns/op; 211 B/op; 0 allocs/op
 | Compact JSON passthrough | 1.595 | 0 | 0 |
 | Pretty JSON | 454.9 | 177 | 3 |
 | Tradeoff | **285x higher CPU** | **177 more** | **3 more** |
+
+## Replication Wire Metrics
+
+Command: `make benchmark-t062`.
+
+This measures the additive counter update used once per outgoing HTTP
+replication request, the existing batch histogram update for comparison, and a
+snapshot scrape with one target/encoding. It is an instrumentation cost
+measurement, not a data-path speedup claim.
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Wire byte counter update | 64.43 | 0 | 0 |
+| Existing batch histogram update | 14.28 | 0 | 0 |
+| Wire metric snapshot | 704.1 | 1,024 | 8 |
+
+Raw samples from five repetitions:
+
+```text
+wire_counter: 72.97, 64.43, 65.18, 61.78, 61.08 ns/op; 0 B/op; 0 allocs/op
+batch_histogram: 15.20, 14.28, 13.91, 13.71, 17.71 ns/op; 0 B/op; 0 allocs/op
+wire_snapshot: 725.9, 658.5, 722.9, 704.1, 662.7 ns/op; 1024 B/op; 8 allocs/op
+```
+
+The counter runs once after a request body has been sent and does not allocate
+per read chunk. The snapshot allocations are bounded by the number of observed
+targets and encodings.

@@ -418,8 +418,8 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T058 Quorum reads and writes.
 - [x] T059 Read-only mode during failover.
 - [ ] T060 Replica health gate before serving stale-sensitive reads.
-- [ ] T061 Replication queue depth and error metrics.
-- [ ] T062 Replication bandwidth and compression metrics.
+- [x] T061 Replication queue depth and error metrics - `/metrics` exposes queue depth, capacity, enqueue/drop, attempt, success/failure, retry, and age gauges/counters.
+- [x] T062 Replication bandwidth and compression metrics - `/metrics` exposes outgoing request wire bytes and request counts by target and `identity`/`gzip` encoding; see [REPLICATION_METRICS.md](REPLICATION_METRICS.md).
 - [ ] T063 Replication pause and resume controls.
 - [ ] T064 Rolling replica replacement.
 - [ ] T065 Failure-domain-aware replica placement.

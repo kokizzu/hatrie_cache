@@ -162,6 +162,12 @@ func (replicator *HTTPReplicator) recordReplicationBatchSize(target TopologyNode
 	}
 }
 
+func (replicator *HTTPReplicator) recordReplicationWireBytes(target TopologyNode, bytes uint64, contentEncoding string) {
+	if replicator != nil {
+		replicator.metrics.ObserveTargetWireBytes(replicationMetricsTarget(target), contentEncoding, bytes)
+	}
+}
+
 func (replicator *HTTPReplicator) recordReplicationRetryDelay(duration time.Duration) {
 	if replicator != nil {
 		replicator.metrics.ObserveRetryDelay(duration)
@@ -3640,11 +3646,30 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBodyResponse(ctx con
 		result.Error = err.Error()
 		return result, CacheCommandResponse{}
 	}
+	transportOwnsClose := false
+	if _, ok := req.Body.(interface{ TransportOwnsClose() }); ok {
+		transportOwnsClose = true
+	}
+	wireBytes := new(atomic.Uint64)
+	req.Body = &replicationCountingReadCloser{body: req.Body, bytes: wireBytes}
+	if req.GetBody != nil {
+		getBody := req.GetBody
+		req.GetBody = func() (io.ReadCloser, error) {
+			body, err := getBody()
+			if err != nil {
+				return nil, err
+			}
+			return &replicationCountingReadCloser{body: body, bytes: wireBytes}, nil
+		}
+	}
 	defer func() {
-		if _, ok := req.Body.(interface{ TransportOwnsClose() }); ok {
+		if transportOwnsClose {
 			return
 		}
 		_ = req.Body.Close()
+	}()
+	defer func() {
+		replicator.recordReplicationWireBytes(target, wireBytes.Load(), contentEncoding)
 	}()
 	req.Header.Set("Accept", contentType)
 	req.Header.Set("Content-Type", contentType)

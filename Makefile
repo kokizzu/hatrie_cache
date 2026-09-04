@@ -4133,3 +4133,31 @@ commit-replay-progress:
 .PHONY: push-replay-progress
 push-replay-progress:
 	bash ./scripts/commit-replay-progress.sh push
+
+.PHONY: test-t062
+test-t062:
+	bash ./scripts/test-t062.sh
+.PHONY: format-t062
+format-t062:
+	bash ./scripts/format-t062.sh
+.PHONY: test-race-t062
+test-race-t062:
+	bash ./scripts/test-race-t062.sh
+.PHONY: vet-t062
+vet-t062:
+	bash ./scripts/vet-t062.sh
+.PHONY: benchmark-t062
+benchmark-t062:
+	bash ./scripts/benchmark-t062.sh
+.PHONY: stage-t062
+stage-t062:
+	bash ./scripts/commit-t062.sh stage
+.PHONY: commit-t062
+commit-t062:
+	bash ./scripts/commit-t062.sh commit
+.PHONY: push-t062
+push-t062:
+	bash ./scripts/commit-t062.sh push
+.PHONY: review-t062
+review-t062:
+	bash ./scripts/review-t062.sh

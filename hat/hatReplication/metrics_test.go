@@ -30,3 +30,29 @@ func TestMetricsRecordsIndependentHistogramsAndTransitions(t *testing.T) {
 		t.Fatal("snapshot aliases metrics state")
 	}
 }
+
+func TestMetricsRecordsWireBytesByEncoding(t *testing.T) {
+	var metrics Metrics
+	metrics.ObserveTargetWireBytes("node-b", "gzip", 17)
+	metrics.ObserveTargetWireBytes("node-b", "gzip", 3)
+	metrics.ObserveTargetWireBytes("node-b", "", 11)
+
+	snapshot := metrics.Snapshot()
+	if got := snapshot.TargetWireBytes["node-b"]["gzip"]; got != 20 {
+		t.Fatalf("gzip wire bytes = %d, want 20", got)
+	}
+	if got := snapshot.TargetWireBytes["node-b"]["identity"]; got != 11 {
+		t.Fatalf("identity wire bytes = %d, want 11", got)
+	}
+	if got := snapshot.TargetWireRequests["node-b"]["gzip"]; got != 2 {
+		t.Fatalf("gzip wire requests = %d, want 2", got)
+	}
+	if got := snapshot.TargetWireRequests["node-b"]["identity"]; got != 1 {
+		t.Fatalf("identity wire requests = %d, want 1", got)
+	}
+
+	delete(snapshot.TargetWireBytes["node-b"], "gzip")
+	if got := metrics.Snapshot().TargetWireBytes["node-b"]["gzip"]; got != 20 {
+		t.Fatal("wire byte snapshot aliases metrics state")
+	}
+}
