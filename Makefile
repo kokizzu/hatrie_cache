@@ -697,6 +697,33 @@ test-sql-limit-by:
 test-sql-hash-aggregate:
 	sh ./scripts/test-sql-hash-aggregate.sh
 
+test-sql-vectorized:
+	sh ./scripts/test-sql-vectorized.sh
+
+test-race-sql-vectorized:
+	sh ./scripts/test-race-sql-vectorized.sh
+
+vet-sql-vectorized:
+	sh ./scripts/vet-sql-vectorized.sh
+
+format-sql-vectorized:
+	sh ./scripts/format-sql-vectorized.sh
+
+benchmark-sql-vectorized:
+	sh ./scripts/benchmark-sql-vectorized.sh
+
+benchmark-sql-vectorized-long:
+	BENCHTIME=1s sh ./scripts/benchmark-sql-vectorized.sh
+
+stage-sql-vectorized:
+	sh ./scripts/commit-sql-vectorized.sh stage
+
+commit-sql-vectorized:
+	sh ./scripts/commit-sql-vectorized.sh commit
+
+push-sql-vectorized:
+	sh ./scripts/commit-sql-vectorized.sh push
+
 format-sql-hash-aggregate:
 	sh ./scripts/format-sql-hash-aggregate.sh
 

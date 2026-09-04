@@ -15,6 +15,7 @@ security guidance before exposing it on a network.
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
 - Runtime allocator and GC diagnostics: [MEMORY_REPORT.md](MEMORY_REPORT.md)
 - Read-only hypothetical SQL index/projection cost analysis: [SQL_WHATIF.md](SQL_WHATIF.md)
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)
@@ -3352,3 +3353,18 @@ This path is deliberately limited to binary collation and falls back for
 Unicode case-insensitive ordering, expressions, multiple group fields,
 `HAVING`, and other SQL shapes. See
 [BENCHMARK.md](BENCHMARK.md#dictionary-columnar-grouped-aggregates).
+
+### Vectorized Columnar Grouped Aggregates
+
+Plain-key grouped aggregates over a `ColumnarSourceResolver` now use a bounded
+1,024-row selection buffer and update compact group state directly from aligned
+columns. This is automatic for the exact supported shape and keeps first-seen
+group order, NULL handling, direct `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, filtering,
+group-skew limits, result limits, and `QueryRows` callbacks unchanged.
+
+Queries with ordering, `HAVING`, joins, windows, subqueries, typed sources, or
+an active `MaxGroupBytes` budget retain the established executor. There is no
+new public API, storage format, wire format, or configuration flag. Details,
+fallback rules, raw samples, and tradeoffs are in
+[SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md) and
+[BENCHMARK.md](BENCHMARK.md#columnar-vectorized-grouped-aggregates).

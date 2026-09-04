@@ -15192,3 +15192,63 @@ hash allocation:      9,484,164  9,484,095  9,484,033  9,483,977  9,484,069 B/op
 the query. The result is workload-specific: the optimization reduces temporary
 per-group row retention, while unsupported query shapes continue using the
 existing path. See [SQL_HASH_AGGREGATE.md](SQL_HASH_AGGREGATE.md).
+
+## Columnar Vectorized Grouped Aggregates
+
+Command: `make benchmark-sql-vectorized-long`.
+
+This benchmark compares the established row executor with the automatic
+columnar block path for the same one-key grouped query. The fixture uses direct
+`COUNT`, `SUM`, and `AVG` projections over 64, 1,024, and 20,000 rows. The
+columnar path uses a reusable 1,024-row selection vector and does not retain
+source row maps. All runs use `-benchmem` on Linux with an AMD Ryzen 9 5950X;
+each row count has five samples with `-benchtime=1s`.
+
+Raw five-sample output:
+
+```text
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/baseline_row_executor-32       3766    282452 ns/op  180500 B/op  1209 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/baseline_row_executor-32       4159    286147 ns/op  180490 B/op  1209 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/baseline_row_executor-32       4179    295126 ns/op  180485 B/op  1209 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/baseline_row_executor-32       4332    280038 ns/op  180486 B/op  1209 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/baseline_row_executor-32       3564    292953 ns/op  180487 B/op  1209 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/vectorized_columnar-32         4899    235349 ns/op  151581 B/op  1078 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/vectorized_columnar-32         4533    259333 ns/op  151583 B/op  1078 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/vectorized_columnar-32         4816    255606 ns/op  151585 B/op  1078 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/vectorized_columnar-32         4808    255381 ns/op  151580 B/op  1078 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_64/vectorized_columnar-32         4590    265252 ns/op  151580 B/op  1078 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/baseline_row_executor-32     793   1456724 ns/op  716632 B/op  4692 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/baseline_row_executor-32     732   1415271 ns/op  716664 B/op  4692 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/baseline_row_executor-32     721   1422943 ns/op  716647 B/op  4692 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/baseline_row_executor-32     939   1169220 ns/op  716650 B/op  4692 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/baseline_row_executor-32    1224   1121631 ns/op  716650 B/op  4692 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/vectorized_columnar-32      1862    598080 ns/op  263060 B/op  2639 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/vectorized_columnar-32      2268    576465 ns/op  263057 B/op  2639 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/vectorized_columnar-32      1926    674266 ns/op  263064 B/op  2639 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/vectorized_columnar-32      1592    647674 ns/op  263068 B/op  2639 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_1024/vectorized_columnar-32      1680    662582 ns/op  263071 B/op  2639 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/baseline_row_executor-32     48  23744667 ns/op 9527930 B/op 61622 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/baseline_row_executor-32     50  23319033 ns/op 9527807 B/op 61623 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/baseline_row_executor-32     51  22426476 ns/op 9527686 B/op 61622 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/baseline_row_executor-32     45  24339489 ns/op 9527495 B/op 61622 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/baseline_row_executor-32     68  17706504 ns/op 9527582 B/op 61622 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/vectorized_columnar-32      285   3748941 ns/op  567501 B/op 21615 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/vectorized_columnar-32      327   3930348 ns/op  567509 B/op 21615 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/vectorized_columnar-32      262   4328291 ns/op  567513 B/op 21615 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/vectorized_columnar-32      283   3621912 ns/op  567504 B/op 21615 allocs/op
+BenchmarkSQLColumnarVectorGroupAggregate/rows_20000/vectorized_columnar-32      404   3413230 ns/op  567490 B/op 21615 allocs/op
+```
+
+| Input | Established row executor | Vectorized columnar | CPU improvement | Allocation-volume improvement | Allocation-count improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 64 rows | 286.147 us; 180,481 B; 1,209 | 255.606 us; 151,581 B; 1,078 | 1.12x faster | 1.19x lower | 1.12x fewer |
+| 1,024 rows | 1.415 ms; 716,650 B; 4,692 | 647.674 us; 263,064 B; 2,639 | 2.18x faster | 2.72x lower | 1.78x fewer |
+| 20,000 rows | 23.319 ms; 9,527,686 B; 61,622 | 3.749 ms; 567,504 B; 21,615 | 6.22x faster | 16.79x lower | 2.85x fewer |
+
+`B/op` is cumulative allocation volume, not RSS or live retained heap. The
+vector path adds only a per-query selection buffer capped at 1,024 machine
+integers, about 8 KiB on 64-bit builds, plus one group state per distinct key.
+It has no storage or wire-format cost. The path is automatic only for its
+proved shape; ordered or otherwise richer queries and active group-memory
+budgets retain the established executor. See
+[SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md).
