@@ -3409,3 +3409,11 @@ loaded, replayed, or restored dataset that exceeds the configured limit.
 
 For library users, the same guard is available through
 `ConfigurePersistentStoreMaxBytes` and `EstimatePersistentStorageBytes`.
+
+### Graceful Async Replication Shutdown
+
+`HTTPReplicator.Close()` cancels queued and in-flight asynchronous replication.
+Use `CloseWithContext(ctx)` when shutdown should wait for owned work to finish.
+If the context expires, it returns the context error without canceling or
+dropping the owned work, so the caller can retry with a longer deadline or
+choose the immediate `Close()` behavior.

@@ -4250,3 +4250,27 @@ commit-t111:
 
 push-t111:
 	bash ./scripts/push-t111.sh
+
+test-t115:
+	bash ./scripts/test-t115.sh
+
+format-t115:
+	bash ./scripts/format-t115.sh
+
+test-race-t115:
+	bash ./scripts/test-race-t115.sh
+
+vet-t115:
+	bash ./scripts/vet-t115.sh
+
+review-t115:
+	bash ./scripts/review-t115.sh
+
+stage-t115:
+	bash ./scripts/stage-t115.sh
+
+commit-t115:
+	bash ./scripts/commit-t115.sh
+
+push-t115:
+	bash ./scripts/push-t115.sh

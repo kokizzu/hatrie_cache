@@ -478,7 +478,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T112 Per-queue memory and latency metrics - async replication exposes estimated resident queued/in-flight payload bytes plus queue wait/service histograms through status and Prometheus; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
 - [x] T113 Dead-letter queue with replay controls - public generic bounded retention supports inspection, explicit replay deadlines, and discard; see [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md).
 - [ ] T114 Work stealing for independent queue workers.
-- [ ] T115 Cancellation-safe task ownership.
+- [x] T115 Cancellation-safe task ownership: `HTTPReplicator.CloseWithContext` drains asynchronous work without dropping owned tasks when a shutdown deadline expires.
 
 ### SQL, Security, And Operations
 

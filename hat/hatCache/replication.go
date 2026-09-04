@@ -613,6 +613,45 @@ func (replicator *HTTPReplicator) Close() {
 	})
 }
 
+// CloseWithContext drains asynchronous replication before closing the
+// replicator. If ctx expires, the method returns without canceling or dropping
+// owned work, allowing a later call to retry the drain.
+func (replicator *HTTPReplicator) CloseWithContext(ctx context.Context) error {
+	if replicator == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := replicator.waitForAsyncIdle(ctx); err != nil {
+		return err
+	}
+	replicator.Close()
+	return nil
+}
+
+func (replicator *HTTPReplicator) waitForAsyncIdle(ctx context.Context) error {
+	if replicator.queue == nil {
+		return nil
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		replicator.mu.RLock()
+		idle := len(replicator.queue) == 0 && len(replicator.pending) == 0 &&
+			replicator.queueStats.EstimatedInFlightBytes == 0 && !replicator.outboxRestoreBacklog
+		replicator.mu.RUnlock()
+		if idle {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // PauseAsyncReplication stops the asynchronous worker from starting queued
 // jobs. A job already in flight is allowed to finish.
 func (replicator *HTTPReplicator) PauseAsyncReplication() error {
