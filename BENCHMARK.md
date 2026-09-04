@@ -15553,3 +15553,13 @@ expensive than the disabled branch. It trades CPU and transient allocations for
 bounded durable admission; it is not a throughput improvement. Physical LSM
 metadata, compaction amplification, filesystem blocks, and encryption framing
 remain outside the logical estimate.
+## T154 Slow-command capture overhead
+
+Command: `make benchmark-t154` (`-count=3`, `-benchmem`).
+
+| mode | ns/op range | B/op | allocs/op | median ns/op |
+| --- | ---: | ---: | ---: | ---: |
+| capture disabled | 5,913-6,478 | 8,008 | 42 | 6,185 |
+| capture enabled | 6,021-6,310 | 8,008 | 42 | 6,228 |
+
+The enabled ring added about 0.7% at the median in this sample, with no measured allocation increase. The feature is therefore disabled by the default zero threshold and should be enabled only when the diagnostics are needed.

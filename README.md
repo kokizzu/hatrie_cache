@@ -3426,3 +3426,6 @@ choose the immediate `Close()` behavior.
 Use `CreateBackupBundleWithContext` or `CreateIncrementalBackupRepositoryWithContext` when an operator needs to cancel an online backup. The existing `CreateBackupBundle` and `CreateIncrementalBackupRepository` APIs remain available and use a background context.
 
 Cancellation is checked before repository or bundle publication and during payload transfer. The last published manifest and `latest` pointer remain authoritative; completed content-addressed objects may remain after cancellation and are reused by the next attempt. Pebble's internal checkpoint call is not interruptible mid-call, so cancellation is observed when that call returns.
+### Slow-command capture
+
+Set `MonitoringOptions.SlowCommandThreshold` to a positive duration to enable bounded capture and optionally set `SlowCommandCapacity` (default `128`, capped at `4096`). The default threshold is `0`, so capture is disabled and adds no ring allocation. Read recent records from the authenticated `GET /api/commands/slow` endpoint. Records contain timing, command, key, result, and HTTP status, but never command values or response messages.

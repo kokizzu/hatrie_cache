@@ -99,8 +99,12 @@ type MonitoringOptions struct {
 	Journal              *CommandJournal
 	// AsyncCommands enables the opt-in HTTP async command admission protocol.
 	// It is disabled by default and requires a journal with idempotency enabled.
-	AsyncCommands                   bool
-	AsyncCommandStatusCapacity      int
+	AsyncCommands              bool
+	AsyncCommandStatusCapacity int
+	// SlowCommandThreshold enables bounded slow-command capture when positive.
+	// It is disabled by default; values are never stored in captured records.
+	SlowCommandThreshold            time.Duration
+	SlowCommandCapacity             int
 	JournalRecoveryRepositoryPath   string
 	JournalRecoveryRepositoryRetain int
 	Topology                        *TopologyStore
@@ -144,6 +148,7 @@ type MonitoringHandler struct {
 	asyncCommandsMu       sync.Mutex
 	asyncCommands         map[string]monitoringAsyncCommandEntry
 	asyncCommandOrder     []string
+	slowCommands          *monitoringSlowCommandCapture
 }
 
 type monitoringSQLResolver struct {
@@ -393,6 +398,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.DiagnosticsProfiling {
 		handler.profileCapture = &hatMonitoring.ProfileCapture{}
 	}
+	if options.SlowCommandThreshold > 0 {
+		handler.slowCommands = newMonitoringSlowCommandCapture(options.SlowCommandThreshold, options.SlowCommandCapacity)
+	}
 	return handler
 }
 
@@ -536,6 +544,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/grafana/search", handler.handleGrafanaSearch)
 	server.HandleFunc("/api/grafana/query", handler.handleGrafanaQuery)
 	server.HandleFunc("/api/commands", handler.handleCommands)
+	server.HandleFunc("/api/commands/slow", handler.handleSlowCommands)
 	if handler.options.AsyncCommands {
 		server.HandleFunc("/api/commands/status", handler.handleAsyncCommandStatus)
 	}
@@ -1620,6 +1629,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		handler.handleAsyncCommandSubmission(w, r, request)
 		return
 	}
+	startedAt := time.Now()
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
 		NodeName:            handler.options.NodeName,
 		Journal:             handler.options.Journal,
@@ -1630,6 +1640,11 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		ReplicationSafety:   handler.options.ReplicationSafety,
 		EnforceLeaderWrites: handler.options.EnforceLeaderWrites,
 	})
+	status := http.StatusOK
+	if rejected {
+		status = http.StatusConflict
+	}
+	handler.captureSlowCommand(startedAt, request, response, status)
 	if rejected {
 		handler.auditCommandHTTP(r, request, response, false, http.StatusConflict)
 		writeCommandResponseWire(w, r, http.StatusConflict, response, requestFormat)

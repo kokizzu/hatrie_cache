@@ -4360,3 +4360,19 @@ commit-t046:
 .PHONY: push-t046
 push-t046:
 	bash ./scripts/push-t046.sh
+
+.PHONY: review-t154
+review-t154:
+	bash ./scripts/review-t154.sh
+
+.PHONY: stage-t154
+stage-t154:
+	bash ./scripts/stage-t154.sh
+
+.PHONY: commit-t154
+commit-t154:
+	bash ./scripts/commit-t154.sh
+
+.PHONY: push-t154
+push-t154:
+	bash ./scripts/push-t154.sh

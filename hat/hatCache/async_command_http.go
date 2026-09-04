@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -42,6 +43,8 @@ type AsyncCommandStatusResponse struct {
 type monitoringAsyncCommandEntry struct {
 	check      commandIdempotencyCheck
 	submission *CommandJournalSubmission
+	request    CacheCommandRequest
+	startedAt  time.Time
 	completed  bool
 	response   CacheCommandResponse
 }
@@ -162,7 +165,11 @@ func (handler *MonitoringHandler) admitAsyncCommand(request CacheCommandRequest)
 	if len(handler.asyncCommands) >= handler.options.AsyncCommandStatusCapacity && !handler.evictCompletedAsyncCommandLocked() {
 		return AsyncCommandAcceptedResponse{}, ErrMonitoringAsyncCommandStatusFull
 	}
-	handler.asyncCommands[key] = monitoringAsyncCommandEntry{check: check}
+	handler.asyncCommands[key] = monitoringAsyncCommandEntry{
+		check:     check,
+		request:   cloneAsyncCommandRequest(request),
+		startedAt: time.Now(),
+	}
 	handler.asyncCommandOrder = append(handler.asyncCommandOrder, key)
 	callbackRequest := cloneAsyncCommandRequest(request)
 	submission, err := journal.submitAsyncCommand(handler.trie, request, func(response CacheCommandResponse) {
@@ -195,14 +202,16 @@ func asyncCommandContainsInternal(request CacheCommandRequest) bool {
 
 func (handler *MonitoringHandler) completeAsyncCommand(key string, response CacheCommandResponse) {
 	handler.asyncCommandsMu.Lock()
-	defer handler.asyncCommandsMu.Unlock()
 	entry, ok := handler.asyncCommands[key]
 	if !ok || entry.completed {
+		handler.asyncCommandsMu.Unlock()
 		return
 	}
 	entry.response = cloneCacheCommandResponse(response)
 	entry.completed = true
 	handler.asyncCommands[key] = entry
+	handler.asyncCommandsMu.Unlock()
+	handler.captureSlowCommand(entry.startedAt, entry.request, response, http.StatusOK)
 }
 
 func (handler *MonitoringHandler) evictCompletedAsyncCommandLocked() bool {
