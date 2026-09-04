@@ -63,6 +63,8 @@ func ParseReplicationTransport(value string) (ReplicationTransport, error) {
 
 var (
 	errReplicationResponseTooLarge = hatCommand.ErrResponseTooLarge
+	ErrAsyncReplicationDisabled    = errors.New("hatriecache: asynchronous replication is not configured")
+	ErrAsyncReplicationClosed      = errors.New("hatriecache: asynchronous replication is closed")
 )
 
 type HTTPReplicatorOptions struct {
@@ -124,10 +126,12 @@ type HTTPReplicator struct {
 	capabilityNow            func() time.Time
 	done                     chan struct{}
 	stopped                  chan struct{}
+	resume                   chan struct{}
 	asyncCtx                 context.Context
 	cancel                   context.CancelFunc
 	close                    sync.Once
 	closed                   bool
+	paused                   bool
 	sequence                 uint64
 	queueSeq                 uint64
 	deadSeq                  uint64
@@ -495,6 +499,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.deadLimit = deadLimit
 		replicator.done = make(chan struct{})
 		replicator.stopped = make(chan struct{})
+		replicator.resume = make(chan struct{})
 		replicator.asyncCtx = ctx
 		replicator.cancel = cancel
 		replicator.queueStats = ReplicationQueueStats{
@@ -598,6 +603,60 @@ func (replicator *HTTPReplicator) Close() {
 			<-replicator.stopped
 		}
 	})
+}
+
+// PauseAsyncReplication stops the asynchronous worker from starting queued
+// jobs. A job already in flight is allowed to finish.
+func (replicator *HTTPReplicator) PauseAsyncReplication() error {
+	if replicator == nil {
+		return ErrAsyncReplicationDisabled
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if replicator.queue == nil {
+		return ErrAsyncReplicationDisabled
+	}
+	if replicator.closed {
+		return ErrAsyncReplicationClosed
+	}
+	replicator.paused = true
+	replicator.queueStats.Paused = true
+	return nil
+}
+
+// ResumeAsyncReplication allows the asynchronous worker to continue draining
+// queued jobs.
+func (replicator *HTTPReplicator) ResumeAsyncReplication() error {
+	if replicator == nil {
+		return ErrAsyncReplicationDisabled
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if replicator.queue == nil {
+		return ErrAsyncReplicationDisabled
+	}
+	if replicator.closed {
+		return ErrAsyncReplicationClosed
+	}
+	if !replicator.paused {
+		return nil
+	}
+	replicator.paused = false
+	replicator.queueStats.Paused = false
+	close(replicator.resume)
+	replicator.resume = make(chan struct{})
+	return nil
+}
+
+// AsyncReplicationPaused reports whether asynchronous queue delivery is
+// currently paused.
+func (replicator *HTTPReplicator) AsyncReplicationPaused() bool {
+	if replicator == nil {
+		return false
+	}
+	replicator.mu.RLock()
+	defer replicator.mu.RUnlock()
+	return replicator.queue != nil && replicator.paused
 }
 
 func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
@@ -926,6 +985,25 @@ func (replicator *HTTPReplicator) markAsyncClosed() {
 	defer replicator.mu.Unlock()
 	replicator.closed = true
 	replicator.queueStats.Closed = true
+}
+
+func (replicator *HTTPReplicator) waitForAsyncResume(ctx context.Context) bool {
+	for {
+		replicator.mu.RLock()
+		paused := replicator.paused
+		resume := replicator.resume
+		replicator.mu.RUnlock()
+		if !paused {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-replicator.done:
+			return false
+		case <-resume:
+		}
+	}
 }
 
 func (replicator *HTTPReplicator) recordAsyncEnqueued() {
@@ -1875,17 +1953,31 @@ func replicationTaskTargetKey(target TopologyNode) string {
 func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
 	defer close(replicator.stopped)
 	defer replicator.markAsyncClosed()
+	var pending *replicationJob
 	for {
+		if !replicator.waitForAsyncResume(ctx) {
+			return
+		}
+		if pending != nil {
+			job := *pending
+			pending = nil
+			if replicator.AsyncReplicationPaused() {
+				pending = &job
+				continue
+			}
+			replicator.markAsyncDequeued(job)
+			replicator.refillAsyncOutbox(false)
+			replicator.runAsyncJob(ctx, job)
+			replicator.clearAsyncInFlight(job)
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-replicator.done:
 			return
 		case job := <-replicator.queue:
-			replicator.markAsyncDequeued(job)
-			replicator.refillAsyncOutbox(false)
-			replicator.runAsyncJob(ctx, job)
-			replicator.clearAsyncInFlight(job)
+			pending = &job
 		}
 	}
 }

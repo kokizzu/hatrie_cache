@@ -15,6 +15,7 @@ security guidance before exposing it on a network.
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
 - Opt-in journal replay progress and ETA: [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md)
 - Replication queue and wire-byte metrics: [REPLICATION_METRICS.md](REPLICATION_METRICS.md)
+- Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)

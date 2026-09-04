@@ -420,7 +420,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T060 Replica health gate before serving stale-sensitive reads.
 - [x] T061 Replication queue depth and error metrics - `/metrics` exposes queue depth, capacity, enqueue/drop, attempt, success/failure, retry, and age gauges/counters.
 - [x] T062 Replication bandwidth and compression metrics - `/metrics` exposes outgoing request wire bytes and request counts by target and `identity`/`gzip` encoding; see [REPLICATION_METRICS.md](REPLICATION_METRICS.md).
-- [ ] T063 Replication pause and resume controls.
+- [x] T063 Replication pause and resume controls - async replication exposes idempotent Go pause/resume methods, authenticated `/api/replication` actions, queue status, and a Prometheus paused gauge; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
 - [ ] T064 Rolling replica replacement.
 - [ ] T065 Failure-domain-aware replica placement.
 - [ ] T066 Cross-region replication with explicit RPO/RTO.

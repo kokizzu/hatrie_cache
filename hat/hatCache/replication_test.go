@@ -2117,6 +2117,125 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAsyncPauseAndResume(t *testing.T) {
+	delivered := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		delivered <- r.Method
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       NewElectionStore(topology, ElectionOptions{}),
+		Client:         target.Client(),
+		AsyncQueueSize: 2,
+	})
+	defer replicator.Close()
+
+	if replicator.AsyncReplicationPaused() {
+		t.Fatal("AsyncReplicationPaused() = true by default")
+	}
+	if err := replicator.PauseAsyncReplication(); err != nil {
+		t.Fatalf("PauseAsyncReplication() error = %v", err)
+	}
+	if !replicator.AsyncReplicationPaused() {
+		t.Fatal("AsyncReplicationPaused() = false after pause")
+	}
+	paused := replicator.LastResult()
+	if paused.Queue == nil || !paused.Queue.Paused {
+		t.Fatalf("paused queue stats = %#v, want paused", paused.Queue)
+	}
+
+	request := CacheCommandRequest{Command: "SETSTR", Key: "pause:1", Value: "value"}
+	response := trie.ExecuteCommand(request)
+	result := replicator.ReplicateCommand(context.Background(), trie, request, response)
+	if !result.Queued || result.Skipped {
+		t.Fatalf("paused enqueue result = %#v, want queued", result)
+	}
+	select {
+	case method := <-delivered:
+		t.Fatalf("paused replication delivered request with method %q", method)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := replicator.ResumeAsyncReplication(); err != nil {
+		t.Fatalf("ResumeAsyncReplication() error = %v", err)
+	}
+	if replicator.AsyncReplicationPaused() {
+		t.Fatal("AsyncReplicationPaused() = true after resume")
+	}
+	select {
+	case method := <-delivered:
+		if method != http.MethodPost {
+			t.Fatalf("delivered method = %q, want POST", method)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resumed replication did not deliver queued request")
+	}
+}
+
+func TestMonitoringReplicationPauseAndResume(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       NewElectionStore(topology, ElectionOptions{}),
+		Client:         target.Client(),
+		AsyncQueueSize: 1,
+	})
+	defer replicator.Close()
+	handler := NewMonitoringHandler(trie, MonitoringOptions{NodeName: "node-a", Replicator: replicator})
+
+	for _, action := range []string{"pause", "resume"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/replication", strings.NewReader(`{"action":"`+action+`"}`))
+		response := httptest.NewRecorder()
+		handler.handleReplication(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s response status = %d, want 200: %s", action, response.Code, response.Body.String())
+		}
+		wantPaused := action == "pause"
+		if got := replicator.AsyncReplicationPaused(); got != wantPaused {
+			t.Fatalf("%s paused = %v, want %v", action, got, wantPaused)
+		}
+		if action == "pause" {
+			metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			metricsResponse := httptest.NewRecorder()
+			handler.handleMetrics(metricsResponse, metricsRequest)
+			if !strings.Contains(metricsResponse.Body.String(), `hatrie_cache_replication_queue_paused{node="node-a"} 1`) {
+				t.Fatalf("paused metrics = %s, want paused gauge", metricsResponse.Body.String())
+			}
+		}
+	}
+	invalidRequest := httptest.NewRequest(http.MethodPost, "/api/replication", strings.NewReader(`{"action":"halt"}`))
+	invalidResponse := httptest.NewRecorder()
+	handler.handleReplication(invalidResponse, invalidRequest)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid action status = %d, want 400", invalidResponse.Code)
+	}
+}
+
+func TestHTTPReplicatorAsyncPauseRequiresQueue(t *testing.T) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{})
+	if err := replicator.PauseAsyncReplication(); !errors.Is(err, ErrAsyncReplicationDisabled) {
+		t.Fatalf("PauseAsyncReplication() error = %v, want ErrAsyncReplicationDisabled", err)
+	}
+	if err := replicator.ResumeAsyncReplication(); !errors.Is(err, ErrAsyncReplicationDisabled) {
+		t.Fatalf("ResumeAsyncReplication() error = %v, want ErrAsyncReplicationDisabled", err)
+	}
+}
+
 func TestExecutePublicCommandBatchAsyncOutboxQueuesOneGroupedTargetJob(t *testing.T) {
 	release := make(chan struct{})
 	requests := make(chan CacheCommandRequest, 1)

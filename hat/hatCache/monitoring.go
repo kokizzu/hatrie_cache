@@ -277,6 +277,7 @@ type MonitoringEntriesResponse = hatMonitoring.EntriesResponse
 
 type replicationSyncRequest struct {
 	Prefix string `json:"prefix,omitempty"`
+	Action string `json:"action,omitempty"`
 }
 
 type journalPullRequest struct {
@@ -907,6 +908,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 			writePrometheusType(&builder, "hatrie_cache_replication_queue_depth", "gauge")
 			fmt.Fprintf(&builder, "hatrie_cache_replication_queue_depth{node=\"%s\"} %d\n", node, result.Queue.Depth)
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_capacity", "Configured async replication queue capacity.", node, uint64(result.Queue.Capacity))
+			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_paused", "Whether async replication queue delivery is paused.", node, boolGauge(result.Queue.Paused))
 			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_enqueued_total", "Total enqueued async replication jobs.", node, result.Queue.Enqueued)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_dropped_total", "Total dropped async replication jobs.", node, result.Queue.Dropped)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_attempts_total", "Total async replication target delivery attempts.", node, result.Queue.Attempts)
@@ -2976,6 +2978,32 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 		return
 	}
 	if requestContextDone(w, r) {
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(request.Action))
+	switch action {
+	case "pause", "resume":
+		if handler.rejectDangerousHTTP(w, r, "replication."+action, map[string]interface{}{"action": action}) {
+			return
+		}
+		var err error
+		if action == "pause" {
+			err = handler.options.Replicator.PauseAsyncReplication()
+		} else {
+			err = handler.options.Replicator.ResumeAsyncReplication()
+		}
+		if err != nil {
+			writeJSONStatus(w, http.StatusConflict, commandError(err.Error()))
+			return
+		}
+		result := handler.options.Replicator.LastResult()
+		handler.auditHTTP(r, AuditEvent{Action: "replication." + action, OK: true, Status: http.StatusOK})
+		writeJSON(w, result)
+		return
+	case "":
+		// Empty action preserves the existing manual sync request.
+	default:
+		writeJSONStatus(w, http.StatusBadRequest, commandError("invalid replication action"))
 		return
 	}
 	if handler.rejectDangerousHTTP(w, r, "replication.sync", map[string]interface{}{"prefix": request.Prefix}) {

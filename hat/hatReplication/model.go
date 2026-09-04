@@ -53,6 +53,7 @@ type CircuitBreakerTarget struct {
 // QueueStats reports bounded asynchronous replication outbox health.
 type QueueStats struct {
 	Enabled               bool              `json:"enabled"`
+	Paused                bool              `json:"paused"`
 	Depth                 int               `json:"depth"`
 	Capacity              int               `json:"capacity"`
 	Enqueued              uint64            `json:"enqueued"`

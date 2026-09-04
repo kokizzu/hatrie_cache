@@ -179,6 +179,21 @@ func (reader benchmarkCountingReadCloser) Read(data []byte) (int, error) {
 	return n, err
 }
 
+func BenchmarkHTTPReplicatorAsyncPauseResume(b *testing.B) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{AsyncQueueSize: 1})
+	defer replicator.Close()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if err := replicator.PauseAsyncReplication(); err != nil {
+			b.Fatal(err)
+		}
+		if err := replicator.ResumeAsyncReplication(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 	const keyCount = 10000
 	for _, tt := range []struct {

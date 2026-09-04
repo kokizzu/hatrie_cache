@@ -15495,3 +15495,19 @@ wire_snapshot: 725.9, 658.5, 722.9, 704.1, 662.7 ns/op; 1024 B/op; 8 allocs/op
 The counter runs once after a request body has been sent and does not allocate
 per read chunk. The snapshot allocations are bounded by the number of observed
 targets and encodings.
+
+## Replication Pause And Resume
+
+Command: `make benchmark-t063`.
+
+This measures one pause/resume control transition on an asynchronous
+replicator. It is an operational-control cost measurement, not a throughput
+improvement claim. Normal operation starts unpaused and does not call these
+methods.
+
+| Operation | Samples ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Pause then resume | 66.97, 68.13, 68.26, 69.22, 69.35 | 112 | 1 |
+
+The allocation is the fresh wake-up channel created on resume. Queued work is
+retained while paused; an already in-flight request may finish.

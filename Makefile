@@ -4161,3 +4161,38 @@ push-t062:
 .PHONY: review-t062
 review-t062:
 	bash ./scripts/review-t062.sh
+.PHONY: test-t063
+test-t063:
+	bash ./scripts/test-t063.sh
+
+.PHONY: format-t063
+format-t063:
+	bash ./scripts/format-t063.sh
+
+.PHONY: test-race-t063
+test-race-t063:
+	bash ./scripts/test-race-t063.sh
+
+.PHONY: vet-t063
+vet-t063:
+	bash ./scripts/vet-t063.sh
+
+.PHONY: benchmark-t063
+benchmark-t063:
+	bash ./scripts/benchmark-t063.sh
+
+.PHONY: review-t063
+review-t063:
+	bash ./scripts/review-t063.sh
+
+.PHONY: stage-t063
+stage-t063:
+	bash ./scripts/commit-t063.sh stage
+
+.PHONY: commit-t063
+commit-t063:
+	bash ./scripts/commit-t063.sh commit
+
+.PHONY: push-t063
+push-t063:
+	bash ./scripts/commit-t063.sh push
