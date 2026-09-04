@@ -3959,3 +3959,33 @@ commit-delay-queue:
 .PHONY: push-delay-queue
 push-delay-queue:
 	sh ./scripts/commit-delay-queue.sh push
+.PHONY: format-cli-output
+format-cli-output:
+	sh ./scripts/format-cli-output.sh
+
+.PHONY: test-cli-output
+test-cli-output:
+	sh ./scripts/test-cli-output.sh
+
+.PHONY: test-race-cli-output
+test-race-cli-output:
+	sh ./scripts/test-race-cli-output.sh
+
+.PHONY: vet-cli-output
+vet-cli-output:
+	sh ./scripts/vet-cli-output.sh
+
+.PHONY: benchmark-cli-output
+benchmark-cli-output:
+	sh ./scripts/benchmark-cli-output.sh
+.PHONY: stage-cli-output
+stage-cli-output:
+	sh ./scripts/commit-cli-output.sh stage
+
+.PHONY: commit-cli-output
+commit-cli-output:
+	sh ./scripts/commit-cli-output.sh commit
+
+.PHONY: push-cli-output
+push-cli-output:
+	sh ./scripts/commit-cli-output.sh push

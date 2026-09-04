@@ -15329,3 +15329,26 @@ Raw samples:
 delay_queue: 259.9, 277.7, 314.1, 298.4, 288.8 ns/op; 0 B/op; 0 allocs/op
 container_heap_reference: 291.9, 292.8, 298.5, 309.7, 293.7 ns/op; 96 B/op; 2 allocs/op
 ```
+
+## CLI Output Formatting
+
+Command: make benchmark-cli-output.
+
+This isolates the local CLI output path. JSON passthrough remains the default;
+pretty formatting is opt-in with -output pretty.
+
+| Mode | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Compact JSON passthrough | 1.64 | 0 | 0 |
+| Pretty JSON | 438.9 | 177 | 3 |
+| Tradeoff | **267x higher CPU** | **177 more** | **3 more** |
+
+Raw samples:
+
+~~~text
+json: 1.631, 1.588, 1.608, 1.570, 1.595 ns/op; 0 B/op; 0 allocs/op
+pretty: 471.0, 455.0, 425.3, 454.9, 425.5 ns/op; 177 B/op; 3 allocs/op
+~~~
+| Compact JSON passthrough | 1.595 | 0 | 0 |
+| Pretty JSON | 454.9 | 177 | 3 |
+| Tradeoff | **285x higher CPU** | **177 more** | **3 more** |

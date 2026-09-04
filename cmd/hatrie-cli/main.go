@@ -35,6 +35,7 @@ type clientConfig struct {
 	addr    string
 	timeout time.Duration
 	token   string
+	output  string
 }
 
 type backupAndVerifyResult struct {
@@ -96,6 +97,8 @@ const maxResponseDrainBytes = 1 << 20
 const truncatedErrorBodySuffix = "\n... response body truncated"
 const minCompressedJSONRequestBytes = 16 << 10
 const defaultCommandWireFormat = "auto"
+const cliOutputJSON = "json"
+const cliOutputPretty = "pretty"
 const defaultRequestTimeout = 30 * time.Second
 const minCLIProfileDuration = time.Second
 const maxCLIProfileDuration = 30 * time.Second
@@ -131,7 +134,69 @@ func cliWriter(writer io.Writer) io.Writer {
 	return writer
 }
 
-func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, client *http.Client) error {
+type cliOutputWriter struct {
+	writer  io.Writer
+	format  string
+	pending []byte
+}
+
+func newCLIOutputWriter(writer io.Writer, format string) *cliOutputWriter {
+	return &cliOutputWriter{writer: cliWriter(writer), format: format}
+}
+
+func (writer *cliOutputWriter) Write(data []byte) (int, error) {
+	if writer == nil {
+		return len(data), nil
+	}
+	if writer.format != cliOutputPretty {
+		return writer.writer.Write(data)
+	}
+	writer.pending = append(writer.pending, data...)
+	for {
+		index := bytes.IndexByte(writer.pending, '\n')
+		if index < 0 {
+			break
+		}
+		line := writer.pending[:index]
+		writer.pending = writer.pending[index+1:]
+		if err := writer.writeLine(line); err != nil {
+			return len(data), err
+		}
+	}
+	return len(data), nil
+}
+
+func (writer *cliOutputWriter) Flush() error {
+	if writer == nil || len(writer.pending) == 0 {
+		return nil
+	}
+	line := writer.pending
+	writer.pending = nil
+	return writer.writeLine(line)
+}
+
+func (writer *cliOutputWriter) writeLine(line []byte) error {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		_, err := writer.writer.Write([]byte{'\n'})
+		return err
+	}
+	var formatted bytes.Buffer
+	if err := stdjson.Indent(&formatted, trimmed, "", "  "); err != nil {
+		if _, writeErr := writer.writer.Write(line); writeErr != nil {
+			return writeErr
+		}
+		_, writeErr := writer.writer.Write([]byte{'\n'})
+		return writeErr
+	}
+	if _, err := writer.writer.Write(formatted.Bytes()); err != nil {
+		return err
+	}
+	_, err := writer.writer.Write([]byte{'\n'})
+	return err
+}
+
+func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, client *http.Client) (runErr error) {
 	ctx = cliContext(ctx)
 	stdout = cliWriter(stdout)
 	stderr = cliWriter(stderr)
@@ -147,6 +212,15 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.timeout)
 		defer cancel()
+	}
+	if cfg.output == cliOutputPretty {
+		outputWriter := newCLIOutputWriter(stdout, cfg.output)
+		stdout = outputWriter
+		defer func() {
+			if flushErr := outputWriter.Flush(); flushErr != nil && runErr == nil {
+				runErr = flushErr
+			}
+		}()
 	}
 	if len(remaining) == 0 {
 		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, sql, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, support-bundle, profile, cluster, doctor")
@@ -201,14 +275,23 @@ func parseGlobalFlags(args []string, output io.Writer) (clientConfig, []string, 
 		addr:    "http://127.0.0.1:8080",
 		timeout: defaultRequestTimeout,
 		token:   os.Getenv("HATRIE_CACHE_AUTH_TOKEN"),
+		output:  cliOutputJSON,
 	}
 	flags := flag.NewFlagSet("hatrie-cli", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(output))
 	flags.StringVar(&cfg.addr, "addr", cfg.addr, "monitoring server base URL")
 	flags.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "request timeout; use 0 to disable")
 	flags.StringVar(&cfg.token, "token", cfg.token, "bearer token for authenticated monitoring API requests")
+	flags.StringVar(&cfg.output, "output", cfg.output, "output format: json or pretty")
 	if err := flags.Parse(args); err != nil {
 		return clientConfig{}, nil, err
+	}
+	cfg.output = strings.ToLower(strings.TrimSpace(cfg.output))
+	if cfg.output == "" {
+		cfg.output = cliOutputJSON
+	}
+	if cfg.output != cliOutputJSON && cfg.output != cliOutputPretty {
+		return clientConfig{}, nil, fmt.Errorf("unsupported output format %q; use json or pretty", cfg.output)
 	}
 	return cfg, flags.Args(), nil
 }
