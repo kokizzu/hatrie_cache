@@ -123,18 +123,64 @@ func sqlRewriteFoldable(expr sqlExpr) bool {
 	switch expr.kind {
 	case "literal":
 		return true
+	case "cast":
+		return len(expr.args) == 1 && sqlRewriteFoldable(expr.args[0])
+	case "func":
+		if !sqlRewriteFoldableFunction(expr.name) {
+			return false
+		}
+		for _, argument := range expr.args {
+			if !sqlRewriteFoldable(argument) {
+				return false
+			}
+		}
+		return true
+	case "case":
+		if expr.left != nil && !sqlRewriteFoldable(*expr.left) {
+			return false
+		}
+		for _, branch := range expr.cases {
+			if !sqlRewriteFoldable(branch.when) || !sqlRewriteFoldable(branch.then) {
+				return false
+			}
+		}
+		return expr.right == nil || sqlRewriteFoldable(*expr.right)
+	case "in":
+		if expr.left == nil || !sqlRewriteFoldable(*expr.left) {
+			return false
+		}
+		for _, argument := range expr.args {
+			if !sqlRewriteFoldable(argument) {
+				return false
+			}
+		}
+		return true
+	case "between":
+		if expr.left == nil || len(expr.args) != 2 || !sqlRewriteFoldable(*expr.left) {
+			return false
+		}
+		return sqlRewriteFoldable(expr.args[0]) && sqlRewriteFoldable(expr.args[1])
 	case "unary":
 		return expr.left != nil && sqlRewriteFoldable(*expr.left)
 	case "binary":
 		if expr.left == nil || expr.right == nil {
-			return false
+			return (expr.op == "IS NULL" || expr.op == "IS NOT NULL") && expr.left != nil && sqlRewriteFoldable(*expr.left)
 		}
 		switch expr.op {
-		case "AND", "OR", "=", "!=", "<>", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "LIKE":
+		case "AND", "OR", "=", "!=", "<>", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "LIKE", "REGEXP", "NOT REGEXP", "IS NULL", "IS NOT NULL":
 			return sqlRewriteFoldable(*expr.left) && sqlRewriteFoldable(*expr.right)
 		}
 	}
 	return false
+}
+
+func sqlRewriteFoldableFunction(name string) bool {
+	switch name {
+	case "LOWER", "COALESCE", "NULLIF", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "REGEXP_LIKE", "REGEXP_EXTRACT", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "CONTAINS":
+		return true
+	default:
+		return false
+	}
 }
 
 func sqlPruneDeadDerivedProjections(query *sqlQuery) {

@@ -3906,3 +3906,26 @@ commit-sql-borrowed-prefix-index:
 
 push-sql-borrowed-prefix-index:
 	bash scripts/deliver-sql-borrowed-prefix-index.sh push
+.PHONY: audit-next-inspiration
+audit-next-inspiration:
+	sh ./scripts/audit-next-inspiration.sh
+
+.PHONY: test-sql-constant-folding
+test-sql-constant-folding:
+	sh ./scripts/test-sql-constant-folding.sh
+
+.PHONY: benchmark-sql-constant-folding
+benchmark-sql-constant-folding:
+	sh ./scripts/benchmark-sql-constant-folding.sh
+
+.PHONY: format-sql-constant-folding
+format-sql-constant-folding:
+	sh ./scripts/format-sql-constant-folding.sh
+
+.PHONY: test-race-sql-constant-folding
+test-race-sql-constant-folding:
+	sh ./scripts/test-race-sql-constant-folding.sh
+
+.PHONY: vet-sql-constant-folding
+vet-sql-constant-folding:
+	sh ./scripts/vet-sql-constant-folding.sh

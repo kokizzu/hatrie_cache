@@ -15286,3 +15286,27 @@ The feature is opt-in through `SQLQueryOptions.Workers`; `Workers: 0/1`, small
 inputs, custom functions, and `SUM`/`AVG` retain the established path. See
 [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md) for the correctness
 boundary and rollback rationale.
+## SQL Constant Folding
+
+Command: `make benchmark-sql-constant-folding`.
+
+The same parsed query is executed with the rewrite disabled and enabled. The
+workload has 256 input rows and constant-heavy projections/predicates.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Without rewrite | 229,340 | 312,153 | 2,066 |
+| With constant folding | 110,253 | 225,264 | 1,037 |
+| Improvement | **2.08x faster** | **1.39x lower** | **1.99x lower** |
+
+Raw samples from the five repetitions:
+
+```text
+without_rewrite: 222426, 222550, 229340, 239497, 259081 ns/op
+with_constant_folding: 113826, 113902, 110253, 108889, 107967 ns/op
+without_rewrite: 312153 B/op, 2066 allocs/op
+with_constant_folding: 225264 B/op, 1037 allocs/op
+```
+
+This is a targeted optimizer benchmark; it is not a claim that every query
+will improve by the same factor.

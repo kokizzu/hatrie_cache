@@ -18,6 +18,7 @@ security guidance before exposing it on a network.
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
 - ClickHouse-style opt-in two-level columnar aggregation: [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md)
+- ClickHouse-style SQL constant folding: [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md)
 - Runtime allocator and GC diagnostics: [MEMORY_REPORT.md](MEMORY_REPORT.md)
 - Read-only hypothetical SQL index/projection cost analysis: [SQL_WHATIF.md](SQL_WHATIF.md)
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)

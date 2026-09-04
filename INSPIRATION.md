@@ -122,7 +122,7 @@ name.
 - [x] C062 Predicate pushdown into source scans.
 - [x] C063 Projection pruning through joins and aggregates.
 - [x] C064 Constant and literal normalization for reusable plans.
-- [ ] C065 Constant folding across all scalar expressions.
+- [x] C065 Constant folding across all scalar expressions - deterministic row-independent CAST, scalar functions, CASE, IN, BETWEEN, IS NULL, and REGEXP expressions are folded after parameter binding; unsupported/custom/aggregate expressions retain the established path. See [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md).
 - [ ] C066 Predicate reordering by estimated cost and selectivity.
 - [ ] C067 Common-subexpression elimination.
 - [ ] C068 Short-circuit evaluation for expensive predicates.
