@@ -8924,6 +8924,44 @@ temporary heap, and 1.47x more allocations for a deterministic disk bound.
 With the default `0`, this accounting is bypassed and existing behavior is
 preserved.
 
+### Journal Replay Progress
+
+This benchmark replays the same 256-record binary journal into a fresh trie and
+compares the existing replay path with opt-in progress tracking. It measures
+replay CPU and allocations, not disk restore throughput.
+
+Command:
+
+```text
+make benchmark-replay-progress
+```
+
+Linux, AMD Ryzen 9 5950X, Go benchmark, `-benchtime=100ms -count=5`:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative replay time |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy `Replay` | 452,415 | 153,202 | 2,595 | 1.00x |
+| Opt-in `ReplayWithProgress` | 444,495 | 153,346 | 2,596 | 0.98x |
+
+Raw output:
+
+```text
+BenchmarkCommandJournalReplayProgress/Legacy-32 248 440702 ns/op 153202 B/op 2595 allocs/op
+BenchmarkCommandJournalReplayProgress/Legacy-32 256 452415 ns/op 153202 B/op 2595 allocs/op
+BenchmarkCommandJournalReplayProgress/Legacy-32 252 454649 ns/op 153202 B/op 2595 allocs/op
+BenchmarkCommandJournalReplayProgress/Legacy-32 262 466223 ns/op 153224 B/op 2595 allocs/op
+BenchmarkCommandJournalReplayProgress/Legacy-32 274 452067 ns/op 153202 B/op 2595 allocs/op
+BenchmarkCommandJournalReplayProgress/WithProgress-32 262 439635 ns/op 153346 B/op 2596 allocs/op
+BenchmarkCommandJournalReplayProgress/WithProgress-32 258 451347 ns/op 153346 B/op 2596 allocs/op
+BenchmarkCommandJournalReplayProgress/WithProgress-32 256 435214 ns/op 153346 B/op 2596 allocs/op
+BenchmarkCommandJournalReplayProgress/WithProgress-32 268 444495 ns/op 153346 B/op 2596 allocs/op
+BenchmarkCommandJournalReplayProgress/WithProgress-32 255 490395 ns/op 153346 B/op 2596 allocs/op
+```
+
+The median CPU result is effectively neutral within run-to-run filesystem and
+cache noise. Opt-in tracking adds one allocation and about 144 B/op in this
+fixture. The legacy methods do not pay that cost.
+
 ### Journal-Backed Replication Outbox
 
 With a binary command journal and LevelDB outbox configured together, each

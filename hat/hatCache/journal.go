@@ -190,6 +190,7 @@ type CommandJournal struct {
 	mu                    sync.Mutex
 	snapshotMu            sync.Mutex
 	submitMu              sync.RWMutex
+	replayProgressMu      sync.RWMutex
 	closeOnce             sync.Once
 	path                  string
 	format                CommandJournalFormat
@@ -214,6 +215,7 @@ type CommandJournal struct {
 	outboxRetainFrom      uint64
 	projectionWatermarks  map[string]uint64
 	idempotency           commandIdempotencyState
+	replayProgress        *commandJournalReplayProgressState
 }
 
 type commandJournalAppendState struct {
@@ -1161,7 +1163,33 @@ func (journal *CommandJournal) ReplayThrough(trie *HatTrie, afterSequence uint64
 	return journal.replayThrough(trie, afterSequence, targetSequence)
 }
 
+// ReplayWithProgress replays journal entries and records an opt-in progress
+// snapshot that can be polled with ReplayProgress from another goroutine.
+// Existing Replay and ReplayThrough calls do not enable progress tracking.
+func (journal *CommandJournal) ReplayWithProgress(trie *HatTrie, afterSequence uint64, targetSequence uint64) (uint64, error) {
+	return journal.replayThroughWithProgress(trie, afterSequence, targetSequence, true)
+}
+
+// ReplayProgress returns the most recent ReplayWithProgress state. It is safe
+// to call while replay is active; a zero value means no progress replay ran.
+func (journal *CommandJournal) ReplayProgress() CommandJournalReplayProgress {
+	if journal == nil {
+		return CommandJournalReplayProgress{}
+	}
+	journal.replayProgressMu.RLock()
+	state := journal.replayProgress
+	journal.replayProgressMu.RUnlock()
+	if state == nil {
+		return CommandJournalReplayProgress{}
+	}
+	return state.snapshot()
+}
+
 func (journal *CommandJournal) replayThrough(trie *HatTrie, afterSequence uint64, targetSequence uint64) (uint64, error) {
+	return journal.replayThroughWithProgress(trie, afterSequence, targetSequence, false)
+}
+
+func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSequence uint64, targetSequence uint64, trackProgress bool) (result uint64, err error) {
 	if journal == nil {
 		return 0, ErrNilCommandJournal
 	}
@@ -1174,8 +1202,17 @@ func (journal *CommandJournal) replayThrough(trie *HatTrie, afterSequence uint64
 	if journal.closed {
 		return 0, ErrCommandJournalClosed
 	}
+	var progress *commandJournalReplayProgressState
+	if trackProgress {
+		progress = newCommandJournalReplayProgress(afterSequence)
+		journal.replayProgressMu.Lock()
+		journal.replayProgress = progress
+		journal.replayProgressMu.Unlock()
+		defer func() { progress.finish(err) }()
+	}
 	var maxSequence uint64
 	var compactedThrough uint64
+	var totalEntries uint64
 	if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
@@ -1183,9 +1220,15 @@ func (journal *CommandJournal) replayThrough(trie *HatTrie, afterSequence uint64
 		if entry.Checkpoint && entry.Sequence > compactedThrough {
 			compactedThrough = entry.Sequence
 		}
+		if progress != nil && !entry.Checkpoint && entry.Sequence > afterSequence && (targetSequence == 0 || entry.Sequence <= targetSequence) {
+			totalEntries++
+		}
 		return nil
 	}); err != nil {
 		return 0, err
+	}
+	if progress != nil {
+		progress.setTotal(totalEntries)
 	}
 	if afterSequence < compactedThrough {
 		return 0, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, compactedThrough)
@@ -1206,9 +1249,15 @@ func (journal *CommandJournal) replayThrough(trie *HatTrie, afterSequence uint64
 		if entry.Sequence <= afterSequence || entry.Sequence > targetSequence {
 			return nil
 		}
+		if progress != nil {
+			progress.markCurrent(entry.Sequence)
+		}
 		response := trie.ExecuteCommand(entry.Request)
 		if !response.OK {
 			return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
+		}
+		if progress != nil {
+			progress.markApplied(entry.Sequence)
 		}
 		return nil
 	}); err != nil {

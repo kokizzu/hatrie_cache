@@ -4097,3 +4097,39 @@ commit-journal-retention:
 .PHONY: push-journal-retention
 push-journal-retention:
 	bash ./scripts/commit-journal-retention.sh push
+
+.PHONY: test-replay-progress
+test-replay-progress:
+	bash ./scripts/test-replay-progress.sh
+
+.PHONY: format-replay-progress
+format-replay-progress:
+	bash ./scripts/format-replay-progress.sh
+
+.PHONY: benchmark-replay-progress
+benchmark-replay-progress:
+	bash ./scripts/benchmark-replay-progress.sh
+
+.PHONY: test-race-replay-progress
+test-race-replay-progress:
+	bash ./scripts/test-race-replay-progress.sh
+
+.PHONY: vet-replay-progress
+vet-replay-progress:
+	bash ./scripts/vet-replay-progress.sh
+
+.PHONY: review-replay-progress
+review-replay-progress:
+	bash ./scripts/review-replay-progress.sh
+
+.PHONY: stage-replay-progress
+stage-replay-progress:
+	bash ./scripts/commit-replay-progress.sh stage
+
+.PHONY: commit-replay-progress
+commit-replay-progress:
+	bash ./scripts/commit-replay-progress.sh commit
+
+.PHONY: push-replay-progress
+push-replay-progress:
+	bash ./scripts/commit-replay-progress.sh push
