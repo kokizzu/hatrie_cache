@@ -139,6 +139,11 @@ func applySQLQueryCollation(query *sqlQuery, collation SQLCollation) {
 	for index := range query.orderBy {
 		applySQLOrderCollation(&query.orderBy[index], collation)
 	}
+	if query.limitBy != nil {
+		for index := range query.limitBy.expressions {
+			applySQLExprCollation(&query.limitBy.expressions[index], collation)
+		}
+	}
 	for index := range query.unions {
 		applySQLQueryCollation(query.unions[index].query, collation)
 	}

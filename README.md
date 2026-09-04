@@ -20,6 +20,7 @@ security guidance before exposing it on a network.
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)
 - JSON `LIKE 'prefix%'` scans through ordered indexes: [SQL LIKE prefix index](SQL_LIKE_PREFIX_INDEX.md)
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
+- Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)

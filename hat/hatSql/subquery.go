@@ -90,6 +90,13 @@ func sqlQueryHasSubqueryExpression(query *sqlQuery) bool {
 			return true
 		}
 	}
+	if query.limitBy != nil {
+		for _, expression := range query.limitBy.expressions {
+			if sqlExprHasSubqueryExpression(expression) {
+				return true
+			}
+		}
+	}
 	for _, join := range query.joins {
 		if sqlExprHasSubqueryExpression(join.on) {
 			return true

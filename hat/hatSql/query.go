@@ -340,9 +340,10 @@ type sqlDuration string
 // source/group state is not serialized, which avoids retaining join inputs
 // while an external merge is running.
 type sqlSpillOutput struct {
-	Row     SQLRow
-	Keys    []interface{}
-	Ordinal int
+	Row        SQLRow
+	Keys       []interface{}
+	LimitByKey string
+	Ordinal    int
 }
 
 type sqlSpillRun struct {
@@ -667,14 +668,14 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
-	if metrics == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
+	if metrics == nil && query.limitBy == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		result, err = executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
 		if !errors.Is(err, errSQLOrderedSourceUnavailable) {
 			result.QueryID = observation.id
 			return result, err
 		}
 	}
-	if metrics == nil && sqlTopNMaterializedStreamable(query, resolver) {
+	if metrics == nil && query.limitBy == nil && sqlTopNMaterializedStreamable(query, resolver) {
 		result, err = executeSQLTopNMaterializedStream(ctx, query, resolver, control)
 		result.QueryID = observation.id
 		return result, err
@@ -957,6 +958,19 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 }
 
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if query.limitBy != nil {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			return err
+		}
+		columns := sqlColumns(query.selects)
+		for _, row := range result.Rows {
+			if err := visit(columns, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if query.sample != nil {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 		if err != nil {
@@ -2248,6 +2262,7 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 
 type sqlTopNStreamItem struct {
 	row     SQLRow
+	group   []sqlExecRow
 	key     interface{}
 	keys    []interface{}
 	ordinal int
@@ -4802,6 +4817,13 @@ func bindSQLQuery(query *sqlQuery, parameters []interface{}) error {
 			return err
 		}
 	}
+	if query.limitBy != nil {
+		for index := range query.limitBy.expressions {
+			if err := bindSQLExpr(&query.limitBy.expressions[index], parameters); err != nil {
+				return err
+			}
+		}
+	}
 	for index := range query.unions {
 		if err := bindSQLQuery(query.unions[index].query, parameters); err != nil {
 			return err
@@ -4944,6 +4966,9 @@ func cloneSQLQuery(source *sqlQuery) *sqlQuery {
 	query.groupingDimensions = cloneSQLExprs(source.groupingDimensions)
 	query.having = cloneSQLExpr(source.having)
 	query.orderBy = cloneSQLOrders(source.orderBy)
+	if source.limitBy != nil {
+		query.limitBy = &sqlLimitBy{limit: source.limitBy.limit, expressions: cloneSQLExprs(source.limitBy.expressions)}
+	}
 	query.unions = make([]sqlUnion, len(source.unions))
 	for index, union := range source.unions {
 		query.unions[index] = union
@@ -5045,6 +5070,7 @@ type sqlQuery struct {
 	orderBy            []sqlOrder
 	windows            map[string]sqlWindow
 	sample             *sqlTableSample
+	limitBy            *sqlLimitBy
 	limit              int
 	offset             int
 	distinct           bool
@@ -5052,6 +5078,12 @@ type sqlQuery struct {
 	explain            bool
 	analyze            bool
 }
+
+type sqlLimitBy struct {
+	limit       int
+	expressions []sqlExpr
+}
+
 type sqlUnion struct {
 	kind  string
 	all   bool
@@ -5400,9 +5432,21 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			if err != nil {
 				return nil, err
 			}
-			q.limit = value
+			if p.keyword("BY") {
+				if q.limitBy != nil {
+					return nil, p.diagnostic(p.current(), "LIMIT BY appears more than once")
+				}
+				p.next()
+				expressions, err := p.parseExprList()
+				if err != nil {
+					return nil, err
+				}
+				q.limitBy = &sqlLimitBy{limit: value, expressions: expressions}
+			} else {
+				q.limit = value
+			}
 		case p.keyword("FETCH"):
-			if q.limit >= 0 {
+			if q.limit >= 0 || q.limitBy != nil {
 				return nil, p.diagnostic(p.current(), "FETCH cannot be combined with LIMIT")
 			}
 			p.next()
@@ -6644,6 +6688,13 @@ func (p *sqlQueryParser) resolveSQLNamedWindows(query *sqlQuery) error {
 			return err
 		}
 	}
+	if query.limitBy != nil {
+		for index := range query.limitBy.expressions {
+			if err := resolve(&query.limitBy.expressions[index]); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -7301,6 +7352,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
 	columnar, ok := resolver.(SQLColumnarSourceResolver)
 	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	if q.limitBy != nil {
 		return SQLQueryResult{}, false, nil
 	}
 	if result, handled, err := executeSQLColumnarDictionaryGroupAggregate(q, columnar, control, metrics, outer); handled {
@@ -9441,14 +9495,16 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		}
 		ctes[cte.name] = rows
 	}
-	if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
-		return result, runtimeErr
-	}
-	if result, handled, spillErr := executeSQLSpillHashJoin(q, resolver, control, metrics); handled {
-		return result, spillErr
-	}
-	if result, handled, streamErr := executeSQLStreamedSpilledGroupAggregate(q, resolver, control, metrics, nil); handled {
-		return result, streamErr
+	if q.limitBy == nil {
+		if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
+			return result, runtimeErr
+		}
+		if result, handled, spillErr := executeSQLSpillHashJoin(q, resolver, control, metrics); handled {
+			return result, spillErr
+		}
+		if result, handled, streamErr := executeSQLStreamedSpilledGroupAggregate(q, resolver, control, metrics, nil); handled {
+			return result, streamErr
+		}
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	var started time.Time
@@ -9479,7 +9535,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				return result, err
 			}
 		}
-		if !indexed {
+		if !indexed && q.limitBy == nil {
 			if result, handled, err := executeSQLPrewhereScan(q, resolver, ctes, metrics, control, outer); handled {
 				return result, err
 			}
@@ -10002,11 +10058,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	}
 	started = time.Now()
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(groups))}
-	type output struct {
-		row   SQLRow
-		group []sqlExecRow
-	}
-	projectGroup := func(group []sqlExecRow) (output, bool, error) {
+	projectGroup := func(group []sqlExecRow) (sqlQueryOutput, bool, error) {
 		representative := sqlExecRow{}
 		if len(group) > 0 {
 			representative = group[0]
@@ -10014,10 +10066,10 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if q.having.kind != "" {
 			value := evalSQLExpr(q.having, group, representative)
 			if err := sqlExpressionError(value); err != nil {
-				return output{}, false, err
+				return sqlQueryOutput{}, false, err
 			}
 			if !sqlTruthy(value) {
-				return output{}, false, nil
+				return sqlQueryOutput{}, false, nil
 			}
 		}
 		row := SQLRow{}
@@ -10032,13 +10084,13 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			value := evalSQLExpr(item.expr, group, representative)
 			if err := sqlExpressionError(value); err != nil {
-				return output{}, false, err
+				return sqlQueryOutput{}, false, err
 			}
 			row[result.Columns[idx]] = value
 		}
-		return output{row: row, group: group}, true, nil
+		return sqlQueryOutput{row: row, group: group}, true, nil
 	}
-	out := make([]output, 0, len(groups))
+	out := make([]sqlQueryOutput, 0, len(groups))
 	parallelGroups := control.options.Workers > 1 && len(groups) > 1 && !sqlExprHasCustomFunction(q.having, functions)
 	if parallelGroups {
 		for _, item := range q.selects {
@@ -10059,7 +10111,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 		}
 	} else {
-		projected := make([]output, len(groups))
+		projected := make([]sqlQueryOutput, len(groups))
 		included := make([]bool, len(groups))
 		errs := make([]error, len(groups))
 		workers := control.options.Workers
@@ -10304,13 +10356,38 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	}
 	externallySorted := false
 	sortInputRows := 0
-	if len(q.orderBy) > 0 && !indexOrdered {
+	limitByApplied := false
+	if q.limitBy != nil && !indexOrdered {
+		maxSortBytes := 0
+		if control != nil {
+			maxSortBytes = control.options.MaxSortBytes
+		}
+		selected, applied, err := sqlLimitByTopN(out, q.limitBy, q.orderBy, maxSortBytes)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		if applied {
+			started = time.Now()
+			inputRows := len(out)
+			out = selected
+			limitByApplied = true
+			metrics.record("LIMIT BY TOP-N", fmt.Sprintf("limit=%d by=%s", q.limitBy.limit, sqlExplainExpressions(q.limitBy.expressions)), inputRows, len(out), started)
+		}
+	}
+	if len(q.orderBy) > 0 && !indexOrdered && !limitByApplied {
 		spillRecords := make([]sqlSpillOutput, 0, len(out))
 		for _, output := range out {
 			if err := control.check(); err != nil {
 				return SQLQueryResult{}, err
 			}
 			record := sqlSpillOutput{Row: output.row, Keys: make([]interface{}, len(q.orderBy)), Ordinal: len(spillRecords)}
+			if q.limitBy != nil {
+				key, err := sqlLimitByKey(q.limitBy, output.row, output.group)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				record.LimitByKey = key
+			}
 			for index, item := range q.orderBy {
 				value := evalOutputOrder(item.expr, output.row, output.group)
 				if err := sqlExpressionError(value); err != nil {
@@ -10330,7 +10407,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					return SQLQueryResult{}, fmt.Errorf("SQL sort memory budget exceeded: maximum %d bytes", control.options.MaxSortBytes)
 				}
 				started = time.Now()
-				rows, spillBytes, runs, err := sqlExternalSortRows(spillRecords, q.orderBy, control.options.SpillDirectory, control.options.MaxSortBytes, control.options.MaxSpillBytes, q.offset, q.limit, control)
+				rows, spillBytes, runs, err := sqlExternalSortRows(spillRecords, q.orderBy, control.options.SpillDirectory, control.options.MaxSortBytes, control.options.MaxSpillBytes, q.offset, q.limit, control, q.limitBy)
 				if err != nil {
 					return SQLQueryResult{}, err
 				}
@@ -10359,6 +10436,23 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		}
 	}
 	if !externallySorted {
+		if q.limitBy != nil && !limitByApplied {
+			started = time.Now()
+			inputRows := len(out)
+			state := newSQLLimitByState(q.limitBy)
+			filtered := out[:0]
+			for _, item := range out {
+				include, err := state.accept(item.row, item.group)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				if include {
+					filtered = append(filtered, item)
+				}
+			}
+			out = filtered
+			metrics.record("LIMIT BY", fmt.Sprintf("limit=%d by=%s", q.limitBy.limit, sqlExplainExpressions(q.limitBy.expressions)), inputRows, len(out), started)
+		}
 		started = time.Now()
 		inputRows = len(out)
 		start := q.offset
@@ -10375,6 +10469,10 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if q.limit >= 0 || q.offset > 0 {
 			metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), inputRows, len(result.Rows), started)
 		}
+	}
+	if externallySorted && q.limitBy != nil {
+		started = time.Now()
+		metrics.record("LIMIT BY", fmt.Sprintf("limit=%d by=%s", q.limitBy.limit, sqlExplainExpressions(q.limitBy.expressions)), sortInputRows, len(result.Rows), started)
 	}
 	if externallySorted && (q.limit >= 0 || q.offset > 0) {
 		started = time.Now()
@@ -10777,6 +10875,9 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 	}
 	if len(query.orderBy) > 0 {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "SORT", Detail: sqlExplainOrders(query.orderBy)})
+	}
+	if query.limitBy != nil {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "LIMIT BY", Detail: fmt.Sprintf("limit=%d by=%s", query.limitBy.limit, sqlExplainExpressions(query.limitBy.expressions))})
 	}
 	if query.limit >= 0 || query.offset > 0 {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "LIMIT", Detail: fmt.Sprintf("limit=%d offset=%d", query.limit, query.offset)})
@@ -12154,6 +12255,7 @@ func sqlSpillOutputBytes(record sqlSpillOutput) int {
 	for _, key := range record.Keys {
 		bytes += len(fmt.Sprintf("%#v", key))
 	}
+	bytes += len(record.LimitByKey)
 	return bytes
 }
 
@@ -12315,10 +12417,17 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 	return run, nil
 }
 
-func sqlMergeSpillRunsToRows(runs []sqlSpillRun, order []sqlOrder, offset, limit int, control *sqlExecutionControl) ([]SQLRow, error) {
+func sqlMergeSpillRunsToRows(runs []sqlSpillRun, order []sqlOrder, offset, limit int, control *sqlExecutionControl, limitBy ...*sqlLimitBy) ([]SQLRow, error) {
 	rows := []SQLRow{}
 	position := 0
+	state := (*sqlLimitByState)(nil)
+	if len(limitBy) > 0 {
+		state = newSQLLimitByState(limitBy[0])
+	}
 	err := sqlMergeSpillRunsToVisit(runs, order, control, func(record sqlSpillOutput) error {
+		if state != nil && !state.acceptKey(record.LimitByKey) {
+			return nil
+		}
 		if position >= offset && (limit < 0 || len(rows) < limit) {
 			rows = append(rows, record.Row)
 		}
@@ -12440,7 +12549,7 @@ func sqlMergeSpillSortPassParallel(runs []sqlSpillRun, order []sqlOrder, directo
 	return next, true, nil
 }
 
-func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory string, maxRunBytes, maxSpillBytes, offset, limit int, control *sqlExecutionControl) ([]SQLRow, int64, int, error) {
+func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory string, maxRunBytes, maxSpillBytes, offset, limit int, control *sqlExecutionControl, limitBy ...*sqlLimitBy) ([]SQLRow, int64, int, error) {
 	if directory == "" || maxSpillBytes <= 0 {
 		return nil, 0, 0, fmt.Errorf("SQL external sort requires SpillDirectory and MaxSpillBytes")
 	}
@@ -12536,7 +12645,7 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 		}
 		runs = next
 	}
-	rows, err := sqlMergeSpillRunsToRows(runs, order, offset, limit, control)
+	rows, err := sqlMergeSpillRunsToRows(runs, order, offset, limit, control, limitBy...)
 	if err != nil {
 		return nil, 0, 0, err
 	}

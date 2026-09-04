@@ -453,6 +453,22 @@ after ordering; `OFFSET` skips rows before applying the limit. Window functions
 also include `ROW_NUMBER`, `DENSE_RANK`, `LAG`, `LEAD`, and numeric
 `SUM`/`AVG`/`MIN`/`MAX` frames.
 
+For a bounded result per group, use ClickHouse-style `LIMIT BY`:
+
+```sql
+FROM CACHE('events')
+SELECT region, score
+ORDER BY score DESC
+LIMIT 2 BY region
+LIMIT 100;
+```
+
+`LIMIT BY` keeps the first two rows for each distinct `region` after ordering;
+the following global `LIMIT` then caps the combined result. Multiple expressions
+form a composite group key, `NULL` values share one group, and query collation
+controls text grouping. See [SQL_LIMIT_BY.md](SQL_LIMIT_BY.md) for execution
+and benchmark details.
+
 Reuse a window specification with `WINDOW name AS (...)` and `OVER name`:
 
 ```sql
@@ -1232,7 +1248,7 @@ ORDER BY team;
 ```
 
 The parser is deliberately permissive: `FROM`, joins, `WHERE`, `GROUP BY`,
-`HAVING`, `SELECT`, `ORDER BY`, `LIMIT`, and `OFFSET` may appear in either
+`HAVING`, `SELECT`, `ORDER BY`, `LIMIT`, `LIMIT BY`, and `OFFSET` may appear in either
 standard order or the source-first order, once each. `ON` is mandatory for
 non-CROSS joins; duplicate or misspelled clauses receive a source diagnostic.
 
@@ -1306,7 +1322,8 @@ serialize as `YYYY-MM-DD`, and compare in chronological order.
 - [x] `GROUP BY`, `ROLLUP`, `CUBE`, `GROUPING SETS`, `HAVING`, and aggregate
       `FILTER (WHERE ...)` with `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
       `APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, and `APPROX_TOP_K`.
-- [x] `ORDER BY ... ASC|DESC`, `LIMIT`, and `OFFSET`.
+- [x] `ORDER BY ... ASC|DESC`, `LIMIT`, `LIMIT n BY expression[, ...]`, and
+      `OFFSET`.
 - [x] `SELECT DISTINCT` after projection, before `ORDER BY`/`LIMIT`.
 - [x] Named `WINDOW name AS (...)` specifications plus `ROW_NUMBER`, `RANK`,
       `DENSE_RANK`, running `SUM`, `LAG`, and `LEAD` windows with

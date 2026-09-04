@@ -691,6 +691,27 @@ show-sql-source-execution:
 test-sql-plan-guards:
 	sh ./scripts/test-sql-plan-guards.sh
 
+test-sql-limit-by:
+	sh ./scripts/test-sql-limit-by.sh
+
+format-sql-limit-by:
+	sh ./scripts/format-sql-limit-by.sh
+
+benchmark-sql-limit-by:
+	sh ./scripts/benchmark-sql-limit-by.sh
+
+benchmark-sql-limit-by-all:
+	LIMIT_BY_BENCH_MODE=all sh ./scripts/benchmark-sql-limit-by.sh
+
+stage-sql-limit-by:
+	sh ./scripts/commit-sql-limit-by.sh stage
+
+commit-sql-limit-by:
+	sh ./scripts/commit-sql-limit-by.sh commit
+
+push-sql-limit-by:
+	sh ./scripts/commit-sql-limit-by.sh push
+
 test-sql-table-functions:
 	sh ./scripts/test-sql-table-functions.sh
 

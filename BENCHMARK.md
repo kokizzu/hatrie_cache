@@ -252,6 +252,38 @@ therefore does not claim an index or row-streaming acceleration; the output-row
 count is the bandwidth reduction available to the caller after sampling, while
 the table measures the CPU and memory cost before transport.
 
+## SQL LIMIT BY
+
+`LIMIT n BY expression[, ...]` is the ClickHouse-style per-group top-N
+operator. It is opt-in and keeps exact output semantics: filtering and
+projection happen first, `ORDER BY` defines priority, the per-group cap is
+applied next, and a following global `LIMIT`/`OFFSET` is applied last. The
+ordinary executor uses one bounded Top-N heap per group and sorts only the
+retained candidates. Composite keys, NULLs, query collation, prepared
+expressions, and external sort spill are covered by focused tests.
+
+```sh
+make test-sql-limit-by
+make benchmark-sql-limit-by-all
+```
+
+Five local samples on the AMD Ryzen 9 5950X used a 10,000-row source with 100
+regions, `ORDER BY score DESC`, and `LIMIT 2 BY region`:
+
+| Workload | Median time / query | Heap / query | Allocations / query | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Sort and return all 10,000 rows | 24.707 ms | 9,226,462 B | 50,027 | Baseline |
+| Bounded per-group Top-N, 200 rows retained | 7.097 ms | 8,571,711 B | 40,444 | 3.48x faster; 1.08x lower heap; 1.24x fewer allocations |
+
+Raw `ns/op` samples were `24,618,792`, `25,388,425`, `24,171,644`,
+`24,707,172`, `24,916,388` for the baseline and `7,115,540`, `7,082,898`,
+`7,097,471`, `7,118,953`, `7,006,864` for `LIMIT BY`. The benchmark is an
+in-process SQL comparison, not a Redis/Tarantool wire comparison; it measures
+the new operator against the same query before the per-group reduction. Source
+and projected rows are still materialized for compatibility, while the sort
+working set and final candidate set are bounded by the number of groups times
+the requested per-group limit.
+
 ## SQL Indexed ORDER BY LIMIT Materialization
 
 Compatible materialized queries now consume the ordered JSON field index without
