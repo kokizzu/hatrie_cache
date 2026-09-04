@@ -3929,3 +3929,33 @@ test-race-sql-constant-folding:
 .PHONY: vet-sql-constant-folding
 vet-sql-constant-folding:
 	sh ./scripts/vet-sql-constant-folding.sh
+.PHONY: test-delay-queue
+test-delay-queue:
+	sh ./scripts/test-delay-queue.sh
+
+.PHONY: format-delay-queue
+format-delay-queue:
+	sh ./scripts/format-delay-queue.sh
+
+.PHONY: benchmark-delay-queue
+benchmark-delay-queue:
+	sh ./scripts/benchmark-delay-queue.sh
+
+.PHONY: test-race-delay-queue
+test-race-delay-queue:
+	sh ./scripts/test-race-delay-queue.sh
+
+.PHONY: vet-delay-queue
+vet-delay-queue:
+	sh ./scripts/vet-delay-queue.sh
+.PHONY: stage-delay-queue
+stage-delay-queue:
+	sh ./scripts/commit-delay-queue.sh stage
+
+.PHONY: commit-delay-queue
+commit-delay-queue:
+	sh ./scripts/commit-delay-queue.sh commit
+
+.PHONY: push-delay-queue
+push-delay-queue:
+	sh ./scripts/commit-delay-queue.sh push

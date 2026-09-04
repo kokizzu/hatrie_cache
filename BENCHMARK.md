@@ -15310,3 +15310,22 @@ with_constant_folding: 225264 B/op, 1037 allocs/op
 
 This is a targeted optimizer benchmark; it is not a claim that every query
 will improve by the same factor.
+## Delay Queue
+
+Command: `make benchmark-delay-queue`.
+
+The benchmark keeps 256 items resident and measures steady-state push/pop
+operations against an equivalent `container/heap` implementation.
+
+| Implementation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `DelayQueue` | 288.8 | 0 | 0 |
+| `container/heap` reference | 293.7 | 96 | 2 |
+| Improvement | **1.02x faster** | **96 fewer** | **2 fewer** |
+
+Raw samples:
+
+```text
+delay_queue: 259.9, 277.7, 314.1, 298.4, 288.8 ns/op; 0 B/op; 0 allocs/op
+container_heap_reference: 291.9, 292.8, 298.5, 309.7, 293.7 ns/op; 96 B/op; 2 allocs/op
+```

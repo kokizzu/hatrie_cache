@@ -452,7 +452,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T086 Queue spaces for FIFO workloads.
 - [x] T087 FIFO queue operations.
 - [x] T088 Priority queue operations.
-- [ ] T089 Delay queue operations.
+- [x] T089 Delay queue operations - public generic `hatDataStructure.DelayQueue` uses a stable 4-ary deadline heap with zero steady-state allocations and `PopReady`/`NextReadyAt` operations. See [DELAY_QUEUE.md](DELAY_QUEUE.md).
 - [x] T090 TTL queue expiration.
 - [x] T091 Scheduled refresh and maintenance tasks.
 - [ ] T092 Fiber-style cooperative scheduler.
