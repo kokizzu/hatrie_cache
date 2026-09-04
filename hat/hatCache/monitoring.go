@@ -909,6 +909,8 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 			fmt.Fprintf(&builder, "hatrie_cache_replication_queue_depth{node=\"%s\"} %d\n", node, result.Queue.Depth)
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_capacity", "Configured async replication queue capacity.", node, uint64(result.Queue.Capacity))
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_paused", "Whether async replication queue delivery is paused.", node, boolGauge(result.Queue.Paused))
+			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_estimated_queued_bytes", "Estimated bytes held by queued async replication payloads; excludes durable-only backlog.", node, result.Queue.EstimatedQueuedBytes)
+			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_estimated_in_flight_bytes", "Estimated bytes held by the current in-flight async replication payload.", node, result.Queue.EstimatedInFlightBytes)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_enqueued_total", "Total enqueued async replication jobs.", node, result.Queue.Enqueued)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_dropped_total", "Total dropped async replication jobs.", node, result.Queue.Dropped)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_attempts_total", "Total async replication target delivery attempts.", node, result.Queue.Attempts)
@@ -983,6 +985,16 @@ func writePrometheusReplicationMetrics(builder *strings.Builder, node string, sn
 		writePrometheusHelp(builder, "hatrie_cache_replication_retry_delay_millis", "Async replication retry wait duration in milliseconds.")
 		writePrometheusType(builder, "hatrie_cache_replication_retry_delay_millis", "histogram")
 		writePrometheusNodeHistogram(builder, "hatrie_cache_replication_retry_delay_millis", node, snapshot.RetryDelayMillis)
+	}
+	if snapshot.QueueWaitMillis.Count > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_queue_wait_millis", "Async replication queue wait duration in milliseconds.")
+		writePrometheusType(builder, "hatrie_cache_replication_queue_wait_millis", "histogram")
+		writePrometheusNodeHistogram(builder, "hatrie_cache_replication_queue_wait_millis", node, snapshot.QueueWaitMillis)
+	}
+	if snapshot.QueueServiceMillis.Count > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_queue_service_millis", "Async replication job service duration in milliseconds.")
+		writePrometheusType(builder, "hatrie_cache_replication_queue_service_millis", "histogram")
+		writePrometheusNodeHistogram(builder, "hatrie_cache_replication_queue_service_millis", node, snapshot.QueueServiceMillis)
 	}
 	if len(snapshot.CircuitBreakerTransitions) > 0 {
 		writePrometheusHelp(builder, "hatrie_cache_replication_circuit_breaker_transitions_total", "Replication circuit breaker state transitions.")

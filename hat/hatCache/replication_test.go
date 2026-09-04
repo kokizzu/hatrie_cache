@@ -2094,6 +2094,10 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 	if !result.Queued || result.Skipped || len(result.Targets) != 1 {
 		t.Fatalf("async enqueue result = %#v, want one queued target", result)
 	}
+	resident := replicator.LastResult()
+	if resident.Queue == nil || resident.Queue.EstimatedQueuedBytes+resident.Queue.EstimatedInFlightBytes == 0 {
+		t.Fatalf("resident queue bytes = %#v, want queued or in-flight payload bytes", resident.Queue)
+	}
 	trie.UpsertString("session:1", "second")
 	close(release)
 
@@ -2114,6 +2118,23 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 	})
 	if final.Queue == nil || !final.Queue.Enabled || final.Queue.Capacity != 2 || final.Queue.Enqueued != 1 || final.Queue.Attempts != 1 || final.Queue.Successes != 1 || final.Queue.Failures != 0 || final.Queue.Dropped != 0 {
 		t.Fatalf("async queue stats = %#v, want one successful queued delivery", final.Queue)
+	}
+	waitUntil(t, time.Second, func() bool {
+		queue := replicator.LastResult().Queue
+		return queue != nil && queue.EstimatedQueuedBytes == 0 && queue.EstimatedInFlightBytes == 0
+	})
+	waitUntil(t, time.Second, func() bool {
+		metrics := replicator.MetricsSnapshot()
+		return metrics.QueueWaitMillis.Count == 1 && metrics.QueueServiceMillis.Count == 1
+	})
+	metricsOutput := NewMonitoringHandler(trie, MonitoringOptions{NodeName: "node-a", Replicator: replicator}).prometheusMetrics()
+	for _, metric := range []string{
+		"hatrie_cache_replication_queue_wait_millis",
+		"hatrie_cache_replication_queue_service_millis",
+	} {
+		if !strings.Contains(metricsOutput, metric) {
+			t.Fatalf("Prometheus metrics missing %q:\n%s", metric, metricsOutput)
+		}
 	}
 }
 
@@ -2213,8 +2234,17 @@ func TestMonitoringReplicationPauseAndResume(t *testing.T) {
 			metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 			metricsResponse := httptest.NewRecorder()
 			handler.handleMetrics(metricsResponse, metricsRequest)
-			if !strings.Contains(metricsResponse.Body.String(), `hatrie_cache_replication_queue_paused{node="node-a"} 1`) {
-				t.Fatalf("paused metrics = %s, want paused gauge", metricsResponse.Body.String())
+			metricsOutput := metricsResponse.Body.String()
+			if !strings.Contains(metricsOutput, `hatrie_cache_replication_queue_paused{node="node-a"} 1`) {
+				t.Fatalf("paused metrics = %s, want paused gauge", metricsOutput)
+			}
+			for _, metric := range []string{
+				`hatrie_cache_replication_queue_estimated_queued_bytes{node="node-a"} 0`,
+				`hatrie_cache_replication_queue_estimated_in_flight_bytes{node="node-a"} 0`,
+			} {
+				if !strings.Contains(metricsOutput, metric) {
+					t.Fatalf("paused metrics = %s, want %s", metricsOutput, metric)
+				}
 			}
 		}
 	}
@@ -3402,6 +3432,9 @@ func TestHTTPReplicatorAsyncReportsFullQueue(t *testing.T) {
 	}
 	if last.Queue.InFlightStartedAt == nil || last.Queue.InFlightKey != "session:1" || last.Queue.InFlightAgeMillis < 0 {
 		t.Fatalf("in-flight stats = %#v, want blocked session:1 with age", last.Queue)
+	}
+	if last.Queue.EstimatedQueuedBytes == 0 || last.Queue.EstimatedInFlightBytes == 0 {
+		t.Fatalf("estimated resident bytes = %#v, want pending and in-flight payload bytes", last.Queue)
 	}
 	if last.Queue.DroppedByTarget["node-b"] != 1 {
 		t.Fatalf("dropped target stats = %#v, want one dropped node-b target", last.Queue)
@@ -8475,4 +8508,30 @@ func replicationTestTopologyWithReplicas(t *testing.T, replicaBAddress string, r
 		t.Fatalf("NewTopologyStore() error = %v", err)
 	}
 	return topology
+}
+func TestReplicationJobEstimatedBytesIncludesRestoredPayload(t *testing.T) {
+	job := replicationJob{
+		result: ReplicationResult{Key: "restore:large"},
+		tasks: []replicationTask{{
+			target:  TopologyNode{ID: "node-b"},
+			payload: CacheCommandRequest{Command: replicationSetCompactCommand, Key: "restore:large", BinaryValue: make([]byte, 4096)},
+		}},
+	}
+	if got := replicationJobEstimatedBytes(job); got < 4096 {
+		t.Fatalf("replicationJobEstimatedBytes() = %d, want restored binary payload included", got)
+	}
+}
+
+func BenchmarkReplicationCommandRequestResidentBytes(b *testing.B) {
+	payload := CacheCommandRequest{
+		Command:     replicationSetCompactCommand,
+		Key:         "benchmark:resident-bytes",
+		BinaryValue: make([]byte, 4096),
+	}
+	b.ReportAllocs()
+	var estimate uint64
+	for idx := 0; idx < b.N; idx++ {
+		estimate = replicationCommandRequestResidentBytes(payload)
+	}
+	b.ReportMetric(float64(estimate), "estimate_bytes")
 }

@@ -11,6 +11,7 @@ import (
 var targetLatencyMillisBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000}
 var targetBatchItemsBuckets = []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 4096, 16384}
 var retryDelayMillisBuckets = []float64{1, 10, 50, 100, 250, 500, 1000, 5000, 30000, 60000}
+var queueTimingMillisBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000}
 
 // HistogramSnapshot is the stable histogram representation used by
 // replication metrics.
@@ -23,6 +24,8 @@ type MetricsSnapshot struct {
 	TargetWireBytes           map[string]map[string]uint64
 	TargetWireRequests        map[string]map[string]uint64
 	RetryDelayMillis          HistogramSnapshot
+	QueueWaitMillis           HistogramSnapshot
+	QueueServiceMillis        HistogramSnapshot
 	CircuitBreakerTransitions map[string]map[string]uint64
 }
 
@@ -35,6 +38,8 @@ type Metrics struct {
 	targetWireBytes    map[string]map[string]uint64
 	targetWireRequests map[string]map[string]uint64
 	retryDelayMillis   *hatMetrics.Histogram
+	queueWaitMillis    *hatMetrics.Histogram
+	queueServiceMillis *hatMetrics.Histogram
 	breakerTransitions map[string]map[string]uint64
 }
 
@@ -100,6 +105,32 @@ func (metrics *Metrics) ObserveRetryDelay(duration time.Duration) {
 	metrics.retryDelayMillis.Observe(float64(duration) / float64(time.Millisecond))
 }
 
+// ObserveQueueWait records the time a job spent resident before delivery.
+func (metrics *Metrics) ObserveQueueWait(duration time.Duration) {
+	if metrics == nil || duration < 0 {
+		return
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if metrics.queueWaitMillis == nil {
+		metrics.queueWaitMillis = hatMetrics.NewHistogram(queueTimingMillisBuckets)
+	}
+	metrics.queueWaitMillis.Observe(float64(duration) / float64(time.Millisecond))
+}
+
+// ObserveQueueService records the duration of one asynchronous job delivery.
+func (metrics *Metrics) ObserveQueueService(duration time.Duration) {
+	if metrics == nil || duration < 0 {
+		return
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if metrics.queueServiceMillis == nil {
+		metrics.queueServiceMillis = hatMetrics.NewHistogram(queueTimingMillisBuckets)
+	}
+	metrics.queueServiceMillis.Observe(float64(duration) / float64(time.Millisecond))
+}
+
 // RecordCircuitTransition records one target circuit-breaker state change.
 func (metrics *Metrics) RecordCircuitTransition(target, state string) {
 	if metrics == nil || target == "" || state == "" {
@@ -129,6 +160,8 @@ func (metrics *Metrics) Snapshot() MetricsSnapshot {
 		TargetWireBytes:           snapshotCounterMap(metrics.targetWireBytes),
 		TargetWireRequests:        snapshotCounterMap(metrics.targetWireRequests),
 		RetryDelayMillis:          snapshotHistogram(metrics.retryDelayMillis),
+		QueueWaitMillis:           snapshotHistogram(metrics.queueWaitMillis),
+		QueueServiceMillis:        snapshotHistogram(metrics.queueServiceMillis),
 		CircuitBreakerTransitions: snapshotTransitions(metrics.breakerTransitions),
 	}
 }

@@ -475,7 +475,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T109 Runtime configuration with validation.
 - [x] T110 Memory quotas and admission limits.
 - [ ] T111 Separate cache sizing from durable-storage sizing.
-- [ ] T112 Per-queue memory and latency metrics.
+- [x] T112 Per-queue memory and latency metrics - async replication exposes estimated resident queued/in-flight payload bytes plus queue wait/service histograms through status and Prometheus; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
 - [x] T113 Dead-letter queue with replay controls - public generic bounded retention supports inspection, explicit replay deadlines, and discard; see [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md).
 - [ ] T114 Work stealing for independent queue workers.
 - [ ] T115 Cancellation-safe task ownership.

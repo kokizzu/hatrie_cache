@@ -40,6 +40,17 @@ The `/metrics` endpoint exposes:
 
 ```text
 hatrie_cache_replication_queue_paused{node="..."} 0|1
+hatrie_cache_replication_queue_estimated_queued_bytes{node="..."} N
+hatrie_cache_replication_queue_estimated_in_flight_bytes{node="..."} N
+hatrie_cache_replication_queue_wait_millis_bucket{node="...",le="..."} N
+hatrie_cache_replication_queue_service_millis_bucket{node="...",le="..."} N
 ```
+
+The byte gauges are bounded estimates of payload and replication metadata held by
+the in-memory queue or current delivery. They exclude durable-only outbox
+backlog, Go allocator overhead, and process-wide RSS. Queue wait includes time
+from enqueue until delivery starts; service covers one async job, including its
+retry handling. Use the gauges with queue depth and the histograms with target
+latency to distinguish payload pressure from a slow peer.
 
 Use pause during a planned peer outage or maintenance window, monitor queue depth and durable backlog, then resume and verify that the backlog drains. Pause is not a data-loss operation; closing the process or exhausting configured non-durable queue capacity still follows the existing queue semantics.

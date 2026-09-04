@@ -15511,3 +15511,22 @@ methods.
 
 The allocation is the fresh wake-up channel created on resume. Queued work is
 retained while paused; an already in-flight request may finish.
+<a id="per-queue-resident-memory-and-timing-metrics"></a>
+### Per-Queue Resident Memory And Timing Metrics
+
+T112 adds queue accounting and lifecycle histograms without changing the
+replication wire format or durable outbox records. The benchmark below measures
+the steady-state cost of two histogram observations and the no-allocation
+resident-field byte walk used when a restored task has no precomputed payload
+estimate.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Benchmark | Result |
+| --- | ---: |
+| `BenchmarkMetricsObserveQueueTiming` | 12.64 ns/op; 0 B/op; 0 allocs/op |
+| `BenchmarkReplicationCommandRequestResidentBytes` | 12.06 ns/op; 0 B/op; 0 allocs/op |
+
+These are instrumentation costs, not application throughput improvements. The
+byte values are estimates of owned payload/metadata bytes, not exact Go heap or
+RSS measurements; disk-only durable backlog is intentionally excluded.

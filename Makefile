@@ -4196,3 +4196,30 @@ commit-t063:
 .PHONY: push-t063
 push-t063:
 	bash ./scripts/commit-t063.sh push
+
+test-t112:
+	bash ./scripts/test-t112.sh
+
+format-t112:
+	bash ./scripts/format-t112.sh
+
+benchmark-t112:
+	bash ./scripts/benchmark-t112.sh
+
+test-race-t112:
+	bash ./scripts/test-race-t112.sh
+
+vet-t112:
+	bash ./scripts/vet-t112.sh
+
+review-t112:
+	bash ./scripts/review-t112.sh
+
+stage-t112:
+	bash ./scripts/commit-t112.sh stage
+
+commit-t112:
+	bash ./scripts/commit-t112.sh commit
+
+push-t112:
+	bash ./scripts/commit-t112.sh push

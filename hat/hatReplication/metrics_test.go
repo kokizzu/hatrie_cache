@@ -56,3 +56,27 @@ func TestMetricsRecordsWireBytesByEncoding(t *testing.T) {
 		t.Fatal("wire byte snapshot aliases metrics state")
 	}
 }
+
+func TestMetricsRecordsQueueTiming(t *testing.T) {
+	var metrics Metrics
+	metrics.ObserveQueueWait(7 * time.Millisecond)
+	metrics.ObserveQueueService(19 * time.Millisecond)
+
+	snapshot := metrics.Snapshot()
+	if got := snapshot.QueueWaitMillis; got.Count != 1 || got.Sum != 7 {
+		t.Fatalf("queue wait = %#v, want one 7ms observation", got)
+	}
+	if got := snapshot.QueueServiceMillis; got.Count != 1 || got.Sum != 19 {
+		t.Fatalf("queue service = %#v, want one 19ms observation", got)
+	}
+}
+
+func BenchmarkMetricsObserveQueueTiming(b *testing.B) {
+	var metrics Metrics
+	b.ReportAllocs()
+	b.ResetTimer()
+	for idx := 0; idx < b.N; idx++ {
+		metrics.ObserveQueueWait(time.Microsecond)
+		metrics.ObserveQueueService(2 * time.Microsecond)
+	}
+}

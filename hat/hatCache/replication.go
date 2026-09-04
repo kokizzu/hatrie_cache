@@ -192,6 +192,18 @@ func (replicator *HTTPReplicator) MetricsSnapshot() ReplicationMetricsSnapshot {
 	return replicator.metrics.Snapshot()
 }
 
+func (replicator *HTTPReplicator) recordReplicationQueueWait(duration time.Duration) {
+	if replicator != nil {
+		replicator.metrics.ObserveQueueWait(duration)
+	}
+}
+
+func (replicator *HTTPReplicator) recordReplicationQueueService(duration time.Duration) {
+	if replicator != nil {
+		replicator.metrics.ObserveQueueService(duration)
+	}
+}
+
 func replicationMetricsTarget(target TopologyNode) string {
 	if value := strings.TrimSpace(target.ID); value != "" {
 		return value
@@ -308,10 +320,11 @@ type replicationJob struct {
 }
 
 type replicationQueueMeta struct {
-	id         uint64
-	key        string
-	targets    []string
-	enqueuedAt time.Time
+	id             uint64
+	key            string
+	targets        []string
+	enqueuedAt     time.Time
+	estimatedBytes uint64
 }
 
 type replicationCircuitBreakerState struct {
@@ -567,12 +580,7 @@ func (replicator *HTTPReplicator) refillAsyncOutbox(force bool) {
 		if job.enqueuedAt.IsZero() {
 			job.enqueuedAt = time.Now().UTC()
 		}
-		replicator.pending = append(replicator.pending, replicationQueueMeta{
-			id:         job.id,
-			key:        job.result.Key,
-			targets:    replicationJobTargetIDs(job.tasks),
-			enqueuedAt: job.enqueuedAt,
-		})
+		replicator.appendPendingAsyncJobLocked(job)
 		replicator.queue <- job
 		replicator.queueStats.Enqueued++
 	}
@@ -1033,15 +1041,10 @@ func (replicator *HTTPReplicator) prepareAsyncJobForQueue(job replicationJob) bo
 	}
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
+	replicator.appendPendingAsyncJobLocked(job)
 	if replicator.outboxRestoreBacklog || job.id <= replicator.outboxRestoreCursor {
 		return true
 	}
-	replicator.pending = append(replicator.pending, replicationQueueMeta{
-		id:         job.id,
-		key:        job.result.Key,
-		targets:    replicationJobTargetIDs(job.tasks),
-		enqueuedAt: job.enqueuedAt,
-	})
 	return false
 }
 
@@ -1053,6 +1056,98 @@ func replicationJobTargetIDs(tasks []replicationTask) []string {
 		}
 	}
 	return targets
+}
+
+const (
+	replicationJobResidentOverheadBytes  = uint64(128)
+	replicationTaskResidentOverheadBytes = uint64(64)
+)
+
+func replicationJobEstimatedBytes(job replicationJob) uint64 {
+	estimate := replicationJobResidentOverheadBytes
+	estimate = addReplicationByteEstimate(estimate, uint64(len(job.result.Key)))
+	for _, task := range job.tasks {
+		estimate = addReplicationByteEstimate(estimate, replicationTaskResidentOverheadBytes)
+		payloadBytes := task.payloadBytes
+		if payloadBytes <= 0 {
+			estimate = addReplicationByteEstimate(estimate, replicationCommandRequestResidentBytes(task.payload))
+		} else {
+			estimate = addReplicationByteEstimate(estimate, uint64(payloadBytes))
+		}
+		estimate = addReplicationByteEstimate(estimate, uint64(len(task.target.ID)))
+		estimate = addReplicationByteEstimate(estimate, uint64(len(task.target.Address)))
+	}
+	return estimate
+}
+
+func addReplicationByteEstimate(total, value uint64) uint64 {
+	if ^uint64(0)-total < value {
+		return ^uint64(0)
+	}
+	return total + value
+}
+
+func replicationCommandRequestResidentBytes(payload CacheCommandRequest) uint64 {
+	estimate := uint64(64)
+	estimate = addReplicationByteEstimate(estimate, uint64(len(payload.Command)))
+	estimate = addReplicationByteEstimate(estimate, uint64(len(payload.Key)))
+	estimate = addReplicationByteEstimate(estimate, uint64(len(payload.Value)))
+	estimate = addReplicationByteEstimate(estimate, uint64(len(payload.Subkey)))
+	estimate = addReplicationByteEstimate(estimate, uint64(len(payload.BinaryValue)))
+	for _, value := range payload.Values {
+		estimate = addReplicationByteEstimate(estimate, replicationCommandValueResidentBytes(value))
+	}
+	for key, value := range payload.Pairs {
+		estimate = addReplicationByteEstimate(estimate, uint64(len(key)))
+		estimate = addReplicationByteEstimate(estimate, replicationCommandValueResidentBytes(value))
+	}
+	for _, nested := range payload.Batch {
+		estimate = addReplicationByteEstimate(estimate, replicationCommandRequestResidentBytes(nested))
+	}
+	if payload.Priority != nil {
+		estimate = addReplicationByteEstimate(estimate, 8)
+	}
+	if payload.TTLSeconds != nil {
+		estimate = addReplicationByteEstimate(estimate, 8)
+	}
+	if payload.UnixSeconds != nil {
+		estimate = addReplicationByteEstimate(estimate, 8)
+	}
+	return estimate
+}
+
+func replicationCommandValueResidentBytes(value any) uint64 {
+	switch typed := value.(type) {
+	case string:
+		return uint64(len(typed))
+	case []byte:
+		return uint64(len(typed))
+	case []string:
+		var estimate uint64
+		for _, item := range typed {
+			estimate = addReplicationByteEstimate(estimate, uint64(len(item)))
+		}
+		return estimate
+	default:
+		return 8
+	}
+}
+
+func (replicator *HTTPReplicator) appendPendingAsyncJobLocked(job replicationJob) {
+	for _, meta := range replicator.pending {
+		if meta.id == job.id {
+			return
+		}
+	}
+	estimatedBytes := replicationJobEstimatedBytes(job)
+	replicator.pending = append(replicator.pending, replicationQueueMeta{
+		id:             job.id,
+		key:            job.result.Key,
+		targets:        replicationJobTargetIDs(job.tasks),
+		enqueuedAt:     job.enqueuedAt,
+		estimatedBytes: estimatedBytes,
+	})
+	replicator.queueStats.EstimatedQueuedBytes = addReplicationByteEstimate(replicator.queueStats.EstimatedQueuedBytes, estimatedBytes)
 }
 
 func (replicator *HTTPReplicator) persistAsyncJob(job replicationJob) error {
@@ -1092,7 +1187,11 @@ func (replicator *HTTPReplicator) markAsyncDequeued(job replicationJob) {
 	now := time.Now().UTC()
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
-	replicator.removePendingLocked(job.id)
+	estimatedBytes := replicator.removePendingLocked(job.id)
+	if estimatedBytes == 0 {
+		estimatedBytes = replicationJobEstimatedBytes(job)
+	}
+	replicator.queueStats.EstimatedInFlightBytes = estimatedBytes
 	replicator.queueStats.InFlightStartedAt = cloneTimePtr(&now)
 	replicator.queueStats.InFlightKey = job.result.Key
 }
@@ -1104,13 +1203,14 @@ func (replicator *HTTPReplicator) clearAsyncInFlight(job replicationJob) {
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
 	if replicator.queueStats.InFlightKey == job.result.Key {
+		replicator.queueStats.EstimatedInFlightBytes = 0
 		replicator.queueStats.InFlightStartedAt = nil
 		replicator.queueStats.InFlightAgeMillis = 0
 		replicator.queueStats.InFlightKey = ""
 	}
 }
 
-func (replicator *HTTPReplicator) removePendingLocked(id uint64) {
+func (replicator *HTTPReplicator) removePendingLocked(id uint64) uint64 {
 	for idx, meta := range replicator.pending {
 		if meta.id != id {
 			continue
@@ -1118,8 +1218,14 @@ func (replicator *HTTPReplicator) removePendingLocked(id uint64) {
 		copy(replicator.pending[idx:], replicator.pending[idx+1:])
 		replicator.pending[len(replicator.pending)-1] = replicationQueueMeta{}
 		replicator.pending = replicator.pending[:len(replicator.pending)-1]
-		return
+		if meta.estimatedBytes >= replicator.queueStats.EstimatedQueuedBytes {
+			replicator.queueStats.EstimatedQueuedBytes = 0
+		} else {
+			replicator.queueStats.EstimatedQueuedBytes -= meta.estimatedBytes
+		}
+		return meta.estimatedBytes
 	}
+	return 0
 }
 
 func (replicator *HTTPReplicator) recordAsyncDropped() {
@@ -1965,9 +2071,15 @@ func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
 				pending = &job
 				continue
 			}
+			dequeuedAt := time.Now()
 			replicator.markAsyncDequeued(job)
+			if !job.enqueuedAt.IsZero() {
+				replicator.recordReplicationQueueWait(dequeuedAt.Sub(job.enqueuedAt))
+			}
 			replicator.refillAsyncOutbox(false)
+			serviceStarted := time.Now()
 			replicator.runAsyncJob(ctx, job)
+			replicator.recordReplicationQueueService(time.Since(serviceStarted))
 			replicator.clearAsyncInFlight(job)
 			continue
 		}

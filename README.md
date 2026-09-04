@@ -2662,7 +2662,8 @@ lifetime to a parent service context.
 `GET /api/replication` includes the latest replication start/finish timestamps,
 duration, async queue depth, capacity, enqueue/drop counts, delivery attempts,
 successes, failures, retries, oldest queued key/age, in-flight key/age, last
-retry age, durable backlog state, per-target drops, per-target failures, closed state,
+retry age, estimated queued and in-flight payload bytes, durable backlog state,
+per-target drops, per-target failures, closed state,
 `dead_letter_count`, recent `dead_letters`, `circuit_breakers`, target-level
 `circuit_open` state, and a `health_score` from `0` to `100` with `health` and
 `health_reason`:
@@ -2701,7 +2702,11 @@ exports `hatrie_cache_leveldb_dirty_keys` and
 `hatrie_cache_storage_operation_running`. When replication is configured,
 Prometheus also exports `hatrie_cache_replication_health_score`,
 `hatrie_cache_replication_dead_letters`,
-`hatrie_cache_replication_queue_capacity`, and async queue counters such as
+`hatrie_cache_replication_queue_capacity`,
+`hatrie_cache_replication_queue_estimated_queued_bytes`,
+`hatrie_cache_replication_queue_estimated_in_flight_bytes`,
+`hatrie_cache_replication_queue_wait_millis`,
+`hatrie_cache_replication_queue_service_millis`, and async queue counters such as
 `hatrie_cache_replication_queue_enqueued_total` and
 `hatrie_cache_replication_retried_total`.
 `GET /api/memory` is an authenticated, no-store, on-demand allocator and GC

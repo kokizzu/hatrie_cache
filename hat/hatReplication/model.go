@@ -52,30 +52,32 @@ type CircuitBreakerTarget struct {
 
 // QueueStats reports bounded asynchronous replication outbox health.
 type QueueStats struct {
-	Enabled               bool              `json:"enabled"`
-	Paused                bool              `json:"paused"`
-	Depth                 int               `json:"depth"`
-	Capacity              int               `json:"capacity"`
-	Enqueued              uint64            `json:"enqueued"`
-	Dropped               uint64            `json:"dropped"`
-	Attempts              uint64            `json:"attempts"`
-	Successes             uint64            `json:"successes"`
-	Failures              uint64            `json:"failures"`
-	Retried               uint64            `json:"retried"`
-	OldestQueuedAt        *time.Time        `json:"oldest_queued_at,omitempty"`
-	OldestQueuedAgeMillis int64             `json:"oldest_queued_age_millis,omitempty"`
-	OldestQueuedKey       string            `json:"oldest_queued_key,omitempty"`
-	OldestQueuedTargets   []string          `json:"oldest_queued_targets,omitempty"`
-	DurableBacklog        bool              `json:"durable_backlog,omitempty"`
-	InFlightStartedAt     *time.Time        `json:"in_flight_started_at,omitempty"`
-	InFlightAgeMillis     int64             `json:"in_flight_age_millis,omitempty"`
-	InFlightKey           string            `json:"in_flight_key,omitempty"`
-	LastRetryAt           *time.Time        `json:"last_retry_at,omitempty"`
-	LastRetryAgeMillis    int64             `json:"last_retry_age_millis,omitempty"`
-	LastRetryKey          string            `json:"last_retry_key,omitempty"`
-	DroppedByTarget       map[string]uint64 `json:"dropped_by_target,omitempty"`
-	FailuresByTarget      map[string]uint64 `json:"failures_by_target,omitempty"`
-	Closed                bool              `json:"closed"`
+	Enabled                bool              `json:"enabled"`
+	Paused                 bool              `json:"paused"`
+	Depth                  int               `json:"depth"`
+	Capacity               int               `json:"capacity"`
+	EstimatedQueuedBytes   uint64            `json:"estimated_queued_bytes,omitempty"`
+	EstimatedInFlightBytes uint64            `json:"estimated_in_flight_bytes,omitempty"`
+	Enqueued               uint64            `json:"enqueued"`
+	Dropped                uint64            `json:"dropped"`
+	Attempts               uint64            `json:"attempts"`
+	Successes              uint64            `json:"successes"`
+	Failures               uint64            `json:"failures"`
+	Retried                uint64            `json:"retried"`
+	OldestQueuedAt         *time.Time        `json:"oldest_queued_at,omitempty"`
+	OldestQueuedAgeMillis  int64             `json:"oldest_queued_age_millis,omitempty"`
+	OldestQueuedKey        string            `json:"oldest_queued_key,omitempty"`
+	OldestQueuedTargets    []string          `json:"oldest_queued_targets,omitempty"`
+	DurableBacklog         bool              `json:"durable_backlog,omitempty"`
+	InFlightStartedAt      *time.Time        `json:"in_flight_started_at,omitempty"`
+	InFlightAgeMillis      int64             `json:"in_flight_age_millis,omitempty"`
+	InFlightKey            string            `json:"in_flight_key,omitempty"`
+	LastRetryAt            *time.Time        `json:"last_retry_at,omitempty"`
+	LastRetryAgeMillis     int64             `json:"last_retry_age_millis,omitempty"`
+	LastRetryKey           string            `json:"last_retry_key,omitempty"`
+	DroppedByTarget        map[string]uint64 `json:"dropped_by_target,omitempty"`
+	FailuresByTarget       map[string]uint64 `json:"failures_by_target,omitempty"`
+	Closed                 bool              `json:"closed"`
 }
 
 // TargetResult records the outcome for one remote node.

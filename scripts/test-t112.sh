@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+go test ./hat/hatReplication ./hat/hatCache -run 'TestMetricsRecordsQueueTiming|TestReplicationJobEstimatedBytesIncludesRestoredPayload|TestHTTPReplicatorAsyncQueuesMaterializedPayload|TestHTTPReplicatorAsyncReportsFullQueue|TestMonitoringReplicationPauseAndResume|TestPrometheusReplicationQueueTimingMetrics' -count=1
