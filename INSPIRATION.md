@@ -197,7 +197,7 @@ name.
 - [ ] C133 Query log retention and sampling policy.
 - [x] C134 OpenTelemetry spans for query phases. `QueryTraceRecorder.OpenTelemetrySpans` exposes SDK-neutral root/query and operator child spans with OTLP-width IDs, status, counters, cloned attributes, and documented end-anchored phase timing. It is opt-in and keeps SQL/error/row data out of exported spans; see [QUERY_TRACING.md](QUERY_TRACING.md).
 - [ ] C135 Trace IDs carried through remote work.
-- [ ] C136 Per-tenant resource quotas.
+- [x] C136 Per-tenant resource quotas - NamespaceQueryGovernor applies immutable, tightening per-namespace resource policies suitable for tenant, user, or source isolation (see TENANT_RESOURCE_LIMITS.md).
 - [x] C137 TLS, authentication, and authorization controls.
 - [x] C138 Operational config validation with sane defaults.
 - [x] C139 Regression and compatibility test matrix.

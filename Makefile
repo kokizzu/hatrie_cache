@@ -5430,3 +5430,27 @@ commit-rowbinary-fixed-width:
 .PHONY: push-rowbinary-fixed-width
 push-rowbinary-fixed-width:
 	sh ./scripts/deliver-rowbinary-fixed-width.sh push
+
+.PHONY: test-tenant-resource-limits
+test-tenant-resource-limits:
+	sh ./scripts/test-tenant-resource-limits.sh test
+
+.PHONY: race-tenant-resource-limits
+race-tenant-resource-limits:
+	sh ./scripts/test-tenant-resource-limits.sh race
+
+.PHONY: format-tenant-resource-limits
+format-tenant-resource-limits:
+	sh ./scripts/test-tenant-resource-limits.sh format
+
+.PHONY: inspect-tenant-resource-limits-delivery
+inspect-tenant-resource-limits-delivery:
+	sh ./scripts/deliver-tenant-resource-limits.sh inspect
+
+.PHONY: commit-tenant-resource-limits
+commit-tenant-resource-limits:
+	sh ./scripts/deliver-tenant-resource-limits.sh commit
+
+.PHONY: push-tenant-resource-limits
+push-tenant-resource-limits:
+	sh ./scripts/deliver-tenant-resource-limits.sh push
