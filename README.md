@@ -2983,7 +2983,15 @@ anti-entropy and is also accepted only for authenticated internal replication.
 `BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
 with ordinary command requests to reduce client/server round trips. It executes
 subcommands in order, returns one response per subcommand in `responses`, and is
-not transactional; a failed subcommand does not roll back earlier subcommands.
+not transactional by default; a failed subcommand does not roll back earlier
+subcommands. Set `"atomic":true` to request the public transaction form:
+successful mutations are rolled back if a later subcommand fails, including
+already-existing values, newly-created keys, and the command-journal entries
+for the batch. Atomic batches must target one local partition when partitioning
+is enabled. This opt-in path takes an exclusive command transaction lock;
+ordinary commands retain shared locking and the default pipeline behavior.
+For example, `{"command":"BATCH","atomic":true,"batch":[{"command":"SETSTR","key":"a","value":"1"},{"command":"PUTMAP","key":"profile","subkey":"role","value":"admin"}]}`
+commits both commands or leaves both keys unchanged.
 Internal replication commands are rejected inside public `BATCH` requests.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and

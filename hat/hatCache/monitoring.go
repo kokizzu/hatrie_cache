@@ -1860,6 +1860,13 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if err := ctx.Err(); err != nil {
 		return commandError(err.Error()), false
 	}
+	if request.Atomic {
+		trie.commandTransactionMu.Lock()
+		defer trie.commandTransactionMu.Unlock()
+	} else {
+		trie.commandTransactionMu.RLock()
+		defer trie.commandTransactionMu.RUnlock()
+	}
 	payloads, err := publicCommandBatchRequests(request)
 	if err != nil {
 		return commandError(err.Error()), false
@@ -1872,9 +1879,10 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 		effects.journal.mu.Lock()
 	}
 
+	effects.atomic = request.Atomic
 	response, ok := executePublicScalarBatchWithSideEffects(ctx, trie, request, options, effects)
-	if !ok && publicCommandBatchCanUseTrieFastPath(options) {
-		response = trie.ExecuteCommand(request)
+	if !ok && !request.Atomic && publicCommandBatchCanUseTrieFastPath(options) {
+		response = trie.executeCommand(request)
 		ok = true
 	}
 	if !ok {
@@ -1892,7 +1900,7 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 				continue
 			}
 			itemResponse, stop := effects.execute(ctx, trie, payload, false, func() CacheCommandResponse {
-				return trie.ExecuteCommand(payload)
+				return trie.executeCommand(payload)
 			})
 			if !itemResponse.OK {
 				allOK = false
@@ -1905,7 +1913,12 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 		response = publicCommandBatchResponse(responses, allOK)
 	}
 
-	commitErr := effects.commitLocked(trie)
+	var commitErr error
+	if request.Atomic && !response.OK {
+		commitErr = effects.rollbackLocked(trie, errors.New("atomic batch rejected"))
+	} else {
+		commitErr = effects.commitLocked(trie)
+	}
 	if effects.journal != nil {
 		effects.journal.mu.Unlock()
 	}
@@ -1986,6 +1999,7 @@ type publicCommandBatchEffects struct {
 	idempotencyPending []commandIdempotencyPending
 	journalJob         replicationJob
 	batch              bool
+	atomic             bool
 	infrastructureErr  error
 }
 
@@ -2072,6 +2086,23 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 				err = effects.journal.rollbackFailedAppendLocked(appendState, err)
 				effects.infrastructureErr = err
 				return commandError(err.Error()), true
+			}
+		}
+	}
+	if effects.atomic && !journaled {
+		key := strings.TrimSpace(request.Key)
+		if err := validateKey(key); err == nil {
+			var captureErr error
+			if trieLocked {
+				captureErr = effects.rollback.captureLocked(trie, key)
+			} else {
+				trie.mu.Lock()
+				captureErr = effects.rollback.captureLocked(trie, key)
+				trie.mu.Unlock()
+			}
+			if captureErr != nil {
+				effects.infrastructureErr = captureErr
+				return commandError(captureErr.Error()), true
 			}
 		}
 	}
@@ -2217,7 +2248,7 @@ func (effects *publicCommandBatchEffects) publish(ctx context.Context) {
 }
 
 func executePublicScalarBatchWithSideEffects(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions, effects *publicCommandBatchEffects) (CacheCommandResponse, bool) {
-	if publicCommandBatchCanUseTrieFastPath(options) {
+	if !request.Atomic && publicCommandBatchCanUseTrieFastPath(options) {
 		return trie.executePublicScalarBatchCommand(request)
 	}
 	executor := func(index int, request CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {

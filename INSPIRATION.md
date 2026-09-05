@@ -382,7 +382,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 ### Transactions, WAL, Backup, And Recovery
 
 - [x] T027 Consistent read views.
-- [ ] T028 Public multi-operation transaction API.
+- [x] T028 Public multi-operation transaction API.
 - [ ] T029 Atomic callback or box.atomic-style mutation.
 - [ ] T030 Configurable transaction isolation levels.
 - [ ] T031 Savepoints and partial rollback.

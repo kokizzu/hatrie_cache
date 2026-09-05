@@ -6,7 +6,7 @@ package hatCommand
 // from JSON because binary command transports encode it separately.
 type Request struct {
 	Command        string         `json:"command"`
-	Atomic         bool           `json:"atomic,omitempty"`
+	Atomic         bool           `json:"atomic,omitempty"` // BATCH only: apply all subcommands or roll back.
 	Key            string         `json:"key"`
 	Value          string         `json:"value,omitempty"`
 	Values         []any          `json:"values,omitempty"`

@@ -187,6 +187,20 @@ func TestExecuteCommandAtomicScalarBatchRollsBackOnFailure(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandAtomicScalarBatchRollsBackAfterRuntimeFailure(t *testing.T) {
+	ht := newTestTrie(t)
+	response := ht.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: []CacheCommandRequest{
+		{Command: "SETSTR", Key: "first", Value: "written"},
+		{Command: "PUTMAP", Key: "malformed"},
+	}})
+	if response.OK {
+		t.Fatalf("atomic BATCH response = %#v, want failure", response)
+	}
+	if got := ht.GetString("first"); got != "" {
+		t.Fatalf("atomic BATCH retained first write after runtime failure")
+	}
+}
+
 func TestExecuteCommandScalarBatchUsesLowAllocationFastPath(t *testing.T) {
 	batch := make([]CacheCommandRequest, 0, benchmarkCommandPipelineOps)
 	for i := 0; i < benchmarkCommandPipelineOps; i++ {

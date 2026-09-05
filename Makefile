@@ -5060,3 +5060,9 @@ format-sql-multikey:
 
 benchmark-sql-multikey:
 	sh ./scripts/benchmark-sql-multikey.sh
+
+test-t028:
+	sh ./scripts/test-t028.sh
+
+format-t028:
+	sh ./scripts/format-t028.sh

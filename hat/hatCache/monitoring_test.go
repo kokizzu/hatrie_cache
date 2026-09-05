@@ -1267,6 +1267,43 @@ func TestExecutePublicStructuredCommandBatchJournalSyncsOnceAndReplays(t *testin
 	}
 }
 
+func TestExecutePublicAtomicCommandBatchRollsBackMemoryAndJournal(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("existing", "before")
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournalWithFormat(path, CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "BATCH",
+		Atomic:  true,
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "existing", Value: "changed"},
+			{Command: "SETSTR", Key: "created", Value: "temporary"},
+			{Command: "PUTMAP", Key: "malformed"},
+		},
+	}, commandExecutionOptions{Journal: journal})
+	if rejected || response.OK {
+		t.Fatalf("executeCacheCommand(atomic batch) = %#v rejected=%v, want failure", response, rejected)
+	}
+	if got := ht.GetString("existing"); got != "before" {
+		t.Fatalf("atomic batch existing value = %q, want before", got)
+	}
+	if ht.Exists("created") {
+		t.Fatal("atomic batch retained created key after failure")
+	}
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("atomic batch journal entries = %#v, want empty journal", entries)
+	}
+}
+
 func TestExecutePublicCommandBatchSyncFailureRollsBackMemoryAndJournal(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("name", "before")

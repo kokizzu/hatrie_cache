@@ -127,6 +127,17 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if ht == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	if strings.EqualFold(strings.TrimSpace(request.Command), "BATCH") && request.Atomic {
+		ht.commandTransactionMu.Lock()
+		defer ht.commandTransactionMu.Unlock()
+	} else {
+		ht.commandTransactionMu.RLock()
+		defer ht.commandTransactionMu.RUnlock()
+	}
+	return ht.executeCommand(request)
+}
+
+func (ht *HatTrie) executeCommand(request CacheCommandRequest) CacheCommandResponse {
 	request.Command = normalizedCommand(request.Command)
 	if ht.localPartitionSet() != nil {
 		command := strings.ToUpper(strings.TrimSpace(request.Command))
@@ -1095,10 +1106,54 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 }
 
 func (ht *HatTrie) executePublicBatchCommand(request CacheCommandRequest) CacheCommandResponse {
+	if request.Atomic {
+		return ht.executeAtomicPublicBatchCommand(request)
+	}
 	if response, ok := ht.executePublicScalarBatchCommand(request); ok {
 		return response
 	}
-	return executePublicCommandBatchRequests(request, ht.ExecuteCommand)
+	return executePublicCommandBatchRequests(request, ht.executeCommand)
+}
+
+func (ht *HatTrie) executeAtomicPublicBatchCommand(request CacheCommandRequest) CacheCommandResponse {
+	payloads, err := publicCommandBatchRequests(request)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	for index, payload := range payloads {
+		if err := validatePublicCommandBatchPayload(payload, index); err != nil {
+			return commandError(err.Error())
+		}
+	}
+
+	rollback := publicCommandBatchRollback{}
+	ht.mu.Lock()
+	for index, payload := range payloads {
+		key := strings.TrimSpace(payload.Key)
+		if err := validateKey(key); err != nil {
+			ht.mu.Unlock()
+			return commandError(fmt.Sprintf("atomic batch value %d: %s", index, err.Error()))
+		}
+		if err := rollback.captureLocked(ht, key); err != nil {
+			ht.mu.Unlock()
+			return commandError(err.Error())
+		}
+	}
+	ht.mu.Unlock()
+
+	responses := make([]CacheCommandResponse, 0, len(payloads))
+	for _, payload := range payloads {
+		response := ht.executeCommand(payload)
+		responses = append(responses, response)
+		if response.OK {
+			continue
+		}
+		if err := rollback.restore(ht); err != nil {
+			return commandError(fmt.Sprintf("%s; atomic rollback failed: %s", response.Message, err.Error()))
+		}
+		return publicCommandBatchResponse(responses, false)
+	}
+	return publicCommandBatchResponse(responses, true)
 }
 
 // executeSQLTransactionBatch applies already-validated scalar writes only when

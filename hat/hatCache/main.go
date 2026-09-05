@@ -3682,6 +3682,7 @@ type hatTrieAuxStorage struct {
 
 type HatTrie struct {
 	mu                                sync.RWMutex
+	commandTransactionMu              sync.RWMutex
 	sqlIndexMu                        sync.RWMutex
 	sqlColumnarLayouts                sqlColumnarLayoutCache
 	sqlJSONIndexAdmissionBudget       SQLJSONIndexAdmissionBudget
