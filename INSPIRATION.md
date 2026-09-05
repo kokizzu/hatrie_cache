@@ -377,7 +377,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T023 Persistent statistics refreshed from observed workloads.
 - [ ] T024 Automatic covering-index recommendation.
 - [ ] T025 Index build cancellation and resume.
-- [ ] T026 Index consistency checker independent of normal reads.
+- [x] T026 Index consistency checker independent of normal reads - `CheckSQLJSONIndexConsistency` rebuilds temporary candidates for every configured SQL JSON index kind, reports stale/unready state, and never repairs the live index.
 
 ### Transactions, WAL, Backup, And Recovery
 
