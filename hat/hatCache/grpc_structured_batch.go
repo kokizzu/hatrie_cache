@@ -319,14 +319,15 @@ func (server *CacheGRPCServer) executeStructuredBatchCompatibility(ctx context.C
 func (server *CacheGRPCServer) executeStructuredBatchCompatibilityPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
 	command := structuredBatchCacheCommandPrepared(request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
 	result, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
-		NodeName:            server.options.NodeName,
-		Journal:             server.options.Journal,
-		DirtyTracker:        server.options.DirtyTracker,
-		Topology:            server.options.Topology,
-		Election:            server.options.Election,
-		Replicator:          server.options.Replicator,
-		ReplicationSafety:   server.options.ReplicationSafety,
-		EnforceLeaderWrites: server.options.EnforceLeaderWrites,
+		NodeName:                   server.options.NodeName,
+		Journal:                    server.options.Journal,
+		DirtyTracker:               server.options.DirtyTracker,
+		Topology:                   server.options.Topology,
+		Election:                   server.options.Election,
+		Replicator:                 server.options.Replicator,
+		ReplicationSafety:          server.options.ReplicationSafety,
+		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
+		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
 	})
 	return structuredBatchResponseFromCommand(request, result)
 }

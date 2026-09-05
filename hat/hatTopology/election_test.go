@@ -67,6 +67,12 @@ func TestElectionStoreReportsAndPrunesOrphanNodes(t *testing.T) {
 	if err := store.MarkOffline("node-b"); err != nil {
 		t.Fatalf("MarkOffline(node-b) error = %v", err)
 	}
+	if !store.IsHealthy("node-a") {
+		t.Fatal("IsHealthy(node-a) = false, want true")
+	}
+	if store.IsHealthy("node-b") {
+		t.Fatal("IsHealthy(node-b) = true, want false")
+	}
 
 	provider.topology = hatTopology.ClusterTopology{
 		Version: 2,
@@ -79,6 +85,12 @@ func TestElectionStoreReportsAndPrunesOrphanNodes(t *testing.T) {
 	}
 	if got := store.Status().OrphanNodes; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Status().OrphanNodes = %#v, want %#v", got, want)
+	}
+	if store.IsHealthy("node-a") {
+		t.Fatal("IsHealthy(orphan node-a) = true, want false")
+	}
+	if !store.IsHealthy("node-c") {
+		t.Fatal("IsHealthy(untracked current node-c) = false, want true")
 	}
 	if got := store.PruneOrphanNodes(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("PruneOrphanNodes() = %#v, want %#v", got, want)

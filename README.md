@@ -2320,6 +2320,14 @@ The current shard primary stays leader while healthy; when it is marked offline
 or its heartbeat times out, the first healthy replica becomes leader. A running
 monitoring server refreshes its own node heartbeat periodically while it is up:
 
+The optional `-require-healthy-replica-reads` flag defaults to `false` for
+backward compatibility. When enabled, HTTP and native gRPC read commands and
+read-only typed batches return an explicit health-gate error instead of serving
+from a local node whose liveness is offline, timed out, in maintenance, or absent
+from the current topology. HTTP reports status `409`; gRPC returns an unsuccessful
+command or batch response. Mutating commands and internal replication commands
+remain governed by their existing write and replication controls.
+
 Election liveness records are kept separate from topology membership. After a
 membership change, `GET /api/election` reports tracked node IDs that are no
 longer present as the sorted `orphan_nodes` field. Cleanup is explicit and

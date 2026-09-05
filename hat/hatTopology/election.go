@@ -89,6 +89,26 @@ func (store *ElectionStore) MarkOffline(nodeID string) error {
 	return store.setNode(nodeID, true)
 }
 
+// IsHealthy reports whether nodeID is currently eligible to serve a
+// stale-sensitive read according to topology membership, maintenance state,
+// heartbeat timeout, and explicit offline state.
+func (store *ElectionStore) IsHealthy(nodeID string) bool {
+	if store == nil {
+		return false
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return false
+	}
+	topology, ok := store.topologySnapshot()
+	if !ok {
+		return false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.nodeActiveLocked(topology.Nodes, nodeID, store.now())
+}
+
 // OrphanNodes returns liveness records for node IDs that are no longer in the
 // current topology. The returned IDs are sorted and independently owned.
 func (store *ElectionStore) OrphanNodes() []string {

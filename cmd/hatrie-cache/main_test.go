@@ -877,11 +877,12 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-sync-interval", "10s",
 		"-replication-sync-prefix", "session:",
 		"-enforce-leader-writes",
+		"-require-healthy-replica-reads",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
-	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" || cfg.electionTimeout != 30*time.Second || !cfg.replication || !cfg.enforceLeaderWrites {
+	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" || cfg.electionTimeout != 30*time.Second || !cfg.replication || !cfg.enforceLeaderWrites || !cfg.requireHealthyReplicaReads {
 		t.Fatalf("cfg topology = %#v, want explicit node and path", cfg)
 	}
 	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 || cfg.replicationDeadLetterLimit != 7 {

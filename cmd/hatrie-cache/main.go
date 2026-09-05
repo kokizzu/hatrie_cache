@@ -106,6 +106,7 @@ type config struct {
 	replicationSyncInterval              time.Duration
 	replicationSyncPrefix                string
 	enforceLeaderWrites                  bool
+	requireHealthyReplicaReads           bool
 	grpcAddr                             string
 	grpcTLSCert                          string
 	grpcTLSKey                           string
@@ -456,6 +457,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Replicator:                       replicator,
 		ReplicationSafety:                replicationSafety,
 		EnforceLeaderWrites:              cfg.enforceLeaderWrites,
+		RequireHealthyReplicaReads:       cfg.requireHealthyReplicaReads,
 		RuntimeConfig:                    redactedConfig(cfg),
 		SQLFunctions:                     sqlFunctions,
 	})
@@ -647,6 +649,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
+	flags.BoolVar(&cfg.requireHealthyReplicaReads, "require-healthy-replica-reads", false, "reject stale-sensitive reads when this node is not a healthy topology replica")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.grpcTLSCert, "grpc-tls-cert", "", "TLS certificate path for the native gRPC API")
 	flags.StringVar(&cfg.grpcTLSKey, "grpc-tls-key", "", "TLS private key path for the native gRPC API")
@@ -1272,6 +1275,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_sync_interval":                cfg.replicationSyncInterval.String(),
 		"replication_sync_prefix":                  cfg.replicationSyncPrefix,
 		"enforce_leader_writes":                    cfg.enforceLeaderWrites,
+		"require_healthy_replica_reads":            cfg.requireHealthyReplicaReads,
 		"grpc_addr":                                cfg.grpcAddr,
 		"grpc_tls_cert":                            cfg.grpcTLSCert,
 		"grpc_tls_key":                             cfg.grpcTLSKey,
@@ -1761,6 +1765,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		Replicator:                       replicator,
 		ReplicationSafety:                replicationSafety,
 		EnforceLeaderWrites:              cfg.enforceLeaderWrites,
+		RequireHealthyReplicaReads:       cfg.requireHealthyReplicaReads,
 	}))
 	return server, listener, nil
 }

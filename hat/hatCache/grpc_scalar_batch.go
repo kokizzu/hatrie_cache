@@ -87,7 +87,8 @@ func (server *CacheGRPCServer) scalarBatchRequiresCompatibilityPath() bool {
 	return server.options.Journal != nil ||
 		server.options.DirtyTracker != nil ||
 		server.options.Replicator != nil ||
-		server.options.EnforceLeaderWrites
+		server.options.EnforceLeaderWrites ||
+		server.options.RequireHealthyReplicaReads
 }
 
 func validateScalarBatchColumns(request *hatriecachev1.ScalarBatchRequest) error {
@@ -507,14 +508,15 @@ func (server *CacheGRPCServer) executeScalarBatchCompatibility(ctx context.Conte
 	request = materializeScalarBatchSharedKey(request)
 	command := scalarBatchCacheCommand(request)
 	result, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
-		NodeName:            server.options.NodeName,
-		Journal:             server.options.Journal,
-		DirtyTracker:        server.options.DirtyTracker,
-		Topology:            server.options.Topology,
-		Election:            server.options.Election,
-		Replicator:          server.options.Replicator,
-		ReplicationSafety:   server.options.ReplicationSafety,
-		EnforceLeaderWrites: server.options.EnforceLeaderWrites,
+		NodeName:                   server.options.NodeName,
+		Journal:                    server.options.Journal,
+		DirtyTracker:               server.options.DirtyTracker,
+		Topology:                   server.options.Topology,
+		Election:                   server.options.Election,
+		Replicator:                 server.options.Replicator,
+		ReplicationSafety:          server.options.ReplicationSafety,
+		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
+		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
 	})
 	return scalarBatchResponseFromCommand(request, result)
 }

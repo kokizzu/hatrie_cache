@@ -417,7 +417,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T057 Election and failover behavior for supported topologies.
 - [ ] T058 Quorum reads and writes.
 - [x] T059 Read-only mode during failover.
-- [ ] T060 Replica health gate before serving stale-sensitive reads.
+- [x] T060 Replica health gate before serving stale-sensitive reads. Optional `RequireHealthyReplicaReads` / `-require-healthy-replica-reads` gates HTTP and native gRPC read commands and read-only typed batches on election health; the default remains off, and writes plus internal replication are unchanged.
 - [x] T061 Replication queue depth and error metrics - `/metrics` exposes queue depth, capacity, enqueue/drop, attempt, success/failure, retry, and age gauges/counters.
 - [x] T062 Replication bandwidth and compression metrics - `/metrics` exposes outgoing request wire bytes and request counts by target and `identity`/`gzip` encoding; see [REPLICATION_METRICS.md](REPLICATION_METRICS.md).
 - [x] T063 Replication pause and resume controls - async replication exposes idempotent Go pause/resume methods, authenticated `/api/replication` actions, queue status, and a Prometheus paused gauge; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).

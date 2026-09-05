@@ -3368,6 +3368,86 @@ func TestMonitoringHandlerReportsAndCleansElectionOrphans(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerGatesUnhealthyReplicaReads(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:health", "value")
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes: []TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	if err := election.MarkOffline("node-b"); err != nil {
+		t.Fatalf("MarkOffline(node-b) error = %v", err)
+	}
+	protected := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:                   "node-b",
+		Topology:                   topology,
+		Election:                   election,
+		RequireHealthyReplicaReads: true,
+	}).Handler()
+
+	readRequest := httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GETSTR","key":"session:health"}`))
+	readResp := httptest.NewRecorder()
+	protected.ServeHTTP(readResp, readRequest)
+	if readResp.Code != http.StatusConflict {
+		t.Fatalf("unhealthy replica read status = %d body %q, want 409", readResp.Code, readResp.Body.String())
+	}
+	var rejected CacheCommandResponse
+	if err := json.Unmarshal(readResp.Body.Bytes(), &rejected); err != nil {
+		t.Fatalf("unhealthy replica read JSON error = %v", err)
+	}
+	if rejected.OK || !strings.Contains(rejected.Message, "stale-sensitive") {
+		t.Fatalf("unhealthy replica read response = %#v, want stale-sensitive rejection", rejected)
+	}
+
+	writeRequest := httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:health-write","value":"written"}`))
+	writeResp := httptest.NewRecorder()
+	protected.ServeHTTP(writeResp, writeRequest)
+	if writeResp.Code != http.StatusOK {
+		t.Fatalf("unhealthy replica write status = %d body %q, want 200", writeResp.Code, writeResp.Body.String())
+	}
+
+	if err := election.Heartbeat("node-b"); err != nil {
+		t.Fatalf("Heartbeat(node-b) error = %v", err)
+	}
+	healthyReadResp := httptest.NewRecorder()
+	protected.ServeHTTP(healthyReadResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GETSTR","key":"session:health"}`)))
+	if healthyReadResp.Code != http.StatusOK {
+		t.Fatalf("healthy replica read status = %d body %q, want 200", healthyReadResp.Code, healthyReadResp.Body.String())
+	}
+	var healthy CacheCommandResponse
+	if err := json.Unmarshal(healthyReadResp.Body.Bytes(), &healthy); err != nil {
+		t.Fatalf("healthy replica read JSON error = %v", err)
+	}
+	if !healthy.OK || healthy.Value != "value" {
+		t.Fatalf("healthy replica read response = %#v, want value", healthy)
+	}
+
+	defaultHandler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName: "node-b",
+		Topology: topology,
+		Election: election,
+	}).Handler()
+	if err := election.MarkOffline("node-b"); err != nil {
+		t.Fatalf("second MarkOffline(node-b) error = %v", err)
+	}
+	defaultResp := httptest.NewRecorder()
+	defaultHandler.ServeHTTP(defaultResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GETSTR","key":"session:health"}`)))
+	if defaultResp.Code != http.StatusOK {
+		t.Fatalf("default-off replica read status = %d body %q, want 200", defaultResp.Code, defaultResp.Body.String())
+	}
+}
+
 func TestMonitoringHandlerEnforcesLeaderWrites(t *testing.T) {
 	ht := newTestTrie(t)
 	topology := replicationTestTopology(t, "127.0.0.1:1")

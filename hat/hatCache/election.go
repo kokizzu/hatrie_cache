@@ -50,6 +50,14 @@ func (store *ElectionStore) MarkOffline(nodeID string) error {
 	return store.core.MarkOffline(nodeID)
 }
 
+// IsHealthy reports whether nodeID is eligible to serve stale-sensitive reads.
+func (store *ElectionStore) IsHealthy(nodeID string) bool {
+	if store == nil || store.core == nil {
+		return false
+	}
+	return store.core.IsHealthy(nodeID)
+}
+
 // OrphanNodes returns liveness records for node IDs no longer in the current
 // topology. The returned IDs are sorted and independently owned.
 func (store *ElectionStore) OrphanNodes() []string {

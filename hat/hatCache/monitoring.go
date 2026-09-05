@@ -112,8 +112,12 @@ type MonitoringOptions struct {
 	Replicator                      *HTTPReplicator
 	ReplicationSafety               *ReplicationSafetyStore
 	EnforceLeaderWrites             bool
-	RuntimeConfig                   map[string]interface{}
-	SQLFunctions                    *SQLFunctionRegistry
+	// RequireHealthyReplicaReads rejects stale-sensitive reads when the local
+	// node is offline, timed out, in maintenance, or absent from topology.
+	// It is disabled by default for backward compatibility.
+	RequireHealthyReplicaReads bool
+	RuntimeConfig              map[string]interface{}
+	SQLFunctions               *SQLFunctionRegistry
 	// SQLCatalog is optional declared metadata rendered by the monitoring UI.
 	// It is separate from live cache values and is served read-only.
 	SQLCatalog SQLCatalog
@@ -255,14 +259,15 @@ func (resolver monitoringSQLResolver) EvaluateSQLFunction(name string, calls []S
 }
 
 type commandExecutionOptions struct {
-	NodeName            string
-	Journal             *CommandJournal
-	DirtyTracker        *LevelDBDirtyTracker
-	Topology            *TopologyStore
-	Election            *ElectionStore
-	Replicator          *HTTPReplicator
-	ReplicationSafety   *ReplicationSafetyStore
-	EnforceLeaderWrites bool
+	NodeName                   string
+	Journal                    *CommandJournal
+	DirtyTracker               *LevelDBDirtyTracker
+	Topology                   *TopologyStore
+	Election                   *ElectionStore
+	Replicator                 *HTTPReplicator
+	ReplicationSafety          *ReplicationSafetyStore
+	EnforceLeaderWrites        bool
+	RequireHealthyReplicaReads bool
 }
 
 type preparedInternalReplicationPayload struct {
@@ -1631,14 +1636,15 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	}
 	startedAt := time.Now()
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
-		NodeName:            handler.options.NodeName,
-		Journal:             handler.options.Journal,
-		DirtyTracker:        handler.options.LevelDBDirtyTracker,
-		Topology:            handler.options.Topology,
-		Election:            handler.options.Election,
-		Replicator:          handler.options.Replicator,
-		ReplicationSafety:   handler.options.ReplicationSafety,
-		EnforceLeaderWrites: handler.options.EnforceLeaderWrites,
+		NodeName:                   handler.options.NodeName,
+		Journal:                    handler.options.Journal,
+		DirtyTracker:               handler.options.LevelDBDirtyTracker,
+		Topology:                   handler.options.Topology,
+		Election:                   handler.options.Election,
+		Replicator:                 handler.options.Replicator,
+		ReplicationSafety:          handler.options.ReplicationSafety,
+		EnforceLeaderWrites:        handler.options.EnforceLeaderWrites,
+		RequireHealthyReplicaReads: handler.options.RequireHealthyReplicaReads,
 	})
 	status := http.StatusOK
 	if rejected {
@@ -1768,7 +1774,11 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		return executeInternalReplicationBatch(ctx, trie, request, options)
 	case replicationSetBinaryCommand, replicationSetCompactCommand:
 		return executeInternalReplicationBinary(ctx, trie, request, options)
-	case "BATCH":
+	}
+	if response, rejected := rejectUnhealthyReplicaRead(request, options.NodeName, options.Election, options.RequireHealthyReplicaReads); rejected {
+		return response, true
+	}
+	if normalizedCommand(request.Command) == "BATCH" {
 		return executePublicCommandBatch(ctx, trie, request, options)
 	}
 	replicationToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
@@ -2390,6 +2400,19 @@ func rejectNonLeaderWrite(request CacheCommandRequest, nodeName string, election
 	}
 	if route.Leader.Leader != strings.TrimSpace(nodeName) {
 		return commandError("local node is not elected leader for key; leader is " + route.Leader.Leader), true
+	}
+	return CacheCommandResponse{}, false
+}
+
+func rejectUnhealthyReplicaRead(request CacheCommandRequest, nodeName string, election *ElectionStore, enforce bool) (CacheCommandResponse, bool) {
+	if !enforce || commandRequiresLeader(request) {
+		return CacheCommandResponse{}, false
+	}
+	if election == nil {
+		return commandError("replica health gate requires an election store"), true
+	}
+	if !election.IsHealthy(nodeName) {
+		return commandError("local replica is not healthy for stale-sensitive reads"), true
 	}
 	return CacheCommandResponse{}, false
 }
