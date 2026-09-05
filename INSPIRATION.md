@@ -180,7 +180,7 @@ name.
 - [x] C117 RowBinary-compatible encoding. `EncodeSQLRowBinary` and `DecodeSQLRowBinary` provide an explicit schema-aware RowBinary-style stream with little-endian fixed-width values, varint-length strings/bytes, nullable markers, strict validation, and bounded decoding; JSON/protobuf defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 - [x] C118 JSON row encoding for compatibility paths.
 - [x] C119 Arrow-compatible column transfer.
-- [ ] C120 Parquet import and export.
+- [x] C120 Parquet import and export. `ExternalTables` provides `ExportParquet`, `ImportParquet`, and `WriteParquet` over the existing in-memory external-table registry; round-trip tests and `BenchmarkExternalTablesExportTransfer` cover the path.
 - [ ] C121 Native compressed block transfer with independent blocks.
 - [x] C122 Configurable wire compression.
 - [ ] C123 Compression level negotiation per client.

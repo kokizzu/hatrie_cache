@@ -39,6 +39,7 @@ security guidance before exposing it on a network.
 - Structural EXPLAIN dataflow graphs: call `BuildExplainDataflowGraph`, `MarshalExplainDataflowJSON`, or `ExplainDataflowDOT` to inspect nested subplans and pipeline edges without changing query execution.
 - Literal-independent SQL fingerprints: call `SQLQueryFingerprint` to group structurally identical queries without retaining literal values; identifiers, operators, literal types, and parameter positions remain significant.
 - Schema-aware RowBinary-style SQL row transfer: use `EncodeSQLRowBinary` and `DecodeSQLRowBinary`; the existing JSON/protobuf wire defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
+- External Parquet tables: `ExternalTables` supports `ExportParquet`, `ImportParquet`, and `WriteParquet` alongside CSV, JSON, NDJSON, and Arrow formats.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
