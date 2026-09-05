@@ -375,7 +375,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T021 Online index alteration with progress. `RunScheduledSQLJSONIndexRebuildsWithProgress` reports queue-level queued/running/completed/failed/canceled transitions and requeues canceled work for a later call while preserving atomic index publication; cancellation does not interrupt a single rebuild unit.
 - [x] T022 Index statistics for selectivity estimates - `SQLJSONIndexStats` exposes cardinality/frequency statistics and `SQLJSONIndexValueEstimate` exposes exact posting estimates for configured JSON indexes.
 - [x] T023 Persistent statistics refreshed from observed workloads. `SQLIndexAdvisor.Save` and `Load` persist bounded, versioned workload recommendations without SQL text, literal values, or row data; load validation is atomic and size-limited.
-- [ ] T024 Automatic covering-index recommendation.
+- [x] T024 Automatic covering-index recommendation. The opt-in `SQLIndexAdvisor` now exposes bounded `CoveringRecommendations` for slow, unindexed single-source equality projections; columns are canonicalized and returned without query text, literal values, or row data, while index creation remains an explicit operator decision.
 - [ ] T025 Index build cancellation and resume.
 - [x] T026 Index consistency checker independent of normal reads - `CheckSQLJSONIndexConsistency` rebuilds temporary candidates for every configured SQL JSON index kind, reports stale/unready state, and never repairs the live index.
 

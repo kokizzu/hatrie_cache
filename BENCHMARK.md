@@ -15690,6 +15690,37 @@ No additional measured bytes or allocations appeared in this fixture. The
 progress path was approximately 1.08x slower in this run; that latency
 difference is an operational-control cost, not a broad performance claim.
 
+## Automatic Covering-Index Recommendations
+
+Command: `make benchmark-sql-covering-advisor` (`-count=5`, `-benchmem`). The
+fixture compares a covering-shaped query without the advisor, the existing
+predicate advisor on a non-covering query, the new covering recommendation
+path, and reading one returned recommendation. The advisor is opt-in and this
+measures advisory overhead, not query throughput with an activated index.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| No advisor, covering-shaped query | 4,814 | 5,432 | 33 |
+| Existing advisor, non-covering query | 9,399 | 7,434 | 93 |
+| Covering recommendation observation | 10,658 | 8,012 | 100 |
+| `CoveringRecommendations` read | 163.3 | 144 | 4 |
+
+Raw samples from five repetitions:
+
+```text
+baseline: 4814, 4704, 5013, 5091, 4727 ns/op; 5432 B/op; 33 allocs/op
+advisor_noncovering: 9399, 9448, 9199, 9651, 9348 ns/op; 7434 B/op; 93 allocs/op
+advisor_covering: 10519, 10937, 10658, 10550, 10851 ns/op; 8012 B/op; 100 allocs/op
+CoveringRecommendations: 162.4, 163.3, 160.4, 169.4, 167.7 ns/op; 144 B/op; 4 allocs/op
+```
+
+Relative to the existing advisor on the non-covering fixture, the covering
+shape was about 1.13x slower, used 1.08x the heap, and made 1.08x the
+allocations in this run. That cost is paid only when `IndexAdvisor` is
+explicitly configured; no default query path or index storage changes.
+
 ## Replication Pause And Resume
 
 Command: `make benchmark-t063`.

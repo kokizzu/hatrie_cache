@@ -1021,6 +1021,12 @@ format-sql-index-progress:
 	sh ./scripts/format-sql-index-progress.sh
 benchmark-sql-index-progress:
 	sh ./scripts/benchmark-sql-index-progress.sh
+test-sql-covering-advisor:
+	sh ./scripts/test-sql-covering-advisor.sh
+format-sql-covering-advisor:
+	sh ./scripts/format-sql-covering-advisor.sh
+benchmark-sql-covering-advisor:
+	sh ./scripts/benchmark-sql-covering-advisor.sh
 
 test-sql-index-usage:
 	sh ./scripts/test-sql-index-usage.sh

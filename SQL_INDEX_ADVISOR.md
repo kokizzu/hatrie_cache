@@ -32,6 +32,35 @@ if err := restored.Load(file); err != nil {
 recommendations := restored.Recommendations()
 ```
 
+For simple unindexed equality projections, the same opt-in advisor can also
+return covering-index candidates:
+
+```go
+for _, recommendation := range advisor.CoveringRecommendations() {
+	// Review the recommendation before changing the live index configuration.
+	if err := trie.CreateSQLJSONCoveringIndex(
+		recommendation.Key,
+		recommendation.Field,
+		recommendation.Columns..., // predicate field is retained automatically
+	); err != nil {
+		return err
+	}
+}
+```
+
+`CoveringRecommendations` only considers a single `CACHE` source with a
+literal equality predicate and direct selected fields. Joins, aggregates,
+grouping, ordering, distinct queries, windows, CTEs, unions, computed
+expressions, and non-equality predicates are excluded. The columns are sorted,
+deduplicated, and exclude the predicate field so the result can be passed
+directly to `CreateSQLJSONCoveringIndex` after review. The advisor never creates
+or activates an index automatically.
+
+`Save` and `Load` continue to persist the existing predicate-field observations
+in the version-1 snapshot format. Covering recommendations are derived
+in-memory from the current workload and are intentionally regenerated rather
+than silently changing the established persistence format.
+
 The snapshot is versioned JSON. `Load` accepts at most
 `DefaultSQLIndexAdvisorSnapshotMaxBytes` (1 MiB), limits each key and field to
 1 KiB, rejects unknown or trailing JSON, duplicate entries, zero counts,
