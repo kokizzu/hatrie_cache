@@ -2993,6 +2993,28 @@ ordinary commands retain shared locking and the default pipeline behavior.
 For example, `{"command":"BATCH","atomic":true,"batch":[{"command":"SETSTR","key":"a","value":"1"},{"command":"PUTMAP","key":"profile","subkey":"role","value":"admin"}]}`
 commits both commands or leaves both keys unchanged.
 Internal replication commands are rejected inside public `BATCH` requests.
+Embedded Go callers can use the equivalent callback form without constructing
+the outer request:
+
+```go
+import hatriecache "hatrie_cache"
+
+trie := hatriecache.CreateHatTrie()
+defer trie.Destroy()
+response, err := trie.RunAtomic(func(batch *hatriecache.AtomicCommandBatch) error {
+    if err := batch.Add(hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "a", Value: "1"}); err != nil {
+        return err
+    }
+    return batch.Add(hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "b", Value: "2"})
+})
+```
+
+The callback form is opt-in and uses the same public command set as `BATCH`.
+A callback error or command failure leaves mutations unchanged; command
+failures are returned as both the response and a Go error. Use
+`BeginSQLTransaction` for SQL queries, savepoints, or snapshot-isolated
+read-your-writes behavior. `AtomicCommandBatch.Add` copies mutable request
+payloads before the callback returns.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons. The comparison includes single-command

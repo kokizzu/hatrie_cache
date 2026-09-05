@@ -5066,3 +5066,9 @@ test-t028:
 
 format-t028:
 	sh ./scripts/format-t028.sh
+
+test-t029:
+	sh ./scripts/test-t029.sh
+
+format-t029:
+	sh ./scripts/format-t029.sh
