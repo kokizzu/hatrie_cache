@@ -92,6 +92,8 @@ message CommandResponse {
   string message = 2;
   string value = 3;
   repeated CommandResponse responses = 4;
+  // Stable machine-readable error classification; empty for successful responses.
+  string code = 5;
 }
 
 message CommandBatchRequest {

@@ -21,10 +21,19 @@ type Request struct {
 }
 
 // Response is the result of one cache command, optionally including the
-// results of a batch command in request order.
+// results of a batch command in request order. Code is populated only for
+// errors and is omitted from JSON when empty.
 type Response struct {
 	OK        bool       `json:"ok"`
 	Message   string     `json:"message"`
 	Value     string     `json:"value,omitempty"`
+	Code      string     `json:"code,omitempty"`
 	Responses []Response `json:"responses,omitempty"`
 }
+
+const (
+	ErrorCodeInvalidArgument    = "invalid_argument"
+	ErrorCodeUnsupportedCommand = "unsupported_command"
+	ErrorCodeCounterOverflow    = "counter_overflow"
+	ErrorCodeInternal           = "internal_error"
+)

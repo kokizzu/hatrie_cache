@@ -4456,3 +4456,34 @@ commit-t155-checklist:
 .PHONY: push-t155-checklist
 push-t155-checklist:
 	bash ./scripts/push-t155-checklist.sh
+.PHONY: test-t147
+test-t147:
+	bash ./scripts/test-t147.sh
+
+.PHONY: bench-t147
+bench-t147:
+	bash ./scripts/bench-t147.sh
+
+.PHONY: review-t147
+review-t147:
+	bash ./scripts/review-t147.sh
+
+.PHONY: format-t147
+format-t147:
+	bash ./scripts/format-t147.sh
+
+.PHONY: stage-t147
+stage-t147:
+	bash ./scripts/stage-t147.sh
+
+.PHONY: commit-t147
+commit-t147:
+	bash ./scripts/commit-t147.sh
+
+.PHONY: push-t147
+push-t147:
+	bash ./scripts/push-t147.sh
+
+.PHONY: audit-inspiration-state
+audit-inspiration-state:
+	bash ./scripts/audit-inspiration-state.sh

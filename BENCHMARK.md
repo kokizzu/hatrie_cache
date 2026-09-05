@@ -16,6 +16,22 @@ the implementation before the text scanner stopped repeating token validation.
 The filter is conservative and must be followed by an exact word predicate.
 See [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md).
 
+## Structured Command Error Metadata
+
+The new `code` field is omitted from successful responses and included only on
+command failures. These three `-count=3` runs used `make bench-t147` on the
+same AMD Ryzen 9 5950X host; the table reports the median run.
+
+| JSON response | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Error with `invalid_argument` code | 251.5 | 160 | 2 |
+| Successful response without code | 173.8 | 48 | 1 |
+
+The code adds no wire bytes to successful JSON responses. Error payloads gain
+the short machine-readable code and keep the exact existing message. The Go
+response struct gains one string field, so callers that retain large numbers
+of response structs should account for the additive in-memory footprint.
+
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
 families. It is a benchmarked feature/command coverage report, not a

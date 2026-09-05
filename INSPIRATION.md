@@ -513,7 +513,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T144 Resource isolation.
 - [ ] T145 Admin console with read-only diagnostics.
 - [ ] T146 Operator command idempotency keys.
-- [ ] T147 Structured error codes for automation.
+- [x] T147 Structured error codes for automation.
 - [x] T148 CLI output formats for scripts and humans - the CLI keeps compact JSON as the default and supports opt-in streaming pretty JSON; see [CLI_OUTPUT.md](CLI_OUTPUT.md).
 - [x] T149 Upgrade compatibility tests.
 - [ ] T150 Language-neutral client SDK coverage.

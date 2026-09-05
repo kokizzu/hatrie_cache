@@ -298,6 +298,7 @@ func cacheCommandResponseFromProto(response *hatriecachev1.CommandResponse) Resp
 		OK:      response.GetOk(),
 		Message: response.GetMessage(),
 		Value:   response.GetValue(),
+		Code:    response.GetCode(),
 	}
 	if len(response.GetResponses()) > 0 {
 		out.Responses = make([]Response, len(response.GetResponses()))
@@ -713,6 +714,7 @@ func fillCacheCommandResponseProto(out *hatriecachev1.CommandResponse, response 
 	out.Ok = response.OK
 	out.Message = response.Message
 	out.Value = response.Value
+	out.Code = response.Code
 	if len(response.Responses) == 0 {
 		return
 	}

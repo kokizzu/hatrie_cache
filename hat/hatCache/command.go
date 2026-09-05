@@ -5091,5 +5091,18 @@ func requirePositiveTTL(ttlSeconds *int64) (time.Duration, bool) {
 }
 
 func commandError(message string) CacheCommandResponse {
-	return CacheCommandResponse{OK: false, Message: message}
+	return CacheCommandResponse{OK: false, Message: message, Code: commandErrorCode(message)}
+}
+
+func commandErrorCode(message string) string {
+	switch message {
+	case "unsupported command":
+		return hatCommand.ErrorCodeUnsupportedCommand
+	case "counter overflow":
+		return hatCommand.ErrorCodeCounterOverflow
+	}
+	if strings.Contains(message, "required") || strings.Contains(message, "must be") || strings.HasPrefix(message, "invalid ") {
+		return hatCommand.ErrorCodeInvalidArgument
+	}
+	return hatCommand.ErrorCodeInternal
 }

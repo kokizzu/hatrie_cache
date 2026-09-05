@@ -3429,3 +3429,20 @@ Cancellation is checked before repository or bundle publication and during paylo
 ### Slow-command capture
 
 Set `MonitoringOptions.SlowCommandThreshold` to a positive duration to enable bounded capture and optionally set `SlowCommandCapacity` (default `128`, capped at `4096`). The default threshold is `0`, so capture is disabled and adds no ring allocation. Read recent records from the authenticated `GET /api/commands/slow` endpoint. Records contain timing, command, key, result, and HTTP status, but never command values or response messages.
+
+### Structured command errors
+
+Command failures retain their existing `message` and add an optional stable
+`code` field on JSON, protobuf, gRPC, and replication command responses. The
+current codes are `invalid_argument`, `unsupported_command`,
+`counter_overflow`, and `internal_error`. Successful responses omit `code`.
+For example, a missing key remains compatible with existing clients while
+becoming machine-readable:
+
+```json
+{"ok":false,"message":"key is required","code":"invalid_argument"}
+```
+
+Clients should branch on `code` and keep `message` for logs and operator-facing
+diagnostics. The field is additive and protobuf field number 5 is reserved for
+this purpose.
