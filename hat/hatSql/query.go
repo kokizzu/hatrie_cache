@@ -15219,6 +15219,9 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 		return out, nil
 	}
 	if expr.kind == "binary" {
+		if (expr.op == "AND" || expr.op == "OR") && expr.right != nil && sqlExprBatchShortCircuitSafe(*expr.right) {
+			return evalSQLLogicalExprBatch(expr, rows, functions)
+		}
 		left, err := evalSQLExprBatch(*expr.left, rows, functions)
 		if err != nil {
 			return nil, err

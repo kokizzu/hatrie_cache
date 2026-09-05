@@ -2557,6 +2557,21 @@ format-sql-explain-pipeline:
 .PHONY: commit-sql-explain-pipeline
 commit-sql-explain-pipeline:
 \tsh ./scripts/commit-sql-explain-pipeline.sh
+.PHONY: test-sql-logical-short-circuit
+test-sql-logical-short-circuit:
+\tsh ./scripts/test-sql-logical-short-circuit.sh
+
+.PHONY: benchmark-sql-logical-short-circuit
+benchmark-sql-logical-short-circuit:
+\tsh ./scripts/benchmark-sql-logical-short-circuit.sh
+
+.PHONY: format-sql-logical-short-circuit
+format-sql-logical-short-circuit:
+\tsh ./scripts/format-sql-logical-short-circuit.sh
+
+.PHONY: commit-sql-logical-short-circuit
+commit-sql-logical-short-circuit:
+\tsh ./scripts/commit-sql-logical-short-circuit.sh
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

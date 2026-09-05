@@ -16050,3 +16050,34 @@ BenchmarkSQLExplainPipeline/pipeline_explain-32 274768 4330 ns/op 6584 B/op 43 a
 BenchmarkSQLExplainPipeline/pipeline_explain-32 273217 4592 ns/op 6584 B/op 43 allocs/op
 BenchmarkSQLExplainPipeline/pipeline_explain-32 246422 4442 ns/op 6584 B/op 43 allocs/op
 ```
+
+## SQL Logical Predicate Short-Circuiting
+
+Five-run local benchmark on an AMD Ryzen 9 5950X, Go `amd64`, evaluating a
+20,000-row batch where `active` is true for 99% of rows and the right-hand
+`LIKE` predicate would otherwise be evaluated for every row.
+
+| Workload | Eager right evaluation | Short-circuit batch evaluation | Improvement |
+| --- | ---: | ---: | ---: |
+| `active OR payload LIKE '%needle%'` | 4.062 ms; 2,920,478 B; 60,006 allocs | 618 us; 703,208 B; 607 allocs | 6.57x faster; 4.15x lower heap; 98.9x fewer allocations |
+
+The optimization preserves SQL `TRUE`/`FALSE`/`NULL` truth tables. It only
+activates for deterministic total expressions; custom functions, regular
+expressions, and other error-producing expressions retain eager evaluation.
+There is no cost for ordinary non-logical expressions, and no storage or wire
+format change.
+
+Raw output from `make benchmark-sql-logical-short-circuit`:
+
+```text
+BenchmarkSQLLogicalBatchShortCircuit/eager_right-32 289 4019038 ns/op 2920518 B/op 60006 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/eager_right-32 298 4062480 ns/op 2920478 B/op 60006 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/eager_right-32 294 4037366 ns/op 2920478 B/op 60006 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/eager_right-32 286 4211613 ns/op 2920478 B/op 60006 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/eager_right-32 292 4142122 ns/op 2920484 B/op 60006 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1876 630424 ns/op 703209 B/op 607 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1952 608598 ns/op 703207 B/op 607 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1860 627918 ns/op 703210 B/op 607 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1810 618209 ns/op 703208 B/op 607 allocs/op
+BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1874 616657 ns/op 703208 B/op 607 allocs/op
+```

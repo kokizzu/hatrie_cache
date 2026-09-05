@@ -3755,6 +3755,19 @@ is rejected explicitly. Existing `EXPLAIN` and `EXPLAIN ANALYZE` output is
 unchanged. See [BENCHMARK.md](BENCHMARK.md#sql-explain-pipeline) for the
 diagnostic overhead.
 
+## SQL Logical Predicate Short-Circuiting
+
+Columnar batch evaluation short-circuits deterministic, total right-hand
+predicates for `AND` and `OR` when the left value already fixes the SQL
+three-valued result. This is especially useful when a broad boolean filter is
+combined with an expensive `LIKE` predicate. Expressions involving custom
+functions or operations that can produce SQL evaluation errors keep the
+existing eager path, so error behavior remains compatible.
+
+The optimization is automatic and has no configuration or storage/wire-format
+change. See [BENCHMARK.md](BENCHMARK.md#sql-logical-predicate-short-circuiting)
+for CPU, heap, and allocation measurements.
+
 ## SQL Sparse Primary Mark Pruning
 
 Typed-table columnar caches can optionally publish a sparse primary mark index
