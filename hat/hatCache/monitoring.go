@@ -2922,8 +2922,14 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 }
 
 type electionUpdateRequest struct {
-	Node   string `json:"node"`
-	Online *bool  `json:"online,omitempty"`
+	Node           string `json:"node"`
+	Online         *bool  `json:"online,omitempty"`
+	CleanupOrphans bool   `json:"cleanup_orphans,omitempty"`
+}
+
+type electionCleanupResponse struct {
+	ElectionStatus
+	RemovedOrphanNodes []string `json:"removed_orphan_nodes,omitempty"`
 }
 
 func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.Request) {
@@ -2972,6 +2978,24 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 			return
 		}
 		if requestContextDone(w, r) {
+			return
+		}
+		if request.CleanupOrphans {
+			if strings.TrimSpace(request.Node) != "" || request.Online != nil {
+				writeJSONStatus(w, http.StatusBadRequest, commandError("cleanup_orphans cannot be combined with node or online"))
+				return
+			}
+			details := map[string]interface{}{"cleanup_orphans": true}
+			if handler.rejectDangerousHTTP(w, r, "election.cleanup_orphans", details) {
+				return
+			}
+			removed := handler.options.Election.PruneOrphanNodes()
+			details["removed_count"] = len(removed)
+			handler.auditHTTP(r, AuditEvent{Action: "election.cleanup_orphans", OK: true, Status: http.StatusOK, Details: details})
+			writeJSON(w, electionCleanupResponse{
+				ElectionStatus:     handler.options.Election.Status(),
+				RemovedOrphanNodes: removed,
+			})
 			return
 		}
 		details := map[string]interface{}{"node": request.Node, "online": request.Online == nil || *request.Online}

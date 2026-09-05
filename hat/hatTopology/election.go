@@ -2,6 +2,7 @@ package hatTopology
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ type ElectionStatus struct {
 	TimeoutMillis int64                `json:"timeout_ms"`
 	Nodes         []ElectionNodeStatus `json:"nodes"`
 	Leaders       []ElectionLeader     `json:"leaders"`
+	OrphanNodes   []string             `json:"orphan_nodes,omitempty"`
 }
 
 type ElectionNodeStatus struct {
@@ -87,6 +89,41 @@ func (store *ElectionStore) MarkOffline(nodeID string) error {
 	return store.setNode(nodeID, true)
 }
 
+// OrphanNodes returns liveness records for node IDs that are no longer in the
+// current topology. The returned IDs are sorted and independently owned.
+func (store *ElectionStore) OrphanNodes() []string {
+	if store == nil {
+		return nil
+	}
+	topology, ok := store.topologySnapshot()
+	if !ok {
+		return nil
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.orphanNodeIDsLocked(topology)
+}
+
+// PruneOrphanNodes removes only stale liveness records whose node IDs are no
+// longer present in the current topology. It never changes topology or cache
+// data. The removed IDs are sorted and independently owned.
+func (store *ElectionStore) PruneOrphanNodes() []string {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	topology, ok := store.topologySnapshot()
+	if !ok {
+		return nil
+	}
+	orphans := store.orphanNodeIDsLocked(topology)
+	for _, nodeID := range orphans {
+		delete(store.nodes, nodeID)
+	}
+	return orphans
+}
+
 // Status reports each node and elected leader for every current shard.
 func (store *ElectionStore) Status() ElectionStatus {
 	topology, ok := store.topologySnapshot()
@@ -110,7 +147,12 @@ func (store *ElectionStore) Status() ElectionStatus {
 			leaders = append(leaders, store.electShardLeaderLocked(shard, topology.Nodes, now))
 		}
 	}
-	return ElectionStatus{TimeoutMillis: store.timeout.Milliseconds(), Nodes: nodes, Leaders: leaders}
+	return ElectionStatus{
+		TimeoutMillis: store.timeout.Milliseconds(),
+		Nodes:         nodes,
+		Leaders:       leaders,
+		OrphanNodes:   store.orphanNodeIDsLocked(topology),
+	}
 }
 
 // LeaderForKey reports the selected route and its current available leader.
@@ -249,6 +291,23 @@ func (store *ElectionStore) nodeStatusLocked(node TopologyNode, now time.Time) E
 		status.Online, status.Reason = true, "healthy"
 	}
 	return status
+}
+
+func (store *ElectionStore) orphanNodeIDsLocked(topology ClusterTopology) []string {
+	if len(store.nodes) == 0 {
+		return nil
+	}
+	orphans := make([]string, 0)
+	for nodeID := range store.nodes {
+		if !topologyHasNode(topology.Nodes, nodeID) {
+			orphans = append(orphans, nodeID)
+		}
+	}
+	if len(orphans) == 0 {
+		return nil
+	}
+	sort.Strings(orphans)
+	return orphans
 }
 
 func topologyHasNode(nodes []TopologyNode, nodeID string) bool {

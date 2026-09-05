@@ -50,6 +50,24 @@ func (store *ElectionStore) MarkOffline(nodeID string) error {
 	return store.core.MarkOffline(nodeID)
 }
 
+// OrphanNodes returns liveness records for node IDs no longer in the current
+// topology. The returned IDs are sorted and independently owned.
+func (store *ElectionStore) OrphanNodes() []string {
+	if store == nil || store.core == nil {
+		return nil
+	}
+	return store.core.OrphanNodes()
+}
+
+// PruneOrphanNodes removes stale liveness records without changing topology or
+// cache data. The returned IDs are sorted and independently owned.
+func (store *ElectionStore) PruneOrphanNodes() []string {
+	if store == nil || store.core == nil {
+		return nil
+	}
+	return store.core.PruneOrphanNodes()
+}
+
 func (store *ElectionStore) Status() ElectionStatus {
 	if store == nil || store.core == nil {
 		return ElectionStatus{}

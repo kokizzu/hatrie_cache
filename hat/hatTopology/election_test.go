@@ -1,6 +1,7 @@
 package hatTopology_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -46,5 +47,46 @@ func TestElectionStorePromotesReplicaAndReportsStatus(t *testing.T) {
 	status := store.Status()
 	if len(status.Nodes) != 2 || status.Nodes[0].ID != "node-a" || status.Nodes[0].Reason != "offline" {
 		t.Fatalf("Status().Nodes = %#v; want node-a offline", status.Nodes)
+	}
+}
+
+func TestElectionStoreReportsAndPrunesOrphanNodes(t *testing.T) {
+	provider := &staticTopologyProvider{topology: hatTopology.ClusterTopology{
+		Version: 1,
+		Mode:    hatTopology.TopologyModeSharded,
+		Nodes: []hatTopology.TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+		Shards: []hatTopology.TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	}}
+	store := hatTopology.NewElectionStore(provider, hatTopology.ElectionOptions{})
+	if err := store.Heartbeat("node-a"); err != nil {
+		t.Fatalf("Heartbeat(node-a) error = %v", err)
+	}
+	if err := store.MarkOffline("node-b"); err != nil {
+		t.Fatalf("MarkOffline(node-b) error = %v", err)
+	}
+
+	provider.topology = hatTopology.ClusterTopology{
+		Version: 2,
+		Mode:    hatTopology.TopologyModeSharded,
+		Nodes:   []hatTopology.TopologyNode{{ID: "node-c"}},
+	}
+	want := []string{"node-a", "node-b"}
+	if got := store.OrphanNodes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("OrphanNodes() = %#v, want %#v", got, want)
+	}
+	if got := store.Status().OrphanNodes; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Status().OrphanNodes = %#v, want %#v", got, want)
+	}
+	if got := store.PruneOrphanNodes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("PruneOrphanNodes() = %#v, want %#v", got, want)
+	}
+	if got := store.OrphanNodes(); len(got) != 0 {
+		t.Fatalf("OrphanNodes() after prune = %#v, want empty", got)
+	}
+	if got := store.PruneOrphanNodes(); len(got) != 0 {
+		t.Fatalf("second PruneOrphanNodes() = %#v, want empty", got)
 	}
 }

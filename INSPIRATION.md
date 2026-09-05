@@ -411,7 +411,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T051 Per-peer replication lag measurement: async queue status exposes source, acknowledged, and per-target lag sequences, with Prometheus gauges.
 - [x] T052 Relay reconnect and retry.
 - [x] T053 Bootstrap a node from a peer.
-- [ ] T054 Orphan replica detection and cleanup.
+- [x] T054 Orphan replica detection and cleanup. Election status reports sorted liveness records whose node IDs are no longer in the current topology, and an authenticated `POST /api/election` with `{"cleanup_orphans":true}` prunes only those stale election records without touching cache or replica data.
 - [x] T055 Idempotent journal replay.
 - [ ] T056 Deterministic conflict resolution for concurrent writers.
 - [x] T057 Election and failover behavior for supported topologies.

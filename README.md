@@ -2320,6 +2320,16 @@ The current shard primary stays leader while healthy; when it is marked offline
 or its heartbeat times out, the first healthy replica becomes leader. A running
 monitoring server refreshes its own node heartbeat periodically while it is up:
 
+Election liveness records are kept separate from topology membership. After a
+membership change, `GET /api/election` reports tracked node IDs that are no
+longer present as the sorted `orphan_nodes` field. Cleanup is explicit and
+operator-authenticated: send `POST /api/election` with
+`{"cleanup_orphans":true}` to remove only those stale election records. The
+request cannot be combined with `node` or `online`, respects
+`WRITE_PROTECTION` and monitoring rate limits, and never deletes cache values,
+journal entries, topology data, or replica data. The response includes the
+removed IDs in `removed_orphan_nodes`.
+
 Per-key leader selection uses
 [direct election routing](BENCHMARK.md#direct-election-key-routing): it reads
 one owned normalized route and checks only that shard's candidates instead of

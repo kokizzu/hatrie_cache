@@ -3275,6 +3275,99 @@ func TestMonitoringHandlerManagesElection(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerReportsAndCleansElectionOrphans(t *testing.T) {
+	ht := newTestTrie(t)
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Nodes: []TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	if err := election.Heartbeat("node-a"); err != nil {
+		t.Fatalf("Heartbeat(node-a) error = %v", err)
+	}
+	if err := election.MarkOffline("node-b"); err != nil {
+		t.Fatalf("MarkOffline(node-b) error = %v", err)
+	}
+	if err := topology.Set(ClusterTopology{
+		Version: 1,
+		Nodes:   []TopologyNode{{ID: "node-c"}},
+		Shards:  []TopologyShard{{ID: 0, Primary: "node-c"}},
+	}); err != nil {
+		t.Fatalf("TopologyStore.Set() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		Topology:  topology,
+		Election:  election,
+		AuthToken: "operator-token",
+	}).Handler()
+
+	statusRequest := httptest.NewRequest(http.MethodGet, "/api/election", nil)
+	statusRequest.Header.Set("Authorization", "Bearer operator-token")
+	statusResp := httptest.NewRecorder()
+	handler.ServeHTTP(statusResp, statusRequest)
+	if statusResp.Code != http.StatusOK {
+		t.Fatalf("election GET status = %d body %q, want 200", statusResp.Code, statusResp.Body.String())
+	}
+	var status ElectionStatus
+	if err := json.Unmarshal(statusResp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("election status JSON error = %v", err)
+	}
+	wantOrphans := []string{"node-a", "node-b"}
+	if !reflect.DeepEqual(status.OrphanNodes, wantOrphans) {
+		t.Fatalf("election orphan_nodes = %#v, want %#v", status.OrphanNodes, wantOrphans)
+	}
+
+	unauthorizedResp := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedResp, httptest.NewRequest(http.MethodPost, "/api/election", bytes.NewBufferString(`{"cleanup_orphans":true}`)))
+	if unauthorizedResp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized cleanup status = %d, want 401", unauthorizedResp.Code)
+	}
+	if got := election.OrphanNodes(); !reflect.DeepEqual(got, wantOrphans) {
+		t.Fatalf("orphans after unauthorized cleanup = %#v, want %#v", got, wantOrphans)
+	}
+
+	ambiguousRequest := httptest.NewRequest(http.MethodPost, "/api/election", bytes.NewBufferString(`{"cleanup_orphans":true,"node":"node-c"}`))
+	ambiguousRequest.Header.Set("Authorization", "Bearer operator-token")
+	ambiguousResp := httptest.NewRecorder()
+	handler.ServeHTTP(ambiguousResp, ambiguousRequest)
+	if ambiguousResp.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous cleanup status = %d body %q, want 400", ambiguousResp.Code, ambiguousResp.Body.String())
+	}
+	if got := election.OrphanNodes(); !reflect.DeepEqual(got, wantOrphans) {
+		t.Fatalf("orphans after ambiguous cleanup = %#v, want %#v", got, wantOrphans)
+	}
+
+	cleanupRequest := httptest.NewRequest(http.MethodPost, "/api/election", bytes.NewBufferString(`{"cleanup_orphans":true}`))
+	cleanupRequest.Header.Set("Authorization", "Bearer operator-token")
+	cleanupResp := httptest.NewRecorder()
+	handler.ServeHTTP(cleanupResp, cleanupRequest)
+	if cleanupResp.Code != http.StatusOK {
+		t.Fatalf("cleanup status = %d body %q, want 200", cleanupResp.Code, cleanupResp.Body.String())
+	}
+	var cleanup struct {
+		ElectionStatus
+		RemovedOrphanNodes []string `json:"removed_orphan_nodes"`
+	}
+	if err := json.Unmarshal(cleanupResp.Body.Bytes(), &cleanup); err != nil {
+		t.Fatalf("cleanup JSON error = %v", err)
+	}
+	if !reflect.DeepEqual(cleanup.RemovedOrphanNodes, wantOrphans) {
+		t.Fatalf("removed_orphan_nodes = %#v, want %#v", cleanup.RemovedOrphanNodes, wantOrphans)
+	}
+	if len(cleanup.OrphanNodes) != 0 || len(election.OrphanNodes()) != 0 {
+		t.Fatalf("orphans after cleanup = response %#v, store %#v; want empty", cleanup.OrphanNodes, election.OrphanNodes())
+	}
+}
+
 func TestMonitoringHandlerEnforcesLeaderWrites(t *testing.T) {
 	ht := newTestTrie(t)
 	topology := replicationTestTopology(t, "127.0.0.1:1")
