@@ -3033,6 +3033,9 @@ rollback. Mutations through direct typed APIs still trigger the existing epoch
 conflict check rather than being silently overwritten. Use
 `ParseSQLTransactionIsolation` for configuration strings (`snapshot` or
 `serializable`).
+`SQLTransaction.Savepoint`, `RollbackTo`, and `ReleaseSavepoint` provide
+partial rollback inside the private transaction snapshot; releasing or
+rolling back a savepoint never publishes writes to the live cache.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons. The comparison includes single-command

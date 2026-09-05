@@ -5078,3 +5078,6 @@ test-t030:
 
 format-t030:
 	sh ./scripts/format-t030.sh
+
+test-t031:
+	sh ./scripts/test-t031.sh

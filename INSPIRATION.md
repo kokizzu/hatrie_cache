@@ -385,7 +385,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T028 Public multi-operation transaction API.
 - [x] T029 Atomic callback or box.atomic-style mutation.
 - [x] T030 Configurable transaction isolation levels.
-- [ ] T031 Savepoints and partial rollback.
+- [x] T031 Savepoints and partial rollback.
 - [x] T032 MVCC-style versioned reads for supported paths.
 - [x] T033 Write-ahead journal.
 - [x] T034 Durable snapshots.
