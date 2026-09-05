@@ -5030,3 +5030,7 @@ format-sql-query-manager:
 .PHONY: benchmark-sql-query-manager
 benchmark-sql-query-manager:
 	bash ./scripts/benchmark-sql-query-manager.sh
+format-sql-index-advisor:
+	sh ./scripts/format-sql-index-advisor.sh
+benchmark-sql-index-advisor:
+	sh ./scripts/benchmark-sql-index-advisor.sh

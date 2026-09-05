@@ -53,13 +53,16 @@ type SQLQueryEvent = hatSql.QueryEvent
 type SQLQueryOperator = hatSql.QueryOperator
 
 const (
-	DefaultSQLQueryManagerHistoryCapacity = hatSql.DefaultSQLQueryManagerHistoryCapacity
-	SQLQueryStateRunning                  = hatSql.SQLQueryStateRunning
-	SQLQueryStateCancelRequested          = hatSql.SQLQueryStateCancelRequested
-	SQLQueryStateSucceeded                = hatSql.SQLQueryStateSucceeded
-	SQLQueryStateFailed                   = hatSql.SQLQueryStateFailed
-	SQLQueryStateCanceled                 = hatSql.SQLQueryStateCanceled
+	DefaultSQLIndexAdvisorSnapshotMaxBytes = hatSql.DefaultSQLIndexAdvisorSnapshotMaxBytes
+	SQLIndexAdvisorSnapshotVersion         = hatSql.SQLIndexAdvisorSnapshotVersion
+	DefaultSQLQueryManagerHistoryCapacity  = hatSql.DefaultSQLQueryManagerHistoryCapacity
+	SQLQueryStateRunning                   = hatSql.SQLQueryStateRunning
+	SQLQueryStateCancelRequested           = hatSql.SQLQueryStateCancelRequested
+	SQLQueryStateSucceeded                 = hatSql.SQLQueryStateSucceeded
+	SQLQueryStateFailed                    = hatSql.SQLQueryStateFailed
+	SQLQueryStateCanceled                  = hatSql.SQLQueryStateCanceled
 )
+
 type SQLSourceResolver = hatSql.SourceResolver
 type SQLColumnarBatch = hatSql.ColumnarBatch
 type SQLColumnarSourceResolver = hatSql.ColumnarSourceResolver

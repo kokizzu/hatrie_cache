@@ -374,7 +374,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T020 Online secondary-index build.
 - [ ] T021 Online index alteration with progress.
 - [x] T022 Index statistics for selectivity estimates - `SQLJSONIndexStats` exposes cardinality/frequency statistics and `SQLJSONIndexValueEstimate` exposes exact posting estimates for configured JSON indexes.
-- [ ] T023 Persistent statistics refreshed from observed workloads.
+- [x] T023 Persistent statistics refreshed from observed workloads. `SQLIndexAdvisor.Save` and `Load` persist bounded, versioned workload recommendations without SQL text, literal values, or row data; load validation is atomic and size-limited.
 - [ ] T024 Automatic covering-index recommendation.
 - [ ] T025 Index build cancellation and resume.
 - [x] T026 Index consistency checker independent of normal reads - `CheckSQLJSONIndexConsistency` rebuilds temporary candidates for every configured SQL JSON index kind, reports stale/unready state, and never repairs the live index.

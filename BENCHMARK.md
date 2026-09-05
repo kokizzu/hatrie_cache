@@ -15641,6 +15641,30 @@ The counter runs once after a request body has been sent and does not allocate
 per read chunk. The snapshot allocations are bounded by the number of observed
 targets and encodings.
 
+## SQL Index Advisor Persistence
+
+Command: `make benchmark-sql-index-advisor` (`-count=5`, `-benchmem`). This
+measures explicit persistence of a 64-entry advisor snapshot; it is not on the
+default query execution path.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Save JSON snapshot | 14,208 | 5,548 | 6 |
+| Load JSON snapshot | 62,499 | 27,440 | 165 |
+
+Raw samples from five repetitions:
+
+```text
+save: 14486, 14208, 13589, 13893, 14244 ns/op; 5547, 5548, 5548, 5548, 5549 B/op; 6 allocs/op
+load: 58144, 62569, 64571, 62499, 58814 ns/op; 27440 B/op; 165 allocs/op
+```
+
+The cost is paid only when an application explicitly saves or loads the
+advisor; regular query execution and the existing advisor hot path are
+unchanged.
+
 ## Replication Pause And Resume
 
 Command: `make benchmark-t063`.
