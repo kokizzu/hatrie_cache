@@ -5406,3 +5406,27 @@ commit-query-quota:
 .PHONY: push-query-quota
 push-query-quota:
 	sh ./scripts/deliver-query-quota.sh push
+
+.PHONY: test-rowbinary-fixed-width
+test-rowbinary-fixed-width:
+	sh ./scripts/test-rowbinary-fixed-width.sh test
+
+.PHONY: race-rowbinary-fixed-width
+race-rowbinary-fixed-width:
+	sh ./scripts/test-rowbinary-fixed-width.sh race
+
+.PHONY: format-rowbinary-fixed-width
+format-rowbinary-fixed-width:
+	sh ./scripts/test-rowbinary-fixed-width.sh format
+
+.PHONY: inspect-rowbinary-fixed-width-delivery
+inspect-rowbinary-fixed-width-delivery:
+	sh ./scripts/deliver-rowbinary-fixed-width.sh inspect
+
+.PHONY: commit-rowbinary-fixed-width
+commit-rowbinary-fixed-width:
+	sh ./scripts/deliver-rowbinary-fixed-width.sh commit
+
+.PHONY: push-rowbinary-fixed-width
+push-rowbinary-fixed-width:
+	sh ./scripts/deliver-rowbinary-fixed-width.sh push
