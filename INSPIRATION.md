@@ -373,7 +373,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T019 Unique constraints and duplicate-key errors.
 - [ ] T020 Online secondary-index build.
 - [ ] T021 Online index alteration with progress.
-- [ ] T022 Index statistics for selectivity estimates.
+- [x] T022 Index statistics for selectivity estimates - `SQLJSONIndexStats` exposes cardinality/frequency statistics and `SQLJSONIndexValueEstimate` exposes exact posting estimates for configured JSON indexes.
 - [ ] T023 Persistent statistics refreshed from observed workloads.
 - [ ] T024 Automatic covering-index recommendation.
 - [ ] T025 Index build cancellation and resume.
