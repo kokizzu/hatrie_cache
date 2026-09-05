@@ -15665,6 +15665,31 @@ The cost is paid only when an application explicitly saves or loads the
 advisor; regular query execution and the existing advisor hot path are
 unchanged.
 
+## SQL JSON Index Rebuild Progress
+
+Command: `make benchmark-sql-index-progress` (`-count=5`, `-benchmem`). This
+compares one queued field-index rebuild through the legacy runner and the
+opt-in queue-level progress runner. It is an operational-control measurement,
+not a general query-throughput claim.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Legacy rebuild runner | 2,611 | 1,184 | 23 |
+| Progress rebuild runner | 2,812 | 1,184 | 23 |
+
+Raw samples from five repetitions:
+
+```text
+legacy: 2611, 2432, 2497, 2732, 2752 ns/op; 1184 B/op; 23 allocs/op
+progress: 2875, 2812, 2739, 2702, 2853 ns/op; 1184 B/op; 23 allocs/op
+```
+
+No additional measured bytes or allocations appeared in this fixture. The
+progress path was approximately 1.08x slower in this run; that latency
+difference is an operational-control cost, not a broad performance claim.
+
 ## Replication Pause And Resume
 
 Command: `make benchmark-t063`.

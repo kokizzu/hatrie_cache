@@ -1015,6 +1015,12 @@ deliver-sql-retention:
 
 test-sql-index-advisor:
 	sh ./scripts/test-sql-index-advisor.sh
+test-sql-index-progress:
+	sh ./scripts/test-sql-index-progress.sh
+format-sql-index-progress:
+	sh ./scripts/format-sql-index-progress.sh
+benchmark-sql-index-progress:
+	sh ./scripts/benchmark-sql-index-progress.sh
 
 test-sql-index-usage:
 	sh ./scripts/test-sql-index-usage.sh
