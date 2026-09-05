@@ -15422,6 +15422,29 @@ with_constant_folding: 225264 B/op, 1037 allocs/op
 
 This is a targeted optimizer benchmark; it is not a claim that every query
 will improve by the same factor.
+
+## EXPLAIN Dataflow Graph
+
+Command: `make benchmark-explain-dataflow`.
+
+This benchmark measures the optional structural graph conversion and DOT
+rendering against the existing linear `ExplainDOT` renderer. It uses four
+steps with one nested subplan on Linux/AMD Ryzen 9 5950X; the graph path is a
+diagnostic capability, not a default query-execution path.
+
+Raw output from one benchmark run:
+
+```text
+BenchmarkBuildExplainDataflowGraph-32    1696100  687.2 ns/op   857 B/op   7 allocs/op
+BenchmarkExplainDataflowDOT-32            401666 2824 ns/op   2211 B/op  33 allocs/op
+BenchmarkExplainDOTLinear-32              721597 1594 ns/op    913 B/op  13 allocs/op
+```
+
+The structural graph build costs about 0.69 us, 857 B, and 7 allocations per
+call. Rendering the richer graph costs about 1.77x the CPU, 2.42x the heap,
+and 2.54x the allocations of the existing linear DOT renderer in this small
+fixture. The new APIs are explicit and read-only; `ExplainDOT` remains
+unchanged for callers that do not need graph structure.
 ## Delay Queue
 
 Command: `make benchmark-delay-queue`.

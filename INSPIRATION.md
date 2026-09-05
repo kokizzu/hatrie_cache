@@ -314,7 +314,7 @@ Materialize's Timely/Differential Dataflow runtime.
 
 - [x] M076 Explain plan output.
 - [x] M077 Explain arrangement ownership and reuse. `TypedTableAggregateArrangements.Snapshot` and `TypedTableJoinArrangements.Snapshot` expose deterministic ownership, active lease reuse, checkpoints, source sequences, and staleness without changing execution.
-- [ ] M078 Explain the full dataflow graph.
+- [x] M078 Explain the full dataflow graph. `BuildExplainDataflowGraph` preserves every EXPLAIN step, derives nested depth, and emits stable pipeline/subplan edges; JSON and DOT helpers are additive and read-only.
 - [x] M079 Explain keys and index characteristics.
 - [ ] M080 Explain optimizer notices and rejected alternatives.
 - [x] M081 Arrangement and source metrics for existing structures.

@@ -36,6 +36,7 @@ security guidance before exposing it on a network.
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Arrangement ownership and reuse snapshots: call `Snapshot()` on typed aggregate or join arrangement registries to inspect active leases, checkpoints, source sequences, and staleness.
+- Structural EXPLAIN dataflow graphs: call `BuildExplainDataflowGraph`, `MarshalExplainDataflowJSON`, or `ExplainDataflowDOT` to inspect nested subplans and pipeline edges without changing query execution.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
