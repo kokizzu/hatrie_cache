@@ -15903,3 +15903,12 @@ intentionally avoid or replace the same write work, so these numbers are not
 a claim that conflict handling is universally faster than an unconditional
 insert. Re-run with `make benchmark-sql-mutation`; the script uses five
 benchmark repetitions and reports every raw sample.
+
+## SQL Result Cache Hit
+
+The portable `ResultCache` hit benchmark remains in
+`hat/hatSql/result_cache_benchmark_test.go`; run it with
+`make benchmark-sql-result-cache`. The cache is opt-in and epoch-validated, so
+hit speed is useful only when the caller can provide a correct mutation epoch.
+The five-run local median for its 256-row clone workload was `154,421 ns/op`,
+`270,624 B/op`, and `2,050 allocs/op`; the benchmark prints all raw samples.

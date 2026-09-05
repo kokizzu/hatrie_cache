@@ -2475,6 +2475,18 @@ benchmark-sql-mutation:
 commit-sql-on-conflict:
 	sh ./scripts/commit-sql-on-conflict.sh
 
+test-sql-result-cache:
+	sh ./scripts/test-sql-result-cache.sh
+
+format-sql-result-cache:
+	sh ./scripts/format-sql-result-cache.sh
+
+benchmark-sql-result-cache:
+	sh ./scripts/benchmark-sql-result-cache.sh
+
+commit-sql-result-cache:
+	sh ./scripts/commit-sql-result-cache.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/sh
 set -eu
 
-go test ./hat/hatSql -run '^TestResultCache' -count=1
+go test ./hat/hatCache -run '^TestSQLResultCache' -count=1
