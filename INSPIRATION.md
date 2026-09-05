@@ -511,7 +511,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T142 Authorization and audit logging.
 - [x] T143 Rate limiting.
 - [x] T144 Resource isolation.
-- [ ] T145 Admin console with read-only diagnostics.
+- [x] T145 Admin console with read-only diagnostics. The Svelte MPA exposes `/admin.html` with health, storage, audit, and replication diagnostics; its mutating flush/compact controls remain separately authenticated and protected.
 - [x] T146 Operator command idempotency keys. Journal-backed synchronous, batch, and asynchronous command paths validate and fingerprint `CacheCommandRequest.IdempotencyKey`, replay the durable response for duplicates, and reject payload changes under the same key.
 - [x] T147 Structured error codes for automation.
 - [x] T148 CLI output formats for scripts and humans - the CLI keeps compact JSON as the default and supports opt-in streaming pretty JSON; see [CLI_OUTPUT.md](CLI_OUTPUT.md).
