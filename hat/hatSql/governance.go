@@ -13,6 +13,12 @@ import (
 // reached its configured MaxQueuedQueries limit.
 var ErrNamespaceQueryQueueFull = errors.New("namespace query queue is full")
 
+// ErrNamespaceQueryRateLimited indicates that a namespace has exhausted its
+// configured MaxQueriesPerWindow allowance.
+var ErrNamespaceQueryRateLimited = errors.New("namespace query rate limit exceeded")
+
+const defaultNamespaceQueryWindow = time.Minute
+
 // NamespaceResourceLimits caps resources available to queries in one namespace.
 // Zero leaves a limit unset. Timeout is wall-clock time, which bounds CPU work
 // performed by the cooperative SQL executor; MaxWorkers caps parallel operators.
@@ -21,6 +27,11 @@ type NamespaceResourceLimits struct {
 	// MaxQueuedQueries bounds waiters behind MaxConcurrentQueries. Zero keeps
 	// the existing unlimited-waiter behavior.
 	MaxQueuedQueries      int
+	// MaxQueriesPerWindow limits admitted executions in QueryWindow. Zero
+	// disables the quota. A zero QueryWindow uses one minute when the quota is
+	// enabled.
+	MaxQueriesPerWindow int
+	QueryWindow         time.Duration
 	MaxRows              int
 	MaxJoinWork          int
 	MaxJoinBytes         int
@@ -90,6 +101,7 @@ func (limits NamespaceResourceLimits) validate() error {
 	}{
 		{"max concurrent queries", limits.MaxConcurrentQueries},
 		{"max queued queries", limits.MaxQueuedQueries},
+		{"max queries per window", limits.MaxQueriesPerWindow},
 		{"max rows", limits.MaxRows},
 		{"max join work", limits.MaxJoinWork},
 		{"max join bytes", limits.MaxJoinBytes},
@@ -109,6 +121,9 @@ func (limits NamespaceResourceLimits) validate() error {
 	if limits.Timeout < 0 {
 		return fmt.Errorf("namespace resource limit timeout must not be negative")
 	}
+	if limits.QueryWindow < 0 {
+		return fmt.Errorf("namespace resource limit query window must not be negative")
+	}
 	return nil
 }
 
@@ -118,8 +133,9 @@ type NamespaceQueryGovernor struct {
 	defaults   NamespaceResourceLimits
 	namespaces map[string]NamespaceResourceLimits
 
-	mu    sync.Mutex
-	gates map[string]*namespaceQueryGate
+	mu     sync.Mutex
+	gates  map[string]*namespaceQueryGate
+	quotas map[string]*namespaceQueryQuota
 }
 
 // NewNamespaceQueryGovernor validates and copies the supplied static policies.
@@ -129,6 +145,7 @@ func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[
 	if err := defaults.validate(); err != nil {
 		return nil, err
 	}
+	defaults = normalizeNamespaceResourceLimits(defaults)
 	copyNamespaces := make(map[string]NamespaceResourceLimits, len(namespaces))
 	for namespace, limits := range namespaces {
 		if strings.TrimSpace(namespace) == "" {
@@ -137,19 +154,30 @@ func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[
 		if err := limits.validate(); err != nil {
 			return nil, fmt.Errorf("namespace %q: %w", namespace, err)
 		}
+		limits = normalizeNamespaceResourceLimits(limits)
 		copyNamespaces[namespace] = tightenNamespaceLimits(defaults, limits)
 	}
 	return &NamespaceQueryGovernor{
 		defaults:   defaults,
 		namespaces: copyNamespaces,
 		gates:      make(map[string]*namespaceQueryGate),
+		quotas:     make(map[string]*namespaceQueryQuota),
 	}, nil
+}
+
+func normalizeNamespaceResourceLimits(limits NamespaceResourceLimits) NamespaceResourceLimits {
+	if limits.MaxQueriesPerWindow > 0 && limits.QueryWindow == 0 {
+		limits.QueryWindow = defaultNamespaceQueryWindow
+	}
+	return limits
 }
 
 func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) NamespaceResourceLimits {
 	return NamespaceResourceLimits{
 		MaxConcurrentQueries: applyPositiveLimit(defaults.MaxConcurrentQueries, override.MaxConcurrentQueries),
 		MaxQueuedQueries:     applyPositiveLimit(defaults.MaxQueuedQueries, override.MaxQueuedQueries),
+		MaxQueriesPerWindow:  applyPositiveLimit(defaults.MaxQueriesPerWindow, override.MaxQueriesPerWindow),
+		QueryWindow:          tightenQueryWindow(defaults.QueryWindow, override.QueryWindow),
 		MaxRows:              applyPositiveLimit(defaults.MaxRows, override.MaxRows),
 		MaxJoinWork:          applyPositiveLimit(defaults.MaxJoinWork, override.MaxJoinWork),
 		MaxJoinBytes:         applyPositiveLimit(defaults.MaxJoinBytes, override.MaxJoinBytes),
@@ -163,6 +191,16 @@ func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) Namespac
 		Timeout:              applyDurationLimit(defaults.Timeout, override.Timeout),
 		SpillDirectory:       firstNonEmpty(defaults.SpillDirectory, override.SpillDirectory),
 	}
+}
+
+func tightenQueryWindow(defaultWindow, overrideWindow time.Duration) time.Duration {
+	if overrideWindow <= 0 {
+		return defaultWindow
+	}
+	if defaultWindow <= 0 || overrideWindow < defaultWindow {
+		return overrideWindow
+	}
+	return defaultWindow
 }
 
 func firstNonEmpty(first, second string) string {
@@ -213,7 +251,56 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 		}
 		defer gate.release()
 	}
+	if quota := governor.quotaFor(namespace, limits); quota != nil && !quota.allow(time.Now()) {
+		return SQLQueryResult{}, ErrNamespaceQueryRateLimited
+	}
 	return ExecuteSQLQueryParameters(ctx, source, resolver, parameters, limits.Apply(options))
+}
+
+func (governor *NamespaceQueryGovernor) quotaFor(namespace string, limits NamespaceResourceLimits) *namespaceQueryQuota {
+	if governor == nil || limits.MaxQueriesPerWindow <= 0 {
+		return nil
+	}
+	governor.mu.Lock()
+	defer governor.mu.Unlock()
+	if quota := governor.quotas[namespace]; quota != nil {
+		return quota
+	}
+	quota := newNamespaceQueryQuota(limits.MaxQueriesPerWindow, limits.QueryWindow)
+	governor.quotas[namespace] = quota
+	return quota
+}
+
+type namespaceQueryQuota struct {
+	mu     sync.Mutex
+	limit  int
+	window time.Duration
+	start  time.Time
+	used   int
+}
+
+func newNamespaceQueryQuota(limit int, window time.Duration) *namespaceQueryQuota {
+	if window <= 0 {
+		window = defaultNamespaceQueryWindow
+	}
+	return &namespaceQueryQuota{limit: limit, window: window}
+}
+
+func (quota *namespaceQueryQuota) allow(now time.Time) bool {
+	if quota == nil || quota.limit <= 0 {
+		return true
+	}
+	quota.mu.Lock()
+	defer quota.mu.Unlock()
+	if quota.start.IsZero() || now.Before(quota.start) || now.Sub(quota.start) >= quota.window {
+		quota.start = now
+		quota.used = 0
+	}
+	if quota.used >= quota.limit {
+		return false
+	}
+	quota.used++
+	return true
 }
 
 // namespaceQueryGate bounds one namespace while admitting waiters in arrival

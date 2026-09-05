@@ -5378,3 +5378,31 @@ commit-query-governor:
 .PHONY: push-query-governor
 push-query-governor:
 	sh ./scripts/deliver-query-governor.sh push
+
+.PHONY: test-query-quota
+test-query-quota:
+	sh ./scripts/test-query-quota.sh test
+
+.PHONY: race-query-quota
+race-query-quota:
+	sh ./scripts/test-query-quota.sh race
+
+.PHONY: benchmark-query-quota
+benchmark-query-quota:
+	sh ./scripts/test-query-quota.sh bench
+
+.PHONY: format-query-quota
+format-query-quota:
+	sh ./scripts/test-query-quota.sh format
+
+.PHONY: inspect-query-quota-delivery
+inspect-query-quota-delivery:
+	sh ./scripts/deliver-query-quota.sh inspect
+
+.PHONY: commit-query-quota
+commit-query-quota:
+	sh ./scripts/deliver-query-quota.sh commit
+
+.PHONY: push-query-quota
+push-query-quota:
+	sh ./scripts/deliver-query-quota.sh push

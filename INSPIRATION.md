@@ -157,7 +157,7 @@ name.
 - [x] C097 Query cancellation through context propagation.
 - [x] C098 Query memory budgets and allocation reporting.
 - [x] C099 Query timeout and deadline enforcement.
-- [ ] C100 Query quotas by user, tenant, or source.
+- [x] C100 Query quotas by user, tenant, or source - NamespaceQueryGovernor supports per-namespace fixed-window request quotas with default-off behavior and per-namespace tightening (see QUERY_GOVERNANCE.md).
 - [x] C101 Query result cache with explicit freshness and invalidation policy. `ResultCache.Execute` requires an epoch callback, serves hits only for the same epoch, invalidates stale entries, and returns independent result snapshots; existing tests cover freshness changes and nested plan/result isolation.
 - [x] C102 Prepared-plan cache keyed by normalized SQL and schema version. `SQLPreparedQueryCache` canonicalizes lexer tokens while preserving identifiers and literal values, namespaces entries with `PreparedSchemaVersion`, keeps an allocation-free exact-source fast path, and exposes `PrepareSQLQueryWithSchemaVersion`; focused execution tests and cache benchmarks cover normalization, literal safety, version isolation, and LRU behavior.
 - [x] C103 Plan invalidation when an index or projection changes. `SQLPreparedQueryCache.InvalidateSchemaVersion` removes only the affected version namespace and `Invalidate` clears all parsed plans and source aliases while retaining capacity; rebuild callers can release stale plans explicitly without adding work to query hits, and tests cover version isolation, alias cleanup, and refill behavior.
