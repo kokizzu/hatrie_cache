@@ -5618,3 +5618,31 @@ commit-sql-row-binary-read-stats:
 .PHONY: push-sql-row-binary-read-stats
 push-sql-row-binary-read-stats:
 	sh ./scripts/deliver-sql-row-binary-read-stats.sh push
+
+.PHONY: test-sql-row-binary-bitmap
+test-sql-row-binary-bitmap:
+	sh ./scripts/test-sql-row-binary-bitmap.sh
+
+.PHONY: format-sql-row-binary-bitmap
+format-sql-row-binary-bitmap:
+	sh ./scripts/format-sql-row-binary-bitmap.sh
+
+.PHONY: test-race-sql-row-binary-bitmap
+test-race-sql-row-binary-bitmap:
+	sh ./scripts/test-race-sql-row-binary-bitmap.sh
+
+.PHONY: benchmark-sql-row-binary-bitmap
+benchmark-sql-row-binary-bitmap:
+	sh ./scripts/benchmark-sql-row-binary-bitmap.sh
+
+.PHONY: deliver-sql-row-binary-bitmap
+deliver-sql-row-binary-bitmap:
+	sh ./scripts/deliver-sql-row-binary-bitmap.sh preview
+
+.PHONY: commit-sql-row-binary-bitmap
+commit-sql-row-binary-bitmap:
+	sh ./scripts/deliver-sql-row-binary-bitmap.sh commit
+
+.PHONY: push-sql-row-binary-bitmap
+push-sql-row-binary-bitmap:
+	sh ./scripts/deliver-sql-row-binary-bitmap.sh push
