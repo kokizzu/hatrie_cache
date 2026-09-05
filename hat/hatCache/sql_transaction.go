@@ -14,13 +14,15 @@ import (
 // command SQL. Queries and staged writes run against a private snapshot; commit
 // is rejected if any live mutation occurred after that snapshot.
 type SQLTransaction struct {
-	mu         sync.Mutex
-	live       *HatTrie
-	snapshot   *HatTrie
-	epoch      uint64
-	staged     []CacheCommandRequest
-	savepoints []sqlTransactionSavepoint
-	closed     bool
+	mu                   sync.Mutex
+	live                 *HatTrie
+	snapshot             *HatTrie
+	epoch                uint64
+	isolation            SQLTransactionIsolation
+	serializableLockHeld bool
+	staged               []CacheCommandRequest
+	savepoints           []sqlTransactionSavepoint
+	closed               bool
 }
 
 type sqlTransactionSavepoint struct {
@@ -32,8 +34,30 @@ type sqlTransactionSavepoint struct {
 // BeginSQLTransaction captures a consistent private snapshot. A busy cache is
 // retried when it changes during capture rather than exposing a mixed view.
 func BeginSQLTransaction(trie *HatTrie) (*SQLTransaction, error) {
+	return BeginSQLTransactionWithOptions(trie, SQLTransactionOptions{})
+}
+
+// BeginSQLTransactionWithOptions captures a consistent private snapshot with
+// the requested isolation policy. Snapshot is the backward-compatible default;
+// serializable additionally holds the command transaction lock until the
+// transaction closes. Direct typed mutations still cause the existing epoch
+// conflict check at commit.
+func BeginSQLTransactionWithOptions(trie *HatTrie, options SQLTransactionOptions) (transaction *SQLTransaction, err error) {
 	if trie == nil {
 		return nil, ErrNilHatTrie
+	}
+	options, err = options.normalized()
+	if err != nil {
+		return nil, err
+	}
+	serializableLockHeld := options.Isolation == SQLTransactionIsolationSerializable
+	if serializableLockHeld {
+		trie.commandTransactionMu.Lock()
+		defer func() {
+			if transaction == nil {
+				trie.commandTransactionMu.Unlock()
+			}
+		}()
 	}
 	directory, err := os.MkdirTemp("", "hatrie-sql-transaction-*")
 	if err != nil {
@@ -64,7 +88,22 @@ func BeginSQLTransaction(trie *HatTrie) (*SQLTransaction, error) {
 		return nil, err
 	}
 	_ = os.RemoveAll(directory)
-	return &SQLTransaction{live: trie, snapshot: snapshot, epoch: epoch}, nil
+	return &SQLTransaction{
+		live:                 trie,
+		snapshot:             snapshot,
+		epoch:                epoch,
+		isolation:            options.Isolation,
+		serializableLockHeld: serializableLockHeld,
+	}, nil
+}
+
+// Isolation reports the policy selected when the transaction began. A nil
+// transaction reports the backward-compatible snapshot default.
+func (transaction *SQLTransaction) Isolation() SQLTransactionIsolation {
+	if transaction == nil {
+		return DefaultSQLTransactionIsolation
+	}
+	return transaction.isolation
 }
 
 // Execute stages one or more scalar command-SQL mutations. SELECT and CALL
@@ -260,6 +299,10 @@ func (transaction *SQLTransaction) closeLocked() {
 		return
 	}
 	transaction.closed = true
+	if transaction.serializableLockHeld && transaction.live != nil {
+		transaction.live.commandTransactionMu.Unlock()
+		transaction.serializableLockHeld = false
+	}
 	if transaction.snapshot != nil {
 		transaction.snapshot.Destroy()
 		transaction.snapshot = nil

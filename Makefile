@@ -5072,3 +5072,9 @@ test-t029:
 
 format-t029:
 	sh ./scripts/format-t029.sh
+
+test-t030:
+	sh ./scripts/test-t030.sh
+
+format-t030:
+	sh ./scripts/format-t030.sh

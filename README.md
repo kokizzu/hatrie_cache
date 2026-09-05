@@ -3015,6 +3015,24 @@ failures are returned as both the response and a Go error. Use
 `BeginSQLTransaction` for SQL queries, savepoints, or snapshot-isolated
 read-your-writes behavior. `AtomicCommandBatch.Add` copies mutable request
 payloads before the callback returns.
+SQL transactions keep optimistic `snapshot` isolation by default. Applications
+that need command-path serializability can opt in explicitly:
+
+```go
+transaction, err := hatriecache.BeginSQLTransactionWithOptions(trie, hatriecache.SQLTransactionOptions{
+    Isolation: hatriecache.SQLTransactionIsolationSerializable,
+})
+if err != nil {
+    return err
+}
+defer transaction.Rollback()
+```
+
+The serializable mode holds the command transaction lock until commit or
+rollback. Mutations through direct typed APIs still trigger the existing epoch
+conflict check rather than being silently overwritten. Use
+`ParseSQLTransactionIsolation` for configuration strings (`snapshot` or
+`serializable`).
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons. The comparison includes single-command
