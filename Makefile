@@ -5266,3 +5266,19 @@ commit-typed-table-aggregate-key:
 .PHONY: push-typed-table-aggregate-key
 push-typed-table-aggregate-key:
 	bash scripts/deliver-typed-table-aggregate-key.sh push
+
+.PHONY: test-journal-replay-fastpath
+test-journal-replay-fastpath:
+	sh ./scripts/test-journal-replay-fastpath.sh test
+
+.PHONY: format-journal-replay-fastpath
+format-journal-replay-fastpath:
+	sh ./scripts/test-journal-replay-fastpath.sh format
+
+.PHONY: race-journal-replay-fastpath
+race-journal-replay-fastpath:
+	sh ./scripts/test-journal-replay-fastpath.sh race
+
+.PHONY: benchmark-journal-replay-fastpath
+benchmark-journal-replay-fastpath:
+	sh ./scripts/test-journal-replay-fastpath.sh bench

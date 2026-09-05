@@ -1270,9 +1270,8 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 		if progress != nil {
 			progress.markCurrent(entry.Sequence)
 		}
-		response := trie.ExecuteCommand(entry.Request)
-		if !response.OK {
-			return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
+		if err := executeCommandForReplay(trie, entry.Request); err != nil {
+			return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, err)
 		}
 		if progress != nil {
 			progress.markApplied(entry.Sequence)
