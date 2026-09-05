@@ -19,6 +19,7 @@ security guidance before exposing it on a network.
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
 - Opt-in journal replay progress and ETA: [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md)
+- SDK-neutral OpenTelemetry-compatible SQL query and operator spans: [QUERY_TRACING.md](QUERY_TRACING.md)
 - Replication queue and wire-byte metrics: [REPLICATION_METRICS.md](REPLICATION_METRICS.md)
 - Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)

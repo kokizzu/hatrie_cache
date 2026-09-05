@@ -194,7 +194,7 @@ name.
 - [x] C131 Metrics and health endpoints are opt-in.
 - [ ] C132 System tables for parts, mutations, and query history.
 - [ ] C133 Query log retention and sampling policy.
-- [ ] C134 OpenTelemetry spans for query phases.
+- [x] C134 OpenTelemetry spans for query phases. `QueryTraceRecorder.OpenTelemetrySpans` exposes SDK-neutral root/query and operator child spans with OTLP-width IDs, status, counters, cloned attributes, and documented end-anchored phase timing. It is opt-in and keeps SQL/error/row data out of exported spans; see [QUERY_TRACING.md](QUERY_TRACING.md).
 - [ ] C135 Trace IDs carried through remote work.
 - [ ] C136 Per-tenant resource quotas.
 - [x] C137 TLS, authentication, and authorization controls.

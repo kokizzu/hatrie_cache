@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	json "github.com/goccy/go-json"
 )
@@ -13,9 +14,16 @@ import (
 // a non-positive limit retains all events for compatibility with the existing
 // unbounded recorder convention.
 type QueryTraceRecorder struct {
-	mu     sync.Mutex
-	limit  int
-	events []QueryEvent
+	mu           sync.Mutex
+	limit        int
+	nextSequence uint64
+	events       []queryTraceEvent
+}
+
+type queryTraceEvent struct {
+	event      QueryEvent
+	observedAt time.Time
+	sequence   uint64
 }
 
 // NewQueryTraceRecorder creates an opt-in SQL trace recorder. It can be passed
@@ -32,12 +40,14 @@ func (recorder *QueryTraceRecorder) ObserveSQLQuery(event QueryEvent) {
 	event.Operators = append([]QueryOperator(nil), event.Operators...)
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
+	recorder.nextSequence++
+	entry := queryTraceEvent{event: event, observedAt: time.Now().UTC(), sequence: recorder.nextSequence}
 	if recorder.limit > 0 && len(recorder.events) >= recorder.limit {
 		drop := len(recorder.events) - recorder.limit + 1
 		copy(recorder.events, recorder.events[drop:])
 		recorder.events = recorder.events[:len(recorder.events)-drop]
 	}
-	recorder.events = append(recorder.events, event)
+	recorder.events = append(recorder.events, entry)
 }
 
 // Events returns an independent snapshot in chronological order.
@@ -48,9 +58,9 @@ func (recorder *QueryTraceRecorder) Events() []QueryEvent {
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
 	result := make([]QueryEvent, len(recorder.events))
-	for index, event := range recorder.events {
-		result[index] = event
-		result[index].Operators = append([]QueryOperator(nil), event.Operators...)
+	for index, entry := range recorder.events {
+		result[index] = entry.event
+		result[index].Operators = append([]QueryOperator(nil), entry.event.Operators...)
 	}
 	return result
 }

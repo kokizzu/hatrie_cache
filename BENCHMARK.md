@@ -349,6 +349,27 @@ make test-sql-incremental-projection
 make benchmark-sql-incremental-projection
 ```
 
+## OpenTelemetry-Compatible Query Trace Spans
+
+`QueryTraceRecorder.OpenTelemetrySpans` is an opt-in export projection over
+the existing privacy-safe query trace. Five samples on an AMD Ryzen 9 5950X,
+with 64 retained events and two operators per event, produced these medians:
+
+| Export | Median time / snapshot | Heap / snapshot | Allocations / snapshot |
+| --- | ---: | ---: | ---: |
+| Existing `Events()` snapshot | 9,265 ns | 17,432 B | 66 |
+| `OpenTelemetrySpans()` | 86,226 ns | 100,973 B | 963 |
+| Export cost | 9.31x | 5.79x | 14.59x |
+
+The cost is paid only when an application requests span conversion; supplying
+no observer leaves the normal query path unchanged. Reproduce with:
+
+```sh
+make test-sql-query-trace-spans
+make test-race-sql-query-trace-spans
+make benchmark-sql-query-trace-spans
+```
+
 ## SQL Approximate Aggregates
 
 The SQL aggregate benchmark executes one grouped query over 10,000 in-memory

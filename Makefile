@@ -5224,3 +5224,21 @@ test-c036-durable-mutation-queue:
 .PHONY: commit-c036-audit
 commit-c036-audit:
 	bash ./scripts/commit-c036-audit.sh
+.PHONY: test-sql-query-trace-spans
+test-sql-query-trace-spans:
+	bash ./scripts/test-sql-query-trace-spans.sh
+.PHONY: format-sql-query-trace-spans
+format-sql-query-trace-spans:
+	bash ./scripts/format-sql-query-trace-spans.sh
+.PHONY: benchmark-sql-query-trace-spans
+benchmark-sql-query-trace-spans:
+	bash ./scripts/benchmark-sql-query-trace-spans.sh
+.PHONY: test-race-sql-query-trace-spans
+test-race-sql-query-trace-spans:
+	bash ./scripts/test-race-sql-query-trace-spans.sh
+.PHONY: verify-sql-query-trace-spans
+verify-sql-query-trace-spans:
+	bash ./scripts/verify-sql-query-trace-spans.sh
+.PHONY: commit-sql-query-trace-spans
+commit-sql-query-trace-spans:
+	bash ./scripts/commit-sql-query-trace-spans.sh

@@ -106,6 +106,7 @@ explicitly opt-in operational control.
 
 | Materialize | Refreshable materialized views with explicit refresh policy | Already present / adopted | `MaterializedViews` publishes immutable snapshots with dependency-scoped atomic refresh, `ManagedRefreshScheduler.AddMaterializedView` provides fixed intervals, and the disabled-by-default `IncrementalProjectionRunner` provides ordered journal coalescing and durable checkpoints. See [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md) and the benchmark in [BENCHMARK.md](BENCHMARK.md). |
 | ClickHouse / Tarantool | Durable mutation queue with observable progress | Already present / adopted | `CommandJournal` and the LevelDB-backed `ReplicationOutboxStore` provide durable FIFO recovery, bounded restart restore, dead letters, and compatibility codecs; `ReplayWithProgress` exposes concurrent replay progress and ETA. See [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md) and the replication/outbox benchmark in [BENCHMARK.md](BENCHMARK.md). |
+| ClickHouse / Materialize | OpenTelemetry spans for query phases | Implemented, opt-in | `QueryTraceRecorder.OpenTelemetrySpans` emits SDK-neutral query root and operator child spans with OTLP-compatible IDs, statuses, counters, independent attributes, and no SQL/error/value retention. See [QUERY_TRACING.md](QUERY_TRACING.md). |
 
 ## Deliberately Deferred
 
