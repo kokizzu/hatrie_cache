@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if git diff --cached --quiet -- Makefile; then
+if git show HEAD:Makefile | rg -q '^test-t069:'; then
+	:
+elif git diff --cached --quiet -- Makefile; then
 	line_count="$(git show HEAD:Makefile | wc -l)"
 	line_count="${line_count//[[:space:]]/}"
 	next_line=$((line_count + 1))

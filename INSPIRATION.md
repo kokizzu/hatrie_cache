@@ -426,7 +426,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T066 Cross-region replication with explicit RPO/RTO.
 - [ ] T067 Split-brain fencing token.
 - [ ] T068 Schema-change replication compatibility checks.
-- [ ] T069 Recovery rehearsal that compares checksums after replay.
+- [x] T069 Recovery rehearsal that compares checksums after replay.
 
 ### Partitioning And Sharding
 
