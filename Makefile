@@ -5318,3 +5318,35 @@ commit-runtime-introspection:
 .PHONY: push-runtime-introspection
 push-runtime-introspection:
 	sh ./scripts/deliver-runtime-introspection.sh push
+
+.PHONY: test-geospatial-index
+test-geospatial-index:
+	sh ./scripts/test-geospatial-index.sh test
+
+.PHONY: test-geospatial-all
+test-geospatial-all:
+	sh ./scripts/test-geospatial-index.sh all
+
+.PHONY: race-geospatial-index
+race-geospatial-index:
+	sh ./scripts/test-geospatial-index.sh race
+
+.PHONY: benchmark-geospatial-index
+benchmark-geospatial-index:
+	sh ./scripts/test-geospatial-index.sh bench
+
+.PHONY: format-geospatial-index
+format-geospatial-index:
+	sh ./scripts/test-geospatial-index.sh format
+
+.PHONY: inspect-geospatial-delivery
+inspect-geospatial-delivery:
+	sh ./scripts/deliver-geospatial-index.sh inspect
+
+.PHONY: commit-geospatial-index
+commit-geospatial-index:
+	sh ./scripts/deliver-geospatial-index.sh commit
+
+.PHONY: push-geospatial-index
+push-geospatial-index:
+	sh ./scripts/deliver-geospatial-index.sh push

@@ -118,21 +118,29 @@ func (index *GeoIndex) WithinBox(bounds GeoBoundingBox) ([]string, error) {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	candidates := make(map[string]struct{})
 	minimumLatitude := index.latitudeCell(bounds.MinLatitude)
 	maximumLatitude := index.latitudeCell(bounds.MaxLatitude)
 	minimumLongitude := index.longitudeCell(bounds.MinLongitude)
 	maximumLongitude := index.longitudeCell(bounds.MaxLongitude)
+	ids := make([]string, 0)
 	if bounds.MinLongitude <= bounds.MaxLongitude {
-		index.addCellsLocked(candidates, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude)
+		if index.shouldEnumerateCellsLocked(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude) {
+			ids = index.appendCellRangeLocked(ids, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude, bounds)
+		} else {
+			ids = index.appendOccupiedCellsLocked(ids, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude, bounds)
+		}
 	} else {
-		index.addCellsLocked(candidates, minimumLatitude, maximumLatitude, minimumLongitude, index.longitudeN-1)
-		index.addCellsLocked(candidates, minimumLatitude, maximumLatitude, 0, maximumLongitude)
-	}
-	ids := make([]string, 0, len(candidates))
-	for id := range candidates {
-		if bounds.contains(index.points[id]) {
-			ids = append(ids, id)
+		if minimumLongitude == 0 && maximumLongitude == index.longitudeN-1 {
+			if index.shouldEnumerateCellsLocked(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude) {
+				ids = index.appendCellRangeLocked(ids, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude, bounds)
+			} else {
+				ids = index.appendOccupiedCellsLocked(ids, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude, bounds)
+			}
+		} else if index.shouldEnumerateCellRangesLocked(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude) {
+			ids = index.appendCellRangeLocked(ids, minimumLatitude, maximumLatitude, minimumLongitude, index.longitudeN-1, bounds)
+			ids = index.appendCellRangeLocked(ids, minimumLatitude, maximumLatitude, 0, maximumLongitude, bounds)
+		} else {
+			ids = index.appendOccupiedCellsLocked(ids, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude, bounds)
 		}
 	}
 	sort.Strings(ids)
@@ -235,14 +243,75 @@ func geoCellCoordinate(value float64, count int) int {
 	return coordinate
 }
 
-func (index *GeoIndex) addCellsLocked(candidates map[string]struct{}, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude int) {
+func (index *GeoIndex) appendCellRangeLocked(ids []string, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude int, bounds GeoBoundingBox) []string {
 	for latitude := minimumLatitude; latitude <= maximumLatitude; latitude++ {
 		for longitude := minimumLongitude; longitude <= maximumLongitude; longitude++ {
 			for id := range index.buckets[geoCell{latitude: latitude, longitude: longitude}] {
-				candidates[id] = struct{}{}
+				if bounds.contains(index.points[id]) {
+					ids = append(ids, id)
+				}
 			}
 		}
 	}
+	return ids
+}
+
+func (index *GeoIndex) appendOccupiedCellsLocked(ids []string, minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude int, bounds GeoBoundingBox) []string {
+	for cell, bucket := range index.buckets {
+		if cell.latitude < minimumLatitude || cell.latitude > maximumLatitude {
+			continue
+		}
+		if minimumLongitude <= maximumLongitude {
+			if cell.longitude < minimumLongitude || cell.longitude > maximumLongitude {
+				continue
+			}
+		} else if cell.longitude < minimumLongitude && cell.longitude > maximumLongitude {
+			continue
+		}
+		for id := range bucket {
+			if bounds.contains(index.points[id]) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+func (index *GeoIndex) shouldEnumerateCellsLocked(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude int) bool {
+	cellCount, ok := geoCellRangeProduct(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude)
+	return ok && geoCellCountWithinBucketBudget(cellCount, len(index.buckets))
+}
+
+func (index *GeoIndex) shouldEnumerateCellRangesLocked(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude int) bool {
+	first, firstOK := geoCellRangeProduct(minimumLatitude, maximumLatitude, minimumLongitude, index.longitudeN-1)
+	second, secondOK := geoCellRangeProduct(minimumLatitude, maximumLatitude, 0, maximumLongitude)
+	if !firstOK || !secondOK || first > ^uint64(0)-second {
+		return false
+	}
+	return geoCellCountWithinBucketBudget(first+second, len(index.buckets))
+}
+
+func geoCellRangeProduct(minimumLatitude, maximumLatitude, minimumLongitude, maximumLongitude int) (uint64, bool) {
+	if minimumLatitude < 0 || minimumLongitude < 0 || maximumLatitude < minimumLatitude || maximumLongitude < minimumLongitude {
+		return 0, false
+	}
+	latitudeCount := uint64(maximumLatitude-minimumLatitude) + 1
+	longitudeCount := uint64(maximumLongitude-minimumLongitude) + 1
+	if latitudeCount > ^uint64(0)/longitudeCount {
+		return 0, false
+	}
+	return latitudeCount * longitudeCount, true
+}
+
+func geoCellCountWithinBucketBudget(cellCount uint64, bucketCount int) bool {
+	if bucketCount <= 0 {
+		return false
+	}
+	buckets := uint64(bucketCount)
+	if buckets > ^uint64(0)/8 {
+		return true
+	}
+	return cellCount <= buckets*8
 }
 
 func geoRadiusBounds(center GeoPoint, radiusMeters float64) GeoBoundingBox {

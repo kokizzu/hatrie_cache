@@ -360,6 +360,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T006 Ordered TREE index behavior.
 - [x] T007 HASH index behavior.
 - [ ] T008 RTREE spatial index.
+- [x] T008a Adaptive sparse-grid spatial candidate enumeration - Keep grid-cell memory overhead while avoiding empty-cell scans and per-query candidate deduplication (see SPATIAL_INDEX.md).
 - [x] T009 Bitset and bitmap structures.
 - [x] T010 Functional indexes for supported expressions.
 - [x] T011 Multikey indexes over array fields. `CreateSQLJSONMultikeyIndex` builds deduplicated element postings for `ARRAY_CONTAINS`; candidates are rechecked by the executor, mixed JSON types preserve existing SQL equality, and non-binary collation falls back to a scan. See [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md).
