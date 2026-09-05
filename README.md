@@ -40,6 +40,7 @@ security guidance before exposing it on a network.
 - Literal-independent SQL fingerprints: call `SQLQueryFingerprint` to group structurally identical queries without retaining literal values; identifiers, operators, literal types, and parameter positions remain significant.
 - Schema-aware RowBinary-style SQL row transfer: use `EncodeSQLRowBinary` and `DecodeSQLRowBinary`; the existing JSON/protobuf wire defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 - Stateful RowBinary dictionary batches: use `NewSQLRowBinaryDictionaryEncoder` and `NewSQLRowBinaryDictionaryDecoder` for repeated string-like values across batches; plain RowBinary remains the default. See [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
+- RowBinary column statistics: use `EncodeSQLRowBinaryWithStats`, `DecodeSQLRowBinaryWithStats`, or `BuildSQLRowBinaryColumnStats` for exact counts and typed min/max metadata; the ordinary RowBinary path remains unchanged. See [ROW_BINARY_STATS.md](ROW_BINARY_STATS.md).
 - Independent compressed block streams: use `EncodeCompressedBlocks` and `DecodeCompressedBlocks` when block-local checksums and bounded recovery matter; existing JSON, protobuf, and gzip defaults remain unchanged. See [COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
 - External Parquet tables: `ExternalTables` supports `ExportParquet`, `ImportParquet`, and `WriteParquet` alongside CSV, JSON, NDJSON, and Arrow formats.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)

@@ -86,6 +86,23 @@ This is a bandwidth-focused opt-in. It reduces repeated-value wire size by
 must be maintained. Plain RowBinary remains the general-purpose default. See
 [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
 
+## RowBinary Column Statistics
+
+These five `-count=5` runs used `make benchmark-row-binary-stats` on an AMD
+Ryzen 9 5950X with 256 rows, one numeric column, and three repeated
+string-like columns. The baseline uses plain RowBinary on the same rows. The
+stats decoder recomputes metadata from decoded rows and rejects stale values.
+
+| Operation | Stats envelope | Plain RowBinary | Relative result |
+| --- | ---: | ---: | --- |
+| Encode | 66,825 ns/op; 86,078 B; 538 allocs; 11,345 B wire | 27,976 ns/op; 46,586 B; 16 allocs; 11,264 B wire | 2.39x slower; 1.85x higher heap; 33.63x more allocs; 1.01x larger wire |
+| Decode and verify | 116,736 ns/op; 122,473 B; 2,325 allocs | 76,416 ns/op; 111,490 B; 1,801 allocs | 1.53x slower; 1.10x higher heap; 1.29x more allocs |
+
+The envelope adds only 81 wire bytes for this schema, but exact metadata
+construction and validation cost CPU and heap. It is therefore an opt-in
+pruning and diagnostic aid; plain RowBinary remains the default. See
+[ROW_BINARY_STATS.md](ROW_BINARY_STATS.md).
+
 ## Independent Compressed Blocks
 
 These five `-count=5` runs used `make benchmark-compressed-blocks` on an AMD

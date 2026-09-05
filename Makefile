@@ -1300,6 +1300,15 @@ format-row-binary-dictionary:
 benchmark-row-binary-dictionary:
 	bash ./scripts/benchmark-row-binary-dictionary.sh
 
+test-row-binary-stats:
+	bash ./scripts/test-row-binary-stats.sh
+
+format-row-binary-stats:
+	bash ./scripts/format-row-binary-stats.sh
+
+benchmark-row-binary-stats:
+	bash ./scripts/benchmark-row-binary-stats.sh
+
 generate-proto:
 	./scripts/generate-proto.sh
 
