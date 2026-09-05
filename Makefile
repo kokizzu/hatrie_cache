@@ -5215,3 +5215,6 @@ format-t030:
 
 test-t031:
 	sh ./scripts/test-t031.sh
+.PHONY: commit-c024-audit
+commit-c024-audit:
+	bash ./scripts/commit-c024-audit.sh

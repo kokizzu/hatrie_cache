@@ -104,6 +104,8 @@ explicitly opt-in operational control.
 
 | ClickHouse | Common-subexpression elimination | Adopted for exact pure boolean duplicates | The execution rewrite collapses structurally identical deterministic subexpressions in `A AND A` and `A OR A` predicates. It excludes custom functions, subqueries, windows, filtered aggregates, and query-dependent expressions, so ordinary queries have no runtime cache or storage-format cost. [BENCHMARK.md](BENCHMARK.md#sql-common-subexpression-elimination) |
 
+| Materialize | Refreshable materialized views with explicit refresh policy | Already present / adopted | `MaterializedViews` publishes immutable snapshots with dependency-scoped atomic refresh, `ManagedRefreshScheduler.AddMaterializedView` provides fixed intervals, and the disabled-by-default `IncrementalProjectionRunner` provides ordered journal coalescing and durable checkpoints. See [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md) and the benchmark in [BENCHMARK.md](BENCHMARK.md). |
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge

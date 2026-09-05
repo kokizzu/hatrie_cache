@@ -78,7 +78,7 @@ name.
 - [x] C021 Explicit projections for reusable sorted or aggregated data.
 - [x] C022 Automatic selection of compatible projections.
 - [x] C023 Materialized projection maintenance.
-- [ ] C024 Refreshable materialized views with an explicit refresh policy.
+- [x] C024 Refreshable materialized views with an explicit refresh policy. `MaterializedViews.RefreshChanged`, `ManagedRefreshScheduler.AddMaterializedView`, and the disabled-by-default `IncrementalProjectionRunner` provide dependency-scoped refresh, fixed intervals, source-version checks, journal coalescing, and durable checkpoints. Verified with `make test-sql-refresh-scheduler`, `make test-sql-incremental-projection`, and `make benchmark-sql-incremental-projection`.
 - [x] C025 Projection consistency checks against source versions.
 - [x] C026 Independent persistent data parts through the Pebble-backed path.
 - [x] C027 Part metadata and checksums.
