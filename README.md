@@ -1224,6 +1224,21 @@ agreement. Use `-allow-memory-only` only for a deliberately volatile replica;
 use `-pull-journal=false` or `-final-sync=false` only when those stages are
 performed externally.
 
+Replica placement can carry an optional failure-domain label, such as an
+availability zone or host, with `-failure-domain`. Add
+`-min-failure-domains N` to `cluster add-replica` or `cluster join` to reject
+an activation unless every shard has at least `N` distinct, explicitly known
+failure domains. The default is `0`, which keeps the placement check disabled
+and preserves existing behavior. This is a safety guard only; it does not
+automatically rebalance or move replicas.
+
+For example:
+
+```sh
+make cli ARGS='cluster add-replica -peer http://node-a:8080 -address http://node-c:8080 -failure-domain zone-c -min-failure-domains 2'
+make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080 -failure-domain zone-c -min-failure-domains 2'
+```
+
 The older `cluster join` workflow remains available as a lower-level operation
 for custom sequencing:
 

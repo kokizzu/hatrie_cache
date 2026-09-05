@@ -422,7 +422,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T062 Replication bandwidth and compression metrics - `/metrics` exposes outgoing request wire bytes and request counts by target and `identity`/`gzip` encoding; see [REPLICATION_METRICS.md](REPLICATION_METRICS.md).
 - [x] T063 Replication pause and resume controls - async replication exposes idempotent Go pause/resume methods, authenticated `/api/replication` actions, queue status, and a Prometheus paused gauge; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
 - [x] T064 Rolling replica replacement. `cluster add-replica -replace` catches the replacement node up before activation, while `cluster decommission` validates remaining redundancy, runs a final sync, marks the retiring node offline, updates reachable members, and verifies the resulting topology.
-- [ ] T065 Failure-domain-aware replica placement.
+- [x] T065 Failure-domain-aware replica placement. Topology nodes carry optional `failure_domain` metadata through JSON and native gRPC; `cluster add-replica` and `cluster join` accept `-failure-domain` plus opt-in `-min-failure-domains N` (default `0`) and reject placements that do not meet the requested distinct-domain count.
 - [ ] T066 Cross-region replication with explicit RPO/RTO.
 - [ ] T067 Split-brain fencing token.
 - [ ] T068 Schema-change replication compatibility checks.

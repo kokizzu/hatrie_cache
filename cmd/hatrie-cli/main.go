@@ -1661,6 +1661,7 @@ type clusterJoinResult struct {
 	Peer            string   `json:"peer"`
 	Node            string   `json:"node"`
 	Address         string   `json:"address"`
+	FailureDomain   string   `json:"failure_domain,omitempty"`
 	TopologyUpdated bool     `json:"topology_updated"`
 	TargetUpdated   bool     `json:"target_updated"`
 	JournalPulled   bool     `json:"journal_pulled"`
@@ -1673,6 +1674,7 @@ type clusterAddReplicaResult struct {
 	Peer             string   `json:"peer"`
 	Node             string   `json:"node"`
 	Address          string   `json:"address"`
+	FailureDomain    string   `json:"failure_domain,omitempty"`
 	Replaced         bool     `json:"replaced"`
 	TopologyUpdated  bool     `json:"topology_updated"`
 	JournalPulled    bool     `json:"journal_pulled"`
@@ -2873,6 +2875,8 @@ func runClusterAddReplica(ctx context.Context, client *http.Client, addr string,
 	nodeAddress := flags.String("address", "", "joining node monitoring API base URL")
 	nodeID := flags.String("node", "", "expected joining node id; defaults to the target health identity")
 	replace := flags.Bool("replace", false, "allow the same replica id to move to a new address")
+	failureDomain := flags.String("failure-domain", "", "failure domain for the joining replica, such as a zone or host")
+	minFailureDomains := flags.Int("min-failure-domains", 0, "minimum distinct failure domains per affected shard; 0 disables placement validation")
 	pullJournal := flags.Bool("pull-journal", true, "catch the joining node up before activating membership")
 	finalSync := flags.Bool("final-sync", true, "run anti-entropy replication after activating membership")
 	allowMemoryOnly := flags.Bool("allow-memory-only", false, "allow a joining node without persistent storage")
@@ -2882,11 +2886,15 @@ func runClusterAddReplica(ctx context.Context, client *http.Client, addr string,
 	*peer = strings.TrimSpace(*peer)
 	*nodeAddress = strings.TrimRight(strings.TrimSpace(*nodeAddress), "/")
 	*nodeID = strings.TrimSpace(*nodeID)
+	*failureDomain = strings.TrimSpace(*failureDomain)
 	if *peer == "" {
 		return errors.New("cluster add-replica -peer is required")
 	}
 	if *nodeAddress == "" {
 		return errors.New("cluster add-replica -address is required")
+	}
+	if *minFailureDomains < 0 {
+		return errors.New("cluster add-replica -min-failure-domains must be non-negative")
 	}
 
 	targetHealth, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *nodeAddress, "/api/health")
@@ -2930,7 +2938,7 @@ func runClusterAddReplica(ctx context.Context, client *http.Client, addr string,
 	if err != nil {
 		return fmt.Errorf("peer topology: %w", err)
 	}
-	if _, _, _, err := clusterAddReplicaTopology(topology, *nodeID, *nodeAddress, *replace); err != nil {
+	if _, _, _, err := clusterAddReplicaTopologyWithPlacement(topology, *nodeID, *nodeAddress, *replace, *failureDomain, *minFailureDomains); err != nil {
 		return err
 	}
 
@@ -2953,7 +2961,7 @@ func runClusterAddReplica(ctx context.Context, client *http.Client, addr string,
 	if err != nil {
 		return fmt.Errorf("refresh peer topology after catch-up: %w", err)
 	}
-	updated, topologyChanged, replaced, err := clusterAddReplicaTopology(latest, *nodeID, *nodeAddress, *replace)
+	updated, topologyChanged, replaced, err := clusterAddReplicaTopologyWithPlacement(latest, *nodeID, *nodeAddress, *replace, *failureDomain, *minFailureDomains)
 	if err != nil {
 		return fmt.Errorf("refreshed topology: %w", err)
 	}
@@ -2980,6 +2988,7 @@ func runClusterAddReplica(ctx context.Context, client *http.Client, addr string,
 		Peer:             *peer,
 		Node:             *nodeID,
 		Address:          *nodeAddress,
+		FailureDomain:    *failureDomain,
 		Replaced:         replaced,
 		TopologyUpdated:  topologyChanged,
 		JournalPulled:    journalPulled,
@@ -3003,6 +3012,8 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
 	role := flags.String("role", "replica", "topology role for the joining node: primary or replica")
 	replace := flags.Bool("replace", false, "allow the same node id to move to a new address")
+	failureDomain := flags.String("failure-domain", "", "failure domain for the joining node, such as a zone or host")
+	minFailureDomains := flags.Int("min-failure-domains", 0, "minimum distinct failure domains per affected shard; 0 disables placement validation")
 	updateTarget := flags.Bool("update-target", true, "upload the updated topology to the joining node")
 	updateNodes := flags.Bool("update-nodes", true, "upload the updated topology to every reachable cluster node")
 	pullJournal := flags.Bool("pull-journal", true, "pull the peer journal into the joining node after topology update")
@@ -3013,6 +3024,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	*nodeAddress = strings.TrimSpace(*nodeAddress)
 	*peer = strings.TrimSpace(*peer)
 	*role = strings.TrimSpace(*role)
+	*failureDomain = strings.TrimSpace(*failureDomain)
 	if *nodeID == "" {
 		return errors.New("cluster join -node is required")
 	}
@@ -3022,6 +3034,9 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	if *peer == "" {
 		return errors.New("cluster join -peer is required")
 	}
+	if *minFailureDomains < 0 {
+		return errors.New("cluster join -min-failure-domains must be non-negative")
+	}
 
 	if _, err := getJSONValue[map[string]interface{}](ctx, client, *peer, "/api/health"); err != nil {
 		return fmt.Errorf("peer health: %w", err)
@@ -3030,7 +3045,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	if err != nil {
 		return fmt.Errorf("peer topology: %w", err)
 	}
-	updated, topologyChanged, err := clusterJoinTopologyWithReplace(topology, *nodeID, *nodeAddress, *role, *replace)
+	updated, topologyChanged, err := clusterJoinTopologyWithPlacement(topology, *nodeID, *nodeAddress, *role, *replace, *failureDomain, *minFailureDomains)
 	if err != nil {
 		return err
 	}
@@ -3085,6 +3100,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 		Peer:            *peer,
 		Node:            *nodeID,
 		Address:         *nodeAddress,
+		FailureDomain:   *failureDomain,
 		TopologyUpdated: topologyChanged,
 		TargetUpdated:   targetUpdated,
 		JournalPulled:   journalPulled,
@@ -3270,9 +3286,14 @@ func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, ad
 }
 
 func clusterJoinTopologyWithReplace(topology hatriecache.ClusterTopology, nodeID string, address string, role string, replace bool) (hatriecache.ClusterTopology, bool, error) {
+	return clusterJoinTopologyWithPlacement(topology, nodeID, address, role, replace, "", 0)
+}
+
+func clusterJoinTopologyWithPlacement(topology hatriecache.ClusterTopology, nodeID string, address string, role string, replace bool, failureDomain string, minimumDistinctDomains int) (hatriecache.ClusterTopology, bool, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	address = strings.TrimRight(strings.TrimSpace(address), "/")
 	role = strings.TrimSpace(role)
+	failureDomain = strings.TrimSpace(failureDomain)
 	if nodeID == "" {
 		return hatriecache.ClusterTopology{}, false, errors.New("cluster join node id is required")
 	}
@@ -3284,6 +3305,9 @@ func clusterJoinTopologyWithReplace(topology hatriecache.ClusterTopology, nodeID
 	}
 	if role != "primary" && role != "replica" {
 		return hatriecache.ClusterTopology{}, false, errors.New("cluster join role must be primary or replica")
+	}
+	if minimumDistinctDomains < 0 {
+		return hatriecache.ClusterTopology{}, false, errors.New("cluster join minimum failure domains must be non-negative")
 	}
 	for _, node := range topology.Nodes {
 		nodeAddress := strings.TrimRight(strings.TrimSpace(node.Address), "/")
@@ -3310,9 +3334,13 @@ func clusterJoinTopologyWithReplace(topology hatriecache.ClusterTopology, nodeID
 			topology.Nodes[idx].Role = role
 			changed = true
 		}
+		if failureDomain != "" && topology.Nodes[idx].FailureDomain != failureDomain {
+			topology.Nodes[idx].FailureDomain = failureDomain
+			changed = true
+		}
 	}
 	if !found {
-		topology.Nodes = append(topology.Nodes, hatriecache.TopologyNode{ID: nodeID, Address: address, Role: role})
+		topology.Nodes = append(topology.Nodes, hatriecache.TopologyNode{ID: nodeID, Address: address, Role: role, FailureDomain: failureDomain})
 		changed = true
 	}
 	if topology.Mode == "" || topology.Mode == hatriecache.TopologyModeSharded {
@@ -3329,10 +3357,18 @@ func clusterJoinTopologyWithReplace(topology hatriecache.ClusterTopology, nodeID
 	if err != nil {
 		return hatriecache.ClusterTopology{}, false, err
 	}
-	return store.Get(), changed, nil
+	normalized := store.Get()
+	if err := hatriecache.ValidateFailureDomainPlacement(normalized, minimumDistinctDomains); err != nil {
+		return hatriecache.ClusterTopology{}, false, err
+	}
+	return normalized, changed, nil
 }
 
 func clusterAddReplicaTopology(topology hatriecache.ClusterTopology, nodeID string, address string, replace bool) (hatriecache.ClusterTopology, bool, bool, error) {
+	return clusterAddReplicaTopologyWithPlacement(topology, nodeID, address, replace, "", 0)
+}
+
+func clusterAddReplicaTopologyWithPlacement(topology hatriecache.ClusterTopology, nodeID string, address string, replace bool, failureDomain string, minimumDistinctDomains int) (hatriecache.ClusterTopology, bool, bool, error) {
 	store, err := hatriecache.NewTopologyStore(topology)
 	if err != nil {
 		return hatriecache.ClusterTopology{}, false, false, err
@@ -3345,6 +3381,9 @@ func clusterAddReplicaTopology(topology hatriecache.ClusterTopology, nodeID stri
 	}
 	if address == "" {
 		return hatriecache.ClusterTopology{}, false, false, errors.New("cluster add-replica node address is required")
+	}
+	if minimumDistinctDomains < 0 {
+		return hatriecache.ClusterTopology{}, false, false, errors.New("cluster add-replica minimum failure domains must be non-negative")
 	}
 
 	replaced := false
@@ -3367,7 +3406,7 @@ func clusterAddReplicaTopology(topology hatriecache.ClusterTopology, nodeID stri
 		}
 	}
 
-	updated, changed, err := clusterJoinTopologyWithReplace(normalized, nodeID, address, "replica", replace)
+	updated, changed, err := clusterJoinTopologyWithPlacement(normalized, nodeID, address, "replica", replace, failureDomain, minimumDistinctDomains)
 	if err != nil {
 		return hatriecache.ClusterTopology{}, false, false, err
 	}

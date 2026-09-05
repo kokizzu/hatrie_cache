@@ -254,6 +254,7 @@ message TopologyNode {
   bool maintenance = 5;
   string maintenance_reason = 6;
   string maintenance_since = 7;
+  string failure_domain = 8;
 }
 
 message TopologyShard {

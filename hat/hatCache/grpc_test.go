@@ -1809,6 +1809,7 @@ func TestGRPCTopologyNodeMaintenanceRoundTrip(t *testing.T) {
 		ID:                "node-a",
 		Address:           "https://node-a.example",
 		Role:              "primary",
+		FailureDomain:     "zone-a",
 		Maintenance:       true,
 		MaintenanceReason: "kernel upgrade",
 		MaintenanceSince:  "2026-07-23T12:00:00Z",

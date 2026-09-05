@@ -5,6 +5,7 @@ package hatTopology
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"os"
@@ -40,6 +41,7 @@ type TopologyNode struct {
 	Address           string `json:"address"`
 	GRPCAddress       string `json:"grpc_address,omitempty"`
 	Role              string `json:"role,omitempty"`
+	FailureDomain     string `json:"failure_domain,omitempty"`
 	Maintenance       bool   `json:"maintenance,omitempty"`
 	MaintenanceReason string `json:"maintenance_reason,omitempty"`
 	MaintenanceSince  string `json:"maintenance_since,omitempty"`
@@ -145,6 +147,7 @@ func Normalize(topology ClusterTopology) (ClusterTopology, error) {
 	for idx := range out.Nodes {
 		node := &out.Nodes[idx]
 		node.ID, node.Address, node.GRPCAddress, node.Role = strings.TrimSpace(node.ID), strings.TrimSpace(node.Address), strings.TrimSpace(node.GRPCAddress), strings.TrimSpace(node.Role)
+		node.FailureDomain = strings.TrimSpace(node.FailureDomain)
 		node.MaintenanceReason, node.MaintenanceSince = strings.TrimSpace(node.MaintenanceReason), strings.TrimSpace(node.MaintenanceSince)
 		if !node.Maintenance {
 			node.MaintenanceReason, node.MaintenanceSince = "", ""
@@ -202,6 +205,53 @@ func Normalize(topology ClusterTopology) (ClusterTopology, error) {
 	sort.Slice(out.Nodes, func(i, j int) bool { return out.Nodes[i].ID < out.Nodes[j].ID })
 	sort.Slice(out.Shards, func(i, j int) bool { return out.Shards[i].ID < out.Shards[j].ID })
 	return out, nil
+}
+
+// ValidateFailureDomainPlacement checks that every shard has enough distinct,
+// explicitly known failure domains. A zero or negative minimum disables the
+// policy without inspecting the topology, preserving legacy behavior.
+func ValidateFailureDomainPlacement(topology ClusterTopology, minimumDistinctDomains int) error {
+	if minimumDistinctDomains <= 0 {
+		return nil
+	}
+	normalized, err := Normalize(topology)
+	if err != nil {
+		return err
+	}
+	domains := make(map[string]string, len(normalized.Nodes))
+	for _, node := range normalized.Nodes {
+		domains[node.ID] = node.FailureDomain
+	}
+	validateOwners := func(label string, owners []string) error {
+		seen := make(map[string]struct{}, len(owners))
+		for _, owner := range owners {
+			domain := strings.TrimSpace(domains[owner])
+			if domain == "" {
+				return fmt.Errorf("hatriecache: %s node %q failure domain is required", label, owner)
+			}
+			seen[domain] = struct{}{}
+		}
+		if len(seen) < minimumDistinctDomains {
+			return fmt.Errorf("hatriecache: %s requires at least %d distinct failure domains, got %d", label, minimumDistinctDomains, len(seen))
+		}
+		return nil
+	}
+	if normalized.Mode == TopologyModeFullReplica {
+		owners := make([]string, 0, len(normalized.Nodes))
+		for _, node := range normalized.Nodes {
+			owners = append(owners, node.ID)
+		}
+		return validateOwners("full replica topology", owners)
+	}
+	for _, shard := range normalized.Shards {
+		owners := make([]string, 1, 1+len(shard.Replicas))
+		owners[0] = shard.Primary
+		owners = append(owners, shard.Replicas...)
+		if err := validateOwners(fmt.Sprintf("shard %d", shard.ID), owners); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TopologyMode(mode string) string {
