@@ -1458,6 +1458,7 @@ func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
 		stats.Capacity = cap(replicator.queue)
 		stats.DurableBacklog = replicator.outboxRestoreBacklog
 	}
+	stats.VectorClock = replicator.replicationVectorClockLocked(stats)
 	if len(replicator.pending) > 0 {
 		oldest := replicator.pending[0]
 		stats.OldestQueuedAt = cloneTimePtr(&oldest.enqueuedAt)
@@ -1472,6 +1473,45 @@ func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
 		stats.LastRetryAgeMillis = now.Sub(*stats.LastRetryAt).Milliseconds()
 	}
 	return stats
+}
+
+func (replicator *HTTPReplicator) replicationVectorClockLocked(stats ReplicationQueueStats) map[string]uint64 {
+	if replicator == nil {
+		return nil
+	}
+	topology := ClusterTopology{}
+	if replicator.topology != nil {
+		topology = replicator.topology.Get()
+	}
+	self := replicator.self
+	if self == "" {
+		self = topology.Self
+	}
+	if self == "" && len(stats.LastAcknowledgedSequenceByTarget) == 0 && len(topology.Nodes) == 0 {
+		return nil
+	}
+	capacity := len(stats.LastAcknowledgedSequenceByTarget) + len(topology.Nodes) + 1
+	clock := make(map[string]uint64, capacity)
+	if self != "" {
+		clock[self] = stats.SourceSequence
+	}
+	for target, sequence := range stats.LastAcknowledgedSequenceByTarget {
+		if current, exists := clock[target]; !exists || sequence > current {
+			clock[target] = sequence
+		}
+	}
+	for _, node := range topology.Nodes {
+		if node.ID == "" {
+			continue
+		}
+		if _, exists := clock[node.ID]; !exists {
+			clock[node.ID] = 0
+		}
+	}
+	if len(clock) == 0 {
+		return nil
+	}
+	return clock
 }
 
 func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, []replicationTask) {
@@ -4508,6 +4548,12 @@ func cloneReplicationQueueStats(stats ReplicationQueueStats) ReplicationQueueSta
 		out.ReplicationLagByTarget = make(map[string]uint64, len(stats.ReplicationLagByTarget))
 		for target, lag := range stats.ReplicationLagByTarget {
 			out.ReplicationLagByTarget[target] = lag
+		}
+	}
+	if stats.VectorClock != nil {
+		out.VectorClock = make(map[string]uint64, len(stats.VectorClock))
+		for node, sequence := range stats.VectorClock {
+			out.VectorClock[node] = sequence
 		}
 	}
 	return out

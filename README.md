@@ -3545,7 +3545,7 @@ For library users, the same guard is available through
 
 ### Per-Peer Replication Lag
 
-Async replication queue status includes `source_sequence`, `last_acknowledged_sequence_by_target`, and `replication_lag_by_target`. The Prometheus endpoint exposes the same data as `hatrie_cache_replication_source_sequence`, `hatrie_cache_replication_target_last_acknowledged_sequence`, and `hatrie_cache_replication_target_lag`, labeled by node and target.
+Async replication queue status includes `source_sequence`, `last_acknowledged_sequence_by_target`, `replication_lag_by_target`, and an immutable `vector_clock` map containing the local sequence plus every current topology replica's acknowledged sequence (zero when none has been acknowledged). This is observational metadata, not quorum or conflict-resolution state. The Prometheus endpoint exposes the same data as `hatrie_cache_replication_source_sequence`, `hatrie_cache_replication_target_last_acknowledged_sequence`, and `hatrie_cache_replication_target_lag`, labeled by node and target.
 
 ### Graceful Async Replication Shutdown
 

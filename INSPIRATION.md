@@ -406,7 +406,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 
 - [ ] T047 Synchronous replication with an explicit quorum.
 - [x] T048 Replication sets and peer topology.
-- [ ] T049 Vector-clock exposure for every replica.
+- [x] T049 Vector-clock exposure for every replica - replication queue results expose an immutable observational `vector_clock` containing the local sequence and all current topology members' acknowledged sequences; it does not change quorum or conflict semantics.
 - [x] T050 LSN or journal sequence exposure.
 - [x] T051 Per-peer replication lag measurement: async queue status exposes source, acknowledged, and per-target lag sequences, with Prometheus gauges.
 - [x] T052 Relay reconnect and retry.
