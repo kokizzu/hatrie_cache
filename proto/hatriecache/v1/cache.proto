@@ -259,6 +259,7 @@ message TopologyNode {
   string maintenance_reason = 6;
   string maintenance_since = 7;
   string failure_domain = 8;
+  string region = 9;
 }
 
 message TopologyShard {

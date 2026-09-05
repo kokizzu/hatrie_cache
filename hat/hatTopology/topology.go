@@ -43,6 +43,7 @@ type TopologyNode struct {
 	GRPCAddress       string `json:"grpc_address,omitempty"`
 	Role              string `json:"role,omitempty"`
 	FailureDomain     string `json:"failure_domain,omitempty"`
+	Region            string `json:"region,omitempty"`
 	Maintenance       bool   `json:"maintenance,omitempty"`
 	MaintenanceReason string `json:"maintenance_reason,omitempty"`
 	MaintenanceSince  string `json:"maintenance_since,omitempty"`
@@ -149,6 +150,7 @@ func Normalize(topology ClusterTopology) (ClusterTopology, error) {
 		node := &out.Nodes[idx]
 		node.ID, node.Address, node.GRPCAddress, node.Role = strings.TrimSpace(node.ID), strings.TrimSpace(node.Address), strings.TrimSpace(node.GRPCAddress), strings.TrimSpace(node.Role)
 		node.FailureDomain = strings.TrimSpace(node.FailureDomain)
+		node.Region = strings.TrimSpace(node.Region)
 		node.MaintenanceReason, node.MaintenanceSince = strings.TrimSpace(node.MaintenanceReason), strings.TrimSpace(node.MaintenanceSince)
 		if !node.Maintenance {
 			node.MaintenanceReason, node.MaintenanceSince = "", ""
@@ -292,6 +294,7 @@ func (topology ClusterTopology) Fingerprint() string {
 		part(node.Address)
 		part(node.GRPCAddress)
 		part(node.Role)
+		part(node.Region)
 	}
 	for _, shard := range normalized.Shards {
 		part(strconv.FormatUint(uint64(shard.ID), 10))

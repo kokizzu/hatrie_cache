@@ -73,6 +73,7 @@ type HTTPReplicatorOptions struct {
 	Self                     string
 	Topology                 *TopologyStore
 	ReplicationSchema        ReplicationSchemaContract
+	ReplicationRegionPolicy  ReplicationRegionPolicy
 	Election                 *ElectionStore
 	Client                   *http.Client
 	Timeout                  time.Duration
@@ -101,6 +102,7 @@ type HTTPReplicator struct {
 	self                     string
 	topology                 *TopologyStore
 	replicationSchema        ReplicationSchemaContract
+	regionPolicy             ReplicationRegionPolicy
 	election                 *ElectionStore
 	client                   *http.Client
 	timeout                  time.Duration
@@ -422,6 +424,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		self:                     strings.TrimSpace(options.Self),
 		topology:                 options.Topology,
 		replicationSchema:        options.ReplicationSchema,
+		regionPolicy:             options.ReplicationRegionPolicy,
 		election:                 options.Election,
 		client:                   client,
 		timeout:                  timeout,

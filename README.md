@@ -1278,6 +1278,56 @@ supporting code first, configure the same contract on all nodes, and enable the
 gate after every sender is ready. This check validates compatibility; it does
 not execute schema migrations.
 
+Cross-region replication policy is also opt-in. Add a `region` to each topology
+node, then configure a `ReplicationRegionPolicy` on the local replicator:
+
+```json
+{
+  "id": "node-a",
+  "address": "http://node-a:8080",
+  "region": "asia"
+}
+```
+
+```go
+import "time"
+
+topology, err := hatCache.OpenTopologyStore(
+    "data/topology.json",
+    hatCache.SingleNodeTopology("node-a", "http://node-a:8080"),
+)
+if err != nil {
+    panic(err)
+}
+policy := hatCache.ReplicationRegionPolicy{
+    LocalRegion:           "asia",
+    RequiredRemoteRegions: []string{"europe", "us"},
+    MaxRPOLagSequences:    100,
+    MaxRTO:                30 * time.Second,
+}
+replicator := hatCache.NewHTTPReplicator(hatCache.HTTPReplicatorOptions{
+    Self:                   "node-a",
+    Topology:               topology,
+    ReplicationRegionPolicy: policy,
+})
+status := replicator.RegionReplicationStatus()
+if !status.RPOWithinBudget {
+    // Alert or stop a planned cutover; routing and failover are not automatic.
+}
+observedRecoveryDuration := 25 * time.Second
+if err := policy.ValidateRecoveryDuration(observedRecoveryDuration); err != nil {
+    // The declared RTO budget was missed.
+}
+```
+
+`RegionReplicationStatus` reports missing required regions, available remote
+targets, and current per-target journal-sequence lag. `MaxRPOLagSequences` is a
+sequence-based RPO proxy, not a time estimate; it is meaningful when the
+replicator's async queue telemetry is enabled. `MaxRTO` is a declared recovery
+duration budget checked by `ValidateRecoveryDuration`. The zero-value policy is
+disabled, and this feature does not route writes, rebalance partitions, or
+perform automatic cross-region failover.
+
 For example:
 
 ```sh
