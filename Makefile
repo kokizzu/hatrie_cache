@@ -5674,3 +5674,31 @@ commit-sql-string-dictionary:
 .PHONY: push-sql-string-dictionary
 push-sql-string-dictionary:
 	sh ./scripts/deliver-sql-string-dictionary.sh push
+
+.PHONY: test-sql-row-binary-stats-pruning
+test-sql-row-binary-stats-pruning:
+	sh ./scripts/test-sql-row-binary-stats-pruning.sh
+
+.PHONY: format-sql-row-binary-stats-pruning
+format-sql-row-binary-stats-pruning:
+	sh ./scripts/format-sql-row-binary-stats-pruning.sh
+
+.PHONY: test-race-sql-row-binary-stats-pruning
+test-race-sql-row-binary-stats-pruning:
+	sh ./scripts/test-race-sql-row-binary-stats-pruning.sh
+
+.PHONY: benchmark-sql-row-binary-stats-pruning
+benchmark-sql-row-binary-stats-pruning:
+	sh ./scripts/benchmark-sql-row-binary-stats-pruning.sh
+
+.PHONY: deliver-sql-row-binary-stats-pruning
+deliver-sql-row-binary-stats-pruning:
+	sh ./scripts/deliver-sql-row-binary-stats-pruning.sh preview
+
+.PHONY: commit-sql-row-binary-stats-pruning
+commit-sql-row-binary-stats-pruning:
+	sh ./scripts/deliver-sql-row-binary-stats-pruning.sh commit
+
+.PHONY: push-sql-row-binary-stats-pruning
+push-sql-row-binary-stats-pruning:
+	sh ./scripts/deliver-sql-row-binary-stats-pruning.sh push

@@ -103,6 +103,7 @@ name.
 - [ ] C046 Read amplification accounting per part and column.
 - [x] C046a Statistics-only per-column RowBinary read accounting.
 - [ ] C047 Adaptive granule sizing from observed predicate selectivity.
+- [x] C047a Conservative block min/max predicate pruning.
 - [ ] C048 Compact numeric encodings selected from data statistics.
 - [x] C048a Exact full-batch codec selection by encoded size.
 - [x] C049 Low-cardinality dictionary encoding for typed string values.
