@@ -5052,3 +5052,11 @@ format-sql-index-advisor:
 	sh ./scripts/format-sql-index-advisor.sh
 benchmark-sql-index-advisor:
 	sh ./scripts/benchmark-sql-index-advisor.sh
+test-sql-multikey:
+	sh ./scripts/test-sql-multikey.sh
+
+format-sql-multikey:
+	sh ./scripts/format-sql-multikey.sh
+
+benchmark-sql-multikey:
+	sh ./scripts/benchmark-sql-multikey.sh

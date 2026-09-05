@@ -163,6 +163,7 @@ type SQLFunctionRegistryOptions = core.SQLFunctionRegistryOptions
 type SQLFunctionResolver = core.SQLFunctionResolver
 type SQLIndexValueEstimator = core.SQLIndexValueEstimator
 type SQLIndexedSourceResolver = core.SQLIndexedSourceResolver
+type SQLMultikeyIndexedSourceResolver = core.SQLMultikeyIndexedSourceResolver
 type SQLJSONIndexFrequencyBucket = core.SQLJSONIndexFrequencyBucket
 type SQLJSONIndexHealth = core.SQLJSONIndexHealth
 type SQLJSONIndexStats = core.SQLJSONIndexStats

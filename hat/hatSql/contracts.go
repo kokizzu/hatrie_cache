@@ -338,6 +338,14 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// MultikeyIndexedSourceResolver optionally resolves ARRAY_CONTAINS predicates
+// against an index that stores one posting per distinct array element. It
+// returns candidates only; the executor evaluates ARRAY_CONTAINS again before
+// publishing results.
+type MultikeyIndexedSourceResolver interface {
+	ResolveSQLMultikeySource(name, key, field string, value interface{}) ([]Row, bool, error)
+}
+
 // BorrowedIndexedSourceResolver optionally resolves equality predicates through
 // an immutable index posting list. The returned rows must stay valid for the
 // active SQL snapshot and callers must not mutate them. SQL uses this contract

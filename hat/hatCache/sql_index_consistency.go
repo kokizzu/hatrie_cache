@@ -80,11 +80,15 @@ func (ht *HatTrie) CheckSQLJSONIndexConsistency(key string) (SQLJSONIndexConsist
 		if index == nil {
 			continue
 		}
-		candidate := sqlJSONFieldIndex{}
+		candidate := sqlJSONFieldIndex{multikey: index.multikey}
 		if err := refreshSQLJSONFieldIndexSourceRows(&candidate, field, source, rows); err != nil {
 			return SQLJSONIndexConsistencyReport{}, true, err
 		}
-		appendEntry("field", []string{field}, index.sqlJSONIndexState, index, &candidate)
+		kind := "field"
+		if index.multikey {
+			kind = "multikey"
+		}
+		appendEntry(kind, []string{field}, index.sqlJSONIndexState, index, &candidate)
 	}
 	for field, index := range ht.sqlJSONLowerIndexes[key] {
 		if index == nil {

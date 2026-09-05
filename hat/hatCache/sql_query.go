@@ -73,6 +73,7 @@ type SQLSegmentedColumnarSourceResolver = hatSql.SegmentedColumnarSourceResolver
 type SQLStreamSourceResolver = hatSql.StreamSourceResolver
 type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
+type SQLMultikeyIndexedSourceResolver = hatSql.MultikeyIndexedSourceResolver
 type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
 type SQLPrefixIndexedSourceResolver = hatSql.PrefixIndexedSourceResolver
 type SQLBorrowedPrefixIndexedSourceResolver = hatSql.BorrowedPrefixIndexedSourceResolver
@@ -487,10 +488,14 @@ func sqlBinaryValue(op string, left, right interface{}) interface{} {
 
 type sqlJSONFieldIndex struct {
 	sqlJSONIndexState
-	rows       map[string][]SQLRow
-	ordered    []sqlJSONFieldIndexEntry
-	nulls      []SQLRow
-	stringOnly bool
+	rows            map[string][]SQLRow
+	comparisonRows  map[string][]SQLRow
+	ordered         []sqlJSONFieldIndexEntry
+	nulls           []SQLRow
+	stringOnly      bool
+	multikey        bool
+	rowCount        int
+	indexedRowCount int
 }
 type sqlJSONFieldIndexEntry struct {
 	value interface{}
@@ -1244,6 +1249,13 @@ func (ht *HatTrie) SQLJSONIndexHealth(key, field string) (SQLJSONIndexHealth, bo
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return SQLJSONIndexHealth{}, false, err
 	}
+	if index.multikey {
+		return SQLJSONIndexHealth{
+			Key: key, Field: field, Rows: index.rowCount, IndexedRows: index.indexedRowCount,
+			NullRows: len(index.nulls), DistinctKeys: len(index.rows), SourceBytes: len(source.raw),
+			Current: source.current(index.sqlJSONIndexState), Refreshed: refreshed,
+		}, true, nil
+	}
 	indexedRows := 0
 	for _, rows := range index.rows {
 		indexedRows += len(rows)
@@ -1301,6 +1313,9 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	index := ht.sqlJSONIndexes[key][field]
 	skip := ht.sqlJSONPathSkipIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
+	if index != nil && index.multikey {
+		index = nil
+	}
 	if typed != nil {
 		source, err := ht.sqlJSONSource(key)
 		if err != nil {
@@ -1624,7 +1639,7 @@ func (ht *HatTrie) SQLJSONIndexStats(key string, fields ...string) (SQLJSONIndex
 			return sqlJSONTypedInt64IndexStats(key, fields, typed), true, nil
 		}
 		index := ht.sqlJSONIndexes[key][fields[0]]
-		if index == nil {
+		if index == nil || index.multikey {
 			return SQLJSONIndexStats{}, false, nil
 		}
 		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
@@ -1678,6 +1693,9 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	bitmap := ht.sqlJSONBitmapIndexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
+	if index != nil && index.multikey {
+		index = nil
+	}
 	ht.sqlIndexMu.Unlock()
 	if typed != nil {
 		source, err := ht.sqlJSONSource(key)
@@ -1735,7 +1753,7 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	index = ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		return 0, false, false, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
@@ -1767,6 +1785,9 @@ func (ht *HatTrie) SQLJSONRangeStats(key, field string, bucketCount int) (SQLJSO
 	defer ht.sqlIndexMu.Unlock()
 	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
+	if index != nil && index.multikey {
+		index = nil
+	}
 	if typed == nil && index == nil {
 		return SQLJSONRangeStats{}, false, nil
 	}
@@ -1821,6 +1842,9 @@ func (ht *HatTrie) SQLJSONRangeEstimate(key, field, operator string, value inter
 	defer ht.sqlIndexMu.Unlock()
 	typed := ht.sqlJSONTypedInt64Indexes[key][field]
 	index := ht.sqlJSONIndexes[key][field]
+	if index != nil && index.multikey {
+		index = nil
+	}
 	if typed == nil && index == nil {
 		return 0, false, false, nil
 	}
@@ -2003,7 +2027,7 @@ func (ht *HatTrie) ResolveSQLIndexedRangeSource(name, key, field, operator strin
 		return sqlJSONTypedInt64Rows(typed, ordinals), true, nil
 	}
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		return nil, false, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
@@ -2042,7 +2066,7 @@ func (ht *HatTrie) ResolveSQLPrefixSource(name, key, field, prefix string) ([]SQ
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		return nil, false, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
@@ -2128,7 +2152,7 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 		return sqlJSONTypedInt64OrderedRows(typed, desc, nullsFirst, nullsLast), true, nil
 	}
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		return nil, false, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
@@ -2224,7 +2248,7 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		return true, nil
 	}
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		ht.sqlIndexMu.Unlock()
 		return false, nil
 	}
@@ -2486,7 +2510,7 @@ func (ht *HatTrie) StreamSQLOrderedSourceAfter(ctx context.Context, name, key, f
 		return true, nil
 	}
 	index := ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		ht.sqlIndexMu.Unlock()
 		return false, nil
 	}
@@ -3090,6 +3114,9 @@ func refreshSQLJSONFieldIndexRows(index *sqlJSONFieldIndex, field, data string, 
 }
 
 func refreshSQLJSONFieldIndexSourceRows(index *sqlJSONFieldIndex, field string, source sqlJSONSource, rows []SQLRow) error {
+	if index.multikey {
+		return refreshSQLJSONMultikeyIndexSourceRows(index, field, source, rows)
+	}
 	if source.current(index.sqlJSONIndexState) {
 		return nil
 	}

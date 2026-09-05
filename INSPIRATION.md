@@ -362,7 +362,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T008 RTREE spatial index.
 - [x] T009 Bitset and bitmap structures.
 - [x] T010 Functional indexes for supported expressions.
-- [ ] T011 Multikey indexes over array fields.
+- [x] T011 Multikey indexes over array fields. `CreateSQLJSONMultikeyIndex` builds deduplicated element postings for `ARRAY_CONTAINS`; candidates are rechecked by the executor, mixed JSON types preserve existing SQL equality, and non-binary collation falls back to a scan. See [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md).
 - [x] T012 Partial equality indexes.
 - [x] T013 Covering indexes and borrowed postings.
 - [x] T014 Equality index iterators.

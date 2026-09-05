@@ -14960,7 +14960,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 		return true
 	}
 	return false
@@ -15468,3 +15468,58 @@ func resolveSQLColumnarSource(resolver ColumnarSourceResolver, name, key string,
 	batch, available, err := resolver.ResolveSQLColumnarSource(name, key, fields)
 	return batch, nil, available, err
 }
+	if rows, indexed, err := resolveSQLMultikeyIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
+func resolveSQLMultikeyIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, hint SQLIndexHint) ([]SQLRow, bool, error) {
+	if condition.kind != "func" || !strings.EqualFold(condition.name, "ARRAY_CONTAINS") || len(condition.args) != 2 {
+		return nil, false, nil
+	}
+	if condition.collation != "" && condition.collation != SQLCollationBinary {
+		return nil, false, nil
+	}
+	field, value := condition.args[0], condition.args[1]
+	if field.kind != "field" || field.qualifier != source.alias || value.kind != "literal" || !hint.allowsField(source, field.name) {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(MultikeyIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	started := time.Now()
+	rows, available, err := indexed.ResolveSQLMultikeySource(source.kind, source.key, field.name, value.value)
+	if available && metrics != nil {
+		metrics.record("MULTIKEY INDEX SCAN", sqlExplainSource(source)+" field="+field.name, 0, len(rows), started)
+	}
+	return rows, available, err
+}
+
+		case "ARRAY_CONTAINS":
+			if len(expr.args) != 2 {
+				return sqlEvalError{err: fmt.Errorf("ARRAY_CONTAINS expects exactly two arguments"), token: expr.token}
+			}
+			value := evalSQLExpr(expr.args[0], group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			query := evalSQLExpr(expr.args[1], group, row)
+			if err := sqlExpressionError(query); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if value == nil || query == nil {
+				return nil
+			}
+			elements, ok := value.([]interface{})
+			if !ok {
+				return false
+			}
+			for _, element := range elements {
+				matched := sqlBinaryValueWithCollation("=", element, query, expr.collation)
+				if err := sqlExpressionError(matched); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				if matched == true {
+					return true
+				}
+			}
+			return false

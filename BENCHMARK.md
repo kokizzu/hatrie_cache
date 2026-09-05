@@ -15826,3 +15826,37 @@ Command: `make benchmark-t155` (`-count=3`, `-benchmem`). These are test-time re
 | INCRCMS | 164.8-184.4 | 7 | 1 | 1 |
 
 The focused test enforces these ceilings after warm-up and logs the measured allocation rate. `INCRCMS` intentionally keeps a one-allocation budget because the benchmark consistently observed `7 B/op`; it is not misreported as zero-allocation.
+
+## SQL Multikey Array Membership
+
+Command: `make benchmark-sql-multikey` (`-benchmem -count=5`). The fixture has
+10,000 JSON rows; one row in every 100 contains the target array element. The
+indexed query is warmed before measurement. These results are query-time
+measurements on an AMD Ryzen 9 5950X, Linux amd64.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full scan | 15,556,089 | 5,678,901 | 170,236 | 1.00x | 1.00x | 1.00x |
+| Multikey index | 67,498 | 102,008 | 523 | 230.5x faster | 55.7x lower | 325.5x lower |
+
+Raw output:
+
+```text
+BenchmarkSQLJSONMultikeyScanQuery-32       70  15556089 ns/op  5678901 B/op 170236 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       78  15634522 ns/op  5678955 B/op 170236 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       70  17081137 ns/op  5678978 B/op 170236 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       75  15315834 ns/op  5678815 B/op 170236 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       78  15223002 ns/op  5678815 B/op 170236 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  17839     67948 ns/op   102008 B/op    523 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  17598     67498 ns/op   102008 B/op    523 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  16965     70807 ns/op   102008 B/op    523 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  16179     66248 ns/op   102008 B/op    523 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  18192     67301 ns/op   102008 B/op    523 allocs/op
+```
+
+`B/op` is transient allocation during each query; it is not the resident
+memory consumed by the index. The index is opt-in and retains postings for
+distinct array elements, so resident memory grows with array cardinality and
+row coverage. Mixed string/non-string JSON sources also retain comparison
+postings when required to preserve the existing SQL equality behavior. See
+[SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md) for fallback and sizing rules.

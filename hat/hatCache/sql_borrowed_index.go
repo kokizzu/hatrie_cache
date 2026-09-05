@@ -15,7 +15,7 @@ func (ht *HatTrie) BorrowSQLIndexedSource(name, key, field string, value interfa
 	ht.sqlIndexMu.Lock()
 	index := ht.sqlJSONIndexes[key][field]
 	ht.sqlIndexMu.Unlock()
-	if index == nil {
+	if index == nil || index.multikey {
 		return nil, false, nil
 	}
 	source, err := ht.sqlJSONSource(key)
@@ -25,7 +25,7 @@ func (ht *HatTrie) BorrowSQLIndexedSource(name, key, field string, value interfa
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	index = ht.sqlJSONIndexes[key][field]
-	if index == nil {
+	if index == nil || index.multikey {
 		return nil, false, nil
 	}
 	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
