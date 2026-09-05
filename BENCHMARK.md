@@ -15886,3 +15886,20 @@ distinct array elements, so resident memory grows with array cardinality and
 row coverage. Mixed string/non-string JSON sources also retain comparison
 postings when required to preserve the existing SQL equality behavior. See
 [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md) for fallback and sizing rules.
+## SQL `ON CONFLICT` Mutation Paths
+
+Five-run `go test` benchmark on AMD Ryzen 9 5950X, Go `amd64`; the hot key
+already exists for every iteration. The direct insert overwrites the key,
+`DO NOTHING` preserves it, and `DO UPDATE` replaces it from `EXCLUDED`.
+
+| Path | Median ns/op | B/op | allocs/op | Direct ns/op / path |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `INSERT` | 8,639 | 14,944 | 29 | 1.00x |
+| `ON CONFLICT DO NOTHING` hit | 7,145 | 11,808 | 18 | 1.21x |
+| `ON CONFLICT DO UPDATE` hit | 6,893 | 8,992 | 16 | 1.25x |
+
+The x column is only a workload-relative reference: the conflict-hit paths
+intentionally avoid or replace the same write work, so these numbers are not
+a claim that conflict handling is universally faster than an unconditional
+insert. Re-run with `make benchmark-sql-mutation`; the script uses five
+benchmark repetitions and reports every raw sample.

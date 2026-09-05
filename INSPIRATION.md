@@ -487,14 +487,14 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T118 Parameter binding.
 - [x] T119 SQL views.
 - [ ] T120 SQL triggers with transaction semantics.
-- [ ] T121 Public SQL transaction commands.
+- [x] T121 Public SQL transaction commands. `CompileSQL` exposes `BEGIN ATOMIC` programs with savepoints, and `BeginSQLTransaction` exposes snapshot reads, rollback, conflict-aware commit, and savepoint methods.
 - [x] T122 UPSERT behavior.
 - [x] T123 REPLACE behavior.
 - [x] T124 DELETE behavior.
 - [x] T125 UPDATE behavior.
-- [ ] T126 RETURNING clauses.
-- [ ] T127 ON CONFLICT clauses.
-- [ ] T128 MERGE statements.
+- [x] T126 RETURNING clauses. `ExecuteSQLMutation` returns selected key/value/existence/TTL columns for direct key-targeted mutations, including delete and conditional merge results.
+- [x] T127 ON CONFLICT clauses. `ExecuteSQLMutation` supports primary-key `DO NOTHING` and typed `DO UPDATE ... EXCLUDED` forms with explicit rejection of unsupported expressions and expiration combinations; the supported paths are covered by tests and a five-run benchmark.
+- [x] T128 MERGE statements. `ExecuteSQLMutation` supports matched and not-matched conditional `MERGE` actions through the atomic merge executor, with `RETURNING` coverage.
 - [x] T129 Common table expressions.
 - [ ] T130 Generated columns.
 - [x] T131 Typed constraints.

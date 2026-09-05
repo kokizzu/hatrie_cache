@@ -216,6 +216,74 @@ RETURNING key, value`, nil, SQLQueryOptions{})
 	}
 }
 
+func TestExecuteSQLMutationSupportsOnConflictActions(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("profile:1", "Ada")
+
+	result, err := ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, value) VALUES ('profile:1', 'ignored')
+ON CONFLICT (key) DO NOTHING
+RETURNING key, value`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(ON CONFLICT DO NOTHING) error = %v", err)
+	}
+	if result.Affected != 0 || len(result.Rows) != 0 {
+		t.Fatalf("ON CONFLICT DO NOTHING result = %#v, want no affected row", result)
+	}
+	if got := trie.GetString("profile:1"); got != "Ada" {
+		t.Fatalf("profile:1 after DO NOTHING = %q, want Ada", got)
+	}
+
+	result, err = ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, value) VALUES ('profile:1', 'Grace')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+RETURNING key, value`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(ON CONFLICT DO UPDATE) error = %v", err)
+	}
+	if result.Affected != 1 || !reflect.DeepEqual(result.Rows, []SQLRow{{"key": "profile:1", "value": "Grace"}}) {
+		t.Fatalf("ON CONFLICT DO UPDATE result = %#v", result)
+	}
+
+	result, err = ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, value) VALUES ('profile:2', 'Lin')
+ON CONFLICT (key) DO NOTHING
+RETURNING key, value`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(ON CONFLICT insert) error = %v", err)
+	}
+	if result.Affected != 1 || !reflect.DeepEqual(result.Rows, []SQLRow{{"key": "profile:2", "value": "Lin"}}) {
+		t.Fatalf("ON CONFLICT insert result = %#v", result)
+	}
+
+	result, err = ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, counter) VALUES ('counter:1', 7)
+ON CONFLICT DO NOTHING`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(ON CONFLICT counter insert) error = %v", err)
+	}
+	result, err = ExecuteSQLMutation(context.Background(), trie, `
+INSERT INTO cache (key, counter) VALUES ('counter:1', 9)
+ON CONFLICT (key) DO UPDATE SET counter = EXCLUDED.counter`, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteSQLMutation(ON CONFLICT counter update) error = %v", err)
+	}
+	gotCounter := trie.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "counter:1"})
+	if result.Affected != 1 || !gotCounter.OK || gotCounter.Value != "9" {
+		t.Fatalf("ON CONFLICT counter update result = %#v, value = %#v", result, gotCounter)
+	}
+
+	for _, source := range []string{
+		"INSERT INTO cache (key, value) VALUES ('bad', 'value') ON CONFLICT (value) DO NOTHING",
+		"INSERT INTO cache (key, value) VALUES ('bad', 'value') ON CONFLICT DO UPDATE SET value = 'constant'",
+		"INSERT INTO cache (key, value, ttl_seconds) VALUES ('bad', 'value', 30) ON CONFLICT DO NOTHING",
+	} {
+		if _, err := ExecuteSQLMutation(context.Background(), trie, source, nil, SQLQueryOptions{}); err == nil {
+			t.Fatalf("ExecuteSQLMutation(%q) accepted unsupported ON CONFLICT form", source)
+		}
+	}
+}
+
 func TestSQLTransactionSavepointsRollbackOnlyLaterWrites(t *testing.T) {
 	trie := newTestTrie(t)
 	transaction, err := BeginSQLTransaction(trie)

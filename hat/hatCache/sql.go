@@ -26,7 +26,9 @@ type SQLMutationResult struct {
 // ExecuteSQLMutation executes direct command-SQL mutations and INSERT ...
 // SELECT against trie. INSERT ... SELECT accepts a relational query after the
 // target column list; its selected columns are mapped positionally to key,
-// value or counter, and optional ttl_seconds or unix_seconds fields. All rows
+// value or counter, and optional ttl_seconds or unix_seconds fields. Direct
+// INSERT supports primary-key ON CONFLICT DO NOTHING and
+// ON CONFLICT DO UPDATE using the inserted value through EXCLUDED. All rows
 // are validated before one atomic command batch is applied, so an invalid
 // selected row cannot leave preceding writes behind.
 func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
@@ -39,6 +41,25 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 	mutationSource, returning, err := parseSQLMutationReturning(source)
 	if err != nil {
 		return SQLMutationResult{}, err
+	}
+	insertConflict, conflictAction, conflictStatement, err := parseSQLInsertConflict(mutationSource)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if conflictStatement {
+		condition := sqlMergeConditionNotMatched
+		if conflictAction == sqlInsertConflictUpdate {
+			condition = sqlMergeConditionAny
+		}
+		response, applied := trie.executeSQLMerge(insertConflict, condition)
+		if !response.OK {
+			return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
+		}
+		result := SQLMutationResult{Response: response}
+		if applied {
+			result.Affected = 1
+		}
+		return sqlMutationReturningResult(trie, result, insertConflict, returning, nil, false)
 	}
 	merge, mergeStatement, err := parseSQLMerge(mutationSource)
 	if err != nil {
@@ -116,6 +137,169 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 		return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
 	}
 	return SQLMutationResult{Affected: len(requests), Response: response}, nil
+}
+
+type sqlInsertConflictAction uint8
+
+const (
+	sqlInsertConflictNothing sqlInsertConflictAction = iota
+	sqlInsertConflictUpdate
+)
+
+// parseSQLInsertConflict recognizes the primary-key ON CONFLICT forms that can
+// be applied by the existing atomic merge executor. Keeping this parser
+// separate from CompileSQL preserves the wire command shape for callers that
+// compile ordinary SQL statements and avoids adding conflict metadata to the
+// public command protocol.
+func parseSQLInsertConflict(source string) (CacheCommandRequest, sqlInsertConflictAction, bool, error) {
+	tokens, err := lexSQL(source)
+	if err != nil {
+		return CacheCommandRequest{}, 0, false, err
+	}
+	if len(tokens) == 0 || tokens[0].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[0].text, "INSERT") {
+		return CacheCommandRequest{}, 0, false, nil
+	}
+	on := -1
+	depth := 0
+	for index := 0; index+1 < len(tokens); index++ {
+		switch tokens[index].kind {
+		case sqlTokenLeftParen:
+			depth++
+		case sqlTokenRightParen:
+			if depth > 0 {
+				depth--
+			}
+		case sqlTokenIdentifier:
+			if depth == 0 && strings.EqualFold(tokens[index].text, "ON") && tokens[index+1].kind == sqlTokenIdentifier && strings.EqualFold(tokens[index+1].text, "CONFLICT") {
+				if on >= 0 {
+					return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(tokens[index], "only one ON CONFLICT clause is supported")
+				}
+				on = index
+			}
+		}
+	}
+	if on < 0 {
+		return CacheCommandRequest{}, 0, false, nil
+	}
+	offset, err := sqlTokenByteOffset(source, tokens[on])
+	if err != nil {
+		return CacheCommandRequest{}, 0, true, err
+	}
+	baseSource := strings.TrimSpace(source[:offset])
+	request, err := CompileSQL(baseSource)
+	if err != nil {
+		return CacheCommandRequest{}, 0, true, err
+	}
+	if !isSQLInsertRequest(request) {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(tokens[0], "ON CONFLICT requires a direct INSERT into cache")
+	}
+	if request.TTLSeconds != nil || request.UnixSeconds != nil {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(tokens[on], "ON CONFLICT does not support expiration fields")
+	}
+
+	index := on + 2
+	if index < len(tokens) && tokens[index].kind == sqlTokenLeftParen {
+		index++
+		if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[index].text, "key") {
+			return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "ON CONFLICT target must be key")
+		}
+		index++
+		if index >= len(tokens) || tokens[index].kind != sqlTokenRightParen {
+			return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "ON CONFLICT key target must end with )")
+		}
+		index++
+	}
+	if !sqlTokenIs(tokens, index, "DO") {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "expected DO after ON CONFLICT")
+	}
+	index++
+	if sqlTokenIs(tokens, index, "NOTHING") {
+		index++
+		if err := requireSQLMutationClauseEnd(tokens, index, "ON CONFLICT DO NOTHING"); err != nil {
+			return CacheCommandRequest{}, 0, true, err
+		}
+		return request, sqlInsertConflictNothing, true, nil
+	}
+	if !sqlTokenIs(tokens, index, "UPDATE") {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "expected NOTHING or UPDATE after ON CONFLICT DO")
+	}
+	index++
+	if !sqlTokenIs(tokens, index, "SET") {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "expected SET after ON CONFLICT DO UPDATE")
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "expected value or counter after ON CONFLICT DO UPDATE SET")
+	}
+	column := strings.ToLower(tokens[index].text)
+	if !sqlInsertConflictColumnMatches(request, column) {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(tokens[index], "ON CONFLICT update column must match the inserted value type")
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenEqual {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "expected = after ON CONFLICT update column")
+	}
+	index++
+	if !sqlTokenIs(tokens, index, "EXCLUDED") {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "ON CONFLICT update must use EXCLUDED")
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenDot {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "expected . after EXCLUDED")
+	}
+	index++
+	if index >= len(tokens) || tokens[index].kind != sqlTokenIdentifier || !strings.EqualFold(tokens[index].text, column) {
+		return CacheCommandRequest{}, 0, true, sqlTokenDiagnostic(sqlTokenAt(tokens, index), "EXCLUDED column must match the update column")
+	}
+	index++
+	if err := requireSQLMutationClauseEnd(tokens, index, "ON CONFLICT DO UPDATE"); err != nil {
+		return CacheCommandRequest{}, 0, true, err
+	}
+	return request, sqlInsertConflictUpdate, true, nil
+}
+
+func isSQLInsertRequest(request CacheCommandRequest) bool {
+	switch normalizedCommand(request.Command) {
+	case "SETSTR", "SETINT", "SETSTRX", "SETINTX":
+		return request.Key != ""
+	default:
+		return false
+	}
+}
+
+func sqlInsertConflictColumnMatches(request CacheCommandRequest, column string) bool {
+	switch column {
+	case "value":
+		return normalizedCommand(request.Command) == "SETSTR"
+	case "counter":
+		return normalizedCommand(request.Command) == "SETINT"
+	default:
+		return false
+	}
+}
+
+func sqlTokenIs(tokens []sqlToken, index int, text string) bool {
+	return index < len(tokens) && tokens[index].kind == sqlTokenIdentifier && strings.EqualFold(tokens[index].text, text)
+}
+
+func sqlTokenAt(tokens []sqlToken, index int) sqlToken {
+	if index >= 0 && index < len(tokens) {
+		return tokens[index]
+	}
+	if len(tokens) > 0 {
+		return tokens[len(tokens)-1]
+	}
+	return sqlToken{}
+}
+
+func requireSQLMutationClauseEnd(tokens []sqlToken, index int, clause string) error {
+	if index < len(tokens) && tokens[index].kind == sqlTokenSemicolon {
+		index++
+	}
+	if index >= len(tokens) || tokens[index].kind != sqlTokenEOF {
+		return sqlTokenDiagnostic(sqlTokenAt(tokens, index), clause+" must end the statement")
+	}
+	return nil
 }
 
 type sqlMergeCondition uint8

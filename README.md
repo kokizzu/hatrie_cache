@@ -3667,3 +3667,24 @@ machine before enabling it for a workload.
 source backup and once from the restored copy after journal replay. Its report
 includes `source_state_checksum`, `restored_state_checksum`, and
 `state_checksums_match`; a missing or mismatched checksum fails the rehearsal.
+## SQL Mutation Conflict Handling
+
+`ExecuteSQLMutation` supports primary-key conflict handling without changing
+the public cache command protocol:
+
+```sql
+INSERT INTO cache (key, value) VALUES ('profile:1', 'Ada')
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO cache (key, value) VALUES ('profile:1', 'Grace')
+ON CONFLICT DO UPDATE SET value = EXCLUDED.value
+RETURNING key, value;
+```
+
+`key` is the only conflict target. `DO NOTHING` inserts only when the key is
+absent; `DO UPDATE` atomically replaces the existing value or counter with the
+typed value from the attempted insert. Conflict updates must use the matching
+`EXCLUDED.value` or `EXCLUDED.counter` expression. Expiration fields,
+arbitrary update expressions, and `INSERT ... SELECT` conflict clauses are
+rejected explicitly. Use `BEGIN ATOMIC`/`COMMIT` or `BeginSQLTransaction` for
+multi-statement transaction workflows.

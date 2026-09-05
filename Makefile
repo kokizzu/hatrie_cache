@@ -2463,6 +2463,18 @@ commit-sql-prepared-plan-cache:
 commit-sql-prepared-invalidation:
 	sh ./scripts/commit-sql-prepared-invalidation.sh
 
+test-sql-mutation:
+	sh ./scripts/test-sql-mutation.sh
+
+format-sql-mutation:
+	sh ./scripts/format-sql-mutation.sh
+
+benchmark-sql-mutation:
+	sh ./scripts/benchmark-sql-mutation.sh
+
+commit-sql-on-conflict:
+	sh ./scripts/commit-sql-on-conflict.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
