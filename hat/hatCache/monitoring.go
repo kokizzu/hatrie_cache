@@ -259,15 +259,17 @@ func (resolver monitoringSQLResolver) EvaluateSQLFunction(name string, calls []S
 }
 
 type commandExecutionOptions struct {
-	NodeName                   string
-	Journal                    *CommandJournal
-	DirtyTracker               *LevelDBDirtyTracker
-	Topology                   *TopologyStore
-	Election                   *ElectionStore
-	Replicator                 *HTTPReplicator
-	ReplicationSafety          *ReplicationSafetyStore
-	EnforceLeaderWrites        bool
-	RequireHealthyReplicaReads bool
+	NodeName                            string
+	Journal                             *CommandJournal
+	DirtyTracker                        *LevelDBDirtyTracker
+	Topology                            *TopologyStore
+	Election                            *ElectionStore
+	Replicator                          *HTTPReplicator
+	ReplicationSafety                   *ReplicationSafetyStore
+	EnforceLeaderWrites                 bool
+	RequireHealthyReplicaReads          bool
+	inheritedReplicationFencingToken    uint64
+	inheritedReplicationFencingTokenSet bool
 }
 
 type preparedInternalReplicationPayload struct {
@@ -2225,6 +2227,10 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 	}
 	batchOptions := options
 	batchOptions.Replicator = nil
+	if fencingToken, present, _ := replicationFencingToken(request); present {
+		batchOptions.inheritedReplicationFencingToken = fencingToken
+		batchOptions.inheritedReplicationFencingTokenSet = true
+	}
 	prepared := make([]preparedInternalReplicationPayload, 0, len(payloads))
 	for idx, payload := range payloads {
 		preparedPayload, response, rejected := prepareInternalReplicationBatchPayload(payload, batchOptions, idx)
@@ -2289,7 +2295,13 @@ func prepareInternalReplicationBatchPayload(request CacheCommandRequest, options
 		}
 	}
 	prepared.request = request
-	token, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	token, response, handled, rejected := checkReplicationSafetyWithInheritedFencingToken(
+		request,
+		options.Topology,
+		options.ReplicationSafety,
+		options.inheritedReplicationFencingToken,
+		options.inheritedReplicationFencingTokenSet,
+	)
 	if handled {
 		if response.OK {
 			prepared.skipResponse = &response
@@ -2359,14 +2371,21 @@ func decodeInternalReplicationBatchValue(value interface{}) (CacheCommandRequest
 }
 
 func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
+	return checkReplicationSafetyWithInheritedFencingToken(request, topology, safety, 0, false)
+}
+
+func checkReplicationSafetyWithInheritedFencingToken(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore, inheritedFencingToken uint64, inheritedFencingTokenSet bool) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
 	switch normalizedCommand(request.Command) {
 	case "INTERNALSET", "INTERNALDEL", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
 	default:
 		return replicationSafetyToken{}, CacheCommandResponse{}, false, false
 	}
-	fencingToken, _, err := replicationFencingToken(request)
+	fencingToken, present, err := replicationFencingToken(request)
 	if err != nil {
 		return replicationSafetyToken{}, commandError("invalid replication fencing token"), true, true
+	}
+	if !present && inheritedFencingTokenSet {
+		fencingToken = inheritedFencingToken
 	}
 	localFencingToken := uint64(0)
 	if topology != nil {

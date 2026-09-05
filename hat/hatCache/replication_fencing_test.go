@@ -243,3 +243,25 @@ func TestReplicationSyncBatchWirePreservesFencingToken(t *testing.T) {
 		})
 	}
 }
+
+func TestReplicationBatchFencingTokenAppliesOnceAtEnvelope(t *testing.T) {
+	topology, err := NewTopologyStore(fencedReplicationTopology(42))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	request := replicationBatchEnvelopePayloadWithMetadataAndFencingToken(
+		[]CacheCommandRequest{{Command: "INTERNALSET", Key: "key", Value: `{"type":"string","string":"value"}`}},
+		"node-a", 1, topology.Fingerprint(), 42,
+	)
+	trie := newTestTrie(t)
+	response, rejected := executeCacheCommand(context.Background(), trie, request, commandExecutionOptions{
+		Topology:          topology,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand(fenced batch) = %#v rejected=%v, want success", response, rejected)
+	}
+	if value := trie.GetString("key"); value != "value" {
+		t.Fatalf("fenced batch value = %q, want value", value)
+	}
+}
