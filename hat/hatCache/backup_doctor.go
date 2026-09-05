@@ -116,6 +116,30 @@ func verifySnapshotBackupRoot(displayPath string, kind string, manifest BackupBu
 			report.OK = false
 			return report, err
 		}
+		journalFormat := DefaultCommandJournalFormat
+		if manifest.JournalFormat != "" {
+			journalFormat, err = ParseCommandJournalFormat(manifest.JournalFormat)
+			if err != nil {
+				return BackupDoctorReport{}, err
+			}
+		}
+		journal, err := OpenCommandJournalWithFormat(journalPath, journalFormat)
+		if err != nil {
+			return BackupDoctorReport{}, err
+		}
+		if _, err := journal.Replay(trie, metadata.JournalSequence); err != nil {
+			_ = journal.Close()
+			return BackupDoctorReport{}, err
+		}
+		report.RecoveredKeys = trie.Size()
+		report.JournalSequence = journal.Sequence()
+		if err := journal.Close(); err != nil {
+			return BackupDoctorReport{}, err
+		}
+	}
+	report.StateChecksum, err = backupStateChecksum(trie)
+	if err != nil {
+		return BackupDoctorReport{}, err
 	}
 	return report, nil
 }
@@ -241,6 +265,10 @@ func verifyPebbleBackupRoot(displayPath string, kind string, manifest BackupBund
 		report.OK = false
 		return report, err
 	}
+	report.StateChecksum, err = backupStateChecksum(trie)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
 	if manifest.Journal != "" {
 		journalPath := filepath.Join(root, filepath.FromSlash(manifest.Journal))
 		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
@@ -360,6 +388,7 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 	report := BackupDoctorReport{OK: true, Kind: "directory", Path: path}
 	trie := CreateHatTrie()
 	defer trie.Destroy()
+	stateTrie := trie
 
 	snapshotPath := firstExistingPath(filepath.Join(path, "snapshot.hc"), filepath.Join(path, "snapshot.json"))
 	var snapshotMetadata SnapshotMetadata
@@ -426,6 +455,7 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 		if report.RecoveredKeys == 0 {
 			report.RecoveredKeys = loaded.Size()
 		}
+		stateTrie = loaded
 	}
 
 	if report.Snapshot == nil && report.Journal == nil && report.LevelDB == nil {
@@ -434,6 +464,11 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 	if report.RecoveredKeys == 0 {
 		report.RecoveredKeys = trie.Size()
 	}
+	stateChecksum, err := backupStateChecksum(stateTrie)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	report.StateChecksum = stateChecksum
 	return report, nil
 }
 

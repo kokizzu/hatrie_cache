@@ -14,6 +14,7 @@ type DoctorReport struct {
 	PartitionValidation *PartitionValidation `json:"partition_validation,omitempty"`
 	RecoveredKeys       int                  `json:"recovered_keys,omitempty"`
 	JournalSequence     uint64               `json:"journal_sequence,omitempty"`
+	StateChecksum       string               `json:"state_checksum,omitempty"`
 }
 
 // DoctorSnapshot records verified snapshot contents.

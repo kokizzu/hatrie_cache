@@ -3463,3 +3463,10 @@ new segments. `InspectCommandJournal` and the daemon's startup scan fully
 decode archived frames, verify their checksums, and reject corrupted segments.
 Run `make benchmark-t041` to measure codec CPU and allocation cost on the local
 machine before enabling it for a workload.
+
+### Restore Rehearsal Checksums
+
+`RehearseRestore` verifies the recovered logical state twice: once from the
+source backup and once from the restored copy after journal replay. Its report
+includes `source_state_checksum`, `restored_state_checksum`, and
+`state_checksums_match`; a missing or mismatched checksum fails the rehearsal.

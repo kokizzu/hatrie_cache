@@ -15,17 +15,20 @@ type BackupBundleRestoreReport = hatBackup.RestoreReport
 type RestoreRehearsalOptions = hatBackup.RehearsalOptions
 
 type RestoreRehearsalReport struct {
-	OK              bool                           `json:"ok"`
-	Source          string                         `json:"source"`
-	SourceKind      string                         `json:"source_kind"`
-	WorkDir         string                         `json:"work_dir,omitempty"`
-	WorkDirKept     bool                           `json:"work_dir_kept"`
-	RestoredDir     string                         `json:"restored_dir"`
-	RecoveredKeys   int                            `json:"recovered_keys"`
-	JournalSequence uint64                         `json:"journal_sequence,omitempty"`
-	Backup          BackupDoctorReport             `json:"backup"`
-	Restored        BackupDoctorReport             `json:"restored"`
-	Runtime         *RestoreRehearsalRuntimeReport `json:"runtime,omitempty"`
+	OK                    bool                           `json:"ok"`
+	Source                string                         `json:"source"`
+	SourceKind            string                         `json:"source_kind"`
+	WorkDir               string                         `json:"work_dir,omitempty"`
+	WorkDirKept           bool                           `json:"work_dir_kept"`
+	RestoredDir           string                         `json:"restored_dir"`
+	RecoveredKeys         int                            `json:"recovered_keys"`
+	JournalSequence       uint64                         `json:"journal_sequence,omitempty"`
+	SourceStateChecksum   string                         `json:"source_state_checksum,omitempty"`
+	RestoredStateChecksum string                         `json:"restored_state_checksum,omitempty"`
+	StateChecksumsMatch   bool                           `json:"state_checksums_match"`
+	Backup                BackupDoctorReport             `json:"backup"`
+	Restored              BackupDoctorReport             `json:"restored"`
+	Runtime               *RestoreRehearsalRuntimeReport `json:"runtime,omitempty"`
 }
 
 type RestoreRehearsalRuntimeReport struct {
@@ -310,17 +313,26 @@ func RehearseRestore(path string, options RestoreRehearsalOptions) (RestoreRehea
 	if err != nil {
 		return RestoreRehearsalReport{}, err
 	}
+	if backup.StateChecksum == "" || restored.StateChecksum == "" {
+		return RestoreRehearsalReport{}, errors.New("hatriecache: restore rehearsal state checksum missing")
+	}
+	if backup.StateChecksum != restored.StateChecksum {
+		return RestoreRehearsalReport{}, fmt.Errorf("hatriecache: restore rehearsal state checksum mismatch: source=%s restored=%s", backup.StateChecksum, restored.StateChecksum)
+	}
 	return RestoreRehearsalReport{
-		OK:              true,
-		Source:          path,
-		SourceKind:      backup.Kind,
-		WorkDir:         workDir,
-		WorkDirKept:     workDirKept,
-		RestoredDir:     restoredDir,
-		RecoveredKeys:   restored.RecoveredKeys,
-		JournalSequence: restored.JournalSequence,
-		Backup:          backup,
-		Restored:        restored,
+		OK:                    true,
+		Source:                path,
+		SourceKind:            backup.Kind,
+		WorkDir:               workDir,
+		WorkDirKept:           workDirKept,
+		RestoredDir:           restoredDir,
+		RecoveredKeys:         restored.RecoveredKeys,
+		JournalSequence:       restored.JournalSequence,
+		SourceStateChecksum:   backup.StateChecksum,
+		RestoredStateChecksum: restored.StateChecksum,
+		StateChecksumsMatch:   true,
+		Backup:                backup,
+		Restored:              restored,
 	}, nil
 }
 

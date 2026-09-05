@@ -4555,3 +4555,35 @@ commit-t041:
 .PHONY: push-t041
 push-t041:
 \tbash ./scripts/push-t041.sh
+
+.PHONY: test-t069
+test-t069:
+\tbash ./scripts/test-t069.sh
+
+.PHONY: format-t069
+format-t069:
+\tbash ./scripts/format-t069.sh
+
+.PHONY: test-race-t069
+test-race-t069:
+\tbash ./scripts/test-race-t069.sh
+
+.PHONY: vet-t069
+vet-t069:
+\tbash ./scripts/vet-t069.sh
+
+.PHONY: review-t069
+review-t069:
+\tbash ./scripts/review-t069.sh
+
+.PHONY: stage-t069
+stage-t069:
+\tbash ./scripts/stage-t069.sh
+
+.PHONY: commit-t069
+commit-t069:
+\tbash ./scripts/commit-t069.sh
+
+.PHONY: push-t069
+push-t069:
+\tbash ./scripts/push-t069.sh
