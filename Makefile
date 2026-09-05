@@ -1273,6 +1273,15 @@ format-query-fingerprint:
 benchmark-query-fingerprint:
 	bash ./scripts/benchmark-query-fingerprint.sh
 
+test-row-binary:
+	bash ./scripts/test-row-binary.sh
+
+format-row-binary:
+	bash ./scripts/format-row-binary.sh
+
+benchmark-row-binary:
+	bash ./scripts/benchmark-row-binary.sh
+
 generate-proto:
 	./scripts/generate-proto.sh
 

@@ -177,7 +177,7 @@ name.
 - [x] C114 Adaptive async-insert batching.
 - [ ] C115 Parallel input parsing with deterministic error reporting.
 - [x] C116 Binary wire format negotiation.
-- [ ] C117 RowBinary-compatible encoding.
+- [x] C117 RowBinary-compatible encoding. `EncodeSQLRowBinary` and `DecodeSQLRowBinary` provide an explicit schema-aware RowBinary-style stream with little-endian fixed-width values, varint-length strings/bytes, nullable markers, strict validation, and bounded decoding; JSON/protobuf defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 - [x] C118 JSON row encoding for compatibility paths.
 - [x] C119 Arrow-compatible column transfer.
 - [ ] C120 Parquet import and export.

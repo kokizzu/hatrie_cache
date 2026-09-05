@@ -49,6 +49,22 @@ SHA-256 digest after grammar validation, while retaining fewer bytes per
 operation. The digest contains no literal values and is intended for grouping
 telemetry, not for reusing query results.
 
+## RowBinary-Style SQL Row Transfer
+
+These five `-count=5` runs used `make benchmark-row-binary` on an AMD Ryzen 9
+5950X. The workload encodes and decodes 128 rows with five typed columns. The
+JSON baseline uses the same rows and includes map keys; the RowBinary path uses
+the ordered schema supplied to both APIs.
+
+| Operation | RowBinary median | JSON median | CPU improvement | RowBinary heap / allocs | JSON heap / allocs | Wire size |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Encode | 14,843 ns/op | 120,711 ns/op | 8.13x faster | 12,536 B / 12 | 57,496 B / 1,410 | 3,840 vs 9,851 B (2.57x smaller) |
+| Decode | 41,103 ns/op | 246,546 ns/op | 6.00x faster | 53,362 B / 903 | 71,965 B / 2,686 | 3,840 vs 9,851 B (2.57x smaller) |
+
+The codec is opt-in because it requires an agreed column schema and returns
+typed Go values; JSON remains the compatibility default. See
+[SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
+
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
 families. It is a benchmarked feature/command coverage report, not a
