@@ -238,6 +238,7 @@ Materialize's Timely/Differential Dataflow runtime.
 
 - [x] M001 Incremental data-parallel dataflow for supported table paths.
 - [ ] M002 Generic `(data,time,diff)` multiset representation.
+- [x] M002a Exported differential row batch representation.
 - [ ] M003 Timely-style nested worker scopes.
 - [x] M004 Data-parallel map, filter, project, and reduce stages where supported.
 - [x] M005 Shared arrangements reused by multiple compatible queries.
@@ -245,6 +246,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M007 Arrangement reuse across subscriptions and point reads.
 - [x] M008 Arrangement compaction for old versions.
 - [ ] M009 Consolidation of equal data and opposite diffs.
+- [x] M009a Overflow-safe batch consolidation by key and time.
 - [x] M010 Reduce/group arrangements for typed tables.
 - [x] M011 Join arrangements for typed indexed tables.
 - [x] M012 Distinct arrangements for typed sources.
@@ -273,7 +275,9 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M035 Self-correcting materialized results for typed arrangements.
 - [x] M036 Retractions and insertions on typed updates.
 - [ ] M037 Generic negative-diff support for every SQL operator.
+- [x] M037a Signed negative diffs in the reusable batch primitive.
 - [ ] M038 Generic multiset duplicate preservation across all operators.
+- [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M039 Compaction constrained by active read frontiers.
 - [ ] M040 Append-only fast path selected from source metadata.
 - [ ] M041 Upsert-source semantics with key replacement.

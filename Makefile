@@ -5562,3 +5562,31 @@ commit-sql-row-binary-adaptive:
 .PHONY: push-sql-row-binary-adaptive
 push-sql-row-binary-adaptive:
 	sh ./scripts/deliver-sql-row-binary-adaptive.sh push
+
+.PHONY: test-sql-differential-rows
+test-sql-differential-rows:
+	sh ./scripts/test-sql-differential-rows.sh
+
+.PHONY: format-sql-differential-rows
+format-sql-differential-rows:
+	sh ./scripts/format-sql-differential-rows.sh
+
+.PHONY: test-race-sql-differential-rows
+test-race-sql-differential-rows:
+	sh ./scripts/test-race-sql-differential-rows.sh
+
+.PHONY: benchmark-sql-differential-rows
+benchmark-sql-differential-rows:
+	sh ./scripts/benchmark-sql-differential-rows.sh
+
+.PHONY: deliver-sql-differential-rows
+deliver-sql-differential-rows:
+	sh ./scripts/deliver-sql-differential-rows.sh preview
+
+.PHONY: commit-sql-differential-rows
+commit-sql-differential-rows:
+	sh ./scripts/deliver-sql-differential-rows.sh commit
+
+.PHONY: push-sql-differential-rows
+push-sql-differential-rows:
+	sh ./scripts/deliver-sql-differential-rows.sh push
