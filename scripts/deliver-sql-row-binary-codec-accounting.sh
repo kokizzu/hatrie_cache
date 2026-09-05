@@ -9,11 +9,15 @@ trap 'rm -rf "$tmp_dir"' EXIT
 index_file="$tmp_dir/index"
 
 git -C "$repo_root" show HEAD:Makefile > "$tmp_dir/Makefile"
-printf '\n.PHONY: benchmark-sql-row-binary-codec-accounting\nbenchmark-sql-row-binary-codec-accounting:\n\tbash ./scripts/benchmark-sql-row-binary-codec-accounting.sh\n\n.PHONY: deliver-sql-row-binary-codec-accounting\ndeliver-sql-row-binary-codec-accounting:\n\tbash ./scripts/deliver-sql-row-binary-codec-accounting.sh preview\n\n.PHONY: commit-sql-row-binary-codec-accounting\ncommit-sql-row-binary-codec-accounting:\n\tbash ./scripts/deliver-sql-row-binary-codec-accounting.sh commit\n\n.PHONY: push-sql-row-binary-codec-accounting\npush-sql-row-binary-codec-accounting:\n\tbash ./scripts/deliver-sql-row-binary-codec-accounting.sh push\n' >> "$tmp_dir/Makefile"
+if ! grep -Fq 'benchmark-sql-row-binary-codec-accounting:' "$tmp_dir/Makefile"; then
+	printf '\n.PHONY: benchmark-sql-row-binary-codec-accounting\nbenchmark-sql-row-binary-codec-accounting:\n\tbash ./scripts/benchmark-sql-row-binary-codec-accounting.sh\n\n.PHONY: deliver-sql-row-binary-codec-accounting\ndeliver-sql-row-binary-codec-accounting:\n\tbash ./scripts/deliver-sql-row-binary-codec-accounting.sh preview\n\n.PHONY: commit-sql-row-binary-codec-accounting\ncommit-sql-row-binary-codec-accounting:\n\tbash ./scripts/deliver-sql-row-binary-codec-accounting.sh commit\n\n.PHONY: push-sql-row-binary-codec-accounting\npush-sql-row-binary-codec-accounting:\n\tbash ./scripts/deliver-sql-row-binary-codec-accounting.sh push\n' >> "$tmp_dir/Makefile"
+fi
 
 git -C "$repo_root" show HEAD:INSPIRATION.md > "$tmp_dir/INSPIRATION.md"
-awk '/^- \[ \] C060 Compression ratio and decompression CPU accounting\.$/ { print; print "- [x] C060a Opt-in codec size and synchronous decode-time accounting."; next } { print }' "$tmp_dir/INSPIRATION.md" > "$tmp_dir/INSPIRATION.md.new"
-mv "$tmp_dir/INSPIRATION.md.new" "$tmp_dir/INSPIRATION.md"
+if ! grep -Fq 'C060a Opt-in codec size and synchronous decode-time accounting.' "$tmp_dir/INSPIRATION.md"; then
+	awk '/^- \[ \] C060 Compression ratio and decompression CPU accounting\.$/ { print; print "- [x] C060a Opt-in codec size and synchronous decode-time accounting."; next } { print }' "$tmp_dir/INSPIRATION.md" > "$tmp_dir/INSPIRATION.md.new"
+	mv "$tmp_dir/INSPIRATION.md.new" "$tmp_dir/INSPIRATION.md"
+fi
 
 GIT_INDEX_FILE="$index_file" git -C "$repo_root" read-tree HEAD
 for path in \
@@ -49,7 +53,6 @@ case "$mode" in
 		GIT_INDEX_FILE="$index_file" git -C "$repo_root" commit -m "feat(sql): add RowBinary codec accounting"
 		;;
 	push)
-		GIT_INDEX_FILE="$index_file" git -C "$repo_root" commit -m "feat(sql): add RowBinary codec accounting"
 		git -C "$repo_root" push origin HEAD:master
 		;;
 	*)
