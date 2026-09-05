@@ -190,6 +190,8 @@ message ReplicationStreamBatch {
   repeated string keys = 4;
   repeated bytes binary_values = 5;
   uint64 fencing_token = 6;
+  uint64 schema_version = 7;
+  string schema_fingerprint = 8;
 }
 
 message ReplicationStreamAck {

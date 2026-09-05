@@ -116,8 +116,13 @@ type MonitoringOptions struct {
 	// node is offline, timed out, in maintenance, or absent from topology.
 	// It is disabled by default for backward compatibility.
 	RequireHealthyReplicaReads bool
-	RuntimeConfig              map[string]interface{}
-	SQLFunctions               *SQLFunctionRegistry
+	// ReplicationSchema identifies the schema expected on internal replication.
+	ReplicationSchema ReplicationSchemaContract
+	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
+	// metadata on internal replication. It is disabled by default.
+	RequireReplicationSchemaCompatibility bool
+	RuntimeConfig                         map[string]interface{}
+	SQLFunctions                          *SQLFunctionRegistry
 	// SQLCatalog is optional declared metadata rendered by the monitoring UI.
 	// It is separate from live cache values and is served read-only.
 	SQLCatalog SQLCatalog
@@ -268,8 +273,12 @@ type commandExecutionOptions struct {
 	ReplicationSafety                   *ReplicationSafetyStore
 	EnforceLeaderWrites                 bool
 	RequireHealthyReplicaReads          bool
+	replicationSchema                   ReplicationSchemaContract
+	requireSchemaCompatibility          bool
 	inheritedReplicationFencingToken    uint64
 	inheritedReplicationFencingTokenSet bool
+	inheritedReplicationSchema          ReplicationSchemaContract
+	inheritedReplicationSchemaSet       bool
 }
 
 type preparedInternalReplicationPayload struct {
@@ -1647,6 +1656,8 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		ReplicationSafety:          handler.options.ReplicationSafety,
 		EnforceLeaderWrites:        handler.options.EnforceLeaderWrites,
 		RequireHealthyReplicaReads: handler.options.RequireHealthyReplicaReads,
+		replicationSchema:          handler.options.ReplicationSchema,
+		requireSchemaCompatibility: handler.options.RequireReplicationSchemaCompatibility,
 	})
 	status := http.StatusOK
 	if rejected {
@@ -1783,7 +1794,17 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if normalizedCommand(request.Command) == "BATCH" {
 		return executePublicCommandBatch(ctx, trie, request, options)
 	}
-	replicationToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	replicationToken, response, handled, rejected := checkReplicationSafetyWithMetadata(
+		request,
+		options.Topology,
+		options.ReplicationSafety,
+		options.replicationSchema,
+		options.requireSchemaCompatibility,
+		options.inheritedReplicationFencingToken,
+		options.inheritedReplicationFencingTokenSet,
+		options.inheritedReplicationSchema,
+		options.inheritedReplicationSchemaSet,
+	)
 	if handled {
 		return response, rejected
 	}
@@ -2217,7 +2238,17 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 	if err := ctx.Err(); err != nil {
 		return commandError(err.Error()), false
 	}
-	envelopeToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	envelopeToken, response, handled, rejected := checkReplicationSafetyWithMetadata(
+		request,
+		options.Topology,
+		options.ReplicationSafety,
+		options.replicationSchema,
+		options.requireSchemaCompatibility,
+		0,
+		false,
+		ReplicationSchemaContract{},
+		false,
+	)
 	if handled {
 		return response, rejected
 	}
@@ -2230,6 +2261,10 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 	if fencingToken, present, _ := replicationFencingToken(request); present {
 		batchOptions.inheritedReplicationFencingToken = fencingToken
 		batchOptions.inheritedReplicationFencingTokenSet = true
+	}
+	if schema, present, err := replicationSchemaMetadata(request); err == nil && present {
+		batchOptions.inheritedReplicationSchema = schema
+		batchOptions.inheritedReplicationSchemaSet = true
 	}
 	prepared := make([]preparedInternalReplicationPayload, 0, len(payloads))
 	for idx, payload := range payloads {
@@ -2295,12 +2330,16 @@ func prepareInternalReplicationBatchPayload(request CacheCommandRequest, options
 		}
 	}
 	prepared.request = request
-	token, response, handled, rejected := checkReplicationSafetyWithInheritedFencingToken(
+	token, response, handled, rejected := checkReplicationSafetyWithMetadata(
 		request,
 		options.Topology,
 		options.ReplicationSafety,
+		options.replicationSchema,
+		options.requireSchemaCompatibility,
 		options.inheritedReplicationFencingToken,
 		options.inheritedReplicationFencingTokenSet,
+		options.inheritedReplicationSchema,
+		options.inheritedReplicationSchemaSet,
 	)
 	if handled {
 		if response.OK {
@@ -2371,14 +2410,47 @@ func decodeInternalReplicationBatchValue(value interface{}) (CacheCommandRequest
 }
 
 func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
-	return checkReplicationSafetyWithInheritedFencingToken(request, topology, safety, 0, false)
+	return checkReplicationSafetyWithMetadata(request, topology, safety, ReplicationSchemaContract{}, false, 0, false, ReplicationSchemaContract{}, false)
 }
 
 func checkReplicationSafetyWithInheritedFencingToken(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore, inheritedFencingToken uint64, inheritedFencingTokenSet bool) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
+	return checkReplicationSafetyWithMetadata(request, topology, safety, ReplicationSchemaContract{}, false, inheritedFencingToken, inheritedFencingTokenSet, ReplicationSchemaContract{}, false)
+}
+
+func checkReplicationSafetyWithMetadata(
+	request CacheCommandRequest,
+	topology *TopologyStore,
+	safety *ReplicationSafetyStore,
+	localSchema ReplicationSchemaContract,
+	requireSchemaCompatibility bool,
+	inheritedFencingToken uint64,
+	inheritedFencingTokenSet bool,
+	inheritedSchema ReplicationSchemaContract,
+	inheritedSchemaSet bool,
+) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
 	switch normalizedCommand(request.Command) {
 	case "INTERNALSET", "INTERNALDEL", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
 	default:
 		return replicationSafetyToken{}, CacheCommandResponse{}, false, false
+	}
+	schema, schemaPresent, schemaErr := replicationSchemaMetadata(request)
+	if schemaErr != nil && (requireSchemaCompatibility || localSchema.Configured() || inheritedSchemaSet) {
+		return replicationSafetyToken{}, commandError("invalid replication schema contract"), true, true
+	}
+	if !schemaPresent && inheritedSchemaSet {
+		schema = inheritedSchema
+		schemaPresent = true
+	}
+	if requireSchemaCompatibility {
+		if !localSchema.Configured() {
+			return replicationSafetyToken{}, commandError("replication schema compatibility is not configured"), true, true
+		}
+		if !schemaPresent {
+			return replicationSafetyToken{}, commandError("replication schema contract is required"), true, true
+		}
+		if schema != localSchema {
+			return replicationSafetyToken{}, commandError("replication schema contract mismatch"), true, true
+		}
 	}
 	fencingToken, present, err := replicationFencingToken(request)
 	if err != nil {

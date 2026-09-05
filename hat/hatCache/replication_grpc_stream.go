@@ -63,6 +63,8 @@ type replicationGRPCStreamJob struct {
 	source              string
 	topologyFingerprint string
 	fencingToken        uint64
+	schemaVersion       uint64
+	schemaFingerprint   string
 	payloads            replicationSyncPayloadBatch
 	sequence            uint64
 	result              chan replicationGRPCStreamJobResult
@@ -299,11 +301,14 @@ func (target *replicationGRPCStreamTarget) collectFlight(first *replicationGRPCS
 }
 
 func replicationGRPCStreamJobsCompatible(left *replicationGRPCStreamJob, right *replicationGRPCStreamJob) bool {
-	return left.source == right.source && left.topologyFingerprint == right.topologyFingerprint && left.fencingToken == right.fencingToken
+	return left.source == right.source && left.topologyFingerprint == right.topologyFingerprint && left.fencingToken == right.fencingToken && left.schemaVersion == right.schemaVersion && left.schemaFingerprint == right.schemaFingerprint
 }
 
 func replicationGRPCStreamJobBytes(job *replicationGRPCStreamJob) int {
-	bytes := len(job.source) + len(job.topologyFingerprint)
+	bytes := len(job.source) + len(job.topologyFingerprint) + len(job.schemaFingerprint)
+	if job.schemaVersion > 0 {
+		bytes += 10
+	}
 	for idx := 0; idx < job.payloads.len(); idx++ {
 		payload := job.payloads.payload(idx)
 		bytes += len(payload.key) + len(payload.binaryValue)
@@ -318,6 +323,8 @@ func (flight *replicationGRPCStreamFlight) buildRequest(sequence uint64) {
 		Sequence:            sequence,
 		TopologyFingerprint: first.topologyFingerprint,
 		FencingToken:        first.fencingToken,
+		SchemaVersion:       first.schemaVersion,
+		SchemaFingerprint:   first.schemaFingerprint,
 		Keys:                make([]string, 0, flight.entries),
 		BinaryValues:        make([][]byte, 0, flight.entries),
 	}
@@ -480,11 +487,14 @@ func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group 
 
 	jobCtx, cancelJob := context.WithTimeout(replicationContext(ctx), session.replicator.timeout)
 	defer cancelJob()
+	schema := session.replicator.currentReplicationSchema()
 	job := &replicationGRPCStreamJob{
 		ctx:                 jobCtx,
 		source:              group.metadataSource,
 		topologyFingerprint: group.metadataTopology,
 		fencingToken:        group.metadataFencingToken,
+		schemaVersion:       schema.Version,
+		schemaFingerprint:   schema.Fingerprint,
 		payloads:            payloads,
 		result:              make(chan replicationGRPCStreamJobResult, 1),
 	}

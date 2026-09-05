@@ -72,6 +72,7 @@ type HTTPReplicatorOptions struct {
 	Context                  context.Context
 	Self                     string
 	Topology                 *TopologyStore
+	ReplicationSchema        ReplicationSchemaContract
 	Election                 *ElectionStore
 	Client                   *http.Client
 	Timeout                  time.Duration
@@ -99,6 +100,7 @@ type HTTPReplicator struct {
 	mu                       sync.RWMutex
 	self                     string
 	topology                 *TopologyStore
+	replicationSchema        ReplicationSchemaContract
 	election                 *ElectionStore
 	client                   *http.Client
 	timeout                  time.Duration
@@ -419,6 +421,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	replicator := &HTTPReplicator{
 		self:                     strings.TrimSpace(options.Self),
 		topology:                 options.Topology,
+		replicationSchema:        options.ReplicationSchema,
 		election:                 options.Election,
 		client:                   client,
 		timeout:                  timeout,
@@ -2364,6 +2367,9 @@ func (replicator *HTTPReplicator) annotateReplicationPayloadWithMetadata(payload
 			payload.Pairs[replicationMetaFencingToken] = strconv.FormatUint(fencingToken, 10)
 		}
 	}
+	for key, value := range replicationSchemaMetadataPairs(replicator.currentReplicationSchema()) {
+		payload.Pairs[key] = value
+	}
 	return payload
 }
 
@@ -3410,7 +3416,10 @@ func (replicator *HTTPReplicator) executeReplicationSyncTargetBatch(ctx context.
 				return replicationResponseRejectsTypedCommand(replicationBatchEnvelopeCommand, true, message)
 			},
 			func() (io.Reader, string, string, error) {
-				return replicationSyncBatchRequestBodyBatchWithFencingToken(payloads, command, source, sequence, fingerprint, replicator.currentReplicationFencingToken(), minCompressedReplicationRequestBytes)
+				return replicationSyncBatchRequestBodyBatchWithMetadata(payloads, command, replicationSyncBatchMetadata{
+					source: source, sequence: sequence, fingerprint: fingerprint,
+					fencingToken: replicator.currentReplicationFencingToken(), schema: replicator.currentReplicationSchema(),
+				}, minCompressedReplicationRequestBytes)
 			},
 		)
 		replicator.recordReplicationTargetLatency(target, time.Since(startedAt))
@@ -3539,7 +3548,7 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 	}
 
 	sequence := replicator.nextReplicationSequence()
-	payload := replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads, source, sequence, fingerprint, replicator.currentReplicationFencingToken())
+	payload := replicationBatchEnvelopePayloadWithMetadataAndSchemaAndFencingToken(payloads, source, sequence, fingerprint, replicator.currentReplicationSchema(), replicator.currentReplicationFencingToken())
 	result := replicator.executeReplicationTarget(ctx, target, payload)
 	if !result.UnsupportedTypedReplication {
 		return result
@@ -3549,7 +3558,7 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 		if err != nil {
 			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
 		}
-		result = replicator.executeReplicationTarget(ctx, target, replicationBatchEnvelopePayloadWithMetadataAndFencingToken(v2Payloads, source, sequence, fingerprint, replicator.currentReplicationFencingToken()))
+		result = replicator.executeReplicationTarget(ctx, target, replicationBatchEnvelopePayloadWithMetadataAndSchemaAndFencingToken(v2Payloads, source, sequence, fingerprint, replicator.currentReplicationSchema(), replicator.currentReplicationFencingToken()))
 		if !result.UnsupportedTypedReplication {
 			return result
 		}
@@ -3720,17 +3729,23 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 	var fingerprint string
 	var sequence uint64
 	var fencingToken uint64
+	var schema ReplicationSchemaContract
 	for idx, payload := range payloads {
 		payloadSource, payloadSequence, payloadFingerprint := replicationSafetyMetadata(payload)
 		payloadFencingToken, _, err := replicationFencingToken(payload)
 		if err != nil {
 			return CacheCommandRequest{}, fmt.Errorf("hatriecache: invalid replication fencing token in batch payload %d: %w", idx, err)
 		}
+		payloadSchema, _, err := replicationSchemaMetadata(payload)
+		if err != nil {
+			return CacheCommandRequest{}, fmt.Errorf("hatriecache: invalid replication schema contract in batch payload %d: %w", idx, err)
+		}
 		if idx == 0 {
 			source = payloadSource
 			fingerprint = payloadFingerprint
 			fencingToken = payloadFencingToken
-		} else if payloadSource != source || payloadFingerprint != fingerprint || payloadFencingToken != fencingToken {
+			schema = payloadSchema
+		} else if payloadSource != source || payloadFingerprint != fingerprint || payloadFencingToken != fencingToken || payloadSchema != schema {
 			return CacheCommandRequest{}, errors.New("hatriecache: replication batch metadata mismatch")
 		}
 		if payloadSequence > sequence {
@@ -3752,6 +3767,9 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 	if fencingToken > 0 {
 		pairs[replicationMetaFencingToken] = strconv.FormatUint(fencingToken, 10)
 	}
+	for key, value := range replicationSchemaMetadataPairs(schema) {
+		pairs[key] = value
+	}
 	if len(pairs) == 0 {
 		pairs = nil
 	}
@@ -3763,11 +3781,15 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 }
 
 func replicationBatchEnvelopePayloadWithMetadata(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string) CacheCommandRequest {
-	return replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads, source, sequence, fingerprint, 0)
+	return replicationBatchEnvelopePayloadWithMetadataAndSchemaAndFencingToken(payloads, source, sequence, fingerprint, ReplicationSchemaContract{}, 0)
 }
 
 func replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string, fencingToken uint64) CacheCommandRequest {
-	pairs := replicationMetadataPairs(source, sequence, fingerprint)
+	return replicationBatchEnvelopePayloadWithMetadataAndSchemaAndFencingToken(payloads, source, sequence, fingerprint, ReplicationSchemaContract{}, fencingToken)
+}
+
+func replicationBatchEnvelopePayloadWithMetadataAndSchemaAndFencingToken(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string, schema ReplicationSchemaContract, fencingToken uint64) CacheCommandRequest {
+	pairs := replicationMetadataPairsWithSchema(source, sequence, fingerprint, schema)
 	if fencingToken > 0 {
 		if pairs == nil {
 			pairs = Map{}
@@ -3782,6 +3804,10 @@ func replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads []Cache
 }
 
 func replicationMetadataPairs(source string, sequence uint64, fingerprint string) Map {
+	return replicationMetadataPairsWithSchema(source, sequence, fingerprint, ReplicationSchemaContract{})
+}
+
+func replicationMetadataPairsWithSchema(source string, sequence uint64, fingerprint string, schema ReplicationSchemaContract) Map {
 	pairs := Map{}
 	if source != "" {
 		pairs[replicationMetaSourceNode] = source
@@ -3792,6 +3818,9 @@ func replicationMetadataPairs(source string, sequence uint64, fingerprint string
 	if fingerprint != "" {
 		pairs[replicationMetaTopologyFingerprint] = fingerprint
 	}
+	for key, value := range replicationSchemaMetadataPairs(schema) {
+		pairs[key] = value
+	}
 	if len(pairs) == 0 {
 		return nil
 	}
@@ -3800,7 +3829,7 @@ func replicationMetadataPairs(source string, sequence uint64, fingerprint string
 
 func commandPairsWithoutReplicationMetadata(pairs Map) Map {
 	remaining := len(pairs)
-	for _, key := range []string{replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint, replicationMetaFencingToken} {
+	for _, key := range []string{replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint, replicationMetaFencingToken, replicationMetaSchemaVersion, replicationMetaSchemaFingerprint} {
 		if _, ok := pairs[key]; ok {
 			remaining--
 		}
@@ -3811,7 +3840,7 @@ func commandPairsWithoutReplicationMetadata(pairs Map) Map {
 	out := make(Map, remaining)
 	for key, value := range pairs {
 		switch key {
-		case replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint, replicationMetaFencingToken:
+		case replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint, replicationMetaFencingToken, replicationMetaSchemaVersion, replicationMetaSchemaFingerprint:
 			continue
 		default:
 			out[key] = value

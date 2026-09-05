@@ -1253,6 +1253,31 @@ Example fenced topology fragment:
 }
 ```
 
+Replication can optionally carry an exact schema contract. Derive the contract
+from the same `hatSchema.Schema` on the writer and receiver, configure it on
+both `hatCache.HTTPReplicatorOptions` and `hatCache.MonitoringOptions` (or
+`hatCache.CacheGRPCOptions`), then enable
+`RequireReplicationSchemaCompatibility` on receivers:
+
+```go
+contract := hatCache.NewReplicationSchemaContract(schema)
+replicator := hatCache.NewHTTPReplicator(hatCache.HTTPReplicatorOptions{
+    ReplicationSchema: contract,
+})
+monitoring := hatCache.MonitoringOptions{
+    ReplicationSchema:                     contract,
+    RequireReplicationSchemaCompatibility: true,
+}
+```
+
+The contract includes the schema version and a deterministic fingerprint of
+sources, columns, and constraints. A receiver rejects missing, malformed, or
+mismatched replication metadata before applying a command or batch. The gate
+and metadata are disabled by default, so rolling upgrades can deploy the
+supporting code first, configure the same contract on all nodes, and enable the
+gate after every sender is ready. This check validates compatibility; it does
+not execute schema migrations.
+
 For example:
 
 ```sh

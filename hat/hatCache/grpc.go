@@ -46,6 +46,11 @@ type CacheGRPCOptions struct {
 	ReplicationSafety                *ReplicationSafetyStore
 	EnforceLeaderWrites              bool
 	RequireHealthyReplicaReads       bool
+	// ReplicationSchema identifies the schema expected on internal replication.
+	ReplicationSchema ReplicationSchemaContract
+	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
+	// metadata on internal replication. It is disabled by default.
+	RequireReplicationSchemaCompatibility bool
 }
 
 type CacheGRPCServer struct {
@@ -328,6 +333,8 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 		ReplicationSafety:          server.options.ReplicationSafety,
 		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
 		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
+		replicationSchema:          server.options.ReplicationSchema,
+		requireSchemaCompatibility: server.options.RequireReplicationSchemaCompatibility,
 	})
 	if commandShouldJournal(command) {
 		server.auditGRPC(AuditEvent{
@@ -451,14 +458,18 @@ func (server *CacheGRPCServer) applyReplicationStreamBatch(ctx context.Context, 
 			}
 		}
 	}
-	request := replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads, batch.GetSource(), batch.GetSequence(), batch.GetTopologyFingerprint(), batch.GetFencingToken())
+	request := replicationBatchEnvelopePayloadWithMetadataAndSchemaAndFencingToken(payloads, batch.GetSource(), batch.GetSequence(), batch.GetTopologyFingerprint(), ReplicationSchemaContract{
+		Version: batch.GetSchemaVersion(), Fingerprint: batch.GetSchemaFingerprint(),
+	}, batch.GetFencingToken())
 	response, _ := executeCacheCommand(ctx, server.trie, request, commandExecutionOptions{
-		NodeName:          server.options.NodeName,
-		Journal:           server.options.Journal,
-		DirtyTracker:      server.options.DirtyTracker,
-		Topology:          server.options.Topology,
-		Election:          server.options.Election,
-		ReplicationSafety: server.options.ReplicationSafety,
+		NodeName:                   server.options.NodeName,
+		Journal:                    server.options.Journal,
+		DirtyTracker:               server.options.DirtyTracker,
+		Topology:                   server.options.Topology,
+		Election:                   server.options.Election,
+		ReplicationSafety:          server.options.ReplicationSafety,
+		replicationSchema:          server.options.ReplicationSchema,
+		requireSchemaCompatibility: server.options.RequireReplicationSchemaCompatibility,
 	})
 	ack.Ok = response.OK
 	ack.Message = response.Message

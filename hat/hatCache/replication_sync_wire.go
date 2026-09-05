@@ -252,6 +252,14 @@ type replicationSyncPayloadBatch struct {
 	count   uint32
 }
 
+type replicationSyncBatchMetadata struct {
+	source       string
+	sequence     uint64
+	fingerprint  string
+	fencingToken uint64
+	schema       ReplicationSchemaContract
+}
+
 func (batch replicationSyncPayloadBatch) len() int {
 	if batch.arena != nil {
 		if batch.indexes == nil {
@@ -284,7 +292,13 @@ func replicationSyncBatchRequestBodyBatch(payloads replicationSyncPayloadBatch, 
 }
 
 func replicationSyncBatchRequestBodyBatchWithFencingToken(payloads replicationSyncPayloadBatch, command string, source string, sequence uint64, fingerprint string, fencingToken uint64, compressionThreshold int) (io.Reader, string, string, error) {
-	size := replicationSyncBatchProtoSizeBatchWithFencingToken(payloads, command, source, sequence, fingerprint, fencingToken)
+	return replicationSyncBatchRequestBodyBatchWithMetadata(payloads, command, replicationSyncBatchMetadata{
+		source: source, sequence: sequence, fingerprint: fingerprint, fencingToken: fencingToken,
+	}, compressionThreshold)
+}
+
+func replicationSyncBatchRequestBodyBatchWithMetadata(payloads replicationSyncPayloadBatch, command string, metadata replicationSyncBatchMetadata, compressionThreshold int) (io.Reader, string, string, error) {
+	size := replicationSyncBatchProtoSizeBatchWithMetadata(payloads, command, metadata)
 	if compressionThreshold > 0 && size >= compressionThreshold {
 		var release func()
 		if payloads.arena != nil {
@@ -292,13 +306,13 @@ func replicationSyncBatchRequestBodyBatchWithFencingToken(payloads replicationSy
 			release = payloads.arena.bodyWriters.Done
 		}
 		body := jsonwire.StreamingGzipWriterReaderWithRelease(func(writer io.Writer) error {
-			return writeReplicationSyncBatchProtoBatchWithFencingToken(writer, payloads, command, source, sequence, fingerprint, fencingToken)
+			return writeReplicationSyncBatchProtoBatchWithMetadata(writer, payloads, command, metadata)
 		}, release)
 		return body, commandWireContentTypeProtobuf, "gzip", nil
 	}
 
 	data := acquireCommandWireBuffer(size)
-	data = appendReplicationSyncBatchProtoBatchWithFencingToken(data, payloads, command, source, sequence, fingerprint, fencingToken)
+	data = appendReplicationSyncBatchProtoBatchWithMetadata(data, payloads, command, metadata)
 	body, contentEncoding, err := jsonwire.EncodedRequestBodyWithRelease(data, 0, releaseCommandWireBuffer)
 	if err != nil {
 		releaseCommandWireBuffer(data)
@@ -316,18 +330,28 @@ func replicationSyncBatchProtoSizeBatch(payloads replicationSyncPayloadBatch, co
 }
 
 func replicationSyncBatchProtoSizeBatchWithFencingToken(payloads replicationSyncPayloadBatch, command string, source string, sequence uint64, fingerprint string, fencingToken uint64) int {
+	return replicationSyncBatchProtoSizeBatchWithMetadata(payloads, command, replicationSyncBatchMetadata{
+		source: source, sequence: sequence, fingerprint: fingerprint, fencingToken: fencingToken,
+	})
+}
+
+func replicationSyncBatchProtoSizeBatchWithMetadata(payloads replicationSyncPayloadBatch, command string, metadata replicationSyncBatchMetadata) int {
 	size := protoStringFieldSize(1, replicationBatchEnvelopeCommand)
-	if source != "" {
-		size += protoMapStringEntryFieldSize(6, replicationMetaSourceNode, source)
+	if metadata.source != "" {
+		size += protoMapStringEntryFieldSize(6, replicationMetaSourceNode, metadata.source)
 	}
-	if sequence > 0 {
-		size += protoMapStringEntryFieldSize(6, replicationMetaSequence, strconv.FormatUint(sequence, 10))
+	if metadata.sequence > 0 {
+		size += protoMapStringEntryFieldSize(6, replicationMetaSequence, strconv.FormatUint(metadata.sequence, 10))
 	}
-	if fingerprint != "" {
-		size += protoMapStringEntryFieldSize(6, replicationMetaTopologyFingerprint, fingerprint)
+	if metadata.fingerprint != "" {
+		size += protoMapStringEntryFieldSize(6, replicationMetaTopologyFingerprint, metadata.fingerprint)
 	}
-	if fencingToken > 0 {
-		size += protoMapStringEntryFieldSize(6, replicationMetaFencingToken, strconv.FormatUint(fencingToken, 10))
+	if metadata.fencingToken > 0 {
+		size += protoMapStringEntryFieldSize(6, replicationMetaFencingToken, strconv.FormatUint(metadata.fencingToken, 10))
+	}
+	if version, fingerprint, ok := replicationSchemaMetadataWireValues(metadata.schema); ok {
+		size += protoMapStringEntryFieldSize(6, replicationMetaSchemaVersion, version)
+		size += protoMapStringEntryFieldSize(6, replicationMetaSchemaFingerprint, fingerprint)
 	}
 	for idx := 0; idx < payloads.len(); idx++ {
 		payload := payloads.payload(idx)
@@ -365,18 +389,28 @@ func appendReplicationSyncBatchProtoBatch(data []byte, payloads replicationSyncP
 }
 
 func appendReplicationSyncBatchProtoBatchWithFencingToken(data []byte, payloads replicationSyncPayloadBatch, command string, source string, sequence uint64, fingerprint string, fencingToken uint64) []byte {
+	return appendReplicationSyncBatchProtoBatchWithMetadata(data, payloads, command, replicationSyncBatchMetadata{
+		source: source, sequence: sequence, fingerprint: fingerprint, fencingToken: fencingToken,
+	})
+}
+
+func appendReplicationSyncBatchProtoBatchWithMetadata(data []byte, payloads replicationSyncPayloadBatch, command string, metadata replicationSyncBatchMetadata) []byte {
 	data = appendProtoStringField(data, 1, replicationBatchEnvelopeCommand)
-	if source != "" {
-		data = appendProtoMapStringEntryField(data, 6, replicationMetaSourceNode, source)
+	if metadata.source != "" {
+		data = appendProtoMapStringEntryField(data, 6, replicationMetaSourceNode, metadata.source)
 	}
-	if sequence > 0 {
-		data = appendProtoMapStringEntryField(data, 6, replicationMetaSequence, strconv.FormatUint(sequence, 10))
+	if metadata.sequence > 0 {
+		data = appendProtoMapStringEntryField(data, 6, replicationMetaSequence, strconv.FormatUint(metadata.sequence, 10))
 	}
-	if fingerprint != "" {
-		data = appendProtoMapStringEntryField(data, 6, replicationMetaTopologyFingerprint, fingerprint)
+	if metadata.fingerprint != "" {
+		data = appendProtoMapStringEntryField(data, 6, replicationMetaTopologyFingerprint, metadata.fingerprint)
 	}
-	if fencingToken > 0 {
-		data = appendProtoMapStringEntryField(data, 6, replicationMetaFencingToken, strconv.FormatUint(fencingToken, 10))
+	if metadata.fencingToken > 0 {
+		data = appendProtoMapStringEntryField(data, 6, replicationMetaFencingToken, strconv.FormatUint(metadata.fencingToken, 10))
+	}
+	if version, fingerprint, ok := replicationSchemaMetadataWireValues(metadata.schema); ok {
+		data = appendProtoMapStringEntryField(data, 6, replicationMetaSchemaVersion, version)
+		data = appendProtoMapStringEntryField(data, 6, replicationMetaSchemaFingerprint, fingerprint)
 	}
 	for idx := 0; idx < payloads.len(); idx++ {
 		data = appendReplicationSyncPayloadProto(data, payloads.payload(idx), command)
@@ -420,21 +454,31 @@ func writeReplicationSyncBatchProtoBatch(writer io.Writer, payloads replicationS
 }
 
 func writeReplicationSyncBatchProtoBatchWithFencingToken(writer io.Writer, payloads replicationSyncPayloadBatch, command string, source string, sequence uint64, fingerprint string, fencingToken uint64) error {
+	return writeReplicationSyncBatchProtoBatchWithMetadata(writer, payloads, command, replicationSyncBatchMetadata{
+		source: source, sequence: sequence, fingerprint: fingerprint, fencingToken: fencingToken,
+	})
+}
+
+func writeReplicationSyncBatchProtoBatchWithMetadata(writer io.Writer, payloads replicationSyncPayloadBatch, command string, metadata replicationSyncBatchMetadata) error {
 	chunk := replicationProtoChunkPool.Get().([]byte)[:0]
 	defer replicationProtoChunkPool.Put(chunk[:0])
 
 	chunk = appendProtoStringField(chunk, 1, replicationBatchEnvelopeCommand)
-	if source != "" {
-		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaSourceNode, source)
+	if metadata.source != "" {
+		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaSourceNode, metadata.source)
 	}
-	if sequence > 0 {
-		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaSequence, strconv.FormatUint(sequence, 10))
+	if metadata.sequence > 0 {
+		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaSequence, strconv.FormatUint(metadata.sequence, 10))
 	}
-	if fingerprint != "" {
-		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaTopologyFingerprint, fingerprint)
+	if metadata.fingerprint != "" {
+		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaTopologyFingerprint, metadata.fingerprint)
 	}
-	if fencingToken > 0 {
-		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaFencingToken, strconv.FormatUint(fencingToken, 10))
+	if metadata.fencingToken > 0 {
+		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaFencingToken, strconv.FormatUint(metadata.fencingToken, 10))
+	}
+	if version, fingerprint, ok := replicationSchemaMetadataWireValues(metadata.schema); ok {
+		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaSchemaVersion, version)
+		chunk = appendProtoMapStringEntryField(chunk, 6, replicationMetaSchemaFingerprint, fingerprint)
 	}
 	for idx := 0; idx < payloads.len(); idx++ {
 		payload := payloads.payload(idx)

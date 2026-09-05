@@ -425,7 +425,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T065 Failure-domain-aware replica placement. Topology nodes carry optional `failure_domain` metadata through JSON and native gRPC; `cluster add-replica` and `cluster join` accept `-failure-domain` plus opt-in `-min-failure-domains N` (default `0`) and reject placements that do not meet the requested distinct-domain count.
 - [ ] T066 Cross-region replication with explicit RPO/RTO.
 - [x] T067 Split-brain fencing token. An optional non-zero topology `fencing_token` is monotonic in `TopologyStore`, included in the topology fingerprint and native gRPC topology, attached to replication writes and batch envelopes, and mismatched or missing non-zero tokens are rejected before apply; token `0` preserves legacy behavior. This is operator-controlled stale-writer fencing, not quorum consensus.
-- [ ] T068 Schema-change replication compatibility checks.
+- [x] T068 Schema-change replication compatibility checks. `hatSchema.Schema.Fingerprint` is deterministic across source-map order, and an opt-in version plus fingerprint contract is carried through HTTP command/batch/compact-sync and native gRPC replication; receivers reject missing, malformed, or mismatched contracts before apply while the default remains off.
 - [x] T069 Recovery rehearsal that compares checksums after replay.
 
 ### Partitioning And Sharding
