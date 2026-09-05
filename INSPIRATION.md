@@ -194,7 +194,7 @@ name.
 - [x] C130 Recovery checkpoints and replay validation.
 - [x] C131 Metrics and health endpoints are opt-in.
 - [ ] C132 System tables for parts, mutations, and query history.
-- [ ] C133 Query log retention and sampling policy.
+- [x] C133 Query log retention and sampling policy - SQLQueryManager provides bounded privacy-safe history with deterministic configurable completion sampling and no SQL-text retention (see QUERY_HISTORY.md).
 - [x] C134 OpenTelemetry spans for query phases. `QueryTraceRecorder.OpenTelemetrySpans` exposes SDK-neutral root/query and operator child spans with OTLP-width IDs, status, counters, cloned attributes, and documented end-anchored phase timing. It is opt-in and keeps SQL/error/row data out of exported spans; see [QUERY_TRACING.md](QUERY_TRACING.md).
 - [ ] C135 Trace IDs carried through remote work.
 - [x] C136 Per-tenant resource quotas - NamespaceQueryGovernor applies immutable, tightening per-namespace resource policies suitable for tenant, user, or source isolation (see TENANT_RESOURCE_LIMITS.md).

@@ -62,6 +62,9 @@ func (err *SQLQueryCanceledError) Unwrap() error { return context.Canceled }
 // SQLQueryManagerOptions configures the bounded operator status history.
 type SQLQueryManagerOptions struct {
 	HistoryCapacity int
+	// HistorySampleEvery retains every Nth completed status. Zero or one
+	// retains every status, preserving the legacy behavior.
+	HistorySampleEvery int
 }
 
 // SQLQueryManager owns cancellation contexts for opt-in SQL executions. It
@@ -70,6 +73,8 @@ type SQLQueryManager struct {
 	mu              sync.Mutex
 	nextID          uint64
 	historyCapacity int
+	historySampleEvery int
+	historySampleCount uint64
 	active          map[string]*managedSQLQuery
 	history         []SQLQueryStatus
 	historyStart    int
@@ -83,18 +88,26 @@ type managedSQLQuery struct {
 // NewSQLQueryManager creates a manager with bounded completed-query history.
 // A nonpositive capacity selects DefaultSQLQueryManagerHistoryCapacity.
 func NewSQLQueryManager(historyCapacity int) *SQLQueryManager {
+	return newSQLQueryManager(historyCapacity, 0)
+}
+
+func newSQLQueryManager(historyCapacity, historySampleEvery int) *SQLQueryManager {
 	if historyCapacity <= 0 {
 		historyCapacity = DefaultSQLQueryManagerHistoryCapacity
 	}
+	if historySampleEvery < 0 {
+		historySampleEvery = 0
+	}
 	return &SQLQueryManager{
-		historyCapacity: historyCapacity,
-		active:          make(map[string]*managedSQLQuery),
+		historyCapacity:    historyCapacity,
+		historySampleEvery: historySampleEvery,
+		active:              make(map[string]*managedSQLQuery),
 	}
 }
 
 // NewSQLQueryManagerWithOptions creates a manager from explicit options.
 func NewSQLQueryManagerWithOptions(options SQLQueryManagerOptions) *SQLQueryManager {
-	return NewSQLQueryManager(options.HistoryCapacity)
+	return newSQLQueryManager(options.HistoryCapacity, options.HistorySampleEvery)
 }
 
 // Execute runs one query under a manager-owned cancellation context. When
@@ -250,6 +263,11 @@ func (manager *SQLQueryManager) History() []SQLQueryStatus {
 }
 
 func (manager *SQLQueryManager) appendHistoryLocked(status SQLQueryStatus) {
+	sampleCount := manager.historySampleCount
+	manager.historySampleCount++
+	if manager.historySampleEvery > 1 && sampleCount%uint64(manager.historySampleEvery) != 0 {
+		return
+	}
 	if len(manager.history) < manager.historyCapacity {
 		manager.history = append(manager.history, status)
 		return

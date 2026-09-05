@@ -5454,3 +5454,27 @@ commit-tenant-resource-limits:
 .PHONY: push-tenant-resource-limits
 push-tenant-resource-limits:
 	sh ./scripts/deliver-tenant-resource-limits.sh push
+
+.PHONY: test-query-history-sampling
+test-query-history-sampling:
+	sh ./scripts/test-query-history-sampling.sh test
+
+.PHONY: race-query-history-sampling
+race-query-history-sampling:
+	sh ./scripts/test-query-history-sampling.sh race
+
+.PHONY: format-query-history-sampling
+format-query-history-sampling:
+	sh ./scripts/test-query-history-sampling.sh format
+
+.PHONY: inspect-query-history-sampling-delivery
+inspect-query-history-sampling-delivery:
+	sh ./scripts/deliver-query-history-sampling.sh inspect
+
+.PHONY: commit-query-history-sampling
+commit-query-history-sampling:
+	sh ./scripts/deliver-query-history-sampling.sh commit
+
+.PHONY: push-query-history-sampling
+push-query-history-sampling:
+	sh ./scripts/deliver-query-history-sampling.sh push
