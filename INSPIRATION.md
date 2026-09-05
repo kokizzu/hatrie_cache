@@ -181,7 +181,7 @@ name.
 - [x] C118 JSON row encoding for compatibility paths.
 - [x] C119 Arrow-compatible column transfer.
 - [x] C120 Parquet import and export. `ExternalTables` provides `ExportParquet`, `ImportParquet`, and `WriteParquet` over the existing in-memory external-table registry; round-trip tests and `BenchmarkExternalTablesExportTransfer` cover the path.
-- [ ] C121 Native compressed block transfer with independent blocks.
+- [x] C121 Native compressed block transfer with independent blocks. `hatCodec.EncodeCompressedBlocks` and `DecodeCompressedBlocks` provide an opt-in `HCB1` stream with independently bounded raw/DEFLATE blocks, raw fallback, and CRC32 validation; JSON/protobuf/gzip defaults remain unchanged. The measured tradeoff is faster encoding but larger wire output and slower decoding than one gzip stream. See [COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
 - [x] C122 Configurable wire compression.
 - [ ] C123 Compression level negotiation per client.
 - [ ] C124 Column statistics in wire metadata.

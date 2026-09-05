@@ -65,6 +65,25 @@ The codec is opt-in because it requires an agreed column schema and returns
 typed Go values; JSON remains the compatibility default. See
 [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 
+## Independent Compressed Blocks
+
+These five `-count=5` runs used `make benchmark-compressed-blocks` on an AMD
+Ryzen 9 5950X. The workload uses the same repetitive 1.3 MiB payload for an
+opt-in 64 KiB `HCB1` stream and a single `gzip.BestSpeed` stream. The block
+stream reports its encoded wire size through the `wire-B` benchmark metric.
+
+| Operation | Independent blocks | Single gzip | Relative result |
+| --- | ---: | ---: | --- |
+| Encode | 324,365 ns/op; 1,429,946 B; 23 allocs | 543,444 ns/op; 1,211,152 B; 25 allocs | 1.68x faster; 1.18x higher heap; 1.09x fewer allocs |
+| Decode | 294,150 ns/op; 817,959 B; 31 allocs | 201,512 ns/op; 507,274 B; 25 allocs | 1.46x slower; 1.61x higher heap; 1.24x more allocs |
+| Encoded wire size | 1,710 B | 1,492 B | 1.15x larger |
+
+Independent blocks are therefore a recovery and integrity feature, not a
+universal gzip performance replacement. They are opt-in so callers can choose
+block-local validation and bounded transfer units only where those properties
+justify the decode, heap, and bandwidth costs. See
+[COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
+
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
 families. It is a benchmarked feature/command coverage report, not a

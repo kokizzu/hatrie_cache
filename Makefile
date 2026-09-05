@@ -1282,6 +1282,15 @@ format-row-binary:
 benchmark-row-binary:
 	bash ./scripts/benchmark-row-binary.sh
 
+test-compressed-blocks:
+	bash ./scripts/test-compressed-blocks.sh
+
+format-compressed-blocks:
+	bash ./scripts/format-compressed-blocks.sh
+
+benchmark-compressed-blocks:
+	bash ./scripts/benchmark-compressed-blocks.sh
+
 generate-proto:
 	./scripts/generate-proto.sh
 
