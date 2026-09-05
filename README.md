@@ -3765,3 +3765,18 @@ When the cache is enabled, unspecified defaults remain `MinReads=2`,
 unless explicitly set to `true`. This changes neither wire nor persistence
 formats. See [BENCHMARK.md](BENCHMARK.md#sql-sparse-primary-mark-pruning) for
 the measured selective-query result and full-range control.
+
+## SQL Numeric Predicate Reordering
+
+Columnar SQL scans automatically evaluate direct numeric predicates in a
+selectivity-informed order when segment min/max statistics are available. For
+example, in `WHERE event.broad >= 0 AND event.narrow = 1`, a mark that can
+match only the second predicate is checked first, so rows rejected by it do
+not require the broad field read.
+
+This optimization has no configuration flag and no format change. It is
+bounded to conjunctions of at most eight direct numeric comparisons. Missing,
+invalid, or incomplete segment statistics, larger conjunctions, and all other
+SQL shapes retain the original predicate order. See
+[BENCHMARK.md](BENCHMARK.md#sql-numeric-predicate-reordering) for the measured
+CPU, allocation, and fallback tradeoffs.

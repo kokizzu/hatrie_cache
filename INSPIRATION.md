@@ -123,7 +123,7 @@ name.
 - [x] C063 Projection pruning through joins and aggregates.
 - [x] C064 Constant and literal normalization for reusable plans.
 - [x] C065 Constant folding across all scalar expressions - deterministic row-independent CAST, scalar functions, CASE, IN, BETWEEN, IS NULL, and REGEXP expressions are folded after parameter binding; unsupported/custom/aggregate expressions retain the established path. See [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md).
-- [ ] C066 Predicate reordering by estimated cost and selectivity.
+- [x] C066 Predicate reordering by estimated cost and selectivity. Direct numeric columnar conjunctions reorder up to eight predicates using available segment min/max selectivity estimates; the original order remains unchanged without statistics or for larger conjunctions.
 - [ ] C067 Common-subexpression elimination.
 - [ ] C068 Short-circuit evaluation for expensive predicates.
 - [x] C069 Expression indexes for supported scalar expressions.

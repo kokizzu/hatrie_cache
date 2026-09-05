@@ -15986,3 +15986,36 @@ BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-3
 BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 52 22101894 ns/op 3840 B/op 20 allocs/op
 BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 54 21952096 ns/op 3840 B/op 20 allocs/op
 ```
+
+## SQL Numeric Predicate Reordering
+
+Five-run local benchmark on an AMD Ryzen 9 5950X, Go `amd64`, using a
+262,144-row columnar source with 256 rows per mark. The query starts with a
+broad `broad >= 0` predicate followed by a predicate matching one mark. The
+legacy path preserves that order; the candidate uses available numeric mark
+statistics to evaluate the selective predicate first.
+
+| Workload | Legacy predicate order | Mark-selectivity order | Improvement |
+| --- | ---: | ---: | ---: |
+| `broad >= 0 AND narrow = 1` | 7.874 ms; 98,216 B; 564 allocs | 4.449 ms; 98,216 B; 564 allocs | 1.77x faster; same transient heap and allocations |
+
+The reorder is limited to direct numeric `AND` predicates, at most eight
+predicates, and fields with usable segment bounds. Without statistics, or for
+larger/unsupported conjunctions, the original order remains unchanged. The
+comparison measures query CPU only; it does not claim a resident-memory
+reduction and does not add a wire or persistence format.
+
+Raw output from `make benchmark-sql-predicate-order`:
+
+```text
+BenchmarkSQLColumnarNumericPredicateOrder/legacy_order-32          152  7725548 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/legacy_order-32          148  8027960 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/legacy_order-32          150  7854226 ns/op  98217 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/legacy_order-32          160  7873648 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/legacy_order-32          150  8662474 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 278  4387392 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 242  4602055 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 271  4451113 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 274  4448935 ns/op  98216 B/op  564 allocs/op
+BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 265  4394659 ns/op  98216 B/op  564 allocs/op
+```

@@ -7552,6 +7552,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}
 		return result, true, nil
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
+		predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 			for _, predicate := range predicates {
@@ -7666,6 +7667,7 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(candidateField), candidateField, batch.Rows)
 		}
 	}
+	predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 	_, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	if q.where.kind != "" && !dictionaryINFilter && len(predicates) == 0 {
 		return SQLQueryResult{}, false, nil
@@ -8639,6 +8641,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 	filterDictionaryField, filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
 	filterDictionaryINField, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	filterCode, filterFound := uint32(0), false
@@ -8933,6 +8936,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 	filterDictionaryField, filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
 	filterDictionaryINField, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
 	filterCode, filterFound := uint32(0), false

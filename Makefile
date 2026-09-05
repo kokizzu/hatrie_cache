@@ -2527,6 +2527,21 @@ benchmark-sql-sparse-primary:
 commit-sql-sparse-primary:
 	sh ./scripts/commit-sql-sparse-primary.sh
 
+.PHONY: test-sql-predicate-order
+test-sql-predicate-order:
+\tsh ./scripts/test-sql-predicate-order.sh
+
+.PHONY: benchmark-sql-predicate-order
+benchmark-sql-predicate-order:
+\tsh ./scripts/benchmark-sql-predicate-order.sh
+
+.PHONY: format-sql-predicate-order
+format-sql-predicate-order:
+\tsh ./scripts/format-sql-predicate-order.sh
+
+.PHONY: commit-sql-predicate-order
+commit-sql-predicate-order:
+\tsh ./scripts/commit-sql-predicate-order.sh
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
