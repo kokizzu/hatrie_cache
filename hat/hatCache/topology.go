@@ -2,6 +2,7 @@ package hatCache
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"os"
@@ -136,6 +137,16 @@ func (store *TopologyStore) Fingerprint() string {
 	return store.fingerprint
 }
 
+// FencingToken returns the current topology fencing token.
+func (store *TopologyStore) FencingToken() uint64 {
+	if store == nil {
+		return 0
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.topology.FencingToken
+}
+
 // VerifiesReplicationFingerprint reports whether the store has enough cluster
 // routing metadata to reject replication from a different topology.
 func (store *TopologyStore) VerifiesReplicationFingerprint() bool {
@@ -159,14 +170,17 @@ func (store *TopologyStore) Set(topology ClusterTopology) error {
 	fingerprint := normalized.Fingerprint()
 	verifiesFingerprint := normalizedTopologyVerifiesReplicationFingerprint(normalized)
 	hasMaintenance := topologyHasMaintenance(normalized)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if current := store.topology.FencingToken; current > 0 && normalized.FencingToken < current {
+		return fmt.Errorf("hatriecache: topology fencing token %d is older than current token %d", normalized.FencingToken, current)
+	}
 	if store.path != "" {
 		if err := SaveTopology(store.path, normalized); err != nil {
 			return err
 		}
 	}
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
 	store.topology = normalized
 	store.fingerprint = fingerprint
 	store.verifiesFingerprint = verifiesFingerprint
@@ -396,6 +410,7 @@ func cloneTopology(topology ClusterTopology) ClusterTopology {
 		BucketCount:  topology.BucketCount,
 		BucketRanges: cloneBucketRanges(topology.BucketRanges),
 		Self:         topology.Self,
+		FencingToken: topology.FencingToken,
 		Nodes:        cloneNodes(topology.Nodes),
 		Shards:       cloneShards(topology.Shards),
 	}

@@ -62,6 +62,7 @@ type replicationGRPCStreamJob struct {
 	ctx                 context.Context
 	source              string
 	topologyFingerprint string
+	fencingToken        uint64
 	payloads            replicationSyncPayloadBatch
 	sequence            uint64
 	result              chan replicationGRPCStreamJobResult
@@ -298,7 +299,7 @@ func (target *replicationGRPCStreamTarget) collectFlight(first *replicationGRPCS
 }
 
 func replicationGRPCStreamJobsCompatible(left *replicationGRPCStreamJob, right *replicationGRPCStreamJob) bool {
-	return left.source == right.source && left.topologyFingerprint == right.topologyFingerprint
+	return left.source == right.source && left.topologyFingerprint == right.topologyFingerprint && left.fencingToken == right.fencingToken
 }
 
 func replicationGRPCStreamJobBytes(job *replicationGRPCStreamJob) int {
@@ -316,6 +317,7 @@ func (flight *replicationGRPCStreamFlight) buildRequest(sequence uint64) {
 		Source:              first.source,
 		Sequence:            sequence,
 		TopologyFingerprint: first.topologyFingerprint,
+		FencingToken:        first.fencingToken,
 		Keys:                make([]string, 0, flight.entries),
 		BinaryValues:        make([][]byte, 0, flight.entries),
 	}
@@ -482,6 +484,7 @@ func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group 
 		ctx:                 jobCtx,
 		source:              group.metadataSource,
 		topologyFingerprint: group.metadataTopology,
+		fencingToken:        group.metadataFencingToken,
 		payloads:            payloads,
 		result:              make(chan replicationGRPCStreamJobResult, 1),
 	}

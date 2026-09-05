@@ -1232,6 +1232,27 @@ failure domains. The default is `0`, which keeps the placement check disabled
 and preserves existing behavior. This is a safety guard only; it does not
 automatically rebalance or move replicas.
 
+For a controlled leadership or topology handoff, set a non-zero
+`fencing_token` in the topology JSON and distribute the same higher token to
+every node before enabling the new writer. `TopologyStore.Set` rejects a token
+that moves backward, and replication writes with a missing or different
+non-zero token are rejected before they can be applied. Token `0` preserves
+legacy behavior. This is operator-controlled stale-writer fencing, not quorum
+consensus; it does not elect a leader or make an unsafe partition safe by
+itself.
+
+Example fenced topology fragment:
+
+```json
+{
+  "version": 1,
+  "mode": "full_replica",
+  "fencing_token": 42,
+  "self": "node-a",
+  "nodes": [{"id": "node-a"}, {"id": "node-b"}]
+}
+```
+
 For example:
 
 ```sh

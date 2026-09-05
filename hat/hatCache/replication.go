@@ -49,6 +49,7 @@ const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 const replicationSetBinaryCommand = "INTERNALSETV2"
 const replicationSetCompactCommand = "INTERNALSETV3"
 const replicationDigestCommand = "INTERNALDIGESTV1"
+const replicationMetaFencingToken = "_hatrie_replication_fencing_token"
 
 type ReplicationTransport = hatReplication.Transport
 
@@ -289,6 +290,7 @@ type replicationTaskGroup struct {
 	deferredMetadata       bool
 	metadataSource         string
 	metadataTopology       string
+	metadataFencingToken   uint64
 }
 
 func (group replicationTaskGroup) replicationSyncPayloadBatch() replicationSyncPayloadBatch {
@@ -1611,6 +1613,13 @@ func (replicator *HTTPReplicator) appendReplicationTasksForTargets(tasks []repli
 	return replicator.appendReplicationTasksForTargetsWithFingerprint(tasks, targets, payload, fingerprint)
 }
 
+func (replicator *HTTPReplicator) currentReplicationFencingToken() uint64 {
+	if replicator == nil || replicator.topology == nil {
+		return 0
+	}
+	return replicator.topology.FencingToken()
+}
+
 func (replicator *HTTPReplicator) appendReplicationTasksForTargetsWithFingerprint(tasks []replicationTask, targets []TopologyNode, payload CacheCommandRequest, fingerprint string) []replicationTask {
 	payload = replicator.annotateReplicationPayloadWithFingerprint(payload, fingerprint)
 	payloadBytes := 0
@@ -1635,13 +1644,14 @@ func (replicator *HTTPReplicator) appendReplicationPayloadToTargetGroups(groups 
 			idx = len(groups)
 			indexes[target] = idx
 			groups = append(groups, replicationTaskGroup{
-				target:           target,
-				payloads:         make([]CacheCommandRequest, 0, groupCapacity),
-				keys:             make([]string, 0, groupCapacity),
-				payloadBytes:     make([]int, 0, groupCapacity),
-				deferredMetadata: true,
-				metadataSource:   replicator.self,
-				metadataTopology: fingerprint,
+				target:               target,
+				payloads:             make([]CacheCommandRequest, 0, groupCapacity),
+				keys:                 make([]string, 0, groupCapacity),
+				payloadBytes:         make([]int, 0, groupCapacity),
+				deferredMetadata:     true,
+				metadataSource:       replicator.self,
+				metadataTopology:     fingerprint,
+				metadataFencingToken: replicator.currentReplicationFencingToken(),
 			})
 		}
 		groups[idx].payloads = append(groups[idx].payloads, payload)
@@ -1667,11 +1677,12 @@ func (replicator *HTTPReplicator) appendReplicationSyncPayloadToTargetGroups(gro
 			idx = len(groups)
 			indexes[target] = idx
 			groups = append(groups, replicationTaskGroup{
-				target:           target,
-				syncPayloads:     make([]replicationSyncPayload, 0, groupCapacity),
-				deferredMetadata: true,
-				metadataSource:   replicator.self,
-				metadataTopology: fingerprint,
+				target:               target,
+				syncPayloads:         make([]replicationSyncPayload, 0, groupCapacity),
+				deferredMetadata:     true,
+				metadataSource:       replicator.self,
+				metadataTopology:     fingerprint,
+				metadataFencingToken: replicator.currentReplicationFencingToken(),
 			})
 		}
 		groups[idx].syncPayloads = append(groups[idx].syncPayloads, payload)
@@ -1698,12 +1709,13 @@ func (replicator *HTTPReplicator) appendReplicationSyncArenaRecordToTargetGroups
 			idx = len(groups)
 			indexes[target] = idx
 			groups = append(groups, replicationTaskGroup{
-				target:             target,
-				syncPayloadArena:   arena,
-				syncPayloadIndexes: make([]uint32, 0, groupCapacity),
-				deferredMetadata:   true,
-				metadataSource:     replicator.self,
-				metadataTopology:   fingerprint,
+				target:               target,
+				syncPayloadArena:     arena,
+				syncPayloadIndexes:   make([]uint32, 0, groupCapacity),
+				deferredMetadata:     true,
+				metadataSource:       replicator.self,
+				metadataTopology:     fingerprint,
+				metadataFencingToken: replicator.currentReplicationFencingToken(),
 			})
 		}
 		groups[idx].syncPayloadIndexes = append(groups[idx].syncPayloadIndexes, recordIndex)
@@ -1741,11 +1753,12 @@ func (replicator *HTTPReplicator) executeSingleLiveReplicationTaskWithFingerprin
 	result.Queued = false
 	result.Targets = make([]ReplicationTargetResult, 1)
 	result.Targets[0] = replicator.grpcLiveSession.executeReplicationTaskGroup(ctx, replicationTaskGroup{
-		target:           task.target,
-		syncPayloads:     []replicationSyncPayload{payload},
-		deferredMetadata: true,
-		metadataSource:   replicator.self,
-		metadataTopology: fingerprint,
+		target:               task.target,
+		syncPayloads:         []replicationSyncPayload{payload},
+		deferredMetadata:     true,
+		metadataSource:       replicator.self,
+		metadataTopology:     fingerprint,
+		metadataFencingToken: replicator.currentReplicationFencingToken(),
 	})
 	return result, true
 }
@@ -1831,6 +1844,7 @@ func (replicator *HTTPReplicator) liveReplicationGRPCGroup(group replicationTask
 	group.deferredMetadata = true
 	group.metadataSource = replicator.self
 	group.metadataTopology = fingerprint
+	group.metadataFencingToken = replicator.currentReplicationFencingToken()
 	return group, nil
 }
 
@@ -2033,13 +2047,14 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 
 func replicationTaskGroupRange(group replicationTaskGroup, keys []string, payloadBytes []int, start int, end int) replicationTaskGroup {
 	return replicationTaskGroup{
-		target:           group.target,
-		payloads:         group.payloads[start:end],
-		keys:             keys[start:end],
-		payloadBytes:     payloadBytes[start:end],
-		deferredMetadata: group.deferredMetadata,
-		metadataSource:   group.metadataSource,
-		metadataTopology: group.metadataTopology,
+		target:               group.target,
+		payloads:             group.payloads[start:end],
+		keys:                 keys[start:end],
+		payloadBytes:         payloadBytes[start:end],
+		deferredMetadata:     group.deferredMetadata,
+		metadataSource:       group.metadataSource,
+		metadataTopology:     group.metadataTopology,
+		metadataFencingToken: group.metadataFencingToken,
 	}
 }
 
@@ -2061,10 +2076,11 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 	}
 	newGroup := func(start int, end int) replicationTaskGroup {
 		current := replicationTaskGroup{
-			target:           group.target,
-			deferredMetadata: group.deferredMetadata,
-			metadataSource:   group.metadataSource,
-			metadataTopology: group.metadataTopology,
+			target:               group.target,
+			deferredMetadata:     group.deferredMetadata,
+			metadataSource:       group.metadataSource,
+			metadataTopology:     group.metadataTopology,
+			metadataFencingToken: group.metadataFencingToken,
 		}
 		if group.syncPayloadArena != nil {
 			current.syncPayloadArena = group.syncPayloadArena
@@ -2342,6 +2358,11 @@ func (replicator *HTTPReplicator) annotateReplicationPayloadWithMetadata(payload
 	payload.Pairs[replicationMetaSequence] = strconv.FormatUint(replicator.nextReplicationSequence(), 10)
 	if fingerprint != "" {
 		payload.Pairs[replicationMetaTopologyFingerprint] = fingerprint
+	}
+	if replicator.topology != nil {
+		if fencingToken := replicator.topology.FencingToken(); fencingToken > 0 {
+			payload.Pairs[replicationMetaFencingToken] = strconv.FormatUint(fencingToken, 10)
+		}
 	}
 	return payload
 }
@@ -3389,7 +3410,7 @@ func (replicator *HTTPReplicator) executeReplicationSyncTargetBatch(ctx context.
 				return replicationResponseRejectsTypedCommand(replicationBatchEnvelopeCommand, true, message)
 			},
 			func() (io.Reader, string, string, error) {
-				return replicationSyncBatchRequestBodyBatch(payloads, command, source, sequence, fingerprint, minCompressedReplicationRequestBytes)
+				return replicationSyncBatchRequestBodyBatchWithFencingToken(payloads, command, source, sequence, fingerprint, replicator.currentReplicationFencingToken(), minCompressedReplicationRequestBytes)
 			},
 		)
 		replicator.recordReplicationTargetLatency(target, time.Since(startedAt))
@@ -3518,7 +3539,7 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 	}
 
 	sequence := replicator.nextReplicationSequence()
-	payload := replicationBatchEnvelopePayloadWithMetadata(payloads, source, sequence, fingerprint)
+	payload := replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads, source, sequence, fingerprint, replicator.currentReplicationFencingToken())
 	result := replicator.executeReplicationTarget(ctx, target, payload)
 	if !result.UnsupportedTypedReplication {
 		return result
@@ -3528,7 +3549,7 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 		if err != nil {
 			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
 		}
-		result = replicator.executeReplicationTarget(ctx, target, replicationBatchEnvelopePayloadWithMetadata(v2Payloads, source, sequence, fingerprint))
+		result = replicator.executeReplicationTarget(ctx, target, replicationBatchEnvelopePayloadWithMetadataAndFencingToken(v2Payloads, source, sequence, fingerprint, replicator.currentReplicationFencingToken()))
 		if !result.UnsupportedTypedReplication {
 			return result
 		}
@@ -3698,12 +3719,18 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 	var source string
 	var fingerprint string
 	var sequence uint64
+	var fencingToken uint64
 	for idx, payload := range payloads {
 		payloadSource, payloadSequence, payloadFingerprint := replicationSafetyMetadata(payload)
+		payloadFencingToken, _, err := replicationFencingToken(payload)
+		if err != nil {
+			return CacheCommandRequest{}, fmt.Errorf("hatriecache: invalid replication fencing token in batch payload %d: %w", idx, err)
+		}
 		if idx == 0 {
 			source = payloadSource
 			fingerprint = payloadFingerprint
-		} else if payloadSource != source || payloadFingerprint != fingerprint {
+			fencingToken = payloadFencingToken
+		} else if payloadSource != source || payloadFingerprint != fingerprint || payloadFencingToken != fencingToken {
 			return CacheCommandRequest{}, errors.New("hatriecache: replication batch metadata mismatch")
 		}
 		if payloadSequence > sequence {
@@ -3722,6 +3749,9 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 	if fingerprint != "" {
 		pairs[replicationMetaTopologyFingerprint] = fingerprint
 	}
+	if fencingToken > 0 {
+		pairs[replicationMetaFencingToken] = strconv.FormatUint(fencingToken, 10)
+	}
 	if len(pairs) == 0 {
 		pairs = nil
 	}
@@ -3733,7 +3763,17 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 }
 
 func replicationBatchEnvelopePayloadWithMetadata(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string) CacheCommandRequest {
+	return replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads, source, sequence, fingerprint, 0)
+}
+
+func replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string, fencingToken uint64) CacheCommandRequest {
 	pairs := replicationMetadataPairs(source, sequence, fingerprint)
+	if fencingToken > 0 {
+		if pairs == nil {
+			pairs = Map{}
+		}
+		pairs[replicationMetaFencingToken] = strconv.FormatUint(fencingToken, 10)
+	}
 	return CacheCommandRequest{
 		Command: replicationBatchEnvelopeCommand,
 		Pairs:   pairs,
@@ -3760,7 +3800,7 @@ func replicationMetadataPairs(source string, sequence uint64, fingerprint string
 
 func commandPairsWithoutReplicationMetadata(pairs Map) Map {
 	remaining := len(pairs)
-	for _, key := range []string{replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint} {
+	for _, key := range []string{replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint, replicationMetaFencingToken} {
 		if _, ok := pairs[key]; ok {
 			remaining--
 		}
@@ -3771,7 +3811,7 @@ func commandPairsWithoutReplicationMetadata(pairs Map) Map {
 	out := make(Map, remaining)
 	for key, value := range pairs {
 		switch key {
-		case replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint:
+		case replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint, replicationMetaFencingToken:
 			continue
 		default:
 			out[key] = value
@@ -4181,6 +4221,18 @@ func replicationSafetyMetadata(request CacheCommandRequest) (string, uint64, str
 		}
 	}
 	return source, sequence, commandPairString(request.Pairs, replicationMetaTopologyFingerprint)
+}
+
+func replicationFencingToken(request CacheCommandRequest) (uint64, bool, error) {
+	value, ok := request.Pairs[replicationMetaFencingToken]
+	if !ok {
+		return 0, false, nil
+	}
+	token, err := commandUint64Value(value)
+	if err != nil {
+		return 0, true, err
+	}
+	return token, true, nil
 }
 
 func commandPairString(pairs Map, key string) string {

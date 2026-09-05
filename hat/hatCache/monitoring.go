@@ -2364,6 +2364,17 @@ func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore
 	default:
 		return replicationSafetyToken{}, CacheCommandResponse{}, false, false
 	}
+	fencingToken, _, err := replicationFencingToken(request)
+	if err != nil {
+		return replicationSafetyToken{}, commandError("invalid replication fencing token"), true, true
+	}
+	localFencingToken := uint64(0)
+	if topology != nil {
+		localFencingToken = topology.FencingToken()
+	}
+	if localFencingToken != fencingToken && (localFencingToken > 0 || fencingToken > 0) {
+		return replicationSafetyToken{}, commandError("replication fencing token mismatch"), true, true
+	}
 	source, sequence, fingerprint := replicationSafetyMetadata(request)
 	if fingerprint != "" && topology != nil && topology.VerifiesReplicationFingerprint() {
 		localFingerprint := topology.Fingerprint()

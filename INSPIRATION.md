@@ -424,7 +424,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T064 Rolling replica replacement. `cluster add-replica -replace` catches the replacement node up before activation, while `cluster decommission` validates remaining redundancy, runs a final sync, marks the retiring node offline, updates reachable members, and verifies the resulting topology.
 - [x] T065 Failure-domain-aware replica placement. Topology nodes carry optional `failure_domain` metadata through JSON and native gRPC; `cluster add-replica` and `cluster join` accept `-failure-domain` plus opt-in `-min-failure-domains N` (default `0`) and reject placements that do not meet the requested distinct-domain count.
 - [ ] T066 Cross-region replication with explicit RPO/RTO.
-- [ ] T067 Split-brain fencing token.
+- [x] T067 Split-brain fencing token. An optional non-zero topology `fencing_token` is monotonic in `TopologyStore`, included in the topology fingerprint and native gRPC topology, attached to replication writes and batch envelopes, and mismatched or missing non-zero tokens are rejected before apply; token `0` preserves legacy behavior. This is operator-controlled stale-writer fencing, not quorum consensus.
 - [ ] T068 Schema-change replication compatibility checks.
 - [x] T069 Recovery rehearsal that compares checksums after replay.
 

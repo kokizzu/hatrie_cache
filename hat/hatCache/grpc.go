@@ -451,7 +451,7 @@ func (server *CacheGRPCServer) applyReplicationStreamBatch(ctx context.Context, 
 			}
 		}
 	}
-	request := replicationBatchEnvelopePayloadWithMetadata(payloads, batch.GetSource(), batch.GetSequence(), batch.GetTopologyFingerprint())
+	request := replicationBatchEnvelopePayloadWithMetadataAndFencingToken(payloads, batch.GetSource(), batch.GetSequence(), batch.GetTopologyFingerprint(), batch.GetFencingToken())
 	response, _ := executeCacheCommand(ctx, server.trie, request, commandExecutionOptions{
 		NodeName:          server.options.NodeName,
 		Journal:           server.options.Journal,
@@ -660,6 +660,7 @@ func grpcClusterTopology(topology ClusterTopology) *hatriecachev1.ClusterTopolog
 		BucketCount:  topology.BucketCount,
 		BucketRanges: make([]*hatriecachev1.TopologyBucketRange, 0, len(topology.BucketRanges)),
 		Self:         topology.Self,
+		FencingToken: topology.FencingToken,
 		Nodes:        make([]*hatriecachev1.TopologyNode, 0, len(topology.Nodes)),
 		Shards:       make([]*hatriecachev1.TopologyShard, 0, len(topology.Shards)),
 	}
@@ -728,6 +729,7 @@ func clusterTopologyFromProto(topology *hatriecachev1.ClusterTopology) ClusterTo
 		BucketCount:  topology.GetBucketCount(),
 		BucketRanges: make([]TopologyBucketRange, 0, len(topology.GetBucketRanges())),
 		Self:         topology.GetSelf(),
+		FencingToken: topology.GetFencingToken(),
 		Nodes:        make([]TopologyNode, 0, len(topology.GetNodes())),
 		Shards:       make([]TopologyShard, 0, len(topology.GetShards())),
 	}

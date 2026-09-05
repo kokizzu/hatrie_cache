@@ -32,6 +32,7 @@ type ClusterTopology struct {
 	BucketCount  uint32                `json:"bucket_count,omitempty"`
 	BucketRanges []TopologyBucketRange `json:"bucket_ranges,omitempty"`
 	Self         string                `json:"self,omitempty"`
+	FencingToken uint64                `json:"fencing_token,omitempty"`
 	Nodes        []TopologyNode        `json:"nodes"`
 	Shards       []TopologyShard       `json:"shards,omitempty"`
 }
@@ -280,6 +281,7 @@ func (topology ClusterTopology) Fingerprint() string {
 	part(strconv.FormatUint(normalized.Version, 10))
 	part(normalized.Mode)
 	part(strconv.FormatUint(uint64(normalized.BucketCount), 10))
+	part(strconv.FormatUint(normalized.FencingToken, 10))
 	for _, bucketRange := range normalized.BucketRanges {
 		part(strconv.FormatUint(uint64(bucketRange.Start), 10))
 		part(strconv.FormatUint(uint64(bucketRange.End), 10))
@@ -408,7 +410,7 @@ func HashKeyToShardIndex(key string, shardCount int) int {
 	return int(hash.Sum32() % uint32(shardCount))
 }
 func Clone(topology ClusterTopology) ClusterTopology {
-	return ClusterTopology{Version: topology.Version, Mode: topology.Mode, BucketCount: topology.BucketCount, BucketRanges: cloneBucketRanges(topology.BucketRanges), Self: topology.Self, Nodes: cloneNodes(topology.Nodes), Shards: cloneShards(topology.Shards)}
+	return ClusterTopology{Version: topology.Version, Mode: topology.Mode, BucketCount: topology.BucketCount, BucketRanges: cloneBucketRanges(topology.BucketRanges), Self: topology.Self, FencingToken: topology.FencingToken, Nodes: cloneNodes(topology.Nodes), Shards: cloneShards(topology.Shards)}
 }
 
 func normalizeBucketRanges(topology *ClusterTopology, shardIDs map[uint32]bool) error {

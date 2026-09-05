@@ -189,6 +189,7 @@ message ReplicationStreamBatch {
   string topology_fingerprint = 3;
   repeated string keys = 4;
   repeated bytes binary_values = 5;
+  uint64 fencing_token = 6;
 }
 
 message ReplicationStreamAck {
@@ -244,6 +245,7 @@ message ClusterTopology {
   string self = 5;
   repeated TopologyNode nodes = 6;
   repeated TopologyShard shards = 7;
+  uint64 fencing_token = 8;
 }
 
 message TopologyNode {
