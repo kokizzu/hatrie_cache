@@ -15613,12 +15613,28 @@ measurement, not a data-path speedup claim.
 | Existing batch histogram update | 14.28 | 0 | 0 |
 | Wire metric snapshot | 704.1 | 1,024 | 8 |
 
+## SQL Query Manager
+
+Command: `make benchmark-sql-query-manager` (`-count=5`, `-benchmem`). This
+measures one-row SQL execution directly and through the opt-in manager. It is
+an operator-control cost measurement, not a query-throughput improvement.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Direct SQL execution | 3,169 | 3,920 | 27 |
+| Managed SQL execution | 4,075 | 4,175 | 32 |
+
+The managed path is about 1.29x CPU, 1.07x allocated bytes, and 1.19x
+allocations in this small fixture. The manager is disabled unless an
+application constructs one and uses it for execution.
+
 Raw samples from five repetitions:
 
 ```text
-wire_counter: 72.97, 64.43, 65.18, 61.78, 61.08 ns/op; 0 B/op; 0 allocs/op
-batch_histogram: 15.20, 14.28, 13.91, 13.71, 17.71 ns/op; 0 B/op; 0 allocs/op
-wire_snapshot: 725.9, 658.5, 722.9, 704.1, 662.7 ns/op; 1024 B/op; 8 allocs/op
+direct: 3162, 3207, 3165, 3197, 3169 ns/op; 3920 B/op; 27 allocs/op
+managed: 3879, 4160, 3942, 4103, 4075 ns/op; 4175 B/op; 32 allocs/op
 ```
 
 The counter runs once after a request body has been sent and does not allocate

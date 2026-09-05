@@ -10,6 +10,7 @@ security guidance before exposing it on a network.
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
+- Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)

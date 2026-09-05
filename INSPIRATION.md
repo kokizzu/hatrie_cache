@@ -165,7 +165,7 @@ name.
 - [x] C105 Query fingerprinting independent of literal values. `SQLQueryFingerprint` validates the shared SQL grammar, preserves identifiers/operators/literal types/parameter positions, replaces literal values with type markers, and returns a SHA-256 digest without retaining query text.
 - [ ] C106 Workload classes with separate concurrency and memory budgets.
 - [ ] C107 Admission control before expensive scans.
-- [ ] C108 Kill-query command with an operator-visible reason.
+- [x] C108 Kill-query command with an operator-visible reason. `SQLQueryManager.Cancel` provides bounded, reasoned cooperative cancellation; remote layers must apply their existing auth policy.
 - [ ] C109 Per-operator CPU and row counters.
 - [ ] C110 Query pipeline trace export.
 

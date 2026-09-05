@@ -5021,3 +5021,12 @@ commit-t069:
 .PHONY: push-t069
 push-t069:
 	bash ./scripts/push-t069.sh
+.PHONY: test-sql-query-manager
+test-sql-query-manager:
+	bash ./scripts/test-sql-query-manager.sh
+.PHONY: format-sql-query-manager
+format-sql-query-manager:
+	bash ./scripts/format-sql-query-manager.sh
+.PHONY: benchmark-sql-query-manager
+benchmark-sql-query-manager:
+	bash ./scripts/benchmark-sql-query-manager.sh

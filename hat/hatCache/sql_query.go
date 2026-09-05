@@ -22,6 +22,11 @@ import (
 )
 
 type SQLQueryOptions = hatSql.SQLQueryOptions
+type SQLQueryCanceledError = hatSql.SQLQueryCanceledError
+type SQLQueryManager = hatSql.SQLQueryManager
+type SQLQueryManagerOptions = hatSql.SQLQueryManagerOptions
+type SQLQueryState = hatSql.SQLQueryState
+type SQLQueryStatus = hatSql.SQLQueryStatus
 type SQLAdaptivePlanner = hatSql.AdaptivePlanner
 type SQLAdaptivePlannerOptions = hatSql.AdaptivePlannerOptions
 type SQLPreparedQueryCache = hatSql.SQLPreparedQueryCache
@@ -46,6 +51,15 @@ type SQLQueryObserver = hatSql.QueryObserver
 type SQLQueryObserverFunc = hatSql.QueryObserverFunc
 type SQLQueryEvent = hatSql.QueryEvent
 type SQLQueryOperator = hatSql.QueryOperator
+
+const (
+	DefaultSQLQueryManagerHistoryCapacity = hatSql.DefaultSQLQueryManagerHistoryCapacity
+	SQLQueryStateRunning                  = hatSql.SQLQueryStateRunning
+	SQLQueryStateCancelRequested          = hatSql.SQLQueryStateCancelRequested
+	SQLQueryStateSucceeded                = hatSql.SQLQueryStateSucceeded
+	SQLQueryStateFailed                   = hatSql.SQLQueryStateFailed
+	SQLQueryStateCanceled                 = hatSql.SQLQueryStateCanceled
+)
 type SQLSourceResolver = hatSql.SourceResolver
 type SQLColumnarBatch = hatSql.ColumnarBatch
 type SQLColumnarSourceResolver = hatSql.ColumnarSourceResolver
@@ -385,6 +399,14 @@ func WithSQLErrorCode(code SQLErrorCode, err error) error { return hatSql.WithEr
 
 func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
 	return hatSql.NewSQLPreparedQueryCache(capacity)
+}
+
+func NewSQLQueryManager(historyCapacity int) *SQLQueryManager {
+	return hatSql.NewSQLQueryManager(historyCapacity)
+}
+
+func NewSQLQueryManagerWithOptions(options SQLQueryManagerOptions) *SQLQueryManager {
+	return hatSql.NewSQLQueryManagerWithOptions(options)
 }
 
 func NewSQLAdaptivePlanner(options SQLAdaptivePlannerOptions) *SQLAdaptivePlanner {
