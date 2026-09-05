@@ -519,7 +519,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T150 Language-neutral client SDK coverage.
 - [x] T151 Online backup drill.
 - [x] T152 Chaos tests for replication and recovery.
-- [ ] T153 Load-shedding policy under memory pressure.
+- [x] T153 Load-shedding policy under memory pressure. Covered by configurable persistent-store admission limits, RSS/hot-value cold eviction, and pressure-triggered TTL vacuum; command rejection remains intentionally caller-controlled because making it automatic would trade availability for protection.
 - [x] T154 Automatic slow-command capture.
 - [x] T155 Per-command allocation budgets.
 
