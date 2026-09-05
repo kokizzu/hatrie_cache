@@ -4487,3 +4487,35 @@ push-t147:
 .PHONY: audit-inspiration-state
 audit-inspiration-state:
 	bash ./scripts/audit-inspiration-state.sh
+
+.PHONY: test-t045
+test-t045:
+	bash ./scripts/test-t045.sh
+
+.PHONY: format-t045
+format-t045:
+	bash ./scripts/format-t045.sh
+
+.PHONY: test-race-t045
+test-race-t045:
+	bash ./scripts/test-race-t045.sh
+
+.PHONY: vet-t045
+vet-t045:
+	bash ./scripts/vet-t045.sh
+
+.PHONY: review-t045
+review-t045:
+	bash ./scripts/review-t045.sh
+
+.PHONY: stage-t045
+stage-t045:
+	bash ./scripts/stage-t045.sh
+
+.PHONY: commit-t045
+commit-t045:
+	bash ./scripts/commit-t045.sh
+
+.PHONY: push-t045
+push-t045:
+	bash ./scripts/push-t045.sh

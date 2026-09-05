@@ -399,7 +399,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T042 Recovery-time parallel replay.
 - [x] T043 Recovery replay progress and ETA metrics.
 - [ ] T044 Recovery point selection by logical sequence.
-- [ ] T045 Crash-consistency fault injection.
+- [x] T045 Crash-consistency fault injection.
 - [x] T046 Online backup cancellation with resumable manifests.
 
 ### Replication And Topology
