@@ -15690,6 +15690,28 @@ No additional measured bytes or allocations appeared in this fixture. The
 progress path was approximately 1.08x slower in this run; that latency
 difference is an operational-control cost, not a broad performance claim.
 
+## Online SQL JSON Index Rebuild Worker
+
+Command: `make benchmark-sql-index-worker` (`-count=5`, `-benchmem`). This
+measures the opt-in worker startup, immediate idle poll, cooperative stop, and
+wait lifecycle on an empty queue. It does not measure index rebuild work; the
+worker delegates that work to the progress runner above.
+
+Host: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Start, stop, and wait for one worker | 1,096 | 552 | 8 |
+
+Raw samples from five repetitions:
+
+```text
+1113, 1084, 1113, 1096, 1036 ns/op; 552 B/op; 8 allocs/op
+```
+
+This cost is paid only when an application explicitly starts a worker; no
+background goroutine or index rebuild is introduced by default.
+
 ## Automatic Covering-Index Recommendations
 
 Command: `make benchmark-sql-covering-advisor` (`-count=5`, `-benchmem`). The

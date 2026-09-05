@@ -371,7 +371,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T017 Explicit NULL index semantics.
 - [x] T018 Collation-aware string ordering.
 - [x] T019 Unique constraints and duplicate-key errors.
-- [ ] T020 Online secondary-index build.
+- [x] T020 Online secondary-index build. `StartSQLJSONIndexRebuildWorker` provides an explicit background consumer for queued SQL JSON index rebuilds with immediate first polling, bounded one-unit ticks, cooperative stop/wait lifecycle, progress callbacks, and retry of failed work; no worker starts by default.
 - [x] T021 Online index alteration with progress. `RunScheduledSQLJSONIndexRebuildsWithProgress` reports queue-level queued/running/completed/failed/canceled transitions and requeues canceled work for a later call while preserving atomic index publication; cancellation does not interrupt a single rebuild unit.
 - [x] T022 Index statistics for selectivity estimates - `SQLJSONIndexStats` exposes cardinality/frequency statistics and `SQLJSONIndexValueEstimate` exposes exact posting estimates for configured JSON indexes.
 - [x] T023 Persistent statistics refreshed from observed workloads. `SQLIndexAdvisor.Save` and `Load` persist bounded, versioned workload recommendations without SQL text, literal values, or row data; load validation is atomic and size-limited.
