@@ -342,6 +342,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M094 Persistent-shard leases and fencing.
 - [x] M095 Snapshot hydration with progress reporting.
 - [ ] M096 Per-column dictionary compression for arrangements.
+- [x] M096a Deterministic low-cardinality string dictionary codec.
 - [ ] M097 Compressed arrangement batches.
 - [x] M098 Schema evolution with compatibility checks.
 - [x] M099 Zero-downtime migration and recovery documentation.

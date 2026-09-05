@@ -5646,3 +5646,31 @@ commit-sql-row-binary-bitmap:
 .PHONY: push-sql-row-binary-bitmap
 push-sql-row-binary-bitmap:
 	sh ./scripts/deliver-sql-row-binary-bitmap.sh push
+
+.PHONY: test-sql-string-dictionary
+test-sql-string-dictionary:
+	sh ./scripts/test-sql-string-dictionary.sh
+
+.PHONY: format-sql-string-dictionary
+format-sql-string-dictionary:
+	sh ./scripts/format-sql-string-dictionary.sh
+
+.PHONY: test-race-sql-string-dictionary
+test-race-sql-string-dictionary:
+	sh ./scripts/test-race-sql-string-dictionary.sh
+
+.PHONY: benchmark-sql-string-dictionary
+benchmark-sql-string-dictionary:
+	sh ./scripts/benchmark-sql-string-dictionary.sh
+
+.PHONY: deliver-sql-string-dictionary
+deliver-sql-string-dictionary:
+	sh ./scripts/deliver-sql-string-dictionary.sh preview
+
+.PHONY: commit-sql-string-dictionary
+commit-sql-string-dictionary:
+	sh ./scripts/deliver-sql-string-dictionary.sh commit
+
+.PHONY: push-sql-string-dictionary
+push-sql-string-dictionary:
+	sh ./scripts/deliver-sql-string-dictionary.sh push
