@@ -158,7 +158,7 @@ name.
 - [x] C098 Query memory budgets and allocation reporting.
 - [x] C099 Query timeout and deadline enforcement.
 - [ ] C100 Query quotas by user, tenant, or source.
-- [ ] C101 Query result cache with explicit freshness and invalidation policy.
+- [x] C101 Query result cache with explicit freshness and invalidation policy. `ResultCache.Execute` requires an epoch callback, serves hits only for the same epoch, invalidates stale entries, and returns independent result snapshots; existing tests cover freshness changes and nested plan/result isolation.
 - [ ] C102 Prepared-plan cache keyed by normalized SQL and schema version.
 - [ ] C103 Plan invalidation when an index or projection changes.
 - [ ] C104 Query result reuse across equivalent parameter bindings.
