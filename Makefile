@@ -5534,3 +5534,31 @@ commit-sql-subscription-status:
 .PHONY: push-sql-subscription-status
 push-sql-subscription-status:
 	sh ./scripts/deliver-sql-subscription-status.sh push
+
+.PHONY: test-sql-row-binary-adaptive
+test-sql-row-binary-adaptive:
+	sh ./scripts/test-sql-row-binary-adaptive.sh
+
+.PHONY: format-sql-row-binary-adaptive
+format-sql-row-binary-adaptive:
+	sh ./scripts/format-sql-row-binary-adaptive.sh
+
+.PHONY: test-race-sql-row-binary-adaptive
+test-race-sql-row-binary-adaptive:
+	sh ./scripts/test-race-sql-row-binary-adaptive.sh
+
+.PHONY: benchmark-sql-row-binary-adaptive
+benchmark-sql-row-binary-adaptive:
+	sh ./scripts/benchmark-sql-row-binary-adaptive.sh
+
+.PHONY: deliver-sql-row-binary-adaptive
+deliver-sql-row-binary-adaptive:
+	sh ./scripts/deliver-sql-row-binary-adaptive.sh preview
+
+.PHONY: commit-sql-row-binary-adaptive
+commit-sql-row-binary-adaptive:
+	sh ./scripts/deliver-sql-row-binary-adaptive.sh commit
+
+.PHONY: push-sql-row-binary-adaptive
+push-sql-row-binary-adaptive:
+	sh ./scripts/deliver-sql-row-binary-adaptive.sh push

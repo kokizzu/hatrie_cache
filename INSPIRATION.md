@@ -103,6 +103,7 @@ name.
 - [ ] C046 Read amplification accounting per part and column.
 - [ ] C047 Adaptive granule sizing from observed predicate selectivity.
 - [ ] C048 Compact numeric encodings selected from data statistics.
+- [x] C048a Exact full-batch codec selection by encoded size.
 - [x] C049 Low-cardinality dictionary encoding for typed string values.
 - [ ] C050 Shared JSON subcolumns for repeated paths.
 - [x] C051 JSON path indexing for supported predicates.
