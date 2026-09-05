@@ -32,6 +32,23 @@ the short machine-readable code and keep the exact existing message. The Go
 response struct gains one string field, so callers that retain large numbers
 of response structs should account for the additive in-memory footprint.
 
+## Literal-Independent SQL Fingerprint
+
+These five `-count=5` runs used `make benchmark-query-fingerprint` on an AMD
+Ryzen 9 5950X. The baseline is `FormatSQL` on the same literal-only query;
+`SQLQueryFingerprint` additionally hashes typed token structure and supports
+prepared statements with positional parameters.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative to baseline |
+| --- | ---: | ---: | ---: | --- |
+| `SQLQueryFingerprint` | 7,638 | 8,240 | 40 | 1.26x CPU, 0.90x heap |
+| `FormatSQL` baseline | 6,068 | 9,144 | 40 | 1.00x |
+
+The fingerprint costs about 1.26x the baseline CPU time because it performs a
+SHA-256 digest after grammar validation, while retaining fewer bytes per
+operation. The digest contains no literal values and is intended for grouping
+telemetry, not for reusing query results.
+
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
 families. It is a benchmarked feature/command coverage report, not a

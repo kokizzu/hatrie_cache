@@ -245,6 +245,35 @@ DOCKER_BUILD_ARGS ?=
 
 test: verify-go
 
+.PHONY: test-t147
+test-t147:
+	bash ./scripts/test-t147.sh
+
+.PHONY: bench-t147
+bench-t147:
+	bash ./scripts/bench-t147.sh
+
+.PHONY: review-t147
+review-t147:
+	bash ./scripts/review-t147.sh
+
+.PHONY: stage-t147
+stage-t147:
+	bash ./scripts/stage-t147.sh
+
+.PHONY: commit-t147
+commit-t147:
+	bash ./scripts/commit-t147.sh
+
+.PHONY: push-t147
+push-t147:
+	bash ./scripts/push-t147.sh
+
+.PHONY: format-t147
+format-t147:
+	bash ./scripts/format-t147.sh
+
+
 verify: verify-local
 
 verify-local: verify-local-contract verify-go verify-c verify-frontend verify-ops verify-benchmark-md-update
@@ -761,6 +790,9 @@ commit-sql-two-level:
 push-sql-two-level:
 	sh ./scripts/commit-sql-two-level.sh push
 
+
+
+
 format-sql-hash-aggregate:
 	sh ./scripts/format-sql-hash-aggregate.sh
 
@@ -1232,8 +1264,27 @@ commit-sql-audit:
 run:
 	@CMD='$(CMD)' ./scripts/run.sh
 
+test-query-fingerprint:
+	bash ./scripts/test-query-fingerprint.sh
+
+format-query-fingerprint:
+	bash ./scripts/format-query-fingerprint.sh
+
+benchmark-query-fingerprint:
+	bash ./scripts/benchmark-query-fingerprint.sh
+
+deliver-query-fingerprint:
+	bash ./scripts/deliver-query-fingerprint.sh
+
 generate-proto:
 	./scripts/generate-proto.sh
+
+.PHONY: inspect-t042-context
+inspect-t042-context:
+	bash ./scripts/inspect-t042-context.sh
+
+
+
 
 cli:
 	./scripts/cli.sh $(ARGS)
@@ -1548,6 +1599,7 @@ benchmark-sql-columnar-topn:
 .PHONY: benchmark-sql-columnar-topn-pruning
 benchmark-sql-columnar-topn-pruning:
 	sh ./scripts/benchmark-sql-columnar-topn-pruning.sh
+
 
 .PHONY: deliver-sql-columnar-topn-pruning
 deliver-sql-columnar-topn-pruning:
@@ -3467,6 +3519,16 @@ commit-sql-runtime-join-filter:
 
 push-sql-runtime-join-filter:
 	sh ./scripts/deliver-sql-runtime-join-filter.sh push
+
+audit-adoption-next-idea:
+	sh ./scripts/audit-adoption-next-idea.sh
+
+inspect-arrangement-core:
+	sh ./scripts/inspect-arrangement-core.sh
+
+
+
+
 benchmark-sql-borrowed-indexed-join:
 	sh ./scripts/benchmark-sql-borrowed-indexed-join.sh
 verify-sql-borrowed-indexed-join:
@@ -3494,45 +3556,6 @@ deliver-sql-typed-minmax:
 check-sql-typed-minmax-stage:
 	sh ./scripts/deliver-sql-typed-minmax.sh check
 test-sql-temporal-storage:
-audit-engine-surface:
-	bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-typed-table:
-	DETAIL=typed-table bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-storage:
-	DETAIL=storage bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-query:
-	DETAIL=query bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-typed-table-symbols:
-	DETAIL=typed-table-symbols bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-mvcc:
-	DETAIL=mvcc bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-mvcc-docs:
-	DETAIL=mvcc-docs bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-makefile:
-	DETAIL=makefile bash scripts/audit-engine-surface.sh
-
-audit-engine-surface-delivery:
-	DETAIL=delivery bash scripts/audit-engine-surface.sh
-
-test-sql-typed-table-mvcc:
-	bash scripts/test-sql-typed-table-mvcc.sh
-
-format-sql-typed-table-mvcc:
-	bash scripts/format-sql-typed-table-mvcc.sh
-
-benchmark-sql-typed-table-mvcc:
-	bash scripts/benchmark-sql-typed-table-mvcc.sh
-deliver-query-engine-adoption-docs:
-	bash scripts/deliver-query-engine-adoption-docs.sh apply
-check-query-engine-adoption-docs-stage:
-	bash scripts/deliver-query-engine-adoption-docs.sh check
 	sh ./scripts/test-sql-temporal-storage.sh
 
 benchmark-sql-temporal-storage:
@@ -3577,6 +3600,8 @@ deliver-sql-typed-dictionary-storage:
 	sh ./scripts/deliver-sql-typed-dictionary-storage.sh apply
 check-sql-typed-dictionary-storage-stage:
 	sh ./scripts/deliver-sql-typed-dictionary-storage.sh check
+check-sql-temporal-storage-stage:
+	sh ./scripts/deliver-sql-temporal-storage.sh check
 
 test-sql-partial-index:
 	sh ./scripts/test-sql-partial-index.sh
@@ -3593,7 +3618,57 @@ deliver-sql-partial-index:
 	sh ./scripts/deliver-sql-partial-index.sh apply
 check-sql-partial-index-stage:
 	sh ./scripts/deliver-sql-partial-index.sh check
-check-sql-temporal-storage-stage:
+audit-engine-surface:
+	bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-typed-table:
+	DETAIL=typed-table bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-storage:
+	DETAIL=storage bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-query:
+	DETAIL=query bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-typed-table-symbols:
+	DETAIL=typed-table-symbols bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-mvcc:
+	DETAIL=mvcc bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-mvcc-docs:
+	DETAIL=mvcc-docs bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-makefile:
+	DETAIL=makefile bash scripts/audit-engine-surface.sh
+
+audit-engine-surface-delivery:
+	DETAIL=delivery bash scripts/audit-engine-surface.sh
+
+test-sql-typed-table-mvcc:
+	bash scripts/test-sql-typed-table-mvcc.sh
+
+format-sql-typed-table-mvcc:
+	bash scripts/format-sql-typed-table-mvcc.sh
+
+benchmark-sql-typed-table-mvcc:
+	bash scripts/benchmark-sql-typed-table-mvcc.sh
+
+test-race-sql-typed-table-mvcc:
+	bash scripts/test-race-sql-typed-table-mvcc.sh
+
+deliver-sql-typed-table-mvcc:
+	bash scripts/deliver-sql-typed-table-mvcc.sh apply
+
+check-sql-typed-table-mvcc-stage:
+	bash scripts/deliver-sql-typed-table-mvcc.sh check
+
+deliver-query-engine-adoption-docs:
+	bash scripts/deliver-query-engine-adoption-docs.sh apply
+
+check-query-engine-adoption-docs-stage:
+	bash scripts/deliver-query-engine-adoption-docs.sh check
+
 test-sql-typed-table-patch-parts:
 	bash scripts/test-sql-typed-table-patch-parts.sh
 
@@ -3617,10 +3692,6 @@ commit-sql-typed-table-patch-parts:
 push-sql-typed-table-patch-parts:
 	bash scripts/deliver-sql-typed-table-patch-parts.sh push
 
-.PHONY: benchmark-sql-typed-table-patch-parts
-benchmark-sql-typed-table-patch-parts:
-	bash scripts/benchmark-sql-typed-table-patch-parts.sh
-
 .PHONY: test-sql-json-path-skip
 test-sql-json-path-skip:
 	bash scripts/test-sql-json-path-skip.sh
@@ -3636,7 +3707,30 @@ format-sql-json-path-skip:
 .PHONY: test-race-sql-json-path-skip
 test-race-sql-json-path-skip:
 	bash scripts/test-race-sql-json-path-skip.sh
-	sh ./scripts/deliver-sql-temporal-storage.sh check
+
+.PHONY: deliver-sql-json-path-skip
+deliver-sql-json-path-skip:
+	bash scripts/deliver-sql-json-path-skip.sh apply
+
+.PHONY: check-sql-json-path-skip
+check-sql-json-path-skip:
+	bash scripts/deliver-sql-json-path-skip.sh check
+
+.PHONY: commit-sql-json-path-skip
+commit-sql-json-path-skip:
+	bash scripts/deliver-sql-json-path-skip.sh commit
+
+.PHONY: push-sql-json-path-skip
+push-sql-json-path-skip:
+	bash scripts/deliver-sql-json-path-skip.sh push
+
+
+
+
+
+.PHONY: benchmark-sql-typed-table-patch-parts
+benchmark-sql-typed-table-patch-parts:
+	bash scripts/benchmark-sql-typed-table-patch-parts.sh
 .PHONY: test-sql-prewhere
 test-sql-prewhere:
 	bash scripts/test-sql-prewhere.sh
@@ -3699,6 +3793,7 @@ commit-typed-table-arrangement-hydration:
 
 .PHONY: push-typed-table-arrangement-hydration
 push-typed-table-arrangement-hydration:
+	bash scripts/deliver-typed-table-arrangement-hydration.sh push
 
 test-command-idempotency:
 		bash scripts/test-command-idempotency.sh
@@ -3718,77 +3813,267 @@ commit-command-idempotency:
 push-command-idempotency:
 		bash scripts/deliver-command-idempotency.sh push
 
+.PHONY: inspect-sql-surface
+inspect-sql-surface:
+	sh ./scripts/inspect-sql-surface.sh symbols
+
+.PHONY: inspect-sql-index
+inspect-sql-index:
+	sh ./scripts/inspect-sql-surface.sh index
+
+.PHONY: inspect-sql-query
+inspect-sql-query:
+	sh ./scripts/inspect-sql-surface.sh query
+
+.PHONY: inspect-sql-typed
+inspect-sql-typed:
+	sh ./scripts/inspect-sql-surface.sh typed
+
+.PHONY: inspect-sql-secondary
+inspect-sql-secondary:
+	sh ./scripts/inspect-sql-surface.sh secondary
+
+.PHONY: inspect-sql-stats
+inspect-sql-stats:
+	sh ./scripts/inspect-sql-surface.sh stats
+
+.PHONY: inspect-sql-transaction
+inspect-sql-transaction:
+	sh ./scripts/inspect-sql-surface.sh transaction
+
+.PHONY: inspect-sql-result
+inspect-sql-result:
+	sh ./scripts/inspect-sql-surface.sh result
+
+.PHONY: inspect-sql-subscription
+inspect-sql-subscription:
+	sh ./scripts/inspect-sql-surface.sh subscription
+
+.PHONY: inspect-sql-join
+inspect-sql-join:
+	sh ./scripts/inspect-sql-surface.sh join
+
+inspect-sql-join-core:
+	sh ./scripts/inspect-sql-join-core.sh
+
+.PHONY: inspect-sql-async
+inspect-sql-async:
+	sh ./scripts/inspect-sql-surface.sh async
+
+.PHONY: inspect-sql-asof
+inspect-sql-asof:
+	sh ./scripts/inspect-sql-surface.sh asof
+
+.PHONY: inspect-sql-projection
+inspect-sql-projection:
+	sh ./scripts/inspect-sql-surface.sh projection
+
+inspect-sql-projection-core:
+	sh ./scripts/inspect-sql-projection-core.sh
+
+inspect-sql-contracts-core:
+	sh ./scripts/inspect-sql-contracts-core.sh
+
 test-sql-projection-selection:
-\tsh ./scripts/test-sql-projection-selection.sh
+	sh ./scripts/test-sql-projection-selection.sh
 
 benchmark-sql-projection-selection:
-\tsh ./scripts/benchmark-sql-projection-selection.sh
+	sh ./scripts/benchmark-sql-projection-selection.sh
 
 format-sql-projection-selection:
-\tsh ./scripts/format-sql-projection-selection.sh
+	sh ./scripts/format-sql-projection-selection.sh
 
-deliver-transparent-projections:
-\tsh ./scripts/deliver-transparent-projections.sh apply
+inspect-doc-tails:
+	sh ./scripts/inspect-doc-tails.sh
 
-commit-transparent-projections:
-\tsh ./scripts/deliver-transparent-projections.sh commit
+inspect-projection-worktree:
+	sh ./scripts/inspect-projection-worktree.sh
 
-push-transparent-projections:
-\tsh ./scripts/deliver-transparent-projections.sh push
+inspect-whatif-context:
+	sh ./scripts/inspect-whatif-context.sh
 
-test-sql-subscription-frontier:
-\tsh ./scripts/test-sql-subscription-frontier.sh
+inspect-whatif-narrow:
+	sh ./scripts/inspect-whatif-narrow.sh "$(WHATIF_MODE)"
 
-format-sql-subscription-frontier:
-\tsh ./scripts/format-sql-subscription-frontier.sh
+inspect-whatif-options:
+	sh ./scripts/inspect-whatif-narrow.sh options
 
-benchmark-sql-subscription-frontier:
-\tsh ./scripts/benchmark-sql-subscription-frontier.sh
+inspect-whatif-contracts:
+	sh ./scripts/inspect-whatif-narrow.sh contracts
 
-deliver-subscription-frontiers:
-\tsh ./scripts/deliver-subscription-frontiers.sh apply
+inspect-whatif-metadata:
+	sh ./scripts/inspect-whatif-narrow.sh metadata
 
-commit-subscription-frontiers:
-\tsh ./scripts/deliver-subscription-frontiers.sh commit
+inspect-whatif-explain:
+	sh ./scripts/inspect-whatif-narrow.sh explain
 
-push-subscription-frontiers:
-\tsh ./scripts/deliver-subscription-frontiers.sh push
+inspect-whatif-parser:
+	sh ./scripts/inspect-whatif-narrow.sh parser
 
-.PHONY: deliver-async-command
-deliver-async-command:
-\tsh ./scripts/deliver-async-command.sh apply
+inspect-whatif-columnar:
+	sh ./scripts/inspect-whatif-narrow.sh columnar
 
-.PHONY: commit-async-command
-commit-async-command:
-\tsh ./scripts/deliver-async-command.sh commit
+inspect-whatif-api:
+	sh ./scripts/inspect-whatif-narrow.sh api
 
-.PHONY: push-async-command
-push-async-command:
-\tsh ./scripts/deliver-async-command.sh push
+inspect-whatif-apihead:
+	sh ./scripts/inspect-whatif-narrow.sh apihead
+
+inspect-whatif-rootgen:
+	sh ./scripts/inspect-whatif-narrow.sh rootgen
+
+inspect-whatif-test:
+	sh ./scripts/inspect-whatif-narrow.sh test
+
+inspect-whatif-docs:
+	sh ./scripts/inspect-whatif-narrow.sh docs
+
+inspect-whatif-headmake:
+	sh ./scripts/inspect-whatif-narrow.sh headmake
+
+gen-root-api:
+	sh ./scripts/generate-root-api.sh
+
+format-sql-whatif:
+	sh ./scripts/format-sql-whatif.sh
+
+test-sql-whatif:
+	sh ./scripts/test-sql-whatif.sh
+
+benchmark-sql-whatif:
+	sh ./scripts/benchmark-sql-whatif.sh
+
+verify-sql-whatif:
+	sh ./scripts/verify-sql-whatif.sh
+
+inspect-whatif-diff:
+	sh ./scripts/inspect-whatif-diff.sh
+
+deliver-sql-whatif:
+	sh ./scripts/deliver-sql-whatif.sh apply
+
+commit-sql-whatif:
+	sh ./scripts/deliver-sql-whatif.sh commit
+
+push-sql-whatif:
+	sh ./scripts/deliver-sql-whatif.sh push
+
+inspect-whatif-advisor:
+	sh ./scripts/inspect-whatif-narrow.sh advisor
+
+inspect-whatif-files:
+	sh ./scripts/inspect-whatif-narrow.sh files
+
+inspect-whatif-core:
+	sh ./scripts/inspect-whatif-narrow.sh core
+
+inspect-whatif-coresql:
+	sh ./scripts/inspect-whatif-narrow.sh coresql
+
+inspect-whatif-corequery:
+	sh ./scripts/inspect-whatif-narrow.sh corequery
+
+.PHONY: inspect-command-surface
+inspect-command-surface:
+	sh ./scripts/inspect-command-surface.sh
+
+.PHONY: inspect-async-write-core
+inspect-async-write-core:
+	sh ./scripts/inspect-async-write-core.sh
+
+.PHONY: inspect-async-http-core
+inspect-async-http-core:
+	sh ./scripts/inspect-async-http-core.sh
 
 .PHONY: test-async-command
 test-async-command:
-\tsh ./scripts/test-async-command.sh
+	sh ./scripts/test-async-command.sh
 
 .PHONY: format-async-command
 format-async-command:
-\tsh ./scripts/format-async-command.sh
+	sh ./scripts/format-async-command.sh
 
 .PHONY: benchmark-async-command
 benchmark-async-command:
-\tsh ./scripts/benchmark-async-command.sh
+	sh ./scripts/benchmark-async-command.sh
 
 .PHONY: deliver-async-command
 deliver-async-command:
-\tsh ./scripts/deliver-async-command.sh apply
+	sh ./scripts/deliver-async-command.sh apply
 
 .PHONY: commit-async-command
 commit-async-command:
-\tsh ./scripts/deliver-async-command.sh commit
+	sh ./scripts/deliver-async-command.sh commit
 
 .PHONY: push-async-command
 push-async-command:
-\tsh ./scripts/deliver-async-command.sh push
+	sh ./scripts/deliver-async-command.sh push
+
+.PHONY: inspect-readme-links
+inspect-readme-links:
+	sh ./scripts/inspect-readme-links.sh
+
+deliver-transparent-projections:
+	sh ./scripts/deliver-transparent-projections.sh apply
+
+commit-transparent-projections:
+	sh ./scripts/deliver-transparent-projections.sh commit
+
+push-transparent-projections:
+	sh ./scripts/deliver-transparent-projections.sh push
+
+test-sql-subscription-frontier:
+	sh ./scripts/test-sql-subscription-frontier.sh
+
+format-sql-subscription-frontier:
+	sh ./scripts/format-sql-subscription-frontier.sh
+
+benchmark-sql-subscription-frontier:
+	sh ./scripts/benchmark-sql-subscription-frontier.sh
+
+deliver-subscription-frontiers:
+	sh ./scripts/deliver-subscription-frontiers.sh apply
+
+commit-subscription-frontiers:
+	sh ./scripts/deliver-subscription-frontiers.sh commit
+
+push-subscription-frontiers:
+	sh ./scripts/deliver-subscription-frontiers.sh push
+
+.PHONY: inspect-sql-constraint
+inspect-sql-constraint:
+	sh ./scripts/inspect-sql-surface.sh constraint
+
+.PHONY: inspect-command-atomic
+inspect-command-atomic:
+	sh ./scripts/inspect-command-surface.sh atomic
+
+.PHONY: inspect-command-ingest
+inspect-command-ingest:
+	sh ./scripts/inspect-command-surface.sh ingest
+
+.PHONY: inspect-command-replication
+inspect-command-replication:
+	sh ./scripts/inspect-command-surface.sh replication
+
+.PHONY: inspect-command-types
+inspect-command-types:
+	sh ./scripts/inspect-command-surface.sh types
+
+.PHONY: inspect-command-locate
+inspect-command-locate:
+	sh ./scripts/inspect-command-surface.sh locate
+
+.PHONY: inspect-command-request
+inspect-command-request:
+	sh ./scripts/inspect-command-surface.sh request
+
+.PHONY: inspect-command-defs
+inspect-command-defs:
+	sh ./scripts/inspect-command-surface.sh defs
+
+inspect-command-request-type:
+	sh ./scripts/inspect-command-request.sh
 
 .PHONY: test-async-http
 test-async-http:
@@ -3814,62 +4099,146 @@ commit-async-http:
 push-async-http:
 	sh ./scripts/deliver-async-http.sh push
 
+.PHONY: inspect-whatif-delivery
+inspect-whatif-delivery:
+	sh ./scripts/inspect-whatif-delivery.sh
 
-gen-root-api:
-	sh ./scripts/generate-root-api.sh
+.PHONY: verify-whatif-targets
+verify-whatif-targets:
+	sh ./scripts/verify-whatif-targets.sh
 
-format-sql-whatif:
-	sh ./scripts/format-sql-whatif.sh
+.PHONY: inspect-sql-whatif-source
+inspect-sql-whatif-source:
+	sh ./scripts/inspect-sql-whatif-source.sh
 
-test-sql-whatif:
-	sh ./scripts/test-sql-whatif.sh
+.PHONY: inspect-sql-whatif-test
+inspect-sql-whatif-test:
+	sh ./scripts/inspect-sql-whatif-test.sh
 
-benchmark-sql-whatif:
-	sh ./scripts/benchmark-sql-whatif.sh
+.PHONY: inspect-sql-whatif-stage
+inspect-sql-whatif-stage:
+	sh ./scripts/inspect-sql-whatif-stage.sh
 
-verify-sql-whatif:
-	sh ./scripts/verify-sql-whatif.sh
+.PHONY: inspect-sql-whatif-docs
+inspect-sql-whatif-docs:
+	sh ./scripts/inspect-sql-whatif-docs.sh
 
-deliver-sql-whatif:
-	sh ./scripts/deliver-sql-whatif.sh apply
+.PHONY: inspect-sql-runtime-join
+inspect-sql-runtime-join:
+	sh ./scripts/inspect-sql-runtime-join.sh
 
-commit-sql-whatif:
-	sh ./scripts/deliver-sql-whatif.sh commit
+.PHONY: inspect-sql-bloom-api
+inspect-sql-bloom-api:
+	sh ./scripts/inspect-sql-bloom-api.sh
 
-push-sql-whatif:
-	sh ./scripts/deliver-sql-whatif.sh push
+.PHONY: inspect-sql-pagination
+inspect-sql-pagination:
+	sh ./scripts/inspect-sql-pagination.sh
 
+.PHONY: inspect-ordered-source
+inspect-ordered-source:
+	sh ./scripts/inspect-ordered-source.sh
 
+.PHONY: inspect-keyset-index
+inspect-keyset-index:
+	sh ./scripts/inspect-keyset-index.sh
+
+.PHONY: format-sql-keyset
 format-sql-keyset:
 	sh ./scripts/format-sql-keyset.sh
 
+.PHONY: test-sql-keyset
 test-sql-keyset:
 	sh ./scripts/test-sql-keyset.sh
 
+.PHONY: benchmark-sql-keyset
 benchmark-sql-keyset:
 	sh ./scripts/benchmark-sql-keyset.sh
 
+.PHONY: test-sql-keyset-hattrie
 test-sql-keyset-hattrie:
 	sh ./scripts/test-sql-keyset-hattrie.sh
-
+.PHONY: inspect-keyset-hattrie-method
+inspect-keyset-hattrie-method:
+	sh ./scripts/inspect-keyset-hattrie-method.sh
+.PHONY: inspect-sql-keyset-hattrie-test
+inspect-sql-keyset-hattrie-test:
+	sh ./scripts/inspect-sql-keyset-hattrie-test.sh
+.PHONY: inspect-sql-order-null-semantics
+inspect-sql-order-null-semantics:
+	sh ./scripts/inspect-sql-order-null-semantics.sh
+.PHONY: inspect-keyset-facade
+inspect-keyset-facade:
+	sh ./scripts/inspect-keyset-facade.sh
+.PHONY: inspect-sql-query-request-path
+inspect-sql-query-request-path:
+	sh ./scripts/inspect-sql-query-request-path.sh
+.PHONY: inspect-sql-client-page
+inspect-sql-client-page:
+	sh ./scripts/inspect-sql-client-page.sh
+.PHONY: benchmark-sql-keyset-hattrie
 benchmark-sql-keyset-hattrie:
 	sh ./scripts/benchmark-sql-keyset-hattrie.sh
+.PHONY: inspect-test-trie
+inspect-test-trie:
+	sh ./scripts/inspect-test-trie.sh
+.PHONY: inspect-keyset-worktree
+inspect-keyset-worktree:
+	sh ./scripts/inspect-keyset-worktree.sh
 
+.PHONY: deliver-sql-keyset
 deliver-sql-keyset:
 	sh ./scripts/deliver-sql-keyset.sh apply
 
+.PHONY: inspect-keyset-stage
+inspect-keyset-stage:
+	sh ./scripts/inspect-keyset-stage.sh
+
+.PHONY: commit-sql-keyset
 commit-sql-keyset:
 	sh ./scripts/deliver-sql-keyset.sh commit
 
+.PHONY: push-sql-keyset
 push-sql-keyset:
 	sh ./scripts/deliver-sql-keyset.sh push
+inspect-memory-apis:
+	bash scripts/inspect-memory-apis.sh $(MEMORY_SECTION)
 
+inspect-memory-apis-summary:
+	bash scripts/inspect-memory-apis.sh summary
+
+inspect-memory-apis-main:
+	bash scripts/inspect-memory-apis.sh main
+
+inspect-memory-apis-monitoring:
+	bash scripts/inspect-memory-apis.sh monitoring
+
+inspect-memory-apis-cli:
+	bash scripts/inspect-memory-apis.sh cli
+
+inspect-memory-apis-routes:
+	bash scripts/inspect-memory-apis.sh routes
+
+inspect-memory-apis-model:
+	bash scripts/inspect-memory-apis.sh model
+
+inspect-memory-apis-tests:
+	bash scripts/inspect-memory-apis.sh tests
+
+inspect-memory-apis-module:
+	bash scripts/inspect-memory-apis.sh module
+
+test-memory-report:
+	bash scripts/test-memory-report.sh
 
 format-memory-report:
 	bash scripts/format-memory-report.sh
 
-test-memory-report:
-	bash scripts/test-memory-report.sh
+inspect-memory-apis-openapi:
+	bash scripts/inspect-memory-apis.sh openapi
+
+inspect-memory-apis-api:
+	bash scripts/inspect-memory-apis.sh api
 
 benchmark-memory-report:
 	bash scripts/benchmark-memory-report.sh
@@ -3886,6 +4255,47 @@ commit-memory-report:
 push-memory-report:
 	bash scripts/deliver-memory-report.sh push
 
+inspect-memory-apis-docs:
+	bash scripts/inspect-memory-apis.sh docs
+
+inspect-memory-apis-docs-top:
+	bash scripts/inspect-memory-apis.sh docs-top
+
+inspect-memory-apis-docs-monitoring:
+	bash scripts/inspect-memory-apis.sh docs-monitoring
+
+inspect-memory-apis-benchmark-top:
+	bash scripts/inspect-memory-apis.sh benchmark-top
+
+inspect-memory-apis-adoption-tail:
+	bash scripts/inspect-memory-apis.sh adoption-tail
+
+inspect-memory-apis-telemetry:
+	bash scripts/inspect-memory-apis.sh telemetry
+
+inspect-memory-apis-telemetry-detail:
+	bash scripts/inspect-memory-apis.sh telemetry-detail
+
+inspect-memory-apis-workers:
+	bash scripts/inspect-memory-apis.sh workers
+
+inspect-memory-apis-adaptive:
+	bash scripts/inspect-memory-apis.sh adaptive
+
+inspect-memory-apis-adaptive-use:
+	bash scripts/inspect-memory-apis.sh adaptive-use
+
+inspect-memory-apis-adaptive-cache:
+	bash scripts/inspect-memory-apis.sh adaptive-cache
+
+inspect-memory-apis-string-index:
+	bash scripts/inspect-memory-apis.sh string-index
+
+inspect-memory-delivery:
+	bash scripts/inspect-memory-delivery.sh
+
+inspect-memory-staged:
+	bash scripts/inspect-memory-delivery.sh staged
 
 format-sql-prefix-index:
 	bash scripts/format-sql-prefix-index.sh
@@ -3896,6 +4306,17 @@ test-sql-prefix-index:
 benchmark-sql-prefix-index:
 	bash scripts/benchmark-sql-prefix-index.sh
 
+deliver-sql-prefix-index:
+	bash scripts/deliver-sql-prefix-index.sh apply
+
+check-sql-prefix-index-stage:
+	bash scripts/deliver-sql-prefix-index.sh check
+
+commit-sql-prefix-index:
+	bash scripts/deliver-sql-prefix-index.sh commit
+
+push-sql-prefix-index:
+	bash scripts/deliver-sql-prefix-index.sh push
 
 deliver-sql-borrowed-prefix-index:
 	bash scripts/deliver-sql-borrowed-prefix-index.sh apply
@@ -3908,9 +4329,59 @@ commit-sql-borrowed-prefix-index:
 
 push-sql-borrowed-prefix-index:
 	bash scripts/deliver-sql-borrowed-prefix-index.sh push
+
+
+
+.PHONY: inspect-sql-prefix-index-delivery-script
+inspect-sql-prefix-index-delivery-script:
+	sh ./scripts/inspect-sql-prefix-index-delivery-script.sh
 .PHONY: audit-next-inspiration
 audit-next-inspiration:
 	sh ./scripts/audit-next-inspiration.sh
+
+.PHONY: audit-inspiration-unchecked
+audit-inspiration-unchecked:
+	sh ./scripts/audit-inspiration-unchecked.sh
+
+
+
+
+.PHONY: test-token-bloom
+test-token-bloom:
+	sh ./scripts/test-token-bloom.sh
+
+.PHONY: format-token-bloom
+format-token-bloom:
+	sh ./scripts/format-token-bloom.sh
+
+.PHONY: test-token-bloom-api
+test-token-bloom-api:
+	sh ./scripts/test-token-bloom-api.sh
+
+.PHONY: benchmark-token-bloom
+benchmark-token-bloom:
+	sh ./scripts/benchmark-token-bloom.sh
+
+.PHONY: test-race-token-bloom
+test-race-token-bloom:
+	sh ./scripts/test-race-token-bloom.sh
+
+.PHONY: vet-token-bloom
+vet-token-bloom:
+	sh ./scripts/vet-token-bloom.sh
+
+.PHONY: stage-token-bloom
+stage-token-bloom:
+	sh ./scripts/commit-token-bloom.sh stage
+
+.PHONY: commit-token-bloom
+commit-token-bloom:
+	sh ./scripts/commit-token-bloom.sh commit
+
+.PHONY: push-token-bloom
+push-token-bloom:
+	sh ./scripts/commit-token-bloom.sh push
+
 
 .PHONY: test-sql-constant-folding
 test-sql-constant-folding:
@@ -3931,6 +4402,19 @@ test-race-sql-constant-folding:
 .PHONY: vet-sql-constant-folding
 vet-sql-constant-folding:
 	sh ./scripts/vet-sql-constant-folding.sh
+
+.PHONY: stage-sql-constant-folding
+stage-sql-constant-folding:
+	sh ./scripts/commit-sql-constant-folding.sh stage
+
+.PHONY: commit-sql-constant-folding
+commit-sql-constant-folding:
+	sh ./scripts/commit-sql-constant-folding.sh commit
+
+.PHONY: push-sql-constant-folding
+push-sql-constant-folding:
+	sh ./scripts/commit-sql-constant-folding.sh push
+
 .PHONY: test-delay-queue
 test-delay-queue:
 	sh ./scripts/test-delay-queue.sh
@@ -4022,58 +4506,15 @@ vet-dead-letter-queue:
 .PHONY: benchmark-dead-letter-queue
 benchmark-dead-letter-queue:
 	sh ./scripts/benchmark-dead-letter-queue.sh
-.PHONY: audit-inspiration-unchecked
-audit-inspiration-unchecked:
-	sh ./scripts/audit-inspiration-unchecked.sh
-
-.PHONY: test-token-bloom
-test-token-bloom:
-	sh ./scripts/test-token-bloom.sh
-
-.PHONY: format-token-bloom
-format-token-bloom:
-	sh ./scripts/format-token-bloom.sh
-
-.PHONY: test-token-bloom-api
-test-token-bloom-api:
-	sh ./scripts/test-token-bloom-api.sh
-
-.PHONY: benchmark-token-bloom
-benchmark-token-bloom:
-	sh ./scripts/benchmark-token-bloom.sh
-
-.PHONY: test-race-token-bloom
-test-race-token-bloom:
-	sh ./scripts/test-race-token-bloom.sh
-
-.PHONY: vet-token-bloom
-vet-token-bloom:
-	sh ./scripts/vet-token-bloom.sh
-
-.PHONY: stage-token-bloom
-stage-token-bloom:
-	sh ./scripts/commit-token-bloom.sh stage
-
-.PHONY: commit-token-bloom
-commit-token-bloom:
-	sh ./scripts/commit-token-bloom.sh commit
-
-.PHONY: push-token-bloom
-push-token-bloom:
-	sh ./scripts/commit-token-bloom.sh push
-
 .PHONY: test-journal-retention
 test-journal-retention:
 	bash ./scripts/test-journal-retention.sh
-
 .PHONY: format-journal-retention
 format-journal-retention:
 	bash ./scripts/format-journal-retention.sh
-
 .PHONY: benchmark-journal-retention
 benchmark-journal-retention:
 	bash ./scripts/benchmark-journal-retention.sh
-
 .PHONY: test-race-journal-retention
 test-race-journal-retention:
 	bash ./scripts/test-race-journal-retention.sh
@@ -4081,11 +4522,9 @@ test-race-journal-retention:
 .PHONY: vet-journal-retention
 vet-journal-retention:
 	bash ./scripts/vet-journal-retention.sh
-
 .PHONY: review-journal-retention
 review-journal-retention:
 	bash ./scripts/review-journal-retention.sh
-
 .PHONY: stage-journal-retention
 stage-journal-retention:
 	bash ./scripts/commit-journal-retention.sh stage
@@ -4097,19 +4536,15 @@ commit-journal-retention:
 .PHONY: push-journal-retention
 push-journal-retention:
 	bash ./scripts/commit-journal-retention.sh push
-
 .PHONY: test-replay-progress
 test-replay-progress:
 	bash ./scripts/test-replay-progress.sh
-
 .PHONY: format-replay-progress
 format-replay-progress:
 	bash ./scripts/format-replay-progress.sh
-
 .PHONY: benchmark-replay-progress
 benchmark-replay-progress:
 	bash ./scripts/benchmark-replay-progress.sh
-
 .PHONY: test-race-replay-progress
 test-race-replay-progress:
 	bash ./scripts/test-race-replay-progress.sh
@@ -4117,7 +4552,6 @@ test-race-replay-progress:
 .PHONY: vet-replay-progress
 vet-replay-progress:
 	bash ./scripts/vet-replay-progress.sh
-
 .PHONY: review-replay-progress
 review-replay-progress:
 	bash ./scripts/review-replay-progress.sh
@@ -4133,7 +4567,6 @@ commit-replay-progress:
 .PHONY: push-replay-progress
 push-replay-progress:
 	bash ./scripts/commit-replay-progress.sh push
-
 .PHONY: test-t062
 test-t062:
 	bash ./scripts/test-t062.sh
@@ -4143,6 +4576,7 @@ format-t062:
 .PHONY: test-race-t062
 test-race-t062:
 	bash ./scripts/test-race-t062.sh
+
 .PHONY: vet-t062
 vet-t062:
 	bash ./scripts/vet-t062.sh
@@ -4152,15 +4586,19 @@ benchmark-t062:
 .PHONY: stage-t062
 stage-t062:
 	bash ./scripts/commit-t062.sh stage
+
 .PHONY: commit-t062
 commit-t062:
 	bash ./scripts/commit-t062.sh commit
+
 .PHONY: push-t062
 push-t062:
 	bash ./scripts/commit-t062.sh push
+
 .PHONY: review-t062
 review-t062:
 	bash ./scripts/review-t062.sh
+
 .PHONY: test-t063
 test-t063:
 	bash ./scripts/test-t063.sh
@@ -4253,7 +4691,6 @@ push-t111:
 
 test-t115:
 	bash ./scripts/test-t115.sh
-
 format-t115:
 	bash ./scripts/format-t115.sh
 
@@ -4274,68 +4711,37 @@ commit-t115:
 
 push-t115:
 	bash ./scripts/push-t115.sh
-
-.PHONY: test-t051
-
 test-t051:
-
 	bash ./scripts/test-t051.sh
 
-
-
 .PHONY: format-t051
-
 format-t051:
-
 	bash ./scripts/format-t051.sh
 
-
-
 .PHONY: test-race-t051
-
 test-race-t051:
-
 	bash ./scripts/test-race-t051.sh
 
-
-
 .PHONY: vet-t051
-
 vet-t051:
-
 	bash ./scripts/vet-t051.sh
 
-
-
 .PHONY: review-t051
-
 review-t051:
-
 	bash ./scripts/review-t051.sh
 
-
-
 .PHONY: stage-t051
-
 stage-t051:
-
 	bash ./scripts/stage-t051.sh
 
-
-
 .PHONY: commit-t051
-
 commit-t051:
-
 	bash ./scripts/commit-t051.sh
 
-
-
 .PHONY: push-t051
-
 push-t051:
-
 	bash ./scripts/push-t051.sh
+
 .PHONY: test-t046
 test-t046:
 	bash ./scripts/test-t046.sh
@@ -4345,21 +4751,41 @@ format-t046:
 .PHONY: test-race-t046
 test-race-t046:
 	bash ./scripts/test-race-t046.sh
+
 .PHONY: vet-t046
 vet-t046:
 	bash ./scripts/vet-t046.sh
 .PHONY: review-t046
 review-t046:
 	bash ./scripts/review-t046.sh
+
 .PHONY: stage-t046
 stage-t046:
 	bash ./scripts/stage-t046.sh
+
 .PHONY: commit-t046
 commit-t046:
 	bash ./scripts/commit-t046.sh
+
 .PHONY: push-t046
 push-t046:
 	bash ./scripts/push-t046.sh
+.PHONY: test-t154
+test-t154:
+	bash ./scripts/test-t154.sh
+.PHONY: format-t154
+format-t154:
+	bash ./scripts/format-t154.sh
+.PHONY: benchmark-t154
+benchmark-t154:
+	bash ./scripts/benchmark-t154.sh
+.PHONY: test-race-t154
+test-race-t154:
+	bash ./scripts/test-race-t154.sh
+
+.PHONY: vet-t154
+vet-t154:
+	bash ./scripts/vet-t154.sh
 
 .PHONY: review-t154
 review-t154:
@@ -4456,37 +4882,12 @@ commit-t155-checklist:
 .PHONY: push-t155-checklist
 push-t155-checklist:
 	bash ./scripts/push-t155-checklist.sh
-.PHONY: test-t147
-test-t147:
-	bash ./scripts/test-t147.sh
-
-.PHONY: bench-t147
-bench-t147:
-	bash ./scripts/bench-t147.sh
-
-.PHONY: review-t147
-review-t147:
-	bash ./scripts/review-t147.sh
-
-.PHONY: format-t147
-format-t147:
-	bash ./scripts/format-t147.sh
-
-.PHONY: stage-t147
-stage-t147:
-	bash ./scripts/stage-t147.sh
-
-.PHONY: commit-t147
-commit-t147:
-	bash ./scripts/commit-t147.sh
-
-.PHONY: push-t147
-push-t147:
-	bash ./scripts/push-t147.sh
 
 .PHONY: audit-inspiration-state
 audit-inspiration-state:
 	bash ./scripts/audit-inspiration-state.sh
+
+
 
 .PHONY: test-t045
 test-t045:
@@ -4522,68 +4923,68 @@ push-t045:
 
 .PHONY: test-t041
 test-t041:
-\tbash ./scripts/test-t041.sh
+	bash ./scripts/test-t041.sh
 
 .PHONY: format-t041
 format-t041:
-\tbash ./scripts/format-t041.sh
+	bash ./scripts/format-t041.sh
 
 .PHONY: benchmark-t041
 benchmark-t041:
-\tbash ./scripts/benchmark-t041.sh
+	bash ./scripts/benchmark-t041.sh
 
 .PHONY: test-race-t041
 test-race-t041:
-\tbash ./scripts/test-race-t041.sh
+	bash ./scripts/test-race-t041.sh
 
 .PHONY: vet-t041
 vet-t041:
-\tbash ./scripts/vet-t041.sh
+	bash ./scripts/vet-t041.sh
 
 .PHONY: review-t041
 review-t041:
-\tbash ./scripts/review-t041.sh
+	bash ./scripts/review-t041.sh
 
 .PHONY: stage-t041
 stage-t041:
-\tbash ./scripts/stage-t041.sh
+	bash ./scripts/stage-t041.sh
 
 .PHONY: commit-t041
 commit-t041:
-\tbash ./scripts/commit-t041.sh
+	bash ./scripts/commit-t041.sh
 
 .PHONY: push-t041
 push-t041:
-\tbash ./scripts/push-t041.sh
+	bash ./scripts/push-t041.sh
 
 .PHONY: test-t069
 test-t069:
-\tbash ./scripts/test-t069.sh
+	bash ./scripts/test-t069.sh
 
 .PHONY: format-t069
 format-t069:
-\tbash ./scripts/format-t069.sh
+	bash ./scripts/format-t069.sh
 
 .PHONY: test-race-t069
 test-race-t069:
-\tbash ./scripts/test-race-t069.sh
+	bash ./scripts/test-race-t069.sh
 
 .PHONY: vet-t069
 vet-t069:
-\tbash ./scripts/vet-t069.sh
+	bash ./scripts/vet-t069.sh
 
 .PHONY: review-t069
 review-t069:
-\tbash ./scripts/review-t069.sh
+	bash ./scripts/review-t069.sh
 
 .PHONY: stage-t069
 stage-t069:
-\tbash ./scripts/stage-t069.sh
+	bash ./scripts/stage-t069.sh
 
 .PHONY: commit-t069
 commit-t069:
-\tbash ./scripts/commit-t069.sh
+	bash ./scripts/commit-t069.sh
 
 .PHONY: push-t069
 push-t069:
-\tbash ./scripts/push-t069.sh
+	bash ./scripts/push-t069.sh

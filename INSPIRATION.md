@@ -162,7 +162,7 @@ name.
 - [ ] C102 Prepared-plan cache keyed by normalized SQL and schema version.
 - [ ] C103 Plan invalidation when an index or projection changes.
 - [ ] C104 Query result reuse across equivalent parameter bindings.
-- [ ] C105 Query fingerprinting independent of literal values.
+- [x] C105 Query fingerprinting independent of literal values. `SQLQueryFingerprint` validates the shared SQL grammar, preserves identifiers/operators/literal types/parameter positions, replaces literal values with type markers, and returns a SHA-256 digest without retaining query text.
 - [ ] C106 Workload classes with separate concurrency and memory budgets.
 - [ ] C107 Admission control before expensive scans.
 - [ ] C108 Kill-query command with an operator-visible reason.
