@@ -2487,6 +2487,18 @@ benchmark-sql-result-cache:
 commit-sql-result-cache:
 	sh ./scripts/commit-sql-result-cache.sh
 
+test-sql-trace-export:
+	sh ./scripts/test-sql-trace-export.sh
+
+format-sql-trace-export:
+	sh ./scripts/format-sql-trace-export.sh
+
+benchmark-sql-trace-export:
+	sh ./scripts/benchmark-sql-trace-export.sh
+
+commit-sql-trace-export:
+	sh ./scripts/commit-sql-trace-export.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

@@ -51,6 +51,7 @@ type SQLQueryObserver = hatSql.QueryObserver
 type SQLQueryObserverFunc = hatSql.QueryObserverFunc
 type SQLQueryEvent = hatSql.QueryEvent
 type SQLQueryOperator = hatSql.QueryOperator
+type SQLQueryTraceRecorder = hatSql.QueryTraceRecorder
 
 const (
 	DefaultSQLIndexAdvisorSnapshotMaxBytes = hatSql.DefaultSQLIndexAdvisorSnapshotMaxBytes
@@ -111,6 +112,12 @@ const (
 // normal SQL execution path or creating index state.
 func ExplainSQLWhatIf(ctx context.Context, request SQLWhatIfRequest, resolver SQLSourceResolver) (SQLWhatIfReport, error) {
 	return hatSql.ExplainSQLWhatIf(ctx, request, resolver)
+}
+
+// NewSQLQueryTraceRecorder creates a bounded, privacy-safe SQL query trace
+// recorder for use as SQLQueryOptions.Observer.
+func NewSQLQueryTraceRecorder(limit int) *SQLQueryTraceRecorder {
+	return hatSql.NewQueryTraceRecorder(limit)
 }
 
 // SQLResultCache retains the root API while hatSql owns the portable cache

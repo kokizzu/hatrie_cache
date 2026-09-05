@@ -15912,3 +15912,16 @@ The portable `ResultCache` hit benchmark remains in
 hit speed is useful only when the caller can provide a correct mutation epoch.
 The five-run local median for its 256-row clone workload was `154,421 ns/op`,
 `270,624 B/op`, and `2,050 allocs/op`; the benchmark prints all raw samples.
+
+## SQL Query Trace Recorder
+
+Five-run local benchmark on AMD Ryzen 9 5950X, Go `amd64`:
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Record bounded observer event | 1,541 | 80 | 1 |
+| Export one event as JSONL | 361.7 | 304 | 3 |
+
+The recorder is opt-in, so an unset `SQLQueryOptions.Observer` adds no trace
+work to query execution. Run `make benchmark-sql-trace-export` to print all
+raw samples.

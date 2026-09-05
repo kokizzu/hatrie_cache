@@ -166,8 +166,8 @@ name.
 - [ ] C106 Workload classes with separate concurrency and memory budgets.
 - [ ] C107 Admission control before expensive scans.
 - [x] C108 Kill-query command with an operator-visible reason. `SQLQueryManager.Cancel` provides bounded, reasoned cooperative cancellation; remote layers must apply their existing auth policy.
-- [ ] C109 Per-operator CPU and row counters.
-- [ ] C110 Query pipeline trace export.
+- [x] C109 Per-operator CPU and row counters. `SQLQueryEvent.Operators` reports privacy-safe input/output rows, bytes, and elapsed nanoseconds for each observed operator; existing observer tests cover the counters.
+- [x] C110 Query pipeline trace export. `NewQueryTraceRecorder` provides an opt-in bounded observer with independent snapshots and JSONL export, retaining only the newest events when a positive limit is configured; focused tests cover bounds, cloning, and writer errors.
 
 ### Ingestion, Formats, And Operations
 

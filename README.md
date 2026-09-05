@@ -3688,3 +3688,25 @@ typed value from the attempted insert. Conflict updates must use the matching
 arbitrary update expressions, and `INSERT ... SELECT` conflict clauses are
 rejected explicitly. Use `BEGIN ATOMIC`/`COMMIT` or `BeginSQLTransaction` for
 multi-statement transaction workflows.
+
+## SQL Query Trace Export
+
+SQL execution already exposes privacy-safe operator counters through
+`SQLQueryOptions.Observer`. To retain and export a bounded trace, pass a
+`hatSql.NewQueryTraceRecorder` as the observer:
+
+```go
+recorder := hatSql.NewQueryTraceRecorder(1024)
+_, err := hatSql.ExecuteSQLQueryContext(ctx, query, resolver, hatSql.SQLQueryOptions{
+	Observer: recorder,
+})
+if err != nil {
+	return err
+}
+return recorder.WriteJSONL(writer)
+```
+
+The export contains query IDs, status, result counters, and per-operator
+timings/row counts; it does not retain SQL text, predicates, parameters, or
+row values. A positive limit keeps the newest events, and a non-positive limit
+retains all events.
