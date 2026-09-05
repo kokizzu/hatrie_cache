@@ -16019,3 +16019,34 @@ BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 271  4451113
 BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 274  4448935 ns/op  98216 B/op  564 allocs/op
 BenchmarkSQLColumnarNumericPredicateOrder/mark_selectivity_order-32 265  4394659 ns/op  98216 B/op  564 allocs/op
 ```
+
+## SQL EXPLAIN PIPELINE
+
+Five-run local benchmark on an AMD Ryzen 9 5950X, Go `amd64`, using a static
+plan with `SCAN`, `AGGREGATE`, `PROJECT`, and `SORT` operators. This compares
+the explicit diagnostic forms only; ordinary query execution does not build
+pipeline metadata.
+
+| Diagnostic | Median time | B/op | allocs/op | Relative cost |
+| --- | ---: | ---: | ---: | ---: |
+| Regular `EXPLAIN` | 4,238 ns | 6,552 | 43 | 1.00x |
+| `EXPLAIN PIPELINE` | 4,573 ns | 6,584 | 43 | 1.08x; +32 B |
+
+The feature is observability-only. It does not change execution, storage, or
+wire formats, and regular `EXPLAIN` keeps its existing result columns and JSON
+shape. Static pipeline workers are currently reported as one worker per stage.
+
+Raw output from `make benchmark-sql-explain-pipeline`:
+
+```text
+BenchmarkSQLExplainPipeline/regular_explain-32 269709 4055 ns/op 6552 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/regular_explain-32 278200 4261 ns/op 6552 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/regular_explain-32 241408 4238 ns/op 6552 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/regular_explain-32 295328 4352 ns/op 6552 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/regular_explain-32 271633 4161 ns/op 6552 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/pipeline_explain-32 276116 4573 ns/op 6584 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/pipeline_explain-32 246861 4691 ns/op 6584 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/pipeline_explain-32 274768 4330 ns/op 6584 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/pipeline_explain-32 273217 4592 ns/op 6584 B/op 43 allocs/op
+BenchmarkSQLExplainPipeline/pipeline_explain-32 246422 4442 ns/op 6584 B/op 43 allocs/op
+```

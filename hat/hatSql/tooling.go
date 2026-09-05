@@ -135,7 +135,7 @@ func formatSQLToken(token Token) string {
 
 func sqlToolingKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "SELECT", "FROM", "WHERE", "AS", "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "GROUP", "BY", "HAVING", "ORDER", "ASC", "DESC", "NULLS", "FIRST", "LAST", "LIMIT", "OFFSET", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "ON", "WITH", "RECURSIVE", "UNION", "INTERSECT", "EXCEPT", "ALL", "DISTINCT", "EXPLAIN", "ANALYZE", "CACHE", "KEYS", "VALUES", "TABLE", "EXTERNAL", "SAMPLE":
+	case "SELECT", "FROM", "WHERE", "AS", "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "GROUP", "BY", "HAVING", "ORDER", "ASC", "DESC", "NULLS", "FIRST", "LAST", "LIMIT", "OFFSET", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "ON", "WITH", "RECURSIVE", "UNION", "INTERSECT", "EXCEPT", "ALL", "DISTINCT", "EXPLAIN", "PIPELINE", "ANALYZE", "CACHE", "KEYS", "VALUES", "TABLE", "EXTERNAL", "SAMPLE":
 		return true
 	default:
 		return false

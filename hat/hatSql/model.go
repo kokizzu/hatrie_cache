@@ -30,6 +30,9 @@ type QueryResult struct {
 type ExplainStep struct {
 	Node                 string          `json:"node"`
 	Detail               string          `json:"detail"`
+	Stage                int             `json:"stage,omitempty"`
+	Worker               int             `json:"worker,omitempty"`
+	Workers              int             `json:"workers,omitempty"`
 	Lineage              []ColumnLineage `json:"lineage,omitempty"`
 	EstimatedRows        *int            `json:"estimated_rows,omitempty"`
 	ActualInputRows      *int            `json:"actual_input_rows,omitempty"`

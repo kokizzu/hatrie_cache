@@ -3735,6 +3735,26 @@ timings/row counts; it does not retain SQL text, predicates, parameters, or
 row values. A positive limit keeps the newest events, and a non-positive limit
 retains all events.
 
+## SQL EXPLAIN PIPELINE
+
+Use `EXPLAIN PIPELINE` when operators need an explicit static stage and worker
+view of a query plan:
+
+```sql
+EXPLAIN PIPELINE
+FROM CACHE('events')
+WHERE region = 'apac'
+SELECT id, value
+```
+
+The result adds one-based `stage`, `worker`, and `workers` columns and mirrors
+the same metadata in `Plan`. Blocking operators such as aggregation, sorting,
+distinct, joins, and set operations begin a new stage. This is a planning
+view, so static plans currently report one worker; `EXPLAIN PIPELINE ANALYZE`
+is rejected explicitly. Existing `EXPLAIN` and `EXPLAIN ANALYZE` output is
+unchanged. See [BENCHMARK.md](BENCHMARK.md#sql-explain-pipeline) for the
+diagnostic overhead.
+
 ## SQL Sparse Primary Mark Pruning
 
 Typed-table columnar caches can optionally publish a sparse primary mark index

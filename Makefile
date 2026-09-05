@@ -2542,6 +2542,21 @@ format-sql-predicate-order:
 .PHONY: commit-sql-predicate-order
 commit-sql-predicate-order:
 \tsh ./scripts/commit-sql-predicate-order.sh
+.PHONY: test-sql-explain-pipeline
+test-sql-explain-pipeline:
+\tsh ./scripts/test-sql-explain-pipeline.sh
+
+.PHONY: benchmark-sql-explain-pipeline
+benchmark-sql-explain-pipeline:
+\tsh ./scripts/benchmark-sql-explain-pipeline.sh
+
+.PHONY: format-sql-explain-pipeline
+format-sql-explain-pipeline:
+\tsh ./scripts/format-sql-explain-pipeline.sh
+
+.PHONY: commit-sql-explain-pipeline
+commit-sql-explain-pipeline:
+\tsh ./scripts/commit-sql-explain-pipeline.sh
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

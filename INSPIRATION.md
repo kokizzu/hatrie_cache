@@ -71,7 +71,7 @@ name.
 - [x] C014 Selection vectors for filtered blocks.
 - [ ] C015 SIMD kernels for common numeric and string predicates.
 - [ ] C016 Pipeline stages with independently scheduled work.
-- [ ] C017 EXPLAIN PIPELINE output with stage and worker detail.
+- [x] C017 EXPLAIN PIPELINE output with stage and worker detail. `EXPLAIN PIPELINE` now emits additive one-based stage, worker, and worker-count metadata derived from the static plan; regular `EXPLAIN` output remains unchanged and `EXPLAIN PIPELINE ANALYZE` is rejected explicitly.
 - [x] C018 EXPLAIN output for the local SQL plan.
 - [x] C019 Version-aware bounded query-result cache - the generic epoch-validated `ResultCache` already exists; automatic SQL wiring remains a separate question.
 - [x] C020 Query-condition cache for reusable predicate state.

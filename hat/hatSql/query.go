@@ -4714,10 +4714,15 @@ func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 	}
 	parser := sqlQueryParser{tokens: tokens, allowParameters: true}
 	explain := false
+	pipeline := false
 	analyze := false
 	if parser.keyword("EXPLAIN") {
 		explain = true
 		parser.next()
+		if parser.keyword("PIPELINE") {
+			pipeline = true
+			parser.next()
+		}
 		if parser.keyword("ANALYZE") {
 			analyze = true
 			parser.next()
@@ -4741,6 +4746,7 @@ func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 		return nil, parser.expected(parser.current(), "end of input", nil)
 	}
 	query.explain = explain
+	query.pipeline = pipeline
 	query.analyze = analyze
 	return query, nil
 }
@@ -5066,6 +5072,7 @@ type sqlQuery struct {
 	distinct           bool
 	unions             []sqlUnion
 	explain            bool
+	pipeline           bool
 	analyze            bool
 }
 
@@ -6932,7 +6939,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
@@ -10844,6 +10851,9 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 }
 
 func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
+	if query.pipeline {
+		return explainSQLPipelineQuery(query)
+	}
 	steps := sqlExplainSteps(query)
 	result := SQLQueryResult{
 		Columns: []string{"node", "detail", "estimated_rows"},
