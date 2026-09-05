@@ -1273,9 +1273,6 @@ format-query-fingerprint:
 benchmark-query-fingerprint:
 	bash ./scripts/benchmark-query-fingerprint.sh
 
-deliver-query-fingerprint:
-	bash ./scripts/deliver-query-fingerprint.sh
-
 generate-proto:
 	./scripts/generate-proto.sh
 
