@@ -851,6 +851,10 @@ pair, while `DB_PATH` is a full key/value persistence store. You can enable
 both, but keep in mind the snapshot is loaded after the persistent store and
 therefore wins for overlapping keys.
 
+The Go API `RestorePointInTime` provides an explicit recovery point by replaying
+only through the requested journal sequence. A target of zero selects the
+current journal tail; a target before the snapshot checkpoint is rejected.
+
 Recommended durability profiles:
 
 | Profile | Configuration | Use case |

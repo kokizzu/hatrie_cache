@@ -398,7 +398,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T041 WAL segment compression and independent verification.
 - [ ] T042 Recovery-time parallel replay.
 - [x] T043 Recovery replay progress and ETA metrics.
-- [ ] T044 Recovery point selection by logical sequence.
+- [x] T044 Recovery point selection by logical sequence.
 - [x] T045 Crash-consistency fault injection.
 - [x] T046 Online backup cancellation with resumable manifests.
 
