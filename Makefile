@@ -5218,3 +5218,9 @@ test-t031:
 .PHONY: commit-c024-audit
 commit-c024-audit:
 	bash ./scripts/commit-c024-audit.sh
+.PHONY: test-c036-durable-mutation-queue
+test-c036-durable-mutation-queue:
+	bash ./scripts/test-c036-durable-mutation-queue.sh
+.PHONY: commit-c036-audit
+commit-c036-audit:
+	bash ./scripts/commit-c036-audit.sh

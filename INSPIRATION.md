@@ -90,7 +90,7 @@ name.
 - [ ] C033 SummingMergeTree-style merge-time summation.
 - [x] C034 Aggregating states for reusable grouped results.
 - [x] C035 Lightweight delete patch parts.
-- [ ] C036 Durable mutation queue with observable progress.
+- [x] C036 Durable mutation queue with observable progress. `CommandJournal` and the LevelDB-backed `ReplicationOutboxStore` provide durable FIFO mutation recovery, dead-letter handling, bounded restore, and binary/JSON compatibility; `ReplayWithProgress` exposes concurrent replay progress and ETA. Verified with `make test-c036-durable-mutation-queue`, `make test-replay-progress`, `make test-race-replay-progress`, and `make benchmark-replay-progress`.
 - [x] C037 TTL expiration for supported values and records.
 - [ ] C038 TTL-driven rollup or recompression.
 - [x] C039 Partition pruning for local partitions.
