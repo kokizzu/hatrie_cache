@@ -421,7 +421,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T061 Replication queue depth and error metrics - `/metrics` exposes queue depth, capacity, enqueue/drop, attempt, success/failure, retry, and age gauges/counters.
 - [x] T062 Replication bandwidth and compression metrics - `/metrics` exposes outgoing request wire bytes and request counts by target and `identity`/`gzip` encoding; see [REPLICATION_METRICS.md](REPLICATION_METRICS.md).
 - [x] T063 Replication pause and resume controls - async replication exposes idempotent Go pause/resume methods, authenticated `/api/replication` actions, queue status, and a Prometheus paused gauge; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
-- [ ] T064 Rolling replica replacement.
+- [x] T064 Rolling replica replacement. `cluster add-replica -replace` catches the replacement node up before activation, while `cluster decommission` validates remaining redundancy, runs a final sync, marks the retiring node offline, updates reachable members, and verifies the resulting topology.
 - [ ] T065 Failure-domain-aware replica placement.
 - [ ] T066 Cross-region replication with explicit RPO/RTO.
 - [ ] T067 Split-brain fencing token.
