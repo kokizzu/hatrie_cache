@@ -2,17 +2,25 @@ package hatSql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 )
 
+// ErrNamespaceQueryQueueFull indicates that a namespace admission queue has
+// reached its configured MaxQueuedQueries limit.
+var ErrNamespaceQueryQueueFull = errors.New("namespace query queue is full")
+
 // NamespaceResourceLimits caps resources available to queries in one namespace.
 // Zero leaves a limit unset. Timeout is wall-clock time, which bounds CPU work
 // performed by the cooperative SQL executor; MaxWorkers caps parallel operators.
 type NamespaceResourceLimits struct {
 	MaxConcurrentQueries int
+	// MaxQueuedQueries bounds waiters behind MaxConcurrentQueries. Zero keeps
+	// the existing unlimited-waiter behavior.
+	MaxQueuedQueries      int
 	MaxRows              int
 	MaxJoinWork          int
 	MaxJoinBytes         int
@@ -81,6 +89,7 @@ func (limits NamespaceResourceLimits) validate() error {
 		value int
 	}{
 		{"max concurrent queries", limits.MaxConcurrentQueries},
+		{"max queued queries", limits.MaxQueuedQueries},
 		{"max rows", limits.MaxRows},
 		{"max join work", limits.MaxJoinWork},
 		{"max join bytes", limits.MaxJoinBytes},
@@ -140,6 +149,7 @@ func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[
 func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) NamespaceResourceLimits {
 	return NamespaceResourceLimits{
 		MaxConcurrentQueries: applyPositiveLimit(defaults.MaxConcurrentQueries, override.MaxConcurrentQueries),
+		MaxQueuedQueries:     applyPositiveLimit(defaults.MaxQueuedQueries, override.MaxQueuedQueries),
 		MaxRows:              applyPositiveLimit(defaults.MaxRows, override.MaxRows),
 		MaxJoinWork:          applyPositiveLimit(defaults.MaxJoinWork, override.MaxJoinWork),
 		MaxJoinBytes:         applyPositiveLimit(defaults.MaxJoinBytes, override.MaxJoinBytes),
@@ -178,7 +188,7 @@ func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits Namespa
 	if gate := governor.gates[namespace]; gate != nil {
 		return gate
 	}
-	gate := newNamespaceQueryGate(limits.MaxConcurrentQueries)
+	gate := newNamespaceQueryGate(limits.MaxConcurrentQueries, limits.MaxQueuedQueries)
 	governor.gates[namespace] = gate
 	return gate
 }
@@ -211,6 +221,7 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 type namespaceQueryGate struct {
 	mu       sync.Mutex
 	capacity int
+	maxQueued int
 	running  int
 	waiters  []*namespaceQueryWaiter
 }
@@ -221,8 +232,12 @@ type namespaceQueryWaiter struct {
 	cancelled bool
 }
 
-func newNamespaceQueryGate(capacity int) *namespaceQueryGate {
-	return &namespaceQueryGate{capacity: capacity}
+func newNamespaceQueryGate(capacity int, maxQueued ...int) *namespaceQueryGate {
+	queueLimit := 0
+	if len(maxQueued) > 0 {
+		queueLimit = maxQueued[0]
+	}
+	return &namespaceQueryGate{capacity: capacity, maxQueued: queueLimit}
 }
 
 func (gate *namespaceQueryGate) acquire(ctx context.Context) error {
@@ -234,6 +249,10 @@ func (gate *namespaceQueryGate) acquire(ctx context.Context) error {
 		gate.running++
 		gate.mu.Unlock()
 		return nil
+	}
+	if gate.maxQueued > 0 && len(gate.waiters) >= gate.maxQueued {
+		gate.mu.Unlock()
+		return ErrNamespaceQueryQueueFull
 	}
 	waiter := &namespaceQueryWaiter{ready: make(chan struct{})}
 	gate.waiters = append(gate.waiters, waiter)

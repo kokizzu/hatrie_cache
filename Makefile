@@ -5350,3 +5350,31 @@ commit-geospatial-index:
 .PHONY: push-geospatial-index
 push-geospatial-index:
 	sh ./scripts/deliver-geospatial-index.sh push
+
+.PHONY: test-query-governor
+test-query-governor:
+	sh ./scripts/test-query-governor.sh test
+
+.PHONY: race-query-governor
+race-query-governor:
+	sh ./scripts/test-query-governor.sh race
+
+.PHONY: format-query-governor
+format-query-governor:
+	sh ./scripts/test-query-governor.sh format
+
+.PHONY: benchmark-query-governor
+benchmark-query-governor:
+	sh ./scripts/test-query-governor.sh bench
+
+.PHONY: inspect-query-governor-delivery
+inspect-query-governor-delivery:
+	sh ./scripts/deliver-query-governor.sh inspect
+
+.PHONY: commit-query-governor
+commit-query-governor:
+	sh ./scripts/deliver-query-governor.sh commit
+
+.PHONY: push-query-governor
+push-query-governor:
+	sh ./scripts/deliver-query-governor.sh push

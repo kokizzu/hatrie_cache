@@ -165,6 +165,7 @@ name.
 - [x] C105 Query fingerprinting independent of literal values. `SQLQueryFingerprint` validates the shared SQL grammar, preserves identifiers/operators/literal types/parameter positions, replaces literal values with type markers, and returns a SHA-256 digest without retaining query text.
 - [ ] C106 Workload classes with separate concurrency and memory budgets.
 - [ ] C107 Admission control before expensive scans.
+- [x] C107a Bounded query-admission queues - Cap namespace waiters before allocation while preserving the default unlimited behavior (see QUERY_GOVERNANCE.md).
 - [x] C108 Kill-query command with an operator-visible reason. `SQLQueryManager.Cancel` provides bounded, reasoned cooperative cancellation; remote layers must apply their existing auth policy.
 - [x] C109 Per-operator CPU and row counters. `SQLQueryEvent.Operators` reports privacy-safe input/output rows, bytes, and elapsed nanoseconds for each observed operator; existing observer tests cover the counters.
 - [x] C110 Query pipeline trace export. `NewQueryTraceRecorder` provides an opt-in bounded observer with independent snapshots and JSONL export, retaining only the newest events when a positive limit is configured; focused tests cover bounds, cloning, and writer errors.
