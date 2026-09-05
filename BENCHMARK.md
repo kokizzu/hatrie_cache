@@ -49,6 +49,29 @@ SHA-256 digest after grammar validation, while retaining fewer bytes per
 operation. The digest contains no literal values and is intended for grouping
 telemetry, not for reusing query results.
 
+## Normalized SQL Prepared-Plan Cache
+
+These are single local `-benchmem -count=1` runs from
+`make benchmark-sql-prepared-cache` on the AMD Ryzen 9 5950X host. The exact
+lookup control reproduces the old mutex/map/LRU hit without token
+normalization. The final cache normalizes tokens only on a source miss and
+remembers one bounded exact-source alias, so repeated prepared statements do
+not re-lex or allocate.
+
+| Operation | ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Final cache, repeated exact source | 25.34 | 0 | 0 | 1.04x CPU versus control |
+| Exact-key lookup control | 24.27 | 0 | 0 | 1.00x |
+| Final cache, normalized alias after first lookup | 13.54 | 0 | 0 | allocation-free |
+| Final cache, versioned hit | 26.63 | 0 | 0 | 1.10x CPU versus control |
+| Rejected normalize-on-every-lookup prototype | 979.6 | 917 | 8 | 40.36x CPU; 917 B/op |
+
+The accepted path therefore adds no steady-state allocation and approximately
+matches the old exact lookup. Versioned prepared plans pay a small key-shape
+comparison cost. Literal values remain part of the normalized key because the
+cache stores parsed ASTs rather than a literal-independent plan IR; schema and
+index/projection changes are isolated by changing `PreparedSchemaVersion`.
+
 ## RowBinary-Style SQL Row Transfer
 
 These five `-count=5` runs used `make benchmark-row-binary` on an AMD Ryzen 9

@@ -159,7 +159,7 @@ name.
 - [x] C099 Query timeout and deadline enforcement.
 - [ ] C100 Query quotas by user, tenant, or source.
 - [x] C101 Query result cache with explicit freshness and invalidation policy. `ResultCache.Execute` requires an epoch callback, serves hits only for the same epoch, invalidates stale entries, and returns independent result snapshots; existing tests cover freshness changes and nested plan/result isolation.
-- [ ] C102 Prepared-plan cache keyed by normalized SQL and schema version.
+- [x] C102 Prepared-plan cache keyed by normalized SQL and schema version. `SQLPreparedQueryCache` canonicalizes lexer tokens while preserving identifiers and literal values, namespaces entries with `PreparedSchemaVersion`, keeps an allocation-free exact-source fast path, and exposes `PrepareSQLQueryWithSchemaVersion`; focused execution tests and cache benchmarks cover normalization, literal safety, version isolation, and LRU behavior.
 - [ ] C103 Plan invalidation when an index or projection changes.
 - [ ] C104 Query result reuse across equivalent parameter bindings.
 - [x] C105 Query fingerprinting independent of literal values. `SQLQueryFingerprint` validates the shared SQL grammar, preserves identifiers/operators/literal types/parameter positions, replaces literal values with type markers, and returns a SHA-256 digest without retaining query text.

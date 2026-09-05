@@ -38,9 +38,10 @@ type ParameterSpec struct {
 // SQLPreparedQuery binds a validated parameter schema to an immutable cached
 // SQL template. It is safe for concurrent execution.
 type SQLPreparedQuery struct {
-	source     string
-	parameters []ParameterSpec
-	cache      *SQLPreparedQueryCache
+	source       string
+	parameters   []ParameterSpec
+	cache        *SQLPreparedQueryCache
+	schemaVersion string
 }
 
 // PreparedQuery is the package-native name for SQLPreparedQuery.
@@ -50,10 +51,17 @@ type PreparedQuery = SQLPreparedQuery
 // and retains the supplied cache for subsequent executions. A nil cache uses
 // the bounded package-default cache.
 func PrepareSQLQuery(source string, parameters []ParameterSpec, cache *SQLPreparedQueryCache) (*SQLPreparedQuery, error) {
+	return PrepareSQLQueryWithSchemaVersion(source, parameters, "", cache)
+}
+
+// PrepareSQLQueryWithSchemaVersion prepares a query using schemaVersion as a
+// plan-cache namespace. Callers should change the version whenever an
+// observable source schema, index, or projection changes.
+func PrepareSQLQueryWithSchemaVersion(source string, parameters []ParameterSpec, schemaVersion string, cache *SQLPreparedQueryCache) (*SQLPreparedQuery, error) {
 	if cache == nil {
 		cache = defaultSQLPreparedQueryCache
 	}
-	if _, err := cache.template(source); err != nil {
+	if _, err := cache.templateWithSchemaVersion(source, schemaVersion); err != nil {
 		return nil, err
 	}
 	parameterCount, err := sqlPreparedParameterCount(source)
@@ -69,15 +77,22 @@ func PrepareSQLQuery(source string, parameters []ParameterSpec, cache *SQLPrepar
 		}
 	}
 	return &SQLPreparedQuery{
-		source:     source,
-		parameters: append([]ParameterSpec(nil), parameters...),
-		cache:      cache,
+		source:        source,
+		parameters:    append([]ParameterSpec(nil), parameters...),
+		cache:         cache,
+		schemaVersion: schemaVersion,
 	}, nil
 }
 
 // PrepareQuery prepares a read-only query with typed positional parameters.
 func PrepareQuery(source string, parameters []ParameterSpec, cache *PreparedQueryCache) (*PreparedQuery, error) {
 	return PrepareSQLQuery(source, parameters, cache)
+}
+
+// PrepareQueryWithSchemaVersion is the compatibility alias for
+// PrepareSQLQueryWithSchemaVersion.
+func PrepareQueryWithSchemaVersion(source string, parameters []ParameterSpec, schemaVersion string, cache *PreparedQueryCache) (*PreparedQuery, error) {
+	return PrepareSQLQueryWithSchemaVersion(source, parameters, schemaVersion, cache)
 }
 
 // Source returns the immutable source text used to prepare query.
@@ -96,6 +111,14 @@ func (query *SQLPreparedQuery) Parameters() []ParameterSpec {
 	return append([]ParameterSpec(nil), query.parameters...)
 }
 
+// SchemaVersion returns the cache namespace supplied during preparation.
+func (query *SQLPreparedQuery) SchemaVersion() string {
+	if query == nil {
+		return ""
+	}
+	return query.schemaVersion
+}
+
 // Execute validates and converts values, then evaluates the prepared query.
 func (query *SQLPreparedQuery) Execute(ctx context.Context, resolver SQLSourceResolver, values []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
 	bound, err := query.bind(values)
@@ -103,6 +126,9 @@ func (query *SQLPreparedQuery) Execute(ctx context.Context, resolver SQLSourceRe
 		return SQLQueryResult{}, sqlClassifyError(err)
 	}
 	options.PreparedCache = query.cache
+	if query.schemaVersion != "" {
+		options.PreparedSchemaVersion = query.schemaVersion
+	}
 	return ExecuteSQLQueryParameters(ctx, query.source, resolver, bound, options)
 }
 
@@ -114,6 +140,9 @@ func (query *SQLPreparedQuery) ExecuteRows(ctx context.Context, resolver SQLSour
 		return sqlClassifyError(err)
 	}
 	options.PreparedCache = query.cache
+	if query.schemaVersion != "" {
+		options.PreparedSchemaVersion = query.schemaVersion
+	}
 	return ExecuteSQLQueryRows(ctx, query.source, resolver, bound, options, visit)
 }
 

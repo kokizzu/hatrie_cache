@@ -423,6 +423,12 @@ func PrepareSQLQuery(source string, parameters []SQLParameterSpec, cache *SQLPre
 	return hatSql.PrepareSQLQuery(source, parameters, cache)
 }
 
+// PrepareSQLQueryWithSchemaVersion prepares a typed query in an explicit
+// schema-version cache namespace.
+func PrepareSQLQueryWithSchemaVersion(source string, parameters []SQLParameterSpec, schemaVersion string, cache *SQLPreparedQueryCache) (*SQLPreparedQuery, error) {
+	return hatSql.PrepareSQLQueryWithSchemaVersion(source, parameters, schemaVersion, cache)
+}
+
 func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult, error) {
 	return hatSql.ExecuteSQLQuery(source, resolver)
 }

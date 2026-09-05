@@ -36,7 +36,7 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 		return result, controlErr
 	}
 	defer cancel()
-	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
+	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if parseErr != nil {
 		return result, parseErr
 	}

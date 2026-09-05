@@ -2457,6 +2457,9 @@ review-sql-prepared-cache-lru:
 commit-sql-prepared-cache-lru:
 	sh ./scripts/commit-sql-prepared-cache-lru.sh
 
+commit-sql-prepared-plan-cache:
+	sh ./scripts/commit-sql-prepared-plan-cache.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

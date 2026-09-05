@@ -225,6 +225,9 @@ type SQLQueryOptions struct {
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
 	PreparedCache         *SQLPreparedQueryCache
+	// PreparedSchemaVersion participates in the prepared-plan cache key. Set it
+	// when a schema, index, or projection change should force a fresh template.
+	PreparedSchemaVersion string
 	// ConditionCache optionally reuses bounded columnar WHERE match positions.
 	// It is disabled by default and is used only with a SourceVersionResolver.
 	ConditionCache *SQLQueryConditionCache
@@ -629,7 +632,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err = control.check(); err != nil {
 		return result, err
 	}
-	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
+	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if parseErr != nil {
 		return result, parseErr
 	}
@@ -750,7 +753,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	defer cancel()
-	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
+	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if err != nil {
 		return err
 	}
@@ -4553,7 +4556,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		return result, controlErr
 	}
 	defer cancel()
-	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache)
+	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if parseErr != nil {
 		return result, parseErr
 	}
@@ -4673,7 +4676,7 @@ func parseSQLQueryParameters(source string, parameters []interface{}) (*sqlQuery
 	return parseSQLQueryWithCache(source, parameters, nil)
 }
 
-func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLPreparedQueryCache) (*sqlQuery, error) {
+func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLPreparedQueryCache, schemaVersions ...string) (*sqlQuery, error) {
 	compiled, err := CompileSQLShortcut(source)
 	if err != nil {
 		return nil, err
@@ -4682,7 +4685,11 @@ func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLP
 	if cache == nil {
 		cache = defaultSQLPreparedQueryCache
 	}
-	template, err := cache.template(source)
+	schemaVersion := ""
+	if len(schemaVersions) > 0 {
+		schemaVersion = schemaVersions[0]
+	}
+	template, err := cache.templateWithSchemaVersion(source, schemaVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -4695,29 +4702,9 @@ func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLP
 }
 
 func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
-	if cache == nil || cache.capacity <= 0 {
-		return parseSQLQueryTemplate(source)
-	}
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if entry, ok := cache.entries[source]; ok {
-		cache.hits++
-		cache.order.MoveToBack(entry.order)
-		return entry.query, nil
-	}
-	query, err := parseSQLQueryTemplate(source)
-	if err != nil {
-		return nil, err
-	}
-	cache.misses++
-	if len(cache.entries) >= cache.capacity {
-		oldest := cache.order.Front()
-		evicted := oldest.Value.(string)
-		cache.order.Remove(oldest)
-		delete(cache.entries, evicted)
-	}
-	cache.entries[source] = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(source)}
-	return query, nil
+	return cache.templateWithSchemaVersion(source, "")
+}
+	return cache.templateWithSchemaVersion(source, "")
 }
 
 func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
