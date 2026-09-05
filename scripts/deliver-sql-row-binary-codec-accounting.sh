@@ -14,6 +14,17 @@ if ! grep -Fq 'benchmark-sql-row-binary-codec-accounting:' "$tmp_dir/Makefile"; 
 fi
 
 git -C "$repo_root" show HEAD:INSPIRATION.md > "$tmp_dir/INSPIRATION.md"
+
+awk '
+/^- \[x\] C060a Opt-in codec size and synchronous decode-time accounting\.$/ {
+	if (seen++) {
+		next
+	}
+}
+{ print }
+' "$tmp_dir/INSPIRATION.md" > "$tmp_dir/INSPIRATION.md.new"
+mv "$tmp_dir/INSPIRATION.md.new" "$tmp_dir/INSPIRATION.md"
+
 if ! grep -Fq 'C060a Opt-in codec size and synchronous decode-time accounting.' "$tmp_dir/INSPIRATION.md"; then
 	awk '/^- \[ \] C060 Compression ratio and decompression CPU accounting\.$/ { print; print "- [x] C060a Opt-in codec size and synchronous decode-time accounting."; next } { print }' "$tmp_dir/INSPIRATION.md" > "$tmp_dir/INSPIRATION.md.new"
 	mv "$tmp_dir/INSPIRATION.md.new" "$tmp_dir/INSPIRATION.md"

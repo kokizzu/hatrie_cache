@@ -120,7 +120,6 @@ name.
 - [ ] C059 Codec selection from sampled column entropy.
 - [ ] C060 Compression ratio and decompression CPU accounting.
 - [x] C060a Opt-in codec size and synchronous decode-time accounting.
-- [x] C060a Opt-in codec size and synchronous decode-time accounting.
 
 ### Query Execution And SQL
 
