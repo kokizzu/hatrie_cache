@@ -96,6 +96,39 @@ func sqlPreparedQueryCacheDeleteExactEntry(cache *SQLPreparedQueryCache, lookupK
 	delete(cache.versionedExactEntries, lookupKey)
 }
 
+// Invalidate removes every parsed template and remembered source alias while
+// retaining the cache capacity and hit/miss counters. It is useful after a
+// broad index or projection rebuild.
+func (cache *SQLPreparedQueryCache) Invalidate() int {
+	return cache.invalidatePreparedPlans(false, "")
+}
+
+// InvalidateSchemaVersion removes parsed templates in one schema-version
+// namespace. The empty version is a valid namespace and is not treated as a
+// request to clear every entry.
+func (cache *SQLPreparedQueryCache) InvalidateSchemaVersion(schemaVersion string) int {
+	return cache.invalidatePreparedPlans(true, schemaVersion)
+}
+
+func (cache *SQLPreparedQueryCache) invalidatePreparedPlans(scoped bool, schemaVersion string) int {
+	if cache == nil {
+		return 0
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	removed := 0
+	for key, entry := range cache.entries {
+		if scoped && entry.lookupKey.schemaVersion != schemaVersion {
+			continue
+		}
+		cache.order.Remove(entry.order)
+		delete(cache.entries, key)
+		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
+		removed++
+	}
+	return removed
+}
+
 // sqlPreparedQueryCacheKey encodes parser tokens instead of source bytes, so
 // whitespace and keyword casing do not create duplicate plans. Token kinds and
 // length prefixes make the key unambiguous without relying on a hash.

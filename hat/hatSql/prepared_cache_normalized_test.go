@@ -115,3 +115,50 @@ func TestSQLPreparedQueryCacheVersionIsUsedByExecution(t *testing.T) {
 		t.Fatalf("execution version stats = %#v, want two versioned plans", stats)
 	}
 }
+
+func TestSQLPreparedQueryCacheInvalidatesOneSchemaVersion(t *testing.T) {
+	cache := NewSQLPreparedQueryCache(4)
+	source := "SELECT value FROM CACHE('users') WHERE id = $1"
+	for _, version := range []string{"schema-1", "schema-2"} {
+		if _, err := cache.templateWithSchemaVersion(source, version); err != nil {
+			t.Fatalf("template with %s: %v", version, err)
+		}
+	}
+	if removed := cache.InvalidateSchemaVersion("schema-1"); removed != 1 {
+		t.Fatalf("InvalidateSchemaVersion() removed %d plans, want 1", removed)
+	}
+	if _, err := cache.templateWithSchemaVersion(source, "schema-2"); err != nil {
+		t.Fatalf("schema-2 lookup after invalidation: %v", err)
+	}
+	if _, err := cache.templateWithSchemaVersion(source, "schema-1"); err != nil {
+		t.Fatalf("schema-1 rebuild after invalidation: %v", err)
+	}
+	stats := cache.Stats()
+	if stats.Entries != 2 || stats.Hits != 1 || stats.Misses != 3 {
+		t.Fatalf("version invalidation stats = %#v, want one hit and three misses", stats)
+	}
+}
+
+func TestSQLPreparedQueryCacheInvalidatesAliasesAndKeepsCapacity(t *testing.T) {
+	cache := NewSQLPreparedQueryCache(1)
+	first := "SELECT value FROM CACHE('users') WHERE id = $1"
+	alias := " select value from cache('users') where id=$1"
+	if _, err := cache.template(first); err != nil {
+		t.Fatalf("first template: %v", err)
+	}
+	if _, err := cache.template(alias); err != nil {
+		t.Fatalf("alias template: %v", err)
+	}
+	if removed := cache.Invalidate(); removed != 1 {
+		t.Fatalf("Invalidate() removed %d plans, want 1", removed)
+	}
+	if stats := cache.Stats(); stats.Entries != 0 {
+		t.Fatalf("cache entries after Invalidate() = %d, want 0", stats.Entries)
+	}
+	if _, err := cache.template(first); err != nil {
+		t.Fatalf("template after full invalidation: %v", err)
+	}
+	if stats := cache.Stats(); stats.Entries != 1 || stats.Misses != 2 || stats.Hits != 1 {
+		t.Fatalf("cache stats after refill = %#v, want one entry, two misses, and one hit", stats)
+	}
+}

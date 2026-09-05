@@ -70,7 +70,10 @@ The accepted path therefore adds no steady-state allocation and approximately
 matches the old exact lookup. Versioned prepared plans pay a small key-shape
 comparison cost. Literal values remain part of the normalized key because the
 cache stores parsed ASTs rather than a literal-independent plan IR; schema and
-index/projection changes are isolated by changing `PreparedSchemaVersion`.
+index/projection changes are isolated by changing `PreparedSchemaVersion`, or
+released immediately with `InvalidateSchemaVersion`/`Invalidate` after a
+rebuild. Invalidation is an out-of-band maintenance operation and adds no
+steady-state lookup work.
 
 ## RowBinary-Style SQL Row Transfer
 

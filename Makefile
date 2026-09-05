@@ -2460,6 +2460,9 @@ commit-sql-prepared-cache-lru:
 commit-sql-prepared-plan-cache:
 	sh ./scripts/commit-sql-prepared-plan-cache.sh
 
+commit-sql-prepared-invalidation:
+	sh ./scripts/commit-sql-prepared-invalidation.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
