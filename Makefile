@@ -5718,3 +5718,19 @@ commit-sql-row-binary-codec-accounting:
 .PHONY: push-sql-row-binary-codec-accounting
 push-sql-row-binary-codec-accounting:
 	bash ./scripts/deliver-sql-row-binary-codec-accounting.sh push
+
+.PHONY: benchmark-sql-row-binary-codec-accounting
+benchmark-sql-row-binary-codec-accounting:
+	bash ./scripts/benchmark-sql-row-binary-codec-accounting.sh
+
+.PHONY: deliver-sql-row-binary-codec-accounting
+deliver-sql-row-binary-codec-accounting:
+	bash ./scripts/deliver-sql-row-binary-codec-accounting.sh preview
+
+.PHONY: commit-sql-row-binary-codec-accounting
+commit-sql-row-binary-codec-accounting:
+	bash ./scripts/deliver-sql-row-binary-codec-accounting.sh commit
+
+.PHONY: push-sql-row-binary-codec-accounting
+push-sql-row-binary-codec-accounting:
+	bash ./scripts/deliver-sql-row-binary-codec-accounting.sh push
