@@ -5734,3 +5734,35 @@ commit-sql-row-binary-codec-accounting:
 .PHONY: push-sql-row-binary-codec-accounting
 push-sql-row-binary-codec-accounting:
 	bash ./scripts/deliver-sql-row-binary-codec-accounting.sh push
+
+.PHONY: inspect-row-binary-adaptive
+inspect-row-binary-adaptive:
+	bash ./scripts/inspect-row-binary-adaptive.sh
+
+.PHONY: test-sql-row-binary-adaptive-sampled
+test-sql-row-binary-adaptive-sampled:
+	bash ./scripts/test-sql-row-binary-adaptive-sampled.sh
+
+.PHONY: test-race-sql-row-binary-adaptive-sampled
+test-race-sql-row-binary-adaptive-sampled:
+	bash ./scripts/test-race-sql-row-binary-adaptive-sampled.sh
+
+.PHONY: format-sql-row-binary-adaptive-sampled
+format-sql-row-binary-adaptive-sampled:
+	bash ./scripts/format-sql-row-binary-adaptive-sampled.sh
+
+.PHONY: benchmark-sql-row-binary-adaptive-sampled
+benchmark-sql-row-binary-adaptive-sampled:
+	bash ./scripts/benchmark-sql-row-binary-adaptive-sampled.sh
+
+.PHONY: deliver-sql-row-binary-adaptive-sampled
+deliver-sql-row-binary-adaptive-sampled:
+	bash ./scripts/deliver-sql-row-binary-adaptive-sampled.sh preview
+
+.PHONY: commit-sql-row-binary-adaptive-sampled
+commit-sql-row-binary-adaptive-sampled:
+	bash ./scripts/deliver-sql-row-binary-adaptive-sampled.sh commit
+
+.PHONY: push-sql-row-binary-adaptive-sampled
+push-sql-row-binary-adaptive-sampled:
+	bash ./scripts/deliver-sql-row-binary-adaptive-sampled.sh push

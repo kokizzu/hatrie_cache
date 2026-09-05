@@ -118,6 +118,7 @@ name.
 - [ ] C057 Gorilla-style floating-point encoding.
 - [x] C058 Configurable storage compression codecs.
 - [ ] C059 Codec selection from sampled column entropy.
+- [x] C059a Sampled adaptive codec selection from a bounded prefix.
 - [ ] C060 Compression ratio and decompression CPU accounting.
 - [x] C060a Opt-in codec size and synchronous decode-time accounting.
 
