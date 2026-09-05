@@ -1291,6 +1291,15 @@ format-compressed-blocks:
 benchmark-compressed-blocks:
 	bash ./scripts/benchmark-compressed-blocks.sh
 
+test-row-binary-dictionary:
+	bash ./scripts/test-row-binary-dictionary.sh
+
+format-row-binary-dictionary:
+	bash ./scripts/format-row-binary-dictionary.sh
+
+benchmark-row-binary-dictionary:
+	bash ./scripts/benchmark-row-binary-dictionary.sh
+
 generate-proto:
 	./scripts/generate-proto.sh
 

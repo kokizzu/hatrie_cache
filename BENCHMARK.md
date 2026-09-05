@@ -65,6 +65,27 @@ The codec is opt-in because it requires an agreed column schema and returns
 typed Go values; JSON remains the compatibility default. See
 [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 
+## Stateful RowBinary Dictionary Batches
+
+These five `-count=5` runs used `make benchmark-row-binary-dictionary` on an
+AMD Ryzen 9 5950X with 256 rows and one numeric plus three repeated
+string-like columns. The plain baseline uses the existing `EncodeSQLRowBinary`
+and `DecodeSQLRowBinary` functions on the same rows. Dictionary encoding keeps
+state between calls; first-batch measurements include dictionary construction,
+while reused-batch measurements send ids only for values already seen.
+
+| Operation | Dictionary path | Plain RowBinary | Relative result |
+| --- | ---: | ---: | --- |
+| First encode | 55,977 ns/op; 17,556 B; 64 allocs; 3,162 B wire | 25,658 ns/op; 34,298 B; 15 allocs; 8,512 B wire | 2.18x slower; 1.95x lower heap; 4.27x more allocs; 2.69x smaller wire |
+| Reused encode | 37,211 ns/op; 15,931 B; 14 allocs; 3,081 B wire | 25,658 ns/op; 34,298 B; 15 allocs; 8,512 B wire | 1.45x slower; 2.15x lower heap; 1.07x fewer allocs; 2.76x smaller wire |
+| First decode | 79,611 ns/op; 111,209 B; 1,808 allocs | 76,933 ns/op; 110,977 B; 1,801 allocs | 1.03x slower; effectively neutral heap; 1.00x more allocs |
+| Reused decode | 74,135 ns/op; 110,961 B; 1,794 allocs | 76,933 ns/op; 110,977 B; 1,801 allocs | 1.04x faster; effectively neutral heap; 1.00x fewer allocs |
+
+This is a bandwidth-focused opt-in. It reduces repeated-value wire size by
+2.69x-2.76x, but encode CPU remains higher because ids and dictionary state
+must be maintained. Plain RowBinary remains the general-purpose default. See
+[ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
+
 ## Independent Compressed Blocks
 
 These five `-count=5` runs used `make benchmark-compressed-blocks` on an AMD

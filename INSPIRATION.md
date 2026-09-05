@@ -185,7 +185,7 @@ name.
 - [x] C122 Configurable wire compression.
 - [ ] C123 Compression level negotiation per client.
 - [ ] C124 Column statistics in wire metadata.
-- [ ] C125 Dictionary transfer reuse across batches.
+- [x] C125 Dictionary transfer reuse across batches. `NewSQLRowBinaryDictionaryEncoder` and `NewSQLRowBinaryDictionaryDecoder` retain selected string/bytes/JSON dictionaries across schema-compatible batches, send only additions plus compact ids, bound retained state, and leave plain RowBinary unchanged. Benchmarks cover first/reused encode/decode paths and show the bandwidth/CPU tradeoff. See [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
 - [x] C126 Backup snapshots with checksums.
 - [x] C127 Incremental journal-backed backup.
 - [ ] C128 Object-store backup targets.
