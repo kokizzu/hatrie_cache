@@ -5478,3 +5478,31 @@ commit-query-history-sampling:
 .PHONY: push-query-history-sampling
 push-query-history-sampling:
 	sh ./scripts/deliver-query-history-sampling.sh push
+
+.PHONY: test-sql-row-binary-delta
+test-sql-row-binary-delta:
+	sh ./scripts/test-sql-row-binary-delta.sh
+
+.PHONY: format-sql-row-binary-delta
+format-sql-row-binary-delta:
+	sh ./scripts/format-sql-row-binary-delta.sh
+
+.PHONY: benchmark-sql-row-binary-delta
+benchmark-sql-row-binary-delta:
+	sh ./scripts/benchmark-sql-row-binary-delta.sh
+
+.PHONY: test-race-sql-row-binary-delta
+test-race-sql-row-binary-delta:
+	sh ./scripts/test-race-sql-row-binary-delta.sh
+
+.PHONY: deliver-sql-row-binary-delta
+deliver-sql-row-binary-delta:
+	sh ./scripts/deliver-sql-row-binary-delta.sh preview
+
+.PHONY: commit-sql-row-binary-delta
+commit-sql-row-binary-delta:
+	sh ./scripts/deliver-sql-row-binary-delta.sh commit
+
+.PHONY: push-sql-row-binary-delta
+push-sql-row-binary-delta:
+	sh ./scripts/deliver-sql-row-binary-delta.sh push
