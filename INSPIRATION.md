@@ -503,7 +503,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T133 JSON path access.
 - [ ] T134 Spatial predicates.
 - [x] T135 Replication and memory introspection.
-- [ ] T136 Fiber and scheduler introspection.
+- [x] T136 Fiber and scheduler introspection - Add an authenticated `/api/scheduler` report and Prometheus gauges for goroutine, GOMAXPROCS, CPU, and scheduler metric state; the on-demand report is zero-allocation in the package benchmark (see SCHEDULER_MONITORING.md).
 - [x] T137 Health checks.
 - [x] T138 Topology introspection.
 - [x] T139 Hot-reloadable safe configuration.

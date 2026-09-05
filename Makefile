@@ -5282,3 +5282,39 @@ race-journal-replay-fastpath:
 .PHONY: benchmark-journal-replay-fastpath
 benchmark-journal-replay-fastpath:
 	sh ./scripts/test-journal-replay-fastpath.sh bench
+
+.PHONY: test-runtime-introspection
+test-runtime-introspection:
+	sh ./scripts/test-runtime-introspection.sh test
+
+.PHONY: http-runtime-introspection
+http-runtime-introspection:
+	sh ./scripts/test-runtime-introspection.sh http
+
+.PHONY: race-http-runtime-introspection
+race-http-runtime-introspection:
+	sh ./scripts/test-runtime-introspection.sh race-http
+
+.PHONY: race-runtime-introspection
+race-runtime-introspection:
+	sh ./scripts/test-runtime-introspection.sh race
+
+.PHONY: benchmark-runtime-introspection
+benchmark-runtime-introspection:
+	sh ./scripts/test-runtime-introspection.sh bench
+
+.PHONY: format-runtime-introspection
+format-runtime-introspection:
+	sh ./scripts/test-runtime-introspection.sh format
+
+.PHONY: inspect-runtime-introspection-delivery
+inspect-runtime-introspection-delivery:
+	sh ./scripts/deliver-runtime-introspection.sh inspect
+
+.PHONY: commit-runtime-introspection
+commit-runtime-introspection:
+	sh ./scripts/deliver-runtime-introspection.sh commit
+
+.PHONY: push-runtime-introspection
+push-runtime-introspection:
+	sh ./scripts/deliver-runtime-introspection.sh push

@@ -293,6 +293,10 @@ type MonitoringHealth = hatMonitoring.Health
 // MonitoringMemoryReport is the on-demand runtime allocator snapshot exposed
 // by the monitoring API.
 type MonitoringMemoryReport = hatMonitoring.MemoryReport
+
+// MonitoringSchedulerReport is the on-demand Go scheduler snapshot exposed
+// by the monitoring API.
+type MonitoringSchedulerReport = hatMonitoring.SchedulerReport
 type MonitoringEntry = hatMonitoring.Entry
 type MonitoringEntriesResponse = hatMonitoring.EntriesResponse
 
@@ -553,6 +557,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/config", handler.handleConfig)
 	server.HandleFunc("/api/stats", handler.handleStats)
 	server.HandleFunc("/api/memory", handler.handleMemory)
+	server.HandleFunc("/api/scheduler", handler.handleScheduler)
 	server.HandleFunc("/api/entries", handler.handleEntries)
 	server.HandleFunc("/api/sql", handler.handleSQL)
 	server.HandleFunc("/api/sql/catalog", handler.handleSQLCatalog)
@@ -857,6 +862,26 @@ func ReadMonitoringMemoryReport() MonitoringMemoryReport {
 	return hatMonitoring.ReadMemoryReport()
 }
 
+func (handler *MonitoringHandler) handleScheduler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, hatMonitoring.ReadSchedulerReport())
+}
+
+// ReadMonitoringSchedulerReport returns an on-demand Go scheduler snapshot.
+func ReadMonitoringSchedulerReport() MonitoringSchedulerReport {
+	return hatMonitoring.ReadSchedulerReport()
+}
+
 func (handler *MonitoringHandler) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
@@ -878,6 +903,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	stats := handler.trie.Stats()
+	scheduler := hatMonitoring.ReadSchedulerReport()
 
 	writePrometheusHelp(&builder, "hatrie_cache_up", "Whether this HAT-trie cache process is serving metrics.")
 	writePrometheusType(&builder, "hatrie_cache_up", "gauge")
@@ -888,6 +914,9 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusHelp(&builder, "hatrie_cache_keys", "Current number of keys in the cache.")
 	writePrometheusType(&builder, "hatrie_cache_keys", "gauge")
 	fmt.Fprintf(&builder, "hatrie_cache_keys{node=\"%s\"} %d\n", node, handler.trie.Size())
+	writePrometheusGauge(&builder, "hatrie_cache_goroutines", "Current number of Go goroutines.", node, scheduler.Goroutines)
+	writePrometheusGauge(&builder, "hatrie_cache_gomaxprocs", "Current Go scheduler GOMAXPROCS value.", node, scheduler.GOMAXPROCS)
+	writePrometheusGauge(&builder, "hatrie_cache_num_cpu", "Number of logical CPUs visible to the process.", node, scheduler.NumCPU)
 	writePrometheusHelp(&builder, "hatrie_cache_memory_bytes", "Go heap bytes currently allocated.")
 	writePrometheusType(&builder, "hatrie_cache_memory_bytes", "gauge")
 	fmt.Fprintf(&builder, "hatrie_cache_memory_bytes{node=\"%s\"} %d\n", node, mem.Alloc)
@@ -1357,9 +1386,18 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 			},
 		},
 	}
+	schedulerResponse := map[string]interface{}{
+		"description": "Go scheduler and goroutine snapshot",
+		"content": map[string]interface{}{
+			"application/json": map[string]interface{}{
+				"schema": map[string]interface{}{"$ref": "#/components/schemas/SchedulerReport"},
+			},
+		},
+	}
 	paths := map[string]interface{}{
 		"/api/health":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/memory":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getMemory", "responses": map[string]interface{}{"200": memoryResponse}}},
+		"/api/scheduler":      map[string]interface{}{"get": map[string]interface{}{"operationId": "getScheduler", "responses": map[string]interface{}{"200": schedulerResponse}}},
 		"/api/entries":        map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/sql":            map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/commands":       map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
@@ -1381,7 +1419,24 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 			"schemas": map[string]interface{}{
 				"SQLQueryRequest": map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
 				"MemoryReport":    monitoringMemoryReportOpenAPISchema(),
+				"SchedulerReport": monitoringSchedulerReportOpenAPISchema(),
 			},
+		},
+	}
+}
+
+func monitoringSchedulerReportOpenAPISchema() map[string]interface{} {
+	uint64Property := map[string]interface{}{"type": "integer", "format": "uint64"}
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"collected_at":                map[string]interface{}{"type": "string", "format": "date-time"},
+			"goroutines":                  uint64Property,
+			"gomaxprocs":                  uint64Property,
+			"num_cpu":                     uint64Property,
+			"scheduler_metric_goroutines": uint64Property,
+			"scheduler_metric_gomaxprocs": uint64Property,
+			"scheduler_latency_samples":   uint64Property,
 		},
 	}
 }
