@@ -5242,3 +5242,27 @@ verify-sql-query-trace-spans:
 .PHONY: commit-sql-query-trace-spans
 commit-sql-query-trace-spans:
 	bash ./scripts/commit-sql-query-trace-spans.sh
+
+.PHONY: test-typed-table-aggregate-key
+test-typed-table-aggregate-key:
+	bash scripts/test-typed-table-aggregate-key.sh
+
+.PHONY: format-typed-table-aggregate-key
+format-typed-table-aggregate-key:
+	bash scripts/format-typed-table-aggregate-key.sh
+
+.PHONY: verify-typed-table-aggregate-key
+verify-typed-table-aggregate-key:
+	bash scripts/verify-typed-table-aggregate-key.sh
+
+.PHONY: test-race-typed-table-aggregate-key
+test-race-typed-table-aggregate-key:
+	bash scripts/test-race-typed-table-aggregate-key.sh
+
+.PHONY: commit-typed-table-aggregate-key
+commit-typed-table-aggregate-key:
+	bash scripts/deliver-typed-table-aggregate-key.sh commit
+
+.PHONY: push-typed-table-aggregate-key
+push-typed-table-aggregate-key:
+	bash scripts/deliver-typed-table-aggregate-key.sh push

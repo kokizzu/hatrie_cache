@@ -147,3 +147,5 @@ Measured with `make benchmark-sql-prewhere`: median 2.39x lower latency, 24.6x
 lower heap, and 2.00x fewer allocations on a 20,000-row selective projection
 benchmark. See [BENCHMARK.md](BENCHMARK.md#generic-prewhere--late-materialization)
 for raw samples and workload details.
+
+| ClickHouse | Typed compact keys for grouped arrangement state | Implemented | `TypedTableAggregate` hashes typed group values without allocating a formatted key on every mutation, uses exact collision buckets, and retains one legacy key per live group for deterministic row ordering. See [BENCHMARK.md](BENCHMARK.md#typed-aggregate-arrangement-hash-keys). |

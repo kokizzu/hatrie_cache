@@ -961,6 +961,7 @@ type typedTableDistinctValue struct {
 }
 
 type typedTableAggregateGroup struct {
+	key            string
 	values         []TypedTableValue
 	count          int64
 	sum            float64
@@ -973,6 +974,11 @@ type typedTableAggregateGroup struct {
 	hasMax         bool
 }
 
+type typedTableAggregateGroupBucket struct {
+	group      typedTableAggregateGroup
+	collisions []typedTableAggregateGroup
+}
+
 // TypedTableAggregate maintains exact grouped COUNT and optional SUM, MIN, MAX,
 // and COUNT DISTINCT results from ordered TypedTableChange records without
 // rescanning the table.
@@ -983,7 +989,8 @@ type TypedTableAggregate struct {
 	minField      int
 	maxField      int
 	distinctField int
-	groups        map[string]typedTableAggregateGroup
+	groups        map[uint64]typedTableAggregateGroupBucket
+	groupCount    int
 	checkpoint    uint64
 }
 
@@ -994,7 +1001,7 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	aggregate := &TypedTableAggregate{table: table, sumField: -1, minField: -1, maxField: -1, distinctField: -1, groups: make(map[string]typedTableAggregateGroup)}
+	aggregate := &TypedTableAggregate{table: table, sumField: -1, minField: -1, maxField: -1, distinctField: -1, groups: make(map[uint64]typedTableAggregateGroupBucket)}
 	seen := make(map[int]struct{}, len(definition.GroupBy))
 	for _, field := range definition.GroupBy {
 		index, exists := table.byName[strings.TrimSpace(field)]
@@ -1080,14 +1087,16 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 	if aggregate == nil {
 		return nil
 	}
-	keys := make([]string, 0, len(aggregate.groups))
-	for key := range aggregate.groups {
-		keys = append(keys, key)
+	groups := make([]typedTableAggregateGroup, 0, aggregate.groupCount)
+	for _, bucket := range aggregate.groups {
+		groups = append(groups, bucket.group)
+		groups = append(groups, bucket.collisions...)
 	}
-	sort.Strings(keys)
-	rows := make([]Row, 0, len(keys))
-	for _, key := range keys {
-		group := aggregate.groups[key]
+	sort.Slice(groups, func(left, right int) bool {
+		return groups[left].key < groups[right].key
+	})
+	rows := make([]Row, 0, len(groups))
+	for _, group := range groups {
 		rowFields := len(aggregate.groupBy) + 1
 		if aggregate.sumField >= 0 {
 			rowFields++
@@ -1127,10 +1136,30 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	if len(values) != len(aggregate.table.columns) {
 		return fmt.Errorf("typed table aggregate row has %d values, want %d", len(values), len(aggregate.table.columns))
 	}
-	key, groupValues := aggregate.groupKey(values)
-	group := aggregate.groups[key]
-	if delta > 0 && group.values == nil {
-		group.values = groupValues
+	hash := typedTableAggregateGroupHash(values, aggregate.groupBy)
+	bucket, bucketExists := aggregate.groups[hash]
+	groupIndex := -1
+	var group typedTableAggregateGroup
+	if bucketExists {
+		if typedTableAggregateGroupValuesEqual(bucket.group.values, values, aggregate.groupBy) {
+			group = bucket.group
+			groupIndex = 0
+		} else {
+			for index := range bucket.collisions {
+				if typedTableAggregateGroupValuesEqual(bucket.collisions[index].values, values, aggregate.groupBy) {
+					group = bucket.collisions[index]
+					groupIndex = index + 1
+					break
+				}
+			}
+		}
+	}
+	if delta > 0 && groupIndex < 0 {
+		group.values = make([]TypedTableValue, len(aggregate.groupBy))
+		for index, column := range aggregate.groupBy {
+			group.values[index] = values[column]
+		}
+		group.key = typedTableAggregateLegacyGroupKey(values, aggregate.groupBy)
 	}
 	if err := aggregate.checkDistinct(group, values, delta); err != nil {
 		return err
@@ -1153,11 +1182,45 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	aggregate.adjustExtrema(&group, values, delta)
 	aggregate.adjustDistinct(&group, values, delta)
 	if group.count == 0 {
-		delete(aggregate.groups, key)
+		if groupIndex >= 0 {
+			aggregate.deleteGroup(hash, bucket, groupIndex)
+		}
 		return nil
 	}
-	aggregate.groups[key] = group
+	if groupIndex < 0 {
+		aggregate.groupCount++
+		if !bucketExists {
+			aggregate.groups[hash] = typedTableAggregateGroupBucket{group: group}
+		} else {
+			bucket.collisions = append(bucket.collisions, group)
+			aggregate.groups[hash] = bucket
+		}
+	} else if groupIndex == 0 {
+		bucket.group = group
+		aggregate.groups[hash] = bucket
+	} else {
+		bucket.collisions[groupIndex-1] = group
+		aggregate.groups[hash] = bucket
+	}
 	return nil
+}
+
+func (aggregate *TypedTableAggregate) deleteGroup(hash uint64, bucket typedTableAggregateGroupBucket, groupIndex int) {
+	aggregate.groupCount--
+	if groupIndex == 0 {
+		if len(bucket.collisions) == 0 {
+			delete(aggregate.groups, hash)
+			return
+		}
+		bucket.group = bucket.collisions[0]
+		bucket.collisions = bucket.collisions[1:]
+		aggregate.groups[hash] = bucket
+		return
+	}
+	collisionIndex := groupIndex - 1
+	copy(bucket.collisions[collisionIndex:], bucket.collisions[collisionIndex+1:])
+	bucket.collisions = bucket.collisions[:len(bucket.collisions)-1]
+	aggregate.groups[hash] = bucket
 }
 
 func (aggregate *TypedTableAggregate) checkDistinct(group typedTableAggregateGroup, values []TypedTableValue, delta int64) error {
@@ -1299,36 +1362,9 @@ func typedTableAggregateValueLess(left, right TypedTableValue) bool {
 }
 
 func (aggregate *TypedTableAggregate) groupKey(values []TypedTableValue) (string, []TypedTableValue) {
-	if len(aggregate.groupBy) == 0 {
-		return "all", nil
-	}
-	var builder strings.Builder
 	groupValues := make([]TypedTableValue, len(aggregate.groupBy))
 	for index, column := range aggregate.groupBy {
-		value := values[column]
-		groupValues[index] = value
-		builder.WriteByte(byte(value.Kind))
-		if !value.Valid {
-			builder.WriteByte('n')
-			continue
-		}
-		switch value.Kind {
-		case TypedTableString:
-			builder.WriteString(strconv.Itoa(len(value.String)))
-			builder.WriteByte(':')
-			builder.WriteString(value.String)
-		case TypedTableInt64:
-			builder.WriteString(strconv.FormatInt(value.Int64, 10))
-		case TypedTableFloat64:
-			builder.WriteString(strconv.FormatUint(math.Float64bits(value.Float64), 16))
-		case TypedTableBool:
-			if value.Bool {
-				builder.WriteByte('1')
-			} else {
-				builder.WriteByte('0')
-			}
-		}
-		builder.WriteByte('|')
+		groupValues[index] = values[column]
 	}
-	return builder.String(), groupValues
+	return typedTableAggregateLegacyGroupKey(values, aggregate.groupBy), groupValues
 }

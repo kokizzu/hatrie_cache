@@ -16133,3 +16133,25 @@ BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 21452 58699 ns/op 55296 
 BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 20521 57019 ns/op 55296 B/op 3 allocs/op
 BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 20146 54136 ns/op 55296 B/op 3 allocs/op
 ```
+
+## Typed Aggregate Arrangement Hash Keys
+
+Five-run local benchmark on an AMD Ryzen 9 5950X, Go `amd64`, using the
+existing typed aggregate arrangement workload. The optimized arrangement
+hashes typed group values without allocating a formatted key for every
+mutation. Exact collision buckets preserve correctness, and one legacy key
+per live group preserves deterministic `Rows()` ordering.
+
+| Workload | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Independent two consumers | 2.817 ms; 1,470,917 B; 60,248 allocs | 1.718 ms; 41,192 B; 443 allocs | 1.64x faster; 35.71x lower heap; 136.00x fewer allocations |
+| Shared two consumers | 1.434 ms; 742,242 B; 30,217 allocs | 0.894 ms; 30,328 B; 316 allocs | 1.60x faster; 24.47x lower heap; 95.62x fewer allocations |
+
+Raw output from `make benchmark-sql-typed-arrangements`:
+
+```text
+Before independent: 2823731 1470917 B/op 60248 allocs/op; 2821445 1470930 60248; 2785670 1470916 60248; 2787432 1470917 60248; 2817434 1470917 60248
+Before shared: 1406455 742242 B/op 30217 allocs/op; 1410190 742242 30217; 1433947 742241 30217; 1457972 742242 30217; 1463700 742242 30217
+After independent: 1717944 41200 B/op 443 allocs/op; 1725849 41192 443; 1704107 41192 443; 1648318 41192 443; 1719211 41192 443
+After shared: 889249 30328 B/op 316 allocs/op; 894965 30328 316; 892509 30328 316; 893720 30328 316; 900877 30328 316
+```
