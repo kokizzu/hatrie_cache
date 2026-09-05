@@ -101,6 +101,7 @@ name.
 - [ ] C044 Zero-copy replication of immutable parts.
 - [ ] C045 Part-level cache admission and eviction policy.
 - [ ] C046 Read amplification accounting per part and column.
+- [x] C046a Statistics-only per-column RowBinary read accounting.
 - [ ] C047 Adaptive granule sizing from observed predicate selectivity.
 - [ ] C048 Compact numeric encodings selected from data statistics.
 - [x] C048a Exact full-batch codec selection by encoded size.

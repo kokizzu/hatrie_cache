@@ -5590,3 +5590,31 @@ commit-sql-differential-rows:
 .PHONY: push-sql-differential-rows
 push-sql-differential-rows:
 	sh ./scripts/deliver-sql-differential-rows.sh push
+
+.PHONY: test-sql-row-binary-read-stats
+test-sql-row-binary-read-stats:
+	sh ./scripts/test-sql-row-binary-read-stats.sh
+
+.PHONY: format-sql-row-binary-read-stats
+format-sql-row-binary-read-stats:
+	sh ./scripts/format-sql-row-binary-read-stats.sh
+
+.PHONY: test-race-sql-row-binary-read-stats
+test-race-sql-row-binary-read-stats:
+	sh ./scripts/test-race-sql-row-binary-read-stats.sh
+
+.PHONY: benchmark-sql-row-binary-read-stats
+benchmark-sql-row-binary-read-stats:
+	sh ./scripts/benchmark-sql-row-binary-read-stats.sh
+
+.PHONY: deliver-sql-row-binary-read-stats
+deliver-sql-row-binary-read-stats:
+	sh ./scripts/deliver-sql-row-binary-read-stats.sh preview
+
+.PHONY: commit-sql-row-binary-read-stats
+commit-sql-row-binary-read-stats:
+	sh ./scripts/deliver-sql-row-binary-read-stats.sh commit
+
+.PHONY: push-sql-row-binary-read-stats
+push-sql-row-binary-read-stats:
+	sh ./scripts/deliver-sql-row-binary-read-stats.sh push
