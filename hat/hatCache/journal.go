@@ -59,6 +59,22 @@ const (
 	DefaultCommandJournalFormat = hatJournal.DefaultFormat
 )
 
+// CommandJournalSegmentCompression is retained for compatibility. New
+// integrations can use hat/hatJournal.SegmentCompression directly.
+type CommandJournalSegmentCompression = hatJournal.SegmentCompression
+
+const (
+	CommandJournalSegmentCompressionNone    = hatJournal.SegmentCompressionNone
+	CommandJournalSegmentCompressionZstd    = hatJournal.SegmentCompressionZstd
+	DefaultCommandJournalSegmentCompression = hatJournal.DefaultSegmentCompression
+)
+
+// ParseCommandJournalSegmentCompression is retained for compatibility. New
+// integrations can use hatJournal.ParseSegmentCompression directly.
+func ParseCommandJournalSegmentCompression(value string) (CommandJournalSegmentCompression, error) {
+	return hatJournal.ParseSegmentCompression(value)
+}
+
 // ParseCommandJournalFormat is retained for compatibility. New integrations
 // can use hatJournal.ParseFormat directly.
 func ParseCommandJournalFormat(value string) (CommandJournalFormat, error) {
@@ -202,6 +218,7 @@ type CommandJournal struct {
 	groupCommitWindow     time.Duration
 	groupCommitMaxBatch   int
 	segmentMaxBytes       int64
+	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
 	retainedBytes         int64
 	activeSegmentStart    uint64
@@ -306,6 +323,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		segmentMaxBytes:       options.SegmentMaxBytes,
+		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
 		retainedBytes:         options.RetainedBytes,
 		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
@@ -1962,7 +1980,7 @@ func (journal *CommandJournal) markAppendedLocked(sequence uint64) {
 }
 
 func scanCommandJournalEntries(path string, visit func(commandJournalEntry) error) (int64, error) {
-	file, err := os.Open(path)
+	file, reader, compression, err := hatJournal.OpenReader(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
@@ -1975,13 +1993,19 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 	var previousSequence uint64
 	var hasPreviousSequence bool
 	var readBuffer commandJournalReadBuffer
-	reader := bufio.NewReader(file)
 	for {
 		entry, bytesRead, complete, err := readCommandJournalEntryBuffered(reader, &readBuffer)
 		if err != nil {
 			return 0, err
 		}
 		if !complete {
+			if compression != CommandJournalSegmentCompressionNone && bytesRead == 0 {
+				info, err := os.Stat(path)
+				if err != nil {
+					return 0, err
+				}
+				return info.Size(), nil
+			}
 			return validBytes, nil
 		}
 		if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {

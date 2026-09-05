@@ -395,7 +395,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T038 Backup checksums and manifest validation.
 - [x] T039 Restore validation across all supported data types.
 - [x] T040 Configurable WAL retention policy with disk budget.
-- [ ] T041 WAL segment compression and independent verification.
+- [x] T041 WAL segment compression and independent verification.
 - [ ] T042 Recovery-time parallel replay.
 - [x] T043 Recovery replay progress and ETA metrics.
 - [ ] T044 Recovery point selection by logical sequence.

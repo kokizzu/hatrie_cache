@@ -1463,6 +1463,45 @@ func TestParseConfigRejectsInvalidJournalFormat(t *testing.T) {
 	}
 }
 
+func TestParseConfigJournalSegmentCompression(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-journal-segment-compression", "zstd",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(journal segment compression) error = %v", err)
+	}
+	if cfg.journalSegmentCompression != string(hatriecache.CommandJournalSegmentCompressionZstd) {
+		t.Fatalf("journal segment compression = %q, want zstd", cfg.journalSegmentCompression)
+	}
+	if options := journalOptions(cfg); options.SegmentCompression != hatriecache.CommandJournalSegmentCompressionZstd {
+		t.Fatalf("journal options segment compression = %q, want zstd", options.SegmentCompression)
+	}
+	if got := redactedConfig(cfg)["journal_segment_compression"]; got != "zstd" {
+		t.Fatalf("redacted journal segment compression = %#v, want zstd", got)
+	}
+}
+
+func TestParseConfigDefaultsJournalSegmentCompressionOff(t *testing.T) {
+	cfg, err := parseConfig([]string{"-monitoring-server"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(default journal segment compression) error = %v", err)
+	}
+	if cfg.journalSegmentCompression != string(hatriecache.DefaultCommandJournalSegmentCompression) {
+		t.Fatalf("default journal segment compression = %q, want disabled default %q", cfg.journalSegmentCompression, hatriecache.DefaultCommandJournalSegmentCompression)
+	}
+}
+
+func TestParseConfigRejectsInvalidJournalSegmentCompression(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-journal-segment-compression", "gzip",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unsupported segment compression") {
+		t.Fatalf("parseConfig(invalid journal segment compression) error = %v, want unsupported compression error", err)
+	}
+}
+
 func TestParseConfigRejectsPartialMonitoringTLSConfig(t *testing.T) {
 	if _, err := parseConfig([]string{"-monitoring-tls-cert", "/tmp/cert.pem"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("parseConfig(partial TLS) error = nil, want error")

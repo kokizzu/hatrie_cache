@@ -11,9 +11,10 @@ import (
 )
 
 type commandJournalSegment struct {
-	path  string
-	start uint64
-	end   uint64
+	path        string
+	start       uint64
+	end         uint64
+	compression CommandJournalSegmentCompression
 }
 
 func (journal *CommandJournal) segmented() bool {
@@ -28,6 +29,10 @@ func commandJournalSegmentPath(path string, start uint64, end uint64) string {
 	return hatJournal.SegmentPath(path, start, end)
 }
 
+func commandJournalSegmentPathWithCompression(path string, start uint64, end uint64, compression CommandJournalSegmentCompression) string {
+	return hatJournal.SegmentPathWithCompression(path, start, end, compression)
+}
+
 func listCommandJournalSegments(path string) ([]commandJournalSegment, error) {
 	portable, err := hatJournal.ListSegments(path)
 	if err != nil {
@@ -35,7 +40,7 @@ func listCommandJournalSegments(path string) ([]commandJournalSegment, error) {
 	}
 	segments := make([]commandJournalSegment, len(portable))
 	for index, segment := range portable {
-		segments[index] = commandJournalSegment{path: segment.Path, start: segment.Start, end: segment.End}
+		segments[index] = commandJournalSegment{path: segment.Path, start: segment.Start, end: segment.End, compression: segment.Compression}
 	}
 	return segments, nil
 }
@@ -182,7 +187,7 @@ func (journal *CommandJournal) rotateSegmentLocked(force bool) error {
 	if err := os.MkdirAll(segmentDir, 0o700); err != nil {
 		return err
 	}
-	destination := commandJournalSegmentPath(journal.path, start, lastSequence)
+	destination := commandJournalSegmentPathWithCompression(journal.path, start, lastSequence, journal.segmentCompression)
 	if _, err := os.Stat(destination); err == nil {
 		return fmt.Errorf("hatriecache: command journal segment already exists: %s", filepath.Base(destination))
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -191,11 +196,32 @@ func (journal *CommandJournal) rotateSegmentLocked(force bool) error {
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err
 	}
+	var compressedPath string
+	if journal.segmentCompression == CommandJournalSegmentCompressionZstd {
+		temporary, err := os.CreateTemp(filepath.Dir(journal.path), ".hatriecache-segment-")
+		if err != nil {
+			return journal.recoverActiveFileAfterRotationLocked(err)
+		}
+		compressedPath = temporary.Name()
+		if err := temporary.Close(); err != nil {
+			_ = os.Remove(compressedPath)
+			return journal.recoverActiveFileAfterRotationLocked(err)
+		}
+		defer os.Remove(compressedPath)
+		if err := hatJournal.CompressFile(journal.path, compressedPath); err != nil {
+			return journal.recoverActiveFileAfterRotationLocked(err)
+		}
+	}
 	if err := os.Rename(journal.path, destination); err != nil {
 		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
 			return errors.Join(err, reopenErr)
 		}
 		return err
+	}
+	if compressedPath != "" {
+		if err := os.Rename(compressedPath, destination); err != nil {
+			return journal.recoverActiveFileAfterRotationLocked(err)
+		}
 	}
 	journal.activeSegmentStart = journal.nextSequence
 	if err := syncDirectory(segmentDir); err != nil {

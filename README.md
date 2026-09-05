@@ -3446,3 +3446,20 @@ becoming machine-readable:
 Clients should branch on `code` and keep `message` for logs and operator-facing
 diagnostics. The field is additive and protobuf field number 5 is reserved for
 this purpose.
+
+### Compressed WAL Segments
+
+Archived command-journal segments can use CRC-protected zstd frames while the
+active journal remains the normal append-only file. Enable it with:
+
+```sh
+./hatrie-cache -journal-segment-max-bytes 67108864 \
+  -journal-segment-compression zstd
+```
+
+The default is disabled (`none`) for backward-compatible CPU behavior. Existing
+uncompressed segments remain readable, and switching back to `none` is safe for
+new segments. `InspectCommandJournal` and the daemon's startup scan fully
+decode archived frames, verify their checksums, and reject corrupted segments.
+Run `make benchmark-t041` to measure codec CPU and allocation cost on the local
+machine before enabling it for a workload.

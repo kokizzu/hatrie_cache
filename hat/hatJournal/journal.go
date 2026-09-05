@@ -38,6 +38,30 @@ const (
 
 const DefaultFormat = FormatBinary
 
+// SegmentCompression identifies compression applied only to immutable
+// archived journal segments. The active journal remains an uncompressed file.
+type SegmentCompression string
+
+const (
+	SegmentCompressionNone SegmentCompression = ""
+	SegmentCompressionZstd SegmentCompression = "zstd"
+)
+
+const DefaultSegmentCompression = SegmentCompressionNone
+
+// ParseSegmentCompression returns the canonical archived-segment compression.
+// Empty input and "none" preserve the uncompressed segment format.
+func ParseSegmentCompression(value string) (SegmentCompression, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "off", "disabled":
+		return SegmentCompressionNone, nil
+	case string(SegmentCompressionZstd):
+		return SegmentCompressionZstd, nil
+	default:
+		return "", fmt.Errorf("hatJournal: unsupported segment compression %q", value)
+	}
+}
+
 // ParseFormat returns the canonical command-journal format. Empty input uses
 // the binary default and "bin" is accepted as a binary alias.
 func ParseFormat(value string) (Format, error) {
@@ -68,6 +92,7 @@ const (
 // bounded segment rotation. SegmentMaxBytes zero keeps one active file.
 type Options struct {
 	Format              Format
+	SegmentCompression  SegmentCompression
 	GroupCommitWindow   time.Duration
 	GroupCommitMaxBatch int
 	SegmentMaxBytes     int64
@@ -80,6 +105,10 @@ type Options struct {
 // canonical format. A batch size of one uses immediate fsync behavior.
 func ValidateOptions(options Options) (Options, error) {
 	format, err := ParseFormat(string(options.Format))
+	if err != nil {
+		return Options{}, err
+	}
+	segmentCompression, err := ParseSegmentCompression(string(options.SegmentCompression))
 	if err != nil {
 		return Options{}, err
 	}
@@ -117,6 +146,7 @@ func ValidateOptions(options Options) (Options, error) {
 		return Options{}, fmt.Errorf("hatJournal: idempotency capacity must be <= %d", MaxIdempotencyCapacity)
 	}
 	options.Format = format
+	options.SegmentCompression = segmentCompression
 	return options, nil
 }
 
@@ -129,15 +159,17 @@ type InspectOptions struct {
 
 // File describes one active or archived journal file.
 type File struct {
-	Path             string `json:"path"`
-	Format           Format `json:"format"`
-	Size             int64  `json:"size"`
-	ValidBytes       int64  `json:"valid_bytes"`
-	RecordCount      int    `json:"record_count"`
-	FirstSequence    uint64 `json:"first_sequence,omitempty"`
-	LastSequence     uint64 `json:"last_sequence,omitempty"`
-	CompactedThrough uint64 `json:"compacted_through,omitempty"`
-	TruncatedTail    bool   `json:"truncated_tail,omitempty"`
+	Path              string             `json:"path"`
+	Format            Format             `json:"format"`
+	Compression       SegmentCompression `json:"compression,omitempty"`
+	Size              int64              `json:"size"`
+	ValidBytes        int64              `json:"valid_bytes"`
+	UncompressedBytes int64              `json:"uncompressed_bytes,omitempty"`
+	RecordCount       int                `json:"record_count"`
+	FirstSequence     uint64             `json:"first_sequence,omitempty"`
+	LastSequence      uint64             `json:"last_sequence,omitempty"`
+	CompactedThrough  uint64             `json:"compacted_through,omitempty"`
+	TruncatedTail     bool               `json:"truncated_tail,omitempty"`
 }
 
 // Inspection summarizes the durable records visible from a journal path.
@@ -163,16 +195,18 @@ type record struct {
 }
 
 type segment struct {
-	path  string
-	start uint64
-	end   uint64
+	path        string
+	start       uint64
+	end         uint64
+	compression SegmentCompression
 }
 
 // Segment identifies one immutable archived range in a segmented journal.
 type Segment struct {
-	Path  string
-	Start uint64
-	End   uint64
+	Path        string
+	Start       uint64
+	End         uint64
+	Compression SegmentCompression
 }
 
 // SegmentDirectory returns the directory used to retain archived journal
@@ -183,7 +217,17 @@ func SegmentDirectory(path string) string {
 
 // SegmentPath returns the canonical file path for an archived sequence range.
 func SegmentPath(path string, start uint64, end uint64) string {
-	name := fmt.Sprintf("%020d-%020d%s", start, end, segmentSuffix)
+	return SegmentPathWithCompression(path, start, end, SegmentCompressionNone)
+}
+
+// SegmentPathWithCompression returns the canonical archived segment path for
+// compression. Existing uncompressed paths remain unchanged.
+func SegmentPathWithCompression(path string, start uint64, end uint64, compression SegmentCompression) string {
+	suffix := segmentSuffix
+	if compression == SegmentCompressionZstd {
+		suffix += ".zst"
+	}
+	name := fmt.Sprintf("%020d-%020d%s", start, end, suffix)
 	return filepath.Join(SegmentDirectory(path), name)
 }
 
@@ -196,7 +240,7 @@ func ListSegments(path string) ([]Segment, error) {
 	}
 	out := make([]Segment, len(segments))
 	for index, current := range segments {
-		out[index] = Segment{Path: current.path, Start: current.start, End: current.end}
+		out[index] = Segment{Path: current.path, Start: current.start, End: current.end, Compression: current.compression}
 	}
 	return out, nil
 }
@@ -267,10 +311,16 @@ func listSegments(path string) ([]segment, error) {
 			return nil, fmt.Errorf("hatJournal: unexpected journal segment entry %q", entry.Name())
 		}
 		name := entry.Name()
-		if !strings.HasSuffix(name, segmentSuffix) {
+		compression := SegmentCompressionNone
+		trimmed := name
+		if strings.HasSuffix(trimmed, ".zst") {
+			compression = SegmentCompressionZstd
+			trimmed = strings.TrimSuffix(trimmed, ".zst")
+		}
+		if !strings.HasSuffix(trimmed, segmentSuffix) {
 			return nil, fmt.Errorf("hatJournal: unexpected journal segment file %q", name)
 		}
-		bounds := strings.Split(strings.TrimSuffix(name, segmentSuffix), "-")
+		bounds := strings.Split(strings.TrimSuffix(trimmed, segmentSuffix), "-")
 		if len(bounds) != 2 {
 			return nil, fmt.Errorf("hatJournal: invalid journal segment file %q", name)
 		}
@@ -279,7 +329,7 @@ func listSegments(path string) ([]segment, error) {
 		if startErr != nil || endErr != nil || start == 0 || end < start {
 			return nil, fmt.Errorf("hatJournal: invalid journal segment file %q", name)
 		}
-		segments = append(segments, segment{path: filepath.Join(dir, name), start: start, end: end})
+		segments = append(segments, segment{path: filepath.Join(dir, name), start: start, end: end, compression: compression})
 	}
 	sort.Slice(segments, func(left, right int) bool { return segments[left].start < segments[right].start })
 	for index := 1; index < len(segments); index++ {
@@ -303,23 +353,27 @@ func inspectFile(path string, limit int64) (File, error) {
 		return File{}, fmt.Errorf("hatJournal: journal file %q is not regular", path)
 	}
 	file.Size = info.Size()
-	handle, err := os.Open(path)
+	handle, reader, compression, err := OpenReader(path)
 	if err != nil {
 		return File{}, err
 	}
 	defer handle.Close()
-
-	reader := bufio.NewReader(handle)
+	file.Compression = compression
 	for {
 		record, bytesRead, complete, err := readRecord(reader, limit)
 		if err != nil {
 			return File{}, fmt.Errorf("hatJournal: inspect %q: %w", path, err)
 		}
 		if !complete {
+			if compression != SegmentCompressionNone && bytesRead == 0 {
+				file.ValidBytes = file.Size
+				return file, nil
+			}
 			file.TruncatedTail = bytesRead > 0
 			return file, nil
 		}
 		file.ValidBytes += int64(bytesRead)
+		file.UncompressedBytes += int64(bytesRead)
 		file.RecordCount++
 		if file.RecordCount == 1 {
 			file.FirstSequence = record.sequence
@@ -347,12 +401,11 @@ func mergeFile(inspection *Inspection, previous *uint64, hasPrevious *bool, file
 		return nil
 	}
 
-	handle, err := os.Open(file.Path)
+	handle, reader, _, err := OpenReader(file.Path)
 	if err != nil {
 		return err
 	}
 	defer handle.Close()
-	reader := bufio.NewReader(handle)
 	first := true
 	var firstMutation uint64
 	var lastMutation uint64
@@ -526,7 +579,7 @@ func parseBinaryHeader(payload []byte) (record, error) {
 	if err != nil {
 		return record{}, err
 	}
-	if version < 1 || version > 3 {
+	if version < 1 || version > 4 {
 		return record{}, errors.New("unsupported binary journal version")
 	}
 	sequence, err := reader.uvarint()
@@ -546,12 +599,22 @@ func parseBinaryHeader(payload []byte) (record, error) {
 			return record{}, err
 		}
 	}
+	if version >= 4 {
+		if _, err := reader.bytes(); err != nil {
+			return record{}, err
+		}
+	}
 	for range 3 { // priority, TTL, and absolute expiry
 		if err := reader.optionalVarint(); err != nil {
 			return record{}, err
 		}
 	}
 	for range 2 { // values and pairs payloads
+		if _, err := reader.bytes(); err != nil {
+			return record{}, err
+		}
+	}
+	if version >= 4 {
 		if _, err := reader.bytes(); err != nil {
 			return record{}, err
 		}
