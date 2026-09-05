@@ -25,6 +25,15 @@ type SQLCoveringIndexRecommendation struct {
 	SlowQueries uint64
 }
 
+// SQLPrimaryOrderRecommendation is a deterministic primary-field ordering
+// suggestion derived from the advisor's observed slow scans. Fields are
+// ordered by descending frequency, then by name; it contains no query text or
+// predicate values.
+type SQLPrimaryOrderRecommendation struct {
+	Key    string
+	Fields []string
+}
+
 // SQLIndexAdvisor records bounded candidate fields from observed slow scans.
 // It is intended for trusted server-side use, not external telemetry export.
 type SQLIndexAdvisor struct {
@@ -70,6 +79,44 @@ func (advisor *SQLIndexAdvisor) Recommendations() []SQLIndexRecommendation {
 			return recommendations[left].Key < recommendations[right].Key
 		}
 		return recommendations[left].Field < recommendations[right].Field
+	})
+	return recommendations
+}
+
+// PrimaryOrderRecommendations groups the advisor's bounded field
+// observations by source and returns a candidate order for an ordered primary
+// layout. The method is advisory only: it never changes an index or query
+// plan, and callers can use the result when creating a new layout.
+func (advisor *SQLIndexAdvisor) PrimaryOrderRecommendations() []SQLPrimaryOrderRecommendation {
+	if advisor == nil {
+		return nil
+	}
+	type fieldCount struct {
+		field string
+		count uint64
+	}
+	advisor.mu.RLock()
+	byKey := make(map[string][]fieldCount)
+	for key, count := range advisor.counts {
+		byKey[key.key] = append(byKey[key.key], fieldCount{field: key.field, count: count})
+	}
+	recommendations := make([]SQLPrimaryOrderRecommendation, 0, len(byKey))
+	for key, fields := range byKey {
+		sort.Slice(fields, func(left, right int) bool {
+			if fields[left].count != fields[right].count {
+				return fields[left].count > fields[right].count
+			}
+			return fields[left].field < fields[right].field
+		})
+		ordered := make([]string, len(fields))
+		for index, field := range fields {
+			ordered[index] = field.field
+		}
+		recommendations = append(recommendations, SQLPrimaryOrderRecommendation{Key: key, Fields: ordered})
+	}
+	advisor.mu.RUnlock()
+	sort.Slice(recommendations, func(left, right int) bool {
+		return recommendations[left].Key < recommendations[right].Key
 	})
 	return recommendations
 }

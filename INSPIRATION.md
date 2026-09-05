@@ -58,7 +58,7 @@ name.
 - [x] C001 Column-oriented storage for analytical values - local columnar tables cover the compatible case.
 - [x] C002 Read only referenced columns - SQL projection pruning is present.
 - [x] C003 Granule-sized reads - columnar blocks provide the current scan unit.
-- [ ] C004 Primary ordering chosen from common predicates - assess automatic order advice.
+- [x] C004 Primary ordering chosen from common predicates. `SQLIndexAdvisor.PrimaryOrderRecommendations` groups existing bounded slow-scan field counts into deterministic source-local field orders; it is advisory-only and leaves the default query planner and storage layout unchanged.
 - [ ] C005 Sparse primary-key index with mark pruning.
 - [x] C006 Min/max skipping over ordered blocks.
 - [x] C007 Set-style skipping for low-cardinality predicates.

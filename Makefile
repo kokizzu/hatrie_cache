@@ -2499,6 +2499,18 @@ benchmark-sql-trace-export:
 commit-sql-trace-export:
 	sh ./scripts/commit-sql-trace-export.sh
 
+test-sql-primary-order-advisor:
+	sh ./scripts/test-sql-primary-order-advisor.sh
+
+format-sql-primary-order-advisor:
+	sh ./scripts/format-sql-primary-order-advisor.sh
+
+benchmark-sql-primary-order-advisor:
+	sh ./scripts/benchmark-sql-primary-order-advisor.sh
+
+commit-sql-primary-order-advisor:
+	sh ./scripts/commit-sql-primary-order-advisor.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

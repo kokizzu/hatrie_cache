@@ -52,6 +52,7 @@ type SQLQueryObserverFunc = hatSql.QueryObserverFunc
 type SQLQueryEvent = hatSql.QueryEvent
 type SQLQueryOperator = hatSql.QueryOperator
 type SQLQueryTraceRecorder = hatSql.QueryTraceRecorder
+type SQLPrimaryOrderRecommendation = hatSql.SQLPrimaryOrderRecommendation
 
 const (
 	DefaultSQLIndexAdvisorSnapshotMaxBytes = hatSql.DefaultSQLIndexAdvisorSnapshotMaxBytes

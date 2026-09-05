@@ -183,6 +183,7 @@ type SQLQueryEvent = core.SQLQueryEvent
 type SQLQueryObserver = core.SQLQueryObserver
 type SQLQueryObserverFunc = core.SQLQueryObserverFunc
 type SQLQueryOperator = core.SQLQueryOperator
+type SQLPrimaryOrderRecommendation = core.SQLPrimaryOrderRecommendation
 type SQLQueryTraceRecorder = core.SQLQueryTraceRecorder
 type SQLQueryOptions = core.SQLQueryOptions
 type SQLQueryRequest = core.SQLQueryRequest

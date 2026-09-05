@@ -15913,6 +15913,23 @@ hit speed is useful only when the caller can provide a correct mutation epoch.
 The five-run local median for its 256-row clone workload was `154,421 ns/op`,
 `270,624 B/op`, and `2,050 allocs/op`; the benchmark prints all raw samples.
 
+## SQL Primary Order Advice
+
+Five-run local benchmark on AMD Ryzen 9 5950X, Go `amd64`, using the same 64
+bounded advisor observations:
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing per-field recommendations | 5,475 | 2,808 | 4 |
+| Grouped primary-order recommendations | 7,570 | 5,856 | 71 |
+
+The grouped method is 1.38x the CPU time, 2.09x the bytes, and 17.75x the
+allocations of the existing flat recommendation call because it creates fresh
+source-local field lists. This is an explicit reporting call; it adds no work
+when `IndexAdvisor` is nil and does not change query execution or the persisted
+advisor snapshot format. Run `make benchmark-sql-primary-order-advisor` to
+print all raw samples.
+
 ## SQL Query Trace Recorder
 
 Five-run local benchmark on AMD Ryzen 9 5950X, Go `amd64`:

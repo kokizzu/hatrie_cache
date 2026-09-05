@@ -3689,6 +3689,30 @@ arbitrary update expressions, and `INSERT ... SELECT` conflict clauses are
 rejected explicitly. Use `BEGIN ATOMIC`/`COMMIT` or `BeginSQLTransaction` for
 multi-statement transaction workflows.
 
+## SQL Primary Order Advice
+
+`SQLIndexAdvisor` can turn its existing bounded slow-scan observations into a
+deterministic candidate field order for a new ordered primary layout:
+
+```go
+advisor := hatSql.NewSQLIndexAdvisor(128)
+_, err := hatSql.ExecuteSQLQueryContext(ctx, query, resolver, hatSql.SQLQueryOptions{
+    SlowQueryThreshold: time.Millisecond,
+    IndexAdvisor:       advisor,
+})
+if err != nil {
+    return err
+}
+for _, recommendation := range advisor.PrimaryOrderRecommendations() {
+    fmt.Println(recommendation.Key, recommendation.Fields)
+}
+```
+
+Fields are ranked by observed slow-query frequency, with a stable name
+tie-breaker. The result contains only source keys and field names; it does not
+change an existing index, query plan, or persisted advisor snapshot. A nil
+`IndexAdvisor` preserves the zero-overhead default path.
+
 ## SQL Query Trace Export
 
 SQL execution already exposes privacy-safe operator counters through
