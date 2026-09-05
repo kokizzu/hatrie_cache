@@ -8710,8 +8710,12 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		return nil
 	}
 	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
-		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
-			segmentIndex := start / segments.RowsPerSegment
+		segmentStart, segmentEnd, sparsePrimary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+		if !sparsePrimary {
+			segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
+		}
+		for segmentIndex := segmentStart; segmentIndex < segmentEnd; segmentIndex++ {
+			start := segmentIndex * segments.RowsPerSegment
 			if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
 				continue
 			}
@@ -8978,8 +8982,12 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		return nil
 	}
 	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
-		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
-			segmentIndex := start / segments.RowsPerSegment
+		segmentStart, segmentEnd, sparsePrimary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+		if !sparsePrimary {
+			segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
+		}
+		for segmentIndex := segmentStart; segmentIndex < segmentEnd; segmentIndex++ {
+			start := segmentIndex * segments.RowsPerSegment
 			if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
 				continue
 			}
@@ -9044,6 +9052,83 @@ func sqlColumnarNumericSegmentMayMatch(segments *ColumnarNumericSegments, segmen
 		}
 	}
 	return true
+}
+
+func sqlColumnarSparsePrimarySegmentRange(segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, segmentCount int) (int, int, bool) {
+	if segments == nil || segments.RowsPerSegment <= 0 || segmentCount <= 0 || segments.SparsePrimaryField == "" {
+		return 0, 0, false
+	}
+	fieldSegments, available := segments.Columns[segments.SparsePrimaryField]
+	if !available || len(fieldSegments) != segmentCount {
+		return 0, 0, false
+	}
+
+	start, end := 0, segmentCount
+	used := false
+	for _, predicate := range predicates {
+		if predicate.field != segments.SparsePrimaryField || predicate.value != predicate.value {
+			continue
+		}
+		predicateStart, predicateEnd, bounded := sqlColumnarSparsePrimaryPredicateRange(fieldSegments, predicate)
+		if !bounded {
+			continue
+		}
+		if predicateStart > start {
+			start = predicateStart
+		}
+		if predicateEnd < end {
+			end = predicateEnd
+		}
+		used = true
+	}
+	if !used {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func sqlColumnarSparsePrimarySkippedRows(rows, rowsPerSegment, startSegment, endSegment int) int {
+	if rows <= 0 || rowsPerSegment <= 0 {
+		return 0
+	}
+	if startSegment < 0 {
+		startSegment = 0
+	}
+	if endSegment < startSegment {
+		endSegment = startSegment
+	}
+	windowStart := startSegment * rowsPerSegment
+	windowEnd := endSegment * rowsPerSegment
+	if windowStart > rows {
+		windowStart = rows
+	}
+	if windowEnd > rows {
+		windowEnd = rows
+	}
+	if windowEnd < windowStart {
+		windowEnd = windowStart
+	}
+	return rows - (windowEnd - windowStart)
+}
+
+func sqlColumnarSparsePrimaryPredicateRange(segments []ColumnarNumericSegment, predicate sqlColumnarNumericFilter) (int, int, bool) {
+	segmentCount := len(segments)
+	switch predicate.operator {
+	case "=":
+		start := sort.Search(segmentCount, func(index int) bool { return segments[index].Maximum >= predicate.value })
+		end := sort.Search(segmentCount, func(index int) bool { return segments[index].Minimum > predicate.value })
+		return start, end, true
+	case "<":
+		return 0, sort.Search(segmentCount, func(index int) bool { return segments[index].Minimum >= predicate.value }), true
+	case "<=":
+		return 0, sort.Search(segmentCount, func(index int) bool { return segments[index].Minimum > predicate.value }), true
+	case ">":
+		return sort.Search(segmentCount, func(index int) bool { return segments[index].Maximum > predicate.value }), segmentCount, true
+	case ">=":
+		return sort.Search(segmentCount, func(index int) bool { return segments[index].Maximum >= predicate.value }), segmentCount, true
+	default:
+		return 0, 0, false
+	}
 }
 
 func sqlColumnarDictionarySegmentMayMatch(segments *ColumnarNumericSegments, segmentIndex int, field, operator string, code uint32, found bool) bool {

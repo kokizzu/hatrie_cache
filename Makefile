@@ -2511,6 +2511,22 @@ benchmark-sql-primary-order-advisor:
 commit-sql-primary-order-advisor:
 	sh ./scripts/commit-sql-primary-order-advisor.sh
 
+.PHONY: test-sql-sparse-primary
+test-sql-sparse-primary:
+	sh ./scripts/test-sql-sparse-primary.sh
+
+.PHONY: format-sql-sparse-primary
+format-sql-sparse-primary:
+	sh ./scripts/format-sql-sparse-primary.sh
+
+.PHONY: benchmark-sql-sparse-primary
+benchmark-sql-sparse-primary:
+	sh ./scripts/benchmark-sql-sparse-primary.sh
+
+.PHONY: commit-sql-sparse-primary
+commit-sql-sparse-primary:
+	sh ./scripts/commit-sql-sparse-primary.sh
+
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

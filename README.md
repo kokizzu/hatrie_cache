@@ -3734,3 +3734,34 @@ The export contains query IDs, status, result counters, and per-operator
 timings/row counts; it does not retain SQL text, predicates, parameters, or
 row values. A positive limit keeps the newest events, and a non-positive limit
 retains all events.
+
+## SQL Sparse Primary Mark Pruning
+
+Typed-table columnar caches can optionally publish a sparse primary mark index
+for one numeric field. The feature is disabled by default and requires both the
+columnar cache and the explicit index flag:
+
+```go
+schema := hatSql.TypedTableSchema{
+	Name:    "events",
+	Columns: []hatSql.TypedTableColumn{{Name: "id", Kind: hatSql.TypedTableInt64}},
+	ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
+		Enabled:            true,
+		SparsePrimaryIndex: true,
+		SparsePrimaryField: "id",
+	},
+}
+```
+
+The configured `TypedInt64` or `TypedFloat64` field must be non-NULL and
+nondecreasing in the current row order. Writes invalidate the cached layout;
+if a rebuild finds an out-of-order value, NULL, or NaN, it omits the sparse
+index and keeps the ordinary segment scan. Compatible direct numeric range
+predicates can then binary-search the existing segment bounds. `EXPLAIN
+ANALYZE` reports `COLUMNAR PRIMARY MARK SKIP` when marks narrow the scan.
+
+When the cache is enabled, unspecified defaults remain `MinReads=2`,
+`RowsPerSegment=256`, and `MaxBytes=4 MiB`; `SparsePrimaryIndex` remains off
+unless explicitly set to `true`. This changes neither wire nor persistence
+formats. See [BENCHMARK.md](BENCHMARK.md#sql-sparse-primary-mark-pruning) for
+the measured selective-query result and full-range control.

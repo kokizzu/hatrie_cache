@@ -33,7 +33,8 @@ func TestSQLColumnarNumericAggregateUsesSegmentedBatchWhenAvailable(t *testing.T
 	probe := &sqlSegmentedColumnarSourceProbe{
 		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": {float64(1), float64(2), float64(100), float64(101)}}, Rows: 4},
 		segments: &ColumnarNumericSegments{
-			RowsPerSegment: 2,
+			RowsPerSegment:     2,
+			SparsePrimaryField: "id",
 			Columns: map[string][]ColumnarNumericSegment{
 				"id": {{Minimum: 1, Maximum: 2, Valid: true}, {Minimum: 100, Maximum: 101, Valid: true}},
 			},
@@ -53,6 +54,20 @@ func TestSQLColumnarNumericAggregateUsesSegmentedBatchWhenAvailable(t *testing.T
 	}
 	if !reflect.DeepEqual(probe.batch, wantBatch) {
 		t.Fatalf("segmented batch mutated = %#v, want %#v", probe.batch, wantBatch)
+	}
+	analysis, err := ExecuteSQLQueryParameters(context.Background(), "EXPLAIN ANALYZE "+"FROM CACHE('events') AS event WHERE event.id >= 100 SELECT COUNT(*) AS total, SUM(event.id) AS sum, AVG(event.id) AS average, MIN(event.id) AS minimum, MAX(event.id) AS maximum", probe, nil, SQLQueryOptions{})
+	if err != nil {
+		t.Fatalf("EXPLAIN ANALYZE error = %v", err)
+	}
+	foundPrimaryMark := false
+	for _, row := range analysis.Rows {
+		if row["node"] == "COLUMNAR PRIMARY MARK SKIP" {
+			foundPrimaryMark = true
+			break
+		}
+	}
+	if !foundPrimaryMark {
+		t.Fatalf("EXPLAIN ANALYZE rows = %#v, want COLUMNAR PRIMARY MARK SKIP", analysis.Rows)
 	}
 }
 

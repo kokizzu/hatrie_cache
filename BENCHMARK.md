@@ -15942,3 +15942,47 @@ Five-run local benchmark on AMD Ryzen 9 5950X, Go `amd64`:
 The recorder is opt-in, so an unset `SQLQueryOptions.Observer` adds no trace
 work to query execution. Run `make benchmark-sql-trace-export` to print all
 raw samples.
+
+## SQL Sparse Primary Mark Pruning
+
+Five-run local benchmark on an AMD Ryzen 9 5950X, Go `amd64`, using a
+1,048,576-row ordered numeric column, 256 rows per mark, and the same query
+fixture for both variants. The point lookup selects one mark; the full-range
+control selects every mark.
+
+| Workload | Linear mark walk | Sparse primary marks | Improvement |
+| --- | ---: | ---: | ---: |
+| Point lookup (`id = 524288`) | 65,192 ns; 3,832 B; 19 allocs | 8,651 ns; 3,832 B; 19 allocs | 7.54x faster; same transient heap and allocations |
+| Full range (`id >= 0`) | 22.268 ms; 3,840 B; 20 allocs | 22.102 ms; 3,840 B; 20 allocs | 1.01x faster; within normal benchmark noise; same transient heap and allocations |
+
+The sparse path reuses the existing min/max segment array and adds no second
+per-row or per-mark allocation. It is therefore a query CPU optimization, not
+a resident-memory reduction. The typed-table builder advertises the field
+only after validating the current snapshot; mutations invalidate that
+metadata. The default remains off, and sources without the ordering guarantee
+leave `SparsePrimaryField` empty.
+
+Raw output from `make benchmark-sql-sparse-primary`:
+
+```text
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/legacy_linear_marks-32 18369 67561 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/legacy_linear_marks-32 18933 65200 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/legacy_linear_marks-32 19221 62941 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/legacy_linear_marks-32 17310 60231 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/legacy_linear_marks-32 16473 65192 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/sparse_primary_binary_search-32 125876 8725 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/sparse_primary_binary_search-32 125334 8612 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/sparse_primary_binary_search-32 127500 8540 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/sparse_primary_binary_search-32 128696 8651 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/point_lookup/sparse_primary_binary_search-32 121672 8715 ns/op 3832 B/op 19 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/legacy_linear_marks-32 52 22267571 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/legacy_linear_marks-32 54 22445668 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/legacy_linear_marks-32 54 22253995 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/legacy_linear_marks-32 50 21886389 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/legacy_linear_marks-32 55 23551912 ns/op 3841 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 57 21815206 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 44 23586810 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 54 22222310 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 52 22101894 ns/op 3840 B/op 20 allocs/op
+BenchmarkSQLColumnarSparsePrimaryRange/full_range/sparse_primary_binary_search-32 54 21952096 ns/op 3840 B/op 20 allocs/op
+```

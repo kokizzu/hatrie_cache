@@ -42,11 +42,13 @@ const (
 // cache. It is disabled by default so existing typed tables keep their current
 // memory behavior.
 type TypedTableColumnarCacheOptions struct {
-	Enabled          bool
-	MaxBytes         int
-	MinReads         int
-	RowsPerSegment   int
-	AdaptiveSegments bool
+	Enabled            bool
+	MaxBytes           int
+	MinReads           int
+	RowsPerSegment     int
+	AdaptiveSegments   bool
+	SparsePrimaryIndex bool
+	SparsePrimaryField string
 }
 
 // TypedTableSchema describes one compact table. Name is used as the SQL source
@@ -362,6 +364,14 @@ func normalizeTypedTableColumnarCacheOptions(options TypedTableColumnarCacheOpti
 	}
 	if options.RowsPerSegment <= 0 {
 		options.RowsPerSegment = typedTableColumnarCacheDefaultRowsPerSegment
+	}
+	if options.SparsePrimaryIndex {
+		options.SparsePrimaryField = strings.TrimSpace(options.SparsePrimaryField)
+		if options.SparsePrimaryField == "" {
+			options.SparsePrimaryIndex = false
+		}
+	} else {
+		options.SparsePrimaryField = ""
 	}
 	return options
 }
@@ -752,6 +762,14 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 		if !found || table.columns[column].kind != TypedTableInt64 && table.columns[column].kind != TypedTableFloat64 {
 			continue
 		}
+		values := batch.Columns[field]
+		if len(values) != batch.Rows {
+			continue
+		}
+		primaryField := table.columnar.options.SparsePrimaryIndex && table.columnar.options.SparsePrimaryField == field
+		primaryOrdered := primaryField
+		primaryHasValue := false
+		var previousPrimaryValue float64
 		bounds := make([]ColumnarNumericSegment, (batch.Rows+rowsPerSegment-1)/rowsPerSegment)
 		for segment := range bounds {
 			start := segment * rowsPerSegment
@@ -760,17 +778,21 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 				end = batch.Rows
 			}
 			for row := start; row < end; row++ {
-				if !table.columns[column].valid[row] {
+				value, numeric := sqlNumber(values[row])
+				if !numeric {
+					primaryOrdered = false
 					continue
 				}
-				value := 0.0
-				if table.columns[column].kind == TypedTableInt64 {
-					value = float64(table.columns[column].int64s[row])
-				} else {
-					value = table.columns[column].floats[row]
+				if primaryField && primaryHasValue && value < previousPrimaryValue {
+					primaryOrdered = false
+				}
+				if primaryField {
+					previousPrimaryValue = value
+					primaryHasValue = true
 				}
 				if math.IsNaN(value) {
 					bounds[segment].Valid = false
+					primaryOrdered = false
 					break
 				}
 				if !bounds[segment].Valid {
@@ -786,6 +808,9 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 			}
 		}
 		segments.Columns[field] = bounds
+		if primaryField && primaryOrdered && primaryHasValue {
+			segments.SparsePrimaryField = field
+		}
 	}
 	if len(segments.Columns) == 0 {
 		return nil

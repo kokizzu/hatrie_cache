@@ -180,9 +180,13 @@ func (segment ColumnarStringNGramBloomSegment) MayContainSubstring(value string)
 // batch. Columns holds numeric min/max bounds. DictionaryCodeSets holds exact
 // membership masks for dictionary columns with at most 64 distinct values.
 // StringBloomFilters holds fixed Bloom filters for all-string plain columns.
-// Segment i covers RowsPerSegment consecutive rows.
+// Segment i covers RowsPerSegment consecutive rows. SparsePrimaryField names
+// an optional numeric field whose complete segment bounds are nondecreasing;
+// the executor may binary-search those bounds for direct range predicates.
+// Providers must leave it empty unless that ordering guarantee is true.
 type ColumnarNumericSegments struct {
 	RowsPerSegment          int
+	SparsePrimaryField      string
 	Columns                 map[string][]ColumnarNumericSegment
 	DictionaryCodeSets      map[string][]uint64
 	StringBloomFilters      map[string][]ColumnarStringBloomSegment
