@@ -16081,3 +16081,34 @@ BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1860 627918 ns/op 703210 B
 BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1810 618209 ns/op 703208 B/op 607 allocs/op
 BenchmarkSQLLogicalBatchShortCircuit/short_circuit-32 1874 616657 ns/op 703208 B/op 607 allocs/op
 ```
+
+## SQL Common-Subexpression Elimination
+
+Five-run local benchmark on an AMD Ryzen 9 5950X, Go `amd64`, evaluating a
+1,024-row batch with the same `score >= 1` predicate on both sides of `AND`.
+The baseline retains the duplicate expression; the rewritten form collapses
+it during execution-local query rewriting.
+
+| Workload | Duplicate expression | Rewritten expression | Improvement |
+| --- | ---: | ---: | ---: |
+| `score >= 1 AND score >= 1` | 130.3 us; 129,024 B; 7 allocs | 57.0 us; 55,296 B; 3 allocs | 2.29x faster; 2.33x lower heap; 2.33x fewer allocations |
+
+The rewrite is limited to exact structurally equal pure expressions in boolean
+`AND`/`OR` operands. Custom functions, subqueries, windows, filtered
+aggregates, and query-dependent expressions retain the original tree. There
+is no storage or wire-format change.
+
+Raw output from `make benchmark-sql-cse`:
+
+```text
+BenchmarkSQLCommonSubexpressionRewrite/baseline_duplicate-32 8822 122581 ns/op 129024 B/op 7 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/baseline_duplicate-32 9114 130345 ns/op 129024 B/op 7 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/baseline_duplicate-32 8994 130625 ns/op 129025 B/op 7 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/baseline_duplicate-32 9384 131339 ns/op 129024 B/op 7 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/baseline_duplicate-32 8028 127374 ns/op 129024 B/op 7 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 22242 58591 ns/op 55296 B/op 3 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 22053 55225 ns/op 55296 B/op 3 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 21452 58699 ns/op 55296 B/op 3 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 20521 57019 ns/op 55296 B/op 3 allocs/op
+BenchmarkSQLCommonSubexpressionRewrite/cse_rewritten-32 20146 54136 ns/op 55296 B/op 3 allocs/op
+```

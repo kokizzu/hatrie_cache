@@ -124,7 +124,7 @@ name.
 - [x] C064 Constant and literal normalization for reusable plans.
 - [x] C065 Constant folding across all scalar expressions - deterministic row-independent CAST, scalar functions, CASE, IN, BETWEEN, IS NULL, and REGEXP expressions are folded after parameter binding; unsupported/custom/aggregate expressions retain the established path. See [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md).
 - [x] C066 Predicate reordering by estimated cost and selectivity. Direct numeric columnar conjunctions reorder up to eight predicates using available segment min/max selectivity estimates; the original order remains unchanged without statistics or for larger conjunctions.
-- [ ] C067 Common-subexpression elimination.
+- [x] C067 Common-subexpression elimination. The execution rewrite removes exact duplicate deterministic pure subexpressions in boolean `A AND A` and `A OR A` predicates, while custom functions, subqueries, windows, filtered aggregates, and other query-dependent expressions retain the original tree.
 - [x] C068 Short-circuit evaluation for expensive predicates. The columnar batch evaluator now skips deterministic, total right-hand `AND`/`OR` expressions for rows whose left value already determines the three-valued result; expressions that may raise errors retain eager evaluation.
 - [x] C069 Expression indexes for supported scalar expressions.
 - [x] C070 Dynamic JSON skip metadata.

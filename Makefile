@@ -2572,6 +2572,25 @@ format-sql-logical-short-circuit:
 .PHONY: commit-sql-logical-short-circuit
 commit-sql-logical-short-circuit:
 \tsh ./scripts/commit-sql-logical-short-circuit.sh
+.PHONY: test-sql-cse
+test-sql-cse:
+\tbash ./scripts/test-sql-cse.sh
+
+.PHONY: benchmark-sql-cse
+benchmark-sql-cse:
+\tbash ./scripts/benchmark-sql-cse.sh
+
+.PHONY: format-sql-cse
+format-sql-cse:
+\tbash ./scripts/format-sql-cse.sh
+
+.PHONY: test-sql-cse-race
+test-sql-cse-race:
+\tbash ./scripts/test-sql-cse-race.sh
+
+.PHONY: commit-sql-cse
+commit-sql-cse:
+\tbash ./scripts/commit-sql-cse.sh
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 

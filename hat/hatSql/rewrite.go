@@ -1,5 +1,7 @@
 package hatSql
 
+import "reflect"
+
 // rewriteSQLQuery simplifies execution-local query trees after parameter
 // binding. Parsed templates stay immutable in the prepared-query cache.
 func rewriteSQLQuery(query *sqlQuery) {
@@ -100,6 +102,9 @@ func rewriteSQLExpr(expr sqlExpr) sqlExpr {
 				return *expr.left
 			}
 		}
+		if (expr.op == "AND" || expr.op == "OR") && sqlRewriteCommonSubexpressionSafe(*expr.left) && sqlRewriteCommonSubexpressionSafe(*expr.right) && sqlExpressionsStructurallyEqual(*expr.left, *expr.right) {
+			return *expr.left
+		}
 	}
 	if sqlRewriteFoldable(expr) {
 		value := evalSQLExpr(expr, nil, sqlExecRow{})
@@ -108,6 +113,110 @@ func rewriteSQLExpr(expr sqlExpr) sqlExpr {
 		}
 	}
 	return expr
+}
+
+// sqlRewriteCommonSubexpressionSafe limits idempotent predicate elimination to
+// expressions whose repeated evaluation cannot invoke user code or depend on
+// query state. Keeping this at rewrite time avoids a cache lookup on ordinary
+// expressions that do not contain a duplicate subtree.
+func sqlRewriteCommonSubexpressionSafe(expr sqlExpr) bool {
+	if expr.query != nil || expr.filter != nil || expr.window != nil {
+		return false
+	}
+	switch expr.kind {
+	case "literal", "field":
+		return true
+	case "cast":
+		return len(expr.args) == 1 && sqlRewriteCommonSubexpressionSafe(expr.args[0])
+	case "unary":
+		return expr.left != nil && sqlRewriteCommonSubexpressionSafe(*expr.left)
+	case "func":
+		if !sqlRewriteFoldableFunction(expr.name) {
+			return false
+		}
+		for _, argument := range expr.args {
+			if !sqlRewriteCommonSubexpressionSafe(argument) {
+				return false
+			}
+		}
+		return true
+	case "case":
+		if expr.left != nil && !sqlRewriteCommonSubexpressionSafe(*expr.left) {
+			return false
+		}
+		for _, branch := range expr.cases {
+			if !sqlRewriteCommonSubexpressionSafe(branch.when) || !sqlRewriteCommonSubexpressionSafe(branch.then) {
+				return false
+			}
+		}
+		return expr.right == nil || sqlRewriteCommonSubexpressionSafe(*expr.right)
+	case "in":
+		if expr.left == nil || !sqlRewriteCommonSubexpressionSafe(*expr.left) {
+			return false
+		}
+		for _, argument := range expr.args {
+			if !sqlRewriteCommonSubexpressionSafe(argument) {
+				return false
+			}
+		}
+		return true
+	case "between":
+		return expr.left != nil && len(expr.args) == 2 && sqlRewriteCommonSubexpressionSafe(*expr.left) && sqlRewriteCommonSubexpressionSafe(expr.args[0]) && sqlRewriteCommonSubexpressionSafe(expr.args[1])
+	case "binary":
+		if expr.left == nil {
+			return false
+		}
+		if expr.op == "IS NULL" || expr.op == "IS NOT NULL" {
+			return sqlRewriteCommonSubexpressionSafe(*expr.left)
+		}
+		if expr.right == nil {
+			return false
+		}
+		switch expr.op {
+		case "AND", "OR", "=", "!=", "<>", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "LIKE", "REGEXP", "NOT REGEXP":
+			return sqlRewriteCommonSubexpressionSafe(*expr.left) && sqlRewriteCommonSubexpressionSafe(*expr.right)
+		}
+	}
+	return false
+}
+
+func sqlExpressionsStructurallyEqual(left, right sqlExpr) bool {
+	if left.kind != right.kind || left.name != right.name || left.qualifier != right.qualifier || left.op != right.op || left.windowName != right.windowName || left.collation != right.collation || !sqlExpressionValuesStructurallyEqual(left.value, right.value) {
+		return false
+	}
+	if !sqlExpressionPointersStructurallyEqual(left.left, right.left) || !sqlExpressionPointersStructurallyEqual(left.right, right.right) || !sqlExpressionPointersStructurallyEqual(left.filter, right.filter) {
+		return false
+	}
+	if len(left.args) != len(right.args) || len(left.cases) != len(right.cases) {
+		return false
+	}
+	for index := range left.args {
+		if !sqlExpressionsStructurallyEqual(left.args[index], right.args[index]) {
+			return false
+		}
+	}
+	for index := range left.cases {
+		if !sqlExpressionsStructurallyEqual(left.cases[index].when, right.cases[index].when) || !sqlExpressionsStructurallyEqual(left.cases[index].then, right.cases[index].then) {
+			return false
+		}
+	}
+	return left.query == nil && right.query == nil && left.window == nil && right.window == nil
+}
+
+func sqlExpressionValuesStructurallyEqual(left, right interface{}) bool {
+	leftToken, leftIsToken := left.(sqlToken)
+	rightToken, rightIsToken := right.(sqlToken)
+	if leftIsToken || rightIsToken {
+		return leftIsToken && rightIsToken && leftToken.kind == rightToken.kind && leftToken.text == rightToken.text
+	}
+	return reflect.DeepEqual(left, right)
+}
+
+func sqlExpressionPointersStructurallyEqual(left, right *sqlExpr) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return sqlExpressionsStructurallyEqual(*left, *right)
 }
 
 func sqlLiteralExpr(value interface{}, token sqlToken) sqlExpr {

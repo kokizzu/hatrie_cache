@@ -102,6 +102,8 @@ explicitly opt-in operational control.
 | ClickHouse `LIMIT BY`, 10,000 rows and 100 groups with `ORDER BY score DESC LIMIT 2 BY region` | Median 7.097 ms and 8,571,711 B with the bounded per-group Top-N path, versus 24.707 ms and 9,226,462 B for sorting and returning every row: 3.48x faster and 1.08x lower heap. It used 40,444 allocations versus 50,027: 1.24x fewer. The result retained 200 rows; source/projected row materialization remains the compatibility baseline. Raw samples and command are in [BENCHMARK.md](BENCHMARK.md#sql-limit-by). |
 | ClickHouse vectorized grouped execution, 64/1,024/20,000 columnar rows | Median 1.12x/2.18x/6.22x faster, 1.19x/2.72x/16.79x lower allocation volume, and 1.12x/1.78x/2.85x fewer allocations than the row executor. The 1,024-row selection buffer is bounded per query; no storage or wire format changes. Raw samples and fallback rules are in [BENCHMARK.md](BENCHMARK.md#columnar-vectorized-grouped-aggregates) and [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md). |
 
+| ClickHouse | Common-subexpression elimination | Adopted for exact pure boolean duplicates | The execution rewrite collapses structurally identical deterministic subexpressions in `A AND A` and `A OR A` predicates. It excludes custom functions, subqueries, windows, filtered aggregates, and query-dependent expressions, so ordinary queries have no runtime cache or storage-format cost. [BENCHMARK.md](BENCHMARK.md#sql-common-subexpression-elimination) |
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge

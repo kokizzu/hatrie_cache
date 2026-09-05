@@ -3768,6 +3768,18 @@ The optimization is automatic and has no configuration or storage/wire-format
 change. See [BENCHMARK.md](BENCHMARK.md#sql-logical-predicate-short-circuiting)
 for CPU, heap, and allocation measurements.
 
+## SQL Common-Subexpression Elimination
+
+The SQL rewrite phase removes an exact duplicate pure predicate in `A AND A`
+and `A OR A` expressions, including nested comparisons and casts. This avoids
+repeating the same batch work without adding a runtime cache to ordinary
+queries. Custom functions, subqueries, windows, filtered aggregates, and other
+query-dependent expressions remain unchanged for compatibility.
+
+The rewrite is automatic and has no configuration or storage/wire-format
+change. See [BENCHMARK.md](BENCHMARK.md#sql-common-subexpression-elimination)
+for CPU, heap, and allocation measurements.
+
 ## SQL Sparse Primary Mark Pruning
 
 Typed-table columnar caches can optionally publish a sparse primary mark index
