@@ -5506,3 +5506,31 @@ commit-sql-row-binary-delta:
 .PHONY: push-sql-row-binary-delta
 push-sql-row-binary-delta:
 	sh ./scripts/deliver-sql-row-binary-delta.sh push
+
+.PHONY: test-sql-subscription-status
+test-sql-subscription-status:
+	sh ./scripts/test-sql-subscription-status.sh
+
+.PHONY: format-sql-subscription-status
+format-sql-subscription-status:
+	sh ./scripts/format-sql-subscription-status.sh
+
+.PHONY: test-race-sql-subscription-status
+test-race-sql-subscription-status:
+	sh ./scripts/test-race-sql-subscription-status.sh
+
+.PHONY: benchmark-sql-subscription-status
+benchmark-sql-subscription-status:
+	sh ./scripts/benchmark-sql-subscription-status.sh
+
+.PHONY: deliver-sql-subscription-status
+deliver-sql-subscription-status:
+	sh ./scripts/deliver-sql-subscription-status.sh preview
+
+.PHONY: commit-sql-subscription-status
+commit-sql-subscription-status:
+	sh ./scripts/deliver-sql-subscription-status.sh commit
+
+.PHONY: push-sql-subscription-status
+push-sql-subscription-status:
+	sh ./scripts/deliver-sql-subscription-status.sh push
