@@ -123,7 +123,7 @@ name.
 - [x] C050a Process-local shared JSON subcolumn path interning with deterministic snapshots.
 - [x] C051 JSON path indexing for supported predicates.
 - [ ] C052 Native array and nested-column physical layout.
-- [ ] C053 Bitmap-backed nullable columns.
+- [x] C053 Bitmap-backed nullable columns. Nullable RowBinary encodes one bitmap per row, preserves typed values, and rejects malformed or unsafe input; see [ROW_BINARY_NULLABLE_BITMAP.md](ROW_BINARY_NULLABLE_BITMAP.md).
 - [x] C053a One-bit-per-row nullable bitmap with resize preservation and population counting.
 - [x] C053a Nullable-column bitmap RowBinary format.
 - [x] C054 Fixed-width date and datetime encodings - RowBinary stores dates as 4-byte epoch days and datetimes as 8-byte Unix nanoseconds, with explicit round-trip and payload-size verification (see ROW_BINARY.md).
