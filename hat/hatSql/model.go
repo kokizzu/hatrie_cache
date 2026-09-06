@@ -30,6 +30,8 @@ type QueryResult struct {
 type ExplainStep struct {
 	Node                 string          `json:"node"`
 	Detail               string          `json:"detail"`
+	Alternatives         []ExplainAlternative `json:"alternatives,omitempty"`
+	Notices              []ExplainNotice `json:"notices,omitempty"`
 	Stage                int             `json:"stage,omitempty"`
 	Worker               int             `json:"worker,omitempty"`
 	Workers              int             `json:"workers,omitempty"`
@@ -42,6 +44,23 @@ type ExplainStep struct {
 	EstimateErrorRows    *int            `json:"estimate_error_rows,omitempty"`
 	EstimateErrorPercent *float64        `json:"estimate_error_percent,omitempty"`
 	ElapsedNanos         *int64          `json:"elapsed_ns,omitempty"`
+}
+
+// ExplainAlternative describes an optimizer strategy considered for one plan
+// step. RejectedReason is empty for the selected alternative.
+type ExplainAlternative struct {
+	Expression     string `json:"expression"`
+	EstimatedRows  int    `json:"estimated_rows"`
+	EstimatedCost  int    `json:"estimated_cost"`
+	Selected       bool   `json:"selected"`
+	RejectedReason string `json:"rejected_reason,omitempty"`
+}
+
+// ExplainNotice is a stable, machine-readable optimizer diagnostic attached
+// to an explain step.
+type ExplainNotice struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
 }
 
 // ColumnLineage identifies the source fields contributing to one projected

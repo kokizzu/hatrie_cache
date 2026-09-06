@@ -7012,3 +7012,18 @@ verify-operator-memory-monitoring:
 
 deliver-operator-memory-monitoring:
 	sh ./scripts/deliver-operator-memory-monitoring.sh
+
+inspect-m080:
+	sh ./scripts/inspect-m080.sh
+
+test-m080:
+	sh ./scripts/test-m080.sh
+
+format-m080:
+	sh ./scripts/format-m080.sh
+
+test-m080-full:
+	sh ./scripts/test-m080-full.sh
+
+test-m080-race:
+	sh ./scripts/test-m080-race.sh

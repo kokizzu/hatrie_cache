@@ -125,6 +125,8 @@ type SQLQueryRequest = QueryRequest
 type SQLRow = Row
 type SQLQueryResult = QueryResult
 type SQLExplainStep = ExplainStep
+type SQLExplainAlternative = ExplainAlternative
+type SQLExplainNotice = ExplainNotice
 type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
 type SQLHistoricalSourceResolver = HistoricalSourceResolver
@@ -7253,6 +7255,16 @@ func (metrics *sqlExecutionMetrics) recordBytes(node, detail string, inputRows, 
 	metrics.steps = append(metrics.steps, step)
 }
 
+func (metrics *sqlExecutionMetrics) recordIndexCandidates(detail string, alternatives []SQLExplainAlternative, notices []SQLExplainNotice, inputRows, outputRows int, started time.Time) {
+	if metrics == nil {
+		return
+	}
+	metrics.record("INDEX CANDIDATES", detail, inputRows, outputRows, started)
+	step := &metrics.steps[len(metrics.steps)-1]
+	step.Alternatives = alternatives
+	step.Notices = notices
+}
+
 func (metrics *sqlExecutionMetrics) recordEstimated(node, detail string, estimatedRows *int, inputRows, outputRows int, started time.Time) {
 	metrics.record(node, detail, inputRows, outputRows, started)
 	if metrics != nil && estimatedRows != nil {
@@ -12022,24 +12034,36 @@ func resolveSQLMostSelectiveIndexedConjunct(source sqlSource, condition sqlExpr,
 	sort.SliceStable(candidates, func(left, right int) bool { return candidates[left].estimate < candidates[right].estimate })
 	started := time.Now()
 	details := make([]string, 0, len(candidates))
+	alternatives := make([]SQLExplainAlternative, 0, len(candidates))
+	notices := make([]SQLExplainNotice, 0, len(candidates))
 	for _, candidate := range candidates {
 		adaptiveKey := sqlAdaptiveIndexKey(source, candidate.condition)
 		if metrics != nil && metrics.adaptive != nil && !metrics.adaptive.ShouldUseIndex(adaptiveKey) {
-			details = append(details, fmt.Sprintf("%s estimated_rows=%d adaptive: scan selected after prior underestimate", sqlExplainExpression(candidate.condition), candidate.estimate))
+			expression := sqlExplainExpression(candidate.condition)
+			reason := "adaptive scan selected after prior underestimate"
+			details = append(details, fmt.Sprintf("%s estimated_rows=%d %s", expression, candidate.estimate, reason))
+			alternatives = append(alternatives, SQLExplainAlternative{Expression: expression, EstimatedRows: candidate.estimate, EstimatedCost: candidate.cost, RejectedReason: reason})
+			notices = append(notices, SQLExplainNotice{Code: "optimizer_scan_fallback", Detail: expression + ": " + reason})
 			continue
 		}
 		rows, indexed, err := resolveSQLIndexedSource(source, candidate.condition, resolver, metrics, nil)
 		if indexed || err != nil {
 			if err == nil {
-				details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d selected", sqlExplainExpression(candidate.condition), candidate.estimate, candidate.cost))
-				metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 1, started)
+				expression := sqlExplainExpression(candidate.condition)
+				details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d selected", expression, candidate.estimate, candidate.cost))
+				alternatives = append(alternatives, SQLExplainAlternative{Expression: expression, EstimatedRows: candidate.estimate, EstimatedCost: candidate.cost, Selected: true})
+				metrics.recordIndexCandidates(strings.Join(details, "; "), alternatives, notices, len(candidates), 1, started)
 			}
 			return rows, indexed, err
 		}
-		details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d rejected: index unavailable", sqlExplainExpression(candidate.condition), candidate.estimate, candidate.cost))
+		expression := sqlExplainExpression(candidate.condition)
+		reason := "index unavailable"
+		details = append(details, fmt.Sprintf("%s estimated_rows=%d estimated_cost=%d rejected: %s", expression, candidate.estimate, candidate.cost, reason))
+		alternatives = append(alternatives, SQLExplainAlternative{Expression: expression, EstimatedRows: candidate.estimate, EstimatedCost: candidate.cost, RejectedReason: reason})
+		notices = append(notices, SQLExplainNotice{Code: "optimizer_alternative_rejected", Detail: expression + ": " + reason})
 	}
 	if len(candidates) > 0 {
-		metrics.record("INDEX CANDIDATES", strings.Join(details, "; "), len(candidates), 0, started)
+		metrics.recordIndexCandidates(strings.Join(details, "; "), alternatives, notices, len(candidates), 0, started)
 	}
 	return nil, false, nil
 }

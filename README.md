@@ -59,6 +59,7 @@ security guidance before exposing it on a network.
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Arrangement ownership and reuse snapshots: call `Snapshot()` on typed aggregate or join arrangement registries to inspect active leases, checkpoints, source sequences, and staleness.
 - Structural EXPLAIN dataflow graphs: call `BuildExplainDataflowGraph`, `MarshalExplainDataflowJSON`, or `ExplainDataflowDOT` to inspect nested subplans and pipeline edges without changing query execution.
+- Structured optimizer alternatives and notices: inspect `ExplainStep.Alternatives` and `ExplainStep.Notices` on `EXPLAIN ANALYZE` plans. See [SQL_EXPLAIN_OPTIMIZER.md](SQL_EXPLAIN_OPTIMIZER.md).
 - Literal-independent SQL fingerprints: call `SQLQueryFingerprint` to group structurally identical queries without retaining literal values; identifiers, operators, literal types, and parameter positions remain significant.
 - Schema-aware RowBinary-style SQL row transfer: use `EncodeSQLRowBinary` and `DecodeSQLRowBinary`; the existing JSON/protobuf wire defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 - Stateful RowBinary dictionary batches: use `NewSQLRowBinaryDictionaryEncoder` and `NewSQLRowBinaryDictionaryDecoder` for repeated string-like values across batches; plain RowBinary remains the default. See [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
@@ -3771,6 +3772,16 @@ view, so static plans currently report one worker; `EXPLAIN PIPELINE ANALYZE`
 is rejected explicitly. Existing `EXPLAIN` and `EXPLAIN ANALYZE` output is
 unchanged. See [BENCHMARK.md](BENCHMARK.md#sql-explain-pipeline) for the
 diagnostic overhead.
+
+## SQL EXPLAIN Optimizer Diagnostics
+
+`EXPLAIN ANALYZE` exposes optimizer decisions on the `INDEX CANDIDATES` plan
+step. `Plan` keeps the existing node and detail text, and now also includes
+structured `Alternatives` with estimates, selection state, and rejection
+reasons, plus machine-readable `Notices`. Regular `EXPLAIN` and plans without
+candidate decisions omit both fields, so existing result columns and JSON
+shape remain unchanged. See [SQL_EXPLAIN_OPTIMIZER.md](SQL_EXPLAIN_OPTIMIZER.md)
+for the contract and example.
 
 ## SQL Logical Predicate Short-Circuiting
 
