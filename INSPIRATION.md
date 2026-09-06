@@ -275,7 +275,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M006 Arrangement keys derived from indexed predicates.
 - [x] M007 Arrangement reuse across subscriptions and point reads.
 - [x] M008 Arrangement compaction for old versions.
-- [ ] M009 Consolidation of equal data and opposite diffs.
+- [x] M009 Consolidation of equal data and opposite diffs. `ConsolidateDifferentialRows` combines equal key/time updates, preserves signed multiplicity, removes zero totals, and rejects overflow; see [DIFFERENTIAL_ROWS.md](DIFFERENTIAL_ROWS.md).
 - [x] M009a Overflow-safe batch consolidation by key and time.
 - [x] M010 Reduce/group arrangements for typed tables.
 - [x] M011 Join arrangements for typed indexed tables.
