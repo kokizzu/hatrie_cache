@@ -6230,3 +6230,31 @@ commit-replay-digest:
 .PHONY: push-replay-digest
 push-replay-digest:
 	bash ./scripts/deliver-replay-digest.sh push
+
+.PHONY: format-quorum-policy
+format-quorum-policy:
+	bash ./scripts/format-quorum-policy.sh
+
+.PHONY: test-quorum-policy
+test-quorum-policy:
+	bash ./scripts/test-quorum-policy.sh
+
+.PHONY: test-race-quorum-policy
+test-race-quorum-policy:
+	bash ./scripts/test-race-quorum-policy.sh
+
+.PHONY: benchmark-quorum-policy
+benchmark-quorum-policy:
+	bash ./scripts/benchmark-quorum-policy.sh
+
+.PHONY: deliver-quorum-policy
+deliver-quorum-policy:
+	bash ./scripts/deliver-quorum-policy.sh preview
+
+.PHONY: commit-quorum-policy
+commit-quorum-policy:
+	bash ./scripts/deliver-quorum-policy.sh commit
+
+.PHONY: push-quorum-policy
+push-quorum-policy:
+	bash ./scripts/deliver-quorum-policy.sh push

@@ -437,6 +437,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 ### Replication And Topology
 
 - [ ] T047 Synchronous replication with an explicit quorum.
+- [x] T047a Explicit write-quorum decision helper with validation and acknowledgement reporting.
 - [x] T048 Replication sets and peer topology.
 - [x] T049 Vector-clock exposure for every replica - replication queue results expose an immutable observational `vector_clock` containing the local sequence and all current topology members' acknowledged sequences; it does not change quorum or conflict semantics.
 - [x] T050 LSN or journal sequence exposure.
