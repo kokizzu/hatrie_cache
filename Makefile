@@ -6606,3 +6606,19 @@ commit-remote-part:
 	bash ./scripts/deliver-remote-part.sh commit
 push-remote-part:
 	bash ./scripts/deliver-remote-part.sh push
+
+.PHONY: format-json-subcolumns test-json-subcolumns test-race-json-subcolumns benchmark-json-subcolumns deliver-json-subcolumns commit-json-subcolumns push-json-subcolumns
+format-json-subcolumns:
+	bash ./scripts/format-json-subcolumns.sh
+test-json-subcolumns:
+	bash ./scripts/test-json-subcolumns.sh
+test-race-json-subcolumns:
+	bash ./scripts/test-race-json-subcolumns.sh
+benchmark-json-subcolumns:
+	bash ./scripts/benchmark-json-subcolumns.sh
+deliver-json-subcolumns:
+	bash ./scripts/deliver-json-subcolumns.sh preview
+commit-json-subcolumns:
+	bash ./scripts/deliver-json-subcolumns.sh commit
+push-json-subcolumns:
+	bash ./scripts/deliver-json-subcolumns.sh push

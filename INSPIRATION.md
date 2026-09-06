@@ -119,6 +119,7 @@ name.
 - [x] C048a Exact full-batch codec selection by encoded size.
 - [x] C049 Low-cardinality dictionary encoding for typed string values.
 - [ ] C050 Shared JSON subcolumns for repeated paths.
+- [x] C050a Process-local shared JSON subcolumn path interning with deterministic snapshots.
 - [x] C051 JSON path indexing for supported predicates.
 - [ ] C052 Native array and nested-column physical layout.
 - [ ] C053 Bitmap-backed nullable columns.
