@@ -6682,3 +6682,25 @@ commit-columnar-layout-selection:
 
 push-columnar-layout-selection:
 	bash ./scripts/deliver-columnar-layout-selection.sh push
+
+# columnar-vertical-merge-targets
+format-columnar-vertical-merge:
+	bash ./scripts/format-columnar-vertical-merge.sh
+
+test-columnar-vertical-merge:
+	bash ./scripts/test-columnar-vertical-merge.sh
+
+test-race-columnar-vertical-merge:
+	bash ./scripts/test-race-columnar-vertical-merge.sh
+
+benchmark-columnar-vertical-merge:
+	bash ./scripts/benchmark-columnar-vertical-merge.sh
+
+deliver-columnar-vertical-merge:
+	bash ./scripts/deliver-columnar-vertical-merge.sh preview
+
+commit-columnar-vertical-merge:
+	bash ./scripts/deliver-columnar-vertical-merge.sh commit
+
+push-columnar-vertical-merge:
+	bash ./scripts/deliver-columnar-vertical-merge.sh push

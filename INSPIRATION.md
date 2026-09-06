@@ -599,3 +599,5 @@ For each future unchecked item:
 - [x] C016a Bounded independently scheduled pipeline stages with backpressure and cancellation.
 
 - [x] C030a Width-aware adaptive dictionary selection for compact columnar layouts.
+
+- [x] C029a Vertical columnar merge loads only requested fields from each part.
