@@ -6314,3 +6314,31 @@ commit-codec-metrics:
 .PHONY: push-codec-metrics
 push-codec-metrics:
 	bash ./scripts/deliver-codec-metrics.sh push
+
+.PHONY: format-late-data-policy
+format-late-data-policy:
+	bash ./scripts/format-late-data-policy.sh
+
+.PHONY: test-late-data-policy
+test-late-data-policy:
+	bash ./scripts/test-late-data-policy.sh
+
+.PHONY: test-race-late-data-policy
+test-race-late-data-policy:
+	bash ./scripts/test-race-late-data-policy.sh
+
+.PHONY: benchmark-late-data-policy
+benchmark-late-data-policy:
+	bash ./scripts/benchmark-late-data-policy.sh
+
+.PHONY: deliver-late-data-policy
+deliver-late-data-policy:
+	bash ./scripts/deliver-late-data-policy.sh preview
+
+.PHONY: commit-late-data-policy
+commit-late-data-policy:
+	bash ./scripts/deliver-late-data-policy.sh commit
+
+.PHONY: push-late-data-policy
+push-late-data-policy:
+	bash ./scripts/deliver-late-data-policy.sh push
