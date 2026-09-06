@@ -66,6 +66,7 @@ security guidance before exposing it on a network.
 - Adaptive numeric RowBinary codec selection: [adaptive RowBinary](ROW_BINARY_ADAPTIVE.md)
 - Shared JSON path metadata: [JSON subcolumns](JSON_SUBCOLUMNS.md)
 - Compact nullable RowBinary markers: [nullable bitmap](ROW_BINARY_NULLABLE_BITMAP.md)
+- Per-namespace SQL workload classes: [SQL workload classes](SQL_WORKLOAD_CLASSES.md)
 - Stateful RowBinary dictionary batches: use `NewSQLRowBinaryDictionaryEncoder` and `NewSQLRowBinaryDictionaryDecoder` for repeated string-like values across batches; plain RowBinary remains the default. See [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
 - RowBinary column statistics: use `EncodeSQLRowBinaryWithStats`, `DecodeSQLRowBinaryWithStats`, or `BuildSQLRowBinaryColumnStats` for exact counts and typed min/max metadata; the ordinary RowBinary path remains unchanged. See [ROW_BINARY_STATS.md](ROW_BINARY_STATS.md).
 - Independent compressed block streams: use `EncodeCompressedBlocks` and `DecodeCompressedBlocks` when block-local checksums and bounded recovery matter; existing JSON, protobuf, and gzip defaults remain unchanged. See [COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
