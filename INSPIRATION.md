@@ -112,7 +112,7 @@ name.
 - [ ] C046 Read amplification accounting per part and column.
 - [x] C046a Per-part and per-column read amplification accounting with deterministic snapshots.
 - [x] C046a Statistics-only per-column RowBinary read accounting.
-- [ ] C047 Adaptive granule sizing from observed predicate selectivity.
+- [x] C047 Adaptive granule sizing from observed predicate selectivity. `GranuleSizingPolicy` adapts bounded future scan granules from observed selectivity without retaining state or changing result semantics; see [GRANULE_SIZING.md](GRANULE_SIZING.md).
 - [x] C047a Bounded adaptive granule sizing from observed predicate selectivity.
 - [x] C047a Conservative block min/max predicate pruning.
 - [x] C048 Compact numeric encodings selected from data statistics. Adaptive RowBinary evaluates legacy, delta, and double-delta encodings from full-batch or sampled statistics and records the selected codec in the header; see [ROW_BINARY_ADAPTIVE.md](ROW_BINARY_ADAPTIVE.md).
