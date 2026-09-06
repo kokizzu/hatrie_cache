@@ -330,6 +330,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M073 Temporal joins.
 - [x] M073a Indexed weighted temporal equi-join.
 - [ ] M074 Interval joins.
+- [x] M074a Inclusive timestamp interval bounds for temporal joins.
 - [x] M075 Temporal filtering for supported typed paths.
 
 ### Planning, Explainability, And Operations

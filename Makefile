@@ -6078,3 +6078,15 @@ commit-sql-differential-temporal-join:
 .PHONY: push-sql-differential-temporal-join
 push-sql-differential-temporal-join:
 	bash ./scripts/deliver-sql-differential-temporal-join.sh push
+
+.PHONY: deliver-sql-differential-interval-join
+deliver-sql-differential-interval-join:
+	bash ./scripts/deliver-sql-differential-interval-join.sh preview
+
+.PHONY: commit-sql-differential-interval-join
+commit-sql-differential-interval-join:
+	bash ./scripts/deliver-sql-differential-interval-join.sh commit
+
+.PHONY: push-sql-differential-interval-join
+push-sql-differential-interval-join:
+	bash ./scripts/deliver-sql-differential-interval-join.sh push

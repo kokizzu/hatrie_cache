@@ -77,6 +77,39 @@ func TestDifferentialTemporalJoinRejectsOutOfWindowAndDifferentKeys(t *testing.T
 	}
 }
 
+func TestDifferentialTemporalJoinSupportsInclusiveDistanceInterval(t *testing.T) {
+	join, err := NewDifferentialTemporalJoin(DifferentialTemporalJoinDefinition{
+		MinTimeDistance: 2,
+		MaxTimeDistance: 3,
+		LeftKey:         func(row SQLRow) string { return row["join"].(string) },
+		RightKey:        func(row SQLRow) string { return row["join"].(string) },
+	})
+	if err != nil {
+		t.Fatalf("NewDifferentialTemporalJoin() error = %v", err)
+	}
+	if _, err := join.ApplyLeft([]DifferentialRow{{Key: "left", Time: 10, Diff: 1, Row: Row{"join": "a"}}}); err != nil {
+		t.Fatalf("ApplyLeft() error = %v", err)
+	}
+	for _, test := range []struct {
+		key  string
+		time uint64
+		want int
+	}{
+		{key: "too-close", time: 11, want: 0},
+		{key: "lower-bound", time: 12, want: 1},
+		{key: "upper-bound", time: 13, want: 1},
+		{key: "too-far", time: 14, want: 0},
+	} {
+		got, err := join.ApplyRight([]DifferentialRow{{Key: test.key, Time: test.time, Diff: 1, Row: Row{"join": "a"}}})
+		if err != nil {
+			t.Fatalf("ApplyRight(%q) error = %v", test.key, err)
+		}
+		if len(got) != test.want {
+			t.Fatalf("ApplyRight(%q) emitted %d rows, want %d", test.key, len(got), test.want)
+		}
+	}
+}
+
 func TestDifferentialTemporalJoinPreservesWeightedMultiplicityAndClonesRows(t *testing.T) {
 	join, err := NewDifferentialTemporalJoin(DifferentialTemporalJoinDefinition{
 		MaxTimeDistance: 0,
@@ -104,6 +137,14 @@ func TestDifferentialTemporalJoinPreservesWeightedMultiplicityAndClonesRows(t *t
 func TestDifferentialTemporalJoinRejectsInvalidStateAndCallbacks(t *testing.T) {
 	if _, err := NewDifferentialTemporalJoin(DifferentialTemporalJoinDefinition{}); !errors.Is(err, ErrDifferentialTemporalJoinLeftKeyRequired) {
 		t.Fatalf("missing left key error = %v, want ErrDifferentialTemporalJoinLeftKeyRequired", err)
+	}
+	if _, err := NewDifferentialTemporalJoin(DifferentialTemporalJoinDefinition{
+		MinTimeDistance: 2,
+		MaxTimeDistance: 1,
+		LeftKey:         func(SQLRow) string { return "a" },
+		RightKey:        func(SQLRow) string { return "a" },
+	}); !errors.Is(err, ErrDifferentialTemporalJoinInvalidInterval) {
+		t.Fatalf("invalid interval error = %v, want ErrDifferentialTemporalJoinInvalidInterval", err)
 	}
 	if _, err := NewDifferentialTemporalJoin(DifferentialTemporalJoinDefinition{LeftKey: func(SQLRow) string { return "a" }}); !errors.Is(err, ErrDifferentialTemporalJoinRightKeyRequired) {
 		t.Fatalf("missing right key error = %v, want ErrDifferentialTemporalJoinRightKeyRequired", err)

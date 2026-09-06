@@ -9,6 +9,7 @@ import (
 )
 
 var (
+	ErrDifferentialTemporalJoinInvalidInterval      = errors.New("hatSql: differential temporal join interval bounds are invalid")
 	ErrDifferentialTemporalJoinNil                  = errors.New("hatSql: differential temporal join is nil")
 	ErrDifferentialTemporalJoinLeftKeyRequired      = errors.New("hatSql: differential temporal join left key callback is required")
 	ErrDifferentialTemporalJoinRightKeyRequired     = errors.New("hatSql: differential temporal join right key callback is required")
@@ -26,6 +27,7 @@ type DifferentialTemporalJoinKeyFunc func(SQLRow) string
 // equi-join. Rows match when their callback keys are equal and their timestamps
 // differ by at most MaxTimeDistance, inclusive.
 type DifferentialTemporalJoinDefinition struct {
+	MinTimeDistance uint64
 	MaxTimeDistance uint64
 	LeftKey         DifferentialTemporalJoinKeyFunc
 	RightKey        DifferentialTemporalJoinKeyFunc
@@ -50,6 +52,7 @@ type differentialTemporalJoinGroupKey struct {
 // calls; each batch is serialized and invalid batches leave state unchanged.
 type DifferentialTemporalJoin struct {
 	mu              sync.Mutex
+	minTimeDistance uint64
 	maxTimeDistance uint64
 	leftKey         DifferentialTemporalJoinKeyFunc
 	rightKey        DifferentialTemporalJoinKeyFunc
@@ -69,7 +72,11 @@ func NewDifferentialTemporalJoin(definition DifferentialTemporalJoinDefinition) 
 	if definition.RightKey == nil {
 		return nil, ErrDifferentialTemporalJoinRightKeyRequired
 	}
+	if definition.MinTimeDistance > definition.MaxTimeDistance {
+		return nil, ErrDifferentialTemporalJoinInvalidInterval
+	}
 	return &DifferentialTemporalJoin{
+		minTimeDistance: definition.MinTimeDistance,
 		maxTimeDistance: definition.MaxTimeDistance,
 		leftKey:         definition.LeftKey,
 		rightKey:        definition.RightKey,
@@ -151,7 +158,7 @@ func (join *DifferentialTemporalJoin) validateChanges(changes []DifferentialRow,
 		}
 		for _, counterpartKey := range otherGroups[entry.groupKey] {
 			counterpart, found := other[counterpartKey]
-			if !found || !differentialTemporalJoinTimesMatch(entry.time, counterpart.time, join.maxTimeDistance) {
+			if !found || !differentialTemporalJoinTimesMatch(entry.time, counterpart.time, join.minTimeDistance, join.maxTimeDistance) {
 				continue
 			}
 			if _, ok := multiplyDifferentialCounts(change.Diff, counterpart.count); !ok {
@@ -195,7 +202,7 @@ func (join *DifferentialTemporalJoin) applyChanges(changes []DifferentialRow, le
 		}
 		for _, counterpartKey := range counterpartGroups[entry.groupKey] {
 			counterpart, found := other[counterpartKey]
-			if !found || counterpart.groupKey != entry.groupKey || !differentialTemporalJoinTimesMatch(entry.time, counterpart.time, join.maxTimeDistance) {
+			if !found || counterpart.groupKey != entry.groupKey || !differentialTemporalJoinTimesMatch(entry.time, counterpart.time, join.minTimeDistance, join.maxTimeDistance) {
 				continue
 			}
 			diff, _ := multiplyDifferentialCounts(change.Diff, counterpart.count)
@@ -258,11 +265,14 @@ func differentialTemporalJoinValueClone(value interface{}) interface{} {
 	return cloned
 }
 
-func differentialTemporalJoinTimesMatch(left, right, maxDistance uint64) bool {
+func differentialTemporalJoinTimesMatch(left, right, minDistance, maxDistance uint64) bool {
+	var distance uint64
 	if left >= right {
-		return left-right <= maxDistance
+		distance = left - right
+	} else {
+		distance = right - left
 	}
-	return right-left <= maxDistance
+	return distance >= minDistance && distance <= maxDistance
 }
 
 func differentialTemporalJoinMaxTime(left, right uint64) uint64 {
