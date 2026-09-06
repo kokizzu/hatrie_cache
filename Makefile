@@ -6704,3 +6704,25 @@ commit-columnar-vertical-merge:
 
 push-columnar-vertical-merge:
 	bash ./scripts/deliver-columnar-vertical-merge.sh push
+
+# rollup-ttl-targets
+format-rollup-ttl:
+	bash ./scripts/format-rollup-ttl.sh
+
+test-rollup-ttl:
+	bash ./scripts/test-rollup-ttl.sh
+
+test-race-rollup-ttl:
+	bash ./scripts/test-race-rollup-ttl.sh
+
+benchmark-rollup-ttl:
+	bash ./scripts/benchmark-rollup-ttl.sh
+
+deliver-rollup-ttl:
+	bash ./scripts/deliver-rollup-ttl.sh preview
+
+commit-rollup-ttl:
+	bash ./scripts/deliver-rollup-ttl.sh commit
+
+push-rollup-ttl:
+	bash ./scripts/deliver-rollup-ttl.sh push

@@ -601,3 +601,5 @@ For each future unchecked item:
 - [x] C030a Width-aware adaptive dictionary selection for compact columnar layouts.
 
 - [x] C029a Vertical columnar merge loads only requested fields from each part.
+
+- [x] C038a TTL pruning removes only complete rollup buckets at explicit boundaries.

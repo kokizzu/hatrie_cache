@@ -123,6 +123,29 @@ func (rollup *TimeBucketRollup) VerifyThrough(raw []TimedMetric, cutoff time.Tim
 	return nil
 }
 
+// ExpireBefore removes only buckets whose end is at or before cutoff. The
+// cutoff must be a bucket boundary, so a current partial bucket is retained.
+// Callers can implement TTL retention by passing now minus their retention
+// duration; no background goroutine or wall-clock dependency is introduced.
+func (rollup *TimeBucketRollup) ExpireBefore(cutoff time.Time) (int, error) {
+	if rollup == nil {
+		return 0, fmt.Errorf("time bucket rollup is nil")
+	}
+	if !cutoff.Equal(rollup.bucketStart(cutoff)) {
+		return 0, fmt.Errorf("rollup expiration cutoff must be a bucket boundary")
+	}
+	rollup.mu.Lock()
+	defer rollup.mu.Unlock()
+	removed := 0
+	for key, bucket := range rollup.buckets {
+		if !bucket.End.After(cutoff) {
+			delete(rollup.buckets, key)
+			removed++
+		}
+	}
+	return removed, nil
+}
+
 // RetainRawAfterVerified returns only raw events at or after cutoff after a
 // successful rollup verification. It never discards data on a failed check.
 func (rollup *TimeBucketRollup) RetainRawAfterVerified(raw []TimedMetric, cutoff time.Time) ([]TimedMetric, int, error) {
