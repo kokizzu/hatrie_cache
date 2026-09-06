@@ -162,7 +162,7 @@ name.
 - [x] C078 Top-K aggregation.
 - [x] C079 Dynamic Top-N skipping.
 - [x] C080 LIMIT BY per-group limiting.
-- [ ] C081 WITH FILL and gap filling for ordered time series.
+- [x] C081 WITH FILL and gap filling for ordered time series. SQL fills bounded timestamp gaps after ordered projection, honors result limits and aliases, and supports streaming output; see [WITH_FILL.md](WITH_FILL.md).
 - [x] C081a Ordered time-series gap filling with explicit half-open bounds.
 - [x] C081b SQL WITH FILL grammar for bounded TIMESTAMP/DURATION ordered series.
 - [x] C082 Window functions for the supported SQL subset.

@@ -1,8 +1,6 @@
-# SQL WITH FILL
+# SQL `WITH FILL`
 
-`WITH FILL` generates missing time buckets in an ordered SQL result. The
-current grammar intentionally accepts one ascending, selected time field and
-literal bounds:
+SQL queries can fill missing timestamp buckets after an ordered result:
 
 ```sql
 SELECT ts, SUM(value) AS total
@@ -10,65 +8,28 @@ FROM CACHE('events')
 GROUP BY ts
 ORDER BY ts WITH FILL
 FROM TIMESTAMP '2026-01-01T00:00:00Z'
-TO TIMESTAMP '2026-01-01T01:00:00Z'
+TO TIMESTAMP '2026-01-01T00:04:00Z'
 STEP DURATION '1m'
 ```
 
-The same gap-filling primitive is available to embedded callers:
+The executor emits the supplied rows and inserts `NULL` values for selected
+columns in missing buckets. `FROM` and `TO` are timestamp literals, `STEP` is
+a positive duration literal, and the upper bound is exclusive. The fill column
+must be selected, either directly or through a simple selected alias. Filled
+rows remain subject to `LIMIT`, `OFFSET`, and the configured maximum row
+budget.
 
-```go
-filled, err := hatSql.FillSQLRows(rows, hatSql.SQLWithFillSpec{
-	Column: "at",
-	From:   start,
-	To:     end,
-	Step:   time.Hour,
-	Template: hatSql.Row{
-		"series": "cpu",
-		"value":  int64(0),
-	},
-})
-```
+The current implementation supports one `ORDER BY` item and rejects
+descending fill, multiple order items, and combinations with `LIMIT BY`. It
+works for materialized and streaming query APIs, including an empty source.
+The fill operation is bounded by the executor's result limit, so a large time
+range cannot silently allocate an unbounded result.
 
-The interval is half-open: `FROM` is included and `TO` is excluded. Existing
-rows are cloned in order. Generated rows contain every selected column with a
-`NULL` value, except the fill column, which contains the generated timestamp.
-An `ORDER BY` alias can be used when that alias is the selected fill field.
+Filled rows are generated after grouping/projection and before the final limit
+is applied. This keeps aggregate values attached to existing buckets and makes
+aliases resolve against the public output column name. `WITH FILL` does not
+change source data or create persistent rollups.
 
-For direct `FillSQLRows` calls, generated rows are copies of `Template` with
-the time column replaced by the generated timestamp. The helper does not
-mutate input rows or the template and returns errors for invalid bounds,
-non-positive steps, missing or non-time columns, unordered rows, or values
-outside the requested interval.
-
-`MaxRows` applies to the expanded result, and `LIMIT`/`OFFSET` are applied
-after filling. This prevents a query from allocating an unbounded range.
-Invalid bounds, non-positive steps, descending or multi-key fill orders, and
-an unselected fill field are rejected. `LIMIT BY` is currently rejected with
-`WITH FILL` because its per-group semantics need a separate fill plan.
-
-Fill queries use the materialized ordering path so indexed, columnar, grouped,
-and external streaming shortcuts cannot omit generated rows. This preserves
-correctness but can use more memory than a normal streaming query; the normal
-`MaxRows`, `MaxResultBytes`, and sort budgets still apply.
-
-## Benchmark
-
-Run:
-
-```text
-make benchmark-with-fill-query
-```
-
-Measured on the repository benchmark host with 50 one-minute buckets and 25
-input rows:
-
-```text
-BenchmarkSQLWithFill-32     23838  50582 ns/op  64180 B/op  460 allocs/op
-BenchmarkSQLWithoutFill-32  34827  34441 ns/op  43081 B/op  314 allocs/op
-```
-
-The unfilled comparison returns 25 grouped rows while the fill query returns
-50 rows, so its absolute totals are not an equal-output comparison. The fill
-path's additional work is the expected 25 generated rows plus their cloned
-maps; it is intentionally bounded rather than silently streaming an unlimited
-range.
+Focused coverage is in `hat/hatSql/with_fill_query_test.go`, including missing
+buckets, empty input, alias resolution, limits, streaming output, invalid
+forms, and an allocation-reporting benchmark.
