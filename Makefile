@@ -5994,3 +5994,31 @@ commit-sql-typed-table-monotone:
 .PHONY: push-sql-typed-table-monotone
 push-sql-typed-table-monotone:
 	bash ./scripts/deliver-sql-typed-table-monotone.sh push
+
+.PHONY: test-sql-differential-late-data
+test-sql-differential-late-data:
+	bash ./scripts/test-sql-differential-late-data.sh
+
+.PHONY: test-race-sql-differential-late-data
+test-race-sql-differential-late-data:
+	bash ./scripts/test-race-sql-differential-late-data.sh
+
+.PHONY: format-sql-differential-late-data
+format-sql-differential-late-data:
+	bash ./scripts/format-sql-differential-late-data.sh
+
+.PHONY: benchmark-sql-differential-late-data
+benchmark-sql-differential-late-data:
+	bash ./scripts/benchmark-sql-differential-late-data.sh
+
+.PHONY: deliver-sql-differential-late-data
+deliver-sql-differential-late-data:
+	bash ./scripts/deliver-sql-differential-late-data.sh preview
+
+.PHONY: commit-sql-differential-late-data
+commit-sql-differential-late-data:
+	bash ./scripts/deliver-sql-differential-late-data.sh commit
+
+.PHONY: push-sql-differential-late-data
+push-sql-differential-late-data:
+	bash ./scripts/deliver-sql-differential-late-data.sh push

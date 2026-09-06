@@ -324,6 +324,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M070 Monotone aggregate specialization.
 - [x] M070a Append-only typed-table aggregate fast path.
 - [ ] M071 Late-data handling policy.
+- [x] M071a Explicit accept/reject/drop late-data policy.
 - [ ] M072 Watermark propagation.
 - [ ] M073 Temporal joins.
 - [ ] M074 Interval joins.
