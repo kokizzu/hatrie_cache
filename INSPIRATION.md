@@ -107,7 +107,7 @@ name.
 - [x] C043 Remote object-store parts with local metadata. `RemotePartReference` validates supported object URIs and root-confined metadata paths; see [REMOTE_PARTS.md](REMOTE_PARTS.md).
 - [x] C043a Validated immutable remote-part references with root-confined local metadata paths.
 - [ ] C044 Zero-copy replication of immutable parts.
-- [ ] C045 Part-level cache admission and eviction policy.
+- [x] C045 Part-level cache admission and eviction policy. `PartCachePolicy` provides explicit admission and deterministic LFU/LRU eviction planning; see [PART_CACHE_POLICY.md](PART_CACHE_POLICY.md).
 - [x] C045a Explicit part-cache admission and deterministic LFU/LRU eviction planning.
 - [ ] C046 Read amplification accounting per part and column.
 - [x] C046a Per-part and per-column read amplification accounting with deterministic snapshots.
