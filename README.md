@@ -20,6 +20,7 @@ security guidance before exposing it on a network.
 - Cross-region replication policy: [cross-region replication](CROSS_REGION_REPLICATION.md)
 - Failure-domain-aware replica placement: [failure-domain placement](FAILURE_DOMAIN_PLACEMENT.md)
 - Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
+- Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
 - Codec byte and CPU accounting: [codec metrics](CODEC_METRICS.md)
 - Bounded independently scheduled processing stages: [Pipeline stages](PIPELINE_STAGES.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
