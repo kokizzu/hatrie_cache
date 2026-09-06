@@ -6913,3 +6913,9 @@ verify-c156:
 
 deliver-c156-checklist:
 	sh ./scripts/deliver-c156-checklist.sh
+
+verify-c159:
+	sh ./scripts/verify-c159.sh
+
+deliver-c159-checklist:
+	sh ./scripts/deliver-c159-checklist.sh

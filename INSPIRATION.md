@@ -252,7 +252,7 @@ name.
 - [x] C156 Cross-region replication policy (see CROSS_REGION_REPLICATION.md).
 - [ ] C157 Cross-region backup restore drill.
 - [x] C158 Split-brain fencing (see SPLIT_BRAIN_FENCING.md).
-- [ ] C159 Failure-domain-aware replica placement.
+- [x] C159 Failure-domain-aware replica placement (see FAILURE_DOMAIN_PLACEMENT.md).
 - [ ] C160 Query routing by region and locality.
 
 ## Materialize Ideas
