@@ -6482,3 +6482,31 @@ commit-differential-multiset:
 .PHONY: push-differential-multiset
 push-differential-multiset:
 	bash ./scripts/deliver-differential-multiset.sh push
+
+.PHONY: format-bitpacked-numeric
+format-bitpacked-numeric:
+	bash ./scripts/format-bitpacked-numeric.sh
+
+.PHONY: test-bitpacked-numeric
+test-bitpacked-numeric:
+	bash ./scripts/test-bitpacked-numeric.sh
+
+.PHONY: test-race-bitpacked-numeric
+test-race-bitpacked-numeric:
+	bash ./scripts/test-race-bitpacked-numeric.sh
+
+.PHONY: benchmark-bitpacked-numeric
+benchmark-bitpacked-numeric:
+	bash ./scripts/benchmark-bitpacked-numeric.sh
+
+.PHONY: deliver-bitpacked-numeric
+deliver-bitpacked-numeric:
+	bash ./scripts/deliver-bitpacked-numeric.sh preview
+
+.PHONY: commit-bitpacked-numeric
+commit-bitpacked-numeric:
+	bash ./scripts/deliver-bitpacked-numeric.sh commit
+
+.PHONY: push-bitpacked-numeric
+push-bitpacked-numeric:
+	bash ./scripts/deliver-bitpacked-numeric.sh push

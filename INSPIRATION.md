@@ -109,6 +109,7 @@ name.
 - [ ] C047 Adaptive granule sizing from observed predicate selectivity.
 - [x] C047a Conservative block min/max predicate pruning.
 - [ ] C048 Compact numeric encodings selected from data statistics.
+- [x] C048a Minimum-width bit-packed uint64 codec selected from column maximum with canonical validation.
 - [x] C048a Exact full-batch codec selection by encoded size.
 - [x] C049 Low-cardinality dictionary encoding for typed string values.
 - [ ] C050 Shared JSON subcolumns for repeated paths.
