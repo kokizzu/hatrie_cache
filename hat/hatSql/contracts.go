@@ -416,6 +416,14 @@ type ExternalSourceResolver interface {
 	ResolveSQLExternalSource(name string) ([]Row, error)
 }
 
+// LookupSourceResolver optionally resolves a literal equality predicate from
+// an arrangement owned by an external or remote source. Returned rows are
+// candidates: the executor evaluates the complete predicate before publishing
+// results. Returning available=false retains the ordinary full-source scan.
+type LookupSourceResolver interface {
+	ResolveSQLLookupSource(name, key, field string, value interface{}) ([]Row, bool, error)
+}
+
 // OrderedSourceResolver optionally reads one source field in SQL ORDER BY order.
 type OrderedSourceResolver interface {
 	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]Row, bool, error)

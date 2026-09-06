@@ -288,7 +288,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M011 Join arrangements for typed indexed tables.
 - [x] M012 Distinct arrangements for typed sources.
 - [x] M013 Top-K arrangements for ordered subscriptions.
-- [ ] M014 Lookup arrangements for external or remote sources.
+- [x] M014 Lookup arrangements for external or remote sources. `LookupSourceResolver` provides optional equality lookups for `EXTERNAL(...)` sources with full-scan fallback and predicate re-evaluation. See [LOOKUP_ARRANGEMENTS.md](LOOKUP_ARRANGEMENTS.md).
 - [ ] M015 Delta joins that avoid repeated large-side scans.
 - [ ] M016 Linear joins with explicit maintained indexes.
 - [ ] M017 Semijoin reduction before maintaining a join.

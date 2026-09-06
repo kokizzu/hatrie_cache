@@ -30,6 +30,7 @@ security guidance before exposing it on a network.
 - Nested cancellable worker scopes for pipeline operators: [pipeline scopes](PIPELINE_SCOPES.md)
 - Typed bounded producer-consumer channels: [CHANNELS.md](CHANNELS.md)
 - Opt-in typed generated columns: [GENERATED_COLUMNS.md](GENERATED_COLUMNS.md)
+- External and remote equality lookup arrangements: [LOOKUP_ARRANGEMENTS.md](LOOKUP_ARRANGEMENTS.md)
 - Explicit bounded-lateness decisions: [late-data policy](LATE_DATA_POLICY.md)
 - Monotone stream frontiers: [watermark propagation](WATERMARK.md) and [differential watermarks](DIFFERENTIAL_WATERMARK.md)
 - Indexed weighted temporal equi-joins: [differential temporal join](DIFFERENTIAL_TEMPORAL_JOIN.md)

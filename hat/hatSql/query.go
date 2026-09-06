@@ -139,6 +139,7 @@ type SQLSegmentedColumnarSourceResolver = SegmentedColumnarSourceResolver
 type SQLStreamSourceResolver = StreamSourceResolver
 type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
+type SQLLookupSourceResolver = LookupSourceResolver
 type SQLRangeIndexedSourceResolver = RangeIndexedSourceResolver
 type SQLBorrowedPrefixIndexedSourceResolver = BorrowedPrefixIndexedSourceResolver
 type SQLOrderedSourceResolver = OrderedSourceResolver
@@ -11628,7 +11629,7 @@ func sqlCoveringIndexedEquality(source sqlSource, condition sqlExpr) (string, in
 }
 
 func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, coveringFields []string) ([]SQLRow, bool, error) {
-	if source.kind != "CACHE" || len(source.fieldTypes) != 0 {
+	if (source.kind != "CACHE" && source.kind != "EXTERNAL") || len(source.fieldTypes) != 0 {
 		return nil, false, nil
 	}
 	hint := sqlIndexHintForSource(metrics, source)
@@ -12246,6 +12247,13 @@ func sqlCompositeIndexedRange(source sqlSource, condition sqlExpr) ([]string, []
 
 func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
 	if operator == "=" {
+		if source.kind == "EXTERNAL" {
+			lookup, ok := resolver.(LookupSourceResolver)
+			if !ok {
+				return nil, false, nil
+			}
+			return lookup.ResolveSQLLookupSource(source.kind, source.key, field, value)
+		}
 		indexed, ok := resolver.(SQLIndexedSourceResolver)
 		if !ok {
 			return nil, false, nil
