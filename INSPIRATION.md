@@ -157,7 +157,7 @@ name.
 - [x] C074 External aggregation with a memory budget and spill path.
 - [x] C075 Ordered aggregation when input ordering makes it cheaper.
 - [x] C076 Approximate sketches for supported distinct and quantile queries.
-- [ ] C077 Aggregate combinators for reusable state, merge, and finalize phases.
+- [x] C077 Aggregate combinators for reusable state, merge, and finalize phases. `SQLAggregateState` and its concurrent registry separate worker-local `Add`, partial `Merge`, and final `Finalize` phases; see [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md).
 - [x] C077a Reusable aggregate state, merge, and finalize combinator registry.
 - [x] C078 Top-K aggregation.
 - [x] C079 Dynamic Top-N skipping.

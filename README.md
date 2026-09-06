@@ -74,6 +74,7 @@ security guidance before exposing it on a network.
 - Merge-time numeric summation: [summing merge](SUMMING_MERGE.md)
 - TTL-safe fixed-width rollups: [TTL rollup](TTL_ROLLUP.md)
 - Deterministic partition-stable SQL sampling: [deterministic sample](DETERMINISTIC_SAMPLE.md)
+- Reusable partial aggregate states: [aggregate combinators](AGGREGATE_COMBINATORS.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
