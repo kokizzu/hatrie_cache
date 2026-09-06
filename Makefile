@@ -6118,3 +6118,31 @@ commit-source-frontier:
 .PHONY: push-source-frontier
 push-source-frontier:
 	bash ./scripts/deliver-source-frontier.sh push
+
+.PHONY: format-operator-memory
+format-operator-memory:
+	bash ./scripts/format-operator-memory.sh
+
+.PHONY: test-operator-memory
+test-operator-memory:
+	bash ./scripts/test-operator-memory.sh
+
+.PHONY: test-race-operator-memory
+test-race-operator-memory:
+	bash ./scripts/test-race-operator-memory.sh
+
+.PHONY: benchmark-operator-memory
+benchmark-operator-memory:
+	bash ./scripts/benchmark-operator-memory.sh
+
+.PHONY: deliver-operator-memory
+deliver-operator-memory:
+	bash ./scripts/deliver-operator-memory.sh preview
+
+.PHONY: commit-operator-memory
+commit-operator-memory:
+	bash ./scripts/deliver-operator-memory.sh commit
+
+.PHONY: push-operator-memory
+push-operator-memory:
+	bash ./scripts/deliver-operator-memory.sh push

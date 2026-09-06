@@ -346,6 +346,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M083a Thread-safe monotone source frontier registry with deterministic lag snapshots.
 - [x] M083a On-demand per-subscription frontier and lag status.
 - [ ] M084 Per-operator retained-memory metrics.
+- [x] M084a Thread-safe operator retained-memory gauge registry with deterministic snapshots.
 - [ ] M085 Per-collection size and compaction metrics.
 - [x] M086 Replica isolation for independent workloads.
 - [ ] M087 Deterministic replica replay checks.
