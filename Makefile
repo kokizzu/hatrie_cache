@@ -6146,3 +6146,31 @@ commit-operator-memory:
 .PHONY: push-operator-memory
 push-operator-memory:
 	bash ./scripts/deliver-operator-memory.sh push
+
+.PHONY: format-collection-metrics
+format-collection-metrics:
+	bash ./scripts/format-collection-metrics.sh
+
+.PHONY: test-collection-metrics
+test-collection-metrics:
+	bash ./scripts/test-collection-metrics.sh
+
+.PHONY: test-race-collection-metrics
+test-race-collection-metrics:
+	bash ./scripts/test-race-collection-metrics.sh
+
+.PHONY: benchmark-collection-metrics
+benchmark-collection-metrics:
+	bash ./scripts/benchmark-collection-metrics.sh
+
+.PHONY: deliver-collection-metrics
+deliver-collection-metrics:
+	bash ./scripts/deliver-collection-metrics.sh preview
+
+.PHONY: commit-collection-metrics
+commit-collection-metrics:
+	bash ./scripts/deliver-collection-metrics.sh commit
+
+.PHONY: push-collection-metrics
+push-collection-metrics:
+	bash ./scripts/deliver-collection-metrics.sh push

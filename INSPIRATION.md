@@ -348,6 +348,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M084 Per-operator retained-memory metrics.
 - [x] M084a Thread-safe operator retained-memory gauge registry with deterministic snapshots.
 - [ ] M085 Per-collection size and compaction metrics.
+- [x] M085a Thread-safe collection size gauges and compaction counters with deterministic snapshots.
 - [x] M086 Replica isolation for independent workloads.
 - [ ] M087 Deterministic replica replay checks.
 - [ ] M088 Read replicas with explicit staleness bounds.
