@@ -6174,3 +6174,31 @@ commit-collection-metrics:
 .PHONY: push-collection-metrics
 push-collection-metrics:
 	bash ./scripts/deliver-collection-metrics.sh push
+
+.PHONY: format-read-replica-policy
+format-read-replica-policy:
+	bash ./scripts/format-read-replica-policy.sh
+
+.PHONY: test-read-replica-policy
+test-read-replica-policy:
+	bash ./scripts/test-read-replica-policy.sh
+
+.PHONY: test-race-read-replica-policy
+test-race-read-replica-policy:
+	bash ./scripts/test-race-read-replica-policy.sh
+
+.PHONY: benchmark-read-replica-policy
+benchmark-read-replica-policy:
+	bash ./scripts/benchmark-read-replica-policy.sh
+
+.PHONY: deliver-read-replica-policy
+deliver-read-replica-policy:
+	bash ./scripts/deliver-read-replica-policy.sh preview
+
+.PHONY: commit-read-replica-policy
+commit-read-replica-policy:
+	bash ./scripts/deliver-read-replica-policy.sh commit
+
+.PHONY: push-read-replica-policy
+push-read-replica-policy:
+	bash ./scripts/deliver-read-replica-policy.sh push

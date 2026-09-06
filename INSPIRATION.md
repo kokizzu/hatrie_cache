@@ -352,6 +352,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M086 Replica isolation for independent workloads.
 - [ ] M087 Deterministic replica replay checks.
 - [ ] M088 Read replicas with explicit staleness bounds.
+- [x] M088a Deterministic read-replica selection with required frontiers and maximum lag.
 - [x] M089 Failover and recovery of supported replicas.
 - [ ] M090 Independent compute and storage scaling.
 - [x] M091 Durable persistent shards through the local storage layer.
