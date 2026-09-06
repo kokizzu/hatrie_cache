@@ -157,6 +157,7 @@ name.
 - [x] C075 Ordered aggregation when input ordering makes it cheaper.
 - [x] C076 Approximate sketches for supported distinct and quantile queries.
 - [ ] C077 Aggregate combinators for reusable state, merge, and finalize phases.
+- [x] C077a Reusable aggregate state, merge, and finalize combinator registry.
 - [x] C078 Top-K aggregation.
 - [x] C079 Dynamic Top-N skipping.
 - [x] C080 LIMIT BY per-group limiting.
