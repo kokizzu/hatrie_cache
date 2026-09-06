@@ -5966,3 +5966,31 @@ commit-sql-differential-group-by:
 .PHONY: push-sql-differential-group-by
 push-sql-differential-group-by:
 	bash ./scripts/deliver-sql-differential-group-by.sh push
+
+.PHONY: test-sql-typed-table-monotone
+test-sql-typed-table-monotone:
+	bash ./scripts/test-sql-typed-table-monotone.sh
+
+.PHONY: test-race-sql-typed-table-monotone
+test-race-sql-typed-table-monotone:
+	bash ./scripts/test-race-sql-typed-table-monotone.sh
+
+.PHONY: format-sql-typed-table-monotone
+format-sql-typed-table-monotone:
+	bash ./scripts/format-sql-typed-table-monotone.sh
+
+.PHONY: benchmark-sql-typed-table-monotone
+benchmark-sql-typed-table-monotone:
+	bash ./scripts/benchmark-sql-typed-table-monotone.sh
+
+.PHONY: deliver-sql-typed-table-monotone
+deliver-sql-typed-table-monotone:
+	bash ./scripts/deliver-sql-typed-table-monotone.sh preview
+
+.PHONY: commit-sql-typed-table-monotone
+commit-sql-typed-table-monotone:
+	bash ./scripts/deliver-sql-typed-table-monotone.sh commit
+
+.PHONY: push-sql-typed-table-monotone
+push-sql-typed-table-monotone:
+	bash ./scripts/deliver-sql-typed-table-monotone.sh push

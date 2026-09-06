@@ -322,6 +322,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M069 Differential distinct updates for generic SQL tables.
 - [x] M069a Boundary-only differential distinct maintenance.
 - [ ] M070 Monotone aggregate specialization.
+- [x] M070a Append-only typed-table aggregate fast path.
 - [ ] M071 Late-data handling policy.
 - [ ] M072 Watermark propagation.
 - [ ] M073 Temporal joins.
