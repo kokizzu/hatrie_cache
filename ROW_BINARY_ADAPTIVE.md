@@ -1,44 +1,34 @@
-# Adaptive RowBinary Codec
+# Adaptive RowBinary Encoding
 
-`EncodeSQLRowBinaryAdaptive` evaluates the legacy, first-order delta, and
-second-order delta encodings for a complete batch, then wraps the smallest
-payload in an `HSA1` envelope. The envelope stores the selected codec and
-payload length, so decoding is deterministic and does not rely on guessing
-from arbitrary legacy bytes.
+`hatSql.EncodeSQLRowBinaryAdaptive` chooses among the legacy, delta, and
+double-delta RowBinary codecs by encoding candidate representations and
+selecting the smallest one for the actual batch. The decoder reads the codec
+identifier from the header, so the choice is self-describing.
 
 ```go
-wire, err := hatSql.EncodeSQLRowBinaryAdaptive(columns, rows)
-if err != nil {
-    return err
-}
-rows, err = hatSql.DecodeSQLRowBinaryAdaptive(columns, wire)
+encoded, err := hatSql.EncodeSQLRowBinaryAdaptive(columns, rows)
+decoded, err := hatSql.DecodeSQLRowBinaryAdaptive(columns, encoded)
 ```
 
-Existing `EncodeSQLRowBinary` and `DecodeSQLRowBinary` remain unchanged. Use
-those functions for compatibility with an older reader. Use the direct delta
-functions when the data shape is already known and the extra selection pass is
-not worthwhile.
+For large batches, `EncodeSQLRowBinaryAdaptiveSampled` evaluates only a
+positive prefix and encodes the full batch using the selected codec:
 
-## Tradeoff
-
-The benchmark uses 128 rows with an increasing `int64` id, increasing
-`DateTime`, and a repeated string. Run it with:
-
-```text
-make benchmark-sql-row-binary-adaptive
+```go
+encoded, err := hatSql.EncodeSQLRowBinaryAdaptiveSampled(columns, rows, 32)
 ```
 
-Representative five-sample ranges on the repository benchmark host:
+The full variant gives the best decision for data whose shape changes across a
+batch, but temporarily encodes each candidate sample and uses more CPU during
+selection. The sampled variant reduces candidate work and memory proportional
+to the sample size, but can choose a less compact codec when later rows differ
+from the prefix. It is opt-in so existing wire behavior remains unchanged.
 
-| Path | Time | Wire bytes | Allocations | Allocated bytes |
-| --- | ---: | ---: | ---: | ---: |
-| Legacy encode | 7.7-8.0 us | 2,944 | 11 | 8,440 |
-| Adaptive encode | 24.3-25.0 us | 1,181 | 20 | 17,784 |
-| Legacy decode | 29.3-29.9 us | 2,944 | 648 | 51,320 |
-| Adaptive decode | 29.8-30.4 us | 1,181 | 641 | 50,304 |
+Both variants preserve the schema-aware RowBinary type contract and enforce the
+existing row limits. A positive sample size is required for non-empty sampled
+batches and is clamped to the batch length. This feature changes codec choice,
+not schema validation, null semantics, or decoded values.
 
-Adaptive encoding is about `2.5x` smaller on this workload, but costs about
-`3.1x` encode CPU and `2.1x` allocation bytes. It is therefore not the global
-default. It is appropriate when bandwidth is the limiting resource and the
-batch can absorb a selection pass; otherwise choose the legacy or direct delta
-API explicitly.
+The benchmark in `hat/hatSql/row_binary_adaptive_sampled_test.go` compares full
+and 32-row sampling on stable and shape-shifting data, reporting allocations,
+CPU, and encoded wire bytes. Focused tests cover codec selection, round trips,
+sample clamping, invalid sizes, and compatibility with legacy encoding.
