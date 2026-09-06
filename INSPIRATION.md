@@ -349,7 +349,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M072 Watermark propagation. `MergeWatermarks`, `AdvanceWatermark`, and `DifferentialWatermark` provide safe minimum frontiers, monotone publication, and regression-checked differential application; see [WATERMARK.md](WATERMARK.md) and [DIFFERENTIAL_WATERMARK.md](DIFFERENTIAL_WATERMARK.md).
 - [x] M072a Safe minimum-source watermark merge with monotonic publication.
 - [x] M072a Monotone differential watermark propagation.
-- [ ] M073 Temporal joins.
+- [x] M073 Temporal joins. `DifferentialTemporalJoin` maintains weighted in-memory temporal inner equi-joins with per-key indexes, signed updates, cloning, and bounded time distance; see [DIFFERENTIAL_TEMPORAL_JOIN.md](DIFFERENTIAL_TEMPORAL_JOIN.md).
 - [x] M073a Indexed weighted temporal equi-join.
 - [ ] M074 Interval joins.
 - [x] M074a Inclusive timestamp interval bounds for temporal joins.

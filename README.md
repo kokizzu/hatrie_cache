@@ -29,6 +29,7 @@ security guidance before exposing it on a network.
 - Batch consolidation of equal updates and opposite diffs: [differential row batches](DIFFERENTIAL_ROWS.md)
 - Explicit bounded-lateness decisions: [late-data policy](LATE_DATA_POLICY.md)
 - Monotone stream frontiers: [watermark propagation](WATERMARK.md) and [differential watermarks](DIFFERENTIAL_WATERMARK.md)
+- Indexed weighted temporal equi-joins: [differential temporal join](DIFFERENTIAL_TEMPORAL_JOIN.md)
 - Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
 - Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
 - Deterministic replica replay checks: [replay digest](REPLAY_DIGEST.md)
