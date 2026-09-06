@@ -6979,3 +6979,9 @@ verify-object-store-verify:
 
 deliver-object-store-verify:
 	sh ./scripts/deliver-object-store-verify.sh
+
+list-inspiration-open:
+	sh ./scripts/list-inspiration-open.sh
+
+deliver-inspiration-list:
+	sh ./scripts/deliver-inspiration-list.sh
