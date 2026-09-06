@@ -71,6 +71,7 @@ security guidance before exposing it on a network.
 - Columnar merges that load only requested fields: [vertical merge](COLUMNAR_VERTICAL_MERGE.md)
 - Latest-row replacement merge primitive: [replacing merge](REPLACING_MERGE.md)
 - Sign-based row cancellation merge: [collapsing merge](COLLAPSING_MERGE.md)
+- Merge-time numeric summation: [summing merge](SUMMING_MERGE.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)

@@ -90,7 +90,7 @@ name.
 - [x] C031a Explicit stable-order replacing merge for versioned rows.
 - [x] C032 CollapsingMergeTree-style sign-based row cancellation. `CollapseSQLRows` pairs unmatched opposite signs by logical key, preserves survivors in input order, and reports invalid signs; see [COLLAPSING_MERGE.md](COLLAPSING_MERGE.md).
 - [x] C032a Explicit deterministic signed-row cancellation merge.
-- [ ] C033 SummingMergeTree-style merge-time summation.
+- [x] C033 SummingMergeTree-style merge-time summation. `SumSQLRows` combines explicitly selected numeric columns with stable key order, type checks, and overflow protection; see [SUMMING_MERGE.md](SUMMING_MERGE.md).
 - [x] C033a Explicit overflow-checked summing merge for selected numeric columns.
 - [x] C034 Aggregating states for reusable grouped results.
 - [x] C035 Lightweight delete patch parts.

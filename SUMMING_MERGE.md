@@ -1,28 +1,46 @@
 # Summing Merge
 
-`SumSQLRows` provides an explicit ClickHouse-style `SummingMergeTree`-like
-merge for a batch of `SQLRow` values.
+`hatSql.SumSQLRows` provides an explicit SummingMergeTree-style merge
+primitive. Rows with the same logical key are combined by adding only the
+named numeric columns; the first row's other fields remain authoritative.
 
 ```go
 merged, err := hatSql.SumSQLRows(rows,
-	func(row hatSql.SQLRow) string { return row["account"].(string) },
-	[]string{"count", "amount"},
+    func(row hatSql.SQLRow) string { return row["id"].(string) },
+    []string{"count", "amount"},
 )
 ```
 
-Rows with the same callback key keep the first row's output position and
-non-summed fields. The named columns are added using their original built-in
-numeric type. Missing or nil values contribute zero. Signed and unsigned
-integer overflow, floating-point overflow, type mismatches, duplicate column
-names, and nonnumeric values return errors. Output maps are shallow copies, so
-the input batch is not mutated or aliased.
+The result keeps keys in first-seen order and returns shallow copies of row
+maps. Missing or nil summed values are ignored. Values must use the same
+built-in numeric type within a key and column. Signed, unsigned, and floating
+point overflow is rejected instead of silently wrapping; floating-point
+infinity supplied as input remains valid, while a finite addition that becomes
+infinite returns an overflow error.
 
-The key callback must be deterministic. The merge is explicit and synchronous;
-it does not change normal SQL execution or start background compaction. Use it
-at batch or immutable-part boundaries where merge-time reduction is desired.
+The primitive supports `int`, all sized signed and unsigned integers, and
+`float32`/`float64`. It does not infer which columns are measures and does not
+alter source rows, storage parts, or durability state. Callers should choose
+the key and measure columns from a schema or merge policy.
 
-The reference benchmark processes 1,024 rows with 256 duplicate keys in about
-`138-140 us`, using `163,409 B/op` and `2,310 allocs/op`. Those allocations
-include cloned output rows and key bookkeeping, which preserve source-row
-isolation. The API intentionally favors predictable correctness over silently
-wrapping numeric totals.
+## Example
+
+Input:
+
+```text
+(id=a, count=2, amount=1.5, label=first)
+(id=b, count=4, amount=2.0, label=b)
+(id=a, count=3, amount=2.5, label=second)
+```
+
+Output:
+
+```text
+(id=a, count=5, amount=4.0, label=first)
+(id=b, count=4, amount=2.0, label=b)
+```
+
+Focused coverage is in `hat/hatSql/summing_merge_test.go`, including every
+built-in numeric kind, missing values, stable ordering, input isolation,
+overflow, type errors, invalid column lists, and an allocation-reporting
+benchmark.
