@@ -6817,3 +6817,24 @@ commit-c015:
 
 push-c015:
 	bash ./scripts/deliver-c015.sh push
+
+format-rtree:
+	bash ./scripts/format-rtree.sh
+
+test-rtree:
+	bash ./scripts/test-rtree.sh
+
+race-rtree:
+	bash ./scripts/race-rtree.sh
+
+benchmark-rtree:
+	bash ./scripts/benchmark-rtree.sh
+
+deliver-rtree:
+	bash ./scripts/deliver-rtree.sh preview
+
+commit-rtree:
+	bash ./scripts/deliver-rtree.sh commit
+
+push-rtree:
+	bash ./scripts/deliver-rtree.sh push

@@ -410,7 +410,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T005 Primary-key index.
 - [x] T006 Ordered TREE index behavior.
 - [x] T007 HASH index behavior.
-- [ ] T008 RTREE spatial index.
+- [x] T008 RTREE spatial index. Importable uint64-ID rectangle index with deterministic overlap and point search (see SPATIAL_RTREE.md).
 - [x] T008a Adaptive sparse-grid spatial candidate enumeration - Keep grid-cell memory overhead while avoiding empty-cell scans and per-query candidate deduplication (see SPATIAL_INDEX.md).
 - [x] T009 Bitset and bitmap structures.
 - [x] T010 Functional indexes for supported expressions.
