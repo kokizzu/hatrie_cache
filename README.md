@@ -69,6 +69,7 @@ security guidance before exposing it on a network.
 - External Parquet tables: `ExternalTables` supports `ExportParquet`, `ImportParquet`, and `WriteParquet` alongside CSV, JSON, NDJSON, and Arrow formats.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - Columnar merges that load only requested fields: [vertical merge](COLUMNAR_VERTICAL_MERGE.md)
+- Latest-row replacement merge primitive: [replacing merge](REPLACING_MERGE.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)

@@ -1,28 +1,51 @@
 # Replacing Merge
 
-`ReplaceSQLRows` provides an explicit ClickHouse-style
-`ReplacingMergeTree`-like merge for a batch of `SQLRow` values.
+`hatSql.ReplaceSQLRows` provides a deterministic ReplacingMergeTree-style
+utility for collapsing duplicate logical rows. The caller supplies the
+logical-key function and may supply a version function.
 
 ```go
 merged, err := hatSql.ReplaceSQLRows(rows,
-	func(row hatSql.SQLRow) string { return row["id"].(string) },
-	func(row hatSql.SQLRow) (uint64, error) { return row["version"].(uint64), nil },
+    func(row hatSql.SQLRow) string { return row["id"].(string) },
+    func(row hatSql.SQLRow) (uint64, error) {
+        return row["version"].(uint64), nil
+    },
 )
 ```
 
-The first occurrence of each logical key fixes its output position. A row with
-a higher version replaces the current row; equal versions use the later input
-row. Passing a nil version callback makes the last input row win. Returned row
-maps are shallow copies, so changing a returned map cannot mutate the input
-batch. Nested slices, maps, and pointers remain intentionally shallow.
+With a version callback, the greatest version wins. Equal versions use the
+later input row. Without a version callback, the last input row for each key
+wins. The result keeps the first-seen order of logical keys, which makes output
+stable across runs and avoids an implicit sort.
 
-The key and version callbacks are required to be deterministic. Version errors
-abort the operation and no partial result is returned. Empty input returns a
-nil result. The function does not alter ordinary SQL execution or enable
-background merging; callers choose where a replacement merge is appropriate.
+The function validates the key callback, propagates version errors, and
+returns shallow copies of selected rows. Replacing or mutating an output map
+therefore does not mutate the input row maps.
 
-The reference benchmark processes 1,024 rows with 256 duplicate keys in about
-`113-124 us`, using `164,688-164,689 B/op` and `1,544 allocs/op`. The memory cost
-includes the result copies and map/index bookkeeping, which buys isolation from
-source-row mutation. Use it at batch or part boundaries rather than on every
-single-row write.
+This is a merge primitive rather than an automatic storage policy. Callers can
+apply it after reading immutable parts, during a compaction boundary, or in a
+materialized projection where the key and version semantics are known. It does
+not delete source data and does not provide a transaction or durability
+boundary by itself.
+
+## Example
+
+Input rows:
+
+```text
+(id=a, version=1, value=old)
+(id=b, version=4, value=b)
+(id=a, version=3, value=new)
+(id=b, version=2, value=stale)
+```
+
+The result is:
+
+```text
+(id=a, version=3, value=new)
+(id=b, version=4, value=b)
+```
+
+Focused coverage is in `hat/hatSql/replacing_merge_test.go`, including stable
+ordering, version ties, last-row behavior without versions, callback errors,
+input isolation, invalid callbacks, and an allocation-reporting benchmark.
