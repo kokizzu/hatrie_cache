@@ -161,6 +161,7 @@ name.
 - [x] C079 Dynamic Top-N skipping.
 - [x] C080 LIMIT BY per-group limiting.
 - [ ] C081 WITH FILL and gap filling for ordered time series.
+- [x] C081a Ordered time-series gap filling with explicit half-open bounds.
 - [x] C082 Window functions for the supported SQL subset.
 - [ ] C083 ArrayJoin-style row expansion.
 - [ ] C084 Array and map aggregate functions.
