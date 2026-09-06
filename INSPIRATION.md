@@ -104,7 +104,7 @@ name.
 - [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
 - [x] C042 Hot, warm, and cold storage tiers. `StorageTierPolicy` selects an immutable age-threshold tier and delegates path placement; see [STORAGE_TIERS.md](STORAGE_TIERS.md).
 - [x] C042a Immutable age-threshold hot, warm, and cold tier policy over disk placement.
-- [ ] C043 Remote object-store parts with local metadata.
+- [x] C043 Remote object-store parts with local metadata. `RemotePartReference` validates supported object URIs and root-confined metadata paths; see [REMOTE_PARTS.md](REMOTE_PARTS.md).
 - [x] C043a Validated immutable remote-part references with root-confined local metadata paths.
 - [ ] C044 Zero-copy replication of immutable parts.
 - [ ] C045 Part-level cache admission and eviction policy.
