@@ -6871,3 +6871,9 @@ commit-c057-checklist:
 
 push-c057-checklist:
 	bash ./scripts/deliver-c057-checklist.sh push
+
+verify-c059:
+	sh ./scripts/verify-c059.sh
+
+deliver-c059-checklist:
+	sh ./scripts/deliver-c059-checklist.sh
