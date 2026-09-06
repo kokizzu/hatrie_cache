@@ -106,6 +106,7 @@ name.
 - [ ] C043 Remote object-store parts with local metadata.
 - [ ] C044 Zero-copy replication of immutable parts.
 - [ ] C045 Part-level cache admission and eviction policy.
+- [x] C045a Explicit part-cache admission and deterministic LFU/LRU eviction planning.
 - [ ] C046 Read amplification accounting per part and column.
 - [x] C046a Per-part and per-column read amplification accounting with deterministic snapshots.
 - [x] C046a Statistics-only per-column RowBinary read accounting.

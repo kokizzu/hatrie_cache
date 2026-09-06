@@ -6558,3 +6558,19 @@ commit-storage-tier:
 	bash ./scripts/deliver-storage-tier.sh commit
 push-storage-tier:
 	bash ./scripts/deliver-storage-tier.sh push
+
+.PHONY: format-part-cache-policy test-part-cache-policy test-race-part-cache-policy benchmark-part-cache-policy deliver-part-cache-policy commit-part-cache-policy push-part-cache-policy
+format-part-cache-policy:
+	bash ./scripts/format-part-cache-policy.sh
+test-part-cache-policy:
+	bash ./scripts/test-part-cache-policy.sh
+test-race-part-cache-policy:
+	bash ./scripts/test-race-part-cache-policy.sh
+benchmark-part-cache-policy:
+	bash ./scripts/benchmark-part-cache-policy.sh
+deliver-part-cache-policy:
+	bash ./scripts/deliver-part-cache-policy.sh preview
+commit-part-cache-policy:
+	bash ./scripts/deliver-part-cache-policy.sh commit
+push-part-cache-policy:
+	bash ./scripts/deliver-part-cache-policy.sh push
