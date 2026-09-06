@@ -6850,3 +6850,12 @@ commit-c016-fix:
 
 push-c016-fix:
 	bash ./scripts/deliver-c016-fix.sh push
+
+deliver-c016-checklist:
+	bash ./scripts/deliver-c016-checklist.sh preview
+
+commit-c016-checklist:
+	bash ./scripts/deliver-c016-checklist.sh commit
+
+push-c016-checklist:
+	bash ./scripts/deliver-c016-checklist.sh push
