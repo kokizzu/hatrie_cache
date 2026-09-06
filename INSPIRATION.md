@@ -100,6 +100,7 @@ name.
 - [ ] C040 Sampling key with deterministic SAMPLE semantics across partitions.
 - [x] C040a Deterministic key-hash sampling across partition boundaries.
 - [ ] C041 Multiple disk policies with placement rules.
+- [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
 - [ ] C042 Hot, warm, and cold storage tiers.
 - [ ] C043 Remote object-store parts with local metadata.
 - [ ] C044 Zero-copy replication of immutable parts.

@@ -6510,3 +6510,19 @@ commit-bitpacked-numeric:
 .PHONY: push-bitpacked-numeric
 push-bitpacked-numeric:
 	bash ./scripts/deliver-bitpacked-numeric.sh push
+
+.PHONY: format-disk-placement test-disk-placement test-race-disk-placement benchmark-disk-placement deliver-disk-placement commit-disk-placement push-disk-placement
+format-disk-placement:
+	bash ./scripts/format-disk-placement.sh
+test-disk-placement:
+	bash ./scripts/test-disk-placement.sh
+test-race-disk-placement:
+	bash ./scripts/test-race-disk-placement.sh
+benchmark-disk-placement:
+	bash ./scripts/benchmark-disk-placement.sh
+deliver-disk-placement:
+	bash ./scripts/deliver-disk-placement.sh preview
+commit-disk-placement:
+	bash ./scripts/deliver-disk-placement.sh commit
+push-disk-placement:
+	bash ./scripts/deliver-disk-placement.sh push
