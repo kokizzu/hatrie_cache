@@ -671,14 +671,14 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
-	if metrics == nil && query.limitBy == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
+	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		result, err = executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
 		if !errors.Is(err, errSQLOrderedSourceUnavailable) {
 			result.QueryID = observation.id
 			return result, err
 		}
 	}
-	if metrics == nil && query.limitBy == nil && sqlTopNMaterializedStreamable(query, resolver) {
+	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && sqlTopNMaterializedStreamable(query, resolver) {
 		result, err = executeSQLTopNMaterializedStream(ctx, query, resolver, control)
 		result.QueryID = observation.id
 		return result, err
@@ -960,6 +960,19 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 	}
 }
 
+	if sqlQueryHasWithFill(query) {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			return err
+		}
+		columns := sqlColumns(query.selects)
+		for _, row := range result.Rows {
+			if err := visit(columns, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	if query.limitBy != nil {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
@@ -5011,6 +5024,11 @@ func cloneSQLOrders(orders []sqlOrder) []sqlOrder {
 	for index, order := range orders {
 		copy[index] = order
 		copy[index].expr = cloneSQLExpr(order.expr)
+		if order.fill != nil {
+			fill := *order.fill
+			fill.spec.Template = cloneSQLFillRow(order.fill.spec.Template)
+			copy[index].fill = &fill
+		}
 	}
 	return copy
 }
@@ -5126,6 +5144,7 @@ type sqlOrder struct {
 	nullsFirst bool
 	nullsLast  bool
 	collation  SQLCollation
+	fill       *sqlOrderFill
 }
 type sqlCaseWhen struct {
 	when sqlExpr
@@ -6002,6 +6021,23 @@ func (p *sqlQueryParser) parseOrder() ([]sqlOrder, error) {
 			} else {
 				return nil, p.expected(p.current(), "FIRST or LAST after NULLS", []string{"FIRST", "LAST"})
 			}
+		}
+		if p.keyword("WITH") {
+			if len(out) > 0 || expr.kind != "field" || expr.qualifier != "" {
+				return nil, p.diagnostic(p.current(), "WITH FILL requires the only ORDER BY item to be an unqualified selected field")
+			}
+			if value.desc {
+				return nil, p.diagnostic(p.current(), "WITH FILL requires ascending ORDER BY")
+			}
+			p.next()
+			if err := p.expectKeyword("FILL"); err != nil {
+				return nil, err
+			}
+			spec, err := p.parseSQLWithFillSpec(expr.name)
+			if err != nil {
+				return nil, err
+			}
+			value.fill = &sqlOrderFill{spec: spec}
 		}
 		out = append(out, value)
 		if p.current().kind != sqlTokenComma {
@@ -7390,6 +7426,9 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 // executeSQLColumnarScan keeps predicate columns separate from projected
 // columns. It only accepts a single-source field projection with a simple
 // field/literal predicate, so every other query keeps the general executor.
+	if sqlQueryHasWithFill(q) {
+		return SQLQueryResult{}, false, nil
+	}
 func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
 	columnar, ok := resolver.(SQLColumnarSourceResolver)
 	if !ok {
@@ -9625,7 +9664,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		}
 		ctes[cte.name] = rows
 	}
-	if q.limitBy == nil {
+	if !sqlQueryHasWithFill(q) && q.limitBy == nil {
 		if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
 			return result, runtimeErr
 		}
@@ -9636,8 +9675,10 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, streamErr
 		}
 	}
-	if result, handled, streamErr := executeSQLHashGroupAggregateStream(q, resolver, control, metrics, nil); handled {
-		return result, streamErr
+	if !sqlQueryHasWithFill(q) {
+		if result, handled, streamErr := executeSQLHashGroupAggregateStream(q, resolver, control, metrics, nil); handled {
+			return result, streamErr
+		}
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	var started time.Time
@@ -9663,7 +9704,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
 			}
 		}
-		if !indexed && q.sample == nil {
+		if !indexed && q.sample == nil && !sqlQueryHasWithFill(q) {
 			if result, handled, err := executeSQLColumnarScan(q, resolver, control, metrics, outer); handled {
 				return result, err
 			}
@@ -10178,7 +10219,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
 		}
 	}
-	if indexOrdered {
+	if indexOrdered && !sqlQueryHasWithFill(q) {
 		result, handled, err := executeSQLOrderedGroupAggregate(q, rows, control, metrics)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -10187,15 +10228,17 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, nil
 		}
 	}
-	if result, handled, err := executeSQLHashGroupAggregateRows(q, func(consume func(sqlExecRow) error) error {
-		for _, row := range rows {
-			if err := consume(row); err != nil {
-				return err
+	if !sqlQueryHasWithFill(q) {
+		if result, handled, err := executeSQLHashGroupAggregateRows(q, func(consume func(sqlExecRow) error) error {
+			for _, row := range rows {
+				if err := consume(row); err != nil {
+					return err
+				}
 			}
+			return nil
+		}, control, metrics, nil); handled {
+			return result, err
 		}
-		return nil
-	}, control, metrics, nil); handled {
-		return result, err
 	}
 	if control != nil && control.options.MaxGroupBytes > 0 && control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
 		result, handled, err := executeSQLSpilledGroupAggregate(q, rows, control, metrics)
@@ -10573,7 +10616,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			spillRecords = append(spillRecords, record)
 		}
-		if control != nil && control.options.MaxSortBytes > 0 {
+		if control != nil && control.options.MaxSortBytes > 0 && !sqlQueryHasWithFill(q) {
 			sortBytes := 0
 			for _, item := range out {
 				sortBytes += sqlRowBytes(item.row)
@@ -10610,6 +10653,23 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			})
 			metrics.record("SORT", sqlExplainOrders(q.orderBy), inputRows, len(out), started)
 		}
+	}
+	if !externallySorted && sqlQueryHasWithFill(q) {
+		started = time.Now()
+		inputRows := len(out)
+		rows := make([]SQLRow, len(out))
+		for index := range out {
+			rows[index] = out[index].row
+		}
+		filled, err := applySQLWithFill(q, result.Columns, rows, control.maxRows)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		out = make([]sqlQueryOutput, len(filled))
+		for index := range filled {
+			out[index].row = filled[index]
+		}
+		metrics.record("WITH FILL", sqlExplainOrders(q.orderBy), inputRows, len(out), started)
 	}
 	if !externallySorted {
 		if q.limitBy != nil && !limitByApplied {
@@ -11213,6 +11273,9 @@ func sqlExplainOrders(orders []sqlOrder) string {
 			values[index] += " NULLS FIRST"
 		} else if order.nullsLast {
 			values[index] += " NULLS LAST"
+		}
+		if order.fill != nil {
+			values[index] += sqlExplainWithFill(order.fill.spec)
 		}
 	}
 	return strings.Join(values, ", ")

@@ -24,6 +24,10 @@ type SQLWithFillSpec struct {
 // the input rows or template. Existing rows remain in their original order;
 // only the [From, To) interval is filled.
 func FillSQLRows(rows []SQLRow, spec SQLWithFillSpec) ([]SQLRow, error) {
+	return fillSQLRowsBounded(rows, spec, 0)
+}
+
+func fillSQLRowsBounded(rows []SQLRow, spec SQLWithFillSpec, maxRows int) ([]SQLRow, error) {
 	if strings.TrimSpace(spec.Column) == "" {
 		return nil, fmt.Errorf("%w: column is empty", ErrSQLWithFillInvalid)
 	}
@@ -33,8 +37,28 @@ func FillSQLRows(rows []SQLRow, spec SQLWithFillSpec) ([]SQLRow, error) {
 	if spec.Step <= 0 {
 		return nil, fmt.Errorf("%w: step must be positive", ErrSQLWithFillInvalid)
 	}
+	bucketCount, err := sqlFillBucketCount(spec)
+	if err != nil {
+		return nil, err
+	}
+	capacity := len(rows)
+	if maxRows > 0 {
+		if capacity < bucketCount {
+			capacity = bucketCount
+		}
+		if capacity > maxRows {
+			capacity = maxRows
+		}
+	}
 
-	result := make([]SQLRow, 0, len(rows))
+	result := make([]SQLRow, 0, capacity)
+	appendRow := func(row SQLRow) error {
+		if maxRows > 0 && len(result) >= maxRows {
+			return fmt.Errorf("%w: expanded result exceeds %d rows", ErrSQLWithFillInvalid, maxRows)
+		}
+		result = append(result, row)
+		return nil
+	}
 	cursor := spec.From
 	var previous time.Time
 	for index, row := range rows {
@@ -53,14 +77,18 @@ func FillSQLRows(rows []SQLRow, spec SQLWithFillSpec) ([]SQLRow, error) {
 			return nil, fmt.Errorf("%w: row %d is outside the half-open fill interval", ErrSQLWithFillInvalid, index)
 		}
 		for cursor.Before(at) {
-			result = append(result, newSQLFillRow(spec.Template, spec.Column, cursor))
+			if err := appendRow(newSQLFillRow(spec.Template, spec.Column, cursor)); err != nil {
+				return nil, err
+			}
 			var err error
 			cursor, err = advanceSQLFillTime(cursor, spec.Step)
 			if err != nil {
 				return nil, err
 			}
 		}
-		result = append(result, cloneSQLFillRow(row))
+		if err := appendRow(cloneSQLFillRow(row)); err != nil {
+			return nil, err
+		}
 		if cursor.Equal(at) {
 			var err error
 			cursor, err = advanceSQLFillTime(at, spec.Step)
@@ -71,7 +99,9 @@ func FillSQLRows(rows []SQLRow, spec SQLWithFillSpec) ([]SQLRow, error) {
 		previous = at
 	}
 	for cursor.Before(spec.To) {
-		result = append(result, newSQLFillRow(spec.Template, spec.Column, cursor))
+		if err := appendRow(newSQLFillRow(spec.Template, spec.Column, cursor)); err != nil {
+			return nil, err
+		}
 		var err error
 		cursor, err = advanceSQLFillTime(cursor, spec.Step)
 		if err != nil {
@@ -79,6 +109,22 @@ func FillSQLRows(rows []SQLRow, spec SQLWithFillSpec) ([]SQLRow, error) {
 		}
 	}
 	return result, nil
+}
+
+func sqlFillBucketCount(spec SQLWithFillSpec) (int, error) {
+	distance := spec.To.Sub(spec.From)
+	if distance <= 0 {
+		return 0, fmt.Errorf("%w: fill range overflows duration arithmetic", ErrSQLWithFillInvalid)
+	}
+	buckets := distance / spec.Step
+	if distance%spec.Step != 0 {
+		buckets++
+	}
+	maxInt := int(^uint(0) >> 1)
+	if uint64(buckets) > uint64(maxInt) {
+		return 0, fmt.Errorf("%w: fill range has too many buckets", ErrSQLWithFillInvalid)
+	}
+	return int(buckets), nil
 }
 
 func newSQLFillRow(template Row, column string, at time.Time) Row {

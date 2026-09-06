@@ -18,7 +18,7 @@ func sqlHashGroupAggregatePlan(query *sqlQuery) bool {
 }
 
 func sqlHashGroupAggregateStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
-	if !sqlHashGroupAggregatePlan(query) || control == nil || control.options.MaxGroupBytes > 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || query.sample != nil || len(query.from.fieldTypes) != 0 || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+	if sqlQueryHasWithFill(query) || !sqlHashGroupAggregatePlan(query) || control == nil || control.options.MaxGroupBytes > 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || query.sample != nil || len(query.from.fieldTypes) != 0 || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return false
 	}
 	if _, ok := resolver.(SQLColumnarSourceResolver); ok {
@@ -223,6 +223,9 @@ func executeSQLHashGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) 
 }
 
 func executeSQLHashGroupAggregateStream(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
+	if sqlQueryHasWithFill(q) {
+		return SQLQueryResult{}, false, nil
+	}
 	if !sqlHashGroupAggregateStreamable(q, resolver, control) {
 		return SQLQueryResult{}, false, nil
 	}

@@ -6770,3 +6770,28 @@ commit-array-join:
 
 push-array-join:
 	bash ./scripts/deliver-array-join.sh push
+
+# with-fill-query-targets
+format-with-fill-query:
+	bash ./scripts/format-with-fill-query.sh
+
+test-with-fill-query:
+	bash ./scripts/test-with-fill-query.sh
+
+test-with-fill-package:
+	bash ./scripts/test-with-fill-package.sh
+
+race-with-fill-query:
+	bash ./scripts/race-with-fill-query.sh
+
+benchmark-with-fill-query:
+	bash ./scripts/benchmark-with-fill-query.sh
+
+deliver-with-fill-query:
+	bash ./scripts/deliver-with-fill-query.sh preview
+
+commit-with-fill-query:
+	bash ./scripts/deliver-with-fill-query.sh commit
+
+push-with-fill-query:
+	bash ./scripts/deliver-with-fill-query.sh push

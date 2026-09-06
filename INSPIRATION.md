@@ -164,6 +164,7 @@ name.
 - [x] C080 LIMIT BY per-group limiting.
 - [ ] C081 WITH FILL and gap filling for ordered time series.
 - [x] C081a Ordered time-series gap filling with explicit half-open bounds.
+- [x] C081b SQL WITH FILL grammar for bounded TIMESTAMP/DURATION ordered series.
 - [x] C082 Window functions for the supported SQL subset.
 - [x] C083a ArrayJoin-style row expansion for array and slice values.
 - [x] C084a Array and map aggregate functions with deterministic NULL and duplicate-key semantics.
