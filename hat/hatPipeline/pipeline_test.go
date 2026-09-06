@@ -49,7 +49,7 @@ func TestPipelineRunsIndependentStagesWithBackpressure(t *testing.T) {
 
 func TestPipelineSchedulesWorkersConcurrently(t *testing.T) {
 	var active, maximum int32
-	started := make(chan struct{}, 4)
+	started := make(chan struct{}, 8)
 	release := make(chan struct{})
 
 	pipeline, err := hatPipeline.NewPipeline(hatPipeline.Stage[int]{

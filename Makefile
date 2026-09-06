@@ -6838,3 +6838,15 @@ commit-rtree:
 
 push-rtree:
 	bash ./scripts/deliver-rtree.sh push
+
+verify-c016:
+	bash ./scripts/verify-c016.sh
+
+deliver-c016-fix:
+	bash ./scripts/deliver-c016-fix.sh preview
+
+commit-c016-fix:
+	bash ./scripts/deliver-c016-fix.sh commit
+
+push-c016-fix:
+	bash ./scripts/deliver-c016-fix.sh push
