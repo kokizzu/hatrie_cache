@@ -6889,3 +6889,9 @@ verify-c123:
 
 deliver-c123-checklist:
 	sh ./scripts/deliver-c123-checklist.sh
+
+verify-c128:
+	sh ./scripts/verify-c128.sh
+
+deliver-c128-checklist:
+	sh ./scripts/deliver-c128-checklist.sh

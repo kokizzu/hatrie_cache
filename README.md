@@ -14,6 +14,7 @@ security guidance before exposing it on a network.
 - Bit-preserving XOR-window float encoding: [Gorilla float codec](GORILLA_FLOAT.md)
 - Entropy-based codec selection: [codec selection](CODEC_SELECTION.md)
 - Per-client compression-level negotiation: [compression negotiation](COMPRESSION_NEGOTIATION.md)
+- Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
 - Codec byte and CPU accounting: [codec metrics](CODEC_METRICS.md)
 - Bounded independently scheduled processing stages: [Pipeline stages](PIPELINE_STAGES.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
