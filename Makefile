@@ -6370,3 +6370,31 @@ commit-watermark:
 .PHONY: push-watermark
 push-watermark:
 	bash ./scripts/deliver-watermark.sh push
+
+.PHONY: format-nullable-bitmap
+format-nullable-bitmap:
+	bash ./scripts/format-nullable-bitmap.sh
+
+.PHONY: test-nullable-bitmap
+test-nullable-bitmap:
+	bash ./scripts/test-nullable-bitmap.sh
+
+.PHONY: test-race-nullable-bitmap
+test-race-nullable-bitmap:
+	bash ./scripts/test-race-nullable-bitmap.sh
+
+.PHONY: benchmark-nullable-bitmap
+benchmark-nullable-bitmap:
+	bash ./scripts/benchmark-nullable-bitmap.sh
+
+.PHONY: deliver-nullable-bitmap
+deliver-nullable-bitmap:
+	bash ./scripts/deliver-nullable-bitmap.sh preview
+
+.PHONY: commit-nullable-bitmap
+commit-nullable-bitmap:
+	bash ./scripts/deliver-nullable-bitmap.sh commit
+
+.PHONY: push-nullable-bitmap
+push-nullable-bitmap:
+	bash ./scripts/deliver-nullable-bitmap.sh push
