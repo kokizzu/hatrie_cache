@@ -343,6 +343,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M081 Arrangement and source metrics for existing structures.
 - [x] M082 Operator-level row and latency metrics where instrumented.
 - [ ] M083 Per-source lag and frontier metrics.
+- [x] M083a Thread-safe monotone source frontier registry with deterministic lag snapshots.
 - [x] M083a On-demand per-subscription frontier and lag status.
 - [ ] M084 Per-operator retained-memory metrics.
 - [ ] M085 Per-collection size and compaction metrics.

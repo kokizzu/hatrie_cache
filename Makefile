@@ -6090,3 +6090,31 @@ commit-sql-differential-interval-join:
 .PHONY: push-sql-differential-interval-join
 push-sql-differential-interval-join:
 	bash ./scripts/deliver-sql-differential-interval-join.sh push
+
+.PHONY: format-source-frontier
+format-source-frontier:
+	bash ./scripts/format-source-frontier.sh
+
+.PHONY: test-source-frontier
+test-source-frontier:
+	bash ./scripts/test-source-frontier.sh
+
+.PHONY: test-race-source-frontier
+test-race-source-frontier:
+	bash ./scripts/test-race-source-frontier.sh
+
+.PHONY: benchmark-source-frontier
+benchmark-source-frontier:
+	bash ./scripts/benchmark-source-frontier.sh
+
+.PHONY: deliver-source-frontier
+deliver-source-frontier:
+	bash ./scripts/deliver-source-frontier.sh preview
+
+.PHONY: commit-source-frontier
+commit-source-frontier:
+	bash ./scripts/deliver-source-frontier.sh commit
+
+.PHONY: push-source-frontier
+push-source-frontier:
+	bash ./scripts/deliver-source-frontier.sh push
