@@ -5766,3 +5766,35 @@ commit-sql-row-binary-adaptive-sampled:
 .PHONY: push-sql-row-binary-adaptive-sampled
 push-sql-row-binary-adaptive-sampled:
 	bash ./scripts/deliver-sql-row-binary-adaptive-sampled.sh push
+
+.PHONY: inspect-replication-checksum
+inspect-replication-checksum:
+	bash ./scripts/inspect-replication-checksum.sh
+
+.PHONY: test-part-checksum
+test-part-checksum:
+	bash ./scripts/test-part-checksum.sh
+
+.PHONY: test-race-part-checksum
+test-race-part-checksum:
+	bash ./scripts/test-race-part-checksum.sh
+
+.PHONY: format-part-checksum
+format-part-checksum:
+	bash ./scripts/format-part-checksum.sh
+
+.PHONY: benchmark-part-checksum
+benchmark-part-checksum:
+	bash ./scripts/benchmark-part-checksum.sh
+
+.PHONY: deliver-part-checksum
+deliver-part-checksum:
+	bash ./scripts/deliver-part-checksum.sh preview
+
+.PHONY: commit-part-checksum
+commit-part-checksum:
+	bash ./scripts/deliver-part-checksum.sh commit
+
+.PHONY: push-part-checksum
+push-part-checksum:
+	bash ./scripts/deliver-part-checksum.sh push

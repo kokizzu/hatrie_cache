@@ -219,6 +219,7 @@ name.
 - [ ] C146 Distributed partial aggregation and final merge.
 - [ ] C147 Quorum inserts with explicit durability policy.
 - [ ] C148 Replicated part exchange with checksums.
+- [x] C148a Immutable-part length and SHA-256 checksums.
 - [x] C149 Replication queue introspection. `ReplicationResult.Queue` exposes `QueueStats` with depth, capacity, attempts, acknowledgements, failures, dead letters, pause state, and vector-clock state; monitoring also exports the queue health metrics.
 - [ ] C150 Replica lag thresholds for read routing.
 - [ ] C151 Read-after-write consistency levels.
