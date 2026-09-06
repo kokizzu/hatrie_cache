@@ -27,6 +27,7 @@ import (
 	"hatrie_cache/hat/hatRate"
 	"hatrie_cache/hat/hatSchema"
 	"hatrie_cache/hat/hatSql"
+	"hatrie_cache/hat/hatTrace"
 	"hatrie_cache/internal/jsonwire"
 )
 
@@ -603,19 +604,19 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	}
 	out = hatHttp.GzipHandler(out)
 	if handler.profileCapture == nil {
-		return out
+		return hatTrace.HTTPMiddleware(out)
 	}
 	var profileHandler http.Handler = http.HandlerFunc(handler.handleProfile)
 	if handler.identityProvider != nil || handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
 		profileHandler = monitoringAuthHandler(handler.identityProvider, handler.authTokens, handler.replicationAuthTokens, profileHandler)
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return hatTrace.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/profile" {
 			profileHandler.ServeHTTP(w, r)
 			return
 		}
 		out.ServeHTTP(w, r)
-	})
+	}))
 }
 
 type monitoringIdentityContextKey struct{}

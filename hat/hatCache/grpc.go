@@ -11,9 +11,11 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatGrpc"
+	"hatrie_cache/hat/hatTrace"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
@@ -103,7 +105,13 @@ func RegisterCacheGRPCServer(registrar grpc.ServiceRegistrar, server *CacheGRPCS
 
 func grpcContext(ctx context.Context) context.Context {
 	if ctx == nil {
-		return context.Background()
+		ctx = context.Background()
+	}
+	if incoming, ok := metadata.FromIncomingContext(ctx); ok {
+		values := incoming.Get(hatTrace.TraceParentHeader)
+		if len(values) > 0 {
+			ctx = hatTrace.WithTraceParent(ctx, values[0])
+		}
 	}
 	return ctx
 }

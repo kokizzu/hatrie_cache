@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"hatrie_cache/hat/hatTrace"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 
 	"google.golang.org/grpc"
@@ -562,12 +563,7 @@ func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*rep
 		return nil, fmt.Errorf("dial gRPC replication target %s: %w", address, err)
 	}
 	streamCtx, cancelStream := context.WithCancel(session.ctx)
-	if token := session.replicator.authToken; token != "" {
-		streamCtx = metadata.AppendToOutgoingContext(streamCtx,
-			"authorization", "Bearer "+token,
-			"x-hatrie-replication-token", token,
-		)
-	}
+	streamCtx = replicationGRPCOutgoingContext(streamCtx, session.replicator.authToken)
 	stream, err := hatriecachev1.NewCacheServiceClient(conn).ReplicationStream(streamCtx, grpc.UseCompressor(grpcgzip.Name))
 	if err != nil {
 		cancelStream()
@@ -609,6 +605,20 @@ func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*rep
 	session.targets[key] = target
 	session.mu.Unlock()
 	return target, nil
+}
+
+func replicationGRPCOutgoingContext(ctx context.Context, token string) context.Context {
+	ctx = replicationContext(ctx)
+	if token != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx,
+			"authorization", "Bearer "+token,
+			"x-hatrie-replication-token", token,
+		)
+	}
+	if traceParent, ok := hatTrace.TraceParentFromContext(ctx); ok {
+		ctx = metadata.AppendToOutgoingContext(ctx, hatTrace.TraceParentHeader, traceParent)
+	}
+	return ctx
 }
 
 func (replicator *HTTPReplicator) replicationGRPCDialOptions(node TopologyNode) (string, []grpc.DialOption, error) {

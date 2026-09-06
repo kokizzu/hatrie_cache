@@ -19,6 +19,7 @@ import (
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatReplication"
+	"hatrie_cache/hat/hatTrace"
 	"hatrie_cache/internal/jsonwire"
 
 	"google.golang.org/grpc"
@@ -4111,6 +4112,7 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBodyResponse(ctx con
 	if contentEncoding != "" {
 		req.Header.Set("Content-Encoding", contentEncoding)
 	}
+	hatTrace.InjectHTTP(postCtx, req.Header)
 	resp, err := replicator.client.Do(req)
 	if err != nil {
 		_ = req.Body.Close()

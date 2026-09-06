@@ -224,7 +224,11 @@ name.
 - [x] C132 System tables for parts, mutations, and query history. `SQLSystemTablesResolver` exposes bounded `system.parts`, `system.mutations`, `system.queries`, and `system.query_history` views without mutation values or query text; see [SYSTEM_TABLES.md](SYSTEM_TABLES.md).
 - [x] C133 Query log retention and sampling policy - SQLQueryManager provides bounded privacy-safe history with deterministic configurable completion sampling and no SQL-text retention (see QUERY_HISTORY.md).
 - [x] C134 OpenTelemetry spans for query phases. `QueryTraceRecorder.OpenTelemetrySpans` exposes SDK-neutral root/query and operator child spans with OTLP-width IDs, status, counters, cloned attributes, and documented end-anchored phase timing. It is opt-in and keeps SQL/error/row data out of exported spans; see [QUERY_TRACING.md](QUERY_TRACING.md).
-- [ ] C135 Trace IDs carried through remote work.
+- [x] C135 Trace IDs carried through remote work. `hat/hatTrace` validates W3C
+  `traceparent` values and carries them through monitoring HTTP extraction,
+  HTTP replication headers, inbound gRPC metadata, and gRPC replication
+  metadata without generating IDs or changing no-header behavior. Covered by
+  focused normal and race tests.
 - [x] C136 Per-tenant resource quotas - NamespaceQueryGovernor applies immutable, tightening per-namespace resource policies suitable for tenant, user, or source isolation (see TENANT_RESOURCE_LIMITS.md).
 - [x] C137 TLS, authentication, and authorization controls.
 - [x] C138 Operational config validation with sane defaults.
