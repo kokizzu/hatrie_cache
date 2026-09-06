@@ -341,7 +341,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M068a Exact generic differential COUNT group maintenance.
 - [x] M069 Differential distinct updates for generic SQL tables. `DistinctDifferentialRows` maintains signed multiplicity transitions with boundary-only emissions, cloning, and negative/overflow validation; see [DIFFERENTIAL_DISTINCT.md](DIFFERENTIAL_DISTINCT.md).
 - [x] M069a Boundary-only differential distinct maintenance.
-- [ ] M070 Monotone aggregate specialization.
+- [x] M070 Monotone aggregate specialization. `TypedTableAggregate.ApplyMonotone` provides a tested insert-only fast path with sequence/replay validation and preserves advanced aggregate semantics; benchmarked at about `1.09x` faster with unchanged allocations; see [MONOTONE_AGGREGATE.md](MONOTONE_AGGREGATE.md).
 - [x] M070a Append-only typed-table aggregate fast path.
 - [x] M071 Late-data handling policy. `ClassifyLateData` provides allocation-free bounded-lateness decisions with explicit retain/drop behavior and inclusive boundaries; see [LATE_DATA_POLICY.md](LATE_DATA_POLICY.md).
 - [x] M071a Bounded-lateness classifier with explicit drop-or-retain policy and boundary semantics.
