@@ -328,6 +328,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M072 Watermark propagation.
 - [x] M072a Monotone differential watermark propagation.
 - [ ] M073 Temporal joins.
+- [x] M073a Indexed weighted temporal equi-join.
 - [ ] M074 Interval joins.
 - [x] M075 Temporal filtering for supported typed paths.
 

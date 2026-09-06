@@ -6050,3 +6050,31 @@ commit-sql-differential-watermark:
 .PHONY: push-sql-differential-watermark
 push-sql-differential-watermark:
 	bash ./scripts/deliver-sql-differential-watermark.sh push
+
+.PHONY: test-sql-differential-temporal-join
+test-sql-differential-temporal-join:
+	bash ./scripts/test-sql-differential-temporal-join.sh
+
+.PHONY: test-race-sql-differential-temporal-join
+test-race-sql-differential-temporal-join:
+	bash ./scripts/test-race-sql-differential-temporal-join.sh
+
+.PHONY: format-sql-differential-temporal-join
+format-sql-differential-temporal-join:
+	bash ./scripts/format-sql-differential-temporal-join.sh
+
+.PHONY: benchmark-sql-differential-temporal-join
+benchmark-sql-differential-temporal-join:
+	bash ./scripts/benchmark-sql-differential-temporal-join.sh
+
+.PHONY: deliver-sql-differential-temporal-join
+deliver-sql-differential-temporal-join:
+	bash ./scripts/deliver-sql-differential-temporal-join.sh preview
+
+.PHONY: commit-sql-differential-temporal-join
+commit-sql-differential-temporal-join:
+	bash ./scripts/deliver-sql-differential-temporal-join.sh commit
+
+.PHONY: push-sql-differential-temporal-join
+push-sql-differential-temporal-join:
+	bash ./scripts/deliver-sql-differential-temporal-join.sh push
