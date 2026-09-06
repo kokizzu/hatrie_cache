@@ -5882,3 +5882,31 @@ commit-sql-collapsing-merge:
 .PHONY: push-sql-collapsing-merge
 push-sql-collapsing-merge:
 	bash ./scripts/deliver-sql-collapsing-merge.sh push
+
+.PHONY: test-sql-deterministic-sample
+test-sql-deterministic-sample:
+	bash ./scripts/test-sql-deterministic-sample.sh
+
+.PHONY: test-race-sql-deterministic-sample
+test-race-sql-deterministic-sample:
+	bash ./scripts/test-race-sql-deterministic-sample.sh
+
+.PHONY: format-sql-deterministic-sample
+format-sql-deterministic-sample:
+	bash ./scripts/format-sql-deterministic-sample.sh
+
+.PHONY: benchmark-sql-deterministic-sample
+benchmark-sql-deterministic-sample:
+	bash ./scripts/benchmark-sql-deterministic-sample.sh
+
+.PHONY: deliver-sql-deterministic-sample
+deliver-sql-deterministic-sample:
+	bash ./scripts/deliver-sql-deterministic-sample.sh preview
+
+.PHONY: commit-sql-deterministic-sample
+commit-sql-deterministic-sample:
+	bash ./scripts/deliver-sql-deterministic-sample.sh commit
+
+.PHONY: push-sql-deterministic-sample
+push-sql-deterministic-sample:
+	bash ./scripts/deliver-sql-deterministic-sample.sh push
