@@ -76,6 +76,7 @@ security guidance before exposing it on a network.
 - Deterministic partition-stable SQL sampling: [deterministic sample](DETERMINISTIC_SAMPLE.md)
 - Reusable partial aggregate states: [aggregate combinators](AGGREGATE_COMBINATORS.md)
 - Bounded timestamp gap filling: [SQL WITH FILL](WITH_FILL.md)
+- Row-and-width based compact-part selection: [columnar part format](COLUMNAR_PART_FORMAT.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)

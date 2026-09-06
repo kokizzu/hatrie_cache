@@ -85,7 +85,7 @@ name.
 - [x] C027 Part metadata and checksums.
 - [x] C028 Background merge and compaction.
 - [x] C029 Vertical merge that reads only changed columns. `MergeColumnarParts` requests fields independently from each part and avoids loading unrequested wide columns; see [COLUMNAR_VERTICAL_MERGE.md](COLUMNAR_VERTICAL_MERGE.md).
-- [ ] C030 Compact-part format selected by row count and width.
+- [x] C030 Compact-part format selected by row count and width. `SelectSQLColumnarPartFormat` uses inclusive row and encoded-byte thresholds with conservative defaults and zero allocations; see [COLUMNAR_PART_FORMAT.md](COLUMNAR_PART_FORMAT.md).
 - [x] C031 ReplacingMergeTree-style latest-row replacement. `ReplaceSQLRows` provides stable-key-order latest-version selection with deterministic tie handling and input isolation; see [REPLACING_MERGE.md](REPLACING_MERGE.md).
 - [x] C031a Explicit stable-order replacing merge for versioned rows.
 - [x] C032 CollapsingMergeTree-style sign-based row cancellation. `CollapseSQLRows` pairs unmatched opposite signs by logical key, preserves survivors in input order, and reports invalid signs; see [COLLAPSING_MERGE.md](COLLAPSING_MERGE.md).
