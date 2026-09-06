@@ -119,7 +119,7 @@ name.
 - [x] C048a Minimum-width bit-packed uint64 codec selected from column maximum with canonical validation.
 - [x] C048a Exact full-batch codec selection by encoded size.
 - [x] C049 Low-cardinality dictionary encoding for typed string values.
-- [ ] C050 Shared JSON subcolumns for repeated paths.
+- [x] C050 Shared JSON subcolumns for repeated paths. `JSONSubcolumnRegistry` interns normalized JSON paths into process-local `uint32` IDs with concurrent lookup and snapshots; see [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md).
 - [x] C050a Process-local shared JSON subcolumn path interning with deterministic snapshots.
 - [x] C051 JSON path indexing for supported predicates.
 - [ ] C052 Native array and nested-column physical layout.
