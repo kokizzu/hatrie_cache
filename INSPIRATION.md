@@ -124,6 +124,7 @@ name.
 - [x] C057a Bit-preserving XOR window codec for repeated and slowly changing float64 values.
 - [x] C058 Configurable storage compression codecs.
 - [ ] C059 Codec selection from sampled column entropy.
+- [x] C059a Stackless byte-entropy estimator with conservative raw-or-compressed codec recommendation.
 - [x] C059a Sampled adaptive codec selection from a bounded prefix.
 - [ ] C060 Compression ratio and decompression CPU accounting.
 - [x] C060a Atomic codec byte and CPU accounting with derived compression ratio.

@@ -6426,3 +6426,31 @@ commit-gorilla-float:
 .PHONY: push-gorilla-float
 push-gorilla-float:
 	bash ./scripts/deliver-gorilla-float.sh push
+
+.PHONY: format-codec-selection
+format-codec-selection:
+	bash ./scripts/format-codec-selection.sh
+
+.PHONY: test-codec-selection
+test-codec-selection:
+	bash ./scripts/test-codec-selection.sh
+
+.PHONY: test-race-codec-selection
+test-race-codec-selection:
+	bash ./scripts/test-race-codec-selection.sh
+
+.PHONY: benchmark-codec-selection
+benchmark-codec-selection:
+	bash ./scripts/benchmark-codec-selection.sh
+
+.PHONY: deliver-codec-selection
+deliver-codec-selection:
+	bash ./scripts/deliver-codec-selection.sh preview
+
+.PHONY: commit-codec-selection
+commit-codec-selection:
+	bash ./scripts/deliver-codec-selection.sh commit
+
+.PHONY: push-codec-selection
+push-codec-selection:
+	bash ./scripts/deliver-codec-selection.sh push
