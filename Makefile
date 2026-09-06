@@ -5938,3 +5938,31 @@ commit-sql-differential-distinct:
 .PHONY: push-sql-differential-distinct
 push-sql-differential-distinct:
 	bash ./scripts/deliver-sql-differential-distinct.sh push
+
+.PHONY: test-sql-differential-group-by
+test-sql-differential-group-by:
+	bash ./scripts/test-sql-differential-group-by.sh
+
+.PHONY: test-race-sql-differential-group-by
+test-race-sql-differential-group-by:
+	bash ./scripts/test-race-sql-differential-group-by.sh
+
+.PHONY: format-sql-differential-group-by
+format-sql-differential-group-by:
+	bash ./scripts/format-sql-differential-group-by.sh
+
+.PHONY: benchmark-sql-differential-group-by
+benchmark-sql-differential-group-by:
+	bash ./scripts/benchmark-sql-differential-group-by.sh
+
+.PHONY: deliver-sql-differential-group-by
+deliver-sql-differential-group-by:
+	bash ./scripts/deliver-sql-differential-group-by.sh preview
+
+.PHONY: commit-sql-differential-group-by
+commit-sql-differential-group-by:
+	bash ./scripts/deliver-sql-differential-group-by.sh commit
+
+.PHONY: push-sql-differential-group-by
+push-sql-differential-group-by:
+	bash ./scripts/deliver-sql-differential-group-by.sh push
