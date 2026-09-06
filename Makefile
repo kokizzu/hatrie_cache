@@ -6342,3 +6342,31 @@ commit-late-data-policy:
 .PHONY: push-late-data-policy
 push-late-data-policy:
 	bash ./scripts/deliver-late-data-policy.sh push
+
+.PHONY: format-watermark
+format-watermark:
+	bash ./scripts/format-watermark.sh
+
+.PHONY: test-watermark
+test-watermark:
+	bash ./scripts/test-watermark.sh
+
+.PHONY: test-race-watermark
+test-race-watermark:
+	bash ./scripts/test-race-watermark.sh
+
+.PHONY: benchmark-watermark
+benchmark-watermark:
+	bash ./scripts/benchmark-watermark.sh
+
+.PHONY: deliver-watermark
+deliver-watermark:
+	bash ./scripts/deliver-watermark.sh preview
+
+.PHONY: commit-watermark
+commit-watermark:
+	bash ./scripts/deliver-watermark.sh commit
+
+.PHONY: push-watermark
+push-watermark:
+	bash ./scripts/deliver-watermark.sh push

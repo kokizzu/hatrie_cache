@@ -328,6 +328,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M071a Bounded-lateness classifier with explicit drop-or-retain policy and boundary semantics.
 - [x] M071a Explicit accept/reject/drop late-data policy.
 - [ ] M072 Watermark propagation.
+- [x] M072a Safe minimum-source watermark merge with monotonic publication.
 - [x] M072a Monotone differential watermark propagation.
 - [ ] M073 Temporal joins.
 - [x] M073a Indexed weighted temporal equi-join.
