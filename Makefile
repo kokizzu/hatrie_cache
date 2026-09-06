@@ -6748,3 +6748,25 @@ commit-aggregate-collections:
 
 push-aggregate-collections:
 	bash ./scripts/deliver-aggregate-collections.sh push
+
+# array-join-targets
+format-array-join:
+	bash ./scripts/format-array-join.sh
+
+test-array-join:
+	bash ./scripts/test-array-join.sh
+
+test-race-array-join:
+	bash ./scripts/test-race-array-join.sh
+
+benchmark-array-join:
+	bash ./scripts/benchmark-array-join.sh
+
+deliver-array-join:
+	bash ./scripts/deliver-array-join.sh preview
+
+commit-array-join:
+	bash ./scripts/deliver-array-join.sh commit
+
+push-array-join:
+	bash ./scripts/deliver-array-join.sh push

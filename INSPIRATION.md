@@ -165,7 +165,7 @@ name.
 - [ ] C081 WITH FILL and gap filling for ordered time series.
 - [x] C081a Ordered time-series gap filling with explicit half-open bounds.
 - [x] C082 Window functions for the supported SQL subset.
-- [ ] C083 ArrayJoin-style row expansion.
+- [x] C083a ArrayJoin-style row expansion for array and slice values.
 - [x] C084a Array and map aggregate functions with deterministic NULL and duplicate-key semantics.
 - [x] C085 Hash joins.
 - [x] C086 Grace-hash or spillable joins.

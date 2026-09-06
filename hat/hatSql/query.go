@@ -5329,6 +5329,15 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.joins = append(q.joins, join)
+		case p.keyword("ARRAY"):
+			if q.from == nil {
+				return nil, p.diagnostic(p.current(), "ARRAY JOIN requires FROM first")
+			}
+			join, err := p.parseArrayJoin()
+			if err != nil {
+				return nil, err
+			}
+			q.joins = append(q.joins, join)
 		case p.keyword("TABLESAMPLE"):
 			if q.from == nil {
 				return nil, p.diagnostic(p.current(), "TABLESAMPLE requires FROM first")
@@ -5761,6 +5770,41 @@ func (p *sqlQueryParser) parseSource() (sqlSource, error) {
 	}
 	return source, nil
 }
+func (p *sqlQueryParser) parseArrayJoin() (sqlJoin, error) {
+	token := p.current()
+	p.next()
+	if err := p.expectKeyword("JOIN"); err != nil {
+		return sqlJoin{}, err
+	}
+	expression, err := p.parsePrimary()
+	if err != nil {
+		return sqlJoin{}, err
+	}
+	if expression.kind == "" {
+		return sqlJoin{}, p.diagnostic(token, "ARRAY JOIN requires an array expression")
+	}
+	alias := ""
+	if p.keyword("AS") {
+		p.next()
+		name, err := p.expectIdentifier("an ARRAY JOIN alias", nil)
+		if err != nil {
+			return sqlJoin{}, err
+		}
+		alias = name.text
+	} else if p.current().kind == sqlTokenIdentifier && !sqlClauseKeyword(p.current().text) {
+		alias = p.current().text
+		p.next()
+	}
+	if alias == "" {
+		if expression.kind == "field" {
+			alias = expression.name
+		} else {
+			alias = "array"
+		}
+	}
+	return sqlJoin{kind: "ARRAY", source: sqlSource{kind: "ARRAY", alias: alias}, on: expression}, nil
+}
+
 func (p *sqlQueryParser) parseAlias(source *sqlSource) error {
 	if p.keyword("AS") {
 		p.next()
@@ -6939,7 +6983,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
@@ -9674,6 +9718,39 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		leftAliases := []string{q.from.alias}
 		for _, join := range q.joins {
 			started = time.Now()
+			if join.kind == "ARRAY" {
+				inputRows := len(rows)
+				next := make([]sqlExecRow, 0, len(rows))
+				for _, left := range rows {
+					value := evalSQLExpr(join.on, []sqlExecRow{left}, left)
+					if err := sqlExpressionError(value); err != nil {
+						return SQLQueryResult{}, err
+					}
+					if value == nil {
+						continue
+					}
+					elements, ok := sqlArrayJoinElements(value)
+					if !ok {
+						return SQLQueryResult{}, fmt.Errorf("ARRAY JOIN expression must evaluate to an array, got %T", value)
+					}
+					for index := 0; index < elements.Len(); index++ {
+						element := elements.Index(index).Interface()
+						if err := control.addJoinWork(1); err != nil {
+							return SQLQueryResult{}, err
+						}
+						candidate := SQLRow{join.source.alias: element}
+						combined := mergeSQLRows(sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}, left)
+						next = append(next, combined)
+						if len(next) > maxRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL ARRAY JOIN exceeds the %d row limit", maxRows)
+						}
+					}
+				}
+				metrics.record("ARRAY JOIN", sqlExplainExpression(join.on)+" AS "+join.source.alias, inputRows, len(next), started)
+				rows = next
+				leftAliases = append(leftAliases, join.source.alias)
+				continue
+			}
 			if join.source.lateral {
 				if join.kind == "RIGHT" || join.kind == "FULL" {
 					return SQLQueryResult{}, fmt.Errorf("%s JOIN LATERAL is not supported", join.kind)
@@ -10940,6 +11017,17 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		leftAliases = append(leftAliases, query.from.alias)
 	}
 	for _, join := range query.joins {
+		if join.kind == "ARRAY" {
+			detail := sqlExplainExpression(join.on)
+			if join.source.alias != "" {
+				detail += " AS " + join.source.alias
+			}
+			*steps = append(*steps, SQLExplainStep{Node: prefix + "ARRAY JOIN", Detail: detail})
+			if join.source.alias != "" {
+				leftAliases = append(leftAliases, join.source.alias)
+			}
+			continue
+		}
 		detail := join.kind + " JOIN " + sqlExplainSource(join.source)
 		if join.kind != "CROSS" {
 			detail += " ON " + sqlExplainExpression(join.on)
