@@ -213,6 +213,7 @@ name.
 - [x] C126 Backup snapshots with checksums.
 - [x] C127 Incremental journal-backed backup.
 - [ ] C128 Object-store backup targets.
+- [x] C128a Streaming object-store backup targets with verified manifests and atomic restore.
 - [x] C129 Restore verification for supported data types.
 - [x] C130 Recovery checkpoints and replay validation.
 - [x] C131 Metrics and health endpoints are opt-in.
