@@ -245,7 +245,7 @@ name.
 - [x] C149 Replication queue introspection. `ReplicationResult.Queue` exposes `QueueStats` with depth, capacity, attempts, acknowledgements, failures, dead letters, pause state, and vector-clock state; monitoring also exports the queue health metrics.
 - [ ] C150 Replica lag thresholds for read routing.
 - [ ] C151 Read-after-write consistency levels.
-- [ ] C152 Leader election independent from query workers.
+- [x] C152 Leader election independent from query workers (see LEADER_ELECTION.md).
 - [ ] C153 Metadata consensus for partition ownership.
 - [ ] C154 Rolling schema changes across replicas.
 - [ ] C155 Rolling binary upgrades with compatibility gates.
