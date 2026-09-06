@@ -1,29 +1,32 @@
-# Deterministic Row Sampling
+# Deterministic Sampling
 
-`SampleSQLRows` provides deterministic, key-based sampling inspired by
-ClickHouse `SAMPLE` semantics.
+`hatSql.SampleSQLRows` selects a stable fraction of rows from a logical key,
+seed, and fraction. It hashes the key with xxhash and a splitmix-style mixing
+step, so the same key is selected consistently even when rows are reordered or
+processed in separate partitions.
 
 ```go
 sample, err := hatSql.SampleSQLRows(rows,
-	func(row hatSql.SQLRow) string { return row["account_id"].(string) },
-	0.25,
-	2026,
+    func(row hatSql.SQLRow) string { return row["customer_id"].(string) },
+    0.10,
+    42,
 )
 ```
 
-The same key, fraction, and seed always have the same selection, regardless of
-input order or which partition supplies the row. The returned slice preserves
-the input order. Fraction `0` returns nil and fraction `1` returns all rows;
-other values must be finite and between zero and one. The key callback must be
-deterministic. Returned row maps are the original row values, so callers must
-treat sampled rows as read-only unless they intentionally want to mutate the
-source view.
+The key callback is the sampling identity. Rows with the same key, fraction,
+and seed are selected together. Returned rows retain the order of the input
+batch, but selection itself does not depend on that order. Use the same seed
+and key encoding on every partition when combining distributed samples.
 
-The implementation uses `xxhash` followed by a fixed integer mixing step. It
-is intended for reproducible workload reduction and distributed sampling, not
-for security, secrecy, or adversarially fair randomization.
+`fraction` must be finite and in `[0, 1]`. Zero returns no rows and one copies
+the input slice. A nil key callback or invalid fraction returns an error. The
+function does not promise an exact row count; it provides a deterministic
+probability threshold, so small inputs can deviate from the requested fraction.
 
-On the reference host, sampling 1,024 rows at fraction `0.25` with precomputed
-keys took about `15.97-16.30 us`, used `2,304 B/op`, and performed one
-allocation for the selected slice. The cost is paid only by callers that opt
-into sampling; no existing SQL or partition path changes its default behavior.
+The returned slice reuses the input row maps. Treat rows as read-only or clone
+maps before mutation. This utility does not provide weighted sampling,
+reservoir sampling, or a global exact-size guarantee.
+
+Focused coverage is in `hat/hatSql/deterministic_sample_test.go`, including
+reordered input, partitioned input, boundary fractions, invalid values, key
+validation, and an allocation-reporting benchmark.

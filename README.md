@@ -73,6 +73,7 @@ security guidance before exposing it on a network.
 - Sign-based row cancellation merge: [collapsing merge](COLLAPSING_MERGE.md)
 - Merge-time numeric summation: [summing merge](SUMMING_MERGE.md)
 - TTL-safe fixed-width rollups: [TTL rollup](TTL_ROLLUP.md)
+- Deterministic partition-stable SQL sampling: [deterministic sample](DETERMINISTIC_SAMPLE.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)

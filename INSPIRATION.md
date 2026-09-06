@@ -98,7 +98,7 @@ name.
 - [x] C037 TTL expiration for supported values and records.
 - [x] C038 TTL-driven rollup or recompression. `TimeBucketRollup` supports verified bucket retention and boundary-only expiration without silently discarding partial buckets; see [TTL_ROLLUP.md](TTL_ROLLUP.md).
 - [x] C039 Partition pruning for local partitions.
-- [ ] C040 Sampling key with deterministic SAMPLE semantics across partitions.
+- [x] C040 Sampling key with deterministic SAMPLE semantics across partitions. `SampleSQLRows` hashes a caller-selected logical key with a seed, preserving selection across order and partition boundaries; see [DETERMINISTIC_SAMPLE.md](DETERMINISTIC_SAMPLE.md).
 - [x] C040a Deterministic key-hash sampling across partition boundaries.
 - [ ] C041 Multiple disk policies with placement rules.
 - [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
