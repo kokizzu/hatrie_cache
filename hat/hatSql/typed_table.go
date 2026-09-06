@@ -25,11 +25,18 @@ const (
 	TypedTableBool
 )
 
+// TypedTableGeneratedFunc derives a column from the candidate row. The input
+// is schema ordered and must be treated as read-only. Generated callbacks
+// should be deterministic and side-effect free so changefeeds and restores
+// remain reproducible.
+type TypedTableGeneratedFunc func([]TypedTableValue) (TypedTableValue, error)
+
 // TypedTableColumn declares one schema-checked table column.
 type TypedTableColumn struct {
 	Name              string
 	Kind              TypedTableKind
 	DictionaryEncoded bool
+	Generated         TypedTableGeneratedFunc
 }
 
 const (
@@ -293,6 +300,7 @@ type TypedTable struct {
 	byName     map[string]int
 	keys       []string
 	positions  map[string]int
+	generated  bool
 	columnar   typedTableColumnarCache
 	patchParts *typedTablePatchState
 	mvcc       *typedTableMVCCState
@@ -344,6 +352,9 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		}
 		table.byName[column.Name] = index
 		table.columns[index].kind = column.Kind
+		if column.Generated != nil {
+			table.generated = true
+		}
 		table.columns[index].dictionary = column.Kind == TypedTableString && column.DictionaryEncoded
 		if table.columns[index].dictionary {
 			table.columns[index].dictionaryPositions = make(map[string]uint32)
@@ -385,6 +396,10 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return TypedTableChange{}, fmt.Errorf("typed table key is required")
+	}
+	values, err := table.applyGeneratedValues(values)
+	if err != nil {
+		return TypedTableChange{}, err
 	}
 	table.mu.Lock()
 	defer table.mu.Unlock()
@@ -875,6 +890,9 @@ func (table *TypedTable) validateValues(values []TypedTableValue) error {
 		return fmt.Errorf("typed table row has %d values, want %d", len(values), len(table.columns))
 	}
 	for index, value := range values {
+		if table.schema.Columns[index].Generated != nil {
+			continue
+		}
 		if !value.Valid {
 			continue
 		}
@@ -883,6 +901,30 @@ func (table *TypedTable) validateValues(values []TypedTableValue) error {
 		}
 	}
 	return nil
+}
+
+func (table *TypedTable) applyGeneratedValues(values []TypedTableValue) ([]TypedTableValue, error) {
+	if !table.generated {
+		return values, nil
+	}
+	if len(values) != len(table.schema.Columns) {
+		return nil, fmt.Errorf("typed table row has %d values, want %d", len(values), len(table.schema.Columns))
+	}
+	computed := cloneTypedTableValues(values)
+	for index, column := range table.schema.Columns {
+		if column.Generated == nil {
+			continue
+		}
+		value, err := column.Generated(cloneTypedTableValues(computed))
+		if err != nil {
+			return nil, fmt.Errorf("typed table generated column %q: %w", column.Name, err)
+		}
+		if value.Valid && value.Kind != column.Kind {
+			return nil, fmt.Errorf("typed table generated column %q requires kind %d", column.Name, column.Kind)
+		}
+		computed[index] = value
+	}
+	return computed, nil
 }
 
 func (table *TypedTable) rowLocked(index int) []TypedTableValue {

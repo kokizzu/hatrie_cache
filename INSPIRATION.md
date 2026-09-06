@@ -563,7 +563,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T127 ON CONFLICT clauses. `ExecuteSQLMutation` supports primary-key `DO NOTHING` and typed `DO UPDATE ... EXCLUDED` forms with explicit rejection of unsupported expressions and expiration combinations; the supported paths are covered by tests and a five-run benchmark.
 - [x] T128 MERGE statements. `ExecuteSQLMutation` supports matched and not-matched conditional `MERGE` actions through the atomic merge executor, with `RETURNING` coverage.
 - [x] T129 Common table expressions.
-- [ ] T130 Generated columns.
+- [x] T130 Generated columns. `TypedTableColumn.Generated` computes a typed value before storage and changefeed publication; derived values are visible through row/columnar SQL, MVCC, and replay paths. See [GENERATED_COLUMNS.md](GENERATED_COLUMNS.md).
 - [x] T131 Typed constraints.
 - [ ] T132 Foreign-key enforcement.
 - [x] T133 JSON path access.
