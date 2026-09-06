@@ -6574,3 +6574,19 @@ commit-part-cache-policy:
 	bash ./scripts/deliver-part-cache-policy.sh commit
 push-part-cache-policy:
 	bash ./scripts/deliver-part-cache-policy.sh push
+
+.PHONY: format-granule-sizing test-granule-sizing test-race-granule-sizing benchmark-granule-sizing deliver-granule-sizing commit-granule-sizing push-granule-sizing
+format-granule-sizing:
+	bash ./scripts/format-granule-sizing.sh
+test-granule-sizing:
+	bash ./scripts/test-granule-sizing.sh
+test-race-granule-sizing:
+	bash ./scripts/test-race-granule-sizing.sh
+benchmark-granule-sizing:
+	bash ./scripts/benchmark-granule-sizing.sh
+deliver-granule-sizing:
+	bash ./scripts/deliver-granule-sizing.sh preview
+commit-granule-sizing:
+	bash ./scripts/deliver-granule-sizing.sh commit
+push-granule-sizing:
+	bash ./scripts/deliver-granule-sizing.sh push

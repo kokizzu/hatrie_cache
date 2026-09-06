@@ -111,6 +111,7 @@ name.
 - [x] C046a Per-part and per-column read amplification accounting with deterministic snapshots.
 - [x] C046a Statistics-only per-column RowBinary read accounting.
 - [ ] C047 Adaptive granule sizing from observed predicate selectivity.
+- [x] C047a Bounded adaptive granule sizing from observed predicate selectivity.
 - [x] C047a Conservative block min/max predicate pruning.
 - [ ] C048 Compact numeric encodings selected from data statistics.
 - [x] C048a Minimum-width bit-packed uint64 codec selected from column maximum with canonical validation.
