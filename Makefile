@@ -6022,3 +6022,31 @@ commit-sql-differential-late-data:
 .PHONY: push-sql-differential-late-data
 push-sql-differential-late-data:
 	bash ./scripts/deliver-sql-differential-late-data.sh push
+
+.PHONY: test-sql-differential-watermark
+test-sql-differential-watermark:
+	bash ./scripts/test-sql-differential-watermark.sh
+
+.PHONY: test-race-sql-differential-watermark
+test-race-sql-differential-watermark:
+	bash ./scripts/test-race-sql-differential-watermark.sh
+
+.PHONY: format-sql-differential-watermark
+format-sql-differential-watermark:
+	bash ./scripts/format-sql-differential-watermark.sh
+
+.PHONY: benchmark-sql-differential-watermark
+benchmark-sql-differential-watermark:
+	bash ./scripts/benchmark-sql-differential-watermark.sh
+
+.PHONY: deliver-sql-differential-watermark
+deliver-sql-differential-watermark:
+	bash ./scripts/deliver-sql-differential-watermark.sh preview
+
+.PHONY: commit-sql-differential-watermark
+commit-sql-differential-watermark:
+	bash ./scripts/deliver-sql-differential-watermark.sh commit
+
+.PHONY: push-sql-differential-watermark
+push-sql-differential-watermark:
+	bash ./scripts/deliver-sql-differential-watermark.sh push

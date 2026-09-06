@@ -326,6 +326,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M071 Late-data handling policy.
 - [x] M071a Explicit accept/reject/drop late-data policy.
 - [ ] M072 Watermark propagation.
+- [x] M072a Monotone differential watermark propagation.
 - [ ] M073 Temporal joins.
 - [ ] M074 Interval joins.
 - [x] M075 Temporal filtering for supported typed paths.
