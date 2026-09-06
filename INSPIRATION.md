@@ -69,7 +69,7 @@ name.
 - [x] C012 Late materialization after filtering.
 - [x] C013 Vectorized block execution.
 - [x] C014 Selection vectors for filtered blocks.
-- [ ] C015 SIMD kernels for common numeric and string predicates.
+- [x] C015 SIMD kernels for common numeric and string predicates. AVX2-gated equality and inequality dispatch is available for typed int64 masks; all other numeric and string predicates retain the portable allocation-free path.
 - [x] C015a Allocation-free batch predicate masks for numeric and string filters.
 - [ ] C016 Pipeline stages with independently scheduled work.
 - [x] C017 EXPLAIN PIPELINE output with stage and worker detail. `EXPLAIN PIPELINE` now emits additive one-based stage, worker, and worker-count metadata derived from the static plan; regular `EXPLAIN` output remains unchanged and `EXPLAIN PIPELINE ANALYZE` is rejected explicitly.

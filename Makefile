@@ -6795,3 +6795,25 @@ commit-with-fill-query:
 
 push-with-fill-query:
 	bash ./scripts/deliver-with-fill-query.sh push
+
+# c015-simd-targets
+format-c015:
+	bash ./scripts/format-c015.sh
+
+test-c015:
+	bash ./scripts/test-c015.sh
+
+race-c015:
+	bash ./scripts/race-c015.sh
+
+benchmark-c015:
+	bash ./scripts/benchmark-c015.sh
+
+deliver-c015:
+	bash ./scripts/deliver-c015.sh preview
+
+commit-c015:
+	bash ./scripts/deliver-c015.sh commit
+
+push-c015:
+	bash ./scripts/deliver-c015.sh push

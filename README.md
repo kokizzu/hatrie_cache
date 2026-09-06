@@ -3827,3 +3827,7 @@ invalid, or incomplete segment statistics, larger conjunctions, and all other
 SQL shapes retain the original predicate order. See
 [BENCHMARK.md](BENCHMARK.md#sql-numeric-predicate-reordering) for the measured
 CPU, allocation, and fallback tradeoffs.
+
+## SIMD Predicate Kernels
+
+Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and inequality when supported, with portable fallback elsewhere. See [C015 SIMD predicate kernels](C015_SIMD.md) for the API, validation, and measurements.

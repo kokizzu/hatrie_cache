@@ -1,0 +1,49 @@
+#include "textflag.h"
+
+// func matchInt64AVX2Equal(values []int64, target int64) uint64
+TEXT ·matchInt64AVX2Equal(SB), NOSPLIT, $0-40
+	MOVQ values_base+0(FP), SI
+	MOVQ values_len+8(FP), CX
+	MOVQ target+24(FP), R8
+	MOVQ CX, R13
+	SHRQ $2, R13
+	XORQ DX, DX
+	XORQ R9, R9
+	MOVQ R8, X1
+	VPBROADCASTQ X1, Y1
+
+loop:
+	TESTQ R13, R13
+	JZ done
+	VMOVDQU (SI), Y0
+	VPCMPEQQ Y1, Y0, Y2
+	VPMOVMSKB Y2, R10
+	ANDL $0x80808080, R10
+	SHRL $7, R10
+	MOVL R10, R11
+	ANDL $0x1, R11
+	MOVL R10, R12
+	SHRL $7, R12
+	ANDL $0x2, R12
+	ORL R12, R11
+	MOVL R10, R12
+	SHRL $14, R12
+	ANDL $0x4, R12
+	ORL R12, R11
+	MOVL R10, R12
+	SHRL $21, R12
+	ANDL $0x8, R12
+	ORL R12, R11
+	MOVL R11, R10
+	MOVQ R9, CX
+	SHLQ CX, R10
+	ORQ R10, DX
+	ADDQ $32, SI
+	ADDQ $4, R9
+	DECQ R13
+	JMP loop
+
+done:
+	VZEROUPPER
+	MOVQ DX, ret+32(FP)
+	RET

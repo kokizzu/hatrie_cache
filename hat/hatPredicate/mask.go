@@ -47,36 +47,7 @@ func MaskWords(length int) int {
 // matching values. The caller owns mask and can reuse it across batches; all
 // supplied words are cleared before matching. No allocation is performed.
 func MatchInt64(mask []uint64, values []int64, predicate Int64Predicate, target int64) (int, error) {
-	if MaskWords(len(values)) > len(mask) {
-		return 0, ErrMaskTooSmall
-	}
-	if predicate > Int64GreaterEqual {
-		return 0, ErrInvalidPredicate
-	}
-	clearMask(mask)
-	matches := 0
-	for index, value := range values {
-		matched := false
-		switch predicate {
-		case Int64Equal:
-			matched = value == target
-		case Int64NotEqual:
-			matched = value != target
-		case Int64Less:
-			matched = value < target
-		case Int64LessEqual:
-			matched = value <= target
-		case Int64Greater:
-			matched = value > target
-		case Int64GreaterEqual:
-			matched = value >= target
-		}
-		if matched {
-			mask[index>>6] |= uint64(1) << uint(index&63)
-			matches++
-		}
-	}
-	return matches, nil
+	return MatchInt64SIMD(mask, values, predicate, target)
 }
 
 // MatchString writes one bit per input string into mask and returns the number
