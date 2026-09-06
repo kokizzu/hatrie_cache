@@ -339,7 +339,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M067 Top-K with offset for supported ordered paths.
 - [x] M068 Differential group-by updates for generic SQL tables. `GroupCountDifferentialRows` maintains exact signed COUNT transitions for callback-defined groups, including negative/overflow validation and no partial output; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M068a Exact generic differential COUNT group maintenance.
-- [ ] M069 Differential distinct updates for generic SQL tables.
+- [x] M069 Differential distinct updates for generic SQL tables. `DistinctDifferentialRows` maintains signed multiplicity transitions with boundary-only emissions, cloning, and negative/overflow validation; see [DIFFERENTIAL_DISTINCT.md](DIFFERENTIAL_DISTINCT.md).
 - [x] M069a Boundary-only differential distinct maintenance.
 - [ ] M070 Monotone aggregate specialization.
 - [x] M070a Append-only typed-table aggregate fast path.

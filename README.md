@@ -32,6 +32,7 @@ security guidance before exposing it on a network.
 - Indexed weighted temporal equi-joins: [differential temporal join](DIFFERENTIAL_TEMPORAL_JOIN.md)
 - Inclusive temporal distance intervals: [differential interval join](DIFFERENTIAL_INTERVAL_JOIN.md)
 - Differential COUNT group updates: [differential GROUP BY](DIFFERENTIAL_GROUP_BY.md)
+- Differential DISTINCT multiplicity transitions: [differential DISTINCT](DIFFERENTIAL_DISTINCT.md)
 - Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
 - Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
 - Deterministic replica replay checks: [replay digest](REPLAY_DIGEST.md)
