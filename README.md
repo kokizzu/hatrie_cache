@@ -16,6 +16,7 @@ security guidance before exposing it on a network.
 - Per-client compression-level negotiation: [compression negotiation](COMPRESSION_NEGOTIATION.md)
 - Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
 - Leader election independent from query workers: [leader election](LEADER_ELECTION.md)
+- Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
 - Codec byte and CPU accounting: [codec metrics](CODEC_METRICS.md)
 - Bounded independently scheduled processing stages: [Pipeline stages](PIPELINE_STAGES.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
