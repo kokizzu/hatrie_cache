@@ -249,7 +249,7 @@ name.
 - [ ] C153 Metadata consensus for partition ownership.
 - [ ] C154 Rolling schema changes across replicas.
 - [ ] C155 Rolling binary upgrades with compatibility gates.
-- [ ] C156 Cross-region replication policy.
+- [x] C156 Cross-region replication policy (see CROSS_REGION_REPLICATION.md).
 - [ ] C157 Cross-region backup restore drill.
 - [x] C158 Split-brain fencing (see SPLIT_BRAIN_FENCING.md).
 - [ ] C159 Failure-domain-aware replica placement.
