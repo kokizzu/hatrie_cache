@@ -1,31 +1,42 @@
-# Write Quorum Policy
+# Quorum Policy
 
-`hat/hatReplication` exposes `EvaluateWriteQuorum` as a small, explicit
-replication-policy helper. It validates the replica counts and returns the
-acknowledgement decision to the caller.
+`hat/hatReplication` exposes a small, reusable quorum-policy layer for callers
+that already have replica acknowledgement counts. It makes read and write
+thresholds explicit without changing the existing asynchronous replication
+default.
 
 ```go
-decision, err := hatReplication.EvaluateWriteQuorum(
-    replicaCount,
-    acknowledgedCount,
-    requiredAcknowledgements,
-)
+policy, err := hatReplication.NewDefaultQuorumPolicy(5)
 if err != nil {
-    if errors.Is(err, hatReplication.ErrWriteQuorumUnsatisfied) {
-        // The write did not reach the required durability level.
-    }
-    return err
+	return err
 }
-fmt.Println(decision.Satisfied)
+
+read, err := policy.EvaluateRead(3)
+if err != nil || !read.Satisfied {
+	return err
+}
+
+write, err := policy.EvaluateWrite(3)
+if err != nil || !write.Satisfied {
+	return err
+}
 ```
 
-`total` must be positive. `acknowledged` must be between zero and `total`,
-and `required` must be between one and `total`. `required` is deliberately
-caller-defined so a deployment can count local and remote participants using
-its own topology and failure policy.
+`NewDefaultQuorumPolicy` uses a majority for both reads and writes. Use
+`NewQuorumPolicy(total, readRequired, writeRequired)` when the deployment has
+an explicit availability policy. All thresholds must be positive and no
+greater than `total`; acknowledgement counts must be between zero and
+`total`. Invalid configuration and unsatisfied quorum results are returned as
+typed, `errors.Is`-compatible errors.
 
-An unsatisfied quorum returns both the decision and
-`ErrWriteQuorumUnsatisfied`. Invalid inputs return the zero decision and
-`ErrWriteQuorumInvalid`. The helper does not send network messages or mutate
-replication state; it only makes the policy decision deterministic and easy
-to test.
+The policy is an evaluation primitive: it evaluates acknowledgements supplied
+by the caller and does not send network requests, wait for replicas, or change
+the current asynchronous replication path. A caller requiring read/write
+intersection should choose thresholds where `readRequired + writeRequired >
+total`.
+
+The focused, full, and race verification is reproducible with:
+
+```sh
+make verify-t058
+```

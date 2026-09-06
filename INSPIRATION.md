@@ -471,6 +471,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T056a Deterministic conflict-version ordering with stable node and sequence tie-breaks.
 - [x] T057 Election and failover behavior for supported topologies.
 - [ ] T058 Quorum reads and writes.
+- [x] T058a Validated read/write quorum policy decisions with majority defaults (see QUORUM_POLICY.md).
 - [x] T059 Read-only mode during failover.
 - [x] T060 Replica health gate before serving stale-sensitive reads. Optional `RequireHealthyReplicaReads` / `-require-healthy-replica-reads` gates HTTP and native gRPC read commands and read-only typed batches on election health; the default remains off, and writes plus internal replication are unchanged.
 - [x] T061 Replication queue depth and error metrics - `/metrics` exposes queue depth, capacity, enqueue/drop, attempt, success/failure, retry, and age gauges/counters.

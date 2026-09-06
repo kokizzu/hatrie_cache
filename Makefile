@@ -6943,3 +6943,18 @@ verify-m088:
 
 deliver-m088-checklist:
 	sh ./scripts/deliver-m088-checklist.sh
+
+format-t058:
+	sh ./scripts/format-t058.sh
+
+test-t058-stage:
+	sh ./scripts/test-t058-stage.sh
+
+test-t058-edge:
+	sh ./scripts/test-t058-edge.sh
+
+verify-t058:
+	sh ./scripts/verify-t058.sh
+
+deliver-t058:
+	sh ./scripts/deliver-t058.sh
