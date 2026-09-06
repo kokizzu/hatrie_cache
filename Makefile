@@ -5798,3 +5798,31 @@ commit-part-checksum:
 .PHONY: push-part-checksum
 push-part-checksum:
 	bash ./scripts/deliver-part-checksum.sh push
+
+.PHONY: test-sql-replacing-merge
+test-sql-replacing-merge:
+	bash ./scripts/test-sql-replacing-merge.sh
+
+.PHONY: test-race-sql-replacing-merge
+test-race-sql-replacing-merge:
+	bash ./scripts/test-race-sql-replacing-merge.sh
+
+.PHONY: format-sql-replacing-merge
+format-sql-replacing-merge:
+	bash ./scripts/format-sql-replacing-merge.sh
+
+.PHONY: benchmark-sql-replacing-merge
+benchmark-sql-replacing-merge:
+	bash ./scripts/benchmark-sql-replacing-merge.sh
+
+.PHONY: deliver-sql-replacing-merge
+deliver-sql-replacing-merge:
+	bash ./scripts/deliver-sql-replacing-merge.sh preview
+
+.PHONY: commit-sql-replacing-merge
+commit-sql-replacing-merge:
+	bash ./scripts/deliver-sql-replacing-merge.sh commit
+
+.PHONY: push-sql-replacing-merge
+push-sql-replacing-merge:
+	bash ./scripts/deliver-sql-replacing-merge.sh push

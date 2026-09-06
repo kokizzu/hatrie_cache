@@ -86,6 +86,7 @@ name.
 - [ ] C029 Vertical merge that reads only changed columns.
 - [ ] C030 Compact-part format selected by row count and width.
 - [ ] C031 ReplacingMergeTree-style latest-row replacement.
+- [x] C031a Explicit stable-order replacing merge for versioned rows.
 - [ ] C032 CollapsingMergeTree-style sign-based row cancellation.
 - [ ] C033 SummingMergeTree-style merge-time summation.
 - [x] C034 Aggregating states for reusable grouped results.
