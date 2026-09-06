@@ -6660,3 +6660,25 @@ commit-pipeline-stages:
 
 push-pipeline-stages:
 	bash ./scripts/deliver-pipeline-stages.sh push
+
+# columnar-layout-selection-targets
+format-columnar-layout-selection:
+	bash ./scripts/format-columnar-layout-selection.sh
+
+test-columnar-layout-selection:
+	bash ./scripts/test-columnar-layout-selection.sh
+
+test-race-columnar-layout-selection:
+	bash ./scripts/test-race-columnar-layout-selection.sh
+
+benchmark-columnar-layout-selection:
+	bash ./scripts/benchmark-columnar-layout-selection.sh
+
+deliver-columnar-layout-selection:
+	bash ./scripts/deliver-columnar-layout-selection.sh preview
+
+commit-columnar-layout-selection:
+	bash ./scripts/deliver-columnar-layout-selection.sh commit
+
+push-columnar-layout-selection:
+	bash ./scripts/deliver-columnar-layout-selection.sh push

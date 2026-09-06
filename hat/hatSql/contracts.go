@@ -219,9 +219,9 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 	return values[row], true
 }
 
-// EncodeRepeatedStrings replaces highly repetitive all-string columns with a
-// dictionary. The source value slice is released only when the encoded form is
-// smaller in cardinality and has enough rows to justify its code array.
+// EncodeRepeatedStrings replaces all-string columns with a dictionary when the
+// estimated retained layout is smaller. The estimate accounts for row count,
+// string width, dictionary codes, and unique string headers.
 func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 	if batch == nil || batch.Rows < 4 || batch.Columns == nil {
 		return
@@ -236,6 +236,8 @@ func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 		positions := make(map[string]uint32)
 		strings := make([]string, 0)
 		codes := make([]uint32, len(values))
+		totalStringBytes := 0
+		uniqueStringBytes := 0
 		allStrings := true
 		for index, value := range values {
 			text, ok := value.(string)
@@ -248,15 +250,31 @@ func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 				code = uint32(len(strings))
 				positions[text] = code
 				strings = append(strings, text)
+				uniqueStringBytes += len(text)
 			}
+			totalStringBytes += len(text)
 			codes[index] = code
 		}
-		if !allStrings || len(strings)*2 > len(values) {
+		if !allStrings || !columnarDictionaryLayoutSmaller(len(values), len(strings), totalStringBytes, uniqueStringBytes) {
 			continue
 		}
 		batch.Dictionaries[field] = DictionaryColumn{Values: strings, Codes: codes}
 		delete(batch.Columns, field)
 	}
+}
+
+func columnarDictionaryLayoutSmaller(rows, unique, totalStringBytes, uniqueStringBytes int) bool {
+	if rows < 4 || unique == 0 || uniqueStringBytes < 0 || totalStringBytes < uniqueStringBytes {
+		return false
+	}
+	// Keep the dictionary's fixed code and string-header storage lower than the
+	// plain interface slice even when repeated strings share backing bytes.
+	if uint64(unique)*4 > uint64(rows)*3 {
+		return false
+	}
+	plainBytes := uint64(rows)*16 + uint64(totalStringBytes)
+	dictionaryBytes := uint64(rows)*4 + uint64(unique)*16 + uint64(uniqueStringBytes)
+	return dictionaryBytes < plainBytes
 }
 
 // ColumnarSourceResolver optionally supplies selected source fields in

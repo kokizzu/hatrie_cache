@@ -597,3 +597,5 @@ For each future unchecked item:
    push the completed feature as its own change.
 
 - [x] C016a Bounded independently scheduled pipeline stages with backpressure and cancellation.
+
+- [x] C030a Width-aware adaptive dictionary selection for compact columnar layouts.
