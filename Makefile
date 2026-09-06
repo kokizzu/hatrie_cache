@@ -5826,3 +5826,31 @@ commit-sql-replacing-merge:
 .PHONY: push-sql-replacing-merge
 push-sql-replacing-merge:
 	bash ./scripts/deliver-sql-replacing-merge.sh push
+
+.PHONY: test-sql-summing-merge
+test-sql-summing-merge:
+	bash ./scripts/test-sql-summing-merge.sh
+
+.PHONY: test-race-sql-summing-merge
+test-race-sql-summing-merge:
+	bash ./scripts/test-race-sql-summing-merge.sh
+
+.PHONY: format-sql-summing-merge
+format-sql-summing-merge:
+	bash ./scripts/format-sql-summing-merge.sh
+
+.PHONY: benchmark-sql-summing-merge
+benchmark-sql-summing-merge:
+	bash ./scripts/benchmark-sql-summing-merge.sh
+
+.PHONY: deliver-sql-summing-merge
+deliver-sql-summing-merge:
+	bash ./scripts/deliver-sql-summing-merge.sh preview
+
+.PHONY: commit-sql-summing-merge
+commit-sql-summing-merge:
+	bash ./scripts/deliver-sql-summing-merge.sh commit
+
+.PHONY: push-sql-summing-merge
+push-sql-summing-merge:
+	bash ./scripts/deliver-sql-summing-merge.sh push

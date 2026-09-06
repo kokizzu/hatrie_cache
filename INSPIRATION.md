@@ -89,6 +89,7 @@ name.
 - [x] C031a Explicit stable-order replacing merge for versioned rows.
 - [ ] C032 CollapsingMergeTree-style sign-based row cancellation.
 - [ ] C033 SummingMergeTree-style merge-time summation.
+- [x] C033a Explicit overflow-checked summing merge for selected numeric columns.
 - [x] C034 Aggregating states for reusable grouped results.
 - [x] C035 Lightweight delete patch parts.
 - [x] C036 Durable mutation queue with observable progress. `CommandJournal` and the LevelDB-backed `ReplicationOutboxStore` provide durable FIFO mutation recovery, dead-letter handling, bounded restore, and binary/JSON compatibility; `ReplayWithProgress` exposes concurrent replay progress and ETA. Verified with `make test-c036-durable-mutation-queue`, `make test-replay-progress`, `make test-race-replay-progress`, and `make benchmark-replay-progress`.
