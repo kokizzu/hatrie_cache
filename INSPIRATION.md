@@ -109,7 +109,7 @@ name.
 - [ ] C044 Zero-copy replication of immutable parts.
 - [x] C045 Part-level cache admission and eviction policy. `PartCachePolicy` provides explicit admission and deterministic LFU/LRU eviction planning; see [PART_CACHE_POLICY.md](PART_CACHE_POLICY.md).
 - [x] C045a Explicit part-cache admission and deterministic LFU/LRU eviction planning.
-- [ ] C046 Read amplification accounting per part and column.
+- [x] C046 Read amplification accounting per part and column. `ReadAmplificationRegistry` and RowBinary read statistics aggregate deterministic per-part/per-column bytes and ratios; see [READ_AMPLIFICATION.md](READ_AMPLIFICATION.md).
 - [x] C046a Per-part and per-column read amplification accounting with deterministic snapshots.
 - [x] C046a Statistics-only per-column RowBinary read accounting.
 - [x] C047 Adaptive granule sizing from observed predicate selectivity. `GranuleSizingPolicy` adapts bounded future scan granules from observed selectivity without retaining state or changing result semantics; see [GRANULE_SIZING.md](GRANULE_SIZING.md).

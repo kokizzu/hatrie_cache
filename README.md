@@ -24,6 +24,7 @@ security guidance before exposing it on a network.
 - Age-based hot, warm, and cold tiers: [storage tiers](STORAGE_TIERS.md)
 - Remote immutable parts with local metadata: [remote parts](REMOTE_PARTS.md)
 - Deterministic part-cache admission and eviction: [part cache policy](PART_CACHE_POLICY.md)
+- Per-part and per-column read amplification accounting: [read amplification](READ_AMPLIFICATION.md)
 - Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
 - Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
 - Deterministic replica replay checks: [replay digest](REPLAY_DIGEST.md)
