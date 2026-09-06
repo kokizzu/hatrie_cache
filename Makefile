@@ -6202,3 +6202,31 @@ commit-read-replica-policy:
 .PHONY: push-read-replica-policy
 push-read-replica-policy:
 	bash ./scripts/deliver-read-replica-policy.sh push
+
+.PHONY: format-replay-digest
+format-replay-digest:
+	bash ./scripts/format-replay-digest.sh
+
+.PHONY: test-replay-digest
+test-replay-digest:
+	bash ./scripts/test-replay-digest.sh
+
+.PHONY: test-race-replay-digest
+test-race-replay-digest:
+	bash ./scripts/test-race-replay-digest.sh
+
+.PHONY: benchmark-replay-digest
+benchmark-replay-digest:
+	bash ./scripts/benchmark-replay-digest.sh
+
+.PHONY: deliver-replay-digest
+deliver-replay-digest:
+	bash ./scripts/deliver-replay-digest.sh preview
+
+.PHONY: commit-replay-digest
+commit-replay-digest:
+	bash ./scripts/deliver-replay-digest.sh commit
+
+.PHONY: push-replay-digest
+push-replay-digest:
+	bash ./scripts/deliver-replay-digest.sh push
