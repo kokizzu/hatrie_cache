@@ -6526,3 +6526,19 @@ commit-disk-placement:
 	bash ./scripts/deliver-disk-placement.sh commit
 push-disk-placement:
 	bash ./scripts/deliver-disk-placement.sh push
+
+.PHONY: format-read-amplification test-read-amplification test-race-read-amplification benchmark-read-amplification deliver-read-amplification commit-read-amplification push-read-amplification
+format-read-amplification:
+	bash ./scripts/format-read-amplification.sh
+test-read-amplification:
+	bash ./scripts/test-read-amplification.sh
+test-race-read-amplification:
+	bash ./scripts/test-race-read-amplification.sh
+benchmark-read-amplification:
+	bash ./scripts/benchmark-read-amplification.sh
+deliver-read-amplification:
+	bash ./scripts/deliver-read-amplification.sh preview
+commit-read-amplification:
+	bash ./scripts/deliver-read-amplification.sh commit
+push-read-amplification:
+	bash ./scripts/deliver-read-amplification.sh push
