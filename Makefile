@@ -6931,3 +6931,9 @@ verify-m085:
 
 deliver-m085-checklist:
 	sh ./scripts/deliver-m085-checklist.sh
+
+verify-m087:
+	sh ./scripts/verify-m087.sh
+
+deliver-m087-checklist:
+	sh ./scripts/deliver-m087-checklist.sh
