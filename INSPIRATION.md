@@ -221,7 +221,7 @@ name.
 - [x] C129 Restore verification for supported data types.
 - [x] C130 Recovery checkpoints and replay validation.
 - [x] C131 Metrics and health endpoints are opt-in.
-- [ ] C132 System tables for parts, mutations, and query history.
+- [x] C132 System tables for parts, mutations, and query history. `SQLSystemTablesResolver` exposes bounded `system.parts`, `system.mutations`, `system.queries`, and `system.query_history` views without mutation values or query text; see [SYSTEM_TABLES.md](SYSTEM_TABLES.md).
 - [x] C133 Query log retention and sampling policy - SQLQueryManager provides bounded privacy-safe history with deterministic configurable completion sampling and no SQL-text retention (see QUERY_HISTORY.md).
 - [x] C134 OpenTelemetry spans for query phases. `QueryTraceRecorder.OpenTelemetrySpans` exposes SDK-neutral root/query and operator child spans with OTLP-width IDs, status, counters, cloned attributes, and documented end-anchored phase timing. It is opt-in and keeps SQL/error/row data out of exported spans; see [QUERY_TRACING.md](QUERY_TRACING.md).
 - [ ] C135 Trace IDs carried through remote work.

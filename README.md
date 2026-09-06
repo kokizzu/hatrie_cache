@@ -10,6 +10,7 @@ security guidance before exposing it on a network.
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
+- Read-only SQL operational catalog: [SQL system tables](SYSTEM_TABLES.md)
 - Importable Cartesian R-tree for selective rectangle and point queries: [R-tree spatial index](SPATIAL_RTREE.md)
 - Bit-preserving XOR-window float encoding: [Gorilla float codec](GORILLA_FLOAT.md)
 - Entropy-based codec selection: [codec selection](CODEC_SELECTION.md)
