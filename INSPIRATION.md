@@ -250,7 +250,7 @@ name.
 - [ ] C154 Rolling schema changes across replicas.
 - [ ] C155 Rolling binary upgrades with compatibility gates.
 - [x] C156 Cross-region replication policy (see CROSS_REGION_REPLICATION.md).
-- [ ] C157 Cross-region backup restore drill.
+- [x] C157 Cross-region backup restore drill. The object-store verification drill checks transferred payload sizes and SHA-256 digests before restore and exercises tamper rejection; see [CROSS_REGION_RESTORE_DRILL.md](CROSS_REGION_RESTORE_DRILL.md).
 - [x] C157a Cross-region backup/restore integrity drill (see CROSS_REGION_RESTORE_DRILL.md).
 - [x] C158 Split-brain fencing (see SPLIT_BRAIN_FENCING.md).
 - [x] C159 Failure-domain-aware replica placement (see FAILURE_DOMAIN_PLACEMENT.md).
