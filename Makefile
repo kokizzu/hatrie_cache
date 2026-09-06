@@ -6286,3 +6286,31 @@ commit-conflict-resolution:
 .PHONY: push-conflict-resolution
 push-conflict-resolution:
 	bash ./scripts/deliver-conflict-resolution.sh push
+
+.PHONY: format-codec-metrics
+format-codec-metrics:
+	bash ./scripts/format-codec-metrics.sh
+
+.PHONY: test-codec-metrics
+test-codec-metrics:
+	bash ./scripts/test-codec-metrics.sh
+
+.PHONY: test-race-codec-metrics
+test-race-codec-metrics:
+	bash ./scripts/test-race-codec-metrics.sh
+
+.PHONY: benchmark-codec-metrics
+benchmark-codec-metrics:
+	bash ./scripts/benchmark-codec-metrics.sh
+
+.PHONY: deliver-codec-metrics
+deliver-codec-metrics:
+	bash ./scripts/deliver-codec-metrics.sh preview
+
+.PHONY: commit-codec-metrics
+commit-codec-metrics:
+	bash ./scripts/deliver-codec-metrics.sh commit
+
+.PHONY: push-codec-metrics
+push-codec-metrics:
+	bash ./scripts/deliver-codec-metrics.sh push
