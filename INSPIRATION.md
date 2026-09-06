@@ -595,3 +595,5 @@ For each future unchecked item:
    benchmark note as appropriate.
 7. Update this checklist and `ADOPTED_QUERY_ENGINE_IDEAS.md`, then commit and
    push the completed feature as its own change.
+
+- [x] C016a Bounded independently scheduled pipeline stages with backpressure and cancellation.

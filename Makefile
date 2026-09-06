@@ -6638,3 +6638,25 @@ commit-compression-negotiation:
 	bash ./scripts/deliver-compression-negotiation.sh commit
 push-compression-negotiation:
 	bash ./scripts/deliver-compression-negotiation.sh push
+
+# pipeline-stage-targets
+format-pipeline-stages:
+	bash ./scripts/format-pipeline-stages.sh
+
+test-pipeline-stages:
+	bash ./scripts/test-pipeline-stages.sh
+
+test-race-pipeline-stages:
+	bash ./scripts/test-race-pipeline-stages.sh
+
+benchmark-pipeline-stages:
+	bash ./scripts/benchmark-pipeline-stages.sh
+
+deliver-pipeline-stages:
+	bash ./scripts/deliver-pipeline-stages.sh preview
+
+commit-pipeline-stages:
+	bash ./scripts/deliver-pipeline-stages.sh commit
+
+push-pipeline-stages:
+	bash ./scripts/deliver-pipeline-stages.sh push
