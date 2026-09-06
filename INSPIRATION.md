@@ -351,7 +351,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M072a Monotone differential watermark propagation.
 - [x] M073 Temporal joins. `DifferentialTemporalJoin` maintains weighted in-memory temporal inner equi-joins with per-key indexes, signed updates, cloning, and bounded time distance; see [DIFFERENTIAL_TEMPORAL_JOIN.md](DIFFERENTIAL_TEMPORAL_JOIN.md).
 - [x] M073a Indexed weighted temporal equi-join.
-- [ ] M074 Interval joins.
+- [x] M074 Interval joins. `DifferentialTemporalJoin` supports inclusive minimum and maximum timestamp distances while preserving max-only backward compatibility; see [DIFFERENTIAL_INTERVAL_JOIN.md](DIFFERENTIAL_INTERVAL_JOIN.md).
 - [x] M074a Inclusive timestamp interval bounds for temporal joins.
 - [x] M075 Temporal filtering for supported typed paths.
 
