@@ -6542,3 +6542,19 @@ commit-read-amplification:
 	bash ./scripts/deliver-read-amplification.sh commit
 push-read-amplification:
 	bash ./scripts/deliver-read-amplification.sh push
+
+.PHONY: format-storage-tier test-storage-tier test-race-storage-tier benchmark-storage-tier deliver-storage-tier commit-storage-tier push-storage-tier
+format-storage-tier:
+	bash ./scripts/format-storage-tier.sh
+test-storage-tier:
+	bash ./scripts/test-storage-tier.sh
+test-race-storage-tier:
+	bash ./scripts/test-race-storage-tier.sh
+benchmark-storage-tier:
+	bash ./scripts/benchmark-storage-tier.sh
+deliver-storage-tier:
+	bash ./scripts/deliver-storage-tier.sh preview
+commit-storage-tier:
+	bash ./scripts/deliver-storage-tier.sh commit
+push-storage-tier:
+	bash ./scripts/deliver-storage-tier.sh push

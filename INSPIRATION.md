@@ -102,6 +102,7 @@ name.
 - [ ] C041 Multiple disk policies with placement rules.
 - [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
 - [ ] C042 Hot, warm, and cold storage tiers.
+- [x] C042a Immutable age-threshold hot, warm, and cold tier policy over disk placement.
 - [ ] C043 Remote object-store parts with local metadata.
 - [ ] C044 Zero-copy replication of immutable parts.
 - [ ] C045 Part-level cache admission and eviction policy.
