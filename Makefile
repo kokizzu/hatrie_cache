@@ -6985,3 +6985,18 @@ list-inspiration-open:
 
 deliver-inspiration-list:
 	sh ./scripts/deliver-inspiration-list.sh
+
+inspect-frontier-metrics:
+	sh ./scripts/inspect-frontier-metrics.sh
+
+test-source-frontier-monitoring:
+	sh ./scripts/test-source-frontier-monitoring.sh
+
+format-source-frontier-monitoring:
+	sh ./scripts/format-source-frontier-monitoring.sh
+
+verify-source-frontier-monitoring:
+	sh ./scripts/verify-source-frontier-monitoring.sh
+
+deliver-source-frontier-monitoring:
+	sh ./scripts/deliver-source-frontier-monitoring.sh

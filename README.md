@@ -3850,3 +3850,5 @@ Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and 
 - [Quorum policy](QUORUM_POLICY.md)
 
 - [Cross-region restore drill](CROSS_REGION_RESTORE_DRILL.md)
+
+- [Source frontier monitoring](SOURCE_FRONTIER_MONITORING.md)

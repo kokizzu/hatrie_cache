@@ -89,14 +89,20 @@ type MonitoringOptions struct {
 	SQLRateLimiter *RateLimiter
 	// SQLQueryOptions is enforced for every monitoring SQL request, including
 	// streaming and paginated reads. Zero keeps the engine defaults.
-	SQLQueryOptions      SQLQueryOptions
-	Metrics              *APIMetrics
-	StartAt              time.Time
-	Snapshot             func() error
-	LevelDBStore         PersistentStore
-	LevelDBDirtyTracker  *LevelDBDirtyTracker
-	BackupSnapshotFormat SnapshotFormat
-	Journal              *CommandJournal
+	SQLQueryOptions SQLQueryOptions
+	Metrics         *APIMetrics
+	// SourceFrontier optionally exposes per-source progress in /metrics. It is
+	// disabled when nil for backward compatibility.
+	SourceFrontier *hatMetrics.SourceFrontierRegistry
+	// SourceFrontierObserved returns the global observed frontier used to
+	// calculate source lag. Without it, only source frontier gauges are emitted.
+	SourceFrontierObserved func() uint64
+	StartAt                time.Time
+	Snapshot               func() error
+	LevelDBStore           PersistentStore
+	LevelDBDirtyTracker    *LevelDBDirtyTracker
+	BackupSnapshotFormat   SnapshotFormat
+	Journal                *CommandJournal
 	// AsyncCommands enables the opt-in HTTP async command admission protocol.
 	// It is disabled by default and requires a journal with idempotency enabled.
 	AsyncCommands              bool
@@ -946,6 +952,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusCounter(&builder, "hatrie_cache_rate_limit_rejections_total", "Total dangerous API actions rejected by rate limiting.", node, apiMetrics.RateLimitRejectionsTotal)
 	writePrometheusGauge(&builder, "hatrie_cache_write_protection_enabled", "Whether dangerous API writes are currently blocked by write protection.", node, boolGauge(handler.options.WriteProtected))
 	writePrometheusGauge(&builder, "hatrie_cache_rate_limit_per_second", "Configured dangerous API action rate limit per caller per second; zero means disabled.", node, uint64(handler.options.RateLimiter.Limit()))
+	handler.writePrometheusSourceFrontierMetrics(&builder, node)
 
 	handler.writePrometheusStorageMetrics(&builder, node)
 	if handler.options.Journal != nil {
