@@ -8,6 +8,12 @@ mode=${1:-preview}
 commit_message='feat(grpc): expose public protobuf client surface'
 child='- [x] T150a Public importable gRPC client aliases over the language-neutral protobuf contract.'
 
+if [ "$mode" = push ]; then
+	git push
+	git rev-parse HEAD
+	exit 0
+fi
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-public-grpc-client.XXXXXX")
 index="$work/index"
 trap 'rm -rf -- "$work"' EXIT
@@ -16,27 +22,31 @@ base=$(git rev-parse HEAD)
 git show "$base:Makefile" > "$work/Makefile"
 git show "$base:INSPIRATION.md" > "$work/INSPIRATION.md"
 
+checklist_existing=0
 if awk '/^- \[x\] T150a / { found=1 } END { exit !found }' "$work/INSPIRATION.md"; then
-	printf '%s\n' 'T150a is already present in HEAD; refusing a duplicate delivery.' >&2
-	exit 1
+	checklist_existing=1
+else
+	awk -v child="$child" '
+	BEGIN { added=0 }
+	{
+		print
+		if (!added && $0 ~ /^- \[ \] T150 /) {
+			print child
+			added=1
+		}
+	}
+	END {
+		if (!added) {
+			print "T150 parent checklist row was not found" > "/dev/stderr"
+			exit 1
+		}
+	}' "$work/INSPIRATION.md" > "$work/INSPIRATION.next"
+	mv "$work/INSPIRATION.next" "$work/INSPIRATION.md"
 fi
 
-awk -v child="$child" '
-BEGIN { added=0 }
-{
-	print
-	if (!added && $0 ~ /^- \[ \] T150 /) {
-		print child
-		added=1
-	}
-}
-END {
-	if (!added) {
-		print "T150 parent checklist row was not found" > "/dev/stderr"
-		exit 1
-	}
-}' "$work/INSPIRATION.md" > "$work/INSPIRATION.next"
-mv "$work/INSPIRATION.next" "$work/INSPIRATION.md"
+if [ "$checklist_existing" -eq 1 ]; then
+	commit_message='fix(grpc): make client delivery idempotent'
+fi
 
 if ! awk '/^# public-grpc-client-targets$/ { found=1 } END { exit found }' "$work/Makefile"; then
 	awk '
