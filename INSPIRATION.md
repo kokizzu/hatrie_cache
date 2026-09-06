@@ -88,7 +88,7 @@ name.
 - [ ] C030 Compact-part format selected by row count and width.
 - [x] C031 ReplacingMergeTree-style latest-row replacement. `ReplaceSQLRows` provides stable-key-order latest-version selection with deterministic tie handling and input isolation; see [REPLACING_MERGE.md](REPLACING_MERGE.md).
 - [x] C031a Explicit stable-order replacing merge for versioned rows.
-- [ ] C032 CollapsingMergeTree-style sign-based row cancellation.
+- [x] C032 CollapsingMergeTree-style sign-based row cancellation. `CollapseSQLRows` pairs unmatched opposite signs by logical key, preserves survivors in input order, and reports invalid signs; see [COLLAPSING_MERGE.md](COLLAPSING_MERGE.md).
 - [x] C032a Explicit deterministic signed-row cancellation merge.
 - [ ] C033 SummingMergeTree-style merge-time summation.
 - [x] C033a Explicit overflow-checked summing merge for selected numeric columns.

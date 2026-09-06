@@ -1,27 +1,47 @@
 # Collapsing Merge
 
-`CollapseSQLRows` provides an explicit signed-row merge inspired by
-ClickHouse's `CollapsingMergeTree`.
+`hatSql.CollapseSQLRows` provides a deterministic CollapsingMergeTree-style
+merge primitive for rows carrying a `-1` or `1` sign. Rows with the same
+logical key and opposite signs cancel one unmatched pair at a time.
 
 ```go
 merged, err := hatSql.CollapseSQLRows(rows,
-	func(row hatSql.SQLRow) string { return row["id"].(string) },
-	func(row hatSql.SQLRow) (int, error) { return row["sign"].(int), nil },
+    func(row hatSql.SQLRow) string { return row["id"].(string) },
+    func(row hatSql.SQLRow) (int, error) {
+        return row["sign"].(int), nil
+    },
 )
 ```
 
-The sign callback must return `+1` or `-1`. Rows with the same key and
-opposite signs cancel. Cancellation uses the latest unmatched opposite row
-(LIFO), which makes the result deterministic even when input signs are out of
-order. Unmatched rows remain, in original input order, so incomplete
-cancellation is visible to the caller. Survivor maps are shallow copies and
-do not alias the input maps.
+The key callback defines the cancellation identity and the sign callback must
+return exactly `-1` or `1`. The implementation pairs a row with the latest
+unmatched opposite-sign row for that key. Surviving rows retain their input
+order, and output maps are shallow copies so output mutation does not mutate
+the source batch.
 
-Key and sign callback errors abort the operation with no partial result. Empty
-input returns nil. The merge is synchronous and explicit; it does not alter
-ordinary SQL execution or start background compaction.
+Unmatched rows remain in the result. This makes incomplete cancellation
+visible to the caller rather than silently dropping data. The function is a
+merge primitive only: it does not delete source parts, provide transactions,
+or establish a durability boundary.
 
-The reference benchmark processes 1,024 rows across 256 keys in about
-`296-303 us`, using `588,194-588,195 B/op` and `3,852 allocs/op`. The cost comes
-from per-key positive/negative stacks and defensive survivor copies. Use it at
-batch or immutable-part boundaries rather than for individual writes.
+## Example
+
+Input rows with signs:
+
+```text
+(id=a, sign=1, value=insert)
+(id=a, sign=-1, value=delete)
+(id=b, sign=1, value=unmatched)
+```
+
+The `a` pair cancels and the result is:
+
+```text
+(id=b, sign=1, value=unmatched)
+```
+
+Invalid callbacks, invalid signs, and callback errors are returned without a
+partial result. Focused coverage is in
+`hat/hatSql/collapsing_merge_test.go`, including pair selection, stable order,
+unmatched rows, input isolation, invalid arguments, and an allocation-reporting
+benchmark.
