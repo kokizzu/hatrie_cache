@@ -135,7 +135,7 @@ name.
 - [x] C059 Codec selection from sampled column entropy (see CODEC_SELECTION.md).
 - [x] C059a Stackless byte-entropy estimator with conservative raw-or-compressed codec recommendation.
 - [x] C059a Sampled adaptive codec selection from a bounded prefix.
-- [ ] C060 Compression ratio and decompression CPU accounting.
+- [x] C060 Compression ratio and decompression CPU accounting (see CODEC_METRICS.md).
 - [x] C060a Atomic codec byte and CPU accounting with derived compression ratio.
 - [x] C060a Opt-in codec size and synchronous decode-time accounting.
 

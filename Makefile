@@ -6877,3 +6877,9 @@ verify-c059:
 
 deliver-c059-checklist:
 	sh ./scripts/deliver-c059-checklist.sh
+
+verify-c060:
+	sh ./scripts/verify-c060.sh
+
+deliver-c060-checklist:
+	sh ./scripts/deliver-c060-checklist.sh
