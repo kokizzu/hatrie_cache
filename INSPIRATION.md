@@ -343,7 +343,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M069a Boundary-only differential distinct maintenance.
 - [ ] M070 Monotone aggregate specialization.
 - [x] M070a Append-only typed-table aggregate fast path.
-- [ ] M071 Late-data handling policy.
+- [x] M071 Late-data handling policy. `ClassifyLateData` provides allocation-free bounded-lateness decisions with explicit retain/drop behavior and inclusive boundaries; see [LATE_DATA_POLICY.md](LATE_DATA_POLICY.md).
 - [x] M071a Bounded-lateness classifier with explicit drop-or-retain policy and boundary semantics.
 - [x] M071a Explicit accept/reject/drop late-data policy.
 - [ ] M072 Watermark propagation.
