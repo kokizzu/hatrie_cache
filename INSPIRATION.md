@@ -100,7 +100,7 @@ name.
 - [x] C039 Partition pruning for local partitions.
 - [x] C040 Sampling key with deterministic SAMPLE semantics across partitions. `SampleSQLRows` hashes a caller-selected logical key with a seed, preserving selection across order and partition boundaries; see [DETERMINISTIC_SAMPLE.md](DETERMINISTIC_SAMPLE.md).
 - [x] C040a Deterministic key-hash sampling across partition boundaries.
-- [ ] C041 Multiple disk policies with placement rules.
+- [x] C041 Multiple disk policies with placement rules. `DiskPlacementPolicy` provides immutable weighted rules with deterministic key selection; see [DISK_PLACEMENT.md](DISK_PLACEMENT.md).
 - [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
 - [ ] C042 Hot, warm, and cold storage tiers.
 - [x] C042a Immutable age-threshold hot, warm, and cold tier policy over disk placement.

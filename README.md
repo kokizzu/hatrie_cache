@@ -20,6 +20,7 @@ security guidance before exposing it on a network.
 - Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
 - Cross-region replication policy: [cross-region replication](CROSS_REGION_REPLICATION.md)
 - Failure-domain-aware replica placement: [failure-domain placement](FAILURE_DOMAIN_PLACEMENT.md)
+- Deterministic weighted disk placement: [disk placement](DISK_PLACEMENT.md)
 - Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
 - Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
 - Deterministic replica replay checks: [replay digest](REPLAY_DIGEST.md)
