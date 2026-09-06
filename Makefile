@@ -5854,3 +5854,31 @@ commit-sql-summing-merge:
 .PHONY: push-sql-summing-merge
 push-sql-summing-merge:
 	bash ./scripts/deliver-sql-summing-merge.sh push
+
+.PHONY: test-sql-collapsing-merge
+test-sql-collapsing-merge:
+	bash ./scripts/test-sql-collapsing-merge.sh
+
+.PHONY: test-race-sql-collapsing-merge
+test-race-sql-collapsing-merge:
+	bash ./scripts/test-race-sql-collapsing-merge.sh
+
+.PHONY: format-sql-collapsing-merge
+format-sql-collapsing-merge:
+	bash ./scripts/format-sql-collapsing-merge.sh
+
+.PHONY: benchmark-sql-collapsing-merge
+benchmark-sql-collapsing-merge:
+	bash ./scripts/benchmark-sql-collapsing-merge.sh
+
+.PHONY: deliver-sql-collapsing-merge
+deliver-sql-collapsing-merge:
+	bash ./scripts/deliver-sql-collapsing-merge.sh preview
+
+.PHONY: commit-sql-collapsing-merge
+commit-sql-collapsing-merge:
+	bash ./scripts/deliver-sql-collapsing-merge.sh commit
+
+.PHONY: push-sql-collapsing-merge
+push-sql-collapsing-merge:
+	bash ./scripts/deliver-sql-collapsing-merge.sh push

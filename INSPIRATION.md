@@ -88,6 +88,7 @@ name.
 - [ ] C031 ReplacingMergeTree-style latest-row replacement.
 - [x] C031a Explicit stable-order replacing merge for versioned rows.
 - [ ] C032 CollapsingMergeTree-style sign-based row cancellation.
+- [x] C032a Explicit deterministic signed-row cancellation merge.
 - [ ] C033 SummingMergeTree-style merge-time summation.
 - [x] C033a Explicit overflow-checked summing merge for selected numeric columns.
 - [x] C034 Aggregating states for reusable grouped results.
