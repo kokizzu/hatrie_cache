@@ -96,7 +96,7 @@ name.
 - [x] C035 Lightweight delete patch parts.
 - [x] C036 Durable mutation queue with observable progress. `CommandJournal` and the LevelDB-backed `ReplicationOutboxStore` provide durable FIFO mutation recovery, dead-letter handling, bounded restore, and binary/JSON compatibility; `ReplayWithProgress` exposes concurrent replay progress and ETA. Verified with `make test-c036-durable-mutation-queue`, `make test-replay-progress`, `make test-race-replay-progress`, and `make benchmark-replay-progress`.
 - [x] C037 TTL expiration for supported values and records.
-- [ ] C038 TTL-driven rollup or recompression.
+- [x] C038 TTL-driven rollup or recompression. `TimeBucketRollup` supports verified bucket retention and boundary-only expiration without silently discarding partial buckets; see [TTL_ROLLUP.md](TTL_ROLLUP.md).
 - [x] C039 Partition pruning for local partitions.
 - [ ] C040 Sampling key with deterministic SAMPLE semantics across partitions.
 - [x] C040a Deterministic key-hash sampling across partition boundaries.
