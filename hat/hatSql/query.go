@@ -6471,7 +6471,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
-				case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG":
 				default:
 					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
 				}
@@ -14342,7 +14342,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -14562,6 +14562,24 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvalError{err: fmt.Errorf("CONTAINS expects TEXT arguments"), token: expr.token}
 			}
 			return textContains(text, search)
+		case "ARRAY_AGG", "GROUP_ARRAY":
+			values, err := sqlAggregateCollectionValues(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return values
+		case "GROUP_UNIQ_ARRAY":
+			values, err := sqlAggregateCollectionValues(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return sqlAggregateUniqueCollection(values)
+		case "MAP_AGG":
+			values, err := sqlAggregateMapValues(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return values
 		case "COUNT":
 			aggregateRows, err := sqlAggregateFilterRows(expr, group)
 			if err != nil {
@@ -15046,7 +15064,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 		return true
 	}
 	return false

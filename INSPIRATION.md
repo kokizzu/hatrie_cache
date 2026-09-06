@@ -166,7 +166,7 @@ name.
 - [x] C081a Ordered time-series gap filling with explicit half-open bounds.
 - [x] C082 Window functions for the supported SQL subset.
 - [ ] C083 ArrayJoin-style row expansion.
-- [ ] C084 Array and map aggregate functions.
+- [x] C084a Array and map aggregate functions with deterministic NULL and duplicate-key semantics.
 - [x] C085 Hash joins.
 - [x] C086 Grace-hash or spillable joins.
 - [x] C087 Runtime Bloom filters for joins.

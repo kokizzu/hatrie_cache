@@ -6726,3 +6726,25 @@ commit-rollup-ttl:
 
 push-rollup-ttl:
 	bash ./scripts/deliver-rollup-ttl.sh push
+
+# aggregate-collections-targets
+format-aggregate-collections:
+	bash ./scripts/format-aggregate-collections.sh
+
+test-aggregate-collections:
+	bash ./scripts/test-aggregate-collections.sh
+
+test-race-aggregate-collections:
+	bash ./scripts/test-race-aggregate-collections.sh
+
+benchmark-aggregate-collections:
+	bash ./scripts/benchmark-aggregate-collections.sh
+
+deliver-aggregate-collections:
+	bash ./scripts/deliver-aggregate-collections.sh preview
+
+commit-aggregate-collections:
+	bash ./scripts/deliver-aggregate-collections.sh commit
+
+push-aggregate-collections:
+	bash ./scripts/deliver-aggregate-collections.sh push
