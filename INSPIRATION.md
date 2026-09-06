@@ -121,6 +121,7 @@ name.
 - [x] C055 Delta encoding for monotonically changing numeric columns.
 - [x] C056 Double-delta encoding for timestamps.
 - [ ] C057 Gorilla-style floating-point encoding.
+- [x] C057a Bit-preserving XOR window codec for repeated and slowly changing float64 values.
 - [x] C058 Configurable storage compression codecs.
 - [ ] C059 Codec selection from sampled column entropy.
 - [x] C059a Sampled adaptive codec selection from a bounded prefix.

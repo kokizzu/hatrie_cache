@@ -6398,3 +6398,31 @@ commit-nullable-bitmap:
 .PHONY: push-nullable-bitmap
 push-nullable-bitmap:
 	bash ./scripts/deliver-nullable-bitmap.sh push
+
+.PHONY: format-gorilla-float
+format-gorilla-float:
+	bash ./scripts/format-gorilla-float.sh
+
+.PHONY: test-gorilla-float
+test-gorilla-float:
+	bash ./scripts/test-gorilla-float.sh
+
+.PHONY: test-race-gorilla-float
+test-race-gorilla-float:
+	bash ./scripts/test-race-gorilla-float.sh
+
+.PHONY: benchmark-gorilla-float
+benchmark-gorilla-float:
+	bash ./scripts/benchmark-gorilla-float.sh
+
+.PHONY: deliver-gorilla-float
+deliver-gorilla-float:
+	bash ./scripts/deliver-gorilla-float.sh preview
+
+.PHONY: commit-gorilla-float
+commit-gorilla-float:
+	bash ./scripts/deliver-gorilla-float.sh commit
+
+.PHONY: push-gorilla-float
+push-gorilla-float:
+	bash ./scripts/deliver-gorilla-float.sh push
