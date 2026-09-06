@@ -6454,3 +6454,31 @@ commit-codec-selection:
 .PHONY: push-codec-selection
 push-codec-selection:
 	bash ./scripts/deliver-codec-selection.sh push
+
+.PHONY: format-differential-multiset
+format-differential-multiset:
+	bash ./scripts/format-differential-multiset.sh
+
+.PHONY: test-differential-multiset
+test-differential-multiset:
+	bash ./scripts/test-differential-multiset.sh
+
+.PHONY: test-race-differential-multiset
+test-race-differential-multiset:
+	bash ./scripts/test-race-differential-multiset.sh
+
+.PHONY: benchmark-differential-multiset
+benchmark-differential-multiset:
+	bash ./scripts/benchmark-differential-multiset.sh
+
+.PHONY: deliver-differential-multiset
+deliver-differential-multiset:
+	bash ./scripts/deliver-differential-multiset.sh preview
+
+.PHONY: commit-differential-multiset
+commit-differential-multiset:
+	bash ./scripts/deliver-differential-multiset.sh commit
+
+.PHONY: push-differential-multiset
+push-differential-multiset:
+	bash ./scripts/deliver-differential-multiset.sh push

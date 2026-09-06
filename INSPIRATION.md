@@ -252,6 +252,7 @@ Materialize's Timely/Differential Dataflow runtime.
 
 - [x] M001 Incremental data-parallel dataflow for supported table paths.
 - [ ] M002 Generic `(data,time,diff)` multiset representation.
+- [x] M002a Generic differential multiset keyed by comparable data and time with zero-consolidation and overflow checks.
 - [x] M002a Exported differential row batch representation.
 - [ ] M003 Timely-style nested worker scopes.
 - [x] M004 Data-parallel map, filter, project, and reduce stages where supported.
