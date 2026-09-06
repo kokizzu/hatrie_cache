@@ -84,7 +84,7 @@ name.
 - [x] C026 Independent persistent data parts through the Pebble-backed path.
 - [x] C027 Part metadata and checksums.
 - [x] C028 Background merge and compaction.
-- [ ] C029 Vertical merge that reads only changed columns.
+- [x] C029 Vertical merge that reads only changed columns. `MergeColumnarParts` requests fields independently from each part and avoids loading unrequested wide columns; see [COLUMNAR_VERTICAL_MERGE.md](COLUMNAR_VERTICAL_MERGE.md).
 - [ ] C030 Compact-part format selected by row count and width.
 - [ ] C031 ReplacingMergeTree-style latest-row replacement.
 - [x] C031a Explicit stable-order replacing merge for versioned rows.

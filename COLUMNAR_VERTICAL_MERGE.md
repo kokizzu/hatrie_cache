@@ -1,49 +1,53 @@
-# Vertical Columnar Merge
+# Columnar Vertical Merge
 
-`hat/hatSql.MergeColumnarParts` combines physical columnar parts while asking
-each part for only the requested fields. A storage adapter can therefore pass
-the primary key and changed columns without reading unchanged wide payload
-columns.
+`hatSql.MergeColumnarParts` combines row-aligned columnar parts while loading
+only the requested fields from each part. This is useful for wide immutable
+parts when a merge, projection, or repair needs only a subset of columns.
 
 ```go
-type Part struct {
-    rows int
+parts := []hatSql.ColumnarMergePart{
+    hatSql.ColumnarBatchPart{Batch: partA},
+    hatSql.ColumnarBatchPart{Batch: partB},
 }
-
-func (part Part) RowCount() int { return part.rows }
-
-func (part Part) LoadColumn(field string) ([]interface{}, bool, error) {
-    // Read only field from the part's storage.
-    return loadField(field)
-}
-
-merged, err := hatSql.MergeColumnarParts(parts, []string{"id", "status"})
+merged, err := hatSql.MergeColumnarParts(parts, []string{"id", "region"})
 ```
 
-The merger validates non-negative row counts, duplicate or empty field names,
-missing fields, and per-field row alignment. Part order and row order are
-preserved. The built-in `ColumnarBatchPart` adapter reads either plain or
-dictionary columns and exposes the same logical values. The merged result uses
-the existing width-aware dictionary selector.
+`ColumnarMergePart.LoadColumn` receives each requested field independently.
+Storage implementations can use that callback to seek directly to a column
+file or compressed stream. Unrequested columns are not read or decoded. The
+result retains the input part order and contains only the requested fields.
 
-This API is additive and does not alter the default SQL resolver path. It is
-most useful to a storage provider that can defer physical column reads until
-`LoadColumn` is called.
+## Contract
 
-## Measurement
+Each part must report a non-negative row count. Every requested field must be
+present in every part and must return exactly that part's row count. The merge
+rejects empty input, empty or duplicate field names, nil parts, missing fields,
+short columns, and integer row-count overflow with an error.
 
-Run:
+`ColumnarBatchPart` adapts the in-memory `ColumnarBatch` representation. Plain
+columns are copied for requested fields, and dictionary columns are decoded
+only when requested. The output may dictionary-encode repeated strings after
+the merge, preserving normal `ColumnarBatch.Value` behavior.
 
-```text
-make benchmark-columnar-vertical-merge
+## Example
+
+Two parts with rows `(1, ap)`, `(2, eu)` and `(3, ap)`, `(4, us)` can be merged
+as follows:
+
+```go
+merged, err := hatSql.MergeColumnarParts(parts, []string{"id", "region"})
+// merged.Rows == 4
+// merged.Value("id", 2) == int64(3)
+// merged.Value("region", 3) == "us"
 ```
 
-The focused benchmark merges four 256-row parts while requesting two of three
-columns. The observed development-host result was:
+The adapter is deliberately lower-level than SQL planning. Callers choose the
+fields after planning the required projection, predicates, grouping keys, or
+ordering keys. This keeps the storage read policy explicit and avoids making
+unrequested wide payloads part of the merge working set.
 
-| Workload | ns/op | B/op | allocs/op |
-| --- | ---: | ---: | ---: |
-| Four 256-row parts, two requested columns | 49,053 | 85,104 | 19 |
+## Verification
 
-Rerun the benchmark for current-host numbers because scheduler and compiler
-versions affect it.
+`hat/hatSql/columnar_vertical_merge_test.go` verifies selective field loading,
+dictionary columns, part ordering, missing and short columns, invalid input,
+and a repeatable allocation-reporting benchmark.
