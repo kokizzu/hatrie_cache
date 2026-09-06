@@ -6958,3 +6958,9 @@ verify-t058:
 
 deliver-t058:
 	sh ./scripts/deliver-t058.sh
+
+audit-inspiration-remote:
+	sh ./scripts/audit-inspiration-remote.sh
+
+deliver-inspiration-audit:
+	sh ./scripts/deliver-inspiration-audit.sh
