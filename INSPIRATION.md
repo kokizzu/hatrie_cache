@@ -102,7 +102,7 @@ name.
 - [x] C040a Deterministic key-hash sampling across partition boundaries.
 - [x] C041 Multiple disk policies with placement rules. `DiskPlacementPolicy` provides immutable weighted rules with deterministic key selection; see [DISK_PLACEMENT.md](DISK_PLACEMENT.md).
 - [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
-- [ ] C042 Hot, warm, and cold storage tiers.
+- [x] C042 Hot, warm, and cold storage tiers. `StorageTierPolicy` selects an immutable age-threshold tier and delegates path placement; see [STORAGE_TIERS.md](STORAGE_TIERS.md).
 - [x] C042a Immutable age-threshold hot, warm, and cold tier policy over disk placement.
 - [ ] C043 Remote object-store parts with local metadata.
 - [x] C043a Validated immutable remote-part references with root-confined local metadata paths.
