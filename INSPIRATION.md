@@ -524,7 +524,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T091 Scheduled refresh and maintenance tasks.
 - [ ] T092 Fiber-style cooperative scheduler.
 - [x] T093 Cooperative yielding in bounded worker loops.
-- [ ] T094 Channels for typed producer-consumer exchange.
+- [x] T094 Channels for typed producer-consumer exchange. `hat/hatPipeline.Channel[T]` provides bounded buffering, context-aware send/receive, and idempotent close with drain semantics. See [CHANNELS.md](CHANNELS.md).
 - [x] T095 Net.box-like binary client path.
 - [x] T096 IProto-like compact protocol path.
 - [x] T097 Prepared calls and prepared SQL statements.
