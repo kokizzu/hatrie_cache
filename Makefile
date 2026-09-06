@@ -6883,3 +6883,9 @@ verify-c060:
 
 deliver-c060-checklist:
 	sh ./scripts/deliver-c060-checklist.sh
+
+verify-c123:
+	sh ./scripts/verify-c123.sh
+
+deliver-c123-checklist:
+	sh ./scripts/deliver-c123-checklist.sh
