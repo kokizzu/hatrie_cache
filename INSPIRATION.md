@@ -447,6 +447,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T054 Orphan replica detection and cleanup. Election status reports sorted liveness records whose node IDs are no longer in the current topology, and an authenticated `POST /api/election` with `{"cleanup_orphans":true}` prunes only those stale election records without touching cache or replica data.
 - [x] T055 Idempotent journal replay.
 - [ ] T056 Deterministic conflict resolution for concurrent writers.
+- [x] T056a Deterministic conflict-version ordering with stable node and sequence tie-breaks.
 - [x] T057 Election and failover behavior for supported topologies.
 - [ ] T058 Quorum reads and writes.
 - [x] T059 Read-only mode during failover.

@@ -6258,3 +6258,31 @@ commit-quorum-policy:
 .PHONY: push-quorum-policy
 push-quorum-policy:
 	bash ./scripts/deliver-quorum-policy.sh push
+
+.PHONY: format-conflict-resolution
+format-conflict-resolution:
+	bash ./scripts/format-conflict-resolution.sh
+
+.PHONY: test-conflict-resolution
+test-conflict-resolution:
+	bash ./scripts/test-conflict-resolution.sh
+
+.PHONY: test-race-conflict-resolution
+test-race-conflict-resolution:
+	bash ./scripts/test-race-conflict-resolution.sh
+
+.PHONY: benchmark-conflict-resolution
+benchmark-conflict-resolution:
+	bash ./scripts/benchmark-conflict-resolution.sh
+
+.PHONY: deliver-conflict-resolution
+deliver-conflict-resolution:
+	bash ./scripts/deliver-conflict-resolution.sh preview
+
+.PHONY: commit-conflict-resolution
+commit-conflict-resolution:
+	bash ./scripts/deliver-conflict-resolution.sh commit
+
+.PHONY: push-conflict-resolution
+push-conflict-resolution:
+	bash ./scripts/deliver-conflict-resolution.sh push
