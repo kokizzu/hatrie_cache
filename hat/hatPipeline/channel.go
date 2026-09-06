@@ -39,11 +39,18 @@ func NewChannel[T any](capacity int) (*Channel[T], error) {
 
 // Send publishes value, waiting for capacity or ctx cancellation.
 func (channel *Channel[T]) Send(ctx context.Context, value T) (err error) {
+	return channel.sendWithStop(ctx, nil, nil, value)
+}
+
+func (channel *Channel[T]) sendWithStop(ctx context.Context, stop <-chan struct{}, stopErr error, value T) (err error) {
 	if channel == nil || channel.values == nil {
 		return ErrChannelInvalid
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	channel.mu.Lock()
 	if channel.closed {
@@ -56,6 +63,11 @@ func (channel *Channel[T]) Send(ctx context.Context, value T) (err error) {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-stop:
+		if stopErr != nil {
+			return stopErr
+		}
+		return ErrChannelClosed
 	case <-channel.done:
 		return ErrChannelClosed
 	case channel.values <- value:

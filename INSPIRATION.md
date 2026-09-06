@@ -522,7 +522,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T089 Delay queue operations - public generic `hatDataStructure.DelayQueue` uses a stable 4-ary deadline heap with zero steady-state allocations and `PopReady`/`NextReadyAt` operations. See [DELAY_QUEUE.md](DELAY_QUEUE.md).
 - [x] T090 TTL queue expiration.
 - [x] T091 Scheduled refresh and maintenance tasks.
-- [ ] T092 Fiber-style cooperative scheduler.
+- [x] T092 Fiber-style cooperative scheduler. `hat/hatPipeline.Scheduler` provides fixed workers, bounded cooperative task submission, cancellation, fail-fast errors, and close/drain lifecycle semantics. See [SCHEDULER.md](SCHEDULER.md).
 - [x] T093 Cooperative yielding in bounded worker loops.
 - [x] T094 Channels for typed producer-consumer exchange. `hat/hatPipeline.Channel[T]` provides bounded buffering, context-aware send/receive, and idempotent close with drain semantics. See [CHANNELS.md](CHANNELS.md).
 - [x] T095 Net.box-like binary client path.
