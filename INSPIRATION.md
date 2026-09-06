@@ -104,6 +104,7 @@ name.
 - [ ] C042 Hot, warm, and cold storage tiers.
 - [x] C042a Immutable age-threshold hot, warm, and cold tier policy over disk placement.
 - [ ] C043 Remote object-store parts with local metadata.
+- [x] C043a Validated immutable remote-part references with root-confined local metadata paths.
 - [ ] C044 Zero-copy replication of immutable parts.
 - [ ] C045 Part-level cache admission and eviction policy.
 - [x] C045a Explicit part-cache admission and deterministic LFU/LRU eviction planning.

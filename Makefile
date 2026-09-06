@@ -6590,3 +6590,19 @@ commit-granule-sizing:
 	bash ./scripts/deliver-granule-sizing.sh commit
 push-granule-sizing:
 	bash ./scripts/deliver-granule-sizing.sh push
+
+.PHONY: format-remote-part test-remote-part test-race-remote-part benchmark-remote-part deliver-remote-part commit-remote-part push-remote-part
+format-remote-part:
+	bash ./scripts/format-remote-part.sh
+test-remote-part:
+	bash ./scripts/test-remote-part.sh
+test-race-remote-part:
+	bash ./scripts/test-race-remote-part.sh
+benchmark-remote-part:
+	bash ./scripts/benchmark-remote-part.sh
+deliver-remote-part:
+	bash ./scripts/deliver-remote-part.sh preview
+commit-remote-part:
+	bash ./scripts/deliver-remote-part.sh commit
+push-remote-part:
+	bash ./scripts/deliver-remote-part.sh push
