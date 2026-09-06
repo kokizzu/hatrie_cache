@@ -6622,3 +6622,19 @@ commit-json-subcolumns:
 	bash ./scripts/deliver-json-subcolumns.sh commit
 push-json-subcolumns:
 	bash ./scripts/deliver-json-subcolumns.sh push
+
+.PHONY: format-compression-negotiation test-compression-negotiation test-race-compression-negotiation benchmark-compression-negotiation deliver-compression-negotiation commit-compression-negotiation push-compression-negotiation
+format-compression-negotiation:
+	bash ./scripts/format-compression-negotiation.sh
+test-compression-negotiation:
+	bash ./scripts/test-compression-negotiation.sh
+test-race-compression-negotiation:
+	bash ./scripts/test-race-compression-negotiation.sh
+benchmark-compression-negotiation:
+	bash ./scripts/benchmark-compression-negotiation.sh
+deliver-compression-negotiation:
+	bash ./scripts/deliver-compression-negotiation.sh preview
+commit-compression-negotiation:
+	bash ./scripts/deliver-compression-negotiation.sh commit
+push-compression-negotiation:
+	bash ./scripts/deliver-compression-negotiation.sh push

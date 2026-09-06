@@ -207,6 +207,7 @@ name.
 - [x] C121 Native compressed block transfer with independent blocks. `hatCodec.EncodeCompressedBlocks` and `DecodeCompressedBlocks` provide an opt-in `HCB1` stream with independently bounded raw/DEFLATE blocks, raw fallback, and CRC32 validation; JSON/protobuf/gzip defaults remain unchanged. The measured tradeoff is faster encoding but larger wire output and slower decoding than one gzip stream. See [COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
 - [x] C122 Configurable wire compression.
 - [ ] C123 Compression level negotiation per client.
+- [x] C123a Compatible per-client compression level negotiation with explicit range intersection.
 - [x] C124 Column statistics in wire metadata. `BuildSQLRowBinaryColumnStats`, `EncodeSQLRowBinaryWithStats`, and `DecodeSQLRowBinaryWithStats` provide exact NULL/value counts and typed min/max metadata in an opt-in `HBS1` envelope; decoding recomputes and validates the metadata before returning it, while plain RowBinary remains unchanged. See [ROW_BINARY_STATS.md](ROW_BINARY_STATS.md).
 - [x] C125 Dictionary transfer reuse across batches. `NewSQLRowBinaryDictionaryEncoder` and `NewSQLRowBinaryDictionaryDecoder` retain selected string/bytes/JSON dictionaries across schema-compatible batches, send only additions plus compact ids, bound retained state, and leave plain RowBinary unchanged. Benchmarks cover first/reused encode/decode paths and show the bandwidth/CPU tradeoff. See [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
 - [x] C126 Backup snapshots with checksums.
