@@ -6964,3 +6964,18 @@ audit-inspiration-remote:
 
 deliver-inspiration-audit:
 	sh ./scripts/deliver-inspiration-audit.sh
+
+inspect-object-backup:
+	sh ./scripts/inspect-object-backup.sh
+
+test-object-store-verify-stage:
+	sh ./scripts/test-object-store-verify-stage.sh
+
+format-object-store-verify:
+	sh ./scripts/format-object-store-verify.sh
+
+verify-object-store-verify:
+	sh ./scripts/verify-object-store-verify.sh
+
+deliver-object-store-verify:
+	sh ./scripts/deliver-object-store-verify.sh

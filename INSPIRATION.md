@@ -251,6 +251,7 @@ name.
 - [ ] C155 Rolling binary upgrades with compatibility gates.
 - [x] C156 Cross-region replication policy (see CROSS_REGION_REPLICATION.md).
 - [ ] C157 Cross-region backup restore drill.
+- [x] C157a Cross-region backup/restore integrity drill (see CROSS_REGION_RESTORE_DRILL.md).
 - [x] C158 Split-brain fencing (see SPLIT_BRAIN_FENCING.md).
 - [x] C159 Failure-domain-aware replica placement (see FAILURE_DOMAIN_PLACEMENT.md).
 - [ ] C160 Query routing by region and locality.

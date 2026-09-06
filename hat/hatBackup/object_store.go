@@ -183,6 +183,49 @@ func (target *ObjectStoreTarget) Restore(ctx context.Context, destination string
 	return manifest, nil
 }
 
+// Verify downloads the manifest and streams every referenced object through a
+// checksum and size check without creating or publishing a restore directory.
+// It is useful for validating a copied object-store prefix during a recovery
+// drill.
+func (target *ObjectStoreTarget) Verify(ctx context.Context) (BundleManifest, error) {
+	if err := target.validate(ctx); err != nil {
+		return BundleManifest{}, err
+	}
+	manifest, err := target.downloadManifest(ctx)
+	if err != nil {
+		return BundleManifest{}, err
+	}
+	for _, file := range manifest.Files {
+		if err := checkObjectStoreContext(ctx); err != nil {
+			return BundleManifest{}, err
+		}
+		body, err := target.store.Get(ctx, target.objectKey(file.Path))
+		if err != nil {
+			return BundleManifest{}, fmt.Errorf("hatriecache: verify object backup file %q: %w", file.Path, err)
+		}
+		digest := sha256.New()
+		reader := io.Reader(&objectStoreContextReader{ctx: ctx, reader: body})
+		if file.Size < math.MaxInt64 {
+			reader = io.LimitReader(reader, file.Size+1)
+		}
+		readBytes, readErr := io.Copy(io.Discard, io.TeeReader(reader, digest))
+		closeErr := body.Close()
+		if readErr != nil {
+			return BundleManifest{}, fmt.Errorf("hatriecache: verify object backup file %q: %w", file.Path, readErr)
+		}
+		if closeErr != nil {
+			return BundleManifest{}, fmt.Errorf("hatriecache: close verified object backup file %q: %w", file.Path, closeErr)
+		}
+		if readBytes != file.Size {
+			return BundleManifest{}, fmt.Errorf("hatriecache: verified file %q has %d bytes, want %d", file.Path, readBytes, file.Size)
+		}
+		if got := hex.EncodeToString(digest.Sum(nil)); !strings.EqualFold(got, file.SHA256) {
+			return BundleManifest{}, fmt.Errorf("hatriecache: checksum mismatch for verified file %q", file.Path)
+		}
+	}
+	return manifest, nil
+}
+
 func (target *ObjectStoreTarget) validate(ctx context.Context) error {
 	if target == nil || target.store == nil {
 		return ErrObjectStoreNil

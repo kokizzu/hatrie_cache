@@ -3848,3 +3848,5 @@ CPU, allocation, and fallback tradeoffs.
 Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and inequality when supported, with portable fallback elsewhere. See [C015 SIMD predicate kernels](C015_SIMD.md) for the API, validation, and measurements.
 
 - [Quorum policy](QUORUM_POLICY.md)
+
+- [Cross-region restore drill](CROSS_REGION_RESTORE_DRILL.md)
