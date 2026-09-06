@@ -16155,3 +16155,37 @@ Before shared: 1406455 742242 B/op 30217 allocs/op; 1410190 742242 30217; 143394
 After independent: 1717944 41200 B/op 443 allocs/op; 1725849 41192 443; 1704107 41192 443; 1648318 41192 443; 1719211 41192 443
 After shared: 889249 30328 B/op 316 allocs/op; 894965 30328 316; 892509 30328 316; 893720 30328 316; 900877 30328 316
 ```
+
+## Rejected: Recovery-Time Parallel Replay
+
+T042 was tested as an explicit bounded `ReplayParallel` path. It partitioned
+single-key `SET` and `DEL` mutations by stable key hash, preserved each key's
+journal order, and left state-dependent or cross-key commands as serial
+barriers. The implementation was rolled back because the measured workload
+lost on both CPU and heap.
+
+Five runs on an AMD Ryzen 9 5950X, Go `amd64`, replaying 10,000 independent
+`SETINT` entries into a fresh trie per iteration:
+
+| Path | Median time | Median heap | Median allocations | Result |
+| --- | ---: | ---: | ---: | --- |
+| Existing serial `Replay` | 23.666 ms | 18,892,376 B | 100,028 | Baseline |
+| Rejected bounded parallel replay | 29.622 ms | 27,317,568 B | 100,215 | 1.25x slower; 1.45x more heap |
+
+Raw output from the rejected experiment:
+
+```text
+BenchmarkCommandJournalReplayParallel/serial-32         1  26093749 ns/op 18892376 B/op 100028 allocs/op
+BenchmarkCommandJournalReplayParallel/serial-32         1  21974178 ns/op 18892488 B/op 100029 allocs/op
+BenchmarkCommandJournalReplayParallel/serial-32         1  23666183 ns/op 18892376 B/op 100028 allocs/op
+BenchmarkCommandJournalReplayParallel/serial-32         1  24580558 ns/op 18892360 B/op 100027 allocs/op
+BenchmarkCommandJournalReplayParallel/serial-32         1  22684626 ns/op 18892336 B/op 100026 allocs/op
+BenchmarkCommandJournalReplayParallel/parallel-32       1  29367708 ns/op 27323032 B/op 100225 allocs/op
+BenchmarkCommandJournalReplayParallel/parallel-32       1  31271360 ns/op 27317568 B/op 100219 allocs/op
+BenchmarkCommandJournalReplayParallel/parallel-32       1  29622345 ns/op 27314992 B/op 100210 allocs/op
+BenchmarkCommandJournalReplayParallel/parallel-32       1  31273240 ns/op 27317608 B/op 100215 allocs/op
+BenchmarkCommandJournalReplayParallel/parallel-32       1  28786873 ns/op 27315952 B/op 100212 allocs/op
+```
+
+No parallel replay code remains in the tree, and the existing serial `Replay`
+path is unchanged.
