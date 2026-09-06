@@ -5910,3 +5910,31 @@ commit-sql-deterministic-sample:
 .PHONY: push-sql-deterministic-sample
 push-sql-deterministic-sample:
 	bash ./scripts/deliver-sql-deterministic-sample.sh push
+
+.PHONY: test-sql-differential-distinct
+test-sql-differential-distinct:
+	bash ./scripts/test-sql-differential-distinct.sh
+
+.PHONY: test-race-sql-differential-distinct
+test-race-sql-differential-distinct:
+	bash ./scripts/test-race-sql-differential-distinct.sh
+
+.PHONY: format-sql-differential-distinct
+format-sql-differential-distinct:
+	bash ./scripts/format-sql-differential-distinct.sh
+
+.PHONY: benchmark-sql-differential-distinct
+benchmark-sql-differential-distinct:
+	bash ./scripts/benchmark-sql-differential-distinct.sh
+
+.PHONY: deliver-sql-differential-distinct
+deliver-sql-differential-distinct:
+	bash ./scripts/deliver-sql-differential-distinct.sh preview
+
+.PHONY: commit-sql-differential-distinct
+commit-sql-differential-distinct:
+	bash ./scripts/deliver-sql-differential-distinct.sh commit
+
+.PHONY: push-sql-differential-distinct
+push-sql-differential-distinct:
+	bash ./scripts/deliver-sql-differential-distinct.sh push

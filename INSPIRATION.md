@@ -319,6 +319,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M067 Top-K with offset for supported ordered paths.
 - [ ] M068 Differential group-by updates for generic SQL tables.
 - [ ] M069 Differential distinct updates for generic SQL tables.
+- [x] M069a Boundary-only differential distinct maintenance.
 - [ ] M070 Monotone aggregate specialization.
 - [ ] M071 Late-data handling policy.
 - [ ] M072 Watermark propagation.
