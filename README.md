@@ -22,6 +22,7 @@ security guidance before exposing it on a network.
 - Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
 - Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
 - Deterministic replica replay checks: [replay digest](REPLAY_DIGEST.md)
+- Read replicas with explicit staleness bounds: [read-replica policy](READ_REPLICA_POLICY.md)
 - Codec byte and CPU accounting: [codec metrics](CODEC_METRICS.md)
 - Bounded independently scheduled processing stages: [Pipeline stages](PIPELINE_STAGES.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)

@@ -373,7 +373,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M086 Replica isolation for independent workloads.
 - [x] M087 Deterministic replica replay checks (see REPLAY_DIGEST.md).
 - [x] M087a Canonical ordered replay digests with sequence validation and deterministic mismatch errors.
-- [ ] M088 Read replicas with explicit staleness bounds.
+- [x] M088 Read replicas with explicit staleness bounds (see READ_REPLICA_POLICY.md).
 - [x] M088a Deterministic read-replica selection with required frontiers and maximum lag.
 - [x] M089 Failover and recovery of supported replicas.
 - [ ] M090 Independent compute and storage scaling.
