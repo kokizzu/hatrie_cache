@@ -7000,3 +7000,15 @@ verify-source-frontier-monitoring:
 
 deliver-source-frontier-monitoring:
 	sh ./scripts/deliver-source-frontier-monitoring.sh
+
+test-operator-memory-monitoring:
+	sh ./scripts/test-operator-memory-monitoring.sh
+
+format-operator-memory-monitoring:
+	sh ./scripts/format-operator-memory-monitoring.sh
+
+verify-operator-memory-monitoring:
+	sh ./scripts/verify-operator-memory-monitoring.sh
+
+deliver-operator-memory-monitoring:
+	sh ./scripts/deliver-operator-memory-monitoring.sh
