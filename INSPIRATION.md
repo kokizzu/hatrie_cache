@@ -273,7 +273,10 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M002 Generic `(data,time,diff)` multiset representation. `DifferentialMultiset[T]` stores comparable data and timestamps with signed diffs, immediate zero consolidation, and overflow-safe updates; see [DIFFERENTIAL_MULTISET.md](DIFFERENTIAL_MULTISET.md).
 - [x] M002a Generic differential multiset keyed by comparable data and time with zero-consolidation and overflow checks.
 - [x] M002a Exported differential row batch representation.
-- [ ] M003 Timely-style nested worker scopes.
+- [x] M003 Timely-style nested worker scopes. `hatPipeline.Scope` provides
+  cancellable worker ownership, first-error propagation, deterministic waiting,
+  and `GoChild` nesting without changing existing `Pipeline.Run` behavior; see
+  [PIPELINE_SCOPES.md](PIPELINE_SCOPES.md).
 - [x] M004 Data-parallel map, filter, project, and reduce stages where supported.
 - [x] M005 Shared arrangements reused by multiple compatible queries.
 - [x] M006 Arrangement keys derived from indexed predicates.
