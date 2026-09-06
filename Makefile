@@ -6859,3 +6859,15 @@ commit-c016-checklist:
 
 push-c016-checklist:
 	bash ./scripts/deliver-c016-checklist.sh push
+
+verify-c057:
+	bash ./scripts/verify-c057.sh
+
+deliver-c057-checklist:
+	bash ./scripts/deliver-c057-checklist.sh preview
+
+commit-c057-checklist:
+	bash ./scripts/deliver-c057-checklist.sh commit
+
+push-c057-checklist:
+	bash ./scripts/deliver-c057-checklist.sh push

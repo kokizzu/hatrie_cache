@@ -129,7 +129,7 @@ name.
 - [x] C054 Fixed-width date and datetime encodings - RowBinary stores dates as 4-byte epoch days and datetimes as 8-byte Unix nanoseconds, with explicit round-trip and payload-size verification (see ROW_BINARY.md).
 - [x] C055 Delta encoding for monotonically changing numeric columns.
 - [x] C056 Double-delta encoding for timestamps.
-- [ ] C057 Gorilla-style floating-point encoding.
+- [x] C057 Gorilla-style floating-point encoding. Bit-preserving XOR window encoding and exact-input validation are provided by hatCodec (see GORILLA_FLOAT.md).
 - [x] C057a Bit-preserving XOR window codec for repeated and slowly changing float64 values.
 - [x] C058 Configurable storage compression codecs.
 - [ ] C059 Codec selection from sampled column entropy.
