@@ -283,17 +283,20 @@ type PreparedQueryCacheStats = SQLPreparedQueryCacheStats
 // text with least-recently-used eviction. It is safe for concurrent query
 // execution.
 type SQLPreparedQueryCache struct {
-	mu       sync.Mutex
-	capacity int
-	entries  map[string]sqlPreparedQueryCacheEntry
-	order    *list.List
-	hits     uint64
-	misses   uint64
+	mu                    sync.Mutex
+	capacity              int
+	entries               map[string]sqlPreparedQueryCacheEntry
+	exactEntries          map[string]sqlPreparedQueryCacheEntry
+	versionedExactEntries map[sqlPreparedQueryCacheLookupKey]sqlPreparedQueryCacheEntry
+	order                 *list.List
+	hits                  uint64
+	misses                uint64
 }
 
 type sqlPreparedQueryCacheEntry struct {
-	query *sqlQuery
-	order *list.Element
+	query     *sqlQuery
+	order     *list.Element
+	lookupKey sqlPreparedQueryCacheLookupKey
 }
 
 // PreparedQueryCache caches immutable parsed, unbound SQL templates.
@@ -302,7 +305,13 @@ type PreparedQueryCache = SQLPreparedQueryCache
 // NewSQLPreparedQueryCache creates a bounded parsed-template cache. A nonpositive
 // capacity disables storage while preserving syntax and binding behavior.
 func NewSQLPreparedQueryCache(capacity int) *SQLPreparedQueryCache {
-	return &SQLPreparedQueryCache{capacity: capacity, entries: map[string]sqlPreparedQueryCacheEntry{}, order: list.New()}
+	return &SQLPreparedQueryCache{
+		capacity:              capacity,
+		entries:               map[string]sqlPreparedQueryCacheEntry{},
+		exactEntries:          map[string]sqlPreparedQueryCacheEntry{},
+		versionedExactEntries: map[sqlPreparedQueryCacheLookupKey]sqlPreparedQueryCacheEntry{},
+		order:                 list.New(),
+	}
 }
 
 // NewPreparedQueryCache creates a bounded parsed-template cache.
@@ -962,6 +971,10 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 	}
 }
 
+func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if _, handled, err := executeSQLColumnarVectorGroupAggregateRows(query, resolver, control, nil, visit); handled {
+		return err
+	}
 	if sqlQueryHasWithFill(query) {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 		if err != nil {
@@ -975,7 +988,6 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 		}
 		return nil
 	}
-func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	if query.limitBy != nil {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 		if err != nil {
@@ -4719,8 +4731,6 @@ func parseSQLQueryWithCache(source string, parameters []interface{}, cache *SQLP
 func (cache *SQLPreparedQueryCache) template(source string) (*sqlQuery, error) {
 	return cache.templateWithSchemaVersion(source, "")
 }
-	return cache.templateWithSchemaVersion(source, "")
-}
 
 func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 	tokens, err := lexSQL(source)
@@ -7438,16 +7448,19 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 // executeSQLColumnarScan keeps predicate columns separate from projected
 // columns. It only accepts a single-source field projection with a simple
 // field/literal predicate, so every other query keeps the general executor.
+func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
 	if sqlQueryHasWithFill(q) {
 		return SQLQueryResult{}, false, nil
 	}
-func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
 	columnar, ok := resolver.(SQLColumnarSourceResolver)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
 	if q.limitBy != nil {
 		return SQLQueryResult{}, false, nil
+	}
+	if result, handled, err := executeSQLColumnarVectorGroupAggregate(q, columnar, control, metrics, outer); handled {
+		return result, true, err
 	}
 	if result, handled, err := executeSQLColumnarDictionaryGroupAggregate(q, columnar, control, metrics, outer); handled {
 		return result, true, err
@@ -7750,7 +7763,7 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, _, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -9054,6 +9067,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	filterStarted := time.Now()
 	matched := 0
 	scannedRows := 0
+	sparsePrimary := false
 	scanRows := func(start, end int) error {
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if control != nil {
@@ -9088,7 +9102,8 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		return nil
 	}
 	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
-		segmentStart, segmentEnd, sparsePrimary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+		segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+		sparsePrimary = primary
 		if !sparsePrimary {
 			segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
 		}
@@ -9116,7 +9131,11 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			filterName = "COLUMNAR DICTIONARY IN FILTER"
 		}
 		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
-			metrics.record("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+			node := "COLUMNAR SEGMENT SKIP"
+			if sparsePrimary {
+				node = "COLUMNAR PRIMARY MARK SKIP"
+			}
+			metrics.record(node, sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
 		}
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
@@ -11693,6 +11712,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 				return rows, available, err
 			}
 		}
+	}
+	if rows, indexed, err := resolveSQLMultikeyIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
 	}
 	if condition.op == "AND" {
 		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver, metrics); indexed || err != nil {
@@ -14737,6 +14759,35 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvalError{err: fmt.Errorf("CONTAINS expects TEXT arguments"), token: expr.token}
 			}
 			return textContains(text, search)
+		case "ARRAY_CONTAINS":
+			if len(expr.args) != 2 {
+				return sqlEvalError{err: fmt.Errorf("ARRAY_CONTAINS expects exactly two arguments"), token: expr.token}
+			}
+			value := evalSQLExpr(expr.args[0], group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			query := evalSQLExpr(expr.args[1], group, row)
+			if err := sqlExpressionError(query); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if value == nil || query == nil {
+				return nil
+			}
+			elements, ok := value.([]interface{})
+			if !ok {
+				return false
+			}
+			for _, element := range elements {
+				matched := sqlBinaryValueWithCollation("=", element, query, expr.collation)
+				if err := sqlExpressionError(matched); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				if matched == true {
+					return true
+				}
+			}
+			return false
 		case "ARRAY_AGG", "GROUP_ARRAY":
 			values, err := sqlAggregateCollectionValues(expr, group)
 			if err != nil {
@@ -15750,9 +15801,6 @@ func resolveSQLColumnarSource(resolver ColumnarSourceResolver, name, key string,
 	batch, available, err := resolver.ResolveSQLColumnarSource(name, key, fields)
 	return batch, nil, available, err
 }
-	if rows, indexed, err := resolveSQLMultikeyIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
-		return rows, indexed, err
-	}
 func resolveSQLMultikeyIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, hint SQLIndexHint) ([]SQLRow, bool, error) {
 	if condition.kind != "func" || !strings.EqualFold(condition.name, "ARRAY_CONTAINS") || len(condition.args) != 2 {
 		return nil, false, nil
@@ -15775,33 +15823,3 @@ func resolveSQLMultikeyIndexedSource(source sqlSource, condition sqlExpr, resolv
 	}
 	return rows, available, err
 }
-
-		case "ARRAY_CONTAINS":
-			if len(expr.args) != 2 {
-				return sqlEvalError{err: fmt.Errorf("ARRAY_CONTAINS expects exactly two arguments"), token: expr.token}
-			}
-			value := evalSQLExpr(expr.args[0], group, row)
-			if err := sqlExpressionError(value); err != nil {
-				return sqlEvaluationFailure(err)
-			}
-			query := evalSQLExpr(expr.args[1], group, row)
-			if err := sqlExpressionError(query); err != nil {
-				return sqlEvaluationFailure(err)
-			}
-			if value == nil || query == nil {
-				return nil
-			}
-			elements, ok := value.([]interface{})
-			if !ok {
-				return false
-			}
-			for _, element := range elements {
-				matched := sqlBinaryValueWithCollation("=", element, query, expr.collation)
-				if err := sqlExpressionError(matched); err != nil {
-					return sqlEvaluationFailure(err)
-				}
-				if matched == true {
-					return true
-				}
-			}
-			return false
