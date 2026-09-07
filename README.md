@@ -3920,6 +3920,14 @@ correctness for reusable consumers. See
 [LINEAR_INDEXED_JOINS.md](LINEAR_INDEXED_JOINS.md) for the arrangement
 contract.
 
+## Replica Lag Routing
+
+`hatReplication.SelectReadReplica` filters candidates by required frontier and
+maximum lag before deterministic freshness and health selection. A zero lag
+bound requires a replica at or ahead of the observed frontier; no transport or
+endpoint discovery is implied. See
+[REPLICA_LAG_ROUTING.md](REPLICA_LAG_ROUTING.md) for the policy contract.
+
 ## Parallel NDJSON Input Parsing
 
 `hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide
