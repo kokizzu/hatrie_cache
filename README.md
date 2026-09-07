@@ -4018,3 +4018,11 @@ partition-local `COUNT`, `SUM`, `MIN`, `MAX`, and `COUNT DISTINCT` state without
 replaying every source change. The API is explicit and does not deduplicate
 retries; see [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md)
 for the contract, usage, and benchmark.
+
+## Distributed Join Data Movement
+
+`hatSql.TypedTableJoinOptions.TrackDataMovement` enables cumulative per-side
+change, row-image, and logical-byte accounting; it is disabled by default so
+ordinary joins pay no tracking cost. See
+[DISTRIBUTED_JOIN_DATA_MOVEMENT.md](DISTRIBUTED_JOIN_DATA_MOVEMENT.md) for
+the exact accounting definition and benchmark.

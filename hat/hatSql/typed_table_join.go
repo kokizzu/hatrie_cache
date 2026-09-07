@@ -39,8 +39,10 @@ type TypedTableJoin struct {
 	leftIndex, rightIndex             map[string]map[string]struct{}
 	pairs                             map[typedTableJoinPair]struct{}
 	semijoinReduction                 bool
+	trackDataMovement                 bool
 	leftPending, rightPending         map[string]map[string]struct{}
 	leftPendingKeys, rightPendingKeys map[string]string
+	dataMovement                      TypedTableJoinDataMovement
 }
 
 // NewTypedTableJoin snapshots both current tables and begins tracking changes
@@ -74,6 +76,7 @@ func NewTypedTableJoinWithOptions(left, right *TypedTable, definition TypedTable
 		leftRows: map[string][]TypedTableValue{}, rightRows: map[string][]TypedTableValue{},
 		leftIndex: map[string]map[string]struct{}{}, rightIndex: map[string]map[string]struct{}{}, pairs: map[typedTableJoinPair]struct{}{},
 		semijoinReduction: options.SemijoinReduction,
+		trackDataMovement: options.TrackDataMovement,
 		leftPending:       map[string]map[string]struct{}{}, rightPending: map[string]map[string]struct{}{},
 		leftPendingKeys: map[string]string{}, rightPendingKeys: map[string]string{},
 	}
@@ -116,6 +119,7 @@ func (join *TypedTableJoin) ApplyLeft(changes []TypedTableChange) error {
 	}
 	join.mu.Lock()
 	defer join.mu.Unlock()
+	join.recordLeftDataMovement(changes)
 	if len(changes) == 1 {
 		return join.applyLeftOneLocked(changes[0])
 	}
@@ -187,6 +191,7 @@ func (join *TypedTableJoin) ApplyRight(changes []TypedTableChange) error {
 	}
 	join.mu.Lock()
 	defer join.mu.Unlock()
+	join.recordRightDataMovement(changes)
 	if len(changes) == 1 {
 		return join.applyRightOneLocked(changes[0])
 	}

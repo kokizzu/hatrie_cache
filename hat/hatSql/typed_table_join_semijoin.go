@@ -4,6 +4,7 @@ package hatSql
 // table join. The zero value preserves the original full-row arrangement.
 type TypedTableJoinOptions struct {
 	SemijoinReduction bool
+	TrackDataMovement bool
 }
 
 // TypedTableJoinStats describes the rows currently retained by a join. With

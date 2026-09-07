@@ -192,6 +192,18 @@ func (arrangement *TypedTableJoinArrangement) Stats() (TypedTableJoinStats, erro
 	return entry.join.Stats(), nil
 }
 
+// DataMovement returns cumulative changefeed input accounting for the shared
+// join arrangement.
+func (arrangement *TypedTableJoinArrangement) DataMovement() (TypedTableJoinDataMovement, error) {
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return TypedTableJoinDataMovement{}, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.join.DataMovement(), nil
+}
+
 func (arrangement *TypedTableJoinArrangement) Release() bool {
 	if arrangement == nil {
 		return false
