@@ -4048,3 +4048,13 @@ the contract, memory boundary, and measured cost.
 sink partitions with deterministic snapshot and restore support. See
 [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md) for the contract and measured
 cost; it does not claim exactly-once sink delivery.
+
+## SQL Sink Commit Coordination
+
+`hatSql.SQLSinkCommitCoordinator` adds an opt-in idempotent commit gate for
+sink transaction retries, including single-flight behavior for concurrent
+attempts and snapshot/restore support. See [SQL_SINK_COMMIT.md](SQL_SINK_COMMIT.md)
+for the contract, durability boundary, and measured cost. The caller must
+persist the commit record atomically with the sink effect or make the sink
+operation idempotent; the coordinator alone cannot guarantee external
+exactly-once delivery.
