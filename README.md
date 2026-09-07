@@ -3944,6 +3944,14 @@ ordered `INSERT` or `UPDATE` changes with before/after values; `Delete` emits
 rescanning the source. See [UPSERT_SOURCES.md](UPSERT_SOURCES.md) for the
 contract and its scope.
 
+## CDC Envelopes
+
+`hatSql.TypedTableChange` normalizes typed-table mutations as ordered
+`INSERT`, `UPDATE`, or `DELETE` envelopes with key and before/after rows.
+Arrangements and projections can consume the same validated shape. External
+broker offsets, source transaction IDs, and acknowledgements remain separate.
+See [CDC_ENVELOPES.md](CDC_ENVELOPES.md) for the envelope contract.
+
 ## Parallel NDJSON Input Parsing
 
 `hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide

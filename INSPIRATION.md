@@ -318,7 +318,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M039 Compaction constrained by active read frontiers.
 - [ ] M040 Append-only fast path selected from source metadata.
 - [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).
-- [ ] M042 CDC envelope normalization.
+- [x] M042 CDC envelope normalization. `TypedTableChange` carries normalized operation, key, before/after rows, and monotone sequence data for arrangements; see [CDC_ENVELOPES.md](CDC_ENVELOPES.md).
 - [ ] M043 Kafka-style source offset tracking.
 - [ ] M044 Source transaction grouping.
 - [ ] M045 Exactly-once source ingestion.
