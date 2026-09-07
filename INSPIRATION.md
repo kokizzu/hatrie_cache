@@ -324,7 +324,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M043 Kafka-style source offset tracking.
 - [x] M044 Source transaction grouping - `SQLSourceOffsetTracker.AdvanceTransaction` applies a distinct multi-partition source transaction only when every member is newer; see [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md).
 - [ ] M045 Exactly-once source ingestion.
-- [ ] M046 Sink progress and acknowledged frontiers.
+- [x] M046 Sink progress and acknowledged frontiers - `SQLSinkProgressTracker` records monotone per-sink/partition acknowledgements with validated batch updates and deterministic snapshots; see [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md).
 - [ ] M047 Exactly-once sink commits.
 - [x] M048 Backpressure for asynchronous producers and subscribers.
 - [x] M049 Operator cancellation through context propagation.

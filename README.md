@@ -4041,3 +4041,10 @@ for usage and exactly-once boundaries.
 group of source partition offsets when every member is newer. See
 [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md) for
 the contract, memory boundary, and measured cost.
+
+## SQL Sink Progress
+
+`hatSql.SQLSinkProgressTracker` records monotone acknowledged frontiers for
+sink partitions with deterministic snapshot and restore support. See
+[SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md) for the contract and measured
+cost; it does not claim exactly-once sink delivery.
