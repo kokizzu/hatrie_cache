@@ -16285,6 +16285,37 @@ BenchmarkPluginRegistryReplace-32 3143766 76.97 ns/op 32 B/op 1 allocs/op
 BenchmarkPluginRegistryReplace-32 3088768 77.45 ns/op 32 B/op 1 allocs/op
 ```
 
+## Deterministic Ordered Parallel Map
+
+The opt-in `hatPipeline.OrderedMap` benchmark maps 1,024 integers with four
+workers and compares the same transform in a sequential loop. Five samples
+were collected on an AMD Ryzen 9 5950X.
+
+| Path | Time | Heap | Allocs |
+| --- | ---: | ---: | ---: |
+| Ordered parallel map | 14,926-16,352 ns/op | 8,857-8,858 B/op | 11/op |
+| Sequential loop | 2,019-6,775 ns/op | 8,192 B/op | 1/op |
+
+This cheap-work fixture is intentionally a warning: deterministic parallel
+execution has coordination overhead and is not a default replacement for a
+direct loop. It is useful when callback work is materially heavier and output
+order must remain stable. See [ORDERED_MAP.md](ORDERED_MAP.md).
+
+Raw output from `make benchmark-ordered-map-clean`:
+
+```text
+BenchmarkOrderedMap-32 17281 14926 ns/op 8858 B/op 11 allocs/op
+BenchmarkOrderedMap-32 15021 15435 ns/op 8858 B/op 11 allocs/op
+BenchmarkOrderedMap-32 14056 16352 ns/op 8858 B/op 11 allocs/op
+BenchmarkOrderedMap-32 15165 15035 ns/op 8857 B/op 11 allocs/op
+BenchmarkOrderedMap-32 16963 15672 ns/op 8857 B/op 11 allocs/op
+BenchmarkSequentialMap-32 110226 2019 ns/op 8192 B/op 1 allocs/op
+BenchmarkSequentialMap-32 87350 4538 ns/op 8192 B/op 1 allocs/op
+BenchmarkSequentialMap-32 48284 4369 ns/op 8192 B/op 1 allocs/op
+BenchmarkSequentialMap-32 50458 5287 ns/op 8192 B/op 1 allocs/op
+BenchmarkSequentialMap-32 41362 6775 ns/op 8192 B/op 1 allocs/op
+```
+
 ## Parallel And Hedged Replica Reads
 
 This five-run local benchmark uses static callbacks and three replicas for

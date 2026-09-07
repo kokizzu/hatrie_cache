@@ -328,7 +328,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M047 Exactly-once sink commits - `hatSql.SQLSinkCommitCoordinator` provides an opt-in idempotent sink commit gate with concurrent single-flight, conflict detection, retry cleanup, and snapshot/restore; atomic persistence with the sink or an idempotent sink callback remains required; see [SQL_SINK_COMMIT.md](SQL_SINK_COMMIT.md).
 - [x] M048 Backpressure for asynchronous producers and subscribers.
 - [x] M049 Operator cancellation through context propagation.
-- [ ] M050 Timely-style worker parallelism with deterministic merge.
+- [x] M050 Timely-style worker parallelism with deterministic merge. Added opt-in generic `hatPipeline.OrderedMap`, which claims input indexes concurrently and merges directly into stable result positions while canceling cooperative work on error; see [ORDERED_MAP.md](ORDERED_MAP.md). The cheap-work benchmark shows why it is not a default sequential-loop replacement.
 - [ ] M051 Compiled dataflow intermediate representation.
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [ ] M053 Extensible optimizer rule framework.
