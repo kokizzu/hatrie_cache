@@ -317,7 +317,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M039 Compaction constrained by active read frontiers.
 - [ ] M040 Append-only fast path selected from source metadata.
-- [ ] M041 Upsert-source semantics with key replacement.
+- [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).
 - [ ] M042 CDC envelope normalization.
 - [ ] M043 Kafka-style source offset tracking.
 - [ ] M044 Source transaction grouping.

@@ -3936,6 +3936,14 @@ decision primitive; replication, quorum acknowledgement, and metadata
 consensus remain separate concerns. See
 [CONFLICT_RESOLUTION.md](CONFLICT_RESOLUTION.md) for the ordering contract.
 
+## Upsert Sources
+
+`hatSql.TypedTable.Upsert` keeps one current row per application key and emits
+ordered `INSERT` or `UPDATE` changes with before/after values; `Delete` emits
+`DELETE`. Consumers can apply these CDC-shaped changes to arrangements without
+rescanning the source. See [UPSERT_SOURCES.md](UPSERT_SOURCES.md) for the
+contract and its scope.
+
 ## Parallel NDJSON Input Parsing
 
 `hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide
