@@ -106,7 +106,7 @@ name.
 - [x] C042a Immutable age-threshold hot, warm, and cold tier policy over disk placement.
 - [x] C043 Remote object-store parts with local metadata. `RemotePartReference` validates supported object URIs and root-confined metadata paths; see [REMOTE_PARTS.md](REMOTE_PARTS.md).
 - [x] C043a Validated immutable remote-part references with root-confined local metadata paths.
-- [ ] C044 Zero-copy replication of immutable parts.
+- [x] C044 Zero-copy replication of immutable parts. `hatMerkle.CopyImmutablePartFile` validates the declared file boundary and preserves `io.Copy` native transfer hooks; `CopyImmutablePart` supplies the verified streaming fallback. See [ZERO_COPY_PARTS.md](ZERO_COPY_PARTS.md).
 - [x] C045 Part-level cache admission and eviction policy. `PartCachePolicy` provides explicit admission and deterministic LFU/LRU eviction planning; see [PART_CACHE_POLICY.md](PART_CACHE_POLICY.md).
 - [x] C045a Explicit part-cache admission and deterministic LFU/LRU eviction planning.
 - [x] C046 Read amplification accounting per part and column. `ReadAmplificationRegistry` and RowBinary read statistics aggregate deterministic per-part/per-column bytes and ratios; see [READ_AMPLIFICATION.md](READ_AMPLIFICATION.md).
