@@ -3994,3 +3994,12 @@ pending-key metadata while preserving live join correctness when counterparts
 arrive later. The option is disabled by default; see
 [SEMIJOIN_REDUCTION.md](SEMIJOIN_REDUCTION.md) for the contract and measured
 tradeoff.
+
+## Append-Only Source Metadata
+
+`hatSql.TypedTable.ChangeMetadata` and
+`TypedTableAggregate.ApplyWithMetadata` let a source-owned append-only fact
+select the monotone aggregate path without rescanning the batch. The metadata
+path is optional and keeps the existing default behavior; see
+[SOURCE_APPEND_ONLY_METADATA.md](SOURCE_APPEND_ONLY_METADATA.md) for the
+contract and benchmark.

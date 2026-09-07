@@ -304,6 +304,7 @@ type TypedTable struct {
 	columnar   typedTableColumnarCache
 	patchParts *typedTablePatchState
 	mvcc       *typedTableMVCCState
+	appendOnly bool
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -333,6 +334,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 			options: schema.ColumnarCache,
 		},
 		patchParts: newTypedTablePatchState(schema.PatchParts),
+		appendOnly: true,
 	}
 	if schema.MVCC.Enabled {
 		table.mvcc = newTypedTableMVCCState()
@@ -411,6 +413,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	change := TypedTableChange{Key: key, After: cloneTypedTableValues(values)}
 	if exists && !table.typedTableRowDeletedLocked(index) {
 		change.Operation = "UPDATE"
+		table.appendOnly = false
 		change.Before = table.rowLocked(index)
 		for column := range table.columns {
 			table.columns[column].set(index, values[column])
@@ -453,6 +456,7 @@ func (table *TypedTable) Delete(key string) (TypedTableChange, error) {
 		return TypedTableChange{}, fmt.Errorf("typed table key %q does not exist", key)
 	}
 	table.clearColumnarLayoutsLocked()
+	table.appendOnly = false
 	change := TypedTableChange{Operation: "DELETE", Key: key, Before: table.rowLocked(index)}
 	if table.patchParts != nil {
 		table.patchParts.deleted[index] = true
