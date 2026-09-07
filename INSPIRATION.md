@@ -344,7 +344,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M063 Non-materialized SQL views.
 - [ ] M064 Recursive dataflow maintenance.
 - [ ] M065 Incremental window-function maintenance.
-- [ ] M066 Incremental sort maintenance.
+- [x] M066 Incremental sort maintenance via opt-in typed-table sorted arrangements, bulk batch rebuilds, deterministic NULL/NaN ordering, correctness tests, and benchmark guide.
 - [x] M067 Top-K with offset for supported ordered paths.
 - [x] M068 Differential group-by updates for generic SQL tables. `GroupCountDifferentialRows` maintains exact signed COUNT transitions for callback-defined groups, including negative/overflow validation and no partial output; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M068a Exact generic differential COUNT group maintenance.

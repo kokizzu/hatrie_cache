@@ -4003,3 +4003,10 @@ select the monotone aggregate path without rescanning the batch. The metadata
 path is optional and keeps the existing default behavior; see
 [SOURCE_APPEND_ONLY_METADATA.md](SOURCE_APPEND_ONLY_METADATA.md) for the
 contract and benchmark.
+
+## Incremental Sort Arrangement
+
+`hatSql.NewTypedTableSortedArrangement` maintains a reusable ordered typed-row
+view for point updates, with explicit descending and NULL/NaN ordering. It is
+opt-in and large batches can favor a full rebuild; see
+[INCREMENTAL_SORT.md](INCREMENTAL_SORT.md) for the contract and benchmark.
