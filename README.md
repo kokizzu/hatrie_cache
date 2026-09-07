@@ -3898,6 +3898,7 @@ CPU, allocation, and fallback tradeoffs.
 Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and inequality when supported, with portable fallback elsewhere. See [C015 SIMD predicate kernels](C015_SIMD.md) for the API, validation, and measurements.
 
 - [Quorum policy](QUORUM_POLICY.md)
+- [Read quorum](READ_QUORUM.md)
 
 - [Cross-region restore drill](CROSS_REGION_RESTORE_DRILL.md)
 
@@ -4081,4 +4082,13 @@ usage, and measured duplicate-work cost.
 with explicit replica names and acknowledgement thresholds. It leaves normal
 asynchronous replication unchanged and reports failed targets for repair; it
 does not roll back partial external writes. See [WRITE_QUORUM.md](WRITE_QUORUM.md)
+for the contract and measured cost.
+
+## Explicit Read Quorum
+
+`hatReplication.ExecuteReadQuorum` provides an opt-in concurrent read gate
+that requires a matching value from an explicit number of named replicas. It
+reports per-target errors and distinguishes an insufficient number of healthy
+responses from inconsistent successful values. Normal read routing and
+asynchronous replication remain unchanged. See [READ_QUORUM.md](READ_QUORUM.md)
 for the contract and measured cost.
