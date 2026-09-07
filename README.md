@@ -3911,6 +3911,15 @@ matching counterpart group, while negative changes use retained row identity
 and do not rescan the complete opposite input. See
 [DELTA_JOINS.md](DELTA_JOINS.md) for the contract and validation guarantees.
 
+## Linear Indexed Joins
+
+`hatSql.TypedTableJoin` maintains typed equality indexes and matched key pairs
+incrementally. Inserts, updates, and deletes touch only the affected value
+bucket, while ordered changes and independently owned result rows preserve
+correctness for reusable consumers. See
+[LINEAR_INDEXED_JOINS.md](LINEAR_INDEXED_JOINS.md) for the arrangement
+contract.
+
 ## Parallel NDJSON Input Parsing
 
 `hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide

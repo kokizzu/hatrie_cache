@@ -290,7 +290,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M013 Top-K arrangements for ordered subscriptions.
 - [x] M014 Lookup arrangements for external or remote sources. `LookupSourceResolver` provides optional equality lookups for `EXTERNAL(...)` sources with full-scan fallback and predicate re-evaluation. See [LOOKUP_ARRANGEMENTS.md](LOOKUP_ARRANGEMENTS.md).
 - [x] M015 Delta joins that avoid repeated large-side scans. `DifferentialTemporalJoin` retains per-key rows and probes only matching counterpart groups for signed changes; see [DELTA_JOINS.md](DELTA_JOINS.md).
-- [ ] M016 Linear joins with explicit maintained indexes.
+- [x] M016 Linear joins with explicit maintained indexes. `TypedTableJoin` maintains typed equality buckets and matched pairs across ordered inserts, updates, and deletes; see [LINEAR_INDEXED_JOINS.md](LINEAR_INDEXED_JOINS.md).
 - [ ] M017 Semijoin reduction before maintaining a join.
 - [ ] M018 Monotonicity analysis for cheaper maintenance.
 - [x] M019 Key derivation for supported SQL predicates.
