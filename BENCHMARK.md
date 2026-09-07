@@ -16207,3 +16207,20 @@ Five runs on an AMD Ryzen 9 5950X, Go `amd64`:
 The typed comparator is about 4-8% faster in this fixture. The executor is
 opt-in and always reads every target, so the caller explicitly accepts the
 additional replica work required for consistency checking.
+
+## Work-Stealing Pool
+
+The opt-in `hatPipeline.WorkStealingPool` was compared with the existing
+shared-queue `hatPipeline.Scheduler` using four workers and no-op tasks. Each
+operation constructs, fills, closes, and waits for one pool. Five samples were
+run with `-benchtime=200ms` on an AMD Ryzen 9 5950X.
+
+| Batch | Work-stealing | Shared scheduler | Comparison |
+| --- | ---: | ---: | --- |
+| 8 tasks | 4,769-5,449 ns; 1,230-1,232 B; 21 allocs | 3,575-4,082 ns; 1,152-1,153 B; 12 allocs | higher setup and coordination cost |
+| 64 tasks | 18,181-21,442 ns; 2,125-2,136 B; 39-40 allocs | 16,461-20,020 ns; 1,153-1,154 B; 12 allocs | not a general throughput win |
+| 256 tasks | 70,063-78,880 ns; 5,096-5,130 B; 125-128 allocs | 63,656-71,731 ns; 1,155-1,162 B; 12 allocs | retain as opt-in only |
+
+The work-stealing path is for explicit queue affinity and skewed independent
+work, not a default scheduler replacement. Full details and the reproducible
+targets are in [WORK_STEALING.md](WORK_STEALING.md).

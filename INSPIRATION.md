@@ -546,7 +546,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T111 Separate cache sizing from durable-storage sizing. Added independent `-cache-memory-cap-bytes` and `-db-storage-max-bytes` controls, with the old cache flag retained as a legacy alias; see the README and `BENCHMARK.md`.
 - [x] T112 Per-queue memory and latency metrics - async replication exposes estimated resident queued/in-flight payload bytes plus queue wait/service histograms through status and Prometheus; see [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md).
 - [x] T113 Dead-letter queue with replay controls - public generic bounded retention supports inspection, explicit replay deadlines, and discard; see [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md).
-- [ ] T114 Work stealing for independent queue workers.
+- [x] T114 Work stealing for independent queue workers. Added the opt-in `hatPipeline.WorkStealingPool` with bounded total queue capacity, queue-local owner pops, victim steals, cancellation, drain-on-close, and first-error propagation; see [WORK_STEALING.md](WORK_STEALING.md). It is not a replacement for the lower-overhead shared-queue scheduler for tiny balanced tasks.
 - [x] T115 Cancellation-safe task ownership: `HTTPReplicator.CloseWithContext` drains asynchronous work without dropping owned tasks when a shutdown deadline expires.
 
 ### SQL, Security, And Operations

@@ -34,6 +34,7 @@ security guidance before exposing it on a network.
 - Opt-in typed generated columns: [GENERATED_COLUMNS.md](GENERATED_COLUMNS.md)
 - External and remote equality lookup arrangements: [LOOKUP_ARRANGEMENTS.md](LOOKUP_ARRANGEMENTS.md)
 - Bounded cooperative task scheduling: [SCHEDULER.md](SCHEDULER.md)
+- Opt-in queue-local work stealing: [WORK_STEALING.md](WORK_STEALING.md)
 - SQL spatial predicates: [SPATIAL_SQL.md](SPATIAL_SQL.md)
 - Explicit bounded-lateness decisions: [late-data policy](LATE_DATA_POLICY.md)
 - Monotone stream frontiers: [watermark propagation](WATERMARK.md) and [differential watermarks](DIFFERENTIAL_WATERMARK.md)
