@@ -248,7 +248,9 @@ name.
 - [x] C148a Immutable-part length and SHA-256 checksums.
 - [x] C149 Replication queue introspection. `ReplicationResult.Queue` exposes `QueueStats` with depth, capacity, attempts, acknowledgements, failures, dead letters, pause state, and vector-clock state; monitoring also exports the queue health metrics.
 - [x] C150 Replica lag thresholds for read routing. `ReadReplicaPolicy` enforces required frontiers and maximum lag before deterministic candidate selection; see [REPLICA_LAG_ROUTING.md](REPLICA_LAG_ROUTING.md).
-- [ ] C151 Read-after-write consistency levels.
+- [x] C151 Read-after-write consistency levels. Implemented in
+  `hat/hatReplication` with eventual, bounded-staleness, and read-after-write
+  replica selection while preserving the legacy selector default.
 - [x] C152 Leader election independent from query workers (see LEADER_ELECTION.md).
 - [ ] C153 Metadata consensus for partition ownership.
 - [ ] C154 Rolling schema changes across replicas.

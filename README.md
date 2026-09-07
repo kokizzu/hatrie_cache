@@ -3960,3 +3960,11 @@ source order, errors select the lowest invalid line deterministically, and a
 failed import does not replace an existing external-table snapshot. The
 existing sequential importer remains available. See
 [PARALLEL_INPUT.md](PARALLEL_INPUT.md) for the API and benchmark tradeoff.
+
+## Read Consistency
+
+`hatReplication.SelectReadReplicaWithConsistency` supports explicit
+`eventual`, `bounded-staleness`, and `read-after-write` freshness levels.
+`SelectReadReplica` remains the backward-compatible read-after-write default.
+See [READ_CONSISTENCY.md](READ_CONSISTENCY.md) for configuration, API usage,
+selection rules, and operational guidance.
