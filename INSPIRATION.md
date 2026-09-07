@@ -323,7 +323,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M042 CDC envelope normalization. `TypedTableChange` carries normalized operation, key, before/after rows, and monotone sequence data for arrangements; see [CDC_ENVELOPES.md](CDC_ENVELOPES.md).
 - [x] M043 Kafka-style source offset tracking.
 - [x] M044 Source transaction grouping - `SQLSourceOffsetTracker.AdvanceTransaction` applies a distinct multi-partition source transaction only when every member is newer; see [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md).
-- [ ] M045 Exactly-once source ingestion.
+- [x] M045 Exactly-once source ingestion - `hatSql.SQLSourceIngestionCoordinator` provides an opt-in source transaction idempotency gate with complete offset validation, conflict detection, concurrent single-flight, retry cleanup, and snapshot/restore; durable atomic coupling with the applied transaction or an idempotent callback remains required; see [SQL_SOURCE_INGESTION.md](SQL_SOURCE_INGESTION.md).
 - [x] M046 Sink progress and acknowledged frontiers - `SQLSinkProgressTracker` records monotone per-sink/partition acknowledgements with validated batch updates and deterministic snapshots; see [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md).
 - [x] M047 Exactly-once sink commits - `hatSql.SQLSinkCommitCoordinator` provides an opt-in idempotent sink commit gate with concurrent single-flight, conflict detection, retry cleanup, and snapshot/restore; atomic persistence with the sink or an idempotent sink callback remains required; see [SQL_SINK_COMMIT.md](SQL_SINK_COMMIT.md).
 - [x] M048 Backpressure for asynchronous producers and subscribers.

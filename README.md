@@ -4042,6 +4042,14 @@ group of source partition offsets when every member is newer. See
 [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md) for
 the contract, memory boundary, and measured cost.
 
+## Source Ingestion Coordination
+
+`hatSql.SQLSourceIngestionCoordinator` adds an opt-in idempotency gate for
+source transaction retries, with offset-group validation, conflict detection,
+single-flight behavior, and snapshot/restore. See
+[SQL_SOURCE_INGESTION.md](SQL_SOURCE_INGESTION.md) for the contract,
+durability boundary, and measured metadata cost.
+
 ## SQL Sink Progress
 
 `hatSql.SQLSinkProgressTracker` records monotone acknowledged frontiers for
