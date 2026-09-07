@@ -4026,3 +4026,11 @@ change, row-image, and logical-byte accounting; it is disabled by default so
 ordinary joins pay no tracking cost. See
 [DISTRIBUTED_JOIN_DATA_MOVEMENT.md](DISTRIBUTED_JOIN_DATA_MOVEMENT.md) for
 the exact accounting definition and benchmark.
+
+## SQL Source Offset Tracking
+
+`hatSql.SQLSourceOffsetTracker` keeps compact monotone high-watermarks per
+source partition with atomic batch updates and deterministic snapshots. It is
+thread-safe checkpoint metadata, disabled from table behavior unless callers
+explicitly use it; see [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
+for usage and exactly-once boundaries.
