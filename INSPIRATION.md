@@ -567,7 +567,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T129 Common table expressions.
 - [x] T130 Generated columns. `TypedTableColumn.Generated` computes a typed value before storage and changefeed publication; derived values are visible through row/columnar SQL, MVCC, and replay paths. See [GENERATED_COLUMNS.md](GENERATED_COLUMNS.md).
 - [x] T131 Typed constraints.
-- [ ] T132 Foreign-key enforcement.
+- [x] T132 Foreign-key enforcement - `hatSchema.ValidateDataset` and `ValidateRows` validate declared foreign keys against an immutable dataset view or caller-supplied source resolver, including composite keys and NULL semantics; enforcement remains explicit at the caller's transaction boundary. See [SCHEMA_CONSTRAINTS.md](SCHEMA_CONSTRAINTS.md).
 - [x] T133 JSON path access.
 - [x] T134 Spatial predicates. SQL now supports `GEO_DISTANCE_METERS`/`GEO_DISTANCE`, `GEO_WITHIN_RADIUS`, and dateline-aware `GEO_WITHIN_BOX` with NULL propagation and coordinate validation. See [SPATIAL_SQL.md](SPATIAL_SQL.md).
 - [x] T135 Replication and memory introspection.
