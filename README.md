@@ -3903,6 +3903,14 @@ Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and 
 
 - [Operator memory monitoring](OPERATOR_MEMORY_MONITORING.md)
 
+## Delta Joins
+
+`hatSql.DifferentialTemporalJoin` incrementally maintains weighted temporal
+inner joins with equality-key arrangements. Positive changes probe only the
+matching counterpart group, while negative changes use retained row identity
+and do not rescan the complete opposite input. See
+[DELTA_JOINS.md](DELTA_JOINS.md) for the contract and validation guarantees.
+
 ## Parallel NDJSON Input Parsing
 
 `hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide
