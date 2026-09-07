@@ -1,10 +1,6 @@
 package hatReplication
 
-import (
-	"errors"
-	"fmt"
-	"strings"
-)
+import "errors"
 
 var (
 	ErrReadReplicaNameRequired = errors.New("hatriecache: read replica name is required")
@@ -29,33 +25,7 @@ type ReadReplicaPolicy struct {
 // Freshness is preferred first, then health, then lexical node name. A zero
 // MaxLag therefore requires a replica at or ahead of ObservedFrontier.
 func SelectReadReplica(candidates []ReadReplicaProgress, policy ReadReplicaPolicy) (ReadReplicaProgress, error) {
-	var selected ReadReplicaProgress
-	found := false
-	for _, candidate := range candidates {
-		node := strings.TrimSpace(candidate.Node)
-		if node == "" {
-			return ReadReplicaProgress{}, ErrReadReplicaNameRequired
-		}
-		candidate.Node = node
-		if candidate.Frontier < policy.RequiredFrontier {
-			continue
-		}
-		lag := uint64(0)
-		if policy.ObservedFrontier > candidate.Frontier {
-			lag = policy.ObservedFrontier - candidate.Frontier
-		}
-		if lag > policy.MaxLag {
-			continue
-		}
-		if !found || readReplicaPreferred(candidate, selected) {
-			selected = candidate
-			found = true
-		}
-	}
-	if !found {
-		return ReadReplicaProgress{}, fmt.Errorf("%w: required_frontier=%d observed_frontier=%d max_lag=%d", ErrNoEligibleReadReplica, policy.RequiredFrontier, policy.ObservedFrontier, policy.MaxLag)
-	}
-	return selected, nil
+	return SelectReadReplicaWithConsistency(candidates, policy, ReadConsistencyReadAfterWrite)
 }
 
 func readReplicaPreferred(candidate, selected ReadReplicaProgress) bool {
