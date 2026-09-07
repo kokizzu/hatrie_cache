@@ -16284,3 +16284,41 @@ BenchmarkPluginRegistryReplace-32 3051595 75.72 ns/op 32 B/op 1 allocs/op
 BenchmarkPluginRegistryReplace-32 3143766 76.97 ns/op 32 B/op 1 allocs/op
 BenchmarkPluginRegistryReplace-32 3088768 77.45 ns/op 32 B/op 1 allocs/op
 ```
+
+## Parallel And Hedged Replica Reads
+
+This five-run local benchmark uses static callbacks and three replicas for
+immediate first-success fan-out, two replicas for a 1 microsecond delayed
+hedge, and three replicas that all return an error. It measures coordinator
+overhead; it does not model network latency or storage work.
+
+| Mode | Time | Heap | Allocs |
+| --- | ---: | ---: | ---: |
+| Immediate first success | 1,746-1,925 ns/op | 880-881 B/op | 10/op |
+| Hedged success | 52,201-106,537 ns/op | 998-1,001 B/op | 12-13/op |
+| All replicas fail | 2,729-2,895 ns/op | 1,003 B/op | 13/op |
+
+The timer-driven hedge is intentionally more expensive in a static callback
+benchmark. Its value is avoiding a slow first replica's tail latency, not
+beating immediate fan-out on CPU. The API is opt-in and leaves existing
+replication routing unchanged. See [PARALLEL_REPLICA_READS.md](PARALLEL_REPLICA_READS.md).
+
+Raw output from `make benchmark-parallel-replica-read-clean`:
+
+```text
+BenchmarkExecuteParallelReplicaRead/parallel_first_success-32 126564 1808 ns/op 881 B/op 10 allocs/op
+BenchmarkExecuteParallelReplicaRead/parallel_first_success-32 140353 1746 ns/op 880 B/op 10 allocs/op
+BenchmarkExecuteParallelReplicaRead/parallel_first_success-32 119684 1799 ns/op 881 B/op 10 allocs/op
+BenchmarkExecuteParallelReplicaRead/parallel_first_success-32 126618 1844 ns/op 880 B/op 10 allocs/op
+BenchmarkExecuteParallelReplicaRead/parallel_first_success-32 121483 1925 ns/op 880 B/op 10 allocs/op
+BenchmarkExecuteParallelReplicaRead/hedged_success-32 5530 106537 ns/op 1001 B/op 13 allocs/op
+BenchmarkExecuteParallelReplicaRead/hedged_success-32 10000 59615 ns/op 998 B/op 12 allocs/op
+BenchmarkExecuteParallelReplicaRead/hedged_success-32 3278 70856 ns/op 998 B/op 12 allocs/op
+BenchmarkExecuteParallelReplicaRead/hedged_success-32 4032 54591 ns/op 998 B/op 12 allocs/op
+BenchmarkExecuteParallelReplicaRead/hedged_success-32 5034 52201 ns/op 999 B/op 12 allocs/op
+BenchmarkExecuteParallelReplicaRead/all_fail-32 86734 2759 ns/op 1003 B/op 13 allocs/op
+BenchmarkExecuteParallelReplicaRead/all_fail-32 79088 2729 ns/op 1003 B/op 13 allocs/op
+BenchmarkExecuteParallelReplicaRead/all_fail-32 84583 2848 ns/op 1003 B/op 13 allocs/op
+BenchmarkExecuteParallelReplicaRead/all_fail-32 77240 2800 ns/op 1003 B/op 13 allocs/op
+BenchmarkExecuteParallelReplicaRead/all_fail-32 81475 2895 ns/op 1003 B/op 13 allocs/op
+```

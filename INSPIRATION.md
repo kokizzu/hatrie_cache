@@ -239,8 +239,8 @@ name.
 
 - [ ] C141 Distributed table abstraction over partitions.
 - [ ] C142 Automatic shard pruning from partition predicates.
-- [ ] C143 Parallel replicas for one query.
-- [ ] C144 Hedged reads for slow replicas.
+- [x] C143 Parallel replicas for one query. Added opt-in first-success `hatReplication.ExecuteParallelReplicaRead` fan-out with bounded named replicas, cancellation of losing callbacks, and input-order attempt reporting; see [PARALLEL_REPLICA_READS.md](PARALLEL_REPLICA_READS.md).
+- [x] C144 Hedged reads for slow replicas. The same coordinator supports zero-delay parallel fan-out or positive-delay hedges, with explicit timer/callback cost and no default routing change; see [PARALLEL_REPLICA_READS.md](PARALLEL_REPLICA_READS.md).
 - [x] C145 Remote read retries with bounded duplicate work - `hatSql.ReadReplicaSet.ExecuteWithRetry` rotates across replicas with an explicit retry classifier, context-aware backoff, default-off behavior, and a hard eight-attempt cap; see [READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md).
 - [x] C146 Distributed partial aggregation and final merge - `hatSql.TypedTableAggregate.MergePartial` and `MergePartials` combine exact partition-local COUNT, SUM, MIN, MAX, and COUNT DISTINCT state with deterministic validation and a measured replay comparison; see [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md).
 - [x] C147 Quorum inserts with explicit durability policy - `hatReplication.ExecuteWriteQuorum` runs named replica writes concurrently against an explicit acknowledgement threshold, reports deterministic per-target outcomes, and remains opt-in; callers retain responsibility for reconciliation and idempotency after partial failure; see [WRITE_QUORUM.md](WRITE_QUORUM.md).
