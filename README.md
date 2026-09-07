@@ -4010,3 +4010,11 @@ contract and benchmark.
 view for point updates, with explicit descending and NULL/NaN ordering. It is
 opt-in and large batches can favor a full rebuild; see
 [INCREMENTAL_SORT.md](INCREMENTAL_SORT.md) for the contract and benchmark.
+
+## Distributed Partial Aggregation
+
+`hatSql.TypedTableAggregate.MergePartial` and `MergePartials` combine exact
+partition-local `COUNT`, `SUM`, `MIN`, `MAX`, and `COUNT DISTINCT` state without
+replaying every source change. The API is explicit and does not deduplicate
+retries; see [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md)
+for the contract, usage, and benchmark.

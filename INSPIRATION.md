@@ -176,7 +176,7 @@ name.
 - [x] C090 Join reordering for compatible query shapes.
 - [ ] C091 Distributed joins with explicit data movement accounting.
 - [x] C092 Semi-join and anti-join execution where supported.
-- [ ] C093 Distributed partial aggregation followed by merge.
+- [x] C093 Distributed partial aggregation followed by merge.
 - [x] C094 External sorting with bounded memory.
 - [x] C095 Sort and spill safety limits.
 - [x] C096 LIMIT and Top-N early termination.

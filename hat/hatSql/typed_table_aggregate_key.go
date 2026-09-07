@@ -19,31 +19,44 @@ func typedTableAggregateGroupHash(values []TypedTableValue, groupBy []int) uint6
 			_ = hash.WriteByte(0xff)
 			continue
 		}
-		value := values[column]
-		_ = hash.WriteByte(byte(value.Kind))
-		if !value.Valid {
-			_ = hash.WriteByte(0)
-			continue
-		}
-		_ = hash.WriteByte(1)
-		switch value.Kind {
-		case TypedTableString:
-			_, _ = hash.WriteString(value.String)
-		case TypedTableInt64:
-			binary.LittleEndian.PutUint64(encoded[:], uint64(value.Int64))
-			_, _ = hash.Write(encoded[:])
-		case TypedTableFloat64:
-			binary.LittleEndian.PutUint64(encoded[:], math.Float64bits(value.Float64))
-			_, _ = hash.Write(encoded[:])
-		case TypedTableBool:
-			if value.Bool {
-				_ = hash.WriteByte(1)
-			} else {
-				_ = hash.WriteByte(0)
-			}
-		}
+		typedTableAggregateHashValue(&hash, &encoded, values[column])
 	}
 	return hash.Sum64()
+}
+
+func typedTableAggregateGroupedValuesHash(values []TypedTableValue) uint64 {
+	var hash maphash.Hash
+	hash.SetSeed(typedTableAggregateHashSeed)
+	var encoded [8]byte
+	for _, value := range values {
+		typedTableAggregateHashValue(&hash, &encoded, value)
+	}
+	return hash.Sum64()
+}
+
+func typedTableAggregateHashValue(hash *maphash.Hash, encoded *[8]byte, value TypedTableValue) {
+	_ = hash.WriteByte(byte(value.Kind))
+	if !value.Valid {
+		_ = hash.WriteByte(0)
+		return
+	}
+	_ = hash.WriteByte(1)
+	switch value.Kind {
+	case TypedTableString:
+		_, _ = hash.WriteString(value.String)
+	case TypedTableInt64:
+		binary.LittleEndian.PutUint64(encoded[:], uint64(value.Int64))
+		_, _ = hash.Write(encoded[:])
+	case TypedTableFloat64:
+		binary.LittleEndian.PutUint64(encoded[:], math.Float64bits(value.Float64))
+		_, _ = hash.Write(encoded[:])
+	case TypedTableBool:
+		if value.Bool {
+			_ = hash.WriteByte(1)
+		} else {
+			_ = hash.WriteByte(0)
+		}
+	}
 }
 
 func typedTableAggregateGroupValuesEqual(groupValues, values []TypedTableValue, groupBy []int) bool {
