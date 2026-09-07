@@ -25,6 +25,10 @@ type differentialRowKey struct {
 // slice and its row maps are not mutated. Results retain the first surviving
 // key order and zero-sum entries are removed.
 func ConsolidateDifferentialRows(rows []DifferentialRow) ([]DifferentialRow, error) {
+	return consolidateDifferentialRows(rows, true)
+}
+
+func consolidateDifferentialRows(rows []DifferentialRow, cloneRows bool) ([]DifferentialRow, error) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
@@ -40,7 +44,9 @@ func ConsolidateDifferentialRows(rows []DifferentialRow) ([]DifferentialRow, err
 		key := differentialRowKey{key: entry.Key, time: entry.Time}
 		outputIndex, exists := indexes[key]
 		if !exists {
-			entry.Row = cloneDifferentialRow(entry.Row)
+			if cloneRows {
+				entry.Row = cloneDifferentialRow(entry.Row)
+			}
 			indexes[key] = len(consolidated)
 			consolidated = append(consolidated, entry)
 			continue

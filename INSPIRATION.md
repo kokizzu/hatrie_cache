@@ -315,8 +315,10 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M036 Retractions and insertions on typed updates.
 - [ ] M037 Generic negative-diff support for every SQL operator.
 - [x] M037a Signed negative diffs in the reusable batch primitive.
+- [x] M037b Generic signed filter, map, flat-map, union, and join operators with atomic callback failure handling; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
+- [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M039 Compaction constrained by active read frontiers.
 - [x] M040 Append-only fast path selected from source metadata via typed-table change metadata, validating aggregate dispatch, compatibility tests, and benchmark guide.
 - [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).
