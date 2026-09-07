@@ -540,7 +540,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [ ] T105 Hot module loading with version checks.
 - [x] T106 Triggers and update hooks for supported collections.
 - [x] T107 Replace hooks for journal and projection maintenance.
-- [ ] T108 Transactional trigger ordering guarantees.
+- [x] T108 Transactional trigger ordering guarantees. Added `hatSql.SQLTriggerRegistry` and `SQLTriggerTransaction` with deterministic event/trigger ordering, prepare-before-apply, primary-first commit, reverse rollback, and explicit caller-owned atomicity; see [SQL_TRIGGERS.md](SQL_TRIGGERS.md). SQL parser `CREATE TRIGGER` wiring remains a separate T120 item.
 - [x] T109 Runtime configuration with validation.
 - [x] T110 Memory quotas and admission limits.
 - [x] T111 Separate cache sizing from durable-storage sizing. Added independent `-cache-memory-cap-bytes` and `-db-storage-max-bytes` controls, with the old cache flag retained as a legacy alias; see the README and `BENCHMARK.md`.

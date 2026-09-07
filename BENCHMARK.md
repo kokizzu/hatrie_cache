@@ -16224,3 +16224,35 @@ run with `-benchtime=200ms` on an AMD Ryzen 9 5950X.
 The work-stealing path is for explicit queue affinity and skewed independent
 work, not a default scheduler replacement. Full details and the reproducible
 targets are in [WORK_STEALING.md](WORK_STEALING.md).
+
+## Transactional SQL Trigger Coordinator
+
+This five-run local benchmark stages and commits 32 `INSERT` events through
+the reusable trigger coordinator. The primary apply participant is a no-op;
+the trigger callback only returns an empty action. It measures coordinator
+overhead, not storage or external audit work.
+
+| Mode | Time | Heap | Allocs |
+| --- | ---: | ---: | ---: |
+| No matching trigger | 4,327-4,530 ns/op | 9,616 B/op | 10/op |
+| One matching trigger | 5,117-5,581 ns/op | 10,256 B/op | 12/op |
+
+The matching trigger adds about 640 B and two allocations per 32-event
+transaction, plus callback dispatch. The path is opt-in and provides
+transactional ordering and rollback semantics; existing SQL execution is
+unchanged. See [SQL_TRIGGERS.md](SQL_TRIGGERS.md) for the atomicity boundary.
+
+Raw output from `make benchmark-sql-triggers-clean`:
+
+```text
+BenchmarkSQLTriggerTransaction/without_trigger-32 54520 4371 ns/op 9616 B/op 10 allocs/op
+BenchmarkSQLTriggerTransaction/without_trigger-32 51638 4327 ns/op 9616 B/op 10 allocs/op
+BenchmarkSQLTriggerTransaction/without_trigger-32 50788 4458 ns/op 9616 B/op 10 allocs/op
+BenchmarkSQLTriggerTransaction/without_trigger-32 52302 4464 ns/op 9616 B/op 10 allocs/op
+BenchmarkSQLTriggerTransaction/without_trigger-32 53581 4530 ns/op 9616 B/op 10 allocs/op
+BenchmarkSQLTriggerTransaction/with_trigger-32 42849 5465 ns/op 10256 B/op 12 allocs/op
+BenchmarkSQLTriggerTransaction/with_trigger-32 43630 5544 ns/op 10256 B/op 12 allocs/op
+BenchmarkSQLTriggerTransaction/with_trigger-32 41310 5117 ns/op 10256 B/op 12 allocs/op
+BenchmarkSQLTriggerTransaction/with_trigger-32 44815 5123 ns/op 10256 B/op 12 allocs/op
+BenchmarkSQLTriggerTransaction/with_trigger-32 45327 5581 ns/op 10256 B/op 12 allocs/op
+```
