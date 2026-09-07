@@ -4074,3 +4074,11 @@ read-only queries. The default remains one attempt; enabling retries requires
 an explicit transient-error classifier and is capped at eight attempts. See
 [READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md) for context-aware backoff,
 usage, and measured duplicate-work cost.
+
+## Explicit Write Quorum
+
+`hatReplication.ExecuteWriteQuorum` provides an opt-in concurrent write gate
+with explicit replica names and acknowledgement thresholds. It leaves normal
+asynchronous replication unchanged and reports failed targets for repair; it
+does not roll back partial external writes. See [WRITE_QUORUM.md](WRITE_QUORUM.md)
+for the contract and measured cost.

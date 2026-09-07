@@ -243,7 +243,7 @@ name.
 - [ ] C144 Hedged reads for slow replicas.
 - [x] C145 Remote read retries with bounded duplicate work - `hatSql.ReadReplicaSet.ExecuteWithRetry` rotates across replicas with an explicit retry classifier, context-aware backoff, default-off behavior, and a hard eight-attempt cap; see [READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md).
 - [x] C146 Distributed partial aggregation and final merge - `hatSql.TypedTableAggregate.MergePartial` and `MergePartials` combine exact partition-local COUNT, SUM, MIN, MAX, and COUNT DISTINCT state with deterministic validation and a measured replay comparison; see [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md).
-- [ ] C147 Quorum inserts with explicit durability policy.
+- [x] C147 Quorum inserts with explicit durability policy - `hatReplication.ExecuteWriteQuorum` runs named replica writes concurrently against an explicit acknowledgement threshold, reports deterministic per-target outcomes, and remains opt-in; callers retain responsibility for reconciliation and idempotency after partial failure; see [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [ ] C148 Replicated part exchange with checksums.
 - [x] C148a Immutable-part length and SHA-256 checksums.
 - [x] C149 Replication queue introspection. `ReplicationResult.Queue` exposes `QueueStats` with depth, capacity, attempts, acknowledgements, failures, dead letters, pause state, and vector-clock state; monitoring also exports the queue health metrics.
