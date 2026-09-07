@@ -3978,3 +3978,11 @@ the insert-only maintenance fast path only when the batch proves it is safe;
 updates and deletes fall back to the existing general path. See
 [MONOTONE_MAINTENANCE.md](MONOTONE_MAINTENANCE.md) for the contract and
 benchmark.
+
+## Partial Merge Join
+
+`hatSql.MergeSortedTypedTableJoin` streams an exact inner join from two inputs
+that are already ordered by their join fields. It handles duplicate keys,
+validates ordering and key kinds, and keeps the complete result out of memory.
+See [PARTIAL_MERGE_JOIN.md](PARTIAL_MERGE_JOIN.md) for the contract and
+benchmark.

@@ -171,7 +171,7 @@ name.
 - [x] C085 Hash joins.
 - [x] C086 Grace-hash or spillable joins.
 - [x] C087 Runtime Bloom filters for joins.
-- [ ] C088 Partial-merge joins for sorted sources.
+- [x] C088 Partial-merge joins for sorted sources via `hatSql.MergeSortedTypedTableJoin`, with callback streaming, duplicate-run handling, SQL NULL/NaN semantics, input validation, and benchmark guide.
 - [x] C089 Direct lookup joins through indexed sources.
 - [x] C090 Join reordering for compatible query shapes.
 - [ ] C091 Distributed joins with explicit data movement accounting.
