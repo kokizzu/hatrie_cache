@@ -3986,3 +3986,11 @@ that are already ordered by their join fields. It handles duplicate keys,
 validates ordering and key kinds, and keeps the complete result out of memory.
 See [PARTIAL_MERGE_JOIN.md](PARTIAL_MERGE_JOIN.md) for the contract and
 benchmark.
+
+## Semijoin Reduction
+
+`hatSql.NewTypedTableJoinWithOptions` can keep unmatched rows as compact
+pending-key metadata while preserving live join correctness when counterparts
+arrive later. The option is disabled by default; see
+[SEMIJOIN_REDUCTION.md](SEMIJOIN_REDUCTION.md) for the contract and measured
+tradeoff.

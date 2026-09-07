@@ -18,7 +18,7 @@ type TypedTableJoinDefinition struct {
 // TypedTableJoinRow retains both typed source rows for one matching key pair.
 type TypedTableJoinRow struct {
 	LeftKey, RightKey string
-	Left, Right        []TypedTableValue
+	Left, Right       []TypedTableValue
 }
 
 type typedTableJoinPair struct {
@@ -30,19 +30,28 @@ type typedTableJoinPair struct {
 // ordered changes. It is independent from SQL execution and lets consumers
 // share one arrangement rather than each rescan both input tables.
 type TypedTableJoin struct {
-	mu                          sync.RWMutex
-	left, right                 *TypedTable
-	definition                  TypedTableJoinDefinition
-	leftField, rightField       int
-	leftCheckpoint, rightCheckpoint uint64
-	leftRows, rightRows         map[string][]TypedTableValue
-	leftIndex, rightIndex       map[string]map[string]struct{}
-	pairs                       map[typedTableJoinPair]struct{}
+	mu                                sync.RWMutex
+	left, right                       *TypedTable
+	definition                        TypedTableJoinDefinition
+	leftField, rightField             int
+	leftCheckpoint, rightCheckpoint   uint64
+	leftRows, rightRows               map[string][]TypedTableValue
+	leftIndex, rightIndex             map[string]map[string]struct{}
+	pairs                             map[typedTableJoinPair]struct{}
+	semijoinReduction                 bool
+	leftPending, rightPending         map[string]map[string]struct{}
+	leftPendingKeys, rightPendingKeys map[string]string
 }
 
 // NewTypedTableJoin snapshots both current tables and begins tracking changes
 // after their respective current sequences.
 func NewTypedTableJoin(left, right *TypedTable, definition TypedTableJoinDefinition) (*TypedTableJoin, error) {
+	return NewTypedTableJoinWithOptions(left, right, definition, TypedTableJoinOptions{})
+}
+
+// NewTypedTableJoinWithOptions creates a typed join with optional state
+// reduction for currently unmatched rows.
+func NewTypedTableJoinWithOptions(left, right *TypedTable, definition TypedTableJoinDefinition, options TypedTableJoinOptions) (*TypedTableJoin, error) {
 	if left == nil || right == nil {
 		return nil, fmt.Errorf("typed table join requires two tables")
 	}
@@ -64,13 +73,17 @@ func NewTypedTableJoin(left, right *TypedTable, definition TypedTableJoinDefinit
 		left: left, right: right, definition: definition, leftField: leftField, rightField: rightField,
 		leftRows: map[string][]TypedTableValue{}, rightRows: map[string][]TypedTableValue{},
 		leftIndex: map[string]map[string]struct{}{}, rightIndex: map[string]map[string]struct{}{}, pairs: map[typedTableJoinPair]struct{}{},
+		semijoinReduction: options.SemijoinReduction,
+		leftPending:       map[string]map[string]struct{}{}, rightPending: map[string]map[string]struct{}{},
+		leftPendingKeys: map[string]string{}, rightPendingKeys: map[string]string{},
 	}
-	join.leftRows, join.leftCheckpoint = typedTableJoinSnapshot(left)
-	join.rightRows, join.rightCheckpoint = typedTableJoinSnapshot(right)
-	for key, values := range join.leftRows {
+	leftRows, leftCheckpoint := typedTableJoinSnapshot(left)
+	rightRows, rightCheckpoint := typedTableJoinSnapshot(right)
+	join.leftCheckpoint, join.rightCheckpoint = leftCheckpoint, rightCheckpoint
+	for key, values := range leftRows {
 		join.addLeft(key, values)
 	}
-	for key, values := range join.rightRows {
+	for key, values := range rightRows {
 		join.addRight(key, values)
 	}
 	return join, nil
@@ -131,14 +144,14 @@ func (join *TypedTableJoin) ApplyLeft(changes []TypedTableChange) error {
 				if err := join.applyLeft(last); err != nil {
 					return err
 				}
-				join.leftCheckpoint = checkpoint
+				join.advanceLeftCheckpoint(last)
 				return fmt.Errorf("typed table join left change sequence gap: got %d after %d", next.Sequence, checkpoint)
 			}
 			if err := typedTableJoinChange(next); err != nil {
 				if applyErr := join.applyLeft(last); applyErr != nil {
 					return applyErr
 				}
-				join.leftCheckpoint = checkpoint
+				join.advanceLeftCheckpoint(last)
 				return err
 			}
 			last = next
@@ -148,7 +161,7 @@ func (join *TypedTableJoin) ApplyLeft(changes []TypedTableChange) error {
 		if err := join.applyLeft(last); err != nil {
 			return err
 		}
-		join.leftCheckpoint = checkpoint
+		join.advanceLeftCheckpoint(last)
 	}
 	return nil
 }
@@ -163,7 +176,7 @@ func (join *TypedTableJoin) applyLeftOneLocked(change TypedTableChange) error {
 	if err := join.applyLeft(change); err != nil {
 		return err
 	}
-	join.leftCheckpoint = change.Sequence
+	join.advanceLeftCheckpoint(change)
 	return nil
 }
 
@@ -202,14 +215,14 @@ func (join *TypedTableJoin) ApplyRight(changes []TypedTableChange) error {
 				if err := join.applyRight(last); err != nil {
 					return err
 				}
-				join.rightCheckpoint = checkpoint
+				join.advanceRightCheckpoint(last)
 				return fmt.Errorf("typed table join right change sequence gap: got %d after %d", next.Sequence, checkpoint)
 			}
 			if err := typedTableJoinChange(next); err != nil {
 				if applyErr := join.applyRight(last); applyErr != nil {
 					return applyErr
 				}
-				join.rightCheckpoint = checkpoint
+				join.advanceRightCheckpoint(last)
 				return err
 			}
 			last = next
@@ -219,7 +232,7 @@ func (join *TypedTableJoin) ApplyRight(changes []TypedTableChange) error {
 		if err := join.applyRight(last); err != nil {
 			return err
 		}
-		join.rightCheckpoint = checkpoint
+		join.advanceRightCheckpoint(last)
 	}
 	return nil
 }
@@ -234,7 +247,7 @@ func (join *TypedTableJoin) applyRightOneLocked(change TypedTableChange) error {
 	if err := join.applyRight(change); err != nil {
 		return err
 	}
-	join.rightCheckpoint = change.Sequence
+	join.advanceRightCheckpoint(change)
 	return nil
 }
 
@@ -244,6 +257,8 @@ func (join *TypedTableJoin) applyLeft(change TypedTableChange) error {
 	}
 	if previous, found := join.leftRows[change.Key]; found {
 		join.removeLeft(change.Key, previous)
+	} else if join.semijoinReduction {
+		join.removeLeftPending(change.Key)
 	}
 	if change.Operation != "DELETE" {
 		join.addLeft(change.Key, change.After)
@@ -257,6 +272,8 @@ func (join *TypedTableJoin) applyRight(change TypedTableChange) error {
 	}
 	if previous, found := join.rightRows[change.Key]; found {
 		join.removeRight(change.Key, previous)
+	} else if join.semijoinReduction {
+		join.removeRightPending(change.Key)
 	}
 	if change.Operation != "DELETE" {
 		join.addRight(change.Key, change.After)
@@ -275,15 +292,22 @@ func typedTableJoinChange(change TypedTableChange) error {
 }
 
 func (join *TypedTableJoin) addLeft(key string, values []TypedTableValue) {
-	values = cloneTypedTableValues(values)
-	join.leftRows[key] = values
 	valueKey, joined := typedTableJoinValue(values, join.leftField)
 	if !joined {
 		return
 	}
+	if join.semijoinReduction && len(join.rightIndex[valueKey]) == 0 && len(join.rightPending[valueKey]) == 0 {
+		join.addLeftPending(valueKey, key)
+		return
+	}
+	values = cloneTypedTableValues(values)
+	join.leftRows[key] = values
 	addTypedTableJoinIndex(join.leftIndex, valueKey, key)
 	for rightKey := range join.rightIndex[valueKey] {
 		join.pairs[typedTableJoinPair{leftKey: key, rightKey: rightKey}] = struct{}{}
+	}
+	if join.semijoinReduction {
+		join.activateRightPending(valueKey)
 	}
 }
 
@@ -294,20 +318,30 @@ func (join *TypedTableJoin) removeLeft(key string, values []TypedTableValue) {
 			delete(join.pairs, typedTableJoinPair{leftKey: key, rightKey: rightKey})
 		}
 		removeTypedTableJoinIndex(join.leftIndex, valueKey, key)
+		if join.semijoinReduction && len(join.leftIndex[valueKey]) == 0 {
+			join.demoteRight(valueKey)
+		}
 	}
 	delete(join.leftRows, key)
 }
 
 func (join *TypedTableJoin) addRight(key string, values []TypedTableValue) {
-	values = cloneTypedTableValues(values)
-	join.rightRows[key] = values
 	valueKey, joined := typedTableJoinValue(values, join.rightField)
 	if !joined {
 		return
 	}
+	if join.semijoinReduction && len(join.leftIndex[valueKey]) == 0 && len(join.leftPending[valueKey]) == 0 {
+		join.addRightPending(valueKey, key)
+		return
+	}
+	values = cloneTypedTableValues(values)
+	join.rightRows[key] = values
 	addTypedTableJoinIndex(join.rightIndex, valueKey, key)
 	for leftKey := range join.leftIndex[valueKey] {
 		join.pairs[typedTableJoinPair{leftKey: leftKey, rightKey: key}] = struct{}{}
+	}
+	if join.semijoinReduction {
+		join.activateLeftPending(valueKey)
 	}
 }
 
@@ -318,6 +352,9 @@ func (join *TypedTableJoin) removeRight(key string, values []TypedTableValue) {
 			delete(join.pairs, typedTableJoinPair{leftKey: leftKey, rightKey: key})
 		}
 		removeTypedTableJoinIndex(join.rightIndex, valueKey, key)
+		if join.semijoinReduction && len(join.rightIndex[valueKey]) == 0 {
+			join.demoteLeft(valueKey)
+		}
 	}
 	delete(join.rightRows, key)
 }
@@ -362,19 +399,27 @@ func typedTableJoinValue(values []TypedTableValue, field int) (string, bool) {
 
 // LeftCheckpoint and RightCheckpoint identify the latest applied source changes.
 func (join *TypedTableJoin) LeftCheckpoint() uint64 {
-	if join == nil { return 0 }
-	join.mu.RLock(); defer join.mu.RUnlock()
+	if join == nil {
+		return 0
+	}
+	join.mu.RLock()
+	defer join.mu.RUnlock()
 	return join.leftCheckpoint
 }
 func (join *TypedTableJoin) RightCheckpoint() uint64 {
-	if join == nil { return 0 }
-	join.mu.RLock(); defer join.mu.RUnlock()
+	if join == nil {
+		return 0
+	}
+	join.mu.RLock()
+	defer join.mu.RUnlock()
 	return join.rightCheckpoint
 }
 
 // Rows returns independently owned, deterministically ordered join rows.
 func (join *TypedTableJoin) Rows() []TypedTableJoinRow {
-	if join == nil { return nil }
+	if join == nil {
+		return nil
+	}
 	join.mu.RLock()
 	defer join.mu.RUnlock()
 	rows := make([]TypedTableJoinRow, 0, len(join.pairs))
@@ -391,6 +436,11 @@ func (join *TypedTableJoin) Rows() []TypedTableJoinRow {
 			Right:    cloneTypedTableValues(right),
 		})
 	}
-	sort.Slice(rows, func(left, right int) bool { if rows[left].LeftKey != rows[right].LeftKey { return rows[left].LeftKey < rows[right].LeftKey }; return rows[left].RightKey < rows[right].RightKey })
+	sort.Slice(rows, func(left, right int) bool {
+		if rows[left].LeftKey != rows[right].LeftKey {
+			return rows[left].LeftKey < rows[right].LeftKey
+		}
+		return rows[left].RightKey < rows[right].RightKey
+	})
 	return rows
 }

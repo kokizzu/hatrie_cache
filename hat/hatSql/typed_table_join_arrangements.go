@@ -35,6 +35,7 @@ type TypedTableJoinArrangements struct {
 	mu      sync.Mutex
 	left    *TypedTable
 	right   *TypedTable
+	options TypedTableJoinOptions
 	entries map[string]*typedTableJoinArrangementEntry
 }
 
@@ -53,10 +54,16 @@ type TypedTableJoinArrangement struct {
 }
 
 func NewTypedTableJoinArrangements(left, right *TypedTable) (*TypedTableJoinArrangements, error) {
+	return NewTypedTableJoinArrangementsWithOptions(left, right, TypedTableJoinOptions{})
+}
+
+// NewTypedTableJoinArrangementsWithOptions creates shared joins with the
+// supplied maintenance options.
+func NewTypedTableJoinArrangementsWithOptions(left, right *TypedTable, options TypedTableJoinOptions) (*TypedTableJoinArrangements, error) {
 	if left == nil || right == nil || left == right {
 		return nil, fmt.Errorf("typed table join arrangements require two distinct tables")
 	}
-	return &TypedTableJoinArrangements{left: left, right: right, entries: map[string]*typedTableJoinArrangementEntry{}}, nil
+	return &TypedTableJoinArrangements{left: left, right: right, options: options, entries: map[string]*typedTableJoinArrangementEntry{}}, nil
 }
 
 func (arrangements *TypedTableJoinArrangements) Acquire(definition TypedTableJoinDefinition) (*TypedTableJoinArrangement, error) {
@@ -68,7 +75,7 @@ func (arrangements *TypedTableJoinArrangements) Acquire(definition TypedTableJoi
 	defer arrangements.mu.Unlock()
 	entry := arrangements.entries[key]
 	if entry == nil {
-		join, err := NewTypedTableJoin(arrangements.left, arrangements.right, definition)
+		join, err := NewTypedTableJoinWithOptions(arrangements.left, arrangements.right, definition, arrangements.options)
 		if err != nil {
 			return nil, err
 		}
@@ -173,6 +180,18 @@ func (arrangement *TypedTableJoinArrangement) Rows() []TypedTableJoinRow {
 	defer entry.mu.Unlock()
 	return entry.join.Rows()
 }
+
+// Stats returns the retention summary of the shared join arrangement.
+func (arrangement *TypedTableJoinArrangement) Stats() (TypedTableJoinStats, error) {
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return TypedTableJoinStats{}, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.join.Stats(), nil
+}
+
 func (arrangement *TypedTableJoinArrangement) Release() bool {
 	if arrangement == nil {
 		return false
