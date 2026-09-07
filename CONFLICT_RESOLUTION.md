@@ -1,32 +1,13 @@
 # Deterministic Conflict Resolution
 
-`hat/hatReplication` provides `ConflictVersion` and
-`ResolveConflictVersion` for callers that need a deterministic winner when
-two writers update the same logical record.
+`hatReplication.ConflictVersion` identifies a write with a caller-supplied
+timestamp, writer node ID, and per-writer sequence. `CompareConflictVersions`
+orders valid versions by timestamp, then lexical node ID, then sequence.
+`ResolveConflictVersion` returns the larger version; equal versions preserve
+the left value.
 
-```go
-winner, err := hatReplication.ResolveConflictVersion(local, remote)
-if err != nil {
-    return err
-}
-if winner == remote {
-    apply(remoteValue)
-}
-```
-
-The ordering is total for valid versions:
-
-1. Larger `Timestamp` wins.
-2. For equal timestamps, lexicographically larger `NodeID` wins.
-3. For the same node and timestamp, larger `Sequence` wins.
-
-`Timestamp` may be a physical or logical clock value, but all writers must
-use the same unit and ordering convention. `NodeID` is required so concurrent
-writes cannot depend on arrival order. `Sequence` should be unique for each
-distinct write from one node at a given timestamp. Equal versions preserve
-the left argument, so callers must not reuse one version for different values.
-
-`CompareConflictVersions` exposes the ordering when a caller needs to make a
-decision without selecting a value. Invalid versions return
-`ErrConflictVersionInvalid`. The helpers do not mutate state, perform I/O, or
-change the existing replication dispatcher.
+The ordering is deterministic for concurrent writers and independent of
+arrival order. Missing node IDs are rejected. This is a pure conflict-decision
+primitive: it does not perform replication, quorum acknowledgement, or
+metadata consensus, so callers must apply the selected version atomically in
+their own storage path.

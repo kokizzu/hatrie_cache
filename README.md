@@ -3928,6 +3928,14 @@ bound requires a replica at or ahead of the observed frontier; no transport or
 endpoint discovery is implied. See
 [REPLICA_LAG_ROUTING.md](REPLICA_LAG_ROUTING.md) for the policy contract.
 
+## Deterministic Conflict Resolution
+
+`hatReplication.ResolveConflictVersion` chooses the larger valid timestamp,
+node-ID, and sequence tuple independent of arrival order. It is a pure
+decision primitive; replication, quorum acknowledgement, and metadata
+consensus remain separate concerns. See
+[CONFLICT_RESOLUTION.md](CONFLICT_RESOLUTION.md) for the ordering contract.
+
 ## Parallel NDJSON Input Parsing
 
 `hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide
