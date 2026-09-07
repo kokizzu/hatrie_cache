@@ -16189,3 +16189,21 @@ BenchmarkCommandJournalReplayParallel/parallel-32       1  28786873 ns/op 273159
 
 No parallel replay code remains in the tree, and the existing serial `Replay`
 path is unchanged.
+
+## Explicit Read Quorum
+
+`BenchmarkExecuteReadQuorum` reads three named targets with two matching values.
+The callback itself returns static values, so these numbers isolate executor
+coordination, result grouping, and goroutine scheduling rather than network or
+storage latency.
+
+Five runs on an AMD Ryzen 9 5950X, Go `amd64`:
+
+| Mode | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Heap | Allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Typed comparator | 1,420 ns | 1,423 ns | 1,468 ns | 1,479 ns | 1,439 ns | 864 B/op | 12/op |
+| `reflect.DeepEqual` fallback | 1,533 ns | 1,547 ns | 1,555 ns | 1,555 ns | 1,528 ns | 864 B/op | 12/op |
+
+The typed comparator is about 4-8% faster in this fixture. The executor is
+opt-in and always reads every target, so the caller explicitly accepts the
+additional replica work required for consistency checking.
