@@ -14744,6 +14744,8 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return evalSQLRegexFunction(expr, group, row)
 		case "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
 			return evalSQLJSONPathFunction(expr, group, row)
+		case "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+			return evalSQLGeoFunction(expr, group, row)
 		case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
 			return evalSQLApproximateAggregate(expr, group)
 		case "CONTAINS":
@@ -15298,7 +15300,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false

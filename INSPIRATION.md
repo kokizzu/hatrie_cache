@@ -567,7 +567,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T131 Typed constraints.
 - [ ] T132 Foreign-key enforcement.
 - [x] T133 JSON path access.
-- [ ] T134 Spatial predicates.
+- [x] T134 Spatial predicates. SQL now supports `GEO_DISTANCE_METERS`/`GEO_DISTANCE`, `GEO_WITHIN_RADIUS`, and dateline-aware `GEO_WITHIN_BOX` with NULL propagation and coordinate validation. See [SPATIAL_SQL.md](SPATIAL_SQL.md).
 - [x] T135 Replication and memory introspection.
 - [x] T136 Fiber and scheduler introspection - Add an authenticated `/api/scheduler` report and Prometheus gauges for goroutine, GOMAXPROCS, CPU, and scheduler metric state; the on-demand report is zero-allocation in the package benchmark (see SCHEDULER_MONITORING.md).
 - [x] T137 Health checks.
