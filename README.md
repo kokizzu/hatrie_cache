@@ -3970,3 +3970,11 @@ existing sequential importer remains available. See
 `SelectReadReplica` remains the backward-compatible read-after-write default.
 See [READ_CONSISTENCY.md](READ_CONSISTENCY.md) for configuration, API usage,
 selection rules, and operational guidance.
+
+## Adaptive Monotone Maintenance
+
+`hatSql.TypedTableAggregate.ApplyAuto` classifies each change batch and uses
+the insert-only maintenance fast path only when the batch proves it is safe;
+updates and deletes fall back to the existing general path. See
+[MONOTONE_MAINTENANCE.md](MONOTONE_MAINTENANCE.md) for the contract and
+benchmark.

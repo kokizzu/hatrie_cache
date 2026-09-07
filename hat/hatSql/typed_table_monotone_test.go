@@ -135,6 +135,50 @@ func TestTypedTableAggregateApplyMonotoneHandlesNilAndEmptyBatches(t *testing.T)
 	}
 }
 
+func TestTypedTableAggregateApplyAutoSelectsCorrectMaintenancePath(t *testing.T) {
+	appendOnly := []TypedTableChange{
+		{Sequence: 1, Key: "one", After: []TypedTableValue{TypedString("red"), TypedInt64(2)}},
+		{Sequence: 2, Key: "two", After: []TypedTableValue{TypedString("red"), TypedInt64(3)}},
+	}
+	if !TypedTableChangesAreMonotone(appendOnly) {
+		t.Fatal("append-only batch was not classified as monotone")
+	}
+	adaptive := newMonotoneAggregate(t)
+	general := newMonotoneAggregate(t)
+	if err := adaptive.ApplyAuto(appendOnly); err != nil {
+		t.Fatalf("adaptive append-only apply = %v", err)
+	}
+	if err := general.Apply(appendOnly); err != nil {
+		t.Fatalf("general append-only apply = %v", err)
+	}
+	if !reflect.DeepEqual(adaptive.Rows(), general.Rows()) || adaptive.Checkpoint() != general.Checkpoint() {
+		t.Fatalf("adaptive append-only state = %#v/%d, general = %#v/%d", adaptive.Rows(), adaptive.Checkpoint(), general.Rows(), general.Checkpoint())
+	}
+
+	update := []TypedTableChange{{Sequence: 3, Key: "one", Before: []TypedTableValue{TypedString("red"), TypedInt64(2)}, After: []TypedTableValue{TypedString("blue"), TypedInt64(5)}}}
+	if TypedTableChangesAreMonotone(update) {
+		t.Fatal("update batch was classified as monotone")
+	}
+	if err := adaptive.ApplyAuto(update); err != nil {
+		t.Fatalf("adaptive update apply = %v", err)
+	}
+	if err := general.Apply(update); err != nil {
+		t.Fatalf("general update apply = %v", err)
+	}
+	if !reflect.DeepEqual(adaptive.Rows(), general.Rows()) || adaptive.Checkpoint() != general.Checkpoint() {
+		t.Fatalf("adaptive update state = %#v/%d, general = %#v/%d", adaptive.Rows(), adaptive.Checkpoint(), general.Rows(), general.Checkpoint())
+	}
+}
+
+func TestTypedTableChangesAreMonotoneRequiresAfterValues(t *testing.T) {
+	if !TypedTableChangesAreMonotone(nil) {
+		t.Fatal("empty change batch was not classified as monotone")
+	}
+	if TypedTableChangesAreMonotone([]TypedTableChange{{Sequence: 1}}) {
+		t.Fatal("empty change was classified as monotone")
+	}
+}
+
 func newMonotoneAggregate(t *testing.T) *TypedTableAggregate {
 	t.Helper()
 	table, err := NewTypedTable(TypedTableSchema{
@@ -184,6 +228,48 @@ func BenchmarkTypedTableAggregateApplyMonotone(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func BenchmarkTypedTableAggregateApplyAuto(b *testing.B) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name:    "monotone-auto-benchmark",
+		Columns: []TypedTableColumn{{Name: "team", Kind: TypedTableString}, {Name: "points", Kind: TypedTableInt64}},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	changes := make([]TypedTableChange, 256)
+	for index := range changes {
+		changes[index] = TypedTableChange{
+			Sequence: uint64(index + 1),
+			Key:      "key",
+			After:    []TypedTableValue{TypedString("red"), TypedInt64(int64(index))},
+		}
+	}
+	definition := TypedTableAggregateDefinition{GroupBy: []string{"team"}, SumField: "points"}
+	b.ReportAllocs()
+	b.Run("general", func(b *testing.B) {
+		for index := 0; index < b.N; index++ {
+			aggregate, err := NewTypedTableAggregate(table, definition)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := aggregate.Apply(changes); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("auto", func(b *testing.B) {
+		for index := 0; index < b.N; index++ {
+			aggregate, err := NewTypedTableAggregate(table, definition)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := aggregate.ApplyAuto(changes); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func BenchmarkTypedTableAggregateApplyGeneralInsertOnly(b *testing.B) {
