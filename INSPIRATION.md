@@ -322,7 +322,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).
 - [x] M042 CDC envelope normalization. `TypedTableChange` carries normalized operation, key, before/after rows, and monotone sequence data for arrangements; see [CDC_ENVELOPES.md](CDC_ENVELOPES.md).
 - [x] M043 Kafka-style source offset tracking.
-- [ ] M044 Source transaction grouping.
+- [x] M044 Source transaction grouping - `SQLSourceOffsetTracker.AdvanceTransaction` applies a distinct multi-partition source transaction only when every member is newer; see [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md).
 - [ ] M045 Exactly-once source ingestion.
 - [ ] M046 Sink progress and acknowledged frontiers.
 - [ ] M047 Exactly-once sink commits.

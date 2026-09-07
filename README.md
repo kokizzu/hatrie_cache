@@ -4034,3 +4034,10 @@ source partition with atomic batch updates and deterministic snapshots. It is
 thread-safe checkpoint metadata, disabled from table behavior unless callers
 explicitly use it; see [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
 for usage and exactly-once boundaries.
+
+## SQL Source Transaction Grouping
+
+`hatSql.SQLSourceOffsetTracker.AdvanceTransaction` atomically advances a
+group of source partition offsets when every member is newer. See
+[SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md) for
+the contract, memory boundary, and measured cost.
