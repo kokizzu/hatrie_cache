@@ -241,7 +241,7 @@ name.
 - [ ] C142 Automatic shard pruning from partition predicates.
 - [ ] C143 Parallel replicas for one query.
 - [ ] C144 Hedged reads for slow replicas.
-- [ ] C145 Remote read retries with bounded duplicate work.
+- [x] C145 Remote read retries with bounded duplicate work - `hatSql.ReadReplicaSet.ExecuteWithRetry` rotates across replicas with an explicit retry classifier, context-aware backoff, default-off behavior, and a hard eight-attempt cap; see [READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md).
 - [ ] C146 Distributed partial aggregation and final merge.
 - [ ] C147 Quorum inserts with explicit durability policy.
 - [ ] C148 Replicated part exchange with checksums.

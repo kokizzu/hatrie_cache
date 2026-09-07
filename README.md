@@ -4058,3 +4058,11 @@ for the contract, durability boundary, and measured cost. The caller must
 persist the commit record atomically with the sink effect or make the sink
 operation idempotent; the coordinator alone cannot guarantee external
 exactly-once delivery.
+
+## Read Replica Retries
+
+`hatSql.ReadReplicaSet.ExecuteWithRetry` provides opt-in bounded retries for
+read-only queries. The default remains one attempt; enabling retries requires
+an explicit transient-error classifier and is capped at eight attempts. See
+[READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md) for context-aware backoff,
+usage, and measured duplicate-work cost.
