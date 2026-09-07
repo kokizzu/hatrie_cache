@@ -23,6 +23,7 @@ security guidance before exposing it on a network.
 - Deterministic weighted disk placement: [disk placement](DISK_PLACEMENT.md)
 - Age-based hot, warm, and cold tiers: [storage tiers](STORAGE_TIERS.md)
 - Remote immutable parts with local metadata: [remote parts](REMOTE_PARTS.md)
+- Offset-based array and nested column layout: [columnar nested layout](COLUMNAR_NESTED_LAYOUT.md)
 - Zero-copy-friendly immutable-part transfer: [immutable part transfer](ZERO_COPY_PARTS.md)
 - Deterministic part-cache admission and eviction: [part cache policy](PART_CACHE_POLICY.md)
 - Per-part and per-column read amplification accounting: [read amplification](READ_AMPLIFICATION.md)

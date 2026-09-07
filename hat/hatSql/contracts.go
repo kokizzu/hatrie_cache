@@ -70,13 +70,16 @@ type DictionaryColumn struct {
 	Codes  []uint32
 }
 
-// ColumnarBatch stores one source scan as field-aligned value slices or compact
-// dictionary columns. Every requested field must contain Rows values; absent
-// JSON fields are nil in a plain column and are not dictionary encoded.
+// ColumnarBatch stores one source scan as field-aligned value slices, compact
+// dictionary columns, or offset-based array/nested columns. Every requested
+// field must contain Rows logical values; absent JSON fields are nil in a plain
+// column and are not dictionary encoded.
 type ColumnarBatch struct {
-	Columns      map[string][]interface{}
-	Dictionaries map[string]DictionaryColumn
-	Rows         int
+	Columns       map[string][]interface{}
+	Dictionaries  map[string]DictionaryColumn
+	ListColumns   map[string]ColumnarListColumn
+	NestedColumns map[string]ColumnarNestedColumn
+	Rows          int
 }
 
 // ColumnarNumericSegment stores the numeric value bounds for one contiguous
@@ -198,7 +201,22 @@ func (batch ColumnarBatch) FieldRows(field string) int {
 	if dictionary, ok := batch.Dictionaries[field]; ok {
 		return len(dictionary.Codes)
 	}
-	return len(batch.Columns[field])
+	if values, ok := batch.Columns[field]; ok {
+		return len(values)
+	}
+	if column, ok := batch.ListColumns[field]; ok {
+		if len(column.Offsets) == 0 {
+			return 0
+		}
+		return len(column.Offsets) - 1
+	}
+	if column, ok := batch.NestedColumns[field]; ok {
+		if len(column.Offsets) == 0 {
+			return 0
+		}
+		return len(column.Offsets) - 1
+	}
+	return 0
 }
 
 // Value returns one logical field value regardless of its physical encoding.
@@ -213,10 +231,19 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		return dictionary.Values[dictionary.Codes[row]], true
 	}
 	values, ok := batch.Columns[field]
-	if !ok || row >= len(values) {
-		return nil, false
+	if ok {
+		if row >= len(values) {
+			return nil, false
+		}
+		return values[row], true
 	}
-	return values[row], true
+	if column, ok := batch.ListColumns[field]; ok {
+		return column.Value(row)
+	}
+	if column, ok := batch.NestedColumns[field]; ok {
+		return column.Value(row)
+	}
+	return nil, false
 }
 
 // EncodeRepeatedStrings replaces all-string columns with a dictionary when the

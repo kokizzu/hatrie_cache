@@ -122,7 +122,7 @@ name.
 - [x] C050 Shared JSON subcolumns for repeated paths. `JSONSubcolumnRegistry` interns normalized JSON paths into process-local `uint32` IDs with concurrent lookup and snapshots; see [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md).
 - [x] C050a Process-local shared JSON subcolumn path interning with deterministic snapshots.
 - [x] C051 JSON path indexing for supported predicates.
-- [ ] C052 Native array and nested-column physical layout.
+- [x] C052 Native array and nested-column physical layout. `hatSql.ColumnarListColumn` and `ColumnarNestedColumn` use shared offsets with flat child vectors and are integrated into columnar access, merge loading, and cache cloning. See [COLUMNAR_NESTED_LAYOUT.md](COLUMNAR_NESTED_LAYOUT.md).
 - [x] C053 Bitmap-backed nullable columns. Nullable RowBinary encodes one bitmap per row, preserves typed values, and rejects malformed or unsafe input; see [ROW_BINARY_NULLABLE_BITMAP.md](ROW_BINARY_NULLABLE_BITMAP.md).
 - [x] C053a One-bit-per-row nullable bitmap with resize preservation and population counting.
 - [x] C053a Nullable-column bitmap RowBinary format.

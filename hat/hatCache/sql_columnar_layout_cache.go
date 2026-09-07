@@ -334,6 +334,18 @@ func cloneSQLColumnarBatch(batch hatSql.ColumnarBatch) hatSql.ColumnarBatch {
 			}
 		}
 	}
+	if len(batch.ListColumns) > 0 {
+		clone.ListColumns = make(map[string]hatSql.ColumnarListColumn, len(batch.ListColumns))
+		for field, column := range batch.ListColumns {
+			clone.ListColumns[field] = column.Clone()
+		}
+	}
+	if len(batch.NestedColumns) > 0 {
+		clone.NestedColumns = make(map[string]hatSql.ColumnarNestedColumn, len(batch.NestedColumns))
+		for field, column := range batch.NestedColumns {
+			clone.NestedColumns[field] = column.Clone()
+		}
+	}
 	return clone
 }
 
