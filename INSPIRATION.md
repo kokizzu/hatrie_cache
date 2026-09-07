@@ -202,7 +202,7 @@ name.
 - [x] C112 Wait-for-async-insert acknowledgement mode.
 - [x] C113 Idempotent insert deduplication.
 - [x] C114 Adaptive async-insert batching.
-- [ ] C115 Parallel input parsing with deterministic error reporting.
+- [x] C115 Parallel input parsing with deterministic error reporting. `ParseNDJSONParallel` parses independent records with contiguous worker ranges, preserves row order, and returns the lowest invalid source line; `ImportNDJSONParallel` commits only after complete validation. See [PARALLEL_INPUT.md](PARALLEL_INPUT.md).
 - [x] C116 Binary wire format negotiation.
 - [x] C117 RowBinary-compatible encoding. `EncodeSQLRowBinary` and `DecodeSQLRowBinary` provide an explicit schema-aware RowBinary-style stream with little-endian fixed-width values, varint-length strings/bytes, nullable markers, strict validation, and bounded decoding; JSON/protobuf defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
 - [x] C118 JSON row encoding for compatibility paths.

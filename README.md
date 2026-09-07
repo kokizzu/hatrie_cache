@@ -3902,3 +3902,12 @@ Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and 
 - [Source frontier monitoring](SOURCE_FRONTIER_MONITORING.md)
 
 - [Operator memory monitoring](OPERATOR_MEMORY_MONITORING.md)
+
+## Parallel NDJSON Input Parsing
+
+`hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide
+an opt-in bounded worker pool for independent NDJSON records. Rows retain
+source order, errors select the lowest invalid line deterministically, and a
+failed import does not replace an existing external-table snapshot. The
+existing sequential importer remains available. See
+[PARALLEL_INPUT.md](PARALLEL_INPUT.md) for the API and benchmark tradeoff.
