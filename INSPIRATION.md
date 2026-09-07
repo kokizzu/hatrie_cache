@@ -537,7 +537,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T102 Stored functions/UDFs for supported languages.
 - [ ] T103 Native FFI extension boundary.
 - [x] T104 Sandboxed UDF execution.
-- [ ] T105 Hot module loading with version checks.
+- [x] T105 Hot module loading with version checks. Added an opt-in in-process `hatSql.PluginRegistry` with atomic version-checked load/replace/unload, monotonic generations, and deterministic metadata snapshots; see [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md). Native shared-library loading remains intentionally out of scope for the security boundary.
 - [x] T106 Triggers and update hooks for supported collections.
 - [x] T107 Replace hooks for journal and projection maintenance.
 - [x] T108 Transactional trigger ordering guarantees. Added `hatSql.SQLTriggerRegistry` and `SQLTriggerTransaction` with deterministic event/trigger ordering, prepare-before-apply, primary-first commit, reverse rollback, and explicit caller-owned atomicity; see [SQL_TRIGGERS.md](SQL_TRIGGERS.md). SQL parser `CREATE TRIGGER` wiring remains a separate T120 item.

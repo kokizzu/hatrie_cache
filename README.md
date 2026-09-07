@@ -66,6 +66,7 @@ security guidance before exposing it on a network.
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)

@@ -16256,3 +16256,31 @@ BenchmarkSQLTriggerTransaction/with_trigger-32 41310 5117 ns/op 10256 B/op 12 al
 BenchmarkSQLTriggerTransaction/with_trigger-32 44815 5123 ns/op 10256 B/op 12 allocs/op
 BenchmarkSQLTriggerTransaction/with_trigger-32 45327 5581 ns/op 10256 B/op 12 allocs/op
 ```
+
+## Versioned Plugin Registry
+
+The in-process `hatSql.PluginRegistry` benchmark uses one loaded plugin and
+measures a read-only lookup and an alternating version replacement. Five runs
+were collected with `-benchtime=200ms` on an AMD Ryzen 9 5950X.
+
+| Operation | Time | Heap | Allocs |
+| --- | ---: | ---: | ---: |
+| Resolve | 14.16-14.30 ns/op | 0 B/op | 0/op |
+| Replace | 75.72-77.77 ns/op | 32 B/op | 1/op |
+
+This registry is opt-in and changes no existing plugin or SQL execution path.
+It provides version fencing for hot replacement; it is not a native dynamic
+library loader. Raw output from `make benchmark-plugin-registry-clean`:
+
+```text
+BenchmarkPluginRegistryResolve-32 16579047 14.28 ns/op 0 B/op 0 allocs/op
+BenchmarkPluginRegistryResolve-32 16656499 14.25 ns/op 0 B/op 0 allocs/op
+BenchmarkPluginRegistryResolve-32 16713104 14.30 ns/op 0 B/op 0 allocs/op
+BenchmarkPluginRegistryResolve-32 17012972 14.16 ns/op 0 B/op 0 allocs/op
+BenchmarkPluginRegistryResolve-32 16987214 14.23 ns/op 0 B/op 0 allocs/op
+BenchmarkPluginRegistryReplace-32 3141318 76.32 ns/op 32 B/op 1 allocs/op
+BenchmarkPluginRegistryReplace-32 3039374 77.77 ns/op 32 B/op 1 allocs/op
+BenchmarkPluginRegistryReplace-32 3051595 75.72 ns/op 32 B/op 1 allocs/op
+BenchmarkPluginRegistryReplace-32 3143766 76.97 ns/op 32 B/op 1 allocs/op
+BenchmarkPluginRegistryReplace-32 3088768 77.45 ns/op 32 B/op 1 allocs/op
+```
