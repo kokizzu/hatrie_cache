@@ -54,3 +54,47 @@ func BenchmarkTypedTableSortedArrangementAppendBulkApply(b *testing.B) {
 		b.StopTimer()
 	}
 }
+
+func BenchmarkTypedTableSortedArrangementTailInsertApply(b *testing.B) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name: "sorted_tail_benchmark",
+		Columns: []TypedTableColumn{
+			{Name: "team", Kind: TypedTableString},
+			{Name: "score", Kind: TypedTableInt64},
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	for index := range 4096 {
+		key := fmt.Sprintf("key-%05d", index)
+		if _, err := table.Upsert(key, []TypedTableValue{TypedString(fmt.Sprintf("team-%05d", index)), TypedInt64(int64(index))}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	arrangement, err := NewTypedTableSortedArrangement(table, TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	change := TypedTableChange{
+		Sequence:  4097,
+		Operation: "INSERT",
+		Key:       "key-04096",
+		After:     []TypedTableValue{TypedString("team-04096"), TypedInt64(4096)},
+	}
+	baseOrderLength := len(arrangement.order)
+	baseCheckpoint := arrangement.checkpoint
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		delete(arrangement.entries, change.Key)
+		delete(arrangement.positions, change.Key)
+		arrangement.order = arrangement.order[:baseOrderLength]
+		arrangement.checkpoint = baseCheckpoint
+		b.StartTimer()
+		if err := arrangement.Apply([]TypedTableChange{change}); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+	}
+}
