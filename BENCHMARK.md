@@ -16430,3 +16430,13 @@ BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 307059 3932 ns/op 5304 B/op 32 
 BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 294865 3896 ns/op 5304 B/op 32 allocs/op
 BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 319893 3921 ns/op 5304 B/op 32 allocs/op
 ```
+
+## Compaction Scheduler
+
+`make benchmark-compaction-scheduler-clean` ran `BenchmarkCompactionSchedulerRun` three times on an AMD Ryzen 9 5950X. Each iteration created a scheduler, registered 64 no-op shard tasks, and drained them with `MaxConcurrent: 4`.
+
+| Benchmark | Median ns/op | B/op | allocs/op | Workload |
+| --- | ---: | ---: | ---: | --- |
+| Compaction scheduler drain | 26,020 | 17,353 | 35 | 64 scheduled tasks |
+
+This measures maintenance coordination overhead, including task registration, deterministic sorting, worker startup, and result collection. It is not a cache read/write benchmark and does not change the normal data path. The default `MaxConcurrent` is 1 and there is no background scheduler.

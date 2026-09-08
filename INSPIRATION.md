@@ -391,7 +391,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M090 Independent compute and storage scaling.
 - [x] M091 Durable persistent shards through the local storage layer.
 - [x] M092 Batched writes to durable storage.
-- [ ] M093 Generic persistent-shard compaction scheduling.
+- [x] M093 Caller-driven bounded persistent-shard compaction scheduling with duplicate request coalescing, deterministic task ordering, retry-preserving failures, and explicit concurrency limits; see [COMPACTION_SCHEDULER.md](COMPACTION_SCHEDULER.md).
 - [ ] M094 Persistent-shard leases and fencing.
 - [x] M095 Snapshot hydration with progress reporting.
 - [ ] M096 Per-column dictionary compression for arrangements.
