@@ -343,6 +343,9 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M051a Add an opt-in immutable compiled SQL query handle that reuses a parsed template across executions while preserving per-call cloning, binding, and the ordinary executor.
 - [x] M051b Expose a fresh, deterministic logical dataflow IR snapshot from compiled SQL queries without changing execution, storage, or wire behavior; see [COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
+- [x] M052a Lower compiled logical stages into a lazy, versioned immutable
+  `SQLDataflowPlan` with defensive snapshots; executable fragment composition
+  remains separate. See [SQL_DATAFLOW_LOWERING.md](SQL_DATAFLOW_LOWERING.md).
 - [x] M053 Extensible optimizer rule framework. `SQLQueryOptimizer` provides an opt-in ordered rule hook over structural EXPLAIN steps and existing `SQLIndexHint` controls; nil keeps the default path. See [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md) and the measured opt-in cost in [BENCHMARK.md](BENCHMARK.md#opt-in-sql-optimizer-rules).
 - [x] M054 Predicate pushdown before arrangement maintenance.
 - [x] M055 Projection pruning before arrangement maintenance.

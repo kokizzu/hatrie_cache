@@ -35,4 +35,5 @@ go test ./hat/hatSql -run '^$' -bench '^BenchmarkCompiledSQLQueryDataflow$' -ben
 
 The median snapshot cost was `728.9 ns/op`, `1,097 B/op`, and `13 allocs/op`.
 Call `Dataflow` only when the metadata is needed; ordinary compiled execution
-does not call it.
+does not call it. For a retained, versioned lowering with lower repeated
+snapshot cost, see [SQL_DATAFLOW_LOWERING.md](SQL_DATAFLOW_LOWERING.md).

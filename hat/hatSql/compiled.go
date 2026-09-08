@@ -3,14 +3,17 @@ package hatSql
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 // CompiledSQLQuery is an immutable parsed SQL template. It is safe for
 // concurrent execution; every call clones the template before binding values
 // or applying execution-local rewrites.
 type CompiledSQLQuery struct {
-	source   string
-	template *sqlQuery
+	source       string
+	template     *sqlQuery
+	dataflowPlan *SQLDataflowPlan
+	dataflowOnce sync.Once
 }
 
 // CompileSQLQuery parses a SQL source into an immutable reusable template.
@@ -26,7 +29,10 @@ func CompileSQLQuery(source string) (*CompiledSQLQuery, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &CompiledSQLQuery{source: source, template: template}, nil
+	return &CompiledSQLQuery{
+		source:   source,
+		template: template,
+	}, nil
 }
 
 // Source returns the original SQL source used to compile the query.

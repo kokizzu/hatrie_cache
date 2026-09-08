@@ -24,6 +24,8 @@ import (
 type SQLQueryOptions = hatSql.SQLQueryOptions
 type SQLDataflowIR = hatSql.SQLDataflowIR
 type SQLDataflowNode = hatSql.SQLDataflowNode
+type SQLDataflowFragment = hatSql.SQLDataflowFragment
+type SQLDataflowPlan = hatSql.SQLDataflowPlan
 type SQLTrigger = hatSql.SQLTrigger
 type SQLTriggerAction = hatSql.SQLTriggerAction
 type SQLTriggerApplyFunc = hatSql.SQLTriggerApplyFunc

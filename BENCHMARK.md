@@ -17084,3 +17084,24 @@ measure or alter compiled query execution.
 
 Median: **728.9 ns/op**, **1,097 B/op**, **13 allocs/op**. This cost is paid
 only by callers that request the metadata snapshot.
+
+## SQL Dataflow Lowering
+
+Workload: compiled query
+`SELECT name FROM CACHE('users') WHERE score >= $1 ORDER BY name LIMIT 2`;
+Go benchmark with `-benchmem -benchtime=200ms -count=5` on AMD Ryzen 9 5950X.
+The previous `Dataflow` values are the M051b baseline before cached lowering.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | B/op | allocs/op | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| `Dataflow` before cached lowering | 729.2, 735.3, 726.5, 721.1, 728.9 | 728.9 | 1,097 | 13 | baseline |
+| `Dataflow` after cached lowering | 382.9, 372.8, 367.5, 391.2, 373.3 | 373.3 | 704 | 10 | 1.95x faster, 1.56x fewer bytes |
+| repeated `LowerDataflow` | 185.9, 184.8, 182.2, 182.3, 180.7 | 182.3 | 352 | 5 | 4.00x faster than prior `Dataflow` |
+| compile plus first lowering | 4,475, 4,474, 4,537, 4,556, 4,527 | 4,527 | 4,896 | 35 | one-time request cost |
+| compile without lowering request | 3,231, 3,219, 3,119, 3,120, 3,119 | 3,120 | 3,381 | 16 | controlled no-plan path |
+
+The lazy design avoids the eager implementation's compile regression. A caller
+that requests a plan pays about `1.45x` the controlled compile-plus-return
+cost, `+1,515 B/op`, and `+19 allocs/op` for that first request; later plan
+snapshots are about `2.05x` faster than the compatible `Dataflow` view and use
+half its bytes. Callers that never request a plan do not build one.

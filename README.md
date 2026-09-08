@@ -4138,3 +4138,10 @@ slices. Execution still uses the existing cloned compiled-query path, so this
 adds no storage or wire format and does not change query results. See
 [COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md) and the measured metadata
 cost in [BENCHMARK.md](BENCHMARK.md#compiled-sql-dataflow-ir).
+
+Compiled queries can also expose a cached, versioned fragment plan with
+`CompiledSQLQuery.LowerDataflow()`. The plan is initialized only when requested
+and each returned snapshot is independent, so it can be retained by routing,
+explain, or incremental-processing coordinators without changing SQL
+execution. See [SQL_DATAFLOW_LOWERING.md](SQL_DATAFLOW_LOWERING.md) for the
+contract, execution boundary, and measurements.
