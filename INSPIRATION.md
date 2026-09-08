@@ -578,7 +578,13 @@ explicit regional partitioning and simple backups over automatic sharding.
   and `MergePartials` combine validated partition-local COUNT, SUM, MIN, MAX,
   and COUNT DISTINCT states deterministically; see
   [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md).
-- [ ] T084 Cross-partition ordered pagination.
+- [x] T084 Cross-partition ordered pagination. The opt-in
+  `PartitionedOrderedSourceResolver` performs a deterministic k-way merge for
+  keyset pages over independently ordered physical partitions, with a cursor
+  that records each partition's progress and rejects layout changes. The
+  legacy offset and direct-source keyset paths remain unchanged. See
+  [CROSS_PARTITION_PAGINATION.md](CROSS_PARTITION_PAGINATION.md) and the raw
+  measurements in [BENCHMARK.md](BENCHMARK.md#cross-partition-ordered-keyset-pagination).
 - [x] T085 Partition health and lag dashboard. The Svelte MPA Admin page
   derives read-only per-partition primary, region, replica count, maximum
   reported sequence lag, maintenance, and unknown states from `/api/topology`

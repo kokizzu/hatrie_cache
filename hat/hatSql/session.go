@@ -162,6 +162,32 @@ func (session *SQLSession) ResolveSQLSourcePartitions(name, key string) ([]SQLSo
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLOrderedSourcePartitions forwards ordered physical partitions to
+// the external source after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {
+	if session == nil {
+		return nil, false, nil
+	}
+	if strings.EqualFold(name, "CACHE") {
+		session.mu.RLock()
+		_, tableExists := session.tables[strings.ToLower(key)]
+		_, resultExists := session.results[strings.ToLower(key)]
+		_, viewExists := session.views[strings.ToLower(key)]
+		session.mu.RUnlock()
+		if tableExists || resultExists || viewExists {
+			return nil, false, nil
+		}
+	}
+	if session.source == nil {
+		return nil, false, nil
+	}
+	ordered, ok := session.source.(PartitionedOrderedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return ordered.ResolveSQLOrderedSourcePartitions(name, key, field, desc, nullsFirst, nullsLast)
+}
+
 // ResolveSQLSourcePartitionsForPredicate forwards the optional pruning
 // contract after preserving session-local source precedence.
 func (session *SQLSession) ResolveSQLSourcePartitionsForPredicate(name, key string, predicate SQLPartitionPredicate) ([]SQLSourcePartition, bool, error) {

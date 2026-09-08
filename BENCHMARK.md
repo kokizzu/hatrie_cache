@@ -15533,8 +15533,9 @@ Median summary:
 
 Keyset pagination is intended for callers walking ordered pages in sequence.
 Offset pagination remains the default for random page access and compatibility.
-The keyset API currently requires one direct ordered `CACHE` source backed by a
-generic JSON field index or typed `INT64` index. See
+The keyset API supports one direct ordered `CACHE` source backed by a generic
+JSON field index or typed `INT64` index, and opt-in cross-partition ordered
+sources through `PartitionedOrderedSourceResolver`. See
 [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md).
 
 ## SQL Runtime Join Bloom Filter
@@ -17467,3 +17468,15 @@ AMD Ryzen 9 5950X run, eight immutable partitions containing 2,048 rows had a
 ns/op, 923,006 B/op, and 4,120 allocations/op for the legacy resolver. The
 6.80x CPU, 3.93x byte, and 171.67x allocation differences include the
 legacy path's defensive per-query source clone; the feature is opt-in.
+
+## Cross-Partition Ordered Keyset Pagination
+
+The opt-in ordered-partition keyset merge is benchmarked in
+[CROSS_PARTITION_PAGINATION.md](CROSS_PARTITION_PAGINATION.md). With 16
+ordered partitions containing 32,768 total rows, the five-sample median for a
+100-row first page was 837,272 ns/op, 81,470 B/op, and 753 allocations, versus
+46,525,510 ns/op, 19,148,813 B/op, and 98,349 allocations for the existing
+flatten-and-global-sort offset page. That is 55.6x faster, 235.0x fewer bytes,
+and 130.6x fewer allocations. Partition snapshots and their memory remain
+owned by the resolver and are outside the timed region; old resolvers and
+default pagination behavior are unchanged.

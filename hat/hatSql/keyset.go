@@ -57,6 +57,23 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 	if fingerprintErr != nil {
 		return result, fingerprintErr
 	}
+	var metrics *sqlExecutionMetrics
+	if observation.observer != nil || observation.recorder != nil || options.IndexHint.Mode != "" {
+		metrics = &sqlExecutionMetrics{indexHint: options.IndexHint}
+	}
+	if _, partitioned := resolver.(PartitionedOrderedSourceResolver); partitioned && (cursor == "" || isSQLPartitionedKeysetCursor(cursor)) {
+		partitionedResult, used, partitionedErr := executeSQLPartitionedKeysetPage(ctx, query, resolver, control, fingerprint, pageSize, cursor, metrics)
+		if metrics != nil {
+			operatorSteps = metrics.steps
+		}
+		if used {
+			partitionedResult.QueryID = observation.id
+			if partitionedErr != nil {
+				return partitionedResult, sqlRuntimeDiagnostic(partitionedErr)
+			}
+			return partitionedResult, nil
+		}
+	}
 	after := KeysetPosition{}
 	returned := 0
 	if cursor != "" {
@@ -82,10 +99,6 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 		}
 	}
 	query.limit = fetch
-	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil || options.IndexHint.Mode != "" {
-		metrics = &sqlExecutionMetrics{indexHint: options.IndexHint}
-	}
 	var positions []KeysetPosition
 	result, positions, err = executeSQLKeysetPage(ctx, query, resolver, control, after, metrics)
 	if metrics != nil {
@@ -121,7 +134,9 @@ func sqlKeysetQueryStreamable(query *sqlQuery, resolver SQLSourceResolver) bool 
 		return false
 	}
 	if _, ok := resolver.(KeysetOrderedStreamSourceResolver); !ok {
-		return false
+		if _, partitioned := resolver.(PartitionedOrderedSourceResolver); !partitioned {
+			return false
+		}
 	}
 	for _, item := range query.selects {
 		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) {

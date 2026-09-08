@@ -142,6 +142,25 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLOrderedSourcePartitions forwards ordered application partitions
+// while leaving information-schema sources owned by the catalog resolver.
+func (resolver CatalogResolver) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		switch strings.ToLower(key) {
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+			return nil, false, nil
+		}
+	}
+	if resolver.Source == nil {
+		return nil, false, nil
+	}
+	ordered, ok := resolver.Source.(PartitionedOrderedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return ordered.ResolveSQLOrderedSourcePartitions(name, key, field, desc, nullsFirst, nullsLast)
+}
+
 // ResolveSQLSourcePartitionsForPredicate forwards predicate pruning for
 // application sources while leaving information-schema sources to the
 // catalog resolver.

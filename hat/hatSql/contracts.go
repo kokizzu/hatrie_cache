@@ -72,6 +72,16 @@ type PartitionedSourceResolver interface {
 	ResolveSQLSourcePartitions(name string, key string) ([]SQLSourcePartition, bool, error)
 }
 
+// PartitionedOrderedSourceResolver optionally exposes a logical source as
+// independently ordered physical partitions. Each returned partition must be
+// in the requested order, and its name must be stable and unique within the
+// result. The keyset paginator merges these streams without flattening or
+// globally sorting all partition rows. Implementations must not mutate rows
+// while the query is running.
+type PartitionedOrderedSourceResolver interface {
+	ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error)
+}
+
 // SQLPartitionPredicate is a planner-proven literal predicate that may be
 // used to select a subset of physical partitions. Values are read-only for
 // the duration of the resolver call. The SQL executor still evaluates the

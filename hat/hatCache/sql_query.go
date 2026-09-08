@@ -77,6 +77,8 @@ const (
 )
 
 type SQLSourceResolver = hatSql.SourceResolver
+type SQLSourcePartition = hatSql.SQLSourcePartition
+type SQLPartitionedOrderedSourceResolver = hatSql.PartitionedOrderedSourceResolver
 type SQLColumnarBatch = hatSql.ColumnarBatch
 type SQLColumnarSourceResolver = hatSql.ColumnarSourceResolver
 type SQLBorrowedColumnarSourceResolver = hatSql.BorrowedColumnarSourceResolver
