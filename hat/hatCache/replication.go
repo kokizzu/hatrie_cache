@@ -96,6 +96,9 @@ type HTTPReplicatorOptions struct {
 	GRPCLiveBatchWindow      time.Duration
 	DisableHTTPFallback      bool
 	GRPCDialOptions          []grpc.DialOption
+	// ProtocolVersions optionally advertises the HTTP command compatibility
+	// range to replication peers. Zero preserves legacy header omission.
+	ProtocolVersions hatCommand.ProtocolVersionRange
 }
 
 type HTTPReplicator struct {
@@ -125,6 +128,7 @@ type HTTPReplicator struct {
 	disableHTTPFallback      bool
 	grpcDialOptions          []grpc.DialOption
 	grpcLiveSession          *replicationGRPCSyncSession
+	protocolVersions         hatCommand.ProtocolVersionRange
 	grpcLiveCancel           context.CancelFunc
 	grpcStreamBatches        atomic.Uint64
 	breakers                 map[string]replicationCircuitBreakerState
@@ -441,6 +445,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		grpcStreamWindow:         options.GRPCStreamWindow,
 		grpcLiveBatchMaxCommands: options.GRPCLiveBatchMaxCommands,
 		grpcLiveBatchWindow:      options.GRPCLiveBatchWindow,
+		protocolVersions:         options.ProtocolVersions,
 		disableHTTPFallback:      options.DisableHTTPFallback,
 		grpcDialOptions:          append([]grpc.DialOption(nil), options.GRPCDialOptions...),
 	}
@@ -4157,6 +4162,9 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBodyResponse(ctx con
 		}
 		result.Error = err.Error()
 		return result, CacheCommandResponse{}
+	}
+	if replicator.protocolVersions.Min != 0 || replicator.protocolVersions.Max != 0 {
+		req.Header.Set(hatCommand.HeaderProtocolVersion, replicator.protocolVersions.String())
 	}
 	transportOwnsClose := false
 	if _, ok := req.Body.(interface{ TransportOwnsClose() }); ok {

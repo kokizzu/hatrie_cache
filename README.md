@@ -4109,3 +4109,11 @@ reports per-target errors and distinguishes an insufficient number of healthy
 responses from inconsistent successful values. Normal read routing and
 asynchronous replication remain unchanged. See [READ_QUORUM.md](READ_QUORUM.md)
 for the contract and measured cost.
+## HTTP Protocol Compatibility
+
+The monitoring HTTP command endpoint supports opt-in rolling-upgrade gates via
+`MonitoringOptions.ProtocolVersions`; the zero value keeps the current v1
+compatibility behavior. `HTTPReplicatorOptions.ProtocolVersions` optionally
+advertises a client range on HTTP replication requests, while zero omits the
+header for legacy peers. See [HTTP_PROTOCOL_COMPATIBILITY.md](HTTP_PROTOCOL_COMPATIBILITY.md)
+for headers, status codes, and the upgrade contract.

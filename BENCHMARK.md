@@ -17031,3 +17031,19 @@ The medians are `363.4 ns/op` and `103.8 us/op`, respectively, so the
 loopback synchronous path is about `286x` slower. The default path has no
 additional allocation; the enabled cost is the deliberate durability wait and
 wire exchange, not an always-on command overhead.
+## HTTP Protocol Negotiation
+
+Command: `go test ./hat/hatCache -run '^$' -bench '^BenchmarkMonitoringHTTPProtocolNegotiation$' -benchmem -benchtime=200ms -count=5`
+
+This measures the configured-range HTTP protocol negotiation helper directly. It
+does not include network I/O or command execution.
+
+| Run | Time | Memory | Allocations |
+| --- | ---: | ---: | ---: |
+| 1 | 584.5 ns/op | 51 B/op | 4 allocs/op |
+| 2 | 570.9 ns/op | 51 B/op | 4 allocs/op |
+| 3 | 497.9 ns/op | 51 B/op | 4 allocs/op |
+| 4 | 507.0 ns/op | 51 B/op | 4 allocs/op |
+| 5 | 504.8 ns/op | 51 B/op | 4 allocs/op |
+
+Median: **507.0 ns/op**, **51 B/op**, **4 allocs/op**.

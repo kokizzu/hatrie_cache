@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatHttp"
 	"hatrie_cache/hat/hatMetrics"
 	"hatrie_cache/hat/hatMonitoring"
@@ -133,6 +134,9 @@ type MonitoringOptions struct {
 	WriteQuorum int
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
+	// ProtocolVersions is the inclusive HTTP command protocol range accepted
+	// by this monitoring server. Zero defaults to the current supported range.
+	ProtocolVersions hatCommand.ProtocolVersionRange
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool
@@ -385,6 +389,9 @@ type storageOperationStatus struct {
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
 	options.SQLCatalog = cloneSQLCatalog(options.SQLCatalog)
+	if options.ProtocolVersions.Min == 0 && options.ProtocolVersions.Max == 0 {
+		options.ProtocolVersions = hatCommand.SupportedProtocolVersions
+	}
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
 	}
@@ -1678,7 +1685,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		_ = r.Body.Close()
 		return
 	}
-	if !negotiateCommandProtocolHTTP(w, r) {
+	if !negotiateCommandProtocolHTTP(w, r, handler.options.ProtocolVersions) {
 		_ = r.Body.Close()
 		return
 	}
