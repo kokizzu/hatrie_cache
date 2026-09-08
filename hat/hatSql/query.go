@@ -877,7 +877,7 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	if err != nil {
 		return true, err
 	}
-	batch, _, available, err := resolveSQLColumnarSource(columnar, query.from.kind, query.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarSource(columnar, query.from.kind, query.from.key, fields)
 	if err != nil || !available {
 		return available, err
 	}
@@ -940,29 +940,51 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	match := sqlColumnarQueryRowsMatcher(query, batch, functions)
-	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
-		if control != nil {
-			if err := control.check(); err != nil {
+	var predicates []sqlColumnarNumericFilter
+	if query.where.kind != "" {
+		if numeric, ok := sqlColumnarNumericConjunction(query.where, query.from.alias); ok {
+			predicates = sqlColumnarOrderNumericPredicates(segments, numeric)
+		}
+	}
+	rowsPerSegment := batch.Rows
+	if segments != nil && segments.RowsPerSegment > 0 && len(predicates) > 0 {
+		rowsPerSegment = segments.RowsPerSegment
+	}
+	for start := 0; start < batch.Rows; start += rowsPerSegment {
+		if !sqlColumnarNumericSegmentMayMatch(segments, start/rowsPerSegment, predicates) {
+			continue
+		}
+		end := start + rowsPerSegment
+		if end > batch.Rows {
+			end = batch.Rows
+		}
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if control != nil {
+				if err := control.check(); err != nil {
+					return true, err
+				}
+			}
+			matches, err := match(rowIndex)
+			if err != nil {
+				return true, err
+			}
+			if !matches {
+				continue
+			}
+			position := matched
+			matched++
+			if position < query.offset {
+				continue
+			}
+			if query.limit >= 0 && emitted >= query.limit {
+				break
+			}
+			if err := emit(rowIndex); err != nil {
 				return true, err
 			}
 		}
-		matches, err := match(rowIndex)
-		if err != nil {
-			return true, err
-		}
-		if !matches {
-			continue
-		}
-		position := matched
-		matched++
-		if position < query.offset {
-			continue
-		}
 		if query.limit >= 0 && emitted >= query.limit {
 			break
-		}
-		if err := emit(rowIndex); err != nil {
-			return true, err
 		}
 	}
 	return true, nil
@@ -7778,17 +7800,11 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 		filterStarted := time.Now()
-		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			for _, predicate := range predicates {
-				candidate, _ := batch.Value(predicate.field, rowIndex)
-				number, ok := sqlNumber(candidate)
-				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-					return false
-				}
-			}
-			return true
-		}, metrics != nil)
+		result, matched, scanned := sqlColumnarNumericMaterialize(q, batch, projectionFields, segments, predicates, metrics != nil)
 		if metrics != nil {
+			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
+				metrics.record("COLUMNAR NUMERIC SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+			}
 			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
@@ -8767,6 +8783,65 @@ func sqlColumnarStreamMaterializeWithScan(q *sqlQuery, batch ColumnarBatch, proj
 		result.Rows = append(result.Rows, row)
 	}
 	return result, matched
+}
+
+// sqlColumnarNumericMaterialize uses validated numeric bounds as definitive
+// segment rejection while retaining the row matcher for every admitted row.
+func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, scanAll bool) (SQLQueryResult, int, int) {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	if batch.Rows <= 0 {
+		return result, 0, 0
+	}
+	rowsPerSegment := batch.Rows
+	if segments != nil && segments.RowsPerSegment > 0 {
+		rowsPerSegment = segments.RowsPerSegment
+	}
+	matched, scanned := 0, 0
+	for start := 0; start < batch.Rows; start += rowsPerSegment {
+		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		segmentIndex := start / rowsPerSegment
+		if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) {
+			continue
+		}
+		end := start + rowsPerSegment
+		if end > batch.Rows {
+			end = batch.Rows
+		}
+		scanned += end - start
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+				break
+			}
+			matches := true
+			for _, predicate := range predicates {
+				candidate, _ := batch.Value(predicate.field, rowIndex)
+				number, ok := sqlNumber(candidate)
+				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+			position := matched
+			matched++
+			if position < q.offset {
+				continue
+			}
+			if q.limit >= 0 && len(result.Rows) >= q.limit {
+				continue
+			}
+			row := make(SQLRow, len(projectionFields))
+			for selectIndex, item := range q.selects {
+				row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+			}
+			result.Rows = append(result.Rows, row)
+		}
+	}
+	return result, matched, scanned
 }
 
 func sqlColumnarMaterializeMatches(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches []int) SQLQueryResult {

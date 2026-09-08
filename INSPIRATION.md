@@ -273,6 +273,7 @@ name.
 - [x] C162 ClickHouse-style metadata-only MIN/MAX for direct predicate-free numeric columnar sources; complete finite segment bounds are combined without a row loop, while incomplete or ambiguous metadata retains the established scan. See [BENCHMARK.md](BENCHMARK.md#columnar-metadata-minmax).
 - [x] C163 ClickHouse-style dictionary membership shortcuts for filtered `COUNT(*)`; validated low-cardinality dictionaries answer absent equality, inequality, and `IN` predicates without decoding row codes, while matching, richer, untrusted, or invalid inputs retain the established scan and validation behavior. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-membership-count).
 - [x] C164 ClickHouse-style exact low-cardinality set marks per columnar segment; trusted typed-table dictionaries publish compact 64-bit membership masks so compatible equality, inequality, and literal `IN` scans skip impossible segments while all remaining rows retain normal validation. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-segment-marks).
+- [x] C165 ClickHouse-style range data skipping for general columnar filters. Ordinary field-only numeric `CACHE` scans now use valid per-segment min/max bounds to skip disjoint segments while retaining the existing row matcher and fallback behavior; see [COLUMNAR_RANGE_SKIPPING.md](COLUMNAR_RANGE_SKIPPING.md).
 
 ## Materialize Ideas
 

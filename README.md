@@ -4319,3 +4319,10 @@ Expose region, tenant, or time partitions as one logical SQL source with the
 opt-in [`PartitionedSourceResolver`](PARTITIONED_SQL_SOURCES.md) contract.
 Use [`PartitionPruningSourceResolver`](PARTITION_PRUNING.md) to skip
 provably irrelevant partitions for literal equality and `IN` predicates.
+
+## Columnar Range Skipping
+
+Columnar sources that implement the existing segmented-columnar resolver can
+also skip numeric segments whose min/max bounds cannot match a direct `WHERE`
+comparison. The row matcher remains authoritative; see
+[`COLUMNAR_RANGE_SKIPPING.md`](COLUMNAR_RANGE_SKIPPING.md).

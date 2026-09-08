@@ -17431,6 +17431,15 @@ letting callers mutate cached state. The optimization is most useful when
 source scans or joins are materially larger than the returned result. It is
 opt-in and has no persistence or wire-format change.
 
+## Columnar numeric range segment skipping
+
+The ClickHouse-style numeric range data-skipping path is benchmarked in
+[COLUMNAR_RANGE_SKIPPING.md](COLUMNAR_RANGE_SKIPPING.md). Across eight
+256-row segments, selecting the final segment reduced the recorded median from
+107,711 to 57,335 ns/op, or 1.88x faster. Bytes and allocations were unchanged
+at 94,104 B/op and 543 allocs/op because this in-memory benchmark still
+materializes the same result rows.
+
 ## SQL partition pruning
 
 The opt-in partition-pruning path is benchmarked in
