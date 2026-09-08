@@ -24,6 +24,7 @@ type Result struct {
 	FinishedAt      *time.Time             `json:"finished_at,omitempty"`
 	DurationMillis  int64                  `json:"duration_millis,omitempty"`
 	Queue           *QueueStats            `json:"queue,omitempty"`
+	Quorum          *WriteQuorumDecision   `json:"quorum,omitempty"`
 	Targets         []TargetResult         `json:"targets,omitempty"`
 }
 

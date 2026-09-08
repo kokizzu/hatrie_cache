@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	ErrWriteQuorumInvalid     = errors.New("hatriecache: write quorum configuration is invalid")
-	ErrWriteQuorumUnsatisfied = errors.New("hatriecache: write quorum is unsatisfied")
+	ErrWriteQuorumInvalid      = errors.New("hatriecache: write quorum configuration is invalid")
+	ErrWriteQuorumUnsatisfied  = errors.New("hatriecache: write quorum is unsatisfied")
+	ErrWriteQuorumAsynchronous = errors.New("hatriecache: write quorum requires synchronous replication")
 )
 
 // WriteQuorumDecision reports one explicit quorum evaluation.
