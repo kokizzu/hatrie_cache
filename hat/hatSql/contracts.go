@@ -1,6 +1,9 @@
 package hatSql
 
-import "context"
+import (
+	"context"
+	"math/bits"
+)
 
 // QueryObserver receives one privacy-safe execution summary per query.
 type QueryObserver interface {
@@ -74,13 +77,25 @@ type DictionaryColumn struct {
 	CodeWidth   uint8
 }
 
+// ColumnarPackedColumn stores a row-aligned nullable column as a validity
+// bitmap and a dense slice containing only non-NULL values. Ranks stores the
+// number of valid values before each validity byte, followed by the total.
+// It is an optional representation selected by PackNullableColumns.
+type ColumnarPackedColumn struct {
+	Values   []interface{}
+	Validity []byte
+	Ranks    []uint32
+	Rows     int
+}
+
 // ColumnarBatch stores one source scan as field-aligned value slices, compact
-// dictionary columns, or offset-based array/nested columns. Every requested
-// field must contain Rows logical values; absent JSON fields are nil in a plain
-// column and are not dictionary encoded.
+// dictionary or nullable-packed columns, or offset-based array/nested columns.
+// Every requested field must contain Rows logical values; absent JSON fields
+// are nil in a plain column and are not dictionary encoded.
 type ColumnarBatch struct {
 	Columns       map[string][]interface{}
 	Dictionaries  map[string]DictionaryColumn
+	PackedColumns map[string]ColumnarPackedColumn
 	ListColumns   map[string]ColumnarListColumn
 	NestedColumns map[string]ColumnarNestedColumn
 	Rows          int
@@ -205,6 +220,9 @@ func (batch ColumnarBatch) FieldRows(field string) int {
 	if dictionary, ok := batch.Dictionaries[field]; ok {
 		return dictionary.RowCount()
 	}
+	if column, ok := batch.PackedColumns[field]; ok {
+		return column.RowCount()
+	}
 	if values, ok := batch.Columns[field]; ok {
 		return len(values)
 	}
@@ -235,6 +253,9 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		}
 		return dictionary.Values[code], true
 	}
+	if column, ok := batch.PackedColumns[field]; ok {
+		return column.Value(row)
+	}
 	values, ok := batch.Columns[field]
 	if ok {
 		if row >= len(values) {
@@ -249,6 +270,130 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		return column.Value(row)
 	}
 	return nil, false
+}
+
+func columnarPackedBitmapBytes(rows int) int {
+	if rows <= 0 {
+		return 0
+	}
+	bytes := rows >> 3
+	if rows&7 != 0 {
+		bytes++
+	}
+	return bytes
+}
+
+func columnarPackedRankCount(rows int) int {
+	bitmapBytes := columnarPackedBitmapBytes(rows)
+	if bitmapBytes == 0 {
+		return 0
+	}
+	return bitmapBytes + 1
+}
+
+// RowCount returns the logical row count when the packed column metadata is
+// structurally valid. A malformed bitmap or rank index returns zero so source
+// validation rejects the batch instead of reading out of bounds.
+func (column ColumnarPackedColumn) RowCount() int {
+	if column.Rows < 0 || len(column.Validity) != columnarPackedBitmapBytes(column.Rows) || len(column.Ranks) != columnarPackedRankCount(column.Rows) {
+		return 0
+	}
+	expected := uint64(0)
+	for index, validity := range column.Validity {
+		if uint64(column.Ranks[index]) != expected {
+			return 0
+		}
+		expected += uint64(bits.OnesCount8(validity))
+	}
+	if remainder := column.Rows & 7; remainder != 0 {
+		validBits := byte((1 << uint(remainder)) - 1)
+		if column.Validity[len(column.Validity)-1]&^validBits != 0 {
+			return 0
+		}
+	}
+	if len(column.Ranks) == 0 || uint64(column.Ranks[len(column.Ranks)-1]) != expected || expected != uint64(len(column.Values)) {
+		return 0
+	}
+	return column.Rows
+}
+
+// Value returns the logical value at row. A NULL row returns (nil, true),
+// while an out-of-range or malformed packed row returns (nil, false).
+func (column ColumnarPackedColumn) Value(row int) (interface{}, bool) {
+	if row < 0 || row >= column.Rows || len(column.Validity) != columnarPackedBitmapBytes(column.Rows) || len(column.Ranks) != columnarPackedRankCount(column.Rows) {
+		return nil, false
+	}
+	byteIndex := row >> 3
+	mask := byte(1 << uint(row&7))
+	if int(column.Ranks[len(column.Ranks)-1]) != len(column.Values) {
+		return nil, false
+	}
+	if column.Validity[byteIndex]&mask == 0 {
+		return nil, true
+	}
+	index := int(column.Ranks[byteIndex]) + bits.OnesCount8(column.Validity[byteIndex]&(mask-1))
+	if index < 0 || index >= len(column.Values) {
+		return nil, false
+	}
+	return column.Values[index], true
+}
+
+// PackNullableColumns moves plain columns with enough NULL values into a
+// bitmap-plus-dense representation when the estimated retained storage is
+// smaller. It is explicit opt-in; legacy Columns remains the default.
+func (batch *ColumnarBatch) PackNullableColumns() {
+	if batch == nil || len(batch.Columns) == 0 {
+		return
+	}
+	for field, values := range batch.Columns {
+		rows := len(values)
+		if rows == 0 {
+			continue
+		}
+		nonNull := 0
+		for _, value := range values {
+			if value != nil {
+				nonNull++
+			}
+		}
+		if nonNull == rows {
+			continue
+		}
+		validityBytes := columnarPackedBitmapBytes(rows)
+		rankCount := columnarPackedRankCount(rows)
+		legacyBytes := rows * 16
+		packedBytes := nonNull*16 + validityBytes + rankCount*4
+		if packedBytes >= legacyBytes {
+			continue
+		}
+
+		packedValues := make([]interface{}, 0, nonNull)
+		validity := make([]byte, validityBytes)
+		ranks := make([]uint32, rankCount)
+		validCount := 0
+		for row, value := range values {
+			if row&7 == 0 {
+				ranks[row>>3] = uint32(validCount)
+			}
+			if value == nil {
+				continue
+			}
+			validity[row>>3] |= byte(1 << uint(row&7))
+			packedValues = append(packedValues, value)
+			validCount++
+		}
+		ranks[len(ranks)-1] = uint32(validCount)
+		if batch.PackedColumns == nil {
+			batch.PackedColumns = make(map[string]ColumnarPackedColumn)
+		}
+		batch.PackedColumns[field] = ColumnarPackedColumn{
+			Values:   packedValues,
+			Validity: validity,
+			Ranks:    ranks,
+			Rows:     rows,
+		}
+		delete(batch.Columns, field)
+	}
 }
 
 // RowCount returns the number of logical rows in a dictionary column. Invalid

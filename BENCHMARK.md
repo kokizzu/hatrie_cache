@@ -16573,3 +16573,36 @@ access and source validation. Dictionaries with more than 65,536 values keep
 the compatibility representation, so this feature does not trade correctness
 for compression. The broader compressed-arrangement-batch design remains open
 for additional encodings such as packed validity and numeric vectors.
+
+## Packed Nullable Arrangement Columns
+
+Columnar batches can contain many SQL NULL values while still reserving one
+`interface{}` slot per row. `ColumnarBatch.PackNullableColumns` provides an
+opt-in validity bitmap plus dense non-NULL values and byte-level rank
+checkpoints. It moves a column only when the estimated retained layout is
+smaller; all-valid columns and low-savings columns remain in the legacy
+`Columns` map. `Value`, SQL filtering, aggregates, and vertical part merging
+read either representation. The default producer layout is unchanged for
+compatibility and predictable CPU cost.
+
+Five benchmark samples were collected on an AMD Ryzen 9 5950X with one CPU,
+500 ms per sample, 4,096 rows, and 75% NULLs. Lower is better. The benchmark
+reads every row through the logical `ColumnarBatch.Value` accessor.
+
+| Path | Median | Retained column payload | Query heap | Query allocations | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy `[]interface{}` | 55,754 ns/op | 65,536 bytes | 0 B/op | 0 allocs/op | baseline |
+| Packed validity + dense values | 65,565 ns/op | 18,948 bytes | 0 B/op | 0 allocs/op | 3.46x less payload; 1.18x slower CPU; allocation neutral |
+
+Raw five-sample output:
+
+```text
+legacy: 55942, 55754, 55711, 55715, 55884 ns/op; 65536 layout-bytes/op; 0 B/op; 0 allocs/op
+packed: 65925, 65541, 65564, 65565, 65655 ns/op; 18948 layout-bytes/op; 0 B/op; 0 allocs/op
+```
+
+The bitmap uses one bit per logical row and rank checkpoints make lookup
+constant-time without materializing NULL rows. Source validation checks bitmap
+length, trailing bits, rank checkpoints, and dense-value count before a SQL
+scan. This is a memory-saving path for genuinely sparse nullable columns, not
+a default replacement for every column.

@@ -61,6 +61,17 @@ func cloneSQLColumnarBatchForTest(batch ColumnarBatch) ColumnarBatch {
 			clone.Columns[field] = append([]interface{}(nil), values...)
 		}
 	}
+	if batch.PackedColumns != nil {
+		clone.PackedColumns = make(map[string]ColumnarPackedColumn, len(batch.PackedColumns))
+		for field, column := range batch.PackedColumns {
+			clone.PackedColumns[field] = ColumnarPackedColumn{
+				Values:   append([]interface{}(nil), column.Values...),
+				Validity: append([]byte(nil), column.Validity...),
+				Ranks:    append([]uint32(nil), column.Ranks...),
+				Rows:     column.Rows,
+			}
+		}
+	}
 	if batch.Dictionaries != nil {
 		clone.Dictionaries = make(map[string]DictionaryColumn, len(batch.Dictionaries))
 		for field, dictionary := range batch.Dictionaries {
