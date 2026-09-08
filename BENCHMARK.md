@@ -17518,3 +17518,19 @@ independent returned replica slice.
 The direct path is 16.41x faster, uses 45.00x fewer transient bytes, and
 makes 20.00x fewer allocations. Store refresh and ownership-validation tests
 cover topology replacement and stale-write behavior.
+
+## TopologyStore Ownership Validation Fast Path
+
+The same `make benchmark-t079-store-local-clean` run measures
+`TopologyStore.ValidatePartitionWrite` before and after validating against the
+store's normalized topology directly. Five samples were run on Linux/amd64
+with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Re-normalizing validation | 1,291; 1,194; 1,165; 1,161; 1,154 | 1,165 | 720 | 20 |
+| Direct normalized validation | 73.43; 72.52; 73.66; 74.07; 73.04 | 73.43 | 16 | 1 |
+
+The direct path is 15.87x faster, uses 45.00x fewer transient bytes, and
+makes 20.00x fewer allocations. It retains no ownership metadata and keeps
+the existing stale-snapshot, primary, and fencing checks.

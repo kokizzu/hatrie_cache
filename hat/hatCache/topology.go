@@ -270,7 +270,7 @@ func (store *TopologyStore) ValidatePartitionOwnership(ownership PartitionOwners
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return store.topology.ValidatePartitionOwnership(ownership)
+	return validateNormalizedPartitionOwnership(store.topology, store.fingerprint, ownership)
 }
 
 // ValidatePartitionWrite verifies that nodeID is the current primary and that
@@ -281,7 +281,41 @@ func (store *TopologyStore) ValidatePartitionWrite(ownership PartitionOwnership,
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return store.topology.ValidatePartitionWrite(ownership, nodeID, fencingToken)
+	if err := validateNormalizedPartitionOwnership(store.topology, store.fingerprint, ownership); err != nil {
+		return err
+	}
+	if !ownership.IsPrimary(nodeID) {
+		return fmt.Errorf("hatriecache: node %q is not the primary for partition %d", strings.TrimSpace(nodeID), ownership.ShardID)
+	}
+	if fencingToken != ownership.FencingToken {
+		return fmt.Errorf("hatriecache: partition %d fencing token %d does not match current token %d", ownership.ShardID, fencingToken, ownership.FencingToken)
+	}
+	return nil
+}
+
+func validateNormalizedPartitionOwnership(topology ClusterTopology, fingerprint string, ownership PartitionOwnership) error {
+	expected, ok := normalizedTopologyOwnershipForShard(topology, fingerprint, ownership.ShardID)
+	if !ok {
+		return fmt.Errorf("hatriecache: partition %d is not present in topology", ownership.ShardID)
+	}
+	if ownership.Primary != expected.Primary {
+		return fmt.Errorf("hatriecache: partition %d primary changed from %q to %q", ownership.ShardID, ownership.Primary, expected.Primary)
+	}
+	if len(ownership.Replicas) != len(expected.Replicas) {
+		return fmt.Errorf("hatriecache: partition %d replica set changed", ownership.ShardID)
+	}
+	for index := range expected.Replicas {
+		if ownership.Replicas[index] != expected.Replicas[index] {
+			return fmt.Errorf("hatriecache: partition %d replica set changed", ownership.ShardID)
+		}
+	}
+	if ownership.TopologyFingerprint != expected.TopologyFingerprint {
+		return fmt.Errorf("hatriecache: partition %d topology fingerprint is stale", ownership.ShardID)
+	}
+	if ownership.FencingToken != expected.FencingToken {
+		return fmt.Errorf("hatriecache: partition %d fencing token is stale", ownership.ShardID)
+	}
+	return nil
 }
 
 func (store *TopologyStore) electionRouteSnapshot(key string) (TopologyRoute, []TopologyNode, bool) {

@@ -32,6 +32,9 @@ if !ok {
 }
 ```
 
+Validation uses the same normalized store snapshot and does not retain a
+second ownership index.
+
 ## Write Validation
 
 Before a partition-scoped write, validate both the snapshot and the writer:

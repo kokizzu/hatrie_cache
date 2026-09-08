@@ -78,6 +78,33 @@ func TestTopologyStorePartitionOwnershipRefreshesAfterSet(t *testing.T) {
 	}
 }
 
+func TestTopologyStorePartitionOwnershipRejectsStaleSnapshotAfterSet(t *testing.T) {
+	store, err := NewTopologyStore(ClusterTopology{
+		Version:      clusterTopologyVersion,
+		Mode:         TopologyModeSharded,
+		FencingToken: 17,
+		Nodes:        []TopologyNode{{ID: "node-a"}, {ID: "node-b"}},
+		Shards:       []TopologyShard{{ID: 2, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	old, ok := store.OwnershipForShard(2)
+	if !ok {
+		t.Fatal("OwnershipForShard() did not find the shard")
+	}
+	next := store.Get()
+	next.FencingToken = 18
+	next.Shards[0].Primary = "node-b"
+	next.Shards[0].Replicas = []string{"node-a"}
+	if err := store.Set(next); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	if err := store.ValidatePartitionOwnership(old); err == nil {
+		t.Fatal("ValidatePartitionOwnership() accepted a stale snapshot")
+	}
+}
+
 func BenchmarkTopologyStoreOwnershipForShard(b *testing.B) {
 	store, err := NewTopologyStore(ClusterTopology{
 		Version:      clusterTopologyVersion,
@@ -97,5 +124,29 @@ func BenchmarkTopologyStoreOwnershipForShard(b *testing.B) {
 			b.Fatal("OwnershipForShard() did not find the shard")
 		}
 		topologyStorePartitionOwnershipBenchmarkSink = ownership
+	}
+}
+
+func BenchmarkTopologyStoreValidatePartitionWrite(b *testing.B) {
+	store, err := NewTopologyStore(ClusterTopology{
+		Version:      clusterTopologyVersion,
+		Mode:         TopologyModeSharded,
+		FencingToken: 17,
+		Nodes:        []TopologyNode{{ID: "node-a"}, {ID: "node-b"}},
+		Shards:       []TopologyShard{{ID: 2, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	ownership, ok := store.OwnershipForShard(2)
+	if !ok {
+		b.Fatal("OwnershipForShard() did not find the shard")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if err := store.ValidatePartitionWrite(ownership, "node-a", 17); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
