@@ -17,6 +17,9 @@ without losing negative updates or duplicate multiplicity.
 - `JoinDifferentialRows` computes an inner join. A matching pair contributes
   `left.Diff * right.Diff`, including negative weights and duplicate
   multiplicity.
+- `GroupSumInt64DifferentialRows` maintains signed `SUM` transitions for
+  callback-defined groups, including weighted updates and exact overflow
+  checks.
 
 All functions return no partial output when a callback fails. Input rows and
 row maps are not mutated. Callback row maps are private clones and must be

@@ -1,9 +1,11 @@
 # Differential GROUP BY
 
-`hat/hatSql` provides `GroupCountDifferentialRows` for exact generic COUNT
-maintenance over signed row updates. The callback maps each input row to a
-group identity. The identity becomes the `DifferentialRow.Key` of the output,
-and the output `Row` contains one field: `count` as `int64`.
+`hat/hatSql` provides `GroupCountDifferentialRows` and
+`GroupSumInt64DifferentialRows` for exact generic COUNT and signed integer SUM
+maintenance over differential row updates. The callback maps each input row to
+a group identity. The identity becomes the `DifferentialRow.Key` of the
+output, and the output `Row` contains one aggregate field: `count` or `sum` as
+`int64`.
 
 For every non-zero input update, the function computes the group count after
 applying `Diff`:
@@ -18,6 +20,34 @@ The output retraction and insertion use the input update's `Time`, and output
 order follows input order. Output `Diff` is the relation weight (`-1` or `+1`);
 the aggregate value itself is in `Row["count"]`. The operation starts with an
 empty state for each call and does not mutate input rows.
+
+`GroupSumInt64DifferentialRows` takes a second callback that extracts the
+`int64` value contributed by each row. The row's `Diff` is multiplied by that
+value and added to the group's sum. The function tracks multiplicity separately
+from the sum, so a present group with sum zero still emits a valid aggregate
+row. Retraction rows must carry the same value as the insertion they retract.
+It emits the same retraction-then-insertion transition shape as COUNT, using
+`Row["sum"]`, and rejects negative multiplicity, signed multiplication
+overflow, and accumulator overflow without returning partial output.
+
+```go
+changes, err := hatSql.GroupSumInt64DifferentialRows(updates,
+	func(row hatSql.SQLRow) string { return row["team"].(string) },
+	func(row hatSql.SQLRow) (int64, error) { return row["points"].(int64), nil },
+)
+```
+
+For two rows with values 3 and 4, the result is:
+
+```text
+red  +1 {sum: 3}
+red  -1 {sum: 3}
+red  +1 {sum: 7}
+```
+
+Classify sum failures with `errors.Is` against
+`hatSql.ErrDifferentialGroupBySumOverflow`. A nil value callback returns
+`hatSql.ErrDifferentialGroupByValueRequired`.
 
 ```go
 updates := []hatSql.DifferentialRow{
@@ -51,6 +81,9 @@ Benchmark command:
 ```text
 make benchmark-sql-differential-group-by
 ```
+
+The focused COUNT/SUM comparison is available through
+`make benchmark-differential-sum-local-clean`.
 
 On the development machine, 1,024 updates across 256 groups measured:
 

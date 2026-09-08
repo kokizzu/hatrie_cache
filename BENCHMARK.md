@@ -16405,6 +16405,40 @@ BenchmarkDifferentialOperators/join-32 3918 55292 ns/op 56984 B/op 274 allocs/op
 BenchmarkDifferentialOperators/join-32 4008 56622 ns/op 56984 B/op 274 allocs/op
 ```
 
+## Differential Group SUM
+
+This benchmark compares the existing generic differential `COUNT` path with
+the new signed `int64` `SUM` path. Both process 1,024 updates across 256
+groups, retain duplicate multiplicity, and emit the same retraction/insertion
+transition shape. Five samples were collected with
+`-benchtime=500ms -benchmem -cpu=1` on an AMD Ryzen 9 5950X.
+
+| Operation | Median time | Median heap | Median allocations | Relative to COUNT |
+| --- | ---: | ---: | ---: | ---: |
+| COUNT | 367,212 ns/op | 853,328 B/op | 3,592/op | 1.00x |
+| SUM int64 | 361,488 ns/op | 776,273 B/op | 4,870/op | 1.02x faster, 0.91x heap, 1.36x allocations |
+
+The SUM result is a capability addition, not a replacement for COUNT. Its
+lower measured byte total comes from preallocating the complete transition
+slice, while its higher allocation count reflects the value-callback and wider
+per-group state. The API is intentionally reusable and opt-in; existing SQL
+execution and COUNT behavior are unchanged.
+
+Raw output from `make benchmark-differential-sum-local-clean`:
+
+```text
+BenchmarkGroupCountDifferentialRows     1596 366046 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows     1611 369456 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows     1597 367212 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows     1602 366591 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows     1599 367750 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupSumInt64DifferentialRows  1624 363117 ns/op 776272 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows  1616 361488 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows  1629 362741 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows  1626 337577 ns/op 776272 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows  1784 332149 ns/op 776273 B/op 4870 allocs/op
+```
+
 ## Opt-In SQL Optimizer Rules
 
 This benchmark compares the default SQL path with one no-op optimizer rule on
