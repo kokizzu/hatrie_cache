@@ -126,6 +126,98 @@ func TestTypedTableSortedArrangementRowsPageReturnsBoundedIndependentSnapshot(t 
 	}
 }
 
+func TestTypedTableSortedArrangementDictionaryEncodedMatchesLegacyRows(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_dictionary")
+	for index, team := range []string{"red", "blue", "red", "green", "blue"} {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []hatSql.TypedTableValue{hatSql.TypedString(team), hatSql.TypedInt64(int64(index))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team", DictionaryEncoded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementRowsEqual(t, legacy.Rows(), compressed.Rows())
+
+	change, err := table.Upsert("key-0", []hatSql.TypedTableValue{hatSql.TypedString("blue"), hatSql.TypedInt64(10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	if err := compressed.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementRowsEqual(t, legacy.Rows(), compressed.Rows())
+
+	change, err = table.Delete("key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	if err := compressed.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementRowsEqual(t, legacy.Rows(), compressed.Rows())
+
+	change, err = table.Upsert("key-1", []hatSql.TypedTableValue{hatSql.TypedString("red"), hatSql.TypedInt64(11)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	if err := compressed.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementRowsEqual(t, legacy.Rows(), compressed.Rows())
+
+	page := compressed.RowsPage(0, 1)
+	page[0].Values[0] = hatSql.TypedString("mutated")
+	if got := compressed.RowsPage(0, 1); reflect.DeepEqual(got, page) {
+		t.Fatalf("dictionary encoded page exposed arrangement storage: %#v", got)
+	}
+}
+
+func TestTypedTableSortedArrangementDictionaryEncodedPreservesNulls(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_dictionary_null")
+	if _, err := table.Upsert("null", []hatSql.TypedTableValue{hatSql.TypedNull(), hatSql.TypedInt64(0)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := table.Upsert("value", []hatSql.TypedTableValue{hatSql.TypedString("same"), hatSql.TypedInt64(1)}); err != nil {
+		t.Fatal(err)
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team", DictionaryEncoded: true, NullsFirst: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "null", "value")
+	if got := arrangement.Rows()[0].Values[0]; got.Valid {
+		t.Fatalf("dictionary encoded NULL = %#v, want invalid value", got)
+	}
+}
+
+func TestTypedTableSortedArrangementDictionaryEncodedRejectsNonStringField(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_dictionary_invalid")
+	if _, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "score", DictionaryEncoded: true}); !errors.Is(err, hatSql.ErrTypedTableSortedArrangementDictionaryKind) {
+		t.Fatalf("dictionary encoded non-string error = %v, want dictionary kind error", err)
+	}
+}
+
+func assertSortedArrangementRowsEqual(t testing.TB, left, right []hatSql.TypedTableMergeJoinInput) {
+	t.Helper()
+	if !reflect.DeepEqual(left, right) {
+		t.Fatalf("sorted arrangement rows differ:\nleft=%#v\nright=%#v", left, right)
+	}
+}
+
 func TestTypedTableSortedArrangementRejectsGapsAndInvalidDefinitions(t *testing.T) {
 	table := newSortedArrangementTable(t, "sorted_validation")
 	if _, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "missing"}); !errors.Is(err, hatSql.ErrTypedTableSortedArrangementField) {

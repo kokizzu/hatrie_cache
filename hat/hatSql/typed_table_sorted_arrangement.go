@@ -19,17 +19,23 @@ var (
 	ErrTypedTableSortedArrangementSequenceGap = errors.New("typed table sorted arrangement change sequence gap")
 	// ErrTypedTableSortedArrangementTypeMismatch reports an invalid sort value.
 	ErrTypedTableSortedArrangementTypeMismatch = errors.New("typed table sorted arrangement value kind differs")
+	// ErrTypedTableSortedArrangementDictionaryKind reports a dictionary option
+	// on a non-string sort field.
+	ErrTypedTableSortedArrangementDictionaryKind = errors.New("typed table sorted arrangement dictionary field must be string")
 )
 
 const typedTableSortedArrangementBulkMinimumChanges = 64
 
 // TypedTableSortedArrangementDefinition configures one ordered typed-table
 // arrangement. NULL and NaN values use NullsFirst; ties are ordered by row key
-// for deterministic results.
+// for deterministic results. DictionaryEncoded interns live non-NULL string
+// values in Field and is rejected for non-string fields; it is disabled by
+// default to preserve the existing storage and CPU profile.
 type TypedTableSortedArrangementDefinition struct {
-	Field      string
-	Descending bool
-	NullsFirst bool
+	Field             string
+	Descending        bool
+	NullsFirst        bool
+	DictionaryEncoded bool
 }
 
 // TypedTableSortedArrangement maintains an ordered row-key vector while
@@ -44,6 +50,7 @@ type TypedTableSortedArrangement struct {
 	entries     map[string]TypedTableMergeJoinInput
 	order       []string
 	positions   map[string]int
+	dictionary  *typedTableSortedArrangementStringDictionary
 	checkpoint  uint64
 }
 
@@ -57,6 +64,9 @@ func NewTypedTableSortedArrangement(table *TypedTable, definition TypedTableSort
 	if !found {
 		return nil, fmt.Errorf("%w: %q", ErrTypedTableSortedArrangementField, definition.Field)
 	}
+	if definition.DictionaryEncoded && kind != TypedTableString {
+		return nil, fmt.Errorf("%w: field %q has kind %d", ErrTypedTableSortedArrangementDictionaryKind, definition.Field, kind)
+	}
 	rows, checkpoint := typedTableSortedArrangementSnapshot(table)
 	arrangement := &TypedTableSortedArrangement{
 		field: field, fieldKind: kind, columnCount: len(table.columns), definition: definition,
@@ -64,7 +74,7 @@ func NewTypedTableSortedArrangement(table *TypedTable, definition TypedTableSort
 		positions: make(map[string]int, len(rows)), checkpoint: checkpoint,
 	}
 	for key, values := range rows {
-		arrangement.entries[key] = TypedTableMergeJoinInput{Key: key, Values: values}
+		arrangement.entries[key] = TypedTableMergeJoinInput{Key: key, Values: arrangement.storeValues(values)}
 		arrangement.order = append(arrangement.order, key)
 	}
 	sort.Slice(arrangement.order, func(left, right int) bool {
@@ -104,7 +114,7 @@ func (arrangement *TypedTableSortedArrangement) Apply(changes []TypedTableChange
 		}
 		arrangement.removeKey(change.Key)
 		if change.Operation != "DELETE" {
-			arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: cloneTypedTableValues(change.After)}
+			arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: arrangement.storeValues(change.After)}
 			arrangement.insertKey(change.Key)
 		}
 		arrangement.checkpoint = change.Sequence
@@ -175,7 +185,7 @@ func (arrangement *TypedTableSortedArrangement) shouldAppendBulk(changes []Typed
 
 func (arrangement *TypedTableSortedArrangement) applyAppendBulk(changes []TypedTableChange) {
 	for _, change := range changes {
-		arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: cloneTypedTableValues(change.After)}
+		arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: arrangement.storeValues(change.After)}
 		arrangement.order = append(arrangement.order, change.Key)
 		arrangement.positions[change.Key] = len(arrangement.order) - 1
 		arrangement.checkpoint = change.Sequence
@@ -184,9 +194,12 @@ func (arrangement *TypedTableSortedArrangement) applyAppendBulk(changes []TypedT
 
 func (arrangement *TypedTableSortedArrangement) applyBulk(changes []TypedTableChange) {
 	for _, change := range changes {
+		if previous, found := arrangement.entries[change.Key]; found {
+			arrangement.releaseValues(previous.Values)
+		}
 		delete(arrangement.entries, change.Key)
 		if change.Operation != "DELETE" {
-			arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: cloneTypedTableValues(change.After)}
+			arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: arrangement.storeValues(change.After)}
 		} else {
 			delete(arrangement.positions, change.Key)
 		}
@@ -353,6 +366,7 @@ func (arrangement *TypedTableSortedArrangement) removeKey(key string) {
 	if !found {
 		return
 	}
+	arrangement.releaseValues(arrangement.entries[key].Values)
 	copy(arrangement.order[position:], arrangement.order[position+1:])
 	arrangement.order = arrangement.order[:len(arrangement.order)-1]
 	delete(arrangement.positions, key)

@@ -17194,3 +17194,38 @@ Command: `go test ./hat/hatSchema ./hat/hatCache -run '^$' -bench '^Benchmark(Ch
 The policy lookup has no per-command allocation. It is evaluated only when the
 operator enables both schema compatibility enforcement and an explicit policy;
 the nil-policy path remains the existing exact comparison.
+
+## Typed Sorted Arrangement Dictionary Interning
+
+Command: `make benchmark-sorted-arrangement-dictionary-local-clean`
+
+The fixture contains 4,096 rows, 16 repeated string sort values, and one
+`int64` column. The dictionary option is opt-in through
+`TypedTableSortedArrangementDefinition.DictionaryEncoded`; the legacy option
+is the control. Five samples use `-benchtime=250ms -count=5 -benchmem` on an
+AMD Ryzen 9 5950X.
+
+### Bounded page reads
+
+| Mode | Raw ns/op (5 runs) | Median ns/op | Retained sort-string bytes | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Legacy | 3,336, 3,357, 3,273, 3,316, 3,325 | 3,325 | 28,672 | 4,480 | 33 |
+| Dictionary | 3,335, 3,186, 3,232, 3,308, 3,280 | 3,280 | 112 | 4,480 | 33 |
+
+The dictionary retains **256x less sort-string backing data** with the same
+page-read allocation profile; the small CPU difference is within this run's
+noise. The metric counts retained string bytes, not Go map headers, so it is a
+column-storage metric rather than a whole-process heap claim.
+
+### Arrangement construction
+
+| Mode | Raw ns/op (5 runs) | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Legacy | 5,538,096, 5,547,466, 5,363,263, 5,354,052, 5,500,343 | 5,500,343 | 2,163,323 | 8,264 |
+| Dictionary | 5,396,285, 5,215,490, 5,275,783, 5,237,776, 5,390,544 | 5,275,783 | 2,165,666 | 8,281 |
+
+Dictionary construction is approximately neutral in this workload, with a
+small `2.3 KB` increase in transient allocations and `17` additional
+allocations per build. The option remains disabled by default because
+high-cardinality columns can retain dictionary metadata without sharing much
+string data; callers should enable it for repeated, immutable string values.
