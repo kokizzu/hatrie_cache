@@ -179,10 +179,40 @@ func (arrangement *TypedTableSortedArrangement) Rows() []TypedTableMergeJoinInpu
 	}
 	arrangement.mu.RLock()
 	defer arrangement.mu.RUnlock()
-	rows := make([]TypedTableMergeJoinInput, 0, len(arrangement.order))
-	for _, key := range arrangement.order {
+	return arrangement.rowsPageLocked(0, len(arrangement.order))
+}
+
+// RowsPage returns an independent snapshot of at most limit rows starting at
+// offset in the arrangement's configured order. Negative offsets are treated
+// as zero; non-positive limits and offsets beyond the end return an empty
+// snapshot.
+func (arrangement *TypedTableSortedArrangement) RowsPage(offset, limit int) []TypedTableMergeJoinInput {
+	if arrangement == nil {
+		return nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		return []TypedTableMergeJoinInput{}
+	}
+	arrangement.mu.RLock()
+	defer arrangement.mu.RUnlock()
+	return arrangement.rowsPageLocked(offset, limit)
+}
+
+func (arrangement *TypedTableSortedArrangement) rowsPageLocked(offset, limit int) []TypedTableMergeJoinInput {
+	if offset >= len(arrangement.order) || limit <= 0 {
+		return []TypedTableMergeJoinInput{}
+	}
+	end := len(arrangement.order)
+	if limit < end-offset {
+		end = offset + limit
+	}
+	rows := make([]TypedTableMergeJoinInput, end-offset)
+	for index, key := range arrangement.order[offset:end] {
 		row := arrangement.entries[key]
-		rows = append(rows, TypedTableMergeJoinInput{Key: row.Key, Values: cloneTypedTableValues(row.Values)})
+		rows[index] = TypedTableMergeJoinInput{Key: row.Key, Values: cloneTypedTableValues(row.Values)}
 	}
 	return rows
 }

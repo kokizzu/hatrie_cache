@@ -368,6 +368,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M065 Incremental window-function maintenance.
 - [x] M066 Incremental sort maintenance via opt-in typed-table sorted arrangements, bulk batch rebuilds, deterministic NULL/NaN ordering, correctness tests, and benchmark guide.
 - [x] M067 Top-K with offset for supported ordered paths.
+- [x] M067a Bounded `RowsPage` snapshots for maintained typed sorted arrangements; the legacy `Rows()` snapshot remains unchanged, with correctness and allocation measurements in [BENCHMARK.md](BENCHMARK.md#typed-sorted-arrangement-page-snapshots).
 - [x] M068 Differential group-by updates for generic SQL tables. `GroupCountDifferentialRows` and `GroupSumInt64DifferentialRows` maintain exact signed COUNT/SUM transitions for callback-defined groups, including negative/overflow validation and no partial output; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M068a Exact generic differential COUNT group maintenance.
 - [x] M068b Exact signed int64 differential SUM group maintenance.

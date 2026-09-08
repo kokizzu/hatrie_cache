@@ -14711,6 +14711,25 @@ Five local runs on the AMD Ryzen 9 5950X use a warmed 4,096-row
 `TestHatTrieSQLColumnarTopNUsesWarmLayout` verifies both result ordering and
 that the normal materialized query borrows the warm immutable layout.
 
+## Typed Sorted Arrangement Page Snapshots
+
+`TypedTableSortedArrangement.RowsPage(offset, limit)` returns an independent
+bounded snapshot directly from the maintained order vector. It is useful for
+repeated ordered reads that need only an `ORDER BY ... LIMIT` page; the legacy
+`Rows()` method remains unchanged for callers that need the complete snapshot.
+
+The following five local samples used a 4,096-row typed arrangement and a
+ten-row page on the AMD Ryzen 9 5950X:
+
+| API | Median time | Allocated bytes | Allocations | Improvement vs `Rows()` |
+| --- | ---: | ---: | ---: | --- |
+| `Rows()` | 420.313 us/op | 557,057 B/op | 4,097 allocs/op | Baseline |
+| `RowsPage(0, 10)` | 911.5 ns/op | 1,376 B/op | 11 allocs/op | 461.2x faster; 404.8x lower allocated bytes; 372.5x fewer allocations |
+
+The page method does not change arrangement update cost, storage format, wire
+format, ordering, or snapshot isolation. Empty pages are allocation-free at
+the row level and unsupported callers can continue using `Rows()`.
+
 ## Warm Columnar Sorted Projection
 
 Repeated direct single-field `ORDER BY ... LIMIT` reads can use a ClickHouse-

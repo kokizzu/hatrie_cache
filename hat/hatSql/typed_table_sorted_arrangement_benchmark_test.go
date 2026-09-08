@@ -100,6 +100,30 @@ func BenchmarkTypedTableSortedArrangementSingleRebuild(b *testing.B) {
 	}
 }
 
+func BenchmarkTypedTableSortedArrangementRows(b *testing.B) {
+	table := newSortedBenchmarkTable(b)
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for range b.N {
+		typedTableSortedArrangementBenchmarkSink += len(arrangement.Rows())
+	}
+}
+
+func BenchmarkTypedTableSortedArrangementRowsPage(b *testing.B) {
+	table := newSortedBenchmarkTable(b)
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for range b.N {
+		typedTableSortedArrangementBenchmarkSink += len(arrangement.RowsPage(0, 10))
+	}
+}
+
 func makeSortedBenchmarkRows() []hatSql.TypedTableMergeJoinInput {
 	rows := make([]hatSql.TypedTableMergeJoinInput, 4096)
 	for index := range rows {

@@ -90,6 +90,42 @@ func TestTypedTableSortedArrangementSupportsDescendingAndNullOrdering(t *testing
 	assertSortedArrangementKeys(t, arrangement.Rows(), "null", "two", "one")
 }
 
+func TestTypedTableSortedArrangementRowsPageReturnsBoundedIndependentSnapshot(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_page")
+	for _, row := range []struct {
+		key, team string
+		score     int64
+	}{
+		{key: "c", team: "blue", score: 2},
+		{key: "a", team: "red", score: 3},
+		{key: "b", team: "red", score: 1},
+		{key: "d", team: "yellow", score: 4},
+	} {
+		if _, err := table.Upsert(row.key, []hatSql.TypedTableValue{hatSql.TypedString(row.team), hatSql.TypedInt64(row.score)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.RowsPage(1, 2), "a", "b")
+	assertSortedArrangementKeys(t, arrangement.RowsPage(3, 10), "d")
+	if got := arrangement.RowsPage(4, 10); len(got) != 0 {
+		t.Fatalf("page beyond end = %#v, want empty", got)
+	}
+	if got := arrangement.RowsPage(0, 0); len(got) != 0 {
+		t.Fatalf("zero-limit page = %#v, want empty", got)
+	}
+	assertSortedArrangementKeys(t, arrangement.RowsPage(-1, 2), "c", "a")
+
+	page := arrangement.RowsPage(0, 1)
+	page[0].Values[0] = hatSql.TypedString("mutated")
+	if fresh := arrangement.RowsPage(0, 1); fresh[0].Values[0].String != "blue" {
+		t.Fatalf("sorted arrangement page exposed row storage: %#v", fresh)
+	}
+}
+
 func TestTypedTableSortedArrangementRejectsGapsAndInvalidDefinitions(t *testing.T) {
 	table := newSortedArrangementTable(t, "sorted_validation")
 	if _, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "missing"}); !errors.Is(err, hatSql.ErrTypedTableSortedArrangementField) {
