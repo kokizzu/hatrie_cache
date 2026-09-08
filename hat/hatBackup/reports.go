@@ -56,6 +56,7 @@ type PartitionValidation struct {
 // RestoreOptions controls restore publication behavior.
 type RestoreOptions struct {
 	Overwrite bool
+	Partition *PartitionMetadata
 }
 
 // RestoreReport describes an applied offline restore.
@@ -79,6 +80,7 @@ type RestoreReport struct {
 type RehearsalOptions struct {
 	WorkDir     string
 	KeepWorkDir bool
+	Partition   *PartitionMetadata
 }
 
 // RehearsalGetCheck records a single post-restore key probe.

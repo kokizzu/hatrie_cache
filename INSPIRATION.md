@@ -555,7 +555,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [-] T075 Online partition migration - proposal required before implementation.
 - [ ] T076 Explicit region partition routing.
 - [x] T076a Immutable longest-prefix routing for explicit region keys. `hatPartition.PrefixRouter` validates normalized rules, chooses the most specific prefix without lookup allocation, and leaves unmatched keys unassigned; see [REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md).
-- [ ] T077 Region-local backup and restore.
+- [x] T077 Region-local backup and restore. `partition_local` snapshot bundles filter records before encoding, carry `partition.local` metadata, are validated by the backup doctor, and require an optional matching partition selector before restore publication; Pebble checkpoint and incremental modes remain whole-store artifacts.
 - [ ] T078 Cross-region read policy.
 - [ ] T079 Partition ownership and fencing metadata.
 - [ ] T080 Partition split and merge tooling.

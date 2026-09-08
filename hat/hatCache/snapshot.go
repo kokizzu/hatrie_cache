@@ -1067,7 +1067,7 @@ func (ht *HatTrie) captureSnapshotForStoreAtBarrier(currentStore *LevelDBStore, 
 	}
 	cursor.close(ht)
 
-	replacements, sequence, err := ht.captureSnapshotMutationReplacements(tracker, currentStore, currentDB, barrier)
+	replacements, sequence, err := ht.captureSnapshotMutationReplacements(tracker, currentStore, currentDB, barrier, nil)
 	if err != nil {
 		return snapshotCapture{}, 0, err
 	}
@@ -1080,7 +1080,7 @@ type snapshotCaptureReplacement struct {
 	present bool
 }
 
-func (ht *HatTrie) captureSnapshotMutationReplacements(tracker *snapshotMutationTracker, currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (map[string]snapshotCaptureReplacement, uint64, error) {
+func (ht *HatTrie) captureSnapshotMutationReplacements(tracker *snapshotMutationTracker, currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier, includeKey func(string) bool) (map[string]snapshotCaptureReplacement, uint64, error) {
 	var replacements map[string]snapshotCaptureReplacement
 	for {
 		var sequence uint64
@@ -1128,6 +1128,9 @@ func (ht *HatTrie) captureSnapshotMutationReplacements(tracker *snapshotMutation
 				defer ht.mu.Unlock()
 				ht.ensureOpen()
 				for _, key := range keys[first:last] {
+					if includeKey != nil && !includeKey(key) {
+						continue
+					}
 					replacement, err := ht.captureSnapshotReplacementLocked(key, currentStore, currentDB)
 					if err != nil {
 						chunkErr = err

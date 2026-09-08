@@ -204,6 +204,18 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 			t.Fatalf("Makefile missing backup/restore token %q", token)
 		}
 	}
+	for _, script := range []string{"scripts/restore-bundle.sh", "scripts/restore-rehearsal.sh"} {
+		data, err := os.ReadFile(script)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", script, err)
+		}
+		contents := string(data)
+		for _, token := range []string{"PARTITIONS", "PARTITION_PREFIXES", "-partitions", "-partition-prefixes"} {
+			if !strings.Contains(contents, token) {
+				t.Fatalf("%s missing partition selector token %q", script, token)
+			}
+		}
+	}
 
 	data, err = os.ReadFile("scripts/doctor.sh")
 	if err != nil {

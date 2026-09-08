@@ -24,6 +24,7 @@ const (
 // PartitionMetadata identifies the partition coverage of a backup.
 type PartitionMetadata struct {
 	Mode                string   `json:"mode,omitempty"`
+	Local               bool     `json:"local,omitempty"`
 	Partitions          []string `json:"partitions,omitempty"`
 	NodeID              string   `json:"node_id,omitempty"`
 	TopologyEpoch       uint64   `json:"topology_epoch,omitempty"`
@@ -85,6 +86,7 @@ func ParseMode(value string) (Mode, error) {
 func NormalizePartitionMetadata(input PartitionMetadata) (*PartitionMetadata, error) {
 	out := PartitionMetadata{
 		Mode:                strings.TrimSpace(input.Mode),
+		Local:               input.Local,
 		NodeID:              strings.TrimSpace(input.NodeID),
 		TopologyEpoch:       input.TopologyEpoch,
 		TopologyFingerprint: strings.TrimSpace(input.TopologyFingerprint),
@@ -98,7 +100,7 @@ func NormalizePartitionMetadata(input PartitionMetadata) (*PartitionMetadata, er
 	if err != nil {
 		return nil, err
 	}
-	if out.Mode == "" && out.NodeID == "" && out.TopologyEpoch == 0 && out.TopologyFingerprint == "" && len(out.Partitions) == 0 && len(out.KeyPrefixes) == 0 {
+	if out.Mode == "" && !out.Local && out.NodeID == "" && out.TopologyEpoch == 0 && out.TopologyFingerprint == "" && len(out.Partitions) == 0 && len(out.KeyPrefixes) == 0 {
 		return nil, nil
 	}
 	if out.Mode == "" {
@@ -108,6 +110,42 @@ func NormalizePartitionMetadata(input PartitionMetadata) (*PartitionMetadata, er
 		return nil, errors.New("hatriecache: backup partition metadata requires at least one partition id")
 	}
 	return &out, nil
+}
+
+// ValidatePartitionRestore verifies that a requested selector refers to a
+// region-local backup with matching partition coverage. A nil selector keeps
+// the historical restore behavior and accepts any valid backup.
+func ValidatePartitionRestore(manifest BundleManifest, requested *PartitionMetadata) error {
+	if requested == nil {
+		return nil
+	}
+	selector, err := NormalizePartitionMetadata(*requested)
+	if err != nil {
+		return fmt.Errorf("hatriecache: partition selector: %w", err)
+	}
+	if selector == nil {
+		return errors.New("hatriecache: partition selector is empty")
+	}
+	if manifest.Partition == nil || !manifest.Partition.Local {
+		return errors.New("hatriecache: partition selector requires a region-local backup")
+	}
+	backup, err := NormalizePartitionMetadata(*manifest.Partition)
+	if err != nil {
+		return fmt.Errorf("hatriecache: partition selector: invalid backup metadata: %w", err)
+	}
+	if !sameStringSet(selector.Partitions, backup.Partitions) {
+		return fmt.Errorf("hatriecache: partition selector does not match backup partitions")
+	}
+	if len(selector.KeyPrefixes) > 0 && !sameStringSet(selector.KeyPrefixes, backup.KeyPrefixes) {
+		return fmt.Errorf("hatriecache: partition selector does not match backup key prefixes")
+	}
+	if selector.TopologyEpoch != 0 && selector.TopologyEpoch != backup.TopologyEpoch {
+		return fmt.Errorf("hatriecache: partition selector topology epoch does not match backup")
+	}
+	if selector.TopologyFingerprint != "" && selector.TopologyFingerprint != backup.TopologyFingerprint {
+		return fmt.Errorf("hatriecache: partition selector topology fingerprint does not match backup")
+	}
+	return nil
 }
 
 // ClonePartitionMetadata returns an independent copy of metadata.
@@ -139,4 +177,20 @@ func normalizeStringList(label string, values []string) ([]string, error) {
 		out = append(out, value)
 	}
 	return out, nil
+}
+
+func sameStringSet(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		seen[value] = struct{}{}
+	}
+	for _, value := range right {
+		if _, ok := seen[value]; !ok {
+			return false
+		}
+	}
+	return true
 }

@@ -7,6 +7,8 @@ keep_work_dir=${RESTORE_REHEARSAL_KEEP_WORK_DIR:-false}
 runtime_check=${RESTORE_REHEARSAL_RUNTIME_CHECK:-true}
 runtime_get=${RESTORE_REHEARSAL_RUNTIME_GET:-}
 runtime_server_bin=${RESTORE_REHEARSAL_RUNTIME_SERVER_BIN:-}
+partitions=${RESTORE_REHEARSAL_PARTITIONS:-}
+partition_prefixes=${RESTORE_REHEARSAL_PARTITION_PREFIXES:-}
 
 if [ -z "$path" ]; then
 	echo "restore-rehearsal: RESTORE_REHEARSAL_PATH is required" >&2
@@ -14,6 +16,12 @@ if [ -z "$path" ]; then
 fi
 
 set -- restore-rehearsal -path "$path"
+if [ -n "$partitions" ]; then
+	set -- "$@" -partitions "$partitions"
+fi
+if [ -n "$partition_prefixes" ]; then
+	set -- "$@" -partition-prefixes "$partition_prefixes"
+fi
 if [ -n "$work_dir" ]; then
 	set -- "$@" -work-dir "$work_dir"
 fi

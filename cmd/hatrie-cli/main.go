@@ -595,6 +595,7 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 	partitionEpoch := flags.Uint64("partition-epoch", 0, "optional topology epoch for partition metadata")
 	partitionFingerprint := flags.String("partition-fingerprint", "", "optional topology fingerprint for partition metadata")
 	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes covered by the partition backup")
+	partitionLocal := flags.Bool("partition-local", false, "write only keys covered by the partition prefixes; snapshot mode only")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -607,12 +608,14 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 		Mode           string                               `json:"mode,omitempty"`
 		Retain         int                                  `json:"retain,omitempty"`
 		SnapshotFormat string                               `json:"snapshot_format,omitempty"`
+		PartitionLocal bool                                 `json:"partition_local,omitempty"`
 		Partition      *hatriecache.BackupPartitionMetadata `json:"partition,omitempty"`
 	}{
 		Path:           strings.TrimSpace(*path),
 		Mode:           strings.TrimSpace(*mode),
 		Retain:         *retain,
 		SnapshotFormat: strings.TrimSpace(*snapshotFormat),
+		PartitionLocal: *partitionLocal,
 		Partition:      partition,
 	})
 	if err != nil {
@@ -635,6 +638,7 @@ func runBackupAndVerify(ctx context.Context, client *http.Client, addr string, a
 	partitionEpoch := flags.Uint64("partition-epoch", 0, "optional topology epoch for partition metadata")
 	partitionFingerprint := flags.String("partition-fingerprint", "", "optional topology fingerprint for partition metadata")
 	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes covered by the partition backup")
+	partitionLocal := flags.Bool("partition-local", false, "write only keys covered by the partition prefixes; snapshot mode only")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -648,12 +652,14 @@ func runBackupAndVerify(ctx context.Context, client *http.Client, addr string, a
 		Mode           string                               `json:"mode,omitempty"`
 		Retain         int                                  `json:"retain,omitempty"`
 		SnapshotFormat string                               `json:"snapshot_format,omitempty"`
+		PartitionLocal bool                                 `json:"partition_local,omitempty"`
 		Partition      *hatriecache.BackupPartitionMetadata `json:"partition,omitempty"`
 	}{
 		Path:           *path,
 		Mode:           strings.TrimSpace(*mode),
 		Retain:         *retain,
 		SnapshotFormat: strings.TrimSpace(*snapshotFormat),
+		PartitionLocal: *partitionLocal,
 		Partition:      partition,
 	}
 	startedAt := time.Now()
@@ -1339,13 +1345,16 @@ func runRestoreBundle(args []string, stdout io.Writer, stderr io.Writer) error {
 	bundlePath := flags.String("bundle", "", "atomic backup bundle path to verify and restore")
 	dataDir := flags.String("data-dir", "data", "restore target data directory")
 	overwrite := flags.Bool("overwrite", false, "allow restoring into a non-empty data directory")
+	partitions := flags.String("partitions", "", "comma-separated partition ids required in a region-local backup")
+	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes required in a region-local backup")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*bundlePath) == "" {
 		return errors.New("restore-bundle -bundle is required")
 	}
-	report, err := hatriecache.RestoreBackupBundle(*bundlePath, *dataDir, hatriecache.BackupBundleRestoreOptions{Overwrite: *overwrite})
+	partition := backupPartitionMetadataFromFlags("", *partitions, "", 0, "", *partitionPrefixes)
+	report, err := hatriecache.RestoreBackupBundle(*bundlePath, *dataDir, hatriecache.BackupBundleRestoreOptions{Overwrite: *overwrite, Partition: partition})
 	if err != nil {
 		return err
 	}
@@ -1365,6 +1374,8 @@ func runRestoreRehearsal(ctx context.Context, client *http.Client, args []string
 	keepWorkDir := flags.Bool("keep-work-dir", false, "keep the temporary rehearsal work directory")
 	runtimeCheck := flags.Bool("runtime-check", true, "start a temporary server and validate restored health, stats, and GET checks")
 	runtimeServerBin := flags.String("runtime-server-bin", "", "optional hatrie-cache server binary for runtime checks; defaults to building ./cmd/hatrie-cache")
+	partitions := flags.String("partitions", "", "comma-separated partition ids required in a region-local backup")
+	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes required in a region-local backup")
 	var runtimeGets repeatedStringFlag
 	flags.Var(&runtimeGets, "runtime-get", "key or key=value to GET from the temporary restored server; repeat for multiple keys")
 	if err := flags.Parse(args); err != nil {
@@ -1373,9 +1384,11 @@ func runRestoreRehearsal(ctx context.Context, client *http.Client, args []string
 	if strings.TrimSpace(*path) == "" {
 		return errors.New("restore-rehearsal -path is required")
 	}
+	partition := backupPartitionMetadataFromFlags("", *partitions, "", 0, "", *partitionPrefixes)
 	report, err := hatriecache.RehearseRestore(*path, hatriecache.RestoreRehearsalOptions{
 		WorkDir:     *workDir,
 		KeepWorkDir: *keepWorkDir,
+		Partition:   partition,
 	})
 	if err != nil {
 		return err

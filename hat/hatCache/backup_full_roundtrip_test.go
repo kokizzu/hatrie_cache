@@ -79,66 +79,112 @@ func TestBackupRestoreRoundTripsAllSnapshotValueTypes(t *testing.T) {
 }
 
 func newBackupRoundTripCorpus(t *testing.T, now time.Time) *HatTrie {
+	return newBackupRoundTripCorpusWithPrefix(t, now, "")
+}
+
+func TestPartitionLocalBackupRoundTripsAllSnapshotValueTypes(t *testing.T) {
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	partition := BackupPartitionMetadata{Partitions: []string{"sg"}, KeyPrefixes: []string{"sg:"}}
+	for _, format := range []SnapshotFormat{
+		SnapshotFormatBinary,
+		SnapshotFormatGzipBestBinary,
+		SnapshotFormatJSON,
+		SnapshotFormatGzipBestJSON,
+	} {
+		t.Run(string(format), func(t *testing.T) {
+			source := newBackupRoundTripCorpusWithPrefix(t, now, "sg:")
+			want := backupRoundTripEntries(t, source)
+			bundlePath := filepath.Join(t.TempDir(), "sg-backup.tar.gz")
+			manifest, err := CreateBackupBundle(bundlePath, source, nil, BackupBundleOptions{
+				Mode:           BackupModeSnapshot,
+				SnapshotFormat: format,
+				Partition:      partition,
+				PartitionLocal: true,
+			})
+			if err != nil {
+				t.Fatalf("CreateBackupBundle(%s) error = %v", format, err)
+			}
+			if manifest.Partition == nil || !manifest.Partition.Local {
+				t.Fatalf("manifest partition = %#v, want local metadata", manifest.Partition)
+			}
+			report, err := RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "restored"), BackupBundleRestoreOptions{
+				Partition: &BackupPartitionMetadata{Partitions: []string{"sg"}},
+			})
+			if err != nil {
+				t.Fatalf("RestoreBackupBundle(%s) error = %v", format, err)
+			}
+			restored := newTestTrie(t)
+			restored.now = func() time.Time { return now }
+			if err := restored.LoadSnapshot(report.Snapshot); err != nil {
+				t.Fatalf("LoadSnapshot(%s) error = %v", format, err)
+			}
+			assertBackupRoundTripEntries(t, want, backupRoundTripEntries(t, restored))
+		})
+	}
+}
+
+func newBackupRoundTripCorpusWithPrefix(t *testing.T, now time.Time, prefix string) *HatTrie {
 	t.Helper()
 	ht := newTestTrie(t)
 	ht.now = func() time.Time { return now }
-	ht.UpsertCounter("counter", 42)
-	ht.UpsertString("string", "value")
-	ht.UpsertBytes("bytes", []byte("payload"))
-	ht.UpsertMap("map", Map{"name": "ivi", "age": json.Number("32")})
-	ht.UpsertSlice("slice", Slice{"a", json.Number("2")})
-	ht.UpsertSet("set", Set{"a", json.Number("2"), "a"})
-	ht.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 5, Value: json.Number("2")}, {Priority: 1, Value: "urgent"}})
-	if err := ht.UpsertBloomFilter("bloom", 1000, 0.001); err != nil {
+	key := func(name string) string { return prefix + name }
+	ht.UpsertCounter(key("counter"), 42)
+	ht.UpsertString(key("string"), "value")
+	ht.UpsertBytes(key("bytes"), []byte("payload"))
+	ht.UpsertMap(key("map"), Map{"name": "ivi", "age": json.Number("32")})
+	ht.UpsertSlice(key("slice"), Slice{"a", json.Number("2")})
+	ht.UpsertSet(key("set"), Set{"a", json.Number("2"), "a"})
+	ht.UpsertPriorityQueue(key("priority"), PriorityQueue{{Priority: 5, Value: json.Number("2")}, {Priority: 1, Value: "urgent"}})
+	if err := ht.UpsertBloomFilter(key("bloom"), 1000, 0.001); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddBloomFilter("bloom", "alpha", "beta")
-	if err := ht.UpsertCountMinSketch("freq", 128, 4); err != nil {
+	ht.AddBloomFilter(key("bloom"), "alpha", "beta")
+	if err := ht.UpsertCountMinSketch(key("freq"), 128, 4); err != nil {
 		t.Fatal(err)
 	}
-	ht.IncrementCountMinSketch("freq", "alpha", 5)
-	if err := ht.UpsertHyperLogLog("card", 10); err != nil {
+	ht.IncrementCountMinSketch(key("freq"), "alpha", 5)
+	if err := ht.UpsertHyperLogLog(key("card"), 10); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddHyperLogLog("card", "alpha", "beta")
-	if err := ht.UpsertTopK("top", 3); err != nil {
+	ht.AddHyperLogLog(key("card"), "alpha", "beta")
+	if err := ht.UpsertTopK(key("top"), 3); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddTopK("top", "alpha", 5)
-	if err := ht.UpsertQuantileSketch("latency", 0.01); err != nil {
+	ht.AddTopK(key("top"), "alpha", 5)
+	if err := ht.UpsertQuantileSketch(key("latency"), 0.01); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddQuantileSketch("latency", 10, 20, 30)
-	if err := ht.UpsertFenwickTree("scores", 8); err != nil {
+	ht.AddQuantileSketch(key("latency"), 10, 20, 30)
+	if err := ht.UpsertFenwickTree(key("scores"), 8); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddFenwickTree("scores", 2, 5)
-	ht.AddFenwickTree("scores", 6, 7)
-	if err := ht.UpsertCuckooFilter("cuckoo", 128, 0.001); err != nil {
+	ht.AddFenwickTree(key("scores"), 2, 5)
+	ht.AddFenwickTree(key("scores"), 6, 7)
+	if err := ht.UpsertCuckooFilter(key("cuckoo"), 128, 0.001); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddCuckooFilter("cuckoo", "alpha", "beta")
-	if err := ht.UpsertXorFilter("xor", 8); err != nil {
+	ht.AddCuckooFilter(key("cuckoo"), "alpha", "beta")
+	if err := ht.UpsertXorFilter(key("xor"), 8); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ht.AddXorFilter("xor", "alpha", "beta"); err != nil {
+	if _, err := ht.AddXorFilter(key("xor"), "alpha", "beta"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := ht.BuildXorFilter("xor"); err != nil || !ok {
+	if _, ok, err := ht.BuildXorFilter(key("xor")); err != nil || !ok {
 		t.Fatalf("BuildXorFilter() = %v/%v, want success", err, ok)
 	}
-	ht.UpsertRadixTree("radix")
-	ht.PutRadixTree("radix", "user:100/profile", Map{"status": "active"})
-	ht.PutRadixTree("radix", "user:101/profile", json.Number("42"))
-	ht.UpsertRoaringBitmap("bitmap")
-	ht.AddRoaringBitmap("bitmap", 1, 1<<16+7)
-	ht.UpsertSparseBitset("bitset")
-	ht.AddSparseBitset("bitset", 1, 1<<32+7, ^uint64(0))
-	if err := ht.UpsertReservoirSample("sample", 3); err != nil {
+	ht.UpsertRadixTree(key("radix"))
+	ht.PutRadixTree(key("radix"), "user:100/profile", Map{"status": "active"})
+	ht.PutRadixTree(key("radix"), "user:101/profile", json.Number("42"))
+	ht.UpsertRoaringBitmap(key("bitmap"))
+	ht.AddRoaringBitmap(key("bitmap"), 1, 1<<16+7)
+	ht.UpsertSparseBitset(key("bitset"))
+	ht.AddSparseBitset(key("bitset"), 1, 1<<32+7, ^uint64(0))
+	if err := ht.UpsertReservoirSample(key("sample"), 3); err != nil {
 		t.Fatal(err)
 	}
-	ht.AddReservoirSample("sample", "alpha", "beta", "gamma", "delta")
-	if !ht.Expire("string", time.Minute) {
+	ht.AddReservoirSample(key("sample"), "alpha", "beta", "gamma", "delta")
+	if !ht.Expire(key("string"), time.Minute) {
 		t.Fatal("Expire(string) = false")
 	}
 	return ht

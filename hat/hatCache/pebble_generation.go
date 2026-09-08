@@ -466,7 +466,7 @@ func capturePebbleRecords(trie *HatTrie, format StorageFormat, visitRecord func(
 		runtime.Gosched()
 	}
 	cursor.close(trie)
-	replacements, _, err := trie.captureSnapshotMutationReplacements(tracker, nil, nil, nil)
+	replacements, _, err := trie.captureSnapshotMutationReplacements(tracker, nil, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -59,6 +59,9 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	if err := hatBackup.ValidatePartitionRestore(manifest, options.Partition); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
 	mode := backupBundleManifestMode(manifest)
 	if mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
 		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle restore mode %q", mode)
@@ -129,6 +132,9 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	}
 	manifest, err := readBackupRepositoryManifest(repositoryPath, backupID)
 	if err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := hatBackup.ValidatePartitionRestore(manifest, options.Partition); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
 	destination, err := prepareRestoreDestination(repositoryPath, dataDir, options.Overwrite)
@@ -295,7 +301,7 @@ func RehearseRestore(path string, options RestoreRehearsalOptions) (RestoreRehea
 	restoredDir := filepath.Join(workDir, "data")
 	switch backup.Kind {
 	case "bundle", "repository":
-		if _, err := RestoreBackupBundle(path, restoredDir, BackupBundleRestoreOptions{}); err != nil {
+		if _, err := RestoreBackupBundle(path, restoredDir, BackupBundleRestoreOptions{Partition: options.Partition}); err != nil {
 			return RestoreRehearsalReport{}, err
 		}
 	case "directory":

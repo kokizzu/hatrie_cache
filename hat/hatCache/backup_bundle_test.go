@@ -360,6 +360,87 @@ func TestCreateBackupBundleRejectsInvalidPartitionMetadata(t *testing.T) {
 	}
 }
 
+func TestPartitionLocalBackupFiltersKeysAndRequiresMatchingRestoreSelector(t *testing.T) {
+	trie := newTestTrie(t)
+	if response := trie.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "sg:session:1", Value: "local"}); !response.OK {
+		t.Fatalf("SETSTR(sg) response = %#v, want ok", response)
+	}
+	if response := trie.ExecuteCommand(CacheCommandRequest{Command: "SETINT", Key: "us:session:1", Value: "42"}); !response.OK {
+		t.Fatalf("SETINT(us) response = %#v, want ok", response)
+	}
+	partition := BackupPartitionMetadata{
+		Mode:          "partitioned",
+		Partitions:    []string{"sg"},
+		KeyPrefixes:   []string{"sg:"},
+		TopologyEpoch: 7,
+	}
+	bundlePath := filepath.Join(t.TempDir(), "sg-backup.tar.gz")
+	manifest, err := CreateBackupBundle(bundlePath, trie, nil, BackupBundleOptions{
+		Mode:           BackupModeSnapshot,
+		SnapshotFormat: SnapshotFormatJSON,
+		Partition:      partition,
+		PartitionLocal: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackupBundle(local) error = %v", err)
+	}
+	if manifest.Partition == nil || !manifest.Partition.Local || !reflect.DeepEqual(manifest.Partition.Partitions, partition.Partitions) {
+		t.Fatalf("local manifest partition = %#v, want local sg metadata", manifest.Partition)
+	}
+
+	doctor, err := VerifyBackupBundle(bundlePath)
+	if err != nil {
+		t.Fatalf("VerifyBackupBundle(local) error = %v", err)
+	}
+	if doctor.RecoveredKeys != 1 || doctor.PartitionValidation == nil || !doctor.PartitionValidation.OK || doctor.PartitionValidation.CheckedKeys != 1 {
+		t.Fatalf("local doctor = %#v, want one covered key", doctor)
+	}
+
+	wrongSelector := &BackupPartitionMetadata{Partitions: []string{"us"}}
+	if _, err := RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "wrong"), BackupBundleRestoreOptions{Partition: wrongSelector}); err == nil || !strings.Contains(err.Error(), "partition selector") {
+		t.Fatalf("RestoreBackupBundle(wrong selector) error = %v, want selector rejection", err)
+	}
+
+	dataDir := filepath.Join(t.TempDir(), "restored")
+	report, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{
+		Partition: &BackupPartitionMetadata{Partitions: []string{"sg"}},
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackupBundle(local) error = %v", err)
+	}
+	if report.RecoveredKeys != 1 || report.Partition == nil || !report.Partition.Local {
+		t.Fatalf("local restore report = %#v, want one local key", report)
+	}
+	restored := newTestTrie(t)
+	if _, err := restored.LoadSnapshotWithMetadata(report.Snapshot); err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata(local restore) error = %v", err)
+	}
+	if got := restored.GetString("sg:session:1"); got != "local" {
+		t.Fatalf("restored local value = %q, want local", got)
+	}
+	if got := restored.GetString("us:session:1"); got != "" {
+		t.Fatalf("restored foreign value = %q, want missing", got)
+	}
+}
+
+func TestPartitionLocalBackupRejectsNonSnapshotModes(t *testing.T) {
+	partition := BackupPartitionMetadata{
+		Mode:        "partitioned",
+		Partitions:  []string{"sg"},
+		KeyPrefixes: []string{"sg:"},
+	}
+	for _, mode := range []BackupMode{BackupModePebbleCheckpoint, BackupModePebbleIncremental} {
+		_, err := CreateBackupBundle(filepath.Join(t.TempDir(), "backup.tar.gz"), newTestTrie(t), nil, BackupBundleOptions{
+			Mode:           mode,
+			Partition:      partition,
+			PartitionLocal: true,
+		})
+		if err == nil || !strings.Contains(err.Error(), "partition-local backup requires snapshot mode") {
+			t.Fatalf("CreateBackupBundle(%s) error = %v, want snapshot-only rejection", mode, err)
+		}
+	}
+}
+
 func readBackupBundleFiles(t *testing.T, path string) map[string][]byte {
 	t.Helper()
 	file, err := os.Open(path)

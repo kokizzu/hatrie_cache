@@ -129,14 +129,30 @@ func snapshotStreamRecordKey(data []byte, binaryRecord bool) (string, error) {
 }
 
 func (ht *HatTrie) captureSnapshotStreamForStoreAtBarrier(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (snapshotStreamCapture, uint64, error) {
+	return ht.captureSnapshotStreamForStoreAtBarrierWithFilter(currentStore, currentDB, barrier, nil)
+}
+
+func (ht *HatTrie) captureSnapshotStreamForStoreAtBarrierWithFilter(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier, includeKey func(string) bool) (snapshotStreamCapture, uint64, error) {
 	if ht == nil {
 		return snapshotStreamCapture{}, 0, ErrNilHatTrie
 	}
 	if ht.localPartitionSet() != nil {
 		capture := snapshotStreamCapture{}
-		replacements, sequence, err := ht.visitCapturedLocalPartitionEntries(currentStore, currentDB, barrier, capture.append)
+		replacements, sequence, err := ht.visitCapturedLocalPartitionEntries(currentStore, currentDB, barrier, func(entry snapshotEntry) error {
+			if includeKey != nil && !includeKey(entry.Key) {
+				return nil
+			}
+			return capture.append(entry)
+		})
 		if err != nil {
 			return snapshotStreamCapture{}, 0, err
+		}
+		if includeKey != nil {
+			for key := range replacements {
+				if !includeKey(key) {
+					delete(replacements, key)
+				}
+			}
 		}
 		capture.replacements = replacements
 		return capture, sequence, nil
@@ -174,6 +190,9 @@ func (ht *HatTrie) captureSnapshotStreamForStoreAtBarrier(currentStore *LevelDBS
 			if err != nil {
 				return err
 			}
+			if includeKey != nil && !includeKey(captured.Key) {
+				return nil
+			}
 			return capture.append(captured)
 		})
 		if err != nil {
@@ -193,13 +212,21 @@ func (ht *HatTrie) captureSnapshotStreamForStoreAtBarrier(currentStore *LevelDBS
 	}
 	cursor.close(ht)
 
-	replacements, sequence, err := ht.captureSnapshotMutationReplacements(tracker, currentStore, currentDB, barrier)
+	replacements, sequence, err := ht.captureSnapshotMutationReplacements(tracker, currentStore, currentDB, barrier, includeKey)
 	if err != nil {
 		return snapshotStreamCapture{}, 0, err
 	}
 	capture.replacements = replacements
 	active = false
 	return capture, sequence, nil
+}
+
+func (ht *HatTrie) writeSnapshotWithKeyFilter(writer io.Writer, journalSequence uint64, format SnapshotFormat, includeKey func(string) bool) error {
+	capture, _, err := ht.captureSnapshotStreamForStoreAtBarrierWithFilter(nil, nil, nil, includeKey)
+	if err != nil {
+		return err
+	}
+	return writeStreamSnapshot(writer, journalSequence, format, capture)
 }
 
 func writeStreamSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat, capture snapshotStreamCapture) error {

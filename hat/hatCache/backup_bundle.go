@@ -40,6 +40,7 @@ type BackupBundleOptions struct {
 	SnapshotFormat   SnapshotFormat
 	CreatedAt        time.Time
 	Partition        BackupPartitionMetadata
+	PartitionLocal   bool
 	Mode             BackupMode
 	PersistentStore  PersistentStore
 	DirtyTracker     *LevelDBDirtyTracker
@@ -83,6 +84,9 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 	if err != nil {
 		return BackupBundleManifest{}, err
 	}
+	if options.PartitionLocal && mode != BackupModeAuto && mode != BackupModeSnapshot {
+		return BackupBundleManifest{}, errors.New("hatriecache: partition-local backup requires snapshot mode")
+	}
 	if mode == BackupModePebbleIncremental {
 		options.Mode = mode
 		return CreateIncrementalBackupRepositoryWithContext(ctx, path, trie, journal, options)
@@ -102,6 +106,12 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 	partition, err := normalizeBackupPartitionMetadata(options.Partition)
 	if err != nil {
 		return BackupBundleManifest{}, err
+	}
+	if options.PartitionLocal {
+		if partition == nil || len(partition.KeyPrefixes) == 0 {
+			return BackupBundleManifest{}, errors.New("hatriecache: partition-local backup requires at least one key prefix")
+		}
+		partition.Local = true
 	}
 	createdAt := options.CreatedAt
 	if createdAt.IsZero() {
@@ -131,9 +141,9 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 		if err := checkBackupContext(ctx); err != nil {
 			return BackupBundleManifest{}, err
 		}
-		return createBackupBundleLocked(ctx, path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition, mode, options.PersistentStore)
+		return createBackupBundleLocked(ctx, path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition, mode, options.PersistentStore, options.PartitionLocal)
 	}
-	return createBackupBundleLocked(ctx, path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition, mode, options.PersistentStore)
+	return createBackupBundleLocked(ctx, path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition, mode, options.PersistentStore, options.PartitionLocal)
 }
 
 type backupBundlePayloadFile struct {
@@ -142,7 +152,7 @@ type backupBundlePayloadFile struct {
 	data []byte
 }
 
-func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata, mode BackupMode, persistentStore PersistentStore) (BackupBundleManifest, error) {
+func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata, mode BackupMode, persistentStore PersistentStore, partitionLocal bool) (BackupBundleManifest, error) {
 	if err := checkBackupContext(ctx); err != nil {
 		return BackupBundleManifest{}, err
 	}
@@ -158,8 +168,18 @@ func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, t
 	switch mode {
 	case BackupModeSnapshot:
 		snapshotPath := filepath.Join(tmpDir, backupBundleSnapshotPath)
-		if err := trie.SaveSnapshotWithJournalSequenceAndFormat(snapshotPath, journalSequence, snapshotFormat); err != nil {
-			return BackupBundleManifest{}, err
+		var saveErr error
+		if partitionLocal {
+			saveErr = writeFileAtomicStream(snapshotPath, func(writer io.Writer) error {
+				return trie.writeSnapshotWithKeyFilter(writer, journalSequence, snapshotFormat, func(key string) bool {
+					return backupPartitionKeyCoveredByPrefix(key, partition.KeyPrefixes)
+				})
+			})
+		} else {
+			saveErr = trie.SaveSnapshotWithJournalSequenceAndFormat(snapshotPath, journalSequence, snapshotFormat)
+		}
+		if saveErr != nil {
+			return BackupBundleManifest{}, saveErr
 		}
 		if err := checkBackupContext(ctx); err != nil {
 			return BackupBundleManifest{}, err

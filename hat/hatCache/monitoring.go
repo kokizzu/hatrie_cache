@@ -343,6 +343,7 @@ type backupBundleRequest struct {
 	Mode           string                  `json:"mode,omitempty"`
 	Retain         int                     `json:"retain,omitempty"`
 	SnapshotFormat string                  `json:"snapshot_format,omitempty"`
+	PartitionLocal bool                    `json:"partition_local,omitempty"`
 	Partition      BackupPartitionMetadata `json:"partition,omitempty"`
 }
 
@@ -2817,6 +2818,7 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 	manifest, err := CreateBackupBundle(request.Path, handler.trie, handler.options.Journal, BackupBundleOptions{
 		SnapshotFormat:   format,
 		Partition:        request.Partition,
+		PartitionLocal:   request.PartitionLocal,
 		Mode:             mode,
 		PersistentStore:  handler.options.LevelDBStore,
 		DirtyTracker:     handler.options.LevelDBDirtyTracker,

@@ -16,6 +16,7 @@ security guidance before exposing it on a network.
 - Entropy-based codec selection: [codec selection](CODEC_SELECTION.md)
 - Per-client compression-level negotiation: [compression negotiation](COMPRESSION_NEGOTIATION.md)
 - Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
+- Region-local filtered backup and restore: [region-local backup](REGION_LOCAL_BACKUP.md)
 - Leader election independent from query workers: [leader election](LEADER_ELECTION.md)
 - Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
 - Persistent shard ownership leases: [persistent shard leases](PERSISTENT_SHARD_LEASES.md)
@@ -4333,3 +4334,19 @@ Use [`hatPartition.PrefixRouter`](REGIONAL_PARTITION_ROUTING.md) when keys have
 operator-defined regional prefixes. Longest-prefix matching is immutable and
 allocation-free; unmatched keys are rejected by the router rather than sent to
 an implicit default partition.
+
+## Region-Local Backup And Restore
+
+Use `-partition-local` with `backup` to create a snapshot containing only keys
+covered by explicit partition prefixes. The default remains a complete
+snapshot, and Pebble checkpoint/incremental modes remain whole-store artifacts:
+
+```sh
+make cli ARGS='backup -path backup/sg.tar.gz -mode snapshot -partition-local -partitions sg -partition-prefixes sg:'
+make cli ARGS='doctor -path backup/sg.tar.gz'
+make cli ARGS='restore-bundle -bundle backup/sg.tar.gz -data-dir data-sg -partitions sg -partition-prefixes sg:'
+```
+
+Restore selectors are checked before publication and reject a different
+partition or a non-local backup. See [REGION_LOCAL_BACKUP.md](REGION_LOCAL_BACKUP.md)
+for the HTTP request shape, recovery rules, and rehearsal workflow.
