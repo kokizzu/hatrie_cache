@@ -41,6 +41,9 @@ semantics reliable. Multi-datacenter ownership still needs a consensus-backed
 coordinator or the existing topology fencing protocol. Existing persistence
 and single-process defaults are unchanged unless a caller opts into the lease.
 
+For a node-wide restart generation that should not share a user shard ID, use
+[`PersistentNodeEpoch`](PERSISTENT_NODE_EPOCHS.md).
+
 ## Verification
 
 ```sh

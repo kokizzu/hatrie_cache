@@ -1388,6 +1388,33 @@ The lease is intentionally not enabled by existing stores. The cost buys
 cross-process exclusion and durable fencing-token advancement; it must not be
 placed in a per-record write loop.
 
+<a id="persistent-node-epoch-acquisition"></a>
+## Persistent Node Epoch Acquisition
+
+`BenchmarkPersistentNodeEpochAcquireRelease` measures the node-wide restart
+generation wrapper. It uses the same local lock, atomic state publication, and
+directory synchronization as a persistent shard lease, but stores the state in
+its dedicated node-epoch namespace. See [persistent node epochs](PERSISTENT_NODE_EPOCHS.md)
+for the API and scope limits.
+
+Five samples on the same AMD Ryzen 9 5950X, `linux/amd64`, using
+`go test -benchmem -count=5`:
+
+| Operation | Median time | Heap B/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Acquire plus release | 1,723,340 ns/op | 4,937 | 47 |
+
+Raw output:
+
+```text
+1723340, 1656863, 2761169, 1694353, 1894800 ns/op; 4929-4939 B/op; 47 allocs/op
+```
+
+In the paired same-host samples, direct shard-lease acquisition had a median
+of `1,574,790 ns/op`, `4,599 B/op`, and `45 allocs/op`. The wrapper is about
+1.09x the time, 1.07x the heap, and 1.04x the allocations. That small cost is
+the explicit node-wide API and path namespace; it is not a throughput claim.
+
 ### Persistent Storage Backend Bakeoff
 
 <a id="pebble-generation-full-save"></a>
