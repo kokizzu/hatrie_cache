@@ -345,7 +345,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M048 Backpressure for asynchronous producers and subscribers.
 - [x] M049 Operator cancellation through context propagation.
 - [x] M050 Timely-style worker parallelism with deterministic merge. Added opt-in generic `hatPipeline.OrderedMap`, which claims input indexes concurrently and merges directly into stable result positions while canceling cooperative work on error; see [ORDERED_MAP.md](ORDERED_MAP.md). The cheap-work benchmark shows why it is not a default sequential-loop replacement.
-- [ ] M051 Compiled dataflow intermediate representation.
+- [x] M051 Compiled dataflow intermediate representation.
 - [x] M051a Add an opt-in immutable compiled SQL query handle that reuses a parsed template across executions while preserving per-call cloning, binding, and the ordinary executor.
 - [x] M051b Expose a fresh, deterministic logical dataflow IR snapshot from compiled SQL queries without changing execution, storage, or wire behavior; see [COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
@@ -421,7 +421,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M094 Persistent-shard leases and fencing; fully covered by the durable local lease implementation in M094a.
 - [x] M094a Non-blocking local persistent-shard leases with separate advisory lock files, durable monotonic fencing tokens, atomic state publication, stale-token validation, renewal, inspection, and corruption/path-safety tests; see [PERSISTENT_SHARD_LEASES.md](PERSISTENT_SHARD_LEASES.md).
 - [x] M095 Snapshot hydration with progress reporting.
-- [ ] M096 Per-column dictionary compression for arrangements.
+- [x] M096 Per-column dictionary compression for arrangements.
 - [x] M096a Deterministic low-cardinality string dictionary codec.
 - [x] M096b Bounded dictionary admission avoids allocating row codes for columns that exceed the existing size bound; an eight-entry stack prefix preserves the low-cardinality path.
 - [x] M096c Aggregate arrangements defer redundant serialized sort-key materialization until `Rows()` and invalidate only when a new group appears; correctness and cold/warm before/after measurements are recorded in [BENCHMARK.md](BENCHMARK.md#deferred-aggregate-arrangement-sort-keys).
