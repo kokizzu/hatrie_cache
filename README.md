@@ -4117,3 +4117,14 @@ compatibility behavior. `HTTPReplicatorOptions.ProtocolVersions` optionally
 advertises a client range on HTTP replication requests, while zero omits the
 header for legacy peers. See [HTTP_PROTOCOL_COMPATIBILITY.md](HTTP_PROTOCOL_COMPATIBILITY.md)
 for headers, status codes, and the upgrade contract.
+## Automatic SQL DML Triggers
+
+Registered row-level triggers can be connected to direct SQL mutations with
+`SQLQueryOptions.TriggerRegistry`. The option is nil by default, preserving the
+existing caller-owned trigger behavior. The supported automatic path covers one
+key-targeted `INSERT`, `UPDATE`, or `DELETE` without expiration fields and
+prepares triggers before the primary write. Trigger commit failures roll back
+the primary string/counter mutation. Complex or multi-row mutation shapes are
+rejected while the option is enabled rather than silently bypassing triggers;
+see [SQL_TRIGGERS.md](SQL_TRIGGERS.md) and the measured opt-in cost in
+[BENCHMARK.md](BENCHMARK.md#automatic-sql-dml-trigger-dispatch).

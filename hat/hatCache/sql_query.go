@@ -22,6 +22,13 @@ import (
 )
 
 type SQLQueryOptions = hatSql.SQLQueryOptions
+type SQLTrigger = hatSql.SQLTrigger
+type SQLTriggerAction = hatSql.SQLTriggerAction
+type SQLTriggerApplyFunc = hatSql.SQLTriggerApplyFunc
+type SQLTriggerEvent = hatSql.SQLTriggerEvent
+type SQLTriggerPrepareFunc = hatSql.SQLTriggerPrepareFunc
+type SQLTriggerRegistry = hatSql.SQLTriggerRegistry
+type SQLTriggerTransaction = hatSql.SQLTriggerTransaction
 type SQLQueryCanceledError = hatSql.SQLQueryCanceledError
 type SQLQueryManager = hatSql.SQLQueryManager
 type SQLQueryManagerOptions = hatSql.SQLQueryManagerOptions

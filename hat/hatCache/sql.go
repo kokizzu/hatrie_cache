@@ -32,6 +32,13 @@ type SQLMutationResult struct {
 // are validated before one atomic command batch is applied, so an invalid
 // selected row cannot leave preceding writes behind.
 func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
+	if options.TriggerRegistry != nil {
+		return executeSQLMutationWithTriggers(ctx, trie, source, parameters, options)
+	}
+	return executeSQLMutation(ctx, trie, source, parameters, options)
+}
+
+func executeSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
 	if trie == nil {
 		return SQLMutationResult{}, ErrNilHatTrie
 	}
@@ -137,6 +144,187 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 		return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
 	}
 	return SQLMutationResult{Affected: len(requests), Response: response}, nil
+}
+
+type sqlTriggerMutationSnapshot struct {
+	key       string
+	row       SQLRow
+	exists    bool
+	valueKind string
+	value     string
+}
+
+func executeSQLMutationWithTriggers(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	event, snapshot, enabled, err := prepareSQLMutationTrigger(ctx, trie, source)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	plainOptions := options
+	plainOptions.TriggerRegistry = nil
+	if !enabled {
+		return executeSQLMutation(ctx, trie, source, parameters, plainOptions)
+	}
+	transaction, err := options.TriggerRegistry.BeginSQLTriggerTransaction(ctx)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if err := transaction.Add(event); err != nil {
+		return SQLMutationResult{}, err
+	}
+	var result SQLMutationResult
+	if err := transaction.Commit(func(commitContext context.Context, _ []hatSql.SQLTriggerEvent) (hatSql.SQLTriggerAction, error) {
+		var applyErr error
+		result, applyErr = executeSQLMutation(commitContext, trie, source, parameters, plainOptions)
+		if applyErr != nil {
+			return hatSql.SQLTriggerAction{}, applyErr
+		}
+		return trie.sqlTriggerRollbackAction(snapshot), nil
+	}); err != nil {
+		return SQLMutationResult{}, err
+	}
+	return result, nil
+}
+
+func prepareSQLMutationTrigger(ctx context.Context, trie *HatTrie, source string) (hatSql.SQLTriggerEvent, sqlTriggerMutationSnapshot, bool, error) {
+	if trie == nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, ErrNilHatTrie
+	}
+	if err := ctx.Err(); err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	}
+	tokens, err := lexSQL(source)
+	if err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	}
+	if len(tokens) == 0 || tokens[0].kind != sqlTokenIdentifier {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, nil
+	}
+	statement := strings.ToUpper(tokens[0].text)
+	if statement == "MERGE" || statement == "BEGIN" {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers do not support %s", statement)
+	}
+	if statement != "INSERT" && statement != "UPDATE" && statement != "DELETE" {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, nil
+	}
+	mutationSource, _, err := parseSQLMutationReturning(source)
+	if err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	}
+	if _, _, conflict, err := parseSQLInsertConflict(mutationSource); err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	} else if conflict {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers do not support ON CONFLICT")
+	}
+	if _, mergeStatement, err := parseSQLMerge(mutationSource); err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	} else if mergeStatement {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers do not support MERGE")
+	}
+	if _, insertSelect, err := parseSQLInsertSelect(mutationSource); err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	} else if insertSelect {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers do not support INSERT ... SELECT")
+	}
+	request, err := CompileSQL(mutationSource)
+	if err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	}
+	if request.Key == "" {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers require a key-targeted mutation")
+	}
+	if request.TTLSeconds != nil || request.UnixSeconds != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers do not support expiration fields")
+	}
+	switch normalizedCommand(request.Command) {
+	case "SET", "SETSTR", "SETINT", "DEL":
+	default:
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, fmt.Errorf("automatic SQL triggers do not support command %q", request.Command)
+	}
+	snapshot, err := trie.sqlTriggerSnapshot(request.Key)
+	if err != nil {
+		return hatSql.SQLTriggerEvent{}, sqlTriggerMutationSnapshot{}, false, err
+	}
+	if statement == "DELETE" && !snapshot.exists {
+		return hatSql.SQLTriggerEvent{}, snapshot, false, nil
+	}
+	operation := statement
+	if statement == "INSERT" && snapshot.exists {
+		operation = "REPLACE"
+	}
+	return hatSql.SQLTriggerEvent{
+		Source:    "cache",
+		Operation: operation,
+		Key:       request.Key,
+		Before:    snapshot.row,
+		After:     sqlTriggerAfterRow(request),
+	}, snapshot, true, nil
+}
+
+func sqlTriggerAfterRow(request CacheCommandRequest) SQLRow {
+	if normalizedCommand(request.Command) == "DEL" {
+		return nil
+	}
+	return SQLRow{"key": request.Key, "value": request.Value}
+}
+
+func (ht *HatTrie) sqlTriggerSnapshot(key string) (sqlTriggerMutationSnapshot, error) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.sqlTriggerSnapshot(key)
+	}
+	if err := validateKey(key); err != nil {
+		return sqlTriggerMutationSnapshot{}, err
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		return sqlTriggerMutationSnapshot{}, err
+	}
+	if hval.Empty() {
+		return sqlTriggerMutationSnapshot{key: key}, nil
+	}
+	if !hval.IsStringAtRaws() && !hval.IsCounter() {
+		return sqlTriggerMutationSnapshot{}, fmt.Errorf("automatic SQL triggers require string or counter key %q", key)
+	}
+	if !ht.expirationTimeLocked(key).IsZero() {
+		return sqlTriggerMutationSnapshot{}, fmt.Errorf("automatic SQL triggers do not support expiring key %q", key)
+	}
+	value, err := ht.commandValueLocked(hval)
+	if err != nil {
+		return sqlTriggerMutationSnapshot{}, err
+	}
+	kind := "string"
+	if hval.IsCounter() {
+		kind = "counter"
+	}
+	return sqlTriggerMutationSnapshot{
+		key:       key,
+		row:       SQLRow{"key": key, "value": value},
+		exists:    true,
+		valueKind: kind,
+		value:     value,
+	}, nil
+}
+
+func (ht *HatTrie) sqlTriggerRollbackAction(snapshot sqlTriggerMutationSnapshot) hatSql.SQLTriggerAction {
+	return hatSql.SQLTriggerAction{Rollback: func(context.Context) error {
+		request := CacheCommandRequest{Command: "DEL", Key: snapshot.key}
+		if snapshot.exists {
+			request.Command = "SETSTR"
+			if snapshot.valueKind == "counter" {
+				request.Command = "SETINT"
+			}
+			request.Value = snapshot.value
+		}
+		response := ht.ExecuteCommand(request)
+		if !response.OK {
+			return fmt.Errorf("automatic SQL trigger rollback failed: %s", response.Message)
+		}
+		return nil
+	}}
 }
 
 type sqlInsertConflictAction uint8

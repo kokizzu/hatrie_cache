@@ -202,6 +202,13 @@ type SQLTextIndexedSourceResolver = core.SQLTextIndexedSourceResolver
 type SQLTimeSeriesOptions = core.SQLTimeSeriesOptions
 type SQLTimeSeriesResult = core.SQLTimeSeriesResult
 type SQLTransaction = core.SQLTransaction
+type SQLTrigger = core.SQLTrigger
+type SQLTriggerAction = core.SQLTriggerAction
+type SQLTriggerApplyFunc = core.SQLTriggerApplyFunc
+type SQLTriggerEvent = core.SQLTriggerEvent
+type SQLTriggerPrepareFunc = core.SQLTriggerPrepareFunc
+type SQLTriggerRegistry = core.SQLTriggerRegistry
+type SQLTriggerTransaction = core.SQLTriggerTransaction
 type AtomicCommandBatch = core.AtomicCommandBatch
 type SQLTransactionIsolation = core.SQLTransactionIsolation
 type SQLTransactionOptions = core.SQLTransactionOptions
@@ -522,7 +529,6 @@ func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit fu
 	return core.QueryRows[T](ctx, conn, query, visit)
 }
 
-
 type SQLWhatIfFieldStatistics = core.SQLWhatIfFieldStatistics
 type SQLWhatIfIndex = core.SQLWhatIfIndex
 type SQLWhatIfIndexKind = core.SQLWhatIfIndexKind
@@ -538,18 +544,15 @@ const SQLWhatIfIndexRange = core.SQLWhatIfIndexRange
 
 var ExplainSQLWhatIf = core.ExplainSQLWhatIf
 
-
 type SQLKeysetOrderedStreamSourceResolver = core.SQLKeysetOrderedStreamSourceResolver
 type SQLKeysetPosition = core.SQLKeysetPosition
 
 var ExecuteQueryKeysetPage = core.ExecuteQueryKeysetPage
 var ExecuteSQLQueryKeysetPage = core.ExecuteSQLQueryKeysetPage
 
-
 type MonitoringMemoryReport = core.MonitoringMemoryReport
 
 var ReadMonitoringMemoryReport = core.ReadMonitoringMemoryReport
-
 
 type SQLPrefixIndexedSourceResolver = core.SQLPrefixIndexedSourceResolver
 

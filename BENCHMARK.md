@@ -17047,3 +17047,23 @@ does not include network I/O or command execution.
 | 5 | 504.8 ns/op | 51 B/op | 4 allocs/op |
 
 Median: **507.0 ns/op**, **51 B/op**, **4 allocs/op**.
+## Automatic SQL DML Trigger Dispatch
+
+Command: `go test ./hat/hatCache -run '^$' -bench '^BenchmarkExecuteSQLMutationTrigger$' -benchmem -benchtime=200ms -count=5`
+
+The fixture executes one direct `INSERT` repeatedly, comparing the unchanged
+default path with one registered no-op trigger. The trigger registry is opt-in.
+
+| Mode | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Disabled | 7,884 ns/op | 8,625 ns/op | 8,352 ns/op | 8,748 ns/op | 9,277 ns/op | 8,625 ns/op |
+| Enabled | 23,130 ns/op | 23,757 ns/op | 23,272 ns/op | 22,502 ns/op | 22,941 ns/op | 23,130 ns/op |
+
+| Mode | Bytes/op | Allocs/op |
+| --- | ---: | ---: |
+| Disabled | 14,944 | 29 |
+| Enabled | 36,624 | 93 |
+
+The enabled median is **2.68x slower**, allocates **2.45x** as many bytes, and
+adds **64 allocations/op**. This is the explicit price of automatic trigger
+transaction state; calls that leave `TriggerRegistry` nil retain the baseline.

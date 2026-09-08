@@ -223,7 +223,13 @@ type SQLQueryOptions struct {
 	// files. It is off by default to preserve the existing CPU/disk tradeoff.
 	CompressSpill bool
 	// Collation controls text comparisons. Empty keeps the binary default.
-	Collation             SQLCollation
+	Collation SQLCollation
+	// TriggerRegistry opts direct SQL mutations into automatic row-level
+	// trigger dispatch. Nil preserves the existing caller-owned trigger path.
+	// Automatic dispatch currently covers one key-targeted INSERT, UPDATE, or
+	// DELETE without expiration; complex and multi-row mutations are rejected
+	// when this option is enabled until their event contract is defined.
+	TriggerRegistry       *SQLTriggerRegistry
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
