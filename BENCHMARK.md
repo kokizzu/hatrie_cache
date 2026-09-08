@@ -17431,6 +17431,15 @@ letting callers mutate cached state. The optimization is most useful when
 source scans or joins are materially larger than the returned result. It is
 opt-in and has no persistence or wire-format change.
 
+## Explicit regional partition routing
+
+The immutable `hatPartition.PrefixRouter` is benchmarked in
+[REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md). With 16
+explicit prefix rules, the five-sample median was 31.35 ns/op with zero bytes
+and zero allocations per lookup. Longest-prefix matching keeps the common
+regional route lookup allocation-free; construction and rule validation happen
+only once.
+
 ## Columnar numeric range segment skipping
 
 The ClickHouse-style numeric range data-skipping path is benchmarked in

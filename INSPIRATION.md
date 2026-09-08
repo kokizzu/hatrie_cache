@@ -554,6 +554,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [-] T074 Router failover and discovery - deferred with automatic sharding.
 - [-] T075 Online partition migration - proposal required before implementation.
 - [ ] T076 Explicit region partition routing.
+- [x] T076a Immutable longest-prefix routing for explicit region keys. `hatPartition.PrefixRouter` validates normalized rules, chooses the most specific prefix without lookup allocation, and leaves unmatched keys unassigned; see [REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md).
 - [ ] T077 Region-local backup and restore.
 - [ ] T078 Cross-region read policy.
 - [ ] T079 Partition ownership and fencing metadata.

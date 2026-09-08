@@ -4326,3 +4326,10 @@ Columnar sources that implement the existing segmented-columnar resolver can
 also skip numeric segments whose min/max bounds cannot match a direct `WHERE`
 comparison. The row matcher remains authoritative; see
 [`COLUMNAR_RANGE_SKIPPING.md`](COLUMNAR_RANGE_SKIPPING.md).
+
+## Explicit Regional Routing
+
+Use [`hatPartition.PrefixRouter`](REGIONAL_PARTITION_ROUTING.md) when keys have
+operator-defined regional prefixes. Longest-prefix matching is immutable and
+allocation-free; unmatched keys are rejected by the router rather than sent to
+an implicit default partition.
