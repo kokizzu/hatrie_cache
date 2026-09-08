@@ -17355,6 +17355,41 @@ untrusted dictionaries retain the existing scan and validation behavior. The
 metadata path adds no measured bytes or allocations over the corresponding
 absent-value scan.
 
+<a id="columnar-dictionary-segment-marks"></a>
+## Columnar Dictionary Segment Marks
+
+Command: `make benchmark-typed-table-dictionary-code-sets-local-clean`.
+
+The query workload uses 99,840 rows, two dictionary values, and 390 segments
+of 256 rows. The first 389 segments contain only `blue`; the final segment
+contains only `red`. The control uses the same trusted dictionary and segment
+size but has no `DictionaryCodeSets`, so it scans every row. The optimized
+case uses exact `uint64` membership masks and scans only the matching segment.
+The build benchmark compares the same segment builder with a dictionary that
+is deliberately untrusted, which isolates the added sidecar work. Five samples
+use `-benchtime=1s -count=5 -benchmem` on AMD Ryzen 9 5950X, Linux/amd64.
+
+### Query Path
+
+| Path | Raw ns/op (5 runs) | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Without dictionary code sets | 945,374; 936,973; 930,130; 907,052; 904,998 | 930,130 | 3,936 | 24 | 1.00x |
+| With dictionary code sets | 13,002; 13,229; 12,571; 12,814; 13,345 | 13,002 | 3,936 | 24 | 71.5x |
+
+### Layout Build Cost
+
+| Path | Raw ns/op (5 runs) | Median ns/op | B/op | Allocs/op | Cost versus control |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Without dictionary code sets | 132.0; 129.9; 128.8; 125.3; 116.4 | 128.8 | 112 | 2 | 1.00x |
+| With dictionary code sets | 170,312; 170,223; 169,895; 170,327; 172,239 | 170,312 | 3,712 | 5 | 1,322.4x; +3,600 B/op; +3 allocs/op |
+
+The build cost is paid when a typed-table layout is admitted or rebuilt, not
+on each query. For one dictionary field, the retained sidecar accounting is
+`64 + 390 * 8 = 3,184` bytes. Query allocations are unchanged in this
+workload. The feature is therefore a good fit for repeated selective reads of
+warm columnar layouts; workloads that build a layout and read it only once do
+not get the same amortization.
+
 ## Composite Sorted Arrangement Ordering
 
 Command: `make benchmark-sorted-arrangement-composite-local-clean`

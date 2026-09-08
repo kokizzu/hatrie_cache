@@ -832,10 +832,47 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 			segments.SparsePrimaryField = field
 		}
 	}
-	if len(segments.Columns) == 0 {
+	for field, dictionary := range batch.Dictionaries {
+		valueCount := dictionary.ValueCount()
+		if !dictionary.codesTrusted || valueCount == 0 || valueCount > 64 || dictionary.RowCount() != batch.Rows {
+			continue
+		}
+		sets, valid := columnarDictionaryCodeSets(dictionary, valueCount, batch.Rows, rowsPerSegment)
+		if valid {
+			if segments.DictionaryCodeSets == nil {
+				segments.DictionaryCodeSets = make(map[string][]uint64)
+			}
+			segments.DictionaryCodeSets[field] = sets
+		}
+	}
+	if len(segments.Columns) == 0 && len(segments.DictionaryCodeSets) == 0 {
 		return nil
 	}
 	return segments
+}
+
+func columnarDictionaryCodeSets(dictionary DictionaryColumn, valueCount, rows, rowsPerSegment int) ([]uint64, bool) {
+	sets := make([]uint64, (rows+rowsPerSegment-1)/rowsPerSegment)
+	if dictionary.Codes != nil {
+		if len(dictionary.Codes) != rows {
+			return nil, false
+		}
+		for row, code := range dictionary.Codes {
+			if int(code) >= valueCount || code >= 64 {
+				return nil, false
+			}
+			sets[row/rowsPerSegment] |= uint64(1) << code
+		}
+		return sets, true
+	}
+	for row := 0; row < rows; row++ {
+		code, ok := dictionary.CodeAt(row)
+		if !ok || int(code) >= valueCount || code >= 64 {
+			return nil, false
+		}
+		sets[row/rowsPerSegment] |= uint64(1) << code
+	}
+	return sets, true
 }
 
 func columnarBatchHasField(batch ColumnarBatch, field string) bool {
@@ -932,6 +969,10 @@ func typedTableColumnarBatchBytes(batch ColumnarBatch, segments *ColumnarNumeric
 		bytes += len(segments.Columns) * 64
 		for _, values := range segments.Columns {
 			bytes += len(values) * 24
+		}
+		bytes += len(segments.DictionaryCodeSets) * 64
+		for _, values := range segments.DictionaryCodeSets {
+			bytes += len(values) * 8
 		}
 	}
 	return bytes

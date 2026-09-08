@@ -3973,6 +3973,32 @@ from 927.006 us to 4.135 us (224.1x). Each pair kept its original B/op and
 allocation count. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-membership-count)
 for raw samples.
 
+## SQL Columnar Dictionary Segment Marks
+
+Typed-table columnar caches also build exact per-segment membership masks for
+trusted dictionaries with at most 64 values. Equality and literal `IN`
+predicates skip segments whose mask cannot match; inequality predicates skip a
+segment only when it contains no value other than the excluded code. Remaining
+rows still use the ordinary dictionary evaluator, so the marks are a pruning
+hint and never replace result validation.
+
+This is automatic when the existing `ColumnarCache.Enabled` option is enabled;
+there is no new flag and the default columnar cache remains disabled. The
+existing `RowsPerSegment` setting controls the mark granularity. Untrusted,
+malformed, or wider dictionaries do not receive marks and retain the existing
+scan behavior. The sidecar is cache metadata only and changes neither
+persistence nor wire formats. Its retained accounting is 64 bytes per indexed
+field plus 8 bytes per segment; a 99,840-row, 256-row segment layout uses
+about 3,184 bytes for one dictionary field.
+
+On the clustered 99,840-row benchmark, a matching equality query improved from
+930,130 ns to 13,002 ns median (71.5x) with identical 3,936 B/op and 24
+allocations/op. Building the marks costs 170,312 ns and 3,712 B/op in that
+one-time layout-build benchmark, so the feature is valuable for a warm cache
+with repeated selective reads. See
+[BENCHMARK.md](BENCHMARK.md#columnar-dictionary-segment-marks) for all raw
+samples and the build/query tradeoff.
+
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a
