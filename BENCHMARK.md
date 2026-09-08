@@ -16503,3 +16503,39 @@ Before scan/index: approximately 5,678,800-5,678,900 B/op; 170,236 allocs/op
 After scan: 5,678,818-5,679,041 B/op; 170,236 allocs/op
 After indexed: 102,008 B/op; 523 allocs/op
 ```
+
+## Deferred Aggregate Arrangement Sort Keys
+
+Each typed aggregate group already retains typed group values for hash equality
+and result materialization. The previous implementation also allocated and
+retained a serialized legacy sort key during every group insertion, although
+that key is needed only when `Rows()` is first materialized. The implementation
+now defers that allocation until the first `Rows()` call, caches the key for
+subsequent reads, and invalidates the cache only when a new group is added.
+
+Five benchmark samples were collected before and after the change on an AMD
+Ryzen 9 5950X with 4,096 unique long string groups. The cold path includes
+aggregate application and the first `Rows()` call. The warm path materializes
+once before timing repeated `Rows()` calls. Lower is better.
+
+| Path | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Aggregate apply | 1,317,058 ns/op; 1,639,716 B/op; 16,434 allocs/op | 1,058,498 ns/op; 1,344,802 B/op; 8,242 allocs/op | 1.24x faster; 1.22x lower allocation volume; 2.00x fewer allocations |
+| Apply plus first `Rows()` | 3,901,869 ns/op; 3,900,970 B/op; 32,822 allocs/op | 3,893,758 ns/op; 3,900,971 B/op; 32,822 allocs/op | No meaningful change; allocation-neutral |
+| Warm `Rows()` | 1,870,596 ns/op; 2,261,259 B/op; 16,388 allocs/op | 1,871,016 ns/op; 2,261,252 B/op; 16,388 allocs/op | No meaningful change; allocation-neutral |
+
+Raw five-sample `ns/op` output:
+
+```text
+Before apply: 1,397,414, 1,282,708, 1,321,680, 1,294,200, 1,317,058
+After apply: 1,031,464, 1,133,600, 1,058,498, 1,016,288, 1,079,406
+Before apply_and_first_rows: 3,966,585, 3,909,036, 3,901,869, 3,861,327, 3,880,789
+After apply_and_first_rows: 3,912,615, 3,802,951, 3,841,240, 3,897,040, 3,893,758
+Before warm Rows: 1,907,616, 1,775,134, 1,833,048, 1,870,596, 1,877,449
+After warm Rows: 1,859,604, 1,981,742, 1,871,016, 1,820,892, 1,885,557
+```
+
+The optimization improves update-only arrangements and preserves the total
+cold materialization cost. It does not claim a reduction in the final
+materialized result size; the broader compressed-arrangement design remains
+open for a separate implementation.

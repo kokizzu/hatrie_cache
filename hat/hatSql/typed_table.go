@@ -1029,15 +1029,16 @@ type typedTableAggregateGroupBucket struct {
 // and COUNT DISTINCT results from ordered TypedTableChange records without
 // rescanning the table.
 type TypedTableAggregate struct {
-	table         *TypedTable
-	groupBy       []int
-	sumField      int
-	minField      int
-	maxField      int
-	distinctField int
-	groups        map[uint64]typedTableAggregateGroupBucket
-	groupCount    int
-	checkpoint    uint64
+	table          *TypedTable
+	groupBy        []int
+	sumField       int
+	minField       int
+	maxField       int
+	distinctField  int
+	groups         map[uint64]typedTableAggregateGroupBucket
+	groupCount     int
+	checkpoint     uint64
+	groupKeysReady bool
 }
 
 // NewTypedTableAggregate validates an exact delta aggregate for table.
@@ -1127,20 +1128,40 @@ func (aggregate *TypedTableAggregate) Checkpoint() uint64 {
 	return aggregate.checkpoint
 }
 
+func (aggregate *TypedTableAggregate) ensureGroupKeys() {
+	if aggregate == nil {
+		return
+	}
+	if aggregate.groupKeysReady {
+		return
+	}
+	for hash, bucket := range aggregate.groups {
+		if bucket.group.key == "" {
+			bucket.group.key = typedTableAggregateGroupValuesKey(bucket.group.values)
+		}
+		for index := range bucket.collisions {
+			if bucket.collisions[index].key == "" {
+				bucket.collisions[index].key = typedTableAggregateGroupValuesKey(bucket.collisions[index].values)
+			}
+		}
+		aggregate.groups[hash] = bucket
+	}
+	aggregate.groupKeysReady = true
+}
+
 // Rows returns a deterministic snapshot with group columns, count, and
 // optional sum, min, max, and count_distinct. Rows with count zero are absent.
 func (aggregate *TypedTableAggregate) Rows() []Row {
 	if aggregate == nil {
 		return nil
 	}
+	aggregate.ensureGroupKeys()
 	groups := make([]typedTableAggregateGroup, 0, aggregate.groupCount)
 	for _, bucket := range aggregate.groups {
 		groups = append(groups, bucket.group)
 		groups = append(groups, bucket.collisions...)
 	}
-	sort.Slice(groups, func(left, right int) bool {
-		return groups[left].key < groups[right].key
-	})
+	sort.Slice(groups, func(left, right int) bool { return groups[left].key < groups[right].key })
 	rows := make([]Row, 0, len(groups))
 	for _, group := range groups {
 		rowFields := len(aggregate.groupBy) + 1
@@ -1201,11 +1222,11 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 		}
 	}
 	if delta > 0 && groupIndex < 0 {
+		aggregate.groupKeysReady = false
 		group.values = make([]TypedTableValue, len(aggregate.groupBy))
 		for index, column := range aggregate.groupBy {
 			group.values[index] = values[column]
 		}
-		group.key = typedTableAggregateLegacyGroupKey(values, aggregate.groupBy)
 	}
 	if err := aggregate.checkDistinct(group, values, delta); err != nil {
 		return err

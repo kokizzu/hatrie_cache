@@ -98,29 +98,43 @@ func typedTableAggregateLegacyGroupKey(values []TypedTableValue, groupBy []int) 
 	}
 	var builder strings.Builder
 	for _, column := range groupBy {
-		value := values[column]
-		builder.WriteByte(byte(value.Kind))
-		if !value.Valid {
-			builder.WriteByte('n')
-			continue
-		}
-		switch value.Kind {
-		case TypedTableString:
-			builder.WriteString(strconv.Itoa(len(value.String)))
-			builder.WriteByte(':')
-			builder.WriteString(value.String)
-		case TypedTableInt64:
-			builder.WriteString(strconv.FormatInt(value.Int64, 10))
-		case TypedTableFloat64:
-			builder.WriteString(strconv.FormatUint(math.Float64bits(value.Float64), 16))
-		case TypedTableBool:
-			if value.Bool {
-				builder.WriteByte('1')
-			} else {
-				builder.WriteByte('0')
-			}
-		}
-		builder.WriteByte('|')
+		typedTableAggregateAppendKeyValue(&builder, values[column])
 	}
 	return builder.String()
+}
+
+func typedTableAggregateGroupValuesKey(values []TypedTableValue) string {
+	if len(values) == 0 {
+		return "all"
+	}
+	var builder strings.Builder
+	for _, value := range values {
+		typedTableAggregateAppendKeyValue(&builder, value)
+	}
+	return builder.String()
+}
+
+func typedTableAggregateAppendKeyValue(builder *strings.Builder, value TypedTableValue) {
+	builder.WriteByte(byte(value.Kind))
+	if !value.Valid {
+		builder.WriteByte('n')
+		return
+	}
+	switch value.Kind {
+	case TypedTableString:
+		builder.WriteString(strconv.Itoa(len(value.String)))
+		builder.WriteByte(':')
+		builder.WriteString(value.String)
+	case TypedTableInt64:
+		builder.WriteString(strconv.FormatInt(value.Int64, 10))
+	case TypedTableFloat64:
+		builder.WriteString(strconv.FormatUint(math.Float64bits(value.Float64), 16))
+	case TypedTableBool:
+		if value.Bool {
+			builder.WriteByte('1')
+		} else {
+			builder.WriteByte('0')
+		}
+	}
+	builder.WriteByte('|')
 }

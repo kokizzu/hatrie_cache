@@ -398,6 +398,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M096 Per-column dictionary compression for arrangements.
 - [x] M096a Deterministic low-cardinality string dictionary codec.
 - [x] M096b Bounded dictionary admission avoids allocating row codes for columns that exceed the existing size bound; an eight-entry stack prefix preserves the low-cardinality path.
+- [x] M096c Aggregate arrangements defer redundant serialized sort-key materialization until `Rows()` and invalidate only when a new group appears; correctness and cold/warm before/after measurements are recorded in [BENCHMARK.md](BENCHMARK.md#deferred-aggregate-arrangement-sort-keys).
 - [ ] M097 Compressed arrangement batches.
 - [x] M098 Schema evolution with compatibility checks.
 - [x] M099 Zero-downtime migration and recovery documentation.

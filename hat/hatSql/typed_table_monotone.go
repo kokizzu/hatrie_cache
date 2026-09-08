@@ -71,11 +71,11 @@ func (aggregate *TypedTableAggregate) applyMonotoneFastRow(values []TypedTableVa
 		}
 	}
 	if groupIndex < 0 {
+		aggregate.groupKeysReady = false
 		group.values = make([]TypedTableValue, len(aggregate.groupBy))
 		for index, column := range aggregate.groupBy {
 			group.values[index] = values[column]
 		}
-		group.key = typedTableAggregateLegacyGroupKey(values, aggregate.groupBy)
 	}
 	if group.count == math.MaxInt64 {
 		return ErrTypedTableAggregateMonotoneCountOverflow
