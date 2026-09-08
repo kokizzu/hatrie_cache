@@ -553,7 +553,10 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [-] T073 Automatic bucket rebalancing - deferred until operator controls are complete.
 - [-] T074 Router failover and discovery - deferred with automatic sharding.
 - [-] T075 Online partition migration - proposal required before implementation.
-- [ ] T076 Explicit region partition routing.
+- [x] T076 Explicit region partition routing. Implemented by the immutable
+  longest-prefix `hatPartition.PrefixRouter`; unmatched keys remain explicitly
+  unassigned and the routing rules are validated before publication. See
+  [REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md).
 - [x] T076a Immutable longest-prefix routing for explicit region keys. `hatPartition.PrefixRouter` validates normalized rules, chooses the most specific prefix without lookup allocation, and leaves unmatched keys unassigned; see [REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md).
 - [x] T077 Region-local backup and restore. `partition_local` snapshot bundles filter records before encoding, carry `partition.local` metadata, are validated by the backup doctor, and require an optional matching partition selector before restore publication; Pebble checkpoint and incremental modes remain whole-store artifacts.
 - [ ] T078 Cross-region read policy.
