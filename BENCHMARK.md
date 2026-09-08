@@ -16539,3 +16539,37 @@ The optimization improves update-only arrangements and preserves the total
 cold materialization cost. It does not claim a reduction in the final
 materialized result size; the broader compressed-arrangement design remains
 open for a separate implementation.
+
+## Packed Arrangement Dictionary Codes
+
+Dictionary-encoded arrangement batches previously retained one `uint32` code
+per row. `DictionaryColumn.PackDictionaryCodes` now provides a byte-aligned
+8-bit or 16-bit representation for low-cardinality dictionaries and leaves the
+legacy `Codes` representation available for wider or default-produced columns.
+Packing is explicit opt-in because the legacy layout is the compatibility
+default and the packed scan has a small measured CPU cost. Callers can pack a
+typed-table or merged batch after receiving it. `Value`, SQL filters,
+`DISTINCT`, grouped aggregates, ordering, and part merges read either
+representation.
+
+Five benchmark samples were collected on an AMD Ryzen 9 5950X with 4,096 rows
+and 8 dictionary values. Lower is better. The query is a dictionary-backed
+`DISTINCT` scan with ordering.
+
+| Path | Median | Retained row-code bytes | Query heap | Query allocations | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy `uint32` codes | 26,070 ns/op | 16,384 | 5,336 B/op | 39 allocs/op | baseline |
+| Packed `uint8` codes | 26,890 ns/op | 4,096 | 5,336 B/op | 39 allocs/op | 4.00x less code storage; 1.03x slower CPU; query allocations neutral |
+
+Raw five-sample output:
+
+```text
+legacy_uint32: 25997, 26070, 25776, 26187, 26141 ns/op; 16384 code-bytes/op; 5336 B/op; 39 allocs/op
+packed_uint8: 27492, 26738, 26890, 27350, 26421 ns/op; 4096 code-bytes/op; 5336 B/op; 39 allocs/op
+```
+
+Malformed packed lengths and out-of-range codes are rejected by logical row
+access and source validation. Dictionaries with more than 65,536 values keep
+the compatibility representation, so this feature does not trade correctness
+for compression. The broader compressed-arrangement-batch design remains open
+for additional encodings such as packed validity and numeric vectors.

@@ -65,9 +65,13 @@ type BorrowedSourceResolver interface {
 
 // DictionaryColumn stores repeated text values once and addresses them through
 // row-aligned codes. Values are ordered by first appearance for determinism.
+// Codes is the compatibility representation. PackedCodes is an optional
+// byte-aligned representation selected by PackDictionaryCodes.
 type DictionaryColumn struct {
-	Values []string
-	Codes  []uint32
+	Values      []string
+	Codes       []uint32
+	PackedCodes []byte
+	CodeWidth   uint8
 }
 
 // ColumnarBatch stores one source scan as field-aligned value slices, compact
@@ -199,7 +203,7 @@ type ColumnarNumericSegments struct {
 // FieldRows reports the physical row count retained for one field.
 func (batch ColumnarBatch) FieldRows(field string) int {
 	if dictionary, ok := batch.Dictionaries[field]; ok {
-		return len(dictionary.Codes)
+		return dictionary.RowCount()
 	}
 	if values, ok := batch.Columns[field]; ok {
 		return len(values)
@@ -225,10 +229,11 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		return nil, false
 	}
 	if dictionary, ok := batch.Dictionaries[field]; ok {
-		if row >= len(dictionary.Codes) || int(dictionary.Codes[row]) >= len(dictionary.Values) {
+		code, ok := dictionary.CodeAt(row)
+		if !ok {
 			return nil, false
 		}
-		return dictionary.Values[dictionary.Codes[row]], true
+		return dictionary.Values[code], true
 	}
 	values, ok := batch.Columns[field]
 	if ok {
@@ -244,6 +249,109 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		return column.Value(row)
 	}
 	return nil, false
+}
+
+// RowCount returns the number of logical rows in a dictionary column. Invalid
+// packed byte lengths return zero so source validation rejects the batch.
+func (dictionary DictionaryColumn) RowCount() int {
+	if dictionary.Codes != nil {
+		return len(dictionary.Codes)
+	}
+	switch dictionary.CodeWidth {
+	case 1:
+		return len(dictionary.PackedCodes)
+	case 2:
+		if len(dictionary.PackedCodes)&1 != 0 {
+			return 0
+		}
+		return len(dictionary.PackedCodes) >> 1
+	default:
+		return 0
+	}
+}
+
+// CodeAt returns one validated dictionary code without materializing the
+// packed representation. It accepts both the legacy and packed layouts.
+func (dictionary DictionaryColumn) CodeAt(row int) (uint32, bool) {
+	if row < 0 {
+		return 0, false
+	}
+	if dictionary.Codes != nil {
+		if row >= len(dictionary.Codes) {
+			return 0, false
+		}
+		code := dictionary.Codes[row]
+		if int(code) >= len(dictionary.Values) {
+			return 0, false
+		}
+		return code, true
+	}
+	var code uint32
+	switch dictionary.CodeWidth {
+	case 1:
+		if row >= len(dictionary.PackedCodes) {
+			return 0, false
+		}
+		code = uint32(dictionary.PackedCodes[row])
+	case 2:
+		offset := row << 1
+		if len(dictionary.PackedCodes)&1 != 0 || offset < 0 || offset+1 >= len(dictionary.PackedCodes) {
+			return 0, false
+		}
+		code = uint32(dictionary.PackedCodes[offset]) | uint32(dictionary.PackedCodes[offset+1])<<8
+	default:
+		return 0, false
+	}
+	if int(code) >= len(dictionary.Values) {
+		return 0, false
+	}
+	return code, true
+}
+
+// PackDictionaryCodes replaces valid low-cardinality uint32 row codes with a
+// byte-aligned 8- or 16-bit representation. Wider dictionaries retain the
+// legacy representation because packing them would not reduce storage.
+func (batch *ColumnarBatch) PackDictionaryCodes() {
+	if batch == nil || len(batch.Dictionaries) == 0 {
+		return
+	}
+	for field, dictionary := range batch.Dictionaries {
+		if dictionary.Codes == nil || len(dictionary.Codes) == 0 || len(dictionary.Values) == 0 {
+			continue
+		}
+		width := 0
+		switch {
+		case len(dictionary.Values) <= 1<<8:
+			width = 1
+		case len(dictionary.Values) <= 1<<16:
+			width = 2
+		default:
+			continue
+		}
+		if len(dictionary.Codes) > int(^uint(0)>>1)/width {
+			continue
+		}
+		packed := make([]byte, len(dictionary.Codes)*width)
+		valid := true
+		for row, code := range dictionary.Codes {
+			if int(code) >= len(dictionary.Values) {
+				valid = false
+				break
+			}
+			offset := row * width
+			packed[offset] = byte(code)
+			if width == 2 {
+				packed[offset+1] = byte(code >> 8)
+			}
+		}
+		if !valid {
+			continue
+		}
+		dictionary.PackedCodes = packed
+		dictionary.CodeWidth = uint8(width)
+		dictionary.Codes = nil
+		batch.Dictionaries[field] = dictionary
+	}
 }
 
 // EncodeRepeatedStrings replaces all-string columns with a dictionary when the

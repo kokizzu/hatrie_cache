@@ -920,13 +920,20 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 	}
 	if dictionary, codes, encoded := sqlColumnarDictionaryLiteralINPredicate(query.where, query.from.alias, batch); encoded {
 		return func(rowIndex int) (bool, error) {
-			return codes[dictionary.Codes[rowIndex]], nil
+			code, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code", query.from.key)
+			}
+			return codes[code], nil
 		}
 	}
 	if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(query.where, query.from.alias, batch); encoded {
 		code, found := sqlDictionaryCode(dictionary, value, collation)
 		return func(rowIndex int) (bool, error) {
-			candidate := dictionary.Codes[rowIndex]
+			candidate, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code", query.from.key)
+			}
 			return operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code), nil
 		}
 	}
@@ -7547,7 +7554,8 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if dictionary, codes, encoded := sqlColumnarDictionaryLiteralINPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			return codes[dictionary.Codes[rowIndex]]
+			code, ok := dictionary.CodeAt(rowIndex)
+			return ok && codes[code]
 		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR DICTIONARY IN FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
@@ -7557,7 +7565,8 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if dictionary, codes, encoded := sqlColumnarDictionaryLiteralORPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			return codes[dictionary.Codes[rowIndex]]
+			code, ok := dictionary.CodeAt(rowIndex)
+			return ok && codes[code]
 		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR DICTIONARY OR FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
@@ -7567,7 +7576,8 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if dictionary, codes, predicates, mixed := sqlColumnarDictionaryLiteralINNumericConjunction(q.where, q.from.alias, batch); mixed {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			if !codes[dictionary.Codes[rowIndex]] {
+			code, ok := dictionary.CodeAt(rowIndex)
+			if !ok || !codes[code] {
 				return false
 			}
 			for _, predicate := range predicates {
@@ -7588,7 +7598,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		filterStarted := time.Now()
 		code, found := sqlDictionaryCode(dictionary, value, collation)
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			candidate := dictionary.Codes[rowIndex]
+			candidate, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false
+			}
 			return operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code)
 		}, metrics != nil)
 		if metrics != nil {
@@ -7600,7 +7613,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		filterStarted := time.Now()
 		code, found := sqlDictionaryCode(dictionary, value, collation)
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			candidate := dictionary.Codes[rowIndex]
+			candidate, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false
+			}
 			if !(operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code)) {
 				return false
 			}
@@ -7621,7 +7637,8 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if dictionary, codes, encoded := sqlColumnarDictionaryLikePredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
-			return codes[dictionary.Codes[rowIndex]]
+			code, ok := dictionary.CodeAt(rowIndex)
+			return ok && codes[code]
 		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR DICTIONARY LIKE FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
@@ -7802,8 +7819,19 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 	if dictionaryINFilter && len(predicates) == 0 {
 		copy(used, filterDictionaryINCodes)
 	} else {
-		for rowIndex, code := range dictionary.Codes {
-			matches := !dictionaryINFilter || filterDictionaryINCodes[filterDictionaryIN.Codes[rowIndex]]
+		for rowIndex := 0; rowIndex < dictionary.RowCount(); rowIndex++ {
+			code, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, field)
+			}
+			matches := true
+			if dictionaryINFilter {
+				filterCode, valid := filterDictionaryIN.CodeAt(rowIndex)
+				if !valid {
+					return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+				}
+				matches = filterDictionaryINCodes[filterCode]
+			}
 			for _, predicate := range predicates {
 				value, _ := batch.Value(predicate.field, rowIndex)
 				number, numeric := sqlNumber(value)
@@ -7943,10 +7971,14 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	matches := func(rowIndex int) bool {
 		matches := true
 		if dictionaryPredicate {
-			candidate := dictionary.Codes[rowIndex]
+			candidate, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false
+			}
 			matches = dictionaryOperator == "=" && dictionaryFound && candidate == dictionaryCode || (dictionaryOperator == "!=" || dictionaryOperator == "<>") && (!dictionaryFound || candidate != dictionaryCode)
 		} else if dictionaryINPredicate {
-			matches = dictionaryINCodes[dictionaryIN.Codes[rowIndex]]
+			code, ok := dictionaryIN.CodeAt(rowIndex)
+			matches = ok && dictionaryINCodes[code]
 		}
 		for _, predicate := range predicates {
 			value, _ := batch.Value(predicate.field, rowIndex)
@@ -8796,10 +8828,17 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			scannedRows++
 			matches := true
 			if dictionaryFilter {
-				candidate := filterDictionary.Codes[rowIndex]
+				candidate, ok := filterDictionary.CodeAt(rowIndex)
+				if !ok {
+					return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+				}
 				matches = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
 			} else if dictionaryINFilter {
-				matches = filterDictionaryINCodes[filterDictionaryIN.Codes[rowIndex]]
+				filterCode, ok := filterDictionaryIN.CodeAt(rowIndex)
+				if !ok {
+					return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+				}
+				matches = filterDictionaryINCodes[filterCode]
 			}
 			for _, predicate := range predicates {
 				candidate, _ := batch.Value(predicate.field, rowIndex)
@@ -8812,8 +8851,8 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			if !matches {
 				continue
 			}
-			code := dictionary.Codes[rowIndex]
-			if int(code) >= len(dictionary.Values) {
+			code, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
 				return fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, groupField)
 			}
 			if states[code] == nil {
@@ -9089,10 +9128,17 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			scannedRows++
 			matchedPredicate := true
 			if dictionaryFilter {
-				candidate := filterDictionary.Codes[rowIndex]
+				candidate, ok := filterDictionary.CodeAt(rowIndex)
+				if !ok {
+					return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+				}
 				matchedPredicate = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
 			} else if dictionaryINFilter {
-				matchedPredicate = filterDictionaryINCodes[filterDictionaryIN.Codes[rowIndex]]
+				filterCode, ok := filterDictionaryIN.CodeAt(rowIndex)
+				if !ok {
+					return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+				}
+				matchedPredicate = filterDictionaryINCodes[filterCode]
 			}
 			for _, predicate := range predicates {
 				candidate, _ := batch.Value(predicate.field, rowIndex)

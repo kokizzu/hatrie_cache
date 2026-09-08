@@ -875,7 +875,11 @@ func typedTableColumnarBatchBytes(batch ColumnarBatch, segments *ColumnarNumeric
 		bytes += len(values) * 16
 	}
 	for _, dictionary := range batch.Dictionaries {
-		bytes += len(dictionary.Codes) * 4
+		if dictionary.Codes != nil {
+			bytes += len(dictionary.Codes) * 4
+		} else {
+			bytes += len(dictionary.PackedCodes)
+		}
 		for _, value := range dictionary.Values {
 			bytes += 16 + len(value)
 		}
