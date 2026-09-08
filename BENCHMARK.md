@@ -17067,3 +17067,20 @@ default path with one registered no-op trigger. The trigger registry is opt-in.
 The enabled median is **2.68x slower**, allocates **2.45x** as many bytes, and
 adds **64 allocations/op**. This is the explicit price of automatic trigger
 transaction state; calls that leave `TriggerRegistry` nil retain the baseline.
+## Compiled SQL Dataflow IR
+
+Command: `go test ./hat/hatSql -run '^$' -bench '^BenchmarkCompiledSQLQueryDataflow$' -benchmem -benchtime=200ms -count=5`
+
+This measures a fresh logical IR snapshot from one compiled query. It does not
+measure or alter compiled query execution.
+
+| Run | Time | Memory | Allocations |
+| --- | ---: | ---: | ---: |
+| 1 | 729.2 ns/op | 1,097 B/op | 13 allocs/op |
+| 2 | 735.3 ns/op | 1,097 B/op | 13 allocs/op |
+| 3 | 726.5 ns/op | 1,097 B/op | 13 allocs/op |
+| 4 | 721.1 ns/op | 1,097 B/op | 13 allocs/op |
+| 5 | 728.9 ns/op | 1,097 B/op | 13 allocs/op |
+
+Median: **728.9 ns/op**, **1,097 B/op**, **13 allocs/op**. This cost is paid
+only by callers that request the metadata snapshot.

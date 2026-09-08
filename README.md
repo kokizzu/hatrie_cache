@@ -4128,3 +4128,13 @@ the primary string/counter mutation. Complex or multi-row mutation shapes are
 rejected while the option is enabled rather than silently bypassing triggers;
 see [SQL_TRIGGERS.md](SQL_TRIGGERS.md) and the measured opt-in cost in
 [BENCHMARK.md](BENCHMARK.md#automatic-sql-dml-trigger-dispatch).
+## Compiled SQL Dataflow IR
+
+`hatSql.CompileSQLQuery` exposes an immutable logical plan snapshot through
+`CompiledSQLQuery.Dataflow()`. The returned `SQLDataflowIR` has deterministic
+stage IDs, input links, a root ID, and the original SQL source for routing,
+admission, explain tooling, or plan registries. Each call returns independent
+slices. Execution still uses the existing cloned compiled-query path, so this
+adds no storage or wire format and does not change query results. See
+[COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md) and the measured metadata
+cost in [BENCHMARK.md](BENCHMARK.md#compiled-sql-dataflow-ir).

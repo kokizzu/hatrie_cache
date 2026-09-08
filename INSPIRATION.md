@@ -341,6 +341,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M050 Timely-style worker parallelism with deterministic merge. Added opt-in generic `hatPipeline.OrderedMap`, which claims input indexes concurrently and merges directly into stable result positions while canceling cooperative work on error; see [ORDERED_MAP.md](ORDERED_MAP.md). The cheap-work benchmark shows why it is not a default sequential-loop replacement.
 - [ ] M051 Compiled dataflow intermediate representation.
 - [x] M051a Add an opt-in immutable compiled SQL query handle that reuses a parsed template across executions while preserving per-call cloning, binding, and the ordinary executor.
+- [x] M051b Expose a fresh, deterministic logical dataflow IR snapshot from compiled SQL queries without changing execution, storage, or wire behavior; see [COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [x] M053 Extensible optimizer rule framework. `SQLQueryOptimizer` provides an opt-in ordered rule hook over structural EXPLAIN steps and existing `SQLIndexHint` controls; nil keeps the default path. See [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md) and the measured opt-in cost in [BENCHMARK.md](BENCHMARK.md#opt-in-sql-optimizer-rules).
 - [x] M054 Predicate pushdown before arrangement maintenance.
