@@ -90,6 +90,129 @@ func TestTypedTableSortedArrangementSupportsDescendingAndNullOrdering(t *testing
 	assertSortedArrangementKeys(t, arrangement.Rows(), "null", "two", "one")
 }
 
+func TestTypedTableSortedArrangementSupportsCompositeOrder(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_composite")
+	for _, row := range []struct {
+		key, team string
+		score     int64
+	}{
+		{key: "red-high", team: "red", score: 9},
+		{key: "red-low", team: "red", score: 1},
+		{key: "blue-low", team: "blue", score: 1},
+		{key: "blue-high", team: "blue", score: 9},
+	} {
+		if _, err := table.Upsert(row.key, []hatSql.TypedTableValue{hatSql.TypedString(row.team), hatSql.TypedInt64(row.score)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{
+		OrderBy: []hatSql.TypedTableSortedArrangementOrder{
+			{Field: "team", DictionaryEncoded: true},
+			{Field: "score", Descending: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "blue-high", "blue-low", "red-high", "red-low")
+
+	change, err := table.Upsert("red-low", []hatSql.TypedTableValue{hatSql.TypedString("blue"), hatSql.TypedInt64(12)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := arrangement.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "red-low", "blue-high", "blue-low", "red-high")
+}
+
+func TestTypedTableSortedArrangementCompositeOrderPreservesNullOrdering(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_composite_null")
+	for _, row := range []struct {
+		key, team string
+		score     hatSql.TypedTableValue
+	}{
+		{key: "red-null", team: "red", score: hatSql.TypedNull()},
+		{key: "red-value", team: "red", score: hatSql.TypedInt64(1)},
+		{key: "blue-null", team: "blue", score: hatSql.TypedNull()},
+	} {
+		if _, err := table.Upsert(row.key, []hatSql.TypedTableValue{hatSql.TypedString(row.team), row.score}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{
+		OrderBy: []hatSql.TypedTableSortedArrangementOrder{
+			{Field: "team"},
+			{Field: "score", NullsFirst: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "blue-null", "red-null", "red-value")
+}
+
+func TestTypedTableSortedArrangementCompositeOrderDictionariesEachStringField(t *testing.T) {
+	table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
+		Name: "sorted_composite_dictionary",
+		Columns: []hatSql.TypedTableColumn{
+			{Name: "region", Kind: hatSql.TypedTableString},
+			{Name: "team", Kind: hatSql.TypedTableString},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		key, region, team string
+	}{
+		{key: "north-zulu", region: "north", team: "zulu"},
+		{key: "north-alpha", region: "north", team: "alpha"},
+		{key: "south-beta", region: "south", team: "beta"},
+		{key: "south-alpha", region: "south", team: "alpha"},
+	} {
+		if _, err := table.Upsert(row.key, []hatSql.TypedTableValue{hatSql.TypedString(row.region), hatSql.TypedString(row.team)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{
+		OrderBy: []hatSql.TypedTableSortedArrangementOrder{
+			{Field: "region", DictionaryEncoded: true},
+			{Field: "team", Descending: true, DictionaryEncoded: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "north-zulu", "north-alpha", "south-beta", "south-alpha")
+
+	change, err := table.Upsert("north-alpha", []hatSql.TypedTableValue{hatSql.TypedString("south"), hatSql.TypedString("omega")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := arrangement.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "north-zulu", "north-alpha", "south-beta", "south-alpha")
+}
+
+func TestTypedTableSortedArrangementRejectsInvalidCompositeOrder(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_composite_invalid")
+	for name, definition := range map[string]hatSql.TypedTableSortedArrangementDefinition{
+		"empty order":            {OrderBy: []hatSql.TypedTableSortedArrangementOrder{}},
+		"missing field":          {OrderBy: []hatSql.TypedTableSortedArrangementOrder{{Field: "missing"}}},
+		"duplicate field":        {OrderBy: []hatSql.TypedTableSortedArrangementOrder{{Field: "team"}, {Field: "team"}}},
+		"dictionary non-string":  {OrderBy: []hatSql.TypedTableSortedArrangementOrder{{Field: "score", DictionaryEncoded: true}}},
+		"ambiguous legacy field": {Field: "team", OrderBy: []hatSql.TypedTableSortedArrangementOrder{{Field: "score"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := hatSql.NewTypedTableSortedArrangement(table, definition); !errors.Is(err, hatSql.ErrTypedTableSortedArrangementOrder) && !errors.Is(err, hatSql.ErrTypedTableSortedArrangementField) && !errors.Is(err, hatSql.ErrTypedTableSortedArrangementDictionaryKind) {
+				t.Fatalf("composite definition error = %v, want order or field error", err)
+			}
+		})
+	}
+}
+
 func TestTypedTableSortedArrangementRowsPageReturnsBoundedIndependentSnapshot(t *testing.T) {
 	table := newSortedArrangementTable(t, "sorted_page")
 	for _, row := range []struct {

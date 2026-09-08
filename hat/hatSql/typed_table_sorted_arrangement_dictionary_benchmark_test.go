@@ -23,6 +23,14 @@ func BenchmarkTypedTableSortedArrangementDictionaryBuild(b *testing.B) {
 	benchmarkTypedTableSortedArrangementBuild(b, true)
 }
 
+func BenchmarkTypedTableSortedArrangementSingleOrderBuild(b *testing.B) {
+	benchmarkTypedTableSortedArrangementOrderBuild(b, false)
+}
+
+func BenchmarkTypedTableSortedArrangementCompositeOrderBuild(b *testing.B) {
+	benchmarkTypedTableSortedArrangementOrderBuild(b, true)
+}
+
 func benchmarkTypedTableSortedArrangementBuild(b *testing.B, dictionaryEncoded bool) {
 	table := newTypedTableSortedArrangementDictionaryBenchmarkTable(b)
 	b.ResetTimer()
@@ -31,6 +39,27 @@ func benchmarkTypedTableSortedArrangementBuild(b *testing.B, dictionaryEncoded b
 			Field:             "team",
 			DictionaryEncoded: dictionaryEncoded,
 		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		typedTableSortedArrangementDictionaryBenchmarkSink += len(arrangement.entries)
+	}
+}
+
+func benchmarkTypedTableSortedArrangementOrderBuild(b *testing.B, composite bool) {
+	table := newTypedTableSortedArrangementDictionaryBenchmarkTable(b)
+	definition := TypedTableSortedArrangementDefinition{Field: "team"}
+	if composite {
+		definition = TypedTableSortedArrangementDefinition{
+			OrderBy: []TypedTableSortedArrangementOrder{
+				{Field: "team"},
+				{Field: "score", Descending: true},
+			},
+		}
+	}
+	b.ResetTimer()
+	for range b.N {
+		arrangement, err := NewTypedTableSortedArrangement(table, definition)
 		if err != nil {
 			b.Fatal(err)
 		}

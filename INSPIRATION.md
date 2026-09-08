@@ -371,6 +371,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M066b Tail-checked single-row inserts append directly when the candidate is already after the current sorted tail; non-tail updates and inserts retain binary-search insertion.
 - [x] M067 Top-K with offset for supported ordered paths.
 - [x] M067a Bounded `RowsPage` snapshots for maintained typed sorted arrangements; the legacy `Rows()` snapshot remains unchanged, with correctness and allocation measurements in [BENCHMARK.md](BENCHMARK.md#typed-sorted-arrangement-page-snapshots).
+- [x] M067b Add additive composite ordered arrangements with per-field direction, NULL placement, and optional string dictionary encoding; preserve the legacy single-field definition and validate duplicate or ambiguous order specifications, with construction measurements in [BENCHMARK.md](BENCHMARK.md#composite-sorted-arrangement-ordering).
 - [x] M068 Differential group-by updates for generic SQL tables. `GroupCountDifferentialRows` and `GroupSumInt64DifferentialRows` maintain exact signed COUNT/SUM transitions for callback-defined groups, including negative/overflow validation and no partial output; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M068a Exact generic differential COUNT group maintenance.
 - [x] M068b Exact signed int64 differential SUM group maintenance.

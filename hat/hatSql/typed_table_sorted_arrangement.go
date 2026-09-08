@@ -22,6 +22,9 @@ var (
 	// ErrTypedTableSortedArrangementDictionaryKind reports a dictionary option
 	// on a non-string sort field.
 	ErrTypedTableSortedArrangementDictionaryKind = errors.New("typed table sorted arrangement dictionary field must be string")
+	// ErrTypedTableSortedArrangementOrder reports an ambiguous or duplicate
+	// composite order definition.
+	ErrTypedTableSortedArrangementOrder = errors.New("typed table sorted arrangement order is invalid")
 )
 
 const typedTableSortedArrangementBulkMinimumChanges = 64
@@ -30,28 +33,51 @@ const typedTableSortedArrangementBulkMinimumChanges = 64
 // arrangement. NULL and NaN values use NullsFirst; ties are ordered by row key
 // for deterministic results. DictionaryEncoded interns live non-NULL string
 // values in Field and is rejected for non-string fields; it is disabled by
-// default to preserve the existing storage and CPU profile.
+// default to preserve the existing storage and CPU profile. OrderBy selects
+// an additive composite definition; when it is non-empty, the legacy scalar
+// fields must remain at their zero values.
 type TypedTableSortedArrangementDefinition struct {
+	Field             string
+	Descending        bool
+	NullsFirst        bool
+	DictionaryEncoded bool
+	OrderBy           []TypedTableSortedArrangementOrder
+}
+
+// TypedTableSortedArrangementOrder describes one field in a composite ordered
+// arrangement. OrderBy fields are compared from first to last; ties are then
+// ordered by row key for deterministic results.
+type TypedTableSortedArrangementOrder struct {
 	Field             string
 	Descending        bool
 	NullsFirst        bool
 	DictionaryEncoded bool
 }
 
+type typedTableSortedArrangementOrderField struct {
+	index             int
+	kind              TypedTableKind
+	descending        bool
+	nullsFirst        bool
+	dictionaryEncoded bool
+}
+
 // TypedTableSortedArrangement maintains an ordered row-key vector while
 // applying a typed table's insert, update, and delete changefeed. It is useful
 // for repeated ORDER BY access when the source field is already typed.
 type TypedTableSortedArrangement struct {
-	mu          sync.RWMutex
-	field       int
-	fieldKind   TypedTableKind
-	columnCount int
-	definition  TypedTableSortedArrangementDefinition
-	entries     map[string]TypedTableMergeJoinInput
-	order       []string
-	positions   map[string]int
-	dictionary  *typedTableSortedArrangementStringDictionary
-	checkpoint  uint64
+	mu           sync.RWMutex
+	field        int
+	fieldKind    TypedTableKind
+	columnCount  int
+	definition   TypedTableSortedArrangementDefinition
+	entries      map[string]TypedTableMergeJoinInput
+	order        []string
+	positions    map[string]int
+	orderFields  []typedTableSortedArrangementOrderField
+	dictionary   *typedTableSortedArrangementStringDictionary
+	dictionaries []*typedTableSortedArrangementStringDictionary
+	checkpoint   uint64
 }
 
 // NewTypedTableSortedArrangement snapshots table and creates an ordered
@@ -60,18 +86,24 @@ func NewTypedTableSortedArrangement(table *TypedTable, definition TypedTableSort
 	if table == nil {
 		return nil, ErrTypedTableSortedArrangementNil
 	}
-	field, kind, found := typedTableJoinField(table, definition.Field)
-	if !found {
-		return nil, fmt.Errorf("%w: %q", ErrTypedTableSortedArrangementField, definition.Field)
-	}
-	if definition.DictionaryEncoded && kind != TypedTableString {
-		return nil, fmt.Errorf("%w: field %q has kind %d", ErrTypedTableSortedArrangementDictionaryKind, definition.Field, kind)
+	orderFields, err := typedTableSortedArrangementOrderFields(table, definition)
+	if err != nil {
+		return nil, err
 	}
 	rows, checkpoint := typedTableSortedArrangementSnapshot(table)
 	arrangement := &TypedTableSortedArrangement{
-		field: field, fieldKind: kind, columnCount: len(table.columns), definition: definition,
+		field: orderFields[0].index, fieldKind: orderFields[0].kind, columnCount: len(table.columns), definition: definition,
 		entries:   make(map[string]TypedTableMergeJoinInput, len(rows)),
-		positions: make(map[string]int, len(rows)), checkpoint: checkpoint,
+		positions: make(map[string]int, len(rows)), orderFields: orderFields,
+		dictionaries: make([]*typedTableSortedArrangementStringDictionary, len(orderFields)), checkpoint: checkpoint,
+	}
+	for index, orderField := range orderFields {
+		if orderField.dictionaryEncoded {
+			arrangement.dictionaries[index] = &typedTableSortedArrangementStringDictionary{}
+			if index == 0 {
+				arrangement.dictionary = arrangement.dictionaries[index]
+			}
+		}
 	}
 	for key, values := range rows {
 		arrangement.entries[key] = TypedTableMergeJoinInput{Key: key, Values: arrangement.storeValues(values)}
@@ -84,6 +116,43 @@ func NewTypedTableSortedArrangement(table *TypedTable, definition TypedTableSort
 		arrangement.positions[key] = index
 	}
 	return arrangement, nil
+}
+
+func typedTableSortedArrangementOrderFields(table *TypedTable, definition TypedTableSortedArrangementDefinition) ([]typedTableSortedArrangementOrderField, error) {
+	if len(definition.OrderBy) == 0 {
+		field, kind, found := typedTableJoinField(table, definition.Field)
+		if !found {
+			return nil, fmt.Errorf("%w: %q", ErrTypedTableSortedArrangementField, definition.Field)
+		}
+		if definition.DictionaryEncoded && kind != TypedTableString {
+			return nil, fmt.Errorf("%w: field %q has kind %d", ErrTypedTableSortedArrangementDictionaryKind, definition.Field, kind)
+		}
+		return []typedTableSortedArrangementOrderField{{
+			index: field, kind: kind, descending: definition.Descending, nullsFirst: definition.NullsFirst, dictionaryEncoded: definition.DictionaryEncoded,
+		}}, nil
+	}
+	if definition.Field != "" || definition.Descending || definition.NullsFirst || definition.DictionaryEncoded {
+		return nil, fmt.Errorf("%w: OrderBy cannot be combined with legacy scalar fields", ErrTypedTableSortedArrangementOrder)
+	}
+	fields := make([]typedTableSortedArrangementOrderField, len(definition.OrderBy))
+	seen := make(map[int]struct{}, len(fields))
+	for index, order := range definition.OrderBy {
+		field, kind, found := typedTableJoinField(table, order.Field)
+		if !found {
+			return nil, fmt.Errorf("%w: %q", ErrTypedTableSortedArrangementField, order.Field)
+		}
+		if _, duplicate := seen[field]; duplicate {
+			return nil, fmt.Errorf("%w: field %q occurs more than once", ErrTypedTableSortedArrangementOrder, order.Field)
+		}
+		if order.DictionaryEncoded && kind != TypedTableString {
+			return nil, fmt.Errorf("%w: field %q has kind %d", ErrTypedTableSortedArrangementDictionaryKind, order.Field, kind)
+		}
+		seen[field] = struct{}{}
+		fields[index] = typedTableSortedArrangementOrderField{
+			index: field, kind: kind, descending: order.Descending, nullsFirst: order.NullsFirst, dictionaryEncoded: order.DictionaryEncoded,
+		}
+	}
+	return fields, nil
 }
 
 // Apply advances the arrangement through strictly ordered source changes.
@@ -310,9 +379,11 @@ func (arrangement *TypedTableSortedArrangement) validateChange(change TypedTable
 	if len(change.After) != arrangement.columnCount {
 		return fmt.Errorf("%w: row has %d values, want %d", ErrTypedTableSortedArrangementChange, len(change.After), arrangement.columnCount)
 	}
-	value := change.After[arrangement.field]
-	if value.Valid && value.Kind != arrangement.fieldKind {
-		return fmt.Errorf("%w: got=%d want=%d", ErrTypedTableSortedArrangementTypeMismatch, value.Kind, arrangement.fieldKind)
+	for _, orderField := range arrangement.orderFields {
+		value := change.After[orderField.index]
+		if value.Valid && value.Kind != orderField.kind {
+			return fmt.Errorf("%w: got=%d want=%d", ErrTypedTableSortedArrangementTypeMismatch, value.Kind, orderField.kind)
+		}
 	}
 	return nil
 }
@@ -324,21 +395,23 @@ func (arrangement *TypedTableSortedArrangement) compareKeys(leftKey, rightKey st
 }
 
 func (arrangement *TypedTableSortedArrangement) compareRows(left, right TypedTableMergeJoinInput) int {
-	leftValue, leftValid := typedTableSortedArrangementValue(left.Values, arrangement.field)
-	rightValue, rightValid := typedTableSortedArrangementValue(right.Values, arrangement.field)
-	if leftValid != rightValid {
-		if arrangement.definition.NullsFirst == leftValid {
-			return 1
+	for _, orderField := range arrangement.orderFields {
+		leftValue, leftValid := typedTableSortedArrangementValue(left.Values, orderField.index)
+		rightValue, rightValid := typedTableSortedArrangementValue(right.Values, orderField.index)
+		if leftValid != rightValid {
+			if orderField.nullsFirst == leftValid {
+				return 1
+			}
+			return -1
 		}
-		return -1
-	}
-	if leftValid {
-		comparison := compareTypedTableMergeJoinValues(leftValue, rightValue)
-		if arrangement.definition.Descending {
-			comparison = -comparison
-		}
-		if comparison != 0 {
-			return comparison
+		if leftValid {
+			comparison := compareTypedTableMergeJoinValues(leftValue, rightValue)
+			if orderField.descending {
+				comparison = -comparison
+			}
+			if comparison != 0 {
+				return comparison
+			}
 		}
 	}
 	if left.Key < right.Key {

@@ -17229,3 +17229,22 @@ small `2.3 KB` increase in transient allocations and `17` additional
 allocations per build. The option remains disabled by default because
 high-cardinality columns can retain dictionary metadata without sharing much
 string data; callers should enable it for repeated, immutable string values.
+
+## Composite Sorted Arrangement Ordering
+
+Command: `make benchmark-sorted-arrangement-composite-local-clean`
+
+The fixture contains 4,096 rows with repeated `team` values and an `int64`
+score. Five samples use `-benchtime=250ms -count=5 -benchmem` on an AMD Ryzen
+9 5950X. The single-field definition is the control; the composite definition
+orders by `team ASC, score DESC`.
+
+| Mode | Raw ns/op (5 runs) | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Single field | 4,812,183, 4,392,380, 4,399,668, 4,800,486, 4,863,728 | 4,800,486 | 2,163,429 | 8,266 |
+| Composite | 5,507,582, 5,049,845, 5,082,175, 4,962,480, 5,159,475 | 5,082,175 | 2,163,451 | 8,266 |
+
+Composite construction is **1.06x** the single-field setup time, with no
+additional allocations and only `22 B/op` in this fixture. The feature is
+additive and opt-in through `OrderBy`; existing single-field arrangements do
+not pay the composite API cost.
