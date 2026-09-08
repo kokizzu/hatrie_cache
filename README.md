@@ -3925,6 +3925,17 @@ the cache residency reduction is more valuable than that CPU/allocation cost.
 See [BENCHMARK.md](BENCHMARK.md#compressed-typed-table-columnar-batches) for
 the raw run.
 
+## SQL Columnar Metadata Counts
+
+Direct predicate-free `COUNT(*)` queries over a columnar `CACHE` source use the
+batch's validated row-count metadata instead of visiting every row. This has
+no new configuration or storage/wire format and preserves `MaxRows`,
+`LIMIT`/`OFFSET`, empty-source, and cancellation checks. Queries with a
+`WHERE` clause, `COUNT(field)`, or any richer aggregate shape retain the
+existing scan path. On the 100,000-row benchmark this reduced execution time
+from `838.151 us` to `2.647 us` (about `316.6x`) with unchanged `2,688 B/op`
+and `14 allocs/op`; see [BENCHMARK.md](BENCHMARK.md#columnar-metadata-count).
+
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a

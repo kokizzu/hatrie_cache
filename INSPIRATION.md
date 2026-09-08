@@ -269,6 +269,7 @@ name.
 - [x] C158 Split-brain fencing (see SPLIT_BRAIN_FENCING.md).
 - [x] C159 Failure-domain-aware replica placement (see FAILURE_DOMAIN_PLACEMENT.md).
 - [ ] C160 Query routing by region and locality.
+- [x] C161 ClickHouse-style metadata-only COUNT(*) for direct predicate-free columnar sources; the executor uses validated batch row counts without a row loop while richer or filtered aggregates retain the established path. See [BENCHMARK.md](BENCHMARK.md#columnar-metadata-count).
 
 ## Materialize Ideas
 

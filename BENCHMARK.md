@@ -17274,6 +17274,41 @@ why TypedTableColumnarCacheOptions.CompressedBatches is opt-in and defaults
 to false; it is appropriate for memory-constrained caches where residency
 matters more than read CPU and allocation rate.
 
+## Columnar Metadata COUNT(*)
+
+Command: `make benchmark-columnar-count-metadata-local-clean`.
+
+The workload is a direct, predicate-free `SELECT COUNT(*)` over a 100,000-row
+columnar `CACHE` source. The baseline was captured after adding the focused
+tests but before wiring the metadata fast path; both runs use the same warmed
+prepared-query cache and `-benchmem`. Five samples were run on an AMD Ryzen 9
+5950X, Linux/amd64.
+
+Raw baseline samples:
+
+    833796 ns/op  2688 B/op  14 allocs/op
+    855351 ns/op  2688 B/op  14 allocs/op
+    853806 ns/op  2688 B/op  14 allocs/op
+    838151 ns/op  2688 B/op  14 allocs/op
+    831731 ns/op  2688 B/op  14 allocs/op
+
+Raw metadata-path samples:
+
+    2647 ns/op  2688 B/op  14 allocs/op
+    2633 ns/op  2688 B/op  14 allocs/op
+    2659 ns/op  2688 B/op  14 allocs/op
+    2656 ns/op  2688 B/op  14 allocs/op
+    2647 ns/op  2688 B/op  14 allocs/op
+
+| Path | Median time | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Existing row-count loop | 838.151 us | 2,688 | 14 | 1.00x |
+| Columnar metadata count | 2.647 us | 2,688 | 14 | 316.6x faster |
+
+The optimization is limited to the proven count-only shape. Filtered counts,
+nullable `COUNT(field)`, mixed aggregates, limits, and source row-count
+validation keep their established semantics and fallback behavior.
+
 ## Composite Sorted Arrangement Ordering
 
 Command: `make benchmark-sorted-arrangement-composite-local-clean`

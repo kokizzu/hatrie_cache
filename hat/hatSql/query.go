@@ -9152,8 +9152,13 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	} else if !dictionaryINFilter && q.where.kind != "" && len(predicates) == 0 {
 		return SQLQueryResult{}, false, nil
 	}
+	countOnlyMetadata := sqlColumnarCountOnlyMetadata(aggregates, q.where)
 	if metrics != nil {
-		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
+		node := "COLUMNAR SCAN"
+		if countOnlyMetadata {
+			node = "COLUMNAR COUNT METADATA"
+		}
+		metrics.record(node, sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
 
 	filterStarted := time.Now()
@@ -9200,7 +9205,12 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		}
 		return nil
 	}
-	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
+	if countOnlyMetadata {
+		for index := range aggregates {
+			aggregates[index].count = int64(batch.Rows)
+		}
+		matched = batch.Rows
+	} else if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
 		segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
 		sparsePrimary = primary
 		if !sparsePrimary {
@@ -9453,6 +9463,18 @@ func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []
 		aggregates[index] = aggregate
 	}
 	return aggregates, fields, predicates, true
+}
+
+func sqlColumnarCountOnlyMetadata(aggregates []sqlColumnarNumericAggregate, where sqlExpr) bool {
+	if len(aggregates) == 0 || where.kind != "" {
+		return false
+	}
+	for _, aggregate := range aggregates {
+		if aggregate.name != "COUNT" || aggregate.field != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlColumnarAggregateField(expr sqlExpr, alias string, field *string) bool {
