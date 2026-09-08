@@ -3,6 +3,7 @@ package hatSql
 import (
 	"context"
 	"math/bits"
+	"strings"
 )
 
 // QueryObserver receives one privacy-safe execution summary per query.
@@ -68,13 +69,17 @@ type BorrowedSourceResolver interface {
 
 // DictionaryColumn stores repeated text values once and addresses them through
 // row-aligned codes. Values are ordered by first appearance for determinism.
-// Codes is the compatibility representation. PackedCodes is an optional
-// byte-aligned representation selected by PackDictionaryCodes.
+// Values and Codes are the compatibility representation. PackedValueData and
+// ValueOffsets are an optional contiguous string representation selected by
+// PackDictionaryValues. PackedCodes is an optional byte-aligned code
+// representation selected by PackDictionaryCodes.
 type DictionaryColumn struct {
-	Values      []string
-	Codes       []uint32
-	PackedCodes []byte
-	CodeWidth   uint8
+	Values          []string
+	Codes           []uint32
+	PackedCodes     []byte
+	CodeWidth       uint8
+	PackedValueData string
+	ValueOffsets    []uint32
 }
 
 // ColumnarPackedColumn stores a row-aligned nullable column as a validity
@@ -229,6 +234,9 @@ type ColumnarNumericSegments struct {
 // FieldRows reports the physical row count retained for one field.
 func (batch ColumnarBatch) FieldRows(field string) int {
 	if dictionary, ok := batch.Dictionaries[field]; ok {
+		if !dictionary.ValuesValid() {
+			return 0
+		}
 		return dictionary.RowCount()
 	}
 	if column, ok := batch.PackedColumns[field]; ok {
@@ -265,7 +273,11 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		if !ok {
 			return nil, false
 		}
-		return dictionary.Values[code], true
+		value, ok := dictionary.ValueAt(code)
+		if !ok {
+			return nil, false
+		}
+		return value, true
 	}
 	if column, ok := batch.PackedColumns[field]; ok {
 		return column.Value(row)
@@ -514,6 +526,102 @@ func (batch *ColumnarBatch) PackBooleanColumns() {
 	}
 }
 
+// ValueCount returns the number of dictionary values in either representation.
+func (dictionary DictionaryColumn) ValueCount() int {
+	if dictionary.Values != nil {
+		return len(dictionary.Values)
+	}
+	if len(dictionary.ValueOffsets) < 1 {
+		return 0
+	}
+	return len(dictionary.ValueOffsets) - 1
+}
+
+// ValuesValid verifies contiguous dictionary offsets without allocating. A
+// legacy Values slice is already self-describing and therefore valid.
+func (dictionary DictionaryColumn) ValuesValid() bool {
+	if dictionary.Values != nil {
+		return true
+	}
+	if dictionary.ValueOffsets == nil {
+		return true
+	}
+	if len(dictionary.ValueOffsets) == 0 || dictionary.ValueOffsets[0] != 0 {
+		return false
+	}
+	previous := uint64(0)
+	for _, offset := range dictionary.ValueOffsets {
+		current := uint64(offset)
+		if current < previous || current > uint64(len(dictionary.PackedValueData)) {
+			return false
+		}
+		previous = current
+	}
+	return previous == uint64(len(dictionary.PackedValueData))
+}
+
+// ValueAt returns one dictionary value without materializing the packed blob.
+func (dictionary DictionaryColumn) ValueAt(code uint32) (string, bool) {
+	if dictionary.Values != nil {
+		if uint64(code) >= uint64(len(dictionary.Values)) {
+			return "", false
+		}
+		return dictionary.Values[code], true
+	}
+	if uint64(code)+1 >= uint64(len(dictionary.ValueOffsets)) {
+		return "", false
+	}
+	start := uint64(dictionary.ValueOffsets[code])
+	end := uint64(dictionary.ValueOffsets[code+1])
+	if start > end || end > uint64(len(dictionary.PackedValueData)) {
+		return "", false
+	}
+	return dictionary.PackedValueData[int(start):int(end)], true
+}
+
+// PackDictionaryValues replaces valid dictionary string headers with one
+// immutable string blob and row-independent offsets. It is explicit opt-in;
+// Values remains the default representation for compatibility and predictable
+// access cost.
+func (batch *ColumnarBatch) PackDictionaryValues() {
+	if batch == nil || len(batch.Dictionaries) == 0 {
+		return
+	}
+	for field, dictionary := range batch.Dictionaries {
+		if dictionary.Values == nil || len(dictionary.Values) < 2 {
+			continue
+		}
+		total := 0
+		valid := true
+		for _, value := range dictionary.Values {
+			if len(value) > int(^uint(0)>>1)-total {
+				valid = false
+				break
+			}
+			total += len(value)
+		}
+		if !valid || uint64(total) > uint64(^uint32(0)) {
+			continue
+		}
+		legacyBytes := len(dictionary.Values)*16 + total
+		packedBytes := 16 + (len(dictionary.Values)+1)*4 + total
+		if packedBytes >= legacyBytes {
+			continue
+		}
+		offsets := make([]uint32, len(dictionary.Values)+1)
+		var builder strings.Builder
+		builder.Grow(total)
+		for index, value := range dictionary.Values {
+			builder.WriteString(value)
+			offsets[index+1] = uint32(builder.Len())
+		}
+		dictionary.PackedValueData = builder.String()
+		dictionary.ValueOffsets = offsets
+		dictionary.Values = nil
+		batch.Dictionaries[field] = dictionary
+	}
+}
+
 // RowCount returns the number of logical rows in a dictionary column. Invalid
 // packed byte lengths return zero so source validation rejects the batch.
 func (dictionary DictionaryColumn) RowCount() int {
@@ -544,7 +652,7 @@ func (dictionary DictionaryColumn) CodeAt(row int) (uint32, bool) {
 			return 0, false
 		}
 		code := dictionary.Codes[row]
-		if int(code) >= len(dictionary.Values) {
+		if uint64(code) >= uint64(dictionary.ValueCount()) {
 			return 0, false
 		}
 		return code, true
@@ -565,7 +673,7 @@ func (dictionary DictionaryColumn) CodeAt(row int) (uint32, bool) {
 	default:
 		return 0, false
 	}
-	if int(code) >= len(dictionary.Values) {
+	if uint64(code) >= uint64(dictionary.ValueCount()) {
 		return 0, false
 	}
 	return code, true
@@ -579,14 +687,14 @@ func (batch *ColumnarBatch) PackDictionaryCodes() {
 		return
 	}
 	for field, dictionary := range batch.Dictionaries {
-		if dictionary.Codes == nil || len(dictionary.Codes) == 0 || len(dictionary.Values) == 0 {
+		if dictionary.Codes == nil || len(dictionary.Codes) == 0 || dictionary.ValueCount() == 0 {
 			continue
 		}
 		width := 0
 		switch {
-		case len(dictionary.Values) <= 1<<8:
+		case dictionary.ValueCount() <= 1<<8:
 			width = 1
-		case len(dictionary.Values) <= 1<<16:
+		case dictionary.ValueCount() <= 1<<16:
 			width = 2
 		default:
 			continue
@@ -597,7 +705,7 @@ func (batch *ColumnarBatch) PackDictionaryCodes() {
 		packed := make([]byte, len(dictionary.Codes)*width)
 		valid := true
 		for row, code := range dictionary.Codes {
-			if int(code) >= len(dictionary.Values) {
+			if uint64(code) >= uint64(dictionary.ValueCount()) {
 				valid = false
 				break
 			}

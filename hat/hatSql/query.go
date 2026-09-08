@@ -7815,7 +7815,7 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 	if q.where.kind != "" && !dictionaryINFilter && len(predicates) == 0 {
 		return SQLQueryResult{}, false, nil
 	}
-	used := make([]bool, len(dictionary.Values))
+	used := make([]bool, dictionary.ValueCount())
 	if dictionaryINFilter && len(predicates) == 0 {
 		copy(used, filterDictionaryINCodes)
 	} else {
@@ -7843,30 +7843,35 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 			if !matches {
 				continue
 			}
-			if int(code) >= len(dictionary.Values) {
+			if uint64(code) >= uint64(dictionary.ValueCount()) {
 				return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code for field %q", q.from.key, field)
 			}
 			used[code] = true
 		}
 	}
-	codes := make([]uint32, 0, len(dictionary.Values))
+	codes := make([]uint32, 0, dictionary.ValueCount())
 	for code, present := range used {
 		if present {
 			codes = append(codes, uint32(code))
 		}
 	}
 	sort.Slice(codes, func(left, right int) bool {
+		leftValue, _ := dictionary.ValueAt(codes[left])
+		rightValue, _ := dictionary.ValueAt(codes[right])
 		if descending {
-			return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
+			return leftValue > rightValue
 		}
-		return dictionary.Values[codes[left]] < dictionary.Values[codes[right]]
+		return leftValue < rightValue
 	})
 
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(codes))}
 	resultBytes, position := 0, 0
 	lastValue, haveLastValue := "", false
 	for _, code := range codes {
-		value := dictionary.Values[code]
+		value, ok := dictionary.ValueAt(code)
+		if !ok {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary value for field %q", q.from.key, field)
+		}
 		if haveLastValue && value == lastValue {
 			continue
 		}
@@ -8460,7 +8465,7 @@ func sqlColumnarDictionaryLiteralORPredicate(expr sqlExpr, alias string, batch C
 	if !encoded {
 		return DictionaryColumn{}, nil, false
 	}
-	codes := make([]bool, len(dictionary.Values))
+	codes := make([]bool, dictionary.ValueCount())
 	for _, candidate := range literals {
 		if code, found := sqlDictionaryCode(dictionary, candidate.value, candidate.collation); found {
 			codes[code] = true
@@ -8478,8 +8483,12 @@ func sqlColumnarDictionaryLikePredicate(expr sqlExpr, alias string, batch Column
 	if !encoded {
 		return DictionaryColumn{}, nil, false
 	}
-	codes := make([]bool, len(dictionary.Values))
-	for index, value := range dictionary.Values {
+	codes := make([]bool, dictionary.ValueCount())
+	for index := 0; index < dictionary.ValueCount(); index++ {
+		value, valid := dictionary.ValueAt(uint32(index))
+		if !valid {
+			return DictionaryColumn{}, nil, false
+		}
 		codes[index] = sqlLike(value, pattern)
 	}
 	return dictionary, codes, true
@@ -8812,9 +8821,9 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
 
-	states := make([][]sqlColumnarNumericAggregate, len(dictionary.Values))
-	groupRows := make([]int, len(dictionary.Values))
-	codes := make([]uint32, 0, len(dictionary.Values))
+	states := make([][]sqlColumnarNumericAggregate, dictionary.ValueCount())
+	groupRows := make([]int, dictionary.ValueCount())
+	codes := make([]uint32, 0, dictionary.ValueCount())
 	matched := 0
 	scannedRows := 0
 	filterStarted := time.Now()
@@ -8912,6 +8921,8 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 	}
 	if len(q.orderBy) > 0 {
 		sort.Slice(codes, func(left, right int) bool {
+			leftValue, _ := dictionary.ValueAt(codes[left])
+			rightValue, _ := dictionary.ValueAt(codes[right])
 			if orderProjection >= 0 {
 				leftValue := states[codes[left]][orderProjection].result()
 				rightValue := states[codes[right]][orderProjection].result()
@@ -8920,9 +8931,9 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 				}
 			}
 			if descending {
-				return dictionary.Values[codes[left]] > dictionary.Values[codes[right]]
+				return leftValue > rightValue
 			}
-			return dictionary.Values[codes[left]] < dictionary.Values[codes[right]]
+			return leftValue < rightValue
 		})
 	}
 
@@ -8936,7 +8947,11 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		row := make(SQLRow, len(projections))
 		for index, projection := range projections {
 			if projection.group {
-				row[projection.column] = dictionary.Values[code]
+				value, ok := dictionary.ValueAt(code)
+				if !ok {
+					return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned an invalid dictionary value for field %q", q.from.key, groupField)
+				}
+				row[projection.column] = value
 			} else {
 				row[projection.column] = states[code][index].result()
 			}
@@ -9582,7 +9597,7 @@ func sqlColumnarDictionaryLiteralINPredicate(expr sqlExpr, alias string, batch C
 	if !ok {
 		return DictionaryColumn{}, nil, false
 	}
-	codes := make([]bool, len(dictionary.Values))
+	codes := make([]bool, dictionary.ValueCount())
 	for _, argument := range expr.args {
 		if argument.kind != "literal" {
 			return DictionaryColumn{}, nil, false
@@ -9673,7 +9688,11 @@ func sqlColumnarVectorConjunction(expr sqlExpr, alias string) ([]sqlColumnarVect
 }
 
 func sqlDictionaryCode(dictionary DictionaryColumn, value string, collation SQLCollation) (uint32, bool) {
-	for code, candidate := range dictionary.Values {
+	for code := 0; code < dictionary.ValueCount(); code++ {
+		candidate, ok := dictionary.ValueAt(uint32(code))
+		if !ok {
+			return 0, false
+		}
 		if sqlBinaryValueWithCollation("=", candidate, value, collation) == true {
 			return uint32(code), true
 		}

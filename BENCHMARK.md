@@ -16607,6 +16607,39 @@ length, trailing bits, rank checkpoints, and dense-value count before a SQL
 scan. This is a memory-saving path for genuinely sparse nullable columns, not
 a default replacement for every column.
 
+## Packed Dictionary Values
+
+Dictionary encoding already removes repeated string contents from each row,
+but its `Values []string` dictionary still retains one string header per unique
+value. `ColumnarBatch.PackDictionaryValues` provides an explicit contiguous
+string blob plus `uint32` offsets and routes dictionary access through
+`ValueAt`. Legacy `Values` remains the default. Packed codes and packed values
+can be enabled together, while vertical merges and SQL predicates preserve the
+same logical strings.
+
+Five benchmark samples were collected on an AMD Ryzen 9 5950X with one CPU,
+500 ms per sample, 4,096 rows, and 16 dictionary values. Lower is better. The
+benchmark reads every row through `ColumnarBatch.Value`; the total layout still
+includes the unchanged 16,384-byte legacy row-code array.
+
+| Path | Median | Dictionary-value payload | Total layout | Query heap | Query allocations | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy `[]string` values | 180,155 ns/op | 338 bytes | 16,722 bytes | 65,536 B/op | 4,096 allocs/op | baseline |
+| Packed blob + offsets | 177,545 ns/op | 166 bytes | 16,550 bytes | 65,536 B/op | 4,096 allocs/op | 2.04x less dictionary payload; 1.01x less total layout; CPU and allocations neutral |
+
+Raw five-sample output:
+
+```text
+legacy: 189428, 185837, 180155, 172981, 177988 ns/op; 338 dictionary-bytes/op; 16722 layout-bytes/op; 65536 B/op; 4096 allocs/op
+packed: 176020, 194234, 185467, 177545, 170901 ns/op; 166 dictionary-bytes/op; 16550 layout-bytes/op; 65536 B/op; 4096 allocs/op
+```
+
+`ValuesValid` checks the first offset, monotonic offsets, the final offset,
+and blob bounds before a source is accepted. `ValueAt` also bounds-checks each
+requested slice. The conversion copies dictionary bytes once, so callers
+should enable it for retained dictionaries where the measured header/data
+reduction matters; normal typed-table and merge producers stay unchanged.
+
 ## Bit-Packed Boolean Arrangement Columns
 
 Boolean columnar values have only two value states, but the legacy
