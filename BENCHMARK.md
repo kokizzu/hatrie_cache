@@ -17013,3 +17013,21 @@ BenchmarkParseSQLTriggerDefinition 1164985 539.4 ns/op 896 B/op 1 allocs/op
 BenchmarkParseSQLTriggerDefinition 1148383 513.1 ns/op 896 B/op 1 allocs/op
 BenchmarkParseSQLTriggerDefinition 1163752 522.1 ns/op 896 B/op 1 allocs/op
 ```
+
+## Public Command Write Quorum
+
+`BenchmarkExecuteCacheCommandWriteQuorum` compares the existing single-command
+path with the opt-in synchronous quorum path. The enabled case uses one
+loopback HTTP replica and required quorum two; it includes transport and
+replication allocations. Five runs use `-count=5`, `-benchtime=200ms`, and
+`-benchmem` on Linux/amd64 with an AMD Ryzen 9 5950X:
+
+| Mode | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Heap | Allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Quorum disabled | 363.4 ns | 362.4 ns | 365.7 ns | 362.2 ns | 371.0 ns | 0 B/op | 0/op |
+| Loopback quorum | 106.1 us | 101.8 us | 103.8 us | 103.9 us | 103.7 us | 14.4-14.6 KB/op | 161/op |
+
+The medians are `363.4 ns/op` and `103.8 us/op`, respectively, so the
+loopback synchronous path is about `286x` slower. The default path has no
+additional allocation; the enabled cost is the deliberate durability wait and
+wire exchange, not an always-on command overhead.

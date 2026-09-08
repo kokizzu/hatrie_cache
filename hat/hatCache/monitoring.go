@@ -25,6 +25,7 @@ import (
 	"hatrie_cache/hat/hatMetrics"
 	"hatrie_cache/hat/hatMonitoring"
 	"hatrie_cache/hat/hatRate"
+	"hatrie_cache/hat/hatReplication"
 	"hatrie_cache/hat/hatSchema"
 	"hatrie_cache/hat/hatSql"
 	"hatrie_cache/hat/hatTrace"
@@ -126,6 +127,10 @@ type MonitoringOptions struct {
 	// node is offline, timed out, in maintenance, or absent from topology.
 	// It is disabled by default for backward compatibility.
 	RequireHealthyReplicaReads bool
+	// WriteQuorum synchronously requires this many acknowledgements, including
+	// the local command result, for single public write commands. Zero keeps the
+	// existing asynchronous or best-effort replication behavior.
+	WriteQuorum int
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
@@ -283,6 +288,7 @@ type commandExecutionOptions struct {
 	ReplicationSafety                   *ReplicationSafetyStore
 	EnforceLeaderWrites                 bool
 	RequireHealthyReplicaReads          bool
+	WriteQuorum                         int
 	replicationSchema                   ReplicationSchemaContract
 	requireSchemaCompatibility          bool
 	inheritedReplicationFencingToken    uint64
@@ -1723,6 +1729,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		ReplicationSafety:          handler.options.ReplicationSafety,
 		EnforceLeaderWrites:        handler.options.EnforceLeaderWrites,
 		RequireHealthyReplicaReads: handler.options.RequireHealthyReplicaReads,
+		WriteQuorum:                handler.options.WriteQuorum,
 		replicationSchema:          handler.options.ReplicationSchema,
 		requireSchemaCompatibility: handler.options.RequireReplicationSchemaCompatibility,
 	})
@@ -1878,6 +1885,11 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
 		return response, true
 	}
+	if options.WriteQuorum > 0 && commandWriteQuorumEligible(request) {
+		if err := validateCommandWriteQuorum(ctx, options); err != nil {
+			return commandError(err.Error()), true
+		}
+	}
 	if options.Journal != nil && options.Replicator.usesJournalOutbox(options.Journal) {
 		effects := newPublicCommandBatchEffects(options)
 		effects.batch = false
@@ -1906,9 +1918,45 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		options.DirtyTracker.markCommand(request)
 	}
 	if options.Replicator != nil {
-		options.Replicator.ReplicateCommand(ctx, trie, request, response)
+		if options.WriteQuorum > 0 && replicationPayloadKindFor(request, response) != replicationPayloadNone {
+			if _, err := options.Replicator.ReplicateCommandWithQuorum(ctx, trie, request, response, options.WriteQuorum); err != nil {
+				response.OK = false
+				response.Message = err.Error()
+				return response, true
+			}
+		} else {
+			options.Replicator.ReplicateCommand(ctx, trie, request, response)
+		}
 	}
 	return response, false
+}
+
+func commandWriteQuorumEligible(request CacheCommandRequest) bool {
+	command := normalizedCommand(request.Command)
+	if command == "" || strings.TrimSpace(request.Key) == "" {
+		return false
+	}
+	switch command {
+	case "BATCH", "INTERNALSET", "INTERNALDEL", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand, replicationDigestCommand:
+		return false
+	}
+	return commandShouldJournal(request)
+}
+
+func validateCommandWriteQuorum(ctx context.Context, options commandExecutionOptions) error {
+	if options.WriteQuorum < 1 {
+		return fmt.Errorf("%w: required=%d", hatReplication.ErrWriteQuorumInvalid, options.WriteQuorum)
+	}
+	if options.Replicator == nil {
+		return fmt.Errorf("%w: replication is not configured", hatReplication.ErrWriteQuorumInvalid)
+	}
+	if options.Replicator.queue != nil {
+		return hatReplication.ErrWriteQuorumAsynchronous
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func executeInternalReplicationBinary(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {

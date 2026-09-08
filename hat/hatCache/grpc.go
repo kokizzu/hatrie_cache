@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatAuth"
+	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatGrpc"
 	"hatrie_cache/hat/hatTrace"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
@@ -51,6 +51,10 @@ type CacheGRPCOptions struct {
 	RequireHealthyReplicaReads       bool
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
+	// WriteQuorum synchronously requires this many acknowledgements, including
+	// the local command result, for single public write commands. Zero keeps the
+	// existing asynchronous or best-effort replication behavior.
+	WriteQuorum int
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool
@@ -369,6 +373,7 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 		ReplicationSafety:          server.options.ReplicationSafety,
 		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
 		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
+		WriteQuorum:                server.options.WriteQuorum,
 		replicationSchema:          server.options.ReplicationSchema,
 		requireSchemaCompatibility: server.options.RequireReplicationSchemaCompatibility,
 	})
