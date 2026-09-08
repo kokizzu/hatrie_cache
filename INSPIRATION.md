@@ -324,6 +324,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M035 Self-correcting materialized results for typed arrangements.
 - [x] M036 Retractions and insertions on typed updates.
 - [ ] M037 Generic negative-diff support for every SQL operator.
+- [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
 - [x] M037a Signed negative diffs in the reusable batch primitive.
 - [x] M037b Generic signed filter, map, flat-map, union, and join operators with atomic callback failure handling; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M037c Signed differential int64 SUM maintenance for callback-defined groups with checked weighted updates; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).

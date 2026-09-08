@@ -17230,6 +17230,27 @@ allocations per build. The option remains disabled by default because
 high-cardinality columns can retain dictionary metadata without sharing much
 string data; callers should enable it for repeated, immutable string values.
 
+## Rejected Generic Keyed Differential Reduction
+
+Workload: 256 weighted rows across 16 groups, comparing an arbitrary
+keyed reducer with the existing specialized COUNT+SUM reducer. The benchmark
+command was:
+
+    go test ./hat/hatSql -run '^$' -bench '^BenchmarkDifferentialReduceComparedWithCountSum$' -benchmem -count=5
+
+Median of five runs on AMD Ryzen 9 5950X, Linux/amd64:
+
+| Mode | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Generic keyed reduce | 2,449,013 | 1,331,823 | 7,521 |
+| Specialized COUNT+SUM | 307,433 | 209,538 | 1,326 |
+
+The generic callback implementation was about 7.97x slower, 6.36x larger
+in transient bytes, and 5.67x more allocation-heavy. It was removed rather
+than added to the public API; M037e remains open for a future implementation
+with an incremental state contract that does not clone the whole group on
+every update.
+
 ## Compressed Typed-Table Columnar Batches
 
 Workload: one 4,096-row typed-table batch with repeated strings, int64,
