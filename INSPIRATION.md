@@ -368,6 +368,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M065 Incremental window-function maintenance.
 - [x] M066 Incremental sort maintenance via opt-in typed-table sorted arrangements, bulk batch rebuilds, deterministic NULL/NaN ordering, correctness tests, and benchmark guide.
 - [x] M066a Strictly validated append-only bulk maintenance skips a full arrangement rebuild when incoming rows are already ordered after the current tail; mixed, duplicate, update, delete, gap, and out-of-order batches retain the existing rebuild or incremental path.
+- [x] M066b Tail-checked single-row inserts append directly when the candidate is already after the current sorted tail; non-tail updates and inserts retain binary-search insertion.
 - [x] M067 Top-K with offset for supported ordered paths.
 - [x] M067a Bounded `RowsPage` snapshots for maintained typed sorted arrangements; the legacy `Rows()` snapshot remains unchanged, with correctness and allocation measurements in [BENCHMARK.md](BENCHMARK.md#typed-sorted-arrangement-page-snapshots).
 - [x] M068 Differential group-by updates for generic SQL tables. `GroupCountDifferentialRows` and `GroupSumInt64DifferentialRows` maintain exact signed COUNT/SUM transitions for callback-defined groups, including negative/overflow validation and no partial output; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).

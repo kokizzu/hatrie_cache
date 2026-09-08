@@ -265,6 +265,27 @@ func TestTypedTableSortedArrangementBulkAppendFallsBackForDuplicateKey(t *testin
 	t.Fatalf("duplicate key %q missing from rows", changes[len(changes)-1].Key)
 }
 
+func TestTypedTableSortedArrangementTailInsertPreservesOrder(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_tail_insert")
+	if _, err := table.Upsert("first", []hatSql.TypedTableValue{hatSql.TypedString("alpha"), hatSql.TypedInt64(1)}); err != nil {
+		t.Fatal(err)
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := hatSql.TypedTableChange{
+		Sequence:  2,
+		Operation: "INSERT",
+		Key:       "last",
+		After:     []hatSql.TypedTableValue{hatSql.TypedString("omega"), hatSql.TypedInt64(2)},
+	}
+	if err := arrangement.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), "first", "last")
+}
+
 func TestTypedTableSortedArrangementBulkApplyHandlesDeleteAndReinsert(t *testing.T) {
 	table := newSortedArrangementTable(t, "sorted_bulk_reinsert")
 	if _, err := table.Upsert("same", []hatSql.TypedTableValue{hatSql.TypedString("old"), hatSql.TypedInt64(1)}); err != nil {

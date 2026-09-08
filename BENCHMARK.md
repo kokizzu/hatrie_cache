@@ -14751,6 +14751,24 @@ ordering, checkpoint behavior, duplicate-key semantics, storage format, or
 wire format. A one-sample full arrangement matrix is also kept runnable with
 `make benchmark-sorted-arrangement-matrix-smoke-local-clean`.
 
+## Typed Sorted Arrangement Tail Inserts
+
+For a single new row that compares after the current sorted tail,
+`TypedTableSortedArrangement` now appends directly instead of running a binary
+search. Non-tail inserts and updates keep the established insertion path.
+
+Five local samples used a 4,096-row arrangement and one tail INSERT on the AMD
+Ryzen 9 5950X, with setup outside the timer:
+
+| Apply path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Legacy binary-search insert | 1,225 ns/op | 96 B/op | 1 alloc/op | Baseline |
+| Tail-checked append | 482.4 ns/op | 96 B/op | 1 alloc/op | 2.54x faster; same allocated bytes and allocation count |
+
+The fast path changes only the ordered-vector insertion decision; it does not
+change ordering, checkpoint behavior, storage format, wire format, or the
+fallback for candidates that are not after the tail.
+
 ## Warm Columnar Sorted Projection
 
 Repeated direct single-field `ORDER BY ... LIMIT` reads can use a ClickHouse-

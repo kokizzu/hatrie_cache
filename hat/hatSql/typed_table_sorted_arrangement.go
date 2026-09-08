@@ -363,6 +363,11 @@ func (arrangement *TypedTableSortedArrangement) removeKey(key string) {
 }
 
 func (arrangement *TypedTableSortedArrangement) insertKey(key string) {
+	if len(arrangement.order) == 0 || arrangement.compareKeys(arrangement.order[len(arrangement.order)-1], key) < 0 {
+		arrangement.positions[key] = len(arrangement.order)
+		arrangement.order = append(arrangement.order, key)
+		return
+	}
 	position := sort.Search(len(arrangement.order), func(index int) bool {
 		return arrangement.compareKeys(key, arrangement.order[index]) < 0
 	})
