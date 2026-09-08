@@ -11669,6 +11669,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if rows, indexed, err := resolveSQLIndexedLiteralINSource(source, condition, resolver, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
+	if rows, indexed, err := resolveSQLMultikeyIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
@@ -11723,9 +11726,6 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 				return rows, available, err
 			}
 		}
-	}
-	if rows, indexed, err := resolveSQLMultikeyIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
-		return rows, indexed, err
 	}
 	if condition.op == "AND" {
 		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver, metrics); indexed || err != nil {

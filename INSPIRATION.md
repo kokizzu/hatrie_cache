@@ -340,6 +340,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M057 Filter-before-arrange planning.
 - [x] M058 Arrangement sharing.
 - [x] M059 Index selection from predicate shape.
+- [x] M059a Function predicates reach specialized multikey index resolvers before binary-only planner guards; `ARRAY_CONTAINS` correctness and before/after measurements are recorded in [BENCHMARK.md](BENCHMARK.md).
 - [x] M060 View dependency graph and invalidation.
 - [x] M061 Incremental view maintenance for supported typed views.
 - [x] M062 Materialized view refresh and hydration state.

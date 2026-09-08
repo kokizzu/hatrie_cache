@@ -16462,3 +16462,44 @@ runs the focused correctness tests before the benchmark.
 This is an admission/allocation optimization, not a new persisted format. Mixed
 columns, malformed row counts, unsupported values, and columns that do not meet
 the existing layout estimate retain the plain-column fallback.
+
+## SQL JSON Multikey Index Planner Fix
+
+The planner previously rejected function predicates before reaching the
+specialized JSON multikey resolver. `ARRAY_CONTAINS(person.tags, 'go')` therefore
+scanned and filtered the complete source even when a matching multikey index
+was configured. The fix dispatches this resolver before the binary-predicate
+guard; scalar predicates and the general scan path are unchanged.
+
+Five benchmark samples were collected before and after the fix on an AMD Ryzen
+9 5950X. The indexed query uses 10,000 JSON rows and returns the rows matching
+one array element. The scan query is the same workload without an index. The
+reported table uses the median of the five samples; lower is better.
+
+| Query path | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Full scan | 16.000 ms/op; 5,678,900 B/op; 170,236 allocs/op | 15.234 ms/op; 5,678,877 B/op; 170,236 allocs/op | No meaningful change; allocation-neutral |
+| `ARRAY_CONTAINS` with multikey index | 15.282 ms/op; 5,678,800 B/op; 170,236 allocs/op | 66.404 us/op; 102,008 B/op; 523 allocs/op | 230.1x faster; 55.7x lower allocation volume; 325.5x fewer allocations |
+
+The full-scan measurements are within normal run-to-run noise and are shown
+to demonstrate that the fix does not make the fallback path more expensive.
+The focused correctness test also verifies array membership, duplicate array
+elements, mixed scalar input, missing fields, refresh after an upsert, and the
+`EXPLAIN ANALYZE` node.
+
+Raw five-sample `ns/op` output:
+
+```text
+Before BenchmarkSQLJSONMultikeyScanQuery: 14.830 ms, 15.718 ms, 16.000 ms, 17.080 ms, 16.242 ms
+Before BenchmarkSQLJSONMultikeyIndexQuery: 15.349 ms, 15.077 ms, 14.997 ms, 15.282 ms, 17.271 ms
+After BenchmarkSQLJSONMultikeyScanQuery: 15.199063 ms, 15.234304 ms, 14.953720 ms, 15.798810 ms, 15.466182 ms
+After BenchmarkSQLJSONMultikeyIndexQuery: 69.675 us, 66.372 us, 65.008 us, 66.404 us, 68.676 us
+```
+
+Raw allocation output was stable across the five samples:
+
+```text
+Before scan/index: approximately 5,678,800-5,678,900 B/op; 170,236 allocs/op
+After scan: 5,678,818-5,679,041 B/op; 170,236 allocs/op
+After indexed: 102,008 B/op; 523 allocs/op
+```
