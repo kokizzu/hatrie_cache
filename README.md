@@ -4139,6 +4139,12 @@ adds no storage or wire format and does not change query results. See
 [COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md) and the measured metadata
 cost in [BENCHMARK.md](BENCHMARK.md#compiled-sql-dataflow-ir).
 
+`hatSchema.CheckRollingCompatibility` provides a conservative deployment
+preflight for rolling schema changes. It reports deterministic reasons and
+allows only append-only nullable columns or relaxed nullability; the existing
+exact replication fingerprint gate remains unchanged. See
+[SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
+
 Compiled queries can also expose a cached, versioned fragment plan with
 `CompiledSQLQuery.LowerDataflow()`. The plan is initialized only when requested
 and each returned snapshot is independent, so it can be retained by routing,

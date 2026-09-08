@@ -17105,3 +17105,21 @@ that requests a plan pays about `1.45x` the controlled compile-plus-return
 cost, `+1,515 B/op`, and `+19 allocs/op` for that first request; later plan
 snapshots are about `2.05x` faster than the compatible `Dataflow` view and use
 half its bytes. Callers that never request a plan do not build one.
+
+## Rolling Schema Compatibility
+
+Command: `go test ./hat/hatSchema -run '^$' -bench '^BenchmarkCheckRollingCompatibility$' -benchmem -benchtime=200ms -count=5`
+
+Fixture: a two-column `users` schema compared with version 2 containing one
+appended nullable column. Five runs on AMD Ryzen 9 5950X:
+
+| Run | Time | Memory | Allocations |
+| --- | ---: | ---: | ---: |
+| 1 | 659.9 ns/op | 224 B/op | 3 allocs/op |
+| 2 | 663.2 ns/op | 224 B/op | 3 allocs/op |
+| 3 | 666.7 ns/op | 224 B/op | 3 allocs/op |
+| 4 | 652.3 ns/op | 224 B/op | 3 allocs/op |
+| 5 | 645.2 ns/op | 224 B/op | 3 allocs/op |
+
+Median: **659.9 ns/op**, **224 B/op**, **3 allocs/op**. This is a preflight
+operation and is not on the replication command path.
