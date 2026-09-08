@@ -53,6 +53,30 @@ func TestSelectReadReplicaDoesNotMutateCandidates(t *testing.T) {
 	}
 }
 
+func TestSelectReadReplicaPrefersConfiguredRegionWithoutReducingEligibility(t *testing.T) {
+	candidates := []hatReplication.ReadReplicaProgress{
+		{Node: "remote", Region: "us", Frontier: 10, HealthScore: 100},
+		{Node: "local", Region: "asia", Frontier: 9, HealthScore: 10},
+	}
+	selected, err := hatReplication.SelectReadReplicaWithConsistency(
+		candidates,
+		hatReplication.ReadReplicaPolicy{ObservedFrontier: 10, MaxLag: 1, PreferredRegions: []string{" asia "}},
+		hatReplication.ReadConsistencyEventual,
+	)
+	if err != nil || selected.Node != "local" {
+		t.Fatalf("preferred-region selection = %#v, %v; want local", selected, err)
+	}
+
+	selected, err = hatReplication.SelectReadReplicaWithConsistency(
+		candidates,
+		hatReplication.ReadReplicaPolicy{ObservedFrontier: 10, MaxLag: 0, PreferredRegions: []string{"eu"}},
+		hatReplication.ReadConsistencyReadAfterWrite,
+	)
+	if err != nil || selected.Node != "remote" {
+		t.Fatalf("preferred-region fallback = %#v, %v; want eligible remote", selected, err)
+	}
+}
+
 func BenchmarkSelectReadReplica(b *testing.B) {
 	replicas := make([]hatReplication.ReadReplicaProgress, 1024)
 	for index := range replicas {
@@ -62,6 +86,33 @@ func BenchmarkSelectReadReplica(b *testing.B) {
 	b.ResetTimer()
 	for iteration := 0; iteration < b.N; iteration++ {
 		if _, err := hatReplication.SelectReadReplica(replicas, policy); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSelectReadReplicaWithPreferredRegion(b *testing.B) {
+	replicas := make([]hatReplication.ReadReplicaProgress, 1024)
+	for index := range replicas {
+		region := "us"
+		if index%2 == 0 {
+			region = "asia"
+		}
+		replicas[index] = hatReplication.ReadReplicaProgress{
+			Node:        "node-" + string(rune(index)),
+			Region:      region,
+			Frontier:    uint64(index),
+			HealthScore: index,
+		}
+	}
+	policy := hatReplication.ReadReplicaPolicy{
+		ObservedFrontier: 1023,
+		MaxLag:           3,
+		PreferredRegions: []string{"asia", "us"},
+	}
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := hatReplication.SelectReadReplicaWithConsistency(replicas, policy, hatReplication.ReadConsistencyBoundedStaleness); err != nil {
 			b.Fatal(err)
 		}
 	}

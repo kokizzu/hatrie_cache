@@ -39,8 +39,8 @@ func ParseReadConsistencyLevel(value string) (ReadConsistencyLevel, error) {
 }
 
 // SelectReadReplicaWithConsistency selects an eligible candidate under an
-// explicit freshness level. Selection remains deterministic: highest frontier,
-// then health score, then lexical node name.
+// explicit freshness level. Configured locality is preferred first, followed by
+// highest frontier, health score, and lexical node name.
 func SelectReadReplicaWithConsistency(candidates []ReadReplicaProgress, policy ReadReplicaPolicy, level ReadConsistencyLevel) (ReadReplicaProgress, error) {
 	switch level {
 	case ReadConsistencyEventual, ReadConsistencyBoundedStaleness, ReadConsistencyReadAfterWrite:
@@ -69,7 +69,7 @@ func SelectReadReplicaWithConsistency(candidates []ReadReplicaProgress, policy R
 				continue
 			}
 		}
-		if !found || readReplicaPreferred(candidate, selected) {
+		if !found || readReplicaPreferred(candidate, selected, policy) {
 			selected = candidate
 			found = true
 		}

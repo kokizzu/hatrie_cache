@@ -4089,6 +4089,13 @@ bound requires a replica at or ahead of the observed frontier; no transport or
 endpoint discovery is implied. See
 [REPLICA_LAG_ROUTING.md](REPLICA_LAG_ROUTING.md) for the policy contract.
 
+## Replica Locality Routing
+
+`hatReplication.SelectReadReplicaWithConsistency` can optionally prefer an
+ordered list of node regions after consistency filtering, with fallback to any
+eligible region. The default empty preference preserves existing routing. See
+[REPLICA_LOCALITY_ROUTING.md](REPLICA_LOCALITY_ROUTING.md) for the contract.
+
 ## Deterministic Conflict Resolution
 
 `hatReplication.ResolveConflictVersion` chooses the larger valid timestamp,
