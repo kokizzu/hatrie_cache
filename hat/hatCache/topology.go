@@ -207,7 +207,7 @@ func (store *TopologyStore) OwnershipForShard(shardID uint32) (PartitionOwnershi
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return store.topology.OwnershipForShard(shardID)
+	return normalizedTopologyOwnershipForShard(store.topology, store.fingerprint, shardID)
 }
 
 // OwnershipForKey returns a copy of the current ownership metadata for key.
@@ -217,7 +217,49 @@ func (store *TopologyStore) OwnershipForKey(key string) (PartitionOwnership, boo
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return store.topology.OwnershipForKey(key)
+	route, ok := normalizedTopologyRouteForKey(store.topology, key)
+	if !ok {
+		return PartitionOwnership{}, false
+	}
+	return normalizedTopologyOwnershipForShard(store.topology, store.fingerprint, route.Shard.ID)
+}
+
+// normalizedTopologyOwnershipForShard reads a topology already normalized by
+// TopologyStore. Keeping this path separate avoids rebuilding validation maps
+// for every control-plane lookup while returning the same independent snapshot.
+func normalizedTopologyOwnershipForShard(topology ClusterTopology, fingerprint string, shardID uint32) (PartitionOwnership, bool) {
+	var shard TopologyShard
+	if hatTopology.ModeFor(topology) == TopologyModeFullReplica {
+		if shardID != 0 || len(topology.Nodes) == 0 {
+			return PartitionOwnership{}, false
+		}
+		primary := strings.TrimSpace(topology.Self)
+		if primary == "" {
+			primary = topology.Nodes[0].ID
+		}
+		replicas := make([]string, 0, len(topology.Nodes)-1)
+		for _, node := range topology.Nodes {
+			if node.ID != primary {
+				replicas = append(replicas, node.ID)
+			}
+		}
+		shard = TopologyShard{ID: 0, Primary: primary, Replicas: replicas}
+	} else {
+		index := sort.Search(len(topology.Shards), func(index int) bool {
+			return topology.Shards[index].ID >= shardID
+		})
+		if index >= len(topology.Shards) || topology.Shards[index].ID != shardID {
+			return PartitionOwnership{}, false
+		}
+		shard = topology.Shards[index]
+	}
+	return PartitionOwnership{
+		ShardID:             shard.ID,
+		Primary:             shard.Primary,
+		Replicas:            append([]string(nil), shard.Replicas...),
+		TopologyFingerprint: fingerprint,
+		FencingToken:        topology.FencingToken,
+	}, true
 }
 
 // ValidatePartitionOwnership verifies ownership metadata against the current

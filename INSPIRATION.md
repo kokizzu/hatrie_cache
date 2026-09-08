@@ -564,7 +564,7 @@ explicit regional partitioning and simple backups over automatic sharding.
   falls back deterministically when the preferred region is unavailable. See
   [REPLICA_LOCALITY_ROUTING.md](REPLICA_LOCALITY_ROUTING.md) and
   [READ_CONSISTENCY.md](READ_CONSISTENCY.md).
-- [x] T079 Partition ownership and fencing metadata. `hatTopology.PartitionOwnership` exposes a stable primary/replica snapshot bound to the existing topology fingerprint and fencing token; `TopologyStore` forwards snapshot and write-validation APIs without changing legacy topology JSON or command behavior. See [PARTITION_OWNERSHIP.md](PARTITION_OWNERSHIP.md).
+- [x] T079 Partition ownership and fencing metadata. `hatTopology.PartitionOwnership` exposes a stable primary/replica snapshot bound to the existing topology fingerprint and fencing token; `TopologyStore` forwards snapshot and write-validation APIs through a zero-retained-memory normalized fast path without changing legacy topology JSON or command behavior. See [PARTITION_OWNERSHIP.md](PARTITION_OWNERSHIP.md).
 - [ ] T080 Partition split and merge tooling.
 - [x] T081 Partition-local query planning. `hatSql.PartitionPruningSourceResolver`
   participates in planning before source scans and preserves the full

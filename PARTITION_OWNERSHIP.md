@@ -22,7 +22,8 @@ their single logical partition as shard `0`. The returned replica slice and
 the `Owners` result are independent snapshots.
 
 `TopologyStore` exposes the same operations without requiring callers to
-manage a topology copy:
+manage a topology copy. Its lookup path reads the store's already-normalized
+topology and retains no separate ownership index:
 
 ```go
 ownership, ok := topologyStore.OwnershipForShard(7)

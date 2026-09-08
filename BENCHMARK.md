@@ -17499,3 +17499,22 @@ samples were run on Linux/amd64 with an AMD Ryzen 9 5950X.
 The reuse path is 1.45x faster, uses 1.84x fewer transient bytes, and makes
 1.40x fewer allocations. The change is internal to metadata snapshot creation;
 topology JSON, routing, and write-validation semantics are unchanged.
+
+## TopologyStore Ownership Fast Path
+
+Command: `make benchmark-t079-store-local-clean`.
+
+This benchmark measures the runtime `TopologyStore.OwnershipForShard` path
+before and after reading the store's already-normalized, sorted topology
+directly. Five samples were run on Linux/amd64 with an AMD Ryzen 9 5950X.
+The fast path retains no additional ownership map; it allocates only the
+independent returned replica slice.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Re-normalizing store wrapper | 1,229; 1,164; 1,142; 1,222; 1,163 | 1,164 | 720 | 20 |
+| Direct normalized snapshot | 70.91; 72.34; 70.74; 73.76; 70.02 | 70.91 | 16 | 1 |
+
+The direct path is 16.41x faster, uses 45.00x fewer transient bytes, and
+makes 20.00x fewer allocations. Store refresh and ownership-validation tests
+cover topology replacement and stale-write behavior.
