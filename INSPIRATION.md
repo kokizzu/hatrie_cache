@@ -579,7 +579,11 @@ explicit regional partitioning and simple backups over automatic sharding.
   and COUNT DISTINCT states deterministically; see
   [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md).
 - [ ] T084 Cross-partition ordered pagination.
-- [ ] T085 Partition health and lag dashboard.
+- [x] T085 Partition health and lag dashboard. The Svelte MPA Admin page
+  derives read-only per-partition primary, region, replica count, maximum
+  reported sequence lag, maintenance, and unknown states from `/api/topology`
+  and `/api/replication`; no routing, failover, or default configuration
+  changes are made. See [PARTITION_HEALTH.md](PARTITION_HEALTH.md).
 
 ### Queues, Calls, And Runtime
 

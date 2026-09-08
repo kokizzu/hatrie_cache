@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Activity, Clock3, Database, HardDrive, RefreshCw, Send, ShieldCheck } from '@lucide/svelte';
+  import { Activity, Clock3, Database, HardDrive, Network, RefreshCw, Send, ShieldCheck } from '@lucide/svelte';
   import Shell from '../components/Shell.svelte';
   import StatTile from '../components/StatTile.svelte';
   import {
@@ -9,6 +9,7 @@
     loadAuditEvents,
     loadReplicationStatus,
     loadStorageStatus,
+    loadTopology,
     syncReplication,
     type AuditEvent,
     type AuditStatus,
@@ -18,12 +19,15 @@
     type ReplicationQueueStats,
     type StorageCompactResult,
     type StorageFlushResult,
-    type StorageStatus
+    type StorageStatus,
+    type ClusterTopology
   } from '../lib/api';
   import { formatBytes, formatDuration, formatRelativeTime } from '../lib/format';
+  import { partitionHealthRows, partitionStatusTone } from '../lib/partition-health';
 
   let storage: StorageStatus | null = null;
   let replication: ReplicationResult | null = null;
+  let topology: ClusterTopology | null = null;
   let audit: AuditStatus | null = null;
   let lastFlush: StorageFlushResult | null = null;
   let lastCompact: StorageCompactResult | null = null;
@@ -43,10 +47,11 @@
   async function refresh() {
     loading = true;
     try {
-      const [nextStorage, nextReplication, nextAudit] = await Promise.all([loadStorageStatus(), loadReplicationStatus(), loadAuditEvents()]);
+      const [nextStorage, nextReplication, nextAudit, nextTopology] = await Promise.all([loadStorageStatus(), loadReplicationStatus(), loadAuditEvents(), loadTopology()]);
       storage = nextStorage;
       replication = nextReplication;
       audit = nextAudit;
+      topology = nextTopology;
     } finally {
       loading = false;
     }
@@ -208,6 +213,7 @@
   $: openCircuitBreakers = circuitBreakers.filter((breaker) => breaker.state === 'open' || breaker.state === 'half_open').length;
   $: dropsByTarget = targetRows(queue?.dropped_by_target);
   $: failuresByTarget = targetRows(queue?.failures_by_target);
+  $: partitionRows = partitionHealthRows(topology, replication);
 </script>
 
 <Shell active="admin">
@@ -367,6 +373,41 @@
         </tbody>
       </table>
     </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <div>
+        <h2>Partition Health</h2>
+        <p>{partitionRows.length ? `${partitionRows.length.toLocaleString()} routed partitions` : 'No routed partitions reported'}</p>
+      </div>
+      <Network size={18} aria-hidden="true" />
+    </div>
+    {#if topology?.version === 0}
+      <p class="notice">Topology is unavailable or not configured.</p>
+    {:else if !partitionRows.length}
+      <p class="notice">No shard ownership data is available.</p>
+    {:else}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Partition</th><th>Primary</th><th>Region</th><th>Replicas</th><th>Max lag</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {#each partitionRows as partition}
+              <tr>
+                <td><code>{partition.id}</code></td>
+                <td>{partition.primary}</td>
+                <td>{partition.region}</td>
+                <td>{partition.replicas}</td>
+                <td>{partition.lag === null ? 'unreported' : `${partition.lag.toLocaleString()} seq`}</td>
+                <td><span class={`result-pill ${partitionStatusTone(partition.status)}`}>{partition.status}</span></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </section>
 
   {#if circuitBreakers.length}

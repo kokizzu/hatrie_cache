@@ -137,6 +137,7 @@ if [ -n "$browser" ]; then
 	fi
 	grep -q 'Persistent Storage' "$dom_file"
 	grep -q 'Replication' "$dom_file"
+	grep -q 'Partition Health' "$dom_file"
 	grep -q 'Audit Trail' "$dom_file"
 else
 	if bool_true "${FRONTEND_SMOKE_REQUIRE_BROWSER:-false}"; then

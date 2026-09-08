@@ -7,6 +7,7 @@ import {
   loadEntries,
   loadReplicationStatus,
   loadStorageStatus,
+  loadTopology,
   runCommand,
   runSQL,
   sampleCommandResponse,
@@ -231,6 +232,38 @@ describe('command fallback', () => {
       queue: { depth: 1, capacity: 4 }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads topology snapshots for the partition health view', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request) => {
+      expect(path).toBe('/api/topology');
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          mode: 'sharded',
+          self: 'node-a',
+          nodes: [
+            { id: 'node-a', address: 'http://node-a', region: 'asia', role: 'primary' },
+            { id: 'node-b', address: 'http://node-b', region: 'europe', role: 'replica' }
+          ],
+          shards: [{ id: 3, primary: 'node-a', replicas: ['node-b'] }]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadTopology()).resolves.toEqual({
+      version: 1,
+      mode: 'sharded',
+      self: 'node-a',
+      nodes: [
+        { id: 'node-a', address: 'http://node-a', region: 'asia', role: 'primary' },
+        { id: 'node-b', address: 'http://node-b', region: 'europe', role: 'replica' }
+      ],
+      shards: [{ id: 3, primary: 'node-a', replicas: ['node-b'] }]
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('loads recent audit events with a bounded limit', async () => {

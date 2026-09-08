@@ -173,6 +173,10 @@ export type ReplicationQueueStats = {
   enabled: boolean;
   depth: number;
   capacity: number;
+  source_sequence?: number;
+  last_acknowledged_sequence_by_target?: Record<string, number>;
+  replication_lag_by_target?: Record<string, number>;
+  vector_clock?: Record<string, number>;
   enqueued: number;
   dropped: number;
   attempts: number;
@@ -225,6 +229,41 @@ export type ReplicationResult = {
   duration_millis?: number;
   queue?: ReplicationQueueStats;
   targets?: ReplicationTargetResult[];
+};
+
+export type TopologyNode = {
+  id: string;
+  address: string;
+  grpc_address?: string;
+  role?: string;
+  failure_domain?: string;
+  region?: string;
+  maintenance?: boolean;
+  maintenance_reason?: string;
+  maintenance_since?: string;
+};
+
+export type TopologyShard = {
+  id: number;
+  primary: string;
+  replicas?: string[];
+};
+
+export type TopologyBucketRange = {
+  start: number;
+  end: number;
+  shard: number;
+};
+
+export type ClusterTopology = {
+  version: number;
+  mode?: string;
+  bucket_count?: number;
+  bucket_ranges?: TopologyBucketRange[];
+  self?: string;
+  fencing_token?: number;
+  nodes: TopologyNode[];
+  shards?: TopologyShard[];
 };
 
 export type ReplicationCircuitBreakerTarget = {
@@ -579,6 +618,14 @@ export async function compactStorage(startKey = '', limitKey = ''): Promise<Stor
 
 export async function loadReplicationStatus(): Promise<ReplicationResult> {
   return readJSONWithFallback<ReplicationResult>('/api/replication', sampleReplicationResult);
+}
+
+export async function loadTopology(): Promise<ClusterTopology> {
+  return readJSONWithFallback<ClusterTopology>('/api/topology', {
+    version: 0,
+    nodes: [],
+    shards: []
+  });
 }
 
 export async function loadAuditEvents(limit = 25): Promise<AuditStatus> {

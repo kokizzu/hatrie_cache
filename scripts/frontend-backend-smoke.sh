@@ -75,7 +75,7 @@ if ! bool_true "${FRONTEND_BACKEND_SMOKE_SKIP_BUILD:-false}"; then
 	cd "$ROOT"
 fi
 
-go build -o "$server_bin" ./cmd/hatrie-cache
+go build -buildvcs=false -o "$server_bin" ./cmd/hatrie-cache
 
 "$server_bin" \
 	-monitoring-server \
@@ -183,5 +183,6 @@ grep -q 'cache.leveldb' "$dom_file"
 grep -q 'Audit Trail' "$dom_file"
 grep -q 'storage.flush' "$dom_file"
 grep -q 'Replication' "$dom_file"
+grep -q 'Partition Health' "$dom_file"
 
 echo "frontend backend smoke: ok $base_url"
