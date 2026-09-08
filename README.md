@@ -3936,6 +3936,22 @@ existing scan path. On the 100,000-row benchmark this reduced execution time
 from `838.151 us` to `2.647 us` (about `316.6x`) with unchanged `2,688 B/op`
 and `14 allocs/op`; see [BENCHMARK.md](BENCHMARK.md#columnar-metadata-count).
 
+## SQL Columnar Metadata MIN/MAX
+
+Direct predicate-free `MIN(numeric_field)` and `MAX(numeric_field)` queries on
+columnar `CACHE` sources combine complete numeric segment bounds instead of
+reading every row. `COUNT(*)` can use the same path in a mixed aggregate query.
+The executor requires complete finite bounds for every segment; missing,
+invalid, nullable-only, or ambiguous metadata falls back to the established
+row scan, and filtered or richer aggregates are unchanged. There is no new
+configuration flag, persistence format, or wire-format change.
+
+The measured 100,000-row read went from a 6.373 ms median row scan to a
+6.141 us median metadata read, about 1,037.8x faster, with the same 3,456 B/op
+and 17 allocations/op. See
+[BENCHMARK.md](BENCHMARK.md#columnar-metadata-minmax) for the raw five-run
+comparison.
+
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a

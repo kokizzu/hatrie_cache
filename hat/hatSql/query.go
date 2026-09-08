@@ -9153,10 +9153,13 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		return SQLQueryResult{}, false, nil
 	}
 	countOnlyMetadata := sqlColumnarCountOnlyMetadata(aggregates, q.where)
+	metadataAggregates := sqlColumnarMetadataAggregates(aggregates, q.where, segments, batch.Rows)
 	if metrics != nil {
 		node := "COLUMNAR SCAN"
 		if countOnlyMetadata {
 			node = "COLUMNAR COUNT METADATA"
+		} else if metadataAggregates {
+			node = "COLUMNAR AGGREGATE METADATA"
 		}
 		metrics.record(node, sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
@@ -9205,10 +9208,8 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		}
 		return nil
 	}
-	if countOnlyMetadata {
-		for index := range aggregates {
-			aggregates[index].count = int64(batch.Rows)
-		}
+	if metadataAggregates {
+		sqlColumnarApplyMetadataAggregates(aggregates, segments, batch.Rows)
 		matched = batch.Rows
 	} else if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
 		segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
@@ -9475,6 +9476,75 @@ func sqlColumnarCountOnlyMetadata(aggregates []sqlColumnarNumericAggregate, wher
 		}
 	}
 	return true
+}
+
+// sqlColumnarMetadataAggregates accepts only aggregate shapes whose result can
+// be reconstructed from immutable batch metadata. MIN/MAX require complete,
+// finite numeric segment bounds; ambiguous metadata keeps the row scan.
+func sqlColumnarMetadataAggregates(aggregates []sqlColumnarNumericAggregate, where sqlExpr, segments *ColumnarNumericSegments, rows int) bool {
+	if len(aggregates) == 0 || where.kind != "" {
+		return false
+	}
+	for _, aggregate := range aggregates {
+		switch aggregate.name {
+		case "COUNT":
+			if aggregate.field != "" {
+				return false
+			}
+		case "MIN", "MAX":
+			if !sqlColumnarCompleteNumericMetadata(segments, aggregate.field, rows) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func sqlColumnarCompleteNumericMetadata(segments *ColumnarNumericSegments, field string, rows int) bool {
+	if segments == nil || field == "" || rows <= 0 || segments.RowsPerSegment <= 0 {
+		return false
+	}
+	segmentCount := rows / segments.RowsPerSegment
+	if rows%segments.RowsPerSegment != 0 {
+		segmentCount++
+	}
+	fieldSegments, ok := segments.Columns[field]
+	if !ok || len(fieldSegments) != segmentCount {
+		return false
+	}
+	for _, segment := range fieldSegments {
+		if !segment.Valid || math.IsNaN(segment.Minimum) || math.IsNaN(segment.Maximum) || math.IsInf(segment.Minimum, 0) || math.IsInf(segment.Maximum, 0) || segment.Minimum > segment.Maximum {
+			return false
+		}
+	}
+	return true
+}
+
+func sqlColumnarApplyMetadataAggregates(aggregates []sqlColumnarNumericAggregate, segments *ColumnarNumericSegments, rows int) {
+	for index := range aggregates {
+		aggregate := &aggregates[index]
+		switch aggregate.name {
+		case "COUNT":
+			aggregate.count = int64(rows)
+		case "MIN", "MAX":
+			for _, segment := range segments.Columns[aggregate.field] {
+				value := segment.Minimum
+				if aggregate.name == "MAX" {
+					value = segment.Maximum
+				}
+				if !aggregate.seen {
+					aggregate.value = value
+					aggregate.seen = true
+					continue
+				}
+				if aggregate.name == "MIN" && value < aggregate.value || aggregate.name == "MAX" && value > aggregate.value {
+					aggregate.value = value
+				}
+			}
+		}
+	}
 }
 
 func sqlColumnarAggregateField(expr sqlExpr, alias string, field *string) bool {

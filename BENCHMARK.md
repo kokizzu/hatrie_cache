@@ -17274,6 +17274,28 @@ why TypedTableColumnarCacheOptions.CompressedBatches is opt-in and defaults
 to false; it is appropriate for memory-constrained caches where residency
 matters more than read CPU and allocation rate.
 
+## Columnar Metadata MIN/MAX
+
+Workload: `SELECT MIN(score), MAX(score)` over a 100,000-row numeric columnar
+batch. The metadata case used the existing complete 256-row numeric segment
+bounds; the legacy case supplied no segment sidecar and performed the existing
+row-by-row aggregate scan. Command:
+
+    make benchmark-columnar-minmax-metadata-local-clean
+
+Raw five-run samples on AMD Ryzen 9 5950X, Linux/amd64:
+
+| Mode | Run 1 ns/op | Run 2 ns/op | Run 3 ns/op | Run 4 ns/op | Run 5 ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy row scan | 6,667,771 | 6,443,346 | 6,190,873 | 6,279,591 | 6,373,338 | 3,456 | 17 |
+| Segment metadata | 6,622 | 6,102 | 6,232 | 6,141 | 6,140 | 3,456 | 17 |
+
+The median fell from 6,373,338 ns (6.373 ms) to 6,141 ns (6.141 us), or
+about 1,037.8x faster. Allocations and transient bytes were unchanged because
+the optimization combines already-available immutable segment bounds. It is
+limited to predicate-free `MIN`/`MAX` plus `COUNT(*)`; incomplete or ambiguous
+metadata retains the established row scan.
+
 ## Columnar Metadata COUNT(*)
 
 Command: `make benchmark-columnar-count-metadata-local-clean`.
