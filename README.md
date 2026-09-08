@@ -18,6 +18,7 @@ security guidance before exposing it on a network.
 - Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
 - Leader election independent from query workers: [leader election](LEADER_ELECTION.md)
 - Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
+- Persistent shard ownership leases: [persistent shard leases](PERSISTENT_SHARD_LEASES.md)
 - Cross-region replication policy: [cross-region replication](CROSS_REGION_REPLICATION.md)
 - Failure-domain-aware replica placement: [failure-domain placement](FAILURE_DOMAIN_PLACEMENT.md)
 - Deterministic weighted disk placement: [disk placement](DISK_PLACEMENT.md)

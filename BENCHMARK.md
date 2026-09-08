@@ -1363,6 +1363,31 @@ Baseline milliseconds were `14.460, 20.531, 17.039, 15.102, 16.285,
 `build/benchmarks/startup-persistence.txt`.
 
 <a id="persistent-storage-backend-bakeoff"></a>
+## Persistent Shard Lease Acquisition
+
+`BenchmarkPersistentShardLeaseAcquireRelease` repeatedly acquires and releases
+one local shard lease, including the durable token state write, file sync, and
+directory sync. This is a lifecycle benchmark rather than a row-mutation
+benchmark; callers should acquire once per owned shard and validate the token
+at write boundaries.
+
+Five samples on an AMD Ryzen 9 5950X, `linux/amd64`, one CPU, using
+`go test -benchmem -count=5 -cpu=1`:
+
+| Operation | Median time | Heap | Allocations |
+| --- | ---: | ---: | ---: |
+| Acquire plus release | 1,590,246 ns/op | 4,615 B/op | 45 allocs/op |
+
+Raw output:
+
+```text
+1533909, 1590246, 1760913, 1544612, 1649188 ns/op; 4615-4616 B/op; 45 allocs/op
+```
+
+The lease is intentionally not enabled by existing stores. The cost buys
+cross-process exclusion and durable fencing-token advancement; it must not be
+placed in a per-record write loop.
+
 ### Persistent Storage Backend Bakeoff
 
 <a id="pebble-generation-full-save"></a>
