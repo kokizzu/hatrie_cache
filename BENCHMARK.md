@@ -16671,3 +16671,36 @@ For nullable boolean columns, `Validity` stores one bit per logical row and
 Bitmap lengths and unused trailing bits are validated before a SQL scan. The
 default remains the legacy representation because the packed accessor has a
 small CPU cost despite its substantial storage reduction.
+
+## Fixed-Width Numeric Arrangement Columns
+
+Columnar numeric values can avoid the 16-byte interface slot retained by the
+legacy `[]interface{}` representation. `ColumnarBatch.PackNumericColumns`
+provides an explicit fixed-width representation for homogeneous `int64` or
+`float64` columns, plus one validity bitmap only when NULLs exist. It preserves
+exact integer values and floating-point bit patterns, while unsupported and
+mixed-type columns remain in `Columns`. SQL filtering and vertical merges use
+the same logical accessor, and the legacy producer layout remains the default.
+
+Five benchmark samples were collected on an AMD Ryzen 9 5950X with one CPU,
+500 ms per sample, and 4,096 all-valid `int64` rows. Lower is better. The
+benchmark reads every row through `ColumnarBatch.Value` and reports the
+retained column layout separately from query allocations.
+
+| Path | Median | Retained value payload | Query heap | Query allocations | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy `[]interface{}` | 99,209 ns/op | 65,536 bytes | 0 B/op | 0 allocs/op | baseline |
+| Fixed-width numeric words | 115,010 ns/op | 32,768 bytes | 0 B/op | 0 allocs/op | 2.00x less payload; 1.16x slower CPU; allocation neutral |
+
+Raw five-sample output:
+
+```text
+legacy: 99950, 100277, 99209, 97873, 91586 ns/op; 65536 layout-bytes/op; 0 B/op; 0 allocs/op
+packed: 110560, 115010, 115022, 122909, 105224 ns/op; 32768 layout-bytes/op; 0 B/op; 0 allocs/op
+```
+
+The packed form is therefore a memory-saving opt-in for retained analytic
+batches, not a CPU optimization. Its admission check compares the fixed data
+and optional bitmap with the legacy interface-slot estimate, so very small or
+unsupported columns stay unchanged. Row-count, kind, byte-length, validity,
+and trailing-bit checks reject malformed packed input before SQL scans.

@@ -2,6 +2,8 @@ package hatSql
 
 import (
 	"context"
+	"encoding/binary"
+	"math"
 	"math/bits"
 	"strings"
 )
@@ -103,18 +105,39 @@ type ColumnarBoolColumn struct {
 	Rows     int
 }
 
+// ColumnarNumericKind identifies the fixed-width numeric representation.
+type ColumnarNumericKind uint8
+
+const (
+	ColumnarNumericInt64 ColumnarNumericKind = iota + 1
+	ColumnarNumericFloat64
+)
+
+// ColumnarNumericColumn stores int64 or float64 values as little-endian
+// 64-bit words. Validity is nil when every row is non-NULL; otherwise it
+// contains one bit per row with set bits marking non-NULL values. It is an
+// optional representation selected by PackNumericColumns.
+type ColumnarNumericColumn struct {
+	Kind     ColumnarNumericKind
+	Data     []byte
+	Validity []byte
+	Rows     int
+}
+
 // ColumnarBatch stores one source scan as field-aligned value slices, compact
-// dictionary, nullable-packed, or bit-packed boolean columns, or offset-based
-// array/nested columns. Every requested field must contain Rows logical values;
-// absent JSON fields are nil in a plain column and are not dictionary encoded.
+// dictionary, nullable-packed, bit-packed boolean, or fixed-width numeric
+// columns, or offset-based array/nested columns. Every requested field must
+// contain Rows logical values; absent JSON fields are nil in a plain column
+// and are not dictionary encoded.
 type ColumnarBatch struct {
-	Columns       map[string][]interface{}
-	Dictionaries  map[string]DictionaryColumn
-	PackedColumns map[string]ColumnarPackedColumn
-	BoolColumns   map[string]ColumnarBoolColumn
-	ListColumns   map[string]ColumnarListColumn
-	NestedColumns map[string]ColumnarNestedColumn
-	Rows          int
+	Columns        map[string][]interface{}
+	Dictionaries   map[string]DictionaryColumn
+	PackedColumns  map[string]ColumnarPackedColumn
+	BoolColumns    map[string]ColumnarBoolColumn
+	NumericColumns map[string]ColumnarNumericColumn
+	ListColumns    map[string]ColumnarListColumn
+	NestedColumns  map[string]ColumnarNestedColumn
+	Rows           int
 }
 
 // ColumnarNumericSegment stores the numeric value bounds for one contiguous
@@ -245,6 +268,9 @@ func (batch ColumnarBatch) FieldRows(field string) int {
 	if column, ok := batch.BoolColumns[field]; ok {
 		return column.RowCount()
 	}
+	if column, ok := batch.NumericColumns[field]; ok {
+		return column.RowCount()
+	}
 	if values, ok := batch.Columns[field]; ok {
 		return len(values)
 	}
@@ -283,6 +309,9 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		return column.Value(row)
 	}
 	if column, ok := batch.BoolColumns[field]; ok {
+		return column.Value(row)
+	}
+	if column, ok := batch.NumericColumns[field]; ok {
 		return column.Value(row)
 	}
 	values, ok := batch.Columns[field]
@@ -522,6 +551,143 @@ func (batch *ColumnarBatch) PackBooleanColumns() {
 			batch.BoolColumns = make(map[string]ColumnarBoolColumn)
 		}
 		batch.BoolColumns[field] = ColumnarBoolColumn{Bits: bitsBitmap, Validity: validityBitmap, Rows: rows}
+		delete(batch.Columns, field)
+	}
+}
+
+func columnarFixedWidthBytes(rows, width int) int {
+	if rows <= 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if rows > maxInt/width {
+		return -1
+	}
+	return rows * width
+}
+
+// RowCount returns the logical row count when the numeric column metadata is
+// structurally valid. Invalid widths, kinds, or trailing bitmap bits return
+// zero so source validation rejects the batch.
+func (column ColumnarNumericColumn) RowCount() int {
+	dataBytes := columnarFixedWidthBytes(column.Rows, 8)
+	bitmapBytes := columnarPackedBitmapBytes(column.Rows)
+	if column.Rows < 0 || dataBytes < 0 || len(column.Data) != dataBytes || (column.Validity != nil && len(column.Validity) != bitmapBytes) {
+		return 0
+	}
+	if column.Kind != ColumnarNumericInt64 && column.Kind != ColumnarNumericFloat64 {
+		return 0
+	}
+	if !columnarBitmapHasNoTrailingBits(column.Validity, column.Rows) {
+		return 0
+	}
+	return column.Rows
+}
+
+// Value returns the logical numeric value at row. A NULL row returns
+// (nil, true), while an out-of-range or malformed row returns (nil, false).
+func (column ColumnarNumericColumn) Value(row int) (interface{}, bool) {
+	dataBytes := columnarFixedWidthBytes(column.Rows, 8)
+	bitmapBytes := columnarPackedBitmapBytes(column.Rows)
+	if row < 0 || row >= column.Rows || dataBytes < 0 || len(column.Data) != dataBytes || (column.Validity != nil && len(column.Validity) != bitmapBytes) {
+		return nil, false
+	}
+	if column.Kind != ColumnarNumericInt64 && column.Kind != ColumnarNumericFloat64 || !columnarBitmapHasNoTrailingBits(column.Validity, column.Rows) {
+		return nil, false
+	}
+	byteIndex := row >> 3
+	mask := byte(1 << uint(row&7))
+	if column.Validity != nil && column.Validity[byteIndex]&mask == 0 {
+		return nil, true
+	}
+	offset := row << 3
+	bitsValue := binary.LittleEndian.Uint64(column.Data[offset : offset+8])
+	if column.Kind == ColumnarNumericInt64 {
+		return int64(bitsValue), true
+	}
+	return math.Float64frombits(bitsValue), true
+}
+
+// PackNumericColumns moves plain int64 and float64 columns into a fixed-width
+// little-endian representation when the estimated retained storage is smaller.
+// It is explicit opt-in; legacy Columns remains the default.
+func (batch *ColumnarBatch) PackNumericColumns() {
+	if batch == nil || len(batch.Columns) == 0 {
+		return
+	}
+	for field, values := range batch.Columns {
+		rows := len(values)
+		if rows == 0 {
+			continue
+		}
+		kind := ColumnarNumericKind(0)
+		hasNull := false
+		valid := true
+		for _, value := range values {
+			if value == nil {
+				hasNull = true
+				continue
+			}
+			valueKind := ColumnarNumericKind(0)
+			switch value.(type) {
+			case int64:
+				valueKind = ColumnarNumericInt64
+			case float64:
+				valueKind = ColumnarNumericFloat64
+			default:
+				valid = false
+			}
+			if !valid {
+				break
+			}
+			if kind == 0 {
+				kind = valueKind
+			} else if kind != valueKind {
+				valid = false
+				break
+			}
+		}
+		if !valid || kind == 0 {
+			continue
+		}
+		dataBytes := columnarFixedWidthBytes(rows, 8)
+		legacyBytes := columnarFixedWidthBytes(rows, 16)
+		if dataBytes < 0 || legacyBytes < 0 {
+			continue
+		}
+		bitmapBytes := 0
+		if hasNull {
+			bitmapBytes = columnarPackedBitmapBytes(rows)
+		}
+		if dataBytes+bitmapBytes >= legacyBytes {
+			continue
+		}
+		data := make([]byte, dataBytes)
+		var validityBitmap []byte
+		if hasNull {
+			validityBitmap = make([]byte, bitmapBytes)
+		}
+		for row, value := range values {
+			if value == nil {
+				continue
+			}
+			byteIndex := row >> 3
+			mask := byte(1 << uint(row&7))
+			if hasNull {
+				validityBitmap[byteIndex] |= mask
+			}
+			var bitsValue uint64
+			if kind == ColumnarNumericInt64 {
+				bitsValue = uint64(value.(int64))
+			} else {
+				bitsValue = math.Float64bits(value.(float64))
+			}
+			binary.LittleEndian.PutUint64(data[row<<3:], bitsValue)
+		}
+		if batch.NumericColumns == nil {
+			batch.NumericColumns = make(map[string]ColumnarNumericColumn)
+		}
+		batch.NumericColumns[field] = ColumnarNumericColumn{Kind: kind, Data: data, Validity: validityBitmap, Rows: rows}
 		delete(batch.Columns, field)
 	}
 }
