@@ -59,8 +59,16 @@ contexts are rejected before the local command runs. For a valid direct
 replicator, the local command is applied before remote acknowledgements are
 collected. If the threshold is not met, the response reports
 `ErrWriteQuorumUnsatisfied`, but the local write remains applied; callers must
-reconcile or retry using an idempotent command. `BATCH` and internal
-replication commands retain their existing transaction and replication paths.
+reconcile or retry using an idempotent command. Non-eligible `BATCH` and
+internal replication commands retain their existing transaction and
+replication paths.
+
+An atomic public `BATCH` also honors `WriteQuorum` when every item is an eligible
+journaled write command with a key. The batch is validated before local
+mutation, committed or rolled back locally using the existing atomic batch
+logic, and sent as one grouped `INTERNALBATCHV2` per replication target. A
+remote quorum failure does not roll back the local atomic commit; rollback-free
+cluster-wide commit is not provided by this path.
 
 ## Measured Cost
 

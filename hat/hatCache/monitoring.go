@@ -2002,6 +2002,12 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if trie.localPartitionSet() != nil {
 		return executePartitionedPublicCommandBatch(ctx, trie, request, payloads, options)
 	}
+	batchQuorum := request.Atomic && options.WriteQuorum > 0 && atomicBatchWriteQuorumEligible(payloads)
+	if batchQuorum {
+		if err := validateCommandWriteQuorum(ctx, options); err != nil {
+			return commandError(err.Error()), true
+		}
+	}
 	effects := newPublicCommandBatchEffects(options)
 	if effects.journal != nil {
 		effects.journal.mu.Lock()
@@ -2053,8 +2059,32 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if commitErr != nil {
 		return commandError(commitErr.Error()), false
 	}
+	if batchQuorum {
+		if !response.OK {
+			return response, false
+		}
+		effects.publishDirty()
+		if _, err := options.Replicator.replicatePlannedBatchWithQuorum(ctx, effects.planned, options.WriteQuorum); err != nil {
+			response.OK = false
+			response.Message = err.Error()
+			return response, true
+		}
+		return response, false
+	}
 	effects.publish(ctx)
 	return response, false
+}
+
+func atomicBatchWriteQuorumEligible(payloads []CacheCommandRequest) bool {
+	if len(payloads) == 0 {
+		return false
+	}
+	for index, payload := range payloads {
+		if validatePublicCommandBatchPayload(payload, index) != nil || !commandWriteQuorumEligible(payload) {
+			return false
+		}
+	}
+	return true
 }
 
 type publicCommandBatchRollback struct {
@@ -2363,15 +2393,22 @@ func (effects *publicCommandBatchEffects) rollbackLocked(trie *HatTrie, cause er
 }
 
 func (effects *publicCommandBatchEffects) publish(ctx context.Context) {
-	for _, request := range effects.dirtyRequests {
-		effects.dirtyTracker.markCommand(request)
-	}
+	effects.publishDirty()
 	if effects.replicator != nil && effects.planned.seen {
 		if effects.journalJob.journalSeq != 0 {
 			effects.replicator.replicateJournalJob(ctx, effects.journalJob)
 		} else {
 			effects.replicator.replicatePlannedBatch(ctx, effects.planned)
 		}
+	}
+}
+
+func (effects *publicCommandBatchEffects) publishDirty() {
+	if effects.dirtyTracker == nil {
+		return
+	}
+	for _, request := range effects.dirtyRequests {
+		effects.dirtyTracker.markCommand(request)
 	}
 }
 

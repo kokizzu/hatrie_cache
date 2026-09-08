@@ -823,6 +823,75 @@ func (replicator *HTTPReplicator) ReplicateCommandWithQuorum(ctx context.Context
 	return result, decisionErr
 }
 
+func (replicator *HTTPReplicator) replicatePlannedBatchWithQuorum(ctx context.Context, planned plannedReplicationBatch, required int) (ReplicationResult, error) {
+	if required < 1 {
+		return ReplicationResult{
+			Command: "BATCH",
+			Skipped: true,
+			Reason:  "write quorum configuration is invalid",
+		}, fmt.Errorf("%w: required=%d", hatReplication.ErrWriteQuorumInvalid, required)
+	}
+	if replicator == nil {
+		return ReplicationResult{
+			Command: "BATCH",
+			Skipped: true,
+			Reason:  "replication is not configured",
+		}, fmt.Errorf("%w: replication is not configured", hatReplication.ErrWriteQuorumInvalid)
+	}
+	if replicator.queue != nil {
+		return ReplicationResult{
+			Command: "BATCH",
+			Skipped: true,
+			Reason:  hatReplication.ErrWriteQuorumAsynchronous.Error(),
+		}, hatReplication.ErrWriteQuorumAsynchronous
+	}
+
+	ctx = replicationContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return ReplicationResult{
+			Command: "BATCH",
+			Skipped: true,
+			Reason:  err.Error(),
+		}, err
+	}
+
+	startedAt := time.Now().UTC()
+	result, tasks := aggregatePlannedReplication(planned)
+	if len(tasks) == 0 {
+		result = finishReplicationResult(result, startedAt)
+		result = replicator.attachReplicationHealth(result)
+		replicator.storeLastResult(result)
+		return result, fmt.Errorf("%w: %s", hatReplication.ErrWriteQuorumUnsatisfied, result.Reason)
+	}
+	participants := len(replicator.groupReplicationTasksByTarget(tasks)) + 1
+	if required > participants {
+		err := fmt.Errorf("%w: required=%d exceeds participants=%d", hatReplication.ErrWriteQuorumInvalid, required, participants)
+		result.Reason = err.Error()
+		result = finishReplicationResult(result, startedAt)
+		result = replicator.attachReplicationHealth(result)
+		replicator.storeLastResult(result)
+		return result, err
+	}
+	result = replicator.executeReplicationTasks(ctx, result, tasks)
+	acknowledged := 1
+	for _, target := range result.Targets {
+		if target.OK {
+			acknowledged++
+		}
+	}
+	decision, decisionErr := hatReplication.EvaluateWriteQuorum(len(result.Targets)+1, acknowledged, required)
+	if decisionErr == nil || errors.Is(decisionErr, hatReplication.ErrWriteQuorumUnsatisfied) {
+		result.Quorum = &decision
+	}
+	if decisionErr != nil {
+		result.Reason = decisionErr.Error()
+	}
+	result = finishReplicationResult(result, startedAt)
+	result = replicator.attachReplicationHealth(result)
+	replicator.storeLastResult(result)
+	return result, decisionErr
+}
+
 func (replicator *HTTPReplicator) replicatePlannedBatch(ctx context.Context, planned plannedReplicationBatch) ReplicationResult {
 	if replicator == nil {
 		return withReplicationHealth(ReplicationResult{

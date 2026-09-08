@@ -4245,6 +4245,9 @@ commands, set `MonitoringOptions.WriteQuorum` or `CacheGRPCOptions.WriteQuorum`
 to a positive threshold; the default `0` keeps the existing behavior. The
 command path applies locally before waiting for remote acknowledgements, so an
 unsatisfied quorum is a failed durability response rather than a rollback.
+Eligible atomic public `BATCH` write requests use the same threshold and one
+grouped replication envelope; see [WRITE_QUORUM.md](WRITE_QUORUM.md) for the
+eligibility and failure semantics.
 
 ## Explicit Read Quorum
 
