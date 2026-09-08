@@ -574,6 +574,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T118 Parameter binding.
 - [x] T119 SQL views.
 - [ ] T120 SQL triggers with transaction semantics.
+- [x] T120a Strict row-level `CREATE TRIGGER` parsing and explicit registry registration for `AFTER` DML events; automatic DML wiring remains caller-owned, see [SQL_TRIGGERS.md](SQL_TRIGGERS.md).
 - [x] T121 Public SQL transaction commands. `CompileSQL` exposes `BEGIN ATOMIC` programs with savepoints, and `BeginSQLTransaction` exposes snapshot reads, rollback, conflict-aware commit, and savepoint methods.
 - [x] T122 UPSERT behavior.
 - [x] T123 REPLACE behavior.

@@ -16805,3 +16805,21 @@ This is a targeted hot-query optimization, not a replacement for the bounded
 cache: compiling a query once adds the retained plan's memory and has no
 payback for one-shot execution. `ExecuteRows` uses the same handle and keeps
 the streaming contract.
+## SQL Trigger Definition Parsing
+
+The strict row-level `CREATE TRIGGER` parser was measured independently from
+the mutation path. Five samples used
+`-run '^$' -bench '^BenchmarkParseSQLTriggerDefinition$' -benchmem -count=5
+-benchtime=500ms -cpu=1` on an AMD Ryzen 9 5950X. The median was `522.1 ns/op`,
+`896 B/op`, and one allocation per definition. This is control-plane setup
+cost; ordinary SQL queries and caller-owned DML do not invoke it.
+
+Raw output from `make benchmark-sql-trigger-definition-local-clean`:
+
+```text
+BenchmarkParseSQLTriggerDefinition 1156185 522.0 ns/op 896 B/op 1 allocs/op
+BenchmarkParseSQLTriggerDefinition 1154758 523.0 ns/op 896 B/op 1 allocs/op
+BenchmarkParseSQLTriggerDefinition 1164985 539.4 ns/op 896 B/op 1 allocs/op
+BenchmarkParseSQLTriggerDefinition 1148383 513.1 ns/op 896 B/op 1 allocs/op
+BenchmarkParseSQLTriggerDefinition 1163752 522.1 ns/op 896 B/op 1 allocs/op
+```

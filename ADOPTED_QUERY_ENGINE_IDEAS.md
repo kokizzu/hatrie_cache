@@ -116,6 +116,8 @@ explicitly opt-in operational control.
 | ClickHouse / Materialize | OpenTelemetry spans for query phases | Implemented, opt-in | `QueryTraceRecorder.OpenTelemetrySpans` emits SDK-neutral query root and operator child spans with OTLP-compatible IDs, statuses, counters, independent attributes, and no SQL/error/value retention. See [QUERY_TRACING.md](QUERY_TRACING.md). |
 | ClickHouse | Fixed-width numeric arrangement vectors | Adopted as an additive opt-in | `ColumnarBatch.PackNumericColumns` stores homogeneous `int64`/`float64` values in fixed-width words with an optional NULL bitmap; `Value`, SQL predicates, and vertical merges preserve logical values, while legacy `Columns` remains the default. The controlled 4,096-row benchmark cuts layout bytes 2.00x with 0 allocations and measures a 1.16x lookup CPU cost. |
 
+| Tarantool | Declarative row-level SQL triggers | Adopted as an explicit API | `ParseSQLTriggerDefinition` validates `AFTER ... FOR EACH ROW` DDL and `SQLTriggerRegistry.RegisterSQLTrigger` binds it to the existing caller-owned transactional trigger coordinator; unsupported `BEFORE` timing and automatic DML wiring remain rejected. See [SQL_TRIGGERS.md](SQL_TRIGGERS.md). |
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge

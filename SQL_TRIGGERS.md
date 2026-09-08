@@ -1,9 +1,10 @@
 # Transactional SQL Triggers
 
 `hat/hatSql` exposes an importable transaction trigger coordinator for code
-that already owns a SQL mutation path. It is deliberately separate from the
-SQL parser: callers stage row events, provide the primary storage participant,
-and receive deterministic prepare, commit, and rollback behavior.
+that already owns a SQL mutation path. It also parses and registers a strict
+row-level `CREATE TRIGGER` definition through `RegisterSQLTrigger`; callers
+still stage row events and provide the primary storage participant, receiving
+deterministic prepare, commit, and rollback behavior.
 
 ```go
 registry := hatSql.NewSQLTriggerRegistry()
@@ -35,6 +36,21 @@ return transaction.Commit(func(context.Context, []hatSql.SQLTriggerEvent) (hatSq
 })
 ```
 
+The SQL definition path accepts `CREATE TRIGGER name AFTER INSERT|UPDATE|DELETE|REPLACE
+ON source FOR EACH ROW`, with an optional trailing semicolon. The parser
+rejects `BEFORE`, statement-level triggers, unsupported operations, and
+additional statements. Registration remains explicit so an application can
+bind the callback to its own storage and side-effect policy:
+
+```go
+if err := registry.RegisterSQLTrigger(
+	"CREATE TRIGGER audit AFTER INSERT ON people FOR EACH ROW",
+	prepareAudit,
+); err != nil {
+	return err
+}
+```
+
 Triggers are sorted by ascending `Order`, then name. Events retain their add
 order. Matching is exact for non-empty `Source` and `Operation`; an empty
 filter is a wildcard. All matching trigger preparation callbacks run before
@@ -51,11 +67,11 @@ created by default.
 
 ## Current Boundary
 
-This is the reusable transaction primitive behind future SQL trigger syntax;
-it does not add `CREATE TRIGGER`, automatic DML wiring, or cross-process
-trigger replication. Those remain separate work because they need a storage
-transaction contract and an explicit failure policy for external side
-effects.
+The parser and registration helper cover the safe row-level DDL shape, but DML
+wiring remains caller-owned. The package does not execute trigger bodies,
+create a registry by default, or replicate trigger definitions across
+processes; those require an explicit storage transaction contract and failure
+policy for external side effects.
 
 ## Verification
 
