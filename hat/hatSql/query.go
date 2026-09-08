@@ -260,6 +260,10 @@ type SQLQueryOptions struct {
 	// IndexHint is a diagnostic-only FORCE or FORBID override for one index
 	// field. The default leaves planner selection unchanged.
 	IndexHint SQLIndexHint
+	// Optimizer is an optional ordered rule set that may select existing
+	// planner controls after parsing. Nil preserves the default path and keeps
+	// SQLQueryOptions comparable for callers that use it as a value.
+	Optimizer *SQLQueryOptimizer
 	// SlowQueryRecorder retains privacy-safe samples only for queries that
 	// meet SlowQueryThreshold. Nil disables sample retention.
 	SlowQueryRecorder *SQLSlowQueryRecorder
@@ -652,6 +656,12 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, err
 	}
 	applySQLQueryCollation(query, options.Collation)
+	if options.IndexHint.Mode != "" || options.Optimizer != nil {
+		options.IndexHint, err = applySQLQueryOptimizerRules(source, query, options)
+		if err != nil {
+			return result, err
+		}
+	}
 	query.indexHint = options.IndexHint
 	if query.explain {
 		result, err = explainSQLQuery(query, resolver, control)

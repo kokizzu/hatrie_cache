@@ -16404,3 +16404,29 @@ BenchmarkDifferentialOperators/join-32 3776 56472 ns/op 56984 B/op 274 allocs/op
 BenchmarkDifferentialOperators/join-32 3918 55292 ns/op 56984 B/op 274 allocs/op
 BenchmarkDifferentialOperators/join-32 4008 56622 ns/op 56984 B/op 274 allocs/op
 ```
+
+## Opt-In SQL Optimizer Rules
+
+This benchmark compares the default SQL path with one no-op optimizer rule on
+`FROM VALUES (1) AS values(id) SELECT id`. Three samples were collected on an
+AMD Ryzen 9 5950X. The rule path is intentionally opt-in and pays to build a
+structural plan copy; the default path does not evaluate rules.
+
+| Mode | Median time | Heap | Allocs | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Default | 2,863 ns/op | 3,312 B/op | 25/op | 1.00x |
+| One no-op rule | 3,921 ns/op | 5,304 B/op | 32/op | 1.37x slower |
+
+The opt-in rule uses `1.60x` the heap and 7 more allocations. This is an
+extensibility feature, not a default performance optimization.
+
+Raw output from `make benchmark-optimizer-rules-clean`:
+
+```text
+BenchmarkSQLQueryOptimizerRules/default-32 365077 2863 ns/op 3312 B/op 25 allocs/op
+BenchmarkSQLQueryOptimizerRules/default-32 395971 2813 ns/op 3312 B/op 25 allocs/op
+BenchmarkSQLQueryOptimizerRules/default-32 409712 2923 ns/op 3312 B/op 25 allocs/op
+BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 307059 3932 ns/op 5304 B/op 32 allocs/op
+BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 294865 3896 ns/op 5304 B/op 32 allocs/op
+BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 319893 3921 ns/op 5304 B/op 32 allocs/op
+```
