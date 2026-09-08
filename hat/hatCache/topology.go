@@ -25,6 +25,7 @@ type TopologyNode = hatTopology.TopologyNode
 type TopologyShard = hatTopology.TopologyShard
 type TopologyBucketRange = hatTopology.TopologyBucketRange
 type TopologyRoute = hatTopology.TopologyRoute
+type PartitionOwnership = hatTopology.PartitionOwnership
 
 // TopologyStore stores a validated topology and optionally persists updates.
 type TopologyStore struct {
@@ -196,6 +197,49 @@ func (store *TopologyStore) Route(key string) (TopologyRoute, bool) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	return normalizedTopologyRouteForKey(store.topology, key)
+}
+
+// OwnershipForShard returns a copy of the current ownership metadata for a
+// logical partition.
+func (store *TopologyStore) OwnershipForShard(shardID uint32) (PartitionOwnership, bool) {
+	if store == nil {
+		return PartitionOwnership{}, false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.topology.OwnershipForShard(shardID)
+}
+
+// OwnershipForKey returns a copy of the current ownership metadata for key.
+func (store *TopologyStore) OwnershipForKey(key string) (PartitionOwnership, bool) {
+	if store == nil {
+		return PartitionOwnership{}, false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.topology.OwnershipForKey(key)
+}
+
+// ValidatePartitionOwnership verifies ownership metadata against the current
+// topology generation.
+func (store *TopologyStore) ValidatePartitionOwnership(ownership PartitionOwnership) error {
+	if store == nil {
+		return errors.New("hatriecache: topology store is nil")
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.topology.ValidatePartitionOwnership(ownership)
+}
+
+// ValidatePartitionWrite verifies that nodeID is the current primary and that
+// fencingToken belongs to the current ownership generation.
+func (store *TopologyStore) ValidatePartitionWrite(ownership PartitionOwnership, nodeID string, fencingToken uint64) error {
+	if store == nil {
+		return errors.New("hatriecache: topology store is nil")
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.topology.ValidatePartitionWrite(ownership, nodeID, fencingToken)
 }
 
 func (store *TopologyStore) electionRouteSnapshot(key string) (TopologyRoute, []TopologyNode, bool) {

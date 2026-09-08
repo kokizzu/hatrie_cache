@@ -17480,3 +17480,22 @@ flatten-and-global-sort offset page. That is 55.6x faster, 235.0x fewer bytes,
 and 130.6x fewer allocations. Partition snapshots and their memory remain
 owned by the resolver and are outside the timed region; old resolvers and
 default pagination behavior are unchanged.
+
+## Partition Ownership Snapshots
+
+Command: `make benchmark-t079-local-clean`.
+
+This benchmark measures `hatTopology.ClusterTopology.OwnershipForShard` on the
+same normalized topology shape. The baseline is the implementation before the
+fingerprint helper reuse; the optimized path computes the fingerprint from the
+already-normalized topology instead of normalizing it a second time. Five
+samples were run on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Baseline | 1,732; 1,612; 1,616; 1,623; 1,636 | 1,623 | 1,328 | 28 |
+| Normalized fingerprint reuse | 1,150; 1,106; 1,123; 1,125; 1,100 | 1,123 | 720 | 20 |
+
+The reuse path is 1.45x faster, uses 1.84x fewer transient bytes, and makes
+1.40x fewer allocations. The change is internal to metadata snapshot creation;
+topology JSON, routing, and write-validation semantics are unchanged.

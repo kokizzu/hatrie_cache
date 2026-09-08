@@ -277,6 +277,10 @@ func (topology ClusterTopology) Fingerprint() string {
 	if err != nil {
 		return ""
 	}
+	return fingerprintNormalized(normalized)
+}
+
+func fingerprintNormalized(normalized ClusterTopology) string {
 	normalized.Self = ""
 	hash := fnv.New64a()
 	part := func(value string) { _, _ = io.WriteString(hash, value); _, _ = hash.Write([]byte{0}) }
