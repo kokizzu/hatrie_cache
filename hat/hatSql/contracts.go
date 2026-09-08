@@ -55,6 +55,23 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// SQLSourcePartition is one ordered physical partition of a logical SQL
+// source. Rows are read-only for the duration of a query; the executor keeps
+// their existing row semantics and does not deduplicate rows across
+// partitions.
+type SQLSourcePartition struct {
+	Name string
+	Rows []Row
+}
+
+// PartitionedSourceResolver optionally exposes one logical source as ordered
+// physical partitions. It is an opt-in extension of SourceResolver: returning
+// available=false preserves the normal BorrowSQLSource/ResolveSQLSource path.
+// Implementations should return partitions in a deterministic order.
+type PartitionedSourceResolver interface {
+	ResolveSQLSourcePartitions(name string, key string) ([]SQLSourcePartition, bool, error)
+}
+
 // HistoricalSourceResolver optionally resolves a source at an immutable
 // sequence frontier. It is required for QuerySubscriptionDefinition.AsOf;
 // callers that only need live UpTo/progress delivery can use SourceResolver.

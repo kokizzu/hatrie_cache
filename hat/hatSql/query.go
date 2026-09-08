@@ -11663,8 +11663,17 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		var rows []SQLRow
 		borrowed := false
 		var err error
-		if resolver, ok := resolver.(BorrowedSourceResolver); ok {
-			rows, borrowed, err = resolver.BorrowSQLSource(source.kind, source.key)
+		if partitioned, ok := resolver.(PartitionedSourceResolver); ok {
+			var available bool
+			rows, available, err = resolveSQLSourcePartitions(partitioned, source.kind, source.key)
+			if available {
+				borrowed = true
+			}
+		}
+		if !borrowed && err == nil {
+			if borrowedResolver, ok := resolver.(BorrowedSourceResolver); ok {
+				rows, borrowed, err = borrowedResolver.BorrowSQLSource(source.kind, source.key)
+			}
 		}
 		if !borrowed && err == nil {
 			rows, err = resolver.ResolveSQLSource(source.kind, source.key)
@@ -11721,6 +11730,31 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		return rows, nil
 	}
 	return nil, nil
+}
+
+func resolveSQLSourcePartitions(resolver PartitionedSourceResolver, name, key string) ([]SQLRow, bool, error) {
+	partitions, available, err := resolver.ResolveSQLSourcePartitions(name, key)
+	if err != nil || !available {
+		return nil, available, err
+	}
+	if len(partitions) == 0 {
+		return nil, true, nil
+	}
+	if len(partitions) == 1 {
+		return partitions[0].Rows, true, nil
+	}
+	total := 0
+	for _, partition := range partitions {
+		total += len(partition.Rows)
+	}
+	if total == 0 {
+		return nil, true, nil
+	}
+	rows := make([]SQLRow, 0, total)
+	for _, partition := range partitions {
+		rows = append(rows, partition.Rows...)
+	}
+	return rows, true, nil
 }
 
 func validateSQLSourceFieldTypes(source sqlSource, rows []SQLRow) ([]SQLRow, error) {

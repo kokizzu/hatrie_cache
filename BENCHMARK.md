@@ -17430,3 +17430,13 @@ The hit still clones all returned rows and plans, which is the cost of not
 letting callers mutate cached state. The optimization is most useful when
 source scans or joins are materially larger than the returned result. It is
 opt-in and has no persistence or wire-format change.
+
+## Partitioned SQL source flattening
+
+The opt-in partitioned SQL source path is benchmarked in
+[PARTITIONED_SQL_SOURCES.md](PARTITIONED_SQL_SOURCES.md). On the recorded
+AMD Ryzen 9 5950X run, eight immutable partitions containing 2,048 rows had a
+68,282 ns/op median, 234,873 B/op, and 24 allocations/op, versus 464,314
+ns/op, 923,006 B/op, and 4,120 allocations/op for the legacy resolver. The
+6.80x CPU, 3.93x byte, and 171.67x allocation differences include the
+legacy path's defensive per-query source clone; the feature is opt-in.

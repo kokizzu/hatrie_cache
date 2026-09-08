@@ -135,6 +135,33 @@ func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
 	return session.source.ResolveSQLSource(name, key)
 }
 
+// ResolveSQLSourcePartitions forwards the optional partition contract to the
+// session's external source after giving session-local tables, results, and
+// views the normal precedence.
+func (session *SQLSession) ResolveSQLSourcePartitions(name, key string) ([]SQLSourcePartition, bool, error) {
+	if session == nil {
+		return nil, false, nil
+	}
+	if strings.EqualFold(name, "CACHE") {
+		session.mu.RLock()
+		_, tableExists := session.tables[strings.ToLower(key)]
+		_, resultExists := session.results[strings.ToLower(key)]
+		_, viewExists := session.views[strings.ToLower(key)]
+		session.mu.RUnlock()
+		if tableExists || resultExists || viewExists {
+			return nil, false, nil
+		}
+	}
+	if session.source == nil {
+		return nil, false, nil
+	}
+	partitioned, ok := session.source.(PartitionedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return partitioned.ResolveSQLSourcePartitions(name, key)
+}
+
 func sqlQueryCacheDependencies(query *sqlQuery) []string {
 	seen := map[string]struct{}{}
 	var collect func(*sqlQuery)

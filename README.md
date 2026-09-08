@@ -4312,3 +4312,8 @@ and each returned snapshot is independent, so it can be retained by routing,
 explain, or incremental-processing coordinators without changing SQL
 execution. See [SQL_DATAFLOW_LOWERING.md](SQL_DATAFLOW_LOWERING.md) for the
 contract, execution boundary, and measurements.
+
+## Partitioned SQL Sources
+
+Expose region, tenant, or time partitions as one logical SQL source with the
+opt-in [`PartitionedSourceResolver`](PARTITIONED_SQL_SOURCES.md) contract.
