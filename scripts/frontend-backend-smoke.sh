@@ -75,7 +75,7 @@ if ! bool_true "${FRONTEND_BACKEND_SMOKE_SKIP_BUILD:-false}"; then
 	cd "$ROOT"
 fi
 
-go build -buildvcs=false -o "$server_bin" ./cmd/hatrie-cache
+GOFLAGS="${GOFLAGS:-} -buildvcs=false" go build -o "$server_bin" ./cmd/hatrie-cache
 
 "$server_bin" \
 	-monitoring-server \
