@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatGrpc"
 	"hatrie_cache/hat/hatTrace"
@@ -53,6 +54,9 @@ type CacheGRPCOptions struct {
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool
+	// ProtocolVersions is the inclusive gRPC protocol range this server accepts.
+	// A zero value defaults to the current protocol version for compatibility.
+	ProtocolVersions hatCommand.ProtocolVersionRange
 }
 
 type CacheGRPCServer struct {
@@ -81,6 +85,9 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 	}
 	if options.ReplicationSafety == nil {
 		options.ReplicationSafety = NewReplicationSafetyStore()
+	}
+	if options.ProtocolVersions.Min == 0 && options.ProtocolVersions.Max == 0 {
+		options.ProtocolVersions = hatCommand.SupportedProtocolVersions
 	}
 	return &CacheGRPCServer{trie: trie, options: options}
 }
@@ -131,7 +138,28 @@ func (server *CacheGRPCServer) requestContext(ctx context.Context) (context.Cont
 	if err := server.requireAuthorized(ctx); err != nil {
 		return ctx, err
 	}
+	if err := server.negotiateProtocol(ctx); err != nil {
+		return ctx, err
+	}
 	return ctx, nil
+}
+
+func (server *CacheGRPCServer) negotiateProtocol(ctx context.Context) error {
+	version, err := hatGrpc.NegotiateProtocolVersion(ctx, server.options.ProtocolVersions)
+	if err != nil {
+		code := codes.InvalidArgument
+		if errors.Is(err, hatCommand.ErrIncompatibleProtocolVersion) {
+			code = codes.FailedPrecondition
+		}
+		return status.Error(code, err.Error())
+	}
+	if grpc.ServerTransportStreamFromContext(ctx) == nil {
+		return nil
+	}
+	if err := grpc.SetHeader(ctx, hatGrpc.ProtocolResponseMetadata(version, server.options.ProtocolVersions)); err != nil {
+		return status.Error(codes.Internal, "set gRPC protocol metadata")
+	}
+	return nil
 }
 
 func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
@@ -417,6 +445,9 @@ func (server *CacheGRPCServer) ReplicationStream(stream hatriecachev1.CacheServi
 		return err
 	}
 	if err := server.requireReplicationAuthorized(ctx); err != nil {
+		return err
+	}
+	if err := server.negotiateProtocol(ctx); err != nil {
 		return err
 	}
 

@@ -1440,6 +1440,30 @@ Raw output:
 This is a new in-memory capability, so there is no prior implementation
 baseline. Durability and global ordering remain separate coordination costs.
 
+<a id="grpc-protocol-compatibility-gate"></a>
+## gRPC Protocol Compatibility Gate
+
+`BenchmarkGRPCProtocolVersionNegotiation` measures the negotiation helper used
+once per unary RPC or stream. The omitted-metadata path preserves legacy
+clients; the explicit path parses a client range. Five samples were collected
+on the same AMD Ryzen 9 5950X, `linux/amd64`, using `go test -benchmem -count=5`:
+
+| Path | Median time | Heap B/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Omitted metadata | 7.317 ns/op | 0 | 0 |
+| Explicit range | 293.0 ns/op | 416 | 3 |
+
+Raw output:
+
+```text
+default: 7.712, 6.914, 7.231, 7.658, 7.317 ns/op; 0 B/op; 0 allocs/op
+explicit: 306.2, 293.0, 299.5, 291.3, 290.8 ns/op; 416 B/op; 3 allocs/op
+```
+
+The gate is not invoked per message on streaming RPCs. It adds a small
+per-request check while enabling controlled binary rollouts; existing default
+behavior remains protocol version 1.
+
 ### Persistent Storage Backend Bakeoff
 
 <a id="pebble-generation-full-save"></a>
