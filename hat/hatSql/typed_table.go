@@ -50,6 +50,7 @@ const (
 // memory behavior.
 type TypedTableColumnarCacheOptions struct {
 	Enabled            bool
+	CompressedBatches  bool
 	MaxBytes           int
 	MinReads           int
 	RowsPerSegment     int
@@ -663,6 +664,9 @@ func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {
 		batch.Columns[field] = values
 	}
 	batch.EncodeRepeatedStrings()
+	if table.columnar.options.CompressedBatches {
+		batch.PackCompressedColumns()
+	}
 	return batch
 }
 
@@ -776,13 +780,10 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 		return nil
 	}
 	segments := &ColumnarNumericSegments{RowsPerSegment: rowsPerSegment, Columns: make(map[string][]ColumnarNumericSegment)}
-	for field := range batch.Columns {
+	for _, schemaColumn := range table.schema.Columns {
+		field := schemaColumn.Name
 		column, found := table.byName[field]
-		if !found || table.columns[column].kind != TypedTableInt64 && table.columns[column].kind != TypedTableFloat64 {
-			continue
-		}
-		values := batch.Columns[field]
-		if len(values) != batch.Rows {
+		if !found || table.columns[column].kind != TypedTableInt64 && table.columns[column].kind != TypedTableFloat64 || !columnarBatchHasField(batch, field) {
 			continue
 		}
 		primaryField := table.columnar.options.SparsePrimaryIndex && table.columnar.options.SparsePrimaryField == field
@@ -797,7 +798,7 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 				end = batch.Rows
 			}
 			for row := start; row < end; row++ {
-				value, numeric := sqlNumber(values[row])
+				value, numeric := columnarBatchNumericValue(batch, field, row)
 				if !numeric {
 					primaryOrdered = false
 					continue
@@ -835,6 +836,33 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 		return nil
 	}
 	return segments
+}
+
+func columnarBatchHasField(batch ColumnarBatch, field string) bool {
+	if values, ok := batch.Columns[field]; ok {
+		return len(values) == batch.Rows
+	}
+	if column, ok := batch.NumericColumns[field]; ok {
+		return column.RowCount() == batch.Rows
+	}
+	if column, ok := batch.PackedColumns[field]; ok {
+		return column.RowCount() == batch.Rows
+	}
+	return false
+}
+
+func columnarBatchNumericValue(batch ColumnarBatch, field string, row int) (float64, bool) {
+	if values, ok := batch.Columns[field]; ok {
+		if row < 0 || row >= len(values) {
+			return 0, false
+		}
+		return sqlNumber(values[row])
+	}
+	value, ok := batch.Value(field, row)
+	if !ok {
+		return 0, false
+	}
+	return sqlNumber(value)
 }
 
 // typedTableAdaptiveRowsPerSegment keeps a bounded number of smaller

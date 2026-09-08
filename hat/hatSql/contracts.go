@@ -140,6 +140,22 @@ type ColumnarBatch struct {
 	Rows           int
 }
 
+// PackCompressedColumns applies the specialized compact representations to
+// plain and dictionary columns. It is explicit opt-in; the legacy layout is
+// unchanged unless this method is called.
+func (batch *ColumnarBatch) PackCompressedColumns() {
+	if batch == nil {
+		return
+	}
+	// Specialized encodings avoid retaining interface values when their type
+	// and layout permit a smaller representation.
+	batch.PackBooleanColumns()
+	batch.PackNumericColumns()
+	batch.PackNullableColumns()
+	batch.PackDictionaryValues()
+	batch.PackDictionaryCodes()
+}
+
 // ColumnarNumericSegment stores the numeric value bounds for one contiguous
 // columnar row segment. Invalid segments contain no numeric values.
 type ColumnarNumericSegment struct {

@@ -3891,6 +3891,40 @@ unless explicitly set to `true`. This changes neither wire nor persistence
 formats. See [BENCHMARK.md](BENCHMARK.md#sql-sparse-primary-mark-pruning) for
 the measured selective-query result and full-range control.
 
+## SQL Compressed Columnar Batches
+
+Typed-table columnar caches can optionally use compact per-column batch
+representations. The option is disabled by default:
+
+```go
+schema := hatSql.TypedTableSchema{
+	Name:    "events",
+	Columns: []hatSql.TypedTableColumn{
+		{Name: "team", Kind: hatSql.TypedTableString},
+		{Name: "points", Kind: hatSql.TypedTableInt64},
+	},
+	ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
+		Enabled:           true,
+		CompressedBatches: true,
+	},
+}
+```
+
+When enabled, the cache keeps low-cardinality strings in packed dictionaries,
+fixed-width numeric values in byte vectors, booleans in bitmaps, and sparse
+nullable values in validity-bitmaps plus dense values. Each representation is
+selected only when its estimated retained payload is smaller. CompressedBatches
+does not change logical values, SQL results, persistence, or wire formats, and
+the cache byte budget includes all packed payloads and metadata.
+
+This is a memory-first mode, not a universal speed setting. The recorded
+4,096-row mixed batch used about 4.53x less retained column payload
+(213,904 vs 47,224 bytes), while the warmed SQL read was 1.13x slower and
+allocated 1.97x as many objects. Leave it off for read-heavy workloads unless
+the cache residency reduction is more valuable than that CPU/allocation cost.
+See [BENCHMARK.md](BENCHMARK.md#compressed-typed-table-columnar-batches) for
+the raw run.
+
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a

@@ -17230,6 +17230,29 @@ allocations per build. The option remains disabled by default because
 high-cardinality columns can retain dictionary metadata without sharing much
 string data; callers should enable it for repeated, immutable string values.
 
+## Compressed Typed-Table Columnar Batches
+
+Workload: one 4,096-row typed-table batch with repeated strings, int64,
+booleans, and sparse nullable strings. The benchmark command is:
+
+    go test ./hat/hatSql -run '^$' -bench '^BenchmarkTypedTableColumnarCompressedBatches(Query)?$' -benchmem -count=1
+
+The payload metric counts retained column vectors, dictionary payloads,
+bitmaps, and packed metadata; it excludes Go map headers and process RSS.
+Median of five runs on AMD Ryzen 9 5950X, Linux/amd64:
+
+| Mode | Build ns/op | Build payload bytes/op | Build B/op | Build allocs/op | Warm query ns/op | Query B/op | Query allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy | 833,928 | 213,904 | 831,900 | 17,548 | 728,179 | 790,128 | 6,330 |
+| Compressed | 900,233 | 47,224 | 882,044 | 17,562 | 819,243 | 839,035 | 12,439 |
+
+The compressed layout retains 4.53x less measured column payload. Build time
+was 1.08x slower in this run, and the warmed SQL read was 1.13x
+slower, with 1.06x more transient bytes and 1.97x more allocations. This is
+why TypedTableColumnarCacheOptions.CompressedBatches is opt-in and defaults
+to false; it is appropriate for memory-constrained caches where residency
+matters more than read CPU and allocation rate.
+
 ## Composite Sorted Arrangement Ordering
 
 Command: `make benchmark-sorted-arrangement-composite-local-clean`

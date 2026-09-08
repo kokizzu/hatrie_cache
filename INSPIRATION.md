@@ -428,7 +428,8 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M096d Add opt-in contiguous dictionary-value storage with immutable string data and offsets; keep legacy `Values` by default and validate packed offsets before SQL access.
 - [x] M096e Add opt-in per-column dictionary-coded string group keys for typed aggregates, with reference-counted code reuse, partial-merge remapping, cached order references, and high-cardinality/repeated-group measurements in [BENCHMARK.md](BENCHMARK.md#per-column-dictionary-coded-aggregate-groups).
 - [x] M096f Add opt-in reference-counted dictionary interning for live string sort values in typed sorted arrangements; preserve the legacy row shape and ordering while sharing repeated backing strings, with lifecycle tests and before/after measurements in [BENCHMARK.md](BENCHMARK.md#typed-sorted-arrangement-dictionary-interning).
-- [ ] M097 Compressed arrangement batches.
+- [x] M097 Compressed arrangement batches.
+- [x] M097e Integrate the existing specialized packers into typed-table columnar caches behind CompressedBatches; keep the default off, charge packed payloads to MaxBytes, and record the memory/read tradeoff in [BENCHMARK.md](BENCHMARK.md#compressed-typed-table-columnar-batches).
 - [x] M097a Add opt-in byte-packing for low-cardinality arrangement dictionary codes without changing logical values; the legacy representation remains the default for compatibility and predictable CPU cost.
 - [x] M097b Add opt-in NULL validity-bitmap and dense-value packing for sparse nullable arrangement columns; pack only when the estimated retained layout is smaller, while preserving legacy `Columns` by default.
 - [x] M097c Add opt-in bit-packing for boolean arrangement columns, using a second bitmap only when NULLs exist; preserve legacy `Columns` by default and reject non-boolean input.
