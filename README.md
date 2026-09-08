@@ -20,6 +20,7 @@ security guidance before exposing it on a network.
 - Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
 - Persistent shard ownership leases: [persistent shard leases](PERSISTENT_SHARD_LEASES.md)
 - Restart-safe local node generations: [persistent node epochs](PERSISTENT_NODE_EPOCHS.md)
+- Process-local causal timestamps: [timestamp oracle](TIMESTAMP_ORACLE.md)
 - Cross-region replication policy: [cross-region replication](CROSS_REGION_REPLICATION.md)
 - Failure-domain-aware replica placement: [failure-domain placement](FAILURE_DOMAIN_PLACEMENT.md)
 - Deterministic weighted disk placement: [disk placement](DISK_PLACEMENT.md)

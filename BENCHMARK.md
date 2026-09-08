@@ -1415,6 +1415,31 @@ of `1,574,790 ns/op`, `4,599 B/op`, and `45 allocs/op`. The wrapper is about
 1.09x the time, 1.07x the heap, and 1.04x the allocations. That small cost is
 the explicit node-wide API and path namespace; it is not a throughput claim.
 
+<a id="local-timestamp-oracle"></a>
+## Local Timestamp Oracle
+
+`BenchmarkTimestampOracleNext` measures the lock-free local timestamp
+allocator. It allocates no heap memory in the timed path and is intended for
+high-frequency local ordering, not for durable or cross-node ordering. See
+[timestamp oracle](TIMESTAMP_ORACLE.md) for the limitations and integration
+example.
+
+Five samples on the same AMD Ryzen 9 5950X, `linux/amd64`, using
+`go test -benchmem -count=5`:
+
+| Operation | Median time | Heap B/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| `TimestampOracle.Next` | 2.274 ns/op | 0 | 0 |
+
+Raw output:
+
+```text
+2.482, 2.508, 2.172, 2.274, 2.101 ns/op; 0 B/op; 0 allocs/op
+```
+
+This is a new in-memory capability, so there is no prior implementation
+baseline. Durability and global ordering remain separate coordination costs.
+
 ### Persistent Storage Backend Bakeoff
 
 <a id="pebble-generation-full-save"></a>
