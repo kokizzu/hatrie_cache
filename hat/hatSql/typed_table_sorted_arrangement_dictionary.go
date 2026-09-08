@@ -73,26 +73,45 @@ func (dictionary *typedTableSortedArrangementStringDictionary) release(value str
 
 func (arrangement *TypedTableSortedArrangement) storeValues(values []TypedTableValue) []TypedTableValue {
 	cloned := cloneTypedTableValues(values)
-	if !arrangement.definition.DictionaryEncoded || arrangement.fieldKind != TypedTableString || arrangement.field < 0 || arrangement.field >= len(cloned) {
+	if arrangement == nil {
 		return cloned
 	}
-	value := cloned[arrangement.field]
-	if !value.Valid || value.Kind != TypedTableString {
-		return cloned
+	for orderIndex, orderField := range arrangement.orderFields {
+		if !orderField.dictionaryEncoded || orderField.kind != TypedTableString || orderField.index < 0 || orderField.index >= len(cloned) {
+			continue
+		}
+		value := cloned[orderField.index]
+		if !value.Valid || value.Kind != TypedTableString {
+			continue
+		}
+		dictionary := arrangement.dictionaries[orderIndex]
+		if dictionary == nil {
+			dictionary = &typedTableSortedArrangementStringDictionary{}
+			arrangement.dictionaries[orderIndex] = dictionary
+			if orderIndex == 0 {
+				arrangement.dictionary = dictionary
+			}
+		}
+		cloned[orderField.index].String = dictionary.retain(value.String)
 	}
-	if arrangement.dictionary == nil {
-		arrangement.dictionary = &typedTableSortedArrangementStringDictionary{}
-	}
-	cloned[arrangement.field].String = arrangement.dictionary.retain(value.String)
 	return cloned
 }
 
 func (arrangement *TypedTableSortedArrangement) releaseValues(values []TypedTableValue) {
-	if arrangement == nil || arrangement.dictionary == nil || !arrangement.definition.DictionaryEncoded || arrangement.fieldKind != TypedTableString || arrangement.field < 0 || arrangement.field >= len(values) {
+	if arrangement == nil {
 		return
 	}
-	value := values[arrangement.field]
-	if value.Valid && value.Kind == TypedTableString {
-		arrangement.dictionary.release(value.String)
+	for orderIndex, orderField := range arrangement.orderFields {
+		if !orderField.dictionaryEncoded || orderField.kind != TypedTableString || orderField.index < 0 || orderField.index >= len(values) {
+			continue
+		}
+		dictionary := arrangement.dictionaries[orderIndex]
+		if dictionary == nil {
+			continue
+		}
+		value := values[orderField.index]
+		if value.Valid && value.Kind == TypedTableString {
+			dictionary.release(value.String)
+		}
 	}
 }
