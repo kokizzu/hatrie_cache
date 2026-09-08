@@ -231,6 +231,10 @@ type SQLQueryOptions struct {
 	// PreparedSchemaVersion participates in the prepared-plan cache key. Set it
 	// when a schema, index, or projection change should force a fresh template.
 	PreparedSchemaVersion string
+	// compiledTemplate is set only by CompiledSQLQuery and is intentionally not
+	// exported. It bypasses parsing and cache lookup while retaining the normal
+	// execution and per-call clone path.
+	compiledTemplate *sqlQuery
 	// ConditionCache optionally reuses bounded columnar WHERE match positions.
 	// It is disabled by default and is used only with a SourceVersionResolver.
 	ConditionCache *SQLQueryConditionCache
@@ -648,7 +652,16 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err = control.check(); err != nil {
 		return result, err
 	}
-	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
+	var query *sqlQuery
+	var parseErr error
+	if options.compiledTemplate != nil {
+		query, parseErr = bindSQLQueryParameters(options.compiledTemplate, parameters)
+		if parseErr == nil {
+			rewriteSQLQuery(query)
+		}
+	} else {
+		query, parseErr = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
+	}
 	if parseErr != nil {
 		return result, parseErr
 	}
@@ -775,7 +788,15 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	defer cancel()
-	query, err := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
+	var query *sqlQuery
+	if options.compiledTemplate != nil {
+		query, err = bindSQLQueryParameters(options.compiledTemplate, parameters)
+		if err == nil {
+			rewriteSQLQuery(query)
+		}
+	} else {
+		query, err = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
+	}
 	if err != nil {
 		return err
 	}

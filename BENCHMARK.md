@@ -16704,3 +16704,37 @@ batches, not a CPU optimization. Its admission check compares the fixed data
 and optional bitmap with the legacy interface-slot estimate, so very small or
 unsupported columns stay unchanged. Row-count, kind, byte-length, validity,
 and trailing-bit checks reject malformed packed input before SQL scans.
+
+## Compiled SQL Plan Handle
+
+The normal SQL entry point parses the source, looks up an immutable template in
+the bounded prepared-query cache, clones it, binds parameters, and executes it.
+`CompileSQLQuery` provides an additive opt-in handle that retains one immutable
+parsed template and skips the parser and cache lookup on repeated executions.
+Each call still deep-clones the template before binding or applying rewrites, so
+parameters, limits, offsets, collations, optimizer options, and result state
+are isolated. Existing entry points and prepared-cache statistics are
+unchanged.
+
+Five benchmark samples were collected on an AMD Ryzen 9 5950X with one CPU,
+500 ms per sample, using a one-row source and the same parameterized query.
+Lower is better. Both paths report per-execution allocations; the compiled
+handle's retained template is outside the benchmark operation and should be
+counted separately by callers deciding whether the query is hot enough.
+
+| Path | Median | Query heap | Query allocations | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Cached parsed template | 4,202 ns/op | 5,040 B/op | 31 allocs/op | baseline |
+| Compiled query handle | 4,039 ns/op | 4,912 B/op | 30 allocs/op | 1.04x faster; 1.03x less per-call heap; 1 fewer allocation |
+
+Raw five-sample output:
+
+```text
+cached_template: 4260, 4177, 4200, 4320, 4202 ns/op; 5040 B/op; 31 allocs/op
+compiled_handle: 4009, 4039, 4050, 4068, 4022 ns/op; 4912 B/op; 30 allocs/op
+```
+
+This is a targeted hot-query optimization, not a replacement for the bounded
+cache: compiling a query once adds the retained plan's memory and has no
+payback for one-shot execution. `ExecuteRows` uses the same handle and keeps
+the streaming contract.
