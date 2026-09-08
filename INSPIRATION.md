@@ -404,7 +404,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M091 Durable persistent shards through the local storage layer.
 - [x] M092 Batched writes to durable storage.
 - [x] M093 Caller-driven bounded persistent-shard compaction scheduling with duplicate request coalescing, deterministic task ordering, retry-preserving failures, and explicit concurrency limits; see [COMPACTION_SCHEDULER.md](COMPACTION_SCHEDULER.md).
-- [ ] M094 Persistent-shard leases and fencing.
+- [x] M094 Persistent-shard leases and fencing; fully covered by the durable local lease implementation in M094a.
 - [x] M094a Non-blocking local persistent-shard leases with separate advisory lock files, durable monotonic fencing tokens, atomic state publication, stale-token validation, renewal, inspection, and corruption/path-safety tests; see [PERSISTENT_SHARD_LEASES.md](PERSISTENT_SHARD_LEASES.md).
 - [x] M095 Snapshot hydration with progress reporting.
 - [ ] M096 Per-column dictionary compression for arrangements.
