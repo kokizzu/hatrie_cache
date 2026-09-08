@@ -244,6 +244,10 @@ type SQLQueryOptions struct {
 	// ConditionCache optionally reuses bounded columnar WHERE match positions.
 	// It is disabled by default and is used only with a SourceVersionResolver.
 	ConditionCache *SQLQueryConditionCache
+	// ResultCache optionally reuses complete read-only SQL results while every
+	// referenced source reports the same non-empty version. Nil preserves the
+	// ordinary executor and is the default.
+	ResultCache *SQLResultCache
 	// AdaptivePlanner learns index candidate cardinality from prior queries.
 	// Nil preserves the deterministic estimate-only planner.
 	AdaptivePlanner *AdaptivePlanner
@@ -688,6 +692,27 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		result.QueryID = observation.id
 		return result, err
 	}
+	if key, version, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
+		result, err = options.ResultCache.ExecuteVersioned(ctx, key, version, func(execCtx context.Context) (QueryResult, error) {
+			return executeSQLQueryUncached(execCtx, source, query, resolver, options, control, observation, &operatorSteps)
+		})
+		if err != nil {
+			return result, err
+		}
+		if err = control.check(); err != nil {
+			return result, err
+		}
+		result.QueryID = observation.id
+		operatorSteps = result.Plan
+		return result, nil
+	}
+	result, err = executeSQLQueryUncached(ctx, source, query, resolver, options, control, observation, &operatorSteps)
+	return result, err
+}
+
+func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl, observation sqlQueryObservation, operatorSteps *[]SQLExplainStep) (SQLQueryResult, error) {
+	var result SQLQueryResult
+	result.QueryID = observation.id
 	if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
 		if control.options.MaxRows > 0 && len(projection.Rows) > control.options.MaxRows {
 			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.options.MaxRows)
@@ -695,16 +720,17 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		if control.options.MaxResultBytes > 0 && sqlRowsBytes(projection.Rows) > control.options.MaxResultBytes {
 			return result, fmt.Errorf("SQL result exceeds the %d byte limit", control.options.MaxResultBytes)
 		}
-		if err = control.check(); err != nil {
+		if err := control.check(); err != nil {
 			return result, err
 		}
 		projection.QueryID = observation.id
-		result = projection
-		operatorSteps = projection.Plan
-		return result, nil
+		if operatorSteps != nil {
+			*operatorSteps = projection.Plan
+		}
+		return projection, nil
 	}
 	if options.IndexHint.Mode == SQLIndexHintForce && query.from != nil && options.IndexHint.applies(*query.from) {
-		if _, _, err = resolveSQLForcedIndex(*query.from, query.where, resolver, nil, options.IndexHint); err != nil {
+		if _, _, err := resolveSQLForcedIndex(*query.from, query.where, resolver, nil, options.IndexHint); err != nil {
 			return result, err
 		}
 	}
@@ -713,17 +739,18 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
 	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
-		result, err = executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
-		if !errors.Is(err, errSQLOrderedSourceUnavailable) {
-			result.QueryID = observation.id
-			return result, err
+		streamed, streamErr := executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
+		if !errors.Is(streamErr, errSQLOrderedSourceUnavailable) {
+			streamed.QueryID = observation.id
+			return streamed, streamErr
 		}
 	}
 	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && sqlTopNMaterializedStreamable(query, resolver) {
-		result, err = executeSQLTopNMaterializedStream(ctx, query, resolver, control)
-		result.QueryID = observation.id
-		return result, err
+		streamed, streamErr := executeSQLTopNMaterializedStream(ctx, query, resolver, control)
+		streamed.QueryID = observation.id
+		return streamed, streamErr
 	}
+	var err error
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if options.IndexAdvisor != nil {
 		options.IndexAdvisor.observeSlowQuery(query, metrics, time.Since(observation.started), options.SlowQueryThreshold, err)
@@ -734,8 +761,8 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if options.IndexUseRecorder != nil {
 		options.IndexUseRecorder.observe(query, metrics, err)
 	}
-	if metrics != nil {
-		operatorSteps = metrics.steps
+	if metrics != nil && operatorSteps != nil {
+		*operatorSteps = metrics.steps
 	}
 	result.QueryID = observation.id
 	return result, err

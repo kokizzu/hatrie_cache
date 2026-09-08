@@ -3999,6 +3999,43 @@ with repeated selective reads. See
 [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-segment-marks) for all raw
 samples and the build/query tradeoff.
 
+## SQL Result Cache
+
+Read-only materialized SQL queries can opt into a bounded, typed result cache
+when the resolver implements `SourceVersionResolver`:
+
+```go
+cache := hatSql.NewSQLResultCache(256)
+result, err := hatSql.ExecuteSQLQueryParameters(
+	ctx,
+	"SELECT id FROM CACHE('events') WHERE team = $1",
+	resolver,
+	[]interface{}{"core"},
+	hatSql.SQLQueryOptions{ResultCache: cache},
+)
+```
+
+The default is off: `ResultCache` is nil and the ordinary SQL executor is
+unchanged. Every `CACHE` or `EXTERNAL` source referenced by a query must report
+a non-empty version that changes whenever observable rows or values change.
+The cache checks all source versions before and after a miss, so a source that
+changes during execution is not retained. Resolvers without version metadata
+fall back to normal execution.
+
+Cache keys include the exact SQL text, positional parameter values, collation,
+and prepared schema version. Returned rows and plans are independently cloned
+with their SQL value types preserved, and each invocation receives its current
+`QueryID`. The cache is caller-owned and should be scoped to one resolver or
+tenant. It conservatively bypasses queries with samples, volatile functions,
+custom functions, explicit resource budgets, projections, hints, optimizer
+rules, or instrumentation options. Streaming row APIs are unchanged.
+
+The measured 1,024-row hit path was 225,920 ns, 360,416 B, and 2,091
+allocations versus 816,510 ns, 1,231,422 B, and 6,169 allocations for the
+uncached control: 3.61x faster, 3.42x lower transient heap, and 2.95x fewer
+allocations. The hit still pays for result cloning to preserve isolation. See
+[BENCHMARK.md](BENCHMARK.md#sql-result-cache) for raw runs.
+
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a

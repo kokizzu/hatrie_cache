@@ -17408,3 +17408,25 @@ Composite construction is **1.06x** the single-field setup time, with no
 additional allocations and only `22 B/op` in this fixture. The feature is
 additive and opt-in through `OrderBy`; existing single-field arrangements do
 not pay the composite API cost.
+
+<a id="sql-result-cache"></a>
+## SQL Result Cache
+
+Command: `make benchmark-sql-result-cache-auto-local-clean`.
+
+The workload executes a 1,024-row materialized `CACHE` query with an equality
+filter. The hit case seeds `NewSQLResultCache(1)` and then repeats the exact
+query; the control executes the same query with the default options. Five
+samples use `-benchmem -benchtime=2s -cpu=1 -count=5` on AMD Ryzen 9 5950X,
+Linux/amd64. B/op and allocs/op measure transient execution heap; the cache
+itself retains a bounded deep copy of the result.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Uncached control | 816,510; 846,662; 780,573; 767,694; 852,122 | 816,510 | 1,231,422 | 6,169 | 1.00x |
+| Typed cache hit | 235,501; 220,909; 229,470; 221,787; 225,920 | 225,920 | 360,416 | 2,091 | 3.61x faster; 3.42x lower B/op; 2.95x fewer allocs |
+
+The hit still clones all returned rows and plans, which is the cost of not
+letting callers mutate cached state. The optimization is most useful when
+source scans or joins are materially larger than the returned result. It is
+opt-in and has no persistence or wire-format change.
