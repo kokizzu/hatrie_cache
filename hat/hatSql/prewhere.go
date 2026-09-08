@@ -88,7 +88,7 @@ func executeSQLPrewhereScan(query *sqlQuery, resolver SQLSourceResolver, ctes ma
 		return nil
 	}
 
-	err := streamSQLSourceRows(control.ctx, *query.from, resolver, visit)
+	err := streamSQLSourceRowsWithPartitionPredicates(control.ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), visit)
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}

@@ -162,6 +162,32 @@ func (session *SQLSession) ResolveSQLSourcePartitions(name, key string) ([]SQLSo
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLSourcePartitionsForPredicate forwards the optional pruning
+// contract after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLSourcePartitionsForPredicate(name, key string, predicate SQLPartitionPredicate) ([]SQLSourcePartition, bool, error) {
+	if session == nil {
+		return nil, false, nil
+	}
+	if strings.EqualFold(name, "CACHE") {
+		session.mu.RLock()
+		_, tableExists := session.tables[strings.ToLower(key)]
+		_, resultExists := session.results[strings.ToLower(key)]
+		_, viewExists := session.views[strings.ToLower(key)]
+		session.mu.RUnlock()
+		if tableExists || resultExists || viewExists {
+			return nil, false, nil
+		}
+	}
+	if session.source == nil {
+		return nil, false, nil
+	}
+	pruning, ok := session.source.(PartitionPruningSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return pruning.ResolveSQLSourcePartitionsForPredicate(name, key, predicate)
+}
+
 func sqlQueryCacheDependencies(query *sqlQuery) []string {
 	seen := map[string]struct{}{}
 	var collect func(*sqlQuery)

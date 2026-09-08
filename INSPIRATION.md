@@ -238,7 +238,7 @@ name.
 ### Distributed And Replicated Behavior
 
 - [x] C141 Distributed table abstraction over partitions. `hatSql.PartitionedSourceResolver` exposes ordered physical row partitions as one logical `CACHE`/`KEYS` source with immutable zero-copy query admission and explicit fallback to the existing resolver contract; see [PARTITIONED_SQL_SOURCES.md](PARTITIONED_SQL_SOURCES.md).
-- [ ] C142 Automatic shard pruning from partition predicates.
+- [x] C142 Automatic shard pruning from partition predicates. `hatSql.PartitionPruningSourceResolver` prunes complete physical partition subsets for literal equality and `IN` conjuncts while re-evaluating the full `WHERE`; unsupported or unavailable predicates preserve the existing scan path. See [PARTITION_PRUNING.md](PARTITION_PRUNING.md).
 - [x] C143 Parallel replicas for one query. Added opt-in first-success `hatReplication.ExecuteParallelReplicaRead` fan-out with bounded named replicas, cancellation of losing callbacks, and input-order attempt reporting; see [PARALLEL_REPLICA_READS.md](PARALLEL_REPLICA_READS.md).
 - [x] C144 Hedged reads for slow replicas. The same coordinator supports zero-delay parallel fan-out or positive-delay hedges, with explicit timer/callback cost and no default routing change; see [PARALLEL_REPLICA_READS.md](PARALLEL_REPLICA_READS.md).
 - [x] C145 Remote read retries with bounded duplicate work - `hatSql.ReadReplicaSet.ExecuteWithRetry` rotates across replicas with an explicit retry classifier, context-aware backoff, default-off behavior, and a hard eight-attempt cap; see [READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md).

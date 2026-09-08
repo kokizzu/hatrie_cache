@@ -72,6 +72,25 @@ type PartitionedSourceResolver interface {
 	ResolveSQLSourcePartitions(name string, key string) ([]SQLSourcePartition, bool, error)
 }
 
+// SQLPartitionPredicate is a planner-proven literal predicate that may be
+// used to select a subset of physical partitions. Values are read-only for
+// the duration of the resolver call. The SQL executor still evaluates the
+// complete original predicate after the source is resolved.
+type SQLPartitionPredicate struct {
+	Field    string
+	Operator string
+	Values   []interface{}
+}
+
+// PartitionPruningSourceResolver optionally prunes a partitioned source from
+// a literal equality or IN predicate. Returning available=false asks the
+// executor to use PartitionedSourceResolver or SourceResolver instead.
+// Implementations must never omit a partition that could contain a matching
+// row; pruning is an optimization, not a source of SQL semantics.
+type PartitionPruningSourceResolver interface {
+	ResolveSQLSourcePartitionsForPredicate(name string, key string, predicate SQLPartitionPredicate) ([]SQLSourcePartition, bool, error)
+}
+
 // HistoricalSourceResolver optionally resolves a source at an immutable
 // sequence frontier. It is required for QuerySubscriptionDefinition.AsOf;
 // callers that only need live UpTo/progress delivery can use SourceResolver.

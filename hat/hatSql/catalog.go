@@ -141,3 +141,23 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 	}
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
+
+// ResolveSQLSourcePartitionsForPredicate forwards predicate pruning for
+// application sources while leaving information-schema sources to the
+// catalog resolver.
+func (resolver CatalogResolver) ResolveSQLSourcePartitionsForPredicate(name, key string, predicate SQLPartitionPredicate) ([]SQLSourcePartition, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		switch strings.ToLower(key) {
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+			return nil, false, nil
+		}
+	}
+	if resolver.Source == nil {
+		return nil, false, nil
+	}
+	pruning, ok := resolver.Source.(PartitionPruningSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return pruning.ResolveSQLSourcePartitionsForPredicate(name, key, predicate)
+}

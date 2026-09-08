@@ -17431,6 +17431,15 @@ letting callers mutate cached state. The optimization is most useful when
 source scans or joins are materially larger than the returned result. It is
 opt-in and has no persistence or wire-format change.
 
+## SQL partition pruning
+
+The opt-in partition-pruning path is benchmarked in
+[PARTITION_PRUNING.md](PARTITION_PRUNING.md). Across eight partitions and
+2,048 rows, the recorded median for `WHERE region = 'apac'` fell from 239,486
+to 76,036 ns/op and from 339,665 to 135,504 B/op; allocations were 538 versus
+537 per operation. The full predicate remains authoritative after candidate
+partition selection.
+
 ## Partitioned SQL source flattening
 
 The opt-in partitioned SQL source path is benchmarked in

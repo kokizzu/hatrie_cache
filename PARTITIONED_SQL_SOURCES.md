@@ -40,10 +40,11 @@ func (r resolver) ResolveSQLSourcePartitions(name, key string) ([]hatSql.SQLSour
 
 This is an opt-in API. Existing resolvers do not need a new method, and the
 existing index, columnar, stream, and historical resolver extensions remain
-available when implemented by the resolver passed to the query. The current
-partition adapter is a row-source boundary; automatic predicate pruning,
-per-partition index/columnar fan-out, ownership consensus, and cross-partition
-writes remain separate follow-up features.
+available when implemented by the resolver passed to the query. The partition
+adapter is a row-source boundary. Automatic literal predicate pruning is
+documented in [PARTITION_PRUNING.md](PARTITION_PRUNING.md); per-partition
+index/columnar fan-out, ownership consensus, and cross-partition writes remain
+separate follow-up features.
 
 ## Benchmark
 

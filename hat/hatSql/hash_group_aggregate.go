@@ -231,7 +231,7 @@ func executeSQLHashGroupAggregateStream(q *sqlQuery, resolver SQLSourceResolver,
 	}
 	inputRows := 0
 	result, handled, err := executeSQLHashGroupAggregateRows(q, func(consume func(sqlExecRow) error) error {
-		return streamSQLSourceRows(control.ctx, *q.from, resolver, func(sourceRow SQLRow) error {
+		return streamSQLSourceRowsWithPartitionPredicates(control.ctx, *q.from, resolver, sqlQueryPartitionPredicates(q), func(sourceRow SQLRow) error {
 			if err := control.check(); err != nil {
 				return err
 			}

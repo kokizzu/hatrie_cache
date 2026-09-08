@@ -4317,3 +4317,5 @@ contract, execution boundary, and measurements.
 
 Expose region, tenant, or time partitions as one logical SQL source with the
 opt-in [`PartitionedSourceResolver`](PARTITIONED_SQL_SOURCES.md) contract.
+Use [`PartitionPruningSourceResolver`](PARTITION_PRUNING.md) to skip
+provably irrelevant partitions for literal equality and `IN` predicates.

@@ -1274,7 +1274,7 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		}
 		return err
 	}
-	if err := streamSQLSourceRows(ctx, *query.from, resolver, streamRow); err != nil && err != errSQLStreamLimitReached {
+	if err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), streamRow); err != nil && err != errSQLStreamLimitReached {
 		return sqlRuntimeDiagnostic(err)
 	}
 	return nil
@@ -2161,7 +2161,7 @@ func executeSQLLeadWindowStream(ctx context.Context, query *sqlQuery, resolver S
 		}
 		return nil
 	}
-	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -2303,7 +2303,7 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 		return nil
 	}
 	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
-	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -2452,7 +2452,7 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 	columns := sqlColumns(query.selects)
 	inputRows := 0
 	ordinal := 0
-	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -2623,7 +2623,7 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 		return nil
 	}
 	inputRows, ordinal := 0, 0
-	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -2765,7 +2765,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 		return nil
 	}
 	inputRows, ordinal := 0, 0
-	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -3060,7 +3060,7 @@ func (aggregate sqlStreamAggregate) result() interface{} {
 
 func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error, aggregates []sqlStreamAggregate) error {
 	inputRows := 0
-	err := streamSQLSourceRows(ctx, *query.from, resolver, func(sourceRow SQLRow) error {
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -4064,6 +4064,10 @@ func validateSQLQueryStreamable(query *sqlQuery) error {
 }
 
 func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSourceResolver, visit func(SQLRow) error) error {
+	return streamSQLSourceRowsWithPartitionPredicates(ctx, source, resolver, nil, visit)
+}
+
+func streamSQLSourceRowsWithPartitionPredicates(ctx context.Context, source sqlSource, resolver SQLSourceResolver, predicates []SQLPartitionPredicate, visit func(SQLRow) error) error {
 	switch source.kind {
 	case "VALUES":
 		for _, values := range source.values {
@@ -4090,6 +4094,32 @@ func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSour
 			}
 			return validateSQLSourceFieldTypeRow(source, row, rowIndex)
 		}
+		visitRows := func(rows []SQLRow) error {
+			for _, row := range rows {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				validated, err := validate(row)
+				if err != nil {
+					return err
+				}
+				if err := visit(validated); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if len(predicates) != 0 {
+			if pruning, ok := resolver.(PartitionPruningSourceResolver); ok {
+				rows, available, err := resolveSQLSourcePartitionsForPredicates(pruning, source.kind, source.key, predicates)
+				if err != nil {
+					return err
+				}
+				if available {
+					return visitRows(rows)
+				}
+			}
+		}
 		if streaming, ok := resolver.(SQLStreamSourceResolver); ok {
 			return streaming.StreamSQLSource(ctx, source.kind, source.key, func(row SQLRow) error {
 				validated, err := validate(row)
@@ -4099,23 +4129,20 @@ func streamSQLSourceRows(ctx context.Context, source sqlSource, resolver SQLSour
 				return visit(validated)
 			})
 		}
+		if partitioned, ok := resolver.(PartitionedSourceResolver); ok {
+			rows, available, err := resolveSQLSourcePartitions(partitioned, source.kind, source.key)
+			if err != nil {
+				return err
+			}
+			if available {
+				return visitRows(rows)
+			}
+		}
 		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
 		if err != nil {
 			return err
 		}
-		for _, row := range rows {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			validated, err := validate(row)
-			if err != nil {
-				return err
-			}
-			if err := visit(validated); err != nil {
-				return err
-			}
-		}
-		return nil
+		return visitRows(rows)
 	default:
 		return fmt.Errorf("SQL source %q cannot stream rows yet", source.kind)
 	}
@@ -4448,7 +4475,7 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 	result := SQLQueryResult{Columns: columns}
 	evaluationGroup := make([]sqlExecRow, 1)
 	leftRows, filterProbes, filterSkipped := 0, 0, 0
-	leftErr := streamSQLSourceRows(ctx, *query.from, resolver, func(row SQLRow) error {
+	leftErr := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(row SQLRow) error {
 		if leftRows >= maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, maxRows)
 		}
@@ -10016,7 +10043,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 		}
 		if !indexed {
-			base, err = resolveSQLSource(*q.from, resolver, ctes, metrics, control)
+			base, err = resolveSQLSourceWithPartitionPredicates(*q.from, resolver, ctes, metrics, control, sqlQueryPartitionPredicates(q))
 		}
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -11639,6 +11666,10 @@ func sqlOutputRowKeyWithCollation(row SQLRow, collation SQLCollation) string {
 	return sqlOutputRowKey(key)
 }
 func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) ([]SQLRow, error) {
+	return resolveSQLSourceWithPartitionPredicates(source, resolver, ctes, metrics, control, nil)
+}
+
+func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, predicates []SQLPartitionPredicate) ([]SQLRow, error) {
 	switch source.kind {
 	case "VALUES":
 		return valuesSQLRows(source.values, source.columns), nil
@@ -11663,11 +11694,22 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		var rows []SQLRow
 		borrowed := false
 		var err error
-		if partitioned, ok := resolver.(PartitionedSourceResolver); ok {
-			var available bool
-			rows, available, err = resolveSQLSourcePartitions(partitioned, source.kind, source.key)
-			if available {
-				borrowed = true
+		if len(predicates) != 0 {
+			if pruning, ok := resolver.(PartitionPruningSourceResolver); ok {
+				var available bool
+				rows, available, err = resolveSQLSourcePartitionsForPredicates(pruning, source.kind, source.key, predicates)
+				if available {
+					borrowed = true
+				}
+			}
+		}
+		if !borrowed && err == nil {
+			if partitioned, ok := resolver.(PartitionedSourceResolver); ok {
+				var available bool
+				rows, available, err = resolveSQLSourcePartitions(partitioned, source.kind, source.key)
+				if available {
+					borrowed = true
+				}
 			}
 		}
 		if !borrowed && err == nil {
@@ -11678,17 +11720,7 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 		if !borrowed && err == nil {
 			rows, err = resolver.ResolveSQLSource(source.kind, source.key)
 		}
-		if err != nil {
-			return nil, err
-		}
-		if control != nil {
-			if borrowed {
-				control.sources[cacheKey] = rows
-			} else {
-				control.sources[cacheKey] = cloneSQLRows(rows)
-			}
-		}
-		return validateSQLSourceFieldTypes(source, rows)
+		return finishSQLSourceRows(source, control, rows, borrowed, err)
 	case "EXTERNAL":
 		if resolver == nil {
 			return nil, fmt.Errorf("EXTERNAL(%q) requires an external source resolver", source.key)
@@ -11732,29 +11764,125 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 	return nil, nil
 }
 
+func finishSQLSourceRows(source sqlSource, control *sqlExecutionControl, rows []SQLRow, borrowed bool, err error) ([]SQLRow, error) {
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := source.kind + "\x00" + source.key
+	if control != nil {
+		if borrowed {
+			control.sources[cacheKey] = rows
+		} else {
+			control.sources[cacheKey] = cloneSQLRows(rows)
+		}
+	}
+	return validateSQLSourceFieldTypes(source, rows)
+}
+
 func resolveSQLSourcePartitions(resolver PartitionedSourceResolver, name, key string) ([]SQLRow, bool, error) {
 	partitions, available, err := resolver.ResolveSQLSourcePartitions(name, key)
 	if err != nil || !available {
 		return nil, available, err
 	}
+	return flattenSQLSourcePartitions(partitions), true, nil
+}
+
+func resolveSQLSourcePartitionsForPredicates(resolver PartitionPruningSourceResolver, name, key string, predicates []SQLPartitionPredicate) ([]SQLRow, bool, error) {
+	for _, predicate := range predicates {
+		partitions, available, err := resolver.ResolveSQLSourcePartitionsForPredicate(name, key, predicate)
+		if err != nil {
+			return nil, false, err
+		}
+		if available {
+			return flattenSQLSourcePartitions(partitions), true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func flattenSQLSourcePartitions(partitions []SQLSourcePartition) []SQLRow {
 	if len(partitions) == 0 {
-		return nil, true, nil
+		return nil
 	}
 	if len(partitions) == 1 {
-		return partitions[0].Rows, true, nil
+		return partitions[0].Rows
 	}
 	total := 0
 	for _, partition := range partitions {
 		total += len(partition.Rows)
 	}
 	if total == 0 {
-		return nil, true, nil
+		return nil
 	}
 	rows := make([]SQLRow, 0, total)
 	for _, partition := range partitions {
 		rows = append(rows, partition.Rows...)
 	}
-	return rows, true, nil
+	return rows
+}
+
+func sqlQueryPartitionPredicates(query *sqlQuery) []SQLPartitionPredicate {
+	if query == nil || query.from == nil || query.sample != nil || query.from.kind != "CACHE" && query.from.kind != "KEYS" {
+		return nil
+	}
+	return sqlPartitionPredicates(*query.from, query.where, len(query.joins) == 0)
+}
+
+func sqlPartitionPredicates(source sqlSource, condition sqlExpr, allowUnqualified bool) []SQLPartitionPredicate {
+	if condition.kind == "" {
+		return nil
+	}
+	var predicates []SQLPartitionPredicate
+	var collect func(sqlExpr)
+	collect = func(expression sqlExpr) {
+		if expression.kind == "binary" && expression.op == "AND" && expression.left != nil && expression.right != nil {
+			collect(*expression.left)
+			collect(*expression.right)
+			return
+		}
+		if predicate, ok := sqlPartitionPredicate(source, expression, allowUnqualified); ok {
+			predicates = append(predicates, predicate)
+		}
+	}
+	collect(condition)
+	return predicates
+}
+
+func sqlPartitionPredicate(source sqlSource, condition sqlExpr, allowUnqualified bool) (SQLPartitionPredicate, bool) {
+	if condition.collation.normalized() != SQLCollationBinary {
+		return SQLPartitionPredicate{}, false
+	}
+	if condition.kind == "binary" && condition.op == "=" && condition.left != nil && condition.right != nil {
+		if field, ok := sqlPartitionField(source, *condition.left, allowUnqualified); ok && condition.right.kind == "literal" && condition.right.value != nil {
+			return SQLPartitionPredicate{Field: field, Operator: "=", Values: []interface{}{condition.right.value}}, true
+		}
+		if field, ok := sqlPartitionField(source, *condition.right, allowUnqualified); ok && condition.left.kind == "literal" && condition.left.value != nil {
+			return SQLPartitionPredicate{Field: field, Operator: "=", Values: []interface{}{condition.left.value}}, true
+		}
+		return SQLPartitionPredicate{}, false
+	}
+	if condition.kind != "in" || condition.op != "IN" || condition.left == nil || len(condition.args) == 0 {
+		return SQLPartitionPredicate{}, false
+	}
+	field, ok := sqlPartitionField(source, *condition.left, allowUnqualified)
+	if !ok {
+		return SQLPartitionPredicate{}, false
+	}
+	values := make([]interface{}, 0, len(condition.args))
+	for _, argument := range condition.args {
+		if argument.kind != "literal" || argument.value == nil {
+			return SQLPartitionPredicate{}, false
+		}
+		values = append(values, argument.value)
+	}
+	return SQLPartitionPredicate{Field: field, Operator: "IN", Values: values}, true
+}
+
+func sqlPartitionField(source sqlSource, expression sqlExpr, allowUnqualified bool) (string, bool) {
+	if expression.kind != "field" || expression.name == "" || expression.qualifier != source.alias && !(allowUnqualified && expression.qualifier == "") {
+		return "", false
+	}
+	return expression.name, true
 }
 
 func validateSQLSourceFieldTypes(source sqlSource, rows []SQLRow) ([]SQLRow, error) {
@@ -14578,7 +14706,7 @@ func executeSQLStreamedSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceReso
 	}
 	filterStarted := time.Now()
 	result, handled, err := executeSQLSpilledGroupAggregateRows(q, func(visit func(sqlExecRow) error) error {
-		return streamSQLSourceRows(control.ctx, *q.from, resolver, func(sourceRow SQLRow) error {
+		return streamSQLSourceRowsWithPartitionPredicates(control.ctx, *q.from, resolver, sqlQueryPartitionPredicates(q), func(sourceRow SQLRow) error {
 			if err := control.check(); err != nil {
 				return err
 			}
