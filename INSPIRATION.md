@@ -407,6 +407,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M096b Bounded dictionary admission avoids allocating row codes for columns that exceed the existing size bound; an eight-entry stack prefix preserves the low-cardinality path.
 - [x] M096c Aggregate arrangements defer redundant serialized sort-key materialization until `Rows()` and invalidate only when a new group appears; correctness and cold/warm before/after measurements are recorded in [BENCHMARK.md](BENCHMARK.md#deferred-aggregate-arrangement-sort-keys).
 - [x] M096d Add opt-in contiguous dictionary-value storage with immutable string data and offsets; keep legacy `Values` by default and validate packed offsets before SQL access.
+- [x] M096e Add opt-in per-column dictionary-coded string group keys for typed aggregates, with reference-counted code reuse, partial-merge remapping, cached order references, and high-cardinality/repeated-group measurements in [BENCHMARK.md](BENCHMARK.md#per-column-dictionary-coded-aggregate-groups).
 - [ ] M097 Compressed arrangement batches.
 - [x] M097a Add opt-in byte-packing for low-cardinality arrangement dictionary codes without changing logical values; the legacy representation remains the default for compatibility and predictable CPU cost.
 - [x] M097b Add opt-in NULL validity-bitmap and dense-value packing for sparse nullable arrangement columns; pack only when the estimated retained layout is smaller, while preserving legacy `Columns` by default.

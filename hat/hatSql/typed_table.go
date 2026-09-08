@@ -1009,13 +1009,16 @@ func typedTableValueInterface(value TypedTableValue) interface{} {
 // always emits count; SumField, MinField, and MaxField are optional numeric
 // schema columns. DistinctField is an optional scalar schema column. Min, max,
 // and distinct values retain per-group counts so deletes and updates remain
-// exact.
+// exact. DictionaryEncodeGroups is disabled by default; when enabled, string
+// group columns use per-aggregate dictionary codes to reduce retained key
+// memory and cache repeated output ordering.
 type TypedTableAggregateDefinition struct {
-	GroupBy       []string
-	SumField      string
-	MinField      string
-	MaxField      string
-	DistinctField string
+	GroupBy                []string
+	SumField               string
+	MinField               string
+	MaxField               string
+	DistinctField          string
+	DictionaryEncodeGroups bool
 }
 
 type typedTableDistinctValue struct {
@@ -1029,6 +1032,8 @@ type typedTableDistinctValue struct {
 type typedTableAggregateGroup struct {
 	key            string
 	values         []TypedTableValue
+	codes          []uint32
+	kinds          []TypedTableKind
 	count          int64
 	sum            float64
 	minValues      map[TypedTableValue]int64
@@ -1045,20 +1050,31 @@ type typedTableAggregateGroupBucket struct {
 	collisions []typedTableAggregateGroup
 }
 
+type typedTableAggregateGroupReference struct {
+	hash      uint64
+	collision int
+}
+
 // TypedTableAggregate maintains exact grouped COUNT and optional SUM, MIN, MAX,
 // and COUNT DISTINCT results from ordered TypedTableChange records without
 // rescanning the table.
 type TypedTableAggregate struct {
-	table          *TypedTable
-	groupBy        []int
-	sumField       int
-	minField       int
-	maxField       int
-	distinctField  int
-	groups         map[uint64]typedTableAggregateGroupBucket
-	groupCount     int
-	checkpoint     uint64
-	groupKeysReady bool
+	table                  *TypedTable
+	groupBy                []int
+	groupValueIndexes      []int
+	groupCodeIndexes       []int
+	groupValueCount        int
+	groupDictionaries      []typedTableAggregateStringDictionary
+	dictionaryEncodeGroups bool
+	sumField               int
+	minField               int
+	maxField               int
+	distinctField          int
+	groups                 map[uint64]typedTableAggregateGroupBucket
+	compactGroupOrder      []typedTableAggregateGroupReference
+	groupCount             int
+	checkpoint             uint64
+	groupKeysReady         bool
 }
 
 // NewTypedTableAggregate validates an exact delta aggregate for table.
@@ -1068,7 +1084,15 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	aggregate := &TypedTableAggregate{table: table, sumField: -1, minField: -1, maxField: -1, distinctField: -1, groups: make(map[uint64]typedTableAggregateGroupBucket)}
+	aggregate := &TypedTableAggregate{
+		table:                  table,
+		sumField:               -1,
+		minField:               -1,
+		maxField:               -1,
+		distinctField:          -1,
+		dictionaryEncodeGroups: definition.DictionaryEncodeGroups,
+		groups:                 make(map[uint64]typedTableAggregateGroupBucket),
+	}
 	seen := make(map[int]struct{}, len(definition.GroupBy))
 	for _, field := range definition.GroupBy {
 		index, exists := table.byName[strings.TrimSpace(field)]
@@ -1080,6 +1104,15 @@ func NewTypedTableAggregate(table *TypedTable, definition TypedTableAggregateDef
 		}
 		seen[index] = struct{}{}
 		aggregate.groupBy = append(aggregate.groupBy, index)
+		if aggregate.dictionaryEncodeGroups && table.columns[index].kind == TypedTableString {
+			aggregate.groupValueIndexes = append(aggregate.groupValueIndexes, -1)
+			aggregate.groupCodeIndexes = append(aggregate.groupCodeIndexes, len(aggregate.groupDictionaries))
+			aggregate.groupDictionaries = append(aggregate.groupDictionaries, typedTableAggregateStringDictionary{})
+		} else {
+			aggregate.groupValueIndexes = append(aggregate.groupValueIndexes, aggregate.groupValueCount)
+			aggregate.groupCodeIndexes = append(aggregate.groupCodeIndexes, -1)
+			aggregate.groupValueCount++
+		}
 	}
 	if definition.SumField != "" {
 		index, exists := table.byName[strings.TrimSpace(definition.SumField)]
@@ -1175,13 +1208,20 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 	if aggregate == nil {
 		return nil
 	}
-	aggregate.ensureGroupKeys()
-	groups := make([]typedTableAggregateGroup, 0, aggregate.groupCount)
-	for _, bucket := range aggregate.groups {
-		groups = append(groups, bucket.group)
-		groups = append(groups, bucket.collisions...)
+	var groups []typedTableAggregateGroup
+	if aggregate.dictionaryEncodeGroups {
+		groups = aggregate.compactOrderedGroups()
+	} else {
+		aggregate.ensureGroupKeys()
+		groups = make([]typedTableAggregateGroup, 0, aggregate.groupCount)
+		for _, bucket := range aggregate.groups {
+			groups = append(groups, bucket.group)
+			groups = append(groups, bucket.collisions...)
+		}
+		sort.Slice(groups, func(left, right int) bool {
+			return groups[left].key < groups[right].key
+		})
 	}
-	sort.Slice(groups, func(left, right int) bool { return groups[left].key < groups[right].key })
 	rows := make([]Row, 0, len(groups))
 	for _, group := range groups {
 		rowFields := len(aggregate.groupBy) + 1
@@ -1199,7 +1239,13 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 		}
 		row := make(Row, rowFields)
 		for index, column := range aggregate.groupBy {
-			row[aggregate.table.schema.Columns[column].Name] = typedTableValueInterface(group.values[index])
+			value := TypedTableValue{}
+			if aggregate.dictionaryEncodeGroups {
+				value = aggregate.groupValue(group, index)
+			} else {
+				value = group.values[index]
+			}
+			row[aggregate.table.schema.Columns[column].Name] = typedTableValueInterface(value)
 		}
 		row["count"] = group.count
 		if aggregate.sumField >= 0 {
@@ -1228,12 +1274,12 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	groupIndex := -1
 	var group typedTableAggregateGroup
 	if bucketExists {
-		if typedTableAggregateGroupValuesEqual(bucket.group.values, values, aggregate.groupBy) {
+		if aggregate.dictionaryEncodeGroups && aggregate.groupValuesEqual(bucket.group, values) || !aggregate.dictionaryEncodeGroups && typedTableAggregateGroupValuesEqual(bucket.group.values, values, aggregate.groupBy) {
 			group = bucket.group
 			groupIndex = 0
 		} else {
 			for index := range bucket.collisions {
-				if typedTableAggregateGroupValuesEqual(bucket.collisions[index].values, values, aggregate.groupBy) {
+				if aggregate.dictionaryEncodeGroups && aggregate.groupValuesEqual(bucket.collisions[index], values) || !aggregate.dictionaryEncodeGroups && typedTableAggregateGroupValuesEqual(bucket.collisions[index].values, values, aggregate.groupBy) {
 					group = bucket.collisions[index]
 					groupIndex = index + 1
 					break
@@ -1243,9 +1289,14 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	}
 	if delta > 0 && groupIndex < 0 {
 		aggregate.groupKeysReady = false
-		group.values = make([]TypedTableValue, len(aggregate.groupBy))
-		for index, column := range aggregate.groupBy {
-			group.values[index] = values[column]
+		aggregate.compactGroupOrder = nil
+		if aggregate.dictionaryEncodeGroups {
+			group = aggregate.newGroup(values)
+		} else {
+			group.values = make([]TypedTableValue, len(aggregate.groupBy))
+			for index, column := range aggregate.groupBy {
+				group.values[index] = values[column]
+			}
 		}
 	}
 	if err := aggregate.checkDistinct(group, values, delta); err != nil {
@@ -1270,6 +1321,9 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	aggregate.adjustDistinct(&group, values, delta)
 	if group.count == 0 {
 		if groupIndex >= 0 {
+			if aggregate.dictionaryEncodeGroups {
+				aggregate.releaseGroup(group)
+			}
 			aggregate.deleteGroup(hash, bucket, groupIndex)
 		}
 		return nil
@@ -1293,6 +1347,8 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 }
 
 func (aggregate *TypedTableAggregate) deleteGroup(hash uint64, bucket typedTableAggregateGroupBucket, groupIndex int) {
+	aggregate.groupKeysReady = false
+	aggregate.compactGroupOrder = nil
 	aggregate.groupCount--
 	if groupIndex == 0 {
 		if len(bucket.collisions) == 0 {

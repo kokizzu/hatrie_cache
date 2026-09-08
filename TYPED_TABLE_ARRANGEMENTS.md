@@ -14,8 +14,9 @@ if err != nil {
 }
 
 definition := hatSql.TypedTableAggregateDefinition{
-	GroupBy:  []string{"team"},
-	SumField: "points",
+	GroupBy:                []string{"team"},
+	SumField:               "points",
+	DictionaryEncodeGroups: true, // optional; false is the compatibility default
 }
 first, err := arrangements.Acquire(definition)
 if err != nil {
@@ -47,8 +48,9 @@ is ignored and a sequence gap is rejected, exactly as with
 
 ## Lifecycle And Limits
 
-- Definitions share state only when their ordered `GROUP BY` fields and
-  `SUM` field match exactly. Different aggregate definitions remain separate.
+- Definitions share state only when their ordered `GROUP BY` fields, aggregate
+  fields, and `DictionaryEncodeGroups` setting match exactly. Different
+  aggregate definitions remain separate.
 - The registry never scans table rows or applies changes by itself. The caller
   chooses the batch boundary and remains responsible for coordinating
   `TypedTable.CompactChangesThrough` after every consumer is past that point.
@@ -56,6 +58,12 @@ is ignored and a sequence gap is rejected, exactly as with
   The shared aggregate is discarded when its final lease is released.
 - A released lease cannot be used. Acquire a new lease to start a new
   aggregate state.
+
+When `DictionaryEncodeGroups` is true, string group columns use a compact
+per-arrangement dictionary. It is useful for read-heavy arrangements with
+repeated or large string keys, but the measured update path is slower, so the
+flag remains opt-in. Compatible partial aggregates must use the same setting;
+mixed legacy and dictionary-coded partials are rejected.
 
 ## Measured Tradeoff
 

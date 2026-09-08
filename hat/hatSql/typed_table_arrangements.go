@@ -245,5 +245,10 @@ func typedTableAggregateArrangementKey(definition TypedTableAggregateDefinition)
 		builder.WriteString(field)
 		builder.WriteByte(';')
 	}
+	if definition.DictionaryEncodeGroups {
+		builder.WriteByte('1')
+	} else {
+		builder.WriteByte('0')
+	}
 	return builder.String()
 }

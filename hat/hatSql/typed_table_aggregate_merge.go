@@ -46,22 +46,27 @@ func (aggregate *TypedTableAggregate) MergePartials(partials ...*TypedTableAggre
 		}
 	}
 
-	groups := cloneTypedTableAggregateGroups(aggregate)
+	working := *aggregate
+	working.groups = cloneTypedTableAggregateGroups(aggregate)
+	working.groupDictionaries = cloneTypedTableAggregateDictionaries(aggregate.groupDictionaries)
 	groupCount := aggregate.groupCount
 	for _, partial := range partials {
 		for _, bucket := range partial.groups {
-			if err := mergeTypedTableAggregatePartialGroup(aggregate, groups, &groupCount, bucket.group); err != nil {
+			if err := mergeTypedTableAggregatePartialGroup(&working, working.groups, &groupCount, partial, bucket.group); err != nil {
 				return err
 			}
 			for _, collision := range bucket.collisions {
-				if err := mergeTypedTableAggregatePartialGroup(aggregate, groups, &groupCount, collision); err != nil {
+				if err := mergeTypedTableAggregatePartialGroup(&working, working.groups, &groupCount, partial, collision); err != nil {
 					return err
 				}
 			}
 		}
 	}
-	aggregate.groups = groups
+	aggregate.groups = working.groups
+	aggregate.groupDictionaries = working.groupDictionaries
 	aggregate.groupCount = groupCount
+	aggregate.groupKeysReady = false
+	aggregate.compactGroupOrder = nil
 	return nil
 }
 
@@ -70,6 +75,9 @@ func typedTableAggregatePartialsCompatible(target, partial *TypedTableAggregate)
 		return false
 	}
 	if target.sumField != partial.sumField || target.minField != partial.minField || target.maxField != partial.maxField || target.distinctField != partial.distinctField {
+		return false
+	}
+	if target.dictionaryEncodeGroups != partial.dictionaryEncodeGroups {
 		return false
 	}
 	for index, column := range target.groupBy {
@@ -109,6 +117,8 @@ func cloneTypedTableAggregateGroups(aggregate *TypedTableAggregate) map[uint64]t
 
 func cloneTypedTableAggregateGroup(group typedTableAggregateGroup, sharedExtrema bool) typedTableAggregateGroup {
 	group.values = cloneTypedTableValues(group.values)
+	group.codes = append([]uint32(nil), group.codes...)
+	group.kinds = append([]TypedTableKind(nil), group.kinds...)
 	group.minValues = cloneTypedTableAggregateValueCounts(group.minValues)
 	if sharedExtrema {
 		group.maxValues = group.minValues
@@ -141,20 +151,20 @@ func cloneTypedTableAggregateDistinctCounts(values map[typedTableDistinctValue]i
 	return cloned
 }
 
-func mergeTypedTableAggregatePartialGroup(aggregate *TypedTableAggregate, groups map[uint64]typedTableAggregateGroupBucket, groupCount *int, partial typedTableAggregateGroup) error {
-	if partial.count <= 0 || len(partial.values) != len(aggregate.groupBy) {
+func mergeTypedTableAggregatePartialGroup(aggregate *TypedTableAggregate, groups map[uint64]typedTableAggregateGroupBucket, groupCount *int, partialAggregate *TypedTableAggregate, partial typedTableAggregateGroup) error {
+	if partial.count <= 0 || !partialAggregate.groupShapeValid(partial) {
 		return ErrTypedTableAggregatePartialState
 	}
-	hash := typedTableAggregateGroupHashFromValues(partial.values)
+	hash := typedTableAggregateStoredGroupHash(partialAggregate, partial)
 	bucket := groups[hash]
 	groupIndex := -1
 	var target typedTableAggregateGroup
-	if typedTableAggregateGroupSlicesEqual(bucket.group.values, partial.values) && bucket.group.count > 0 {
+	if bucket.group.count > 0 && typedTableAggregateStoredGroupsEqual(aggregate, bucket.group, partialAggregate, partial) {
 		groupIndex = 0
 		target = bucket.group
 	} else {
 		for index, collision := range bucket.collisions {
-			if typedTableAggregateGroupSlicesEqual(collision.values, partial.values) {
+			if typedTableAggregateStoredGroupsEqual(aggregate, collision, partialAggregate, partial) {
 				groupIndex = index + 1
 				target = collision
 				break
@@ -162,7 +172,10 @@ func mergeTypedTableAggregatePartialGroup(aggregate *TypedTableAggregate, groups
 		}
 	}
 	if groupIndex < 0 {
-		cloned := cloneTypedTableAggregateGroup(partial, aggregate.minField >= 0 && aggregate.maxField == aggregate.minField)
+		cloned, err := cloneTypedTableAggregateGroupForAggregate(aggregate, partialAggregate, partial, aggregate.minField >= 0 && aggregate.maxField == aggregate.minField)
+		if err != nil {
+			return err
+		}
 		if bucket.group.count == 0 && len(bucket.collisions) == 0 {
 			bucket.group = cloned
 		} else {

@@ -72,6 +72,7 @@ func typedTableAggregateArrangementSnapshot(aggregate *TypedTableAggregate) (Typ
 	definition.MinField = typedTableColumnName(table.schema.Columns, aggregate.minField)
 	definition.MaxField = typedTableColumnName(table.schema.Columns, aggregate.maxField)
 	definition.DistinctField = typedTableColumnName(table.schema.Columns, aggregate.distinctField)
+	definition.DictionaryEncodeGroups = aggregate.dictionaryEncodeGroups
 	return definition, table.schema.Name, table.sequence
 }
 

@@ -61,6 +61,7 @@ aggregate, err := hatSql.NewTypedTableAggregate(table, hatSql.TypedTableAggregat
 	GroupBy:  []string{"team"},
 	SumField: "points",
 	DistinctField: "player_id",
+	// DictionaryEncodeGroups: true, // optional compact string group keys
 })
 if err != nil {
 	return err
@@ -81,6 +82,14 @@ _ = rows
 scalar column and retains one counter per distinct non-NULL value in each
 group. This makes inserts, updates, and deletes exact; choose it only when the
 avoided rescan cost is worth that bounded per-group state.
+
+`DictionaryEncodeGroups` is also disabled by default. When enabled, string
+columns named by `GroupBy` use one per-aggregate dictionary and compact codes
+for live groups. Code reuse and cached ordered group references reduce retained
+key state, but updates and the first `Rows()` materialization do extra work.
+Non-string group columns and the logical result remain unchanged. Use the
+default representation when update throughput is more important than retained
+arrangement memory; see the [measured comparison](BENCHMARK.md#per-column-dictionary-coded-aggregate-groups).
 
 Changes are idempotent at or below the aggregate checkpoint. A sequence gap is
 rejected rather than skipped. Keep a durable aggregate checkpoint alongside

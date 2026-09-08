@@ -16607,6 +16607,95 @@ cold materialization cost. It does not claim a reduction in the final
 materialized result size; the broader compressed-arrangement design remains
 open for a separate implementation.
 
+## Per-Column Dictionary-Coded Aggregate Groups
+
+`TypedTableAggregateDefinition.DictionaryEncodeGroups` is an opt-in layout for
+typed aggregate arrangements. For every `TypedTableString` column named in
+`GroupBy`, live groups retain a `uint32` dictionary code instead of a repeated
+`TypedTableValue` string header and payload. The dictionary is per aggregate,
+reuses codes after a group is removed, and remaps codes when compatible partial
+aggregates are merged. Non-string group columns continue using compact typed
+values. The logical `Rows()` output, NULL behavior, deterministic ordering,
+arrangement snapshots, and aggregate metrics are unchanged.
+
+The default is `false`. This matters because encoding adds dictionary lookup
+and reference-count work on the update path. Existing callers and arrangement
+definitions therefore keep the old representation and performance unless they
+explicitly enable the field. A compact and a legacy aggregate are different
+arrangement definitions; `MergePartials` also rejects a mode mismatch.
+
+The first `Rows()` call in compact mode creates temporary canonical ordering
+keys, then retains only sorted group references. Repeated `Rows()` calls reuse
+those references, and updates to an existing group do not rebuild the order.
+Adding or removing a group invalidates it. The retained-key estimate below
+includes group value/code storage, dictionary string headers and payloads, and
+the compact order references; it includes the legacy cached sort-key storage in
+the baseline. It excludes Go map bucket overhead, allocator fragmentation, and
+the temporary first-read sorter.
+
+Five samples were collected on an AMD Ryzen 9 5950X, `linux/amd64`, with one
+CPU and `go test -benchmem -count=5 -cpu=1`. Each benchmark applies 2,048
+changes. The high-cardinality workload has 2,048 distinct two-string groups;
+the repeated workload has 512 groups reused across 10,000 changes. Lower time,
+heap, allocation count, and retained-key bytes are better.
+
+### High-Cardinality Groups
+
+| Phase or metric | Legacy median | Dictionary encoded median | Encoded vs legacy |
+| --- | ---: | ---: | ---: |
+| Apply time | 596,424 ns/op | 744,829 ns/op | 1.25x slower |
+| Apply heap | 869,521 B/op | 767,224 B/op | 0.88x; 1.13x lower |
+| Apply allocations | 4,134/op | 4,179/op | 1.01x higher |
+| Apply plus first `Rows()` time | 2,486,046 ns/op | 2,806,196 ns/op | 1.13x slower |
+| Apply plus first `Rows()` heap | 2,248,129 B/op | 2,243,930 B/op | 1.00x; neutral |
+| Warm repeated `Rows()` time | 1,406,614 ns/op | 861,661 ns/op | 1.63x faster |
+| Warm repeated `Rows()` heap | 1,263,922 B/op | 1,263,610 B/op | 1.00x; neutral |
+| Warm repeated `Rows()` allocations | 10,244/op | 10,241/op | 1.00x; neutral |
+| Retained group-key estimate | 375,952 bytes | 61,426 bytes | 6.12x lower |
+
+Raw five-run output:
+
+```text
+legacy/apply: 623970, 578952, 567709, 596424, 629530 ns/op; 869521 B/op; 4134 allocs/op
+dictionary_encoded/apply: 773614, 814496, 721667, 739498, 744829 ns/op; 767224 B/op; 4179 allocs/op
+legacy/apply_rows: 2479300, 2951852, 2529622, 2479065, 2486046 ns/op; 2248129 B/op; 20522 allocs/op
+dictionary_encoded/apply_rows: 2972415, 2832237, 2579903, 2812058, 2806196 ns/op; 2243930 B/op; 20569 allocs/op
+legacy/rows_existing_state: 1454380, 1420889, 1378894, 1376299, 1406614 ns/op; 375952 group-key-bytes-est; 1263921 B/op; 10244 allocs/op
+dictionary_encoded/rows_existing_state: 934203, 857874, 840850, 861661, 862358 ns/op; 61426 group-key-bytes-est; 1263610 B/op; 10241 allocs/op
+```
+
+### Repeated Groups
+
+| Phase or metric | Legacy median | Dictionary encoded median | Encoded vs legacy |
+| --- | ---: | ---: | ---: |
+| Apply time | 1,236,217 ns/op | 1,302,901 ns/op | 1.05x slower |
+| Apply heap | 218,016 B/op | 183,368 B/op | 0.84x; 1.19x lower |
+| Apply allocations | 1,048/op | 1,083/op | 1.03x higher |
+| Apply plus first `Rows()` time | 1,732,130 ns/op | 1,827,482 ns/op | 1.06x slower |
+| Apply plus first `Rows()` heap | 567,256 B/op | 559,024 B/op | 0.99x; 1.01x lower |
+| Warm repeated `Rows()` time | 327,087 ns/op | 196,496 ns/op | 1.66x faster |
+| Warm repeated `Rows()` heap | 320,568 B/op | 320,256 B/op | 1.00x; neutral |
+| Warm repeated `Rows()` allocations | 2,565/op | 2,562/op | 1.00x; neutral |
+| Retained group-key estimate | 93,024 bytes | 13,942 bytes | 6.67x lower |
+
+Raw five-run output:
+
+```text
+legacy/apply: 1236217, 1270990, 1224837, 1238185, 1205126 ns/op; 218016 B/op; 1048 allocs/op
+dictionary_encoded/apply: 1504444, 1302901, 1304324, 1290903, 1293544 ns/op; 183368 B/op; 1083 allocs/op
+legacy/apply_rows: 1732130, 1690289, 1963565, 1793851, 1672558 ns/op; 567256 B/op; 5149 allocs/op
+dictionary_encoded/apply_rows: 2038660, 1827482, 1822564, 1787118, 1925039 ns/op; 559024 B/op; 5186 allocs/op
+legacy/rows_existing_state: 327087, 332372, 325929, 323521, 380898 ns/op; 93024 group-key-bytes-est; 320568 B/op; 2565 allocs/op
+dictionary_encoded/rows_existing_state: 187805, 196496, 192905, 211388, 216524 ns/op; 13942 group-key-bytes-est; 320256 B/op; 2562 allocs/op
+```
+
+This is a targeted memory win for read-heavy arrangements with repeated or
+large string group keys. It is not a universal throughput win: measured
+updates are 5-25% slower and compact mode performs extra work on the first
+materialization. Keep the default off unless retained arrangement memory or
+repeated ordered reads are the limiting resource, and remeasure with the
+application's actual key cardinality and mutation rate.
+
 ## Packed Arrangement Dictionary Codes
 
 Dictionary-encoded arrangement batches previously retained one `uint32` code
