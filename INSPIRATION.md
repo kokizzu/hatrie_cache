@@ -559,12 +559,25 @@ explicit regional partitioning and simple backups over automatic sharding.
   [REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md).
 - [x] T076a Immutable longest-prefix routing for explicit region keys. `hatPartition.PrefixRouter` validates normalized rules, chooses the most specific prefix without lookup allocation, and leaves unmatched keys unassigned; see [REGIONAL_PARTITION_ROUTING.md](REGIONAL_PARTITION_ROUTING.md).
 - [x] T077 Region-local backup and restore. `partition_local` snapshot bundles filter records before encoding, carry `partition.local` metadata, are validated by the backup doctor, and require an optional matching partition selector before restore publication; Pebble checkpoint and incremental modes remain whole-store artifacts.
-- [ ] T078 Cross-region read policy.
+- [x] T078 Cross-region read policy. `hatReplication.SelectReadReplicaWithConsistency`
+  applies freshness constraints before optional ordered region preferences and
+  falls back deterministically when the preferred region is unavailable. See
+  [REPLICA_LOCALITY_ROUTING.md](REPLICA_LOCALITY_ROUTING.md) and
+  [READ_CONSISTENCY.md](READ_CONSISTENCY.md).
 - [ ] T079 Partition ownership and fencing metadata.
 - [ ] T080 Partition split and merge tooling.
-- [ ] T081 Partition-local query planning.
-- [ ] T082 Partition pruning from region predicates.
-- [ ] T083 Cross-partition aggregate merge.
+- [x] T081 Partition-local query planning. `hatSql.PartitionPruningSourceResolver`
+  participates in planning before source scans and preserves the full
+  predicate for post-pruning re-evaluation; unsupported predicates retain the
+  legacy path. See [PARTITION_PRUNING.md](PARTITION_PRUNING.md).
+- [x] T082 Partition pruning from region predicates. Literal `region =` and
+  `region IN (...)` predicates select complete physical partition subsets while
+  preserving correctness through the original `WHERE` evaluation; see
+  [PARTITION_PRUNING.md](PARTITION_PRUNING.md).
+- [x] T083 Cross-partition aggregate merge. `hatSql.TypedTableAggregate.MergePartial`
+  and `MergePartials` combine validated partition-local COUNT, SUM, MIN, MAX,
+  and COUNT DISTINCT states deterministically; see
+  [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md).
 - [ ] T084 Cross-partition ordered pagination.
 - [ ] T085 Partition health and lag dashboard.
 
@@ -607,7 +620,10 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T117 Explain query plan output.
 - [x] T118 Parameter binding.
 - [x] T119 SQL views.
-- [ ] T120 SQL triggers with transaction semantics.
+- [x] T120 SQL triggers with transaction semantics. Strict `CREATE TRIGGER`
+  parsing and opt-in direct SQL DML dispatch use prepare-before-apply,
+  deterministic ordering, and rollback on trigger commit failure; see
+  [SQL_TRIGGERS.md](SQL_TRIGGERS.md).
 - [x] T120a Strict row-level `CREATE TRIGGER` parsing and explicit registry registration for `AFTER` DML events; automatic DML wiring remains caller-owned, see [SQL_TRIGGERS.md](SQL_TRIGGERS.md).
 - [x] T120b Opt-in automatic row-level trigger dispatch for direct SQL INSERT, UPDATE, and DELETE with prepare-before-apply, rollback on trigger commit failure, and legacy default-off behavior; see [SQL_TRIGGERS.md](SQL_TRIGGERS.md).
 - [x] T121 Public SQL transaction commands. `CompileSQL` exposes `BEGIN ATOMIC` programs with savepoints, and `BeginSQLTransaction` exposes snapshot reads, rollback, conflict-aware commit, and savepoint methods.
