@@ -888,6 +888,10 @@ func typedTableColumnarBatchBytes(batch ColumnarBatch, segments *ColumnarNumeric
 	for _, column := range batch.PackedColumns {
 		bytes += len(column.Values)*16 + len(column.Validity) + len(column.Ranks)*4
 	}
+	bytes += len(batch.BoolColumns) * 64
+	for _, column := range batch.BoolColumns {
+		bytes += len(column.Bits) + len(column.Validity)
+	}
 	if segments != nil {
 		bytes += len(segments.Columns) * 64
 		for _, values := range segments.Columns {

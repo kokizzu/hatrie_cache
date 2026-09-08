@@ -402,6 +402,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M097 Compressed arrangement batches.
 - [x] M097a Add opt-in byte-packing for low-cardinality arrangement dictionary codes without changing logical values; the legacy representation remains the default for compatibility and predictable CPU cost.
 - [x] M097b Add opt-in NULL validity-bitmap and dense-value packing for sparse nullable arrangement columns; pack only when the estimated retained layout is smaller, while preserving legacy `Columns` by default.
+- [x] M097c Add opt-in bit-packing for boolean arrangement columns, using a second bitmap only when NULLs exist; preserve legacy `Columns` by default and reject non-boolean input.
 - [x] M098 Schema evolution with compatibility checks.
 - [x] M099 Zero-downtime migration and recovery documentation.
 - [x] M100 Backup and restore verification.

@@ -88,14 +88,25 @@ type ColumnarPackedColumn struct {
 	Rows     int
 }
 
+// ColumnarBoolColumn stores boolean values as one bit per row. Validity is
+// nil when every row is non-NULL; otherwise it contains one bit per row with
+// set bits marking non-NULL values. It is an optional representation selected
+// by PackBooleanColumns.
+type ColumnarBoolColumn struct {
+	Bits     []byte
+	Validity []byte
+	Rows     int
+}
+
 // ColumnarBatch stores one source scan as field-aligned value slices, compact
-// dictionary or nullable-packed columns, or offset-based array/nested columns.
-// Every requested field must contain Rows logical values; absent JSON fields
-// are nil in a plain column and are not dictionary encoded.
+// dictionary, nullable-packed, or bit-packed boolean columns, or offset-based
+// array/nested columns. Every requested field must contain Rows logical values;
+// absent JSON fields are nil in a plain column and are not dictionary encoded.
 type ColumnarBatch struct {
 	Columns       map[string][]interface{}
 	Dictionaries  map[string]DictionaryColumn
 	PackedColumns map[string]ColumnarPackedColumn
+	BoolColumns   map[string]ColumnarBoolColumn
 	ListColumns   map[string]ColumnarListColumn
 	NestedColumns map[string]ColumnarNestedColumn
 	Rows          int
@@ -223,6 +234,9 @@ func (batch ColumnarBatch) FieldRows(field string) int {
 	if column, ok := batch.PackedColumns[field]; ok {
 		return column.RowCount()
 	}
+	if column, ok := batch.BoolColumns[field]; ok {
+		return column.RowCount()
+	}
 	if values, ok := batch.Columns[field]; ok {
 		return len(values)
 	}
@@ -254,6 +268,9 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 		return dictionary.Values[code], true
 	}
 	if column, ok := batch.PackedColumns[field]; ok {
+		return column.Value(row)
+	}
+	if column, ok := batch.BoolColumns[field]; ok {
 		return column.Value(row)
 	}
 	values, ok := batch.Columns[field]
@@ -392,6 +409,107 @@ func (batch *ColumnarBatch) PackNullableColumns() {
 			Ranks:    ranks,
 			Rows:     rows,
 		}
+		delete(batch.Columns, field)
+	}
+}
+
+func columnarBitmapHasNoTrailingBits(bitmap []byte, rows int) bool {
+	if len(bitmap) == 0 || rows&7 == 0 {
+		return true
+	}
+	validBits := byte((1 << uint(rows&7)) - 1)
+	return bitmap[len(bitmap)-1]&^validBits == 0
+}
+
+// RowCount returns the logical row count when the boolean bitmap metadata is
+// structurally valid. Invalid lengths or trailing bits return zero so source
+// validation rejects the batch instead of reading outside the logical rows.
+func (column ColumnarBoolColumn) RowCount() int {
+	bitmapBytes := columnarPackedBitmapBytes(column.Rows)
+	if column.Rows < 0 || len(column.Bits) != bitmapBytes || (column.Validity != nil && len(column.Validity) != bitmapBytes) {
+		return 0
+	}
+	if !columnarBitmapHasNoTrailingBits(column.Bits, column.Rows) || !columnarBitmapHasNoTrailingBits(column.Validity, column.Rows) {
+		return 0
+	}
+	return column.Rows
+}
+
+// Value returns the logical boolean value at row. A NULL row returns
+// (nil, true), while an out-of-range or malformed row returns (nil, false).
+func (column ColumnarBoolColumn) Value(row int) (interface{}, bool) {
+	bitmapBytes := columnarPackedBitmapBytes(column.Rows)
+	if row < 0 || row >= column.Rows || len(column.Bits) != bitmapBytes || (column.Validity != nil && len(column.Validity) != bitmapBytes) {
+		return nil, false
+	}
+	if !columnarBitmapHasNoTrailingBits(column.Bits, column.Rows) || !columnarBitmapHasNoTrailingBits(column.Validity, column.Rows) {
+		return nil, false
+	}
+	byteIndex := row >> 3
+	mask := byte(1 << uint(row&7))
+	if column.Validity != nil && column.Validity[byteIndex]&mask == 0 {
+		return nil, true
+	}
+	return column.Bits[byteIndex]&mask != 0, true
+}
+
+// PackBooleanColumns moves plain boolean columns into a bit-packed
+// representation when the estimated retained storage is smaller. It is
+// explicit opt-in; legacy Columns remains the default.
+func (batch *ColumnarBatch) PackBooleanColumns() {
+	if batch == nil || len(batch.Columns) == 0 {
+		return
+	}
+	for field, values := range batch.Columns {
+		rows := len(values)
+		if rows == 0 {
+			continue
+		}
+		hasNull := false
+		valid := true
+		for _, value := range values {
+			if value == nil {
+				hasNull = true
+				continue
+			}
+			if _, ok := value.(bool); !ok {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		bitmapBytes := columnarPackedBitmapBytes(rows)
+		packedBytes := bitmapBytes
+		if hasNull {
+			packedBytes += bitmapBytes
+		}
+		if packedBytes >= rows*16 {
+			continue
+		}
+		bitsBitmap := make([]byte, bitmapBytes)
+		var validityBitmap []byte
+		if hasNull {
+			validityBitmap = make([]byte, bitmapBytes)
+		}
+		for row, value := range values {
+			if value == nil {
+				continue
+			}
+			mask := byte(1 << uint(row&7))
+			byteIndex := row >> 3
+			if hasNull {
+				validityBitmap[byteIndex] |= mask
+			}
+			if value.(bool) {
+				bitsBitmap[byteIndex] |= mask
+			}
+		}
+		if batch.BoolColumns == nil {
+			batch.BoolColumns = make(map[string]ColumnarBoolColumn)
+		}
+		batch.BoolColumns[field] = ColumnarBoolColumn{Bits: bitsBitmap, Validity: validityBitmap, Rows: rows}
 		delete(batch.Columns, field)
 	}
 }

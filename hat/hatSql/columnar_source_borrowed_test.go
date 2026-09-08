@@ -72,6 +72,16 @@ func cloneSQLColumnarBatchForTest(batch ColumnarBatch) ColumnarBatch {
 			}
 		}
 	}
+	if batch.BoolColumns != nil {
+		clone.BoolColumns = make(map[string]ColumnarBoolColumn, len(batch.BoolColumns))
+		for field, column := range batch.BoolColumns {
+			clone.BoolColumns[field] = ColumnarBoolColumn{
+				Bits:     append([]byte(nil), column.Bits...),
+				Validity: append([]byte(nil), column.Validity...),
+				Rows:     column.Rows,
+			}
+		}
+	}
 	if batch.Dictionaries != nil {
 		clone.Dictionaries = make(map[string]DictionaryColumn, len(batch.Dictionaries))
 		for field, dictionary := range batch.Dictionaries {

@@ -16606,3 +16606,35 @@ constant-time without materializing NULL rows. Source validation checks bitmap
 length, trailing bits, rank checkpoints, and dense-value count before a SQL
 scan. This is a memory-saving path for genuinely sparse nullable columns, not
 a default replacement for every column.
+
+## Bit-Packed Boolean Arrangement Columns
+
+Boolean columnar values have only two value states, but the legacy
+`[]interface{}` representation still reserves 16 bytes per row. `ColumnarBatch.PackBooleanColumns`
+provides a value bitmap and, only for nullable input, a validity bitmap. It
+accepts only exact boolean or NULL values, keeps mixed-type columns in the
+legacy map, and is explicit opt-in so existing producers and CPU behavior are
+unchanged. `Value`, SQL filtering, and vertical part merging read the packed
+layout.
+
+Five benchmark samples were collected on an AMD Ryzen 9 5950X with one CPU,
+500 ms per sample, 4,096 all-valid alternating boolean rows. Lower is better.
+The benchmark reads every row through `ColumnarBatch.Value`.
+
+| Path | Median | Retained value payload | Query heap | Query allocations | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy `[]interface{}` | 72,228 ns/op | 65,536 bytes | 0 B/op | 0 allocs/op | baseline |
+| Bit-packed values | 82,737 ns/op | 512 bytes | 0 B/op | 0 allocs/op | 128x less payload; 1.15x slower CPU; allocation neutral |
+
+Raw five-sample output:
+
+```text
+legacy: 77555, 72098, 72228, 72084, 72740 ns/op; 65536 layout-bytes/op; 0 B/op; 0 allocs/op
+packed: 82655, 83129, 82704, 83343, 82737 ns/op; 512 layout-bytes/op; 0 B/op; 0 allocs/op
+```
+
+For nullable boolean columns, `Validity` stores one bit per logical row and
+`Bits` stores the value bit for non-NULL rows; NULL reads return `(nil, true)`.
+Bitmap lengths and unused trailing bits are validated before a SQL scan. The
+default remains the legacy representation because the packed accessor has a
+small CPU cost despite its substantial storage reduction.
