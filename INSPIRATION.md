@@ -396,6 +396,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M095 Snapshot hydration with progress reporting.
 - [ ] M096 Per-column dictionary compression for arrangements.
 - [x] M096a Deterministic low-cardinality string dictionary codec.
+- [x] M096b Bounded dictionary admission avoids allocating row codes for columns that exceed the existing size bound; an eight-entry stack prefix preserves the low-cardinality path.
 - [ ] M097 Compressed arrangement batches.
 - [x] M098 Schema evolution with compatibility checks.
 - [x] M099 Zero-downtime migration and recovery documentation.

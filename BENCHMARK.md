@@ -16440,3 +16440,25 @@ BenchmarkSQLQueryOptimizerRules/one_noop_rule-32 319893 3921 ns/op 5304 B/op 32 
 | Compaction scheduler drain | 26,020 | 17,353 | 35 | 64 scheduled tasks |
 
 This measures maintenance coordination overhead, including task registration, deterministic sorting, worker startup, and result collection. It is not a cache read/write benchmark and does not change the normal data path. The default `MaxConcurrent` is 1 and there is no background scheduler.
+
+## Bounded Columnar Dictionary Admission
+
+`ColumnarBatch.EncodeRepeatedStrings` now delays the full row-code allocation
+until it observes a duplicate, while retaining an eight-entry stack prefix for
+the common early-duplicate case. It stops admission as soon as the column
+exceeds the existing three-quarters unique-value bound, preserving the previous
+encoding decision and leaving the original plain column unchanged on fallback.
+
+The following three-run medians use 4,096 in-memory values on an AMD Ryzen 9
+5950X. The before path is a local copy of the pre-change encoder, and the after
+path is the bounded-admission encoder. `make benchmark-columnar-dictionary-admission-clean`
+runs the focused correctness tests before the benchmark.
+
+| Input | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| High cardinality, unique `value-N` strings | 473.677 us/op; 692,776 B/op; 62 allocs/op | 262.634 us/op; 376,041 B/op; 43 allocs/op | 1.80x faster; 1.84x lower allocation volume; 1.44x fewer allocations |
+| Low cardinality, four repeated status strings | 41.168 us/op; 17,120 B/op; 6 allocs/op | 40.241 us/op; 17,120 B/op; 6 allocs/op | 1.02x faster; allocation-neutral |
+
+This is an admission/allocation optimization, not a new persisted format. Mixed
+columns, malformed row counts, unsupported values, and columns that do not meet
+the existing layout estimate retain the plain-column fallback.

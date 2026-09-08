@@ -262,10 +262,14 @@ func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 		}
 		positions := make(map[string]uint32)
 		strings := make([]string, 0)
-		codes := make([]uint32, len(values))
 		totalStringBytes := 0
 		uniqueStringBytes := 0
 		allStrings := true
+		maxUnique := columnarDictionaryMaximumUnique(len(values))
+		tooManyUnique := false
+		var codes []uint32
+		var prefixCodes [8]uint32
+		duplicateIndex := -1
 		for index, value := range values {
 			text, ok := value.(string)
 			if !ok {
@@ -274,20 +278,77 @@ func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 			}
 			code, found := positions[text]
 			if !found {
+				if len(strings)+1 > maxUnique {
+					tooManyUnique = true
+					break
+				}
 				code = uint32(len(strings))
 				positions[text] = code
 				strings = append(strings, text)
 				uniqueStringBytes += len(text)
 			}
 			totalStringBytes += len(text)
-			codes[index] = code
+			if index < len(prefixCodes) {
+				prefixCodes[index] = code
+			}
+			if !found {
+				continue
+			}
+			duplicateIndex = index
+			break
 		}
-		if !allStrings || !columnarDictionaryLayoutSmaller(len(values), len(strings), totalStringBytes, uniqueStringBytes) {
+		if duplicateIndex >= 0 && allStrings && !tooManyUnique {
+			codes = make([]uint32, len(values))
+			prefixCount := duplicateIndex
+			if prefixCount > len(prefixCodes) {
+				prefixCount = len(prefixCodes)
+			}
+			copy(codes, prefixCodes[:prefixCount])
+			for previous := prefixCount; previous < duplicateIndex; previous++ {
+				codes[previous] = positions[values[previous].(string)]
+			}
+			codes[duplicateIndex] = positions[values[duplicateIndex].(string)]
+			for index := duplicateIndex + 1; index < len(values); index++ {
+				text, ok := values[index].(string)
+				if !ok {
+					allStrings = false
+					break
+				}
+				code, found := positions[text]
+				if !found {
+					if len(strings)+1 > maxUnique {
+						tooManyUnique = true
+						break
+					}
+					code = uint32(len(strings))
+					positions[text] = code
+					strings = append(strings, text)
+					uniqueStringBytes += len(text)
+				}
+				totalStringBytes += len(text)
+				codes[index] = code
+			}
+		}
+		if !allStrings || tooManyUnique || !columnarDictionaryLayoutSmaller(len(values), len(strings), totalStringBytes, uniqueStringBytes) {
+			continue
+		}
+		if codes == nil {
 			continue
 		}
 		batch.Dictionaries[field] = DictionaryColumn{Values: strings, Codes: codes}
 		delete(batch.Columns, field)
 	}
+}
+
+func columnarDictionaryMaximumUnique(rows int) int {
+	if rows <= 0 {
+		return 0
+	}
+	maximum := rows - rows/4
+	if rows%4 != 0 {
+		maximum--
+	}
+	return maximum
 }
 
 func columnarDictionaryLayoutSmaller(rows, unique, totalStringBytes, uniqueStringBytes int) bool {
