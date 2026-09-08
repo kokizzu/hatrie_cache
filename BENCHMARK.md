@@ -14730,6 +14730,27 @@ The page method does not change arrangement update cost, storage format, wire
 format, ordering, or snapshot isolation. Empty pages are allocation-free at
 the row level and unsupported callers can continue using `Rows()`.
 
+## Typed Sorted Arrangement Append Batches
+
+When a large change batch contains only new rows that are strictly after the
+current sorted tail, `TypedTableSortedArrangement.Apply` validates the batch
+and appends it directly. Existing update, delete, duplicate-key, gap, and
+out-of-order batches continue through the established rebuild or incremental
+paths.
+
+Five local samples used a 4,096-row arrangement and 256 ordered INSERT changes
+on the AMD Ryzen 9 5950X. Benchmark setup was outside the timer:
+
+| Apply path | Median time | Allocated bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Legacy full rebuild | 1.148 ms/op | 423,400 B/op | 278 allocs/op | Baseline |
+| Validated append batch | 51.366 us/op | 38,232 B/op | 260 allocs/op | 22.3x faster; 11.1x lower allocated bytes; 1.07x fewer allocations |
+
+The optimization is strictly gated and does not change the public default,
+ordering, checkpoint behavior, duplicate-key semantics, storage format, or
+wire format. A one-sample full arrangement matrix is also kept runnable with
+`make benchmark-sorted-arrangement-matrix-smoke-local-clean`.
+
 ## Warm Columnar Sorted Projection
 
 Repeated direct single-field `ORDER BY ... LIMIT` reads can use a ClickHouse-

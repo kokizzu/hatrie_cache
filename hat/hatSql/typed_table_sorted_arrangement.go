@@ -84,6 +84,10 @@ func (arrangement *TypedTableSortedArrangement) Apply(changes []TypedTableChange
 	}
 	arrangement.mu.Lock()
 	defer arrangement.mu.Unlock()
+	if arrangement.shouldAppendBulk(changes) {
+		arrangement.applyAppendBulk(changes)
+		return nil
+	}
 	if arrangement.shouldBulkApply(changes) {
 		arrangement.applyBulk(changes)
 		return nil
@@ -123,6 +127,59 @@ func (arrangement *TypedTableSortedArrangement) shouldBulkApply(changes []TypedT
 		sequence++
 	}
 	return true
+}
+
+func (arrangement *TypedTableSortedArrangement) shouldAppendBulk(changes []TypedTableChange) bool {
+	if len(changes) < typedTableSortedArrangementBulkMinimumChanges {
+		return false
+	}
+	sequence := arrangement.checkpoint + 1
+	var seen map[string]struct{}
+	var firstKey string
+	var previous TypedTableMergeJoinInput
+	for index, change := range changes {
+		if change.Sequence != sequence || change.Operation != "INSERT" {
+			return false
+		}
+		if err := arrangement.validateChange(change); err != nil {
+			return false
+		}
+		if _, found := arrangement.entries[change.Key]; found {
+			return false
+		}
+		candidate := TypedTableMergeJoinInput{Key: change.Key, Values: change.After}
+		if index == 0 {
+			if len(arrangement.order) > 0 && arrangement.compareRows(arrangement.entries[arrangement.order[len(arrangement.order)-1]], candidate) >= 0 {
+				return false
+			}
+		} else if arrangement.compareRows(previous, candidate) >= 0 {
+			return false
+		}
+		if index == 0 {
+			firstKey = change.Key
+		} else {
+			if seen == nil {
+				seen = make(map[string]struct{}, len(changes))
+				seen[firstKey] = struct{}{}
+			}
+			if _, found := seen[change.Key]; found {
+				return false
+			}
+			seen[change.Key] = struct{}{}
+		}
+		previous = candidate
+		sequence++
+	}
+	return true
+}
+
+func (arrangement *TypedTableSortedArrangement) applyAppendBulk(changes []TypedTableChange) {
+	for _, change := range changes {
+		arrangement.entries[change.Key] = TypedTableMergeJoinInput{Key: change.Key, Values: cloneTypedTableValues(change.After)}
+		arrangement.order = append(arrangement.order, change.Key)
+		arrangement.positions[change.Key] = len(arrangement.order) - 1
+		arrangement.checkpoint = change.Sequence
+	}
 }
 
 func (arrangement *TypedTableSortedArrangement) applyBulk(changes []TypedTableChange) {

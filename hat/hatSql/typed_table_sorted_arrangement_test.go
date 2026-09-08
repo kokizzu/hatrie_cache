@@ -205,6 +205,66 @@ func TestTypedTableSortedArrangementBulkApplyRebuildsDeterministicOrder(t *testi
 	assertSortedArrangementKeys(t, arrangement.Rows(), want...)
 }
 
+func TestTypedTableSortedArrangementBulkAppendPreservesOrder(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_bulk_append")
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := make([]hatSql.TypedTableChange, 128)
+	for index := range changes {
+		changes[index] = hatSql.TypedTableChange{
+			Sequence:  uint64(index + 1),
+			Operation: "INSERT",
+			Key:       fmt.Sprintf("key-%03d", index),
+			After:     []hatSql.TypedTableValue{hatSql.TypedString(fmt.Sprintf("team-%03d", index)), hatSql.TypedInt64(int64(index))},
+		}
+	}
+	if err := arrangement.Apply(changes); err != nil {
+		t.Fatal(err)
+	}
+	want := make([]string, len(changes))
+	for index := range want {
+		want[index] = fmt.Sprintf("key-%03d", index)
+	}
+	assertSortedArrangementKeys(t, arrangement.Rows(), want...)
+}
+
+func TestTypedTableSortedArrangementBulkAppendFallsBackForDuplicateKey(t *testing.T) {
+	table := newSortedArrangementTable(t, "sorted_bulk_append_duplicate")
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := make([]hatSql.TypedTableChange, 64)
+	for index := range changes {
+		changes[index] = hatSql.TypedTableChange{
+			Sequence:  uint64(index + 1),
+			Operation: "INSERT",
+			Key:       fmt.Sprintf("key-%03d", index),
+			After:     []hatSql.TypedTableValue{hatSql.TypedString(fmt.Sprintf("team-%03d", index)), hatSql.TypedInt64(int64(index))},
+		}
+	}
+	changes[len(changes)-1].Key = changes[len(changes)-2].Key
+	changes[len(changes)-1].After = []hatSql.TypedTableValue{hatSql.TypedString("team-final"), hatSql.TypedInt64(999)}
+	if err := arrangement.Apply(changes); err != nil {
+		t.Fatal(err)
+	}
+	rows := arrangement.Rows()
+	if len(rows) != len(changes)-1 {
+		t.Fatalf("row count = %d, want %d", len(rows), len(changes)-1)
+	}
+	for _, row := range rows {
+		if row.Key == changes[len(changes)-1].Key {
+			if row.Values[0].String != "team-final" {
+				t.Fatalf("duplicate key value = %#v, want final value", row.Values)
+			}
+			return
+		}
+	}
+	t.Fatalf("duplicate key %q missing from rows", changes[len(changes)-1].Key)
+}
+
 func TestTypedTableSortedArrangementBulkApplyHandlesDeleteAndReinsert(t *testing.T) {
 	table := newSortedArrangementTable(t, "sorted_bulk_reinsert")
 	if _, err := table.Upsert("same", []hatSql.TypedTableValue{hatSql.TypedString("old"), hatSql.TypedInt64(1)}); err != nil {
