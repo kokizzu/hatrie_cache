@@ -16415,8 +16415,8 @@ transition shape. Five samples were collected with
 
 | Operation | Median time | Median heap | Median allocations | Relative to COUNT |
 | --- | ---: | ---: | ---: | ---: |
-| COUNT | 367,212 ns/op | 853,328 B/op | 3,592/op | 1.00x |
-| SUM int64 | 361,488 ns/op | 776,273 B/op | 4,870/op | 1.02x faster, 0.91x heap, 1.36x allocations |
+| COUNT | 368,924 ns/op | 853,328 B/op | 3,592/op | 1.00x |
+| SUM int64 | 366,391 ns/op | 776,273 B/op | 4,870/op | 1.01x faster, 0.91x heap, 1.36x allocations |
 
 The SUM result is a capability addition, not a replacement for COUNT. Its
 lower measured byte total comes from preallocating the complete transition
@@ -16427,16 +16427,49 @@ execution and COUNT behavior are unchanged.
 Raw output from `make benchmark-differential-sum-local-clean`:
 
 ```text
-BenchmarkGroupCountDifferentialRows     1596 366046 ns/op 853328 B/op 3592 allocs/op
-BenchmarkGroupCountDifferentialRows     1611 369456 ns/op 853328 B/op 3592 allocs/op
-BenchmarkGroupCountDifferentialRows     1597 367212 ns/op 853328 B/op 3592 allocs/op
-BenchmarkGroupCountDifferentialRows     1602 366591 ns/op 853328 B/op 3592 allocs/op
-BenchmarkGroupCountDifferentialRows     1599 367750 ns/op 853328 B/op 3592 allocs/op
-BenchmarkGroupSumInt64DifferentialRows  1624 363117 ns/op 776272 B/op 4870 allocs/op
-BenchmarkGroupSumInt64DifferentialRows  1616 361488 ns/op 776273 B/op 4870 allocs/op
-BenchmarkGroupSumInt64DifferentialRows  1629 362741 ns/op 776273 B/op 4870 allocs/op
-BenchmarkGroupSumInt64DifferentialRows  1626 337577 ns/op 776272 B/op 4870 allocs/op
-BenchmarkGroupSumInt64DifferentialRows  1784 332149 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 796 744775 ns/op 1629601 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 787 754948 ns/op 1629602 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 806 748742 ns/op 1629601 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 810 743804 ns/op 1629602 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 795 825428 ns/op 1629602 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1518 378869 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1662 360914 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1672 354282 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1690 375205 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1504 389967 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountDifferentialRows 1602 366940 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows 1606 372778 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows 1588 372546 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows 1567 344265 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupCountDifferentialRows 1734 368924 ns/op 853328 B/op 3592 allocs/op
+BenchmarkGroupSumInt64DifferentialRows 1606 366391 ns/op 776272 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows 1633 365372 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows 1592 371906 ns/op 776272 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows 1566 370651 ns/op 776272 B/op 4870 allocs/op
+BenchmarkGroupSumInt64DifferentialRows 1635 347248 ns/op 776272 B/op 4870 allocs/op
+```
+
+For the common case that needs both aggregates, the one-pass
+`GroupCountSumInt64DifferentialRows` path was compared with separate calls to
+the existing COUNT and SUM APIs. Five samples used the same 1,024 updates and
+256 groups. Median results were `748,742 ns/op`, `1,629,602 B/op`, and 8,462
+allocations for separate calls versus `375,205 ns/op`, `776,273 B/op`, and
+4,870 allocations for the combined path: `2.00x` faster, `0.48x` heap, and
+`0.58x` allocations. The combined API is additive and opt-in.
+
+Raw output from the same benchmark:
+
+```text
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 796 744775 ns/op 1629601 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 787 754948 ns/op 1629602 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 806 748742 ns/op 1629601 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 810 743804 ns/op 1629602 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/separate_count_sum 795 825428 ns/op 1629602 B/op 8462 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1518 378869 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1662 360914 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1672 354282 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1690 375205 ns/op 776273 B/op 4870 allocs/op
+BenchmarkGroupCountSumInt64DifferentialRows/combined 1504 389967 ns/op 776273 B/op 4870 allocs/op
 ```
 
 ## Opt-In SQL Optimizer Rules

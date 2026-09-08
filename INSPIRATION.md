@@ -317,10 +317,12 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M037a Signed negative diffs in the reusable batch primitive.
 - [x] M037b Generic signed filter, map, flat-map, union, and join operators with atomic callback failure handling; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M037c Signed differential int64 SUM maintenance for callback-defined groups with checked weighted updates; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M037d One-pass signed differential COUNT+SUM maintenance for callback-defined groups; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M038c Weighted duplicate-preserving differential SUM maintenance for callback-defined groups; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M038d One-pass weighted duplicate-preserving differential COUNT+SUM maintenance; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M039 Compaction constrained by active read frontiers.
 - [x] M040 Append-only fast path selected from source metadata via typed-table change metadata, validating aggregate dispatch, compatibility tests, and benchmark guide.
 - [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).
@@ -355,6 +357,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M068 Differential group-by updates for generic SQL tables. `GroupCountDifferentialRows` and `GroupSumInt64DifferentialRows` maintain exact signed COUNT/SUM transitions for callback-defined groups, including negative/overflow validation and no partial output; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M068a Exact generic differential COUNT group maintenance.
 - [x] M068b Exact signed int64 differential SUM group maintenance.
+- [x] M068c Exact one-pass signed int64 differential COUNT+SUM group maintenance.
 - [x] M069 Differential distinct updates for generic SQL tables. `DistinctDifferentialRows` maintains signed multiplicity transitions with boundary-only emissions, cloning, and negative/overflow validation; see [DIFFERENTIAL_DISTINCT.md](DIFFERENTIAL_DISTINCT.md).
 - [x] M069a Boundary-only differential distinct maintenance.
 - [x] M070 Monotone aggregate specialization. `TypedTableAggregate.ApplyMonotone` provides a tested insert-only fast path with sequence/replay validation and preserves advanced aggregate semantics; benchmarked at about `1.09x` faster with unchanged allocations; see [MONOTONE_AGGREGATE.md](MONOTONE_AGGREGATE.md).

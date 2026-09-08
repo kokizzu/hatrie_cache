@@ -49,6 +49,18 @@ Classify sum failures with `errors.Is` against
 `hatSql.ErrDifferentialGroupBySumOverflow`. A nil value callback returns
 `hatSql.ErrDifferentialGroupByValueRequired`.
 
+When both aggregates are needed, `GroupCountSumInt64DifferentialRows` performs
+the same checked update in one pass and emits `Row["count"]` and `Row["sum"]`
+together. This avoids maintaining two independent output streams while
+preserving the same signed multiplicity and ownership rules.
+
+```go
+changes, err := hatSql.GroupCountSumInt64DifferentialRows(updates,
+	func(row hatSql.SQLRow) string { return row["team"].(string) },
+	func(row hatSql.SQLRow) (int64, error) { return row["points"].(int64), nil },
+)
+```
+
 ```go
 updates := []hatSql.DifferentialRow{
 	{Key: "one", Time: 1, Diff: 1, Row: hatSql.Row{"team": "red"}},
