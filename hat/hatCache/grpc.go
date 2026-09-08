@@ -58,6 +58,9 @@ type CacheGRPCOptions struct {
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool
+	// SchemaCompatibilityPolicy optionally accepts an explicit validated schema
+	// history during a rolling deployment. Nil preserves exact matching.
+	SchemaCompatibilityPolicy *ReplicationSchemaCompatibilityPolicy
 	// ProtocolVersions is the inclusive gRPC protocol range this server accepts.
 	// A zero value defaults to the current protocol version for compatibility.
 	ProtocolVersions hatCommand.ProtocolVersionRange
@@ -364,18 +367,19 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 		}
 	}
 	response, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
-		NodeName:                   server.options.NodeName,
-		Journal:                    server.options.Journal,
-		DirtyTracker:               server.options.DirtyTracker,
-		Topology:                   server.options.Topology,
-		Election:                   server.options.Election,
-		Replicator:                 server.options.Replicator,
-		ReplicationSafety:          server.options.ReplicationSafety,
-		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
-		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
-		WriteQuorum:                server.options.WriteQuorum,
-		replicationSchema:          server.options.ReplicationSchema,
-		requireSchemaCompatibility: server.options.RequireReplicationSchemaCompatibility,
+		NodeName:                       server.options.NodeName,
+		Journal:                        server.options.Journal,
+		DirtyTracker:                   server.options.DirtyTracker,
+		Topology:                       server.options.Topology,
+		Election:                       server.options.Election,
+		Replicator:                     server.options.Replicator,
+		ReplicationSafety:              server.options.ReplicationSafety,
+		EnforceLeaderWrites:            server.options.EnforceLeaderWrites,
+		RequireHealthyReplicaReads:     server.options.RequireHealthyReplicaReads,
+		WriteQuorum:                    server.options.WriteQuorum,
+		replicationSchema:              server.options.ReplicationSchema,
+		replicationSchemaCompatibility: server.options.SchemaCompatibilityPolicy,
+		requireSchemaCompatibility:     server.options.RequireReplicationSchemaCompatibility,
 	})
 	if commandShouldJournal(command) {
 		server.auditGRPC(AuditEvent{
@@ -506,14 +510,15 @@ func (server *CacheGRPCServer) applyReplicationStreamBatch(ctx context.Context, 
 		Version: batch.GetSchemaVersion(), Fingerprint: batch.GetSchemaFingerprint(),
 	}, batch.GetFencingToken())
 	response, _ := executeCacheCommand(ctx, server.trie, request, commandExecutionOptions{
-		NodeName:                   server.options.NodeName,
-		Journal:                    server.options.Journal,
-		DirtyTracker:               server.options.DirtyTracker,
-		Topology:                   server.options.Topology,
-		Election:                   server.options.Election,
-		ReplicationSafety:          server.options.ReplicationSafety,
-		replicationSchema:          server.options.ReplicationSchema,
-		requireSchemaCompatibility: server.options.RequireReplicationSchemaCompatibility,
+		NodeName:                       server.options.NodeName,
+		Journal:                        server.options.Journal,
+		DirtyTracker:                   server.options.DirtyTracker,
+		Topology:                       server.options.Topology,
+		Election:                       server.options.Election,
+		ReplicationSafety:              server.options.ReplicationSafety,
+		replicationSchema:              server.options.ReplicationSchema,
+		replicationSchemaCompatibility: server.options.SchemaCompatibilityPolicy,
+		requireSchemaCompatibility:     server.options.RequireReplicationSchemaCompatibility,
 	})
 	ack.Ok = response.OK
 	ack.Message = response.Message

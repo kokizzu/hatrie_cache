@@ -134,6 +134,9 @@ type MonitoringOptions struct {
 	WriteQuorum int
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
+	// SchemaCompatibilityPolicy optionally accepts an explicit validated schema
+	// history during a rolling deployment. Nil preserves exact matching.
+	SchemaCompatibilityPolicy *ReplicationSchemaCompatibilityPolicy
 	// ProtocolVersions is the inclusive HTTP command protocol range accepted
 	// by this monitoring server. Zero defaults to the current supported range.
 	ProtocolVersions hatCommand.ProtocolVersionRange
@@ -294,6 +297,7 @@ type commandExecutionOptions struct {
 	RequireHealthyReplicaReads          bool
 	WriteQuorum                         int
 	replicationSchema                   ReplicationSchemaContract
+	replicationSchemaCompatibility      *ReplicationSchemaCompatibilityPolicy
 	requireSchemaCompatibility          bool
 	inheritedReplicationFencingToken    uint64
 	inheritedReplicationFencingTokenSet bool
@@ -1727,18 +1731,19 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	}
 	startedAt := time.Now()
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
-		NodeName:                   handler.options.NodeName,
-		Journal:                    handler.options.Journal,
-		DirtyTracker:               handler.options.LevelDBDirtyTracker,
-		Topology:                   handler.options.Topology,
-		Election:                   handler.options.Election,
-		Replicator:                 handler.options.Replicator,
-		ReplicationSafety:          handler.options.ReplicationSafety,
-		EnforceLeaderWrites:        handler.options.EnforceLeaderWrites,
-		RequireHealthyReplicaReads: handler.options.RequireHealthyReplicaReads,
-		WriteQuorum:                handler.options.WriteQuorum,
-		replicationSchema:          handler.options.ReplicationSchema,
-		requireSchemaCompatibility: handler.options.RequireReplicationSchemaCompatibility,
+		NodeName:                       handler.options.NodeName,
+		Journal:                        handler.options.Journal,
+		DirtyTracker:                   handler.options.LevelDBDirtyTracker,
+		Topology:                       handler.options.Topology,
+		Election:                       handler.options.Election,
+		Replicator:                     handler.options.Replicator,
+		ReplicationSafety:              handler.options.ReplicationSafety,
+		EnforceLeaderWrites:            handler.options.EnforceLeaderWrites,
+		RequireHealthyReplicaReads:     handler.options.RequireHealthyReplicaReads,
+		WriteQuorum:                    handler.options.WriteQuorum,
+		replicationSchema:              handler.options.ReplicationSchema,
+		replicationSchemaCompatibility: handler.options.SchemaCompatibilityPolicy,
+		requireSchemaCompatibility:     handler.options.RequireReplicationSchemaCompatibility,
 	})
 	status := http.StatusOK
 	if rejected {
@@ -1880,6 +1885,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		options.Topology,
 		options.ReplicationSafety,
 		options.replicationSchema,
+		options.replicationSchemaCompatibility,
 		options.requireSchemaCompatibility,
 		options.inheritedReplicationFencingToken,
 		options.inheritedReplicationFencingTokenSet,
@@ -2396,6 +2402,7 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 		options.Topology,
 		options.ReplicationSafety,
 		options.replicationSchema,
+		options.replicationSchemaCompatibility,
 		options.requireSchemaCompatibility,
 		0,
 		false,
@@ -2488,6 +2495,7 @@ func prepareInternalReplicationBatchPayload(request CacheCommandRequest, options
 		options.Topology,
 		options.ReplicationSafety,
 		options.replicationSchema,
+		options.replicationSchemaCompatibility,
 		options.requireSchemaCompatibility,
 		options.inheritedReplicationFencingToken,
 		options.inheritedReplicationFencingTokenSet,
@@ -2563,11 +2571,11 @@ func decodeInternalReplicationBatchValue(value interface{}) (CacheCommandRequest
 }
 
 func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
-	return checkReplicationSafetyWithMetadata(request, topology, safety, ReplicationSchemaContract{}, false, 0, false, ReplicationSchemaContract{}, false)
+	return checkReplicationSafetyWithMetadata(request, topology, safety, ReplicationSchemaContract{}, nil, false, 0, false, ReplicationSchemaContract{}, false)
 }
 
 func checkReplicationSafetyWithInheritedFencingToken(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore, inheritedFencingToken uint64, inheritedFencingTokenSet bool) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
-	return checkReplicationSafetyWithMetadata(request, topology, safety, ReplicationSchemaContract{}, false, inheritedFencingToken, inheritedFencingTokenSet, ReplicationSchemaContract{}, false)
+	return checkReplicationSafetyWithMetadata(request, topology, safety, ReplicationSchemaContract{}, nil, false, inheritedFencingToken, inheritedFencingTokenSet, ReplicationSchemaContract{}, false)
 }
 
 func checkReplicationSafetyWithMetadata(
@@ -2575,6 +2583,7 @@ func checkReplicationSafetyWithMetadata(
 	topology *TopologyStore,
 	safety *ReplicationSafetyStore,
 	localSchema ReplicationSchemaContract,
+	replicationSchemaCompatibility *ReplicationSchemaCompatibilityPolicy,
 	requireSchemaCompatibility bool,
 	inheritedFencingToken uint64,
 	inheritedFencingTokenSet bool,
@@ -2601,7 +2610,14 @@ func checkReplicationSafetyWithMetadata(
 		if !schemaPresent {
 			return replicationSafetyToken{}, commandError("replication schema contract is required"), true, true
 		}
-		if schema != localSchema {
+		if replicationSchemaCompatibility != nil {
+			if replicationSchemaCompatibility.Current() != localSchema {
+				return replicationSafetyToken{}, commandError("replication schema compatibility policy mismatch"), true, true
+			}
+			if !replicationSchemaCompatibility.Accepts(schema) {
+				return replicationSafetyToken{}, commandError("replication schema contract mismatch"), true, true
+			}
+		} else if schema != localSchema {
 			return replicationSafetyToken{}, commandError("replication schema contract mismatch"), true, true
 		}
 	}

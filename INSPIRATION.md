@@ -257,6 +257,9 @@ name.
 - [x] C154a Conservative rolling-schema compatibility preflight over validated
   schemas; exact replication fingerprint enforcement remains unchanged. See
   [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
+- [x] C154b Explicit validated schema-history policy wired into HTTP and gRPC
+  replication gates; unknown contracts remain rejected and nil preserves exact
+  matching. See [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
 - [x] C155 Rolling binary upgrades with compatibility gates for the gRPC and HTTP command protocols; schema compatibility remains tracked separately under C154.
 - [x] C155a gRPC protocol-version metadata negotiation and server compatibility gates with legacy omission defaults; see [GRPC_PROTOCOL_COMPATIBILITY.md](GRPC_PROTOCOL_COMPATIBILITY.md).
 - [x] C155b Configurable HTTP command protocol ranges and optional HTTP replication-client range advertisement with legacy omission defaults; see [HTTP_PROTOCOL_COMPATIBILITY.md](HTTP_PROTOCOL_COMPATIBILITY.md).

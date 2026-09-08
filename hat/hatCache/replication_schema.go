@@ -2,6 +2,7 @@ package hatCache
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,65 @@ const (
 type ReplicationSchemaContract struct {
 	Version     uint64
 	Fingerprint string
+}
+
+// ReplicationSchemaCompatibilityPolicy contains an explicit current schema
+// contract and a private set of validated previous contracts accepted during a
+// rolling deployment. Unknown contracts are never accepted.
+type ReplicationSchemaCompatibilityPolicy struct {
+	current  ReplicationSchemaContract
+	accepted map[ReplicationSchemaContract]struct{}
+}
+
+// NewReplicationSchemaCompatibilityPolicy creates an explicit schema history
+// for rolling replication. Every previous schema must be conservatively
+// compatible with current; the supplied schemas are not retained or mutated.
+func NewReplicationSchemaCompatibilityPolicy(current hatSchema.Schema, previous ...hatSchema.Schema) (*ReplicationSchemaCompatibilityPolicy, error) {
+	if err := current.Validate(); err != nil {
+		return nil, fmt.Errorf("current schema: %w", err)
+	}
+	currentContract := NewReplicationSchemaContract(current)
+	if !currentContract.Configured() {
+		return nil, errors.New("current schema has an incomplete replication contract")
+	}
+	policy := &ReplicationSchemaCompatibilityPolicy{
+		current:  currentContract,
+		accepted: make(map[ReplicationSchemaContract]struct{}, len(previous)+1),
+	}
+	policy.accepted[policy.current] = struct{}{}
+	for index, schema := range previous {
+		report, err := hatSchema.CheckRollingCompatibility(schema, current)
+		if err != nil {
+			return nil, fmt.Errorf("previous schema %d: %w", index, err)
+		}
+		if !report.Compatible {
+			return nil, fmt.Errorf("previous schema %d is not rolling-compatible: %v", index, report.Changes)
+		}
+		contract := NewReplicationSchemaContract(schema)
+		if !contract.Configured() {
+			return nil, fmt.Errorf("previous schema %d has an incomplete replication contract", index)
+		}
+		policy.accepted[contract] = struct{}{}
+	}
+	return policy, nil
+}
+
+// Current returns the current contract represented by the policy.
+func (policy *ReplicationSchemaCompatibilityPolicy) Current() ReplicationSchemaContract {
+	if policy == nil {
+		return ReplicationSchemaContract{}
+	}
+	return policy.current
+}
+
+// Accepts reports whether contract is the current contract or one of the
+// explicitly registered validated previous contracts.
+func (policy *ReplicationSchemaCompatibilityPolicy) Accepts(contract ReplicationSchemaContract) bool {
+	if policy == nil || !contract.Configured() {
+		return false
+	}
+	_, exists := policy.accepted[contract]
+	return exists
 }
 
 // NewReplicationSchemaContract derives a replication contract from a schema.

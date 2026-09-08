@@ -4145,6 +4145,12 @@ allows only append-only nullable columns or relaxed nullability; the existing
 exact replication fingerprint gate remains unchanged. See
 [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
 
+During an explicit rolling transition, pass a
+`ReplicationSchemaCompatibilityPolicy` built from the current schema and
+known compatible previous schemas to `MonitoringOptions` or
+`CacheGRPCOptions`. The policy is opt-in; nil retains exact version and
+fingerprint matching, and unknown contracts are still rejected.
+
 Compiled queries can also expose a cached, versioned fragment plan with
 `CompiledSQLQuery.LowerDataflow()`. The plan is initialized only when requested
 and each returned snapshot is independent, so it can be retained by routing,

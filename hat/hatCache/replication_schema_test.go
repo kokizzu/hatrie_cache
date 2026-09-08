@@ -87,6 +87,69 @@ func TestReplicationSchemaCompatibilityRejectsMissingOrMismatchedContract(t *tes
 	}
 }
 
+func TestReplicationSchemaCompatibilityPolicyAcceptsKnownSafePreviousVersion(t *testing.T) {
+	current := replicationSchemaFixture()
+	previous := current.Clone()
+	previous.Version = current.Version - 1
+	source := previous.Sources["users"]
+	source.Columns = source.Columns[:1]
+	previous.Sources["users"] = source
+	policy, err := NewReplicationSchemaCompatibilityPolicy(current, previous)
+	if err != nil {
+		t.Fatalf("NewReplicationSchemaCompatibilityPolicy() error = %v", err)
+	}
+	currentContract := NewReplicationSchemaContract(current)
+	previousContract := NewReplicationSchemaContract(previous)
+	if !policy.Accepts(currentContract) || !policy.Accepts(previousContract) {
+		t.Fatalf("policy does not accept current and known previous contracts: %#v", policy)
+	}
+	unknown := previousContract
+	unknown.Fingerprint = "unknown"
+	if policy.Accepts(unknown) {
+		t.Fatalf("policy accepts unknown contract: %#v", unknown)
+	}
+	topology, err := NewTopologyStore(SingleNodeTopology("node-b", "http://node-b"))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	options := commandExecutionOptions{
+		Topology:                       topology,
+		ReplicationSafety:              NewReplicationSafetyStore(),
+		replicationSchema:              currentContract,
+		replicationSchemaCompatibility: policy,
+		requireSchemaCompatibility:     true,
+	}
+	response, rejected := executeCacheCommand(context.Background(), newTestTrie(t), schemaReplicationRequest(previousContract), options)
+	if rejected || !response.OK {
+		t.Fatalf("known previous schema response = %#v rejected=%v, want success", response, rejected)
+	}
+	request := schemaReplicationRequest(unknown)
+	response, rejected = executeCacheCommand(context.Background(), newTestTrie(t), request, options)
+	if !rejected || response.OK || !strings.Contains(response.Message, "schema contract") {
+		t.Fatalf("unknown schema response = %#v rejected=%v, want rejection", response, rejected)
+	}
+}
+
+func TestReplicationSchemaCompatibilityPolicyRejectsUnsafeHistory(t *testing.T) {
+	current := replicationSchemaFixture()
+	previous := current.Clone()
+	previous.Version = current.Version - 1
+	source := previous.Sources["users"]
+	source.Columns[0].Type = hatSchema.TypeText
+	previous.Sources["users"] = source
+	if _, err := NewReplicationSchemaCompatibilityPolicy(current, previous); err == nil {
+		t.Fatal("NewReplicationSchemaCompatibilityPolicy() error = nil, want unsafe history rejection")
+	}
+}
+
+func TestReplicationSchemaCompatibilityPolicyRejectsUnconfiguredCurrentSchema(t *testing.T) {
+	current := replicationSchemaFixture()
+	current.Version = 0
+	if _, err := NewReplicationSchemaCompatibilityPolicy(current); err == nil {
+		t.Fatal("NewReplicationSchemaCompatibilityPolicy() error = nil, want unconfigured current schema rejection")
+	}
+}
+
 func TestReplicationSchemaCompatibilityIsDisabledByDefault(t *testing.T) {
 	contract := NewReplicationSchemaContract(replicationSchemaFixture())
 	topology, err := NewTopologyStore(SingleNodeTopology("node-b", "http://node-b"))
@@ -230,5 +293,66 @@ func TestGRPCReplicationStreamRejectsMismatchedSchemaContract(t *testing.T) {
 	})
 	if ack.GetOk() || !strings.Contains(ack.GetMessage(), "schema contract") {
 		t.Fatalf("gRPC schema mismatch ack = %#v, want rejection", ack)
+	}
+}
+
+func TestGRPCReplicationStreamAcceptsKnownPreviousSchemaContract(t *testing.T) {
+	current := replicationSchemaFixture()
+	previous := current.Clone()
+	previous.Version = current.Version - 1
+	source := previous.Sources["users"]
+	source.Columns = source.Columns[:1]
+	previous.Sources["users"] = source
+	policy, err := NewReplicationSchemaCompatibilityPolicy(current, previous)
+	if err != nil {
+		t.Fatalf("NewReplicationSchemaCompatibilityPolicy() error = %v", err)
+	}
+	topology, err := NewTopologyStore(SingleNodeTopology("node-b", "http://node-b"))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	server := NewCacheGRPCServer(newTestTrie(t), CacheGRPCOptions{
+		Topology:                              topology,
+		ReplicationSafety:                     NewReplicationSafetyStore(),
+		ReplicationSchema:                     NewReplicationSchemaContract(current),
+		SchemaCompatibilityPolicy:             policy,
+		RequireReplicationSchemaCompatibility: true,
+	})
+	previousContract := NewReplicationSchemaContract(previous)
+	value, err := appendReplicationValueBinary(nil, snapshotEntry{Type: "string", String: "value"})
+	if err != nil {
+		t.Fatalf("appendReplicationValueBinary() error = %v", err)
+	}
+	ack := server.applyReplicationStreamBatch(context.Background(), &hatriecachev1.ReplicationStreamBatch{
+		Source:              "node-a",
+		Sequence:            1,
+		TopologyFingerprint: topology.Fingerprint(),
+		SchemaVersion:       previousContract.Version,
+		SchemaFingerprint:   previousContract.Fingerprint,
+		Keys:                []string{"key"},
+		BinaryValues:        [][]byte{value},
+	})
+	if !ack.GetOk() {
+		t.Fatalf("known previous schema ack = %#v, want success", ack)
+	}
+}
+
+func BenchmarkReplicationSchemaCompatibilityPolicyAccepts(b *testing.B) {
+	current := replicationSchemaFixture()
+	previous := current.Clone()
+	previous.Version = current.Version - 1
+	source := previous.Sources["users"]
+	source.Columns = source.Columns[:1]
+	previous.Sources["users"] = source
+	policy, err := NewReplicationSchemaCompatibilityPolicy(current, previous)
+	if err != nil {
+		b.Fatal(err)
+	}
+	contract := NewReplicationSchemaContract(previous)
+	b.ReportAllocs()
+	for range b.N {
+		if !policy.Accepts(contract) {
+			b.Fatal("policy rejected known previous contract")
+		}
 	}
 }

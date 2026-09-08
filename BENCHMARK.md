@@ -17123,3 +17123,16 @@ appended nullable column. Five runs on AMD Ryzen 9 5950X:
 
 Median: **659.9 ns/op**, **224 B/op**, **3 allocs/op**. This is a preflight
 operation and is not on the replication command path.
+
+## Rolling Schema History Policy
+
+Command: `go test ./hat/hatSchema ./hat/hatCache -run '^$' -bench '^Benchmark(CheckRollingCompatibility|ReplicationSchemaCompatibilityPolicyAccepts)$' -benchmem -benchtime=200ms -count=5`
+
+| Benchmark | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median | Memory | Allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `CheckRollingCompatibility` | 693.1 ns | 695.2 ns | 693.7 ns | 699.0 ns | 694.6 ns | 694.6 ns | 224 B/op | 3/op |
+| `PolicyAccepts` | 24.55 ns | 24.61 ns | 24.27 ns | 24.57 ns | 24.32 ns | 24.55 ns | 0 B/op | 0/op |
+
+The policy lookup has no per-command allocation. It is evaluated only when the
+operator enables both schema compatibility enforcement and an explicit policy;
+the nil-policy path remains the existing exact comparison.

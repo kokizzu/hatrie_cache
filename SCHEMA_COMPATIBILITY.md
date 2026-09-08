@@ -39,8 +39,33 @@ new schema based only on this report; relaxing the wire gate requires a
 separate protocol contract with explicit schema registration and rollout
 state. Legacy replication remains unchanged.
 
+For an explicit rolling transition, construct a
+`ReplicationSchemaCompatibilityPolicy` with the current schema and each
+validated previous schema, then pass the same policy together with the current
+`ReplicationSchemaContract` to `MonitoringOptions` or `CacheGRPCOptions`:
+
+```go
+policy, err := hatCache.NewReplicationSchemaCompatibilityPolicy(current, previous)
+if err != nil {
+    return err
+}
+options := hatCache.MonitoringOptions{
+    ReplicationSchema:                     hatCache.NewReplicationSchemaContract(current),
+    SchemaCompatibilityPolicy:             policy,
+    RequireReplicationSchemaCompatibility: true,
+}
+```
+
+The policy accepts only the current contract or exact contracts derived from
+the supplied history. It rejects unknown fingerprints and rejects a policy
+whose current contract differs from the server's configured current contract.
+The policy is opt-in; a nil policy retains exact matching. Batch metadata is
+inherited by child replication commands on both transports.
+
 ## Performance
 
-The small two-column fixture measured a median `659.9 ns/op`, `224 B/op`, and
-`3 allocs/op` across five local runs. See
+The small two-column fixture measured a median `694.6 ns/op`, `224 B/op`, and
+`3 allocs/op` across five local runs. The exact contract lookup in an enabled
+replication command costs `24.55 ns/op`, `0 B/op`, and `0 allocs/op` in the
+same fixture. See
 [`BENCHMARK.md`](BENCHMARK.md#rolling-schema-compatibility) for raw results.
