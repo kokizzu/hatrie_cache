@@ -9154,12 +9154,15 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	}
 	countOnlyMetadata := sqlColumnarCountOnlyMetadata(aggregates, q.where)
 	metadataAggregates := sqlColumnarMetadataAggregates(aggregates, q.where, segments, batch.Rows)
+	dictionaryCount, dictionaryCountMetadata := sqlColumnarDictionaryCountMetadata(aggregates, q.where.kind, q.where.op, batch.Rows, dictionaryFilter, filterDictionary.codesTrusted, filterOperator, filterFound, dictionaryINFilter, filterDictionaryIN.codesTrusted, filterDictionaryINCodes)
 	if metrics != nil {
 		node := "COLUMNAR SCAN"
 		if countOnlyMetadata {
 			node = "COLUMNAR COUNT METADATA"
 		} else if metadataAggregates {
 			node = "COLUMNAR AGGREGATE METADATA"
+		} else if dictionaryCountMetadata {
+			node = "COLUMNAR DICTIONARY COUNT METADATA"
 		}
 		metrics.record(node, sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
 	}
@@ -9168,70 +9171,84 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	matched := 0
 	scannedRows := 0
 	sparsePrimary := false
-	scanRows := func(start, end int) error {
-		for rowIndex := start; rowIndex < end; rowIndex++ {
-			if control != nil {
-				if err := control.check(); err != nil {
-					return err
-				}
-			}
-			scannedRows++
-			matchedPredicate := true
-			if dictionaryFilter {
-				candidate, ok := filterDictionary.CodeAt(rowIndex)
-				if !ok {
-					return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
-				}
-				matchedPredicate = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
-			} else if dictionaryINFilter {
-				filterCode, ok := filterDictionaryIN.CodeAt(rowIndex)
-				if !ok {
-					return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
-				}
-				matchedPredicate = filterDictionaryINCodes[filterCode]
-			}
-			for _, predicate := range predicates {
-				candidate, _ := batch.Value(predicate.field, rowIndex)
-				number, numeric := sqlNumber(candidate)
-				if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-					matchedPredicate = false
-					break
-				}
-			}
-			if !matchedPredicate {
-				continue
-			}
-			matched++
-			for index := range aggregates {
-				aggregates[index].add(batch, rowIndex)
-			}
-		}
-		return nil
-	}
-	if metadataAggregates {
-		sqlColumnarApplyMetadataAggregates(aggregates, segments, batch.Rows)
-		matched = batch.Rows
-	} else if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
-		segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
-		sparsePrimary = primary
-		if !sparsePrimary {
-			segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
-		}
-		for segmentIndex := segmentStart; segmentIndex < segmentEnd; segmentIndex++ {
-			start := segmentIndex * segments.RowsPerSegment
-			if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
-				continue
-			}
-			end := start + segments.RowsPerSegment
-			if end > batch.Rows {
-				end = batch.Rows
-			}
-			if err := scanRows(start, end); err != nil {
+	if metadataAggregates || dictionaryCountMetadata {
+		if control != nil {
+			if err := control.check(); err != nil {
 				return SQLQueryResult{}, true, err
 			}
 		}
-	} else if err := scanRows(0, batch.Rows); err != nil {
-		return SQLQueryResult{}, true, err
+	}
+	if dictionaryCountMetadata {
+		for index := range aggregates {
+			aggregates[index].count = int64(dictionaryCount)
+		}
+		matched = dictionaryCount
+	} else if metadataAggregates {
+		sqlColumnarApplyMetadataAggregates(aggregates, segments, batch.Rows)
+		matched = batch.Rows
+	} else {
+		scanRows := func(start, end int) error {
+			for rowIndex := start; rowIndex < end; rowIndex++ {
+				if control != nil {
+					if err := control.check(); err != nil {
+						return err
+					}
+				}
+				scannedRows++
+				matchedPredicate := true
+				if dictionaryFilter {
+					candidate, ok := filterDictionary.CodeAt(rowIndex)
+					if !ok {
+						return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+					}
+					matchedPredicate = filterOperator == "=" && filterFound && candidate == filterCode || (filterOperator == "!=" || filterOperator == "<>") && (!filterFound || candidate != filterCode)
+				} else if dictionaryINFilter {
+					filterCode, ok := filterDictionaryIN.CodeAt(rowIndex)
+					if !ok {
+						return fmt.Errorf("SQL columnar source %q returned an invalid dictionary filter code", q.from.key)
+					}
+					matchedPredicate = filterDictionaryINCodes[filterCode]
+				}
+				for _, predicate := range predicates {
+					candidate, _ := batch.Value(predicate.field, rowIndex)
+					number, numeric := sqlNumber(candidate)
+					if !numeric || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+						matchedPredicate = false
+						break
+					}
+				}
+				if !matchedPredicate {
+					continue
+				}
+				matched++
+				for index := range aggregates {
+					aggregates[index].add(batch, rowIndex)
+				}
+			}
+			return nil
+		}
+		if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
+			segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+			sparsePrimary = primary
+			if !sparsePrimary {
+				segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
+			}
+			for segmentIndex := segmentStart; segmentIndex < segmentEnd; segmentIndex++ {
+				start := segmentIndex * segments.RowsPerSegment
+				if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
+					continue
+				}
+				end := start + segments.RowsPerSegment
+				if end > batch.Rows {
+					end = batch.Rows
+				}
+				if err := scanRows(start, end); err != nil {
+					return SQLQueryResult{}, true, err
+				}
+			}
+		} else if err := scanRows(0, batch.Rows); err != nil {
+			return SQLQueryResult{}, true, err
+		}
 	}
 	if metrics != nil && q.where.kind != "" {
 		filterName := "COLUMNAR NUMERIC FILTER"
@@ -9476,6 +9493,37 @@ func sqlColumnarCountOnlyMetadata(aggregates []sqlColumnarNumericAggregate, wher
 		}
 	}
 	return true
+}
+
+func sqlColumnarDictionaryCountMetadata(aggregates []sqlColumnarNumericAggregate, whereKind, whereOperator string, rows int, dictionaryFilter, dictionaryTrusted bool, dictionaryOperator string, dictionaryFound bool, dictionaryINFilter, dictionaryINTrusted bool, dictionaryINCodes []bool) (int, bool) {
+	if len(aggregates) == 0 || whereKind == "" || whereKind == "binary" && (whereOperator == "AND" || whereOperator == "OR") {
+		return 0, false
+	}
+	for _, aggregate := range aggregates {
+		if aggregate.name != "COUNT" || aggregate.field != "" {
+			return 0, false
+		}
+	}
+	if dictionaryFilter && dictionaryTrusted {
+		if dictionaryFound {
+			return 0, false
+		}
+		if dictionaryOperator == "=" {
+			return 0, true
+		}
+		if dictionaryOperator == "!=" || dictionaryOperator == "<>" {
+			return rows, true
+		}
+	}
+	if dictionaryINFilter && dictionaryINTrusted {
+		for _, included := range dictionaryINCodes {
+			if included {
+				return 0, false
+			}
+		}
+		return 0, true
+	}
+	return 0, false
 }
 
 // sqlColumnarMetadataAggregates accepts only aggregate shapes whose result can

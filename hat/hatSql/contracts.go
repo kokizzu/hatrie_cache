@@ -76,10 +76,13 @@ type BorrowedSourceResolver interface {
 // PackDictionaryValues. PackedCodes is an optional byte-aligned code
 // representation selected by PackDictionaryCodes.
 type DictionaryColumn struct {
-	Values          []string
-	Codes           []uint32
-	PackedCodes     []byte
-	CodeWidth       uint8
+	Values      []string
+	Codes       []uint32
+	PackedCodes []byte
+	CodeWidth   uint8
+	// codesTrusted is set only by constructors which validate every row code.
+	// Untrusted manual or decoded dictionaries retain query-time code checks.
+	codesTrusted    bool
 	PackedValueData string
 	ValueOffsets    []uint32
 }
@@ -996,7 +999,7 @@ func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 		if codes == nil {
 			continue
 		}
-		batch.Dictionaries[field] = DictionaryColumn{Values: strings, Codes: codes}
+		batch.Dictionaries[field] = DictionaryColumn{Values: strings, Codes: codes, codesTrusted: true}
 		delete(batch.Columns, field)
 	}
 }

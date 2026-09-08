@@ -271,6 +271,7 @@ name.
 - [ ] C160 Query routing by region and locality.
 - [x] C161 ClickHouse-style metadata-only COUNT(*) for direct predicate-free columnar sources; the executor uses validated batch row counts without a row loop while richer or filtered aggregates retain the established path. See [BENCHMARK.md](BENCHMARK.md#columnar-metadata-count).
 - [x] C162 ClickHouse-style metadata-only MIN/MAX for direct predicate-free numeric columnar sources; complete finite segment bounds are combined without a row loop, while incomplete or ambiguous metadata retains the established scan. See [BENCHMARK.md](BENCHMARK.md#columnar-metadata-minmax).
+- [x] C163 ClickHouse-style dictionary membership shortcuts for filtered `COUNT(*)`; validated low-cardinality dictionaries answer absent equality, inequality, and `IN` predicates without decoding row codes, while matching, richer, untrusted, or invalid inputs retain the established scan and validation behavior. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-membership-count).
 
 ## Materialize Ideas
 

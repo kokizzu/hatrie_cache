@@ -17331,6 +17331,30 @@ The optimization is limited to the proven count-only shape. Filtered counts,
 nullable `COUNT(field)`, mixed aggregates, limits, and source row-count
 validation keep their established semantics and fallback behavior.
 
+## Columnar Dictionary Membership COUNT(*)
+
+Command: `make benchmark-columnar-dictionary-count-local-clean`.
+
+The workload uses a 100,000-row, two-value dictionary column and compares
+matching or absent literals. The row-scan cases use the same query with the
+dictionary trust marker disabled; metadata cases use the validated
+`EncodeRepeatedStrings` representation. Five samples use `-benchmem` on AMD
+Ryzen 9 5950X, Linux/amd64.
+
+| Path | Run 1 ns/op | Run 2 ns/op | Run 3 ns/op | Run 4 ns/op | Run 5 ns/op | Median ns/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Matching value row scan | 1,157,576 | 1,166,005 | 1,161,622 | 1,217,338 | 1,224,010 | 1,166,005 | 3,888 | 22 | baseline |
+| Missing value row scan | 953,206 | 1,040,863 | 880,393 | 978,391 | 944,932 | 953,206 | 3,912 | 23 | 1.00x |
+| Missing value metadata | 3,869 | 3,820 | 3,846 | 3,879 | 3,807 | 3,846 | 3,912 | 23 | 247.8x |
+| Missing `IN` row scan | 934,964 | 931,559 | 927,006 | 895,352 | 871,185 | 927,006 | 3,994 | 27 | 1.00x |
+| Missing `IN` metadata | 4,232 | 4,142 | 4,096 | 4,135 | 4,132 | 4,135 | 3,994 | 27 | 224.1x |
+
+The improvements compare each metadata case with its identical untrusted
+row-scan case. Matching literals, `COUNT(field)`, conjunctions, and invalid or
+untrusted dictionaries retain the existing scan and validation behavior. The
+metadata path adds no measured bytes or allocations over the corresponding
+absent-value scan.
+
 ## Composite Sorted Arrangement Ordering
 
 Command: `make benchmark-sorted-arrangement-composite-local-clean`

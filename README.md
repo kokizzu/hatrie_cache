@@ -3952,6 +3952,27 @@ and 17 allocations/op. See
 [BENCHMARK.md](BENCHMARK.md#columnar-metadata-minmax) for the raw five-run
 comparison.
 
+## SQL Columnar Dictionary Membership Counts
+
+Pure `COUNT(*)` queries over trusted low-cardinality string dictionaries can
+answer absent-value predicates from dictionary membership without decoding row
+codes. `team = 'missing'` and `team IN ('missing-a', 'missing-b')` return zero;
+`team != 'missing'` and `team <> 'missing'` return the batch row count. A
+matching literal, `COUNT(team)`, a conjunction, or another richer shape keeps
+the established row scan.
+
+The fast path is enabled only for dictionaries produced by the validated
+`EncodeRepeatedStrings` path used by typed-table columnar batches. The trust
+marker is internal and is not serialized; manually supplied or decoded
+dictionaries retain the existing per-row code validation. There is no new
+configuration, persistence, or wire-format change.
+
+On 100,000 rows, the same absent equality predicate improved from a 953.206 us
+median row scan to 3.846 us (247.8x), and the absent `IN` predicate improved
+from 927.006 us to 4.135 us (224.1x). Each pair kept its original B/op and
+allocation count. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-membership-count)
+for raw samples.
+
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a
