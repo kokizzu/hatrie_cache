@@ -7226,3 +7226,10 @@ commit-m064-recursive-reachability:
 .PHONY: push-m064-recursive-reachability
 push-m064-recursive-reachability:
 	bash ./scripts/push-m064-recursive-reachability.sh
+.PHONY: commit-t042-rejection
+commit-t042-rejection:
+	bash ./scripts/commit-t042-rejection.sh
+
+.PHONY: push-t042-rejection
+push-t042-rejection:
+	bash ./scripts/push-t042-rejection.sh
