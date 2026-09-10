@@ -7358,6 +7358,30 @@ commit-m065-rank-window-mutations:
 .PHONY: push-m065-rank-window-mutations
 push-m065-rank-window-mutations:
 	bash ./scripts/push-m065-rank-window-mutations.sh
+.PHONY: test-m065c-incremental-offset-window
+test-m065c-incremental-offset-window:
+	bash ./scripts/test-m065c-incremental-offset-window.sh
+.PHONY: format-m065c-incremental-offset-window
+format-m065c-incremental-offset-window:
+	bash ./scripts/format-m065c-incremental-offset-window.sh
+.PHONY: test-race-m065c-incremental-offset-window
+test-race-m065c-incremental-offset-window:
+	bash ./scripts/test-race-m065c-incremental-offset-window.sh
+.PHONY: vet-m065c-incremental-offset-window
+vet-m065c-incremental-offset-window:
+	bash ./scripts/vet-m065c-incremental-offset-window.sh
+.PHONY: benchmark-m065c-incremental-offset-window
+benchmark-m065c-incremental-offset-window:
+	bash ./scripts/benchmark-m065c-incremental-offset-window.sh
+.PHONY: review-m065c-incremental-offset-window
+review-m065c-incremental-offset-window:
+	bash ./scripts/review-m065c-incremental-offset-window.sh
+.PHONY: commit-m065c-incremental-offset-window
+commit-m065c-incremental-offset-window:
+	bash ./scripts/commit-m065c-incremental-offset-window.sh
+.PHONY: push-m065c-incremental-offset-window
+push-m065c-incremental-offset-window:
+	bash ./scripts/push-m065c-incremental-offset-window.sh
 .PHONY: test-m064-mutable-recursive-reachability
 test-m064-mutable-recursive-reachability:
 	bash ./scripts/test-m064-mutable-recursive-reachability.sh

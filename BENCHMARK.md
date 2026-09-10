@@ -17580,6 +17580,27 @@ can approach full rebuild cost. The default append-only constructor remains
 zero-retention; in this run its control measured 2,073 ns/op, 996 B/op, and
 14 allocs/op.
 
+## M065c Incremental LAG and LEAD Windows
+
+Command: `make benchmark-m065c-incremental-offset-window`.
+
+This benchmark compares a full ordered recomputation of 1,025 rows with one
+incremental tail append after a 1,024-row seed, using 16 partitions. Five
+samples were run on Linux/amd64 with an AMD Ryzen 9 5950X and a 200 ms sample
+window. The incremental seed and identity-map capacity are outside the timer.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| LAG | Full ordered scan | 407,016; 386,071; 390,370; 415,973; 387,629 | 390,370 | 526,873 | 2,219 | 1x |
+| LAG | Incremental append | 928.1; 910.1; 907.4; 890.7; 958.6 | 910.1 | 704 | 10 | 429x faster |
+| LEAD | Full ordered scan | 452,987; 425,797; 415,349; 448,276; 427,194 | 427,194 | 526,873 | 2,219 | 1x |
+| LEAD | Incremental append | 1,832; 1,879; 1,869; 1,881; 1,966 | 1,879 | 2,143 | 18 | 227x faster |
+
+Incremental `LAG` uses about `748x` fewer transient bytes and `222x` fewer
+allocations than its full-scan control. Incremental `LEAD` uses about `246x`
+fewer transient bytes and `123x` fewer allocations. The feature is append-only;
+arbitrary reordering requires a retained mutable arrangement.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.
