@@ -7061,3 +7061,15 @@ test-partition-resize:
 	bash ./scripts/test-partition-resize.sh
 benchmark-partition-resize:
 	bash ./scripts/benchmark-partition-resize.sh
+.PHONY: generate-inspiration-audit
+generate-inspiration-audit:
+	bash ./scripts/generate-inspiration-audit.sh
+	bash ./scripts/verify-inspiration-audit.sh
+
+.PHONY: verify-inspiration-audit
+verify-inspiration-audit:
+	bash ./scripts/verify-inspiration-audit.sh
+
+.PHONY: commit-inspiration-audit
+commit-inspiration-audit:
+	bash ./scripts/commit-inspiration-audit.sh

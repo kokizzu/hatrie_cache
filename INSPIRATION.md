@@ -324,7 +324,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [ ] M032 Strong consistency across all independent source partitions.
 - [ ] M033 Timestamp oracle for globally ordered writes.
 - [x] M033a Process-local lock-free Lamport timestamp allocation with monotone remote observation; see [TIMESTAMP_ORACLE.md](TIMESTAMP_ORACLE.md). Global cross-node ordering remains open.
-- [ ] M034 Epoch management for restarts and leases.
+- [x] M034 Epoch management for restarts and leases. `hatStorage.PersistentShardLease` and `hatStorage.PersistentNodeEpoch` durably advance fencing tokens across restarts, reject concurrent owners, and expose explicit renew, release, inspect, and validation operations; see [PERSISTENT_NODE_EPOCHS.md](PERSISTENT_NODE_EPOCHS.md).
 - [x] M034a Durable local node epochs with monotone restart fencing; see [PERSISTENT_NODE_EPOCHS.md](PERSISTENT_NODE_EPOCHS.md).
 - [x] M035 Self-correcting materialized results for typed arrangements.
 - [x] M036 Retractions and insertions on typed updates.

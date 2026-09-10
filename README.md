@@ -4352,3 +4352,8 @@ make cli ARGS='restore-bundle -bundle backup/sg.tar.gz -data-dir data-sg -partit
 Restore selectors are checked before publication and reject a different
 partition or a non-local backup. See [REGION_LOCAL_BACKUP.md](REGION_LOCAL_BACKUP.md)
 for the HTTP request shape, recovery rules, and rehearsal workflow.
+## Product Inspiration Audit
+
+The source-product research ledger contains 50 canonical ClickHouse, Materialize,
+and Tarantool ideas with their current adopted, open, deferred, or rejected
+status: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md).
