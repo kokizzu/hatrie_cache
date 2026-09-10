@@ -7264,3 +7264,25 @@ commit-m032-frontier:
 .PHONY: push-m032-frontier
 push-m032-frontier:
 	bash ./scripts/push-m032-frontier.sh
+.PHONY: benchmark-m033-global-timestamps
+benchmark-m033-global-timestamps:
+	bash ./scripts/benchmark-m033-global-timestamps.sh
+.PHONY: test-m033-global-timestamps
+test-m033-global-timestamps:
+	bash ./scripts/test-m033-global-timestamps.sh
+.PHONY: format-m033-global-timestamps
+format-m033-global-timestamps:
+	bash ./scripts/format-m033-global-timestamps.sh
+.PHONY: test-race-m033-global-timestamps
+test-race-m033-global-timestamps:
+	bash ./scripts/test-race-m033-global-timestamps.sh
+.PHONY: review-m033-global-timestamps
+review-m033-global-timestamps:
+	bash ./scripts/review-m033-global-timestamps.sh
+.PHONY: commit-m033-global-timestamps
+commit-m033-global-timestamps:
+	bash ./scripts/commit-m033-global-timestamps.sh
+
+.PHONY: push-m033-global-timestamps
+push-m033-global-timestamps:
+	bash ./scripts/push-m033-global-timestamps.sh

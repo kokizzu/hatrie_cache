@@ -17610,3 +17610,28 @@ new opt-in tracker maintains an indexed min-heap and reads its root.
 The indexed path is 2.65x faster with no measured allocation or transient-byte
 cost. See [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md) for the
 consistency contract and physical snapshot integration boundary.
+## M033b Consensus-Bound Global Timestamp Ranges
+
+Command: `make benchmark-m033-global-timestamps`.
+
+This benchmark compares the existing process-local Lamport allocator with the
+new consensus-bound coordinator. The coordinator reserves globally unique
+timestamp ranges; the local lease consumes 1,024 values and renews the range
+when exhausted. Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen
+9 5950X.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Comparison |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing local `TimestampOracle.Next`, before | 2.593; 2.467; 2.510; 2.121; 2.072 | 2.467 | 0 | 0 | baseline |
+| Existing local `TimestampOracle.Next`, final | 2.281; 2.272; 2.267; 2.287; 2.275 | 2.275 | 0 | 0 | baseline |
+| Global coordinator, one timestamp grant | 55.54; 55.24; 55.08; 55.19; 54.76 | 55.19 | 0 | 0 | 24.26x local cost; global ordering |
+| Global coordinator, 1,024-timestamp grant | 55.08; 54.74; 54.91; 54.65; 54.79 | 54.79 | 0 | 0 | 0.0535 ns/timestamp coordination amortization |
+| Local consumption from 1,024-timestamp grant | 2.290; 2.275; 2.264; 2.276; 2.282 | 2.276 | 0 | 0 | 1.00x local cost |
+
+The lease path includes one reservation and reset per 1,024 values, so global
+ordering is obtained at effectively the same steady-state cost as the local
+oracle. Single-value grants remain slower by design. This is an additive
+correctness/control-plane capability, not a replacement for the faster local
+oracle when cross-node ordering is unnecessary. See
+[GLOBAL_TIMESTAMP_ORACLE.md](GLOBAL_TIMESTAMP_ORACLE.md) for the persistence
+and consensus boundary.
