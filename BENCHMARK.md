@@ -17748,6 +17748,26 @@ maps, but the total allocated bytes are substantially lower for this bounded
 workload. See [INCREMENTAL_DISTINCT_FRAME_WINDOW.md](INCREMENTAL_DISTINCT_FRAME_WINDOW.md)
 for the contract and correctness coverage.
 
+## Rejected M065j Small-Cardinality Distinct Arrangement
+
+Command: `make benchmark-m065i-incremental-distinct-frame-window`.
+
+The M065i incremental path was experimentally changed to retain up to eight
+distinct values in a linear slice before promoting to the existing map. The
+test-first promotion and fallback checks passed, but the optimization was
+rolled back after the benchmark showed an insufficient gain:
+
+| Incremental representation | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing reference-counted map | 1,190; 1,187; 1,238; 1,242; 1,222 | 1,222 | 1,290 | 8 | 1x |
+| Rejected eight-entry slice | 1,235; 1,104; 1,170; 1,150; 1,240 | 1,170 | 1,370 | 8 | 1.04x faster |
+
+The slice was only about `4.4%` faster and used about `6.2%` more transient
+bytes, with no allocation-count reduction. The experiment was removed before
+commit; a post-rollback run returned to `1,290 B/op` and `8 allocs/op`, so the
+map representation remains the current default. This is an explicit rejected
+tradeoff, not an adopted implementation.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

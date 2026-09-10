@@ -7600,3 +7600,14 @@ commit-m065i-incremental-distinct-frame-window:
 .PHONY: push-m065i-incremental-distinct-frame-window
 push-m065i-incremental-distinct-frame-window:
 	bash ./scripts/push-m065i-incremental-distinct-frame-window.sh
+.PHONY: review-m065j-rejected-small-distinct
+review-m065j-rejected-small-distinct:
+	bash ./scripts/review-m065j-rejected-small-distinct.sh
+
+.PHONY: commit-m065j-rejected-small-distinct
+commit-m065j-rejected-small-distinct:
+	bash ./scripts/commit-m065j-rejected-small-distinct.sh
+
+.PHONY: push-m065j-rejected-small-distinct
+push-m065j-rejected-small-distinct:
+	bash ./scripts/push-m065j-rejected-small-distinct.sh
