@@ -4357,3 +4357,7 @@ for the HTTP request shape, recovery rules, and rehearsal workflow.
 The source-product research ledger contains 50 canonical ClickHouse, Materialize,
 and Tarantool ideas with their current adopted, open, deferred, or rejected
 status: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md).
+## Rolling Schema Deployment
+
+The opt-in state machine for safely coordinating validated replica schema
+transitions is documented in [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).

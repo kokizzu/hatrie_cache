@@ -7073,3 +7073,35 @@ verify-inspiration-audit:
 .PHONY: commit-inspiration-audit
 commit-inspiration-audit:
 	bash ./scripts/commit-inspiration-audit.sh
+
+.PHONY: benchmark-c154-rollout
+benchmark-c154-rollout:
+	bash ./scripts/benchmark-c154-rollout.sh
+
+.PHONY: test-c154-rollout
+test-c154-rollout:
+	bash ./scripts/test-c154-rollout.sh
+
+.PHONY: test-c154-race
+test-c154-race:
+	bash ./scripts/test-c154-race.sh
+
+.PHONY: vet-c154-rollout
+vet-c154-rollout:
+	bash ./scripts/vet-c154-rollout.sh
+
+.PHONY: test-c154-regression
+test-c154-regression:
+	bash ./scripts/test-c154-regression.sh
+
+.PHONY: test-c154-all
+test-c154-all:
+	bash ./scripts/test-c154-all.sh
+
+.PHONY: format-c154
+format-c154:
+	bash ./scripts/format-c154.sh
+
+.PHONY: commit-c154-rollout
+commit-c154-rollout:
+	bash ./scripts/commit-c154-rollout.sh
