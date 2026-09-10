@@ -17601,6 +17601,31 @@ allocations than its full-scan control. Incremental `LEAD` uses about `246x`
 fewer transient bytes and `123x` fewer allocations. The feature is append-only;
 arbitrary reordering requires a retained mutable arrangement.
 
+## M065d Incremental Bounded Frame Windows
+
+Command: `make benchmark-m065d-incremental-frame-window`.
+
+This benchmark compares a full recomputation of 1,025 rows with one append
+after a 1,024-row seed, using 16 partitions and a `ROWS BETWEEN 7 PRECEDING AND
+CURRENT ROW` frame. Five samples were run on Linux/amd64 with an AMD Ryzen 9
+5950X and a 200 ms sample window. Seed setup and incremental identity-map
+capacity are outside the timer; incremental unique-key tracking is measured.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `COUNT(*)` | Full recomputation | 319,865; 317,054; 315,459; 317,024; 325,347 | 317,054 | 427,738 | 2,247 | 1x |
+| `COUNT(*)` | Incremental append | 998.5; 985.8; 1,020; 1,036; 1,047 | 1,020 | 931 | 8 | 311x faster |
+| `SUM(int64)` | Full recomputation | 364,720; 359,907; 364,040; 369,391; 372,976 | 364,720 | 427,737 | 2,247 | 1x |
+| `SUM(int64)` | Incremental append | 1,098; 1,048; 1,101; 992.5; 1,098 | 1,098 | 944 | 10 | 332x faster |
+
+Incremental `COUNT(*)` uses about `459x` fewer transient bytes and `281x` fewer
+allocations than its full-recompute control. Incremental `SUM(int64)` uses
+about `453x` fewer transient bytes and `225x` fewer allocations. The state is
+bounded to `N+1` contributions per partition; arbitrary updates, deletes,
+reordering, `RANGE` frames, and other aggregates remain outside this API. See
+[INCREMENTAL_FRAME_WINDOW.md](INCREMENTAL_FRAME_WINDOW.md) for the contract
+and correctness coverage.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

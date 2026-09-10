@@ -7382,6 +7382,38 @@ commit-m065c-incremental-offset-window:
 .PHONY: push-m065c-incremental-offset-window
 push-m065c-incremental-offset-window:
 	bash ./scripts/push-m065c-incremental-offset-window.sh
+.PHONY: test-m065d-incremental-frame-window
+test-m065d-incremental-frame-window:
+	bash ./scripts/test-m065d-incremental-frame-window.sh
+
+.PHONY: format-m065d-incremental-frame-window
+format-m065d-incremental-frame-window:
+	bash ./scripts/format-m065d-incremental-frame-window.sh
+
+.PHONY: test-race-m065d-incremental-frame-window
+test-race-m065d-incremental-frame-window:
+	bash ./scripts/test-race-m065d-incremental-frame-window.sh
+
+.PHONY: vet-m065d-incremental-frame-window
+vet-m065d-incremental-frame-window:
+	bash ./scripts/vet-m065d-incremental-frame-window.sh
+
+.PHONY: benchmark-m065d-incremental-frame-window
+benchmark-m065d-incremental-frame-window:
+	bash ./scripts/benchmark-m065d-incremental-frame-window.sh
+
+.PHONY: review-m065d-incremental-frame-window
+review-m065d-incremental-frame-window:
+	bash ./scripts/review-m065d-incremental-frame-window.sh
+
+.PHONY: commit-m065d-incremental-frame-window
+commit-m065d-incremental-frame-window:
+	bash ./scripts/commit-m065d-incremental-frame-window.sh
+
+.PHONY: push-m065d-incremental-frame-window
+push-m065d-incremental-frame-window:
+	bash ./scripts/push-m065d-incremental-frame-window.sh
+
 .PHONY: test-m064-mutable-recursive-reachability
 test-m064-mutable-recursive-reachability:
 	bash ./scripts/test-m064-mutable-recursive-reachability.sh
