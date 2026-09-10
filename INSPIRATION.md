@@ -384,6 +384,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M063 Non-materialized SQL views.
 - [ ] M064 Recursive dataflow maintenance.
 - [ ] M065 Incremental window-function maintenance.
+- [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).
 - [x] M066 Incremental sort maintenance via opt-in typed-table sorted arrangements, bulk batch rebuilds, deterministic NULL/NaN ordering, correctness tests, and benchmark guide.
 - [x] M066a Strictly validated append-only bulk maintenance skips a full arrangement rebuild when incoming rows are already ordered after the current tail; mixed, duplicate, update, delete, gap, and out-of-order batches retain the existing rebuild or incremental path.
 - [x] M066b Tail-checked single-row inserts append directly when the candidate is already after the current sorted tail; non-tail updates and inserts retain binary-search insertion.

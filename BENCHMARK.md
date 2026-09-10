@@ -17534,3 +17534,22 @@ with an AMD Ryzen 9 5950X.
 The direct path is 15.87x faster, uses 45.00x fewer transient bytes, and
 makes 20.00x fewer allocations. It retains no ownership metadata and keeps
 the existing stale-snapshot, primary, and fencing checks.
+
+## M065a Incremental Rank Window Maintenance
+
+Command: `make benchmark-m065-rank-window`.
+
+This benchmark compares recomputing a 1,024-row, 16-partition rank window
+with maintaining the same ordered window after one append. Five samples were
+run on Linux/amd64. The incremental path is intended for append-only input;
+the full recomputation remains the fallback for arbitrary updates.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Full SQL recomputation | 930,347; 877,934; 875,743; 872,780; 875,711 | 875,743 | 900,006 | 4,653 |
+| Incremental append | 1,016; 1,034; 1,092; 1,126; 1,106 | 1,092 | 863 | 9 |
+
+For this append workload, incremental maintenance is 802x faster, uses
+1,043x fewer transient bytes, and makes 517x fewer allocations. See
+[INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md) for the API,
+correctness coverage, and limitations.

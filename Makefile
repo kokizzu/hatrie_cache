@@ -7184,3 +7184,22 @@ commit-sql-snapshot-provider:
 .PHONY: push-sql-snapshot-provider
 push-sql-snapshot-provider:
 	bash ./scripts/push-sql-snapshot-provider.sh
+.PHONY: benchmark-m065-rank-window
+benchmark-m065-rank-window:
+	bash ./scripts/benchmark-m065-rank-window.sh
+.PHONY: test-m065-rank-window
+test-m065-rank-window:
+	bash ./scripts/test-m065-rank-window.sh
+.PHONY: format-m065-rank-window
+format-m065-rank-window:
+	bash ./scripts/format-m065-rank-window.sh
+.PHONY: review-m065-rank-window
+review-m065-rank-window:
+	bash ./scripts/review-m065-rank-window.sh
+.PHONY: commit-m065-rank-window
+commit-m065-rank-window:
+	bash ./scripts/commit-m065-rank-window.sh
+
+.PHONY: push-m065-rank-window
+push-m065-rank-window:
+	bash ./scripts/push-m065-rank-window.sh

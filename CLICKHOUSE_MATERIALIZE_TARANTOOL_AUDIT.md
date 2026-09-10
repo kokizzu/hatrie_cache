@@ -179,6 +179,7 @@ records a separate implementation boundary.
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [ ] M064 Recursive dataflow maintenance.
 - [ ] M065 Incremental window-function maintenance.
+- [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).
 - [ ] M090 Independent compute and storage scaling.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics and rollback-free cluster-wide commit remain open.
