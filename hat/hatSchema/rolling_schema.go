@@ -1,6 +1,7 @@
 package hatSchema
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -15,6 +16,8 @@ var (
 	ErrRollingSchemaNodeUnknown = errors.New("hatSchema: rolling schema node is unknown")
 	// ErrRollingSchemaTransition reports an attempted phase skip or regression.
 	ErrRollingSchemaTransition = errors.New("hatSchema: rolling schema transition is invalid")
+	// ErrRollingSchemaCoordinatorInvalid reports missing hooks or an empty plan.
+	ErrRollingSchemaCoordinatorInvalid = errors.New("hatSchema: rolling schema coordinator is invalid")
 )
 
 // RollingSchemaPhase is the monotone deployment phase for one replica.
@@ -24,6 +27,8 @@ const (
 	RollingSchemaPhasePending RollingSchemaPhase = iota
 	RollingSchemaPhasePrepared
 	RollingSchemaPhaseActive
+	rollingSchemaPhaseInstalling
+	rollingSchemaPhaseActivating
 )
 
 func (phase RollingSchemaPhase) String() string {
@@ -146,6 +151,147 @@ func (deployment *RollingSchemaDeployment) Activate(node string) error {
 	return deployment.advance(node, RollingSchemaPhaseActive)
 }
 
+// RollingSchemaInstallFunc installs and validates the next schema on one
+// replica while that replica can still serve the previous schema.
+type RollingSchemaInstallFunc func(context.Context, string, Schema) error
+
+// RollingSchemaActivateFunc switches one prepared replica to the next schema.
+type RollingSchemaActivateFunc func(context.Context, string, Schema) error
+
+// Run coordinates a sequential rolling deployment through caller-supplied
+// transport hooks. Successful phases are recorded before returning, so a
+// failed or canceled run can be retried without repeating completed work.
+// Hooks receive independent schema snapshots and are never called while the
+// deployment state lock is held. Concurrent runs that reach the same node
+// while its hook is active are rejected as an invalid phase transition.
+func (plan RollingSchemaPlan) Run(ctx context.Context, deployment *RollingSchemaDeployment, install RollingSchemaInstallFunc, activate RollingSchemaActivateFunc) error {
+	if deployment == nil {
+		return ErrRollingSchemaCoordinatorInvalid
+	}
+	if install == nil || activate == nil {
+		return fmt.Errorf("%w: install and activate hooks are required", ErrRollingSchemaCoordinatorInvalid)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deployment.mu.RLock()
+	nodes := append([]string(nil), deployment.nodes...)
+	deployment.mu.RUnlock()
+	if len(nodes) == 0 {
+		return fmt.Errorf("%w: deployment has no nodes", ErrRollingSchemaCoordinatorInvalid)
+	}
+	if len(nodes) != len(plan.nodes) {
+		return fmt.Errorf("%w: deployment does not match plan", ErrRollingSchemaCoordinatorInvalid)
+	}
+	for index, node := range nodes {
+		if node != plan.nodes[index] {
+			return fmt.Errorf("%w: deployment does not match plan", ErrRollingSchemaCoordinatorInvalid)
+		}
+	}
+	next := plan.next
+
+	for _, node := range nodes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		phase, ok := deployment.Phase(node)
+		if !ok {
+			return fmt.Errorf("%w: node %q disappeared", ErrRollingSchemaCoordinatorInvalid, node)
+		}
+		if phase == RollingSchemaPhasePending {
+			if err := deployment.claimPhase(node, RollingSchemaPhasePending, rollingSchemaPhaseInstalling); err != nil {
+				return err
+			}
+			if err := install(ctx, node, next.Clone()); err != nil {
+				deployment.restorePhase(node, rollingSchemaPhaseInstalling, RollingSchemaPhasePending)
+				return fmt.Errorf("hatSchema: install %q: %w", node, err)
+			}
+			if err := deployment.finishPhase(node, rollingSchemaPhaseInstalling, RollingSchemaPhasePrepared); err != nil {
+				return err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		phase, ok = deployment.Phase(node)
+		if !ok {
+			return fmt.Errorf("%w: node %q disappeared", ErrRollingSchemaCoordinatorInvalid, node)
+		}
+		if phase == RollingSchemaPhasePrepared {
+			if err := deployment.claimPhase(node, RollingSchemaPhasePrepared, rollingSchemaPhaseActivating); err != nil {
+				return err
+			}
+			if err := activate(ctx, node, next.Clone()); err != nil {
+				deployment.restorePhase(node, rollingSchemaPhaseActivating, RollingSchemaPhasePrepared)
+				return fmt.Errorf("hatSchema: activate %q: %w", node, err)
+			}
+			if err := deployment.finishPhase(node, rollingSchemaPhaseActivating, RollingSchemaPhaseActive); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (deployment *RollingSchemaDeployment) claimPhase(node string, expected, inProgress RollingSchemaPhase) error {
+	if deployment == nil {
+		return ErrRollingSchemaCoordinatorInvalid
+	}
+	node = strings.TrimSpace(node)
+	deployment.mu.Lock()
+	defer deployment.mu.Unlock()
+	index, ok := deployment.index[node]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrRollingSchemaNodeUnknown, node)
+	}
+	current := deployment.phases[index]
+	if current != expected {
+		if current == rollingSchemaPhaseInstalling || current == rollingSchemaPhaseActivating {
+			return fmt.Errorf("%w: node %q already has a transition in progress", ErrRollingSchemaTransition, node)
+		}
+		return fmt.Errorf("%w: node %q cannot start from %s", ErrRollingSchemaTransition, node, current)
+	}
+	deployment.phases[index] = inProgress
+	return nil
+}
+
+func (deployment *RollingSchemaDeployment) finishPhase(node string, inProgress, completed RollingSchemaPhase) error {
+	return deployment.replacePhase(node, inProgress, completed)
+}
+
+func (deployment *RollingSchemaDeployment) restorePhase(node string, inProgress, restored RollingSchemaPhase) error {
+	return deployment.replacePhase(node, inProgress, restored)
+}
+
+func (deployment *RollingSchemaDeployment) replacePhase(node string, expected, replacement RollingSchemaPhase) error {
+	if deployment == nil {
+		return ErrRollingSchemaCoordinatorInvalid
+	}
+	node = strings.TrimSpace(node)
+	deployment.mu.Lock()
+	defer deployment.mu.Unlock()
+	index, ok := deployment.index[node]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrRollingSchemaNodeUnknown, node)
+	}
+	if deployment.phases[index] != expected {
+		return fmt.Errorf("%w: node %q changed while transition was in progress", ErrRollingSchemaTransition, node)
+	}
+	deployment.phases[index] = replacement
+	return nil
+}
+
+func stableRollingSchemaPhase(phase RollingSchemaPhase) RollingSchemaPhase {
+	switch phase {
+	case rollingSchemaPhaseInstalling:
+		return RollingSchemaPhasePending
+	case rollingSchemaPhaseActivating:
+		return RollingSchemaPhasePrepared
+	default:
+		return phase
+	}
+}
+
 func (deployment *RollingSchemaDeployment) advance(node string, target RollingSchemaPhase) error {
 	if deployment == nil {
 		return ErrRollingSchemaTransition
@@ -158,6 +304,9 @@ func (deployment *RollingSchemaDeployment) advance(node string, target RollingSc
 		return fmt.Errorf("%w: %q", ErrRollingSchemaNodeUnknown, node)
 	}
 	current := deployment.phases[index]
+	if current == rollingSchemaPhaseInstalling || current == rollingSchemaPhaseActivating {
+		return fmt.Errorf("%w: node %q already has a transition in progress", ErrRollingSchemaTransition, node)
+	}
 	if current == target || current > target {
 		return nil
 	}
@@ -180,7 +329,7 @@ func (deployment *RollingSchemaDeployment) Phase(node string) (RollingSchemaPhas
 	if !ok {
 		return RollingSchemaPhasePending, false
 	}
-	return deployment.phases[index], true
+	return stableRollingSchemaPhase(deployment.phases[index]), true
 }
 
 // Complete reports whether every planned replica has activated the next
@@ -214,7 +363,7 @@ func (deployment *RollingSchemaDeployment) Snapshot() []RollingSchemaNode {
 	}
 	snapshot := make([]RollingSchemaNode, len(deployment.nodes))
 	for index, node := range deployment.nodes {
-		snapshot[index] = RollingSchemaNode{Node: node, Phase: deployment.phases[index]}
+		snapshot[index] = RollingSchemaNode{Node: node, Phase: stableRollingSchemaPhase(deployment.phases[index])}
 	}
 	return snapshot
 }

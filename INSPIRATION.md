@@ -267,6 +267,10 @@ name.
 - [x] C154c Stateful, retry-safe rolling deployment phases for validated replica
   schema transitions; network installation and activation remain caller-owned.
   See [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).
+- [x] C154d Sequential retry-safe rolling-schema coordinator with deterministic
+  node ordering, independent hook snapshots, cancellation checkpoints, and
+  phase-preserving retries; transport and authentication remain caller-owned.
+  See [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).
 - [x] C155 Rolling binary upgrades with compatibility gates for the gRPC and HTTP command protocols; schema compatibility remains tracked separately under C154.
 - [x] C155a gRPC protocol-version metadata negotiation and server compatibility gates with legacy omission defaults; see [GRPC_PROTOCOL_COMPATIBILITY.md](GRPC_PROTOCOL_COMPATIBILITY.md).
 - [x] C155b Configurable HTTP command protocol ranges and optional HTTP replication-client range advertisement with legacy omission defaults; see [HTTP_PROTOCOL_COMPATIBILITY.md](HTTP_PROTOCOL_COMPATIBILITY.md).

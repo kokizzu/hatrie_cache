@@ -7132,3 +7132,31 @@ review-c153:
 .PHONY: commit-c153
 commit-c153:
 	bash ./scripts/commit-c153.sh
+
+.PHONY: benchmark-c154d
+benchmark-c154d:
+	bash ./scripts/benchmark-c154d.sh
+
+.PHONY: test-c154d
+test-c154d:
+	bash ./scripts/test-c154d.sh
+
+.PHONY: format-c154d
+format-c154d:
+	bash ./scripts/format-c154d.sh
+
+.PHONY: race-c154d
+race-c154d:
+	bash ./scripts/race-c154d.sh
+
+.PHONY: vet-c154d
+vet-c154d:
+	bash ./scripts/vet-c154d.sh
+
+.PHONY: review-c154d
+review-c154d:
+	bash ./scripts/review-c154d.sh
+
+.PHONY: commit-c154d
+commit-c154d:
+	bash ./scripts/commit-c154d.sh

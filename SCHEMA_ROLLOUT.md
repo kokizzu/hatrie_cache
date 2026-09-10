@@ -64,3 +64,47 @@ on the same five-run fixture:
 The approximately 1.01x compatibility-check variation is within local benchmark
 noise; the checker code and default request path are unchanged. The new phase
 read is allocation-free and only runs on the explicit control-plane object.
+## Sequential Coordinator
+
+`RollingSchemaPlan.Run` adds an opt-in sequential coordinator around the
+deployment state machine. The caller supplies the transport-specific hooks:
+
+```go
+deployment := plan.Begin()
+err := plan.Run(
+	ctx,
+	deployment,
+	func(ctx context.Context, node string, schema hatSchema.Schema) error {
+		return installSchema(ctx, node, schema)
+	},
+	func(ctx context.Context, node string, schema hatSchema.Schema) error {
+		return activateSchema(ctx, node, schema)
+	},
+)
+```
+
+Nodes are processed in the deterministic order returned by `plan.Nodes()`. A
+successful install is recorded as `prepared` before activation is attempted.
+If either hook fails, the completed phase remains recorded and a retry calls
+only the unfinished hook. Cancellation behaves the same way. Each hook gets
+an independent schema snapshot, and concurrent `Run` calls for the same node
+are rejected while its transition is in progress.
+
+The hooks remain responsible for HTTP/gRPC transport, remote authentication,
+durability, and the actual schema install or activation. The coordinator is a
+local control-plane helper and does not change the default replication or SQL
+execution paths.
+
+## Coordinator Cost
+
+Linux/amd64, AMD Ryzen 9 5950X, five benchmark samples, `-benchmem`:
+
+| Operation | Before | After | Heap / allocs after |
+| --- | ---: | ---: | ---: |
+| Four-node manual phase transitions | 0.388 us/op | 0.389 us/op | 404 B/op, 5/op |
+| Four-node `RollingSchemaPlan.Run` with no-op hooks | n/a | 3.084 us/op | 7,124 B/op, 30/op |
+
+The existing manual transition path has the same measured heap and allocation
+profile after the change. The coordinator cost is opt-in and is dominated by
+independent schema snapshots and callback dispatch; it is paid during schema
+rollouts, not by cache commands or query execution.
