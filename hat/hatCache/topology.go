@@ -26,6 +26,16 @@ type TopologyShard = hatTopology.TopologyShard
 type TopologyBucketRange = hatTopology.TopologyBucketRange
 type TopologyRoute = hatTopology.TopologyRoute
 type PartitionOwnership = hatTopology.PartitionOwnership
+type TopologyCommit = hatTopology.TopologyCommit
+
+// TopologyCommitResult reports whether a proposal changed the store or was
+// already installed by an earlier retry.
+type TopologyCommitResult struct {
+	Applied             bool   `json:"applied"`
+	AlreadyApplied      bool   `json:"already_applied"`
+	PreviousFingerprint string `json:"previous_fingerprint"`
+	CurrentFingerprint  string `json:"current_fingerprint"`
+}
 
 // TopologyStore stores a validated topology and optionally persists updates.
 type TopologyStore struct {
@@ -187,6 +197,56 @@ func (store *TopologyStore) Set(topology ClusterTopology) error {
 	store.verifiesFingerprint = verifiesFingerprint
 	store.hasMaintenance = hasMaintenance
 	return nil
+}
+
+// ApplyCommit atomically applies a CAS-style topology proposal. The proposal
+// must match the current fingerprint and advance the fencing token. Repeating
+// an already-applied proposal is successful and reports AlreadyApplied.
+func (store *TopologyStore) ApplyCommit(commit TopologyCommit) (TopologyCommitResult, error) {
+	if store == nil {
+		return TopologyCommitResult{}, errors.New("hatriecache: topology store is nil")
+	}
+	normalized, err := normalizeTopology(commit.Topology)
+	if err != nil {
+		return TopologyCommitResult{}, fmt.Errorf("%w: topology: %v", hatTopology.ErrTopologyCommitInvalid, err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	previousFingerprint := store.fingerprint
+	if err := commit.Validate(store.topology); err != nil {
+		return TopologyCommitResult{PreviousFingerprint: previousFingerprint, CurrentFingerprint: previousFingerprint}, err
+	}
+	candidateFingerprint := normalized.Fingerprint()
+	if candidateFingerprint == previousFingerprint {
+		return TopologyCommitResult{
+			AlreadyApplied:      true,
+			PreviousFingerprint: previousFingerprint,
+			CurrentFingerprint:  previousFingerprint,
+		}, nil
+	}
+	if store.path != "" {
+		if err := SaveTopology(store.path, normalized); err != nil {
+			return TopologyCommitResult{PreviousFingerprint: previousFingerprint, CurrentFingerprint: previousFingerprint}, err
+		}
+	}
+	store.topology = normalized
+	store.fingerprint = candidateFingerprint
+	store.verifiesFingerprint = normalizedTopologyVerifiesReplicationFingerprint(normalized)
+	store.hasMaintenance = topologyHasMaintenance(normalized)
+	return TopologyCommitResult{
+		Applied:             true,
+		PreviousFingerprint: previousFingerprint,
+		CurrentFingerprint:  candidateFingerprint,
+	}, nil
+}
+
+// ApplyConsensusCommit applies a proposal only after a bound quorum decision
+// has been produced by hatTopology.EvaluateTopologyConsensus.
+func (store *TopologyStore) ApplyConsensusCommit(commit TopologyCommit, decision hatTopology.TopologyConsensusDecision) (TopologyCommitResult, error) {
+	if err := hatTopology.ValidateTopologyConsensusDecision(decision, commit.ExpectedFingerprint, commit.CandidateFingerprint()); err != nil {
+		return TopologyCommitResult{}, err
+	}
+	return store.ApplyCommit(commit)
 }
 
 // Route returns the shard selected for key by the current topology.

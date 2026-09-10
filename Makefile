@@ -7105,3 +7105,30 @@ format-c154:
 .PHONY: commit-c154-rollout
 commit-c154-rollout:
 	bash ./scripts/commit-c154-rollout.sh
+.PHONY: benchmark-c153
+benchmark-c153:
+	bash ./scripts/benchmark-c153.sh
+
+.PHONY: test-c153
+test-c153:
+	bash ./scripts/test-c153.sh
+
+.PHONY: format-c153
+format-c153:
+	bash ./scripts/format-c153.sh
+
+.PHONY: race-c153
+race-c153:
+	bash ./scripts/race-c153.sh
+
+.PHONY: vet-c153
+vet-c153:
+	bash ./scripts/vet-c153.sh
+
+.PHONY: review-c153
+review-c153:
+	bash ./scripts/review-c153.sh
+
+.PHONY: commit-c153
+commit-c153:
+	bash ./scripts/commit-c153.sh

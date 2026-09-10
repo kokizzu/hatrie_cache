@@ -253,6 +253,10 @@ name.
   replica selection while preserving the legacy selector default.
 - [x] C152 Leader election independent from query workers (see LEADER_ELECTION.md).
 - [ ] C153 Metadata consensus for partition ownership.
+- [x] C153a Consensus-bound, retry-safe topology commit admission with
+  fingerprint compare-and-swap, strict-majority vote evaluation, and fencing
+  monotonicity; transport and vote authentication remain caller-owned. See
+  [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md).
 - [ ] C154 Rolling schema changes across replicas.
 - [x] C154a Conservative rolling-schema compatibility preflight over validated
   schemas; exact replication fingerprint enforcement remains unchanged. See
