@@ -7203,3 +7203,26 @@ commit-m065-rank-window:
 .PHONY: push-m065-rank-window
 push-m065-rank-window:
 	bash ./scripts/push-m065-rank-window.sh
+.PHONY: benchmark-m064-recursive-reachability
+benchmark-m064-recursive-reachability:
+	bash ./scripts/benchmark-m064-recursive-reachability.sh
+.PHONY: test-m064-recursive-reachability
+test-m064-recursive-reachability:
+	bash ./scripts/test-m064-recursive-reachability.sh
+.PHONY: format-m064-recursive-reachability
+format-m064-recursive-reachability:
+	bash ./scripts/format-m064-recursive-reachability.sh
+
+.PHONY: test-race-m064-recursive-reachability
+test-race-m064-recursive-reachability:
+	bash ./scripts/test-race-m064-recursive-reachability.sh
+.PHONY: review-m064-recursive-reachability
+review-m064-recursive-reachability:
+	bash ./scripts/review-m064-recursive-reachability.sh
+.PHONY: commit-m064-recursive-reachability
+commit-m064-recursive-reachability:
+	bash ./scripts/commit-m064-recursive-reachability.sh
+
+.PHONY: push-m064-recursive-reachability
+push-m064-recursive-reachability:
+	bash ./scripts/push-m064-recursive-reachability.sh

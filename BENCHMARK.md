@@ -17535,6 +17535,27 @@ The direct path is 15.87x faster, uses 45.00x fewer transient bytes, and
 makes 20.00x fewer allocations. It retains no ownership metadata and keeps
 the existing stale-snapshot, primary, and fencing checks.
 
+## M064a Incremental Recursive Reachability
+
+Command: `make benchmark-m064-recursive-reachability`.
+
+This benchmark starts with 1,024 independent directed edges and compares a
+full transitive-closure rebuild with attaching one new leaf to an existing
+root. The full rebuild is a benchmark-local map/BFS baseline; the incremental
+path maintains only newly discovered positive pairs. Five samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Full closure before implementation | 157,098; 153,578; 142,785; 143,547; 142,099 | 143,547 | 114,832 | 1,031 |
+| Full closure after implementation | 145,970; 149,561; 143,744; 147,748; 154,600 | 147,748 | 114,832 | 1,031 |
+| Incremental leaf append | 1,534; 1,552; 1,446; 1,478; 1,421 | 1,478 | 990 | 14 |
+
+For this append-only workload, incremental maintenance is 100x faster, uses
+116x fewer transient bytes, and makes 74x fewer allocations. See
+[INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
+for the API and its deletion/rebuild limitation.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

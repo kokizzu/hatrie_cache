@@ -79,6 +79,7 @@ security guidance before exposing it on a network.
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Opt-in cross-source SQL read snapshots: [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md)
 - Append-only incremental rank windows: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
+- Append-only incremental recursive reachability: [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
 - Consensus-bound topology commits and fencing: [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md)
 - Deterministic local partition split and merge planning: [PARTITION_RESIZE.md](PARTITION_RESIZE.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)

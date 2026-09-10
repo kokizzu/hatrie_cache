@@ -178,6 +178,7 @@ records a separate implementation boundary.
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [ ] M064 Recursive dataflow maintenance.
+- [x] M064a Append-only incremental transitive reachability with cycle-safe positive deltas; arbitrary deletes and updates remain rebuild-only. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
 - [ ] M065 Incremental window-function maintenance.
 - [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).
 - [ ] M090 Independent compute and storage scaling.
