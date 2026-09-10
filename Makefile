@@ -7446,6 +7446,38 @@ commit-m065e-incremental-boundary-window:
 push-m065e-incremental-boundary-window:
 	bash ./scripts/push-m065e-incremental-boundary-window.sh
 
+.PHONY: test-m065f-incremental-nth-value-window
+test-m065f-incremental-nth-value-window:
+	bash ./scripts/test-m065f-incremental-nth-value-window.sh
+
+.PHONY: benchmark-m065f-incremental-nth-value-window
+benchmark-m065f-incremental-nth-value-window:
+	bash ./scripts/benchmark-m065f-incremental-nth-value-window.sh
+
+.PHONY: format-m065f-incremental-nth-value-window
+format-m065f-incremental-nth-value-window:
+	bash ./scripts/format-m065f-incremental-nth-value-window.sh
+
+.PHONY: test-race-m065f-incremental-nth-value-window
+test-race-m065f-incremental-nth-value-window:
+	bash ./scripts/test-race-m065f-incremental-nth-value-window.sh
+
+.PHONY: vet-m065f-incremental-nth-value-window
+vet-m065f-incremental-nth-value-window:
+	bash ./scripts/vet-m065f-incremental-nth-value-window.sh
+
+.PHONY: review-m065f-incremental-nth-value-window
+review-m065f-incremental-nth-value-window:
+	bash ./scripts/review-m065f-incremental-nth-value-window.sh
+
+.PHONY: commit-m065f-incremental-nth-value-window
+commit-m065f-incremental-nth-value-window:
+	bash ./scripts/commit-m065f-incremental-nth-value-window.sh
+
+.PHONY: push-m065f-incremental-nth-value-window
+push-m065f-incremental-nth-value-window:
+	bash ./scripts/push-m065f-incremental-nth-value-window.sh
+
 
 .PHONY: test-m064-mutable-recursive-reachability
 test-m064-mutable-recursive-reachability:

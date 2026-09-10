@@ -17653,6 +17653,29 @@ remain outside this API. See
 [INCREMENTAL_BOUNDARY_WINDOW.md](INCREMENTAL_BOUNDARY_WINDOW.md) for the
 contract and correctness coverage.
 
+## M065f Incremental NTH_VALUE Windows
+
+Command: `make benchmark-m065f-incremental-nth-value-window`.
+
+This benchmark compares a full recomputation of 1,025 rows with one append
+after a 1,024-row seed, using 16 partitions, position 4, and the
+`ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` frame. Five samples were
+run on Linux/amd64 with an AMD Ryzen 9 5950X and a 200 ms sample window. Seed
+setup and incremental identity-map capacity are outside the timer; incremental
+unique-key tracking is measured.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `NTH_VALUE(..., 4)` | Full recomputation | 340,627; 318,620; 312,296; 321,811; 325,298 | 321,811 | 395,682 | 2,057 | 1x |
+| `NTH_VALUE(..., 4)` | Incremental append | 756.2; 771.7; 814.1; 822.8; 803.2 | 803.2 | 558 | 6 | 401x faster |
+
+Incremental maintenance uses about `709x` fewer transient bytes and `343x`
+fewer allocations in this workload. The maintainer retains only a count and
+the selected value per partition; arbitrary updates, deletes, reordering,
+dynamic positions, `RANGE` frames, and `IGNORE NULLS` remain outside this API.
+See [INCREMENTAL_NTH_VALUE_WINDOW.md](INCREMENTAL_NTH_VALUE_WINDOW.md) for
+the contract and correctness coverage.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

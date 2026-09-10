@@ -86,6 +86,7 @@ security guidance before exposing it on a network.
 - Incremental LAG/LEAD windows: [INCREMENTAL_OFFSET_WINDOW.md](INCREMENTAL_OFFSET_WINDOW.md)
 - Incremental bounded COUNT/SUM frame windows: [INCREMENTAL_FRAME_WINDOW.md](INCREMENTAL_FRAME_WINDOW.md)
 - Incremental FIRST_VALUE/LAST_VALUE windows: [INCREMENTAL_BOUNDARY_WINDOW.md](INCREMENTAL_BOUNDARY_WINDOW.md)
+- Incremental NTH_VALUE windows: [INCREMENTAL_NTH_VALUE_WINDOW.md](INCREMENTAL_NTH_VALUE_WINDOW.md)
 - Incremental recursive reachability with opt-in mutable retractions: [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
 - Consensus-bound topology commits and fencing: [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md)
 - Deterministic local partition split and merge planning: [PARTITION_RESIZE.md](PARTITION_RESIZE.md)
