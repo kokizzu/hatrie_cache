@@ -7,6 +7,7 @@ explicitly opt-in operational control.
 
 | Source | Idea | Status | Evidence |
 |---|---|---|---|
+| Tarantool | Partition split and merge tooling | Adopted as an explicit operator planning API | `hatPartition.PlanSplit`, `PlanMerge`, and `PlanResize` validate adjacent power-of-two layouts and provide deterministic allocation-free per-key routes plus an inspectable move mapping. They do not move data or enable partitioning; automatic online migration remains deferred. [PARTITION_RESIZE.md](PARTITION_RESIZE.md) |
 | Materialize | Coordinated progress frontier | Adopted | `SQLProjectionRetentionFrontier` commits journal retention only after all configured runners succeed. [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md) |
 | Materialize | Shared arrangements | Adopted | `TypedTableAggregateArrangements` shares exact aggregate state among identical definitions, and `TypedTableJoinArrangements` shares exact incremental equi-joins. [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md), [TYPED_TABLES.md](TYPED_TABLES.md) |
 | Materialize | Compiled reusable plan fragments | Adopted as an additive opt-in | `CompileSQLQuery` returns an immutable `CompiledSQLQuery` handle that avoids parser and prepared-cache lookup work while cloning and rebinding per execution. Existing query entry points and prepared-cache statistics remain unchanged; the handle retains one plan and is intended for repeated hot queries. |

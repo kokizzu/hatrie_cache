@@ -7055,3 +7055,9 @@ benchmark-limit-with-ties-local-clean:
 
 verify-limit-with-ties-doc-local-clean:
 	bash ./scripts/verify-limit-with-ties-doc-local-clean.sh
+
+.PHONY: test-partition-resize benchmark-partition-resize
+test-partition-resize:
+	bash ./scripts/test-partition-resize.sh
+benchmark-partition-resize:
+	bash ./scripts/benchmark-partition-resize.sh
