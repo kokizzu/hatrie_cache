@@ -82,7 +82,7 @@ security guidance before exposing it on a network.
 - Indexed common source frontiers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
 - Frontier-bound SQL snapshots: [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)
 - Context-aware SQL source frontier barriers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md#bounded-snapshot-barrier)
-- Append-only incremental rank windows: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
+- Incremental rank windows with opt-in mutable retractions: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
 - Append-only incremental recursive reachability: [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
 - Consensus-bound topology commits and fencing: [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md)
 - Deterministic local partition split and merge planning: [PARTITION_RESIZE.md](PARTITION_RESIZE.md)

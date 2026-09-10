@@ -17562,8 +17562,9 @@ Command: `make benchmark-m065-rank-window`.
 
 This benchmark compares recomputing a 1,024-row, 16-partition rank window
 with maintaining the same ordered window after one append. Five samples were
-run on Linux/amd64. The incremental path is intended for append-only input;
-the full recomputation remains the fallback for arbitrary updates.
+run on Linux/amd64. The default incremental path is intended for append-only
+input; opt-in mutable update/retraction maintenance is measured separately in
+M065b.
 
 | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
 | --- | --- | ---: | ---: | ---: |
@@ -17574,6 +17575,35 @@ For this append workload, incremental maintenance is 802x faster, uses
 1,043x fewer transient bytes, and makes 517x fewer allocations. See
 [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md) for the API,
 correctness coverage, and limitations.
+
+## M065b Mutable Rank-Window Update and Retraction Maintenance
+
+Command: `make benchmark-m065-rank-window-mutations`.
+
+This benchmark compares one update in a 1,024-row, 16-partition rank window
+with the parent full SQL recomputation. Five samples were run on Linux/amd64.
+The mutable constructor is seeded outside the timed loop because its retained
+base rows are resident state, not per-update transient allocation.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative to parent recompute |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Parent full SQL recompute | 907,724; 941,029; 915,992; 881,533; 882,566 | 907,724 | 900,019 | 4,653 | 1x |
+| Final full SQL recompute control | 848,101; 849,703; 867,056; 922,797; 901,212 | 867,056 | 900,009 | 4,653 | control |
+| Mutable affected-partition update | 360,232; 345,045; 354,094; 354,421; 379,028 | 354,094 | 314,476 | 1,066 | 2.56x faster |
+
+The mutable path is `2.56x` faster, uses `2.86x` fewer transient bytes, and
+makes `4.36x` fewer allocations for this update workload. It retains base rows,
+derived outputs, and per-key partition metadata only when
+`NewMutableIncrementalRankWindow` is selected. The default append-only
+constructor retains no full rows. Its final control result was `1,018 ns/op`,
+`863 B/op`, and `9 allocs/op`, versus the parent `1,136 ns/op`, `863 B/op`, and
+`9 allocs/op`.
+
+The first all-partition rebuild experiment was rejected: it measured about
+`2.65 ms/op`, `1.61 MB/op`, and `16,540 allocs/op`, losing to the parent
+recompute. The retained implementation rebuilds only affected partitions and
+keeps this measured win. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
+for the API contract and correctness tests.
 
 ## Rejected T042 Parallel Journal Replay
 

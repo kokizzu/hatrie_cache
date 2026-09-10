@@ -68,14 +68,17 @@ type IncrementalRankWindowDefinition struct {
 // publishing any state, so callback failures, duplicate identities, and
 // out-of-order rows are atomic failures.
 type IncrementalRankWindow struct {
-	kind         IncrementalRankWindowKind
-	outputColumn string
-	partitionKey IncrementalWindowPartitionKeyFunc
-	orderKey     IncrementalWindowOrderKeyFunc
-	rowKey       IncrementalWindowRowKeyFunc
-	descending   bool
-	partitions   map[string]incrementalRankWindowPartition
-	keys         map[string]struct{}
+	kind              IncrementalRankWindowKind
+	outputColumn      string
+	partitionKey      IncrementalWindowPartitionKeyFunc
+	orderKey          IncrementalWindowOrderKeyFunc
+	rowKey            IncrementalWindowRowKeyFunc
+	descending        bool
+	partitions        map[string]incrementalRankWindowPartition
+	keys              map[string]struct{}
+	mutableRows       map[string]Row
+	mutableOutputs    map[string]Row
+	mutablePartitions map[string]string
 }
 
 type incrementalRankWindowPartition struct {
@@ -125,6 +128,12 @@ func (window *IncrementalRankWindow) Append(rows []Row) ([]DifferentialRow, erro
 
 	states := make(map[string]incrementalRankWindowPartition, len(rows))
 	pendingKeys := make(map[string]struct{}, len(rows))
+	var pendingRows map[string]Row
+	var pendingPartitions map[string]string
+	if window.mutableRows != nil {
+		pendingRows = make(map[string]Row, len(rows))
+		pendingPartitions = make(map[string]string, len(rows))
+	}
 	updates := make([]DifferentialRow, 0, len(rows))
 	for index, row := range rows {
 		partition := ""
@@ -205,6 +214,10 @@ func (window *IncrementalRankWindow) Append(rows []Row) ([]DifferentialRow, erro
 		}
 		output[window.outputColumn] = value
 		updates = append(updates, DifferentialRow{Key: key, Diff: 1, Row: output})
+		if pendingRows != nil {
+			pendingRows[key] = cloneIncrementalRankWindowRow(row)
+			pendingPartitions[key] = partition
+		}
 	}
 
 	for partition, state := range states {
@@ -212,6 +225,21 @@ func (window *IncrementalRankWindow) Append(rows []Row) ([]DifferentialRow, erro
 	}
 	for key := range pendingKeys {
 		window.keys[key] = struct{}{}
+	}
+	if pendingRows != nil {
+		if window.mutableOutputs == nil {
+			window.mutableOutputs = make(map[string]Row, len(window.mutableRows)+len(pendingRows))
+		}
+		if window.mutablePartitions == nil {
+			window.mutablePartitions = make(map[string]string, len(window.mutableRows)+len(pendingRows))
+		}
+		for key, row := range pendingRows {
+			window.mutableRows[key] = row
+			window.mutablePartitions[key] = pendingPartitions[key]
+		}
+		for _, update := range updates {
+			window.mutableOutputs[update.Key] = cloneIncrementalRankWindowRow(update.Row)
+		}
 	}
 	return updates, nil
 }

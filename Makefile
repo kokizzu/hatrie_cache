@@ -7328,3 +7328,33 @@ commit-m032d-frontier-snapshot:
 .PHONY: push-m032d-frontier-snapshot
 push-m032d-frontier-snapshot:
 	bash ./scripts/push-m032d-frontier-snapshot.sh
+.PHONY: test-m065-rank-window-mutations
+test-m065-rank-window-mutations:
+	bash ./scripts/test-m065-rank-window-mutations.sh
+.PHONY: format-m065-rank-window-mutations
+format-m065-rank-window-mutations:
+	bash ./scripts/format-m065-rank-window-mutations.sh
+.PHONY: benchmark-m065-rank-window-mutations
+benchmark-m065-rank-window-mutations:
+	bash ./scripts/benchmark-m065-rank-window-mutations.sh
+.PHONY: test-m065-rank-window-all
+test-m065-rank-window-all:
+	bash ./scripts/test-m065-rank-window-all.sh
+
+.PHONY: test-race-m065-rank-window-mutations
+test-race-m065-rank-window-mutations:
+	bash ./scripts/test-race-m065-rank-window-mutations.sh
+
+.PHONY: vet-m065-rank-window-mutations
+vet-m065-rank-window-mutations:
+	bash ./scripts/vet-m065-rank-window-mutations.sh
+.PHONY: review-m065-rank-window-mutations
+review-m065-rank-window-mutations:
+	bash ./scripts/review-m065-rank-window-mutations.sh
+.PHONY: commit-m065-rank-window-mutations
+commit-m065-rank-window-mutations:
+	bash ./scripts/commit-m065-rank-window-mutations.sh
+
+.PHONY: push-m065-rank-window-mutations
+push-m065-rank-window-mutations:
+	bash ./scripts/push-m065-rank-window-mutations.sh
