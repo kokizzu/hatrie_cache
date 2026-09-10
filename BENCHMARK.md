@@ -17610,6 +17610,27 @@ new opt-in tracker maintains an indexed min-heap and reads its root.
 The indexed path is 2.65x faster with no measured allocation or transient-byte
 cost. See [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md) for the
 consistency contract and physical snapshot integration boundary.
+
+## M032c Bounded SQL Source Frontier Barrier
+
+Command: `make benchmark-m032c-frontier`.
+
+This benchmark compares the existing tracker readiness check with the new
+opt-in `SQLSourceFrontierBarrier.WaitForFrontier` ready path over 1,024 fixed
+partitions. Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9
+5950X. The barrier uses an atomic cached common frontier after observations are
+published through its `Observe` or `ObserveBatch` methods.
+
+| Path | Raw ns/op | Median ns/op | Median B/op | Median allocs/op | Comparison |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing `SQLSourceFrontierTracker.ReadyAt`, before | 4.744; 4.632; 4.896; 4.813; 4.577 | 4.744 | 0 | 0 | baseline |
+| Existing `SQLSourceFrontierTracker.ReadyAt`, final run | 4.945; 4.934; 4.928; 4.941; 4.970 | 4.941 | 0 | 0 | baseline |
+| `SQLSourceFrontierBarrier.WaitForFrontier`, final | 2.858; 2.815; 2.837; 2.836; 2.906 | 2.837 | 0 | 0 | 1.74x faster than final baseline |
+
+The barrier adds context-aware blocking and wake-up semantics while reducing
+the already-ready check to 2.837 ns/op with no measured allocations. It does
+not change default SQL execution, source transport, leader election, or
+physical snapshot acquisition.
 ## M033b Consensus-Bound Global Timestamp Ranges
 
 Command: `make benchmark-m033-global-timestamps`.

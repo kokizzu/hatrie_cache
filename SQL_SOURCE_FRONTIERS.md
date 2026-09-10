@@ -43,6 +43,61 @@ batch.
 The tracker is opt-in and does not change ordinary SQL execution or source
 offset tracking. It retains one small state entry per configured partition.
 
+## Bounded Snapshot Barrier
+
+`SQLSourceFrontierBarrier` adds an opt-in, context-aware wait over the tracker.
+It wakes blocked callers when observations advance and returns only after every
+configured source partition has observed at least the requested frontier. A
+frontier of zero still waits for the initial observation from every partition.
+
+```go
+tracker, err := hatSql.NewSQLSourceFrontierTracker([]hatSql.SQLSourceFrontierPartition{
+	{Source: "orders", Partition: "0"},
+	{Source: "orders", Partition: "1"},
+})
+if err != nil {
+	return err
+}
+barrier, err := hatSql.NewSQLSourceFrontierBarrier(tracker)
+if err != nil {
+	return err
+}
+
+if _, err := barrier.ObserveBatch([]hatSql.SQLSourceFrontier{
+	{Source: "orders", Partition: "0", Frontier: 42},
+	{Source: "orders", Partition: "1", Frontier: 42},
+}); err != nil {
+	return err
+}
+frontier, err := barrier.WaitForFrontier(ctx, 42)
+if err != nil {
+	return err
+}
+_ = frontier
+```
+
+Call `WaitForFrontier` before `SQLSnapshotProvider.BeginSQLSnapshot` when the
+provider uses the same source frontier. The barrier does not copy or pause a
+source resolver, elect a leader, or provide replication. Publish observations
+through the barrier; direct mutation of the wrapped tracker cannot notify
+blocked waiters. Invalid batches remain atomic.
+
+### Ready-Path Benchmark
+
+Run `make benchmark-m032c-frontier`. Five `-benchmem` samples ran on
+Linux/amd64 with an AMD Ryzen 9 5950X and 1,024 configured partitions.
+
+| Path | Raw ns/op | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing `SQLSourceFrontierTracker.ReadyAt`, before | 4.744; 4.632; 4.896; 4.813; 4.577 | 4.744 | 0 | 0 |
+| Existing `SQLSourceFrontierTracker.ReadyAt`, final run | 4.945; 4.934; 4.928; 4.941; 4.970 | 4.941 | 0 | 0 |
+| `SQLSourceFrontierBarrier.WaitForFrontier`, final | 2.858; 2.815; 2.837; 2.836; 2.906 | 2.837 | 0 | 0 |
+
+The cached ready path is `1.74x` faster than the same-run existing readiness
+check, with no measured allocations. The improvement comes from an atomic
+cached common frontier; the blocking path pays only when a caller actually
+has to wait.
+
 ## Benchmark
 
 Command: `make benchmark-m032-frontier`.
