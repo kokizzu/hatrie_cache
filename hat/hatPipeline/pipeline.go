@@ -68,6 +68,9 @@ func (p *Pipeline[T]) Run(ctx context.Context, input <-chan T) (<-chan T, <-chan
 	go func() {
 		select {
 		case <-lastDone:
+			if err := ctx.Err(); err != nil {
+				run.report(err)
+			}
 			run.finish()
 		case <-ctx.Done():
 			run.report(ctx.Err())

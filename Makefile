@@ -7233,3 +7233,27 @@ commit-t042-rejection:
 .PHONY: push-t042-rejection
 push-t042-rejection:
 	bash ./scripts/push-t042-rejection.sh
+.PHONY: benchmark-m032-frontier
+benchmark-m032-frontier:
+	bash ./scripts/benchmark-m032-frontier.sh
+.PHONY: test-m032-frontier
+test-m032-frontier:
+	bash ./scripts/test-m032-frontier.sh
+.PHONY: format-m032-frontier
+format-m032-frontier:
+	bash ./scripts/format-m032-frontier.sh
+
+.PHONY: test-race-m032-frontier
+test-race-m032-frontier:
+	bash ./scripts/test-race-m032-frontier.sh
+
+.PHONY: review-m032-frontier
+review-m032-frontier:
+	bash ./scripts/review-m032-frontier.sh
+.PHONY: commit-pipeline-cancellation
+commit-pipeline-cancellation:
+	bash ./scripts/commit-pipeline-cancellation.sh
+
+.PHONY: push-pipeline-cancellation
+push-pipeline-cancellation:
+	bash ./scripts/push-pipeline-cancellation.sh
