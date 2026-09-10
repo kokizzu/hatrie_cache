@@ -7636,3 +7636,34 @@ commit-m065k-distinct-snapshot-atomicity:
 .PHONY: push-m065k-distinct-snapshot-atomicity
 push-m065k-distinct-snapshot-atomicity:
 	bash ./scripts/push-m065k-distinct-snapshot-atomicity.sh
+.PHONY: test-m052b-dataflow-fragments
+test-m052b-dataflow-fragments:
+	bash ./scripts/test-m052b-dataflow-fragments.sh
+
+.PHONY: format-m052b-dataflow-fragments
+format-m052b-dataflow-fragments:
+	bash ./scripts/format-m052b-dataflow-fragments.sh
+
+.PHONY: benchmark-m052b-dataflow-fragments
+benchmark-m052b-dataflow-fragments:
+	bash ./scripts/benchmark-m052b-dataflow-fragments.sh
+
+.PHONY: test-race-m052b-dataflow-fragments
+test-race-m052b-dataflow-fragments:
+	bash ./scripts/test-race-m052b-dataflow-fragments.sh
+
+.PHONY: vet-m052b-dataflow-fragments
+vet-m052b-dataflow-fragments:
+	bash ./scripts/vet-m052b-dataflow-fragments.sh
+
+.PHONY: review-m052b-dataflow-fragments
+review-m052b-dataflow-fragments:
+	bash ./scripts/review-m052b-dataflow-fragments.sh
+
+.PHONY: commit-m052b-dataflow-fragments
+commit-m052b-dataflow-fragments:
+	bash ./scripts/commit-m052b-dataflow-fragments.sh
+
+.PHONY: push-m052b-dataflow-fragments
+push-m052b-dataflow-fragments:
+	bash ./scripts/push-m052b-dataflow-fragments.sh

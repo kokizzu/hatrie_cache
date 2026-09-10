@@ -17937,3 +17937,25 @@ dispatch.
 The stronger path has no measured allocation or retained-memory cost. Its
 small absolute overhead is opt-in and buys an explicit exact-frontier contract;
 ordinary SQL execution does not call it.
+## Reusable SQL Dataflow Fragment Execution
+
+M052b adds reusable execution wiring for lowered SQL dataflow fragments. The
+runner owns each operator's semantics; plan validation, dependency wiring, and
+cancellation checks are provided by `CompileSQLDataflow`. The benchmark uses
+128 map rows and five identical stages, compiles the plan outside the timed
+loop, and runs five `1s` samples through the Makefile target
+`benchmark-m052b-dataflow-fragments`.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+|---|---:|---:|---:|---:|
+| Before: direct-only pre-implementation run | 141,098 | 220,841 | 1,290 | 1.000x |
+| After: paired direct control | 144,089 | 220,841 | 1,290 | 1.000x |
+| After: reusable fragment executor | 155,126 | 220,969 | 1,291 | 1.077x CPU time vs paired direct |
+
+Raw after runs: direct `143254, 144089, 141378, 144316, 145553 ns/op`;
+executor `145037, 147087, 155126, 157046, 156084 ns/op`. The executor adds
+one `[][]SQLRow` dependency-output table per execution for this five-fragment
+plan (`+128 B/op`, `+1 alloc/op`) and measured 7.7% CPU overhead in this
+inlined-loop comparison. The
+pre-implementation direct run is retained for audit history, while the paired
+control avoids treating normal benchmark noise as a code-path regression.

@@ -24,8 +24,9 @@ This is an inspection and coordination boundary, not a new executor. Compiled
 query execution still clones and runs the existing template, preserving result
 ordering, parameter binding, error behavior, and all existing optimization
 fallbacks. It adds no storage, wire, or configuration format. Lowering nodes
-into independently executable reusable fragments remains the separate `M052`
-goal.
+into independently executable reusable fragments is available through the
+callback-backed `CompileSQLDataflow` API. The callback owns operator semantics;
+the existing SQL executor remains unchanged.
 
 The five-run local benchmark used the command below:
 

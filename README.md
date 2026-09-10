@@ -4329,7 +4329,8 @@ Compiled queries can also expose a cached, versioned fragment plan with
 and each returned snapshot is independent, so it can be retained by routing,
 explain, or incremental-processing coordinators without changing SQL
 execution. See [SQL_DATAFLOW_LOWERING.md](SQL_DATAFLOW_LOWERING.md) for the
-contract, execution boundary, and measurements.
+contract, execution boundary, and measurements. Reusable callback-backed
+fragment composition is documented in [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md).
 
 ## Partitioned SQL Sources
 

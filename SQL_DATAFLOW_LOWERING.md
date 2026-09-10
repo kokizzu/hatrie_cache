@@ -39,8 +39,10 @@ The fragments are structural and reusable metadata. They do not replace the
 existing SQL executor, automatically maintain differential results, or change
 storage, wire protocols, query defaults, or backup formats. Callers that need
 incremental execution can use the fragment IDs and details to select existing
-typed or differential operators; executable reusable fragment composition is
-tracked separately as M052.
+typed or differential operators. Reusable executable composition is available
+through `CompileSQLDataflow` or `CompiledSQLQuery.CompileDataflow`; the caller
+still supplies the operator runner, so lowering does not change the existing
+SQL executor.
 
 ## Performance
 

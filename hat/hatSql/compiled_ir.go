@@ -22,8 +22,9 @@ type SQLDataflowIR struct {
 }
 
 // SQLDataflowFragment is one reusable logical operator in a lowered SQL plan.
-// Inputs refer to earlier fragment IDs in the same SQLDataflowPlan. A fragment
-// is descriptive; execution remains owned by the existing SQL executor.
+// Inputs refer to earlier fragment IDs in the same SQLDataflowPlan. A caller
+// can execute validated fragments with CompileSQLDataflow and a runner-owned
+// operator implementation; the existing SQL executor remains unchanged.
 type SQLDataflowFragment struct {
 	ID     int    `json:"id"`
 	Kind   string `json:"kind"`
