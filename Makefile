@@ -7257,3 +7257,10 @@ commit-pipeline-cancellation:
 .PHONY: push-pipeline-cancellation
 push-pipeline-cancellation:
 	bash ./scripts/push-pipeline-cancellation.sh
+.PHONY: commit-m032-frontier
+commit-m032-frontier:
+	bash ./scripts/commit-m032-frontier.sh
+
+.PHONY: push-m032-frontier
+push-m032-frontier:
+	bash ./scripts/push-m032-frontier.sh

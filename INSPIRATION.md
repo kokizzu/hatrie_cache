@@ -334,6 +334,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M031 Transaction-consistent snapshots.
 - [ ] M032 Strong consistency across all independent source partitions.
 - [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).
+- [x] M032b Fixed-partition indexed common frontier tracking with O(1) readiness checks; physical source waiting remains caller-owned. See [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md).
 - [ ] M033 Timestamp oracle for globally ordered writes.
 - [x] M033a Process-local lock-free Lamport timestamp allocation with monotone remote observation; see [TIMESTAMP_ORACLE.md](TIMESTAMP_ORACLE.md). Global cross-node ordering remains open.
 - [x] M034 Epoch management for restarts and leases. `hatStorage.PersistentShardLease` and `hatStorage.PersistentNodeEpoch` durably advance fencing tokens across restarts, reject concurrent owners, and expose explicit renew, release, inspect, and validation operations; see [PERSISTENT_NODE_EPOCHS.md](PERSISTENT_NODE_EPOCHS.md).

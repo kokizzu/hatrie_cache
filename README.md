@@ -78,6 +78,7 @@ security guidance before exposing it on a network.
 - Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Opt-in cross-source SQL read snapshots: [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md)
+- Indexed common source frontiers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
 - Append-only incremental rank windows: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
 - Append-only incremental recursive reachability: [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
 - Consensus-bound topology commits and fencing: [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md)

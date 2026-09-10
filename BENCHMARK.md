@@ -17592,3 +17592,21 @@ overhead.
 The parallel path was 1.14x slower, used 1.02x more transient bytes, and
 made 1.00x as many allocations. No parallel replay API or runtime path was
 retained.
+
+## M032b Indexed Common Source Frontier
+
+Command: `make benchmark-m032-frontier`.
+
+This benchmark tracks 1,024 observed source partitions, advances one
+partition, and reads the common frontier. The baseline scans all values; the
+new opt-in tracker maintains an indexed min-heap and reads its root.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Scan all partitions before implementation | 481.8; 482.9; 479.1; 479.2; 488.3 | 481.8 | 0 | 0 |
+| Scan all partitions final baseline | 487.8; 481.5; 483.8; 479.0; 479.8 | 481.5 | 0 | 0 |
+| Indexed heap update and read | 181.9; 182.3; 179.4; 179.7; 181.5 | 181.5 | 0 | 0 |
+
+The indexed path is 2.65x faster with no measured allocation or transient-byte
+cost. See [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md) for the
+consistency contract and physical snapshot integration boundary.
