@@ -17723,6 +17723,31 @@ allocations than its full-recompute control in this workload. The checked
 `int64` sum and `float64` output contract are documented in
 [INCREMENTAL_AVERAGE_FRAME_WINDOW.md](INCREMENTAL_AVERAGE_FRAME_WINDOW.md).
 
+## M065i Incremental COUNT DISTINCT Frame Windows
+
+Command: `make benchmark-m065i-incremental-distinct-frame-window`.
+
+This benchmark compares a full recomputation of 1,025 rows with incremental
+appends after a 1,024-row seed, using 16 partitions and a
+`ROWS BETWEEN 7 PRECEDING AND CURRENT ROW` frame. Five samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X and a 200 ms sample window. Seed setup
+and tail-row construction are outside the timer; the public incremental
+append, including its transactional distinct-map snapshot, is measured.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `COUNT(DISTINCT int64)` | Full recomputation | 1,239,711; 1,201,259; 1,233,445; 1,232,393; 1,220,935 | 1,232,393 | 9,472 | 1 | 1x |
+| `COUNT(DISTINCT int64)` | Incremental append | 1,252; 1,166; 1,173; 1,168; 1,089 | 1,168 | 1,290 | 8 | 1,055x faster |
+
+The pre-change full-scan-only control had a median of `1,236,520 ns/op`,
+`9,472 B/op`, and `1 alloc/op`; the post-change control is within normal
+benchmark noise. Incremental maintenance is about `1,055x` faster and uses
+about `7.3x` fewer transient bytes. It performs `8x` as many allocations per
+operation because the atomic snapshot and output path retain separate small
+maps, but the total allocated bytes are substantially lower for this bounded
+workload. See [INCREMENTAL_DISTINCT_FRAME_WINDOW.md](INCREMENTAL_DISTINCT_FRAME_WINDOW.md)
+for the contract and correctness coverage.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

@@ -7571,3 +7571,32 @@ commit-m065h-incremental-average-frame-window:
 .PHONY: push-m065h-incremental-average-frame-window
 push-m065h-incremental-average-frame-window:
 	bash ./scripts/push-m065h-incremental-average-frame-window.sh
+.PHONY: benchmark-m065i-incremental-distinct-frame-window
+benchmark-m065i-incremental-distinct-frame-window:
+	bash ./scripts/benchmark-m065i-incremental-distinct-frame-window.sh
+
+.PHONY: format-m065i-incremental-distinct-frame-window
+format-m065i-incremental-distinct-frame-window:
+	bash ./scripts/format-m065i-incremental-distinct-frame-window.sh
+.PHONY: test-m065i-incremental-distinct-frame-window
+test-m065i-incremental-distinct-frame-window:
+	bash ./scripts/test-m065i-incremental-distinct-frame-window.sh
+.PHONY: test-race-m065i-incremental-distinct-frame-window
+test-race-m065i-incremental-distinct-frame-window:
+	bash ./scripts/test-race-m065i-incremental-distinct-frame-window.sh
+
+.PHONY: vet-m065i-incremental-distinct-frame-window
+vet-m065i-incremental-distinct-frame-window:
+	bash ./scripts/vet-m065i-incremental-distinct-frame-window.sh
+
+.PHONY: review-m065i-incremental-distinct-frame-window
+review-m065i-incremental-distinct-frame-window:
+	bash ./scripts/review-m065i-incremental-distinct-frame-window.sh
+
+.PHONY: commit-m065i-incremental-distinct-frame-window
+commit-m065i-incremental-distinct-frame-window:
+	bash ./scripts/commit-m065i-incremental-distinct-frame-window.sh
+
+.PHONY: push-m065i-incremental-distinct-frame-window
+push-m065i-incremental-distinct-frame-window:
+	bash ./scripts/push-m065i-incremental-distinct-frame-window.sh

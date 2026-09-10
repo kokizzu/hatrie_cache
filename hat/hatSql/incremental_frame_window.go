@@ -7,20 +7,21 @@ import (
 )
 
 var (
-	ErrIncrementalFrameWindowNil                 = errors.New("incremental frame window is nil")
-	ErrIncrementalFrameWindowInvalidKind         = errors.New("incremental frame window kind is invalid")
-	ErrIncrementalFrameWindowOutputRequired      = errors.New("incremental frame window output column is required")
-	ErrIncrementalFrameWindowOrderRequired       = errors.New("incremental frame window order key is required")
-	ErrIncrementalFrameWindowRowKeyRequired      = errors.New("incremental frame window row key is required")
-	ErrIncrementalFrameWindowValueRequired       = errors.New("incremental frame window value key is required")
-	ErrIncrementalFrameWindowNegativeFrame       = errors.New("incremental frame window preceding bound must be non-negative")
-	ErrIncrementalFrameWindowDuplicateKey        = errors.New("incremental frame window row key already exists")
-	ErrIncrementalFrameWindowOutputConflict      = errors.New("incremental frame window output column conflicts with input")
-	ErrIncrementalFrameWindowOutOfOrder          = errors.New("incremental frame window row is out of order")
-	ErrIncrementalFrameWindowSumValueInvalid     = errors.New("incremental frame window SUM value must be int64 or nil")
-	ErrIncrementalFrameWindowExtremaValueInvalid = errors.New("incremental frame window MIN/MAX value must be int64 or nil")
-	ErrIncrementalFrameWindowAvgValueInvalid     = errors.New("incremental frame window AVG value must be int64 or nil")
-	ErrIncrementalFrameWindowSumOverflow         = errors.New("incremental frame window SUM overflows int64")
+	ErrIncrementalFrameWindowNil                  = errors.New("incremental frame window is nil")
+	ErrIncrementalFrameWindowInvalidKind          = errors.New("incremental frame window kind is invalid")
+	ErrIncrementalFrameWindowOutputRequired       = errors.New("incremental frame window output column is required")
+	ErrIncrementalFrameWindowOrderRequired        = errors.New("incremental frame window order key is required")
+	ErrIncrementalFrameWindowRowKeyRequired       = errors.New("incremental frame window row key is required")
+	ErrIncrementalFrameWindowValueRequired        = errors.New("incremental frame window value key is required")
+	ErrIncrementalFrameWindowNegativeFrame        = errors.New("incremental frame window preceding bound must be non-negative")
+	ErrIncrementalFrameWindowDuplicateKey         = errors.New("incremental frame window row key already exists")
+	ErrIncrementalFrameWindowOutputConflict       = errors.New("incremental frame window output column conflicts with input")
+	ErrIncrementalFrameWindowOutOfOrder           = errors.New("incremental frame window row is out of order")
+	ErrIncrementalFrameWindowSumValueInvalid      = errors.New("incremental frame window SUM value must be int64 or nil")
+	ErrIncrementalFrameWindowExtremaValueInvalid  = errors.New("incremental frame window MIN/MAX value must be int64 or nil")
+	ErrIncrementalFrameWindowAvgValueInvalid      = errors.New("incremental frame window AVG value must be int64 or nil")
+	ErrIncrementalFrameWindowDistinctValueInvalid = errors.New("incremental frame window COUNT DISTINCT value must be int64 or nil")
+	ErrIncrementalFrameWindowSumOverflow          = errors.New("incremental frame window SUM overflows int64")
 )
 
 // IncrementalFrameWindowKind selects the aggregate maintained for a bounded
@@ -33,6 +34,7 @@ const (
 	IncrementalWindowFrameMinInt64
 	IncrementalWindowFrameMaxInt64
 	IncrementalWindowFrameAvgInt64
+	IncrementalWindowFrameCountDistinctInt64
 )
 
 // IncrementalFrameWindowDefinition configures an append-only bounded frame
@@ -50,10 +52,10 @@ type IncrementalFrameWindowDefinition struct {
 	Descending     bool
 }
 
-// IncrementalFrameWindow maintains an append-only bounded COUNT(*), SUM(int64),
-// AVG(int64), MIN(int64), or MAX(int64) frame. It retains at most
-// FramePreceding+1 contributions per partition and emits one positive
-// differential row for each appended row.
+// IncrementalFrameWindow maintains an append-only bounded COUNT(*),
+// COUNT(DISTINCT int64), SUM(int64), AVG(int64), MIN(int64), or MAX(int64)
+// frame. It retains at most FramePreceding+1 contributions per partition and
+// emits one positive differential row for each appended row.
 type IncrementalFrameWindow struct {
 	kind           IncrementalFrameWindowKind
 	outputColumn   string
@@ -73,6 +75,7 @@ type incrementalFrameWindowPartition struct {
 	contributions  []incrementalFrameWindowContribution
 	sum            int64
 	validSumCount  int
+	distinctCounts map[int64]int
 	monotonic      []incrementalFrameWindowExtremaEntry
 	monotonicHead  int
 	monotonicCount int
@@ -104,7 +107,8 @@ func NewIncrementalFrameWindow(definition IncrementalFrameWindowDefinition) (*In
 		definition.Kind != IncrementalWindowFrameSumInt64 &&
 		definition.Kind != IncrementalWindowFrameMinInt64 &&
 		definition.Kind != IncrementalWindowFrameMaxInt64 &&
-		definition.Kind != IncrementalWindowFrameAvgInt64 {
+		definition.Kind != IncrementalWindowFrameAvgInt64 &&
+		definition.Kind != IncrementalWindowFrameCountDistinctInt64 {
 		return nil, ErrIncrementalFrameWindowInvalidKind
 	}
 	outputColumn := strings.TrimSpace(definition.OutputColumn)
@@ -197,6 +201,8 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 						err = ErrIncrementalFrameWindowExtremaValueInvalid
 					} else if window.kind == IncrementalWindowFrameAvgInt64 {
 						err = ErrIncrementalFrameWindowAvgValueInvalid
+					} else if window.kind == IncrementalWindowFrameCountDistinctInt64 {
+						err = ErrIncrementalFrameWindowDistinctValueInvalid
 					}
 					return nil, fmt.Errorf("incremental frame window row %d: %w", index, err)
 				}
@@ -254,6 +260,14 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 				}
 				state.validSumCount--
 			}
+			if window.kind == IncrementalWindowFrameCountDistinctInt64 && outgoing.valid {
+				count := state.distinctCounts[outgoing.value]
+				if count <= 1 {
+					delete(state.distinctCounts, outgoing.value)
+				} else {
+					state.distinctCounts[outgoing.value] = count - 1
+				}
+			}
 		}
 		state.contributions = append(state.contributions, row.contribution)
 		value := interface{}(int64(len(state.contributions)))
@@ -273,6 +287,14 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 			} else {
 				value = float64(state.sum) / float64(state.validSumCount)
 			}
+		} else if window.kind == IncrementalWindowFrameCountDistinctInt64 {
+			if row.contribution.valid {
+				if state.distinctCounts == nil {
+					state.distinctCounts = make(map[int64]int)
+				}
+				state.distinctCounts[row.contribution.value]++
+			}
+			value = int64(len(state.distinctCounts))
 		} else if window.kind == IncrementalWindowFrameMinInt64 || window.kind == IncrementalWindowFrameMaxInt64 {
 			value = window.appendIncrementalFrameWindowExtrema(&state, row.contribution)
 		}
@@ -295,6 +317,13 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 
 func cloneIncrementalFrameWindowPartition(state incrementalFrameWindowPartition) incrementalFrameWindowPartition {
 	state.contributions = append([]incrementalFrameWindowContribution(nil), state.contributions...)
+	if state.distinctCounts != nil {
+		distinctCounts := make(map[int64]int, len(state.distinctCounts))
+		for value, count := range state.distinctCounts {
+			distinctCounts[value] = count
+		}
+		state.distinctCounts = distinctCounts
+	}
 	state.monotonic = append([]incrementalFrameWindowExtremaEntry(nil), state.monotonic...)
 	return state
 }

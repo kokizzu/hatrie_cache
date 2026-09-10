@@ -7,6 +7,8 @@ whole input for every row.
 The first supported kinds are:
 
 - `IncrementalWindowFrameCount` for exact `COUNT(*)` semantics.
+- `IncrementalWindowFrameCountDistinctInt64` for exact `COUNT(DISTINCT int64)`
+  semantics.
 - `IncrementalWindowFrameSumInt64` for exact `SUM(int64)` semantics.
 - `IncrementalWindowFrameMinInt64` for NULL-aware `MIN(int64)` semantics.
 - `IncrementalWindowFrameMaxInt64` for NULL-aware `MAX(int64)` semantics.
@@ -57,6 +59,10 @@ so a failed batch does not advance the window or reserve its keys.
 The retained aggregate state is bounded to at most `N+1` contributions per
 partition. `COUNT(*)`, `SUM(int64)`, and `AVG(int64)` updates are O(1), with
 checked add/subtract for the sum and a final `float64` division for averages.
+`COUNT(DISTINCT int64)` uses a reference-counted hash map, so duplicate
+values are counted once and outgoing values are removed in O(1) average time.
+See [INCREMENTAL_DISTINCT_FRAME_WINDOW.md](INCREMENTAL_DISTINCT_FRAME_WINDOW.md)
+for its atomic snapshot and allocation measurements.
 `MIN(int64)` and `MAX(int64)` use a fixed-size circular monotonic deque and
 are O(1) amortized per update while ignoring SQL NULL values. See
 [INCREMENTAL_EXTREMA_FRAME_WINDOW.md](INCREMENTAL_EXTREMA_FRAME_WINDOW.md)
