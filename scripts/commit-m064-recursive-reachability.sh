@@ -14,6 +14,7 @@ git add \
   scripts/benchmark-m064-recursive-reachability.sh \
   scripts/commit-m064-recursive-reachability.sh \
   scripts/format-m064-recursive-reachability.sh \
+  scripts/push-m064-recursive-reachability.sh \
   scripts/review-m064-recursive-reachability.sh \
   scripts/test-m064-recursive-reachability.sh \
   scripts/test-race-m064-recursive-reachability.sh
