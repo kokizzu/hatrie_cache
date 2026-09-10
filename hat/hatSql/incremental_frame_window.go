@@ -212,7 +212,12 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 
 		state, exists := states[partition]
 		if !exists {
-			state = cloneIncrementalFrameWindowPartition(window.partitions[partition])
+			// COUNT DISTINCT has no error-producing transition after the full
+			// validation pass, so its bounded state can be reused in place.
+			state = cloneIncrementalFrameWindowPartition(
+				window.partitions[partition],
+				window.kind != IncrementalWindowFrameCountDistinctInt64,
+			)
 		}
 		if state.hasOrder {
 			comparison := sqlCompare(state.lastOrder, order)
@@ -315,7 +320,10 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 	return updates, nil
 }
 
-func cloneIncrementalFrameWindowPartition(state incrementalFrameWindowPartition) incrementalFrameWindowPartition {
+func cloneIncrementalFrameWindowPartition(state incrementalFrameWindowPartition, cloneMutableState bool) incrementalFrameWindowPartition {
+	if !cloneMutableState {
+		return state
+	}
 	state.contributions = append([]incrementalFrameWindowContribution(nil), state.contributions...)
 	if state.distinctCounts != nil {
 		distinctCounts := make(map[int64]int, len(state.distinctCounts))

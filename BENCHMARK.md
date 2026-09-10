@@ -17736,17 +17736,37 @@ append, including its transactional distinct-map snapshot, is measured.
 
 | Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
 | --- | --- | --- | ---: | ---: | ---: | --- |
-| `COUNT(DISTINCT int64)` | Full recomputation | 1,239,711; 1,201,259; 1,233,445; 1,232,393; 1,220,935 | 1,232,393 | 9,472 | 1 | 1x |
-| `COUNT(DISTINCT int64)` | Incremental append | 1,252; 1,166; 1,173; 1,168; 1,089 | 1,168 | 1,290 | 8 | 1,055x faster |
+| `COUNT(DISTINCT int64)` | Full recomputation | 1,231,197; 1,263,424; 1,235,684; 1,217,719; 1,238,137 | 1,235,684 | 9,472 | 1 | 1x |
+| `COUNT(DISTINCT int64)` | Incremental append | 784.2; 773.3; 773.6; 753.6; 768.8 | 773.3 | 605 | 4 | 1,598x faster |
 
 The pre-change full-scan-only control had a median of `1,236,520 ns/op`,
 `9,472 B/op`, and `1 alloc/op`; the post-change control is within normal
-benchmark noise. Incremental maintenance is about `1,055x` faster and uses
-about `7.3x` fewer transient bytes. It performs `8x` as many allocations per
-operation because the atomic snapshot and output path retain separate small
-maps, but the total allocated bytes are substantially lower for this bounded
-workload. See [INCREMENTAL_DISTINCT_FRAME_WINDOW.md](INCREMENTAL_DISTINCT_FRAME_WINDOW.md)
+benchmark noise. Incremental maintenance is about `1,598x` faster and uses
+about `15.7x` fewer transient bytes. It performs `4x` as many allocations as
+the full-recompute control, but the zero-copy validated-state path reduced
+the original M065i incremental result from 8 allocations and 1,290 B/op to
+4 allocations and 605 B/op. See
+[INCREMENTAL_DISTINCT_FRAME_WINDOW.md](INCREMENTAL_DISTINCT_FRAME_WINDOW.md)
 for the contract and correctness coverage.
+
+## M065k Zero-Copy Distinct Frame State
+
+Command: `make benchmark-m065i-incremental-distinct-frame-window`.
+
+This experiment compared the M065i reference-counted-map implementation with
+the adopted post-validation zero-copy path. The workload and five 200 ms
+samples were identical; only the incremental append state handling changed.
+
+| Incremental path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| M065i map snapshot | 1,185; 1,216; 1,160; 1,173; 1,175 | 1,175 | 1,290 | 8 | 1x |
+| M065k validated-state reuse | 784.2; 773.3; 773.6; 753.6; 768.8 | 773.3 | 605 | 4 | 1.52x faster |
+
+M065k is about `1.52x` faster, uses about `2.1x` fewer transient bytes, and
+uses `2x` fewer allocations. Atomicity remains guaranteed by the complete
+preflight validation and by the fact that `COUNT(DISTINCT)` has no
+post-validation error-producing transition. The slice representation tested
+separately under M065j remains rejected.
 
 ## Rejected M065j Small-Cardinality Distinct Arrangement
 

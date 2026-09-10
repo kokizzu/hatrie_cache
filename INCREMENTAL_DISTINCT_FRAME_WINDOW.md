@@ -51,10 +51,11 @@ peer-aware `RANGE` frames remain outside this contract.
 
 The retained contribution queue is bounded to `N+1` rows per partition, and
 the multiplicity map has at most one entry per non-NULL value in that frame.
-Incrementing or decrementing a value is O(1) average. Because `Append`
-preserves atomic failure semantics, its transactional partition snapshot
-copies the bounded contribution state and distinct map; the benchmark below
-measures that real public path.
+Incrementing or decrementing a value is O(1) average. `Append` validates all
+callbacks and ordering before mutation; because the distinct transition has
+no post-validation error path, it reuses the validated bounded state in place
+instead of copying the contribution queue and multiplicity map. Other frame
+aggregates retain their copy-on-write state path for checked arithmetic errors.
 
 ## Benchmark
 
@@ -73,13 +74,13 @@ append, including its transactional snapshot, is measured.
 
 | Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
 | --- | --- | --- | ---: | ---: | ---: | --- |
-| `COUNT(DISTINCT int64)` | Full recomputation | 1,239,711; 1,201,259; 1,233,445; 1,232,393; 1,220,935 | 1,232,393 | 9,472 | 1 | 1x |
-| `COUNT(DISTINCT int64)` | Incremental append | 1,252; 1,166; 1,173; 1,168; 1,089 | 1,168 | 1,290 | 8 | 1,055x faster |
+| `COUNT(DISTINCT int64)` | Full recomputation | 1,231,197; 1,263,424; 1,235,684; 1,217,719; 1,238,137 | 1,235,684 | 9,472 | 1 | 1x |
+| `COUNT(DISTINCT int64)` | Incremental append | 784.2; 773.3; 773.6; 753.6; 768.8 | 773.3 | 605 | 4 | 1,598x faster |
 
 The pre-change full-scan-only control had a median of `1,236,520 ns/op`,
 `9,472 B/op`, and `1 alloc/op`; the post-change control is within normal
-benchmark noise. Incremental maintenance is about `1,055x` faster and uses
-about `7.3x` fewer transient bytes. It performs `8x` as many allocations per
-operation because the atomic snapshot and output path retain separate small
-maps, but the total allocated bytes are substantially lower for this bounded
-workload.
+benchmark noise. Incremental maintenance is about `1,598x` faster and uses
+about `15.7x` fewer transient bytes. It performs `4x` as many allocations as
+the full-recompute control, but the zero-copy validated-state path reduced
+the original M065i incremental result from 8 allocations and 1,290 B/op to
+4 allocations and 605 B/op.

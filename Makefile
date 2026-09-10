@@ -7611,3 +7611,28 @@ commit-m065j-rejected-small-distinct:
 .PHONY: push-m065j-rejected-small-distinct
 push-m065j-rejected-small-distinct:
 	bash ./scripts/push-m065j-rejected-small-distinct.sh
+.PHONY: test-m065k-distinct-snapshot-atomicity
+test-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/test-m065k-distinct-snapshot-atomicity.sh
+.PHONY: format-m065k-distinct-snapshot-atomicity
+format-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/format-m065k-distinct-snapshot-atomicity.sh
+.PHONY: test-race-m065k-distinct-snapshot-atomicity
+test-race-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/test-race-m065k-distinct-snapshot-atomicity.sh
+
+.PHONY: vet-m065k-distinct-snapshot-atomicity
+vet-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/vet-m065k-distinct-snapshot-atomicity.sh
+
+.PHONY: review-m065k-distinct-snapshot-atomicity
+review-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/review-m065k-distinct-snapshot-atomicity.sh
+
+.PHONY: commit-m065k-distinct-snapshot-atomicity
+commit-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/commit-m065k-distinct-snapshot-atomicity.sh
+
+.PHONY: push-m065k-distinct-snapshot-atomicity
+push-m065k-distinct-snapshot-atomicity:
+	bash ./scripts/push-m065k-distinct-snapshot-atomicity.sh
