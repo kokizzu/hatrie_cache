@@ -10,6 +10,7 @@ The first supported kinds are:
 - `IncrementalWindowFrameSumInt64` for exact `SUM(int64)` semantics.
 - `IncrementalWindowFrameMinInt64` for NULL-aware `MIN(int64)` semantics.
 - `IncrementalWindowFrameMaxInt64` for NULL-aware `MAX(int64)` semantics.
+- `IncrementalWindowFrameAvgInt64` for NULL-aware `AVG(int64)` semantics.
 
 Rows must arrive in order within each partition. Set `Descending` when the
 input order is descending. `PartitionKey` is optional; omitting it creates one
@@ -54,14 +55,16 @@ sum values must be `int64`; overflow returns
 so a failed batch does not advance the window or reserve its keys.
 
 The retained aggregate state is bounded to at most `N+1` contributions per
-partition. `COUNT(*)` and `SUM(int64)` updates are O(1), with checked
-add/subtract for sums. `MIN(int64)` and `MAX(int64)` use a fixed-size circular
-monotonic deque and are O(1) amortized per update while ignoring SQL NULL
-values. See
+partition. `COUNT(*)`, `SUM(int64)`, and `AVG(int64)` updates are O(1), with
+checked add/subtract for the sum and a final `float64` division for averages.
+`MIN(int64)` and `MAX(int64)` use a fixed-size circular monotonic deque and
+are O(1) amortized per update while ignoring SQL NULL values. See
 [INCREMENTAL_EXTREMA_FRAME_WINDOW.md](INCREMENTAL_EXTREMA_FRAME_WINDOW.md)
-for their detailed contract and measurements. Arbitrary updates, deletes,
-reordering, peer-aware `RANGE` frames, and other aggregates remain outside
-this append-only API.
+for extrema details and
+[INCREMENTAL_AVERAGE_FRAME_WINDOW.md](INCREMENTAL_AVERAGE_FRAME_WINDOW.md)
+for average details and measurements. Arbitrary updates, deletes, reordering,
+peer-aware `RANGE` frames, and other aggregates remain outside this append-only
+API.
 
 ## Benchmark
 

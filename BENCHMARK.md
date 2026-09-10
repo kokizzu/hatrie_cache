@@ -17702,6 +17702,27 @@ frames, and non-`int64` values remain outside this API. See
 [INCREMENTAL_EXTREMA_FRAME_WINDOW.md](INCREMENTAL_EXTREMA_FRAME_WINDOW.md) for
 the contract and correctness coverage.
 
+## M065h Incremental AVG Frame Windows
+
+Command: `make benchmark-m065h-incremental-average-frame-window`.
+
+This benchmark compares a full recomputation of 1,025 rows with one append
+after a 1,024-row seed, using 16 partitions and a
+`ROWS BETWEEN 7 PRECEDING AND CURRENT ROW` frame. Five samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X and a 200 ms sample window. Seed setup
+and incremental identity-map capacity are outside the timer; incremental
+unique-key tracking is measured.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `AVG(int64)` | Full recomputation | 375,757; 381,391; 388,279; 384,735; 380,631 | 381,391 | 435,932 | 3,271 | 1x |
+| `AVG(int64)` | Incremental append | 1,027; 962.3; 961.9; 1,042; 1,026 | 1,026 | 1,111 | 9 | 372x faster |
+
+Incremental AVG uses about `392x` fewer transient bytes and `363x` fewer
+allocations than its full-recompute control in this workload. The checked
+`int64` sum and `float64` output contract are documented in
+[INCREMENTAL_AVERAGE_FRAME_WINDOW.md](INCREMENTAL_AVERAGE_FRAME_WINDOW.md).
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

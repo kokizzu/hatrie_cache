@@ -7510,6 +7510,19 @@ vet-m065g-incremental-extrema-frame-window:
 benchmark-m065g-incremental-extrema-frame-window:
 	bash ./scripts/benchmark-m065g-incremental-extrema-frame-window.sh
 
+.PHONY: test-m065h-incremental-average-frame-window
+test-m065h-incremental-average-frame-window:
+	bash ./scripts/test-m065h-incremental-average-frame-window.sh
+
+.PHONY: format-m065h-incremental-average-frame-window
+format-m065h-incremental-average-frame-window:
+	bash ./scripts/format-m065h-incremental-average-frame-window.sh
+
+.PHONY: benchmark-m065h-incremental-average-frame-window
+benchmark-m065h-incremental-average-frame-window:
+	bash ./scripts/benchmark-m065h-incremental-average-frame-window.sh
+
+
 .PHONY: test-m064-mutable-recursive-reachability
 test-m064-mutable-recursive-reachability:
 	bash ./scripts/test-m064-mutable-recursive-reachability.sh
@@ -7539,3 +7552,22 @@ commit-m064-mutable-recursive-reachability:
 .PHONY: push-m064-mutable-recursive-reachability
 push-m064-mutable-recursive-reachability:
 	bash ./scripts/push-m064-mutable-recursive-reachability.sh
+.PHONY: test-race-m065h-incremental-average-frame-window
+test-race-m065h-incremental-average-frame-window:
+	bash ./scripts/test-race-m065h-incremental-average-frame-window.sh
+
+.PHONY: vet-m065h-incremental-average-frame-window
+vet-m065h-incremental-average-frame-window:
+	bash ./scripts/vet-m065h-incremental-average-frame-window.sh
+
+.PHONY: review-m065h-incremental-average-frame-window
+review-m065h-incremental-average-frame-window:
+	bash ./scripts/review-m065h-incremental-average-frame-window.sh
+
+.PHONY: commit-m065h-incremental-average-frame-window
+commit-m065h-incremental-average-frame-window:
+	bash ./scripts/commit-m065h-incremental-average-frame-window.sh
+
+.PHONY: push-m065h-incremental-average-frame-window
+push-m065h-incremental-average-frame-window:
+	bash ./scripts/push-m065h-incremental-average-frame-window.sh

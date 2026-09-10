@@ -19,6 +19,7 @@ var (
 	ErrIncrementalFrameWindowOutOfOrder          = errors.New("incremental frame window row is out of order")
 	ErrIncrementalFrameWindowSumValueInvalid     = errors.New("incremental frame window SUM value must be int64 or nil")
 	ErrIncrementalFrameWindowExtremaValueInvalid = errors.New("incremental frame window MIN/MAX value must be int64 or nil")
+	ErrIncrementalFrameWindowAvgValueInvalid     = errors.New("incremental frame window AVG value must be int64 or nil")
 	ErrIncrementalFrameWindowSumOverflow         = errors.New("incremental frame window SUM overflows int64")
 )
 
@@ -31,6 +32,7 @@ const (
 	IncrementalWindowFrameSumInt64
 	IncrementalWindowFrameMinInt64
 	IncrementalWindowFrameMaxInt64
+	IncrementalWindowFrameAvgInt64
 )
 
 // IncrementalFrameWindowDefinition configures an append-only bounded frame
@@ -49,9 +51,9 @@ type IncrementalFrameWindowDefinition struct {
 }
 
 // IncrementalFrameWindow maintains an append-only bounded COUNT(*), SUM(int64),
-// MIN(int64), or MAX(int64) frame. It retains at most FramePreceding+1
-// contributions per partition and emits one positive differential row for each
-// appended row.
+// AVG(int64), MIN(int64), or MAX(int64) frame. It retains at most
+// FramePreceding+1 contributions per partition and emits one positive
+// differential row for each appended row.
 type IncrementalFrameWindow struct {
 	kind           IncrementalFrameWindowKind
 	outputColumn   string
@@ -101,7 +103,8 @@ func NewIncrementalFrameWindow(definition IncrementalFrameWindowDefinition) (*In
 	if definition.Kind != IncrementalWindowFrameCount &&
 		definition.Kind != IncrementalWindowFrameSumInt64 &&
 		definition.Kind != IncrementalWindowFrameMinInt64 &&
-		definition.Kind != IncrementalWindowFrameMaxInt64 {
+		definition.Kind != IncrementalWindowFrameMaxInt64 &&
+		definition.Kind != IncrementalWindowFrameAvgInt64 {
 		return nil, ErrIncrementalFrameWindowInvalidKind
 	}
 	outputColumn := strings.TrimSpace(definition.OutputColumn)
@@ -192,6 +195,8 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 					err := ErrIncrementalFrameWindowSumValueInvalid
 					if window.kind == IncrementalWindowFrameMinInt64 || window.kind == IncrementalWindowFrameMaxInt64 {
 						err = ErrIncrementalFrameWindowExtremaValueInvalid
+					} else if window.kind == IncrementalWindowFrameAvgInt64 {
+						err = ErrIncrementalFrameWindowAvgValueInvalid
 					}
 					return nil, fmt.Errorf("incremental frame window row %d: %w", index, err)
 				}
@@ -237,7 +242,7 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 			} else {
 				state.contributions = state.contributions[1:]
 			}
-			if window.kind == IncrementalWindowFrameSumInt64 && outgoing.valid {
+			if (window.kind == IncrementalWindowFrameSumInt64 || window.kind == IncrementalWindowFrameAvgInt64) && outgoing.valid {
 				if state.validSumCount == 1 {
 					state.sum = 0
 				} else {
@@ -252,7 +257,7 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 		}
 		state.contributions = append(state.contributions, row.contribution)
 		value := interface{}(int64(len(state.contributions)))
-		if window.kind == IncrementalWindowFrameSumInt64 {
+		if window.kind == IncrementalWindowFrameSumInt64 || window.kind == IncrementalWindowFrameAvgInt64 {
 			if row.contribution.valid {
 				newSum, err := addIncrementalFrameWindowSum(state.sum, row.contribution.value)
 				if err != nil {
@@ -263,8 +268,10 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 			}
 			if state.validSumCount == 0 {
 				value = nil
-			} else {
+			} else if window.kind == IncrementalWindowFrameSumInt64 {
 				value = state.sum
+			} else {
+				value = float64(state.sum) / float64(state.validSumCount)
 			}
 		} else if window.kind == IncrementalWindowFrameMinInt64 || window.kind == IncrementalWindowFrameMaxInt64 {
 			value = window.appendIncrementalFrameWindowExtrema(&state, row.contribution)
