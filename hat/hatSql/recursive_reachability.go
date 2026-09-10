@@ -32,10 +32,11 @@ type RecursiveReachabilityEdge struct {
 // Deletes and edge updates are intentionally unsupported. A caller needing
 // those operations should rebuild the closure from the current edge set.
 type IncrementalRecursiveReachability struct {
-	mu        sync.RWMutex
-	edges     map[string]struct{}
-	reachable map[string]map[string]struct{}
-	ancestors map[string]map[string]struct{}
+	mu           sync.RWMutex
+	edges        map[string]struct{}
+	reachable    map[string]map[string]struct{}
+	ancestors    map[string]map[string]struct{}
+	mutableEdges map[string]RecursiveReachabilityEdge
 }
 
 // NewIncrementalRecursiveReachability creates an empty append-only recursive
@@ -61,8 +62,16 @@ func (reachability *IncrementalRecursiveReachability) Append(edges []RecursiveRe
 
 	reachability.mu.Lock()
 	defer reachability.mu.Unlock()
+	return reachability.appendLocked(edges)
+}
+
+func (reachability *IncrementalRecursiveReachability) appendLocked(edges []RecursiveReachabilityEdge) ([]DifferentialRow, error) {
 
 	pending := make(map[string]struct{}, len(edges))
+	var pendingEdges map[string]RecursiveReachabilityEdge
+	if reachability.mutableEdges != nil {
+		pendingEdges = make(map[string]RecursiveReachabilityEdge, len(edges))
+	}
 	for _, edge := range edges {
 		if err := validateRecursiveReachabilityEdge(edge); err != nil {
 			return nil, err
@@ -79,6 +88,9 @@ func (reachability *IncrementalRecursiveReachability) Append(edges []RecursiveRe
 	updates := make([]DifferentialRow, 0, len(edges))
 	for _, edge := range edges {
 		reachability.edges[edge.Key] = struct{}{}
+		if pendingEdges != nil {
+			pendingEdges[edge.Key] = edge
+		}
 		sources := recursiveReachabilityEndpoints(reachability.ancestors[edge.From], edge.From)
 		destinations := recursiveReachabilityEndpoints(reachability.reachable[edge.To], edge.To)
 		for _, source := range sources {
@@ -103,6 +115,14 @@ func (reachability *IncrementalRecursiveReachability) Append(edges []RecursiveRe
 					},
 				})
 			}
+		}
+	}
+	if pendingEdges != nil {
+		if reachability.mutableEdges == nil {
+			reachability.mutableEdges = make(map[string]RecursiveReachabilityEdge, len(pendingEdges))
+		}
+		for key, edge := range pendingEdges {
+			reachability.mutableEdges[key] = edge
 		}
 	}
 	if len(updates) == 0 {

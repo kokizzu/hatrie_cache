@@ -388,6 +388,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M063 Non-materialized SQL views.
 - [ ] M064 Recursive dataflow maintenance.
 - [x] M064a Append-only incremental transitive reachability with cycle-safe positive deltas; arbitrary deletes and updates remain rebuild-only. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
+- [x] M064b Opt-in Materialize-style recursive reachability `INSERT`/`UPDATE`/`DELETE` maintenance with exact signed pair retractions, affected-source recomputation, leaf direct fast paths, cycle tests, and before/after allocation benchmarks. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
 - [ ] M065 Incremental window-function maintenance.
 - [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).
 - [x] M065b Opt-in Materialize-style rank-window `INSERT`/`UPDATE`/`DELETE` maintenance with signed retractions, affected-partition rebuilds, atomic validation, and before/after allocation benchmarks. Full framed and lead/lag window maintenance remains open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).

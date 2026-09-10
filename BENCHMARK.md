@@ -17554,7 +17554,31 @@ Linux/amd64 with an AMD Ryzen 9 5950X.
 For this append-only workload, incremental maintenance is 100x faster, uses
 116x fewer transient bytes, and makes 74x fewer allocations. See
 [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
-for the API and its deletion/rebuild limitation.
+for the append-only API and the M064b mutable extension.
+
+## M064b Mutable Recursive Reachability Retractions
+
+Command: `make benchmark-m064-mutable-recursive-reachability`.
+
+This benchmark compares one edge delete and one endpoint update in a graph of
+1,024 independent edges against rebuilding the closure. Five samples were run
+on Linux/amd64 with an AMD Ryzen 9 5950X. The mutable maintainer is seeded
+outside the timer; `B/op` measures transient operation allocation and excludes
+its resident endpoint map.
+
+| Operation | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative to rebuild |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| Delete | Parent full closure rebuild | 161,072; 155,988; 148,324; 148,174; 148,622 | 148,622 | 114,752 | 1,028 | 1x |
+| Delete | Mutable leaf delete | 13,145; 13,435; 13,012; 13,121; 12,977 | 13,121 | 496 | 7 | 11.33x faster |
+| Update | Parent full closure rebuild | 152,882; 162,215; 162,463; 155,311; 159,252 | 159,252 | 114,768 | 1,029 | 1x |
+| Update | Mutable leaf endpoint update | 19,296; 20,518; 20,560; 20,051; 20,652 | 20,518 | 1,368 | 18 | 7.76x faster |
+
+Mutable delete uses 231x fewer transient bytes and 147x fewer allocations;
+mutable update uses 83.9x fewer transient bytes and 57.2x fewer allocations.
+Complex connected-graph changes use the localized graph-search fallback and
+can approach full rebuild cost. The default append-only constructor remains
+zero-retention; in this run its control measured 2,073 ns/op, 996 B/op, and
+14 allocs/op.
 
 ## M065a Incremental Rank Window Maintenance
 

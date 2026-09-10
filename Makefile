@@ -7358,3 +7358,32 @@ commit-m065-rank-window-mutations:
 .PHONY: push-m065-rank-window-mutations
 push-m065-rank-window-mutations:
 	bash ./scripts/push-m065-rank-window-mutations.sh
+.PHONY: test-m064-mutable-recursive-reachability
+test-m064-mutable-recursive-reachability:
+	bash ./scripts/test-m064-mutable-recursive-reachability.sh
+.PHONY: format-m064-mutable-recursive-reachability
+format-m064-mutable-recursive-reachability:
+	bash ./scripts/format-m064-mutable-recursive-reachability.sh
+.PHONY: benchmark-m064-mutable-recursive-reachability
+benchmark-m064-mutable-recursive-reachability:
+	bash ./scripts/benchmark-m064-mutable-recursive-reachability.sh
+.PHONY: test-race-m064-mutable-recursive-reachability
+test-race-m064-mutable-recursive-reachability:
+	bash ./scripts/test-race-m064-mutable-recursive-reachability.sh
+
+.PHONY: test-m064-reachability-all
+test-m064-reachability-all:
+	bash ./scripts/test-m064-reachability-all.sh
+
+.PHONY: vet-m064-mutable-recursive-reachability
+vet-m064-mutable-recursive-reachability:
+	bash ./scripts/vet-m064-mutable-recursive-reachability.sh
+.PHONY: review-m064-mutable-recursive-reachability
+review-m064-mutable-recursive-reachability:
+	bash ./scripts/review-m064-mutable-recursive-reachability.sh
+.PHONY: commit-m064-mutable-recursive-reachability
+commit-m064-mutable-recursive-reachability:
+	bash ./scripts/commit-m064-mutable-recursive-reachability.sh
+.PHONY: push-m064-mutable-recursive-reachability
+push-m064-mutable-recursive-reachability:
+	bash ./scripts/push-m064-mutable-recursive-reachability.sh
