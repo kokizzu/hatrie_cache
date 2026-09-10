@@ -238,9 +238,10 @@ type SQLQueryOptions struct {
 	// when a schema, index, or projection change should force a fresh template.
 	PreparedSchemaVersion string
 	// compiledTemplate is set only by CompiledSQLQuery and is intentionally not
-	// exported. It bypasses parsing and cache lookup while retaining the normal
-	// execution and per-call clone path.
-	compiledTemplate *sqlQuery
+	// exported. It bypasses parsing and cache lookup. Static default executions
+	// may use the immutable template directly; other executions clone it.
+	compiledTemplate         *sqlQuery
+	compiledTemplateReadOnly bool
 	// ConditionCache optionally reuses bounded columnar WHERE match positions.
 	// It is disabled by default and is used only with a SourceVersionResolver.
 	ConditionCache *SQLQueryConditionCache
@@ -673,9 +674,13 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	var query *sqlQuery
 	var parseErr error
 	if options.compiledTemplate != nil {
-		query, parseErr = bindSQLQueryParameters(options.compiledTemplate, parameters)
-		if parseErr == nil {
-			rewriteSQLQuery(query)
+		if options.compiledTemplateReadOnly {
+			query = options.compiledTemplate
+		} else {
+			query, parseErr = bindSQLQueryParameters(options.compiledTemplate, parameters)
+			if parseErr == nil {
+				rewriteSQLQuery(query)
+			}
 		}
 	} else {
 		query, parseErr = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
@@ -686,14 +691,18 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err = options.IndexHint.validate(); err != nil {
 		return result, err
 	}
-	applySQLQueryCollation(query, options.Collation)
+	if !options.compiledTemplateReadOnly {
+		applySQLQueryCollation(query, options.Collation)
+	}
 	if options.IndexHint.Mode != "" || options.Optimizer != nil {
 		options.IndexHint, err = applySQLQueryOptimizerRules(source, query, options)
 		if err != nil {
 			return result, err
 		}
 	}
-	query.indexHint = options.IndexHint
+	if !options.compiledTemplateReadOnly {
+		query.indexHint = options.IndexHint
+	}
 	if query.explain {
 		result, err = explainSQLQuery(query, resolver, control)
 		operatorSteps = result.Plan
@@ -839,9 +848,13 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	defer cancel()
 	var query *sqlQuery
 	if options.compiledTemplate != nil {
-		query, err = bindSQLQueryParameters(options.compiledTemplate, parameters)
-		if err == nil {
-			rewriteSQLQuery(query)
+		if options.compiledTemplateReadOnly {
+			query = options.compiledTemplate
+		} else {
+			query, err = bindSQLQueryParameters(options.compiledTemplate, parameters)
+			if err == nil {
+				rewriteSQLQuery(query)
+			}
 		}
 	} else {
 		query, err = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
@@ -855,7 +868,9 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if options.IndexHint.Mode != "" {
 		return fmt.Errorf("SQL index hints are not supported by streamed SQL rows")
 	}
-	applySQLQueryCollation(query, options.Collation)
+	if !options.compiledTemplateReadOnly {
+		applySQLQueryCollation(query, options.Collation)
+	}
 	outputColumns = len(sqlColumns(query.selects))
 	return executeSQLQueryRowsParsed(ctx, query, resolver, control, func(columns []string, row SQLRow) error {
 		if err := visit(columns, row); err != nil {

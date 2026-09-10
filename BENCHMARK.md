@@ -17990,3 +17990,26 @@ plan (`+128 B/op`, `+1 alloc/op`) and measured 7.7% CPU overhead in this
 inlined-loop comparison. The
 pre-implementation direct run is retained for audit history, while the paired
 control avoids treating normal benchmark noise as a code-path regression.
+
+## Immutable Compiled SQL Template Reuse
+
+The workload executes a static compiled query over a 16-row `VALUES` source.
+The paired control forces the previous per-call clone path; the optimized path
+uses the public compiled-handle API with default options. Five samples used
+`-benchmem -count=5` on Linux amd64/AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Clone control | 10,585 | 17,552 | 111 | baseline |
+| Read-only compiled handle | 8,111 | 13,696 | 85 | 1.31x faster, 1.28x lower bytes, 1.31x fewer allocations |
+
+Raw samples:
+
+```text
+clone_control: 10739, 10585, 10530, 10498, 10750 ns/op; 17552 B/op; 111 allocs/op
+read_only_handle: 8121, 8113, 8111, 8084, 8020 ns/op; 13696 B/op; 85 allocs/op
+```
+
+See [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md) for eligibility
+rules and tradeoff analysis. Run `make benchmark-m071-compiled-template-reuse`
+to repeat it.

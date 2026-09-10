@@ -738,3 +738,4 @@ For each future unchecked item:
 - [x] C029a Vertical columnar merge loads only requested fields from each part.
 
 - [x] C038a TTL pruning removes only complete rollup buckets at explicit boundaries.
+- [x] M071 immutable compiled SQL template reuse for static, parameter-free compiled handles; dynamic options retain the clone path. See [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md) and [BENCHMARK.md](BENCHMARK.md#immutable-compiled-sql-template-reuse).

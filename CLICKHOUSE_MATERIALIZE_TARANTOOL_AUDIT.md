@@ -190,3 +190,10 @@ records a separate implementation boundary.
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics and rollback-free cluster-wide commit remain open.
 - [ ] T103 Native FFI extension boundary.
 - [ ] T150 Language-neutral client SDK coverage.
+
+### M071: Immutable Compiled SQL Template Reuse
+
+Adopted. Static parameter-free compiled SQL handles reuse the immutable
+rewritten template; parameterized and execution-local calls retain cloning.
+Verification and measurements are recorded in
+[COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md).

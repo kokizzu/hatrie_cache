@@ -7699,3 +7699,39 @@ commit-m065l-mutable-frame:
 .PHONY: push-m065l-mutable-frame
 push-m065l-mutable-frame:
 	bash ./scripts/push-m065l-mutable-frame.sh
+
+.PHONY: test-m071-compiled-template-reuse
+test-m071-compiled-template-reuse:
+	bash ./scripts/test-m071-compiled-template-reuse.sh
+
+.PHONY: benchmark-m071-compiled-template-reuse
+benchmark-m071-compiled-template-reuse:
+	bash ./scripts/benchmark-m071-compiled-template-reuse.sh
+
+.PHONY: format-m071-compiled-template-reuse
+format-m071-compiled-template-reuse:
+	bash ./scripts/format-m071-compiled-template-reuse.sh
+
+.PHONY: test-race-m071-compiled-template-reuse
+test-race-m071-compiled-template-reuse:
+	bash ./scripts/test-race-m071-compiled-template-reuse.sh
+
+.PHONY: vet-m071-compiled-template-reuse
+vet-m071-compiled-template-reuse:
+	bash ./scripts/vet-m071-compiled-template-reuse.sh
+
+.PHONY: review-m071-compiled-template-reuse
+review-m071-compiled-template-reuse:
+	sh ./scripts/review-m071-compiled-template-reuse.sh
+
+.PHONY: commit-m071-compiled-template-reuse
+commit-m071-compiled-template-reuse:
+	bash ./scripts/commit-m071-compiled-template-reuse.sh
+
+.PHONY: amend-m071-compiled-template-reuse
+amend-m071-compiled-template-reuse:
+	M071_AMEND=1 bash ./scripts/commit-m071-compiled-template-reuse.sh
+
+.PHONY: push-m071-compiled-template-reuse
+push-m071-compiled-template-reuse:
+	bash ./scripts/push-m071-compiled-template-reuse.sh
