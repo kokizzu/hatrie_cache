@@ -14,6 +14,7 @@ git add \
   scripts/benchmark-sql-snapshot-provider.sh \
   scripts/commit-sql-snapshot-provider.sh \
   scripts/format-sql-snapshot-provider.sh \
+  scripts/push-sql-snapshot-provider.sh \
   scripts/review-sql-snapshot-provider.sh \
   scripts/test-sql-snapshot-provider.sh
 git diff --cached --check
