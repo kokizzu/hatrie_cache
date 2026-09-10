@@ -2529,68 +2529,68 @@ commit-sql-sparse-primary:
 
 .PHONY: test-sql-predicate-order
 test-sql-predicate-order:
-\tsh ./scripts/test-sql-predicate-order.sh
+	sh ./scripts/test-sql-predicate-order.sh
 
 .PHONY: benchmark-sql-predicate-order
 benchmark-sql-predicate-order:
-\tsh ./scripts/benchmark-sql-predicate-order.sh
+	sh ./scripts/benchmark-sql-predicate-order.sh
 
 .PHONY: format-sql-predicate-order
 format-sql-predicate-order:
-\tsh ./scripts/format-sql-predicate-order.sh
+	sh ./scripts/format-sql-predicate-order.sh
 
 .PHONY: commit-sql-predicate-order
 commit-sql-predicate-order:
-\tsh ./scripts/commit-sql-predicate-order.sh
+	sh ./scripts/commit-sql-predicate-order.sh
 .PHONY: test-sql-explain-pipeline
 test-sql-explain-pipeline:
-\tsh ./scripts/test-sql-explain-pipeline.sh
+	sh ./scripts/test-sql-explain-pipeline.sh
 
 .PHONY: benchmark-sql-explain-pipeline
 benchmark-sql-explain-pipeline:
-\tsh ./scripts/benchmark-sql-explain-pipeline.sh
+	sh ./scripts/benchmark-sql-explain-pipeline.sh
 
 .PHONY: format-sql-explain-pipeline
 format-sql-explain-pipeline:
-\tsh ./scripts/format-sql-explain-pipeline.sh
+	sh ./scripts/format-sql-explain-pipeline.sh
 
 .PHONY: commit-sql-explain-pipeline
 commit-sql-explain-pipeline:
-\tsh ./scripts/commit-sql-explain-pipeline.sh
+	sh ./scripts/commit-sql-explain-pipeline.sh
 .PHONY: test-sql-logical-short-circuit
 test-sql-logical-short-circuit:
-\tsh ./scripts/test-sql-logical-short-circuit.sh
+	sh ./scripts/test-sql-logical-short-circuit.sh
 
 .PHONY: benchmark-sql-logical-short-circuit
 benchmark-sql-logical-short-circuit:
-\tsh ./scripts/benchmark-sql-logical-short-circuit.sh
+	sh ./scripts/benchmark-sql-logical-short-circuit.sh
 
 .PHONY: format-sql-logical-short-circuit
 format-sql-logical-short-circuit:
-\tsh ./scripts/format-sql-logical-short-circuit.sh
+	sh ./scripts/format-sql-logical-short-circuit.sh
 
 .PHONY: commit-sql-logical-short-circuit
 commit-sql-logical-short-circuit:
-\tsh ./scripts/commit-sql-logical-short-circuit.sh
+	sh ./scripts/commit-sql-logical-short-circuit.sh
 .PHONY: test-sql-cse
 test-sql-cse:
-\tbash ./scripts/test-sql-cse.sh
+	bash ./scripts/test-sql-cse.sh
 
 .PHONY: benchmark-sql-cse
 benchmark-sql-cse:
-\tbash ./scripts/benchmark-sql-cse.sh
+	bash ./scripts/benchmark-sql-cse.sh
 
 .PHONY: format-sql-cse
 format-sql-cse:
-\tbash ./scripts/format-sql-cse.sh
+	bash ./scripts/format-sql-cse.sh
 
 .PHONY: test-sql-cse-race
 test-sql-cse-race:
-\tbash ./scripts/test-sql-cse-race.sh
+	bash ./scripts/test-sql-cse-race.sh
 
 .PHONY: commit-sql-cse
 commit-sql-cse:
-\tbash ./scripts/commit-sql-cse.sh
+	bash ./scripts/commit-sql-cse.sh
 audit-extensibility-goal:
 	sh ./scripts/audit-extensibility-goal.sh
 
