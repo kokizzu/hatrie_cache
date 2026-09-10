@@ -7414,6 +7414,39 @@ commit-m065d-incremental-frame-window:
 push-m065d-incremental-frame-window:
 	bash ./scripts/push-m065d-incremental-frame-window.sh
 
+.PHONY: test-m065e-incremental-boundary-window
+test-m065e-incremental-boundary-window:
+	bash ./scripts/test-m065e-incremental-boundary-window.sh
+
+.PHONY: benchmark-m065e-incremental-boundary-window
+benchmark-m065e-incremental-boundary-window:
+	bash ./scripts/benchmark-m065e-incremental-boundary-window.sh
+
+.PHONY: format-m065e-incremental-boundary-window
+format-m065e-incremental-boundary-window:
+	bash ./scripts/format-m065e-incremental-boundary-window.sh
+
+.PHONY: test-race-m065e-incremental-boundary-window
+test-race-m065e-incremental-boundary-window:
+	bash ./scripts/test-race-m065e-incremental-boundary-window.sh
+
+.PHONY: vet-m065e-incremental-boundary-window
+vet-m065e-incremental-boundary-window:
+	bash ./scripts/vet-m065e-incremental-boundary-window.sh
+
+.PHONY: review-m065e-incremental-boundary-window
+review-m065e-incremental-boundary-window:
+	bash ./scripts/review-m065e-incremental-boundary-window.sh
+
+.PHONY: commit-m065e-incremental-boundary-window
+commit-m065e-incremental-boundary-window:
+	bash ./scripts/commit-m065e-incremental-boundary-window.sh
+
+.PHONY: push-m065e-incremental-boundary-window
+push-m065e-incremental-boundary-window:
+	bash ./scripts/push-m065e-incremental-boundary-window.sh
+
+
 .PHONY: test-m064-mutable-recursive-reachability
 test-m064-mutable-recursive-reachability:
 	bash ./scripts/test-m064-mutable-recursive-reachability.sh

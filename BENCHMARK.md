@@ -17626,6 +17626,33 @@ reordering, `RANGE` frames, and other aggregates remain outside this API. See
 [INCREMENTAL_FRAME_WINDOW.md](INCREMENTAL_FRAME_WINDOW.md) for the contract
 and correctness coverage.
 
+## M065e Incremental Boundary Windows
+
+Command: `make benchmark-m065e-incremental-boundary-window`.
+
+This benchmark compares a full recomputation of 1,025 rows with one append
+after a 1,024-row seed, using 16 partitions and the
+`ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` frame. Five samples were
+run on Linux/amd64 with an AMD Ryzen 9 5950X and a 200 ms sample window. Seed
+setup and incremental identity-map capacity are outside the timer; incremental
+unique-key tracking is measured.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `FIRST_VALUE` | Full recomputation | 315,217; 305,326; 311,791; 324,647; 305,445 | 311,791 | 394,746 | 2,054 | 1x |
+| `FIRST_VALUE` | Incremental append | 800.7; 818.6; 833.2; 822.1; 806.8 | 818.6 | 564 | 6 | 381x faster |
+| `LAST_VALUE` | Full recomputation | 291,606; 286,751; 284,244; 294,677; 283,740 | 286,751 | 394,745 | 2,054 | 1x |
+| `LAST_VALUE` | Incremental append | 795.4; 837.6; 830.5; 776.8; 820.9 | 820.9 | 561 | 6 | 349x faster |
+
+Incremental `FIRST_VALUE` uses about `700x` fewer transient bytes and `342x`
+fewer allocations than its full-recompute control. Incremental `LAST_VALUE`
+uses about `704x` fewer transient bytes and `342x` fewer allocations. The
+maintainer retains one value per partition for `FIRST_VALUE` and no input rows;
+arbitrary updates, deletes, reordering, `RANGE` frames, and `IGNORE NULLS`
+remain outside this API. See
+[INCREMENTAL_BOUNDARY_WINDOW.md](INCREMENTAL_BOUNDARY_WINDOW.md) for the
+contract and correctness coverage.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.
