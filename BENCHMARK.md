@@ -17574,3 +17574,21 @@ For this append workload, incremental maintenance is 802x faster, uses
 1,043x fewer transient bytes, and makes 517x fewer allocations. See
 [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md) for the API,
 correctness coverage, and limitations.
+
+## Rejected T042 Parallel Journal Replay
+
+Command used for the experiment: `make benchmark-t042-parallel-replay`.
+
+This opt-in experiment replayed 1,024 independent `SETSTR` journal entries
+with four workers striped by key. It was rolled back because the existing
+global trie write lock serialized the mutations while worker scheduling added
+overhead.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Sequential replay | 1,203,326; 1,179,393; 1,206,818; 1,221,360; 1,176,822 | 1,203,326 | 527,627 | 10,270 |
+| Parallel replay, 4 workers | 1,382,251; 1,369,657; 1,268,168; 1,421,976; 1,375,489 | 1,375,489 | 537,090 | 10,294 |
+
+The parallel path was 1.14x slower, used 1.02x more transient bytes, and
+made 1.00x as many allocations. No parallel replay API or runtime path was
+retained.
