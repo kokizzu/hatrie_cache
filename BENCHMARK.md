@@ -17788,6 +17788,37 @@ commit; a post-rollback run returned to `1,290 B/op` and `8 allocs/op`, so the
 map representation remains the current default. This is an explicit rejected
 tradeoff, not an adopted implementation.
 
+## M065l Mutable Bounded Frame Windows
+
+Command: `make benchmark-m065l-mutable-frame`.
+
+This benchmark compares a full recomputation with one update in a 1,024-row,
+16-partition `ROWS BETWEEN 7 PRECEDING AND CURRENT ROW` SUM frame. The mutable
+window is seeded outside the timed loop because its retained rows and derived
+outputs are resident state, not per-update transient allocation.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Pre-change full recompute baseline | 362,523; 345,015; 357,532; 350,369; 344,728 | 350,369 | 363,073 | 2,058 | 1x baseline |
+| Final full recompute control | 347,693; 351,231; 364,393; 355,785; 362,805 | 355,785 | 363,073 | 2,058 | 1x control |
+| Mutable affected-partition update | 206,382; 210,115; 203,969; 207,972; 212,505 | 207,972 | 119,522 | 1,276 | 1.71x faster |
+
+Against the same-run control, mutable maintenance is `1.71x` faster, uses
+`3.04x` fewer transient bytes, and makes `1.61x` fewer allocations. The final
+control is close to the pre-change baseline for bytes and allocations; its
+latency variation is normal for this short benchmark. The mutable constructor
+does retain base rows, output rows, and partition maps, so the `B/op` column is
+not a measurement of total resident memory.
+
+The first implementation copied every retained row on each update. Its median
+was `410,250 ns/op` versus a `365,155 ns/op` full-recompute control, or `1.12x`
+slower, so it was rejected before commit. The adopted implementation copies
+only affected partition candidates and keeps the measured win. Correctness
+coverage includes all six aggregate kinds, out-of-order inserts, partition
+moves, failed rebuild atomicity, NULL handling, and append-only default
+rejection. See [INCREMENTAL_MUTABLE_FRAME_WINDOW.md](INCREMENTAL_MUTABLE_FRAME_WINDOW.md)
+for the API contract.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.

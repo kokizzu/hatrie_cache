@@ -7667,3 +7667,35 @@ commit-m052b-dataflow-fragments:
 .PHONY: push-m052b-dataflow-fragments
 push-m052b-dataflow-fragments:
 	bash ./scripts/push-m052b-dataflow-fragments.sh
+
+.PHONY: format-m065l-mutable-frame
+format-m065l-mutable-frame:
+	bash ./scripts/format-m065l-mutable-frame.sh
+
+.PHONY: test-m065l-mutable-frame
+test-m065l-mutable-frame:
+	bash ./scripts/test-m065l-mutable-frame.sh
+
+.PHONY: benchmark-m065l-mutable-frame
+benchmark-m065l-mutable-frame:
+	bash ./scripts/benchmark-m065l-mutable-frame.sh
+
+.PHONY: test-race-m065l-mutable-frame
+test-race-m065l-mutable-frame:
+	bash ./scripts/test-race-m065l-mutable-frame.sh
+
+.PHONY: vet-m065l-mutable-frame
+vet-m065l-mutable-frame:
+	bash ./scripts/vet-m065l-mutable-frame.sh
+
+.PHONY: review-m065l-mutable-frame
+review-m065l-mutable-frame:
+	bash ./scripts/review-m065l-mutable-frame.sh
+
+.PHONY: commit-m065l-mutable-frame
+commit-m065l-mutable-frame:
+	bash ./scripts/commit-m065l-mutable-frame.sh
+
+.PHONY: push-m065l-mutable-frame
+push-m065l-mutable-frame:
+	bash ./scripts/push-m065l-mutable-frame.sh

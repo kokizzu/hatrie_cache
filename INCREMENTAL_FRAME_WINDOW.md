@@ -70,7 +70,8 @@ for extrema details and
 [INCREMENTAL_AVERAGE_FRAME_WINDOW.md](INCREMENTAL_AVERAGE_FRAME_WINDOW.md)
 for average details and measurements. Arbitrary updates, deletes, reordering,
 peer-aware `RANGE` frames, and other aggregates remain outside this append-only
-API.
+API. For exact row mutations with affected-partition rebuilds, see
+[INCREMENTAL_MUTABLE_FRAME_WINDOW.md](INCREMENTAL_MUTABLE_FRAME_WINDOW.md).
 
 ## Benchmark
 

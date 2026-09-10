@@ -184,6 +184,7 @@ records a separate implementation boundary.
 - [x] M064a Append-only incremental transitive reachability with cycle-safe positive deltas; arbitrary deletes and updates remain rebuild-only. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
 - [ ] M065 Incremental window-function maintenance.
 - [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).
+- [x] M065l Opt-in mutable bounded `ROWS` frame maintenance with exact `INSERT`/`UPDATE`/`DELETE` differentials and affected-partition rebuilds; peer-aware `RANGE` frames and automatic planner selection remain open. See [INCREMENTAL_MUTABLE_FRAME_WINDOW.md](INCREMENTAL_MUTABLE_FRAME_WINDOW.md).
 - [ ] M090 Independent compute and storage scaling.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics and rollback-free cluster-wide commit remain open.

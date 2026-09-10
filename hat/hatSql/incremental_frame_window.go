@@ -57,16 +57,20 @@ type IncrementalFrameWindowDefinition struct {
 // frame. It retains at most FramePreceding+1 contributions per partition and
 // emits one positive differential row for each appended row.
 type IncrementalFrameWindow struct {
-	kind           IncrementalFrameWindowKind
-	outputColumn   string
-	partitionKey   IncrementalWindowPartitionKeyFunc
-	orderKey       IncrementalWindowOrderKeyFunc
-	rowKey         IncrementalWindowRowKeyFunc
-	valueKey       IncrementalOffsetWindowValueKeyFunc
-	framePreceding int
-	descending     bool
-	partitions     map[string]incrementalFrameWindowPartition
-	keys           map[string]struct{}
+	kind                   IncrementalFrameWindowKind
+	outputColumn           string
+	partitionKey           IncrementalWindowPartitionKeyFunc
+	orderKey               IncrementalWindowOrderKeyFunc
+	rowKey                 IncrementalWindowRowKeyFunc
+	valueKey               IncrementalOffsetWindowValueKeyFunc
+	framePreceding         int
+	descending             bool
+	partitions             map[string]incrementalFrameWindowPartition
+	keys                   map[string]struct{}
+	mutableRows            map[string]Row
+	mutableOutputs         map[string]Row
+	mutablePartitions      map[string]string
+	mutableRowsByPartition map[string]map[string]Row
 }
 
 type incrementalFrameWindowPartition struct {
@@ -155,6 +159,12 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 	prepared := make([]incrementalFrameWindowPreparedRow, 0, len(rows))
 	states := make(map[string]incrementalFrameWindowPartition)
 	pendingKeys := make(map[string]struct{}, len(rows))
+	var pendingRows map[string]Row
+	var pendingPartitions map[string]string
+	if window.mutableRows != nil {
+		pendingRows = make(map[string]Row, len(rows))
+		pendingPartitions = make(map[string]string, len(rows))
+	}
 	for index, row := range rows {
 		partition := ""
 		if window.partitionKey != nil {
@@ -309,6 +319,10 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 			Row:  incrementalFrameWindowOutput(row.row, window.outputColumn, value),
 		})
 		states[row.partition] = state
+		if pendingRows != nil {
+			pendingRows[row.key] = cloneIncrementalFrameWindowRow(row.row)
+			pendingPartitions[row.key] = row.partition
+		}
 	}
 
 	for partition, state := range states {
@@ -316,6 +330,31 @@ func (window *IncrementalFrameWindow) Append(rows []Row) ([]DifferentialRow, err
 	}
 	for key := range pendingKeys {
 		window.keys[key] = struct{}{}
+	}
+	if pendingRows != nil {
+		if window.mutableOutputs == nil {
+			window.mutableOutputs = make(map[string]Row, len(window.mutableRows)+len(pendingRows))
+		}
+		if window.mutablePartitions == nil {
+			window.mutablePartitions = make(map[string]string, len(window.mutableRows)+len(pendingRows))
+		}
+		if window.mutableRowsByPartition == nil {
+			window.mutableRowsByPartition = make(map[string]map[string]Row)
+		}
+		for key, row := range pendingRows {
+			window.mutableRows[key] = row
+			partition := pendingPartitions[key]
+			window.mutablePartitions[key] = partition
+			partitionRows := window.mutableRowsByPartition[partition]
+			if partitionRows == nil {
+				partitionRows = make(map[string]Row)
+				window.mutableRowsByPartition[partition] = partitionRows
+			}
+			partitionRows[key] = row
+		}
+		for _, update := range updates {
+			window.mutableOutputs[update.Key] = cloneIncrementalFrameWindowRow(update.Row)
+		}
 	}
 	return updates, nil
 }
