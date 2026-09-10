@@ -121,6 +121,8 @@ explicitly opt-in operational control.
 
 | Tarantool | Declarative row-level SQL triggers | Adopted as an explicit API | `ParseSQLTriggerDefinition` validates `AFTER ... FOR EACH ROW` DDL and `SQLTriggerRegistry.RegisterSQLTrigger` binds it to the existing caller-owned transactional trigger coordinator; unsupported `BEFORE` timing and automatic DML wiring remain rejected. See [SQL_TRIGGERS.md](SQL_TRIGGERS.md). |
 
+| Materialize | Frontier-bound immutable SQL snapshots | Adopted as an explicit provider contract | `BeginSQLFrontierSnapshot` waits for every indexed source partition and requires `BeginSQLSnapshotAt` to bind the physical immutable view to the exact frontier; legacy providers are rejected rather than silently weakened. The default SQL path remains unchanged. [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md) |
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge

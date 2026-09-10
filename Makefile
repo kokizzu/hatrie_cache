@@ -7307,3 +7307,24 @@ commit-m032c-frontier:
 .PHONY: push-m032c-frontier
 push-m032c-frontier:
 	bash ./scripts/push-m032c-frontier.sh
+.PHONY: benchmark-m032d-frontier-snapshot
+benchmark-m032d-frontier-snapshot:
+	bash ./scripts/benchmark-m032d-frontier-snapshot.sh
+.PHONY: test-m032d-frontier-snapshot
+test-m032d-frontier-snapshot:
+	bash ./scripts/test-m032d-frontier-snapshot.sh
+.PHONY: format-m032d-frontier-snapshot
+format-m032d-frontier-snapshot:
+	bash ./scripts/format-m032d-frontier-snapshot.sh
+.PHONY: test-race-m032d-frontier-snapshot
+test-race-m032d-frontier-snapshot:
+	bash ./scripts/test-race-m032d-frontier-snapshot.sh
+.PHONY: review-m032d-frontier-snapshot
+review-m032d-frontier-snapshot:
+	bash ./scripts/review-m032d-frontier-snapshot.sh
+.PHONY: commit-m032d-frontier-snapshot
+commit-m032d-frontier-snapshot:
+	bash ./scripts/commit-m032d-frontier-snapshot.sh
+.PHONY: push-m032d-frontier-snapshot
+push-m032d-frontier-snapshot:
+	bash ./scripts/push-m032d-frontier-snapshot.sh

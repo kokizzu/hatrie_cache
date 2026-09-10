@@ -17656,3 +17656,22 @@ correctness/control-plane capability, not a replacement for the faster local
 oracle when cross-node ordering is unnecessary. See
 [GLOBAL_TIMESTAMP_ORACLE.md](GLOBAL_TIMESTAMP_ORACLE.md) for the persistence
 and consensus boundary.
+## M032d Frontier-Bound SQL Snapshot Provider
+
+Command: `make benchmark-m032d-frontier-snapshot`.
+
+This benchmark compares the existing SQL snapshot-provider dispatch with the
+new opt-in `BeginSQLFrontierSnapshot` path. Five `-benchmem` samples ran on
+Linux/amd64 with an AMD Ryzen 9 5950X. The parent benchmark was run from
+pre-feature commit `8ae6ba5`; the final control is the unchanged provider
+dispatch.
+
+| Path | Raw ns/op | Median ns/op | Median B/op | Median allocs/op | Comparison |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing provider dispatch, before | 4.190; 4.104; 4.037; 4.110; 4.095 | 4.104 | 0 | 0 | baseline |
+| Existing provider dispatch, final control | 4.973; 4.759; 4.666; 4.624; 4.624 | 4.666 | 0 | 0 | unchanged path |
+| Frontier-bound provider, final | 8.589; 8.485; 8.213; 8.637; 9.162 | 8.589 | 0 | 0 | +3.92 ns; 1.84x control |
+
+The stronger path has no measured allocation or retained-memory cost. Its
+small absolute overhead is opt-in and buys an explicit exact-frontier contract;
+ordinary SQL execution does not call it.

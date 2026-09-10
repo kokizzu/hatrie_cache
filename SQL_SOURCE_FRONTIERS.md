@@ -123,3 +123,11 @@ make test-m032-frontier
 make test-race-m032-frontier
 make benchmark-m032-frontier
 ```
+## Frontier-Bound Physical Snapshots
+
+When a storage resolver can create an immutable view at an exact source
+frontier, implement `SQLFrontierSnapshotProvider` and call
+`BeginSQLFrontierSnapshot`. This composes the barrier's logical readiness with
+the provider's physical atomicity contract and rejects providers that can only
+create an unbounded snapshot. See [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)
+for the API and benchmark.

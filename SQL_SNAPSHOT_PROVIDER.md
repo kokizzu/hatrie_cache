@@ -79,3 +79,13 @@ make test
 ```
 
 The full test target covers normal tests, race tests, and coverage checks.
+
+## Exact Frontier Extension
+
+Providers that can bind an immutable view to a caller-selected source frontier
+may implement `SQLFrontierSnapshotProvider` and use
+`BeginSQLFrontierSnapshot`. The helper waits on
+`SQLSourceFrontierBarrier`, passes the exact frontier to
+`BeginSQLSnapshotAt`, and rejects legacy providers rather than silently
+weakening consistency. See [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)
+for the contract, example, and measured opt-in overhead.
