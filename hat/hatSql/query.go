@@ -652,6 +652,14 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
+	snapshotResolver, snapshotRelease, snapshotErr := beginSQLSnapshot(ctx, resolver)
+	if snapshotErr != nil {
+		return result, snapshotErr
+	}
+	if snapshotRelease != nil {
+		defer snapshotRelease()
+	}
+	resolver = snapshotResolver
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
@@ -814,6 +822,14 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
 	}
+	snapshotResolver, snapshotRelease, snapshotErr := beginSQLSnapshot(ctx, resolver)
+	if snapshotErr != nil {
+		return snapshotErr
+	}
+	if snapshotRelease != nil {
+		defer snapshotRelease()
+	}
+	resolver = snapshotResolver
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	control, cancel, err := newSQLExecutionControl(ctx, options)

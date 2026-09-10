@@ -7160,3 +7160,27 @@ review-c154d:
 .PHONY: commit-c154d
 commit-c154d:
 	bash ./scripts/commit-c154d.sh
+
+
+.PHONY: inspect-timestamp-next
+inspect-timestamp-next:
+	bash ./scripts/inspect-timestamp-next.sh
+.PHONY: benchmark-sql-snapshot-provider
+benchmark-sql-snapshot-provider:
+	bash ./scripts/benchmark-sql-snapshot-provider.sh
+.PHONY: test-sql-snapshot-provider
+test-sql-snapshot-provider:
+	bash ./scripts/test-sql-snapshot-provider.sh
+.PHONY: format-sql-snapshot-provider
+format-sql-snapshot-provider:
+	bash ./scripts/format-sql-snapshot-provider.sh
+.PHONY: review-sql-snapshot-provider
+review-sql-snapshot-provider:
+	bash ./scripts/review-sql-snapshot-provider.sh
+.PHONY: commit-sql-snapshot-provider
+commit-sql-snapshot-provider:
+	bash ./scripts/commit-sql-snapshot-provider.sh
+
+.PHONY: push-sql-snapshot-provider
+push-sql-snapshot-provider:
+	bash ./scripts/push-sql-snapshot-provider.sh

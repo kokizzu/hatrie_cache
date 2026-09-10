@@ -91,6 +91,7 @@ or intentionally deferred, and `[-]` rejected or rolled back.
 - [x] M030 Snapshot-then-tail subscription startup.
 - [x] M031 Transaction-consistent snapshots.
 - [ ] M032 Strong consistency across all independent source partitions.
+- [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).
 - [x] M033a Process-local lock-free Lamport timestamp allocation with monotone remote observation; see [TIMESTAMP_ORACLE.md](TIMESTAMP_ORACLE.md). Global cross-node ordering remains open.
 - [x] M034 Epoch management for restarts and leases. `hatStorage.PersistentShardLease` and `hatStorage.PersistentNodeEpoch` durably advance fencing tokens across restarts, reject concurrent owners, and expose explicit renew, release, inspect, and validation operations; see [PERSISTENT_NODE_EPOCHS.md](PERSISTENT_NODE_EPOCHS.md).
 - [x] M035 Self-correcting materialized results for typed arrangements.
@@ -170,6 +171,7 @@ records a separate implementation boundary.
 - [ ] C153 Metadata consensus for partition ownership.
 - [ ] C154 Rolling schema changes across replicas.
 - [ ] M032 Strong consistency across all independent source partitions.
+- [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).
 - [ ] M033 Timestamp oracle for globally ordered writes.
 - [ ] M037 Generic negative-diff support for every SQL operator.
 - [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
