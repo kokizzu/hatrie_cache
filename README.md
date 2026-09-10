@@ -91,6 +91,7 @@ security guidance before exposing it on a network.
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)
+- Tie-preserving ordered limits: [SQL `LIMIT WITH TIES`](LIMIT_WITH_TIES.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Opt-in dictionary-coded string group keys for typed aggregates: set `TypedTableAggregateDefinition.DictionaryEncodeGroups` to reduce retained arrangement key state; the default remains the legacy representation. See [the measured tradeoff](BENCHMARK.md#per-column-dictionary-coded-aggregate-groups).

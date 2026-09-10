@@ -738,14 +738,14 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
-	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
+	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		streamed, streamErr := executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
 		if !errors.Is(streamErr, errSQLOrderedSourceUnavailable) {
 			streamed.QueryID = observation.id
 			return streamed, streamErr
 		}
 	}
-	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && sqlTopNMaterializedStreamable(query, resolver) {
+	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlTopNMaterializedStreamable(query, resolver) {
 		streamed, streamErr := executeSQLTopNMaterializedStream(ctx, query, resolver, control)
 		streamed.QueryID = observation.id
 		return streamed, streamErr
@@ -1070,6 +1070,19 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		return err
 	}
 	if sqlQueryHasWithFill(query) {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			return err
+		}
+		columns := sqlColumns(query.selects)
+		for _, row := range result.Rows {
+			if err := visit(columns, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if query.limitWithTies {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 		if err != nil {
 			return err
@@ -2595,7 +2608,7 @@ func executeSQLTopNMaterializedStream(ctx context.Context, query *sqlQuery, reso
 // bounded ORDER BY stays on the cheaper in-memory top-N path, while indexed
 // orders remain a direct scan.
 func sqlExternalSortStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
-	if control == nil || control.options.MaxSortBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || query.from == nil || query.limit >= 0 || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) {
+	if control == nil || control.options.MaxSortBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || query.from == nil || query.limit >= 0 || query.limitWithTies || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) {
 		return false
 	}
 	for _, selectItem := range query.selects {
@@ -4361,7 +4374,7 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 	if err := flushOutput(); err != nil {
 		return SQLQueryResult{}, true, err
 	}
-	rows, err := sqlMergeSpillRunsToRows(outputRuns, []sqlOrder{{}}, 0, -1, control)
+	rows, err := sqlMergeSpillRunsToRows(outputRuns, []sqlOrder{{}}, 0, -1, control, false)
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}
@@ -5203,6 +5216,17 @@ func cloneSQLExpr(source sqlExpr) sqlExpr {
 	return copy
 }
 
+func sqlQueryOutputsTie(order []sqlOrder, left, right sqlQueryOutput) bool {
+	for _, item := range order {
+		leftValue := evalOutputOrder(item.expr, left.row, left.group)
+		rightValue := evalOutputOrder(item.expr, right.row, right.group)
+		if sqlCompare(leftValue, rightValue) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 type sqlQuery struct {
 	indexHint          SQLIndexHint
 	ctes               []sqlCTE
@@ -5219,6 +5243,7 @@ type sqlQuery struct {
 	sample             *sqlTableSample
 	limitBy            *sqlLimitBy
 	limit              int
+	limitWithTies      bool
 	offset             int
 	distinct           bool
 	unions             []sqlUnion
@@ -5602,6 +5627,13 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				q.limitBy = &sqlLimitBy{limit: value, expressions: expressions}
 			} else {
 				q.limit = value
+				if p.keyword("WITH") {
+					p.next()
+					if err := p.expectKeyword("TIES"); err != nil {
+						return nil, err
+					}
+					q.limitWithTies = true
+				}
 			}
 		case p.keyword("FETCH"):
 			if q.limit >= 0 || q.limitBy != nil {
@@ -5641,6 +5673,14 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 	}
 	if q.from == nil {
 		return nil, p.diagnostic(p.current(), "query requires FROM")
+	}
+	if q.limitWithTies {
+		if q.limit < 0 {
+			return nil, p.diagnostic(p.current(), "LIMIT WITH TIES requires a finite non-negative LIMIT")
+		}
+		if len(q.orderBy) == 0 {
+			return nil, p.diagnostic(p.current(), "LIMIT WITH TIES requires ORDER BY")
+		}
 	}
 	if q.selects == nil {
 		return nil, p.diagnostic(p.current(), "query requires SELECT")
@@ -11029,7 +11069,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					return SQLQueryResult{}, fmt.Errorf("SQL sort memory budget exceeded: maximum %d bytes", control.options.MaxSortBytes)
 				}
 				started = time.Now()
-				rows, spillBytes, runs, err := sqlExternalSortRows(spillRecords, q.orderBy, control.options.SpillDirectory, control.options.MaxSortBytes, control.options.MaxSpillBytes, q.offset, q.limit, control, q.limitBy)
+				rows, spillBytes, runs, err := sqlExternalSortRowsWithTies(spillRecords, q.orderBy, control.options.SpillDirectory, control.options.MaxSortBytes, control.options.MaxSpillBytes, q.offset, q.limit, q.limitWithTies, control, q.limitBy)
 				if err != nil {
 					return SQLQueryResult{}, err
 				}
@@ -11101,6 +11141,12 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		end := len(out)
 		if q.limit >= 0 && start+q.limit < end {
 			end = start + q.limit
+			if q.limitWithTies && end > start {
+				boundary := out[end-1]
+				for end < len(out) && sqlQueryOutputsTie(q.orderBy, boundary, out[end]) {
+					end++
+				}
+			}
 		}
 		for _, item := range out[start:end] {
 			result.Rows = append(result.Rows, item.row)
@@ -11533,7 +11579,11 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "LIMIT BY", Detail: fmt.Sprintf("limit=%d by=%s", query.limitBy.limit, sqlExplainExpressions(query.limitBy.expressions))})
 	}
 	if query.limit >= 0 || query.offset > 0 {
-		*steps = append(*steps, SQLExplainStep{Node: prefix + "LIMIT", Detail: fmt.Sprintf("limit=%d offset=%d", query.limit, query.offset)})
+		detail := fmt.Sprintf("limit=%d offset=%d", query.limit, query.offset)
+		if query.limitWithTies {
+			detail += " with ties"
+		}
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "LIMIT", Detail: detail})
 	}
 	for _, union := range query.unions {
 		kind := union.kind
@@ -13230,27 +13280,58 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 	return run, nil
 }
 
-func sqlMergeSpillRunsToRows(runs []sqlSpillRun, order []sqlOrder, offset, limit int, control *sqlExecutionControl, limitBy ...*sqlLimitBy) ([]SQLRow, error) {
+func sqlMergeSpillRunsToRows(runs []sqlSpillRun, order []sqlOrder, offset, limit int, control *sqlExecutionControl, withTies bool, limitBy ...*sqlLimitBy) ([]SQLRow, error) {
 	rows := []SQLRow{}
 	position := 0
+	boundaryKeys := []interface{}(nil)
+	done := false
 	state := (*sqlLimitByState)(nil)
 	if len(limitBy) > 0 {
 		state = newSQLLimitByState(limitBy[0])
 	}
 	err := sqlMergeSpillRunsToVisit(runs, order, control, func(record sqlSpillOutput) error {
+		if done {
+			return nil
+		}
 		if state != nil && !state.acceptKey(record.LimitByKey) {
 			return nil
 		}
-		if position >= offset && (limit < 0 || len(rows) < limit) {
-			rows = append(rows, record.Row)
+		if position < offset {
+			position++
+			return nil
 		}
-		position++
+		if limit < 0 || len(rows) < limit {
+			rows = append(rows, record.Row)
+			position++
+			if withTies && limit >= 0 && len(rows) == limit {
+				boundaryKeys = append(boundaryKeys[:0], record.Keys...)
+			}
+			return nil
+		}
+		if withTies && len(rows) > 0 && sqlSpillOutputKeysTie(record.Keys, boundaryKeys) {
+			rows = append(rows, record.Row)
+			position++
+			return nil
+		}
+		done = true
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return rows, nil
+}
+
+func sqlSpillOutputKeysTie(left, right []interface{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if sqlCompare(left[index], right[index]) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlMergeSpillRunsToVisit(runs []sqlSpillRun, order []sqlOrder, control *sqlExecutionControl, visit func(sqlSpillOutput) error) error {
@@ -13363,6 +13444,10 @@ func sqlMergeSpillSortPassParallel(runs []sqlSpillRun, order []sqlOrder, directo
 }
 
 func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory string, maxRunBytes, maxSpillBytes, offset, limit int, control *sqlExecutionControl, limitBy ...*sqlLimitBy) ([]SQLRow, int64, int, error) {
+	return sqlExternalSortRowsWithTies(records, order, directory, maxRunBytes, maxSpillBytes, offset, limit, false, control, limitBy...)
+}
+
+func sqlExternalSortRowsWithTies(records []sqlSpillOutput, order []sqlOrder, directory string, maxRunBytes, maxSpillBytes, offset, limit int, withTies bool, control *sqlExecutionControl, limitBy ...*sqlLimitBy) ([]SQLRow, int64, int, error) {
 	if directory == "" || maxSpillBytes <= 0 {
 		return nil, 0, 0, fmt.Errorf("SQL external sort requires SpillDirectory and MaxSpillBytes")
 	}
@@ -13458,7 +13543,7 @@ func sqlExternalSortRows(records []sqlSpillOutput, order []sqlOrder, directory s
 		}
 		runs = next
 	}
-	rows, err := sqlMergeSpillRunsToRows(runs, order, offset, limit, control, limitBy...)
+	rows, err := sqlMergeSpillRunsToRows(runs, order, offset, limit, control, withTies, limitBy...)
 	if err != nil {
 		return nil, 0, 0, err
 	}

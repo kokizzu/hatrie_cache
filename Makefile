@@ -7027,3 +7027,31 @@ test-m080-full:
 
 test-m080-race:
 	sh ./scripts/test-m080-race.sh
+
+.PHONY: test-limit-with-ties-local-clean format-limit-with-ties-local-clean test-limit-with-ties-package-local-clean test-limit-with-ties-cache-sql-local-clean test-limit-with-ties-regression-local-clean test-limit-with-ties-race-local-clean vet-limit-with-ties-local-clean benchmark-limit-with-ties-local-clean verify-limit-with-ties-doc-local-clean
+test-limit-with-ties-local-clean:
+	bash ./scripts/test-limit-with-ties-local-clean.sh
+
+format-limit-with-ties-local-clean:
+	bash ./scripts/format-limit-with-ties-local-clean.sh
+
+test-limit-with-ties-package-local-clean:
+	bash ./scripts/test-limit-with-ties-package-local-clean.sh
+
+test-limit-with-ties-cache-sql-local-clean:
+	bash ./scripts/test-limit-with-ties-cache-sql-local-clean.sh
+
+test-limit-with-ties-regression-local-clean:
+	bash ./scripts/test-limit-with-ties-regression-local-clean.sh
+
+test-limit-with-ties-race-local-clean:
+	bash ./scripts/test-limit-with-ties-race-local-clean.sh
+
+vet-limit-with-ties-local-clean:
+	bash ./scripts/vet-limit-with-ties-local-clean.sh
+
+benchmark-limit-with-ties-local-clean:
+	bash ./scripts/benchmark-limit-with-ties-local-clean.sh
+
+verify-limit-with-ties-doc-local-clean:
+	bash ./scripts/verify-limit-with-ties-doc-local-clean.sh
