@@ -7478,6 +7478,37 @@ commit-m065f-incremental-nth-value-window:
 push-m065f-incremental-nth-value-window:
 	bash ./scripts/push-m065f-incremental-nth-value-window.sh
 
+.PHONY: test-m065g-incremental-extrema-frame-window
+test-m065g-incremental-extrema-frame-window:
+	bash ./scripts/test-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: review-m065g-incremental-extrema-frame-window
+review-m065g-incremental-extrema-frame-window:
+	bash ./scripts/review-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: commit-m065g-incremental-extrema-frame-window
+commit-m065g-incremental-extrema-frame-window:
+	bash ./scripts/commit-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: push-m065g-incremental-extrema-frame-window
+push-m065g-incremental-extrema-frame-window:
+	bash ./scripts/push-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: format-m065g-incremental-extrema-frame-window
+format-m065g-incremental-extrema-frame-window:
+	bash ./scripts/format-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: test-race-m065g-incremental-extrema-frame-window
+test-race-m065g-incremental-extrema-frame-window:
+	bash ./scripts/test-race-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: vet-m065g-incremental-extrema-frame-window
+vet-m065g-incremental-extrema-frame-window:
+	bash ./scripts/vet-m065g-incremental-extrema-frame-window.sh
+
+.PHONY: benchmark-m065g-incremental-extrema-frame-window
+benchmark-m065g-incremental-extrema-frame-window:
+	bash ./scripts/benchmark-m065g-incremental-extrema-frame-window.sh
 
 .PHONY: test-m064-mutable-recursive-reachability
 test-m064-mutable-recursive-reachability:

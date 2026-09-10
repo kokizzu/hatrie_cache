@@ -17676,6 +17676,32 @@ dynamic positions, `RANGE` frames, and `IGNORE NULLS` remain outside this API.
 See [INCREMENTAL_NTH_VALUE_WINDOW.md](INCREMENTAL_NTH_VALUE_WINDOW.md) for
 the contract and correctness coverage.
 
+## M065g Incremental MIN/MAX Frame Windows
+
+Command: `make benchmark-m065g-incremental-extrema-frame-window`.
+
+This benchmark compares a full recomputation of 1,025 rows with one append
+after a 1,024-row seed, using 16 partitions and a
+`ROWS BETWEEN 7 PRECEDING AND CURRENT ROW` frame. Five samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X and a 200 ms sample window. Seed setup
+and incremental identity-map capacity are outside the timer; incremental
+unique-key tracking is measured.
+
+| Window | Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `MIN(int64)` | Full recomputation | 373,435; 360,406; 357,249; 353,957; 347,232 | 357,249 | 427,738 | 2,247 | 1x |
+| `MIN(int64)` | Incremental append | 1,010; 1,003; 1,013; 1,016; 967.6 | 1,010 | 1,212 | 9 | 354x faster |
+| `MAX(int64)` | Full recomputation | 360,219; 353,066; 374,646; 362,892; 382,733 | 362,892 | 427,737 | 2,247 | 1x |
+| `MAX(int64)` | Incremental append | 1,004; 1,031; 999.5; 1,091; 1,024 | 1,024 | 1,242 | 9 | 354x faster |
+
+Incremental MIN uses about `353x` fewer transient bytes, while MAX uses about
+`344x` fewer; both use `250x`
+fewer allocations than their full-recompute controls. The monotonic deque is
+bounded to the frame width; arbitrary updates, deletes, reordering, `RANGE`
+frames, and non-`int64` values remain outside this API. See
+[INCREMENTAL_EXTREMA_FRAME_WINDOW.md](INCREMENTAL_EXTREMA_FRAME_WINDOW.md) for
+the contract and correctness coverage.
+
 ## M065a Incremental Rank Window Maintenance
 
 Command: `make benchmark-m065-rank-window`.
