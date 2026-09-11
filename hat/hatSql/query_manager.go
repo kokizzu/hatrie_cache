@@ -8,15 +8,29 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hatrie_cache/hat/hatPipeline"
 )
 
 const (
 	// DefaultSQLQueryManagerHistoryCapacity bounds completed status retained by
 	// a new manager. Query text and parameter values are never retained.
 	DefaultSQLQueryManagerHistoryCapacity = 256
-	maxSQLQueryManagerIDBytes             = 256
-	maxSQLQueryManagerReasonBytes         = 512
+	// DefaultSQLQueryManagerComputeQueueCapacity bounds queued SQL compute
+	// tasks when ComputeWorkers is enabled and no queue size is provided.
+	DefaultSQLQueryManagerComputeQueueCapacity = 64
+	// MaxSQLQueryManagerComputeWorkers prevents an accidental worker explosion
+	// from an untrusted or malformed service configuration.
+	MaxSQLQueryManagerComputeWorkers = 256
+	// MaxSQLQueryManagerComputeQueueCapacity bounds retained query closures and
+	// their caller-owned arguments while they wait for compute capacity.
+	MaxSQLQueryManagerComputeQueueCapacity = 100000
+	maxSQLQueryManagerIDBytes              = 256
+	maxSQLQueryManagerReasonBytes          = 512
 )
+
+// ErrSQLQueryManagerClosed identifies execution submitted after Close.
+var ErrSQLQueryManagerClosed = errors.New("SQL query manager is closed")
 
 // SQLQueryState describes one managed query's lifecycle.
 type SQLQueryState string
@@ -59,7 +73,11 @@ func (err *SQLQueryCanceledError) Error() string {
 
 func (err *SQLQueryCanceledError) Unwrap() error { return context.Canceled }
 
-// SQLQueryManagerOptions configures the bounded operator status history.
+// SQLQueryManagerOptions configures SQL query history and optional compute
+// admission. ComputeWorkers is zero by default, preserving direct execution;
+// a positive value runs managed queries on an independently bounded compute
+// pool. ComputeQueueCapacity is used only when ComputeWorkers is positive and
+// zero selects DefaultSQLQueryManagerComputeQueueCapacity.
 type SQLQueryManagerOptions struct {
 	HistoryCapacity int
 	// HistorySampleEvery retains every Nth completed status. Zero or one
@@ -68,6 +86,12 @@ type SQLQueryManagerOptions struct {
 	// QueryLog persists every terminal status in a privacy-safe append-only
 	// record. Nil preserves the default in-memory-only behavior.
 	QueryLog *SQLQueryLog
+	// ComputeWorkers enables an independently scheduled SQL compute pool.
+	// Zero preserves the legacy caller-goroutine execution path.
+	ComputeWorkers int
+	// ComputeQueueCapacity bounds admitted queries waiting for a compute worker.
+	// Zero uses DefaultSQLQueryManagerComputeQueueCapacity when workers are on.
+	ComputeQueueCapacity int
 }
 
 // SQLQueryManager owns cancellation contexts for opt-in SQL executions. It
@@ -83,11 +107,18 @@ type SQLQueryManager struct {
 	active             map[string]*managedSQLQuery
 	history            []SQLQueryStatus
 	historyStart       int
+	compute            *sqlQueryManagerCompute
 }
 
 type managedSQLQuery struct {
 	status SQLQueryStatus
 	cancel context.CancelFunc
+}
+
+type sqlQueryManagerCompute struct {
+	pool             *hatPipeline.WorkStealingPool
+	configurationErr error
+	closed           bool
 }
 
 // NewSQLQueryManager creates a manager with bounded completed-query history.
@@ -101,23 +132,86 @@ func newSQLQueryManager(historyCapacity, historySampleEvery int) *SQLQueryManage
 }
 
 func newSQLQueryManagerWithLog(historyCapacity, historySampleEvery int, queryLog *SQLQueryLog) *SQLQueryManager {
+	return newSQLQueryManagerWithConfiguration(SQLQueryManagerOptions{
+		HistoryCapacity:    historyCapacity,
+		HistorySampleEvery: historySampleEvery,
+		QueryLog:           queryLog,
+	})
+}
+
+func newSQLQueryManagerWithConfiguration(options SQLQueryManagerOptions) *SQLQueryManager {
+	configurationErr := ValidateSQLQueryManagerOptions(options)
+	computeWorkers := options.ComputeWorkers
+	computeQueueCapacity := options.ComputeQueueCapacity
+	historyCapacity := options.HistoryCapacity
 	if historyCapacity <= 0 {
 		historyCapacity = DefaultSQLQueryManagerHistoryCapacity
 	}
-	if historySampleEvery < 0 {
-		historySampleEvery = 0
+	if options.HistorySampleEvery < 0 {
+		options.HistorySampleEvery = 0
 	}
-	return &SQLQueryManager{
+	manager := &SQLQueryManager{
 		historyCapacity:    historyCapacity,
-		historySampleEvery: historySampleEvery,
-		queryLog:           queryLog,
+		historySampleEvery: options.HistorySampleEvery,
+		queryLog:           options.QueryLog,
 		active:             make(map[string]*managedSQLQuery),
 	}
+	if configurationErr != nil || computeWorkers > 0 {
+		manager.compute = &sqlQueryManagerCompute{configurationErr: configurationErr}
+		if configurationErr == nil && computeWorkers > 0 {
+			if computeQueueCapacity == 0 {
+				computeQueueCapacity = DefaultSQLQueryManagerComputeQueueCapacity
+			}
+			pool, err := hatPipeline.NewWorkStealingPool(context.Background(), computeWorkers, computeQueueCapacity)
+			if err != nil {
+				manager.compute.configurationErr = fmt.Errorf("SQL compute pool: %w", err)
+			} else {
+				manager.compute.pool = pool
+			}
+		}
+	}
+	return manager
 }
 
 // NewSQLQueryManagerWithOptions creates a manager from explicit options.
 func NewSQLQueryManagerWithOptions(options SQLQueryManagerOptions) *SQLQueryManager {
-	return newSQLQueryManagerWithLog(options.HistoryCapacity, options.HistorySampleEvery, options.QueryLog)
+	return newSQLQueryManagerWithConfiguration(options)
+}
+
+// ValidateSQLQueryManagerOptions validates optional compute-pool limits.
+// History options retain their existing normalization behavior.
+func ValidateSQLQueryManagerOptions(options SQLQueryManagerOptions) error {
+	if options.ComputeWorkers < 0 {
+		return errors.New("SQL compute workers cannot be negative")
+	}
+	if options.ComputeWorkers > MaxSQLQueryManagerComputeWorkers {
+		return fmt.Errorf("SQL compute workers exceed %d", MaxSQLQueryManagerComputeWorkers)
+	}
+	if options.ComputeQueueCapacity < 0 {
+		return errors.New("SQL compute queue capacity cannot be negative")
+	}
+	if options.ComputeQueueCapacity > MaxSQLQueryManagerComputeQueueCapacity {
+		return fmt.Errorf("SQL compute queue capacity exceeds %d", MaxSQLQueryManagerComputeQueueCapacity)
+	}
+	return nil
+}
+
+// Close stops new managed queries and drains admitted compute work. It is
+// idempotent. Managers without ComputeWorkers have no owned worker pool.
+func (manager *SQLQueryManager) Close() error {
+	if manager == nil {
+		return nil
+	}
+	manager.mu.Lock()
+	compute := manager.compute
+	if compute != nil {
+		compute.closed = true
+	}
+	manager.mu.Unlock()
+	if compute == nil || compute.pool == nil {
+		return nil
+	}
+	return compute.pool.Wait()
 }
 
 // Execute runs one query under a manager-owned cancellation context. When
@@ -128,6 +222,10 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	compute := manager.compute
+	if compute != nil && compute.configurationErr != nil {
+		return SQLQueryResult{}, compute.configurationErr
 	}
 	queryID, err := manager.queryID(options.QueryID)
 	if err != nil {
@@ -144,6 +242,11 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 		cancel: cancel,
 	}
 	manager.mu.Lock()
+	if manager.compute != nil && manager.compute.closed {
+		manager.mu.Unlock()
+		cancel()
+		return SQLQueryResult{}, ErrSQLQueryManagerClosed
+	}
 	if _, exists := manager.active[queryID]; exists {
 		manager.mu.Unlock()
 		cancel()
@@ -153,7 +256,11 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	manager.mu.Unlock()
 
 	options.QueryID = queryID
-	result, err = ExecuteSQLQueryParameters(queryContext, source, resolver, parameters, options)
+	if compute == nil || compute.pool == nil {
+		result, err = ExecuteSQLQueryParameters(queryContext, source, resolver, parameters, options)
+	} else {
+		result, err = executeSQLQueryOnComputePool(compute.pool, queryContext, source, resolver, parameters, options)
+	}
 	manager.mu.Lock()
 	status := entry.status
 	if queryContext.Err() != nil && (err == nil || status.State == SQLQueryStateCancelRequested) {
@@ -186,6 +293,21 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	}
 	cancel()
 	return result, err
+}
+
+func executeSQLQueryOnComputePool(pool *hatPipeline.WorkStealingPool, queryContext context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
+	taskDone := make(chan struct{})
+	var taskErr error
+	submitErr := pool.Submit(queryContext, func(context.Context) error {
+		defer close(taskDone)
+		result, taskErr = ExecuteSQLQueryParameters(queryContext, source, resolver, parameters, options)
+		return nil
+	})
+	if submitErr != nil {
+		return SQLQueryResult{}, submitErr
+	}
+	<-taskDone
+	return result, taskErr
 }
 
 // Cancel requests cooperative cancellation of one active query. The first

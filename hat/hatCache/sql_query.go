@@ -69,20 +69,24 @@ type SQLQueryTraceRecorder = hatSql.QueryTraceRecorder
 type SQLPrimaryOrderRecommendation = hatSql.SQLPrimaryOrderRecommendation
 
 const (
-	DefaultSQLIndexAdvisorSnapshotMaxBytes = hatSql.DefaultSQLIndexAdvisorSnapshotMaxBytes
-	SQLIndexAdvisorSnapshotVersion         = hatSql.SQLIndexAdvisorSnapshotVersion
-	DefaultSQLQueryManagerHistoryCapacity  = hatSql.DefaultSQLQueryManagerHistoryCapacity
-	DefaultSQLQueryLogMaxRecordBytes       = hatSql.DefaultSQLQueryLogMaxRecordBytes
-	SQLQueryStateRunning                   = hatSql.SQLQueryStateRunning
-	SQLQueryStateCancelRequested           = hatSql.SQLQueryStateCancelRequested
-	SQLQueryStateSucceeded                 = hatSql.SQLQueryStateSucceeded
-	SQLQueryStateFailed                    = hatSql.SQLQueryStateFailed
-	SQLQueryStateCanceled                  = hatSql.SQLQueryStateCanceled
+	DefaultSQLIndexAdvisorSnapshotMaxBytes     = hatSql.DefaultSQLIndexAdvisorSnapshotMaxBytes
+	SQLIndexAdvisorSnapshotVersion             = hatSql.SQLIndexAdvisorSnapshotVersion
+	DefaultSQLQueryManagerHistoryCapacity      = hatSql.DefaultSQLQueryManagerHistoryCapacity
+	DefaultSQLQueryManagerComputeQueueCapacity = hatSql.DefaultSQLQueryManagerComputeQueueCapacity
+	MaxSQLQueryManagerComputeWorkers           = hatSql.MaxSQLQueryManagerComputeWorkers
+	MaxSQLQueryManagerComputeQueueCapacity     = hatSql.MaxSQLQueryManagerComputeQueueCapacity
+	DefaultSQLQueryLogMaxRecordBytes           = hatSql.DefaultSQLQueryLogMaxRecordBytes
+	SQLQueryStateRunning                       = hatSql.SQLQueryStateRunning
+	SQLQueryStateCancelRequested               = hatSql.SQLQueryStateCancelRequested
+	SQLQueryStateSucceeded                     = hatSql.SQLQueryStateSucceeded
+	SQLQueryStateFailed                        = hatSql.SQLQueryStateFailed
+	SQLQueryStateCanceled                      = hatSql.SQLQueryStateCanceled
 )
 
 var (
 	ErrSQLQueryLogClosed        = hatSql.ErrSQLQueryLogClosed
 	ErrSQLQueryLogRecordInvalid = hatSql.ErrSQLQueryLogRecordInvalid
+	ErrSQLQueryManagerClosed    = hatSql.ErrSQLQueryManagerClosed
 )
 
 type SQLSourceResolver = hatSql.SourceResolver
@@ -459,6 +463,10 @@ func NewSQLQueryManager(historyCapacity int) *SQLQueryManager {
 
 func NewSQLQueryManagerWithOptions(options SQLQueryManagerOptions) *SQLQueryManager {
 	return hatSql.NewSQLQueryManagerWithOptions(options)
+}
+
+func ValidateSQLQueryManagerOptions(options SQLQueryManagerOptions) error {
+	return hatSql.ValidateSQLQueryManagerOptions(options)
 }
 
 func NewSQLAdaptivePlanner(options SQLAdaptivePlannerOptions) *SQLAdaptivePlanner {

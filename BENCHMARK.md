@@ -20771,3 +20771,40 @@ make benchmark-mz017-restore-workers
 
 Raw output is written to
 `build/benchmarks/mz017-restore-workers.txt`.
+<a id="mz-018-optional-sql-compute-pool"></a>
+## MZ-018 Optional SQL Compute Pool
+
+`SQLQueryManager` now optionally executes managed queries on a bounded
+`hatPipeline.WorkStealingPool`. This separates query CPU admission from the
+caller and leaves the default manager path unchanged. It does not claim a
+single-query speedup: the value is a fixed worker budget, bounded queue, and
+drainable shutdown for services that need predictable query resource ownership.
+
+The fixture runs a deterministic one-row `CACHE` query through a static
+resolver. Results are five samples for each benchmark at `go test -cpu 32
+-benchmem -count=5` on `linux/amd64` with an AMD Ryzen 9 5950X.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Legacy manager, concurrent callers | 3,458; 3,597; 3,584; 3,682; 3,877 | 3,506; 3,506; 3,507; 3,506; 3,507 | 23; 23; 23; 23; 23 |
+| Compute pool, 1 worker | 5,799; 5,751; 5,716; 5,712; 5,974 | 4,400; 4,400; 4,400; 4,400; 4,400 | 30; 30; 30; 30; 30 |
+| Compute pool, 2 workers | 6,055; 5,880; 5,881; 6,092; 5,839 | 4,400; 4,400; 4,400; 4,400; 4,400 | 30; 30; 30; 30; 30 |
+| Compute pool, 4 workers | 6,098; 6,093; 5,918; 5,913; 5,823 | 4,400; 4,400; 4,400; 4,400; 4,400 | 30; 30; 30; 30; 30 |
+| Compute pool, 4 workers, concurrent callers | 3,708; 3,861; 4,196; 4,085; 3,982 | 4,417; 4,417; 4,419; 4,420; 4,420 | 30; 30; 30; 30; 30 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to legacy concurrent |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy manager, concurrent callers | 3,597 | 3,506 | 23 | `1.00x` |
+| Compute pool, 1 worker | 5,751 | 4,400 | 30 | `1.60x` time, `1.25x` memory |
+| Compute pool, 2 workers | 5,881 | 4,400 | 30 | `1.64x` time, `1.25x` memory |
+| Compute pool, 4 workers | 5,918 | 4,400 | 30 | `1.65x` time, `1.25x` memory |
+| Compute pool, 4 workers, concurrent callers | 3,982 | 4,419 | 30 | `1.11x` time, `1.26x` memory |
+
+The default remains `ComputeWorkers: 0`. Positive workers are appropriate for
+long-running or overloaded managed-query traffic where bounded admission and
+clean draining matter more than the overhead measured here. `Close` drains
+admitted tasks; request contexts still control cancellation of running work.

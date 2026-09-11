@@ -9741,3 +9741,43 @@ commit-mz017:
 
 push-mz017:
 	bash scripts/push-mz017.sh
+
+.PHONY: benchmark-mz018-compute-pool
+benchmark-mz018-compute-pool:
+	bash scripts/benchmark-mz018-compute-pool.sh
+
+.PHONY: test-mz018-compute-pool
+test-mz018-compute-pool:
+	bash scripts/test-mz018-compute-pool.sh
+
+.PHONY: format-mz018-compute-pool
+format-mz018-compute-pool:
+	bash scripts/format-mz018-compute-pool.sh
+
+.PHONY: test-race-mz018-compute-pool
+test-race-mz018-compute-pool:
+	bash scripts/test-race-mz018-compute-pool.sh
+
+.PHONY: test-mz018-broad
+test-mz018-broad:
+	bash scripts/test-mz018-broad.sh
+
+.PHONY: verify-mz018-compute-pool-docs
+verify-mz018-compute-pool-docs:
+	bash scripts/verify-mz018-compute-pool-docs.sh
+
+.PHONY: review-mz018-compute-pool
+review-mz018-compute-pool:
+	bash scripts/review-mz018-compute-pool.sh
+
+.PHONY: status-mz018-compute-pool
+status-mz018-compute-pool:
+	bash scripts/status-mz018-compute-pool.sh
+
+.PHONY: commit-mz018-compute-pool
+commit-mz018-compute-pool:
+	bash scripts/commit-mz018-compute-pool.sh
+
+.PHONY: push-mz018-compute-pool
+push-mz018-compute-pool:
+	bash scripts/push-mz018-compute-pool.sh
