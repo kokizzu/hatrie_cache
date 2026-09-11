@@ -18070,3 +18070,52 @@ BenchmarkM065nRangeIncremental-32:
 The ratios are median-to-median. `B/op` is cumulative allocation volume, not
 the same thing as peak or retained heap; the higher value is recorded as a
 real tradeoff rather than hidden behind the CPU improvement.
+## Peer-Aware Incremental `RANGE` `COUNT(DISTINCT)`
+
+M065o compares the pre-change materialized `COUNT(DISTINCT int64)` frame with
+the incremental multiplicity-map maintainer over the same 4,096-row workload
+and a preceding bound of 64. The pre-change baseline was measured before the
+new production kind was added. The optimized path is faster, allocates fewer
+objects, and also lowers cumulative allocation bytes for this workload.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change materialized DISTINCT | 10,189,711 | 11,318,060 | 38,537 | baseline |
+| Incremental `RANGE` DISTINCT | 2,595,549 | 2,926,112 | 12,376 | 3.93x faster, 74.1% lower cumulative bytes, 3.11x fewer allocations |
+
+The post-change benchmark reran the unchanged materialized path at a median
+of 10,215,097 ns/op, 11,318,053 B/op, and 38,537 allocs/op; the comparison
+above uses the pre-change baseline for the before/after ratio.
+
+Raw pre-change baseline:
+
+```text
+BenchmarkM065oRangeNaiveMaterialized-32:
+10236414 ns/op 11318108 B/op 38537 allocs/op
+10142970 ns/op 11318047 B/op 38537 allocs/op
+10189711 ns/op 11318048 B/op 38537 allocs/op
+10123104 ns/op 11318060 B/op 38537 allocs/op
+10794586 ns/op 11318060 B/op 38537 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkM065oRangeNaiveMaterialized-32:
+10215097 ns/op 11318116 B/op 38537 allocs/op
+10019354 ns/op 11318049 B/op 38537 allocs/op
+10248259 ns/op 11318047 B/op 38537 allocs/op
+10086127 ns/op 11318054 B/op 38537 allocs/op
+10610658 ns/op 11318053 B/op 38537 allocs/op
+
+BenchmarkM065oRangeIncremental-32:
+2623487 ns/op 2926113 B/op 12376 allocs/op
+2652773 ns/op 2926112 B/op 12376 allocs/op
+2588537 ns/op 2926112 B/op 12376 allocs/op
+2595549 ns/op 2926112 B/op 12376 allocs/op
+2574608 ns/op 2926113 B/op 12376 allocs/op
+```
+
+`B/op` is cumulative allocation volume, not retained or peak heap. The
+distinct map is exact rather than approximate, so memory scales with the
+number of distinct active values.

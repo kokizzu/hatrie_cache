@@ -742,3 +742,6 @@ For each future unchecked item:
 - [x] M051c immutable compiled SQL template reuse for static, parameter-free compiled handles; dynamic options retain the clone path. See [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md) and [BENCHMARK.md](BENCHMARK.md#immutable-compiled-sql-template-reuse).
 - [x] M065n Peer-aware numeric `RANGE` `MIN`/`MAX` maintenance using monotonic
   deques, including NULL handling, descending order, and atomic validation.
+- [x] M065o Peer-aware numeric `RANGE` `COUNT(DISTINCT int64)` maintenance
+  using exact multiplicity counts, NULL handling, descending order, and
+  deterministic reference coverage.

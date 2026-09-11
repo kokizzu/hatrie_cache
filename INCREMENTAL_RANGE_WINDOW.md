@@ -87,3 +87,16 @@ configured direction, and peer rows receive the same frame result. The
 maintainer is append-only and does not provide arbitrary updates or deletes.
 See `BENCHMARK.md` for the measured CPU, cumulative-byte, and allocation
 tradeoffs against materialized MIN evaluation.
+## M065o: Incremental `RANGE` `COUNT(DISTINCT int64)`
+
+`IncrementalRangeWindowCountDistinctInt64` maintains peer-aware distinct
+counts for the same inclusive numeric `RANGE` frame. `ValueKey` must return an
+`int64` or `nil`; NULL values are ignored and an empty/all-NULL frame returns
+zero. Each active value has an exact multiplicity count, so duplicate values
+are removed only after their last contribution expires.
+
+The implementation remains append-only, requires monotonic `int64` order
+keys, supports ascending and descending input, and emits exact retractions and
+replacements for late peers with the same order key. It does not provide
+arbitrary updates or deletes. The measured materialized comparison and memory
+tradeoff are recorded in `BENCHMARK.md`.

@@ -7803,3 +7803,39 @@ commit-m065n-incremental-range-window:
 .PHONY: push-m065n-incremental-range-window
 push-m065n-incremental-range-window:
 	bash ./scripts/push-m065n-incremental-range-window.sh
+
+.PHONY: inspect-sql-window-ideas-now
+inspect-sql-window-ideas-now:
+	bash ./scripts/inspect-sql-window-ideas-now.sh
+
+.PHONY: benchmark-m065o-incremental-range-distinct
+benchmark-m065o-incremental-range-distinct:
+	bash ./scripts/benchmark-m065o-incremental-range-distinct.sh
+
+.PHONY: test-m065o-incremental-range-distinct
+test-m065o-incremental-range-distinct:
+	bash ./scripts/test-m065o-incremental-range-distinct.sh
+
+.PHONY: format-m065o-incremental-range-distinct
+format-m065o-incremental-range-distinct:
+	bash ./scripts/format-m065o-incremental-range-distinct.sh
+
+.PHONY: test-race-m065o-incremental-range-distinct
+test-race-m065o-incremental-range-distinct:
+	bash ./scripts/test-race-m065o-incremental-range-distinct.sh
+
+.PHONY: vet-m065o-incremental-range-distinct
+vet-m065o-incremental-range-distinct:
+	bash ./scripts/vet-m065o-incremental-range-distinct.sh
+
+.PHONY: review-m065o-incremental-range-distinct
+review-m065o-incremental-range-distinct:
+	bash ./scripts/review-m065o-incremental-range-distinct.sh
+
+.PHONY: commit-m065o-incremental-range-distinct
+commit-m065o-incremental-range-distinct:
+	bash ./scripts/commit-m065o-incremental-range-distinct.sh
+
+.PHONY: push-m065o-incremental-range-distinct
+push-m065o-incremental-range-distinct:
+	bash ./scripts/push-m065o-incremental-range-distinct.sh

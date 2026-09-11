@@ -198,3 +198,11 @@ monotonic deque over the active frame. Peer rows are updated together, NULL
 values are ignored, and empty frames return NULL. The existing append-only and
 monotonic-order contract remains explicit. See
 [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).
+## M065o: Peer-Aware Incremental `RANGE` Distinct Counts
+
+Adopted exact incremental `COUNT(DISTINCT int64)` maintenance for numeric
+`RANGE` frames. The active queue provides expiry order and a value-to-
+multiplicity map preserves duplicates without rescanning the frame. NULLs are
+ignored, peer replacements remain differential, and ascending/descending
+partitioned reference tests cover the contract. See
+[`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).

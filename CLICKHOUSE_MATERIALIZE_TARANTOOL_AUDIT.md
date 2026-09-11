@@ -212,3 +212,10 @@ expired entries are removed by sequence, and all rows in an equal-order peer
 group receive the same result. NULL values and descending order are covered by
 tests. This is intentionally limited to append-only monotonic input; general
 late-data maintenance remains open.
+### M065o: Incremental `RANGE` `COUNT(DISTINCT)`
+
+Implemented exact peer-aware `COUNT(DISTINCT int64)` for bounded numeric
+`RANGE` frames. A multiplicity map supports duplicate values and exact expiry
+without a frame rescan; NULL, peer, ascending, descending, and atomic
+validation cases are tested. This remains an append-only capability with
+explicit monotonic ordering, not a general late-data arrangement.
