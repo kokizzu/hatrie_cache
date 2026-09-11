@@ -19621,3 +19621,112 @@ Pebble enabled hit:
 1638 539 9
 1642 538 9
 ```
+
+## MZ-042 materialized-view dependency invalidation
+
+This benchmark compares the previous full-registry dependency scan with the
+reverse source-to-view index. Five `-benchmem` samples were collected on
+`linux/amd64`, AMD Ryzen 9 5950X. Each case changes one source against the
+indicated number of registered views; `one-match` refreshes one view and
+`no-match` refreshes none.
+
+| Views | Case | Scan median | Indexed median | Relative | Heap / allocs |
+| ---: | --- | ---: | ---: | --- | --- |
+| 8 | one match | 4,592 ns/op | 3,936 ns/op | 1.17x faster | 5,976 -> 3,960 B / 27 -> 27 |
+| 8 | no match | 664.4 ns/op | 131.6 ns/op | 5.05x faster | 2,328 -> 24 B / 2 -> 1 |
+| 1,024 | one match | 101,225 ns/op | 4,846 ns/op | 20.89x faster | 282,201 -> 3,960 B / 27 -> 27 |
+| 1,024 | no match | 90,684 ns/op | 133.9 ns/op | 677x faster | 278,552 -> 24 B / 2 -> 1 |
+| 4,096 | one match | 381,645 ns/op | 4,645 ns/op | 82.11x faster | 1,117,788 -> 3,960 B / 27 -> 27 |
+| 4,096 | no match | 375,706 ns/op | 132.1 ns/op | 2,844x faster | 1,114,136 -> 24 B / 2 -> 1 |
+
+Raw baseline samples (`ns/op B/op allocs/op`):
+
+```text
+8 one-match:
+4592 5976 27
+4608 5976 27
+4389 5976 27
+4511 5976 27
+4717 5976 27
+
+8 no-match:
+664.6 2328 2
+686.2 2328 2
+658.6 2328 2
+663.4 2328 2
+664.4 2328 2
+
+1024 one-match:
+104442 282202 27
+104006 282201 27
+100673 282201 27
+99414 282201 27
+101225 282202 27
+
+1024 no-match:
+92127 278552 2
+90604 278552 2
+86983 278552 2
+90684 278552 2
+91383 278552 2
+
+4096 one-match:
+383300 1117790 27
+400157 1117788 27
+381645 1117790 27
+367075 1117788 27
+376251 1117788 27
+
+4096 no-match:
+362459 1114136 2
+356277 1114136 2
+375706 1114136 2
+381732 1114136 2
+376564 1114136 2
+```
+
+Raw indexed samples:
+
+```text
+8 one-match:
+3882 3960 27
+3947 3960 27
+3905 3960 27
+3977 3960 27
+3936 3960 27
+
+8 no-match:
+130.0 24 1
+133.0 24 1
+131.5 24 1
+131.6 24 1
+131.9 24 1
+
+1024 one-match:
+4751 3960 27
+4935 3960 27
+4846 3960 27
+4866 3960 27
+4805 3960 27
+
+1024 no-match:
+137.3 24 1
+133.8 24 1
+133.6 24 1
+133.9 24 1
+135.1 24 1
+
+4096 one-match:
+4720 3960 27
+4427 3960 27
+4645 3960 27
+4638 3960 27
+4757 3960 27
+
+4096 no-match:
+131.3 24 1
+133.3 24 1
+133.3 24 1
+132.1 24 1
+131.6 24 1
+```

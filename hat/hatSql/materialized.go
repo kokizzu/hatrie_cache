@@ -35,8 +35,9 @@ type MaterializedView struct {
 // MaterializedViews stores named query-result snapshots. It is safe for
 // concurrent reads and refreshes.
 type MaterializedViews struct {
-	mu    sync.RWMutex
-	views map[string]materializedView
+	mu         sync.RWMutex
+	views      map[string]materializedView
+	dependents map[string][]string
 }
 
 type materializedView struct {
@@ -48,7 +49,10 @@ type materializedView struct {
 
 // NewMaterializedViews creates an empty materialized-view registry.
 func NewMaterializedViews() *MaterializedViews {
-	return &MaterializedViews{views: make(map[string]materializedView)}
+	return &MaterializedViews{
+		views:      make(map[string]materializedView),
+		dependents: make(map[string][]string),
+	}
 }
 
 // Create evaluates and publishes a new materialized view. The view name must
@@ -68,6 +72,12 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 
 	views.mu.Lock()
 	defer views.mu.Unlock()
+	if views.views == nil {
+		views.views = make(map[string]materializedView)
+	}
+	if views.dependents == nil {
+		views.dependents = make(map[string][]string)
+	}
 	if _, exists := views.views[definition.Name]; exists {
 		return MaterializedViewStatus{}, fmt.Errorf("materialized view %q already exists", definition.Name)
 	}
@@ -85,6 +95,9 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 			Status: status,
 			Result: cloneQueryResult(result),
 		},
+	}
+	for _, dependency := range definition.Dependencies {
+		views.dependents[dependency] = append(views.dependents[dependency], definition.Name)
 	}
 	return cloneMaterializedViewStatus(status), nil
 }
@@ -121,9 +134,15 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 	}
 
 	views.mu.RLock()
-	candidates := make([]materializedView, 0, len(views.views))
-	for _, view := range views.views {
-		if materializedViewDependsOn(view.definition, changedSet) {
+	candidateNames := make(map[string]struct{})
+	for dependency := range changedSet {
+		for _, name := range views.dependents[dependency] {
+			candidateNames[name] = struct{}{}
+		}
+	}
+	candidates := make([]materializedView, 0, len(candidateNames))
+	for name := range candidateNames {
+		if view, exists := views.views[name]; exists {
 			candidates = append(candidates, view)
 		}
 	}

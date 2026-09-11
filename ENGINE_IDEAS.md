@@ -123,7 +123,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-039 | General incremental distinct | Distinct maintenance is not a general relation operator for arbitrary updates. | Medium |
 | MZ-040 | Incremental percentile | Percentiles are not maintained with a bounded or mergeable differential sketch. | High |
 | MZ-041 | View freshness SLA | Implemented as optional per-task max-staleness status for managed materialized-view and rollup refreshes; existing scheduling remains unchanged by default. | Medium |
-| MZ-042 | Dependency invalidation graph | View invalidation does not expose a durable dependency graph and topological refresh plan. | Medium |
+| MZ-042 | Dependency invalidation graph | Implemented as an automatic reverse source-to-view index for `MaterializedViews.RefreshChanged`; affected candidates are deduplicated and still sorted/published atomically. | Medium |
 | MZ-043 | Transactional DDL dependencies | DDL cannot atomically create/alter a source, view, index, and dependent sink plan. | High |
 | MZ-044 | Costed dataflow explanation | Explain output lacks arrangement cost, frontier, and memory estimates. | Medium |
 | MZ-045 | Workload plan equivalence | Query fingerprints are not linked to canonical plan and arrangement reuse decisions. | Low |

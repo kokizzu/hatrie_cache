@@ -9009,3 +9009,43 @@ commit-tt017:
 .PHONY: push-tt017
 push-tt017:
 	@bash ./scripts/push-tt017.sh
+
+.PHONY: test-mz042-dependency-graph
+test-mz042-dependency-graph:
+	@bash ./scripts/test-mz042-dependency-graph.sh
+
+.PHONY: format-mz042-dependency-graph
+format-mz042-dependency-graph:
+	@bash ./scripts/format-mz042-dependency-graph.sh
+
+.PHONY: benchmark-mz042-dependency-graph
+benchmark-mz042-dependency-graph:
+	@bash ./scripts/benchmark-mz042-dependency-graph.sh
+
+.PHONY: benchmark-mz042-baseline
+benchmark-mz042-baseline:
+	@bash ./scripts/benchmark-mz042-baseline.sh
+
+.PHONY: test-race-mz042-dependency-graph
+test-race-mz042-dependency-graph:
+	@bash ./scripts/test-race-mz042-dependency-graph.sh
+
+.PHONY: vet-mz042-dependency-graph
+vet-mz042-dependency-graph:
+	@bash ./scripts/vet-mz042-dependency-graph.sh
+
+.PHONY: verify-mz042-docs
+verify-mz042-docs:
+	@bash ./scripts/verify-mz042-docs.sh
+
+.PHONY: review-mz042-dependency-graph
+review-mz042-dependency-graph:
+	@bash ./scripts/review-mz042-dependency-graph.sh
+
+.PHONY: commit-mz042-dependency-graph
+commit-mz042-dependency-graph:
+	@bash ./scripts/commit-mz042-dependency-graph.sh
+
+.PHONY: push-mz042-dependency-graph
+push-mz042-dependency-graph:
+	@bash ./scripts/push-mz042-dependency-graph.sh
