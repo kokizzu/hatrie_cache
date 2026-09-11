@@ -748,3 +748,6 @@ For each future unchecked item:
 - [x] M065p Peer-aware numeric `RANGE` `AVG(int64)` maintenance reusing
   checked sum/count state, with NULL, peer, descending, overflow, and
   deterministic reference coverage.
+- [x] M065q Generic peer-aware numeric `RANGE` `FIRST_VALUE`/`LAST_VALUE`
+  maintenance, with NULL-respecting values, peer retractions, expiry,
+  descending order, and partitioned reference coverage.

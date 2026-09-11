@@ -225,3 +225,9 @@ Implemented peer-aware `AVG(int64)` for bounded numeric RANGE frames. It reuses
 checked incremental sum/count arithmetic, ignores NULL values, handles
 descending input and peer replacement, and preserves atomic overflow failure.
 The append-only monotonic-order contract remains explicit.
+### M065q: Incremental `RANGE` `FIRST_VALUE`/`LAST_VALUE`
+
+Implemented generic peer-aware numeric RANGE boundary values. FIRST_VALUE uses
+bounded active-frame retention; LAST_VALUE keeps only the current peer group
+and emits exact peer replacements. NULL-respecting values, descending order,
+expiry, callback atomicity, and partitioned reference tests are included.

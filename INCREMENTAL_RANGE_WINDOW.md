@@ -112,3 +112,15 @@ The append-only, monotonic-order, ascending/descending, and peer-replacement
 constraints remain the same as the other numeric RANGE kinds. Sum overflow is
 reported atomically, so a failed append can be retried without losing prior
 state. See `BENCHMARK.md` for the measured cumulative-byte tradeoff.
+## M065q: Incremental `RANGE` `FIRST_VALUE`/`LAST_VALUE`
+
+`IncrementalRangeBoundaryWindow` adds generic peer-aware numeric RANGE boundary
+windows for `IncrementalRangeFirstValue` and `IncrementalRangeLastValue`.
+`ValueKey` may return any value, including `nil`, and SQL NULL is respected.
+
+`FIRST_VALUE` maintains a compact queue of active frame values and removes
+expired rows from the numeric bound. `LAST_VALUE` tracks only the current peer
+group: a later row at the same order key emits exact retractions and
+replacements for earlier peers, while a later non-peer cannot change their
+RANGE frame. Input remains append-only and monotonic within each partition.
+See `BENCHMARK.md` for the FIRST_VALUE measurement.

@@ -213,3 +213,10 @@ combining the existing checked sum and valid-count state. NULL values are
 ignored, peers receive exact differential replacements, and overflow remains
 atomic. Ascending/descending partitioned reference tests cover the behavior.
 See [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).
+## M065q: Peer-Aware Incremental `RANGE` Boundary Values
+
+Adopted bounded numeric RANGE boundary maintenance for generic values. The
+FIRST_VALUE path uses an active expiry queue; LAST_VALUE updates only equal-
+order peers, preserving exact differential semantics without retaining all
+older rows. NULLs, descending order, expiry, and partitioned reference cases
+are covered. See [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).

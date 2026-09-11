@@ -7871,3 +7871,35 @@ commit-m065p-incremental-range-average:
 .PHONY: push-m065p-incremental-range-average
 push-m065p-incremental-range-average:
 	bash ./scripts/push-m065p-incremental-range-average.sh
+
+.PHONY: benchmark-m065q-incremental-range-boundary
+benchmark-m065q-incremental-range-boundary:
+	bash ./scripts/benchmark-m065q-incremental-range-boundary.sh
+
+.PHONY: test-m065q-incremental-range-boundary
+test-m065q-incremental-range-boundary:
+	bash ./scripts/test-m065q-incremental-range-boundary.sh
+
+.PHONY: format-m065q-incremental-range-boundary
+format-m065q-incremental-range-boundary:
+	bash ./scripts/format-m065q-incremental-range-boundary.sh
+
+.PHONY: test-race-m065q-incremental-range-boundary
+test-race-m065q-incremental-range-boundary:
+	bash ./scripts/test-race-m065q-incremental-range-boundary.sh
+
+.PHONY: vet-m065q-incremental-range-boundary
+vet-m065q-incremental-range-boundary:
+	bash ./scripts/vet-m065q-incremental-range-boundary.sh
+
+.PHONY: review-m065q-incremental-range-boundary
+review-m065q-incremental-range-boundary:
+	bash ./scripts/review-m065q-incremental-range-boundary.sh
+
+.PHONY: commit-m065q-incremental-range-boundary
+commit-m065q-incremental-range-boundary:
+	bash ./scripts/commit-m065q-incremental-range-boundary.sh
+
+.PHONY: push-m065q-incremental-range-boundary
+push-m065q-incremental-range-boundary:
+	bash ./scripts/push-m065q-incremental-range-boundary.sh

@@ -18165,3 +18165,49 @@ BenchmarkM065pRangeIncremental-32:
 The CPU ratio against the pre-change baseline is 2.75x; the same-run control
 ratio is 2.29x. `B/op` is cumulative allocation volume, not retained or peak
 heap.
+## Peer-Aware Incremental `RANGE` `FIRST_VALUE`
+
+M065q compares materialized FIRST_VALUE evaluation with the incremental active
+queue over the same 4,096-row workload and a preceding bound of 64. The
+optimized path is faster, allocates substantially fewer objects, and retains
+a moderate cumulative-byte increase. LAST_VALUE has the same API and is
+covered by correctness tests; this benchmark uses FIRST_VALUE because it is
+the path that maintains an expiring frame.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change materialized FIRST_VALUE | 5,127,095 | 1,732,925 | 28,212 | baseline |
+| Post-change materialized FIRST_VALUE control | 5,110,496 | 1,732,924 | 28,212 | same-run control |
+| Incremental `RANGE` FIRST_VALUE | 2,092,419 | 2,465,956 | 8,271 | 2.45x faster than pre-change, 2.44x faster than same-run control, 42.3% higher cumulative bytes, 3.41x fewer allocations |
+
+Raw pre-change baseline:
+
+```text
+BenchmarkM065qRangeNaiveMaterialized-32:
+5127095 ns/op 1732948 B/op 28212 allocs/op
+5217166 ns/op 1732925 B/op 28212 allocs/op
+5112866 ns/op 1732923 B/op 28212 allocs/op
+5059068 ns/op 1732925 B/op 28212 allocs/op
+5172028 ns/op 1732924 B/op 28212 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkM065qRangeNaiveMaterialized-32:
+5106763 ns/op 1732924 B/op 28212 allocs/op
+5104597 ns/op 1732923 B/op 28212 allocs/op
+5110496 ns/op 1732924 B/op 28212 allocs/op
+5130759 ns/op 1732923 B/op 28212 allocs/op
+5123021 ns/op 1732925 B/op 28212 allocs/op
+
+BenchmarkM065qRangeIncremental-32:
+2092419 ns/op 2465958 B/op 8271 allocs/op
+2048471 ns/op 2465956 B/op 8271 allocs/op
+2076751 ns/op 2465954 B/op 8271 allocs/op
+2129472 ns/op 2465956 B/op 8271 allocs/op
+2164196 ns/op 2465964 B/op 8271 allocs/op
+```
+
+The ratios use median-to-median values. `B/op` is cumulative allocation
+volume, not retained or peak heap.

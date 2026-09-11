@@ -6,3 +6,5 @@ git show HEAD:hat/hatSql/incremental_frame_window.go
 git show HEAD:hat/hatSql/m065i_incremental_distinct_frame_window_benchmark_test.go
 git show HEAD:hat/hatSql/m065m_incremental_range_window_benchmark_test.go
 git show HEAD:hat/hatSql/m065m_incremental_range_window_test.go
+git show HEAD:hat/hatSql/incremental_nth_value_window.go
+git show HEAD:hat/hatSql/incremental_boundary_window.go
