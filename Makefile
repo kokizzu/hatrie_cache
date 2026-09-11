@@ -9405,6 +9405,38 @@ commit-tt050-sql-planner-statistics:
 test-ch049-external-dictionary:
 	bash scripts/test-ch049-external-dictionary.sh
 
+.PHONY: test-ch032-query-profiler
+test-ch032-query-profiler:
+	bash scripts/test-ch032-query-profiler.sh
+
+.PHONY: benchmark-ch032-query-profiler
+benchmark-ch032-query-profiler:
+	bash scripts/benchmark-ch032-query-profiler.sh
+
+.PHONY: format-ch032-query-profiler
+format-ch032-query-profiler:
+	bash scripts/format-ch032-query-profiler.sh
+
+.PHONY: test-race-ch032-query-profiler
+test-race-ch032-query-profiler:
+	bash scripts/test-race-ch032-query-profiler.sh
+
+.PHONY: verify-ch032-query-profiler-docs
+verify-ch032-query-profiler-docs:
+	bash scripts/verify-ch032-query-profiler-docs.sh
+
+.PHONY: review-ch032-query-profiler
+review-ch032-query-profiler:
+	bash scripts/review-ch032-query-profiler.sh
+
+.PHONY: commit-ch032-query-profiler
+commit-ch032-query-profiler:
+	bash scripts/commit-ch032-query-profiler.sh
+
+.PHONY: push-ch032-query-profiler
+push-ch032-query-profiler:
+	bash scripts/push-ch032-query-profiler.sh
+
 .PHONY: format-ch049-external-dictionary
 format-ch049-external-dictionary:
 	bash scripts/format-ch049-external-dictionary.sh

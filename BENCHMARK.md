@@ -1,5 +1,57 @@
 # Benchmark
 
+## CH-032: Query Profiler Samples
+
+The benchmark compares the opt-in profiler recording path with the no-op
+accounting baseline. Recording benchmarks pre-initialize the bounded per-query
+ring; snapshot benchmarks include the defensive copy returned to callers.
+
+### Raw Samples
+
+~~~text
+Test-first baseline before implementation:
+BenchmarkCH032BaselineProfileNoop-32  1000000000  0.4823 ns/op  0 B/op  0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32  1000000000  0.4748 ns/op  0 B/op  0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32  1000000000  0.4751 ns/op  0 B/op  0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32  1000000000  0.4756 ns/op  0 B/op  0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32  1000000000  0.4814 ns/op  0 B/op  0 allocs/op
+
+Post-implementation benchmark:
+BenchmarkCH032BaselineProfileNoop-32         1000000000  0.4776 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32         1000000000  0.4851 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32         1000000000  0.4879 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32         1000000000  0.4785 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032BaselineProfileNoop-32         1000000000  0.4837 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecord-32           44332551  27.47 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecord-32           43838508  27.30 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecord-32           44840439  27.23 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecord-32           43600519  26.89 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecord-32           43925404  27.27 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecordSampled-32    90456663  13.13 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecordSampled-32    91003899  13.26 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecordSampled-32    92074784  13.40 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecordSampled-32    85822359  12.60 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerRecordSampled-32    86201396  13.06 ns/op    0 B/op    0 allocs/op
+BenchmarkCH032QueryProfilerProfile-32           1663538  721.7 ns/op  4864 B/op    1 allocs/op
+BenchmarkCH032QueryProfilerProfile-32           1643199  698.2 ns/op  4864 B/op    1 allocs/op
+BenchmarkCH032QueryProfilerProfile-32           1757286  715.9 ns/op  4864 B/op    1 allocs/op
+BenchmarkCH032QueryProfilerProfile-32           1931449  673.4 ns/op  4864 B/op    1 allocs/op
+BenchmarkCH032QueryProfilerProfile-32           1816312  722.2 ns/op  4864 B/op    1 allocs/op
+~~~
+
+### Median Comparison
+
+| Operation | Median | Bytes/op | Allocs/op | Relative to no-op |
+| --- | ---: | ---: | ---: | ---: |
+| No-op sample accounting baseline | 0.484 ns | 0 | 0 | 1.00x |
+| Captured `Record` | 27.27 ns | 0 | 0 | 56.4x slower |
+| `SampleEvery=16` `Record` | 13.13 ns | 0 | 0 | 27.1x slower |
+| 64-sample `Profile` copy | 715.9 ns | 4,864 | 1 | Inspection path |
+
+This is an opt-in diagnostics API, so these costs are not added to ordinary
+SQL execution. Recording retains bounded state without per-sample allocation;
+inspection allocates a defensive copy so readers cannot mutate live state.
+
 ## CH-049: Refreshable External Dictionaries
 
 The benchmark compares the new dictionary's direct read path with the raw Go

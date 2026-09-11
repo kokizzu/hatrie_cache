@@ -58,7 +58,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-029 | User/key quotas | No rolling per-user query/bytes/CPU quota enforcement. | Medium |
 | CH-030 | Query complexity limits | Partially adopted: SQL options already bound rows, joins, results, bytes, skew, and now total `GROUP BY` keys; per-expression and CPU quotas remain future work. | Medium |
 | CH-031 | Persistent query log | Implemented as an opt-in privacy-safe newline-delimited JSON log attached to `SQLQueryManager`; terminal status survives process restart without retaining SQL text, sources, parameters, or cancellation reasons. | Low |
-| CH-032 | Query profiler samples | No sampled operator CPU/blocking profile attached to a query ID. | Medium |
+| CH-032 | Query profiler samples | Adopted as an opt-in bounded `hatSql` API keyed by query ID, with configurable sampling, CPU/blocking/row/byte fields, deterministic snapshots, and no default executor overhead. | Done |
 | CH-033 | Distributed query fan-out | One query cannot plan and merge reads from multiple independent nodes. | High |
 | CH-034 | Parallel replicas | No coordinated replica reads that divide ranges and merge ordered results. | High |
 | CH-035 | Remote shard pruning | No shard-level predicate routing before distributed execution. | High |

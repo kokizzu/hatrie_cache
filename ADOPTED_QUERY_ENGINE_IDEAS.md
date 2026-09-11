@@ -5,6 +5,7 @@
 | Source | Idea | Status | Evidence |
 | --- | --- | --- | --- |
 | ClickHouse | Refreshable external dictionaries | Adopted as an opt-in SQL function registry | `SQLExternalDictionary` publishes immutable snapshots atomically, retains the last good snapshot across bounded refresh failures, supports `DICT_GET`, `DICT_GET_OR_DEFAULT`, and `DICT_HAS`, and keeps per-lookup counters disabled by default. See [SQL_EXTERNAL_DICTIONARIES.md](SQL_EXTERNAL_DICTIONARIES.md) and [BENCHMARK.md#ch-049-refreshable-external-dictionaries](BENCHMARK.md#ch-049-refreshable-external-dictionaries). |
+| ClickHouse | Query profiler samples | Adopted as an opt-in bounded API | `SQLQueryProfiler` stores sampled operator CPU/blocking/row/byte observations by query ID, evicts old query IDs and samples at configured bounds, and leaves ordinary SQL execution unchanged unless callers explicitly record samples. See [SQL_QUERY_PROFILER.md](SQL_QUERY_PROFILER.md) and [BENCHMARK.md#ch-032-query-profiler-samples](BENCHMARK.md#ch-032-query-profiler-samples). |
 
 This matrix records the ClickHouse, Materialize, and Tarantool ideas assessed
 for `hatrie_cache`. An idea is adopted only when it preserves exact query or

@@ -72,6 +72,7 @@ security guidance before exposing it on a network.
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
 - Opt-in SQL text token-prefix indexes: [SQL_TEXT_PREFIX_INDEX.md](SQL_TEXT_PREFIX_INDEX.md)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
+- Opt-in bounded SQL query profiler samples: [SQL_QUERY_PROFILER.md](SQL_QUERY_PROFILER.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Transactional SQL trigger orchestration: [SQL_TRIGGERS.md](SQL_TRIGGERS.md)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
