@@ -20683,3 +20683,40 @@ The exact command was:
 ```sh
 make benchmark-mz014-upsert
 ```
+
+## MZ-015 CDC Envelope Normalization
+
+This benchmark compares the duplicated manual alias/shape dispatch that a
+connector previously needed with `hatSql.NormalizeCDCEnvelope`. Both paths
+process the same 10,000 valid events: 2,500 creates, 2,500 updates, 2,500
+deletes, and 2,500 snapshot reads over 1,000 keys. Both paths construct the
+same result shape and borrow the same row maps. Five samples were collected on
+an AMD Ryzen 9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `MZ015BaselineManual` | 229895, 229521, 250086, 236718, 215387 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `MZ015Normalize` | 234086, 233549, 236074, 254769, 245395 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative to manual adapter |
+| --- | ---: | ---: | ---: | --- |
+| Manual alias and shape dispatch | 229895 | 0 | 0 | `1.00x` |
+| Shared `NormalizeCDCEnvelope` | 236074 | 0 | 0 | `1.03x` CPU, `2.7%` slower, same memory |
+
+The shared boundary is a correctness and integration improvement rather than a
+raw throughput optimization. It centralizes aliases and rejects invalid
+before/after combinations while adding only about `2.7%` CPU in this
+allocation-free in-memory workload. JSON decoding is intentionally separate;
+its memory and CPU depend on payload size and are not hidden in this
+normalization comparison. Row maps are borrowed, so no additional bandwidth
+or retained copy is introduced by normalization.
+
+The exact command was:
+
+```sh
+make benchmark-mz015-cdc
+```

@@ -4177,7 +4177,20 @@ contract and its scope.
 `INSERT`, `UPDATE`, or `DELETE` envelopes with key and before/after rows.
 Arrangements and projections can consume the same validated shape. External
 broker offsets, source transaction IDs, and acknowledgements remain separate.
-See [CDC_ENVELOPES.md](CDC_ENVELOPES.md) for the envelope contract.
+
+For dynamic external change streams, `hatSql.CDCEnvelope` and
+`hatSql.NormalizeCDCEnvelope` provide the same canonical operation names
+without converting rows to a fixed schema. Debezium-style `c`, `r`, `u`, and
+`d`, plus common `create`, `snapshot`, `insert`, `update`, `delete`, `remove`,
+`replace`, and `upsert` spellings are accepted. Inserts require `After`,
+updates require both `Before` and `After`, and deletes require a key with no
+`After` row. `hatSql.DecodeCDCEnvelopeJSON` accepts either `op` or
+`operation`. The hot path borrows row maps, does not mutate them, and measured
+zero additional bytes or allocations; callers that retain mutable source maps
+must copy them at their own ownership boundary. Source-specific conversion
+and differential `diff` interpretation remain connector-owned. See
+[CDC_ENVELOPES.md](CDC_ENVELOPES.md) and the
+[MZ-015 benchmark](BENCHMARK.md#mz-015-cdc-envelope-normalization).
 
 ## Parallel NDJSON Input Parsing
 

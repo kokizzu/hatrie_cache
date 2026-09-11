@@ -9690,3 +9690,24 @@ commit-mz014:
 	bash scripts/commit-mz014.sh
 push-mz014:
 	bash scripts/push-mz014.sh
+
+benchmark-mz015-cdc:
+	bash scripts/benchmark-mz015-cdc.sh
+format-mz015-cdc:
+	bash scripts/format-mz015-cdc.sh
+test-mz015-cdc:
+	bash scripts/test-mz015-cdc.sh
+test-race-mz015-cdc:
+	bash scripts/test-race-mz015-cdc.sh
+test-mz015-broad:
+	bash scripts/test-mz015-broad.sh
+verify-mz015-docs:
+	bash scripts/verify-mz015-docs.sh
+review-mz015:
+	bash scripts/review-mz015.sh
+status-mz015:
+	bash scripts/status-mz015.sh
+commit-mz015:
+	bash scripts/commit-mz015.sh
+push-mz015:
+	bash scripts/push-mz015.sh
