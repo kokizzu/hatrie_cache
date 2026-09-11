@@ -18997,3 +18997,75 @@ The first implementation also computed source and result byte counters for
 the explain step and measured 3.4 ms, 1.76 MB, and 40,973 allocations. That
 was rejected during the same goal; byte accounting is now done only when the
 explicit `MaxResultBytes` budget requires it.
+
+## M052q automatic native aggregate and distinct
+
+This feature automatically selects the existing native batch runtime for
+global aggregates and direct-field `DISTINCT` over ordinary row resolvers.
+Each comparison uses a compiled query, the same 4,096-row resolver, five
+benchmark samples, and `-benchmem`. The fallback sets
+`SQLQueryOptions.DisableNativeDataflow = true`. The pre-feature samples were
+the same materialized executor under both benchmark names.
+
+| Operator | Before median | Automatic median | Improvement |
+| --- | --- | --- | --- |
+| Global `COUNT` + `SUM` | 1,234,614 ns, 2,423,755 B, 12,321 allocs | 192,454 ns, 2,192 B, 18 allocs | 6.86x faster, 1,106x less heap, 684.50x fewer allocations |
+| One-field `DISTINCT` | 3,389,196 ns, 4,155,941 B, 36,900 allocs | 285,685 ns, 267,592 B, 539 allocs | 10.90x faster, 15.53x less heap, 68.46x fewer allocations |
+
+Final fallback control medians were 1,319,361 ns, 2,423,753 B, and 12,321
+allocations for the aggregate query, and 3,114,669 ns, 4,155,845 B, and
+36,900 allocations for the distinct query.
+
+Raw pre-feature samples (`ns/op B/op allocs/op`):
+
+```text
+aggregate automatic name:
+1331502 2423768 12321
+1226851 2423753 12321
+1263902 2423759 12321
+1234614 2423755 12321
+1174991 2423752 12321
+
+distinct automatic name:
+3246243 4155986 36900
+3443649 4155845 36900
+3446270 4155806 36900
+3353259 4156022 36900
+3389196 4155941 36900
+```
+
+Raw final automatic samples:
+
+```text
+aggregate:
+189067 2192 18
+191585 2192 18
+192454 2192 18
+192875 2192 18
+209491 2192 18
+
+distinct:
+280947 267592 539
+284149 267592 539
+287894 267592 539
+285685 267592 539
+286827 267592 539
+```
+
+Raw final fallback samples:
+
+```text
+aggregate:
+1450727 2423751 12321
+1257159 2423760 12321
+1253633 2423752 12321
+1403458 2423754 12321
+1319361 2423753 12321
+
+distinct:
+3251660 4155845 36900
+3114669 4155866 36900
+3027050 4155808 36900
+3141729 4156002 36900
+3075256 4155756 36900
+```

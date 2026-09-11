@@ -397,6 +397,12 @@ Materialize's Timely/Differential Dataflow runtime.
   existing native batch runtime by default; specialized resolvers and richer
   shapes retain their established paths, and `DisableNativeDataflow` keeps an
   explicit fallback. See [SQL_AUTO_NATIVE_DATAFLOW.md](SQL_AUTO_NATIVE_DATAFLOW.md).
+- [x] M052q Automatic safe aggregate and distinct native dataflow selection.
+  Global `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` aggregates and one- or two-field
+  `DISTINCT` projections over ordinary row resolvers use the existing native
+  batch runtime by default; grouped, ordered, and specialized-resolver paths
+  retain their established executor. See
+  [SQL_AUTO_NATIVE_OPERATORS.md](SQL_AUTO_NATIVE_OPERATORS.md).
 - [x] M052a Lower compiled logical stages into a lazy, versioned immutable
   `SQLDataflowPlan` with defensive snapshots. M052b adds caller-supplied
   executable fragment composition. See

@@ -3,6 +3,10 @@ set -euo pipefail
 
 printf '%s\n' '===== M052p implementation ====='
 sed -n '1,220p' hat/hatSql/m052p_auto_native_dataflow.go
+printf '%s\n' '===== Existing native operator implementation ====='
+sed -n '1,320p' hat/hatSql/m052c_native_dataflow.go
+sed -n '1,180p' hat/hatSql/m052c_native_dataflow_test.go
+sed -n '1,150p' hat/hatSql/m052c_native_dataflow_benchmark_test.go
 printf '%s\n' '===== Commit file list ====='
 sed -n '1,100p' scripts/commit-m052p-auto-native-dataflow.sh
 printf '%s\n' '===== Query execution observation state ====='

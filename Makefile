@@ -8485,3 +8485,35 @@ commit-m052p-auto-native-dataflow:
 .PHONY: push-m052p-auto-native-dataflow
 push-m052p-auto-native-dataflow:
 	bash ./scripts/push-m052p-auto-native-dataflow.sh
+
+.PHONY: test-m052q-auto-native-operators
+test-m052q-auto-native-operators:
+	bash ./scripts/test-m052q-auto-native-operators.sh
+
+.PHONY: benchmark-m052q-auto-native-operators
+benchmark-m052q-auto-native-operators:
+	bash ./scripts/benchmark-m052q-auto-native-operators.sh
+
+.PHONY: format-m052q-auto-native-operators
+format-m052q-auto-native-operators:
+	bash ./scripts/format-m052q-auto-native-operators.sh
+
+.PHONY: test-race-m052q-auto-native-operators
+test-race-m052q-auto-native-operators:
+	bash ./scripts/test-race-m052q-auto-native-operators.sh
+
+.PHONY: vet-m052q-auto-native-operators
+vet-m052q-auto-native-operators:
+	bash ./scripts/vet-m052q-auto-native-operators.sh
+
+.PHONY: review-m052q-auto-native-operators
+review-m052q-auto-native-operators:
+	bash ./scripts/review-m052q-auto-native-operators.sh
+
+.PHONY: commit-m052q-auto-native-operators
+commit-m052q-auto-native-operators:
+	bash ./scripts/commit-m052q-auto-native-operators.sh
+
+.PHONY: push-m052q-auto-native-operators
+push-m052q-auto-native-operators:
+	bash ./scripts/push-m052q-auto-native-operators.sh
