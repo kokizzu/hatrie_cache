@@ -306,12 +306,13 @@ func sortedStringsContains(values []string, value string) bool {
 }
 
 type LevelDBStore struct {
-	mu                    sync.RWMutex
-	path                  string
-	db                    *leveldb.DB
-	format                StorageFormat
-	recordCipher          *hatCodec.StreamCipher
-	storageSizeLimitBytes atomic.Int64
+	mu                      sync.RWMutex
+	path                    string
+	db                      *leveldb.DB
+	format                  StorageFormat
+	recordCipher            *hatCodec.StreamCipher
+	storageSizeLimitBytes   atomic.Int64
+	storageDiskReserveBytes atomic.Int64
 }
 
 func OpenLevelDBStore(path string) (*LevelDBStore, error) {
@@ -370,6 +371,9 @@ func (store *LevelDBStore) saveWithJournalSequence(trie *HatTrie, sequence *uint
 	if trie == nil {
 		return ErrNilHatTrie
 	}
+	if err := checkPersistentStorageDiskReserve(store.path, store.storageDiskReserveBytes.Load(), store.Backend()); err != nil {
+		return err
+	}
 	if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
 		return err
 	}
@@ -413,6 +417,9 @@ func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opt
 	keys = normalizeLevelDBDirtyKeys(keys)
 	if len(keys) == 0 {
 		return nil
+	}
+	if err := checkPersistentStorageDiskReserve(store.path, store.storageDiskReserveBytes.Load(), store.Backend()); err != nil {
+		return err
 	}
 	if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
 		return err
@@ -514,6 +521,9 @@ func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []stri
 		}
 	}
 	if len(keys) > 0 {
+		if err := checkPersistentStorageDiskReserve(store.path, store.storageDiskReserveBytes.Load(), store.Backend()); err != nil {
+			return err
+		}
 		if err := checkPersistentStorageSizeLimit(trie, store.format, store.storageSizeLimitBytes.Load(), store.Backend()); err != nil {
 			return err
 		}

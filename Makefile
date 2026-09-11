@@ -8865,3 +8865,39 @@ commit-ch040-arg-extreme:
 .PHONY: push-ch040-arg-extreme
 push-ch040-arg-extreme:
 	@bash ./scripts/push-ch040-arg-extreme.sh
+.PHONY: benchmark-tt016-disk-reserve
+benchmark-tt016-disk-reserve:
+	@bash ./scripts/benchmark-tt016-disk-reserve.sh
+.PHONY: test-tt016-disk-reserve
+test-tt016-disk-reserve:
+	@bash ./scripts/test-tt016-disk-reserve.sh
+.PHONY: test-tt016-cli-config
+test-tt016-cli-config:
+	@bash ./scripts/test-tt016-cli-config.sh
+.PHONY: format-tt016-disk-reserve
+format-tt016-disk-reserve:
+	@bash ./scripts/format-tt016-disk-reserve.sh
+
+.PHONY: verify-tt016-docs
+verify-tt016-docs:
+	@bash ./scripts/verify-tt016-docs.sh
+
+.PHONY: test-race-tt016-disk-reserve
+test-race-tt016-disk-reserve:
+	@bash ./scripts/test-race-tt016-disk-reserve.sh
+
+.PHONY: vet-tt016-disk-reserve
+vet-tt016-disk-reserve:
+	@bash ./scripts/vet-tt016-disk-reserve.sh
+
+.PHONY: review-tt016-disk-reserve
+review-tt016-disk-reserve:
+	@bash ./scripts/review-tt016-disk-reserve.sh
+
+.PHONY: commit-tt016-disk-reserve
+commit-tt016-disk-reserve:
+	@bash ./scripts/commit-tt016-disk-reserve.sh
+
+.PHONY: push-tt016-disk-reserve
+push-tt016-disk-reserve:
+	@bash ./scripts/push-tt016-disk-reserve.sh

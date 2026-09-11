@@ -1,0 +1,10 @@
+package hatriecache
+
+import core "hatrie_cache/hat/hatCache"
+
+const DefaultPersistentStoreDiskReserveBytes = core.DefaultPersistentStoreDiskReserveBytes
+
+var ErrPersistentStorageDiskReserveExceeded = core.ErrPersistentStorageDiskReserveExceeded
+var ErrPersistentStorageDiskReserveUnavailable = core.ErrPersistentStorageDiskReserveUnavailable
+var ConfigurePersistentStoreDiskReserveBytes = core.ConfigurePersistentStoreDiskReserveBytes
+var PersistentStoreDiskReserveBytes = core.PersistentStoreDiskReserveBytes

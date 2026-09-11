@@ -1346,6 +1346,23 @@ func TestParseConfigSeparatesCacheAndStorageSizeLimits(t *testing.T) {
 	}
 }
 
+func TestParseConfigStorageDiskReserve(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-db-storage-disk-reserve-bytes", "8192",
+		"-db-path", t.TempDir(),
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.dbStorageDiskReserveBytes != 8192 {
+		t.Fatalf("db storage disk reserve = %d, want 8192", cfg.dbStorageDiskReserveBytes)
+	}
+	redacted := redactedConfig(cfg)
+	if redacted["db_storage_disk_reserve_bytes"] != int64(8192) {
+		t.Fatalf("redacted disk reserve = %#v, want 8192", redacted["db_storage_disk_reserve_bytes"])
+	}
+}
+
 func TestParseConfigLegacyDBMemoryCapFeedsCacheLimit(t *testing.T) {
 	cfg, err := parseConfig([]string{"-db-memory-cap-bytes", "4096"}, &bytes.Buffer{})
 	if err != nil {
@@ -1393,6 +1410,10 @@ func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 		{
 			name: "storage max bytes",
 			args: []string{"-db-storage-max-bytes", "-1"},
+		},
+		{
+			name: "storage disk reserve bytes",
+			args: []string{"-db-storage-disk-reserve-bytes", "-1"},
 		},
 		{
 			name: "rss cap",

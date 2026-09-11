@@ -14471,6 +14471,36 @@ Memory summary:
 ```
 
 <!-- END GENERATED COMMAND BENCHMARK RAW RESULTS -->
+## Persistent Storage Disk Reserve Admission
+
+This paired benchmark repeatedly saved a small Pebble store. Both cases
+performed successful writes; the enabled case used a one-byte reserve.
+
+| Mode | Median time | Bytes/op | Allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Disabled (`reserve=0`) | 6,787,756 ns | 373,085 | 1,405 | baseline |
+| Enabled (`reserve=1`) | 7,011,204 ns | 371,397 | 1,403 | 1.03x slower |
+
+The enabled guard was about 3.3% slower in this write-heavy benchmark, with no
+meaningful allocation or memory increase. The default `reserve=0` skips the
+filesystem probe, so this is an operational safety feature rather than a
+throughput optimization.
+
+Raw output from `make benchmark-tt016-disk-reserve` (five runs per mode):
+
+```text
+BenchmarkTT016PersistentStoreSave/disabled-32 178 6698011 ns/op 375648 B/op 1410 allocs/op
+BenchmarkTT016PersistentStoreSave/disabled-32 181 6533358 ns/op 373425 B/op 1405 allocs/op
+BenchmarkTT016PersistentStoreSave/disabled-32 178 6894588 ns/op 373085 B/op 1404 allocs/op
+BenchmarkTT016PersistentStoreSave/disabled-32 178 6787756 ns/op 372783 B/op 1405 allocs/op
+BenchmarkTT016PersistentStoreSave/disabled-32 170 6933872 ns/op 370027 B/op 1400 allocs/op
+BenchmarkTT016PersistentStoreSave/enabled-32 174 6870325 ns/op 372502 B/op 1406 allocs/op
+BenchmarkTT016PersistentStoreSave/enabled-32 165 7110028 ns/op 371397 B/op 1403 allocs/op
+BenchmarkTT016PersistentStoreSave/enabled-32 174 6840941 ns/op 369936 B/op 1400 allocs/op
+BenchmarkTT016PersistentStoreSave/enabled-32 170 7016894 ns/op 370900 B/op 1403 allocs/op
+BenchmarkTT016PersistentStoreSave/enabled-32 177 7011204 ns/op 372499 B/op 1405 allocs/op
+```
+
 ## SQL ARGMAX and ARGMIN
 
 This benchmark compares the new `ARGMAX`/`ARGMIN` aggregate query with the

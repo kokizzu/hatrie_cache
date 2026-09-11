@@ -89,6 +89,8 @@ explicitly opt-in operational control.
 | ClickHouse | Two-level local columnar aggregation | Adopted as an explicit `Workers >= 2` SQL control | High-cardinality columnar grouped queries with at least two `COUNT`/`MIN`/`MAX` projections build local states over contiguous ranges and merge them in range order. The default sequential path is unchanged; small inputs, custom functions, `SUM`/`AVG`, richer queries, and configured group-memory budgets fall back. On 32K rows and 257 groups, the measured two-worker path was 1.32x faster than the pre-feature control, with 1.41x higher allocation volume, so it remains opt-in. [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md) |
 | ClickHouse | `argMax`/`argMin` aggregates | Adopted automatically | `ARGMAX(payload, ordering_value)` and `ARGMIN(payload, ordering_value)` support ordinary, grouped, filtered, and window aggregates. Eligible global field/literal scans use bounded constant state and simple literal predicates are applied during source traversal; complex shapes retain the general evaluator. NULL operands are skipped and ties preserve first-seen order. [SQL_ARG_EXTREME.md](SQL_ARG_EXTREME.md) |
 
+| Tarantool | Disk-space reserve admission | Adopted as an opt-in storage guard | The CLI flag `-db-storage-disk-reserve-bytes` and `ConfigurePersistentStoreDiskReserveBytes` keep a minimum physical free-space reserve before persistent writes. The default is `0`; logical `db-storage-max-bytes` remains separate. Unsupported free-space probes fail closed. [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md) |
+
 ## Measured Results
 
 | Feature | Result |

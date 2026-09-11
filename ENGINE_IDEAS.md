@@ -152,7 +152,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-013 | Vinyl range tuple cache | Storage has no range-aware cache that retains only hot key intervals. | High |
 | TT-014 | Vinyl compaction throttling | Compaction does not expose adaptive disk/latency throttles and backpressure. | Medium |
 | TT-015 | Vinyl read/write thread tuning | Read and compaction workers lack independent bounded runtime configuration. | Medium |
-| TT-016 | Disk-space reserve admission | Writes do not fail early based on a configured compaction/restore reserve. | Low |
+| TT-016 | Disk-space reserve admission | Implemented as an opt-in filesystem free-space reserve for LevelDB/Pebble full, key, dirty, and generation saves; default remains disabled. | Low |
 | TT-017 | Run-level Bloom filters | Persistent runs lack a conservative key Bloom prefilter before page reads. | Medium |
 | TT-018 | Page-index residency policy | Page indexes have no explicit memory budget and eviction metrics. | Medium |
 | TT-019 | Covering secondary indexes | Secondary postings cannot retain selected payload fields to avoid primary lookups. | Medium |
