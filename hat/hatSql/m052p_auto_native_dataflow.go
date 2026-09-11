@@ -63,7 +63,7 @@ func sqlAutoNativeDataflowEligible(query *sqlQuery, resolver SQLSourceResolver, 
 	if !sqlAutoNativeDataflowBaseEligible(query, resolver, options) {
 		return false
 	}
-	if query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.having.kind != "" || query.limitBy != nil || query.limitWithTies || query.limit >= 0 || query.offset > 0 || sqlQueryHasWithFill(query) {
+	if query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.having.kind != "" || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
 		return false
 	}
 	if sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {

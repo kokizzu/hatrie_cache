@@ -8597,3 +8597,27 @@ commit-m052t-auto-native-grouped-ordered:
 
 push-m052t-auto-native-grouped-ordered:
 	bash scripts/push-m052t-auto-native-grouped-ordered.sh
+.PHONY: test-m052v-auto-native-scalar-limit benchmark-m052v-auto-native-scalar-limit format-m052v-auto-native-scalar-limit test-race-m052v-auto-native-scalar-limit vet-m052v-auto-native-scalar-limit review-m052v-auto-native-scalar-limit commit-m052v-auto-native-scalar-limit push-m052v-auto-native-scalar-limit
+test-m052v-auto-native-scalar-limit:
+	bash scripts/test-m052v-auto-native-scalar-limit.sh
+
+benchmark-m052v-auto-native-scalar-limit:
+	bash scripts/benchmark-m052v-auto-native-scalar-limit.sh
+
+format-m052v-auto-native-scalar-limit:
+	bash scripts/format-m052v-auto-native-scalar-limit.sh
+
+test-race-m052v-auto-native-scalar-limit:
+	bash scripts/test-race-m052v-auto-native-scalar-limit.sh
+
+vet-m052v-auto-native-scalar-limit:
+	bash scripts/vet-m052v-auto-native-scalar-limit.sh
+
+review-m052v-auto-native-scalar-limit:
+	bash scripts/review-m052v-auto-native-scalar-limit.sh
+
+commit-m052v-auto-native-scalar-limit:
+	bash scripts/commit-m052v-auto-native-scalar-limit.sh
+
+push-m052v-auto-native-scalar-limit:
+	bash scripts/push-m052v-auto-native-scalar-limit.sh

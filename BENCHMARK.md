@@ -19189,3 +19189,33 @@ fallback control / before:
 13150878 18441660 104164
 12916100 18441776 104165
 ```
+## M052v automatic native scalar LIMIT/OFFSET
+
+This feature automatically selects the existing early-terminating native scalar
+runtime for a two-field projection with `WHERE`, `LIMIT 16`, and `OFFSET 32`
+over 20,000 rows. The benchmark uses five samples and `-benchmem`; the
+fallback sets `SQLQueryOptions.DisableNativeDataflow = true`. The fallback is
+the exact pre-feature executor for this query shape.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native scalar window | 9,711 | 6,344 | 41 | 986x faster, 2,677x less heap, 1,952x fewer allocations |
+| Existing materialized fallback | 9,573,869 | 16,984,999 | 80,021 | control / before |
+
+Raw samples (`ns/op B/op allocs/op`):
+
+```text
+automatic native scalar window:
+9828 6344 41
+9854 6344 41
+9639 6344 41
+9711 6344 41
+9661 6344 41
+
+fallback control / before:
+9291833 16984210 80021
+9721068 16985297 80021
+9585383 16984201 80021
+9573869 16984999 80021
+9557386 16985135 80021
+```

@@ -887,3 +887,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   ambiguous ordering, alias-only unsupported `HAVING`, `WITH TIES`, richer SQL,
   and specialized resolver contracts retain their established executor. See
   [SQL_AUTO_NATIVE_GROUPED_ORDERED.md](SQL_AUTO_NATIVE_GROUPED_ORDERED.md).
+- [x] M052v Automatic safe scalar finite-window dataflow selection. Plain
+  scalar projections with finite `LIMIT`/`OFFSET` over ordinary row resolvers
+  now use the existing early-terminating native batch runtime by default;
+  ordering, `WITH TIES`, richer SQL, and specialized resolver contracts retain
+  their established executor. See
+  [SQL_AUTO_NATIVE_SCALAR_LIMIT.md](SQL_AUTO_NATIVE_SCALAR_LIMIT.md).
