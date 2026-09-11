@@ -8901,3 +8901,39 @@ commit-tt016-disk-reserve:
 .PHONY: push-tt016-disk-reserve
 push-tt016-disk-reserve:
 	@bash ./scripts/push-tt016-disk-reserve.sh
+
+.PHONY: test-tt044-migration-preview
+test-tt044-migration-preview:
+	@bash ./scripts/test-tt044-migration-preview.sh
+
+.PHONY: format-tt044-migration-preview
+format-tt044-migration-preview:
+	@bash ./scripts/format-tt044-migration-preview.sh
+
+.PHONY: benchmark-tt044-migration-preview
+benchmark-tt044-migration-preview:
+	@bash ./scripts/benchmark-tt044-migration-preview.sh
+
+.PHONY: verify-tt044-docs
+verify-tt044-docs:
+	@bash ./scripts/verify-tt044-docs.sh
+
+.PHONY: test-race-tt044-migration-preview
+test-race-tt044-migration-preview:
+	@bash ./scripts/test-race-tt044-migration-preview.sh
+
+.PHONY: vet-tt044-migration-preview
+vet-tt044-migration-preview:
+	@bash ./scripts/vet-tt044-migration-preview.sh
+
+.PHONY: review-tt044-migration-preview
+review-tt044-migration-preview:
+	@bash ./scripts/review-tt044-migration-preview.sh
+
+.PHONY: commit-tt044-migration-preview
+commit-tt044-migration-preview:
+	@bash ./scripts/commit-tt044-migration-preview.sh
+
+.PHONY: push-tt044-migration-preview
+push-tt044-migration-preview:
+	@bash ./scripts/push-tt044-migration-preview.sh

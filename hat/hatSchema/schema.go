@@ -83,22 +83,32 @@ type Migration struct {
 	Down    []Change `json:"down"`
 }
 
-// Apply atomically applies the next migration version to schema.
-func Apply(schema *Schema, migration Migration) error {
+// Preview applies the next migration version to a cloned schema and returns
+// the result without publishing it to the input schema.
+func Preview(schema *Schema, migration Migration) (Schema, error) {
 	if schema == nil {
-		return errors.New("hatSchema: schema is nil")
+		return Schema{}, errors.New("hatSchema: schema is nil")
 	}
 	if err := migration.Validate(); err != nil {
-		return err
+		return Schema{}, err
 	}
 	if migration.Version != schema.Version+1 {
-		return fmt.Errorf("hatSchema: migration version %d requires schema version %d", migration.Version, schema.Version+1)
+		return Schema{}, fmt.Errorf("hatSchema: migration version %d requires schema version %d", migration.Version, schema.Version+1)
 	}
 	updated := schema.Clone()
 	if err := applyChanges(&updated, migration.Up); err != nil {
-		return err
+		return Schema{}, err
 	}
 	updated.Version = migration.Version
+	return updated, nil
+}
+
+// Apply atomically applies the next migration version to schema.
+func Apply(schema *Schema, migration Migration) error {
+	updated, err := Preview(schema, migration)
+	if err != nil {
+		return err
+	}
 	*schema = updated
 	return nil
 }

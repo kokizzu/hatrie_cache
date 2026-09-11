@@ -4326,6 +4326,9 @@ allows only append-only nullable columns or relaxed nullability; the existing
 exact replication fingerprint gate remains unchanged. See
 [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
 
+Use `hatSchema.Preview` to validate a versioned migration against a cloned
+schema without publishing it; see [SCHEMA_MIGRATION_DRY_RUN.md](SCHEMA_MIGRATION_DRY_RUN.md).
+
 During an explicit rolling transition, pass a
 `ReplicationSchemaCompatibilityPolicy` built from the current schema and
 known compatible previous schemas to `MonitoringOptions` or

@@ -180,7 +180,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-041 | Crash-safe index resume | An interrupted index build has no durable unit checkpoint independent of the queue. | Medium |
 | TT-042 | Restore resume checkpoints | A large restore cannot resume from a verified per-file/per-range checkpoint. | Medium |
 | TT-043 | Maintenance read-only mode | No explicit mode rejects writes while allowing health, backup, and read traffic. | Low |
-| TT-044 | Schema migration dry run | Operators cannot validate a schema/index migration against a snapshot without publication. | Low |
+| TT-044 | Schema migration dry run | Implemented as importable `hatSchema.Preview`, which validates a migration on an independent schema copy without publication. | Low |
 | TT-045 | Tuple-level compression | Individual large values/tuples lack transparent compressed storage with size thresholds. | Medium |
 | TT-046 | Slab/memory accounting | No per-structure allocator accounting and bounded eviction/admission telemetry. | Medium |
 | TT-047 | Expiration wheel | TTL cleanup has no hierarchical timer wheel for low-overhead mass expiration. | Medium |

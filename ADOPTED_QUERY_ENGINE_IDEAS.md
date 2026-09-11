@@ -90,6 +90,7 @@ explicitly opt-in operational control.
 | ClickHouse | `argMax`/`argMin` aggregates | Adopted automatically | `ARGMAX(payload, ordering_value)` and `ARGMIN(payload, ordering_value)` support ordinary, grouped, filtered, and window aggregates. Eligible global field/literal scans use bounded constant state and simple literal predicates are applied during source traversal; complex shapes retain the general evaluator. NULL operands are skipped and ties preserve first-seen order. [SQL_ARG_EXTREME.md](SQL_ARG_EXTREME.md) |
 
 | Tarantool | Disk-space reserve admission | Adopted as an opt-in storage guard | The CLI flag `-db-storage-disk-reserve-bytes` and `ConfigurePersistentStoreDiskReserveBytes` keep a minimum physical free-space reserve before persistent writes. The default is `0`; logical `db-storage-max-bytes` remains separate. Unsupported free-space probes fail closed. [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md) |
+| Materialize/Tarantool | Schema migration dry run | Adopted as an importable schema control-plane API | `hatSchema.Preview` validates and applies `Up` changes to an independent schema clone without publication; `hatSchema.Apply` uses the same validation path. It is metadata-only and does not validate existing row contents. [SCHEMA_MIGRATION_DRY_RUN.md](SCHEMA_MIGRATION_DRY_RUN.md) |
 
 ## Measured Results
 

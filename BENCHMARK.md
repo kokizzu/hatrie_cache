@@ -14471,6 +14471,26 @@ Memory summary:
 ```
 
 <!-- END GENERATED COMMAND BENCHMARK RAW RESULTS -->
+## Schema Migration Dry Run
+
+This benchmark previews a one-source add-column migration. It measures the
+control-plane clone and validation operation; normal cache reads and writes do
+not call it.
+
+| Operation | Median time | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| `Preview` | 375.6 ns | 880 | 4 |
+
+Raw output from `make benchmark-tt044-migration-preview` (five runs):
+
+```text
+BenchmarkPreviewMigration-32    	 2994028	       390.4 ns/op	     880 B/op	       4 allocs/op
+BenchmarkPreviewMigration-32    	 3218942	       375.6 ns/op	     880 B/op	       4 allocs/op
+BenchmarkPreviewMigration-32    	 3285481	       367.3 ns/op	     880 B/op	       4 allocs/op
+BenchmarkPreviewMigration-32    	 3180006	       379.3 ns/op	     880 B/op	       4 allocs/op
+BenchmarkPreviewMigration-32    	 3228758	       372.0 ns/op	     880 B/op	       4 allocs/op
+```
+
 ## Persistent Storage Disk Reserve Admission
 
 This paired benchmark repeatedly saved a small Pebble store. Both cases
