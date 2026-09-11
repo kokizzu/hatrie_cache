@@ -15350,6 +15350,30 @@ pruning, not physical ClickHouse part/mark metadata. See
 [SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md) for scope,
 fallback rules, examples, and verification commands.
 
+## SQL Partition Range Pruning
+
+Command: `make benchmark-sql-range-partition-pruning`.
+
+This five-sample benchmark uses an AMD Ryzen 9 5950X, 64 deterministic logical
+partitions, 128 rows per partition, and a literal `region >= 'us'` predicate
+whose matching rows are isolated in the final partition. The no-pruning path
+returns all partitions to the SQL executor; the pruning path forwards the
+validated range to the provider, which returns only the matching partition.
+`B/op` is Go allocation volume per operation, not retained process RSS.
+
+| Path | Without range pruning | With range pruning | x improvement |
+| --- | --- | --- | --- |
+| `ns/op` | 711992; 709268; 710291; 726288; 726353 | 41542; 39678; 40075; 39976; 40134 | 17.77x lower median latency |
+| `B/op` | 973940; 973936; 973940; 973936; 973936 | 70000; 70000; 70000; 70000; 70000 | 13.91x lower allocation volume |
+| `allocs/op` | 282; 282; 282; 282; 282 | 281; 281; 281; 281; 281 | 1 fewer allocation/query |
+
+Medians are `711992 ns/op`, `973936 B/op`, and `282 allocs/op` without
+pruning versus `40075 ns/op`, `70000 B/op`, and `281 allocs/op` with pruning.
+The improvement is provider-side scan reduction, not a claim of physical
+ClickHouse part/mark metadata. Unsafe predicate shapes continue to use the
+existing fallback path. Full scope and the resolver contract are in
+[SQL_PARTITION_RANGE_PRUNING.md](SQL_PARTITION_RANGE_PRUNING.md).
+
 ## Typed Arrangement Hydration
 
 Command: `make benchmark-typed-table-arrangement-hydration`.

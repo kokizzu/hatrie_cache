@@ -12137,12 +12137,14 @@ func sqlPartitionPredicate(source sqlSource, condition sqlExpr, allowUnqualified
 	if condition.collation.normalized() != SQLCollationBinary {
 		return SQLPartitionPredicate{}, false
 	}
-	if condition.kind == "binary" && condition.op == "=" && condition.left != nil && condition.right != nil {
-		if field, ok := sqlPartitionField(source, *condition.left, allowUnqualified); ok && condition.right.kind == "literal" && condition.right.value != nil {
-			return SQLPartitionPredicate{Field: field, Operator: "=", Values: []interface{}{condition.right.value}}, true
-		}
-		if field, ok := sqlPartitionField(source, *condition.right, allowUnqualified); ok && condition.left.kind == "literal" && condition.left.value != nil {
-			return SQLPartitionPredicate{Field: field, Operator: "=", Values: []interface{}{condition.left.value}}, true
+	if condition.kind == "binary" && condition.left != nil && condition.right != nil {
+		if operator, ok := sqlPartitionComparisonOperator(condition.op); ok {
+			if field, ok := sqlPartitionField(source, *condition.left, allowUnqualified); ok && condition.right.kind == "literal" && condition.right.value != nil {
+				return SQLPartitionPredicate{Field: field, Operator: operator, Values: []interface{}{condition.right.value}}, true
+			}
+			if field, ok := sqlPartitionField(source, *condition.right, allowUnqualified); ok && condition.left.kind == "literal" && condition.left.value != nil {
+				return SQLPartitionPredicate{Field: field, Operator: reverseSQLPartitionComparisonOperator(operator), Values: []interface{}{condition.left.value}}, true
+			}
 		}
 		return SQLPartitionPredicate{}, false
 	}
@@ -12161,6 +12163,30 @@ func sqlPartitionPredicate(source sqlSource, condition sqlExpr, allowUnqualified
 		values = append(values, argument.value)
 	}
 	return SQLPartitionPredicate{Field: field, Operator: "IN", Values: values}, true
+}
+
+func sqlPartitionComparisonOperator(operator string) (string, bool) {
+	switch operator {
+	case "=", "<", "<=", ">", ">=":
+		return operator, true
+	default:
+		return "", false
+	}
+}
+
+func reverseSQLPartitionComparisonOperator(operator string) string {
+	switch operator {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	default:
+		return operator
+	}
 }
 
 func sqlPartitionField(source sqlSource, expression sqlExpr, allowUnqualified bool) (string, bool) {

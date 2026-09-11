@@ -8,15 +8,16 @@ import (
 )
 
 type partitionedSourceTestResolver struct {
-	partitions       []SQLSourcePartition
-	prunedPartitions []SQLSourcePartition
-	partitionedCall  int
-	predicateCalls   int
-	regularCalls     int
-	partitioned      bool
-	pruneAvailable   bool
-	partitionError   error
-	rows             []Row
+	partitions            []SQLSourcePartition
+	prunedPartitions      []SQLSourcePartition
+	rangePrunedPartitions []SQLSourcePartition
+	partitionedCall       int
+	predicateCalls        int
+	regularCalls          int
+	partitioned           bool
+	pruneAvailable        bool
+	partitionError        error
+	rows                  []Row
 }
 
 func (resolver *partitionedSourceTestResolver) ResolveSQLSource(name, key string) ([]Row, error) {
@@ -51,6 +52,12 @@ func (resolver *partitionedSourceTestResolver) ResolveSQLSourcePartitionsForPred
 	}
 	if predicate.Operator == "IN" && reflect.DeepEqual(predicate.Values, []interface{}{"apac", "eu"}) {
 		return resolver.partitions, true, nil
+	}
+	if predicate.Operator == ">=" && len(predicate.Values) == 1 && predicate.Values[0] == "eu" {
+		return resolver.prunedPartitions, true, nil
+	}
+	if predicate.Operator == ">=" && len(predicate.Values) == 1 && predicate.Values[0] == "us" {
+		return resolver.rangePrunedPartitions, true, nil
 	}
 	return nil, false, nil
 }
@@ -332,6 +339,73 @@ func TestPartitionPruningResolverUsesLiteralINPredicate(t *testing.T) {
 	}
 }
 
+func TestPartitionPruningResolverUsesLiteralRangePredicate(t *testing.T) {
+	resolver := &partitionedSourceTestResolver{
+		partitioned:      true,
+		pruneAvailable:   true,
+		partitions:       []SQLSourcePartition{{Name: "apac", Rows: []Row{{"id": int64(1), "region": "apac"}}}, {Name: "eu", Rows: []Row{{"id": int64(2), "region": "eu"}}}, {Name: "us", Rows: []Row{{"id": int64(3), "region": "us"}}}},
+		prunedPartitions: []SQLSourcePartition{{Name: "eu", Rows: []Row{{"id": int64(2), "region": "eu"}}}, {Name: "us", Rows: []Row{{"id": int64(3), "region": "us"}}}},
+	}
+	result, err := ExecuteSQLQueryContext(
+		context.Background(),
+		"FROM CACHE('events') SELECT id, region WHERE region >= 'eu' ORDER BY id",
+		resolver,
+		SQLQueryOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryContext() error = %v", err)
+	}
+	want := []Row{{"id": int64(2), "region": "eu"}, {"id": int64(3), "region": "us"}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("result.Rows = %#v, want %#v", result.Rows, want)
+	}
+	if resolver.predicateCalls != 1 || resolver.partitionedCall != 0 || resolver.regularCalls != 0 {
+		t.Fatalf("resolver calls = predicate %d, partitions %d, regular %d; want 1, 0, 0", resolver.predicateCalls, resolver.partitionedCall, resolver.regularCalls)
+	}
+}
+
+func TestSQLPartitionPredicateNormalizesLiteralComparisons(t *testing.T) {
+	source := sqlSource{kind: "CACHE", alias: "events"}
+	tests := []struct {
+		name     string
+		operator string
+		reverse  bool
+		want     string
+		ok       bool
+	}{
+		{name: "equal", operator: "=", want: "=", ok: true},
+		{name: "less", operator: "<", want: "<", ok: true},
+		{name: "less_equal", operator: "<=", want: "<=", ok: true},
+		{name: "greater", operator: ">", want: ">", ok: true},
+		{name: "greater_equal", operator: ">=", want: ">=", ok: true},
+		{name: "reversed_less", operator: "<", reverse: true, want: ">", ok: true},
+		{name: "reversed_less_equal", operator: "<=", reverse: true, want: ">=", ok: true},
+		{name: "reversed_greater", operator: ">", reverse: true, want: "<", ok: true},
+		{name: "reversed_greater_equal", operator: ">=", reverse: true, want: "<=", ok: true},
+		{name: "not_equal", operator: "!=", ok: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			field := sqlExpr{kind: "field", name: "region"}
+			literal := sqlExpr{kind: "literal", value: "eu"}
+			left, right := &field, &literal
+			if test.reverse {
+				left, right = right, left
+			}
+			predicate, ok := sqlPartitionPredicate(source, sqlExpr{kind: "binary", op: test.operator, left: left, right: right}, true)
+			if ok != test.ok {
+				t.Fatalf("sqlPartitionPredicate() ok = %t, want %t; predicate = %#v", ok, test.ok, predicate)
+			}
+			if !test.ok {
+				return
+			}
+			if predicate.Field != "region" || predicate.Operator != test.want || !reflect.DeepEqual(predicate.Values, []interface{}{"eu"}) {
+				t.Fatalf("sqlPartitionPredicate() = %#v, want region %s eu", predicate, test.want)
+			}
+		})
+	}
+}
+
 func TestPartitionPruningResolverDoesNotPruneORPredicate(t *testing.T) {
 	resolver := &partitionedSourceTestResolver{
 		partitioned:    true,
@@ -484,6 +558,58 @@ func BenchmarkPartitionPruningSourceResolver(b *testing.B) {
 				pruneAvailable:   test.pruneAvailable,
 				partitions:       partitions,
 				prunedPartitions: test.pruned,
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				result, err := ExecuteSQLQueryContext(context.Background(), query, resolver, SQLQueryOptions{})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(result.Rows) != rowsPerPart {
+					b.Fatalf("result rows = %d, want %d", len(result.Rows), rowsPerPart)
+				}
+				partitionedSourceBenchmarkResult = result
+			}
+		})
+	}
+}
+
+func BenchmarkPartitionRangePruningSourceResolver(b *testing.B) {
+	const (
+		partitionCount = 64
+		rowsPerPart    = 128
+	)
+	partitions := make([]SQLSourcePartition, partitionCount)
+	for partition := range partitions {
+		region := "apac"
+		if partition == partitionCount-1 {
+			region = "us"
+		}
+		partitions[partition].Name = "partition-" + string(rune('a'+partition))
+		partitions[partition].Rows = make([]Row, 0, rowsPerPart)
+		for row := 0; row < rowsPerPart; row++ {
+			partitions[partition].Rows = append(partitions[partition].Rows, Row{
+				"id":     int64(partition*rowsPerPart + row),
+				"region": region,
+			})
+		}
+	}
+	query := "FROM CACHE('events') SELECT id WHERE region >= 'us'"
+	for _, test := range []struct {
+		name           string
+		pruneAvailable bool
+		pruned         []SQLSourcePartition
+	}{
+		{name: "without_pruning"},
+		{name: "with_pruning", pruneAvailable: true, pruned: partitions[partitionCount-1:]},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			resolver := &partitionedSourceTestResolver{
+				partitioned:           true,
+				pruneAvailable:        test.pruneAvailable,
+				partitions:            partitions,
+				rangePrunedPartitions: test.pruned,
 			}
 			b.ReportAllocs()
 			b.ResetTimer()

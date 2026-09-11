@@ -1728,6 +1728,42 @@ audit-time-series-pruning-seams:
 test-sql-time-partition-pruning:
 	sh ./scripts/test-sql-time-partition-pruning.sh
 
+.PHONY: test-sql-range-partition-pruning
+test-sql-range-partition-pruning:
+	bash ./scripts/test-sql-range-partition-pruning.sh
+
+.PHONY: benchmark-sql-range-partition-pruning
+benchmark-sql-range-partition-pruning:
+	bash ./scripts/benchmark-sql-range-partition-pruning.sh
+
+.PHONY: format-sql-range-partition-pruning
+format-sql-range-partition-pruning:
+	bash ./scripts/format-sql-range-partition-pruning.sh
+
+.PHONY: verify-sql-range-partition-pruning-docs
+verify-sql-range-partition-pruning-docs:
+	bash ./scripts/verify-sql-range-partition-pruning-docs.sh
+
+.PHONY: test-race-sql-range-partition-pruning
+test-race-sql-range-partition-pruning:
+	bash ./scripts/test-race-sql-range-partition-pruning.sh
+
+.PHONY: vet-sql-range-partition-pruning
+vet-sql-range-partition-pruning:
+	bash ./scripts/vet-sql-range-partition-pruning.sh
+
+.PHONY: review-sql-range-partition-pruning
+review-sql-range-partition-pruning:
+	bash ./scripts/review-sql-range-partition-pruning.sh
+
+.PHONY: commit-sql-range-partition-pruning
+commit-sql-range-partition-pruning:
+	bash ./scripts/commit-sql-range-partition-pruning.sh
+
+.PHONY: push-sql-range-partition-pruning
+push-sql-range-partition-pruning:
+	bash ./scripts/push-sql-range-partition-pruning.sh
+
 format-sql-time-partition-pruning:
 	sh ./scripts/format-sql-time-partition-pruning.sh
 

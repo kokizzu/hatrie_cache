@@ -93,8 +93,9 @@ type SQLPartitionPredicate struct {
 }
 
 // PartitionPruningSourceResolver optionally prunes a partitioned source from
-// a literal equality or IN predicate. Returning available=false asks the
-// executor to use PartitionedSourceResolver or SourceResolver instead.
+// a literal equality, IN, or binary comparison predicate. Returning
+// available=false asks the executor to use PartitionedSourceResolver or
+// SourceResolver instead.
 // Implementations must never omit a partition that could contain a matching
 // row; pruning is an optimization, not a source of SQL semantics.
 type PartitionPruningSourceResolver interface {
