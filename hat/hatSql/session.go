@@ -188,6 +188,58 @@ func (session *SQLSession) ResolveSQLOrderedSourcePartitions(name, key, field st
 	return ordered.ResolveSQLOrderedSourcePartitions(name, key, field, desc, nullsFirst, nullsLast)
 }
 
+// ResolveSQLOrderedSourceRange forwards the optional ordered range contract
+// after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLOrderedSourceRange(name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}) ([]Row, bool, error) {
+	if session == nil {
+		return nil, false, nil
+	}
+	if strings.EqualFold(name, "CACHE") {
+		session.mu.RLock()
+		_, tableExists := session.tables[strings.ToLower(key)]
+		_, resultExists := session.results[strings.ToLower(key)]
+		_, viewExists := session.views[strings.ToLower(key)]
+		session.mu.RUnlock()
+		if tableExists || resultExists || viewExists {
+			return nil, false, nil
+		}
+	}
+	if session.source == nil {
+		return nil, false, nil
+	}
+	ordered, ok := session.source.(OrderedRangeSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return ordered.ResolveSQLOrderedSourceRange(name, key, field, desc, nullsFirst, nullsLast, operator, value)
+}
+
+// StreamSQLOrderedSourceRange forwards the optional ordered range stream
+// contract after preserving session-local source precedence.
+func (session *SQLSession) StreamSQLOrderedSourceRange(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}, visit func(Row) error) (bool, error) {
+	if session == nil {
+		return false, nil
+	}
+	if strings.EqualFold(name, "CACHE") {
+		session.mu.RLock()
+		_, tableExists := session.tables[strings.ToLower(key)]
+		_, resultExists := session.results[strings.ToLower(key)]
+		_, viewExists := session.views[strings.ToLower(key)]
+		session.mu.RUnlock()
+		if tableExists || resultExists || viewExists {
+			return false, nil
+		}
+	}
+	if session.source == nil {
+		return false, nil
+	}
+	ordered, ok := session.source.(OrderedRangeStreamSourceResolver)
+	if !ok {
+		return false, nil
+	}
+	return ordered.StreamSQLOrderedSourceRange(ctx, name, key, field, desc, nullsFirst, nullsLast, operator, value, visit)
+}
+
 // ResolveSQLSourcePartitionsForPredicate forwards the optional pruning
 // contract after preserving session-local source precedence.
 func (session *SQLSession) ResolveSQLSourcePartitionsForPredicate(name, key string, predicate SQLPartitionPredicate) ([]SQLSourcePartition, bool, error) {

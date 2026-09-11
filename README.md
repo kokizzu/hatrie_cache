@@ -11,6 +11,7 @@ security guidance before exposing it on a network.
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Explicit ClickHouse-style early SQL filter: [SQL PREWHERE](SQL_PREWHERE.md)
+- Ordered SQL range pruning: [SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md)
 - Compiled SQL performance path: [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md)
 - Incremental numeric RANGE windows: [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md)
 - Read-only SQL operational catalog: [SQL system tables](SYSTEM_TABLES.md)

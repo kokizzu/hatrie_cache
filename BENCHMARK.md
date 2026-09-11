@@ -15322,6 +15322,34 @@ The materialized fallback is 0.2% slower, uses 2.7% more heap, and performs
 without changing specialized physical plans. Full usage and scope are in
 [SQL_PREWHERE.md](SQL_PREWHERE.md).
 
+## Ordered Range Pruning
+
+Commands: `make benchmark-ch002-hattrie-materialized` and
+`make benchmark-ch002-hattrie-stream`. These five-run measurements use an AMD
+Ryzen 9 5950X, a real `HatTrie` generic JSON field index, 100,000 ordered rows,
+`score >= 90,000`, and `LIMIT 10`. The baseline resolver exposes the existing
+full ordered scan while withholding the new range contract. `B/op` is Go
+allocation volume per operation, not retained process RSS.
+
+| Path | Legacy ordered scan | Ordered range pruning | x improvement |
+| --- | --- | --- | --- |
+| Materialized ns/op | 128510420; 129374781; 127066067; 127924425; 127461277 | 7783891; 7693653; 7693180; 7723676; 7657705 | 16.63x faster |
+| Materialized B/op | 77566067; 77565375; 77565391; 77565405; 77565434 | 10982128; 10968880; 10982122; 11041518; 10966337 | 7.06x lower |
+| Materialized allocs/op | 1530053; 1530052; 1530051; 1530052; 1530052 | 88595; 88323; 88595; 89818; 88270 | 17.27x fewer |
+| `QueryRows` ns/op | 47902110; 43011596; 43621677; 43376314; 43888450 | 11906; 12017; 11528; 11622; 11885 | 3,670x faster |
+| `QueryRows` B/op | 57367136; 57261784; 57164563; 57164558; 57164573 | 14394; 14407; 14384; 14397; 14416 | 3,971x lower |
+| `QueryRows` allocs/op | 504289; 502121; 500120; 500120; 500120 | 104; 104; 104; 104; 105 | 4,809x fewer |
+
+Median summary: materialized latency is 127,924,425 ns/op versus 7,693,653
+ns/op; streaming latency is 43,621,677 ns/op versus 11,885 ns/op. Materialized
+allocation volume falls from 77,565,405 to 10,982,122 B/op, while streaming
+falls from 57,164,573 to 14,397 B/op. The streaming path can stop after ten
+matching rows; the materialized Top-N path processes the selected 10,000-row
+range to preserve general predicate behavior. This is ordered-index range
+pruning, not physical ClickHouse part/mark metadata. See
+[SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md) for scope,
+fallback rules, examples, and verification commands.
+
 ## Typed Arrangement Hydration
 
 Command: `make benchmark-typed-table-arrangement-hydration`.

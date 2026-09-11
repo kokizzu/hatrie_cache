@@ -1227,9 +1227,27 @@ type OrderedSourceResolver interface {
 	ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]Row, bool, error)
 }
 
+// OrderedRangeSourceResolver optionally resolves only the non-NULL portion of
+// an ordered source selected by one literal range predicate. The SQL executor
+// still evaluates the complete WHERE expression on every returned candidate.
+// Implementations must return available=false without returning candidates
+// when the range cannot be served by the ordered index.
+type OrderedRangeSourceResolver interface {
+	ResolveSQLOrderedSourceRange(name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}) ([]Row, bool, error)
+}
+
 // OrderedStreamSourceResolver is the streaming counterpart of OrderedSourceResolver.
 type OrderedStreamSourceResolver interface {
 	StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(Row) error) (bool, error)
+}
+
+// OrderedRangeStreamSourceResolver optionally streams only the non-NULL
+// portion of an ordered source that satisfies one literal range predicate.
+// The SQL executor still evaluates the complete WHERE expression on every
+// returned candidate. Implementations must return available=false without
+// invoking visit when the range cannot be served by the ordered index.
+type OrderedRangeStreamSourceResolver interface {
+	StreamSQLOrderedSourceRange(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}, visit func(Row) error) (bool, error)
 }
 
 // KeysetPosition identifies one row in an ordered source. Tie is a

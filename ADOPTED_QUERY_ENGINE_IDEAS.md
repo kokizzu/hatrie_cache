@@ -7,6 +7,7 @@ explicitly opt-in operational control.
 
 | Source | Idea | Status | Evidence |
 |---|---|---|---|
+| ClickHouse | Sparse primary-key mark pruning | Partially adopted as ordered-index range pruning | `OrderedRangeSourceResolver` and its streaming counterpart use binary-search bounds for safe literal comparisons on indexed `ORDER BY` fields; the complete `WHERE` is still evaluated, and unavailable or unsafe shapes fall back. Physical part/mark metadata is not yet present. [SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md), [BENCHMARK.md](BENCHMARK.md#ordered-range-pruning) |
 | ClickHouse | Explicit SQL `PREWHERE` / late materialization | Adopted for stream-capable single-source reads | `PREWHERE` is evaluated before `WHERE` and projection on the narrow `StreamSourceResolver` path; specialized index, columnar, and ordered resolvers retain a combined predicate until they have an explicit two-stage contract. The measured fixture is 2.95x faster, 5.67x lower heap, and 2.29x fewer allocations. [SQL_PREWHERE.md](SQL_PREWHERE.md), [BENCHMARK.md](BENCHMARK.md#explicit-prewhere-stage) |
 | Tarantool | Partition split and merge tooling | Adopted as an explicit operator planning API | `hatPartition.PlanSplit`, `PlanMerge`, and `PlanResize` validate adjacent power-of-two layouts and provide deterministic allocation-free per-key routes plus an inspectable move mapping. They do not move data or enable partitioning; automatic online migration remains deferred. [PARTITION_RESIZE.md](PARTITION_RESIZE.md) |
 | Materialize | Coordinated progress frontier | Adopted | `SQLProjectionRetentionFrontier` commits journal retention only after all configured runners succeed. [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md) |
@@ -185,6 +186,19 @@ Measured with `make benchmark-sql-prewhere`: median 2.39x lower latency, 24.6x
 lower heap, and 2.00x fewer allocations on a 20,000-row selective projection
 benchmark. See [BENCHMARK.md](BENCHMARK.md#generic-prewhere--late-materialization)
 for raw samples and workload details.
+
+### Ordered range pruning / primary-key marks
+
+Status: partially adopted. Existing ordered generic and typed JSON indexes now
+expose an optional range resolver. The planner recognizes one direct literal
+comparison on the same field as a single-field `ORDER BY` and uses binary-search
+bounds before evaluating the complete predicate. The stream path also feeds the
+bounded Top-N operator from that range, so the materialized API and `QueryRows`
+both avoid scanning the lower ordered prefix. OR and other unsafe shapes retain
+the old resolver path. The physical ClickHouse-style part/mark index remains a
+future storage-layer improvement. See
+[SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md) and the raw
+[benchmark results](BENCHMARK.md#ordered-range-pruning).
 
 | ClickHouse | Typed compact keys for grouped arrangement state | Implemented | `TypedTableAggregate` hashes typed group values without allocating a formatted key on every mutation, uses exact collision buckets, and retains one legacy key per live group for deterministic row ordering. See [BENCHMARK.md](BENCHMARK.md#typed-aggregate-arrangement-hash-keys). |
 

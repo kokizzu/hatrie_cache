@@ -28,7 +28,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | ID | Candidate not yet complete here | Current gap and likely value | Initial risk |
 | --- | --- | --- | --- |
 | CH-001 | Explicit `PREWHERE` stage | Implemented for stream-capable single-source reads; specialized physical plans still use a combined predicate. | Low |
-| CH-002 | Sparse primary-key mark pruning | No ordered mark index maps key ranges to compact read marks; could reduce source scans. | Medium |
+| CH-002 | Sparse primary-key mark pruning | Ordered JSON indexes now prune literal ranges with binary-search bounds; physical part/mark granularity is still deferred. | Medium |
 | CH-003 | Partition-key pruning | SQL does not prune physical partitions from a validated partition predicate. | Medium |
 | CH-004 | `FINAL` read semantics | No query-time reconciliation of replacing or collapsing versions. | High |
 | CH-005 | Lightweight delete bitmap | Deletes are not represented as compact immutable bitmaps over stored parts. | High |

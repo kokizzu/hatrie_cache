@@ -94,7 +94,9 @@ type SQLPrefixIndexedSourceResolver = hatSql.PrefixIndexedSourceResolver
 type SQLBorrowedPrefixIndexedSourceResolver = hatSql.BorrowedPrefixIndexedSourceResolver
 type SQLTextIndexedSourceResolver = hatSql.TextIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
+type SQLOrderedRangeSourceResolver = hatSql.OrderedRangeSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
+type SQLOrderedRangeStreamSourceResolver = hatSql.OrderedRangeStreamSourceResolver
 type SQLKeysetPosition = hatSql.KeysetPosition
 type SQLKeysetOrderedStreamSourceResolver = hatSql.KeysetOrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = hatSql.CompositeIndexedSourceResolver
@@ -2137,6 +2139,9 @@ func sqlJSONPrefixRows(index *sqlJSONFieldIndex, prefix string) ([]SQLRow, bool)
 func sqlJSONRangeBounds(ordered []sqlJSONFieldIndexEntry, operator string, value interface{}) (start, end int, ok bool) {
 	start, end = 0, len(ordered)
 	switch operator {
+	case "=":
+		start = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) >= 0 })
+		end = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) > 0 })
 	case "<":
 		end = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) >= 0 })
 	case "<=":
@@ -2145,6 +2150,26 @@ func sqlJSONRangeBounds(ordered []sqlJSONFieldIndexEntry, operator string, value
 		start = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) > 0 })
 	case ">=":
 		start = sort.Search(len(ordered), func(index int) bool { return hatSql.Compare(ordered[index].value, value) >= 0 })
+	default:
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func sqlJSONTypedInt64RangeBounds(ordered []sqlJSONTypedInt64Entry, operator string, value int64) (start, end int, ok bool) {
+	start, end = 0, len(ordered)
+	switch operator {
+	case "=":
+		start = sort.Search(len(ordered), func(index int) bool { return ordered[index].value >= value })
+		end = sort.Search(len(ordered), func(index int) bool { return ordered[index].value > value })
+	case "<":
+		end = sort.Search(len(ordered), func(index int) bool { return ordered[index].value >= value })
+	case "<=":
+		end = sort.Search(len(ordered), func(index int) bool { return ordered[index].value > value })
+	case ">":
+		start = sort.Search(len(ordered), func(index int) bool { return ordered[index].value > value })
+	case ">=":
+		start = sort.Search(len(ordered), func(index int) bool { return ordered[index].value >= value })
 	default:
 		return 0, 0, false
 	}
@@ -2219,6 +2244,116 @@ func (ht *HatTrie) ResolveSQLOrderedSource(name, key, field string, desc, nullsF
 		rows = append(rows, index.nulls...)
 	}
 	return hatSql.CloneRows(rows), true, nil
+}
+
+// ResolveSQLOrderedSourceRange returns ordered candidates from the portion of
+// an indexed CACHE field selected by one literal comparison. The SQL executor
+// evaluates the complete predicate after this candidate pruning step.
+func (ht *HatTrie) ResolveSQLOrderedSourceRange(name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}) ([]SQLRow, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+	if name != "CACHE" || value == nil {
+		return nil, false, nil
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return nil, false, err
+	}
+
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+		if err != nil {
+			if err == errSQLJSONIndexAdmissionDenied {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
+		if !typed.complete {
+			return nil, false, nil
+		}
+		needle, ok := sqlJSONTypedInt64Value(value)
+		if !ok {
+			return []SQLRow{}, true, nil
+		}
+		start, end, ok := sqlJSONTypedInt64RangeBounds(typed.ordered, operator, needle)
+		if !ok {
+			return nil, false, nil
+		}
+		return sqlJSONTypedInt64OrderedRangeRows(typed.ordered[start:end], typed.rows, desc), true, nil
+	}
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil || index.multikey {
+		return nil, false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
+		return nil, false, err
+	}
+	start, end, ok := sqlJSONRangeBounds(index.ordered, operator, value)
+	if !ok {
+		return nil, false, nil
+	}
+	return sqlJSONFieldIndexOrderedRangeRows(index.ordered[start:end], desc), true, nil
+}
+
+func sqlJSONTypedInt64OrderedRangeRows(ordered []sqlJSONTypedInt64Entry, rows []SQLRow, desc bool) []SQLRow {
+	selected := make([]SQLRow, 0, len(ordered))
+	appendRow := func(entry sqlJSONTypedInt64Entry) {
+		if int(entry.ordinal) < len(rows) {
+			selected = append(selected, rows[entry.ordinal])
+		}
+	}
+	if !desc {
+		for _, entry := range ordered {
+			appendRow(entry)
+		}
+		return hatSql.CloneRows(selected)
+	}
+	for end := len(ordered); end > 0; {
+		start := end - 1
+		for start > 0 && ordered[start-1].value == ordered[end-1].value {
+			start--
+		}
+		for _, entry := range ordered[start:end] {
+			appendRow(entry)
+		}
+		end = start
+	}
+	return hatSql.CloneRows(selected)
+}
+
+func sqlJSONFieldIndexOrderedRangeRows(ordered []sqlJSONFieldIndexEntry, desc bool) []SQLRow {
+	selected := make([]SQLRow, 0, len(ordered))
+	appendRow := func(entry sqlJSONFieldIndexEntry) {
+		selected = append(selected, entry.row)
+	}
+	if !desc {
+		for _, entry := range ordered {
+			appendRow(entry)
+		}
+		return hatSql.CloneRows(selected)
+	}
+	for end := len(ordered); end > 0; {
+		start := end - 1
+		for start > 0 && hatSql.Compare(ordered[start-1].value, ordered[end-1].value) == 0 {
+			start--
+		}
+		for _, entry := range ordered[start:end] {
+			appendRow(entry)
+		}
+		end = start
+	}
+	return hatSql.CloneRows(selected)
 }
 
 // StreamSQLOrderedSource visits an indexed CACHE source in one-field SQL
@@ -2356,6 +2491,155 @@ func (ht *HatTrie) StreamSQLOrderedSource(ctx context.Context, name, key, field 
 		return true, err
 	}
 	return true, emitNulls()
+}
+
+// StreamSQLOrderedSourceRange visits only the ordered-index range selected by
+// one literal comparison. It captures immutable index slices while locked,
+// then releases the index before callbacks, matching the ordinary ordered
+// stream's snapshot and callback ownership rules.
+func (ht *HatTrie) StreamSQLOrderedSourceRange(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}, visit func(SQLRow) error) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+	if visit == nil {
+		return false, fmt.Errorf("SQL row callback is required")
+	}
+	if name != "CACHE" || value == nil {
+		return false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return false, err
+	}
+
+	ht.sqlIndexMu.Lock()
+	if typed := ht.sqlJSONTypedInt64Indexes[key][field]; typed != nil {
+		snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+		if err != nil {
+			ht.sqlIndexMu.Unlock()
+			if err == errSQLJSONIndexAdmissionDenied {
+				return false, nil
+			}
+			return false, err
+		}
+		refreshSQLJSONTypedInt64IndexSource(typed, field, source, snapshot.rows)
+		if !typed.complete {
+			ht.sqlIndexMu.Unlock()
+			return false, nil
+		}
+		needle, ok := sqlJSONTypedInt64Value(value)
+		if !ok {
+			ht.sqlIndexMu.Unlock()
+			return true, nil
+		}
+		start, end, ok := sqlJSONTypedInt64RangeBounds(typed.ordered, operator, needle)
+		if !ok {
+			ht.sqlIndexMu.Unlock()
+			return false, nil
+		}
+		ordered, rows := typed.ordered[start:end], typed.rows
+		ht.sqlIndexMu.Unlock()
+		return true, streamSQLTypedInt64OrderedRange(ctx, ordered, rows, desc, visit)
+	}
+	index := ht.sqlJSONIndexes[key][field]
+	if index == nil || index.multikey {
+		ht.sqlIndexMu.Unlock()
+		return false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		ht.sqlIndexMu.Unlock()
+		if err == errSQLJSONIndexAdmissionDenied {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
+		ht.sqlIndexMu.Unlock()
+		return false, err
+	}
+	start, end, ok := sqlJSONRangeBounds(index.ordered, operator, value)
+	if !ok {
+		ht.sqlIndexMu.Unlock()
+		return false, nil
+	}
+	ordered := index.ordered[start:end]
+	ht.sqlIndexMu.Unlock()
+	return true, streamSQLFieldIndexRange(ctx, ordered, desc, visit)
+}
+
+func streamSQLTypedInt64OrderedRange(ctx context.Context, ordered []sqlJSONTypedInt64Entry, rows []SQLRow, desc bool, visit func(SQLRow) error) error {
+	emit := func(entry sqlJSONTypedInt64Entry) error {
+		if int(entry.ordinal) >= len(rows) {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		copy := make(SQLRow, len(rows[entry.ordinal]))
+		for name, value := range rows[entry.ordinal] {
+			copy[name] = value
+		}
+		return visit(copy)
+	}
+	if !desc {
+		for _, entry := range ordered {
+			if err := emit(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for end := len(ordered); end > 0; {
+		start := end - 1
+		for start > 0 && ordered[start-1].value == ordered[end-1].value {
+			start--
+		}
+		for _, entry := range ordered[start:end] {
+			if err := emit(entry); err != nil {
+				return err
+			}
+		}
+		end = start
+	}
+	return nil
+}
+
+func streamSQLFieldIndexRange(ctx context.Context, ordered []sqlJSONFieldIndexEntry, desc bool, visit func(SQLRow) error) error {
+	emit := func(entry sqlJSONFieldIndexEntry) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		copy := make(SQLRow, len(entry.row))
+		for name, value := range entry.row {
+			copy[name] = value
+		}
+		return visit(copy)
+	}
+	if !desc {
+		for _, entry := range ordered {
+			if err := emit(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for end := len(ordered); end > 0; {
+		start := end - 1
+		for start > 0 && hatSql.Compare(ordered[start-1].value, ordered[end-1].value) == 0 {
+			start--
+		}
+		for _, entry := range ordered[start:end] {
+			if err := emit(entry); err != nil {
+				return err
+			}
+		}
+		end = start
+	}
+	return nil
 }
 
 // StreamSQLOrderedSourceAfter visits an indexed CACHE source after a stable

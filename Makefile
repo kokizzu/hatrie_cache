@@ -8728,6 +8728,65 @@ commit-ch001-prewhere:
 push-ch001-prewhere:
 	bash scripts/push-ch001-prewhere.sh
 
+.PHONY: list-engine-ideas
+list-engine-ideas:
+	bash scripts/list-engine-ideas.sh
+
+.PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
+test-ch002-primary-mark-pruning:
+	bash scripts/test-ch002-primary-mark-pruning.sh
+
+.PHONY: test-race-ch002-primary-mark-pruning vet-ch002-primary-mark-pruning
+test-race-ch002-primary-mark-pruning:
+	bash scripts/test-race-ch002-primary-mark-pruning.sh
+
+vet-ch002-primary-mark-pruning:
+	bash scripts/vet-ch002-primary-mark-pruning.sh
+
+benchmark-ch002-primary-mark-pruning:
+	bash scripts/benchmark-ch002-primary-mark-pruning.sh
+
+format-ch002-primary-mark-pruning:
+	bash scripts/format-ch002-primary-mark-pruning.sh
+
+.PHONY: test-ch002-real-index
+test-ch002-real-index:
+	bash scripts/test-ch002-real-index.sh
+
+.PHONY: benchmark-ch002-stream-sparse
+benchmark-ch002-stream-sparse:
+	bash scripts/benchmark-ch002-stream-sparse.sh
+
+.PHONY: benchmark-ch002-hattrie
+benchmark-ch002-hattrie:
+	bash scripts/benchmark-ch002-hattrie.sh
+
+.PHONY: benchmark-ch002-hattrie-materialized benchmark-ch002-hattrie-stream
+benchmark-ch002-hattrie-materialized:
+	bash scripts/benchmark-ch002-hattrie-materialized.sh
+
+benchmark-ch002-hattrie-stream:
+	bash scripts/benchmark-ch002-hattrie-stream.sh
+
+.PHONY: verify-ch002-docs
+verify-ch002-docs:
+	bash scripts/verify-ch002-docs.sh
+
+.PHONY: review-ch002
+review-ch002:
+	bash scripts/review-ch002.sh
+
+.PHONY: review-ch002-code
+review-ch002-code:
+	bash scripts/review-ch002-code.sh
+
+.PHONY: commit-ch002 push-ch002
+commit-ch002:
+	bash scripts/commit-ch002.sh
+
+push-ch002:
+	bash scripts/push-ch002.sh
+
 .PHONY: commit-engine-idea-catalog push-engine-idea-catalog
 commit-engine-idea-catalog:
 	bash scripts/commit-engine-idea-catalog.sh

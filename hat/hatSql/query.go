@@ -143,7 +143,9 @@ type SQLLookupSourceResolver = LookupSourceResolver
 type SQLRangeIndexedSourceResolver = RangeIndexedSourceResolver
 type SQLBorrowedPrefixIndexedSourceResolver = BorrowedPrefixIndexedSourceResolver
 type SQLOrderedSourceResolver = OrderedSourceResolver
+type SQLOrderedRangeSourceResolver = OrderedRangeSourceResolver
 type SQLOrderedStreamSourceResolver = OrderedStreamSourceResolver
+type SQLOrderedRangeStreamSourceResolver = OrderedRangeStreamSourceResolver
 type SQLKeysetPosition = KeysetPosition
 type SQLKeysetOrderedStreamSourceResolver = KeysetOrderedStreamSourceResolver
 type SQLCompositeIndexedSourceResolver = CompositeIndexedSourceResolver
@@ -2546,7 +2548,7 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 	columns := sqlColumns(query.selects)
 	inputRows := 0
 	ordinal := 0
-	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
+	visitSourceRow := func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
 			return err
 		}
@@ -2600,7 +2602,24 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 			heap.Fix(&candidates, 0)
 		}
 		return nil
-	})
+	}
+	var err error
+	usedOrderedRange := false
+	if ranged, ok := resolver.(OrderedRangeStreamSourceResolver); ok {
+		if operator, value, matched := sqlOrderedRangePredicate(query); matched {
+			order := query.orderBy[0]
+			available, rangeErr := ranged.StreamSQLOrderedSourceRange(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, operator, value, visitSourceRow)
+			if rangeErr != nil {
+				return sqlRuntimeDiagnostic(rangeErr)
+			}
+			if available {
+				usedOrderedRange = true
+			}
+		}
+	}
+	if !usedOrderedRange {
+		err = streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), visitSourceRow)
+	}
 	if err != nil {
 		return sqlRuntimeDiagnostic(err)
 	}
@@ -3455,6 +3474,17 @@ func executeSQLIndexedOrderStreamWithLimitBehavior(ctx context.Context, query *s
 		return nil
 	}
 	order := query.orderBy[0]
+	if ranged, ok := resolver.(SQLOrderedRangeStreamSourceResolver); ok {
+		if operator, value, matched := sqlOrderedRangePredicate(query); matched {
+			available, err := ranged.StreamSQLOrderedSourceRange(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, operator, value, emit)
+			if err != nil && err != errSQLStreamLimitReached {
+				return sqlRuntimeDiagnostic(err)
+			}
+			if available {
+				return nil
+			}
+		}
+	}
 	available, err := streaming.StreamSQLOrderedSource(ctx, query.from.kind, query.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, emit)
 	if err != nil && err != errSQLStreamLimitReached {
 		return sqlRuntimeDiagnostic(err)
@@ -12683,12 +12713,11 @@ func resolveSQLJoinPushedSource(source sqlSource, condition sqlExpr, resolver SQ
 }
 
 // resolveSQLOrderedSource chooses the narrow order-preserving scan that can
-// replace both a source scan and the final SORT. It intentionally excludes
-// filters, joins, unions, typed sources, aliases, and composite order keys:
-// those forms need the established executor until their ordering proof is as
-// direct as this one-field case.
+// replace both a source scan and the final SORT. A literal range predicate on
+// the ordered field may additionally select a source-side range scan; the
+// complete predicate is still evaluated by the normal executor.
 func resolveSQLOrderedSource(q *sqlQuery, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
-	if q == nil || q.from == nil || q.sample != nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || q.where.kind != "" || q.distinct || sqlQueryHasWindow(q) || len(q.joins) != 0 || len(q.unions) != 0 || len(q.orderBy) != 1 {
+	if q == nil || q.from == nil || q.sample != nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || q.distinct || sqlQueryHasWindow(q) || len(q.joins) != 0 || len(q.unions) != 0 || len(q.orderBy) != 1 {
 		return nil, false, nil
 	}
 	order := q.orderBy[0]
@@ -12701,6 +12730,20 @@ func resolveSQLOrderedSource(q *sqlQuery, resolver SQLSourceResolver) ([]SQLRow,
 		}
 	} else if sqlQueryHasAggregate(q) {
 		return nil, false, nil
+	}
+	if q.where.kind != "" {
+		ranged, ok := resolver.(SQLOrderedRangeSourceResolver)
+		if !ok {
+			return nil, false, nil
+		}
+		operator, value, matched := sqlOrderedRangePredicate(q)
+		if !matched {
+			return nil, false, nil
+		}
+		rows, available, err := ranged.ResolveSQLOrderedSourceRange(q.from.kind, q.from.key, order.expr.name, order.desc, order.nullsFirst, order.nullsLast, operator, value)
+		if available || err != nil {
+			return rows, available, err
+		}
 	}
 	indexed, ok := resolver.(SQLOrderedSourceResolver)
 	if !ok {

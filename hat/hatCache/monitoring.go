@@ -207,12 +207,36 @@ func (resolver monitoringSQLResolver) StreamSQLSource(ctx context.Context, name 
 	return streaming.StreamSQLSource(ctx, name, key, visit)
 }
 
+func (resolver monitoringSQLResolver) ResolveSQLOrderedSource(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLRow, bool, error) {
+	ordered, ok := resolver.source.(SQLOrderedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return ordered.ResolveSQLOrderedSource(name, key, field, desc, nullsFirst, nullsLast)
+}
+
+func (resolver monitoringSQLResolver) ResolveSQLOrderedSourceRange(name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}) ([]SQLRow, bool, error) {
+	ordered, ok := resolver.source.(SQLOrderedRangeSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return ordered.ResolveSQLOrderedSourceRange(name, key, field, desc, nullsFirst, nullsLast, operator, value)
+}
+
 func (resolver monitoringSQLResolver) StreamSQLOrderedSource(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, visit func(SQLRow) error) (bool, error) {
 	streaming, ok := resolver.source.(SQLOrderedStreamSourceResolver)
 	if !ok {
 		return false, nil
 	}
 	return streaming.StreamSQLOrderedSource(ctx, name, key, field, desc, nullsFirst, nullsLast, visit)
+}
+
+func (resolver monitoringSQLResolver) StreamSQLOrderedSourceRange(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, operator string, value interface{}, visit func(SQLRow) error) (bool, error) {
+	streaming, ok := resolver.source.(SQLOrderedRangeStreamSourceResolver)
+	if !ok {
+		return false, nil
+	}
+	return streaming.StreamSQLOrderedSourceRange(ctx, name, key, field, desc, nullsFirst, nullsLast, operator, value, visit)
 }
 
 func (resolver monitoringSQLResolver) StreamSQLOrderedSourceAfter(ctx context.Context, name, key, field string, desc, nullsFirst, nullsLast bool, after hatSql.SQLKeysetPosition, visit func(SQLRow, hatSql.SQLKeysetPosition) error) (bool, error) {
