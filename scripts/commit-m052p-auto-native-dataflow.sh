@@ -6,6 +6,7 @@ git add \
 	BENCHMARK.md \
 	INSPIRATION.md \
 	SQL_AUTO_NATIVE_DATAFLOW.md \
+	hat/hatSql/query.go \
 	hat/hatSql/m052p_auto_native_dataflow.go \
 	hat/hatSql/m052p_auto_native_dataflow_test.go \
 	hat/hatSql/m052p_auto_native_dataflow_benchmark_test.go \

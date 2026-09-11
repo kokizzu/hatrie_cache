@@ -194,9 +194,14 @@ type SQLQueryOptions struct {
 	MaxResultBytes         int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
-	Workers       int
-	MaxSortBytes  int
-	MaxGroupBytes int
+	Workers int
+	// DisableNativeDataflow keeps the general materialized executor for plain
+	// scalar row projections. The automatic native batch path is enabled by
+	// default only for ordinary row resolvers; specialized resolvers and richer
+	// query shapes retain their existing executor.
+	DisableNativeDataflow bool
+	MaxSortBytes          int
+	MaxGroupBytes         int
 	// MaxGroupRowsPerKey rejects a GROUP BY value once it receives more than
 	// this many input rows. Zero preserves the existing unbounded behavior.
 	// It is an opt-in skew guard for workloads where one key must not dominate
@@ -754,6 +759,14 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 	var metrics *sqlExecutionMetrics
 	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
+	}
+	recordNativePlan := observation.observer != nil || observation.recorder != nil
+	if nativeResult, handled, nativeErr := executeSQLAutoNativeDataflow(ctx, query, resolver, options, control, recordNativePlan); handled {
+		nativeResult.QueryID = observation.id
+		if operatorSteps != nil {
+			*operatorSteps = nativeResult.Plan
+		}
+		return nativeResult, nativeErr
 	}
 	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		streamed, streamErr := executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
