@@ -488,3 +488,19 @@ and `22,220` versus `552 allocs/op` for ordinary versus native execution.
 That is `4.51x` lower latency, `6.20x` lower allocation volume, and `40.25x`
 fewer allocations. First-seen order, empty strings, `NULL`, and unsupported
 key fallback behavior are covered by focused tests.
+
+### Native Composite Distinct Measurement
+
+Command:
+
+```text
+make benchmark-m052n-native-composite-distinct
+```
+
+The native distinct executor now admits two direct fields using a fixed
+comparable key with typed integer, string, and `NULL` components. A five-sample
+20,000-row benchmark measured `14,473,692` versus `4,544,236 ns/op`,
+`15,502,442` versus `3,974,801 B/op`, and `130,053` versus `7,140 allocs/op`
+for ordinary versus native execution. That is `3.19x` lower latency, `3.90x`
+lower allocation volume, and `18.21x` fewer allocations. First-seen order and
+unsupported component fallback behavior are covered by focused tests.

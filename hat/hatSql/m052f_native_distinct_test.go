@@ -43,7 +43,7 @@ func TestCompiledSQLNativeDataflowMatchesDistinctRows(t *testing.T) {
 
 func TestCompiledSQLNativeDataflowDistinctRejectsUnsupportedShapes(t *testing.T) {
 	queries := []string{
-		"FROM CACHE('items') AS src SELECT DISTINCT src.group AS bucket, src.value",
+		"FROM CACHE('items') AS src SELECT DISTINCT src.group AS bucket, src.value, src.extra",
 		"FROM CACHE('items') AS src SELECT DISTINCT src.group AS bucket ORDER BY bucket",
 		"FROM CACHE('items') AS src SELECT DISTINCT LOWER(src.group) AS bucket",
 	}

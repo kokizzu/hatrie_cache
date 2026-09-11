@@ -18831,6 +18831,40 @@ The pre-implementation ordinary-only median was `12,430,246 ns/op`,
 `21,510,718 B/op`, and `100,282 allocs/op`. The feature remains opt-in;
 unsupported runtime key types retain the existing fail-closed behavior.
 
+## Native SQL Dataflow Composite Distinct
+
+Command:
+
+```text
+make benchmark-m052n-native-composite-distinct
+```
+
+This measures 20,000 resolved rows with two direct `DISTINCT` fields: 512
+repeated string regions and eight integer tiers, plus a scalar `WHERE`
+predicate. The native path uses a fixed comparable two-slot key whose
+components support integer, string, and `NULL` values, preserving first-seen
+output order without formatted composite keys. Five paired `-benchmem` samples
+were measured on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary composite distinct | 14,473,692 | 15,502,442 | 130,053 | baseline |
+| Native composite distinct | 4,544,236 | 3,974,801 | 7,140 | 3.19x faster; 3.90x fewer bytes; 18.21x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 15,067,571 | 4,154,206 | 15,502,536 | 3,974,806 | 130,053 | 7,140 |
+| 2 | 14,803,185 | 4,367,519 | 15,502,606 | 3,974,803 | 130,053 | 7,140 |
+| 3 | 14,473,692 | 4,683,653 | 15,502,336 | 3,974,801 | 130,052 | 7,140 |
+| 4 | 14,221,688 | 4,544,236 | 15,502,160 | 3,974,801 | 130,053 | 7,140 |
+| 5 | 14,382,767 | 4,681,696 | 15,502,442 | 3,974,801 | 130,052 | 7,140 |
+
+The pre-implementation ordinary-only median was `14,490,716 ns/op`,
+`15,502,365 B/op`, and `130,052 allocs/op`. The feature remains opt-in;
+unsupported component types retain the existing fail-closed behavior.
+
 ## Native SQL Dataflow String Distinct
 
 Command:

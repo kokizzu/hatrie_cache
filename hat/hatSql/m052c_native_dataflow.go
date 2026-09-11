@@ -112,7 +112,9 @@ type nativeSQLDataflowGroupedOrderedPlan struct {
 }
 
 type nativeSQLDataflowDistinctPlan struct {
-	field sqlExpr
+	field      sqlExpr
+	fields     [2]sqlExpr
+	fieldCount int
 }
 
 type nativeSQLDataflowOrderedPlan struct {
@@ -147,10 +149,23 @@ func nativeSQLDataflowOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowOrderedP
 }
 
 func nativeSQLDataflowDistinctPlanFor(query *sqlQuery) (nativeSQLDataflowDistinctPlan, bool) {
-	if query == nil || !query.distinct || len(query.selects) != 1 || query.selects[0].expr.kind != "field" || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+	if query == nil || !query.distinct || len(query.selects) == 0 || len(query.selects) > 2 || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return nativeSQLDataflowDistinctPlan{}, false
 	}
-	return nativeSQLDataflowDistinctPlan{field: query.selects[0].expr}, true
+	if len(query.selects) == 1 {
+		if query.selects[0].expr.kind != "field" {
+			return nativeSQLDataflowDistinctPlan{}, false
+		}
+		return nativeSQLDataflowDistinctPlan{field: query.selects[0].expr, fieldCount: 1}, true
+	}
+	plan := nativeSQLDataflowDistinctPlan{fieldCount: 2}
+	for index, item := range query.selects {
+		if item.expr.kind != "field" {
+			return nativeSQLDataflowDistinctPlan{}, false
+		}
+		plan.fields[index] = item.expr
+	}
+	return plan, true
 }
 
 func nativeSQLDataflowGroupPlanFor(query *sqlQuery) (nativeSQLDataflowGroupPlan, bool) {
@@ -334,6 +349,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 		return executeNativeSQLDataflowOrdered(ctx, query, initial, plan)
 	}
 	if plan, ok := nativeSQLDataflowDistinctPlanFor(query); ok {
+		if plan.fieldCount == 2 {
+			return executeNativeSQLDataflowCompositeDistinct(ctx, query, initial, plan)
+		}
 		return executeNativeSQLDataflowDistinct(ctx, query, initial, plan)
 	}
 	if plan, ok := nativeSQLDataflowGroupPlanFor(query); ok {
@@ -722,6 +740,95 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			row[columns[selectIndex]] = aggregates[group.aggregateOffset+aggregateIndex].result()
 		}
 		result = append(result, row)
+	}
+	return result, nil
+}
+
+const (
+	nativeSQLDataflowDistinctKeyNull uint8 = iota
+	nativeSQLDataflowDistinctKeyInteger
+	nativeSQLDataflowDistinctKeyString
+)
+
+type nativeSQLDataflowDistinctKey struct {
+	kind        uint8
+	integer     int64
+	stringValue string
+}
+
+type nativeSQLDataflowCompositeDistinctKey struct {
+	first  nativeSQLDataflowDistinctKey
+	second nativeSQLDataflowDistinctKey
+}
+
+func nativeSQLDataflowDistinctKeyFor(value interface{}) (nativeSQLDataflowDistinctKey, bool) {
+	integer, isNull, ok := nativeSQLDataflowIntegerGroupKey(value)
+	if ok {
+		if isNull {
+			return nativeSQLDataflowDistinctKey{kind: nativeSQLDataflowDistinctKeyNull}, true
+		}
+		return nativeSQLDataflowDistinctKey{kind: nativeSQLDataflowDistinctKeyInteger, integer: integer}, true
+	}
+	stringValue, ok := value.(string)
+	if !ok {
+		return nativeSQLDataflowDistinctKey{}, false
+	}
+	return nativeSQLDataflowDistinctKey{kind: nativeSQLDataflowDistinctKeyString, stringValue: stringValue}, true
+}
+
+func executeNativeSQLDataflowCompositeDistinct(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowDistinctPlan) ([]SQLRow, error) {
+	seen := make(map[nativeSQLDataflowCompositeDistinctKey]struct{}, len(initial))
+	columns := sqlColumns(query.selects)
+	result := make([]SQLRow, 0, len(initial))
+	execRows := make([]sqlExecRow, 1)
+	for index, input := range initial {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := input
+		if len(query.from.fieldTypes) != 0 {
+			validated, err := validateSQLSourceFieldTypeRow(*query.from, input, index+1)
+			if err != nil {
+				return nil, err
+			}
+			row = validated
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, row)
+		execRows[0] = execRow
+		if query.where.kind != "" {
+			whereValue := evalSQLExpr(query.where, execRows, execRow)
+			if err := sqlExpressionError(whereValue); err != nil {
+				return nil, fmt.Errorf("native dataflow WHERE row %d: %w", index+1, err)
+			}
+			if !sqlTruthy(whereValue) {
+				continue
+			}
+		}
+		firstValue := evalSQLExpr(plan.fields[0], execRows, execRow)
+		if err := sqlExpressionError(firstValue); err != nil {
+			return nil, fmt.Errorf("native dataflow DISTINCT row %d column 1: %w", index+1, err)
+		}
+		secondValue := evalSQLExpr(plan.fields[1], execRows, execRow)
+		if err := sqlExpressionError(secondValue); err != nil {
+			return nil, fmt.Errorf("native dataflow DISTINCT row %d column 2: %w", index+1, err)
+		}
+		firstKey, ok := nativeSQLDataflowDistinctKeyFor(firstValue)
+		if !ok {
+			return nil, fmt.Errorf("%w: DISTINCT key type %T", ErrSQLNativeDataflowUnsupported, firstValue)
+		}
+		secondKey, ok := nativeSQLDataflowDistinctKeyFor(secondValue)
+		if !ok {
+			return nil, fmt.Errorf("%w: DISTINCT key type %T", ErrSQLNativeDataflowUnsupported, secondValue)
+		}
+		key := nativeSQLDataflowCompositeDistinctKey{first: firstKey, second: secondKey}
+		if _, found := seen[key]; found {
+			continue
+		}
+		seen[key] = struct{}{}
+		projected := make(SQLRow, len(columns))
+		projected[columns[0]] = firstValue
+		projected[columns[1]] = secondValue
+		result = append(result, projected)
 	}
 	return result, nil
 }

@@ -8384,3 +8384,30 @@ commit-m052m-native-string-distinct:
 
 push-m052m-native-string-distinct:
 	bash ./scripts/push-m052m-native-string-distinct.sh
+.PHONY: test-m052n-native-composite-distinct benchmark-m052n-native-composite-distinct benchmark-m052n-native-composite-distinct-baseline format-m052n-native-composite-distinct test-race-m052n-native-composite-distinct vet-m052n-native-composite-distinct review-m052n-native-composite-distinct commit-m052n-native-composite-distinct push-m052n-native-composite-distinct
+test-m052n-native-composite-distinct:
+	bash ./scripts/test-m052n-native-composite-distinct.sh
+
+benchmark-m052n-native-composite-distinct:
+	bash ./scripts/benchmark-m052n-native-composite-distinct.sh
+
+benchmark-m052n-native-composite-distinct-baseline:
+	bash ./scripts/benchmark-m052n-native-composite-distinct-baseline.sh
+
+format-m052n-native-composite-distinct:
+	bash ./scripts/format-m052n-native-composite-distinct.sh
+
+test-race-m052n-native-composite-distinct:
+	bash ./scripts/test-race-m052n-native-composite-distinct.sh
+
+vet-m052n-native-composite-distinct:
+	bash ./scripts/vet-m052n-native-composite-distinct.sh
+
+review-m052n-native-composite-distinct:
+	bash ./scripts/review-m052n-native-composite-distinct.sh
+
+commit-m052n-native-composite-distinct:
+	bash ./scripts/commit-m052n-native-composite-distinct.sh
+
+push-m052n-native-composite-distinct:
+	bash ./scripts/push-m052n-native-composite-distinct.sh

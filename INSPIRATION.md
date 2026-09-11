@@ -462,6 +462,12 @@ Materialize's Timely/Differential Dataflow runtime.
   identity, scalar filtering, and the fail-closed path for unsupported values.
   The paired benchmark is 4.51x faster with 6.20x fewer bytes and 40.25x fewer
   allocations; see [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-string-distinct).
+- [x] M052n Extend native `DISTINCT` dataflow to two direct typed fields. A
+  fixed comparable key supports integer, string, and `NULL` components without
+  per-row formatted composite keys or dynamic key slices, preserving
+  first-seen order and unsupported-value rejection. The paired benchmark is
+  3.19x faster with 3.90x fewer bytes and 18.21x fewer allocations; see
+  [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-composite-distinct).
   `HAVING` expressions. Selected `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` expressions are
   rewritten to compact grouped output values before filtering and Top-N
   selection; qualified, missing, unselected, custom, and windowed expressions
