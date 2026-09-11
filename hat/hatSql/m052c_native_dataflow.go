@@ -38,25 +38,35 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	if query.explain || query.sample != nil || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
 		return fmt.Errorf("%w: query contains non-scalar stages", ErrSQLNativeDataflowUnsupported)
 	}
-	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || query.limit >= 0 || query.offset > 0 || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
+	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
 		return fmt.Errorf("%w: query requires materialized state", ErrSQLNativeDataflowUnsupported)
 	}
 	if query.where.kind != "" && !sqlStreamScalarExpr(query.where) {
 		return fmt.Errorf("%w: WHERE expression is not scalar", ErrSQLNativeDataflowUnsupported)
 	}
+	hasOutputWindow := query.limit >= 0 || query.offset > 0
 	if query.distinct {
+		if hasOutputWindow {
+			return fmt.Errorf("%w: DISTINCT query requires materialized state", ErrSQLNativeDataflowUnsupported)
+		}
 		if _, ok := nativeSQLDataflowDistinctPlanFor(query); !ok {
 			return fmt.Errorf("%w: DISTINCT query shape", ErrSQLNativeDataflowUnsupported)
 		}
 		return nil
 	}
 	if len(query.groupBy) != 0 {
+		if hasOutputWindow {
+			return fmt.Errorf("%w: grouped query requires materialized state", ErrSQLNativeDataflowUnsupported)
+		}
 		if _, ok := nativeSQLDataflowGroupPlanFor(query); !ok {
 			return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
 		}
 		return nil
 	}
 	if _, ok := nativeSQLDataflowAggregatePlan(query); ok {
+		if hasOutputWindow {
+			return fmt.Errorf("%w: aggregate query requires materialized state", ErrSQLNativeDataflowUnsupported)
+		}
 		return nil
 	}
 	if len(query.selects) == 0 {
@@ -172,10 +182,18 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 		return executeNativeSQLDataflowAggregates(ctx, query, initial, aggregates)
 	}
 	columns := sqlColumns(query.selects)
-	result := make([]SQLRow, 0, len(initial))
+	capacity := len(initial)
+	if query.limit >= 0 && capacity > query.limit {
+		capacity = query.limit
+	}
+	result := make([]SQLRow, 0, capacity)
+	offset := query.offset
 	for index, input := range initial {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if query.limit == 0 {
+			return result, nil
 		}
 		row := input
 		if len(query.from.fieldTypes) != 0 {
@@ -195,6 +213,10 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 				continue
 			}
 		}
+		if offset > 0 {
+			offset--
+			continue
+		}
 		projected := make(SQLRow, len(columns))
 		for selectIndex, item := range query.selects {
 			value, err := evalSQLStreamExpr(item.expr, execRow, nil)
@@ -204,6 +226,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 			projected[columns[selectIndex]] = value
 		}
 		result = append(result, projected)
+		if query.limit >= 0 && len(result) >= query.limit {
+			break
+		}
 	}
 	return result, nil
 }

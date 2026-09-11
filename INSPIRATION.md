@@ -424,6 +424,12 @@ Materialize's Timely/Differential Dataflow runtime.
   The paired benchmark is 4.91x faster with 11.13x fewer bytes and 41.34x
   fewer allocations; see
   [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-distinct).
+- [x] M052g Extend the opt-in built-in executor to finite `LIMIT`/`OFFSET`
+  windows for scalar filter/project batches. The native path stops after the
+  post-filter page while grouped, aggregate, and `DISTINCT` windows remain
+  rejected. The paired benchmark is 35.13x faster with 309.98x fewer bytes and
+  245.19x fewer allocations; see
+  [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-limit).
 - [x] M053 Extensible optimizer rule framework. `SQLQueryOptimizer` provides an opt-in ordered rule hook over structural EXPLAIN steps and existing `SQLIndexHint` controls; nil keeps the default path. See [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md) and the measured opt-in cost in [BENCHMARK.md](BENCHMARK.md#opt-in-sql-optimizer-rules).
 - [x] M054 Predicate pushdown before arrangement maintenance.
 - [x] M055 Projection pruning before arrangement maintenance.

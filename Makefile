@@ -8166,3 +8166,35 @@ commit-m052f-native-distinct:
 .PHONY: push-m052f-native-distinct
 push-m052f-native-distinct:
 	bash ./scripts/push-m052f-native-distinct.sh
+
+.PHONY: test-m052g-native-limit
+test-m052g-native-limit:
+	bash ./scripts/test-m052g-native-limit.sh
+
+.PHONY: benchmark-m052g-native-limit
+benchmark-m052g-native-limit:
+	bash ./scripts/benchmark-m052g-native-limit.sh
+
+.PHONY: format-m052g-native-limit
+format-m052g-native-limit:
+	bash ./scripts/format-m052g-native-limit.sh
+
+.PHONY: test-race-m052g-native-limit
+test-race-m052g-native-limit:
+	bash ./scripts/test-race-m052g-native-limit.sh
+
+.PHONY: vet-m052g-native-limit
+vet-m052g-native-limit:
+	bash ./scripts/vet-m052g-native-limit.sh
+
+.PHONY: review-m052g-native-limit
+review-m052g-native-limit:
+	bash ./scripts/review-m052g-native-limit.sh
+
+.PHONY: commit-m052g-native-limit
+commit-m052g-native-limit:
+	bash ./scripts/commit-m052g-native-limit.sh
+
+.PHONY: push-m052g-native-limit
+push-m052g-native-limit:
+	bash ./scripts/push-m052g-native-limit.sh

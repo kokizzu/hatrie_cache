@@ -259,6 +259,43 @@ The pre-implementation ordinary-only baseline median was `2,881,364 ns/op`,
 the ratio because it controls for normal benchmark noise. No storage, wire,
 or default-execution behavior changes.
 
+### Native Limit Measurement
+
+Command:
+
+```text
+make benchmark-m052g-native-limit
+```
+
+The benchmark applies `WHERE value >= 0 LIMIT 32 OFFSET 512` to 4,096 already
+resolved rows and projects two fields. Both paths compile the query outside the
+timed loop and receive the same rows. The ordinary executor and native scalar
+executor each use five paired `-benchmem` samples on Linux/amd64 with an AMD
+Ryzen 9 5950X. The native path stops after the post-filter page and therefore
+does not project the remaining rows. Finite windows are supported only for the
+plain scalar projection path; grouped, aggregate, and `DISTINCT` windows still
+fail closed to preserve their existing materialization semantics.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 2,269,821 | 3,481,020 | 16,428 | baseline |
+| Native scalar executor | 64,618 | 11,230 | 67 | 35.13x faster; 309.98x fewer bytes; 245.19x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2,287,573 | 64,398 | 3,481,020 | 11,232 | 16,428 | 67 |
+| 2 | 2,261,348 | 64,395 | 3,480,726 | 11,229 | 16,426 | 67 |
+| 3 | 2,287,249 | 65,092 | 3,481,103 | 11,230 | 16,429 | 67 |
+| 4 | 2,239,096 | 64,618 | 3,481,071 | 11,230 | 16,429 | 67 |
+| 5 | 2,269,821 | 65,230 | 3,480,886 | 11,230 | 16,428 | 67 |
+
+The pre-implementation ordinary-only baseline median was `2,246,740 ns/op`,
+`3,481,030 B/op`, and `16,428 allocs/op`. The paired control is reported for
+the ratio because it controls for normal benchmark noise. The feature is
+opt-in and changes no storage, wire, or default SQL behavior.
+
 ### Native Distinct Measurement
 
 Command:
