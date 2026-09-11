@@ -148,6 +148,26 @@ func TestPartitionOwnershipConsensusRejectsMalformedVotesAndDecisionReuse(t *tes
 	}
 }
 
+func TestEvaluatePartitionOwnershipConsensusRejectsNonCanonicalMetadata(t *testing.T) {
+	expected := PartitionOwnership{ShardID: 1, Primary: "a", Replicas: []string{"b"}, TopologyFingerprint: "fp"}
+	variants := []PartitionOwnership{
+		{ShardID: 1, Primary: " a", Replicas: []string{"b"}, TopologyFingerprint: "fp"},
+		{ShardID: 1, Primary: "a", Replicas: []string{" b"}, TopologyFingerprint: "fp"},
+		{ShardID: 1, Primary: "a", Replicas: []string{"a"}, TopologyFingerprint: "fp"},
+		{ShardID: 1, Primary: "a", Replicas: []string{"b"}, TopologyFingerprint: " fp"},
+	}
+	for index, ownership := range variants {
+		_, err := EvaluatePartitionOwnershipConsensus(
+			TopologyConsensusPolicy{Voters: []string{"a"}},
+			expected,
+			[]PartitionOwnershipConsensusVote{{NodeID: "a", Accepted: true, Ownership: ownership}},
+		)
+		if !errors.Is(err, ErrPartitionOwnershipConsensusInvalid) {
+			t.Errorf("variant %d: error = %v, want ErrPartitionOwnershipConsensusInvalid", index, err)
+		}
+	}
+}
+
 func TestValidatePartitionOwnershipConsensusDecisionRequiresQuorum(t *testing.T) {
 	expected := PartitionOwnership{ShardID: 1, Primary: "a", TopologyFingerprint: "fp"}
 	decision, err := EvaluatePartitionOwnershipConsensus(

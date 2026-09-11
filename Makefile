@@ -8023,6 +8023,10 @@ verify-partition-ownership-consensus:
 commit-partition-ownership-consensus:
 	bash ./scripts/commit-partition-ownership-consensus.sh
 
+.PHONY: inspect-source-frontier-contract
+inspect-source-frontier-contract:
+	bash ./scripts/inspect-source-frontier-contract.sh
+
 .PHONY: test-sql-set-operation-all
 test-sql-set-operation-all:
 	bash ./scripts/test-sql-set-operation-all.sh

@@ -17,5 +17,5 @@ git add \
   scripts/verify-partition-ownership-consensus.sh
 git diff --cached --check
 git diff --cached --stat
-git commit -m "hatTopology: add partition ownership consensus"
+git commit -m "hatTopology: harden partition ownership consensus"
 git push origin HEAD:master

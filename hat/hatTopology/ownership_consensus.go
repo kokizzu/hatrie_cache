@@ -168,22 +168,24 @@ func preparePartitionOwnershipConsensusVoters(policy TopologyConsensusPolicy) ([
 }
 
 func validatePartitionOwnershipConsensusMetadata(ownership PartitionOwnership) error {
-	if strings.TrimSpace(ownership.Primary) == "" {
+	primary := strings.TrimSpace(ownership.Primary)
+	if primary == "" || primary != ownership.Primary {
 		return fmt.Errorf("%w: primary is required", ErrPartitionOwnershipConsensusInvalid)
 	}
-	if strings.TrimSpace(ownership.TopologyFingerprint) == "" {
+	fingerprint := strings.TrimSpace(ownership.TopologyFingerprint)
+	if fingerprint == "" || fingerprint != ownership.TopologyFingerprint {
 		return fmt.Errorf("%w: topology fingerprint is required", ErrPartitionOwnershipConsensusInvalid)
 	}
 	for index, replica := range ownership.Replicas {
-		replica = strings.TrimSpace(replica)
-		if replica == "" {
+		trimmedReplica := strings.TrimSpace(replica)
+		if trimmedReplica == "" || trimmedReplica != replica {
 			return fmt.Errorf("%w: replica name is empty", ErrPartitionOwnershipConsensusInvalid)
 		}
-		if replica == ownership.Primary {
+		if replica == primary {
 			return fmt.Errorf("%w: primary is also a replica", ErrPartitionOwnershipConsensusInvalid)
 		}
 		for _, previous := range ownership.Replicas[:index] {
-			if replica == strings.TrimSpace(previous) {
+			if replica == previous {
 				return fmt.Errorf("%w: duplicate replica %q", ErrPartitionOwnershipConsensusInvalid, replica)
 			}
 		}
