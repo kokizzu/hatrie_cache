@@ -8908,15 +8908,13 @@ review-tt024-text-prefix:
 	bash scripts/review-tt024-text-prefix.sh
 
 commit-tt024-text-prefix:
-	bash scripts/commit-tt024-text-prefix.sh
+	COMMIT_MESSAGE='$(COMMIT_MESSAGE)' bash scripts/commit-tt024-text-prefix.sh
 
 push-tt024-text-prefix:
 	bash scripts/push-tt024-text-prefix.sh
 
 
 
-inspect-sql-text-resolver:
-	bash scripts/inspect-sql-text-resolver.sh
 
 
 inspect-text-index-implementation:
