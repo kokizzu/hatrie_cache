@@ -20104,3 +20104,37 @@ BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  17280  69037 ns/op  
 BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  16590  71786 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
 BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  17202  71033 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
 ```
+
+## CH-038 SQL aggregate `If` combinators
+
+The conditional aggregate syntax was compared with the equivalent `FILTER`
+clause over the same 10,000-row source. Ten samples per variant were used.
+The `COUNT_IF` median was 3,333,482 ns/op versus 3,422,337 ns/op for the
+control: 1.027x faster, 0.99995x the transient bytes, and 0.99997x the
+allocations. The parser normalizes both forms to the same aggregate filter
+state, so there is no additional retained data structure.
+
+Raw output from `make benchmark-ch038-aggregate-if`:
+
+```text
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  373  3358428 ns/op  6647286 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  344  3523283 ns/op  6647299 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  346  3388405 ns/op  6647283 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  344  3465173 ns/op  6647283 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  350  3303389 ns/op  6647284 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  349  3313280 ns/op  6647284 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  372  3468569 ns/op  6647281 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  346  3465113 ns/op  6647283 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  349  3340850 ns/op  6647280 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/filter_clause-32  349  3456268 ns/op  6647279 B/op  30029 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  346  3341291 ns/op  6646979 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  390  3456599 ns/op  6646976 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  343  3539588 ns/op  6646975 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  348  3293192 ns/op  6646976 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  376  3262447 ns/op  6646976 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  369  3236036 ns/op  6646976 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  346  3431006 ns/op  6646977 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  344  3509066 ns/op  6646978 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  342  3325672 ns/op  6646975 B/op  30028 allocs/op
+BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  333  3299914 ns/op  6646976 B/op  30028 allocs/op
+```

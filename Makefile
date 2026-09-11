@@ -8913,6 +8913,24 @@ commit-tt024-text-prefix:
 push-tt024-text-prefix:
 	bash scripts/push-tt024-text-prefix.sh
 
+test-ch038-aggregate-if:
+	bash scripts/test-ch038-aggregate-if.sh
+
+format-ch038-aggregate-if:
+	bash scripts/format-ch038-aggregate-if.sh
+
+benchmark-ch038-aggregate-if:
+	bash scripts/benchmark-ch038-aggregate-if.sh
+
+review-ch038-aggregate-if:
+	bash scripts/review-ch038-aggregate-if.sh
+
+commit-ch038-aggregate-if:
+	bash scripts/commit-ch038-aggregate-if.sh
+
+push-ch038-aggregate-if:
+	bash scripts/push-ch038-aggregate-if.sh
+
 
 
 
