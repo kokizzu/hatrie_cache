@@ -20578,3 +20578,35 @@ The exact command was:
 ```sh
 make benchmark-mz011-sink
 ```
+## MZ-012 Exactly-Once Sink Checkpoints
+
+This benchmark compares the MZ-011 at-least-once runner with the transactional
+MZ-012 runner on the same 100-record replay. Both use in-memory no-op delivery;
+the exact-once variant also calls `LoadSequence`, `Begin`, `Write`, and
+`Commit`. Five samples were collected on an AMD Ryzen 9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `MZ012BaselineAtLeastOnceSinkBatch100` | 131221, 129303, 123553, 121847, 149198 | 142242, 142230, 142053, 142146, 141877 | 535, 535, 535, 535, 535 |
+| `MZ012ExactlyOnceSinkBatch100` | 127279, 126302, 123240, 124994, 131375 | 141969, 141645, 142295, 141969, 142467 | 535, 535, 535, 535, 535 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative to at-least-once |
+| --- | ---: | ---: | ---: | --- |
+| At-least-once sink runner | 129303 | 142146 | 535 | `1.00x` |
+| Exactly-once transactional runner | 126302 | 141969 | 535 | `0.98x` CPU, `1.00x` bytes, same allocations |
+
+The apparent `0.98x` CPU difference is within benchmark noise because the
+transaction implementation is an in-memory no-op. Durable transaction latency,
+conflict detection, and output bandwidth must be measured by each concrete
+connector. The runner's value is the atomic contract and recovery behavior, not
+a claim that arbitrary external systems become exactly once.
+
+The exact command was:
+
+```sh
+make benchmark-mz012-sink
+```

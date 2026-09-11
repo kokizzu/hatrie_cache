@@ -93,7 +93,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-009 | Temporal validity filters | Partially adopted: `VALID_AT(at, valid_from, valid_to)` provides first-class half-open validity semantics and uses native scalar execution when eligible; validity indexes and frontier-aware pruning remain open. | High |
 | MZ-010 | `TAIL`/`SUBSCRIBE` changefeed | Partially adopted: opt-in `CommandJournal.Subscribe` replays a contiguous bounded command tail and follows live journal records with bounded backpressure; SQL result `TAIL`/`SUBSCRIBE` and signed differential results remain open. | High |
 | MZ-011 | Sink connector API | Partially adopted: importable `CommandJournalSink` and bounded `StartCommandJournalSink` runner support ordered batches, cancellation, and optional sequence checkpoints; concrete external connectors and exactly-once transactions remain open. | High |
-| MZ-012 | Exactly-once sink checkpoints | No atomic coupling between output offsets and maintained result frontiers. | High |
+| MZ-012 | Exactly-once sink checkpoints | Partially adopted: `CommandJournalExactlyOnceSink` lets a sink atomically commit output with its journal watermark and reload that watermark on restart; the guarantee depends on the external sink transaction. | High |
 | MZ-013 | Source connector checkpoints | Ingestion does not expose durable source offsets tied to snapshot progress. | High |
 | MZ-014 | Upsert-source consolidation | No generic source operator that collapses key updates while retaining correct deletes. | Medium |
 | MZ-015 | CDC envelope normalization | No common insert/update/delete envelope adapter for external change streams. | Medium |

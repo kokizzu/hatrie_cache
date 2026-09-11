@@ -217,6 +217,10 @@ func (runner *CommandJournalSinkRunner) run(ctx context.Context, subscription *C
 }
 
 func (runner *CommandJournalSinkRunner) readBatch(ctx context.Context, subscription *CommandJournalSubscription, batchSize int, batchWait time.Duration) ([]CommandJournalRecord, bool, error) {
+	return readCommandJournalSinkBatch(ctx, runner.stop, subscription, batchSize, batchWait)
+}
+
+func readCommandJournalSinkBatch(ctx context.Context, stop <-chan struct{}, subscription *CommandJournalSubscription, batchSize int, batchWait time.Duration) ([]CommandJournalRecord, bool, error) {
 	batch := make([]CommandJournalRecord, 0, batchSize)
 	for {
 		select {
@@ -226,7 +230,7 @@ func (runner *CommandJournalSinkRunner) readBatch(ctx context.Context, subscript
 			}
 			batch = append(batch, record)
 			goto collect
-		case <-runner.stop:
+		case <-stop:
 			return nil, false, nil
 		case <-ctx.Done():
 			return nil, false, ctx.Err()
@@ -270,7 +274,7 @@ drain:
 			batch = append(batch, record)
 		case <-timer.C:
 			return batch, false, nil
-		case <-runner.stop:
+		case <-stop:
 			return nil, false, nil
 		case <-ctx.Done():
 			return nil, false, ctx.Err()
