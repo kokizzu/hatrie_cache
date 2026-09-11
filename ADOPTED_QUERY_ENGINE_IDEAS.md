@@ -1,5 +1,11 @@
 # Query Engine Ideas: Adoption Status
 
+## Recently Adopted
+
+| Source | Idea | Status | Evidence |
+| --- | --- | --- | --- |
+| ClickHouse | Refreshable external dictionaries | Adopted as an opt-in SQL function registry | `SQLExternalDictionary` publishes immutable snapshots atomically, retains the last good snapshot across bounded refresh failures, supports `DICT_GET`, `DICT_GET_OR_DEFAULT`, and `DICT_HAS`, and keeps per-lookup counters disabled by default. See [SQL_EXTERNAL_DICTIONARIES.md](SQL_EXTERNAL_DICTIONARIES.md) and [BENCHMARK.md#ch-049-refreshable-external-dictionaries](BENCHMARK.md#ch-049-refreshable-external-dictionaries). |
+
 This matrix records the ClickHouse, Materialize, and Tarantool ideas assessed
 for `hatrie_cache`. An idea is adopted only when it preserves exact query or
 recovery behavior and either improves a measured workload or supplies an

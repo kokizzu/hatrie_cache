@@ -75,7 +75,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-046 | Native wire protocol framing | No ClickHouse-style typed block protocol with explicit column framing and progress. | High |
 | CH-047 | Parallel format parsing | Large RowBinary payloads now index row boundaries once and decode independent ranges in parallel; small and single-core inputs remain serial. CSV/JSON block parsing remains open. | Medium |
 | CH-048 | SIMD/generic predicate coverage | Existing `hatPredicate` masks cover typed int64 batches, and SQL direct numeric and packed-boolean predicates now use byte-oriented kernels; string and broader predicate shapes remain open. | Medium |
-| CH-049 | Refreshable external dictionaries | No named external lookup dictionaries with refresh, lifetime, and failure policy. | Medium |
+| CH-049 | Refreshable external dictionaries | Adopted as an opt-in `hatSql` registry with immutable atomic snapshots, manual/background refresh, bounded staleness, and `DICT_GET`/`DICT_GET_OR_DEFAULT`/`DICT_HAS`. | Done |
 | CH-050 | Named settings collections | No versioned named query/storage profiles that can be applied atomically. | Low |
 
 ## Materialize candidates

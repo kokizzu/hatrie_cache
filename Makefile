@@ -9401,5 +9401,37 @@ commit-tt050-sql-planner-statistics:
 	bash scripts/commit-tt050-sql-planner-statistics.sh
 
 .PHONY: push-tt050-sql-planner-statistics
+.PHONY: test-ch049-external-dictionary
+test-ch049-external-dictionary:
+	bash scripts/test-ch049-external-dictionary.sh
+
+.PHONY: format-ch049-external-dictionary
+format-ch049-external-dictionary:
+	bash scripts/format-ch049-external-dictionary.sh
+
+.PHONY: benchmark-ch049-external-dictionary
+benchmark-ch049-external-dictionary:
+	bash scripts/benchmark-ch049-external-dictionary.sh
+
+.PHONY: test-race-ch049-external-dictionary
+test-race-ch049-external-dictionary:
+	bash scripts/test-race-ch049-external-dictionary.sh
+
+.PHONY: verify-ch049-external-dictionary-docs
+verify-ch049-external-dictionary-docs:
+	bash scripts/verify-ch049-external-dictionary-docs.sh
+
+.PHONY: review-ch049-external-dictionary
+review-ch049-external-dictionary:
+	bash scripts/review-ch049-external-dictionary.sh
+
+.PHONY: commit-ch049-external-dictionary
+commit-ch049-external-dictionary:
+	bash scripts/commit-ch049-external-dictionary.sh
+
+.PHONY: push-ch049-external-dictionary
+push-ch049-external-dictionary:
+	bash scripts/push-ch049-external-dictionary.sh
+
 push-tt050-sql-planner-statistics:
 	bash scripts/push-tt050-sql-planner-statistics.sh

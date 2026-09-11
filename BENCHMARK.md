@@ -1,5 +1,58 @@
 # Benchmark
 
+## CH-049: Refreshable External Dictionaries
+
+The benchmark compares the new dictionary's direct read path with the raw Go
+map path used as its baseline. The function benchmark includes registry lookup
+and `DICT_GET`; refresh measures publishing a complete 256-entry snapshot.
+
+### Raw Samples
+
+~~~text
+BenchmarkCH049BaselineMapLookup-16                    7.126 ns/op    0 B/op    0 allocs/op
+BenchmarkCH049BaselineMapLookup-16                    6.733 ns/op    0 B/op    0 allocs/op
+BenchmarkCH049BaselineMapLookup-16                    7.123 ns/op    0 B/op    0 allocs/op
+BenchmarkCH049BaselineMapLookup-16                    6.885 ns/op    0 B/op    0 allocs/op
+BenchmarkCH049BaselineMapLookup-16                    7.103 ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookup-16            52.53  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookup-16            48.92  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookup-16            52.00  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookup-16            49.98  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookup-16            46.66  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookupWithStats-16   48.45  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookupWithStats-16   52.76  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookupWithStats-16   53.65  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookupWithStats-16   53.51  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryLookupWithStats-16   50.35  ns/op    0 B/op    0 allocs/op
+BenchmarkCH049ExternalDictionaryFunctionLookup-16   114.7   ns/op   16 B/op    1 allocs/op
+BenchmarkCH049ExternalDictionaryFunctionLookup-16   114.3   ns/op   16 B/op    1 allocs/op
+BenchmarkCH049ExternalDictionaryFunctionLookup-16   115.0   ns/op   16 B/op    1 allocs/op
+BenchmarkCH049ExternalDictionaryFunctionLookup-16   115.8   ns/op   16 B/op    1 allocs/op
+BenchmarkCH049ExternalDictionaryFunctionLookup-16   114.6   ns/op   16 B/op    1 allocs/op
+BenchmarkCH049ExternalDictionaryRefresh-16        22450     ns/op 37600 B/op  265 allocs/op
+BenchmarkCH049ExternalDictionaryRefresh-16        22330     ns/op 37600 B/op  265 allocs/op
+BenchmarkCH049ExternalDictionaryRefresh-16        22447     ns/op 37600 B/op  265 allocs/op
+BenchmarkCH049ExternalDictionaryRefresh-16        22686     ns/op 37600 B/op  265 allocs/op
+BenchmarkCH049ExternalDictionaryRefresh-16        22481     ns/op 37600 B/op  265 allocs/op
+~~~
+
+### Median Comparison
+
+| Path | Median time | Bytes/op | Allocs/op | Relative to raw map |
+| --- | ---: | ---: | ---: | ---: |
+| Raw map lookup baseline | 7.10 ns | 0 | 0 | 1.00x |
+| Dictionary lookup, default stats off | 49.98 ns | 0 | 0 | 7.04x slower |
+| Dictionary lookup, stats on | 52.76 ns | 0 | 0 | 7.43x slower |
+| `DICT_GET` function lookup | 114.7 ns | 16 | 1 | 16.15x slower |
+| 256-entry snapshot refresh | 22.45 us | 37,600 | 265 | Refresh cost, not a read comparison |
+
+The direct dictionary path is deliberately additive: it is slower than an
+unprotected map lookup because it adds atomic snapshot publication, lifecycle
+checks, stale-data policy, and value-copying while retaining zero allocations
+for reads. Statistics are opt-in and add no measured allocation cost. Use the
+dictionary for independently refreshed reference data, and keep raw maps for
+private hot loops whose lifecycle and mutation safety are already controlled.
+
 ## MZ-027 Arrangement Memory Telemetry
 
 This is an opt-in diagnostics API, so the useful comparison is the existing
