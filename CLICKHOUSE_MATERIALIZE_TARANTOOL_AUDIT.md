@@ -219,3 +219,9 @@ Implemented exact peer-aware `COUNT(DISTINCT int64)` for bounded numeric
 without a frame rescan; NULL, peer, ascending, descending, and atomic
 validation cases are tested. This remains an append-only capability with
 explicit monotonic ordering, not a general late-data arrangement.
+### M065p: Incremental `RANGE` `AVG`
+
+Implemented peer-aware `AVG(int64)` for bounded numeric RANGE frames. It reuses
+checked incremental sum/count arithmetic, ignores NULL values, handles
+descending input and peer replacement, and preserves atomic overflow failure.
+The append-only monotonic-order contract remains explicit.

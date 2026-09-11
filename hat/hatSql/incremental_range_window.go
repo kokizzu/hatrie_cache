@@ -21,6 +21,7 @@ var (
 	ErrIncrementalRangeWindowSumValueInvalid      = errors.New("incremental range window SUM value must be int64 or nil")
 	ErrIncrementalRangeWindowExtremaValueInvalid  = errors.New("incremental range window MIN/MAX value must be int64 or nil")
 	ErrIncrementalRangeWindowDistinctValueInvalid = errors.New("incremental range window COUNT DISTINCT value must be int64 or nil")
+	ErrIncrementalRangeWindowAvgValueInvalid      = errors.New("incremental range window AVG value must be int64 or nil")
 	ErrIncrementalRangeWindowSumOverflow          = errors.New("incremental range window SUM overflows int64")
 )
 
@@ -35,6 +36,7 @@ const (
 	IncrementalRangeWindowMinInt64
 	IncrementalRangeWindowMaxInt64
 	IncrementalRangeWindowCountDistinctInt64
+	IncrementalRangeWindowAvgInt64
 )
 
 // IncrementalRangeWindowDefinition configures an append-only, peer-aware
@@ -53,10 +55,10 @@ type IncrementalRangeWindowDefinition struct {
 }
 
 // IncrementalRangeWindow maintains append-only COUNT(*), COUNT(DISTINCT int64),
-// SUM(int64), MIN(int64), or MAX(int64) values for an inclusive numeric RANGE
-// frame. When a peer row arrives, prior rows in that peer group receive exact
-// differential replacement events because SQL RANGE frames include all rows
-// with the same order key.
+// SUM(int64), AVG(int64), MIN(int64), or MAX(int64) values for an inclusive
+// numeric RANGE frame. When a peer row arrives, prior rows in that peer group
+// receive exact differential replacement events because SQL RANGE frames
+// include all rows with the same order key.
 type IncrementalRangeWindow struct {
 	kind         IncrementalRangeWindowKind
 	outputColumn string
@@ -121,7 +123,7 @@ type incrementalRangeWindowPreparedRow struct {
 // maintainer. The existing ROWS frame maintainer remains the lower-retention
 // choice when peer-aware value-distance semantics are not needed.
 func NewIncrementalRangeWindow(definition IncrementalRangeWindowDefinition) (*IncrementalRangeWindow, error) {
-	if definition.Kind != IncrementalRangeWindowCount && definition.Kind != IncrementalRangeWindowSumInt64 && definition.Kind != IncrementalRangeWindowMinInt64 && definition.Kind != IncrementalRangeWindowMaxInt64 && definition.Kind != IncrementalRangeWindowCountDistinctInt64 {
+	if definition.Kind != IncrementalRangeWindowCount && definition.Kind != IncrementalRangeWindowSumInt64 && definition.Kind != IncrementalRangeWindowMinInt64 && definition.Kind != IncrementalRangeWindowMaxInt64 && definition.Kind != IncrementalRangeWindowCountDistinctInt64 && definition.Kind != IncrementalRangeWindowAvgInt64 {
 		return nil, ErrIncrementalRangeWindowInvalidKind
 	}
 	outputColumn := strings.TrimSpace(definition.OutputColumn)
@@ -218,6 +220,8 @@ func (window *IncrementalRangeWindow) Append(rows []Row) ([]DifferentialRow, err
 						err = ErrIncrementalRangeWindowExtremaValueInvalid
 					} else if window.kind == IncrementalRangeWindowCountDistinctInt64 {
 						err = ErrIncrementalRangeWindowDistinctValueInvalid
+					} else if window.kind == IncrementalRangeWindowAvgInt64 {
+						err = ErrIncrementalRangeWindowAvgValueInvalid
 					}
 					return nil, fmt.Errorf("incremental range window row %d: %w", index, err)
 				}
@@ -261,7 +265,7 @@ func (window *IncrementalRangeWindow) Append(rows []Row) ([]DifferentialRow, err
 		preparedRow.contribution.sequence = state.nextSequence
 		state.nextSequence++
 		state.active = append(state.active, preparedRow.contribution)
-		if window.kind == IncrementalRangeWindowSumInt64 && preparedRow.contribution.valid {
+		if (window.kind == IncrementalRangeWindowSumInt64 || window.kind == IncrementalRangeWindowAvgInt64) && preparedRow.contribution.valid {
 			newSum, err := addIncrementalRangeWindowSum(state.sum, preparedRow.contribution.value)
 			if err != nil {
 				return nil, fmt.Errorf("incremental range window partition %q: %w", preparedRow.partition, err)
@@ -281,11 +285,13 @@ func (window *IncrementalRangeWindow) Append(rows []Row) ([]DifferentialRow, err
 		}
 
 		value := interface{}(int64(len(state.active) - state.activeHead))
-		if window.kind == IncrementalRangeWindowSumInt64 {
+		if window.kind == IncrementalRangeWindowSumInt64 || window.kind == IncrementalRangeWindowAvgInt64 {
 			if state.validCount == 0 {
 				value = nil
-			} else {
+			} else if window.kind == IncrementalRangeWindowSumInt64 {
 				value = state.sum
+			} else {
+				value = float64(state.sum) / float64(state.validCount)
 			}
 		} else if window.kind == IncrementalRangeWindowMinInt64 || window.kind == IncrementalRangeWindowMaxInt64 {
 			if state.validCount == 0 {
@@ -401,7 +407,7 @@ func removeIncrementalRangeWindowExpired(state *incrementalRangeWindowPartition,
 	if state == nil {
 		return nil
 	}
-	sumEnabled := kind == IncrementalRangeWindowSumInt64
+	sumEnabled := kind == IncrementalRangeWindowSumInt64 || kind == IncrementalRangeWindowAvgInt64
 	extremaEnabled := kind == IncrementalRangeWindowMinInt64 || kind == IncrementalRangeWindowMaxInt64
 	distinctEnabled := kind == IncrementalRangeWindowCountDistinctInt64
 	if descending {

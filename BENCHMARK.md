@@ -18119,3 +18119,49 @@ BenchmarkM065oRangeIncremental-32:
 `B/op` is cumulative allocation volume, not retained or peak heap. The
 distinct map is exact rather than approximate, so memory scales with the
 number of distinct active values.
+## Peer-Aware Incremental `RANGE` `AVG`
+
+M065p compares the pre-change materialized `AVG(int64)` frame with the
+incremental sum/count maintainer over the same 4,096-row workload and a
+preceding bound of 64. The optimized path is faster and allocates fewer
+objects, while cumulative allocation bytes are higher because the
+peer-aware differential path retains bounded frame state.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change materialized AVG | 7,296,484 | 1,748,146 | 30,105 | baseline |
+| Post-change materialized AVG control | 6,055,467 | 1,748,146 | 30,105 | same-run control |
+| Incremental `RANGE` AVG | 2,649,288 | 2,955,833 | 16,225 | 2.75x faster than pre-change, 2.29x faster than same-run control, 1.69x higher cumulative bytes, 1.86x fewer allocations |
+
+Raw pre-change baseline:
+
+```text
+BenchmarkM065pRangeNaiveMaterialized-32:
+7286789 ns/op 1748142 B/op 30105 allocs/op
+7303874 ns/op 1748146 B/op 30105 allocs/op
+7296484 ns/op 1748149 B/op 30105 allocs/op
+7299882 ns/op 1748148 B/op 30105 allocs/op
+7261178 ns/op 1748145 B/op 30105 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkM065pRangeNaiveMaterialized-32:
+6055467 ns/op 1748178 B/op 30105 allocs/op
+6012155 ns/op 1748146 B/op 30105 allocs/op
+6030668 ns/op 1748144 B/op 30105 allocs/op
+6060831 ns/op 1748143 B/op 30105 allocs/op
+6107369 ns/op 1748147 B/op 30105 allocs/op
+
+BenchmarkM065pRangeIncremental-32:
+2649288 ns/op 2955845 B/op 16225 allocs/op
+2647424 ns/op 2955833 B/op 16225 allocs/op
+2696180 ns/op 2955833 B/op 16225 allocs/op
+2672335 ns/op 2955833 B/op 16225 allocs/op
+2596407 ns/op 2955833 B/op 16225 allocs/op
+```
+
+The CPU ratio against the pre-change baseline is 2.75x; the same-run control
+ratio is 2.29x. `B/op` is cumulative allocation volume, not retained or peak
+heap.

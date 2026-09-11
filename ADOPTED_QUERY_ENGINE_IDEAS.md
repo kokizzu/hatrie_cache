@@ -206,3 +206,10 @@ multiplicity map preserves duplicates without rescanning the frame. NULLs are
 ignored, peer replacements remain differential, and ascending/descending
 partitioned reference tests cover the contract. See
 [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).
+## M065p: Peer-Aware Incremental `RANGE` Averages
+
+Adopted incremental `AVG(int64)` maintenance for numeric RANGE frames by
+combining the existing checked sum and valid-count state. NULL values are
+ignored, peers receive exact differential replacements, and overflow remains
+atomic. Ascending/descending partitioned reference tests cover the behavior.
+See [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).

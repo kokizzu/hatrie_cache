@@ -745,3 +745,6 @@ For each future unchecked item:
 - [x] M065o Peer-aware numeric `RANGE` `COUNT(DISTINCT int64)` maintenance
   using exact multiplicity counts, NULL handling, descending order, and
   deterministic reference coverage.
+- [x] M065p Peer-aware numeric `RANGE` `AVG(int64)` maintenance reusing
+  checked sum/count state, with NULL, peer, descending, overflow, and
+  deterministic reference coverage.

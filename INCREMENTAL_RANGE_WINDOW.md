@@ -100,3 +100,15 @@ keys, supports ascending and descending input, and emits exact retractions and
 replacements for late peers with the same order key. It does not provide
 arbitrary updates or deletes. The measured materialized comparison and memory
 tradeoff are recorded in `BENCHMARK.md`.
+## M065p: Incremental `RANGE` `AVG(int64)`
+
+`IncrementalRangeWindowAvgInt64` maintains a peer-aware average over the same
+inclusive numeric `RANGE` frame. `ValueKey` must return an `int64` or `nil`;
+NULL values are ignored and an empty/all-NULL frame returns `nil`. The state
+reuses checked `int64` sum arithmetic plus a valid-value count, and emits a
+`float64` average.
+
+The append-only, monotonic-order, ascending/descending, and peer-replacement
+constraints remain the same as the other numeric RANGE kinds. Sum overflow is
+reported atomically, so a failed append can be retried without losing prior
+state. See `BENCHMARK.md` for the measured cumulative-byte tradeoff.

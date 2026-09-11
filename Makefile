@@ -7839,3 +7839,35 @@ commit-m065o-incremental-range-distinct:
 .PHONY: push-m065o-incremental-range-distinct
 push-m065o-incremental-range-distinct:
 	bash ./scripts/push-m065o-incremental-range-distinct.sh
+
+.PHONY: benchmark-m065p-incremental-range-average
+benchmark-m065p-incremental-range-average:
+	bash ./scripts/benchmark-m065p-incremental-range-average.sh
+
+.PHONY: test-m065p-incremental-range-average
+test-m065p-incremental-range-average:
+	bash ./scripts/test-m065p-incremental-range-average.sh
+
+.PHONY: format-m065p-incremental-range-average
+format-m065p-incremental-range-average:
+	bash ./scripts/format-m065p-incremental-range-average.sh
+
+.PHONY: test-race-m065p-incremental-range-average
+test-race-m065p-incremental-range-average:
+	bash ./scripts/test-race-m065p-incremental-range-average.sh
+
+.PHONY: vet-m065p-incremental-range-average
+vet-m065p-incremental-range-average:
+	bash ./scripts/vet-m065p-incremental-range-average.sh
+
+.PHONY: review-m065p-incremental-range-average
+review-m065p-incremental-range-average:
+	bash ./scripts/review-m065p-incremental-range-average.sh
+
+.PHONY: commit-m065p-incremental-range-average
+commit-m065p-incremental-range-average:
+	bash ./scripts/commit-m065p-incremental-range-average.sh
+
+.PHONY: push-m065p-incremental-range-average
+push-m065p-incremental-range-average:
+	bash ./scripts/push-m065p-incremental-range-average.sh
