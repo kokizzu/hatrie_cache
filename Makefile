@@ -8892,6 +8892,42 @@ commit-ch048-numeric-predicate-kernel:
 push-ch048-numeric-predicate-kernel:
 	bash scripts/push-ch048-numeric-predicate-kernel.sh
 
+audit-next-engine-idea:
+	bash scripts/audit-next-engine-idea.sh
+
+test-m065t-boolean-predicate-kernel:
+	bash scripts/test-m065t-boolean-predicate-kernel.sh
+
+benchmark-m065t-boolean-predicate-kernel-baseline:
+	bash scripts/benchmark-m065t-boolean-predicate-kernel-baseline.sh
+
+benchmark-m065t-boolean-predicate-kernel:
+	bash scripts/benchmark-m065t-boolean-predicate-kernel.sh
+
+format-m065t-boolean-predicate-kernel:
+	bash scripts/format-m065t-boolean-predicate-kernel.sh
+
+test-m065t-boolean-predicate-kernel-full:
+	bash scripts/test-m065t-boolean-predicate-kernel-full.sh
+
+race-m065t-boolean-predicate-kernel:
+	bash scripts/race-m065t-boolean-predicate-kernel.sh
+
+vet-m065t-boolean-predicate-kernel:
+	bash scripts/vet-m065t-boolean-predicate-kernel.sh
+
+verify-m065t-boolean-predicate-kernel-docs:
+	bash scripts/verify-m065t-boolean-predicate-kernel-docs.sh
+
+review-m065t-boolean-predicate-kernel:
+	bash scripts/review-m065t-boolean-predicate-kernel.sh
+
+commit-m065t-boolean-predicate-kernel:
+	bash scripts/commit-m065t-boolean-predicate-kernel.sh
+
+push-m065t-boolean-predicate-kernel:
+	bash scripts/push-m065t-boolean-predicate-kernel.sh
+
 .PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
 test-ch002-primary-mark-pruning:
 	bash scripts/test-ch002-primary-mark-pruning.sh

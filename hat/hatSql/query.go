@@ -7901,6 +7901,14 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), started)
 		}
 		return result, true, nil
+	} else if kernel, boolean := sqlColumnarBooleanKernelForQuery(q.where, q.from.alias, batch); boolean {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, kernel.matches, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR BOOLEAN FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if dictionary, codes, encoded := sqlColumnarDictionaryLiteralINPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {

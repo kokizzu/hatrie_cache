@@ -911,3 +911,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   ordering, and finite `LIMIT`/`OFFSET` use composite group state plus a bounded
   Top-N heap. Unsupported or ambiguous shapes retain the established executor;
   see [SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md](SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md).
+- [x] M065t SQL packed boolean predicate kernel. Direct comparisons against
+  validated packed boolean columns use value and validity bitmaps without
+  per-row interface materialization; legacy and unsupported paths retain the
+  established evaluator. See [SQL_PACKED_BOOLEAN_PREDICATE.md](SQL_PACKED_BOOLEAN_PREDICATE.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065t-sql-packed-boolean-predicate-kernel).

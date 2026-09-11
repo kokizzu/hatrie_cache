@@ -19935,3 +19935,45 @@ BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 484 610876 ns/op 80
 BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 474 618538 ns/op 808019 B/op 8448 allocs/op
 BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 493 611260 ns/op 807993 B/op 8447 allocs/op
 ```
+
+## M065t: SQL Packed Boolean Predicate Kernel
+
+Seven `250ms` local benchmark samples on an AMD Ryzen 9 5950X, Go `amd64`,
+with `GOMAXPROCS=1`. The workload builds a 4,096-row packed boolean column and
+executes `FROM CACHE('events') SELECT active WHERE active = true`. The before
+case uses the existing per-row columnar evaluator; the after case reads the
+packed value and validity bitmaps directly. The storage representation and
+`PackBooleanColumns` API are unchanged.
+
+| Workload | Before | After | Improvement |
+| --- | ---: | ---: | --- |
+| Packed boolean query | 1,125,634 ns/op; 1,865,233 B/op; 12,327 allocs/op | 360,801 ns/op; 740,024 B/op; 4,127 allocs/op | 3.12x CPU; 2.52x lower B/op; 2.99x fewer allocs |
+
+The kernel is only selected for a validated packed boolean field with a direct
+`=`, `!=`, or `<>` literal comparison. Legacy columns, malformed metadata, and
+wider predicates retain the original evaluator. This avoids a separate
+selection-mask allocation and introduces no wire or persistence-format change.
+
+Raw baseline samples from `make benchmark-m065t-boolean-predicate-kernel-baseline`:
+
+```text
+1117084 1865234 12327
+1127422 1865233 12327
+1123872 1865231 12327
+1139221 1865228 12327
+1125634 1865233 12327
+1094180 1865234 12327
+1134871 1865230 12327
+```
+
+Raw final samples from `make benchmark-m065t-boolean-predicate-kernel`:
+
+```text
+363980 740024 4127
+371084 740024 4127
+358019 740024 4127
+357153 740024 4127
+358650 740024 4127
+361222 740024 4127
+360801 740024 4127
+```

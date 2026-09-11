@@ -249,3 +249,11 @@ malformed, NULL, and unsupported predicate paths retain the established
 fallback. Seven-sample benchmarking recorded 1.14x lower CPU time and 21.5%
 fewer allocations on the packed workload without a format or configuration
 change.
+### M065t: SQL packed boolean predicate kernel
+
+Implemented the adjacent CH-048 follow-up for explicitly packed boolean
+columns. Direct `=`, `!=`, and `<>` predicates read value and validity bits
+without per-row interface materialization; NULL, malformed, legacy, reversed,
+and unsupported paths retain established semantics. Seven-sample benchmarking
+recorded 3.12x lower query CPU time, 2.52x lower allocated bytes, and 2.99x
+fewer allocations without changing the wire, persistence, or packing API.

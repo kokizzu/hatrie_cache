@@ -4373,6 +4373,15 @@ also skip numeric segments whose min/max bounds cannot match a direct `WHERE`
 comparison. The row matcher remains authoritative; see
 [`COLUMNAR_RANGE_SKIPPING.md`](COLUMNAR_RANGE_SKIPPING.md).
 
+## SQL Packed Boolean Predicates
+
+Direct `WHERE` comparisons against explicitly packed boolean columns use a
+bitmap kernel without per-row interface materialization. `=`, `!=`, and `<>`
+preserve NULL behavior; legacy columns and unsupported expressions retain the
+existing evaluator. See
+[`SQL_PACKED_BOOLEAN_PREDICATE.md`](SQL_PACKED_BOOLEAN_PREDICATE.md) and the
+raw measurements in [`BENCHMARK.md`](BENCHMARK.md#m065t-sql-packed-boolean-predicate-kernel).
+
 ## Explicit Regional Routing
 
 Use [`hatPartition.PrefixRouter`](REGIONAL_PARTITION_ROUTING.md) when keys have
