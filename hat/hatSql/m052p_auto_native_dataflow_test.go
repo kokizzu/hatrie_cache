@@ -72,7 +72,7 @@ func TestCompiledSQLAutomaticNativeDataflowFallbackPreservesResult(t *testing.T)
 	}
 }
 
-func TestCompiledSQLAutomaticNativeDataflowSkipsGroupedQuery(t *testing.T) {
+func TestCompiledSQLAutomaticNativeDataflowUsesGroupedSafePath(t *testing.T) {
 	compiled, err := CompileSQLQuery("FROM CACHE('items') AS src SELECT src.group, COUNT(*) AS total GROUP BY src.group")
 	if err != nil {
 		t.Fatalf("compile SQL: %v", err)
@@ -92,8 +92,8 @@ func TestCompiledSQLAutomaticNativeDataflowSkipsGroupedQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute grouped SQL: %v", err)
 	}
-	if len(result.Rows) != 2 || sqlQueryEventHasOperator(event, "NATIVE DATAFLOW") {
-		t.Fatalf("grouped result/operators = %#v / %#v, want ordinary grouped execution", result.Rows, event.Operators)
+	if len(result.Rows) != 2 || !sqlQueryEventHasOperator(event, "NATIVE DATAFLOW") {
+		t.Fatalf("grouped result/operators = %#v / %#v, want NATIVE DATAFLOW", result.Rows, event.Operators)
 	}
 }
 

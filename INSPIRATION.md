@@ -875,3 +875,9 @@ T042 remains unchecked. A partition-aware parallel journal replay prototype was
 measured and rejected because it was 1.06x slower, used 2.26x more allocated
 bytes, and used 1.01x more allocations than serial replay; see the raw samples
 in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay).
+- [x] M052s Automatic safe grouped native dataflow selection. One- and two-field
+  grouped aggregates over ordinary row resolvers use the existing native batch
+  runtime by default; `HAVING`, ordered or bounded grouped output, richer SQL,
+  and specialized resolver contracts retain their established executor, and
+  `DisableNativeDataflow` keeps an explicit fallback. See
+  [SQL_AUTO_NATIVE_GROUPED.md](SQL_AUTO_NATIVE_GROUPED.md).

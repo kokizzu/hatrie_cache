@@ -27,3 +27,6 @@ rg -n -C 1 'M052p|M052q|M052r|DisableNativeDataflow' BENCHMARK.md ADOPTED_QUERY_
 sed -n '18965,19020p' BENCHMARK.md
 printf '%s\n' '===== Unchecked backlog candidates ====='
 rg -n '^\- \[ \] (C153 |C154 |M032 |M033 |M037 |M038 |M052 |M090 |T042 |T047 |T103 |T150)' INSPIRATION.md
+printf '===== M052s documentation =====\n'
+rg -n 'M052s|SQL_AUTO_NATIVE_GROUPED' \
+  INSPIRATION.md ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md SQL_AUTO_NATIVE_GROUPED.md

@@ -19110,3 +19110,51 @@ Raw final fallback samples:
 9854774 3773359 20508
 9742188 3773480 20507
 ```
+## M052s automatic native grouped aggregation
+
+This feature automatically selects the existing native batch runtime for a
+one-field grouped `COUNT` plus `SUM` query over 20,000 rows and 257 groups.
+The benchmark uses five samples and `-benchmem`; the fallback sets
+`SQLQueryOptions.DisableNativeDataflow = true`. The pre-feature automatic
+benchmark name used the same materialized executor as the fallback.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native grouped execution | 2,816,893 | 3,013,465 | 20,874 | 3.21x faster, 3.22x less heap, 3.03x fewer allocations |
+| Existing materialized fallback | 9,044,025 | 9,715,983 | 63,141 | control |
+
+Raw pre-feature samples (`ns/op B/op allocs/op`):
+
+```text
+automatic name before:
+8808612 9715808 63141
+8993165 9715945 63141
+8665068 9715832 63141
+8890112 9716046 63141
+8875609 9716058 63141
+
+fallback control before:
+8898186 9715828 63141
+8968597 9715986 63141
+8858764 9715880 63141
+8805353 9715837 63141
+8699337 9715937 63141
+```
+
+Raw final samples:
+
+```text
+automatic native grouped:
+2937041 3013491 20874
+2816893 3013465 20874
+2854654 3013465 20874
+2816530 3013465 20874
+2766398 3013465 20874
+
+fallback control:
+8799148 9715857 63141
+9277022 9716246 63142
+9235335 9715983 63141
+9044025 9716121 63141
+8847060 9715932 63141
+```

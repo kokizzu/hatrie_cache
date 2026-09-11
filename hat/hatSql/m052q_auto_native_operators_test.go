@@ -66,9 +66,9 @@ func TestCompiledSQLAutomaticNativeDistinctUsesSafePath(t *testing.T) {
 	}
 }
 
-func TestCompiledSQLAutomaticNativeOperatorsKeepGroupedQueriesOnFallback(t *testing.T) {
+func TestCompiledSQLAutomaticNativeOperatorsKeepUnsupportedGroupedQueriesOnFallback(t *testing.T) {
 	rows := []SQLRow{{"id": int64(1)}, {"id": int64(1)}}
-	query := "FROM CACHE('items') AS src SELECT src.id, COUNT(*) AS total GROUP BY src.id"
+	query := "FROM CACHE('items') AS src SELECT src.id, COUNT(*) AS total GROUP BY src.id HAVING total > 1"
 	result, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) {
 		return rows, nil
 	}), SQLQueryOptions{Observer: SQLQueryObserverFunc(func(SQLQueryEvent) {})})
