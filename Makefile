@@ -8693,3 +8693,14 @@ commit-m052y-auto-native-composite-grouped-ordered:
 
 push-m052y-auto-native-composite-grouped-ordered:
 	bash scripts/push-m052y-auto-native-composite-grouped-ordered.sh
+
+.PHONY: inspect-engine-ideas
+inspect-engine-ideas:
+	bash scripts/inspect-engine-ideas.sh
+
+.PHONY: commit-engine-idea-catalog push-engine-idea-catalog
+commit-engine-idea-catalog:
+	bash scripts/commit-engine-idea-catalog.sh
+
+push-engine-idea-catalog:
+	bash scripts/push-engine-idea-catalog.sh
