@@ -190,3 +190,11 @@ Materialize-style differential maintenance now supports opt-in append-only
 numeric `RANGE` frames for `COUNT(*)` and `SUM(int64)`. Equal-order peers emit
 exact retractions and replacements; the legacy ROWS path remains unchanged.
 See [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md).
+## M065n: Peer-Aware Incremental `RANGE` Extrema
+
+Adopted a narrow incremental window-function slice inspired by streaming SQL
+engines: numeric `RANGE` `MIN(int64)` and `MAX(int64)` now maintain a
+monotonic deque over the active frame. Peer rows are updated together, NULL
+values are ignored, and empty frames return NULL. The existing append-only and
+monotonic-order contract remains explicit. See
+[`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).

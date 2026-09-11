@@ -204,3 +204,11 @@ Adopted as an opt-in append-only capability for `COUNT(*)` and `SUM(int64)`.
 It maintains inclusive numeric range bounds, emits exact peer replacement
 differentials, and leaves the existing ROWS-frame and default paths unchanged.
 See [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md).
+### M065n: Incremental `RANGE` `MIN`/`MAX`
+
+Implemented peer-aware numeric `RANGE` extrema for `int64` values. A
+monotonic deque keeps the current MIN or MAX without rescanning the frame;
+expired entries are removed by sequence, and all rows in an equal-order peer
+group receive the same result. NULL values and descending order are covered by
+tests. This is intentionally limited to append-only monotonic input; general
+late-data maintenance remains open.

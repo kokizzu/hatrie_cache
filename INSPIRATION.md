@@ -740,3 +740,5 @@ For each future unchecked item:
 
 - [x] C038a TTL pruning removes only complete rollup buckets at explicit boundaries.
 - [x] M051c immutable compiled SQL template reuse for static, parameter-free compiled handles; dynamic options retain the clone path. See [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md) and [BENCHMARK.md](BENCHMARK.md#immutable-compiled-sql-template-reuse).
+- [x] M065n Peer-aware numeric `RANGE` `MIN`/`MAX` maintenance using monotonic
+  deques, including NULL handling, descending order, and atomic validation.

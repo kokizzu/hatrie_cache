@@ -18035,3 +18035,38 @@ incremental_range: 2541649, 2470803, 2525930, 2468039, 2567294 ns/op; 2906365, 2
 The byte increase is bounded state for active range contributions, duplicate
 keys, and exact peer replacements. The legacy ROWS maintainer and default SQL
 execution are unchanged. See [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md).
+## Peer-Aware Incremental `RANGE` Extrema
+
+M065n compares a materialized `MIN(int64)` frame with the incremental
+monotonic-deque maintainer over the same 4,096-row workload and a preceding
+bound of 64. The optimized path is substantially faster and allocates fewer
+objects, but its cumulative `B/op` is higher because the current peer-aware
+snapshot/differential path retains more state. MAX correctness is covered by
+tests; this benchmark uses MIN as the representative extrema workload.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Naive materialized MIN | 13,374,609 | 1,750,093 | 30,345 | baseline |
+| Incremental `RANGE` MIN | 2,860,890 | 2,958,728 | 16,471 | 4.67x faster, 1.69x higher cumulative bytes, 1.84x fewer allocations |
+
+Raw five-sample output:
+
+```text
+BenchmarkM065nRangeNaiveMaterialized-32:
+13459508 ns/op 1750168 B/op 30345 allocs/op
+13374609 ns/op 1750162 B/op 30345 allocs/op
+13370581 ns/op 1750093 B/op 30345 allocs/op
+13366887 ns/op 1750088 B/op 30345 allocs/op
+13498400 ns/op 1750092 B/op 30345 allocs/op
+
+BenchmarkM065nRangeIncremental-32:
+2893502 ns/op 2958728 B/op 16471 allocs/op
+2867215 ns/op 2958729 B/op 16471 allocs/op
+2849010 ns/op 2958729 B/op 16471 allocs/op
+2806702 ns/op 2958728 B/op 16471 allocs/op
+2860890 ns/op 2958728 B/op 16471 allocs/op
+```
+
+The ratios are median-to-median. `B/op` is cumulative allocation volume, not
+the same thing as peak or retained heap; the higher value is recorded as a
+real tradeoff rather than hidden behind the CPU improvement.

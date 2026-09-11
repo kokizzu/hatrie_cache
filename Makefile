@@ -7771,3 +7771,35 @@ commit-m065m-incremental-range-window:
 .PHONY: push-m065m-incremental-range-window
 push-m065m-incremental-range-window:
 	bash ./scripts/push-m065m-incremental-range-window.sh
+
+.PHONY: test-m065n-incremental-range-window
+test-m065n-incremental-range-window:
+	bash ./scripts/test-m065n-incremental-range-window.sh
+
+.PHONY: benchmark-m065n-incremental-range-window
+benchmark-m065n-incremental-range-window:
+	bash ./scripts/benchmark-m065n-incremental-range-window.sh
+
+.PHONY: format-m065n-incremental-range-window
+format-m065n-incremental-range-window:
+	bash ./scripts/format-m065n-incremental-range-window.sh
+
+.PHONY: test-race-m065n-incremental-range-window
+test-race-m065n-incremental-range-window:
+	bash ./scripts/test-race-m065n-incremental-range-window.sh
+
+.PHONY: vet-m065n-incremental-range-window
+vet-m065n-incremental-range-window:
+	bash ./scripts/vet-m065n-incremental-range-window.sh
+
+.PHONY: review-m065n-incremental-range-window
+review-m065n-incremental-range-window:
+	bash ./scripts/review-m065n-incremental-range-window.sh
+
+.PHONY: commit-m065n-incremental-range-window
+commit-m065n-incremental-range-window:
+	bash ./scripts/commit-m065n-incremental-range-window.sh
+
+.PHONY: push-m065n-incremental-range-window
+push-m065n-incremental-range-window:
+	bash ./scripts/push-m065n-incremental-range-window.sh

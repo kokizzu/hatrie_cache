@@ -72,3 +72,18 @@ The primary comparison materializes the same differential output shape for a
 
 The byte increase is bounded maintainer state plus peer-safe output handling;
 the existing ROWS maintainer and all default SQL paths are unchanged.
+## M065n: Incremental `RANGE` `MIN`/`MAX`
+
+The same append-only, peer-aware numeric `RANGE` maintainer also supports
+`IncrementalRangeWindowMinInt64` and `IncrementalRangeWindowMaxInt64`.
+
+Configure `ValueKey` to return either an `int64` or `nil`. NULL values are
+ignored, and the output is `nil` when the current frame has no non-NULL
+values. The implementation uses a monotonic deque, so each valid value is
+inserted and removed at most once instead of rescanning the active frame.
+
+The ordering key remains an `int64`, rows must remain monotonic in the
+configured direction, and peer rows receive the same frame result. The
+maintainer is append-only and does not provide arbitrary updates or deletes.
+See `BENCHMARK.md` for the measured CPU, cumulative-byte, and allocation
+tradeoffs against materialized MIN evaluation.

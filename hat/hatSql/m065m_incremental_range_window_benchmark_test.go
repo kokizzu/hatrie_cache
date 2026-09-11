@@ -50,6 +50,38 @@ func benchmarkM065mNaiveRangeMaterialized(rows []m065mRangeBenchmarkRow, precedi
 	return checksum
 }
 
+func benchmarkM065nNaiveRangeExtremaMaterialized(rows []m065mRangeBenchmarkRow, preceding int64, maximum bool) int64 {
+	updates := make([]DifferentialRow, 0, len(rows))
+	var checksum int64
+	for index, current := range rows {
+		lower := current.order - preceding
+		value := int64(0)
+		initialized := false
+		for candidate := 0; candidate <= index; candidate++ {
+			if rows[candidate].order < lower {
+				continue
+			}
+			candidateValue := rows[candidate].value
+			if !initialized || (maximum && candidateValue > value) || (!maximum && candidateValue < value) {
+				value = candidateValue
+				initialized = true
+			}
+		}
+		updates = append(updates, DifferentialRow{
+			Key:  "row-" + string(rune(index)),
+			Diff: 1,
+			Row: Row{
+				"id":           "row-" + string(rune(index)),
+				"order":        current.order,
+				"value":        current.value,
+				"window_value": value,
+			},
+		})
+		checksum += updates[len(updates)-1].Row["window_value"].(int64)
+	}
+	return checksum
+}
+
 func m065mRangeBenchmarkRows() []m065mRangeBenchmarkRow {
 	rows := make([]m065mRangeBenchmarkRow, 4096)
 	for index := range rows {
@@ -76,5 +108,14 @@ func BenchmarkM065mRangeNaiveMaterialized(b *testing.B) {
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
 		m065mRangeBenchmarkSink = benchmarkM065mNaiveRangeMaterialized(rows, 64)
+	}
+}
+
+func BenchmarkM065nRangeNaiveMaterialized(b *testing.B) {
+	rows := m065mRangeBenchmarkRows()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		m065mRangeBenchmarkSink = benchmarkM065nNaiveRangeExtremaMaterialized(rows, 64, false)
 	}
 }
