@@ -90,7 +90,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-006 | Antichain timestamps | No partially ordered timestamp frontier for concurrent partitions. | High |
 | MZ-007 | Stale-read rejection | Adopted: opt-in `SQLSourceFrontierResolver` validation rejects unavailable, unready, or stale non-local sources before reads, including joins, CTEs, and set-operation branches. | Medium |
 | MZ-008 | `AS OF` query execution | Adopted: opt-in `SQLQueryOptions.AsOfFrontier` binds normal, streamed, offset-page, and keyset-page reads to an immutable `SQLFrontierSnapshotProvider` view; historical reads bypass the live result cache and bind cursors to the frontier. | High |
-| MZ-009 | Temporal validity filters | No first-class valid-from/valid-to relation semantics with frontier-aware pruning. | High |
+| MZ-009 | Temporal validity filters | Partially adopted: `VALID_AT(at, valid_from, valid_to)` provides first-class half-open validity semantics and uses native scalar execution when eligible; validity indexes and frontier-aware pruning remain open. | High |
 | MZ-010 | `TAIL`/`SUBSCRIBE` changefeed | SQL clients cannot subscribe to signed incremental result changes. | High |
 | MZ-011 | Sink connector API | No durable outbound sink abstraction for Kafka, files, or HTTP streams. | High |
 | MZ-012 | Exactly-once sink checkpoints | No atomic coupling between output offsets and maintained result frontiers. | High |

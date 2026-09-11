@@ -9538,6 +9538,34 @@ push-mz007-frontier-rejection:
 benchmark-mz008-asof:
 	bash scripts/benchmark-mz008-asof.sh
 
+
+test-mz009-temporal-validity:
+	bash scripts/test-mz009-temporal-validity.sh
+
+test-race-mz009-temporal-validity:
+	bash scripts/test-race-mz009-temporal-validity.sh
+
+benchmark-mz009-temporal-validity:
+	bash scripts/benchmark-mz009-temporal-validity.sh
+
+format-mz009-temporal-validity:
+	bash scripts/format-mz009-temporal-validity.sh
+
+test-mz009-broad:
+	bash scripts/test-mz009-broad.sh
+
+verify-mz009-docs:
+	bash scripts/verify-mz009-docs.sh
+
+review-mz009-temporal-validity:
+	bash scripts/review-mz009-temporal-validity.sh
+
+commit-mz009-temporal-validity:
+	bash scripts/commit-mz009-temporal-validity.sh
+
+push-mz009-temporal-validity:
+	bash scripts/push-mz009-temporal-validity.sh
+
 test-mz008-asof:
 	bash scripts/test-mz008-asof.sh
 

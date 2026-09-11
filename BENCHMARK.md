@@ -20477,3 +20477,19 @@ The satisfied frontier check adds about 79 ns per simple query in this workload 
 | Historical frontier | 2,770 | 3,488 | 15 | 0 B/op, 0 allocs/op; about 0.07% slower in this run |
 
 The focused run measured no allocation or memory increase for an exact-frontier query. Provider snapshot construction and retention costs are outside this benchmark because they depend on the application's `SQLFrontierSnapshotProvider` implementation. See [SQL_AS_OF.md](SQL_AS_OF.md).
+
+## MZ-009 temporal validity filters
+
+`make benchmark-mz009-temporal-validity` (five samples, `-benchmem`, AMD Ryzen 9 5950X; 1,000 rows):
+
+| Mode | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Equivalent explicit half-open predicate | 362583; 360850; 363189; 357948; 361426 | 361426 | 74040 | 379 | 1.00x |
+| `VALID_AT`, final native scalar path | 210948; 205305; 202816; 204552; 205563 | 205305 | 70056 | 362 | 1.76x faster; 1.06x lower heap; 1.05x fewer allocations |
+
+The final path is faster because the planner admits the builtin into native
+scalar execution; the predicate itself does not materialize per-row argument
+vectors. An earlier generic batch implementation was rejected after measuring
+about 1.25x slower execution, 8.9x higher allocated bytes, and 8.9x more
+allocations than the explicit predicate. Validity-index construction and
+frontier-aware pruning are not included because they are not implemented.

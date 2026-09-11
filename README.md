@@ -100,6 +100,7 @@ security guidance before exposing it on a network.
 - Indexed common source frontiers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
 - Frontier-bound SQL snapshots: [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)
 - Opt-in historical frontier-bound SQL reads: [SQL_AS_OF.md](SQL_AS_OF.md)
+- First-class half-open SQL temporal validity predicates: [SQL_TEMPORAL_VALIDITY.md](SQL_TEMPORAL_VALIDITY.md)
 - Context-aware SQL source frontier barriers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md#bounded-snapshot-barrier)
 - Incremental rank windows with opt-in mutable retractions: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
 - Incremental LAG/LEAD windows: [INCREMENTAL_OFFSET_WINDOW.md](INCREMENTAL_OFFSET_WINDOW.md)

@@ -27,6 +27,9 @@ func evalSQLTimeZoneExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) inter
 }
 
 func evalSQLTimeFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
+	if expr.name == "VALID_AT" {
+		return evalSQLValidAtFunction(expr, group, row)
+	}
 	arguments := make([]interface{}, len(expr.args))
 	for index, argument := range expr.args {
 		value := evalSQLExpr(argument, group, row)
@@ -80,6 +83,145 @@ func evalSQLTimeFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) inter
 		return sqlDuration(left.Sub(right).String())
 	}
 	return invalid("unknown time function " + expr.name)
+}
+
+func evalSQLValidAtFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
+	invalid := func(message string) interface{} {
+		return sqlEvalError{err: fmt.Errorf("%s", message), token: expr.token}
+	}
+	if len(expr.args) != 3 {
+		return invalid("VALID_AT expects exactly three arguments")
+	}
+	atValue := evalSQLExpr(expr.args[0], group, row)
+	if err := sqlExpressionError(atValue); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	if atValue == nil {
+		return nil
+	}
+	fromValue := evalSQLExpr(expr.args[1], group, row)
+	if err := sqlExpressionError(fromValue); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	toValue := evalSQLExpr(expr.args[2], group, row)
+	if err := sqlExpressionError(toValue); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	return sqlEvaluateValidAtValues(atValue, fromValue, toValue, expr.token)
+}
+
+func evalSQLValidAtBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionResolver) ([]interface{}, error) {
+	if len(expr.args) != 3 {
+		return nil, fmt.Errorf("VALID_AT expects exactly three arguments")
+	}
+	if !sqlValidAtBatchSimpleArgument(expr.args[0]) || !sqlValidAtBatchSimpleArgument(expr.args[1]) || !sqlValidAtBatchSimpleArgument(expr.args[2]) {
+		return evalSQLValidAtBatchGeneric(expr, rows, functions)
+	}
+	result := make([]interface{}, len(rows))
+	if expr.args[0].kind == "literal" {
+		if expr.args[0].value == nil {
+			for index, row := range rows {
+				fromValue := sqlValidAtBatchArgument(expr.args[1], row)
+				toValue := sqlValidAtBatchArgument(expr.args[2], row)
+				result[index] = sqlEvaluateValidAtValues(nil, fromValue, toValue, expr.token)
+			}
+			return result, nil
+		}
+		at, err := sqlTimestampValue(expr.args[0].value, time.UTC)
+		if err != nil {
+			failure := sqlEvalError{err: err, token: expr.token}
+			for index := range result {
+				result[index] = failure
+			}
+			return result, nil
+		}
+		for index, row := range rows {
+			fromValue := sqlValidAtBatchArgument(expr.args[1], row)
+			toValue := sqlValidAtBatchArgument(expr.args[2], row)
+			result[index] = sqlEvaluateValidAtTime(at, fromValue, toValue, expr.token)
+		}
+		return result, nil
+	}
+	for index, row := range rows {
+		atValue := sqlValidAtBatchArgument(expr.args[0], row)
+		fromValue := sqlValidAtBatchArgument(expr.args[1], row)
+		toValue := sqlValidAtBatchArgument(expr.args[2], row)
+		result[index] = sqlEvaluateValidAtValues(atValue, fromValue, toValue, expr.token)
+	}
+	return result, nil
+}
+
+func evalSQLValidAtBatchGeneric(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionResolver) ([]interface{}, error) {
+	at, err := evalSQLExprBatch(expr.args[0], rows, functions)
+	if err != nil {
+		return nil, err
+	}
+	validFrom, err := evalSQLExprBatch(expr.args[1], rows, functions)
+	if err != nil {
+		return nil, err
+	}
+	validTo, err := evalSQLExprBatch(expr.args[2], rows, functions)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(rows))
+	for index := range rows {
+		result[index] = sqlEvaluateValidAtValues(at[index], validFrom[index], validTo[index], expr.token)
+	}
+	return result, nil
+}
+
+func sqlValidAtBatchSimpleArgument(expr sqlExpr) bool {
+	return expr.kind == "literal" || expr.kind == "field"
+}
+
+func sqlValidAtBatchArgument(expr sqlExpr, row sqlExecRow) interface{} {
+	if expr.kind == "literal" {
+		return expr.value
+	}
+	return sqlField(row, expr.qualifier, expr.name)
+}
+
+func sqlEvaluateValidAtValues(atValue, fromValue, toValue interface{}, token sqlToken) interface{} {
+	if err := sqlExpressionError(atValue); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	if err := sqlExpressionError(fromValue); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	if err := sqlExpressionError(toValue); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	if atValue == nil {
+		return nil
+	}
+	at, err := sqlTimestampValue(atValue, time.UTC)
+	if err != nil {
+		return sqlEvalError{err: err, token: token}
+	}
+	return sqlEvaluateValidAtTime(at, fromValue, toValue, token)
+}
+
+func sqlEvaluateValidAtTime(at time.Time, fromValue, toValue interface{}, token sqlToken) interface{} {
+	if fromValue != nil {
+		validFrom, err := sqlTimestampValue(fromValue, time.UTC)
+		if err != nil {
+			return sqlEvalError{err: err, token: token}
+		}
+		if at.Before(validFrom) {
+			return false
+		}
+	}
+	if toValue != nil {
+		validTo, err := sqlTimestampValue(toValue, time.UTC)
+		if err != nil {
+			return sqlEvalError{err: err, token: token}
+		}
+		if !at.Before(validTo) {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlTimeZoneLocation(value interface{}) (*time.Location, error) {

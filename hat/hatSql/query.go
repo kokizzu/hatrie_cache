@@ -2016,6 +2016,16 @@ func sqlStreamScalarExpr(expr sqlExpr) bool {
 	switch expr.kind {
 	case "literal", "field":
 		return true
+	case "func":
+		if expr.name != "VALID_AT" || len(expr.args) != 3 {
+			return false
+		}
+		for _, argument := range expr.args {
+			if !sqlStreamScalarExpr(argument) {
+				return false
+			}
+		}
+		return true
 	case "binary":
 		if expr.left == nil || !sqlStreamScalarExpr(*expr.left) {
 			return false
@@ -15857,7 +15867,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvalError{err: fmt.Errorf("GROUPING expects exactly one grouping expression"), token: expr.token}
 			}
 			return int64(0)
-		case "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
+		case "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF":
 			return evalSQLTimeFunction(expr, group, row)
 		case "REGEXP_LIKE", "REGEXP_EXTRACT":
 			return evalSQLRegexFunction(expr, group, row)
@@ -16428,7 +16438,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false
@@ -16497,6 +16507,9 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 			out[index] = sqlField(row, expr.qualifier, expr.name)
 		}
 		return out, nil
+	}
+	if expr.kind == "func" && expr.name == "VALID_AT" {
+		return evalSQLValidAtBatch(expr, rows, functions)
 	}
 	if expr.kind == "func" && !sqlBuiltinFunction(expr.name) {
 		if functions == nil {
