@@ -72,6 +72,13 @@ func (ht *HatTrie) RunScheduledSQLJSONIndexRebuildsWithProgress(ctx context.Cont
 			})
 			return processed, err
 		}
+		if err := ht.completeSQLJSONIndexRebuild(ctx, request); err != nil {
+			ht.reportSQLJSONIndexRebuildProgress(report, SQLJSONIndexRebuildProgress{
+				Key: request.key, Field: request.field, State: SQLJSONIndexRebuildStateFailed,
+				QueuePosition: 1, QueueLength: queueLength, Processed: processed, Total: total,
+			})
+			return processed, err
+		}
 		processed++
 		ht.reportSQLJSONIndexRebuildProgress(report, SQLJSONIndexRebuildProgress{
 			Key: request.key, Field: request.field, State: SQLJSONIndexRebuildStateCompleted,
@@ -88,6 +95,8 @@ func (ht *HatTrie) reportSQLJSONIndexRebuildProgress(report func(SQLJSONIndexReb
 }
 
 func (ht *HatTrie) takeSQLJSONIndexRebuildRequest() (sqlJSONIndexRebuildRequest, int, bool) {
+	ht.sqlJSONIndexRebuildCheckpointMu.Lock()
+	defer ht.sqlJSONIndexRebuildCheckpointMu.Unlock()
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
 	if len(ht.sqlJSONIndexRebuildQueue) == 0 {
@@ -98,12 +107,31 @@ func (ht *HatTrie) takeSQLJSONIndexRebuildRequest() (sqlJSONIndexRebuildRequest,
 	ht.sqlJSONIndexRebuildQueue[0] = sqlJSONIndexRebuildRequest{}
 	ht.sqlJSONIndexRebuildQueue = ht.sqlJSONIndexRebuildQueue[1:]
 	delete(ht.sqlJSONIndexRebuildPending[request.key], request.field)
+	if ht.sqlJSONIndexRebuildCheckpointStore != nil {
+		if ht.sqlJSONIndexRebuildInFlight == nil {
+			ht.sqlJSONIndexRebuildInFlight = make(map[string]map[string]int)
+		}
+		if ht.sqlJSONIndexRebuildInFlight[request.key] == nil {
+			ht.sqlJSONIndexRebuildInFlight[request.key] = make(map[string]int)
+		}
+		ht.sqlJSONIndexRebuildInFlight[request.key][request.field]++
+	}
 	return request, queueLength, true
 }
 
 func (ht *HatTrie) requeueSQLJSONIndexRebuildRequest(request sqlJSONIndexRebuildRequest) {
+	ht.sqlJSONIndexRebuildCheckpointMu.Lock()
+	defer ht.sqlJSONIndexRebuildCheckpointMu.Unlock()
 	ht.sqlIndexMu.Lock()
 	defer ht.sqlIndexMu.Unlock()
+	if ht.sqlJSONIndexRebuildInFlight[request.key][request.field] > 1 {
+		ht.sqlJSONIndexRebuildInFlight[request.key][request.field]--
+	} else {
+		delete(ht.sqlJSONIndexRebuildInFlight[request.key], request.field)
+	}
+	if len(ht.sqlJSONIndexRebuildInFlight[request.key]) == 0 {
+		delete(ht.sqlJSONIndexRebuildInFlight, request.key)
+	}
 	if ht.sqlJSONIndexRebuildPending == nil {
 		ht.sqlJSONIndexRebuildPending = map[string]map[string]bool{}
 	}

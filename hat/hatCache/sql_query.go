@@ -856,27 +856,14 @@ func (ht *HatTrie) CreateSQLJSONCoveringIndex(key, field string, columns ...stri
 // ScheduleSQLJSONIndexRebuild queues one configured field for an explicit
 // rebuild. Duplicate requests are coalesced until the queued request runs.
 func (ht *HatTrie) ScheduleSQLJSONIndexRebuild(key, field string) error {
-	if ht == nil || key == "" || field == "" {
-		return fmt.Errorf("SQL JSON index rebuild requires a cache key and field")
-	}
-	ht.sqlIndexMu.Lock()
-	defer ht.sqlIndexMu.Unlock()
-	if !ht.sqlJSONIndexConfiguredLocked(key, field) {
-		return fmt.Errorf("SQL JSON index %q on %q is not configured", field, key)
-	}
-	if ht.sqlJSONIndexRebuildPending == nil {
-		ht.sqlJSONIndexRebuildPending = map[string]map[string]bool{}
-	}
-	if ht.sqlJSONIndexRebuildPending[key] == nil {
-		ht.sqlJSONIndexRebuildPending[key] = map[string]bool{}
-	}
-	if ht.sqlJSONIndexRebuildPending[key][field] {
-		return nil
-	}
-	ht.sqlJSONIndexRebuildPending[key][field] = true
-	ht.sqlJSONIndexRebuildQueue = append(ht.sqlJSONIndexRebuildQueue, sqlJSONIndexRebuildRequest{key: key, field: field})
-	ht.sqlJSONIndexMaintenanceLocked(key, field).scheduled++
-	return nil
+	return ht.scheduleSQLJSONIndexRebuild(context.Background(), key, field)
+}
+
+// ScheduleSQLJSONIndexRebuildWithContext is the context-aware form of
+// ScheduleSQLJSONIndexRebuild. The legacy method remains the zero-cost default
+// when no checkpoint store is configured.
+func (ht *HatTrie) ScheduleSQLJSONIndexRebuildWithContext(ctx context.Context, key, field string) error {
+	return ht.scheduleSQLJSONIndexRebuild(ctx, key, field)
 }
 
 // RunScheduledSQLJSONIndexRebuilds processes up to limit queued requests. A
@@ -888,44 +875,16 @@ func (ht *HatTrie) RunScheduledSQLJSONIndexRebuilds(limit int) (int, error) {
 	}
 	processed := 0
 	for limit <= 0 || processed < limit {
-		ht.sqlIndexMu.Lock()
-		if len(ht.sqlJSONIndexRebuildQueue) == 0 {
-			ht.sqlIndexMu.Unlock()
+		request, _, ok := ht.takeSQLJSONIndexRebuildRequest()
+		if !ok {
 			return processed, nil
 		}
-		request := ht.sqlJSONIndexRebuildQueue[0]
-		ht.sqlJSONIndexRebuildQueue[0] = sqlJSONIndexRebuildRequest{}
-		ht.sqlJSONIndexRebuildQueue = ht.sqlJSONIndexRebuildQueue[1:]
-		delete(ht.sqlJSONIndexRebuildPending[request.key], request.field)
-		ht.sqlIndexMu.Unlock()
-
-		source, err := ht.sqlJSONSource(request.key)
-		if err != nil {
-			ht.sqlIndexMu.Lock()
-			ht.sqlJSONIndexRebuildQueue = append([]sqlJSONIndexRebuildRequest{request}, ht.sqlJSONIndexRebuildQueue...)
-			if ht.sqlJSONIndexRebuildPending[request.key] == nil {
-				ht.sqlJSONIndexRebuildPending[request.key] = map[string]bool{}
-			}
-			ht.sqlJSONIndexRebuildPending[request.key][request.field] = true
-			ht.sqlIndexMu.Unlock()
+		if err := ht.executeSQLJSONIndexRebuildRequest(request); err != nil {
 			return processed, err
 		}
-
-		ht.sqlIndexMu.Lock()
-		rebuilt, err := ht.refreshSQLJSONIndexesLocked(request.key, request.field, source)
-		if err != nil {
-			ht.sqlJSONIndexRebuildQueue = append([]sqlJSONIndexRebuildRequest{request}, ht.sqlJSONIndexRebuildQueue...)
-			if ht.sqlJSONIndexRebuildPending[request.key] == nil {
-				ht.sqlJSONIndexRebuildPending[request.key] = map[string]bool{}
-			}
-			ht.sqlJSONIndexRebuildPending[request.key][request.field] = true
-			ht.sqlIndexMu.Unlock()
+		if err := ht.completeSQLJSONIndexRebuild(context.Background(), request); err != nil {
 			return processed, err
 		}
-		maintenance := ht.sqlJSONIndexMaintenanceLocked(request.key, request.field)
-		maintenance.runs++
-		maintenance.rebuilds += uint64(rebuilt)
-		ht.sqlIndexMu.Unlock()
 		processed++
 	}
 	return processed, nil

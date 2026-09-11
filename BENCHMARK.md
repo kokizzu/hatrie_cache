@@ -21003,3 +21003,42 @@ still checked. The measured path is therefore a recoverability improvement,
 not a general allocation optimization. The default remains disabled so normal
 successful restores keep their existing resource profile. See
 [RESTORE_RESUME.md](RESTORE_RESUME.md).
+
+<a id="tt-041-sql-index-rebuild-checkpoints"></a>
+## TT-041 SQL Index Rebuild Checkpoints
+
+Command: `make benchmark-sql-index-checkpoint`.
+
+This benchmark runs one SQL JSON index schedule and one rebuild per operation
+using the legacy disabled path, an in-memory checkpoint store, and the atomic
+file checkpoint store. It uses `-benchmem -count=5 -benchtime=100x` on Linux
+amd64 with an AMD Ryzen 9 5950X. The file case includes durable file and
+directory syncs for scheduling and completion.
+
+### Raw Samples
+
+| Mode | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Disabled | 1,149; 1,539; 1,256; 1,630; 1,306 | 57; 57; 57; 57; 57 | 1; 1; 1; 1; 1 |
+| In-memory store | 2,598; 3,053; 2,242; 2,360; 2,343 | 1,037; 1,037; 1,037; 1,037; 1,037 | 14; 14; 14; 14; 14 |
+| File store | 2,850,855; 2,820,546; 2,785,378; 2,829,327; 2,799,162 | 12,323; 12,323; 12,323; 12,299; 12,322 | 58; 58; 58; 57; 58 |
+
+### Median Comparison
+
+| Mode | Median ns/op | Median B/op | Median allocs/op | Relative to disabled |
+| --- | ---: | ---: | ---: | --- |
+| Disabled | 1,306 | 57 | 1 | `1.00x` baseline |
+| In-memory store | 2,360 | 1,037 | 14 | `1.81x` slower, `18.19x` higher bytes, `14.00x` more allocs |
+| File store | 2,820,546 | 12,323 | 58 | `2,160x` slower, `216.19x` higher bytes, `58.00x` more allocs |
+
+The file-store cost is expected from synchronous durability and is isolated to
+opt-in index scheduling and completion. It is not paid by normal SQL reads or
+writes, and the default remains disabled. The benefit is recovery correctness:
+an in-flight rebuild is retried after process loss instead of silently
+disappearing from the volatile queue.
+
+As a separate legacy-path check, the existing progress benchmark's median
+changed from `2,443 ns/op`, `1,184 B/op`, and `23 allocs/op` before this feature
+to `2,466 ns/op`, `1,184 B/op`, and `23 allocs/op` afterward. The measured
+allocation profile is unchanged and the small timing difference is within the
+run-to-run variance of this microbenchmark.

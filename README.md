@@ -71,6 +71,7 @@ security guidance before exposing it on a network.
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
+- Durable SQL index rebuild checkpoints: [SQL_INDEX_REBUILD_CHECKPOINT.md](SQL_INDEX_REBUILD_CHECKPOINT.md)
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
 - Opt-in SQL text token-prefix indexes: [SQL_TEXT_PREFIX_INDEX.md](SQL_TEXT_PREFIX_INDEX.md)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)

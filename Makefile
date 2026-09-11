@@ -1018,6 +1018,22 @@ test-sql-index-advisor:
 	sh ./scripts/test-sql-index-advisor.sh
 test-sql-index-progress:
 	sh ./scripts/test-sql-index-progress.sh
+test-sql-index-checkpoint:
+	sh ./scripts/test-sql-index-checkpoint.sh
+format-sql-index-checkpoint:
+	sh ./scripts/format-sql-index-checkpoint.sh
+review-sql-index-checkpoint:
+	sh ./scripts/review-sql-index-checkpoint.sh
+test-race-sql-index-checkpoint:
+	sh ./scripts/test-race-sql-index-checkpoint.sh
+benchmark-sql-index-checkpoint:
+	sh ./scripts/benchmark-sql-index-checkpoint.sh
+vet-sql-index-checkpoint:
+	sh ./scripts/vet-sql-index-checkpoint.sh
+commit-sql-index-checkpoint:
+	sh ./scripts/commit-sql-index-checkpoint.sh
+push-sql-index-checkpoint:
+	sh ./scripts/push-sql-index-checkpoint.sh
 format-sql-index-progress:
 	sh ./scripts/format-sql-index-progress.sh
 benchmark-sql-index-progress:
