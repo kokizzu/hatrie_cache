@@ -18865,6 +18865,44 @@ The pre-implementation ordinary-only median was `14,490,716 ns/op`,
 `15,502,365 B/op`, and `130,052 allocs/op`. The feature remains opt-in;
 unsupported component types retain the existing fail-closed behavior.
 
+## Native SQL Dataflow Composite Group
+
+Command:
+
+```text
+make benchmark-m052o-native-composite-group
+```
+
+This measures 20,000 resolved rows grouped by two direct fields: 512 repeated
+string regions and eight integer tiers, with `COUNT(*)` and `SUM(int64)`. The
+native path uses a fixed comparable two-component key, supports integer,
+string, and `NULL` values, and preserves first-seen group order without a
+formatted or per-row composite key. Five paired `-benchmem` samples were
+measured on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary composite group | 21,491,106 | 25,831,815 | 191,893 | baseline |
+| Native composite group | 5,821,653 | 6,587,733 | 12,393 | 3.69x faster; 3.92x fewer bytes; 15.48x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 21,066,209 | 5,821,653 | 25,831,889 | 6,587,734 | 191,893 | 12,393 |
+| 2 | 22,128,784 | 6,051,074 | 25,831,805 | 6,587,732 | 191,893 | 12,393 |
+| 3 | 21,491,106 | 6,207,719 | 25,831,933 | 6,587,733 | 191,893 | 12,393 |
+| 4 | 22,759,027 | 5,606,546 | 25,831,665 | 6,587,736 | 191,892 | 12,393 |
+| 5 | 20,791,333 | 5,652,237 | 25,831,815 | 6,587,733 | 191,892 | 12,393 |
+
+The pre-implementation ordinary-only median was `20,570,162 ns/op`,
+`25,831,976 B/op`, and `191,893 allocs/op`. Removing a duplicate composite
+key retained in each group state after the first implementation improved the
+native median from `6,416,347` to `5,821,653 ns/op` and from `7,898,134` to
+`6,587,733 B/op`; the final version is retained. The feature remains opt-in;
+composite ordering, HAVING, and unsupported component types retain the
+existing fail-closed behavior.
+
 ## Native SQL Dataflow String Distinct
 
 Command:

@@ -504,3 +504,23 @@ comparable key with typed integer, string, and `NULL` components. A five-sample
 for ordinary versus native execution. That is `3.19x` lower latency, `3.90x`
 lower allocation volume, and `18.21x` fewer allocations. First-seen order and
 unsupported component fallback behavior are covered by focused tests.
+
+### Native Composite Group Measurement
+
+Command:
+
+```text
+make benchmark-m052o-native-composite-group
+```
+
+The native grouped executor now admits two direct grouping fields using a
+fixed comparable key with integer, string, and `NULL` components. It keeps
+the first-seen group order and reuses the aggregate state for `COUNT`, `SUM`,
+`AVG`, `MIN`, and `MAX`. A five-sample 20,000-row benchmark measured
+`21,491,106` versus `5,821,653 ns/op`, `25,831,815` versus `6,587,733 B/op`,
+and `191,893` versus `12,393 allocs/op` for ordinary versus native execution.
+That is `3.69x` lower latency, `3.92x` lower allocation volume, and `15.48x`
+fewer allocations. Removing the duplicate composite key stored in each group
+state was measured separately at 1.10x faster and 1.20x lower bytes, so the
+final state keeps only the two projected values. Composite ordered, `HAVING`,
+windowed, and unsupported-key queries remain on the ordinary executor.

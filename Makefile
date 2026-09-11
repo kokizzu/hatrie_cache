@@ -8411,3 +8411,30 @@ commit-m052n-native-composite-distinct:
 
 push-m052n-native-composite-distinct:
 	bash ./scripts/push-m052n-native-composite-distinct.sh
+.PHONY: test-m052o-native-composite-group benchmark-m052o-native-composite-group benchmark-m052o-native-composite-group-baseline format-m052o-native-composite-group test-race-m052o-native-composite-group vet-m052o-native-composite-group review-m052o-native-composite-group commit-m052o-native-composite-group push-m052o-native-composite-group
+test-m052o-native-composite-group:
+	bash ./scripts/test-m052o-native-composite-group.sh
+
+benchmark-m052o-native-composite-group:
+	bash ./scripts/benchmark-m052o-native-composite-group.sh
+
+benchmark-m052o-native-composite-group-baseline:
+	bash ./scripts/benchmark-m052o-native-composite-group-baseline.sh
+
+format-m052o-native-composite-group:
+	bash ./scripts/format-m052o-native-composite-group.sh
+
+test-race-m052o-native-composite-group:
+	bash ./scripts/test-race-m052o-native-composite-group.sh
+
+vet-m052o-native-composite-group:
+	bash ./scripts/vet-m052o-native-composite-group.sh
+
+review-m052o-native-composite-group:
+	bash ./scripts/review-m052o-native-composite-group.sh
+
+commit-m052o-native-composite-group:
+	bash ./scripts/commit-m052o-native-composite-group.sh
+
+push-m052o-native-composite-group:
+	bash ./scripts/push-m052o-native-composite-group.sh

@@ -850,3 +850,8 @@ For each future unchecked item:
   optimized path measured 2.89x faster than materialized evaluation with 65.0%
   higher cumulative bytes; see [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md).
+- [x] M052o Native two-field composite `GROUP BY` dataflow using a fixed
+  comparable key for integer, string, and NULL components, preserving
+  first-seen group order and aggregate output. Composite ordered and HAVING
+  shapes remain fail-closed; see [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md)
+  and [BENCHMARK.md](BENCHMARK.md).

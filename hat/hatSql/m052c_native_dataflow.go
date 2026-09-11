@@ -76,7 +76,11 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 		if hasOutputWindow {
 			return fmt.Errorf("%w: grouped query requires materialized state", ErrSQLNativeDataflowUnsupported)
 		}
-		if _, ok := nativeSQLDataflowGroupPlanFor(query); !ok {
+		if len(query.groupBy) == 2 {
+			if _, ok := nativeSQLDataflowCompositeGroupPlanFor(query); !ok {
+				return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
+			}
+		} else if _, ok := nativeSQLDataflowGroupPlanFor(query); !ok {
 			return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
 		}
 		return nil
@@ -102,6 +106,13 @@ type nativeSQLDataflowGroupPlan struct {
 	group               sqlExpr
 	projectionAggregate []int
 	aggregates          []sqlStreamAggregate
+}
+
+type nativeSQLDataflowCompositeGroupPlan struct {
+	groups              [2]sqlExpr
+	projectionGroup     []int
+	projectionAggregate []int
+	aggregates           []sqlStreamAggregate
 }
 
 type nativeSQLDataflowGroupedOrderedPlan struct {
@@ -194,6 +205,51 @@ func nativeSQLDataflowGroupPlanFor(query *sqlQuery) (nativeSQLDataflowGroupPlan,
 	}
 	if !hasGroupProjection {
 		return nativeSQLDataflowGroupPlan{}, false
+	}
+	return plan, true
+}
+
+func nativeSQLDataflowCompositeGroupPlanFor(query *sqlQuery) (nativeSQLDataflowCompositeGroupPlan, bool) {
+	if query == nil || len(query.groupBy) != 2 || len(query.selects) == 0 || query.groupBy[0].kind != "field" || query.groupBy[1].kind != "field" || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return nativeSQLDataflowCompositeGroupPlan{}, false
+	}
+	plan := nativeSQLDataflowCompositeGroupPlan{
+		projectionGroup:     make([]int, len(query.selects)),
+		projectionAggregate: make([]int, len(query.selects)),
+	}
+	for index := range plan.projectionGroup {
+		plan.projectionGroup[index] = -1
+		plan.projectionAggregate[index] = -1
+	}
+	plan.groups[0] = query.groupBy[0]
+	plan.groups[1] = query.groupBy[1]
+	hasGroupProjection := [2]bool{}
+	for index, item := range query.selects {
+		groupProjection := -1
+		for groupIndex, group := range plan.groups {
+			if !sqlSameField(item.expr, group) {
+				continue
+			}
+			if hasGroupProjection[groupIndex] {
+				return nativeSQLDataflowCompositeGroupPlan{}, false
+			}
+			groupProjection = groupIndex
+			break
+		}
+		if groupProjection >= 0 {
+			plan.projectionGroup[index] = groupProjection
+			hasGroupProjection[groupProjection] = true
+			continue
+		}
+		aggregate, ok := nativeSQLDataflowAggregateExpression(item.expr)
+		if !ok {
+			return nativeSQLDataflowCompositeGroupPlan{}, false
+		}
+		plan.projectionAggregate[index] = len(plan.aggregates)
+		plan.aggregates = append(plan.aggregates, aggregate)
+	}
+	if !hasGroupProjection[0] || !hasGroupProjection[1] {
+		return nativeSQLDataflowCompositeGroupPlan{}, false
 	}
 	return plan, true
 }
@@ -356,6 +412,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 	}
 	if plan, ok := nativeSQLDataflowGroupPlanFor(query); ok {
 		return executeNativeSQLDataflowGroups(ctx, query, initial, plan)
+	}
+	if plan, ok := nativeSQLDataflowCompositeGroupPlanFor(query); ok {
+		return executeNativeSQLDataflowCompositeGroups(ctx, query, initial, plan)
 	}
 	if aggregates, ok := nativeSQLDataflowAggregatePlan(query); ok {
 		return executeNativeSQLDataflowAggregates(ctx, query, initial, aggregates)
@@ -737,6 +796,92 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 				}
 				continue
 			}
+			row[columns[selectIndex]] = aggregates[group.aggregateOffset+aggregateIndex].result()
+		}
+		result = append(result, row)
+	}
+	return result, nil
+}
+
+type nativeSQLDataflowCompositeGroupState struct {
+	values          [2]interface{}
+	aggregateOffset int
+}
+
+func executeNativeSQLDataflowCompositeGroups(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowCompositeGroupPlan) ([]SQLRow, error) {
+	indexes := make(map[nativeSQLDataflowCompositeDistinctKey]int, len(initial))
+	groups := make([]nativeSQLDataflowCompositeGroupState, 0)
+	aggregates := make([]sqlStreamAggregate, 0)
+	execRows := make([]sqlExecRow, 1)
+	for index, input := range initial {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := input
+		if len(query.from.fieldTypes) != 0 {
+			validated, err := validateSQLSourceFieldTypeRow(*query.from, input, index+1)
+			if err != nil {
+				return nil, err
+			}
+			row = validated
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, row)
+		execRows[0] = execRow
+		if query.where.kind != "" {
+			whereValue := evalSQLExpr(query.where, execRows, execRow)
+			if err := sqlExpressionError(whereValue); err != nil {
+				return nil, fmt.Errorf("native dataflow WHERE row %d: %w", index+1, err)
+			}
+			if !sqlTruthy(whereValue) {
+				continue
+			}
+		}
+		values := [2]interface{}{}
+		keys := nativeSQLDataflowCompositeDistinctKey{}
+		for groupIndex, group := range plan.groups {
+			value := evalSQLExpr(group, execRows, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return nil, fmt.Errorf("native dataflow GROUP BY row %d column %d: %w", index+1, groupIndex+1, err)
+			}
+			key, ok := nativeSQLDataflowDistinctKeyFor(value)
+			if !ok {
+				return nil, fmt.Errorf("%w: GROUP BY key type %T", ErrSQLNativeDataflowUnsupported, value)
+			}
+			values[groupIndex] = value
+			if groupIndex == 0 {
+				keys.first = key
+			} else {
+				keys.second = key
+			}
+		}
+		groupIndex, found := indexes[keys]
+		if !found {
+			groupIndex = len(groups)
+			indexes[keys] = groupIndex
+			groups = append(groups, nativeSQLDataflowCompositeGroupState{
+				values:          values,
+				aggregateOffset: len(aggregates),
+			})
+			aggregates = append(aggregates, plan.aggregates...)
+		}
+		group := groups[groupIndex]
+		for aggregateIndex := range plan.aggregates {
+			if err := aggregates[group.aggregateOffset+aggregateIndex].addWithGroup(execRows, execRow); err != nil {
+				return nil, fmt.Errorf("native dataflow aggregate row %d column %d: %w", index+1, aggregateIndex+1, err)
+			}
+		}
+	}
+	columns := sqlColumns(query.selects)
+	result := make([]SQLRow, 0, len(groups))
+	for groupIndex := range groups {
+		group := groups[groupIndex]
+		row := make(SQLRow, len(columns))
+		for selectIndex := range query.selects {
+			if projection := plan.projectionGroup[selectIndex]; projection >= 0 {
+				row[columns[selectIndex]] = group.values[projection]
+				continue
+			}
+			aggregateIndex := plan.projectionAggregate[selectIndex]
 			row[columns[selectIndex]] = aggregates[group.aggregateOffset+aggregateIndex].result()
 		}
 		result = append(result, row)
