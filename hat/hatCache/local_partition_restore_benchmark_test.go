@@ -38,10 +38,16 @@ func BenchmarkLocalPartitionRestore100k(b *testing.B) {
 	}
 
 	for _, test := range []struct {
-		name string
-		load func(*HatTrie) error
+		name    string
+		workers int
+		load    func(*HatTrie) error
 	}{
-		{name: "Snapshot", load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
+		{name: "Snapshot", workers: DefaultSnapshotRestoreWorkers, load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
+		{name: "SnapshotWorkers1", workers: 1, load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
+		{name: "SnapshotWorkers2", workers: 2, load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
+		{name: "SnapshotWorkers4", workers: 4, load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
+		{name: "SnapshotWorkers8", workers: 8, load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
+		{name: "SnapshotWorkers16", workers: 16, load: func(target *HatTrie) error { return target.LoadSnapshot(snapshotPath) }},
 		{name: "SnapshotLegacyTwoPass", load: func(target *HatTrie) error {
 			_, err := target.loadSnapshotLegacy(snapshotPath)
 			return err
@@ -63,6 +69,12 @@ func BenchmarkLocalPartitionRestore100k(b *testing.B) {
 				if err := target.ConfigureLocalPartitions(partitions); err != nil {
 					target.Destroy()
 					b.Fatal(err)
+				}
+				if test.workers != 0 {
+					if err := target.ConfigureSnapshotRestoreWorkers(test.workers); err != nil {
+						target.Destroy()
+						b.Fatal(err)
+					}
 				}
 				target.snapshotRestoreCutoverHook = func(duration time.Duration) {
 					cutoverNanos.Add(duration.Nanoseconds())

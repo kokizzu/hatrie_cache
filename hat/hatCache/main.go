@@ -3760,6 +3760,7 @@ type HatTrie struct {
 	replicationMerkle                 *replicationMerkleIndex
 	persistentDirtyTracker            *LevelDBDirtyTracker
 	snapshotMutations                 *snapshotMutationTracker
+	snapshotRestoreWorkers            int
 	snapshotCapturePageHook           func(int)
 	snapshotRestoreStageHook          func(*HatTrie) error
 	snapshotRestoreCutoverHook        func(time.Duration)

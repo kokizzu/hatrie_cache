@@ -87,6 +87,7 @@ func newSnapshotRestoreTrie(target *HatTrie) (*HatTrie, error) {
 	keyStatsMode := target.keyStatsMode
 	keyStatsCapacity := target.keyStatsCapacity
 	stripes := len(target.counterWriteStripes)
+	snapshotRestoreWorkers := target.snapshotRestoreWorkers
 	target.mu.RUnlock()
 
 	generationDir, err := os.MkdirTemp(root, ".snapshot-restore-*")
@@ -101,6 +102,7 @@ func newSnapshotRestoreTrie(target *HatTrie) (*HatTrie, error) {
 	stage.disks.rootDir = root
 	stage.disks.generationDir = true
 	stage.now = now
+	stage.snapshotRestoreWorkers = snapshotRestoreWorkers
 	if err := stage.ConfigureKeyStats(keyStatsMode, keyStatsCapacity); err != nil {
 		stage.Destroy()
 		return nil, err
@@ -132,7 +134,7 @@ func scanSnapshotIntoRestoreStage(file *os.File, stage *HatTrie, now time.Time) 
 		})
 	}
 
-	pool := newLocalPartitionRestorePool(set, func(partition int, operation snapshotOperation) error {
+	pool := newLocalPartitionRestorePool(set, stage.SnapshotRestoreWorkers(), func(partition int, operation snapshotOperation) error {
 		child := set.tries[partition]
 		if child.tryLocation(operation.entry.Key) != nil {
 			return errSnapshotDuplicateActiveKey

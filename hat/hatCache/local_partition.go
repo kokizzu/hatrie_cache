@@ -25,6 +25,10 @@ const (
 	DefaultLocalPartitions = 0
 	// MaxLocalPartitions bounds open C tries, backing pools, and disk directories.
 	MaxLocalPartitions = hatPartition.MaxCount
+	// DefaultSnapshotRestoreWorkers lets the runtime choose a worker count.
+	DefaultSnapshotRestoreWorkers = 0
+	// MaxSnapshotRestoreWorkers bounds restore goroutines and queue memory.
+	MaxSnapshotRestoreWorkers = MaxLocalPartitions
 )
 
 type localPartitionSet struct {
@@ -42,6 +46,54 @@ type LocalPartitioningStats struct {
 // 256. Power-of-two routing avoids division on every key operation.
 func ValidateLocalPartitions(count int) error {
 	return hatPartition.Validate(count)
+}
+
+// ConfigureSnapshotRestoreWorkers bounds partition restore workers. Zero uses
+// the current GOMAXPROCS value, clamped to the number of local partitions.
+func (ht *HatTrie) ConfigureSnapshotRestoreWorkers(workers int) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if err := ValidateSnapshotRestoreWorkers(workers); err != nil {
+		return err
+	}
+
+	ht.mu.Lock()
+	ht.ensureOpen()
+	ht.snapshotRestoreWorkers = workers
+	set := ht.localPartitions.Load()
+	ht.mu.Unlock()
+	if set == nil {
+		return nil
+	}
+	for _, child := range set.tries {
+		child.mu.Lock()
+		child.ensureOpen()
+		child.snapshotRestoreWorkers = workers
+		child.mu.Unlock()
+	}
+	return nil
+}
+
+// ValidateSnapshotRestoreWorkers checks the restore worker policy without
+// changing a trie. Zero is automatic; positive values are an explicit cap.
+func ValidateSnapshotRestoreWorkers(workers int) error {
+	if workers < DefaultSnapshotRestoreWorkers || workers > MaxSnapshotRestoreWorkers {
+		return fmt.Errorf("hatriecache: snapshot restore workers must be zero or from 1 through %d", MaxSnapshotRestoreWorkers)
+	}
+	return nil
+}
+
+// SnapshotRestoreWorkers returns the configured worker cap. Zero means
+// automatic sizing from GOMAXPROCS at restore time.
+func (ht *HatTrie) SnapshotRestoreWorkers() int {
+	if ht == nil {
+		return DefaultSnapshotRestoreWorkers
+	}
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+	ht.ensureOpen()
+	return ht.snapshotRestoreWorkers
 }
 
 // ConfigureLocalPartitions enables independent in-process HAT tries. It is a
@@ -91,6 +143,7 @@ func (ht *HatTrie) ConfigureLocalPartitions(count int) error {
 		}
 		child.now = func() time.Time { return ht.currentTime() }
 		child.persistentDirtyTracker = ht.persistentDirtyTracker
+		child.snapshotRestoreWorkers = ht.snapshotRestoreWorkers
 		if len(ht.counterWriteStripes) != 0 {
 			if err := child.ConfigureCounterWriteStripes(len(ht.counterWriteStripes)); err != nil {
 				child.Destroy()
@@ -837,7 +890,7 @@ func (ht *HatTrie) applyPartitionedSnapshotFile(file *os.File, metadata snapshot
 	}()
 
 	states := newLocalPartitionRestoreStates(len(set.tries))
-	pool := newLocalPartitionRestorePool(set, func(partition int, operation snapshotOperation) error {
+	pool := newLocalPartitionRestorePool(set, ht.SnapshotRestoreWorkers(), func(partition int, operation snapshotOperation) error {
 		return applyLocalPartitionSnapshotRestore(set.tries[partition], &states[partition], operation, now)
 	})
 	applyMetadata, applyErr := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
@@ -883,7 +936,7 @@ func loadLocalPartitionPersistentEntryData(trie *HatTrie, store persistentRefere
 	}()
 
 	states := newLocalPartitionRestoreStates(len(set.tries))
-	pool := newLocalPartitionRestorePool(set, func(partition int, work localPartitionPersistentRestoreWork) error {
+	pool := newLocalPartitionRestorePool(set, trie.SnapshotRestoreWorkers(), func(partition int, work localPartitionPersistentRestoreWork) error {
 		child := set.tries[partition]
 		state := &states[partition]
 		rollback, existed, err := child.restoreRollbackOperationLocked(work.load.entry.Key)
@@ -1029,8 +1082,8 @@ type localPartitionRestorePool[T any] struct {
 	apply    func(int, T) error
 }
 
-func newLocalPartitionRestorePool[T any](set *localPartitionSet, apply func(int, T) error) *localPartitionRestorePool[T] {
-	workerCount := localPartitionRestoreWorkerCount(len(set.tries))
+func newLocalPartitionRestorePool[T any](set *localPartitionSet, configuredWorkers int, apply func(int, T) error) *localPartitionRestorePool[T] {
+	workerCount := localPartitionRestoreWorkerCount(len(set.tries), configuredWorkers)
 	pool := &localPartitionRestorePool[T]{
 		done:  make(chan struct{}),
 		apply: apply,
@@ -1110,8 +1163,11 @@ func (pool *localPartitionRestorePool[T]) fail(err error) {
 	})
 }
 
-func localPartitionRestoreWorkerCount(partitions int) int {
-	workers := runtime.GOMAXPROCS(0)
+func localPartitionRestoreWorkerCount(partitions, configuredWorkers int) int {
+	workers := configuredWorkers
+	if workers == DefaultSnapshotRestoreWorkers {
+		workers = runtime.GOMAXPROCS(0)
+	}
 	if workers > partitions {
 		workers = partitions
 	}
@@ -1122,7 +1178,7 @@ func localPartitionRestoreWorkerCount(partitions int) int {
 }
 
 func visitLocalPartitionsInParallel(set *localPartitionSet, visit func(int, *HatTrie) error) error {
-	workerCount := localPartitionRestoreWorkerCount(len(set.tries))
+	workerCount := localPartitionRestoreWorkerCount(len(set.tries), DefaultSnapshotRestoreWorkers)
 	errs := make([]error, len(set.tries))
 	if workerCount == 1 {
 		for index := range set.tries {

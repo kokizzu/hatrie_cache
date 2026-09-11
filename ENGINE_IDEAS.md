@@ -98,7 +98,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-014 | Upsert-source consolidation | Partially adopted: importable `hatDataStructure.UpsertBatch[T]` keeps one final value or tombstone per key in stable source order with reusable capacity; connector flush policy and automatic SQL integration remain caller-owned. | Medium |
 | MZ-015 | CDC envelope normalization | Partially adopted: importable `hatSql.NormalizeCDCEnvelope` validates dynamic external envelopes, canonicalizes common Debezium/Materialize/Tarantool operation aliases, preserves source sequence and rows, and provides JSON decoding; source offsets and connector-specific row conversion remain caller-owned. | Medium |
 | MZ-016 | Source schema evolution | No additive/drop-column compatibility plan for live source versions. | High |
-| MZ-017 | Parallel source hydration | Snapshot restoration cannot split independent source ranges across workers. | Medium |
+| MZ-017 | Parallel source hydration | Partially adopted: partitioned snapshot and Pebble hydration already dispatch deterministic partition work to workers; `ConfigureSnapshotRestoreWorkers` adds a bounded operator cap, while non-partitioned source-range splitting remains deferred. | Medium |
 | MZ-018 | Compute/storage separation | SQL workers cannot scale independently from durable maintained state. | High |
 | MZ-019 | Per-cluster resource isolation | No named compute pools with independent CPU/memory admission. | Medium |
 | MZ-020 | Worker scaling coordination | No online worker resize protocol that preserves frontier correctness. | High |

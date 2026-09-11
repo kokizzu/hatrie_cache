@@ -20720,3 +20720,54 @@ The exact command was:
 ```sh
 make benchmark-mz015-cdc
 ```
+
+<a id="mz-017-bounded-partition-restore-workers"></a>
+## MZ-017 Bounded Partition Restore Workers
+
+Partitioned snapshot and Pebble restoration already route each source record to
+its deterministic local partition. This change makes the restore worker cap an
+explicit Go configuration, preserving automatic sizing as the default and
+allowing operators to select serial or bounded parallel hydration when CPU or
+storage contention makes unrestricted fan-out undesirable. Non-partitioned
+restore remains serial because it has no independent local source ranges.
+
+The fixture contains 100,000 deterministic 256-byte values across 16 local
+partitions. Results below are three samples for each policy at `go test -cpu 32`
+on an AMD Ryzen 9 5950X, `linux/amd64`; `0` therefore creates 16 workers.
+
+### Raw Samples
+
+| Policy | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Automatic (`0`) | 117797676, 112640257, 105387530 | 67252688, 66483968, 66492352 | 400806, 400562, 400589 |
+| Serial (`1`) | 97124035, 102791080, 100515158 | 66419400, 66419408, 66419448 | 400444, 400444, 400445 |
+| `2` workers | 125248949, 120861870, 127737026 | 66427736, 66429376, 66428200 | 400471, 400477, 400475 |
+| `4` workers | 113444759, 112503313, 113204482 | 66435752, 66437080, 66436088 | 400488, 400487, 400478 |
+| `8` workers | 106926582, 118869836, 119518623 | 66447888, 66454288, 66452320 | 400492, 400513, 400510 |
+| `16` workers | 114834376, 117095358, 104510416 | 66481904, 66481272, 66481528 | 400539, 400538, 400535 |
+
+### Median Comparison
+
+| Policy | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Automatic (`0`) | 102619723 | 66485864 | 400574 | `1.00x` |
+| Serial (`1`) | 94355869 | 66419416 | 400444 | `1.09x` faster |
+| `2` workers | 116092198 | 66429320 | 400479 | `0.88x` |
+| `4` workers | 108263305 | 66436008 | 400482 | `0.95x` |
+| `8` workers | 118646007 | 66452032 | 400504 | `0.87x` |
+| `16` workers | 102831698 | 66482752 | 400541 | `1.00x` |
+
+Serial restore was 1.12x faster than automatic sizing in this disk-bound run
+and used 72,944 fewer bytes per operation. The result is host and storage
+dependent; parallelism can help when independent partition writes overlap on
+faster storage. The 16-worker case used 62,120 more bytes and 94 more
+allocations than serial. No snapshot, persistence, or wire bytes changed.
+
+The exact command was:
+
+```sh
+make benchmark-mz017-restore-workers
+```
+
+Raw output is written to
+`build/benchmarks/mz017-restore-workers.txt`.

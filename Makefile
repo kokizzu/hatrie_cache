@@ -9711,3 +9711,33 @@ commit-mz015:
 	bash scripts/commit-mz015.sh
 push-mz015:
 	bash scripts/push-mz015.sh
+
+benchmark-mz017-restore-workers:
+	MZ017_RESTORE_KEYS='$(MZ017_RESTORE_KEYS)' MZ017_RESTORE_PARTITIONS='$(MZ017_RESTORE_PARTITIONS)' MZ017_RESTORE_CPUS='$(MZ017_RESTORE_CPUS)' BENCHTIME='$(BENCHTIME)' COUNT='3' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' bash scripts/benchmark-mz017-restore-workers.sh
+
+test-mz017-restore-workers:
+	bash scripts/test-mz017-restore-workers.sh
+
+format-mz017-restore-workers:
+	bash scripts/format-mz017-restore-workers.sh
+
+test-race-mz017-restore-workers:
+	bash scripts/test-race-mz017-restore-workers.sh
+
+test-mz017-broad:
+	bash scripts/test-mz017-broad.sh
+
+verify-mz017-docs:
+	bash scripts/verify-mz017-docs.sh
+
+review-mz017:
+	bash scripts/review-mz017.sh
+
+status-mz017:
+	bash scripts/status-mz017.sh
+
+commit-mz017:
+	bash scripts/commit-mz017.sh
+
+push-mz017:
+	bash scripts/push-mz017.sh

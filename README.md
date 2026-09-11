@@ -119,6 +119,7 @@ security guidance before exposing it on a network.
 - Incremental recursive reachability with opt-in mutable retractions: [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
 - Consensus-bound topology commits and fencing: [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md)
 - Deterministic local partition split and merge planning: [PARTITION_RESIZE.md](PARTITION_RESIZE.md)
+- Bounded local-partition snapshot hydration workers: [SNAPSHOT_RESTORE_WORKERS.md](SNAPSHOT_RESTORE_WORKERS.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
@@ -1798,10 +1799,21 @@ the 16-partition restore is 1.46x faster with 1.80x less heap and 1.80x fewer
 allocations. Malformed or failed restores leave the live generation unchanged.
 See [BENCHMARK.md](BENCHMARK.md#atomic-generation-snapshot-restore).
 
-Partitioned restore and Pebble startup also use partition-stable workers bounded
-by `GOMAXPROCS`. The historical 100,000-record comparison measured Pebble
-startup at 1.18x faster. See
-[BENCHMARK.md](BENCHMARK.md#parallel-partition-restore).
+Partitioned restore and Pebble startup also use partition-stable workers. The
+default restore policy is `0`, which chooses `min(GOMAXPROCS, local partitions)`.
+Go callers can cap the pool, or force serial hydration, without changing the
+snapshot or persistence format:
+
+```go
+if err := trie.ConfigureSnapshotRestoreWorkers(8); err != nil {
+	return err
+}
+```
+
+The historical 100,000-record comparison measured Pebble startup at 1.18x
+faster. Worker-policy CPU, memory, and allocation measurements are in
+[SNAPSHOT_RESTORE_WORKERS.md](SNAPSHOT_RESTORE_WORKERS.md) and
+[BENCHMARK.md](BENCHMARK.md#mz-017-bounded-partition-restore-workers).
 
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
 separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key
