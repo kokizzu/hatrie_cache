@@ -9437,6 +9437,38 @@ commit-ch032-query-profiler:
 push-ch032-query-profiler:
 	bash scripts/push-ch032-query-profiler.sh
 
+.PHONY: test-ch050-named-settings
+test-ch050-named-settings:
+	bash scripts/test-ch050-named-settings.sh
+
+.PHONY: benchmark-ch050-named-settings
+benchmark-ch050-named-settings:
+	bash scripts/benchmark-ch050-named-settings.sh
+
+.PHONY: format-ch050-named-settings
+format-ch050-named-settings:
+	bash scripts/format-ch050-named-settings.sh
+
+.PHONY: test-race-ch050-named-settings
+test-race-ch050-named-settings:
+	bash scripts/test-race-ch050-named-settings.sh
+
+.PHONY: verify-ch050-named-settings-docs
+verify-ch050-named-settings-docs:
+	bash scripts/verify-ch050-named-settings-docs.sh
+
+.PHONY: review-ch050-named-settings
+review-ch050-named-settings:
+	bash scripts/review-ch050-named-settings.sh
+
+.PHONY: commit-ch050-named-settings
+commit-ch050-named-settings:
+	bash scripts/commit-ch050-named-settings.sh
+
+.PHONY: push-ch050-named-settings
+push-ch050-named-settings:
+	bash scripts/push-ch050-named-settings.sh
+
 .PHONY: format-ch049-external-dictionary
 format-ch049-external-dictionary:
 	bash scripts/format-ch049-external-dictionary.sh

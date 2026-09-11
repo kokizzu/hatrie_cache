@@ -1,5 +1,65 @@
 # Benchmark
 
+## CH-050: Named Settings Collections
+
+The benchmark compares the named-settings registry with a raw two-entry Go map.
+`LookupValue` measures one setting, `Lookup` measures a defensive full-profile
+copy, `Resolve` measures an override copy, and `Put` measures immutable
+snapshot publication.
+
+### Raw Samples
+
+~~~text
+Test-first baseline before implementation:
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  156977191  7.556 ns/op  0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  158645468  7.319 ns/op  0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  171649479  6.954 ns/op  0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  167556535  7.438 ns/op  0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  172446982  6.971 ns/op  0 B/op  0 allocs/op
+
+Post-implementation benchmark:
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  174253173  6.676 ns/op    0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  185386840  6.921 ns/op    0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  173738202  6.688 ns/op    0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  170988940  6.921 ns/op    0 B/op  0 allocs/op
+BenchmarkCH050BaselineNamedSettingsMapLookup-32  174500020  6.820 ns/op    0 B/op  0 allocs/op
+BenchmarkCH050NamedSettingsLookupValue-32        55221436  21.61  ns/op    0 B/op  0 allocs/op
+BenchmarkCH050NamedSettingsLookupValue-32        54984220  21.18  ns/op    0 B/op  0 allocs/op
+BenchmarkCH050NamedSettingsLookupValue-32        53338827  20.21  ns/op    0 B/op  0 allocs/op
+BenchmarkCH050NamedSettingsLookupValue-32        60320180  19.87  ns/op    0 B/op  0 allocs/op
+BenchmarkCH050NamedSettingsLookupValue-32        54847278  20.65  ns/op    0 B/op  0 allocs/op
+BenchmarkCH050NamedSettingsLookupCollection-32    6635749 178.1   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsLookupCollection-32    6490010 181.6   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsLookupCollection-32    6633777 179.3   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsLookupCollection-32    6894720 176.5   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsLookupCollection-32    6955900 179.6   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsResolve-32             4347830 280.5   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsResolve-32             4278252 279.8   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsResolve-32             4421875 274.5   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsResolve-32             4296316 276.7   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsResolve-32             4213773 276.2   ns/op  336 B/op  2 allocs/op
+BenchmarkCH050NamedSettingsPut-32                 1893939 628.2   ns/op 1008 B/op  9 allocs/op
+BenchmarkCH050NamedSettingsPut-32                 1920426 634.0   ns/op 1008 B/op  9 allocs/op
+BenchmarkCH050NamedSettingsPut-32                 1882212 635.8   ns/op 1008 B/op  9 allocs/op
+BenchmarkCH050NamedSettingsPut-32                 1869830 654.1   ns/op 1008 B/op  9 allocs/op
+BenchmarkCH050NamedSettingsPut-32                 1876117 621.2   ns/op 1008 B/op  9 allocs/op
+~~~
+
+### Median Comparison
+
+| Operation | Median | Bytes/op | Allocs/op | Relative to raw map |
+| --- | ---: | ---: | ---: | ---: |
+| Raw map lookup baseline | 6.82 ns | 0 | 0 | 1.00x |
+| `LookupValue` | 20.65 ns | 0 | 0 | 3.03x slower |
+| Full `Lookup` copy | 179.3 ns | 336 | 2 | 26.3x slower |
+| `Resolve` with override | 276.7 ns | 336 | 2 | 40.6x slower |
+| Immutable `Put` update | 634.0 ns | 1,008 | 9 | Update path |
+
+The registry intentionally trades raw-map speed for atomic publication,
+revision control, and caller isolation. The zero-allocation `LookupValue` path
+keeps the common single-setting read cost small, while full profile copy and
+updates are expected to be configuration-time operations.
+
 ## CH-032: Query Profiler Samples
 
 The benchmark compares the opt-in profiler recording path with the no-op
