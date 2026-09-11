@@ -36,6 +36,9 @@ type SQLTriggerTransaction = hatSql.SQLTriggerTransaction
 type SQLQueryCanceledError = hatSql.SQLQueryCanceledError
 type SQLQueryManager = hatSql.SQLQueryManager
 type SQLQueryManagerOptions = hatSql.SQLQueryManagerOptions
+type SQLQueryLog = hatSql.SQLQueryLog
+type SQLQueryLogEntry = hatSql.SQLQueryLogEntry
+type SQLQueryLogOptions = hatSql.SQLQueryLogOptions
 type SQLQueryState = hatSql.SQLQueryState
 type SQLQueryStatus = hatSql.SQLQueryStatus
 type SQLAdaptivePlanner = hatSql.AdaptivePlanner
@@ -69,11 +72,17 @@ const (
 	DefaultSQLIndexAdvisorSnapshotMaxBytes = hatSql.DefaultSQLIndexAdvisorSnapshotMaxBytes
 	SQLIndexAdvisorSnapshotVersion         = hatSql.SQLIndexAdvisorSnapshotVersion
 	DefaultSQLQueryManagerHistoryCapacity  = hatSql.DefaultSQLQueryManagerHistoryCapacity
+	DefaultSQLQueryLogMaxRecordBytes       = hatSql.DefaultSQLQueryLogMaxRecordBytes
 	SQLQueryStateRunning                   = hatSql.SQLQueryStateRunning
 	SQLQueryStateCancelRequested           = hatSql.SQLQueryStateCancelRequested
 	SQLQueryStateSucceeded                 = hatSql.SQLQueryStateSucceeded
 	SQLQueryStateFailed                    = hatSql.SQLQueryStateFailed
 	SQLQueryStateCanceled                  = hatSql.SQLQueryStateCanceled
+)
+
+var (
+	ErrSQLQueryLogClosed        = hatSql.ErrSQLQueryLogClosed
+	ErrSQLQueryLogRecordInvalid = hatSql.ErrSQLQueryLogRecordInvalid
 )
 
 type SQLSourceResolver = hatSql.SourceResolver
@@ -137,6 +146,17 @@ func ExplainSQLWhatIf(ctx context.Context, request SQLWhatIfRequest, resolver SQ
 // recorder for use as SQLQueryOptions.Observer.
 func NewSQLQueryTraceRecorder(limit int) *SQLQueryTraceRecorder {
 	return hatSql.NewQueryTraceRecorder(limit)
+}
+
+// OpenSQLQueryLog opens a privacy-safe durable SQL query history file.
+func OpenSQLQueryLog(path string) (*SQLQueryLog, error) {
+	return hatSql.OpenSQLQueryLog(path)
+}
+
+// OpenSQLQueryLogWithOptions opens a durable SQL query history file with
+// explicit fsync and record-size settings.
+func OpenSQLQueryLogWithOptions(path string, options SQLQueryLogOptions) (*SQLQueryLog, error) {
+	return hatSql.OpenSQLQueryLogWithOptions(path, options)
 }
 
 // SQLResultCache retains the root API while hatSql owns the portable cache

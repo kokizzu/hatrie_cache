@@ -8769,6 +8769,36 @@ push-ch001-prewhere:
 list-engine-ideas:
 	bash scripts/list-engine-ideas.sh
 
+test-ch031-persistent-query-log:
+	bash scripts/test-ch031-persistent-query-log.sh
+
+benchmark-ch031-persistent-query-log:
+	bash scripts/benchmark-ch031-persistent-query-log.sh
+
+benchmark-ch031-baseline:
+	bash scripts/benchmark-ch031-baseline.sh
+
+format-ch031-persistent-query-log:
+	bash scripts/format-ch031-persistent-query-log.sh
+
+test-race-ch031-persistent-query-log:
+	bash scripts/test-race-ch031-persistent-query-log.sh
+
+vet-ch031-persistent-query-log:
+	bash scripts/vet-ch031-persistent-query-log.sh
+
+verify-ch031-docs:
+	bash scripts/verify-ch031-docs.sh
+
+review-ch031-persistent-query-log:
+	bash scripts/review-ch031-persistent-query-log.sh
+
+commit-ch031-persistent-query-log:
+	bash scripts/commit-ch031-persistent-query-log.sh
+
+push-ch031-persistent-query-log:
+	bash scripts/push-ch031-persistent-query-log.sh
+
 .PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
 test-ch002-primary-mark-pruning:
 	bash scripts/test-ch002-primary-mark-pruning.sh

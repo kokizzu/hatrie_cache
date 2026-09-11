@@ -1,5 +1,23 @@
 # Benchmark
 
+## CH-031 Persistent SQL Query Log
+
+These five-sample runs used `make benchmark-ch031-baseline` and
+`make benchmark-ch031-persistent-query-log` on an AMD Ryzen 9 5950X. The
+manager row measures the default no-log execution path before and after the
+feature. The append rows measure the explicit durable log modes.
+
+| Workload | Before | After | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Default manager completion | 3,611 ns/op; 3,968 B; 29 allocs | 3,576 ns/op; 3,968 B; 29 allocs | 1.01x faster; unchanged heap and allocations |
+| Buffered `SQLQueryLog.Append` | not applicable | 2,349 ns/op; 369 B; 4 allocs | opt-in persistence cost |
+| `SyncOnAppend` `SQLQueryLog.Append` | not applicable | 646,927 ns/op; 374 B; 4 allocs | about 275x slower than buffered append |
+
+The default manager path remains allocation-neutral because it checks a nil log
+pointer and performs no file work. `SyncOnAppend` is intentionally not the
+default; use it only when per-record filesystem durability is worth the latency.
+See [PERSISTENT_QUERY_LOG.md](PERSISTENT_QUERY_LOG.md).
+
 ## Token Bloom Filter
 
 The public token Bloom prefilter uses the existing compact Bloom bitset and

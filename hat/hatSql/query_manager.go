@@ -65,19 +65,24 @@ type SQLQueryManagerOptions struct {
 	// HistorySampleEvery retains every Nth completed status. Zero or one
 	// retains every status, preserving the legacy behavior.
 	HistorySampleEvery int
+	// QueryLog persists every terminal status in a privacy-safe append-only
+	// record. Nil preserves the default in-memory-only behavior.
+	QueryLog *SQLQueryLog
 }
 
 // SQLQueryManager owns cancellation contexts for opt-in SQL executions. It
 // is safe for concurrent Execute, Cancel, Status, Active, and History calls.
 type SQLQueryManager struct {
-	mu              sync.Mutex
-	nextID          uint64
-	historyCapacity int
+	mu                 sync.Mutex
+	nextID             uint64
+	historyCapacity    int
 	historySampleEvery int
 	historySampleCount uint64
-	active          map[string]*managedSQLQuery
-	history         []SQLQueryStatus
-	historyStart    int
+	queryLog           *SQLQueryLog
+	queryLogErr        error
+	active             map[string]*managedSQLQuery
+	history            []SQLQueryStatus
+	historyStart       int
 }
 
 type managedSQLQuery struct {
@@ -92,6 +97,10 @@ func NewSQLQueryManager(historyCapacity int) *SQLQueryManager {
 }
 
 func newSQLQueryManager(historyCapacity, historySampleEvery int) *SQLQueryManager {
+	return newSQLQueryManagerWithLog(historyCapacity, historySampleEvery, nil)
+}
+
+func newSQLQueryManagerWithLog(historyCapacity, historySampleEvery int, queryLog *SQLQueryLog) *SQLQueryManager {
 	if historyCapacity <= 0 {
 		historyCapacity = DefaultSQLQueryManagerHistoryCapacity
 	}
@@ -101,13 +110,14 @@ func newSQLQueryManager(historyCapacity, historySampleEvery int) *SQLQueryManage
 	return &SQLQueryManager{
 		historyCapacity:    historyCapacity,
 		historySampleEvery: historySampleEvery,
-		active:              make(map[string]*managedSQLQuery),
+		queryLog:           queryLog,
+		active:             make(map[string]*managedSQLQuery),
 	}
 }
 
 // NewSQLQueryManagerWithOptions creates a manager from explicit options.
 func NewSQLQueryManagerWithOptions(options SQLQueryManagerOptions) *SQLQueryManager {
-	return newSQLQueryManager(options.HistoryCapacity, options.HistorySampleEvery)
+	return newSQLQueryManagerWithLog(options.HistoryCapacity, options.HistorySampleEvery, options.QueryLog)
 }
 
 // Execute runs one query under a manager-owned cancellation context. When
@@ -165,7 +175,15 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	}
 	delete(manager.active, queryID)
 	manager.appendHistoryLocked(status)
+	queryLog := manager.queryLog
 	manager.mu.Unlock()
+	if queryLog != nil {
+		if logErr := queryLog.Append(status); logErr != nil {
+			manager.mu.Lock()
+			manager.queryLogErr = logErr
+			manager.mu.Unlock()
+		}
+	}
 	cancel()
 	return result, err
 }
@@ -260,6 +278,18 @@ func (manager *SQLQueryManager) History() []SQLQueryStatus {
 		history[index] = manager.history[manager.historyIndexLocked(index)]
 	}
 	return history
+}
+
+// QueryLogError returns the most recent durable-log error, if any. Query
+// execution itself remains successful when the optional observability log
+// cannot be written.
+func (manager *SQLQueryManager) QueryLogError() error {
+	if manager == nil {
+		return nil
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	return manager.queryLogErr
 }
 
 func (manager *SQLQueryManager) appendHistoryLocked(status SQLQueryStatus) {

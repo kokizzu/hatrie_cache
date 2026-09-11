@@ -57,7 +57,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-028 | Query `max_threads` setting | Worker count is not exposed as a stable SQL/session setting with admission checks. | Low |
 | CH-029 | User/key quotas | No rolling per-user query/bytes/CPU quota enforcement. | Medium |
 | CH-030 | Query complexity limits | No limits for rows, joins, expressions, aggregation groups, or result bytes in SQL syntax. | Medium |
-| CH-031 | Persistent query log | No durable privacy-safe history of query latency, rows, bytes, and errors. | Low |
+| CH-031 | Persistent query log | Implemented as an opt-in privacy-safe newline-delimited JSON log attached to `SQLQueryManager`; terminal status survives process restart without retaining SQL text, sources, parameters, or cancellation reasons. | Low |
 | CH-032 | Query profiler samples | No sampled operator CPU/blocking profile attached to a query ID. | Medium |
 | CH-033 | Distributed query fan-out | One query cannot plan and merge reads from multiple independent nodes. | High |
 | CH-034 | Parallel replicas | No coordinated replica reads that divide ranges and merge ordered results. | High |

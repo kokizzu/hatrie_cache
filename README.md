@@ -86,6 +86,7 @@ security guidance before exposing it on a network.
 - Opt-in persistent-store disk reserve admission: [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md)
 - Opt-in persistent-store run Bloom filters: [PERSISTENT_STORE_BLOOM_FILTER.md](PERSISTENT_STORE_BLOOM_FILTER.md)
 - Materialized-view dependency invalidation: [MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md](MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md)
+- Persistent SQL query history: [PERSISTENT_QUERY_LOG.md](PERSISTENT_QUERY_LOG.md)
 - Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Opt-in cross-source SQL read snapshots: [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md)
