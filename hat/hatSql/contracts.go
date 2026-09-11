@@ -1136,6 +1136,14 @@ type SourceVersionResolver interface {
 	SQLSourceVersion(name, key string) (version string, available bool, err error)
 }
 
+// SQLSourceFrontierResolver reports the latest immutable source frontier that
+// a query can safely observe. It is used only when SQLQueryOptions explicitly
+// requires a minimum frontier; ordinary queries do not call this interface.
+// Available distinguishes an unsupported source from a valid frontier of zero.
+type SQLSourceFrontierResolver interface {
+	SQLSourceFrontier(name, key string) (frontier uint64, ready bool, available bool, err error)
+}
+
 // SourceResolverFunc adapts a function into SourceResolver.
 type SourceResolverFunc func(name string, key string) ([]Row, error)
 

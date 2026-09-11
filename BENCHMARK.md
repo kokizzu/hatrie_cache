@@ -20455,3 +20455,14 @@ The improvement is limited to explicitly analyzed, unchanged sources. The
 cache is in-memory derived metadata, is bounded to 128 source entries, and is
 cleared across mutation-safe restore paths. It does not change command wire
 format, backup bytes, or persistence layout.
+## MZ-007 source frontier requirement
+
+`make benchmark-mz007-frontier-rejection` (five samples, `-benchmem`, AMD Ryzen 9 5950X):
+
+| Mode | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline old adapter shape | 2,647 | 3,208 | 18 | comparison only |
+| Requirement disabled | 2,519 | 2,864 | 15 | 1.00x |
+| Requirement enabled and satisfied | 2,598 | 2,864 | 15 | 1.03x |
+
+The satisfied frontier check adds about 79 ns per simple query in this workload and does not add allocations. The default remains disabled. The old adapter-shape row is comparison-only; disabled and enabled use the same resolver and query.

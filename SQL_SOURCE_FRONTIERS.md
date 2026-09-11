@@ -131,3 +131,60 @@ frontier, implement `SQLFrontierSnapshotProvider` and call
 the provider's physical atomicity contract and rejects providers that can only
 create an unbounded snapshot. See [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)
 for the API and benchmark.
+
+## Query Frontier Requirement
+
+`hatSql` can reject a query until every non-local source has reached a
+caller-selected immutable frontier. This is useful when a read must not
+observe a lagging replica, region, ingestion partition, or materialized
+source. The option is disabled by default.
+
+```go
+type frontierResolver struct {
+	hatSql.SourceResolver // the application's ordinary source resolver
+}
+
+func (frontierResolver) SQLSourceFrontier(name, key string) (uint64, bool, bool, error) {
+	// Return the source's durable commit or offset frontier.
+	return 42, true, true, nil
+}
+
+resolver := frontierResolver{SourceResolver: sourceResolver}
+options := hatSql.SQLQueryOptions{
+	RequireSourceFrontier:  true,
+	RequiredSourceFrontier: 42,
+}
+result, err := hatSql.ExecuteSQLQueryContext(ctx, "FROM CACHE('orders') SELECT id", resolver, options)
+```
+
+`ready=false` rejects with `ErrSQLSourceFrontierNotReady`; `available=false`
+rejects with `ErrSQLSourceFrontierUnavailable`; and a frontier below the
+requirement rejects with `ErrSQLSourceFrontierBehind`. Resolver errors are
+returned with the source name and key.
+
+All non-local sources in the main query, joins, CTEs, and set-operation
+branches are checked before source rows are read. Repeated references to the
+same source are checked once. Local `VALUES` sources do not require a
+frontier. When `RequireSourceFrontier=false`, the resolver is never called and
+existing behavior is unchanged.
+
+The frontier is an application-defined monotone sequence, not a wall-clock
+timestamp. For multi-region reads, use a common committed sequence that all
+required regions can report. The query should only be admitted after the
+resolver has acquired the same snapshot or lease used for its rows.
+
+## Query Requirement Measurement
+
+Measured with `make benchmark-mz007-frontier-rejection` on an AMD Ryzen 9
+5950X. The benchmark ran five samples for each case with `-benchmem`:
+
+| Mode | Median time | Bytes/op | Allocs/op | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline old adapter shape | 2,647 ns | 3,208 | 18 | comparison only |
+| Requirement disabled | 2,519 ns | 2,864 | 15 | baseline |
+| Requirement enabled and satisfied | 2,598 ns | 2,864 | 15 | +3.14% |
+
+The satisfied frontier check adds about 79 ns per simple query in this run and
+does not add allocations. The old adapter-shape row is comparison-only;
+disabled and enabled use the same resolver and query. The default remains
+disabled.

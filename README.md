@@ -74,6 +74,7 @@ security guidance before exposing it on a network.
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in bounded SQL query profiler samples: [SQL_QUERY_PROFILER.md](SQL_QUERY_PROFILER.md)
 - Versioned named SQL query/storage settings collections: [SQL_NAMED_SETTINGS.md](SQL_NAMED_SETTINGS.md)
+- Opt-in SQL source frontier freshness rejection: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Transactional SQL trigger orchestration: [SQL_TRIGGERS.md](SQL_TRIGGERS.md)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)

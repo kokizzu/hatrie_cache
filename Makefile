@@ -9469,6 +9469,7 @@ commit-ch050-named-settings:
 push-ch050-named-settings:
 	bash scripts/push-ch050-named-settings.sh
 
+.PHONY: inspect-ch029-query-contracts
 .PHONY: format-ch049-external-dictionary
 format-ch049-external-dictionary:
 	bash scripts/format-ch049-external-dictionary.sh
@@ -9499,3 +9500,37 @@ push-ch049-external-dictionary:
 
 push-tt050-sql-planner-statistics:
 	bash scripts/push-tt050-sql-planner-statistics.sh
+.PHONY: inspect-query-frontier-contracts
+inspect-query-frontier-contracts:
+	bash scripts/inspect-query-frontier-contracts.sh
+.PHONY: benchmark-mz007-frontier-rejection
+benchmark-mz007-frontier-rejection:
+	bash scripts/benchmark-mz007-frontier-rejection.sh
+.PHONY: test-mz007-frontier-rejection
+test-mz007-frontier-rejection:
+	bash scripts/test-mz007-frontier-rejection.sh
+.PHONY: format-mz007-frontier-rejection
+format-mz007-frontier-rejection:
+	bash scripts/format-mz007-frontier-rejection.sh
+.PHONY: inspect-frontier-api
+inspect-frontier-api:
+	bash scripts/inspect-frontier-api.sh
+.PHONY: test-race-mz007-frontier-rejection
+test-race-mz007-frontier-rejection:
+	bash scripts/test-race-mz007-frontier-rejection.sh
+.PHONY: inspect-adopted-ledger
+inspect-adopted-ledger:
+	bash scripts/inspect-adopted-ledger.sh
+.PHONY: verify-mz007-docs
+verify-mz007-docs:
+	bash scripts/verify-mz007-docs.sh
+.PHONY: inspect-api-diff
+
+review-mz007-frontier-rejection:
+	bash scripts/review-mz007-frontier-rejection.sh
+
+commit-mz007-frontier-rejection:
+	bash scripts/commit-mz007-frontier-rejection.sh
+
+push-mz007-frontier-rejection:
+	bash scripts/push-mz007-frontier-rejection.sh

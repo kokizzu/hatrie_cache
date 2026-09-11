@@ -292,6 +292,11 @@ type SQLQueryOptions struct {
 	// SlowQueryRecorder retains privacy-safe samples only for queries that
 	// meet SlowQueryThreshold. Nil disables sample retention.
 	SlowQueryRecorder *SQLSlowQueryRecorder
+	// RequireSourceFrontier rejects a query unless every non-local source
+	// reaches RequiredSourceFrontier. It is disabled by default and requires a
+	// resolver implementing SQLSourceFrontierResolver.
+	RequireSourceFrontier  bool
+	RequiredSourceFrontier uint64
 }
 
 // QueryOptions bounds one query. It is the package-native name for
@@ -698,6 +703,9 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if parseErr != nil {
 		return result, parseErr
 	}
+	if err = validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
+		return result, err
+	}
 	if err = options.IndexHint.validate(); err != nil {
 		return result, err
 	}
@@ -888,6 +896,9 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		query, err = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	}
 	if err != nil {
+		return err
+	}
+	if err := validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
 		return err
 	}
 	if err := options.IndexHint.validate(); err != nil {
@@ -4961,6 +4972,9 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if parseErr != nil {
 		return result, parseErr
+	}
+	if err = validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
+		return result, err
 	}
 	if err = options.IndexHint.validate(); err != nil {
 		return result, err
