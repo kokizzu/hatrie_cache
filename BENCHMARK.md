@@ -18097,6 +18097,41 @@ The pre-implementation ordinary-only run measured `2881364 ns/op`,
 reported above because it controls for normal benchmark noise. The feature is
 opt-in and changes no storage, wire, or default SQL behavior.
 
+## Native SQL Dataflow Distinct
+
+M052f adds an opt-in native path for a single directly selected integer or
+`NULL` field under `SELECT DISTINCT`, with an optional scalar `WHERE`
+predicate. It preserves first-seen order and rejects multiple projections,
+expressions, ordering, limits, and unsupported runtime key types.
+
+Command: `make benchmark-m052f-native-distinct`.
+
+The workload deduplicates one field from 4,096 already resolved map rows after
+a scalar filter. Both paths compile outside the timed loop and receive
+identical rows. Five paired `-benchmem` samples were used on Linux/amd64 with
+an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 2,377,985 | 2,979,083 | 22,243 | baseline |
+| Native distinct executor | 484,782 | 267,616 | 538 | 4.91x faster; 11.13x fewer bytes; 41.34x fewer allocations |
+
+Raw paired samples:
+
+```text
+ordinary: 2330361, 2265494, 2381125, 2377985, 2419058 ns/op;
+  2979083, 2979148, 2978741, 2978994, 2979143 B/op;
+  22243, 22243, 22240, 22242, 22243 allocs/op
+native: 475529, 484782, 497580, 493976, 480919 ns/op;
+  267612, 267622, 267614, 267641, 267616 B/op;
+  538, 538, 538, 538, 538 allocs/op
+```
+
+The pre-implementation ordinary-only run measured `2418758 ns/op`,
+`2979199 B/op`, and `22243 allocs/op` at its median. The paired control is
+reported above because it controls for normal benchmark noise. The feature is
+opt-in and changes no storage, wire, or default SQL behavior.
+
 ## Immutable Compiled SQL Template Reuse
 
 The workload executes a static compiled query over a 16-row `VALUES` source.

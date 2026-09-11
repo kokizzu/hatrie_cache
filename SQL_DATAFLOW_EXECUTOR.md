@@ -96,7 +96,7 @@ validates typed source fields, preserves row order, duplicates, and SQL
 `NULL` filtering semantics, and does not mutate the input rows. Scalar
 evaluation errors retain the normal SQL behavior. `ErrSQLNativeDataflowUnsupported`
 is returned at compilation time for joins, unions, CTEs, mixed aggregate and
-non-aggregate projections, unsupported grouping shapes, window functions, ordering, limits,
+non-aggregate projections, unsupported grouping or `DISTINCT` shapes, window functions, ordering, limits,
 samples, `DISTINCT`, `*`, custom function calls, and other shapes outside the
 supported built-in paths. Callers use the ordinary `CompiledSQLQuery.Execute`
 or callback-backed `CompileDataflow` path for those queries.
@@ -116,6 +116,12 @@ same built-in aggregates. The native path preserves first-seen group order,
 duplicate rows, and one SQL `NULL` group. It accepts signed and unsigned
 integer source values that fit in `int64`; other runtime group-key types return
 `ErrSQLNativeDataflowUnsupported` so callers can use a different executor.
+
+Distinct-only single-source queries are supported when one directly selected
+integer field is deduplicated, with an optional scalar `WHERE` predicate. The
+native path preserves first-seen order and one SQL `NULL` value, accepts
+signed and unsigned integers that fit in `int64`, and returns
+`ErrSQLNativeDataflowUnsupported` for other runtime key types.
 
 This API does not resolve sources, change query defaults, or replace the
 ordinary SQL executor. It is a lower-level boundary for callers that already
@@ -252,3 +258,37 @@ The pre-implementation ordinary-only baseline median was `2,881,364 ns/op`,
 `2,792,011 B/op`, and `16,600 allocs/op`. The paired control is reported for
 the ratio because it controls for normal benchmark noise. No storage, wire,
 or default-execution behavior changes.
+
+### Native Distinct Measurement
+
+Command:
+
+```text
+make benchmark-m052f-native-distinct
+```
+
+The benchmark deduplicates one integer field from 4,096 already resolved rows
+after a scalar `WHERE` predicate. Both paths compile the query outside the
+timed loop and receive the same rows. The ordinary executor and native
+distinct executor each use five paired `-benchmem` samples on Linux/amd64 with
+an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 2,377,985 | 2,979,083 | 22,243 | baseline |
+| Native distinct executor | 484,782 | 267,616 | 538 | 4.91x faster; 11.13x fewer bytes; 41.34x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2,330,361 | 475,529 | 2,979,083 | 267,612 | 22,243 | 538 |
+| 2 | 2,265,494 | 484,782 | 2,979,148 | 267,622 | 22,243 | 538 |
+| 3 | 2,381,125 | 497,580 | 2,978,741 | 267,614 | 22,240 | 538 |
+| 4 | 2,377,985 | 493,976 | 2,978,994 | 267,641 | 22,242 | 538 |
+| 5 | 2,419,058 | 480,919 | 2,979,143 | 267,616 | 22,243 | 538 |
+
+The pre-implementation ordinary-only baseline median was `2,418,758 ns/op`,
+`2,979,199 B/op`, and `22,243 allocs/op`. The paired control is reported for
+the ratio because it controls for normal benchmark noise. The feature is
+opt-in and changes no storage, wire, or default SQL behavior.

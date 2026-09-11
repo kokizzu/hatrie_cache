@@ -38,11 +38,17 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	if query.explain || query.sample != nil || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
 		return fmt.Errorf("%w: query contains non-scalar stages", ErrSQLNativeDataflowUnsupported)
 	}
-	if query.distinct || len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || query.limit >= 0 || query.offset > 0 || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
+	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || query.limit >= 0 || query.offset > 0 || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
 		return fmt.Errorf("%w: query requires materialized state", ErrSQLNativeDataflowUnsupported)
 	}
 	if query.where.kind != "" && !sqlStreamScalarExpr(query.where) {
 		return fmt.Errorf("%w: WHERE expression is not scalar", ErrSQLNativeDataflowUnsupported)
+	}
+	if query.distinct {
+		if _, ok := nativeSQLDataflowDistinctPlanFor(query); !ok {
+			return fmt.Errorf("%w: DISTINCT query shape", ErrSQLNativeDataflowUnsupported)
+		}
+		return nil
 	}
 	if len(query.groupBy) != 0 {
 		if _, ok := nativeSQLDataflowGroupPlanFor(query); !ok {
@@ -68,6 +74,17 @@ type nativeSQLDataflowGroupPlan struct {
 	group               sqlExpr
 	projectionAggregate []int
 	aggregates          []sqlStreamAggregate
+}
+
+type nativeSQLDataflowDistinctPlan struct {
+	field sqlExpr
+}
+
+func nativeSQLDataflowDistinctPlanFor(query *sqlQuery) (nativeSQLDataflowDistinctPlan, bool) {
+	if query == nil || !query.distinct || len(query.selects) != 1 || query.selects[0].expr.kind != "field" || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return nativeSQLDataflowDistinctPlan{}, false
+	}
+	return nativeSQLDataflowDistinctPlan{field: query.selects[0].expr}, true
 }
 
 func nativeSQLDataflowGroupPlanFor(query *sqlQuery) (nativeSQLDataflowGroupPlan, bool) {
@@ -145,6 +162,9 @@ func nativeSQLDataflowAggregatePlan(query *sqlQuery) ([]sqlStreamAggregate, bool
 }
 
 func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQLRow) ([]SQLRow, error) {
+	if plan, ok := nativeSQLDataflowDistinctPlanFor(query); ok {
+		return executeNativeSQLDataflowDistinct(ctx, query, initial, plan)
+	}
 	if plan, ok := nativeSQLDataflowGroupPlanFor(query); ok {
 		return executeNativeSQLDataflowGroups(ctx, query, initial, plan)
 	}
@@ -228,7 +248,8 @@ func executeNativeSQLDataflowAggregates(ctx context.Context, query *sqlQuery, in
 }
 
 type nativeSQLDataflowGroupState struct {
-	value           int64
+	key             int64
+	value           interface{}
 	null            bool
 	aggregateOffset int
 }
@@ -318,7 +339,7 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			} else {
 				indexes[groupValue] = groupIndex
 			}
-			group := nativeSQLDataflowGroupState{value: groupValue, null: isNull, aggregateOffset: len(aggregates)}
+			group := nativeSQLDataflowGroupState{key: groupValue, value: value, null: isNull, aggregateOffset: len(aggregates)}
 			groups = append(groups, group)
 			aggregates = append(aggregates, plan.aggregates...)
 		}
@@ -348,6 +369,59 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			row[columns[selectIndex]] = aggregates[group.aggregateOffset+aggregateIndex].result()
 		}
 		result = append(result, row)
+	}
+	return result, nil
+}
+
+func executeNativeSQLDataflowDistinct(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowDistinctPlan) ([]SQLRow, error) {
+	seen := make(map[int64]struct{}, len(initial))
+	seenNull := false
+	columns := sqlColumns(query.selects)
+	result := make([]SQLRow, 0, len(initial))
+	execRows := make([]sqlExecRow, 1)
+	for index, input := range initial {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := input
+		if len(query.from.fieldTypes) != 0 {
+			validated, err := validateSQLSourceFieldTypeRow(*query.from, input, index+1)
+			if err != nil {
+				return nil, err
+			}
+			row = validated
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, row)
+		execRows[0] = execRow
+		if query.where.kind != "" {
+			whereValue := evalSQLExpr(query.where, execRows, execRow)
+			if err := sqlExpressionError(whereValue); err != nil {
+				return nil, fmt.Errorf("native dataflow WHERE row %d: %w", index+1, err)
+			}
+			if !sqlTruthy(whereValue) {
+				continue
+			}
+		}
+		value := evalSQLExpr(plan.field, execRows, execRow)
+		if err := sqlExpressionError(value); err != nil {
+			return nil, fmt.Errorf("native dataflow DISTINCT row %d: %w", index+1, err)
+		}
+		key, isNull, ok := nativeSQLDataflowIntegerGroupKey(value)
+		if !ok {
+			return nil, fmt.Errorf("%w: DISTINCT key type %T", ErrSQLNativeDataflowUnsupported, value)
+		}
+		if isNull {
+			if seenNull {
+				continue
+			}
+			seenNull = true
+		} else {
+			if _, found := seen[key]; found {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		result = append(result, SQLRow{columns[0]: value})
 	}
 	return result, nil
 }

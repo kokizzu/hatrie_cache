@@ -8134,3 +8134,35 @@ commit-m052e-native-group:
 .PHONY: push-m052e-native-group
 push-m052e-native-group:
 	bash ./scripts/push-m052e-native-group.sh
+
+.PHONY: test-m052f-native-distinct
+test-m052f-native-distinct:
+	bash ./scripts/test-m052f-native-distinct.sh
+
+.PHONY: benchmark-m052f-native-distinct
+benchmark-m052f-native-distinct:
+	bash ./scripts/benchmark-m052f-native-distinct.sh
+
+.PHONY: format-m052f-native-distinct
+format-m052f-native-distinct:
+	bash ./scripts/format-m052f-native-distinct.sh
+
+.PHONY: test-race-m052f-native-distinct
+test-race-m052f-native-distinct:
+	bash ./scripts/test-race-m052f-native-distinct.sh
+
+.PHONY: vet-m052f-native-distinct
+vet-m052f-native-distinct:
+	bash ./scripts/vet-m052f-native-distinct.sh
+
+.PHONY: review-m052f-native-distinct
+review-m052f-native-distinct:
+	bash ./scripts/review-m052f-native-distinct.sh
+
+.PHONY: commit-m052f-native-distinct
+commit-m052f-native-distinct:
+	bash ./scripts/commit-m052f-native-distinct.sh
+
+.PHONY: push-m052f-native-distinct
+push-m052f-native-distinct:
+	bash ./scripts/push-m052f-native-distinct.sh
