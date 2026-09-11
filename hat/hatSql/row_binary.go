@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
 	"time"
 )
 
@@ -35,7 +37,11 @@ type SQLRowBinaryColumn struct {
 	Nullable bool
 }
 
-const maxSQLRowBinaryRows = 1_000_000
+const (
+	maxSQLRowBinaryRows          = 1_000_000
+	sqlRowBinaryParallelMinBytes = 64 << 10
+	sqlRowBinaryParallelMinRows  = 256
+)
 
 // EncodeSQLRowBinary encodes rows as a schema-aware RowBinary stream. Fixed
 // width values use little-endian bytes and strings/bytes/JSON use an unsigned
@@ -88,39 +94,176 @@ func DecodeSQLRowBinary(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow,
 	if len(encoded) == 0 {
 		return nil, nil
 	}
+	if len(encoded) < sqlRowBinaryParallelMinBytes || runtime.GOMAXPROCS(0) < 2 {
+		return decodeSQLRowBinarySerial(columns, encoded)
+	}
+	return decodeSQLRowBinaryParallelValidated(columns, encoded)
+}
+
+// DecodeSQLRowBinaryParallel decodes a RowBinary stream using independent row
+// ranges when the input is large enough and more than one logical processor is
+// available. It preserves the existing wire format and row order; small inputs
+// and single-core processes use the serial decoder.
+func DecodeSQLRowBinaryParallel(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
+	if err := validateSQLRowBinaryColumns(columns); err != nil {
+		return nil, err
+	}
+	if len(encoded) == 0 {
+		return nil, nil
+	}
+	return decodeSQLRowBinaryParallelValidated(columns, encoded)
+}
+
+func decodeSQLRowBinarySerial(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
 	rows := make([]SQLRow, 0)
 	offset := 0
 	for offset < len(encoded) {
 		if len(rows) >= maxSQLRowBinaryRows {
 			return nil, fmt.Errorf("RowBinary row count exceeds limit %d", maxSQLRowBinaryRows)
 		}
-		row := make(SQLRow, len(columns))
+		row, next, err := decodeSQLRowBinaryRow(columns, encoded, offset, len(rows))
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+		offset = next
+	}
+	return rows, nil
+}
+
+func decodeSQLRowBinaryParallelValidated(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
+	offsets, err := indexSQLRowBinaryRows(columns, encoded)
+	if err != nil {
+		return nil, err
+	}
+	rowCount := len(offsets) - 1
+	workers := runtime.GOMAXPROCS(0)
+	if rowCount < sqlRowBinaryParallelMinRows || workers < 2 {
+		return decodeSQLRowBinaryIndexedSerial(columns, encoded, offsets)
+	}
+	if workers > rowCount {
+		workers = rowCount
+	}
+	rows := make([]SQLRow, rowCount)
+	chunk := (rowCount + workers - 1) / workers
+	var waitGroup sync.WaitGroup
+	var errorMu sync.Mutex
+	firstErrorRow := rowCount
+	var firstError error
+	for start := 0; start < rowCount; start += chunk {
+		end := start + chunk
+		if end > rowCount {
+			end = rowCount
+		}
+		waitGroup.Add(1)
+		go func(start, end int) {
+			defer waitGroup.Done()
+			for rowIndex := start; rowIndex < end; rowIndex++ {
+				row, next, err := decodeSQLRowBinaryRow(columns, encoded, offsets[rowIndex], rowIndex)
+				if err != nil {
+					errorMu.Lock()
+					if rowIndex < firstErrorRow {
+						firstErrorRow, firstError = rowIndex, err
+					}
+					errorMu.Unlock()
+					return
+				}
+				if next != offsets[rowIndex+1] {
+					errorMu.Lock()
+					if rowIndex < firstErrorRow {
+						firstErrorRow = rowIndex
+						firstError = fmt.Errorf("RowBinary row %d decoded boundary does not match indexed boundary", rowIndex)
+					}
+					errorMu.Unlock()
+					return
+				}
+				rows[rowIndex] = row
+			}
+		}(start, end)
+	}
+	waitGroup.Wait()
+	if firstError != nil {
+		return nil, firstError
+	}
+	return rows, nil
+}
+
+func decodeSQLRowBinaryIndexedSerial(columns []SQLRowBinaryColumn, encoded []byte, offsets []int) ([]SQLRow, error) {
+	rows := make([]SQLRow, len(offsets)-1)
+	for rowIndex := range rows {
+		row, next, err := decodeSQLRowBinaryRow(columns, encoded, offsets[rowIndex], rowIndex)
+		if err != nil {
+			return nil, err
+		}
+		if next != offsets[rowIndex+1] {
+			return nil, fmt.Errorf("RowBinary row %d decoded boundary does not match indexed boundary", rowIndex)
+		}
+		rows[rowIndex] = row
+	}
+	return rows, nil
+}
+
+func indexSQLRowBinaryRows(columns []SQLRowBinaryColumn, encoded []byte) ([]int, error) {
+	offsets := make([]int, 1, 1024)
+	offset := 0
+	rowIndex := 0
+	for offset < len(encoded) {
+		if rowIndex >= maxSQLRowBinaryRows {
+			return nil, fmt.Errorf("RowBinary row count exceeds limit %d", maxSQLRowBinaryRows)
+		}
 		for _, column := range columns {
 			if column.Nullable {
 				if offset >= len(encoded) {
-					return nil, fmt.Errorf("RowBinary row %d column %q is missing its NULL marker", len(rows), column.Name)
+					return nil, fmt.Errorf("RowBinary row %d column %q is missing its NULL marker", rowIndex, column.Name)
 				}
 				marker := encoded[offset]
 				offset++
 				switch marker {
 				case 0:
 				case 1:
-					row[column.Name] = nil
 					continue
 				default:
-					return nil, fmt.Errorf("RowBinary row %d column %q has invalid NULL marker %d", len(rows), column.Name, marker)
+					return nil, fmt.Errorf("RowBinary row %d column %q has invalid NULL marker %d", rowIndex, column.Name, marker)
 				}
 			}
-			value, next, err := decodeSQLRowBinaryValue(column.Type, encoded, offset, len(rows), column.Name)
+			next, err := skipSQLRowBinaryValue(column.Type, encoded, offset, rowIndex, column.Name)
 			if err != nil {
 				return nil, err
 			}
-			row[column.Name] = value
 			offset = next
 		}
-		rows = append(rows, row)
+		rowIndex++
+		offsets = append(offsets, offset)
 	}
-	return rows, nil
+	return offsets, nil
+}
+
+func decodeSQLRowBinaryRow(columns []SQLRowBinaryColumn, encoded []byte, offset, rowIndex int) (SQLRow, int, error) {
+	row := make(SQLRow, len(columns))
+	for _, column := range columns {
+		if column.Nullable {
+			if offset >= len(encoded) {
+				return nil, offset, fmt.Errorf("RowBinary row %d column %q is missing its NULL marker", rowIndex, column.Name)
+			}
+			marker := encoded[offset]
+			offset++
+			switch marker {
+			case 0:
+			case 1:
+				row[column.Name] = nil
+				continue
+			default:
+				return nil, offset, fmt.Errorf("RowBinary row %d column %q has invalid NULL marker %d", rowIndex, column.Name, marker)
+			}
+		}
+		value, next, err := decodeSQLRowBinaryValue(column.Type, encoded, offset, rowIndex, column.Name)
+		if err != nil {
+			return nil, offset, err
+		}
+		row[column.Name] = value
+		offset = next
+	}
+	return row, offset, nil
 }
 
 func validateSQLRowBinaryColumns(columns []SQLRowBinaryColumn) error {

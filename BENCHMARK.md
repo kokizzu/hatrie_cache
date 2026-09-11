@@ -19977,3 +19977,43 @@ Raw final samples from `make benchmark-m065t-boolean-predicate-kernel`:
 361222 740024 4127
 360801 740024 4127
 ```
+
+## CH-047: Parallel RowBinary Decode
+
+Seven `250ms` local benchmark samples on an AMD Ryzen 9 5950X, Go `amd64`,
+with `GOMAXPROCS=8`. The workload decodes a 4,096-row RowBinary payload with
+`int64`, string, boolean, and nullable byte columns. The baseline uses the
+serial decoder at the parent revision; the final path automatically uses
+parallel row ranges for this large payload.
+
+| Workload | Before | After | Improvement / cost |
+| --- | ---: | ---: | --- |
+| RowBinary decode | 1,222,877 ns/op; 1,961,439 B/op; 26,792 allocs/op | 565,288 ns/op; 1,986,362 B/op; 26,802 allocs/op | 2.16x CPU; 440.49 vs 203.62 MB/s; 1.27% more B/op; +10 allocs |
+
+The wire payload is identical. The bounded row-offset index is the only new
+per-call state, and small inputs, fewer than 256 rows, or single-core workers
+use the serial path.
+
+Raw baseline samples from `make benchmark-m065u-parallel-row-binary-baseline`:
+
+```text
+1283880 1961464 26792
+1272983 1961438 26792
+1313212 1961438 26792
+1160789 1961439 26792
+1222877 1961439 26792
+1210164 1961437 26792
+1195392 1961439 26792
+```
+
+Raw final samples from `make benchmark-m065u-parallel-row-binary`:
+
+```text
+560175 1986471 26802
+540410 1986407 26802
+560552 1986377 26802
+568650 1986357 26802
+597353 1986351 26802
+565288 1986362 26802
+588758 1986356 26802
+```

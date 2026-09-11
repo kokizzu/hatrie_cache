@@ -73,7 +73,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-044 | JSON dynamic subcolumns | No path-level physical extraction and pruning for semi-structured rows. | High |
 | CH-045 | Array/map subcolumn pruning | No read planner that loads only referenced nested subcolumns. | Medium |
 | CH-046 | Native wire protocol framing | No ClickHouse-style typed block protocol with explicit column framing and progress. | High |
-| CH-047 | Parallel format parsing | No parallel CSV/JSON/RowBinary decode for independent input blocks. | Medium |
+| CH-047 | Parallel format parsing | Large RowBinary payloads now index row boundaries once and decode independent ranges in parallel; small and single-core inputs remain serial. CSV/JSON block parsing remains open. | Medium |
 | CH-048 | SIMD/generic predicate coverage | Existing `hatPredicate` masks cover typed int64 batches, and SQL direct numeric and packed-boolean predicates now use byte-oriented kernels; string and broader predicate shapes remain open. | Medium |
 | CH-049 | Refreshable external dictionaries | No named external lookup dictionaries with refresh, lifetime, and failure policy. | Medium |
 | CH-050 | Named settings collections | No versioned named query/storage profiles that can be applied atomically. | Low |

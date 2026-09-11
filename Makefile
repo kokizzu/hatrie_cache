@@ -8928,6 +8928,39 @@ commit-m065t-boolean-predicate-kernel:
 push-m065t-boolean-predicate-kernel:
 	bash scripts/push-m065t-boolean-predicate-kernel.sh
 
+test-m065u-parallel-row-binary:
+	bash scripts/test-m065u-parallel-row-binary.sh
+
+benchmark-m065u-parallel-row-binary-baseline:
+	bash scripts/benchmark-m065u-parallel-row-binary-baseline.sh
+
+benchmark-m065u-parallel-row-binary:
+	bash scripts/benchmark-m065u-parallel-row-binary.sh
+
+format-m065u-parallel-row-binary:
+	bash scripts/format-m065u-parallel-row-binary.sh
+
+test-m065u-parallel-row-binary-full:
+	bash scripts/test-m065u-parallel-row-binary-full.sh
+
+race-m065u-parallel-row-binary:
+	bash scripts/race-m065u-parallel-row-binary.sh
+
+vet-m065u-parallel-row-binary:
+	bash scripts/vet-m065u-parallel-row-binary.sh
+
+verify-m065u-parallel-row-binary-docs:
+	bash scripts/verify-m065u-parallel-row-binary-docs.sh
+
+review-m065u-parallel-row-binary:
+	bash scripts/review-m065u-parallel-row-binary.sh
+
+commit-m065u-parallel-row-binary:
+	bash scripts/commit-m065u-parallel-row-binary.sh
+
+push-m065u-parallel-row-binary:
+	bash scripts/push-m065u-parallel-row-binary.sh
+
 .PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
 test-ch002-primary-mark-pruning:
 	bash scripts/test-ch002-primary-mark-pruning.sh

@@ -257,3 +257,11 @@ without per-row interface materialization; NULL, malformed, legacy, reversed,
 and unsupported paths retain established semantics. Seven-sample benchmarking
 recorded 3.12x lower query CPU time, 2.52x lower allocated bytes, and 2.99x
 fewer allocations without changing the wire, persistence, or packing API.
+### M065u: Parallel RowBinary decode
+
+Implemented the CH-047 RowBinary slice. Large payloads use the existing
+allocation-free value skipper to index row boundaries once, then decode
+independent ranges concurrently into an ordered result. Small inputs, fewer
+than 256 rows, and single-core processes retain serial decoding. The wire and
+persistence formats are unchanged; the measured 4,096-row workload is 2.16x
+faster with 1.27% more transient bytes and 10 additional allocations.

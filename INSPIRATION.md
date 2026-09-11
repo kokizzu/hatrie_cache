@@ -916,3 +916,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   per-row interface materialization; legacy and unsupported paths retain the
   established evaluator. See [SQL_PACKED_BOOLEAN_PREDICATE.md](SQL_PACKED_BOOLEAN_PREDICATE.md)
   and [BENCHMARK.md](BENCHMARK.md#m065t-sql-packed-boolean-predicate-kernel).
+- [x] CH-047/M065u Parallel RowBinary decode. Large payloads index row
+  boundaries once and decode independent ranges in parallel; small and
+  single-core inputs retain the serial path. The wire format is unchanged.
+  See [SQL_PARALLEL_ROW_BINARY.md](SQL_PARALLEL_ROW_BINARY.md) and
+  [BENCHMARK.md](BENCHMARK.md#ch-047-parallel-rowbinary-decode).

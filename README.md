@@ -4382,6 +4382,16 @@ existing evaluator. See
 [`SQL_PACKED_BOOLEAN_PREDICATE.md`](SQL_PACKED_BOOLEAN_PREDICATE.md) and the
 raw measurements in [`BENCHMARK.md`](BENCHMARK.md#m065t-sql-packed-boolean-predicate-kernel).
 
+## Parallel RowBinary Decode
+
+Large RowBinary payloads automatically index row boundaries once and decode
+independent ranges in parallel while preserving order and the existing wire
+format. Small payloads and single-core processes retain the serial path. The
+explicit API is [`hatSql.DecodeSQLRowBinaryParallel`](SQL_PARALLEL_ROW_BINARY.md);
+see the measured CPU and transient-memory tradeoff in
+[`SQL_PARALLEL_ROW_BINARY.md`](SQL_PARALLEL_ROW_BINARY.md) and
+[`BENCHMARK.md`](BENCHMARK.md#ch-047-parallel-rowbinary-decode).
+
 ## Explicit Regional Routing
 
 Use [`hatPartition.PrefixRouter`](REGIONAL_PARTITION_ROUTING.md) when keys have
