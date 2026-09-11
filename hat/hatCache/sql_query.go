@@ -36,6 +36,8 @@ type SQLTriggerTransaction = hatSql.SQLTriggerTransaction
 type SQLQueryCanceledError = hatSql.SQLQueryCanceledError
 type SQLQueryManager = hatSql.SQLQueryManager
 type SQLQueryManagerOptions = hatSql.SQLQueryManagerOptions
+type NamespaceResourceLimits = hatSql.NamespaceResourceLimits
+type NamespaceQueryGovernor = hatSql.NamespaceQueryGovernor
 type SQLQueryLog = hatSql.SQLQueryLog
 type SQLQueryLogEntry = hatSql.SQLQueryLogEntry
 type SQLQueryLogOptions = hatSql.SQLQueryLogOptions
@@ -75,6 +77,8 @@ const (
 	DefaultSQLQueryManagerComputeQueueCapacity = hatSql.DefaultSQLQueryManagerComputeQueueCapacity
 	MaxSQLQueryManagerComputeWorkers           = hatSql.MaxSQLQueryManagerComputeWorkers
 	MaxSQLQueryManagerComputeQueueCapacity     = hatSql.MaxSQLQueryManagerComputeQueueCapacity
+	MaxNamespaceComputeWorkers                 = hatSql.MaxSQLQueryManagerComputeWorkers
+	MaxNamespaceComputeQueueCapacity           = hatSql.MaxSQLQueryManagerComputeQueueCapacity
 	DefaultSQLQueryLogMaxRecordBytes           = hatSql.DefaultSQLQueryLogMaxRecordBytes
 	SQLQueryStateRunning                       = hatSql.SQLQueryStateRunning
 	SQLQueryStateCancelRequested               = hatSql.SQLQueryStateCancelRequested
@@ -84,9 +88,10 @@ const (
 )
 
 var (
-	ErrSQLQueryLogClosed        = hatSql.ErrSQLQueryLogClosed
-	ErrSQLQueryLogRecordInvalid = hatSql.ErrSQLQueryLogRecordInvalid
-	ErrSQLQueryManagerClosed    = hatSql.ErrSQLQueryManagerClosed
+	ErrSQLQueryLogClosed            = hatSql.ErrSQLQueryLogClosed
+	ErrSQLQueryLogRecordInvalid     = hatSql.ErrSQLQueryLogRecordInvalid
+	ErrSQLQueryManagerClosed        = hatSql.ErrSQLQueryManagerClosed
+	ErrNamespaceQueryGovernorClosed = hatSql.ErrNamespaceQueryGovernorClosed
 )
 
 type SQLSourceResolver = hatSql.SourceResolver
@@ -463,6 +468,10 @@ func NewSQLQueryManager(historyCapacity int) *SQLQueryManager {
 
 func NewSQLQueryManagerWithOptions(options SQLQueryManagerOptions) *SQLQueryManager {
 	return hatSql.NewSQLQueryManagerWithOptions(options)
+}
+
+func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[string]NamespaceResourceLimits) (*NamespaceQueryGovernor, error) {
+	return hatSql.NewNamespaceQueryGovernor(defaults, namespaces)
 }
 
 func ValidateSQLQueryManagerOptions(options SQLQueryManagerOptions) error {

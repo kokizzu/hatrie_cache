@@ -89,6 +89,7 @@ security guidance before exposing it on a network.
 - Optional managed-refresh freshness thresholds: [MANAGED_REFRESH_FRESHNESS.md](MANAGED_REFRESH_FRESHNESS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - Optional SQL compute/storage admission pool: [SQL_COMPUTE_STORAGE_SEPARATION.md](SQL_COMPUTE_STORAGE_SEPARATION.md)
+- Optional per-namespace SQL compute pools: [SQL_NAMESPACE_COMPUTE_POOLS.md](SQL_NAMESPACE_COMPUTE_POOLS.md)
 - Opt-in source-versioned SQL `ANALYZE` statistics for what-if planning: [SQL_PLANNER_STATISTICS.md](SQL_PLANNER_STATISTICS.md)
 - ClickHouse-style refreshable external SQL dictionaries: [SQL_EXTERNAL_DICTIONARIES.md](SQL_EXTERNAL_DICTIONARIES.md)
 - Opt-in persistent-store disk reserve admission: [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md)

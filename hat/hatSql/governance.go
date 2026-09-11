@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hatrie_cache/hat/hatPipeline"
 )
 
 // ErrNamespaceQueryQueueFull indicates that a namespace admission queue has
@@ -16,6 +18,10 @@ var ErrNamespaceQueryQueueFull = errors.New("namespace query queue is full")
 // ErrNamespaceQueryRateLimited indicates that a namespace has exhausted its
 // configured MaxQueriesPerWindow allowance.
 var ErrNamespaceQueryRateLimited = errors.New("namespace query rate limit exceeded")
+
+// ErrNamespaceQueryGovernorClosed identifies execution after governor
+// shutdown.
+var ErrNamespaceQueryGovernorClosed = errors.New("namespace query governor is closed")
 
 const defaultNamespaceQueryWindow = time.Minute
 
@@ -27,6 +33,12 @@ type NamespaceResourceLimits struct {
 	// MaxQueuedQueries bounds waiters behind MaxConcurrentQueries. Zero keeps
 	// the existing unlimited-waiter behavior.
 	MaxQueuedQueries int
+	// ComputeWorkers enables a named, independently scheduled compute pool for
+	// this namespace. Zero keeps the existing caller-goroutine execution path.
+	ComputeWorkers int
+	// ComputeQueueCapacity bounds queries waiting for a namespace compute
+	// worker. Zero selects the SQL compute-pool default when workers are on.
+	ComputeQueueCapacity int
 	// MaxQueriesPerWindow limits admitted executions in QueryWindow. Zero
 	// disables the quota. A zero QueryWindow uses one minute when the quota is
 	// enabled.
@@ -103,6 +115,8 @@ func (limits NamespaceResourceLimits) validate() error {
 	}{
 		{"max concurrent queries", limits.MaxConcurrentQueries},
 		{"max queued queries", limits.MaxQueuedQueries},
+		{"compute workers", limits.ComputeWorkers},
+		{"compute queue capacity", limits.ComputeQueueCapacity},
 		{"max queries per window", limits.MaxQueriesPerWindow},
 		{"max rows", limits.MaxRows},
 		{"max join work", limits.MaxJoinWork},
@@ -121,6 +135,12 @@ func (limits NamespaceResourceLimits) validate() error {
 			return fmt.Errorf("namespace resource limit %s must not be negative", value.name)
 		}
 	}
+	if limits.ComputeWorkers > MaxSQLQueryManagerComputeWorkers {
+		return fmt.Errorf("namespace resource limit compute workers exceed %d", MaxSQLQueryManagerComputeWorkers)
+	}
+	if limits.ComputeQueueCapacity > MaxSQLQueryManagerComputeQueueCapacity {
+		return fmt.Errorf("namespace resource limit compute queue capacity exceed %d", MaxSQLQueryManagerComputeQueueCapacity)
+	}
 	if limits.Timeout < 0 {
 		return fmt.Errorf("namespace resource limit timeout must not be negative")
 	}
@@ -136,9 +156,12 @@ type NamespaceQueryGovernor struct {
 	defaults   NamespaceResourceLimits
 	namespaces map[string]NamespaceResourceLimits
 
-	mu     sync.Mutex
-	gates  map[string]*namespaceQueryGate
-	quotas map[string]*namespaceQueryQuota
+	mu                 sync.Mutex
+	gates              map[string]*namespaceQueryGate
+	quotas             map[string]*namespaceQueryQuota
+	computePools       map[string]*hatPipeline.WorkStealingPool
+	defaultComputePool *hatPipeline.WorkStealingPool
+	closed             bool
 }
 
 // NewNamespaceQueryGovernor validates and copies the supplied static policies.
@@ -160,12 +183,42 @@ func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[
 		limits = normalizeNamespaceResourceLimits(limits)
 		copyNamespaces[namespace] = tightenNamespaceLimits(defaults, limits)
 	}
-	return &NamespaceQueryGovernor{
+	governor := &NamespaceQueryGovernor{
 		defaults:   defaults,
 		namespaces: copyNamespaces,
 		gates:      make(map[string]*namespaceQueryGate),
 		quotas:     make(map[string]*namespaceQueryQuota),
-	}, nil
+	}
+	if defaults.ComputeWorkers > 0 {
+		pool, err := newNamespaceComputePool(defaults)
+		if err != nil {
+			return nil, err
+		}
+		governor.defaultComputePool = pool
+	}
+	for namespace, limits := range copyNamespaces {
+		if limits.ComputeWorkers <= 0 {
+			continue
+		}
+		pool, err := newNamespaceComputePool(limits)
+		if err != nil {
+			_ = governor.Close()
+			return nil, fmt.Errorf("namespace %q: %w", namespace, err)
+		}
+		if governor.computePools == nil {
+			governor.computePools = make(map[string]*hatPipeline.WorkStealingPool)
+		}
+		governor.computePools[namespace] = pool
+	}
+	return governor, nil
+}
+
+func newNamespaceComputePool(limits NamespaceResourceLimits) (*hatPipeline.WorkStealingPool, error) {
+	queueCapacity := limits.ComputeQueueCapacity
+	if queueCapacity == 0 {
+		queueCapacity = DefaultSQLQueryManagerComputeQueueCapacity
+	}
+	return hatPipeline.NewWorkStealingPool(context.Background(), limits.ComputeWorkers, queueCapacity)
 }
 
 func normalizeNamespaceResourceLimits(limits NamespaceResourceLimits) NamespaceResourceLimits {
@@ -179,6 +232,8 @@ func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) Namespac
 	return NamespaceResourceLimits{
 		MaxConcurrentQueries: applyPositiveLimit(defaults.MaxConcurrentQueries, override.MaxConcurrentQueries),
 		MaxQueuedQueries:     applyPositiveLimit(defaults.MaxQueuedQueries, override.MaxQueuedQueries),
+		ComputeWorkers:       applyPositiveLimit(defaults.ComputeWorkers, override.ComputeWorkers),
+		ComputeQueueCapacity: applyPositiveLimit(defaults.ComputeQueueCapacity, override.ComputeQueueCapacity),
 		MaxQueriesPerWindow:  applyPositiveLimit(defaults.MaxQueriesPerWindow, override.MaxQueriesPerWindow),
 		QueryWindow:          tightenQueryWindow(defaults.QueryWindow, override.QueryWindow),
 		MaxRows:              applyPositiveLimit(defaults.MaxRows, override.MaxRows),
@@ -235,6 +290,46 @@ func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits Namespa
 	return gate
 }
 
+func (governor *NamespaceQueryGovernor) computePoolFor(namespace string, limits NamespaceResourceLimits) *hatPipeline.WorkStealingPool {
+	if governor == nil || limits.ComputeWorkers <= 0 {
+		return nil
+	}
+	governor.mu.Lock()
+	defer governor.mu.Unlock()
+	if pool := governor.computePools[namespace]; pool != nil {
+		return pool
+	}
+	return governor.defaultComputePool
+}
+
+// Close stops new namespace executions and drains all owned compute pools. It
+// is idempotent. A running query must observe its request context for prompt
+// shutdown because close drains rather than cancels work.
+func (governor *NamespaceQueryGovernor) Close() error {
+	if governor == nil {
+		return nil
+	}
+	governor.mu.Lock()
+	governor.closed = true
+	pools := make([]*hatPipeline.WorkStealingPool, 0, len(governor.computePools)+1)
+	if governor.defaultComputePool != nil {
+		pools = append(pools, governor.defaultComputePool)
+	}
+	for _, pool := range governor.computePools {
+		if pool != nil {
+			pools = append(pools, pool)
+		}
+	}
+	governor.mu.Unlock()
+	var firstErr error
+	for _, pool := range pools {
+		if err := pool.Wait(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // Execute runs source under the named namespace's policy. Waiting for a busy
 // namespace observes ctx cancellation and never starts a second SQL path.
 func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
@@ -243,6 +338,12 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 	}
 	if strings.TrimSpace(namespace) == "" {
 		return SQLQueryResult{}, fmt.Errorf("namespace is required")
+	}
+	governor.mu.Lock()
+	closed := governor.closed
+	governor.mu.Unlock()
+	if closed {
+		return SQLQueryResult{}, ErrNamespaceQueryGovernorClosed
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -258,7 +359,15 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 	if quota := governor.quotaFor(namespace, limits); quota != nil && !quota.allow(time.Now()) {
 		return SQLQueryResult{}, ErrNamespaceQueryRateLimited
 	}
-	return ExecuteSQLQueryParameters(ctx, source, resolver, parameters, limits.Apply(options))
+	options = limits.Apply(options)
+	if pool := governor.computePoolFor(namespace, limits); pool != nil {
+		result, err := executeSQLQueryOnComputePool(pool, ctx, source, resolver, parameters, options)
+		if errors.Is(err, hatPipeline.ErrWorkStealingPoolClosed) {
+			return SQLQueryResult{}, ErrNamespaceQueryGovernorClosed
+		}
+		return result, err
+	}
+	return ExecuteSQLQueryParameters(ctx, source, resolver, parameters, options)
 }
 
 func (governor *NamespaceQueryGovernor) quotaFor(namespace string, limits NamespaceResourceLimits) *namespaceQueryQuota {

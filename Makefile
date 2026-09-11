@@ -9781,3 +9781,43 @@ commit-mz018-compute-pool:
 .PHONY: push-mz018-compute-pool
 push-mz018-compute-pool:
 	bash scripts/push-mz018-compute-pool.sh
+
+.PHONY: benchmark-mz019-resource-pools
+benchmark-mz019-resource-pools:
+	bash scripts/benchmark-mz019-resource-pools.sh
+
+.PHONY: format-mz019-resource-pools
+format-mz019-resource-pools:
+	bash scripts/format-mz019-resource-pools.sh
+
+.PHONY: test-mz019-resource-pools
+test-mz019-resource-pools:
+	bash scripts/test-mz019-resource-pools.sh
+
+.PHONY: test-race-mz019-resource-pools
+test-race-mz019-resource-pools:
+	bash scripts/test-race-mz019-resource-pools.sh
+
+.PHONY: test-mz019-broad
+test-mz019-broad:
+	bash scripts/test-mz019-broad.sh
+
+.PHONY: verify-mz019-resource-pool-docs
+verify-mz019-resource-pool-docs:
+	bash scripts/verify-mz019-resource-pool-docs.sh
+
+.PHONY: review-mz019-resource-pools
+review-mz019-resource-pools:
+	bash scripts/review-mz019-resource-pools.sh
+
+.PHONY: status-mz019-resource-pools
+status-mz019-resource-pools:
+	bash scripts/status-mz019-resource-pools.sh
+
+.PHONY: commit-mz019-resource-pools
+commit-mz019-resource-pools:
+	bash scripts/commit-mz019-resource-pools.sh
+
+.PHONY: push-mz019-resource-pools
+push-mz019-resource-pools:
+	bash scripts/push-mz019-resource-pools.sh

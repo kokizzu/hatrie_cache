@@ -20808,3 +20808,45 @@ The default remains `ComputeWorkers: 0`. Positive workers are appropriate for
 long-running or overloaded managed-query traffic where bounded admission and
 clean draining matter more than the overhead measured here. `Close` drains
 admitted tasks; request contexts still control cancellation of running work.
+
+<a id="mz-019-named-sql-compute-pools"></a>
+## MZ-019 Named SQL Compute Pools
+
+This benchmark measures the opt-in `NamespaceQueryGovernor` compute pools
+inspired by per-workload resource isolation. The legacy rows run the same
+governor with `ComputeWorkers: 0`; the named-pool row gives two namespaces
+independent bounded pools. The query is a deterministic one-row SQL operation
+through a static resolver. Five samples were collected at `go test -cpu 32
+-benchmem -count=5` on an AMD Ryzen 9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Legacy governor, before | 1,330; 1,316; 1,285; 1,275; 1,260 | 3,240; 3,240; 3,240; 3,240; 3,240 | 18; 18; 18; 18; 18 |
+| Legacy governor, after | 1,427; 1,321; 1,297; 1,298; 1,272 | 3,240; 3,240; 3,240; 3,240; 3,240 | 18; 18; 18; 18; 18 |
+| Named namespace pools | 3,138; 3,179; 3,263; 3,266; 3,190 | 4,032; 4,032; 4,032; 4,032; 4,032 | 23; 23; 23; 23; 23 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to legacy baseline |
+| --- | ---: | ---: | ---: | --- |
+| Legacy governor, before | 1,285 | 3,240 | 18 | `1.00x` |
+| Legacy governor, after | 1,298 | 3,240 | 18 | `1.01x` time, same memory |
+| Two named namespace pools | 3,190 | 4,032 | 23 | `2.48x` time, `1.24x` memory, +5 allocations |
+
+Named pools are slower on this tiny query because queue submission and result
+handoff cost more than the query itself. They are an opt-in CPU admission and
+isolation control, not a raw query-speed optimization; the default remains
+caller-goroutine execution. The existing gate and disabled-quota controls
+remain allocation-free. See
+[SQL_NAMESPACE_COMPUTE_POOLS.md](SQL_NAMESPACE_COMPUTE_POOLS.md) for API
+semantics, shutdown behavior, and configuration guidance.
+
+The exact command was:
+
+```sh
+make benchmark-mz019-resource-pools
+```
+
+Raw output is written to `build/benchmarks/mz019-resource-pools.txt`.
