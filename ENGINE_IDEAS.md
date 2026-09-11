@@ -89,7 +89,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-005 | Since/upper frontier introspection | No API exposes lower and upper time frontiers for each maintained object. | Medium |
 | MZ-006 | Antichain timestamps | No partially ordered timestamp frontier for concurrent partitions. | High |
 | MZ-007 | Stale-read rejection | Adopted: opt-in `SQLSourceFrontierResolver` validation rejects unavailable, unready, or stale non-local sources before reads, including joins, CTEs, and set-operation branches. | Medium |
-| MZ-008 | `AS OF` query execution | Historical query reads cannot bind to a logical timestamp across sources. | High |
+| MZ-008 | `AS OF` query execution | Adopted: opt-in `SQLQueryOptions.AsOfFrontier` binds normal, streamed, offset-page, and keyset-page reads to an immutable `SQLFrontierSnapshotProvider` view; historical reads bypass the live result cache and bind cursors to the frontier. | High |
 | MZ-009 | Temporal validity filters | No first-class valid-from/valid-to relation semantics with frontier-aware pruning. | High |
 | MZ-010 | `TAIL`/`SUBSCRIBE` changefeed | SQL clients cannot subscribe to signed incremental result changes. | High |
 | MZ-011 | Sink connector API | No durable outbound sink abstraction for Kafka, files, or HTTP streams. | High |

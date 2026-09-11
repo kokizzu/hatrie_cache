@@ -9534,3 +9534,30 @@ commit-mz007-frontier-rejection:
 
 push-mz007-frontier-rejection:
 	bash scripts/push-mz007-frontier-rejection.sh
+
+benchmark-mz008-asof:
+	bash scripts/benchmark-mz008-asof.sh
+
+test-mz008-asof:
+	bash scripts/test-mz008-asof.sh
+
+format-mz008-asof:
+	bash scripts/format-mz008-asof.sh
+
+test-race-mz008-asof:
+	bash scripts/test-race-mz008-asof.sh
+
+test-mz008-broad:
+	bash scripts/test-mz008-broad.sh
+
+verify-mz008-docs:
+	bash scripts/verify-mz008-docs.sh
+
+review-mz008-asof:
+	bash scripts/review-mz008-asof.sh
+
+commit-mz008-asof:
+	bash scripts/commit-mz008-asof.sh
+
+push-mz008-asof:
+	bash scripts/push-mz008-asof.sh

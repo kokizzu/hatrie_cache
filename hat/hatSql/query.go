@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -297,6 +298,10 @@ type SQLQueryOptions struct {
 	// resolver implementing SQLSourceFrontierResolver.
 	RequireSourceFrontier  bool
 	RequiredSourceFrontier uint64
+	// AsOfFrontier requests an immutable historical view at the pointed
+	// frontier. Nil preserves the live/default execution path; a non-nil
+	// pointer also permits an explicit frontier of zero.
+	AsOfFrontier *uint64
 }
 
 // QueryOptions bounds one query. It is the package-native name for
@@ -668,7 +673,14 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
-	snapshotResolver, snapshotRelease, snapshotErr := beginSQLSnapshot(ctx, resolver)
+	var snapshotResolver SQLSourceResolver
+	var snapshotRelease func()
+	var snapshotErr error
+	if options.AsOfFrontier != nil {
+		snapshotResolver, snapshotRelease, snapshotErr = beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
+	} else {
+		snapshotResolver, snapshotRelease, snapshotErr = beginSQLSnapshot(ctx, resolver)
+	}
 	if snapshotErr != nil {
 		return result, snapshotErr
 	}
@@ -727,19 +739,21 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		result.QueryID = observation.id
 		return result, err
 	}
-	if key, version, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
-		result, err = options.ResultCache.ExecuteVersioned(ctx, key, version, func(execCtx context.Context) (QueryResult, error) {
-			return executeSQLQueryUncached(execCtx, source, query, resolver, options, control, observation, &operatorSteps)
-		})
-		if err != nil {
-			return result, err
+	if options.AsOfFrontier == nil {
+		if key, version, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
+			result, err = options.ResultCache.ExecuteVersioned(ctx, key, version, func(execCtx context.Context) (QueryResult, error) {
+				return executeSQLQueryUncached(execCtx, source, query, resolver, options, control, observation, &operatorSteps)
+			})
+			if err != nil {
+				return result, err
+			}
+			if err = control.check(); err != nil {
+				return result, err
+			}
+			result.QueryID = observation.id
+			operatorSteps = result.Plan
+			return result, nil
 		}
-		if err = control.check(); err != nil {
-			return result, err
-		}
-		result.QueryID = observation.id
-		operatorSteps = result.Plan
-		return result, nil
 	}
 	result, err = executeSQLQueryUncached(ctx, source, query, resolver, options, control, observation, &operatorSteps)
 	return result, err
@@ -867,7 +881,14 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
 	}
-	snapshotResolver, snapshotRelease, snapshotErr := beginSQLSnapshot(ctx, resolver)
+	var snapshotResolver SQLSourceResolver
+	var snapshotRelease func()
+	var snapshotErr error
+	if options.AsOfFrontier != nil {
+		snapshotResolver, snapshotRelease, snapshotErr = beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
+	} else {
+		snapshotResolver, snapshotRelease, snapshotErr = beginSQLSnapshot(ctx, resolver)
+	}
 	if snapshotErr != nil {
 		return snapshotErr
 	}
@@ -4956,6 +4977,16 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
 	defer func() { observation.finish(result, err, operatorSteps, source, parameters) }()
+	if options.AsOfFrontier != nil {
+		snapshotResolver, snapshotRelease, snapshotErr := beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
+		if snapshotErr != nil {
+			return result, snapshotErr
+		}
+		if snapshotRelease != nil {
+			defer snapshotRelease()
+		}
+		resolver = snapshotResolver
+	}
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	if pageSize <= 0 {
@@ -4988,7 +5019,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 			return result, err
 		}
 	}
-	fingerprint, fingerprintErr := sqlCursorFingerprint(source, parameters)
+	fingerprint, fingerprintErr := sqlCursorFingerprint(source, parameters, options.AsOfFrontier)
 	if fingerprintErr != nil {
 		return result, fingerprintErr
 	}
@@ -5053,12 +5084,19 @@ func lockSQLSnapshot(resolver SQLSourceResolver) func() {
 	return func() {}
 }
 
-func sqlCursorFingerprint(source string, parameters []interface{}) (string, error) {
+func sqlCursorFingerprint(source string, parameters []interface{}, asOfFrontier *uint64) (string, error) {
 	encoded, err := json.Marshal(parameters)
 	if err != nil {
 		return "", fmt.Errorf("encode SQL cursor parameters: %w", err)
 	}
-	sum := sha256.Sum256(append(append([]byte(source), 0), encoded...))
+	input := append(append([]byte(source), 0), encoded...)
+	if asOfFrontier != nil {
+		input = append(input, 1)
+		var frontier [8]byte
+		binary.BigEndian.PutUint64(frontier[:], *asOfFrontier)
+		input = append(input, frontier[:]...)
+	}
+	sum := sha256.Sum256(input)
 	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 func encodeSQLCursor(cursor sqlCursor) (string, error) {

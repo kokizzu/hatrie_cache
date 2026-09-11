@@ -20466,3 +20466,14 @@ format, backup bytes, or persistence layout.
 | Requirement enabled and satisfied | 2,598 | 2,864 | 15 | 1.03x |
 
 The satisfied frontier check adds about 79 ns per simple query in this workload and does not add allocations. The default remains disabled. The old adapter-shape row is comparison-only; disabled and enabled use the same resolver and query.
+
+## MZ-008 SQL AS OF historical reads
+
+`make benchmark-mz008-asof` (five samples, `-benchmem`, pointer-backed resolver):
+
+| Mode | Median ns/op | B/op | allocs/op | Difference |
+| --- | ---: | ---: | ---: | --- |
+| Live/default | 2,768 | 3,488 | 15 | baseline |
+| Historical frontier | 2,770 | 3,488 | 15 | 0 B/op, 0 allocs/op; about 0.07% slower in this run |
+
+The focused run measured no allocation or memory increase for an exact-frontier query. Provider snapshot construction and retention costs are outside this benchmark because they depend on the application's `SQLFrontierSnapshotProvider` implementation. See [SQL_AS_OF.md](SQL_AS_OF.md).

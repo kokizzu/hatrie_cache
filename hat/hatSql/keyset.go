@@ -23,6 +23,16 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
 	defer func() { observation.finish(result, err, operatorSteps, source, parameters) }()
+	if options.AsOfFrontier != nil {
+		snapshotResolver, snapshotRelease, snapshotErr := beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
+		if snapshotErr != nil {
+			return result, snapshotErr
+		}
+		if snapshotRelease != nil {
+			defer snapshotRelease()
+		}
+		resolver = snapshotResolver
+	}
 	release := lockSQLSnapshot(resolver)
 	defer release()
 	if pageSize <= 0 {
@@ -53,7 +63,7 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 	if !sqlKeysetQueryStreamable(query, resolver) {
 		return result, fmt.Errorf("SQL keyset pagination requires one direct ordered CACHE source and keyset stream support")
 	}
-	fingerprint, fingerprintErr := sqlCursorFingerprint(source, parameters)
+	fingerprint, fingerprintErr := sqlCursorFingerprint(source, parameters, options.AsOfFrontier)
 	if fingerprintErr != nil {
 		return result, fingerprintErr
 	}
