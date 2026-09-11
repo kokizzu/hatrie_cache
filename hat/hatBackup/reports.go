@@ -57,6 +57,9 @@ type PartitionValidation struct {
 type RestoreOptions struct {
 	Overwrite bool
 	Partition *PartitionMetadata
+	// Resume keeps a verified staging directory after a failed restore and
+	// reuses matching files on retry. The default is false.
+	Resume bool
 }
 
 // RestoreReport describes an applied offline restore.

@@ -11,6 +11,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"hatrie_cache/hat/hatBackup"
@@ -289,6 +290,14 @@ func verifyPebbleBackupRoot(displayPath string, kind string, manifest BackupBund
 }
 
 func extractBackupBundleFiles(bundlePath string, destination string, declared []BackupBundleFile) error {
+	return extractBackupBundleFilesWithMode(bundlePath, destination, declared, false)
+}
+
+func extractBackupBundleFilesWithResume(bundlePath string, destination string, declared []BackupBundleFile) error {
+	return extractBackupBundleFilesWithMode(bundlePath, destination, declared, true)
+}
+
+func extractBackupBundleFilesWithMode(bundlePath string, destination string, declared []BackupBundleFile, resume bool) error {
 	expected := make(map[string]BackupBundleFile, len(declared))
 	for _, file := range declared {
 		clean, err := cleanBackupBundlePath(file.Path)
@@ -305,6 +314,11 @@ func extractBackupBundleFiles(bundlePath string, destination string, declared []
 	}
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return err
+	}
+	if resume {
+		if err := pruneRestoreStaging(destination, expected); err != nil {
+			return err
+		}
 	}
 	archive, err := os.Open(bundlePath)
 	if err != nil {
@@ -345,15 +359,34 @@ func extractBackupBundleFiles(bundlePath string, destination string, declared []
 		}
 		seen[clean] = struct{}{}
 		target := filepath.Join(destination, filepath.FromSlash(clean))
+		if resume {
+			if err := hatBackup.RejectRestoreSymlinkComponents(filepath.Dir(target)); err != nil {
+				return err
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}
+		if err := extractBackupBundlePayload(tarReader, target, declaration, resume); err != nil {
+			return err
+		}
+	}
+	for name := range expected {
+		if _, ok := seen[name]; !ok {
+			return fmt.Errorf("hatriecache: backup bundle missing %s", name)
+		}
+	}
+	return nil
+}
+
+func extractBackupBundlePayload(reader io.Reader, target string, declaration BackupBundleFile, resume bool) error {
+	if !resume {
 		output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return err
 		}
 		hash := sha256.New()
-		size, copyErr := io.Copy(io.MultiWriter(output, hash), tarReader)
+		size, copyErr := io.Copy(io.MultiWriter(output, hash), reader)
 		closeErr := output.Close()
 		if copyErr != nil {
 			return copyErr
@@ -361,13 +394,155 @@ func extractBackupBundleFiles(bundlePath string, destination string, declared []
 		if closeErr != nil {
 			return closeErr
 		}
-		if size != declaration.Size || hex.EncodeToString(hash.Sum(nil)) != declaration.SHA256 {
-			return fmt.Errorf("hatriecache: backup file checksum mismatch for %s", clean)
+		return verifyBackupBundlePayload(declaration, size, hash.Sum(nil))
+	}
+
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("hatriecache: restore staging payload is not a regular file: %s", target)
+		}
+		if info.Size() == declaration.Size {
+			existingHash, err := checksumRestoreFile(target)
+			if err != nil {
+				return err
+			}
+			if existingHash == declaration.SHA256 {
+				hash := sha256.New()
+				size, err := io.Copy(hash, reader)
+				if err != nil {
+					return err
+				}
+				return verifyBackupBundlePayload(declaration, size, hash.Sum(nil))
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	temporary, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".restore-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	removeTemporary := true
+	defer func() {
+		if removeTemporary {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(temporary, hash), reader)
+	closeErr := temporary.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := verifyBackupBundlePayload(declaration, size, hash.Sum(nil)); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, target); err != nil {
+		return err
+	}
+	removeTemporary = false
+	return nil
+}
+
+func verifyBackupBundlePayload(declaration BackupBundleFile, size int64, digest []byte) error {
+	if size != declaration.Size || hex.EncodeToString(digest) != declaration.SHA256 {
+		return fmt.Errorf("hatriecache: backup file checksum mismatch for %s", declaration.Path)
+	}
+	return nil
+}
+
+func checksumRestoreFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	_, copyErr := io.Copy(hash, file)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func pruneRestoreStaging(destination string, expected map[string]BackupBundleFile) error {
+	info, err := os.Lstat(destination)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("hatriecache: restore resume staging is not a directory: %s", destination)
+	}
+	var files []string
+	var directories []string
+	err = filepath.WalkDir(destination, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == destination {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("hatriecache: restore staging contains symlink: %s", path)
+		}
+		relative, err := filepath.Rel(destination, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(relative)
+		if entry.IsDir() {
+			directories = append(directories, path)
+			return nil
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !entryInfo.Mode().IsRegular() {
+			return fmt.Errorf("hatriecache: restore staging contains non-regular file: %s", path)
+		}
+		if _, ok := expected[name]; !ok {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, path := range files {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
 	}
-	for name := range expected {
-		if _, ok := seen[name]; !ok {
-			return fmt.Errorf("hatriecache: backup bundle missing %s", name)
+	sort.Slice(directories, func(left, right int) bool {
+		return len(directories[left]) > len(directories[right])
+	})
+	for _, directory := range directories {
+		relative, err := filepath.Rel(destination, directory)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(relative)
+		keep := false
+		for expectedName := range expected {
+			if strings.HasPrefix(expectedName, name+"/") {
+				keep = true
+				break
+			}
+		}
+		if keep {
+			continue
+		}
+		if err := os.Remove(directory); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
 	}
 	return nil

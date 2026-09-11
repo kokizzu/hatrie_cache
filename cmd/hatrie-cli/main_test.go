@@ -2411,7 +2411,7 @@ func TestRunRestoreBundleVerifiesAndRestores(t *testing.T) {
 	}
 	dataDir := filepath.Join(t.TempDir(), "data")
 	stdout := &bytes.Buffer{}
-	if err := run(context.Background(), []string{"restore-bundle", "-bundle", bundlePath, "-data-dir", dataDir}, stdout, &bytes.Buffer{}, http.DefaultClient); err != nil {
+	if err := run(context.Background(), []string{"restore-bundle", "-bundle", bundlePath, "-data-dir", dataDir, "-resume"}, stdout, &bytes.Buffer{}, http.DefaultClient); err != nil {
 		t.Fatalf("run(restore-bundle) error = %v", err)
 	}
 	var report hatriecache.BackupBundleRestoreReport

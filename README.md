@@ -24,6 +24,7 @@ security guidance before exposing it on a network.
 - Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
 - Region-local filtered backup and restore: [region-local backup](REGION_LOCAL_BACKUP.md)
 - Selective key-prefix snapshot bundles: [selective backups](SELECTIVE_BACKUP.md)
+- Interrupted restore recovery: [restore resume checkpoints](RESTORE_RESUME.md)
 - Leader election independent from query workers: [leader election](LEADER_ELECTION.md)
 - Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
 - Persistent shard ownership leases: [persistent shard leases](PERSISTENT_SHARD_LEASES.md)
@@ -1174,6 +1175,7 @@ Restore an atomic backup bundle after verification:
 ```
 make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data
 make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data RESTORE_BUNDLE_OVERWRITE=true
+make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data RESTORE_BUNDLE_RESUME=true
 ```
 
 Bundle and incremental-repository restore use a sibling staging directory.
@@ -1186,6 +1188,13 @@ components, and source/destination overlap. The measured checkpoint restore is
 1.24x faster with half the payload passes and 1.03x less timed heap; small local
 repository restore is 1.09x slower because durability now includes staged-file
 fsync. See [BENCHMARK.md](BENCHMARK.md#single-pass-staged-restore).
+
+For a large restore that was interrupted after files were staged, opt into a
+deterministic sibling checkpoint with `RESTORE_BUNDLE_RESUME=true`. Matching
+payloads are revalidated and reused on retry; the default remains disabled and
+the normal random staging directory is cleaned up on failure. See
+[RESTORE_RESUME.md](RESTORE_RESUME.md) for the recovery procedure and measured
+CPU/allocation tradeoff.
 
 For a server-side atomic backup bundle, ask the monitoring API to write a
 tar.gz bundle. The sane `auto` default is `snapshot`, which contains

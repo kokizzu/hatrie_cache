@@ -4,6 +4,7 @@ set -eu
 bundle_path=${RESTORE_BUNDLE_PATH:-}
 data_dir=${DATA_DIR:-data}
 overwrite=${RESTORE_BUNDLE_OVERWRITE:-false}
+resume=${RESTORE_BUNDLE_RESUME:-false}
 partitions=${RESTORE_BUNDLE_PARTITIONS:-}
 partition_prefixes=${RESTORE_BUNDLE_PARTITION_PREFIXES:-}
 
@@ -22,6 +23,11 @@ fi
 case "$overwrite" in
 	1|true|TRUE|yes|YES|on|ON)
 		set -- "$@" -overwrite
+		;;
+esac
+case "$resume" in
+	1|true|TRUE|yes|YES|on|ON)
+		set -- "$@" -resume
 		;;
 esac
 

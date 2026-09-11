@@ -22,6 +22,18 @@ type RestoreDestination struct {
 // sibling staging directory. It rejects source/target overlap and symlinks in
 // the destination path to prevent destructive or redirected restores.
 func PrepareRestoreDestination(source string, dataDir string, overwrite bool) (RestoreDestination, error) {
+	return prepareRestoreDestination(source, dataDir, overwrite, false)
+}
+
+// PrepareRestoreDestinationWithResume validates a restore target and reuses a
+// deterministic sibling staging directory when one exists. The staging
+// directory is retained by callers after an unsuccessful restore so a retry
+// can verify and reuse files that were already materialized.
+func PrepareRestoreDestinationWithResume(source string, dataDir string, overwrite bool) (RestoreDestination, error) {
+	return prepareRestoreDestination(source, dataDir, overwrite, true)
+}
+
+func prepareRestoreDestination(source string, dataDir string, overwrite bool, resume bool) (RestoreDestination, error) {
 	target, err := filepath.Abs(dataDir)
 	if err != nil {
 		return RestoreDestination{}, err
@@ -46,11 +58,38 @@ func PrepareRestoreDestination(source string, dataDir string, overwrite bool) (R
 	if _, err := ValidateRestoreTarget(target, overwrite); err != nil {
 		return RestoreDestination{}, err
 	}
-	staging, err := os.MkdirTemp(parent, "."+filepath.Base(target)+".restore-stage-*")
-	if err != nil {
+	if !resume {
+		staging, err := os.MkdirTemp(parent, "."+filepath.Base(target)+".restore-stage-*")
+		if err != nil {
+			return RestoreDestination{}, err
+		}
+		return RestoreDestination{target: target, staging: staging}, nil
+	}
+	staging := filepath.Join(parent, "."+filepath.Base(target)+".restore-resume")
+	if err := prepareRestoreResumeDirectory(staging); err != nil {
 		return RestoreDestination{}, err
 	}
 	return RestoreDestination{target: target, staging: staging}, nil
+}
+
+func prepareRestoreResumeDirectory(staging string) error {
+	if err := RejectRestoreSymlinkComponents(filepath.Dir(staging)); err != nil {
+		return err
+	}
+	if err := os.Mkdir(staging, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(staging)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("hatriecache: restore resume staging must not be a symlink: %s", staging)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("hatriecache: restore resume staging is not a directory: %s", staging)
+	}
+	return nil
 }
 
 // TargetPath returns the final restore directory.

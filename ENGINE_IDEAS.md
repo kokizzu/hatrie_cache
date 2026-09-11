@@ -178,7 +178,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-039 | Transparent credential rotation | Authentication credentials cannot rotate with overlapping validity and no restart. | Medium |
 | TT-040 | Space changefeed | Clients cannot subscribe to committed row changes by logical space. | High |
 | TT-041 | Crash-safe index resume | An interrupted index build has no durable unit checkpoint independent of the queue. | Medium |
-| TT-042 | Restore resume checkpoints | A large restore cannot resume from a verified per-file/per-range checkpoint. | Medium |
+| TT-042 | Restore resume checkpoints | Implemented as opt-in deterministic staging reuse for bundle and incremental repository restore, with checksum revalidation, stale-entry pruning, and CLI/API controls. | Medium |
 | TT-043 | Maintenance read-only mode | No explicit mode rejects writes while allowing health, backup, and read traffic. | Low |
 | TT-044 | Schema migration dry run | Implemented as importable `hatSchema.Preview`, which validates a migration on an independent schema copy without publication. | Low |
 | TT-045 | Tuple-level compression | Individual large values/tuples lack transparent compressed storage with size thresholds. | Medium |

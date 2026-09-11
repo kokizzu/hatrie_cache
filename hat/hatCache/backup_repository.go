@@ -378,12 +378,32 @@ func readBackupRepositoryManifest(root string, backupID string) (BackupBundleMan
 }
 
 func materializeBackupRepository(root string, backupID string, destination string) (BackupBundleManifest, error) {
+	return materializeBackupRepositoryWithResume(root, backupID, destination, false)
+}
+
+func materializeBackupRepositoryWithResume(root string, backupID string, destination string, resume bool) (BackupBundleManifest, error) {
 	manifest, err := readBackupRepositoryManifest(root, backupID)
 	if err != nil {
 		return BackupBundleManifest{}, err
 	}
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return BackupBundleManifest{}, err
+	}
+	if resume {
+		expected := make(map[string]BackupBundleFile, len(manifest.Files))
+		for _, file := range manifest.Files {
+			clean, err := cleanBackupBundlePath(file.Path)
+			if err != nil {
+				return BackupBundleManifest{}, err
+			}
+			if _, exists := expected[clean]; exists {
+				return BackupBundleManifest{}, fmt.Errorf("hatriecache: duplicate backup file declaration %s", clean)
+			}
+			expected[clean] = file
+		}
+		if err := pruneRestoreStaging(destination, expected); err != nil {
+			return BackupBundleManifest{}, err
+		}
 	}
 	for _, file := range manifest.Files {
 		clean, err := cleanBackupBundlePath(file.Path)
@@ -395,14 +415,31 @@ func materializeBackupRepository(root string, backupID string, destination strin
 			return BackupBundleManifest{}, err
 		}
 		target := filepath.Join(destination, filepath.FromSlash(clean))
+		if resume {
+			if err := rejectRestoreSymlinkComponents(filepath.Dir(target)); err != nil {
+				return BackupBundleManifest{}, err
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return BackupBundleManifest{}, err
 		}
-		if err := copyBackupRepositoryObject(objectPath, target, file); err != nil {
+		if err := copyBackupRepositoryObjectWithResume(objectPath, target, file, resume); err != nil {
 			return BackupBundleManifest{}, err
 		}
 	}
 	return manifest, nil
+}
+
+func copyBackupRepositoryObjectWithResume(sourcePath string, targetPath string, declaration BackupBundleFile, resume bool) error {
+	if !resume {
+		return copyBackupRepositoryObject(sourcePath, targetPath, declaration)
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	return extractBackupBundlePayload(source, targetPath, declaration, true)
 }
 
 func copyBackupRepositoryObject(sourcePath string, targetPath string, declaration BackupBundleFile) error {

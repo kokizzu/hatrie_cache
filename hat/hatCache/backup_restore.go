@@ -66,12 +66,18 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
 		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle restore mode %q", mode)
 	}
-	destination, err := prepareRestoreDestination(bundlePath, dataDir, options.Overwrite)
+	destination, err := prepareRestoreDestinationForRestore(bundlePath, dataDir, options.Overwrite, options.Resume)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	defer destination.Cleanup()
-	if err := extractBackupBundleFiles(bundlePath, destination.StagingPath(), manifest.Files); err != nil {
+	if !options.Resume {
+		defer destination.Cleanup()
+	}
+	extract := extractBackupBundleFiles
+	if options.Resume {
+		extract = extractBackupBundleFilesWithResume
+	}
+	if err := extract(bundlePath, destination.StagingPath(), manifest.Files); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
 	var doctor BackupDoctorReport
@@ -137,12 +143,14 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	if err := hatBackup.ValidatePartitionRestore(manifest, options.Partition); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	destination, err := prepareRestoreDestination(repositoryPath, dataDir, options.Overwrite)
+	destination, err := prepareRestoreDestinationForRestore(repositoryPath, dataDir, options.Overwrite, options.Resume)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	defer destination.Cleanup()
-	if _, err := materializeBackupRepository(repositoryPath, manifest.BackupID, destination.StagingPath()); err != nil {
+	if !options.Resume {
+		defer destination.Cleanup()
+	}
+	if _, err := materializeBackupRepositoryWithResume(repositoryPath, manifest.BackupID, destination.StagingPath(), options.Resume); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
 	doctor, err := verifyPebbleBackupRoot(repositoryPath, "repository", manifest, destination.StagingPath())
@@ -252,6 +260,17 @@ type restoreDestination = hatBackup.RestoreDestination
 
 func prepareRestoreDestination(source string, dataDir string, overwrite bool) (restoreDestination, error) {
 	return hatBackup.PrepareRestoreDestination(source, dataDir, overwrite)
+}
+
+func prepareRestoreDestinationWithResume(source string, dataDir string, overwrite bool, resume bool) (restoreDestination, error) {
+	if !resume {
+		return prepareRestoreDestination(source, dataDir, overwrite)
+	}
+	return hatBackup.PrepareRestoreDestinationWithResume(source, dataDir, overwrite)
+}
+
+func prepareRestoreDestinationForRestore(source string, dataDir string, overwrite bool, resume bool) (restoreDestination, error) {
+	return prepareRestoreDestinationWithResume(source, dataDir, overwrite, resume)
 }
 
 func rejectRestoreSymlinkComponents(path string) error {

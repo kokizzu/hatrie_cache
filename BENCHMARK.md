@@ -20972,3 +20972,34 @@ make benchmark-selective-backup
 
 Raw benchmark output is emitted by the target and is not stored in the backup
 directory.
+
+<a id="tt-042-restore-resume-checkpoints"></a>
+## TT-042 Restore Resume Checkpoints
+
+Command: `make benchmark-restore-resume`.
+
+This benchmark compares fresh extraction with retry extraction after the
+checkpoint already contains every declared payload. Both paths read the same
+2,048-key binary snapshot archive and validate its contents. Five samples use
+`-benchmem -count=5` on Linux amd64 with an AMD Ryzen 9 5950X.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Fresh extraction | 1,691,070; 853,533; 842,037; 860,720; 841,384 | 82,646; 82,577; 82,551; 82,534; 82,549 | 82; 82; 82; 82; 82 |
+| Resume extraction | 846,021; 845,917; 829,018; 829,185; 834,838 | 118,496; 118,491; 118,448; 118,462; 118,504 | 112; 112; 112; 112; 112 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to fresh |
+| --- | ---: | ---: | ---: | --- |
+| Fresh extraction | 853,533 | 82,551 | 82 | `1.00x` |
+| Resume extraction | 834,838 | 118,491 | 112 | `1.02x` faster, `1.44x` higher allocation, `1.37x` more allocations |
+
+Resume keeps the checkpoint after an interrupted restore and avoids rewriting
+matching files, but the tar stream remains sequential and every payload is
+still checked. The measured path is therefore a recoverability improvement,
+not a general allocation optimization. The default remains disabled so normal
+successful restores keep their existing resource profile. See
+[RESTORE_RESUME.md](RESTORE_RESUME.md).

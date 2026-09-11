@@ -93,6 +93,7 @@ RESTORE_OVERWRITE ?= false
 DOCTOR_PATH ?= $(BACKUP_DIR)
 RESTORE_BUNDLE_PATH ?= backup/latest.tar.gz
 RESTORE_BUNDLE_OVERWRITE ?= false
+RESTORE_BUNDLE_RESUME ?= false
 RESTORE_REHEARSAL_PATH ?= $(BACKUP_DIR)
 RESTORE_REHEARSAL_WORK_DIR ?=
 RESTORE_REHEARSAL_KEEP_WORK_DIR ?= false
@@ -445,7 +446,7 @@ restore:
 	DATA_DIR='$(DATA_DIR)' BACKUP_DIR='$(BACKUP_DIR)' RESTORE_OVERWRITE='$(RESTORE_OVERWRITE)' ./scripts/restore.sh
 
 restore-bundle:
-	DATA_DIR='$(DATA_DIR)' RESTORE_BUNDLE_PATH='$(RESTORE_BUNDLE_PATH)' RESTORE_BUNDLE_OVERWRITE='$(RESTORE_BUNDLE_OVERWRITE)' ./scripts/restore-bundle.sh
+	DATA_DIR='$(DATA_DIR)' RESTORE_BUNDLE_PATH='$(RESTORE_BUNDLE_PATH)' RESTORE_BUNDLE_OVERWRITE='$(RESTORE_BUNDLE_OVERWRITE)' RESTORE_BUNDLE_RESUME='$(RESTORE_BUNDLE_RESUME)' ./scripts/restore-bundle.sh
 
 restore-rehearsal:
 	RESTORE_REHEARSAL_PATH='$(RESTORE_REHEARSAL_PATH)' RESTORE_REHEARSAL_WORK_DIR='$(RESTORE_REHEARSAL_WORK_DIR)' RESTORE_REHEARSAL_KEEP_WORK_DIR='$(RESTORE_REHEARSAL_KEEP_WORK_DIR)' RESTORE_REHEARSAL_RUNTIME_CHECK='$(RESTORE_REHEARSAL_RUNTIME_CHECK)' RESTORE_REHEARSAL_RUNTIME_GET='$(RESTORE_REHEARSAL_RUNTIME_GET)' RESTORE_REHEARSAL_RUNTIME_SERVER_BIN='$(RESTORE_REHEARSAL_RUNTIME_SERVER_BIN)' ./scripts/restore-rehearsal.sh
@@ -9933,6 +9934,50 @@ commit-selective-backup:
 .PHONY: push-selective-backup
 push-selective-backup:
 	bash scripts/push-selective-backup.sh
+
+.PHONY: test-restore-resume
+test-restore-resume:
+	bash scripts/test-restore-resume.sh
+
+.PHONY: format-restore-resume
+format-restore-resume:
+	bash scripts/format-restore-resume.sh
+
+.PHONY: benchmark-restore-resume
+benchmark-restore-resume:
+	bash scripts/benchmark-restore-resume.sh
+
+.PHONY: test-restore-resume-cli
+test-restore-resume-cli:
+	bash scripts/test-restore-resume-cli.sh
+
+.PHONY: test-race-restore-resume
+test-race-restore-resume:
+	bash scripts/test-race-restore-resume.sh
+
+.PHONY: test-restore-resume-broad
+test-restore-resume-broad:
+	bash scripts/test-restore-resume-broad.sh
+
+.PHONY: vet-restore-resume
+vet-restore-resume:
+	bash scripts/vet-restore-resume.sh
+
+.PHONY: review-restore-resume
+review-restore-resume:
+	bash scripts/review-restore-resume.sh
+
+.PHONY: verify-restore-resume
+verify-restore-resume:
+	bash scripts/verify-restore-resume.sh
+
+.PHONY: commit-restore-resume
+commit-restore-resume:
+	bash scripts/commit-restore-resume.sh
+
+.PHONY: push-restore-resume
+push-restore-resume:
+	bash scripts/push-restore-resume.sh
 
 .PHONY: commit-expiration-deadline-cleaner
 commit-expiration-deadline-cleaner:
