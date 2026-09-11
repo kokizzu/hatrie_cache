@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// executeSQLAutoNativeDataflow selects the native batch runtime only for a
-// plain scalar projection over an ordinary row resolver. Resolvers with
-// columnar, streaming, lookup, index, or ordered contracts retain their more
-// specialized paths, and callers can force the general executor with the
-// DisableNativeDataflow option.
+// executeSQLAutoNativeDataflow selects the native batch runtime for narrow
+// scalar, aggregate/distinct, and ordered Top-N shapes over ordinary row
+// resolvers. Resolvers with columnar, streaming, lookup, index, or ordered
+// contracts retain their specialized paths, and callers can force the general
+// executor with the DisableNativeDataflow option.
 func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl, recordPlan bool) (SQLQueryResult, bool, error) {
 	detail, eligible := sqlAutoNativeDataflowPlanDetail(query, resolver, options)
 	if !eligible {
@@ -111,7 +111,24 @@ func sqlAutoNativeDataflowPlanDetail(query *sqlQuery, resolver SQLSourceResolver
 	if sqlAutoNativeAggregateDistinctEligible(query, resolver, options) {
 		return "automatic aggregate/distinct batch execution", true
 	}
+	if sqlAutoNativeOrderedEligible(query, resolver, options) {
+		return "automatic ordered top-N batch execution", true
+	}
 	return "", false
+}
+
+func sqlAutoNativeOrderedEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
+	if !sqlAutoNativeDataflowBaseEligible(query, resolver, options) {
+		return false
+	}
+	if query.limit < 0 || query.limitWithTies || len(query.orderBy) == 0 || query.distinct || len(query.groupBy) != 0 || query.having.kind != "" || query.limitBy != nil || sqlQueryHasWithFill(query) {
+		return false
+	}
+	if sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	_, ok := nativeSQLDataflowOrderedPlanFor(query)
+	return ok && validateNativeSQLDataflowQuery(query) == nil
 }
 
 func sqlAutoNativeDataflowBaseEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {

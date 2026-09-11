@@ -403,6 +403,11 @@ Materialize's Timely/Differential Dataflow runtime.
   batch runtime by default; grouped, ordered, and specialized-resolver paths
   retain their established executor. See
   [SQL_AUTO_NATIVE_OPERATORS.md](SQL_AUTO_NATIVE_OPERATORS.md).
+- [x] M052r Automatic safe ordered Top-N native dataflow selection. Finite
+  `ORDER BY` pages over ordinary row resolvers use the existing native batch
+  runtime by default for direct source-field keys, mixed directions, and
+  `LIMIT`/`OFFSET`; unbounded and richer ordered shapes remain on the existing
+  executor. See [SQL_AUTO_NATIVE_ORDERED.md](SQL_AUTO_NATIVE_ORDERED.md).
 - [x] M052a Lower compiled logical stages into a lazy, versioned immutable
   `SQLDataflowPlan` with defensive snapshots. M052b adds caller-supplied
   executable fragment composition. See

@@ -19069,3 +19069,44 @@ distinct:
 3141729 4156002 36900
 3075256 4155756 36900
 ```
+
+## M052r automatic native ordered Top-N
+
+This feature automatically selects the existing native Top-N batch runtime for
+finite direct-field `ORDER BY` pages over ordinary row resolvers. The workload
+uses a compiled query with 4,096 rows and `LIMIT 32 OFFSET 512`, five samples,
+and `-benchmem`. The fallback sets `SQLQueryOptions.DisableNativeDataflow`.
+
+| Workload | Before median | Automatic median | Final fallback median | Improvement vs fallback |
+| --- | --- | --- | --- | --- |
+| Ordered Top-N page | 9,823,838 ns, 3,773,519 B, 20,508 allocs | 1,190,198 ns, 105,360 B, 623 allocs | 9,742,188 ns, 3,773,480 B, 20,507 allocs | 8.19x faster, 35.82x less heap, 32.92x fewer allocations |
+
+Raw pre-feature samples (`ns/op B/op allocs/op`):
+
+```text
+9823838 3773421 20508
+9700799 3773519 20508
+9965479 3773710 20507
+9668934 3773353 20507
+9858568 3773759 20508
+```
+
+Raw final automatic samples:
+
+```text
+1200523 105360 623
+1186985 105360 623
+1190198 105360 623
+1214774 105366 623
+1180532 105360 623
+```
+
+Raw final fallback samples:
+
+```text
+9720844 3773588 20508
+9634134 3774450 20506
+9767523 3773312 20507
+9854774 3773359 20508
+9742188 3773480 20507
+```

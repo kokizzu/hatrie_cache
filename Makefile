@@ -8517,3 +8517,35 @@ commit-m052q-auto-native-operators:
 .PHONY: push-m052q-auto-native-operators
 push-m052q-auto-native-operators:
 	bash ./scripts/push-m052q-auto-native-operators.sh
+
+.PHONY: test-m052r-auto-native-ordered
+test-m052r-auto-native-ordered:
+	bash ./scripts/test-m052r-auto-native-ordered.sh
+
+.PHONY: benchmark-m052r-auto-native-ordered
+benchmark-m052r-auto-native-ordered:
+	bash ./scripts/benchmark-m052r-auto-native-ordered.sh
+
+.PHONY: format-m052r-auto-native-ordered
+format-m052r-auto-native-ordered:
+	bash ./scripts/format-m052r-auto-native-ordered.sh
+
+.PHONY: test-race-m052r-auto-native-ordered
+test-race-m052r-auto-native-ordered:
+	bash ./scripts/test-race-m052r-auto-native-ordered.sh
+
+.PHONY: vet-m052r-auto-native-ordered
+vet-m052r-auto-native-ordered:
+	bash ./scripts/vet-m052r-auto-native-ordered.sh
+
+.PHONY: review-m052r-auto-native-ordered
+review-m052r-auto-native-ordered:
+	bash ./scripts/review-m052r-auto-native-ordered.sh
+
+.PHONY: commit-m052r-auto-native-ordered
+commit-m052r-auto-native-ordered:
+	bash ./scripts/commit-m052r-auto-native-ordered.sh
+
+.PHONY: push-m052r-auto-native-ordered
+push-m052r-auto-native-ordered:
+	bash ./scripts/push-m052r-auto-native-ordered.sh
