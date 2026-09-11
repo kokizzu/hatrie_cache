@@ -257,6 +257,10 @@ name.
   fingerprint compare-and-swap, strict-majority vote evaluation, and fencing
   monotonicity; transport and vote authentication remain caller-owned. See
   [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md).
+- [x] C153b Partition-ownership metadata quorum validation binding shard,
+  primary, replica order, topology fingerprint, and fencing token; transport
+  and vote authentication remain caller-owned. See
+  [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md).
 - [ ] C154 Rolling schema changes across replicas.
 - [x] C154a Conservative rolling-schema compatibility preflight over validated
   schemas; exact replication fingerprint enforcement remains unchanged. See

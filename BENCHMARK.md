@@ -18358,6 +18358,38 @@ rolled back because the same workload moved from a median `371,747 ns/op` to
 `415,847 ns/op`, from `657,530` to `657,978 B/op`, and from `2,837` to `2,840`
 allocations. Reusing the map's buckets did not offset the clearing overhead.
 
+## Partition ownership metadata consensus
+
+This benchmark compares the existing fingerprint-only topology quorum check
+with the new ownership-aware check on four voters, a three-vote threshold, and
+one two-replica partition. Five samples were collected with
+`-benchmem -count=5 -cpu=1` on an AMD Ryzen 9 5950X.
+
+| Evaluator | Median time | Median heap | Median allocations | Relative cost |
+| --- | ---: | ---: | ---: | ---: |
+| Fingerprint-only | 432.1 ns/op | 192 B/op | 3/op | 1.00x |
+| Ownership metadata | 652.0 ns/op | 480 B/op | 6/op | 1.51x CPU, 2.5x bytes, 2x allocations |
+
+The metadata path is an opt-in correctness/control-plane check, not a default
+replacement for the lower-cost evaluator. Its extra work is bounded by the
+number of voters and replica names and remains below one microsecond in this
+fixture.
+
+Raw output from `make benchmark-partition-ownership-consensus`:
+
+```text
+BenchmarkPartitionOwnershipConsensus/fingerprint_only 2651526 453.0 ns/op 192 B/op 3 allocs/op
+BenchmarkPartitionOwnershipConsensus/fingerprint_only 2655828 426.6 ns/op 192 B/op 3 allocs/op
+BenchmarkPartitionOwnershipConsensus/fingerprint_only 2870385 432.1 ns/op 192 B/op 3 allocs/op
+BenchmarkPartitionOwnershipConsensus/fingerprint_only 2740234 433.4 ns/op 192 B/op 3 allocs/op
+BenchmarkPartitionOwnershipConsensus/fingerprint_only 2879422 417.6 ns/op 192 B/op 3 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata 1849562 650.6 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata 1831923 653.4 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata 1844948 651.2 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata 1840557 652.0 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata 1842994 652.0 ns/op 480 B/op 6 allocs/op
+```
+
 ## Differential grouped `MIN`/`MAX`
 
 This benchmark compares a naive per-update endpoint rebuild with

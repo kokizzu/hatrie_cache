@@ -8003,6 +8003,26 @@ verify-differential-group-min-max:
 commit-differential-group-min-max:
 	bash ./scripts/commit-differential-group-min-max.sh
 
+.PHONY: benchmark-partition-ownership-consensus
+benchmark-partition-ownership-consensus:
+	bash ./scripts/benchmark-partition-ownership-consensus.sh
+
+.PHONY: test-partition-ownership-consensus
+test-partition-ownership-consensus:
+	bash ./scripts/test-partition-ownership-consensus.sh
+
+.PHONY: format-partition-ownership-consensus
+format-partition-ownership-consensus:
+	bash ./scripts/format-partition-ownership-consensus.sh
+
+.PHONY: verify-partition-ownership-consensus
+verify-partition-ownership-consensus:
+	bash ./scripts/verify-partition-ownership-consensus.sh
+
+.PHONY: commit-partition-ownership-consensus
+commit-partition-ownership-consensus:
+	bash ./scripts/commit-partition-ownership-consensus.sh
+
 .PHONY: test-sql-set-operation-all
 test-sql-set-operation-all:
 	bash ./scripts/test-sql-set-operation-all.sh

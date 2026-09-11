@@ -35,6 +35,13 @@ if !ok {
 Validation uses the same normalized store snapshot and does not retain a
 second ownership index.
 
+For a quorum decision over one partition's complete metadata, use
+`EvaluatePartitionOwnershipConsensus` and
+`ValidatePartitionOwnershipConsensusDecision`; see
+[PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md). This
+opt-in check binds every accepted vote to the shard, primary, replica order,
+topology fingerprint, and fencing token.
+
 ## Write Validation
 
 Before a partition-scoped write, validate both the snapshot and the writer:
