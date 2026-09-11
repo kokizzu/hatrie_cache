@@ -239,3 +239,4 @@ NULLs, and validates callbacks and monotonic order atomically. The benchmark
 shows a 2.89x CPU improvement versus the pre-change materialized path, with
 65.0% higher cumulative allocation bytes and 2.28x fewer allocations. See
 [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).
+| ClickHouse / Materialize | Automatic selection of a compiled native dataflow path | Adopted as a narrow default optimization | Plain scalar `CACHE`/`KEYS` materialized projections over ordinary row resolvers automatically use the existing native batch runtime. Specialized resolver contracts and richer SQL remain on their established paths. `SQLQueryOptions.DisableNativeDataflow` provides an explicit fallback; the paired 4,096-row benchmark is 1.79x faster, uses 3.68x less heap, and uses 3.00x fewer allocations. See [SQL_AUTO_NATIVE_DATAFLOW.md](SQL_AUTO_NATIVE_DATAFLOW.md) and [BENCHMARK.md](BENCHMARK.md#m052p-automatic-native-scalar-dataflow). |

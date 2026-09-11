@@ -8449,3 +8449,39 @@ commit-rejected-t042-parallel-replay:
 .PHONY: push-rejected-t042-parallel-replay
 push-rejected-t042-parallel-replay:
 	bash ./scripts/push-rejected-t042-parallel-replay.sh
+
+.PHONY: inspect-native-dataflow
+inspect-native-dataflow:
+	@bash ./scripts/inspect-native-dataflow.sh
+
+.PHONY: test-m052p-auto-native-dataflow
+test-m052p-auto-native-dataflow:
+	bash ./scripts/test-m052p-auto-native-dataflow.sh
+
+.PHONY: benchmark-m052p-auto-native-dataflow
+benchmark-m052p-auto-native-dataflow:
+	bash ./scripts/benchmark-m052p-auto-native-dataflow.sh
+
+.PHONY: format-m052p-auto-native-dataflow
+format-m052p-auto-native-dataflow:
+	bash ./scripts/format-m052p-auto-native-dataflow.sh
+
+.PHONY: test-race-m052p-auto-native-dataflow
+test-race-m052p-auto-native-dataflow:
+	bash ./scripts/test-race-m052p-auto-native-dataflow.sh
+
+.PHONY: vet-m052p-auto-native-dataflow
+vet-m052p-auto-native-dataflow:
+	bash ./scripts/vet-m052p-auto-native-dataflow.sh
+
+.PHONY: review-m052p-auto-native-dataflow
+review-m052p-auto-native-dataflow:
+	bash ./scripts/review-m052p-auto-native-dataflow.sh
+
+.PHONY: commit-m052p-auto-native-dataflow
+commit-m052p-auto-native-dataflow:
+	bash ./scripts/commit-m052p-auto-native-dataflow.sh
+
+.PHONY: push-m052p-auto-native-dataflow
+push-m052p-auto-native-dataflow:
+	bash ./scripts/push-m052p-auto-native-dataflow.sh

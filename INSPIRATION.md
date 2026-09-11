@@ -392,6 +392,11 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M051b Expose a fresh, deterministic logical dataflow IR snapshot from compiled SQL queries without changing execution, storage, or wire behavior; see [COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments with automatic
   built-in operator execution remains open.
+- [x] M052p Automatic safe scalar native dataflow selection. Plain
+  materialized `CACHE`/`KEYS` projections over ordinary row resolvers use the
+  existing native batch runtime by default; specialized resolvers and richer
+  shapes retain their established paths, and `DisableNativeDataflow` keeps an
+  explicit fallback. See [SQL_AUTO_NATIVE_DATAFLOW.md](SQL_AUTO_NATIVE_DATAFLOW.md).
 - [x] M052a Lower compiled logical stages into a lazy, versioned immutable
   `SQLDataflowPlan` with defensive snapshots. M052b adds caller-supplied
   executable fragment composition. See

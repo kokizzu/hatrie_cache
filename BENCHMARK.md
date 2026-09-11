@@ -18962,3 +18962,38 @@ Raw paired samples:
 The prototype was rolled back. Serial replay remains the default and no public
 parallel replay API, startup flag, storage change, or wire-format change was
 kept.
+## M052p automatic native scalar dataflow
+
+This feature selects the existing native batch runtime automatically for a
+plain scalar `CACHE` projection. The comparison uses the same compiled query,
+4,096 row resolver, `WHERE src.value >= 2048`, five benchmark samples, and
+`-benchmem`. The fallback sets
+`SQLQueryOptions.DisableNativeDataflow = true`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native dataflow | 849,705 | 721,738 | 4,105 | 1.79x faster, 3.68x less heap, 3.00x fewer allocations |
+| Existing materialized fallback | 1,521,457 | 2,657,636 | 12,304 | control |
+
+Raw samples:
+
+```text
+automatic:
+853272 721743 4105
+838935 721739 4105
+854216 721738 4105
+843490 721738 4105
+849705 721738 4105
+
+fallback:
+1424571 2657644 12304
+1430394 2657636 12304
+1521457 2657636 12304
+1614805 2657637 12304
+1602389 2657636 12304
+```
+
+The first implementation also computed source and result byte counters for
+the explain step and measured 3.4 ms, 1.76 MB, and 40,973 allocations. That
+was rejected during the same goal; byte accounting is now done only when the
+explicit `MaxResultBytes` budget requires it.
