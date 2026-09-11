@@ -1363,6 +1363,33 @@ func TestParseConfigStorageDiskReserve(t *testing.T) {
 	}
 }
 
+func TestParseConfigStorageBloomFilter(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-db-storage-bloom-filter-bits-per-key", "10",
+		"-db-path", t.TempDir(),
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.dbStorageBloomFilterBitsPerKey != 10 {
+		t.Fatalf("db storage bloom filter bits/key = %d, want 10", cfg.dbStorageBloomFilterBitsPerKey)
+	}
+	redacted := redactedConfig(cfg)
+	if redacted["db_storage_bloom_filter_bits_per_key"] != 10 {
+		t.Fatalf("redacted bloom filter bits/key = %#v, want 10", redacted["db_storage_bloom_filter_bits_per_key"])
+	}
+}
+
+func TestParseConfigStorageBloomFilterValidatesRange(t *testing.T) {
+	for _, value := range []string{"-1", "65"} {
+		if _, err := parseConfig([]string{
+			"-db-storage-bloom-filter-bits-per-key", value,
+		}, &bytes.Buffer{}); err == nil {
+			t.Fatalf("parseConfig(bits/key=%s) error = nil, want range validation", value)
+		}
+	}
+}
+
 func TestParseConfigLegacyDBMemoryCapFeedsCacheLimit(t *testing.T) {
 	cfg, err := parseConfig([]string{"-db-memory-cap-bytes", "4096"}, &bytes.Buffer{})
 	if err != nil {

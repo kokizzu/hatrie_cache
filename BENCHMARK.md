@@ -19531,3 +19531,93 @@ fallback:
 21253589 25419962 173432
 21873843 25419638 173432
 ```
+
+## TT-017 opt-in persistent-store run-level Bloom filters
+
+This benchmark compares the existing no-filter path with native LevelDB and
+Pebble Bloom filters configured at 10 bits per key. Each case uses one
+compacted 4,096-key store and five `-benchmem` samples on `linux/amd64`, AMD
+Ryzen 9 5950X. The default remains disabled because the warm-cache result is a
+tradeoff rather than a general win.
+
+| Backend | Lookup | Disabled median | Enabled median | Relative | Heap / allocs |
+| --- | --- | ---: | ---: | --- | --- |
+| LevelDB | miss | 274.5 ns/op | 268.8 ns/op | 1.02x faster | 128 B / 5 -> 128 B / 5 |
+| LevelDB | hit | 1,630 ns/op | 1,717 ns/op | 1.05x slower | 1,072 B / 18 -> 1,080 B / 19 |
+| Pebble | miss | 399.8 ns/op | 400.9 ns/op | 1.00x slower | 128 B / 3 -> 128 B / 3 |
+| Pebble | hit | 1,654 ns/op | 1,661 ns/op | 1.00x slower | 539 B / 9 -> 538 B / 9 |
+
+Compacted directory footprint from the same fixture:
+
+| Backend | Disabled | Enabled | Change |
+| --- | ---: | ---: | ---: |
+| LevelDB | 45,215 bytes | 50,498 bytes | +11.7% |
+| Pebble | 36,797 bytes | 42,098 bytes | +14.4% |
+
+The footprint increase is the filter-block storage and corresponding extra
+write/read bandwidth. The warm benchmark does not measure cold-disk I/O, so a
+miss-heavy deployment should validate the filter with production-like cache
+pressure before enabling it. Use `-db-storage-bloom-filter-bits-per-key 10`
+or `ConfigurePersistentStoreBloomFilterBitsPerKey(10)` before opening stores;
+`0` is the compatibility default. Full details are in
+[PERSISTENT_STORE_BLOOM_FILTER.md](PERSISTENT_STORE_BLOOM_FILTER.md).
+
+Raw samples (`ns/op B/op allocs/op`):
+
+```text
+LevelDB disabled miss:
+278.2 128 5
+274.5 128 5
+270.5 128 5
+277.2 128 5
+268.7 128 5
+
+LevelDB enabled miss:
+268.1 128 5
+267.7 128 5
+268.8 128 5
+270.2 128 5
+274.1 128 5
+
+LevelDB disabled hit:
+1630 1072 18
+1634 1072 18
+1659 1072 18
+1617 1072 18
+1609 1072 18
+
+LevelDB enabled hit:
+1720 1080 19
+1717 1080 19
+1686 1080 19
+1738 1080 19
+1710 1080 19
+
+Pebble disabled miss:
+400.6 128 3
+399.8 128 3
+402.8 128 3
+396.3 128 3
+396.1 128 3
+
+Pebble enabled miss:
+395.4 128 3
+387.2 128 3
+402.5 128 3
+400.9 128 3
+404.6 128 3
+
+Pebble disabled hit:
+1647 539 9
+1654 538 9
+1626 539 9
+1682 538 9
+1686 539 9
+
+Pebble enabled hit:
+1672 539 9
+1661 538 9
+1668 538 9
+1638 539 9
+1642 538 9
+```

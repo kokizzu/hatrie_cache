@@ -127,6 +127,7 @@ type config struct {
 	dbMemoryCapBytes                     int64
 	dbStorageMaxBytes                    int64
 	dbStorageDiskReserveBytes            int64
+	dbStorageBloomFilterBitsPerKey       int
 	dbRSSCapBytes                        int64
 	dbMemoryEvictInterval                time.Duration
 	dbMemoryEvictMinValueBytes           int64
@@ -184,6 +185,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	stderr = diagnosticWriter(stderr)
 	cfg, err := parseConfig(args, stderr)
 	if err != nil {
+		return err
+	}
+	if err := hatriecache.ConfigurePersistentStoreBloomFilterBitsPerKey(cfg.dbStorageBloomFilterBitsPerKey); err != nil {
 		return err
 	}
 	if cfg.checkConfig {
@@ -674,6 +678,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.Int64Var(&cfg.dbMemoryCapBytes, "db-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic persistent-store cold eviction; use 0 to disable")
 	flags.Int64Var(&cfg.dbStorageMaxBytes, "db-storage-max-bytes", 0, "maximum logical serialized bytes for durable persistent records; use 0 to disable")
 	flags.Int64Var(&cfg.dbStorageDiskReserveBytes, "db-storage-disk-reserve-bytes", hatriecache.DefaultPersistentStoreDiskReserveBytes, "minimum filesystem free bytes kept for persistent-store writes; use 0 to disable")
+	flags.IntVar(&cfg.dbStorageBloomFilterBitsPerKey, "db-storage-bloom-filter-bits-per-key", hatriecache.DefaultPersistentStoreBloomFilterBitsPerKey, "native persistent-store Bloom filter bits per key for future opens; use 0 to disable")
 	flags.Int64Var(&cfg.dbRSSCapBytes, "db-rss-cap-bytes", 0, "process RSS bytes threshold that triggers periodic persistent-store cold eviction; use 0 to disable")
 	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic persistent-store cold eviction interval; use 0 to disable")
 	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for persistent-store cold eviction")
@@ -810,6 +815,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.dbStorageDiskReserveBytes < 0 {
 		return config{}, errors.New("db storage disk reserve bytes must be non-negative")
+	}
+	if cfg.dbStorageBloomFilterBitsPerKey < hatriecache.DefaultPersistentStoreBloomFilterBitsPerKey || cfg.dbStorageBloomFilterBitsPerKey > hatriecache.MaxPersistentStoreBloomFilterBitsPerKey {
+		return config{}, fmt.Errorf("db storage bloom filter bits/key must be between %d and %d", hatriecache.DefaultPersistentStoreBloomFilterBitsPerKey, hatriecache.MaxPersistentStoreBloomFilterBitsPerKey)
 	}
 	if cfg.dbRSSCapBytes < 0 {
 		return config{}, errors.New("db rss cap bytes must be non-negative")
@@ -1307,6 +1315,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"db_memory_cap_bytes":                      cfg.dbMemoryCapBytes,
 		"db_storage_max_bytes":                     cfg.dbStorageMaxBytes,
 		"db_storage_disk_reserve_bytes":            cfg.dbStorageDiskReserveBytes,
+		"db_storage_bloom_filter_bits_per_key":     cfg.dbStorageBloomFilterBitsPerKey,
 		"db_rss_cap_bytes":                         cfg.dbRSSCapBytes,
 		"db_memory_evict_interval":                 cfg.dbMemoryEvictInterval.String(),
 		"db_memory_evict_min_value_bytes":          cfg.dbMemoryEvictMinValueBytes,

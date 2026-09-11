@@ -84,6 +84,7 @@ security guidance before exposing it on a network.
 - Optional managed-refresh freshness thresholds: [MANAGED_REFRESH_FRESHNESS.md](MANAGED_REFRESH_FRESHNESS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - Opt-in persistent-store disk reserve admission: [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md)
+- Opt-in persistent-store run Bloom filters: [PERSISTENT_STORE_BLOOM_FILTER.md](PERSISTENT_STORE_BLOOM_FILTER.md)
 - Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Opt-in cross-source SQL read snapshots: [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md)

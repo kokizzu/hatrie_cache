@@ -338,6 +338,7 @@ func OpenLevelDBStoreWithFormatAndCipher(path string, format StorageFormat, ciph
 	}
 	db, err := leveldb.OpenFile(path, &opt.Options{
 		Compression: opt.SnappyCompression,
+		Filter:      newPersistentStoreLevelDBFilter(),
 	})
 	if err != nil {
 		return nil, err

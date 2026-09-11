@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+test -f PERSISTENT_STORE_BLOOM_FILTER.md
+rg -F 'PERSISTENT_STORE_BLOOM_FILTER.md' README.md ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md
+rg -F 'TT-017' ENGINE_IDEAS.md BENCHMARK.md
+rg -F 'db-storage-bloom-filter-bits-per-key' PERSISTENT_STORE_BLOOM_FILTER.md README.md ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md

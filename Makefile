@@ -8973,3 +8973,39 @@ commit-mz041-refresh-freshness:
 .PHONY: push-mz041-refresh-freshness
 push-mz041-refresh-freshness:
 	@bash ./scripts/push-mz041-refresh-freshness.sh
+
+.PHONY: test-tt017
+test-tt017:
+	@bash ./scripts/test-tt017.sh
+
+.PHONY: format-tt017
+format-tt017:
+	@bash ./scripts/format-tt017.sh
+
+.PHONY: benchmark-tt017
+benchmark-tt017:
+	@bash ./scripts/benchmark-tt017.sh
+
+.PHONY: test-race-tt017
+test-race-tt017:
+	@bash ./scripts/test-race-tt017.sh
+
+.PHONY: vet-tt017
+vet-tt017:
+	@bash ./scripts/vet-tt017.sh
+
+.PHONY: verify-tt017-docs
+verify-tt017-docs:
+	@bash ./scripts/verify-tt017-docs.sh
+
+.PHONY: review-tt017
+review-tt017:
+	@bash ./scripts/review-tt017.sh
+
+.PHONY: commit-tt017
+commit-tt017:
+	@bash ./scripts/commit-tt017.sh
+
+.PHONY: push-tt017
+push-tt017:
+	@bash ./scripts/push-tt017.sh

@@ -65,7 +65,7 @@ func OpenPebbleStoreWithFormatAndCipher(path string, format StorageFormat, ciphe
 	if err := recoverInterruptedPebbleCheckpointAdoption(path); err != nil {
 		return nil, err
 	}
-	db, err := pebble.Open(path, &pebble.Options{})
+	db, err := pebble.Open(path, newPebbleStoreOptions(false))
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (store *PebbleStore) runCheckpointAdoptHook(stage string) error {
 }
 
 func (store *PebbleStore) reopenPebbleLocked(path string) error {
-	db, err := pebble.Open(path, &pebble.Options{})
+	db, err := pebble.Open(path, newPebbleStoreOptions(false))
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func openPebbleStoreReadOnlyWithFormat(path string, format StorageFormat) (*Pebb
 	if err != nil {
 		return nil, err
 	}
-	db, err := pebble.Open(path, &pebble.Options{ReadOnly: true})
+	db, err := pebble.Open(path, newPebbleStoreOptions(true))
 	if err != nil {
 		return nil, err
 	}

@@ -135,6 +135,7 @@ func OpenLevelDBReplicationOutboxWithOptions(path string, options ReplicationOut
 	}
 	db, err := leveldb.OpenFile(path, &opt.Options{
 		Compression: opt.SnappyCompression,
+		Filter:      newPersistentStoreLevelDBFilter(),
 	})
 	if err != nil {
 		return nil, err
