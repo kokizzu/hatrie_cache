@@ -453,3 +453,21 @@ Top-N heap, and compared with the ordinary executor.
 
 Only finite grouped pages with supported selected aggregate expressions are
 admitted; unsupported `HAVING` expressions remain on the ordinary path.
+
+### Native String Group Measurement
+
+Command:
+
+```text
+make benchmark-m052l-native-string-group
+```
+
+The native grouped executor now admits direct string keys using a lazily
+allocated string index alongside its integer and `NULL` indexes. A five-sample
+20,000-row benchmark with eight repeated regions, selected `COUNT`/`SUM`,
+aggregate `HAVING`, string ordering, and `LIMIT 4 OFFSET 1` measured
+`12,095,943` versus `3,064,917 ns/op`, `21,510,767` versus `3,713,297 B/op`,
+and `100,282` versus `20,203 allocs/op` for ordinary versus native execution.
+That is `3.95x` lower latency, `5.79x` lower allocation volume, and `4.96x`
+fewer allocations. Empty strings, `NULL`, ordering, and unsupported key
+fallback behavior are covered by focused tests.

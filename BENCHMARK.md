@@ -18796,3 +18796,37 @@ The pre-implementation ordinary-only median was `10,793,093 ns/op`,
 `15,948,182 B/op`, and `84,692 allocs/op`. The feature remains opt-in;
 qualified or missing fields, unselected aggregate expressions, custom
 functions, and windowed `HAVING` expressions continue to fail closed.
+
+## Native SQL Dataflow String Group
+
+Command:
+
+```text
+make benchmark-m052l-native-string-group
+```
+
+This measures 20,000 resolved rows across eight repeated string groups, with
+`COUNT(*)`, `SUM(int64)`, `HAVING COUNT(*) >= 2`, string-key ordering, and
+`LIMIT 4 OFFSET 1`. The native path adds a lazily allocated string index next
+to the existing integer/`NULL` indexes, then reuses the grouped `HAVING` and
+bounded Top-N stages. Five paired `-benchmem` samples were measured on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary string grouped sort | 12,095,943 | 21,510,767 | 100,282 | baseline |
+| Native string grouped Top-N | 3,064,917 | 3,713,297 | 20,203 | 3.95x faster; 5.79x fewer bytes; 4.96x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12,443,996 | 3,064,917 | 21,510,825 | 3,713,297 | 100,283 | 20,203 |
+| 2 | 12,095,943 | 3,073,427 | 21,510,708 | 3,713,296 | 100,282 | 20,203 |
+| 3 | 11,549,048 | 3,059,941 | 21,510,773 | 3,713,297 | 100,283 | 20,203 |
+| 4 | 12,279,986 | 3,087,229 | 21,510,715 | 3,713,296 | 100,282 | 20,203 |
+| 5 | 12,001,583 | 3,040,911 | 21,510,767 | 3,713,297 | 100,282 | 20,203 |
+
+The pre-implementation ordinary-only median was `12,430,246 ns/op`,
+`21,510,718 B/op`, and `100,282 allocs/op`. The feature remains opt-in;
+unsupported runtime key types retain the existing fail-closed behavior.

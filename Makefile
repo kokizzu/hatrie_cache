@@ -8330,3 +8330,30 @@ commit-m052k-native-grouped-having:
 .PHONY: push-m052k-native-grouped-having
 push-m052k-native-grouped-having:
 	bash ./scripts/push-m052k-native-grouped-having.sh
+.PHONY: test-m052l-native-string-group benchmark-m052l-native-string-group benchmark-m052l-native-string-group-baseline format-m052l-native-string-group test-race-m052l-native-string-group vet-m052l-native-string-group review-m052l-native-string-group commit-m052l-native-string-group push-m052l-native-string-group
+test-m052l-native-string-group:
+	bash ./scripts/test-m052l-native-string-group.sh
+
+benchmark-m052l-native-string-group:
+	bash ./scripts/benchmark-m052l-native-string-group.sh
+
+benchmark-m052l-native-string-group-baseline:
+	bash ./scripts/benchmark-m052l-native-string-group-baseline.sh
+
+format-m052l-native-string-group:
+	bash ./scripts/format-m052l-native-string-group.sh
+
+test-race-m052l-native-string-group:
+	bash ./scripts/test-race-m052l-native-string-group.sh
+
+vet-m052l-native-string-group:
+	bash ./scripts/vet-m052l-native-string-group.sh
+
+review-m052l-native-string-group:
+	bash ./scripts/review-m052l-native-string-group.sh
+
+commit-m052l-native-string-group:
+	bash ./scripts/commit-m052l-native-string-group.sh
+
+push-m052l-native-string-group:
+	bash ./scripts/push-m052l-native-string-group.sh

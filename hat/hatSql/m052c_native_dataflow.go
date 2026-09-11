@@ -632,6 +632,7 @@ func nativeSQLDataflowIntegerGroupKey(value interface{}) (int64, bool, bool) {
 
 func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowGroupPlan) ([]SQLRow, error) {
 	indexes := make(map[int64]int, len(initial))
+	var stringIndexes map[string]int
 	groups := make([]nativeSQLDataflowGroupState, 0)
 	aggregates := make([]sqlStreamAggregate, 0)
 	execRows := make([]sqlExecRow, 1)
@@ -665,11 +666,17 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 		}
 		groupValue, isNull, ok := nativeSQLDataflowIntegerGroupKey(value)
 		if !ok {
-			return nil, fmt.Errorf("%w: GROUP BY key type %T", ErrSQLNativeDataflowUnsupported, value)
+			if _, stringOK := value.(string); !stringOK {
+				return nil, fmt.Errorf("%w: GROUP BY key type %T", ErrSQLNativeDataflowUnsupported, value)
+			}
 		}
 		groupIndex := -1
 		if isNull {
 			groupIndex = nullGroup
+		} else if stringValue, stringOK := value.(string); stringOK {
+			if existing, found := stringIndexes[stringValue]; found {
+				groupIndex = existing
+			}
 		} else if existing, found := indexes[groupValue]; found {
 			groupIndex = existing
 		}
@@ -677,6 +684,11 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			groupIndex = len(groups)
 			if isNull {
 				nullGroup = groupIndex
+		} else if stringValue, stringOK := value.(string); stringOK {
+				if stringIndexes == nil {
+					stringIndexes = make(map[string]int, len(initial))
+				}
+				stringIndexes[stringValue] = groupIndex
 			} else {
 				indexes[groupValue] = groupIndex
 			}

@@ -451,6 +451,12 @@ Materialize's Timely/Differential Dataflow runtime.
   The paired benchmark is 4.27x faster with 5.80x fewer bytes and 4.81x fewer
   allocations; see [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-grouped-ordered-limit).
 - [x] M052k Extend native grouped ordered pages with standard aggregate
+- [x] M052l Extend native grouped ordered pages to direct string keys. A lazy
+  string index sits beside the existing integer/NULL index, preserving exact
+  grouping, NULL and empty-string identity, ordering, `HAVING`, and the
+  fail-closed path for unsupported key types. The paired benchmark is 3.95x
+  faster with 5.79x fewer bytes and 4.96x fewer allocations; see
+  [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-string-group).
   `HAVING` expressions. Selected `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` expressions are
   rewritten to compact grouped output values before filtering and Top-N
   selection; qualified, missing, unselected, custom, and windowed expressions
