@@ -8829,6 +8829,36 @@ commit-mz027-arrangement-stats:
 push-mz027-arrangement-stats:
 	bash scripts/push-mz027-arrangement-stats.sh
 
+test-tt036-scheduler-stats:
+	bash scripts/test-tt036-scheduler-stats.sh
+
+format-tt036-scheduler-stats:
+	bash scripts/format-tt036-scheduler-stats.sh
+
+benchmark-tt036-baseline:
+	bash scripts/benchmark-tt036-baseline.sh
+
+benchmark-tt036-scheduler-stats:
+	bash scripts/benchmark-tt036-scheduler-stats.sh
+
+test-race-tt036-scheduler-stats:
+	bash scripts/test-race-tt036-scheduler-stats.sh
+
+vet-tt036-scheduler-stats:
+	bash scripts/vet-tt036-scheduler-stats.sh
+
+verify-tt036-docs:
+	bash scripts/verify-tt036-docs.sh
+
+review-tt036-scheduler-stats:
+	bash scripts/review-tt036-scheduler-stats.sh
+
+commit-tt036-scheduler-stats:
+	bash scripts/commit-tt036-scheduler-stats.sh
+
+push-tt036-scheduler-stats:
+	bash scripts/push-tt036-scheduler-stats.sh
+
 .PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
 test-ch002-primary-mark-pruning:
 	bash scripts/test-ch002-primary-mark-pruning.sh

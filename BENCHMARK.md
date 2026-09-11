@@ -76,6 +76,62 @@ aggregate with five leases and exercises the distinct-value estimate and
 compaction counter. `Stats()` allocates only the returned report slice and is
 intended for bounded health or operator sampling, not per-row execution.
 
+## TT-036 CH-027 Compaction Scheduler Statistics
+
+This benchmark compares the existing scheduler drain before and after adding
+the explicit `CompactionScheduler.Stats()` snapshot, then measures the direct
+read cost. The baseline was captured from commit `7076a4c` with
+`make benchmark-tt036-baseline`; the final run used
+`make benchmark-tt036-scheduler-stats`. Both used five one-second samples on
+Linux `amd64`, AMD Ryzen 9 5950X.
+
+### Existing 64-task drain
+
+| Workload | Baseline median | Final median | Relative result | Baseline B/op | Final B/op | Baseline allocs/op | Final allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `BenchmarkCompactionSchedulerRun` | 25,364 ns | 25,320 ns | 1.002x faster, 0.17% | 17,352 | 17,368 | 35 | 35 |
+
+The 16 B/op increase is fixed scheduler-state storage for three cumulative
+counters, not per-task or per-callback allocation. Callback behavior,
+coalescing, retry, and allocation count are unchanged. The CPU difference is
+within normal run-to-run noise, so this feature is retained for its operator
+visibility rather than presented as a throughput optimization.
+
+Raw baseline samples:
+
+```text
+25231 17354 35
+25162 17353 35
+25704 17352 35
+25492 17352 35
+25364 17352 35
+```
+
+Raw final samples:
+
+```text
+25244 17370 35
+25452 17369 35
+25445 17368 35
+25210 17368 35
+25320 17368 35
+```
+
+### Direct stats read
+
+```text
+BenchmarkCompactionSchedulerStats
+13.24 ns/op 0 B/op 0 allocs/op
+13.26 ns/op 0 B/op 0 allocs/op
+12.04 ns/op 0 B/op 0 allocs/op
+12.50 ns/op 0 B/op 0 allocs/op
+13.36 ns/op 0 B/op 0 allocs/op
+```
+
+The median is 13.24 ns/op with zero heap allocation. The benchmark reads a
+64-task pending queue; `Stats()` also reports a running task while a callback
+is in flight and cumulative success/failure counters in the regression test.
+
 ## CH-031 Persistent SQL Query Log
 
 These five-sample runs used `make benchmark-ch031-baseline` and

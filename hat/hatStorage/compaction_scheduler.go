@@ -53,6 +53,9 @@ type CompactionScheduler struct {
 	maxConcurrent int
 	pending       map[string]func(context.Context) error
 	running       map[string]struct{}
+	scheduled     uint64
+	completed     uint64
+	failed        uint64
 }
 
 // NewCompactionScheduler validates and creates a compaction scheduler. A zero
@@ -157,9 +160,11 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 		delete(scheduler.running, task.name)
 		if err == nil {
 			result.Completed++
+			scheduler.completed++
 			continue
 		}
 		result.Failed++
+		scheduler.failed++
 		if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 			scheduler.pending[task.name] = task.run
 		}
@@ -180,5 +185,6 @@ func (scheduler *CompactionScheduler) takePending() []compactionTask {
 		delete(scheduler.pending, name)
 		scheduler.running[name] = struct{}{}
 	}
+	scheduler.scheduled += uint64(len(tasks))
 	return tasks
 }

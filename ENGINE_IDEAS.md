@@ -53,7 +53,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-024 | Detach/attach parts | No operator API to quarantine immutable parts and attach verified replacements. | Medium |
 | CH-025 | Merge-pool prioritization | Compaction lacks a user-visible priority scheduler balancing freshness and space. | Medium |
 | CH-026 | Merge selector policies | No configurable size-tiered or time-aware merge selector. | Medium |
-| CH-027 | Background-task observability | No unified queue, bytes, age, and failure metrics for compaction/TTL work. | Low |
+| CH-027 | Background-task observability | Partially adopted: `CompactionScheduler.Stats()` exposes queue depth, in-flight work, and success/failure counters; task-specific bytes, age, and TTL metrics remain provider-owned. | Low |
 | CH-028 | Query `max_threads` setting | Worker count is not exposed as a stable SQL/session setting with admission checks. | Low |
 | CH-029 | User/key quotas | No rolling per-user query/bytes/CPU quota enforcement. | Medium |
 | CH-030 | Query complexity limits | No limits for rows, joins, expressions, aggregation groups, or result bytes in SQL syntax. | Medium |
@@ -172,7 +172,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-033 | Fiber scheduler quotas | Cooperative tasks lack per-tenant CPU and queue budgets. | Medium |
 | TT-034 | Cooperative task cancellation | Background fibers do not share a standard cancellation token and drain state. | Low |
 | TT-035 | Per-request deadlines | Command APIs lack a consistent deadline propagated through storage and replication. | Low |
-| TT-036 | Storage `box.stat` equivalent | No low-overhead counters for operations, cache hits, pages, WAL, and compaction. | Low |
+| TT-036 | Storage `box.stat` equivalent | Partially adopted: `CompactionScheduler.Stats()` adds low-overhead maintenance queue and outcome counters; storage-engine operation, page, cache, and WAL counters remain provider-owned. | Low |
 | TT-037 | Audit log | No append-only operator/security audit stream with redacted command metadata. | Medium |
 | TT-038 | Roles and grants for commands | Command access is not modeled as a per-operation role/privilege matrix. | Medium |
 | TT-039 | Transparent credential rotation | Authentication credentials cannot rotate with overlapping validity and no restart. | Medium |
