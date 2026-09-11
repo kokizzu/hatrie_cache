@@ -18935,3 +18935,30 @@ Raw paired samples:
 The pre-implementation ordinary-only median was `2,513,008 ns/op`,
 `3,008,096 B/op`, and `22,220 allocs/op`. The feature remains opt-in;
 unsupported runtime key types retain the existing fail-closed behavior.
+## Rejected T042 Partitioned Parallel Journal Replay
+
+This experiment replayed 20,000 binary journal mutations across 16 local
+partitions. The proposed path used eight workers, bounded 1,024-entry batches,
+and preserved per-partition journal order; the control used the existing
+serial `Replay` path. Setup and trie destruction were outside the timed
+region. Five `-benchmem` samples were measured on Linux/amd64 with an AMD
+Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Serial replay | 27,167,858 | 11,205,688 | 200,218 | baseline |
+| Proposed parallel replay | 28,923,405 | 25,343,032 | 203,008 | 1.06x slower; 2.26x more bytes; 1.01x more allocations |
+
+Raw paired samples:
+
+| Run | Serial ns/op | Parallel ns/op | Serial B/op | Parallel B/op | Serial allocs/op | Parallel allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 25,653,707 | 28,573,636 | 11,205,720 | 25,360,392 | 200,218 | 203,040 |
+| 2 | 27,167,858 | 31,312,031 | 11,205,688 | 25,343,032 | 200,217 | 203,008 |
+| 3 | 28,933,315 | 28,923,405 | 11,205,680 | 25,340,128 | 200,218 | 203,006 |
+| 4 | 24,860,435 | 29,944,913 | 11,205,688 | 25,339,048 | 200,217 | 202,996 |
+| 5 | 28,817,152 | 24,831,435 | 11,205,712 | 25,348,392 | 200,218 | 203,011 |
+
+The prototype was rolled back. Serial replay remains the default and no public
+parallel replay API, startup flag, storage change, or wire-format change was
+kept.

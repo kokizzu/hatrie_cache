@@ -8438,3 +8438,14 @@ commit-m052o-native-composite-group:
 
 push-m052o-native-composite-group:
 	bash ./scripts/push-m052o-native-composite-group.sh
+.PHONY: review-rejected-t042-parallel-replay
+review-rejected-t042-parallel-replay:
+	bash ./scripts/review-rejected-t042-parallel-replay.sh
+
+.PHONY: commit-rejected-t042-parallel-replay
+commit-rejected-t042-parallel-replay:
+	bash ./scripts/commit-rejected-t042-parallel-replay.sh
+
+.PHONY: push-rejected-t042-parallel-replay
+push-rejected-t042-parallel-replay:
+	bash ./scripts/push-rejected-t042-parallel-replay.sh

@@ -855,3 +855,7 @@ For each future unchecked item:
   first-seen group order and aggregate output. Composite ordered and HAVING
   shapes remain fail-closed; see [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md)
   and [BENCHMARK.md](BENCHMARK.md).
+T042 remains unchecked. A partition-aware parallel journal replay prototype was
+measured and rejected because it was 1.06x slower, used 2.26x more allocated
+bytes, and used 1.01x more allocations than serial replay; see the raw samples
+in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay).
