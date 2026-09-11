@@ -18830,3 +18830,36 @@ Raw paired samples:
 The pre-implementation ordinary-only median was `12,430,246 ns/op`,
 `21,510,718 B/op`, and `100,282 allocs/op`. The feature remains opt-in;
 unsupported runtime key types retain the existing fail-closed behavior.
+
+## Native SQL Dataflow String Distinct
+
+Command:
+
+```text
+make benchmark-m052m-native-string-distinct
+```
+
+This measures 4,096 resolved rows with 257 repeated string keys and a scalar
+`WHERE` predicate under `SELECT DISTINCT`. The native path adds a lazily
+allocated string membership map beside the existing integer/`NULL` indexes and
+preserves first-seen output order. Five paired `-benchmem` samples were
+measured on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary string distinct | 2,362,237 | 3,008,058 | 22,220 | baseline |
+| Native string distinct | 524,060 | 485,505 | 552 | 4.51x faster; 6.20x fewer bytes; 40.25x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2,397,627 | 551,485 | 3,008,058 | 485,505 | 22,220 | 552 |
+| 2 | 2,244,636 | 517,902 | 3,008,001 | 485,505 | 22,219 | 552 |
+| 3 | 2,158,473 | 524,060 | 3,008,083 | 485,505 | 22,220 | 552 |
+| 4 | 2,418,732 | 527,824 | 3,008,055 | 485,504 | 22,220 | 552 |
+| 5 | 2,362,237 | 516,133 | 3,008,060 | 485,505 | 22,219 | 552 |
+
+The pre-implementation ordinary-only median was `2,513,008 ns/op`,
+`3,008,096 B/op`, and `22,220 allocs/op`. The feature remains opt-in;
+unsupported runtime key types retain the existing fail-closed behavior.

@@ -728,6 +728,7 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 
 func executeNativeSQLDataflowDistinct(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowDistinctPlan) ([]SQLRow, error) {
 	seen := make(map[int64]struct{}, len(initial))
+	var stringSeen map[string]struct{}
 	seenNull := false
 	columns := sqlColumns(query.selects)
 	result := make([]SQLRow, 0, len(initial))
@@ -761,9 +762,19 @@ func executeNativeSQLDataflowDistinct(ctx context.Context, query *sqlQuery, init
 		}
 		key, isNull, ok := nativeSQLDataflowIntegerGroupKey(value)
 		if !ok {
-			return nil, fmt.Errorf("%w: DISTINCT key type %T", ErrSQLNativeDataflowUnsupported, value)
-		}
-		if isNull {
+			stringValue, stringOK := value.(string)
+			if !stringOK {
+				return nil, fmt.Errorf("%w: DISTINCT key type %T", ErrSQLNativeDataflowUnsupported, value)
+			}
+			if stringSeen != nil {
+				if _, found := stringSeen[stringValue]; found {
+					continue
+				}
+			} else {
+				stringSeen = make(map[string]struct{}, len(initial))
+			}
+			stringSeen[stringValue] = struct{}{}
+		} else if isNull {
 			if seenNull {
 				continue
 			}

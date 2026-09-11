@@ -83,7 +83,7 @@ func TestCompiledSQLNativeDataflowDistinctRejectsUnsupportedRuntimeKey(t *testin
 	if err != nil {
 		t.Fatalf("compile native dataflow: %v", err)
 	}
-	if _, err := native.Execute(context.Background(), []SQLRow{{"group": "unsupported"}}); !errors.Is(err, ErrSQLNativeDataflowUnsupported) {
+	if _, err := native.Execute(context.Background(), []SQLRow{{"group": struct{}{}}}); !errors.Is(err, ErrSQLNativeDataflowUnsupported) {
 		t.Fatalf("unsupported native DISTINCT key error = %v, want %v", err, ErrSQLNativeDataflowUnsupported)
 	}
 }

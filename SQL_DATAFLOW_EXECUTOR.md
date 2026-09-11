@@ -471,3 +471,20 @@ and `100,282` versus `20,203 allocs/op` for ordinary versus native execution.
 That is `3.95x` lower latency, `5.79x` lower allocation volume, and `4.96x`
 fewer allocations. Empty strings, `NULL`, ordering, and unsupported key
 fallback behavior are covered by focused tests.
+
+### Native String Distinct Measurement
+
+Command:
+
+```text
+make benchmark-m052m-native-string-distinct
+```
+
+The native distinct executor now admits direct string keys using a lazily
+allocated membership map beside its integer and `NULL` indexes. A five-sample
+4,096-row benchmark with 257 repeated regions and a scalar `WHERE` predicate
+measured `2,362,237` versus `524,060 ns/op`, `3,008,058` versus `485,505 B/op`,
+and `22,220` versus `552 allocs/op` for ordinary versus native execution.
+That is `4.51x` lower latency, `6.20x` lower allocation volume, and `40.25x`
+fewer allocations. First-seen order, empty strings, `NULL`, and unsupported
+key fallback behavior are covered by focused tests.

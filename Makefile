@@ -8357,3 +8357,30 @@ commit-m052l-native-string-group:
 
 push-m052l-native-string-group:
 	bash ./scripts/push-m052l-native-string-group.sh
+.PHONY: test-m052m-native-string-distinct benchmark-m052m-native-string-distinct benchmark-m052m-native-string-distinct-baseline format-m052m-native-string-distinct
+test-m052m-native-string-distinct:
+	bash ./scripts/test-m052m-native-string-distinct.sh
+
+benchmark-m052m-native-string-distinct:
+	bash ./scripts/benchmark-m052m-native-string-distinct.sh
+
+benchmark-m052m-native-string-distinct-baseline:
+	bash ./scripts/benchmark-m052m-native-string-distinct-baseline.sh
+
+format-m052m-native-string-distinct:
+	bash ./scripts/format-m052m-native-string-distinct.sh
+.PHONY: test-race-m052m-native-string-distinct vet-m052m-native-string-distinct review-m052m-native-string-distinct commit-m052m-native-string-distinct push-m052m-native-string-distinct
+test-race-m052m-native-string-distinct:
+	bash ./scripts/test-race-m052m-native-string-distinct.sh
+
+vet-m052m-native-string-distinct:
+	bash ./scripts/vet-m052m-native-string-distinct.sh
+
+review-m052m-native-string-distinct:
+	bash ./scripts/review-m052m-native-string-distinct.sh
+
+commit-m052m-native-string-distinct:
+	bash ./scripts/commit-m052m-native-string-distinct.sh
+
+push-m052m-native-string-distinct:
+	bash ./scripts/push-m052m-native-string-distinct.sh
