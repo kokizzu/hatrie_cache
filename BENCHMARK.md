@@ -20493,3 +20493,44 @@ vectors. An earlier generic batch implementation was rejected after measuring
 about 1.25x slower execution, 8.9x higher allocated bytes, and 8.9x more
 allocations than the explicit predicate. Validity-index construction and
 frontier-aware pruning are not included because they are not implemented.
+
+## MZ-010 Command-Journal Subscriptions
+
+This benchmark measures the opt-in Materialize-style command-journal
+subscription primitive. It uses the same local fixture and journal format for
+all cases, on an AMD Ryzen 9 5950X, `linux/amd64`, with five benchmark samples.
+The subscription replay case drains 100 records. The live case appends one
+record and waits for its delivery. The no-subscription case is the write-path
+control.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `CommandJournalTailReplay100` | 55431, 60518, 57234, 56028, 55862 | 48136, 48136, 48136, 48136, 48136 | 509, 509, 509, 509, 509 |
+| `CommandJournalSubscriptionReplay100` | 89657, 87552, 85347, 91447, 85400 | 69719, 69719, 69718, 69717, 69716 | 520, 520, 520, 520, 520 |
+| `CommandJournalExecuteCommandNoSubscription` | 690028, 664053, 660580, 693433, 656521 | 1576, 1573, 1577, 1579, 1574 | 8, 8, 8, 8, 8 |
+| `CommandJournalSubscriptionLive` | 671334, 716977, 714631, 756811, 709667 | 3126, 3119, 3118, 3122, 3122 | 22, 22, 22, 22, 22 |
+
+### Median And Tradeoff
+
+| Comparison | Median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Durable tail replay control | 56028 | 48136 | 509 | Baseline |
+| Subscription replay of 100 records | 87552 | 69718 | 520 | `1.56x` the CPU, `1.45x` the bytes, and 11 more allocations than direct tail replay |
+| Execute with no subscriber | 664053 | 1576 | 8 | Baseline write path |
+| Execute with one live subscriber | 714631 | 3122 | 22 | `1.08x` the CPU, `1.98x` the bytes, and 14 more allocations |
+
+The live subscription retains a bounded output buffer and per-subscription
+delivery state. The no-subscriber control confirms that the feature remains
+opt-in. Against the first polling-only development prototype, the final direct
+event path was approximately `3.0x` faster, `532x` lower in allocated bytes,
+and `492x` lower in allocations for the live workload; that historical result
+is included to show why the implementation uses direct notifications instead
+of repeated disk-tail scans.
+
+The exact command used was:
+
+```sh
+make benchmark-mz010-journal-subscription
+```

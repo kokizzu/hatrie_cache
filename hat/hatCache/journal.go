@@ -225,6 +225,10 @@ type CommandJournal struct {
 	groupCommitJobs       chan *commandJournalJob
 	groupCommitDone       chan struct{}
 	closeDone             chan struct{}
+	subscriptionWakeMu    sync.Mutex
+	subscriptionWake      chan struct{}
+	subscriptionCount     uint64
+	subscriptions         map[*CommandJournalSubscription]struct{}
 	closeErr              error
 	syncHook              func() error
 	writeHook             func([]byte) (int, error)
@@ -328,6 +332,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		retainedBytes:         options.RetainedBytes,
 		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
 		outboxRetainFrom:      earliestOutboxSequence,
+		subscriptionWake:      make(chan struct{}),
 		closeDone:             make(chan struct{}),
 		idempotency:           idempotency,
 	}
@@ -434,6 +439,10 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 		}
 	} else {
 		journal.idempotency.remember(check, response, journal.lastSequenceLocked())
+		journal.notifyCommandJournalSubscriptions(CommandJournalRecord{
+			Sequence: journal.lastSequenceLocked(),
+			Request:  journalRequest,
+		})
 	}
 	return response
 }
@@ -591,6 +600,10 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 		for idx, job := range pending {
 			response := job.execute()
 			if response.OK {
+				journal.notifyCommandJournalSubscriptions(CommandJournalRecord{
+					Sequence: batchState.nextSequence + uint64(idx),
+					Request:  job.journalRequest,
+				})
 				job.complete(response)
 				rollbackOffset += int64(recordSizes[idx])
 				continue
@@ -721,6 +734,10 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			response := entry.job.execute()
 			if response.OK {
 				journal.idempotency.remember(entry.check, response, entry.sequence)
+				journal.notifyCommandJournalSubscriptions(CommandJournalRecord{
+					Sequence: entry.sequence,
+					Request:  entry.job.journalRequest,
+				})
 				completeCommandJournalIdempotentGroupEntry(entry, response)
 				rollbackOffset += int64(recordSizes[index])
 				continue
@@ -919,6 +936,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		}
 		return idx, response
 	}
+	journal.notifyCommandJournalSubscriptions()
 	return len(records), CacheCommandResponse{OK: true}
 }
 
@@ -1005,6 +1023,7 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 		rollbackOffset += int64(recordSizes[idx])
 	}
 	if response.OK {
+		journal.notifyCommandJournalSubscriptions()
 		return applied, response
 	}
 	rollbackState := commandJournalAppendState{
@@ -1167,6 +1186,10 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 		}
 	} else {
 		journal.idempotency.remember(check, response, journal.lastSequenceLocked())
+		journal.notifyCommandJournalSubscriptions(CommandJournalRecord{
+			Sequence: journal.lastSequenceLocked(),
+			Request:  journalRequest,
+		})
 	}
 	return response
 }

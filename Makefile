@@ -9589,3 +9589,24 @@ commit-mz008-asof:
 
 push-mz008-asof:
 	bash scripts/push-mz008-asof.sh
+test-mz010-journal-subscription:
+	bash scripts/test-mz010-journal-subscription.sh
+format-mz010-journal-subscription:
+	bash scripts/format-mz010-journal-subscription.sh
+test-race-mz010-journal-subscription:
+	bash scripts/test-race-mz010-journal-subscription.sh
+
+test-mz010-broad:
+	bash scripts/test-mz010-broad.sh
+benchmark-mz010-journal-subscription:
+	bash scripts/benchmark-mz010-journal-subscription.sh
+status-mz010:
+	bash scripts/status-mz010.sh
+verify-mz010-docs:
+	bash scripts/verify-mz010-docs.sh
+review-mz010:
+	bash scripts/review-mz010.sh
+commit-mz010:
+	bash scripts/commit-mz010.sh
+push-mz010:
+	bash scripts/push-mz010.sh
