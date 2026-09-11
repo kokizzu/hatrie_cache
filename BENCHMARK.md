@@ -18726,3 +18726,38 @@ BenchmarkSQLSetOperationAll/ExceptAll-32:
 existing distinct path remains unchanged; the lower `ALL` allocation totals
 come from using one count map instead of a membership map followed by a
 distinct pass.
+
+## Native SQL Dataflow Grouped Ordered Limit
+
+Command:
+
+```text
+make benchmark-m052j-native-grouped-ordered-limit
+```
+
+The benchmark groups 20,000 resolved rows into 512 integer groups, computes
+`COUNT(*)` and `SUM(int64)`, orders by the aggregate alias and group alias, and
+returns a finite page with `LIMIT 32 OFFSET 128`. The native path reuses the
+compact grouped state and applies a bounded Top-N heap to grouped output. Five
+paired `-benchmem` samples were measured on Linux/amd64 with an AMD Ryzen 9
+5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary grouped sort | 14,355,898 | 18,719,043 | 107,260 | baseline |
+| Native grouped Top-N | 3,359,320 | 3,228,049 | 22,310 | 4.27x faster; 5.80x fewer bytes; 4.81x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 14,345,303 | 3,439,844 | 18,719,043 | 3,228,049 | 107,260 | 22,310 |
+| 2 | 14,355,898 | 3,342,004 | 18,718,768 | 3,228,048 | 107,259 | 22,310 |
+| 3 | 14,480,470 | 3,393,417 | 18,718,967 | 3,228,050 | 107,260 | 22,310 |
+| 4 | 14,153,996 | 3,359,320 | 18,719,075 | 3,228,049 | 107,259 | 22,310 |
+| 5 | 15,360,219 | 3,354,266 | 18,719,100 | 3,228,049 | 107,260 | 22,310 |
+
+The pre-implementation ordinary-only median was `14,593,568 ns/op`,
+`18,719,092 B/op`, and `107,259 allocs/op`. The native path is opt-in through
+`CompileNativeDataflow`; unsupported `HAVING`, qualified source-field order,
+function order expressions, and `LIMIT WITH TIES` continue to fail closed.

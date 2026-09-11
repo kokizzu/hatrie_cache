@@ -8262,3 +8262,39 @@ commit-m052i-native-composite-ordered-limit:
 .PHONY: push-m052i-native-composite-ordered-limit
 push-m052i-native-composite-ordered-limit:
 	bash ./scripts/push-m052i-native-composite-ordered-limit.sh
+
+.PHONY: inspect-query-engine-backlog
+inspect-query-engine-backlog:
+	bash ./scripts/inspect-query-engine-backlog.sh
+
+.PHONY: test-m052j-native-grouped-ordered-limit
+test-m052j-native-grouped-ordered-limit:
+	bash ./scripts/test-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: benchmark-m052j-native-grouped-ordered-limit
+benchmark-m052j-native-grouped-ordered-limit:
+	bash ./scripts/benchmark-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: format-m052j-native-grouped-ordered-limit
+format-m052j-native-grouped-ordered-limit:
+	bash ./scripts/format-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: test-race-m052j-native-grouped-ordered-limit
+test-race-m052j-native-grouped-ordered-limit:
+	bash ./scripts/test-race-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: vet-m052j-native-grouped-ordered-limit
+vet-m052j-native-grouped-ordered-limit:
+	bash ./scripts/vet-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: review-m052j-native-grouped-ordered-limit
+review-m052j-native-grouped-ordered-limit:
+	bash ./scripts/review-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: commit-m052j-native-grouped-ordered-limit
+commit-m052j-native-grouped-ordered-limit:
+	bash ./scripts/commit-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: push-m052j-native-grouped-ordered-limit
+push-m052j-native-grouped-ordered-limit:
+	bash ./scripts/push-m052j-native-grouped-ordered-limit.sh

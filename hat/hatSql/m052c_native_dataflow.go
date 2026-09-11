@@ -48,6 +48,12 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 		return fmt.Errorf("%w: WHERE expression is not scalar", ErrSQLNativeDataflowUnsupported)
 	}
 	if len(query.orderBy) != 0 {
+		if len(query.groupBy) != 0 {
+			if _, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); !ok {
+				return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
+			}
+			return nil
+		}
 		if _, ok := nativeSQLDataflowOrderedPlanFor(query); !ok {
 			return fmt.Errorf("%w: ordered query shape", ErrSQLNativeDataflowUnsupported)
 		}
@@ -93,6 +99,12 @@ type nativeSQLDataflowGroupPlan struct {
 	group               sqlExpr
 	projectionAggregate []int
 	aggregates          []sqlStreamAggregate
+}
+
+type nativeSQLDataflowGroupedOrderedPlan struct {
+	group           nativeSQLDataflowGroupPlan
+	orders          []sqlOrder
+	orderProjection []int
 }
 
 type nativeSQLDataflowDistinctPlan struct {
@@ -167,6 +179,46 @@ func nativeSQLDataflowGroupPlanFor(query *sqlQuery) (nativeSQLDataflowGroupPlan,
 	return plan, true
 }
 
+func nativeSQLDataflowGroupedOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowGroupedOrderedPlan, bool) {
+	if query == nil || query.limit < 0 || query.limitWithTies || len(query.orderBy) == 0 || len(query.groupBy) != 1 || query.distinct || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return nativeSQLDataflowGroupedOrderedPlan{}, false
+	}
+	group, ok := nativeSQLDataflowGroupPlanFor(query)
+	if !ok {
+		return nativeSQLDataflowGroupedOrderedPlan{}, false
+	}
+	columns := sqlColumns(query.selects)
+	orderProjection := make([]int, len(query.orderBy))
+	for orderIndex, order := range query.orderBy {
+		if order.expr.kind != "field" || order.expr.qualifier != "" {
+			return nativeSQLDataflowGroupedOrderedPlan{}, false
+		}
+		projection := -1
+		for selectIndex, item := range query.selects {
+			matches := item.alias != "" && strings.EqualFold(item.alias, order.expr.name)
+			if !matches && item.alias == "" && strings.EqualFold(columns[selectIndex], order.expr.name) {
+				matches = true
+			}
+			if !matches {
+				continue
+			}
+			if projection >= 0 {
+				return nativeSQLDataflowGroupedOrderedPlan{}, false
+			}
+			projection = selectIndex
+		}
+		if projection < 0 {
+			return nativeSQLDataflowGroupedOrderedPlan{}, false
+		}
+		orderProjection[orderIndex] = projection
+	}
+	return nativeSQLDataflowGroupedOrderedPlan{
+		group:           group,
+		orders:          append([]sqlOrder(nil), query.orderBy...),
+		orderProjection: orderProjection,
+	}, true
+}
+
 func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, bool) {
 	if expr.kind != "func" || expr.window != nil || expr.filter != nil || sqlExprHasCustomFunction(expr, nil) {
 		return sqlStreamAggregate{}, false
@@ -212,6 +264,9 @@ func nativeSQLDataflowAggregatePlan(query *sqlQuery) ([]sqlStreamAggregate, bool
 }
 
 func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQLRow) ([]SQLRow, error) {
+	if plan, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); ok {
+		return executeNativeSQLDataflowGroupedOrdered(ctx, query, initial, plan)
+	}
 	if plan, ok := nativeSQLDataflowOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowOrdered(ctx, query, initial, plan)
 	}
@@ -363,6 +418,61 @@ func executeNativeSQLDataflowOrdered(ctx context.Context, query *sqlQuery, initi
 			projected[columns[selectIndex]] = value
 		}
 		result = append(result, projected)
+	}
+	return result, nil
+}
+
+func executeNativeSQLDataflowGroupedOrdered(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowGroupedOrderedPlan) ([]SQLRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if query.limit == 0 {
+		return []SQLRow{}, nil
+	}
+	grouped, err := executeNativeSQLDataflowGroups(ctx, query, initial, plan.group)
+	if err != nil {
+		return nil, err
+	}
+	capacity := sqlTopNStreamCapacity(query, len(grouped))
+	columns := sqlColumns(query.selects)
+	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: plan.orders}
+	heap.Init(&candidates)
+	for ordinal, row := range grouped {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		candidate := sqlTopNStreamItem{row: row, ordinal: ordinal}
+		if len(plan.orderProjection) == 1 {
+			candidate.key = row[columns[plan.orderProjection[0]]]
+		} else {
+			candidate.keys = make([]interface{}, len(plan.orderProjection))
+			for orderIndex, projection := range plan.orderProjection {
+				candidate.keys[orderIndex] = row[columns[projection]]
+			}
+		}
+		if candidates.Len() < capacity {
+			heap.Push(&candidates, candidate)
+			continue
+		}
+		if sqlTopNStreamBefore(candidate, candidates.items[0], plan.orders) {
+			candidates.items[0] = candidate
+			heap.Fix(&candidates, 0)
+		}
+	}
+	sort.SliceStable(candidates.items, func(left, right int) bool {
+		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], plan.orders)
+	})
+	start := query.offset
+	if start > len(candidates.items) {
+		start = len(candidates.items)
+	}
+	end := len(candidates.items)
+	if query.limit < end-start {
+		end = start + query.limit
+	}
+	result := make([]SQLRow, 0, end-start)
+	for _, candidate := range candidates.items[start:end] {
+		result = append(result, candidate.row)
 	}
 	return result, nil
 }

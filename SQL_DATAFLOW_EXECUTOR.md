@@ -410,3 +410,24 @@ The pre-implementation ordinary-only baseline median was `2,418,758 ns/op`,
 `2,979,199 B/op`, and `22,243 allocs/op`. The paired control is reported for
 the ratio because it controls for normal benchmark noise. The feature is
 opt-in and changes no storage, wire, or default SQL behavior.
+
+### Native Grouped Ordered Limit Measurement
+
+Command:
+
+```text
+make benchmark-m052j-native-grouped-ordered-limit
+```
+
+This measures 20,000 rows grouped into 512 integer groups, with `COUNT(*)`,
+`SUM(int64)`, aggregate-alias and group-alias ordering, and `LIMIT 32 OFFSET
+128`. The native path keeps the existing compact grouped state and uses a
+bounded Top-N heap over the grouped rows instead of fully sorting the result.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary grouped sort | 14,355,898 | 18,719,043 | 107,260 | baseline |
+| Native grouped Top-N | 3,359,320 | 3,228,049 | 22,310 | 4.27x faster; 5.80x fewer bytes; 4.81x fewer allocations |
+
+The feature is opt-in. Only finite pages ordered by unqualified selected output
+names are admitted; unsupported grouped ordering remains on the ordinary path.
