@@ -145,8 +145,8 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-006 | Hot-standby WAL catch-up | No read-only standby that continuously replays and can be promoted without restore. | High |
 | TT-007 | Snapshot-plus-WAL join | A joining node cannot hydrate from a snapshot and then apply a bounded WAL delta automatically. | High |
 | TT-008 | Incremental snapshot chains | Snapshots are not content-addressed deltas with a verified parent chain. | Medium |
-| TT-009 | Backup manifest checksums | Backup output lacks a durable file manifest with per-file hashes and sizes. | Low |
-| TT-010 | Selective space backup | Operators cannot back up only named logical spaces/data structures. | Medium |
+| TT-009 | Backup manifest checksums | Implemented: backup manifests record per-file sizes and SHA-256 hashes, and restore/doctor verification checks them before publication. | Low |
+| TT-010 | Selective space backup | Partially adopted: snapshot bundles accept explicit logical key-prefix scope and record it in the manifest; Pebble checkpoint and incremental repository backups remain full-store only. | Medium |
 | TT-011 | Point-in-time incremental restore | Recovery cannot replay a verified journal only up to a timestamp or sequence. | Medium |
 | TT-012 | Per-space storage engine choice | A logical data structure cannot independently choose memory and LSM persistence policies. | High |
 | TT-013 | Vinyl range tuple cache | Storage has no range-aware cache that retains only hot key intervals. | High |

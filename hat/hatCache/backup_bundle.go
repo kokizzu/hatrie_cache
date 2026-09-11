@@ -39,6 +39,7 @@ const (
 type BackupBundleOptions struct {
 	SnapshotFormat   SnapshotFormat
 	CreatedAt        time.Time
+	KeyPrefixes      []string
 	Partition        BackupPartitionMetadata
 	PartitionLocal   bool
 	Mode             BackupMode
@@ -63,6 +64,25 @@ func cloneBackupPartitionMetadata(input *BackupPartitionMetadata) *BackupPartiti
 	return hatBackup.ClonePartitionMetadata(input)
 }
 
+func normalizeBackupKeyPrefixes(input []string) ([]string, error) {
+	if len(input) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for _, prefix := range input {
+		if prefix == "" {
+			return nil, errors.New("hatriecache: backup key prefix must be non-empty")
+		}
+		if _, ok := seen[prefix]; ok {
+			return nil, fmt.Errorf("hatriecache: duplicate backup key prefix %q", prefix)
+		}
+		seen[prefix] = struct{}{}
+		out = append(out, prefix)
+	}
+	return out, nil
+}
+
 func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
 	return CreateBackupBundleWithContext(context.Background(), path, trie, journal, options)
 }
@@ -83,6 +103,16 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 	mode, err := ParseBackupMode(string(options.Mode))
 	if err != nil {
 		return BackupBundleManifest{}, err
+	}
+	keyPrefixes, err := normalizeBackupKeyPrefixes(options.KeyPrefixes)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if len(keyPrefixes) > 0 && mode != BackupModeAuto && mode != BackupModeSnapshot {
+		return BackupBundleManifest{}, errors.New("hatriecache: backup key prefixes require snapshot mode")
+	}
+	if len(keyPrefixes) > 0 && options.PartitionLocal {
+		return BackupBundleManifest{}, errors.New("hatriecache: backup key prefixes cannot be combined with partition-local mode")
 	}
 	if options.PartitionLocal && mode != BackupModeAuto && mode != BackupModeSnapshot {
 		return BackupBundleManifest{}, errors.New("hatriecache: partition-local backup requires snapshot mode")
@@ -141,9 +171,9 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 		if err := checkBackupContext(ctx); err != nil {
 			return BackupBundleManifest{}, err
 		}
-		return createBackupBundleLocked(ctx, path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition, mode, options.PersistentStore, options.PartitionLocal)
+		return createBackupBundleLocked(ctx, path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition, keyPrefixes, mode, options.PersistentStore, options.PartitionLocal)
 	}
-	return createBackupBundleLocked(ctx, path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition, mode, options.PersistentStore, options.PartitionLocal)
+	return createBackupBundleLocked(ctx, path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition, keyPrefixes, mode, options.PersistentStore, options.PartitionLocal)
 }
 
 type backupBundlePayloadFile struct {
@@ -152,7 +182,7 @@ type backupBundlePayloadFile struct {
 	data []byte
 }
 
-func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata, mode BackupMode, persistentStore PersistentStore, partitionLocal bool) (BackupBundleManifest, error) {
+func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata, keyPrefixes []string, mode BackupMode, persistentStore PersistentStore, partitionLocal bool) (BackupBundleManifest, error) {
 	if err := checkBackupContext(ctx); err != nil {
 		return BackupBundleManifest{}, err
 	}
@@ -163,16 +193,21 @@ func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, t
 		CreatedAt:       createdAt,
 		Mode:            mode,
 		JournalSequence: journalSequence,
+		KeyPrefixes:     append([]string(nil), keyPrefixes...),
 		Partition:       cloneBackupPartitionMetadata(partition),
 	}
 	switch mode {
 	case BackupModeSnapshot:
 		snapshotPath := filepath.Join(tmpDir, backupBundleSnapshotPath)
 		var saveErr error
-		if partitionLocal {
+		if partitionLocal || len(keyPrefixes) > 0 {
+			prefixes := keyPrefixes
+			if partitionLocal {
+				prefixes = partition.KeyPrefixes
+			}
 			saveErr = writeFileAtomicStream(snapshotPath, func(writer io.Writer) error {
 				return trie.writeSnapshotWithKeyFilter(writer, journalSequence, snapshotFormat, func(key string) bool {
-					return backupPartitionKeyCoveredByPrefix(key, partition.KeyPrefixes)
+					return backupPartitionKeyCoveredByPrefix(key, prefixes)
 				})
 			})
 		} else {

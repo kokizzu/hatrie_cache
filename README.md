@@ -23,6 +23,7 @@ security guidance before exposing it on a network.
 - Per-client compression-level negotiation: [compression negotiation](COMPRESSION_NEGOTIATION.md)
 - Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
 - Region-local filtered backup and restore: [region-local backup](REGION_LOCAL_BACKUP.md)
+- Selective key-prefix snapshot bundles: [selective backups](SELECTIVE_BACKUP.md)
 - Leader election independent from query workers: [leader election](LEADER_ELECTION.md)
 - Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
 - Persistent shard ownership leases: [persistent shard leases](PERSISTENT_SHARD_LEASES.md)
@@ -1014,6 +1015,11 @@ snapshot so rotation cannot move a segment between the two copies. Server-side
 atomic backup bundles do not need archived segments: they contain either a
 point-in-time snapshot or a native Pebble checkpoint plus a journal checkpoint
 at the same sequence.
+
+For region-oriented deployments, snapshot bundles can be restricted to one or
+more logical key prefixes with `BackupBundleOptions.KeyPrefixes`. The selected
+scope is recorded in the bundle manifest and is restored as a complete
+snapshot of those keys. See [SELECTIVE_BACKUP.md](SELECTIVE_BACKUP.md).
 
 Archived segments can also be bounded by count and, explicitly, by total bytes.
 `JOURNAL_RETAINED_BYTES=0` is the default and preserves count-only retention;

@@ -9894,6 +9894,46 @@ verify-expiration-deadline-cleaner:
 review-expiration-deadline-cleaner:
 	bash scripts/review-expiration-deadline-cleaner.sh
 
+.PHONY: benchmark-selective-backup
+benchmark-selective-backup:
+	bash scripts/benchmark-selective-backup.sh
+
+.PHONY: test-selective-backup
+test-selective-backup:
+	bash scripts/test-selective-backup.sh
+
+.PHONY: format-selective-backup
+format-selective-backup:
+	bash scripts/format-selective-backup.sh
+
+.PHONY: test-race-selective-backup
+test-race-selective-backup:
+	bash scripts/test-race-selective-backup.sh
+
+.PHONY: test-selective-backup-broad
+test-selective-backup-broad:
+	bash scripts/test-selective-backup-broad.sh
+
+.PHONY: vet-selective-backup
+vet-selective-backup:
+	bash scripts/vet-selective-backup.sh
+
+.PHONY: verify-selective-backup
+verify-selective-backup:
+	bash scripts/verify-selective-backup.sh
+
+.PHONY: review-selective-backup
+review-selective-backup:
+	bash scripts/review-selective-backup.sh
+
+.PHONY: commit-selective-backup
+commit-selective-backup:
+	bash scripts/commit-selective-backup.sh
+
+.PHONY: push-selective-backup
+push-selective-backup:
+	bash scripts/push-selective-backup.sh
+
 .PHONY: commit-expiration-deadline-cleaner
 commit-expiration-deadline-cleaner:
 	bash scripts/commit-expiration-deadline-cleaner.sh

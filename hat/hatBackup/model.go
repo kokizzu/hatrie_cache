@@ -61,6 +61,7 @@ type BundleManifest struct {
 	Journal           string             `json:"journal,omitempty"`
 	JournalFormat     string             `json:"journal_format,omitempty"`
 	JournalSequence   uint64             `json:"journal_sequence"`
+	KeyPrefixes       []string           `json:"key_prefixes,omitempty"`
 	Partition         *PartitionMetadata `json:"partition,omitempty"`
 	Files             []BundleFile       `json:"files"`
 	RestoreHint       string             `json:"restore_hint"`

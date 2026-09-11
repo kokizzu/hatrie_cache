@@ -20930,3 +20930,45 @@ measuring approximately 800 ns/op on active TTL refreshes, about 6.8x the
 baseline; the accepted implementation uses a lazily allocated per-trie signal
 set instead. A full timing-wheel replacement remains unimplemented pending a
 separate mass-expiration benchmark.
+
+<a id="tt-010-selective-snapshot-backups"></a>
+## TT-010 Selective Snapshot Backups
+
+This benchmark compares a full snapshot bundle with a snapshot restricted to
+the `keep:` key prefix. The deterministic corpus has 2,000 string keys, with
+1,000 keys in `keep:` and 1,000 in `drop:`. Five samples use
+`-benchtime=200ms -count=5` on the same Linux amd64 host. `bundle_bytes` is the
+final tar/gzip bundle size; `B/op` is cumulative benchmark allocation, not
+peak resident memory.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples | bundle_bytes samples |
+| --- | --- | --- | --- | --- |
+| JSON full | 8,110,004; 8,162,459; 7,773,713; 7,577,775; 7,760,513 | 2,989,823; 2,954,087; 2,954,573; 2,955,329; 2,954,262 | 48,190; 48,155; 48,156; 48,158; 48,156 | 12,009; 12,005; 12,010; 12,009; 12,009 |
+| JSON selected | 5,923,927; 5,987,049; 6,151,964; 6,617,679; 5,878,531 | 2,202,401; 2,203,976; 2,203,304; 2,204,033; 2,204,380 | 25,150; 25,152; 25,151; 25,151; 25,151 | 6,191; 6,187; 6,186; 6,186; 6,186 |
+| Binary full | 4,630,163; 4,537,033; 4,327,404; 4,682,007; 4,589,210 | 1,587,660; 1,587,890; 1,586,400; 1,586,532; 1,586,245 | 6,144; 6,144; 6,143; 6,143; 6,143 | 11,691; 11,691; 11,688; 11,688; 11,688 |
+| Binary selected | 4,152,767; 4,299,313; 4,228,077; 4,186,011; 4,191,956 | 1,523,397; 1,522,582; 1,523,263; 1,522,951; 1,521,891 | 4,145; 4,145; 4,145; 4,145; 4,144 | 6,072; 6,077; 6,072; 6,074; 6,073 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Median bundle bytes | Relative to full same format |
+| --- | ---: | ---: | ---: | ---: | --- |
+| JSON full | 7,773,713 | 2,954,573 | 48,156 | 12,009 | `1.00x` |
+| JSON selected | 5,987,049 | 2,203,976 | 25,151 | 6,186 | `1.30x` faster, `1.34x` lower allocation, `1.91x` fewer allocs, `1.94x` smaller transfer |
+| Binary full | 4,589,210 | 1,586,532 | 6,143 | 11,688 | `1.00x` |
+| Binary selected | 4,191,956 | 1,522,951 | 4,145 | 6,073 | `1.09x` faster, `1.04x` lower allocation, `1.48x` fewer allocs, `1.92x` smaller transfer |
+
+The full-snapshot control remains on the original path when no prefixes are
+provided. The selected path scans the same source trie but encodes only the
+requested namespace, so its strongest gain is storage and wire size; CPU gain
+depends on the selected fraction and snapshot format. Selective scope is
+snapshot-only and does not change persistent checkpoint or incremental backup
+semantics. The exact command was:
+
+```sh
+make benchmark-selective-backup
+```
+
+Raw benchmark output is emitted by the target and is not stored in the backup
+directory.
