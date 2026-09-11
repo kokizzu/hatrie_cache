@@ -354,6 +354,9 @@ Materialize's Timely/Differential Dataflow runtime.
   weight negation with checked `math.MinInt64` handling, duplicate-preserving
   consolidation, and input ownership guarantees; see
   [DIFFERENTIAL_DIFFERENCE.md](DIFFERENTIAL_DIFFERENCE.md).
+- [x] M037g Signed differential int64 grouped `MIN`/`MAX` maintenance with
+  exact duplicate retractions and endpoint restoration; see
+  [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
@@ -362,6 +365,9 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M038e Stateful duplicate-preserving differential `INTERSECT ALL`
   maintenance with checked multiplicities, atomic validation, and incremental
   output deltas; see [DIFFERENTIAL_INTERSECT.md](DIFFERENTIAL_INTERSECT.md).
+- [x] M038g Weighted duplicate-preserving differential grouped `MIN`/`MAX`
+  maintenance with exact value multiplicity tracking; see
+  [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M038f SQL parser and executor support for duplicate-preserving
   `INTERSECT ALL` and `EXCEPT ALL`, including collation-aware multiplicity and
   left-order output; see [SQL_SET_OPERATIONS.md](SQL_SET_OPERATIONS.md).

@@ -18358,6 +18358,40 @@ rolled back because the same workload moved from a median `371,747 ns/op` to
 `415,847 ns/op`, from `657,530` to `657,978 B/op`, and from `2,837` to `2,840`
 allocations. Reusing the map's buckets did not offset the clearing overhead.
 
+## Differential grouped `MIN`/`MAX`
+
+This benchmark compares a naive per-update endpoint rebuild with
+`GroupMinMaxInt64DifferentialRows` on the same 2,048 positive updates across
+256 groups and 1,024 possible values. Five samples were collected with
+`-benchmem -count=5 -cpu=1` on an AMD Ryzen 9 5950X.
+
+| Implementation | Median time | Median heap | Median allocations | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Naive rebuild | 838,338 ns/op | 939,680 B/op | 5,386/op | 1.00x |
+| Incremental endpoints | 499,572 ns/op | 939,680 B/op | 5,386/op | 1.68x faster |
+
+The incremental path is `1.68x` faster on this append-heavy fixture with no
+measured change in cumulative allocations or bytes. It spends the same
+allocation budget retaining per-group value multiplicities, which is required
+for exact retractions. Endpoint removals can scan the affected group's
+distinct values; that case is covered by correctness tests but is not claimed
+to be constant-time.
+
+Raw output from `make benchmark-differential-group-min-max`:
+
+```text
+BenchmarkDifferentialGroupMinMax/naive_rebuild 1341 822867 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/naive_rebuild 1568 817122 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/naive_rebuild 1573 852409 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/naive_rebuild 1209 894689 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/naive_rebuild 1531 838338 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/incremental 1940 556855 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/incremental 2424 499572 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/incremental 2385 529604 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/incremental 2462 491079 ns/op 939680 B/op 5386 allocs/op
+BenchmarkDifferentialGroupMinMax/incremental 2437 493883 ns/op 939680 B/op 5386 allocs/op
+```
+
 ## SQL `INTERSECT ALL` and `EXCEPT ALL`
 
 The new SQL multiset forms were measured against the existing distinct

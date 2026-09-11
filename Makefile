@@ -7983,6 +7983,26 @@ benchmark-sql-set-operation-all:
 commit-sql-set-operation-all:
 	bash ./scripts/commit-sql-set-operation-all.sh
 
+.PHONY: benchmark-differential-group-min-max
+benchmark-differential-group-min-max:
+	bash ./scripts/benchmark-differential-group-min-max.sh
+
+.PHONY: test-differential-group-min-max
+test-differential-group-min-max:
+	bash ./scripts/test-differential-group-min-max.sh
+
+.PHONY: format-differential-group-min-max
+format-differential-group-min-max:
+	bash ./scripts/format-differential-group-min-max.sh
+
+.PHONY: verify-differential-group-min-max
+verify-differential-group-min-max:
+	bash ./scripts/verify-differential-group-min-max.sh
+
+.PHONY: commit-differential-group-min-max
+commit-differential-group-min-max:
+	bash ./scripts/commit-differential-group-min-max.sh
+
 .PHONY: test-sql-set-operation-all
 test-sql-set-operation-all:
 	bash ./scripts/test-sql-set-operation-all.sh

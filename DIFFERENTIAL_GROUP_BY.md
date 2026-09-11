@@ -86,6 +86,32 @@ negative or overflow `int64`. Classify failures with `errors.Is` against
 `hatSql.ErrDifferentialGroupByCountOverflow`. A nil key callback returns
 `hatSql.ErrDifferentialGroupByKeyRequired`.
 
+## Differential grouped MIN/MAX
+
+`GroupMinMaxInt64DifferentialRows` maintains `MIN` and `MAX` together for
+callback-defined groups over signed `int64` differential updates. Its output
+rows use `Row["min"]` and `Row["max"]` and follow the same retraction-then-
+insertion convention as the other grouped differential aggregates.
+
+```go
+changes, err := hatSql.GroupMinMaxInt64DifferentialRows(updates,
+	func(row hatSql.SQLRow) string { return row["team"].(string) },
+	func(row hatSql.SQLRow) (int64, error) { return row["score"].(int64), nil },
+)
+```
+
+Each group retains a multiplicity map keyed by value. Positive updates and
+removals that do not eliminate the current endpoint are constant-time; a
+removal of the current minimum or maximum scans that group's distinct values
+to find the replacement. Duplicate weights are exact, negative group or
+value multiplicities are rejected, and callback or overflow errors return no
+partial output. Updates that do not change the visible minimum or maximum
+produce no output.
+
+The retained value map is the cost of supporting exact out-of-order
+retractions. The API is batch-scoped and opt-in; existing COUNT and SUM paths
+are unchanged.
+
 ## Measured Cost
 
 Benchmark command:
