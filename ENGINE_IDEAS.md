@@ -62,7 +62,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-033 | Distributed query fan-out | One query cannot plan and merge reads from multiple independent nodes. | High |
 | CH-034 | Parallel replicas | No coordinated replica reads that divide ranges and merge ordered results. | High |
 | CH-035 | Remote shard pruning | No shard-level predicate routing before distributed execution. | High |
-| CH-036 | `ASOF JOIN` | No nearest-prior temporal join over sorted keys. | High |
+| CH-036 | `ASOF JOIN` | Partially adopted: constrained `ASOF [LEFT] JOIN` with one equality and one temporal inequality, keyed right-side buckets, and binary search. | High |
 | CH-037 | `ARRAY JOIN` | No row-expanding array join operator with SQL NULL semantics. | Medium |
 | CH-038 | Aggregate combinators | No systematic `If`, `OrNull`, `State`, or `Merge` aggregate variants. | Medium |
 | CH-039 | Approximate distinct/quantile sketches | No bounded-error HyperLogLog or quantile state for large cardinalities. | Medium |

@@ -5490,9 +5490,10 @@ type sqlSourceFieldType struct {
 	token sqlToken
 }
 type sqlJoin struct {
-	kind   string
-	source sqlSource
-	on     sqlExpr
+	kind     string
+	source   sqlSource
+	on       sqlExpr
+	asofLeft bool
 }
 type sqlSelectItem struct {
 	expr  sqlExpr
@@ -5713,6 +5714,15 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, p.diagnostic(p.current(), "ARRAY JOIN requires FROM first")
 			}
 			join, err := p.parseArrayJoin()
+			if err != nil {
+				return nil, err
+			}
+			q.joins = append(q.joins, join)
+		case p.keyword("ASOF"):
+			if q.from == nil {
+				return nil, p.diagnostic(p.current(), "ASOF JOIN requires FROM first")
+			}
+			join, err := p.parseAsofJoin()
 			if err != nil {
 				return nil, err
 			}
@@ -10464,6 +10474,17 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					}
 				}
 				metrics.record("ARRAY JOIN", sqlExplainExpression(join.on)+" AS "+join.source.alias, inputRows, len(next), started)
+				rows = next
+				leftAliases = append(leftAliases, join.source.alias)
+				continue
+			}
+			if join.kind == "ASOF" {
+				inputRows := len(rows)
+				next, err := executeSQLAsofJoin(rows, join, leftAliases, resolver, ctes, metrics, control, maxRows)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				metrics.record("ASOF JOIN", joinDescription(join), inputRows, len(next), started)
 				rows = next
 				leftAliases = append(leftAliases, join.source.alias)
 				continue

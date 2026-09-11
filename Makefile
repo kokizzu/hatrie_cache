@@ -8895,6 +8895,32 @@ push-ch048-numeric-predicate-kernel:
 audit-next-engine-idea:
 	bash scripts/audit-next-engine-idea.sh
 
+test-ch036-asof-join:
+	bash scripts/test-ch036-asof-join.sh
+
+format-ch036-asof-join:
+	bash scripts/format-ch036-asof-join.sh
+
+benchmark-ch036-asof-join-baseline:
+	bash scripts/benchmark-ch036-asof-join.sh baseline
+
+benchmark-ch036-asof-join-current:
+	bash scripts/benchmark-ch036-asof-join.sh current
+
+benchmark-ch036-asof-join: format-ch036-asof-join
+	bash scripts/benchmark-ch036-asof-join.sh
+
+review-ch036-asof-join:
+	bash scripts/review-ch036-asof-join.sh
+
+commit-ch036-asof-join:
+	bash scripts/commit-ch036-asof-join.sh
+
+push-ch036-asof-join:
+	bash scripts/push-ch036-asof-join.sh
+
+deliver-ch036-asof-join: test-ch036-asof-join benchmark-ch036-asof-join review-ch036-asof-join commit-ch036-asof-join push-ch036-asof-join
+
 test-ch030-group-key-budget:
 	bash scripts/test-ch030-group-key-budget.sh
 

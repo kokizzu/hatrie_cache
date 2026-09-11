@@ -633,6 +633,37 @@ bytes are shown above. The feature is a resource guard: its useful result is
 bounded high-cardinality failure behavior, while the positive-limit control
 path is CPU-neutral in this run and has no measured allocation cost.
 
+## SQL ASOF JOIN
+
+This microbenchmark measures the nearest-match kernel for one equality key
+plus one temporal inequality. The baseline scans all 8,192 right rows for
+each of 2,048 left rows. The optimized path builds 128 keyed right-side
+buckets once, sorts each bucket, and uses binary search for each left row.
+Input construction and bucket construction are outside the timed lookup
+loop. This is not an end-to-end SQL, storage, or network benchmark.
+
+### Raw Runs
+
+| Path | Run 1 (ns/op) | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 | Run 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Baseline HEAD: nested scan | 49,406,578 | 47,996,102 | 44,764,545 | 45,568,836 | 48,709,184 | 46,438,369 | 45,564,482 |
+| Current worktree: nested scan | 46,945,271 | 46,694,573 | 46,904,160 | 46,437,554 | 44,837,375 | 47,072,855 | 45,259,242 |
+| Current worktree: buckets + binary search | 159,969 | 152,286 | 157,414 | 155,846 | 157,769 | 158,324 | 149,181 |
+
+### Median And Cost
+
+| Comparison | Median ns/op | Allocations | Improvement |
+|---|---:|---:|---:|
+| Baseline nested scan | 46,438,369 | 0 B/op, 0 allocs/op | 1.00x |
+| Current nested scan | 46,694,573 | 0 B/op, 0 allocs/op | 0.99x vs baseline |
+| Current buckets + binary search | 157,414 | 0 B/op, 0 allocs/op | 295.01x vs baseline |
+
+The current nested-scan control is within normal run-to-run noise of the
+baseline checkout, so the measured gain is attributable to the bucketed
+lookup algorithm rather than unrelated changes. The optimized benchmark
+does not charge the one-time right-side indexing work to each lookup; full
+query workloads should measure that build cost separately.
+
 ## SQL Indexed ORDER BY LIMIT Materialization
 
 Compatible materialized queries now consume the ordered JSON field index without

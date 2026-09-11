@@ -4392,6 +4392,13 @@ see the measured CPU and transient-memory tradeoff in
 [`SQL_PARALLEL_ROW_BINARY.md`](SQL_PARALLEL_ROW_BINARY.md) and
 [`BENCHMARK.md`](BENCHMARK.md#ch-047-parallel-rowbinary-decode).
 
+## SQL ASOF JOIN
+
+Use `ASOF JOIN` for nearest temporal matches within an equality key, or
+`ASOF LEFT JOIN` when unmatched left rows must be retained. The supported
+syntax, null behavior, limits, and examples are documented in
+[SQL_ASOF_JOIN.md](SQL_ASOF_JOIN.md).
+
 ## SQL GROUP BY Key Limit
 
 High-cardinality aggregations can be bounded per query with
