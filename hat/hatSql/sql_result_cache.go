@@ -67,6 +67,7 @@ func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
 		options.MaxSortBytes == 0 &&
 		options.MaxGroupBytes == 0 &&
 		options.MaxGroupRowsPerKey == 0 &&
+		options.MaxGroupKeys == 0 &&
 		options.MaxSetBytes == 0 &&
 		options.SpillDirectory == "" &&
 		options.MaxSpillBytes == 0 &&

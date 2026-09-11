@@ -114,7 +114,7 @@ func mergeSQLOrderedAggregate(destination *sqlOrderedAggregate, source sqlOrdere
 }
 
 func executeSQLHashGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) error) error, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
-	if control != nil && control.options.MaxGroupBytes > 0 {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.options.MaxGroupKeys > 0) {
 		return SQLQueryResult{}, false, nil
 	}
 	projections, ok := sqlOrderedGroupProjections(q)

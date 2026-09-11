@@ -8895,6 +8895,28 @@ push-ch048-numeric-predicate-kernel:
 audit-next-engine-idea:
 	bash scripts/audit-next-engine-idea.sh
 
+test-ch030-group-key-budget:
+	bash scripts/test-ch030-group-key-budget.sh
+
+format-ch030-group-key-budget:
+	bash scripts/format-ch030-group-key-budget.sh
+
+benchmark-ch030-group-key-budget-baseline:
+	bash scripts/benchmark-ch030-group-key-budget.sh baseline
+
+benchmark-ch030-group-key-budget: format-ch030-group-key-budget
+	bash scripts/benchmark-ch030-group-key-budget.sh
+
+review-ch030-group-key-budget:
+	bash scripts/review-ch030-group-key-budget.sh
+
+commit-ch030-group-key-budget:
+	bash scripts/commit-ch030-group-key-budget.sh
+
+push-ch030-group-key-budget:
+	bash scripts/push-ch030-group-key-budget.sh
+
+deliver-ch030-group-key-budget: test-ch030-group-key-budget benchmark-ch030-group-key-budget review-ch030-group-key-budget commit-ch030-group-key-budget push-ch030-group-key-budget
 test-m065t-boolean-predicate-kernel:
 	bash scripts/test-m065t-boolean-predicate-kernel.sh
 

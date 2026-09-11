@@ -209,6 +209,9 @@ type SQLQueryOptions struct {
 	// It is an opt-in skew guard for workloads where one key must not dominate
 	// aggregate CPU, memory, or spill work.
 	MaxGroupRowsPerKey int
+	// MaxGroupKeys rejects a GROUP BY once it creates more distinct keys. Zero
+	// preserves the existing unbounded behavior and keeps the default off.
+	MaxGroupKeys int
 	// MaxSetBytes bounds one in-memory distinct UNION, INTERSECT, or EXCEPT
 	// operation.
 	// When combined with SpillDirectory and MaxSpillBytes, oversized distinct
@@ -1198,8 +1201,10 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlRunningWindowStreamable(query) {
 		return executeSQLRunningWindowStream(ctx, query, resolver, control, visit)
 	}
-	if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
-		return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
+	if control == nil || control.options.MaxGroupKeys <= 0 {
+		if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
+			return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
+		}
 	}
 	if _, handled, err := executeSQLStreamedSpilledGroupAggregate(query, resolver, control, nil, visit); handled {
 		return err
@@ -7472,7 +7477,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
+	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if !options.Collation.valid() {
@@ -10911,7 +10916,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, err
 		}
 	}
-	if control != nil && control.options.MaxGroupBytes > 0 && control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
+	if control != nil && control.options.MaxGroupBytes > 0 && control.options.MaxGroupKeys <= 0 && control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
 		result, handled, err := executeSQLSpilledGroupAggregate(q, rows, control, metrics)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -10922,16 +10927,23 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	}
 	started = time.Now()
 	inputRows := len(rows)
+	maxGroupKeys := 0
+	if control != nil {
+		maxGroupKeys = control.options.MaxGroupKeys
+	}
 	var groups [][]sqlExecRow
 	if indexOrdered && len(q.groupBy) > 0 {
-		groups, err = groupSQLRowsOrdered(rows, q.groupBy, q)
+		groups, err = groupSQLRowsOrderedWithLimit(rows, q.groupBy, q, maxGroupKeys)
 	} else {
-		groups, err = groupSQLRows(rows, q.groupBy, q)
+		groups, err = groupSQLRowsWithLimit(rows, q.groupBy, q, maxGroupKeys)
 	}
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
 	if control != nil {
+		if err := sqlCheckGroupKeys(groups, control.options.MaxGroupKeys); err != nil {
+			return SQLQueryResult{}, err
+		}
 		if err := sqlCheckGroupRowsPerKey(groups, control.options.MaxGroupRowsPerKey); err != nil {
 			return SQLQueryResult{}, err
 		}
@@ -14829,6 +14841,10 @@ func sqlHashJoinKey(value interface{}) (string, bool) {
 }
 
 func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow, error) {
+	return groupSQLRowsWithLimit(rows, by, q, 0)
+}
+
+func groupSQLRowsWithLimit(rows []sqlExecRow, by []sqlExpr, q *sqlQuery, maximum int) ([][]sqlExecRow, error) {
 	if len(by) == 0 {
 		if !sqlQueryHasAggregate(q) {
 			out := make([][]sqlExecRow, len(rows))
@@ -14855,6 +14871,9 @@ func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow,
 		}
 		key := strings.Join(parts, "\x00")
 		if _, ok := groups[key]; !ok {
+			if maximum > 0 && len(order) >= maximum {
+				return nil, fmt.Errorf("SQL group key limit exceeded: query produced more than %d groups", maximum)
+			}
 			order = append(order, key)
 		}
 		groups[key] = append(groups[key], row)
@@ -14872,8 +14891,12 @@ func groupSQLRows(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow,
 // the grouping hash table while retaining all group rows for aggregate
 // semantics and existing group-memory accounting.
 func groupSQLRowsOrdered(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlExecRow, error) {
+	return groupSQLRowsOrderedWithLimit(rows, by, q, 0)
+}
+
+func groupSQLRowsOrderedWithLimit(rows []sqlExecRow, by []sqlExpr, q *sqlQuery, maximum int) ([][]sqlExecRow, error) {
 	if len(by) == 0 {
-		return groupSQLRows(rows, by, q)
+		return groupSQLRowsWithLimit(rows, by, q, maximum)
 	}
 	out := make([][]sqlExecRow, 0, len(rows))
 	previousKey := ""
@@ -14888,6 +14911,9 @@ func groupSQLRowsOrdered(rows []sqlExecRow, by []sqlExpr, q *sqlQuery) ([][]sqlE
 		}
 		key := strings.Join(parts, "\x00")
 		if index == 0 || key != previousKey {
+			if maximum > 0 && len(out) >= maximum {
+				return nil, fmt.Errorf("SQL group key limit exceeded: query produced more than %d groups", maximum)
+			}
 			out = append(out, []sqlExecRow{row})
 			previousKey = key
 			continue
@@ -14907,6 +14933,13 @@ func sqlCheckGroupRowsPerKey(groups [][]sqlExecRow, maximum int) error {
 		}
 	}
 	return nil
+}
+
+func sqlCheckGroupKeys(groups [][]sqlExecRow, maximum int) error {
+	if maximum <= 0 || len(groups) <= maximum {
+		return nil
+	}
+	return fmt.Errorf("SQL group key limit exceeded: query produced %d groups, maximum %d", len(groups), maximum)
 }
 
 type sqlOrderedGroupProjection struct {
@@ -15150,7 +15183,7 @@ func sqlAddSpillGroupAggregate(state *sqlSpillGroupAggregate, definition *sqlOrd
 // group field, allowing sorted spill-run merging to preserve query order and
 // source-order floating-point accumulation without retaining group rows.
 func sqlCanStreamSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
-	if q == nil || q.from == nil || control == nil || control.options.MaxGroupBytes <= 0 || control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.from.fieldTypes) != 0 {
+	if q == nil || q.from == nil || control == nil || control.options.MaxGroupBytes <= 0 || control.options.MaxGroupKeys > 0 || control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.from.fieldTypes) != 0 {
 		return false
 	}
 	if q.from.kind == "CACHE" {

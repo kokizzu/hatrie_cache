@@ -56,7 +56,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-027 | Background-task observability | Partially adopted: `CompactionScheduler.Stats()` exposes queue depth, in-flight work, and success/failure counters; task-specific bytes, age, and TTL metrics remain provider-owned. | Low |
 | CH-028 | Query `max_threads` setting | Worker count is not exposed as a stable SQL/session setting with admission checks. | Low |
 | CH-029 | User/key quotas | No rolling per-user query/bytes/CPU quota enforcement. | Medium |
-| CH-030 | Query complexity limits | No limits for rows, joins, expressions, aggregation groups, or result bytes in SQL syntax. | Medium |
+| CH-030 | Query complexity limits | Partially adopted: SQL options already bound rows, joins, results, bytes, skew, and now total `GROUP BY` keys; per-expression and CPU quotas remain future work. | Medium |
 | CH-031 | Persistent query log | Implemented as an opt-in privacy-safe newline-delimited JSON log attached to `SQLQueryManager`; terminal status survives process restart without retaining SQL text, sources, parameters, or cancellation reasons. | Low |
 | CH-032 | Query profiler samples | No sampled operator CPU/blocking profile attached to a query ID. | Medium |
 | CH-033 | Distributed query fan-out | One query cannot plan and merge reads from multiple independent nodes. | High |

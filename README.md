@@ -4392,6 +4392,14 @@ see the measured CPU and transient-memory tradeoff in
 [`SQL_PARALLEL_ROW_BINARY.md`](SQL_PARALLEL_ROW_BINARY.md) and
 [`BENCHMARK.md`](BENCHMARK.md#ch-047-parallel-rowbinary-decode).
 
+## SQL GROUP BY Key Limit
+
+High-cardinality aggregations can be bounded per query with
+`hatSql.SQLQueryOptions.MaxGroupKeys`, or per namespace with
+`hatSql.NamespaceResourceLimits.MaxGroupKeys`. The default `0` keeps the
+existing behavior. See [SQL group key limits](SQL_GROUP_KEY_LIMIT.md) for
+error semantics, fast-path fallback rules, and measurements.
+
 ## Explicit Regional Routing
 
 Use [`hatPartition.PrefixRouter`](REGIONAL_PARTITION_ROUTING.md) when keys have

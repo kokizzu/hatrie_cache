@@ -56,7 +56,7 @@ func sqlColumnarVectorGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (string
 }
 
 func executeSQLColumnarVectorGroupAggregate(q *sqlQuery, columnar SQLColumnarSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
-	if control != nil && control.options.MaxGroupBytes > 0 {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.options.MaxGroupKeys > 0) {
 		return SQLQueryResult{}, false, nil
 	}
 	groupField, projections, fields, ok := sqlColumnarVectorGroupAggregatePlan(q, outer)
@@ -76,7 +76,7 @@ func executeSQLColumnarVectorGroupAggregateRows(q *sqlQuery, resolver SQLSourceR
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
-	if control != nil && control.options.MaxGroupBytes > 0 {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.options.MaxGroupKeys > 0) {
 		return SQLQueryResult{}, false, nil
 	}
 	groupField, projections, fields, ok := sqlColumnarVectorGroupAggregatePlan(q, nil)
@@ -92,6 +92,9 @@ func executeSQLColumnarVectorGroupAggregateRows(q *sqlQuery, resolver SQLSourceR
 }
 
 func executeSQLColumnarVectorGroupAggregateBatchFromQuery(q *sqlQuery, batch ColumnarBatch, functions SQLFunctionResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.options.MaxGroupKeys > 0) {
+		return SQLQueryResult{}, false, nil
+	}
 	groupField, projections, fields, ok := sqlColumnarVectorGroupAggregatePlan(q, nil)
 	if !ok {
 		return SQLQueryResult{}, false, nil
@@ -104,7 +107,7 @@ func executeSQLColumnarVectorGroupAggregateBatchFromQuery(q *sqlQuery, batch Col
 // table and lets the aggregate loop operate on aligned source columns without
 // constructing a sqlExecRow or source map for every input row.
 func executeSQLColumnarVectorGroupAggregateBatch(q *sqlQuery, batch ColumnarBatch, functions SQLFunctionResolver, groupField string, projections []sqlOrderedGroupProjection, fields []string, control *sqlExecutionControl, metrics *sqlExecutionMetrics, visit func([]string, SQLRow) error) (SQLQueryResult, bool, error) {
-	if control != nil && control.options.MaxGroupBytes > 0 {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.options.MaxGroupKeys > 0) {
 		return SQLQueryResult{}, false, nil
 	}
 	if batch.Rows < 0 {

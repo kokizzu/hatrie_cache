@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -113,6 +114,17 @@ func TestSQLColumnarVectorGroupAggregateHonorsGroupSkewLimit(t *testing.T) {
 	_, err := ExecuteSQLQueryParameters(context.Background(), "SELECT region, COUNT(*) AS n FROM CACHE('items') GROUP BY region", resolver, nil, SQLQueryOptions{MaxGroupRowsPerKey: 1})
 	if err == nil {
 		t.Fatal("expected group skew limit error")
+	}
+}
+
+func TestSQLColumnarVectorGroupAggregateHonorsGroupKeyLimit(t *testing.T) {
+	resolver := newSQLVectorColumnarResolver()
+	_, err := ExecuteSQLQueryParameters(context.Background(), "SELECT region, COUNT(*) AS n FROM CACHE('items') GROUP BY region", resolver, nil, SQLQueryOptions{MaxGroupKeys: 1})
+	if err == nil || !strings.Contains(err.Error(), "SQL group key limit exceeded") {
+		t.Fatalf("group key limit error = %v, want group key limit error", err)
+	}
+	if resolver.rowCalls == 0 {
+		t.Fatalf("source calls = columnar %d, row %d; want the guarded fallback to reach row execution", resolver.columnarCalls, resolver.rowCalls)
 	}
 }
 

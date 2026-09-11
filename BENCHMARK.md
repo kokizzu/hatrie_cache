@@ -603,6 +603,36 @@ and projected rows are still materialized for compatibility, while the sort
 working set and final candidate set are bounded by the number of groups times
 the requested per-group limit.
 
+## CH-030 GROUP BY Key Limit
+
+The focused benchmark grouped 4,096 in-memory rows into 256 keys on an AMD
+Ryzen 9 5950X. Each case ran seven samples with `-benchmem`. The baseline is
+repository `HEAD`; the guarded case enables a positive `MaxGroupKeys` value
+that is not exceeded.
+
+| Case | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Baseline `HEAD` | 1,248,090 | 1,448,517 | 9,494 | 1.00x |
+| Current default (`MaxGroupKeys: 0`) | 1,240,472 | 1,448,520 | 9,494 | 1.01x faster than baseline |
+| Current guarded positive limit | 1,242,718 | 1,448,515 | 9,494 | 0.18% slower than current default |
+
+Raw samples:
+
+| Sample | Baseline ns/op | Current default ns/op | Current guarded ns/op |
+|---:|---:|---:|---:|
+| 1 | 1,263,608 | 1,214,824 | 1,254,182 |
+| 2 | 1,221,860 | 1,217,944 | 1,250,865 |
+| 3 | 1,199,781 | 1,228,112 | 1,236,417 |
+| 4 | 1,281,333 | 1,314,173 | 1,267,981 |
+| 5 | 1,261,141 | 1,240,472 | 1,230,391 |
+| 6 | 1,227,780 | 1,302,107 | 1,242,718 |
+| 7 | 1,248,090 | 1,245,210 | 1,169,755 |
+
+All samples reported `1,448,5xx B/op` and `9,494 allocs/op`; the exact median
+bytes are shown above. The feature is a resource guard: its useful result is
+bounded high-cardinality failure behavior, while the positive-limit control
+path is CPU-neutral in this run and has no measured allocation cost.
+
 ## SQL Indexed ORDER BY LIMIT Materialization
 
 Compatible materialized queries now consume the ordered JSON field index without

@@ -26,24 +26,25 @@ type NamespaceResourceLimits struct {
 	MaxConcurrentQueries int
 	// MaxQueuedQueries bounds waiters behind MaxConcurrentQueries. Zero keeps
 	// the existing unlimited-waiter behavior.
-	MaxQueuedQueries      int
+	MaxQueuedQueries int
 	// MaxQueriesPerWindow limits admitted executions in QueryWindow. Zero
 	// disables the quota. A zero QueryWindow uses one minute when the quota is
 	// enabled.
 	MaxQueriesPerWindow int
 	QueryWindow         time.Duration
-	MaxRows              int
-	MaxJoinWork          int
-	MaxJoinBytes         int
-	MaxResultBytes       int
-	MaxWorkers           int
-	MaxSortBytes         int
-	MaxGroupBytes        int
-	MaxSetBytes          int
-	MaxSpillBytes        int
-	MaxRecursionDepth    int
-	Timeout              time.Duration
-	SpillDirectory       string
+	MaxRows             int
+	MaxJoinWork         int
+	MaxJoinBytes        int
+	MaxResultBytes      int
+	MaxWorkers          int
+	MaxSortBytes        int
+	MaxGroupBytes       int
+	MaxGroupKeys        int
+	MaxSetBytes         int
+	MaxSpillBytes       int
+	MaxRecursionDepth   int
+	Timeout             time.Duration
+	SpillDirectory      string
 }
 
 // Apply tightens options to this namespace policy. Positive policies are upper
@@ -57,6 +58,7 @@ func (limits NamespaceResourceLimits) Apply(options SQLQueryOptions) SQLQueryOpt
 	options.Workers = applyPositiveLimit(options.Workers, limits.MaxWorkers)
 	options.MaxSortBytes = applyPositiveLimit(options.MaxSortBytes, limits.MaxSortBytes)
 	options.MaxGroupBytes = applyPositiveLimit(options.MaxGroupBytes, limits.MaxGroupBytes)
+	options.MaxGroupKeys = applyPositiveLimit(options.MaxGroupKeys, limits.MaxGroupKeys)
 	options.MaxSetBytes = applyPositiveLimit(options.MaxSetBytes, limits.MaxSetBytes)
 	options.MaxSpillBytes = applyPositiveLimit(options.MaxSpillBytes, limits.MaxSpillBytes)
 	options.MaxRecursionDepth = applyPositiveLimit(options.MaxRecursionDepth, limits.MaxRecursionDepth)
@@ -109,6 +111,7 @@ func (limits NamespaceResourceLimits) validate() error {
 		{"max workers", limits.MaxWorkers},
 		{"max sort bytes", limits.MaxSortBytes},
 		{"max group bytes", limits.MaxGroupBytes},
+		{"max group keys", limits.MaxGroupKeys},
 		{"max set bytes", limits.MaxSetBytes},
 		{"max spill bytes", limits.MaxSpillBytes},
 		{"max recursion depth", limits.MaxRecursionDepth},
@@ -185,6 +188,7 @@ func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) Namespac
 		MaxWorkers:           applyPositiveLimit(defaults.MaxWorkers, override.MaxWorkers),
 		MaxSortBytes:         applyPositiveLimit(defaults.MaxSortBytes, override.MaxSortBytes),
 		MaxGroupBytes:        applyPositiveLimit(defaults.MaxGroupBytes, override.MaxGroupBytes),
+		MaxGroupKeys:         applyPositiveLimit(defaults.MaxGroupKeys, override.MaxGroupKeys),
 		MaxSetBytes:          applyPositiveLimit(defaults.MaxSetBytes, override.MaxSetBytes),
 		MaxSpillBytes:        applyPositiveLimit(defaults.MaxSpillBytes, override.MaxSpillBytes),
 		MaxRecursionDepth:    applyPositiveLimit(defaults.MaxRecursionDepth, override.MaxRecursionDepth),
@@ -306,11 +310,11 @@ func (quota *namespaceQueryQuota) allow(now time.Time) bool {
 // namespaceQueryGate bounds one namespace while admitting waiters in arrival
 // order. A canceled waiter is removed before it can consume a released slot.
 type namespaceQueryGate struct {
-	mu       sync.Mutex
-	capacity int
+	mu        sync.Mutex
+	capacity  int
 	maxQueued int
-	running  int
-	waiters  []*namespaceQueryWaiter
+	running   int
+	waiters   []*namespaceQueryWaiter
 }
 
 type namespaceQueryWaiter struct {
