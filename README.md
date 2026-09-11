@@ -13,6 +13,7 @@ security guidance before exposing it on a network.
 - Explicit ClickHouse-style early SQL filter: [SQL PREWHERE](SQL_PREWHERE.md)
 - Ordered SQL range pruning: [SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md)
 - SQL partition range pruning: [SQL_PARTITION_RANGE_PRUNING.md](SQL_PARTITION_RANGE_PRUNING.md)
+- SQL value-at-extreme aggregates: [SQL_ARG_EXTREME.md](SQL_ARG_EXTREME.md)
 - Compiled SQL performance path: [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md)
 - Incremental numeric RANGE windows: [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md)
 - Read-only SQL operational catalog: [SQL system tables](SYSTEM_TABLES.md)

@@ -14471,6 +14471,62 @@ Memory summary:
 ```
 
 <!-- END GENERATED COMMAND BENCHMARK RAW RESULTS -->
+## SQL ARGMAX and ARGMIN
+
+This benchmark compares the new `ARGMAX`/`ARGMIN` aggregate query with the
+common two-query workaround that sorts by the ordering field and uses
+`LIMIT 1`. It uses 10,000 deterministic rows, five samples per benchmark,
+and an AMD Ryzen 9 5950X. The direct query returns both payloads in one scan;
+the workaround executes one ordered query for each extreme.
+
+| Workload | Implementation | Median time | Bytes/op | Allocs/op | x faster | x less bytes | x fewer allocs |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Global | `ARGMAX` + `ARGMIN` stream | 1,028,248 ns | 5,816 | 25 | 1.29x | 1.43x | 1.84x |
+| Global | Two `ORDER BY ... LIMIT 1` queries | 1,322,109 ns | 8,328 | 46 | control | control | control |
+| Filtered | `ARGMAX` + `ARGMIN` stream | 1,155,990 ns | 6,984 | 31 | 2.21x | 1.50x | 1.74x |
+| Filtered | Two filtered `ORDER BY ... LIMIT 1` queries | 2,549,926 ns | 10,504 | 54 | control | control | control |
+
+The ratios are control divided by the direct implementation. This is a
+replacement-workflow comparison, not a claim that every aggregate query is
+faster. Complex expressions and resource-limited queries retain the general
+SQL evaluator.
+
+### Raw Five-Run Output
+
+```text
+BenchmarkSQLArgExtreme-32
+1135 1032845 ns/op 5816 B/op 25 allocs/op
+1161 1018248 ns/op 5816 B/op 25 allocs/op
+1179  979917 ns/op 5816 B/op 25 allocs/op
+1279 1024108 ns/op 5816 B/op 25 allocs/op
+1161 1053278 ns/op 5816 B/op 25 allocs/op
+
+BenchmarkSQLArgExtremeSortWorkaround-32
+ 810 1329761 ns/op 8328 B/op 46 allocs/op
+ 912 1322109 ns/op 8328 B/op 46 allocs/op
+ 907 1326939 ns/op 8328 B/op 46 allocs/op
+ 902 1279601 ns/op 8328 B/op 46 allocs/op
+ 894 1261636 ns/op 8328 B/op 46 allocs/op
+
+BenchmarkSQLArgExtremeFiltered-32
+ 915 1123274 ns/op 6984 B/op 31 allocs/op
+1074 1160735 ns/op 6984 B/op 31 allocs/op
+1016 1198033 ns/op 6984 B/op 31 allocs/op
+ 990 1155990 ns/op 6984 B/op 31 allocs/op
+ 878 1150341 ns/op 6984 B/op 31 allocs/op
+
+BenchmarkSQLArgExtremeFilteredSortWorkaround-32
+ 513 2554970 ns/op 10504 B/op 54 allocs/op
+ 470 2549926 ns/op 10504 B/op 54 allocs/op
+ 459 2596535 ns/op 10504 B/op 54 allocs/op
+ 463 2504291 ns/op 10504 B/op 54 allocs/op
+ 469 2542721 ns/op 10504 B/op 54 allocs/op
+```
+
+The direct path is about 1.29x faster for the global workload and 2.21x
+faster for the filtered workload, while using fewer bytes and allocations in
+both cases.
+
 ## Gaps Versus Redis
 
 HAT-trie cache intentionally does not try to implement the entire Redis command

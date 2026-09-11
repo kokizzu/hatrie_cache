@@ -66,7 +66,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-037 | `ARRAY JOIN` | No row-expanding array join operator with SQL NULL semantics. | Medium |
 | CH-038 | Aggregate combinators | No systematic `If`, `OrNull`, `State`, or `Merge` aggregate variants. | Medium |
 | CH-039 | Approximate distinct/quantile sketches | No bounded-error HyperLogLog or quantile state for large cardinalities. | Medium |
-| CH-040 | `argMax`/`argMin` aggregates | No value-at-extreme aggregate that keeps a selected payload with the winning key. | Low |
+| CH-040 | `argMax`/`argMin` aggregates | Implemented for ordinary, grouped, filtered, and window aggregates, with a constant-state stream fast path for eligible global scans. | Low |
 | CH-041 | `GROUPING SETS`/`ROLLUP`/`CUBE` | No multi-level grouping expansion with grouping identifiers. | High |
 | CH-042 | Sampling key execution | `SAMPLE` is not a storage-aware deterministic sampling stage. | Medium |
 | CH-043 | Gap filling/interpolation | No ordered time-bucket fill with explicit interpolation behavior. | Medium |

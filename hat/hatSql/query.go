@@ -785,6 +785,13 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		streamed.QueryID = observation.id
 		return streamed, streamErr
 	}
+	if metrics == nil && control.options.MaxResultBytes <= 0 {
+		if aggregates, ok := sqlArgExtremeMaterializedPlan(query); ok {
+			result, aggregateErr := executeSQLArgExtremeMaterialized(ctx, query, resolver, control, aggregates)
+			result.QueryID = observation.id
+			return result, aggregateErr
+		}
+	}
 	var err error
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
 	if options.IndexAdvisor != nil {
@@ -3067,12 +3074,16 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 }
 
 type sqlStreamAggregate struct {
-	name  string
-	arg   *sqlExpr
-	count int64
-	sum   float64
-	value float64
-	seen  bool
+	name      string
+	arg       *sqlExpr
+	order     *sqlExpr
+	collation SQLCollation
+	count     int64
+	sum       float64
+	value     float64
+	selected  interface{}
+	extreme   interface{}
+	seen      bool
 }
 
 // sqlGlobalStreamAggregates recognizes the constant-state aggregate subset.
@@ -3104,6 +3115,12 @@ func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
 			}
 			argument := expr.args[0]
 			aggregate.arg = &argument
+		case "ARGMAX", "ARGMIN":
+			if len(expr.args) != 2 || expr.filter != nil || !sqlSimpleStreamAggregateExpr(expr.args[0]) || !sqlSimpleStreamAggregateExpr(expr.args[1]) {
+				return nil, false
+			}
+			argument, order := expr.args[0], expr.args[1]
+			aggregate.arg, aggregate.order, aggregate.collation = &argument, &order, expr.collation
 		default:
 			return nil, false
 		}
@@ -3117,6 +3134,21 @@ func (aggregate *sqlStreamAggregate) add(row sqlExecRow) error {
 }
 
 func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExecRow) error {
+	if sqlArgExtremeAggregate(aggregate.name) {
+		if aggregate.arg == nil || aggregate.order == nil {
+			return fmt.Errorf("%s aggregate state is incomplete", aggregate.name)
+		}
+		argument := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(argument); err != nil {
+			return err
+		}
+		value := evalSQLExpr(*aggregate.order, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(value); err != nil {
+			return err
+		}
+		updateSQLArgExtreme(aggregate.name, &aggregate.selected, &aggregate.extreme, &aggregate.seen, argument, value, aggregate.collation)
+		return nil
+	}
 	if aggregate.name == "COUNT" && aggregate.arg == nil {
 		aggregate.count++
 		return nil
@@ -3171,11 +3203,58 @@ func (aggregate sqlStreamAggregate) result() interface{} {
 		if aggregate.seen {
 			return aggregate.value
 		}
+	case "ARGMAX", "ARGMIN":
+		if aggregate.seen {
+			return aggregate.selected
+		}
 	}
 	return nil
 }
 
+func sqlSimpleStreamAggregateExpr(expr sqlExpr) bool {
+	return expr.kind == "field" || expr.kind == "literal"
+}
+
+func sqlStreamAggregateSourceValue(expr sqlExpr, row SQLRow, alias string) (interface{}, bool) {
+	switch expr.kind {
+	case "literal":
+		return expr.value, true
+	case "field":
+		if expr.qualifier != "" && !strings.EqualFold(expr.qualifier, alias) {
+			return nil, false
+		}
+		if value, ok := row[expr.name]; ok {
+			return value, true
+		}
+		for name, value := range row {
+			if strings.EqualFold(name, expr.name) {
+				return value, true
+			}
+		}
+		return nil, true
+	default:
+		return nil, false
+	}
+}
+
+func (aggregate *sqlStreamAggregate) addSourceRow(row SQLRow, alias string) error {
+	if !sqlArgExtremeAggregate(aggregate.name) || aggregate.arg == nil || aggregate.order == nil {
+		return fmt.Errorf("%s aggregate is not a direct source aggregate", aggregate.name)
+	}
+	argument, ok := sqlStreamAggregateSourceValue(*aggregate.arg, row, alias)
+	if !ok {
+		return fmt.Errorf("%s aggregate argument is not a direct source expression", aggregate.name)
+	}
+	value, ok := sqlStreamAggregateSourceValue(*aggregate.order, row, alias)
+	if !ok {
+		return fmt.Errorf("%s aggregate ordering expression is not a direct source expression", aggregate.name)
+	}
+	updateSQLArgExtreme(aggregate.name, &aggregate.selected, &aggregate.extreme, &aggregate.seen, argument, value, aggregate.collation)
+	return nil
+}
+
 func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error, aggregates []sqlStreamAggregate) error {
+	directArgExtreme := sqlArgExtremeDirectSourcePlan(query, aggregates)
 	inputRows := 0
 	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
@@ -3184,6 +3263,26 @@ func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resol
 		inputRows++
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		if directArgExtreme {
+			if query.where.kind != "" {
+				matched, valid, predicateErr := sqlStreamAggregateSourcePredicate(query.where, sourceRow, query.from.alias)
+				if predicateErr != nil {
+					return predicateErr
+				}
+				if !valid {
+					return fmt.Errorf("SQL argMax/argMin direct path received an unsupported predicate")
+				}
+				if !matched {
+					return nil
+				}
+			}
+			for index := range aggregates {
+				if err := aggregates[index].addSourceRow(sourceRow, query.from.alias); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		row := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
 		if query.where.kind != "" {
@@ -6829,7 +6928,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
-				case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG":
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG":
 				default:
 					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
 				}
@@ -10920,7 +11019,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if item.expr.window == nil {
 			continue
 		}
-		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "AVG" && item.expr.name != "MIN" && item.expr.name != "MAX" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
+		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "AVG" && item.expr.name != "MIN" && item.expr.name != "MAX" && item.expr.name != "ARGMAX" && item.expr.name != "ARGMIN" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
 			return SQLQueryResult{}, fmt.Errorf("SQL window function %q is not supported", item.expr.name)
 		}
 		for _, output := range out {
@@ -11051,6 +11150,24 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 						}
 					}
 					out[index].row[result.Columns[column]] = sqlWindowAggregate(item.expr.name, values)
+				case "ARGMAX", "ARGMIN":
+					start, end := sqlWindowFrameBounds(item.expr.window.frame, position, len(indexes))
+					if item.expr.window.frame != nil && item.expr.window.frame.kind == "RANGE" {
+						var err error
+						start, end, err = sqlRangeWindowFrameBounds(item.expr.window.frame, item.expr.window.order[0], rangeValues, position)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+					}
+					frame := make([]sqlExecRow, 0, end-start+1)
+					for framePosition := start; framePosition <= end; framePosition++ {
+						frame = append(frame, out[indexes[framePosition]].group...)
+					}
+					value, err := evalSQLArgExtreme(item.expr, frame)
+					if err != nil {
+						return SQLQueryResult{}, err
+					}
+					out[index].row[result.Columns[column]] = value
 				case "LAG", "LEAD":
 					if len(item.expr.args) < 1 || len(item.expr.args) > 3 {
 						return SQLQueryResult{}, fmt.Errorf("%s window function expects one to three arguments", item.expr.name)
@@ -15337,7 +15454,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -15655,6 +15772,12 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			if expr.name == "AVG" {
 				result /= float64(len(values))
+			}
+			return result
+		case "ARGMAX", "ARGMIN":
+			result, err := evalSQLArgExtreme(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
 			}
 			return result
 		}
@@ -16090,7 +16213,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "CONTAINS", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false

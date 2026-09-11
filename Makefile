@@ -1764,6 +1764,7 @@ commit-sql-range-partition-pruning:
 push-sql-range-partition-pruning:
 	bash ./scripts/push-sql-range-partition-pruning.sh
 
+
 format-sql-time-partition-pruning:
 	sh ./scripts/format-sql-time-partition-pruning.sh
 
@@ -8829,3 +8830,38 @@ commit-engine-idea-catalog:
 
 push-engine-idea-catalog:
 	bash scripts/push-engine-idea-catalog.sh
+.PHONY: test-ch040-arg-extreme
+test-ch040-arg-extreme:
+	bash ./scripts/test-ch040-arg-extreme.sh
+
+.PHONY: benchmark-ch040-arg-extreme
+benchmark-ch040-arg-extreme:
+	bash ./scripts/benchmark-ch040-arg-extreme.sh
+
+.PHONY: format-ch040-arg-extreme
+format-ch040-arg-extreme:
+	bash ./scripts/format-ch040-arg-extreme.sh
+
+.PHONY: test-ch040-sql-package
+test-ch040-sql-package:
+	bash ./scripts/test-ch040-sql-package.sh
+
+.PHONY: test-race-ch040-arg-extreme
+test-race-ch040-arg-extreme:
+	bash ./scripts/test-race-ch040-arg-extreme.sh
+
+.PHONY: vet-ch040-arg-extreme
+vet-ch040-arg-extreme:
+	bash ./scripts/vet-ch040-arg-extreme.sh
+.PHONY: verify-ch040-docs
+verify-ch040-docs:
+	@bash ./scripts/verify-ch040-docs.sh
+.PHONY: review-ch040-arg-extreme
+review-ch040-arg-extreme:
+	@bash ./scripts/review-ch040-arg-extreme.sh
+.PHONY: commit-ch040-arg-extreme
+commit-ch040-arg-extreme:
+	@bash ./scripts/commit-ch040-arg-extreme.sh
+.PHONY: push-ch040-arg-extreme
+push-ch040-arg-extreme:
+	@bash ./scripts/push-ch040-arg-extreme.sh
