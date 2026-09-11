@@ -132,6 +132,7 @@ func applySQLQueryCollation(query *sqlQuery, collation SQLCollation) {
 		applySQLExprCollation(&query.selects[index].expr, collation)
 	}
 	applySQLExprCollation(&query.where, collation)
+	applySQLExprCollation(&query.prewhere, collation)
 	for index := range query.groupBy {
 		applySQLExprCollation(&query.groupBy[index], collation)
 	}

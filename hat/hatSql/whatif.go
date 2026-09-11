@@ -279,7 +279,7 @@ func inferSQLWhatIfIndexKind(query sqlQuery) SQLWhatIfIndexKind {
 	if len(query.groupBy) > 0 {
 		return SQLWhatIfIndexGroup
 	}
-	if predicates, ok := sqlWhatIfPredicates(query.where, query.from.alias); ok && len(predicates) > 0 {
+	if predicates, ok := sqlWhatIfPredicates(sqlCombinedWhere(&query), query.from.alias); ok && len(predicates) > 0 {
 		for _, predicate := range predicates {
 			if predicate.operator != "=" {
 				return SQLWhatIfIndexRange
@@ -295,7 +295,7 @@ func analyzeSQLWhatIfShape(query sqlQuery, index SQLWhatIfIndex) (sqlWhatIfShape
 	notes := []string{}
 	switch index.Kind {
 	case SQLWhatIfIndexEquality:
-		predicates, ok := sqlWhatIfPredicates(query.where, query.from.alias)
+		predicates, ok := sqlWhatIfPredicates(sqlCombinedWhere(&query), query.from.alias)
 		if !ok || len(predicates) == 0 {
 			return shape, []string{"equality indexes require one or more simple field = literal predicates"}
 		}
@@ -310,7 +310,7 @@ func analyzeSQLWhatIfShape(query sqlQuery, index SQLWhatIfIndex) (sqlWhatIfShape
 		shape.fields = sqlWhatIfPredicateFields(predicates)
 		shape.benefit = "reduces equality-filtered rows read"
 	case SQLWhatIfIndexRange:
-		predicates, ok := sqlWhatIfPredicates(query.where, query.from.alias)
+		predicates, ok := sqlWhatIfPredicates(sqlCombinedWhere(&query), query.from.alias)
 		if !ok || len(predicates) != 1 || !sqlWhatIfContains(index.Fields, predicates[0].field) || !sqlWhatIfRangeOperator(predicates[0].operator) {
 			return shape, []string{"range indexes require one simple numeric field range predicate"}
 		}

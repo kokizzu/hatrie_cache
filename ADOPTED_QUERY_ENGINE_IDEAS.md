@@ -7,6 +7,7 @@ explicitly opt-in operational control.
 
 | Source | Idea | Status | Evidence |
 |---|---|---|---|
+| ClickHouse | Explicit SQL `PREWHERE` / late materialization | Adopted for stream-capable single-source reads | `PREWHERE` is evaluated before `WHERE` and projection on the narrow `StreamSourceResolver` path; specialized index, columnar, and ordered resolvers retain a combined predicate until they have an explicit two-stage contract. The measured fixture is 2.95x faster, 5.67x lower heap, and 2.29x fewer allocations. [SQL_PREWHERE.md](SQL_PREWHERE.md), [BENCHMARK.md](BENCHMARK.md#explicit-prewhere-stage) |
 | Tarantool | Partition split and merge tooling | Adopted as an explicit operator planning API | `hatPartition.PlanSplit`, `PlanMerge`, and `PlanResize` validate adjacent power-of-two layouts and provide deterministic allocation-free per-key routes plus an inspectable move mapping. They do not move data or enable partitioning; automatic online migration remains deferred. [PARTITION_RESIZE.md](PARTITION_RESIZE.md) |
 | Materialize | Coordinated progress frontier | Adopted | `SQLProjectionRetentionFrontier` commits journal retention only after all configured runners succeed. [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md) |
 | Materialize | Shared arrangements | Adopted | `TypedTableAggregateArrangements` shares exact aggregate state among identical definitions, and `TypedTableJoinArrangements` shares exact incremental equi-joins. [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md), [TYPED_TABLES.md](TYPED_TABLES.md) |

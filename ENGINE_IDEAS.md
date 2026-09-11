@@ -22,9 +22,12 @@ and [Tarantool Vinyl](https://www.tarantool.io/en/doc/latest/platform/engines/vi
 
 ## ClickHouse candidates
 
+Candidates remain listed for traceability. Implemented ideas are recorded in
+[ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md).
+
 | ID | Candidate not yet complete here | Current gap and likely value | Initial risk |
 | --- | --- | --- | --- |
-| CH-001 | `PREWHERE` stage | No separate early column filter exists for avoiding wide-row materialization; useful for selective reads. | Low |
+| CH-001 | Explicit `PREWHERE` stage | Implemented for stream-capable single-source reads; specialized physical plans still use a combined predicate. | Low |
 | CH-002 | Sparse primary-key mark pruning | No ordered mark index maps key ranges to compact read marks; could reduce source scans. | Medium |
 | CH-003 | Partition-key pruning | SQL does not prune physical partitions from a validated partition predicate. | Medium |
 | CH-004 | `FINAL` read semantics | No query-time reconciliation of replacing or collapsing versions. | High |
@@ -187,8 +190,8 @@ and [Tarantool Vinyl](https://www.tarantool.io/en/doc/latest/platform/engines/vi
 
 ## Selection order
 
-The first implementation candidates should be additive and measurable: query
-`PREWHERE`/late materialization, persistent backup manifests, background task
+The first implementation candidates beyond the adopted rows should be additive
+and measurable: persistent backup manifests, background task
 metrics, SQL planner statistics, and bounded TTL expiration. Consensus,
 distributed fan-out, durable dataflow state, and automatic repartitioning need
 separate designs because they affect backup, recovery, and correctness across

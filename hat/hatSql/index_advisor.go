@@ -166,7 +166,7 @@ func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlEx
 			}
 		}
 	}
-	fields := sqlIndexAdvisorPredicateFields(query.where, query.from.alias)
+	fields := sqlIndexAdvisorPredicateFields(sqlCombinedWhere(query), query.from.alias)
 	coveringField, coveringColumns, covering := sqlIndexAdvisorCoveringProjection(query)
 	if len(fields) == 0 && !covering {
 		return
@@ -202,7 +202,7 @@ func sqlIndexAdvisorCoveringProjection(query *sqlQuery) (string, []string, bool)
 	if len(fields) < 2 {
 		return "", nil, false
 	}
-	predicateField, _, ok := sqlCoveringIndexedEquality(*query.from, query.where)
+	predicateField, _, ok := sqlCoveringIndexedEquality(*query.from, sqlCombinedWhere(query))
 	if !ok {
 		return "", nil, false
 	}

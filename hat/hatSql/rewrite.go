@@ -25,6 +25,7 @@ func rewriteSQLQuery(query *sqlQuery) {
 		query.selects[index].expr = rewriteSQLExpr(query.selects[index].expr)
 	}
 	query.where = rewriteSQLExpr(query.where)
+	query.prewhere = rewriteSQLExpr(query.prewhere)
 	query.groupBy = rewriteSQLExprs(query.groupBy)
 	query.having = rewriteSQLExpr(query.having)
 	for index := range query.orderBy {

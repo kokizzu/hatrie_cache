@@ -214,7 +214,7 @@ func sqlAutoNativeDataflowBaseEligible(query *sqlQuery, resolver SQLSourceResolv
 	if query.from.kind != "CACHE" && query.from.kind != "KEYS" {
 		return false
 	}
-	if query.explain || query.sample != nil || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
+	if query.explain || query.sample != nil || query.prewhere.kind != "" || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
 		return false
 	}
 	if options.Collation != "" || options.Optimizer != nil || options.Workers != 0 || options.IndexHint.Source != "" || options.IndexHint.Field != "" || options.IndexHint.Mode != "" || options.AdaptivePlanner != nil || options.IndexAdvisor != nil || options.ProjectionAdvisor != nil || options.IndexUseRecorder != nil || options.SlowQueryRecorder != nil {

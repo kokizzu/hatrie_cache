@@ -77,7 +77,7 @@ func sqlQueryHasSubqueryExpression(query *sqlQuery) bool {
 			return true
 		}
 	}
-	if sqlExprHasSubqueryExpression(query.where) || sqlExprHasSubqueryExpression(query.having) {
+	if sqlExprHasSubqueryExpression(query.where) || sqlExprHasSubqueryExpression(query.prewhere) || sqlExprHasSubqueryExpression(query.having) {
 		return true
 	}
 	for _, expression := range query.groupBy {

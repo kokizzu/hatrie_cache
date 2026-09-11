@@ -8698,6 +8698,36 @@ push-m052y-auto-native-composite-grouped-ordered:
 inspect-engine-ideas:
 	bash scripts/inspect-engine-ideas.sh
 
+.PHONY: inspect-sql-prewhere test-ch001-prewhere benchmark-ch001-prewhere format-ch001-prewhere test-race-ch001-prewhere vet-ch001-prewhere
+inspect-sql-prewhere:
+	bash scripts/inspect-sql-prewhere.sh
+
+test-ch001-prewhere:
+	bash scripts/test-ch001-prewhere.sh
+
+benchmark-ch001-prewhere:
+	bash scripts/benchmark-ch001-prewhere.sh
+
+format-ch001-prewhere:
+	bash scripts/format-ch001-prewhere.sh
+
+test-race-ch001-prewhere:
+	bash scripts/test-race-ch001-prewhere.sh
+
+vet-ch001-prewhere:
+	bash scripts/vet-ch001-prewhere.sh
+
+.PHONY: review-ch001-prewhere
+review-ch001-prewhere:
+	bash scripts/review-ch001-prewhere.sh
+
+.PHONY: commit-ch001-prewhere push-ch001-prewhere
+commit-ch001-prewhere:
+	bash scripts/commit-ch001-prewhere.sh
+
+push-ch001-prewhere:
+	bash scripts/push-ch001-prewhere.sh
+
 .PHONY: commit-engine-idea-catalog push-engine-idea-catalog
 commit-engine-idea-catalog:
 	bash scripts/commit-engine-idea-catalog.sh

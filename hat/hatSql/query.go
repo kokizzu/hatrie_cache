@@ -735,6 +735,9 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl, observation sqlQueryObservation, operatorSteps *[]SQLExplainStep) (SQLQueryResult, error) {
 	var result SQLQueryResult
 	result.QueryID = observation.id
+	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
+		query = sqlQueryWithCombinedPrewhere(query)
+	}
 	if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
 		if control.options.MaxRows > 0 && len(projection.Rows) > control.options.MaxRows {
 			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.options.MaxRows)
@@ -1110,6 +1113,9 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 }
 
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
+		query = sqlQueryWithCombinedPrewhere(query)
+	}
 	if _, handled, err := executeSQLColumnarVectorGroupAggregateRows(query, resolver, control, nil, visit); handled {
 		return err
 	}
@@ -1254,6 +1260,15 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	emitRow := func(execRow sqlExecRow) error {
 		if err := control.check(); err != nil {
 			return err
+		}
+		if query.prewhere.kind != "" {
+			value, err := evalSQLStreamExpr(query.prewhere, execRow, functions)
+			if err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
 		}
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
@@ -5007,6 +5022,9 @@ func bindSQLQuery(query *sqlQuery, parameters []interface{}) error {
 	if err := bindSQLExpr(&query.where, parameters); err != nil {
 		return err
 	}
+	if err := bindSQLExpr(&query.prewhere, parameters); err != nil {
+		return err
+	}
 	for index := range query.groupBy {
 		if err := bindSQLExpr(&query.groupBy[index], parameters); err != nil {
 			return err
@@ -5164,6 +5182,7 @@ func cloneSQLQuery(source *sqlQuery) *sqlQuery {
 		query.joins[index].on = cloneSQLExpr(join.on)
 	}
 	query.where = cloneSQLExpr(source.where)
+	query.prewhere = cloneSQLExpr(source.prewhere)
 	query.groupBy = cloneSQLExprs(source.groupBy)
 	query.groupingSets = cloneSQLGroupingSets(source.groupingSets)
 	query.groupingDimensions = cloneSQLExprs(source.groupingDimensions)
@@ -5282,6 +5301,7 @@ type sqlQuery struct {
 	from               *sqlSource
 	joins              []sqlJoin
 	where              sqlExpr
+	prewhere           sqlExpr
 	groupBy            []sqlExpr
 	groupingSets       [][]sqlExpr
 	groupingDimensions []sqlExpr
@@ -5585,6 +5605,16 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.where = expr
+		case p.keyword("PREWHERE"):
+			if q.prewhere.kind != "" {
+				return nil, p.diagnostic(p.current(), "PREWHERE appears more than once")
+			}
+			p.next()
+			expr, err := p.parseCondition()
+			if err != nil {
+				return nil, err
+			}
+			q.prewhere = expr
 		case p.keyword("GROUP"):
 			if q.groupBy != nil || q.groupingSets != nil {
 				return nil, p.diagnostic(p.current(), "GROUP BY appears more than once")
@@ -5716,7 +5746,7 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			if strings.EqualFold(p.current().text, "JION") {
 				return nil, p.expected(p.current(), "JOIN", []string{"JOIN"})
 			}
-			return nil, p.expected(p.current(), "SELECT, FROM, JOIN, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, or OFFSET", []string{"SELECT", "FROM", "JOIN", "LEFT", "CROSS", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET"})
+			return nil, p.expected(p.current(), "SELECT, FROM, JOIN, WHERE, PREWHERE, GROUP BY, HAVING, ORDER BY, LIMIT, or OFFSET", []string{"SELECT", "FROM", "JOIN", "LEFT", "CROSS", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET"})
 		}
 	}
 	if q.from == nil {
@@ -6970,6 +7000,9 @@ func (p *sqlQueryParser) resolveSQLNamedWindows(query *sqlQuery) error {
 	if err := resolve(&query.where); err != nil {
 		return err
 	}
+	if err := resolve(&query.prewhere); err != nil {
+		return err
+	}
 	if err := resolve(&query.having); err != nil {
 		return err
 	}
@@ -7237,13 +7270,13 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
 }
 func sqlSuspectedClauseTypo(value string) bool {
-	return nearestSQLName(value, []string{"SELECT", "FROM", "JOIN", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET"}) != ""
+	return nearestSQLName(value, []string{"SELECT", "FROM", "JOIN", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET"}) != ""
 }
 
 type sqlExecRow struct {
@@ -10123,6 +10156,9 @@ func sqlColumnarNumericMatches(number float64, operator string, value float64) b
 }
 
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
+	if q != nil && q.prewhere.kind != "" && !sqlPrewhereStreamable(q, resolver) {
+		q = sqlQueryWithCombinedPrewhere(q)
+	}
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -11650,6 +11686,9 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			leftAliases = append(leftAliases, join.source.alias)
 		}
 	}
+	if query.prewhere.kind != "" {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "PREWHERE", Detail: sqlExplainExpression(query.prewhere)})
+	}
 	if query.where.kind != "" {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "FILTER", Detail: sqlExplainExpression(query.where)})
 	}
@@ -12041,7 +12080,7 @@ func sqlQueryPartitionPredicates(query *sqlQuery) []SQLPartitionPredicate {
 	if query == nil || query.from == nil || query.sample != nil || query.from.kind != "CACHE" && query.from.kind != "KEYS" {
 		return nil
 	}
-	return sqlPartitionPredicates(*query.from, query.where, len(query.joins) == 0)
+	return sqlPartitionPredicates(*query.from, sqlCombinedWhere(query), len(query.joins) == 0)
 }
 
 func sqlPartitionPredicates(source sqlSource, condition sqlExpr, allowUnqualified bool) []SQLPartitionPredicate {
@@ -14387,7 +14426,7 @@ func sqlMergeSpillGroupPassParallel(runs []sqlSpillGroupRun, order sqlOrder, dir
 }
 
 func sqlCanPushBaseWhere(query *sqlQuery) bool {
-	if sqlExprHasSubqueryExpression(query.where) {
+	if sqlExprHasSubqueryExpression(query.where) || sqlExprHasSubqueryExpression(query.prewhere) {
 		return false
 	}
 	for _, join := range query.joins {
@@ -15178,7 +15217,7 @@ func sqlQueryHasAggregate(q *sqlQuery) bool {
 			return true
 		}
 	}
-	return sqlExprHasAggregate(q.having)
+	return sqlExprHasAggregate(q.having) || sqlExprHasAggregate(q.prewhere)
 }
 
 func sqlQueryHasWindow(q *sqlQuery) bool {
@@ -15190,7 +15229,7 @@ func sqlQueryHasWindow(q *sqlQuery) bool {
 			return true
 		}
 	}
-	if sqlExprHasWindow(q.having) || sqlExprHasWindow(q.where) {
+	if sqlExprHasWindow(q.having) || sqlExprHasWindow(q.where) || sqlExprHasWindow(q.prewhere) {
 		return true
 	}
 	for _, item := range q.groupBy {
@@ -16396,6 +16435,7 @@ func QuerySourceNamesParameters(source string, parameters []interface{}) ([]stri
 			visitSQLExpressionSubqueries(item.expr, visitQuery)
 		}
 		visitSQLExpressionSubqueries(candidate.where, visitQuery)
+		visitSQLExpressionSubqueries(candidate.prewhere, visitQuery)
 		visitSQLExpressionSubqueries(candidate.having, visitQuery)
 		for _, expression := range candidate.groupBy {
 			visitSQLExpressionSubqueries(expression, visitQuery)

@@ -15297,6 +15297,31 @@ Median: 2.39x lower latency, 24.6x lower heap, and 2.00x fewer allocations.
 This is an in-process resolver benchmark; network, JSON decoding, and storage
 latencies are excluded.
 
+## Explicit PREWHERE Stage
+
+Command: `make benchmark-ch001-prewhere`. This compares the ordinary
+single-predicate path with the ClickHouse-inspired explicit `PREWHERE` stage.
+The fixture has 20,000 rows, keeps one in sixteen rows in the early boolean
+predicate, and places an expensive string predicate first in the ordinary
+baseline. The fallback resolver is also measured to make its compatibility cost
+visible.
+
+Raw five-sample output on Linux, AMD Ryzen 9 5950X:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) |
+| --- | --- | --- | --- |
+| Ordinary `WHERE`, stream resolver | 11,252,924; 11,148,118; 11,284,432; 11,523,257; 11,336,560 | 2,793,467; 2,793,509; 2,793,475; 2,793,490; 2,793,475 | 100,768; 100,769; 100,769; 100,769; 100,768 |
+| Explicit `PREWHERE`, stream resolver | 3,821,507; 3,795,922; 3,852,449; 3,822,869; 3,847,893 | 492,881; 493,317; 492,857; 493,028; 493,089 | 44,032; 44,037; 44,032; 44,034; 44,034 |
+| Ordinary `WHERE`, materialized resolver | 12,906,560; 12,898,595; 12,954,853; 12,918,144; 12,848,015 | 2,961,665; 2,961,643; 2,961,650; 2,962,534; 2,963,424 | 100,845; 100,845; 100,845; 100,854; 100,863 |
+| Explicit `PREWHERE`, materialized fallback | 12,978,235; 12,932,641; 12,836,066; 12,904,424; 12,950,996 | 3,041,910; 3,041,911; 3,041,877; 3,041,901; 3,041,916 | 101,673; 101,673; 101,673; 101,673; 101,673 |
+
+Medians: explicit streaming `PREWHERE` is 2.95x faster, uses 5.67x less heap,
+and performs 2.29x fewer allocations than the ordinary streaming baseline.
+The materialized fallback is 0.2% slower, uses 2.7% more heap, and performs
+0.8% more allocations, which is the measured cost of retaining explicit syntax
+without changing specialized physical plans. Full usage and scope are in
+[SQL_PREWHERE.md](SQL_PREWHERE.md).
+
 ## Typed Arrangement Hydration
 
 Command: `make benchmark-typed-table-arrangement-hydration`.

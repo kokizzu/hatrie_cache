@@ -7,10 +7,14 @@ import (
 )
 
 func sqlPrewhereStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
-	if query == nil || resolver == nil || query.from == nil || query.where.kind == "" || query.limit == 0 || query.sample != nil || query.explain || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.joins) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || sqlQueryHasSubqueryExpression(query) {
+	if query == nil || resolver == nil || query.from == nil || query.prewhere.kind == "" && query.where.kind == "" || query.limit == 0 || query.sample != nil || query.explain || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.joins) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || sqlQueryHasSubqueryExpression(query) {
 		return false
 	}
 	if _, ok := resolver.(SQLStreamSourceResolver); !ok {
+		return false
+	}
+	switch resolver.(type) {
+	case SQLColumnarSourceResolver, SQLIndexedSourceResolver, SQLOrderedSourceResolver, SQLOrderedStreamSourceResolver:
 		return false
 	}
 	functions, _ := resolver.(SQLFunctionResolver)
@@ -19,10 +23,35 @@ func sqlPrewhereStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
 			return false
 		}
 	}
-	if sqlExprHasCustomFunction(query.where, functions) {
+	if sqlExprHasCustomFunction(query.prewhere, functions) || sqlExprHasCustomFunction(query.where, functions) {
 		return false
 	}
 	return true
+}
+
+func sqlCombinedWhere(query *sqlQuery) sqlExpr {
+	if query == nil || query.prewhere.kind == "" {
+		if query == nil {
+			return sqlExpr{}
+		}
+		return query.where
+	}
+	if query.where.kind == "" {
+		return query.prewhere
+	}
+	left := query.prewhere
+	right := query.where
+	return sqlExpr{kind: "binary", op: "AND", left: &left, right: &right, token: query.prewhere.token}
+}
+
+func sqlQueryWithCombinedPrewhere(query *sqlQuery) *sqlQuery {
+	if query == nil || query.prewhere.kind == "" {
+		return query
+	}
+	clone := *query
+	clone.where = sqlCombinedWhere(query)
+	clone.prewhere = sqlExpr{}
+	return &clone
 }
 
 // executeSQLPrewhereScan filters a stream before allocating projected result
@@ -50,12 +79,23 @@ func executeSQLPrewhereScan(query *sqlQuery, resolver SQLSourceResolver, ctes ma
 		execRows[0] = newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		sqlAttachSQLExecutionEnvironment(execRows, outer, environment)
 		execRow := execRows[0]
-		value := evalSQLExpr(query.where, execRows, execRow)
-		if err := sqlExpressionError(value); err != nil {
-			return err
+		if query.prewhere.kind != "" {
+			value := evalSQLExpr(query.prewhere, execRows, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
 		}
-		if !sqlTruthy(value) {
-			return nil
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, execRows, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
 		}
 		matched++
 		emit := matched > query.offset && (query.limit < 0 || len(result.Rows) < query.limit)
@@ -93,7 +133,14 @@ func executeSQLPrewhereScan(query *sqlQuery, resolver SQLSourceResolver, ctes ma
 		return SQLQueryResult{}, true, err
 	}
 	if metrics != nil {
-		metrics.record("PREWHERE SCAN", sqlExplainExpression(query.where), inputRows, matched, started)
+		detail := sqlExplainExpression(query.where)
+		if query.prewhere.kind != "" {
+			detail = sqlExplainExpression(query.prewhere)
+			if query.where.kind != "" {
+				detail += " THEN " + sqlExplainExpression(query.where)
+			}
+		}
+		metrics.record("PREWHERE SCAN", detail, inputRows, matched, started)
 		if !materializeStarted.IsZero() {
 			metrics.record("LATE MATERIALIZATION", strings.Join(columns, ","), matched, len(result.Rows), materializeStarted)
 		}
