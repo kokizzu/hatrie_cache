@@ -176,7 +176,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-037 | Audit log | No append-only operator/security audit stream with redacted command metadata. | Medium |
 | TT-038 | Roles and grants for commands | Command access is not modeled as a per-operation role/privilege matrix. | Medium |
 | TT-039 | Transparent credential rotation | Authentication credentials cannot rotate with overlapping validity and no restart. | Medium |
-| TT-040 | Space changefeed | Clients cannot subscribe to committed row changes by logical space. | High |
+| TT-040 | Space changefeed | Implemented as an opt-in `CommandJournal.SubscribeSpace` stream that replays and follows committed records for one exact logical space key while preserving global journal sequences. | High |
 | TT-041 | Crash-safe index resume | Implemented as an opt-in durable SQL JSON index rebuild checkpoint store with atomic file persistence, restart recovery, and retry-safe completion. | Medium |
 | TT-042 | Restore resume checkpoints | Implemented as opt-in deterministic staging reuse for bundle and incremental repository restore, with checksum revalidation, stale-entry pruning, and CLI/API controls. | Medium |
 | TT-043 | Maintenance read-only mode | No explicit mode rejects writes while allowing health, backup, and read traffic. | Low |

@@ -16,8 +16,9 @@ const (
 )
 
 var (
-	ErrCommandJournalSubscriptionReplayLimit = errors.New("hatriecache: journal subscription replay limit exceeded")
-	ErrCommandJournalSubscriptionOverflow    = errors.New("hatriecache: journal subscription buffer overflowed")
+	ErrCommandJournalSubscriptionReplayLimit   = errors.New("hatriecache: journal subscription replay limit exceeded")
+	ErrCommandJournalSubscriptionOverflow      = errors.New("hatriecache: journal subscription buffer overflowed")
+	ErrCommandJournalSubscriptionSpaceRequired = errors.New("hatriecache: journal subscription space is required")
 )
 
 const commandJournalSubscriptionEventBuffer = 1
@@ -38,11 +39,12 @@ type CommandJournalSubscribeOptions struct {
 // Err reports cancellation, overflow, compaction, or journal errors after the
 // records channel has closed (or while shutdown is in progress).
 type CommandJournalSubscription struct {
-	records chan CommandJournalRecord
-	events  chan CommandJournalRecord
-	stop    chan struct{}
-	done    chan struct{}
-	wake    <-chan struct{}
+	records  chan CommandJournalRecord
+	events   chan CommandJournalRecord
+	stop     chan struct{}
+	done     chan struct{}
+	wake     <-chan struct{}
+	spaceKey string
 
 	stopOnce sync.Once
 	errMu    sync.RWMutex
@@ -55,6 +57,24 @@ type CommandJournalSubscription struct {
 // larger than ReplayLimit is rejected so a caller never silently starts after
 // an unobserved gap.
 func (journal *CommandJournal) Subscribe(ctx context.Context, options CommandJournalSubscribeOptions) (*CommandJournalSubscription, error) {
+	return journal.subscribe(ctx, options, "")
+}
+
+// SubscribeSpace replays and follows only records whose command key exactly
+// matches space. The space value is a logical partition label for callers that
+// maintain a projection per cache key; unrelated journal sequences are skipped
+// while preserving the global journal cursor.
+func (journal *CommandJournal) SubscribeSpace(ctx context.Context, space string, options CommandJournalSubscribeOptions) (*CommandJournalSubscription, error) {
+	if journal == nil {
+		return nil, ErrNilCommandJournal
+	}
+	if space == "" {
+		return nil, ErrCommandJournalSubscriptionSpaceRequired
+	}
+	return journal.subscribe(ctx, options, space)
+}
+
+func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJournalSubscribeOptions, spaceKey string) (*CommandJournalSubscription, error) {
 	if journal == nil {
 		return nil, ErrNilCommandJournal
 	}
@@ -70,13 +90,19 @@ func (journal *CommandJournal) Subscribe(ctx context.Context, options CommandJou
 		return nil, err
 	}
 	subscription := &CommandJournalSubscription{
-		records: make(chan CommandJournalRecord, buffer),
-		events:  make(chan CommandJournalRecord, commandJournalSubscriptionEventBuffer),
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		records:  make(chan CommandJournalRecord, buffer),
+		events:   make(chan CommandJournalRecord, commandJournalSubscriptionEventBuffer),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+		spaceKey: spaceKey,
 	}
 	wake := journal.registerCommandJournalSubscription(subscription)
-	tail, err := journal.commandJournalSubscriptionTail(options.AfterSequence, replayLimit)
+	var tail CommandJournalTail
+	if spaceKey == "" {
+		tail, err = journal.commandJournalSubscriptionTail(options.AfterSequence, replayLimit)
+	} else {
+		tail, err = journal.commandJournalSubscriptionSpaceTail(options.AfterSequence, replayLimit, spaceKey)
+	}
 	if err != nil {
 		journal.unregisterCommandJournalSubscription(subscription)
 		return nil, err
@@ -135,6 +161,24 @@ func (journal *CommandJournal) commandJournalSubscriptionTail(afterSequence uint
 	}
 	journal.mu.Unlock()
 	return journal.Tail(afterSequence, limit)
+}
+
+func (journal *CommandJournal) commandJournalSubscriptionSpaceTail(afterSequence uint64, limit int, spaceKey string) (CommandJournalTail, error) {
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return CommandJournalTail{}, ErrCommandJournalClosed
+	}
+	tail, err := readCommandJournalSpaceTailSet(journal.path, journal.segmented(), afterSequence, limit, spaceKey)
+	if err != nil {
+		return CommandJournalTail{}, err
+	}
+	if afterSequence < tail.CompactedThrough {
+		tail.Entries = []CommandJournalRecord{}
+		tail.HasMore = false
+		return tail, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, tail.CompactedThrough)
+	}
+	return tail, nil
 }
 
 // Records returns the subscription's bounded record channel.
@@ -201,7 +245,11 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 					if record.Sequence <= nextSequence {
 						continue
 					}
-					if record.Sequence > nextSequence+1 {
+					if !subscription.matches(record) {
+						nextSequence = record.Sequence
+						continue
+					}
+					if record.Sequence > nextSequence+1 && subscription.spaceKey == "" {
 						if !subscription.stopped() {
 							subscription.setError(ErrCommandJournalClosed)
 						}
@@ -225,7 +273,11 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 			if record.Sequence <= nextSequence {
 				continue
 			}
-			if record.Sequence > nextSequence+1 {
+			if !subscription.matches(record) {
+				nextSequence = record.Sequence
+				continue
+			}
+			if record.Sequence > nextSequence+1 && subscription.spaceKey == "" {
 				wake = journal.commandJournalSubscriptionWake()
 				var err error
 				nextSequence, err = subscription.poll(journal, nextSequence)
@@ -306,6 +358,9 @@ func (journal *CommandJournal) notifyCommandJournalSubscriptions(records ...Comm
 	if len(records) > 0 {
 		for subscription := range journal.subscriptions {
 			for _, record := range records {
+				if !subscription.matches(record) {
+					continue
+				}
 				select {
 				case subscription.events <- record:
 				default:
@@ -322,6 +377,10 @@ func (journal *CommandJournal) notifyCommandJournalSubscriptions(records ...Comm
 	}
 	close(journal.subscriptionWake)
 	journal.subscriptionWake = make(chan struct{})
+}
+
+func (subscription *CommandJournalSubscription) matches(record CommandJournalRecord) bool {
+	return subscription.spaceKey == "" || record.Request.Key == subscription.spaceKey
 }
 
 func (subscription *CommandJournalSubscription) deliverLive(ctx context.Context, record CommandJournalRecord) error {
@@ -353,6 +412,10 @@ func (subscription *CommandJournalSubscription) poll(journal *CommandJournal, ne
 			return nextSequence, err
 		}
 		for _, record := range tail.Entries {
+			if !subscription.matches(record) {
+				nextSequence = record.Sequence
+				continue
+			}
 			select {
 			case subscription.records <- record:
 				nextSequence = record.Sequence

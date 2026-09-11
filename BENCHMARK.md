@@ -20534,6 +20534,41 @@ The exact command used was:
 ```sh
 make benchmark-mz010-journal-subscription
 ```
+
+## TT-040 Space Changefeed
+
+This benchmark compares an unfiltered journal subscription with the opt-in
+logical-space changefeed on the same 100-record journal. Half of the records
+use `space:orders` and half use `space:users`; the unfiltered case drains all
+100 records and the space case drains the 50 matching records. Samples were
+collected on an AMD Ryzen 9 5950X, `linux/amd64`, with five benchmark samples.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `CommandJournalSubscriptionReplayMixed100` | 83822, 83452, 83049, 83259, 82261 | 69792, 69789, 69789, 69791, 69788 | 521, 521, 521, 521, 521 |
+| `CommandJournalSpaceSubscriptionReplay50Of100` | 114292, 67594, 66589, 68819, 68699 | 49306, 49306, 49306, 49305, 49305 | 521, 521, 521, 521, 521 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative to unfiltered replay |
+| --- | ---: | ---: | ---: | --- |
+| Unfiltered replay of 100 | 83259 | 69789 | 521 | Baseline |
+| Space replay of 50 from 100 | 68699 | 49305 | 521 | `0.83x` CPU, `0.71x` bytes, same allocations |
+
+The space path filters during journal scanning and only materializes matching
+records, while preserving the global sequence cursor. The first page-based
+prototype was rejected before commit after measuring about `1.3x` CPU and
+`3.6x` allocated bytes on this workload. This is a local in-process benchmark,
+not a network bandwidth measurement.
+
+The exact command used was:
+
+```sh
+make benchmark-tt040-space-changefeed
+```
+
 ## MZ-011 Sink Connectors
 
 This benchmark compares the existing direct subscription drain with the new

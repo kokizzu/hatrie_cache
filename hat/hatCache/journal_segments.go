@@ -357,3 +357,31 @@ func readCommandJournalTailSet(path string, segmented bool, afterSequence uint64
 	}
 	return tail, nil
 }
+
+func readCommandJournalSpaceTailSet(path string, segmented bool, afterSequence uint64, limit int, spaceKey string) (CommandJournalTail, error) {
+	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
+	if limit > 0 {
+		tail.Limit = limit
+		tail.Entries = make([]CommandJournalRecord, 0, limit)
+	}
+	if _, err := scanCommandJournalSet(path, segmented, func(entry commandJournalEntry) error {
+		if entry.Sequence > tail.LastSequence {
+			tail.LastSequence = entry.Sequence
+		}
+		if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
+			tail.CompactedThrough = entry.Sequence
+		}
+		if entry.Checkpoint || entry.Sequence <= afterSequence || entry.Request.Key != spaceKey {
+			return nil
+		}
+		if limit > 0 && len(tail.Entries) >= limit {
+			tail.HasMore = true
+			return nil
+		}
+		tail.Entries = append(tail.Entries, CommandJournalRecord{Sequence: entry.Sequence, Request: entry.Request})
+		return nil
+	}); err != nil {
+		return CommandJournalTail{}, err
+	}
+	return tail, nil
+}

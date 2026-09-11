@@ -9617,6 +9617,24 @@ test-mz010-broad:
 	bash scripts/test-mz010-broad.sh
 benchmark-mz010-journal-subscription:
 	bash scripts/benchmark-mz010-journal-subscription.sh
+test-tt040-space-changefeed:
+	sh scripts/test-tt040-space-changefeed.sh
+format-tt040-space-changefeed:
+	sh scripts/format-tt040-space-changefeed.sh
+test-race-tt040-space-changefeed:
+	sh scripts/test-race-tt040-space-changefeed.sh
+benchmark-tt040-space-changefeed:
+	sh scripts/benchmark-tt040-space-changefeed.sh
+vet-tt040-space-changefeed:
+	sh scripts/vet-tt040-space-changefeed.sh
+verify-tt040-docs:
+	sh scripts/verify-tt040-docs.sh
+review-tt040-space-changefeed:
+	sh scripts/review-tt040-space-changefeed.sh
+commit-tt040-space-changefeed:
+	sh scripts/commit-tt040-space-changefeed.sh
+push-tt040-space-changefeed:
+	sh scripts/push-tt040-space-changefeed.sh
 status-mz010:
 	bash scripts/status-mz010.sh
 verify-mz010-docs:
