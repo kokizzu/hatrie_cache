@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestCompiledSQLNativeDataflowMatchesGroupedOrderedLimitedRows(t *testing.T) {
+func TestCompiledSQLNativeDataflowMatchesGroupedHavingOrderedLimitedRows(t *testing.T) {
 	rows := []SQLRow{
 		{"group": int64(2), "value": int64(20)},
 		{"group": int64(1), "value": int64(10)},
@@ -17,7 +17,7 @@ func TestCompiledSQLNativeDataflowMatchesGroupedOrderedLimitedRows(t *testing.T)
 		{"group": nil, "value": nil},
 		{"group": int64(3), "value": int64(7)},
 	}
-	query := "FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total, SUM(src.value) AS total_value GROUP BY src.group ORDER BY total DESC, bucket ASC LIMIT 2 OFFSET 1"
+	query := "FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total, SUM(src.value) AS total_value GROUP BY src.group HAVING COUNT(*) >= 2 ORDER BY total DESC, bucket ASC LIMIT 2 OFFSET 0"
 	compiled, err := CompileSQLQuery(query)
 	if err != nil {
 		t.Fatalf("compile SQL: %v", err)
@@ -31,19 +31,19 @@ func TestCompiledSQLNativeDataflowMatchesGroupedOrderedLimitedRows(t *testing.T)
 	})
 	ordinary, err := compiled.Execute(context.Background(), resolver, nil, SQLQueryOptions{})
 	if err != nil {
-		t.Fatalf("execute ordinary grouped ordered query: %v", err)
+		t.Fatalf("execute ordinary grouped HAVING query: %v", err)
 	}
 	actual, err := native.Execute(context.Background(), rows)
 	if err != nil {
-		t.Fatalf("execute native grouped ordered query: %v", err)
+		t.Fatalf("execute native grouped HAVING query: %v", err)
 	}
 	if !reflect.DeepEqual(actual, ordinary.Rows) {
 		t.Fatalf("native rows = %#v, ordinary rows = %#v", actual, ordinary.Rows)
 	}
 }
 
-func TestCompiledSQLNativeDataflowGroupedOrderedLimitChecksContext(t *testing.T) {
-	compiled, err := CompileSQLQuery("FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group ORDER BY total DESC LIMIT 1")
+func TestCompiledSQLNativeDataflowGroupedHavingOrderedLimitChecksContext(t *testing.T) {
+	compiled, err := CompileSQLQuery("FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group HAVING COUNT(*) > 0 ORDER BY total DESC LIMIT 1")
 	if err != nil {
 		t.Fatalf("compile SQL: %v", err)
 	}
@@ -58,11 +58,13 @@ func TestCompiledSQLNativeDataflowGroupedOrderedLimitChecksContext(t *testing.T)
 	}
 }
 
-func TestCompiledSQLNativeDataflowGroupedOrderedLimitRejectsUnsupportedShapes(t *testing.T) {
+func TestCompiledSQLNativeDataflowGroupedHavingRejectsUnsupportedShapes(t *testing.T) {
 	queries := []string{
-		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group ORDER BY COUNT(*) DESC LIMIT 1",
-		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group ORDER BY LOWER(bucket) LIMIT 1",
-		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group ORDER BY src.group LIMIT 1",
+		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group HAVING total > 0 ORDER BY total DESC LIMIT 1",
+		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group HAVING src.group > 0 ORDER BY total DESC LIMIT 1",
+		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group HAVING LOWER(bucket) = 'x' ORDER BY total DESC LIMIT 1",
+		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group HAVING missing > 0 ORDER BY total DESC LIMIT 1",
+		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) AS total GROUP BY src.group HAVING SUM(src.value) > 0 ORDER BY total DESC LIMIT 1",
 	}
 	for _, source := range queries {
 		compiled, err := CompileSQLQuery(source)

@@ -18761,3 +18761,38 @@ The pre-implementation ordinary-only median was `14,593,568 ns/op`,
 `18,719,092 B/op`, and `107,259 allocs/op`. The native path is opt-in through
 `CompileNativeDataflow`; unsupported `HAVING`, qualified source-field order,
 function order expressions, and `LIMIT WITH TIES` continue to fail closed.
+
+## Native SQL Dataflow Grouped HAVING
+
+Command:
+
+```text
+make benchmark-m052k-native-grouped-having
+```
+
+The benchmark groups 20,000 resolved rows into 512 integer groups, filters
+groups with `HAVING COUNT(*) >= 40`, orders by aggregate and group aliases,
+and returns `LIMIT 8 OFFSET 4`. The native path rewrites only selected,
+supported aggregate expressions in `HAVING`, then filters before bounded
+Top-N selection. Five paired `-benchmem` samples were measured on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary grouped HAVING sort | 11,033,950 | 15,948,190 | 84,693 | baseline |
+| Native grouped HAVING Top-N | 3,213,048 | 3,188,625 | 21,684 | 3.43x faster; 5.00x fewer bytes; 3.91x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 11,033,950 | 3,172,658 | 15,948,270 | 3,188,625 | 84,693 | 21,684 |
+| 2 | 11,281,757 | 3,232,312 | 15,948,365 | 3,188,625 | 84,693 | 21,684 |
+| 3 | 10,648,072 | 3,658,209 | 15,948,190 | 3,188,625 | 84,693 | 21,684 |
+| 4 | 11,111,809 | 3,213,048 | 15,948,119 | 3,188,625 | 84,692 | 21,684 |
+| 5 | 10,915,883 | 3,207,410 | 15,948,130 | 3,188,625 | 84,694 | 21,684 |
+
+The pre-implementation ordinary-only median was `10,793,093 ns/op`,
+`15,948,182 B/op`, and `84,692 allocs/op`. The feature remains opt-in;
+qualified or missing fields, unselected aggregate expressions, custom
+functions, and windowed `HAVING` expressions continue to fail closed.

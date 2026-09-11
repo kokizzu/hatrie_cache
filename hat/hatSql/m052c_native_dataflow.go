@@ -41,19 +41,22 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	if query.explain || query.sample != nil || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
 		return fmt.Errorf("%w: query contains non-scalar stages", ErrSQLNativeDataflowUnsupported)
 	}
-	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
+	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
 		return fmt.Errorf("%w: query requires materialized state", ErrSQLNativeDataflowUnsupported)
 	}
 	if query.where.kind != "" && !sqlStreamScalarExpr(query.where) {
 		return fmt.Errorf("%w: WHERE expression is not scalar", ErrSQLNativeDataflowUnsupported)
 	}
-	if len(query.orderBy) != 0 {
-		if len(query.groupBy) != 0 {
-			if _, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); !ok {
-				return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
-			}
-			return nil
+	if len(query.groupBy) != 0 && len(query.orderBy) != 0 {
+		if _, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); !ok {
+			return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
 		}
+		return nil
+	}
+	if query.having.kind != "" {
+		return fmt.Errorf("%w: query requires materialized state", ErrSQLNativeDataflowUnsupported)
+	}
+	if len(query.orderBy) != 0 {
 		if _, ok := nativeSQLDataflowOrderedPlanFor(query); !ok {
 			return fmt.Errorf("%w: ordered query shape", ErrSQLNativeDataflowUnsupported)
 		}
@@ -103,6 +106,7 @@ type nativeSQLDataflowGroupPlan struct {
 
 type nativeSQLDataflowGroupedOrderedPlan struct {
 	group           nativeSQLDataflowGroupPlan
+	having          sqlExpr
 	orders          []sqlOrder
 	orderProjection []int
 }
@@ -188,6 +192,14 @@ func nativeSQLDataflowGroupedOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowG
 		return nativeSQLDataflowGroupedOrderedPlan{}, false
 	}
 	columns := sqlColumns(query.selects)
+	having := query.having
+	if having.kind != "" {
+		var ok bool
+		having, ok = nativeSQLDataflowRewriteGroupedHaving(having, query, columns)
+		if !ok || !sqlStreamScalarExpr(having) || sqlExprHasAggregate(having) || sqlExprHasCustomFunction(having, nil) {
+			return nativeSQLDataflowGroupedOrderedPlan{}, false
+		}
+	}
 	orderProjection := make([]int, len(query.orderBy))
 	for orderIndex, order := range query.orderBy {
 		if order.expr.kind != "field" || order.expr.qualifier != "" {
@@ -214,9 +226,60 @@ func nativeSQLDataflowGroupedOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowG
 	}
 	return nativeSQLDataflowGroupedOrderedPlan{
 		group:           group,
+		having:          having,
 		orders:          append([]sqlOrder(nil), query.orderBy...),
 		orderProjection: orderProjection,
 	}, true
+}
+
+func nativeSQLDataflowRewriteGroupedHaving(expr sqlExpr, query *sqlQuery, columns []string) (sqlExpr, bool) {
+	if expr.kind == "field" || expr.kind == "star" || expr.query != nil || expr.window != nil || expr.filter != nil || len(expr.cases) != 0 {
+		return sqlExpr{}, false
+	}
+	if expr.kind == "func" {
+		for index, item := range query.selects {
+			if item.expr.kind != "func" {
+				continue
+			}
+			if _, ok := nativeSQLDataflowAggregateExpression(item.expr); !ok {
+				continue
+			}
+			if sqlExpressionsStructurallyEqual(expr, item.expr) {
+				return sqlExpr{kind: "field", name: columns[index]}, true
+			}
+		}
+		name := strings.ToUpper(expr.name)
+		switch name {
+		case "COUNT", "SUM", "AVG", "MIN", "MAX":
+			return sqlExpr{}, false
+		}
+	}
+	rewritten := expr
+	if expr.left != nil {
+		left, ok := nativeSQLDataflowRewriteGroupedHaving(*expr.left, query, columns)
+		if !ok {
+			return sqlExpr{}, false
+		}
+		rewritten.left = &left
+	}
+	if expr.right != nil {
+		right, ok := nativeSQLDataflowRewriteGroupedHaving(*expr.right, query, columns)
+		if !ok {
+			return sqlExpr{}, false
+		}
+		rewritten.right = &right
+	}
+	if len(expr.args) != 0 {
+		rewritten.args = make([]sqlExpr, len(expr.args))
+		for index, argument := range expr.args {
+			rewrittenArgument, ok := nativeSQLDataflowRewriteGroupedHaving(argument, query, columns)
+			if !ok {
+				return sqlExpr{}, false
+			}
+			rewritten.args[index] = rewrittenArgument
+		}
+	}
+	return rewritten, true
 }
 
 func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, bool) {
@@ -440,6 +503,15 @@ func executeNativeSQLDataflowGroupedOrdered(ctx context.Context, query *sqlQuery
 	for ordinal, row := range grouped {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if plan.having.kind != "" {
+			havingValue, err := evalSQLStreamExpr(plan.having, newSQLSingleSourceExecRow("", row), nil)
+			if err != nil {
+				return nil, fmt.Errorf("native dataflow HAVING group %d: %w", ordinal+1, err)
+			}
+			if !sqlTruthy(havingValue) {
+				continue
+			}
 		}
 		candidate := sqlTopNStreamItem{row: row, ordinal: ordinal}
 		if len(plan.orderProjection) == 1 {

@@ -431,3 +431,25 @@ bounded Top-N heap over the grouped rows instead of fully sorting the result.
 
 The feature is opt-in. Only finite pages ordered by unqualified selected output
 names are admitted; unsupported grouped ordering remains on the ordinary path.
+
+### Native Grouped HAVING Measurement
+
+Command:
+
+```text
+make benchmark-m052k-native-grouped-having
+```
+
+This measures grouped `COUNT(*)`/`SUM(int64)` output with
+`HAVING COUNT(*) >= 40`, aggregate-alias and group-alias ordering, and
+`LIMIT 8 OFFSET 4`. Supported aggregate expressions in `HAVING` are rewritten
+to their selected output values after grouping, filtered before the bounded
+Top-N heap, and compared with the ordinary executor.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary grouped HAVING sort | 11,033,950 | 15,948,190 | 84,693 | baseline |
+| Native grouped HAVING Top-N | 3,213,048 | 3,188,625 | 21,684 | 3.43x faster; 5.00x fewer bytes; 3.91x fewer allocations |
+
+Only finite grouped pages with supported selected aggregate expressions are
+admitted; unsupported `HAVING` expressions remain on the ordinary path.

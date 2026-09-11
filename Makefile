@@ -8298,3 +8298,35 @@ commit-m052j-native-grouped-ordered-limit:
 .PHONY: push-m052j-native-grouped-ordered-limit
 push-m052j-native-grouped-ordered-limit:
 	bash ./scripts/push-m052j-native-grouped-ordered-limit.sh
+
+.PHONY: test-m052k-native-grouped-having
+test-m052k-native-grouped-having:
+	bash ./scripts/test-m052k-native-grouped-having.sh
+
+.PHONY: benchmark-m052k-native-grouped-having
+benchmark-m052k-native-grouped-having:
+	bash ./scripts/benchmark-m052k-native-grouped-having.sh
+
+.PHONY: format-m052k-native-grouped-having
+format-m052k-native-grouped-having:
+	bash ./scripts/format-m052k-native-grouped-having.sh
+
+.PHONY: test-race-m052k-native-grouped-having
+test-race-m052k-native-grouped-having:
+	bash ./scripts/test-race-m052k-native-grouped-having.sh
+
+.PHONY: vet-m052k-native-grouped-having
+vet-m052k-native-grouped-having:
+	bash ./scripts/vet-m052k-native-grouped-having.sh
+
+.PHONY: review-m052k-native-grouped-having
+review-m052k-native-grouped-having:
+	bash ./scripts/review-m052k-native-grouped-having.sh
+
+.PHONY: commit-m052k-native-grouped-having
+commit-m052k-native-grouped-having:
+	bash ./scripts/commit-m052k-native-grouped-having.sh
+
+.PHONY: push-m052k-native-grouped-having
+push-m052k-native-grouped-having:
+	bash ./scripts/push-m052k-native-grouped-having.sh

@@ -14,3 +14,9 @@ tail -n 100 SQL_DATAFLOW_EXECUTOR.md
 
 printf '%s\n' '=== adopted idea insertion point ==='
 rg -n -A 4 -B 3 'Constant folding|Compact hash aggregation|Vectorized blocks' ADOPTED_QUERY_ENGINE_IDEAS.md
+
+printf '%s\n' '=== SQL expression AST ==='
+rg -n -A 75 'type sqlExpr struct' hat/hatSql/query.go
+
+printf '%s\n' '=== aggregate and HAVING helpers ==='
+rg -n 'func sql.*[Ee]xpression.*[Ee]qual|sqlExpressionValuesStructurallyEqual' hat/hatSql/*.go
