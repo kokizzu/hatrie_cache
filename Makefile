@@ -8799,6 +8799,36 @@ commit-ch031-persistent-query-log:
 push-ch031-persistent-query-log:
 	bash scripts/push-ch031-persistent-query-log.sh
 
+format-mz027-arrangement-stats:
+	bash scripts/format-mz027-arrangement-stats.sh
+
+test-mz027-arrangement-stats:
+	bash scripts/test-mz027-arrangement-stats.sh
+
+benchmark-mz027-baseline:
+	bash scripts/benchmark-mz027-baseline.sh
+
+benchmark-mz027-arrangement-stats:
+	bash scripts/benchmark-mz027-arrangement-stats.sh
+
+test-race-mz027-arrangement-stats:
+	bash scripts/test-race-mz027-arrangement-stats.sh
+
+vet-mz027-arrangement-stats:
+	bash scripts/vet-mz027-arrangement-stats.sh
+
+verify-mz027-docs:
+	bash scripts/verify-mz027-docs.sh
+
+review-mz027-arrangement-stats:
+	bash scripts/review-mz027-arrangement-stats.sh
+
+commit-mz027-arrangement-stats:
+	bash scripts/commit-mz027-arrangement-stats.sh
+
+push-mz027-arrangement-stats:
+	bash scripts/push-mz027-arrangement-stats.sh
+
 .PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
 test-ch002-primary-mark-pruning:
 	bash scripts/test-ch002-primary-mark-pruning.sh

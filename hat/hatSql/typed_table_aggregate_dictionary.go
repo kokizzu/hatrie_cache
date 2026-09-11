@@ -253,6 +253,7 @@ func (aggregate *TypedTableAggregate) compactOrderedGroups() []typedTableAggrega
 	}
 	sort.Slice(sortable, func(left, right int) bool { return sortable[left].key < sortable[right].key })
 	aggregate.compactGroupOrder = make([]typedTableAggregateGroupReference, 0, len(sortable))
+	aggregate.compactionCount++
 	groups := make([]typedTableAggregateGroup, 0, len(sortable))
 	for _, item := range sortable {
 		aggregate.compactGroupOrder = append(aggregate.compactGroupOrder, item.reference)

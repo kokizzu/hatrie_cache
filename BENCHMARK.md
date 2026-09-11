@@ -1,5 +1,81 @@
 # Benchmark
 
+## MZ-027 Arrangement Memory Telemetry
+
+This is an opt-in diagnostics API, so the useful comparison is the existing
+arrangement workload before and after the implementation plus the direct cost
+of calling `Stats()`. Five one-second samples were run with
+`make benchmark-mz027-baseline` at the committed CH-031 baseline and
+`make benchmark-mz027-arrangement-stats` after implementation on Linux
+`amd64`, AMD Ryzen 9 5950X.
+
+### Existing arrangement path
+
+| Workload | Baseline median | Final median | Relative result | Baseline B/op | Final B/op | Baseline allocs/op | Final allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Independent two consumers | 1,900,204 ns | 1,878,294 ns | 1.012x faster, 1.17% | 45,848 | 45,880 | 383 | 383 |
+| Shared two consumers | 948,714 ns | 949,656 ns | 0.999x, 0.10% slower | 34,088 | 34,104 | 318 | 318 |
+
+The small B/op changes are allocator-size effects from retaining the
+dictionary group-order rebuild counter in aggregate state, not per-row
+allocations. CPU variation is larger than the measured differences, and the
+hot path keeps the same allocation counts. This was retained because the
+counter enables useful diagnostics at negligible measured cost; the feature
+does not claim to accelerate arrangement updates.
+
+Raw baseline samples:
+
+```text
+BenchmarkTypedTableAggregateArrangements/independent_two_consumers
+1906615 45848 383
+1900204 45848 383
+1901386 45848 383
+1893457 45848 383
+1866302 45856 383
+
+BenchmarkTypedTableAggregateArrangements/shared_two_consumers
+932195 34088 318
+950343 34088 318
+948714 34088 318
+952376 34088 318
+933453 34088 318
+```
+
+Raw final samples:
+
+```text
+BenchmarkTypedTableAggregateArrangements/independent_two_consumers
+1887080 45880 383
+1879441 45880 383
+1878294 45880 383
+1799781 45880 383
+1871802 45880 383
+
+BenchmarkTypedTableAggregateArrangements/shared_two_consumers
+949656 34104 318
+957287 34104 318
+947773 34104 318
+948513 34104 318
+952137 34104 318
+```
+
+### Direct stats-call cost
+
+The final five samples for `BenchmarkMZ027ArrangementStats` were:
+
+```text
+220.4 ns/op 104 B/op 2 allocs/op
+217.7 ns/op 104 B/op 2 allocs/op
+220.1 ns/op 104 B/op 2 allocs/op
+219.4 ns/op 104 B/op 2 allocs/op
+221.6 ns/op 104 B/op 2 allocs/op
+```
+
+The median is 220.1 ns/op. The benchmark reports one active dictionary-backed
+aggregate with five leases and exercises the distinct-value estimate and
+compaction counter. `Stats()` allocates only the returned report slice and is
+intended for bounded health or operator sampling, not per-row execution.
+
 ## CH-031 Persistent SQL Query Log
 
 These five-sample runs used `make benchmark-ch031-baseline` and

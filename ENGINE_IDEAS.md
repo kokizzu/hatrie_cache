@@ -108,7 +108,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-024 | Automatic arrangement key selection | No planner explains or chooses a compact key for shared maintained state. | Medium |
 | MZ-025 | Arrangement sharing by logical key | Existing sharing is definition-based; no canonical equivalence for semantically equal plans. | Medium |
 | MZ-026 | Dictionary arrangement compression | Repeated arrangement strings are not transparently dictionary encoded. | Medium |
-| MZ-027 | Arrangement memory telemetry | No per-arrangement distinct values, bytes, and compaction counters. | Low |
+| MZ-027 | Arrangement memory telemetry | Implemented as an explicit read-only stats API reporting per-arrangement distinct values, bounded retained-byte estimates, checkpoints, source sequence, changelog compaction watermark, and dictionary group-order rebuild counts. | Low |
 | MZ-028 | Adaptive arrangement compaction | No feedback loop that changes compaction cadence from memory and update rates. | Medium |
 | MZ-029 | Spillable arrangements | Large maintained indexes cannot spill cold state to bounded local storage. | High |
 | MZ-030 | Differential join delta maintenance | Joins do not expose a generic signed incremental join operator for updates/deletes. | High |

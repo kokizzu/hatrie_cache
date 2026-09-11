@@ -1143,6 +1143,7 @@ type TypedTableAggregate struct {
 	compactGroupOrder      []typedTableAggregateGroupReference
 	groupCount             int
 	checkpoint             uint64
+	compactionCount        uint64
 	groupKeysReady         bool
 }
 
