@@ -220,3 +220,12 @@ FIRST_VALUE path uses an active expiry queue; LAST_VALUE updates only equal-
 order peers, preserving exact differential semantics without retaining all
 older rows. NULLs, descending order, expiry, and partitioned reference cases
 are covered. See [`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).
+## M065r: Peer-Aware Incremental `RANGE` `NTH_VALUE`
+
+Adopted a fixed-position, append-only numeric RANGE NTH_VALUE maintainer. It
+retains only the active range plus the current peer group, emits differential
+replacements when equal-order peers change the selected position, preserves
+NULLs, and validates callbacks and monotonic order atomically. The benchmark
+shows a 2.89x CPU improvement versus the pre-change materialized path, with
+65.0% higher cumulative allocation bytes and 2.28x fewer allocations. See
+[`INCREMENTAL_RANGE_WINDOW.md`](INCREMENTAL_RANGE_WINDOW.md).

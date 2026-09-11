@@ -18211,3 +18211,50 @@ BenchmarkM065qRangeIncremental-32:
 
 The ratios use median-to-median values. `B/op` is cumulative allocation
 volume, not retained or peak heap.
+## M065r Peer-Aware Incremental `RANGE` `NTH_VALUE`
+
+M065r compares materialized `NTH_VALUE(int64, 3)` evaluation with the
+incremental maintainer over the same 4,096-row workload and a preceding bound
+of 64. The benchmark emits the same differential output shape. Five samples
+used `-benchmem -count=5` on Linux amd64/AMD Ryzen 9 5950X.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change materialized NTH_VALUE | 7,637,717 | 1,732,954 | 28,210 | baseline |
+| Post-change materialized control | 7,666,205 | 1,732,953 | 28,210 | same-run control |
+| Incremental numeric RANGE NTH_VALUE | 2,644,299 | 2,859,188 | 12,367 | 2.89x faster than pre-change, 2.90x faster than control, 65.0% higher cumulative bytes, 2.28x fewer allocations |
+
+Raw pre-change baseline:
+
+```text
+BenchmarkM065rRangeNaiveMaterialized-32:
+7755354 ns/op 1732953 B/op 28210 allocs/op
+7640051 ns/op 1732957 B/op 28210 allocs/op
+7637717 ns/op 1732954 B/op 28210 allocs/op
+7601297 ns/op 1732954 B/op 28210 allocs/op
+7623399 ns/op 1732953 B/op 28210 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkM065rRangeNaiveMaterialized-32:
+7731981 ns/op 1732990 B/op 28210 allocs/op
+7742387 ns/op 1732952 B/op 28210 allocs/op
+7666205 ns/op 1732953 B/op 28210 allocs/op
+7663983 ns/op 1732955 B/op 28210 allocs/op
+7627806 ns/op 1732950 B/op 28210 allocs/op
+
+BenchmarkM065rRangeIncremental-32:
+2546227 ns/op 2859199 B/op 12367 allocs/op
+2678643 ns/op 2859201 B/op 12367 allocs/op
+2514275 ns/op 2859184 B/op 12367 allocs/op
+2683001 ns/op 2859187 B/op 12367 allocs/op
+2644299 ns/op 2859188 B/op 12367 allocs/op
+```
+
+The CPU improvement comes from maintaining the active frame instead of
+rescanning all prior rows for every result. `B/op` is cumulative allocation
+volume, not retained or peak heap; the higher value pays for bounded active
+rows and peer-safe source snapshots. The feature does not change default SQL
+execution or the existing ROWS window APIs.

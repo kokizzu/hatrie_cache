@@ -124,3 +124,23 @@ group: a later row at the same order key emits exact retractions and
 replacements for earlier peers, while a later non-peer cannot change their
 RANGE frame. Input remains append-only and monotonic within each partition.
 See `BENCHMARK.md` for the FIRST_VALUE measurement.
+## M065r: Incremental `RANGE` `NTH_VALUE`
+
+`IncrementalRangeNthValueWindow` maintains a fixed one-based NTH_VALUE position
+for an inclusive numeric `RANGE BETWEEN N PRECEDING AND CURRENT ROW` frame.
+`OrderKey` must return an `int64`; `ValueKey` may return any value, including
+`nil`. The active frame is retained in arrival order, so SQL NULL is a real
+position and is not skipped.
+
+Rows must arrive in monotonic order within each partition. Ascending order
+keeps rows from `order - N` through the current order; descending order keeps
+rows from the current order through `order + N`. Equal-order rows are peers,
+so a new peer may change the selected position for every earlier peer. The
+maintainer emits exact `-1`/`+1` replacements only for peers whose value
+changed, followed by the new row's positive differential.
+
+Callback validation, duplicate-key detection, monotonicity checks, and input
+state changes are atomic. The API is append-only and opt-in; arbitrary
+updates, deletes, dynamic positions, `IGNORE NULLS`, and SQL planner wiring
+remain outside this slice. Active rows and the current peer group's original
+rows are retained to make expiry and differential replacement exact.

@@ -751,3 +751,9 @@ For each future unchecked item:
 - [x] M065q Generic peer-aware numeric `RANGE` `FIRST_VALUE`/`LAST_VALUE`
   maintenance, with NULL-respecting values, peer retractions, expiry,
   descending order, and partitioned reference coverage.
+- [x] M065r Generic peer-aware numeric `RANGE` `NTH_VALUE` maintenance with a
+  fixed position, NULL-respecting values, peer retractions, int64 bound
+  saturation, atomic validation, and partitioned reference coverage. The
+  optimized path measured 2.89x faster than materialized evaluation with 65.0%
+  higher cumulative bytes; see [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md).

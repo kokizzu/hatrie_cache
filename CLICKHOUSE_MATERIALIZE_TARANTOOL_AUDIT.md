@@ -231,3 +231,12 @@ Implemented generic peer-aware numeric RANGE boundary values. FIRST_VALUE uses
 bounded active-frame retention; LAST_VALUE keeps only the current peer group
 and emits exact peer replacements. NULL-respecting values, descending order,
 expiry, callback atomicity, and partitioned reference tests are included.
+### M065r: Incremental `RANGE` `NTH_VALUE`
+
+Implemented a narrow Materialize-style differential window extension for fixed
+position NTH_VALUE over numeric RANGE frames. It keeps active rows in frame
+order, retains only current-peer source rows for exact replacements, supports
+NULL and descending semantics, and rejects late/out-of-order appends. It is
+opt-in and append-only; arbitrary updates, deletes, dynamic positions, and
+planner integration remain intentionally deferred. The benchmark and memory
+tradeoff are recorded in [BENCHMARK.md](BENCHMARK.md).

@@ -7903,3 +7903,34 @@ commit-m065q-incremental-range-boundary:
 .PHONY: push-m065q-incremental-range-boundary
 push-m065q-incremental-range-boundary:
 	bash ./scripts/push-m065q-incremental-range-boundary.sh
+.PHONY: benchmark-m065r-incremental-range-nth-value
+benchmark-m065r-incremental-range-nth-value:
+	bash ./scripts/benchmark-m065r-incremental-range-nth-value.sh
+
+.PHONY: test-m065r-incremental-range-nth-value
+test-m065r-incremental-range-nth-value:
+	bash ./scripts/test-m065r-incremental-range-nth-value.sh
+
+.PHONY: format-m065r-incremental-range-nth-value
+format-m065r-incremental-range-nth-value:
+	bash ./scripts/format-m065r-incremental-range-nth-value.sh
+
+.PHONY: test-race-m065r-incremental-range-nth-value
+test-race-m065r-incremental-range-nth-value:
+	bash ./scripts/test-race-m065r-incremental-range-nth-value.sh
+
+.PHONY: vet-m065r-incremental-range-nth-value
+vet-m065r-incremental-range-nth-value:
+	bash ./scripts/vet-m065r-incremental-range-nth-value.sh
+
+.PHONY: review-m065r-incremental-range-nth-value
+review-m065r-incremental-range-nth-value:
+	bash ./scripts/review-m065r-incremental-range-nth-value.sh
+
+.PHONY: commit-m065r-incremental-range-nth-value
+commit-m065r-incremental-range-nth-value:
+	bash ./scripts/commit-m065r-incremental-range-nth-value.sh
+
+.PHONY: push-m065r-incremental-range-nth-value
+push-m065r-incremental-range-nth-value:
+	bash ./scripts/push-m065r-incremental-range-nth-value.sh
