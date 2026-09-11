@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-git push
+git push origin HEAD:master
