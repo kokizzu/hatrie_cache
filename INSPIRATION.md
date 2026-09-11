@@ -905,3 +905,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   offsets, richer SQL, and specialized resolver contracts preserve established
   behavior. See
   [SQL_AUTO_NATIVE_AGGREGATE_LIMIT.md](SQL_AUTO_NATIVE_AGGREGATE_LIMIT.md).
+- [x] M052y Automatic safe composite grouped ordered Top-N selection. Two-field
+  grouped aggregates with native-rewritable `HAVING`, uniquely resolved output
+  ordering, and finite `LIMIT`/`OFFSET` use composite group state plus a bounded
+  Top-N heap. Unsupported or ambiguous shapes retain the established executor;
+  see [SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md](SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md).

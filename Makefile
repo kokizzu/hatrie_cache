@@ -8669,3 +8669,27 @@ commit-m052x-auto-native-aggregate-limit:
 
 push-m052x-auto-native-aggregate-limit:
 	bash scripts/push-m052x-auto-native-aggregate-limit.sh
+.PHONY: test-m052y-auto-native-composite-grouped-ordered benchmark-m052y-auto-native-composite-grouped-ordered format-m052y-auto-native-composite-grouped-ordered test-race-m052y-auto-native-composite-grouped-ordered vet-m052y-auto-native-composite-grouped-ordered review-m052y-auto-native-composite-grouped-ordered commit-m052y-auto-native-composite-grouped-ordered push-m052y-auto-native-composite-grouped-ordered
+test-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/test-m052y-auto-native-composite-grouped-ordered.sh
+
+benchmark-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/benchmark-m052y-auto-native-composite-grouped-ordered.sh
+
+format-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/format-m052y-auto-native-composite-grouped-ordered.sh
+
+test-race-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/test-race-m052y-auto-native-composite-grouped-ordered.sh
+
+vet-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/vet-m052y-auto-native-composite-grouped-ordered.sh
+
+review-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/review-m052y-auto-native-composite-grouped-ordered.sh
+
+commit-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/commit-m052y-auto-native-composite-grouped-ordered.sh
+
+push-m052y-auto-native-composite-grouped-ordered:
+	bash scripts/push-m052y-auto-native-composite-grouped-ordered.sh

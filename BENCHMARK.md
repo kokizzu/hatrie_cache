@@ -19279,3 +19279,52 @@ fallback control / before:
 5979106 11870829 60042
 6235149 11870418 60042
 ```
+## M052y automatic native composite grouped Top-N
+
+M052y extends automatic grouped Top-N selection to exactly two grouping fields.
+The query uses native-rewritable aggregate `HAVING`, deterministic selected
+field ordering, and `LIMIT 16 OFFSET 32` over 20,000 rows. Five `-benchmem`
+samples were collected on `linux/amd64`, AMD Ryzen 9 5950X. The fallback sets
+`SQLQueryOptions.DisableNativeDataflow = true` and is the established
+materialized executor for this shape.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native composite grouped Top-N | 4,841,388 | 3,549,388 | 4,294 | 4.53x faster, 7.16x less heap, 40.39x fewer allocations |
+| Existing materialized fallback | 21,941,606 | 25,419,805 | 173,432 | control |
+
+Raw baseline samples (`ns/op B/op allocs/op`), before automatic selection:
+
+```text
+automatic name before feature:
+22255371 25419830 173433
+22043094 25419696 173432
+21887128 25419750 173432
+21453861 25419902 173432
+22309051 25419614 173432
+
+fallback before feature:
+21831853 25419795 173432
+22029177 25419562 173432
+22039760 25419550 173433
+21604226 25420094 173433
+23087590 25419906 173432
+```
+
+Raw final samples:
+
+```text
+automatic native:
+4838062 3549410 4294
+5137219 3549388 4294
+4830210 3549388 4294
+4841388 3549387 4294
+4905845 3549387 4294
+
+fallback:
+22222557 25419676 173432
+22243701 25419805 173432
+21941606 25420093 173433
+21253589 25419962 173432
+21873843 25419638 173432
+```

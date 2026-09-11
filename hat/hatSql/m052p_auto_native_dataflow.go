@@ -154,13 +154,17 @@ func sqlAutoNativeGroupedOrderedEligible(query *sqlQuery, resolver SQLSourceReso
 	if !sqlAutoNativeDataflowBaseEligible(query, resolver, options) {
 		return false
 	}
-	if query.distinct || len(query.groupBy) != 1 || len(query.orderBy) == 0 || query.limit < 0 || query.limitWithTies || query.limitBy != nil || sqlQueryHasWithFill(query) {
+	if query.distinct || len(query.groupBy) == 0 || len(query.groupBy) > 2 || len(query.orderBy) == 0 || query.limit < 0 || query.limitWithTies || query.limitBy != nil || sqlQueryHasWithFill(query) {
 		return false
 	}
 	if sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return false
 	}
-	_, ok := nativeSQLDataflowGroupedOrderedPlanFor(query)
+	if len(query.groupBy) == 1 {
+		_, ok := nativeSQLDataflowGroupedOrderedPlanFor(query)
+		return ok && validateNativeSQLDataflowQuery(query) == nil
+	}
+	_, ok := nativeSQLDataflowCompositeGroupedOrderedPlanFor(query)
 	return ok && validateNativeSQLDataflowQuery(query) == nil
 }
 
