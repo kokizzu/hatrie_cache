@@ -19219,3 +19219,33 @@ fallback control / before:
 9573869 16984999 80021
 9557386 16985135 80021
 ```
+## M052w automatic native DISTINCT LIMIT/OFFSET
+
+This feature automatically selects the existing native distinct runtime for a
+one-field `DISTINCT` page with `LIMIT 16` and `OFFSET 32` over 20,000 rows and
+4,096 possible values. The benchmark uses five samples and `-benchmem`; the
+fallback sets `SQLQueryOptions.DisableNativeDataflow = true`. The fallback is
+the exact pre-feature executor for this query shape.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native distinct window | 5,815 | 7,392 | 43 | 2,923x faster, 2,721x less heap, 4,188x fewer allocations |
+| Existing materialized fallback | 16,999,290 | 20,102,250 | 180,090 | control / before |
+
+Raw samples (`ns/op B/op allocs/op`):
+
+```text
+automatic native distinct window:
+5815 7392 43
+5736 7392 43
+5901 7392 43
+5788 7392 43
+5875 7392 43
+
+fallback control / before:
+16427427 20102305 180090
+16462219 20102250 180090
+17058371 20102449 180090
+16999290 20102091 180090
+17609081 20101978 180090
+```

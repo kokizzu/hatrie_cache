@@ -64,9 +64,6 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	}
 	hasOutputWindow := query.limit >= 0 || query.offset > 0
 	if query.distinct {
-		if hasOutputWindow {
-			return fmt.Errorf("%w: DISTINCT query requires materialized state", ErrSQLNativeDataflowUnsupported)
-		}
 		if _, ok := nativeSQLDataflowDistinctPlanFor(query); !ok {
 			return fmt.Errorf("%w: DISTINCT query shape", ErrSQLNativeDataflowUnsupported)
 		}
@@ -922,9 +919,24 @@ func nativeSQLDataflowDistinctKeyFor(value interface{}) (nativeSQLDataflowDistin
 }
 
 func executeNativeSQLDataflowCompositeDistinct(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowDistinctPlan) ([]SQLRow, error) {
-	seen := make(map[nativeSQLDataflowCompositeDistinctKey]struct{}, len(initial))
+	if query.limit == 0 {
+		return []SQLRow{}, nil
+	}
+	offset := query.offset
+	seenCapacity := len(initial)
+	if query.limit >= 0 && offset < len(initial) {
+		remaining := len(initial) - offset
+		if query.limit < remaining {
+			seenCapacity = offset + query.limit
+		}
+	}
+	resultCapacity := len(initial)
+	if query.limit >= 0 && query.limit < resultCapacity {
+		resultCapacity = query.limit
+	}
+	seen := make(map[nativeSQLDataflowCompositeDistinctKey]struct{}, seenCapacity)
 	columns := sqlColumns(query.selects)
-	result := make([]SQLRow, 0, len(initial))
+	result := make([]SQLRow, 0, resultCapacity)
 	execRows := make([]sqlExecRow, 1)
 	for index, input := range initial {
 		if err := ctx.Err(); err != nil {
@@ -970,20 +982,42 @@ func executeNativeSQLDataflowCompositeDistinct(ctx context.Context, query *sqlQu
 			continue
 		}
 		seen[key] = struct{}{}
+		if offset > 0 {
+			offset--
+			continue
+		}
 		projected := make(SQLRow, len(columns))
 		projected[columns[0]] = firstValue
 		projected[columns[1]] = secondValue
 		result = append(result, projected)
+		if query.limit >= 0 && len(result) >= query.limit {
+			break
+		}
 	}
 	return result, nil
 }
 
 func executeNativeSQLDataflowDistinct(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowDistinctPlan) ([]SQLRow, error) {
-	seen := make(map[int64]struct{}, len(initial))
+	if query.limit == 0 {
+		return []SQLRow{}, nil
+	}
+	offset := query.offset
+	seenCapacity := len(initial)
+	if query.limit >= 0 && offset < len(initial) {
+		remaining := len(initial) - offset
+		if query.limit < remaining {
+			seenCapacity = offset + query.limit
+		}
+	}
+	resultCapacity := len(initial)
+	if query.limit >= 0 && query.limit < resultCapacity {
+		resultCapacity = query.limit
+	}
+	seen := make(map[int64]struct{}, seenCapacity)
 	var stringSeen map[string]struct{}
 	seenNull := false
 	columns := sqlColumns(query.selects)
-	result := make([]SQLRow, 0, len(initial))
+	result := make([]SQLRow, 0, resultCapacity)
 	execRows := make([]sqlExecRow, 1)
 	for index, input := range initial {
 		if err := ctx.Err(); err != nil {
@@ -1037,7 +1071,14 @@ func executeNativeSQLDataflowDistinct(ctx context.Context, query *sqlQuery, init
 			}
 			seen[key] = struct{}{}
 		}
+		if offset > 0 {
+			offset--
+			continue
+		}
 		result = append(result, SQLRow{columns[0]: value})
+		if query.limit >= 0 && len(result) >= query.limit {
+			break
+		}
 	}
 	return result, nil
 }

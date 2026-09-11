@@ -8621,3 +8621,27 @@ commit-m052v-auto-native-scalar-limit:
 
 push-m052v-auto-native-scalar-limit:
 	bash scripts/push-m052v-auto-native-scalar-limit.sh
+.PHONY: test-m052w-auto-native-distinct-limit benchmark-m052w-auto-native-distinct-limit format-m052w-auto-native-distinct-limit test-race-m052w-auto-native-distinct-limit vet-m052w-auto-native-distinct-limit review-m052w-auto-native-distinct-limit commit-m052w-auto-native-distinct-limit push-m052w-auto-native-distinct-limit
+test-m052w-auto-native-distinct-limit:
+	bash scripts/test-m052w-auto-native-distinct-limit.sh
+
+benchmark-m052w-auto-native-distinct-limit:
+	bash scripts/benchmark-m052w-auto-native-distinct-limit.sh
+
+format-m052w-auto-native-distinct-limit:
+	bash scripts/format-m052w-auto-native-distinct-limit.sh
+
+test-race-m052w-auto-native-distinct-limit:
+	bash scripts/test-race-m052w-auto-native-distinct-limit.sh
+
+vet-m052w-auto-native-distinct-limit:
+	bash scripts/vet-m052w-auto-native-distinct-limit.sh
+
+review-m052w-auto-native-distinct-limit:
+	bash scripts/review-m052w-auto-native-distinct-limit.sh
+
+commit-m052w-auto-native-distinct-limit:
+	bash scripts/commit-m052w-auto-native-distinct-limit.sh
+
+push-m052w-auto-native-distinct-limit:
+	bash scripts/push-m052w-auto-native-distinct-limit.sh

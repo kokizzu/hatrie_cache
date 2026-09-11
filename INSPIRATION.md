@@ -893,3 +893,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   ordering, `WITH TIES`, richer SQL, and specialized resolver contracts retain
   their established executor. See
   [SQL_AUTO_NATIVE_SCALAR_LIMIT.md](SQL_AUTO_NATIVE_SCALAR_LIMIT.md).
+- [x] M052w Automatic safe unordered distinct finite-window selection. One- and
+  two-field direct `DISTINCT` pages over ordinary row resolvers now use bounded
+  typed membership state and first-seen early termination by default; ordered
+  distinct, `WITH TIES`, richer SQL, and specialized resolver contracts retain
+  their established executor. See
+  [SQL_AUTO_NATIVE_DISTINCT_LIMIT.md](SQL_AUTO_NATIVE_DISTINCT_LIMIT.md).
