@@ -259,6 +259,44 @@ The pre-implementation ordinary-only baseline median was `2,881,364 ns/op`,
 the ratio because it controls for normal benchmark noise. No storage, wire,
 or default-execution behavior changes.
 
+### Native Ordered Limit Measurement
+
+Command:
+
+```text
+make benchmark-m052h-native-ordered-limit
+```
+
+The benchmark applies `WHERE value >= 0 ORDER BY value DESC LIMIT 32 OFFSET
+512` to 4,096 already resolved rows and projects two fields. Both paths compile
+the query outside the timed loop and receive the same rows. The ordinary
+executor and native ordered executor each use five paired `-benchmem` samples
+on Linux/amd64 with an AMD Ryzen 9 5950X. The native path retains only the
+bounded Top-N candidate set and evaluates projection expressions after the
+final page is selected. Its current opt-in shape requires one direct qualified
+source-field ordering expression; projected aliases and other unsupported
+ordering shapes fail closed.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 7,726,223 | 3,784,054 | 20,605 | baseline |
+| Native ordered executor | 1,796,266 | 106,119 | 637 | 4.30x faster; 35.66x fewer bytes; 32.35x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 7,726,223 | 1,796,266 | 3,784,126 | 106,132 | 20,607 | 637 |
+| 2 | 7,806,351 | 1,799,055 | 3,784,329 | 106,119 | 20,608 | 637 |
+| 3 | 7,839,020 | 1,771,476 | 3,783,810 | 106,170 | 20,603 | 637 |
+| 4 | 7,716,618 | 1,805,342 | 3,783,900 | 106,068 | 20,605 | 636 |
+| 5 | 7,621,486 | 1,786,047 | 3,784,054 | 106,106 | 20,605 | 637 |
+
+The pre-implementation ordinary-only baseline median was `7,739,188 ns/op`,
+`3,783,806 B/op`, and `20,604 allocs/op`. The paired control is reported for
+the ratio because it controls for normal benchmark noise. The feature is
+opt-in and changes no storage, wire, or default SQL behavior.
+
 ### Native Limit Measurement
 
 Command:

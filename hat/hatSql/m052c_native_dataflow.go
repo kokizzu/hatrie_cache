@@ -1,9 +1,12 @@
 package hatSql
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // ErrSQLNativeDataflowUnsupported reports a compiled query that cannot use the
@@ -12,9 +15,9 @@ var ErrSQLNativeDataflowUnsupported = errors.New("hatSql: native dataflow shape 
 
 // CompileNativeDataflow creates an opt-in built-in executor for a compiled
 // single-source query. Execute receives an already-resolved source batch,
-// then fuses supported filter/project, global aggregate, and grouped
-// aggregate stages without invoking the resolver. The regular SQL executor
-// remains the path for all other query shapes.
+// then fuses supported filter/project, finite ordered pages, global aggregate,
+// grouped aggregate, and distinct stages without invoking the resolver. The
+// regular SQL executor remains the path for all other query shapes.
 func (query *CompiledSQLQuery) CompileNativeDataflow() (*SQLDataflowExecutor, error) {
 	if query == nil || query.template == nil {
 		return nil, fmt.Errorf("compiled SQL query is required")
@@ -38,11 +41,17 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	if query.explain || query.sample != nil || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
 		return fmt.Errorf("%w: query contains non-scalar stages", ErrSQLNativeDataflowUnsupported)
 	}
-	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
+	if len(query.groupingSets) != 0 || len(query.groupingDimensions) != 0 || query.having.kind != "" || query.limitBy != nil || query.limitWithTies || sqlQueryHasWithFill(query) {
 		return fmt.Errorf("%w: query requires materialized state", ErrSQLNativeDataflowUnsupported)
 	}
 	if query.where.kind != "" && !sqlStreamScalarExpr(query.where) {
 		return fmt.Errorf("%w: WHERE expression is not scalar", ErrSQLNativeDataflowUnsupported)
+	}
+	if len(query.orderBy) != 0 {
+		if _, ok := nativeSQLDataflowOrderedPlanFor(query); !ok {
+			return fmt.Errorf("%w: ordered query shape", ErrSQLNativeDataflowUnsupported)
+		}
+		return nil
 	}
 	hasOutputWindow := query.limit >= 0 || query.offset > 0
 	if query.distinct {
@@ -88,6 +97,32 @@ type nativeSQLDataflowGroupPlan struct {
 
 type nativeSQLDataflowDistinctPlan struct {
 	field sqlExpr
+}
+
+type nativeSQLDataflowOrderedPlan struct {
+	order sqlOrder
+}
+
+func nativeSQLDataflowOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowOrderedPlan, bool) {
+	if query == nil || query.limit < 0 || query.limitWithTies || len(query.orderBy) != 1 || query.orderBy[0].expr.kind != "field" || query.distinct || len(query.groupBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return nativeSQLDataflowOrderedPlan{}, false
+	}
+	if len(query.selects) == 0 {
+		return nativeSQLDataflowOrderedPlan{}, false
+	}
+	if query.orderBy[0].expr.qualifier == "" {
+		for _, item := range query.selects {
+			if item.alias != "" && strings.EqualFold(item.alias, query.orderBy[0].expr.name) {
+				return nativeSQLDataflowOrderedPlan{}, false
+			}
+		}
+	}
+	for _, item := range query.selects {
+		if item.expr.kind == "star" || !sqlStreamScalarExpr(item.expr) {
+			return nativeSQLDataflowOrderedPlan{}, false
+		}
+	}
+	return nativeSQLDataflowOrderedPlan{order: query.orderBy[0]}, true
 }
 
 func nativeSQLDataflowDistinctPlanFor(query *sqlQuery) (nativeSQLDataflowDistinctPlan, bool) {
@@ -172,6 +207,9 @@ func nativeSQLDataflowAggregatePlan(query *sqlQuery) ([]sqlStreamAggregate, bool
 }
 
 func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQLRow) ([]SQLRow, error) {
+	if plan, ok := nativeSQLDataflowOrderedPlanFor(query); ok {
+		return executeNativeSQLDataflowOrdered(ctx, query, initial, plan)
+	}
 	if plan, ok := nativeSQLDataflowDistinctPlanFor(query); ok {
 		return executeNativeSQLDataflowDistinct(ctx, query, initial, plan)
 	}
@@ -229,6 +267,85 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 		if query.limit >= 0 && len(result) >= query.limit {
 			break
 		}
+	}
+	return result, nil
+}
+
+func executeNativeSQLDataflowOrdered(ctx context.Context, query *sqlQuery, initial []SQLRow, plan nativeSQLDataflowOrderedPlan) ([]SQLRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if query.limit == 0 {
+		return []SQLRow{}, nil
+	}
+	capacity := sqlTopNStreamCapacity(query, len(initial))
+	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: query.orderBy}
+	heap.Init(&candidates)
+	ordinal := 0
+	for index, input := range initial {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := input
+		if len(query.from.fieldTypes) != 0 {
+			validated, err := validateSQLSourceFieldTypeRow(*query.from, input, index+1)
+			if err != nil {
+				return nil, err
+			}
+			row = validated
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, row)
+		if query.where.kind != "" {
+			matched, err := evalSQLStreamExpr(query.where, execRow, nil)
+			if err != nil {
+				return nil, fmt.Errorf("native dataflow WHERE row %d: %w", index+1, err)
+			}
+			if !sqlTruthy(matched) {
+				continue
+			}
+		}
+		orderValue, err := evalSQLStreamExpr(plan.order.expr, execRow, nil)
+		if err != nil {
+			return nil, fmt.Errorf("native dataflow ORDER BY row %d: %w", index+1, err)
+		}
+		candidate := sqlTopNStreamItem{row: row, key: orderValue, ordinal: ordinal}
+		ordinal++
+		if candidates.Len() < capacity {
+			heap.Push(&candidates, candidate)
+			continue
+		}
+		if sqlTopNStreamBefore(candidate, candidates.items[0], query.orderBy) {
+			candidates.items[0] = candidate
+			heap.Fix(&candidates, 0)
+		}
+	}
+	sort.SliceStable(candidates.items, func(left, right int) bool {
+		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], query.orderBy)
+	})
+	start := query.offset
+	if start > len(candidates.items) {
+		start = len(candidates.items)
+	}
+	end := len(candidates.items)
+	if query.limit < end-start {
+		end = start + query.limit
+	}
+	columns := sqlColumns(query.selects)
+	result := make([]SQLRow, 0, end-start)
+	for _, candidate := range candidates.items[start:end] {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, candidate.row)
+		projected := make(SQLRow, len(columns))
+		for selectIndex, item := range query.selects {
+			value, err := evalSQLStreamExpr(item.expr, execRow, nil)
+			if err != nil {
+				return nil, fmt.Errorf("native dataflow SELECT row column %d: %w", selectIndex+1, err)
+			}
+			projected[columns[selectIndex]] = value
+		}
+		result = append(result, projected)
 	}
 	return result, nil
 }

@@ -8198,3 +8198,35 @@ commit-m052g-native-limit:
 .PHONY: push-m052g-native-limit
 push-m052g-native-limit:
 	bash ./scripts/push-m052g-native-limit.sh
+
+.PHONY: test-m052h-native-ordered-limit
+test-m052h-native-ordered-limit:
+	bash ./scripts/test-m052h-native-ordered-limit.sh
+
+.PHONY: benchmark-m052h-native-ordered-limit
+benchmark-m052h-native-ordered-limit:
+	bash ./scripts/benchmark-m052h-native-ordered-limit.sh
+
+.PHONY: format-m052h-native-ordered-limit
+format-m052h-native-ordered-limit:
+	bash ./scripts/format-m052h-native-ordered-limit.sh
+
+.PHONY: test-race-m052h-native-ordered-limit
+test-race-m052h-native-ordered-limit:
+	bash ./scripts/test-race-m052h-native-ordered-limit.sh
+
+.PHONY: vet-m052h-native-ordered-limit
+vet-m052h-native-ordered-limit:
+	bash ./scripts/vet-m052h-native-ordered-limit.sh
+
+.PHONY: review-m052h-native-ordered-limit
+review-m052h-native-ordered-limit:
+	bash ./scripts/review-m052h-native-ordered-limit.sh
+
+.PHONY: commit-m052h-native-ordered-limit
+commit-m052h-native-ordered-limit:
+	bash ./scripts/commit-m052h-native-ordered-limit.sh
+
+.PHONY: push-m052h-native-ordered-limit
+push-m052h-native-ordered-limit:
+	bash ./scripts/push-m052h-native-ordered-limit.sh
