@@ -67,7 +67,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-038 | Aggregate combinators | `COUNT_IF`/`COUNTIF`, numeric `*_IF`, and `ARGMAX_IF`/`ARGMIN_IF` are adopted through the existing filter state; `OrNull`, `State`, and `Merge` variants remain absent. | Medium |
 | CH-039 | Approximate distinct/quantile sketches | Partially adopted: global `APPROX_COUNT_DISTINCT` and `APPROX_PERCENTILE` queries now feed bounded sketches while streaming; grouped, top-k, and other complex shapes remain on the materialized evaluator. | Medium |
 | CH-040 | `argMax`/`argMin` aggregates | Implemented for ordinary, grouped, filtered, and window aggregates, with a constant-state stream fast path for eligible global scans. | Low |
-| CH-041 | `GROUPING SETS`/`ROLLUP`/`CUBE` | No multi-level grouping expansion with grouping identifiers. | High |
+| CH-041 | `GROUPING SETS`/`ROLLUP`/`CUBE` | Partially adopted: existing multi-level expansion now supports `GROUPING(expr)` identifiers folded per branch; native one-pass grouping and multi-argument `GROUPING_ID` remain open. | High |
 | CH-042 | Sampling key execution | `SAMPLE` is not a storage-aware deterministic sampling stage. | Medium |
 | CH-043 | Gap filling/interpolation | No ordered time-bucket fill with explicit interpolation behavior. | Medium |
 | CH-044 | JSON dynamic subcolumns | No path-level physical extraction and pruning for semi-structured rows. | High |

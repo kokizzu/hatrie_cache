@@ -121,6 +121,7 @@ security guidance before exposing it on a network.
 - JSON text `CONTAINS_PREFIX` scans through token postings: [SQL text prefix index](SQL_TEXT_PREFIX_INDEX.md)
 - ClickHouse-style conditional aggregate names: [SQL aggregate `If` combinators](SQL_AGGREGATE_IF.md)
 - ClickHouse-style streaming approximate aggregates: [Approximate aggregate stream state](SQL_APPROXIMATE_STREAM.md)
+- ClickHouse-style grouping identifiers: [SQL grouping identifiers](SQL_GROUPING_IDENTIFIERS.md)
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)

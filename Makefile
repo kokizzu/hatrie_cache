@@ -8949,6 +8949,27 @@ commit-ch039-approx-stream:
 push-ch039-approx-stream:
 	bash scripts/push-ch039-approx-stream.sh
 
+test-ch041-grouping-identifiers:
+	bash scripts/test-ch041-grouping-identifiers.sh
+
+format-ch041-grouping-identifiers:
+	bash scripts/format-ch041-grouping-identifiers.sh
+
+benchmark-ch041-grouping-identifiers:
+	bash scripts/benchmark-ch041-grouping-identifiers.sh
+
+benchmark-ch041-baseline:
+	bash scripts/benchmark-ch041-baseline.sh
+
+review-ch041-grouping-identifiers:
+	bash scripts/review-ch041-grouping-identifiers.sh
+
+commit-ch041-grouping-identifiers:
+	bash scripts/commit-ch041-grouping-identifiers.sh
+
+push-ch041-grouping-identifiers:
+	bash scripts/push-ch041-grouping-identifiers.sh
+
 
 
 

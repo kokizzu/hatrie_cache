@@ -1,6 +1,9 @@
 package hatSql
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const maxSQLCubeDimensions = 12
 
@@ -110,12 +113,120 @@ func sqlExpandGroupingSets(query *sqlQuery) error {
 		branch.groupBy = cloneSQLExprs(groupingSet)
 		branch.groupingSets = nil
 		branch.groupingDimensions = nil
+		if err := sqlRewriteGroupingIdentifiers(branch, groupingSet, template.groupingDimensions); err != nil {
+			return err
+		}
 		sqlNullAbsentGroupingDimensions(branch, groupingSet, template.groupingDimensions)
 		if index != 0 {
 			query.unions = append(query.unions, sqlUnion{kind: "UNION", all: true, query: branch})
 		}
 	}
 	return nil
+}
+
+func sqlRewriteGroupingIdentifiers(query *sqlQuery, groupingSet, dimensions []sqlExpr) error {
+	if query == nil {
+		return nil
+	}
+	for index := range query.selects {
+		if err := sqlRewriteGroupingIdentifierExpr(&query.selects[index].expr, groupingSet, dimensions); err != nil {
+			return err
+		}
+	}
+	if err := sqlRewriteGroupingIdentifierExpr(&query.having, groupingSet, dimensions); err != nil {
+		return err
+	}
+	for index := range query.orderBy {
+		if err := sqlRewriteGroupingIdentifierExpr(&query.orderBy[index].expr, groupingSet, dimensions); err != nil {
+			return err
+		}
+	}
+	if query.limitBy != nil {
+		for index := range query.limitBy.expressions {
+			if err := sqlRewriteGroupingIdentifierExpr(&query.limitBy.expressions[index], groupingSet, dimensions); err != nil {
+				return err
+			}
+		}
+	}
+	if sqlExprHasGroupingIdentifier(query.where) || sqlExprHasGroupingIdentifier(query.prewhere) {
+		return fmt.Errorf("GROUPING is only valid in SELECT, HAVING, ORDER BY, or LIMIT BY")
+	}
+	return nil
+}
+
+func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []sqlExpr) error {
+	if expr == nil {
+		return nil
+	}
+	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
+		if len(expr.args) != 1 {
+			return fmt.Errorf("GROUPING expects exactly one grouping expression")
+		}
+		if !sqlGroupingSetContains(dimensions, expr.args[0]) {
+			return fmt.Errorf("GROUPING argument must be a grouping expression")
+		}
+		value := int64(0)
+		if !sqlGroupingSetContains(groupingSet, expr.args[0]) {
+			value = 1
+		}
+		*expr = sqlExpr{kind: "literal", value: value}
+		return nil
+	}
+	if err := sqlRewriteGroupingIdentifierExpr(expr.left, groupingSet, dimensions); err != nil {
+		return err
+	}
+	if err := sqlRewriteGroupingIdentifierExpr(expr.right, groupingSet, dimensions); err != nil {
+		return err
+	}
+	for index := range expr.args {
+		if err := sqlRewriteGroupingIdentifierExpr(&expr.args[index], groupingSet, dimensions); err != nil {
+			return err
+		}
+	}
+	for index := range expr.cases {
+		if err := sqlRewriteGroupingIdentifierExpr(&expr.cases[index].when, groupingSet, dimensions); err != nil {
+			return err
+		}
+		if err := sqlRewriteGroupingIdentifierExpr(&expr.cases[index].then, groupingSet, dimensions); err != nil {
+			return err
+		}
+	}
+	if err := sqlRewriteGroupingIdentifierExpr(expr.filter, groupingSet, dimensions); err != nil {
+		return err
+	}
+	if expr.window != nil {
+		for index := range expr.window.partition {
+			if err := sqlRewriteGroupingIdentifierExpr(&expr.window.partition[index], groupingSet, dimensions); err != nil {
+				return err
+			}
+		}
+		for index := range expr.window.order {
+			if err := sqlRewriteGroupingIdentifierExpr(&expr.window.order[index].expr, groupingSet, dimensions); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func sqlExprHasGroupingIdentifier(expr sqlExpr) bool {
+	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
+		return true
+	}
+	if expr.left != nil && sqlExprHasGroupingIdentifier(*expr.left) || expr.right != nil && sqlExprHasGroupingIdentifier(*expr.right) {
+		return true
+	}
+	for _, argument := range expr.args {
+		if sqlExprHasGroupingIdentifier(argument) {
+			return true
+		}
+	}
+	for _, branch := range expr.cases {
+		if sqlExprHasGroupingIdentifier(branch.when) || sqlExprHasGroupingIdentifier(branch.then) {
+			return true
+		}
+	}
+	return expr.filter != nil && sqlExprHasGroupingIdentifier(*expr.filter)
 }
 
 func sqlNullAbsentGroupingDimensions(query *sqlQuery, groupingSet, dimensions []sqlExpr) {

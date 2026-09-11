@@ -20178,3 +20178,64 @@ Raw output after the change:
 4362350 ns/op 192826 B/op 20154 allocs/op
 4354967 ns/op 192827 B/op 20154 allocs/op
 ```
+
+## CH-041 grouping identifiers
+
+The workload uses three input rows and the same six-row `GROUPING SETS` result
+for every sample. The pre-change run is the exact `9dc63e0` checkout. The
+post-change baseline query omits identifier columns; the identifier query
+returns `GROUPING(region)` and `GROUPING(product)` as two additional columns.
+Ten samples were collected for each case.
+
+The pre-change median was 25,258 ns/op, 25,092 B/op, and 242 allocs/op. The
+post-change baseline median was 25,382 ns/op, 25,092 B/op, and 242 allocs/op:
+1.005x the time with no memory or allocation change. The identifier query was
+31,247 ns/op, 29,502 B/op, and 286 allocs/op, or 1.231x the baseline time,
+1.176x the bytes, and 1.182x the allocations. The extra cost is the two
+returned columns; identifiers are folded before row aggregation.
+
+Raw output from `make benchmark-ch041-baseline` before the change:
+
+```text
+25022 ns/op 25091 B/op 242 allocs/op
+25367 ns/op 25092 B/op 242 allocs/op
+25321 ns/op 25092 B/op 242 allocs/op
+26135 ns/op 25092 B/op 242 allocs/op
+25234 ns/op 25092 B/op 242 allocs/op
+25281 ns/op 25091 B/op 242 allocs/op
+25830 ns/op 25092 B/op 242 allocs/op
+25197 ns/op 25092 B/op 242 allocs/op
+24959 ns/op 25092 B/op 242 allocs/op
+24900 ns/op 25092 B/op 242 allocs/op
+```
+
+Raw output from `make benchmark-ch041-grouping-identifiers` after the change,
+existing grouping-set path:
+
+```text
+25471 ns/op 25091 B/op 242 allocs/op
+25680 ns/op 25091 B/op 242 allocs/op
+25505 ns/op 25092 B/op 242 allocs/op
+25309 ns/op 25091 B/op 242 allocs/op
+25346 ns/op 25092 B/op 242 allocs/op
+25274 ns/op 25092 B/op 242 allocs/op
+25154 ns/op 25092 B/op 242 allocs/op
+25418 ns/op 25092 B/op 242 allocs/op
+25466 ns/op 25092 B/op 242 allocs/op
+25317 ns/op 25092 B/op 242 allocs/op
+```
+
+Raw output after the change, grouping identifiers:
+
+```text
+31291 ns/op 29502 B/op 286 allocs/op
+32161 ns/op 29502 B/op 286 allocs/op
+32274 ns/op 29502 B/op 286 allocs/op
+31636 ns/op 29502 B/op 286 allocs/op
+31029 ns/op 29502 B/op 286 allocs/op
+31203 ns/op 29502 B/op 286 allocs/op
+31159 ns/op 29502 B/op 286 allocs/op
+31200 ns/op 29502 B/op 286 allocs/op
+31033 ns/op 29502 B/op 286 allocs/op
+31342 ns/op 29502 B/op 286 allocs/op
+```
