@@ -95,7 +95,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-011 | Sink connector API | Partially adopted: importable `CommandJournalSink` and bounded `StartCommandJournalSink` runner support ordered batches, cancellation, and optional sequence checkpoints; concrete external connectors and exactly-once transactions remain open. | High |
 | MZ-012 | Exactly-once sink checkpoints | Partially adopted: `CommandJournalExactlyOnceSink` lets a sink atomically commit output with its journal watermark and reload that watermark on restart; the guarantee depends on the external sink transaction. | High |
 | MZ-013 | Source connector checkpoints | Partially adopted: importable `CommandJournalSourceCheckpointCoordinator` persists binary source offsets with the latest fully applied journal sequence through `WithPersistenceBarrier`; durable store transactions and connector-specific polling remain store/connector-owned. | High |
-| MZ-014 | Upsert-source consolidation | No generic source operator that collapses key updates while retaining correct deletes. | Medium |
+| MZ-014 | Upsert-source consolidation | Partially adopted: importable `hatDataStructure.UpsertBatch[T]` keeps one final value or tombstone per key in stable source order with reusable capacity; connector flush policy and automatic SQL integration remain caller-owned. | Medium |
 | MZ-015 | CDC envelope normalization | No common insert/update/delete envelope adapter for external change streams. | Medium |
 | MZ-016 | Source schema evolution | No additive/drop-column compatibility plan for live source versions. | High |
 | MZ-017 | Parallel source hydration | Snapshot restoration cannot split independent source ranges across workers. | Medium |

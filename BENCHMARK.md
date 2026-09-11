@@ -20644,3 +20644,42 @@ The exact command was:
 ```sh
 make benchmark-mz013-source
 ```
+
+## MZ-014 Upsert Batch Consolidation
+
+This benchmark compares a map-based last-write loop with the importable
+`UpsertBatch` on 10,000 source events and 1,000 distinct keys. Both paths
+consume the final output. The fresh variants construct a new batch for each
+operation; the reuse variants retain capacity across operations. Five samples
+were collected on an AMD Ryzen 9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `MZ014BaselineMapLastWrite` | 246011, 244544, 242396, 242871, 243252 | 114768, 114768, 114768, 114768, 114768 | 5, 5, 5, 5, 5 |
+| `MZ014BaselineMapLastWriteReuse` | 225850, 225340, 220668, 206211, 207828 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `MZ014UpsertBatchLastWrite` | 169831, 167311, 163796, 154297, 162347 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `MZ014UpsertBatchFresh` | 184867, 182622, 183711, 182665, 183224 | 87424, 87424, 87424, 87424, 87424 | 7, 7, 7, 7, 7 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative to matching map path |
+| --- | ---: | ---: | ---: | --- |
+| Fresh map | 243252 | 114768 | 5 | `1.00x` |
+| Fresh `UpsertBatch` | 183224 | 87424 | 7 | `1.33x` faster, `0.76x` bytes, +2 allocations |
+| Reused map | 220668 | 0 | 0 | `1.00x` |
+| Reused `UpsertBatch` | 163796 | 0 | 0 | `1.35x` faster, same bytes and allocations |
+
+The reusable path is the intended source-consumer path. The fresh variant
+still lowers CPU and allocated bytes, but it uses two additional allocations;
+callers with recurring batches should reserve capacity once and call `Reset`.
+The structure's correctness benefit is one final operation per distinct key
+while retaining delete tombstones, so downstream destinations do not receive
+superseded updates.
+
+The exact command was:
+
+```sh
+make benchmark-mz014-upsert
+```

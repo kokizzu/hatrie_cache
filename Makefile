@@ -9670,3 +9670,23 @@ commit-mz013:
 	bash scripts/commit-mz013.sh
 push-mz013:
 	bash scripts/push-mz013.sh
+benchmark-mz014-upsert:
+	bash scripts/benchmark-mz014-upsert.sh
+test-mz014-upsert:
+	bash scripts/test-mz014-upsert.sh
+format-mz014-upsert:
+	bash scripts/format-mz014-upsert.sh
+test-race-mz014-upsert:
+	bash scripts/test-race-mz014-upsert.sh
+test-mz014-broad:
+	bash scripts/test-mz014-broad.sh
+verify-mz014-docs:
+	bash scripts/verify-mz014-docs.sh
+review-mz014:
+	bash scripts/review-mz014.sh
+status-mz014:
+	bash scripts/status-mz014.sh
+commit-mz014:
+	bash scripts/commit-mz014.sh
+push-mz014:
+	bash scripts/push-mz014.sh
