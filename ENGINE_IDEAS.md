@@ -92,7 +92,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-008 | `AS OF` query execution | Adopted: opt-in `SQLQueryOptions.AsOfFrontier` binds normal, streamed, offset-page, and keyset-page reads to an immutable `SQLFrontierSnapshotProvider` view; historical reads bypass the live result cache and bind cursors to the frontier. | High |
 | MZ-009 | Temporal validity filters | Partially adopted: `VALID_AT(at, valid_from, valid_to)` provides first-class half-open validity semantics and uses native scalar execution when eligible; validity indexes and frontier-aware pruning remain open. | High |
 | MZ-010 | `TAIL`/`SUBSCRIBE` changefeed | Partially adopted: opt-in `CommandJournal.Subscribe` replays a contiguous bounded command tail and follows live journal records with bounded backpressure; SQL result `TAIL`/`SUBSCRIBE` and signed differential results remain open. | High |
-| MZ-011 | Sink connector API | No durable outbound sink abstraction for Kafka, files, or HTTP streams. | High |
+| MZ-011 | Sink connector API | Partially adopted: importable `CommandJournalSink` and bounded `StartCommandJournalSink` runner support ordered batches, cancellation, and optional sequence checkpoints; concrete external connectors and exactly-once transactions remain open. | High |
 | MZ-012 | Exactly-once sink checkpoints | No atomic coupling between output offsets and maintained result frontiers. | High |
 | MZ-013 | Source connector checkpoints | Ingestion does not expose durable source offsets tied to snapshot progress. | High |
 | MZ-014 | Upsert-source consolidation | No generic source operator that collapses key updates while retaining correct deletes. | Medium |

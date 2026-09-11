@@ -9610,3 +9610,23 @@ commit-mz010:
 	bash scripts/commit-mz010.sh
 push-mz010:
 	bash scripts/push-mz010.sh
+benchmark-mz011-sink:
+	bash scripts/benchmark-mz011-sink.sh
+test-mz011-sink:
+	bash scripts/test-mz011-sink.sh
+format-mz011-sink:
+	bash scripts/format-mz011-sink.sh
+test-race-mz011-sink:
+	bash scripts/test-race-mz011-sink.sh
+test-mz011-broad:
+	bash scripts/test-mz011-broad.sh
+verify-mz011-docs:
+	bash scripts/verify-mz011-docs.sh
+review-mz011:
+	bash scripts/review-mz011.sh
+status-mz011:
+	bash scripts/status-mz011.sh
+commit-mz011:
+	bash scripts/commit-mz011.sh
+push-mz011:
+	bash scripts/push-mz011.sh

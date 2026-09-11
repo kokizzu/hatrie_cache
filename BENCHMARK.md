@@ -20534,3 +20534,47 @@ The exact command used was:
 ```sh
 make benchmark-mz010-journal-subscription
 ```
+## MZ-011 Sink Connectors
+
+This benchmark compares the existing direct subscription drain with the new
+bounded sink runner on the same 100-record journal replay. The sink is an
+in-memory no-op consumer; the checkpoint variant uses an in-memory no-op
+checkpoint store. Five samples were collected on an AMD Ryzen 9 5950X,
+`linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `MZ011BaselineSubscriptionBatch100` | 89275, 88612, 90333, 86693, 87452 | 69703, 69702, 69700, 69702, 69702 | 520, 520, 520, 520, 520 |
+| `MZ011CommandJournalSinkBatch100` | 117787, 120771, 112382, 119498, 113556 | 141698, 142354, 142143, 142247, 142116 | 535, 535, 535, 535, 535 |
+| `MZ011CommandJournalSinkBatch100WithCheckpoint` | 114467, 120172, 115034, 111958, 109717 | 142215, 142140, 142080, 142399, 142222 | 535, 535, 535, 535, 535 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative to direct subscription |
+| --- | ---: | ---: | ---: | --- |
+| Direct subscription drain | 88612 | 69702 | 520 | `1.00x` |
+| Sink runner, no checkpoint | 117787 | 142143 | 535 | `1.33x` CPU, `2.04x` bytes, 15 more allocations |
+| Sink runner, in-memory checkpoint | 114467 | 142215 | 535 | `1.29x` CPU, `2.04x` bytes, 15 more allocations |
+
+The checkpoint control is not a disk benchmark; durable file/database
+checkpoint latency depends on the connector. The runner overhead is opt-in and
+does not change ordinary journal writes or direct subscription consumers.
+
+The test-first optimization comparison was:
+
+| Runner version | Median ns/op | Median B/op | Median allocs/op |
+| --- | ---: | ---: | ---: |
+| Before ready-record drain | 124981 | 142415 | 538 |
+| After ready-record drain | 117787 | 142143 | 535 |
+
+The optimization is approximately `1.06x` faster with three fewer allocations;
+it creates the batch timer only when the batch is not already fillable from
+ready records.
+
+The exact command was:
+
+```sh
+make benchmark-mz011-sink
+```
