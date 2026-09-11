@@ -7954,3 +7954,23 @@ verify-differential-except:
 .PHONY: commit-differential-except
 commit-differential-except:
 	bash ./scripts/commit-differential-except.sh
+
+.PHONY: benchmark-differential-intersect
+benchmark-differential-intersect:
+	bash ./scripts/benchmark-differential-intersect.sh
+
+.PHONY: test-differential-intersect
+test-differential-intersect:
+	bash ./scripts/test-differential-intersect.sh
+
+.PHONY: format-differential-intersect
+format-differential-intersect:
+	bash ./scripts/format-differential-intersect.sh
+
+.PHONY: verify-differential-intersect
+verify-differential-intersect:
+	bash ./scripts/verify-differential-intersect.sh
+
+.PHONY: commit-differential-intersect
+commit-differential-intersect:
+	bash ./scripts/commit-differential-intersect.sh

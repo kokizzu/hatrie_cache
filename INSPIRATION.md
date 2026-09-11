@@ -359,6 +359,9 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M038c Weighted duplicate-preserving differential SUM maintenance for callback-defined groups; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M038d One-pass weighted duplicate-preserving differential COUNT+SUM maintenance; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M038e Stateful duplicate-preserving differential `INTERSECT ALL`
+  maintenance with checked multiplicities, atomic validation, and incremental
+  output deltas; see [DIFFERENTIAL_INTERSECT.md](DIFFERENTIAL_INTERSECT.md).
 - [x] M039 Compaction constrained by active read frontiers.
 - [x] M040 Append-only fast path selected from source metadata via typed-table change metadata, validating aggregate dispatch, compatibility tests, and benchmark guide.
 - [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).

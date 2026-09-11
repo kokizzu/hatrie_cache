@@ -17,6 +17,9 @@ without losing negative updates or duplicate multiplicity.
 - `ExceptDifferentialRows` computes an exact signed `left - right` difference,
   while `NegateDifferentialRows` exposes the underlying sign inversion; see
   [DIFFERENTIAL_DIFFERENCE.md](DIFFERENTIAL_DIFFERENCE.md).
+- `DifferentialIntersect` maintains signed `INTERSECT ALL` multiplicity
+  transitions incrementally; see
+  [DIFFERENTIAL_INTERSECT.md](DIFFERENTIAL_INTERSECT.md).
 - `JoinDifferentialRows` computes an inner join. A matching pair contributes
   `left.Diff * right.Diff`, including negative weights and duplicate
   multiplicity.

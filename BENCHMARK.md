@@ -18304,3 +18304,56 @@ BenchmarkExceptDifferentialRows/Optimized-32:
 
 `B/op` is cumulative allocation volume, not retained or peak heap. The
 optimized path changes no existing operator or SQL execution behavior.
+
+## Differential `INTERSECT ALL` Maintenance
+
+The incremental `DifferentialIntersect` path was compared with rebuilding the
+full intersection snapshot after each of 256 single-side updates. The workload
+starts with 512 matching keys and adds 128 matching keys one side at a time.
+Five samples used `-benchmem -count=5` on Linux amd64/AMD Ryzen 9 5950X.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change snapshot rebuild | 15,267,348 | 20,361,752 | 1,796 | baseline |
+| Post-change snapshot rebuild control | 14,955,060 | 20,361,760 | 1,796 | 2.1% faster than pre-change baseline |
+| Incremental `INTERSECT ALL` | 371,747 | 657,530 | 2,837 | 41.08x faster than pre-change, 40.23x faster than control, 96.8% fewer cumulative bytes, 1.58x more allocations |
+
+Raw pre-change baseline:
+
+```text
+BenchmarkDifferentialIntersect/RebuildSnapshot-32:
+15481674 ns/op 20361836 B/op 1796 allocs/op
+15202155 ns/op 20361752 B/op 1796 allocs/op
+15267348 ns/op 20361750 B/op 1796 allocs/op
+15339679 ns/op 20361751 B/op 1796 allocs/op
+15172271 ns/op 20361752 B/op 1796 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkDifferentialIntersect/RebuildSnapshot-32:
+15013528 ns/op 20361833 B/op 1796 allocs/op
+14853295 ns/op 20361758 B/op 1796 allocs/op
+14785539 ns/op 20361751 B/op 1796 allocs/op
+14955060 ns/op 20361760 B/op 1796 allocs/op
+15126280 ns/op 20361830 B/op 1796 allocs/op
+
+BenchmarkDifferentialIntersect/Incremental-32:
+371473 ns/op 657530 B/op 2837 allocs/op
+371747 ns/op 657530 B/op 2837 allocs/op
+391812 ns/op 657530 B/op 2837 allocs/op
+387559 ns/op 657530 B/op 2837 allocs/op
+371374 ns/op 657530 B/op 2837 allocs/op
+```
+
+`B/op` is cumulative allocation volume, not retained or peak heap. The
+incremental operator retains active counts and left payloads, while avoiding
+the repeated full snapshot materialization.
+
+### Rejected Scratch Validation-Map Reuse
+
+A follow-up attempt reused the validation map between `Apply` calls. It was
+rolled back because the same workload moved from a median `371,747 ns/op` to
+`415,847 ns/op`, from `657,530` to `657,978 B/op`, and from `2,837` to `2,840`
+allocations. Reusing the map's buckets did not offset the clearing overhead.
