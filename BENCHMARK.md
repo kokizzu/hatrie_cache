@@ -18013,3 +18013,25 @@ read_only_handle: 8121, 8113, 8111, 8084, 8020 ns/op; 13696 B/op; 85 allocs/op
 See [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md) for eligibility
 rules and tradeoff analysis. Run `make benchmark-m071-compiled-template-reuse`
 to repeat it.
+
+## Peer-Aware Incremental Numeric RANGE Windows
+
+The workload processes 4,096 ordered rows with a 64-unit numeric range frame
+and materializes the same differential output shape in both paths. Five samples
+used `-benchmem -count=5` on Linux amd64/AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Naive recomputation with output | 7,326,222 | 1,732,908 | 28,208 | baseline |
+| Incremental RANGE maintainer | 2,525,930 | 2,906,353 | 14,326 | 2.90x faster, 1.68x higher cumulative bytes, 1.97x fewer allocations |
+
+Raw samples:
+
+```text
+naive_materialized: 7317005, 7322622, 7282366, 7376640, 7511894 ns/op; 1732942, 1732909, 1732907, 1732907, 1732908 B/op; 28208 allocs/op
+incremental_range: 2541649, 2470803, 2525930, 2468039, 2567294 ns/op; 2906365, 2906354, 2906353, 2906353, 2906353 B/op; 14326 allocs/op
+```
+
+The byte increase is bounded state for active range contributions, duplicate
+keys, and exact peer replacements. The legacy ROWS maintainer and default SQL
+execution are unchanged. See [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md).

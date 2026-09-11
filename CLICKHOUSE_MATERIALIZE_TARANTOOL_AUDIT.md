@@ -191,9 +191,16 @@ records a separate implementation boundary.
 - [ ] T103 Native FFI extension boundary.
 - [ ] T150 Language-neutral client SDK coverage.
 
-### M071: Immutable Compiled SQL Template Reuse
+### M051c: Immutable Compiled SQL Template Reuse
 
 Adopted. Static parameter-free compiled SQL handles reuse the immutable
 rewritten template; parameterized and execution-local calls retain cloning.
 Verification and measurements are recorded in
 [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md).
+
+### M065m: Peer-Aware Incremental Numeric RANGE Windows
+
+Adopted as an opt-in append-only capability for `COUNT(*)` and `SUM(int64)`.
+It maintains inclusive numeric range bounds, emits exact peer replacement
+differentials, and leaves the existing ROWS-frame and default paths unchanged.
+See [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md).

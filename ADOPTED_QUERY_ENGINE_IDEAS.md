@@ -177,9 +177,16 @@ for raw samples and workload details.
 
 | ClickHouse | Typed compact keys for grouped arrangement state | Implemented | `TypedTableAggregate` hashes typed group values without allocating a formatted key on every mutation, uses exact collision buckets, and retains one legacy key per live group for deterministic row ordering. See [BENCHMARK.md](BENCHMARK.md#typed-aggregate-arrangement-hash-keys). |
 
-## M071: Immutable Compiled SQL Template Reuse
+## M051c: Immutable Compiled SQL Template Reuse
 
 Inspired by prepared-plan reuse in ClickHouse-style query execution, static
 compiled SQL handles now reuse their immutable rewritten template. Parameterized
 queries and calls with dynamic collation, optimizer, or index-hint options keep
 the clone path. See [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md).
+
+## M065m: Peer-Aware Incremental Numeric RANGE Windows
+
+Materialize-style differential maintenance now supports opt-in append-only
+numeric `RANGE` frames for `COUNT(*)` and `SUM(int64)`. Equal-order peers emit
+exact retractions and replacements; the legacy ROWS path remains unchanged.
+See [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md).

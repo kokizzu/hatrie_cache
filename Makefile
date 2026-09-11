@@ -7735,3 +7735,39 @@ amend-m071-compiled-template-reuse:
 .PHONY: push-m071-compiled-template-reuse
 push-m071-compiled-template-reuse:
 	bash ./scripts/push-m071-compiled-template-reuse.sh
+
+.PHONY: audit-inspiration-now
+audit-inspiration-now:
+	bash ./scripts/audit-inspiration-now.sh
+
+.PHONY: benchmark-m065m-incremental-range-window
+benchmark-m065m-incremental-range-window:
+	bash ./scripts/benchmark-m065m-incremental-range-window.sh
+
+.PHONY: test-m065m-incremental-range-window
+test-m065m-incremental-range-window:
+	bash ./scripts/test-m065m-incremental-range-window.sh
+
+.PHONY: format-m065m-incremental-range-window
+format-m065m-incremental-range-window:
+	bash ./scripts/format-m065m-incremental-range-window.sh
+
+.PHONY: test-race-m065m-incremental-range-window
+test-race-m065m-incremental-range-window:
+	bash ./scripts/test-race-m065m-incremental-range-window.sh
+
+.PHONY: vet-m065m-incremental-range-window
+vet-m065m-incremental-range-window:
+	bash ./scripts/vet-m065m-incremental-range-window.sh
+
+.PHONY: review-m065m-incremental-range-window
+review-m065m-incremental-range-window:
+	bash ./scripts/review-m065m-incremental-range-window.sh
+
+.PHONY: commit-m065m-incremental-range-window
+commit-m065m-incremental-range-window:
+	bash ./scripts/commit-m065m-incremental-range-window.sh
+
+.PHONY: push-m065m-incremental-range-window
+push-m065m-incremental-range-window:
+	bash ./scripts/push-m065m-incremental-range-window.sh
