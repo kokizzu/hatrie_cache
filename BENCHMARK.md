@@ -19880,3 +19880,58 @@ Raw indexed samples:
 132.1 24 1
 131.6 24 1
 ```
+
+## SQL Packed Numeric Predicate Kernel
+
+Seven `250ms` local benchmark samples on an AMD Ryzen 9 5950X, Go `amd64`,
+with `GOMAXPROCS=1`. The workload builds a 4,096-row typed table and executes
+`FROM CACHE('events') SELECT team, points WHERE points >= 6000`. The packed
+variant uses fixed-width numeric storage; the legacy variant is the control.
+
+| Workload | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Packed numeric query | 693,848 ns/op; 826,478 B/op; 10,759 allocs/op | 611,260 ns/op; 808,011 B/op; 8,448 allocs/op | 1.14x CPU; 1.02x lower B/op; 1.27x fewer allocs |
+| Legacy-column control | 686,955 ns/op; 791,066 B/op; 6,345 allocs/op | 627,961 ns/op; 791,010 B/op; 6,343 allocs/op | Allocation profile unchanged; CPU samples are process-to-process noisy |
+
+The kernel is selected only when every direct numeric predicate has a valid
+packed column. Legacy columns and unsupported shapes use the original loop, so
+the optimization has no wire or persistence-format tradeoff and does not
+allocate a reusable selection mask.
+
+Raw output from `make benchmark-ch048-numeric-predicate-kernel-baseline`:
+
+```text
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 422 680017 ns/op 791089 B/op 6345 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 421 685666 ns/op 791075 B/op 6345 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 435 681150 ns/op 791055 B/op 6344 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 428 711555 ns/op 791065 B/op 6345 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 426 697646 ns/op 791068 B/op 6345 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 427 688421 ns/op 791066 B/op 6345 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 433 686955 ns/op 791058 B/op 6344 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 398 746553 ns/op 826518 B/op 10760 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 399 719524 ns/op 826516 B/op 10760 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 433 693848 ns/op 826450 B/op 10758 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 418 690582 ns/op 826478 B/op 10759 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 432 684709 ns/op 826452 B/op 10758 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 432 693504 ns/op 826452 B/op 10758 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 370 712519 ns/op 826581 B/op 10763 allocs/op
+```
+
+Raw output from `make benchmark-ch048-numeric-predicate-kernel`:
+
+```text
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 426 673391 ns/op 791083 B/op 6345 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 459 626123 ns/op 791025 B/op 6343 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 475 629668 ns/op 791007 B/op 6343 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 472 625344 ns/op 791010 B/op 6343 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 476 627961 ns/op 791006 B/op 6343 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 474 632887 ns/op 791008 B/op 6343 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/legacy 459 633607 ns/op 791025 B/op 6343 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 488 610152 ns/op 808000 B/op 8447 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 470 620061 ns/op 808025 B/op 8448 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 472 622112 ns/op 808022 B/op 8448 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 480 610316 ns/op 808011 B/op 8448 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 484 610876 ns/op 808005 B/op 8448 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 474 618538 ns/op 808019 B/op 8448 allocs/op
+BenchmarkTypedTableColumnarCompressedBatchesQuery/compressed 493 611260 ns/op 807993 B/op 8447 allocs/op
+```

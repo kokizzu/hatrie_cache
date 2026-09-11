@@ -71,6 +71,7 @@ name.
 - [x] C014 Selection vectors for filtered blocks.
 - [x] C015 SIMD kernels for common numeric and string predicates. AVX2-gated equality and inequality dispatch is available for typed int64 masks; all other numeric and string predicates retain the portable allocation-free path.
 - [x] C015a Allocation-free batch predicate masks for numeric and string filters.
+- [x] C015b SQL packed numeric predicate kernel. Direct numeric columnar filters reuse fixed-width bytes and validity bits without per-row interface boxing, while legacy and unsupported shapes retain fallback semantics.
 - [x] C016 Pipeline stages with independently scheduled work. Bounded queues, independent worker pools, backpressure, cancellation, and stage-scoped errors are provided by hatPipeline (see PIPELINE_STAGES.md).
 - [x] C017 EXPLAIN PIPELINE output with stage and worker detail. `EXPLAIN PIPELINE` now emits additive one-based stage, worker, and worker-count metadata derived from the static plan; regular `EXPLAIN` output remains unchanged and `EXPLAIN PIPELINE ANALYZE` is rejected explicitly.
 - [x] C018 EXPLAIN output for the local SQL plan.

@@ -8859,6 +8859,39 @@ commit-tt036-scheduler-stats:
 push-tt036-scheduler-stats:
 	bash scripts/push-tt036-scheduler-stats.sh
 
+test-ch048-numeric-predicate-kernel:
+	bash scripts/test-ch048-numeric-predicate-kernel.sh
+
+benchmark-ch048-numeric-predicate-kernel-baseline:
+	bash scripts/benchmark-ch048-numeric-predicate-kernel-baseline.sh
+
+benchmark-ch048-numeric-predicate-kernel:
+	bash scripts/benchmark-ch048-numeric-predicate-kernel.sh
+
+format-ch048-numeric-predicate-kernel:
+	bash scripts/format-ch048-numeric-predicate-kernel.sh
+
+test-ch048-numeric-predicate-kernel-full:
+	bash scripts/test-ch048-numeric-predicate-kernel-full.sh
+
+race-ch048-numeric-predicate-kernel:
+	bash scripts/race-ch048-numeric-predicate-kernel.sh
+
+vet-ch048-numeric-predicate-kernel:
+	bash scripts/vet-ch048-numeric-predicate-kernel.sh
+
+verify-ch048-numeric-predicate-kernel-docs:
+	bash scripts/verify-ch048-numeric-predicate-kernel-docs.sh
+
+review-ch048-numeric-predicate-kernel:
+	bash scripts/review-ch048-numeric-predicate-kernel.sh
+
+commit-ch048-numeric-predicate-kernel:
+	bash scripts/commit-ch048-numeric-predicate-kernel.sh
+
+push-ch048-numeric-predicate-kernel:
+	bash scripts/push-ch048-numeric-predicate-kernel.sh
+
 .PHONY: test-ch002-primary-mark-pruning benchmark-ch002-primary-mark-pruning format-ch002-primary-mark-pruning
 test-ch002-primary-mark-pruning:
 	bash scripts/test-ch002-primary-mark-pruning.sh

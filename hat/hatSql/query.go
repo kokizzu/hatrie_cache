@@ -9043,6 +9043,7 @@ func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionF
 	if segments != nil && segments.RowsPerSegment > 0 {
 		rowsPerSegment = segments.RowsPerSegment
 	}
+	kernels, packedNumeric := sqlColumnarNumericPredicateKernels(batch, predicates)
 	matched, scanned := 0, 0
 	for start := 0; start < batch.Rows; start += rowsPerSegment {
 		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
@@ -9062,12 +9063,21 @@ func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionF
 				break
 			}
 			matches := true
-			for _, predicate := range predicates {
-				candidate, _ := batch.Value(predicate.field, rowIndex)
-				number, ok := sqlNumber(candidate)
-				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
-					matches = false
-					break
+			if packedNumeric {
+				for _, kernel := range kernels {
+					if !kernel.matches(rowIndex) {
+						matches = false
+						break
+					}
+				}
+			} else {
+				for _, predicate := range predicates {
+					candidate, _ := batch.Value(predicate.field, rowIndex)
+					number, ok := sqlNumber(candidate)
+					if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+						matches = false
+						break
+					}
 				}
 			}
 			if !matches {

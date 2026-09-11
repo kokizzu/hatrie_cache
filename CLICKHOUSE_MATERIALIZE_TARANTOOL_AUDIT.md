@@ -240,3 +240,12 @@ NULL and descending semantics, and rejects late/out-of-order appends. It is
 opt-in and append-only; arbitrary updates, deletes, dynamic positions, and
 planner integration remain intentionally deferred. The benchmark and memory
 tradeoff are recorded in [BENCHMARK.md](BENCHMARK.md).
+### M065s: SQL packed numeric predicate kernel
+
+Implemented the SQL-side CH-048 follow-up for packed columnar `int64` and
+`float64` predicates. Direct numeric `WHERE` conjunctions prevalidate packed
+columns once and compare their bytes without per-row interface boxing. Legacy,
+malformed, NULL, and unsupported predicate paths retain the established
+fallback. Seven-sample benchmarking recorded 1.14x lower CPU time and 21.5%
+fewer allocations on the packed workload without a format or configuration
+change.

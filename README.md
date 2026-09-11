@@ -4087,6 +4087,16 @@ CPU, allocation, and fallback tradeoffs.
 
 Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and inequality when supported, with portable fallback elsewhere. See [C015 SIMD predicate kernels](C015_SIMD.md) for the API, validation, and measurements.
 
+## SQL Packed Numeric Predicate Kernel
+
+Direct numeric `WHERE` predicates over packed columnar `int64` or `float64`
+fields now compare fixed-width bytes and validity bits without per-row
+interface boxing. Legacy columns, NULLs, malformed packed metadata, and wider
+predicate shapes retain the existing evaluator. The change is automatic and
+has no wire or persistence-format impact. See
+[SQL packed numeric predicate kernel](SQL_PACKED_NUMERIC_PREDICATE.md) and the
+[raw benchmark](BENCHMARK.md#sql-packed-numeric-predicate-kernel).
+
 - [Quorum policy](QUORUM_POLICY.md)
 - [Read quorum](READ_QUORUM.md)
 
