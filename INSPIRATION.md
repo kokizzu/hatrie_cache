@@ -350,6 +350,10 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M037b Generic signed filter, map, flat-map, union, and join operators with atomic callback failure handling; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M037c Signed differential int64 SUM maintenance for callback-defined groups with checked weighted updates; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M037d One-pass signed differential COUNT+SUM maintenance for callback-defined groups; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M037f Materialize-style signed differential `EXCEPT` and explicit
+  weight negation with checked `math.MinInt64` handling, duplicate-preserving
+  consolidation, and input ownership guarantees; see
+  [DIFFERENTIAL_DIFFERENCE.md](DIFFERENTIAL_DIFFERENCE.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).

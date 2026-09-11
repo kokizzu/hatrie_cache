@@ -7934,3 +7934,23 @@ commit-m065r-incremental-range-nth-value:
 .PHONY: push-m065r-incremental-range-nth-value
 push-m065r-incremental-range-nth-value:
 	bash ./scripts/push-m065r-incremental-range-nth-value.sh
+
+.PHONY: benchmark-differential-except
+benchmark-differential-except:
+	bash ./scripts/benchmark-differential-except.sh
+
+.PHONY: test-differential-except
+test-differential-except:
+	bash ./scripts/test-differential-except.sh
+
+.PHONY: format-differential-except
+format-differential-except:
+	bash ./scripts/format-differential-except.sh
+
+.PHONY: verify-differential-except
+verify-differential-except:
+	bash ./scripts/verify-differential-except.sh
+
+.PHONY: commit-differential-except
+commit-differential-except:
+	bash ./scripts/commit-differential-except.sh

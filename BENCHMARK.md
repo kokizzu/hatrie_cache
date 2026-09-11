@@ -18258,3 +18258,49 @@ rescanning all prior rows for every result. `B/op` is cumulative allocation
 volume, not retained or peak heap; the higher value pays for bounded active
 rows and peer-safe source snapshots. The feature does not change default SQL
 execution or the existing ROWS window APIs.
+
+## Differential `EXCEPT` Composition
+
+The optimized `ExceptDifferentialRows` path was compared with the equivalent
+pre-change composition of cloning the right batch, negating it, appending both
+batches, and calling `ConsolidateDifferentialRows`. The workload contains
+4,096 rows in each input, with repeated key/time identities. Five samples used
+`-benchmem -count=5` on Linux amd64/AMD Ryzen 9 5950X.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change composition baseline | 2,500,865 | 4,752,011 | 20,515 | baseline |
+| Post-change composition control | 2,510,080 | 4,752,008 | 20,515 | 0.4% slower than pre-change baseline |
+| Optimized `ExceptDifferentialRows` | 901,613 | 1,671,808 | 4,130 | 2.77x faster than pre-change, 2.78x faster than control, 64.8% fewer cumulative bytes, 4.97x fewer allocations |
+
+Raw pre-change baseline:
+
+```text
+BenchmarkExceptDifferentialRows/BaselineComposition-32:
+2500865 ns/op 4752012 B/op 20515 allocs/op
+2592897 ns/op 4752011 B/op 20515 allocs/op
+2526609 ns/op 4752011 B/op 20515 allocs/op
+2451307 ns/op 4752011 B/op 20515 allocs/op
+2456709 ns/op 4752009 B/op 20515 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkExceptDifferentialRows/BaselineComposition-32:
+2523013 ns/op 4752012 B/op 20515 allocs/op
+2510080 ns/op 4752008 B/op 20515 allocs/op
+2465852 ns/op 4752009 B/op 20515 allocs/op
+2559743 ns/op 4752006 B/op 20515 allocs/op
+2489779 ns/op 4752008 B/op 20515 allocs/op
+
+BenchmarkExceptDifferentialRows/Optimized-32:
+909329 ns/op 1671810 B/op 4130 allocs/op
+895570 ns/op 1671808 B/op 4130 allocs/op
+901613 ns/op 1671808 B/op 4130 allocs/op
+898494 ns/op 1671808 B/op 4130 allocs/op
+901808 ns/op 1671809 B/op 4130 allocs/op
+```
+
+`B/op` is cumulative allocation volume, not retained or peak heap. The
+optimized path changes no existing operator or SQL execution behavior.

@@ -14,6 +14,9 @@ without losing negative updates or duplicate multiplicity.
   expansion. Each emitted row inherits the input timestamp and weight.
 - `UnionDifferentialRows` combines `UNION ALL`-style batches and consolidates
   equal identities.
+- `ExceptDifferentialRows` computes an exact signed `left - right` difference,
+  while `NegateDifferentialRows` exposes the underlying sign inversion; see
+  [DIFFERENTIAL_DIFFERENCE.md](DIFFERENTIAL_DIFFERENCE.md).
 - `JoinDifferentialRows` computes an inner join. A matching pair contributes
   `left.Diff * right.Diff`, including negative weights and duplicate
   multiplicity.
