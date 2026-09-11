@@ -18060,6 +18060,43 @@ A separate pre-implementation ordinary-only run measured `2052401 ns/op`,
 reported above because it controls for normal CPU noise. No storage, wire, or
 default-execution behavior changes.
 
+## Native SQL Dataflow Grouped Aggregates
+
+M052e extends the opt-in native dataflow executor to a narrow grouped shape:
+one directly selected integer or `NULL` key, a scalar `WHERE` predicate, and
+the built-in `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregates. It preserves
+first-seen group order and rejects mixed projections, multiple grouping
+expressions, `HAVING`, ordering, limits, unsupported runtime key types, and
+other shapes rather than approximating SQL behavior.
+
+Command: `make benchmark-m052e-native-group`.
+
+The workload groups 4,096 already resolved map rows into 257 groups, applies a
+scalar filter, and computes six aggregates. Both paths compile outside the
+timed loop and receive identical rows. Five paired `-benchmem` samples were
+used on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 2,852,423 | 2,792,071 | 16,600 | baseline |
+| Native grouped aggregate executor | 1,370,500 | 1,278,722 | 8,099 | 2.08x faster; 2.18x fewer bytes; 2.05x fewer allocations |
+
+Raw paired samples:
+
+```text
+ordinary: 2866719, 2941904, 2839091, 2730815, 2852423 ns/op;
+  2792071, 2792394, 2791934, 2792123, 2791799 B/op;
+  16600, 16602, 16599, 16600, 16599 allocs/op
+native: 1337656, 1371792, 1370500, 1364299, 1373245 ns/op;
+  1278847, 1278722, 1278772, 1278654, 1278673 B/op;
+  8100, 8099, 8100, 8099, 8099 allocs/op
+```
+
+The pre-implementation ordinary-only run measured `2881364 ns/op`,
+`2792011 B/op`, and `16600 allocs/op` at its median. The paired control is
+reported above because it controls for normal benchmark noise. The feature is
+opt-in and changes no storage, wire, or default SQL behavior.
+
 ## Immutable Compiled SQL Template Reuse
 
 The workload executes a static compiled query over a 16-row `VALUES` source.

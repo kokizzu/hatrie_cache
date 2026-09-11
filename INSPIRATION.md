@@ -412,6 +412,12 @@ Materialize's Timely/Differential Dataflow runtime.
   optional scalar filter. Mixed projections, grouping, ordering, limits,
   aggregate filters, and other unsupported shapes fail closed; see the
   aggregate measurement in [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-global-aggregates).
+- [x] M052e Extend the opt-in built-in executor to one-direct-integer-key
+  grouped `CACHE`/`KEYS` batches with built-in aggregates, first-seen group
+  order, signed/unsigned integer and `NULL` keys, and explicit rejection of
+  unsupported runtime key types. The paired benchmark is 2.08x faster with
+  2.18x fewer bytes and 2.05x fewer allocations; see
+  [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-grouped-aggregates).
 - [x] M053 Extensible optimizer rule framework. `SQLQueryOptimizer` provides an opt-in ordered rule hook over structural EXPLAIN steps and existing `SQLIndexHint` controls; nil keeps the default path. See [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md) and the measured opt-in cost in [BENCHMARK.md](BENCHMARK.md#opt-in-sql-optimizer-rules).
 - [x] M054 Predicate pushdown before arrangement maintenance.
 - [x] M055 Projection pruning before arrangement maintenance.

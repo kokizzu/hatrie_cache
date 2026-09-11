@@ -96,7 +96,7 @@ validates typed source fields, preserves row order, duplicates, and SQL
 `NULL` filtering semantics, and does not mutate the input rows. Scalar
 evaluation errors retain the normal SQL behavior. `ErrSQLNativeDataflowUnsupported`
 is returned at compilation time for joins, unions, CTEs, mixed aggregate and
-non-aggregate projections, grouping, window functions, ordering, limits,
+non-aggregate projections, unsupported grouping shapes, window functions, ordering, limits,
 samples, `DISTINCT`, `*`, custom function calls, and other shapes outside the
 supported built-in paths. Callers use the ordinary `CompiledSQLQuery.Execute`
 or callback-backed `CompileDataflow` path for those queries.
@@ -109,6 +109,13 @@ executor returns one row, including an empty-input result with SQL-compatible
 `COUNT` and `NULL` results for aggregates without values. It evaluates the
 same typed source and SQL null semantics as the ordinary global aggregate
 executor.
+
+Grouped single-source queries are supported when they have one directly
+selected integer `GROUP BY` field and all other selected expressions are the
+same built-in aggregates. The native path preserves first-seen group order,
+duplicate rows, and one SQL `NULL` group. It accepts signed and unsigned
+integer source values that fit in `int64`; other runtime group-key types return
+`ErrSQLNativeDataflowUnsupported` so callers can use a different executor.
 
 This API does not resolve sources, change query defaults, or replace the
 ordinary SQL executor. It is a lower-level boundary for callers that already
@@ -209,5 +216,39 @@ The pre-implementation ordinary-only control measured 2,052,401 ns/op,
 2,996,887 B/op, and 16,479 allocations/op across five samples. The paired
 control is used for the reported ratio because it runs beside the native path
 and avoids treating separate benchmark invocations as a code-path change.
-The optimization is limited to the aggregate-only shape; ordinary SQL
-execution remains the compatibility path for richer queries.
+The optimization is limited to the aggregate-only and narrow grouped shapes;
+ordinary SQL execution remains the compatibility path for richer queries.
+
+### Native Grouped Aggregate Measurement
+
+Command:
+
+```text
+make benchmark-m052e-native-group
+```
+
+The benchmark groups 4,096 already resolved rows into 257 integer-key groups,
+applies a scalar `WHERE` predicate, and computes six built-in aggregates. Both
+paths compile the query outside the timed loop and receive the same rows. The
+ordinary executor and native grouped executor each use five paired
+`-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 2,852,423 | 2,792,071 | 16,600 | baseline |
+| Native grouped aggregate executor | 1,370,500 | 1,278,722 | 8,099 | 2.08x faster; 2.18x fewer bytes; 2.05x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2,866,719 | 1,337,656 | 2,792,071 | 1,278,847 | 16,600 | 8,100 |
+| 2 | 2,941,904 | 1,371,792 | 2,792,394 | 1,278,722 | 16,602 | 8,099 |
+| 3 | 2,839,091 | 1,370,500 | 2,791,934 | 1,278,772 | 16,599 | 8,100 |
+| 4 | 2,730,815 | 1,364,299 | 2,792,123 | 1,278,654 | 16,600 | 8,099 |
+| 5 | 2,852,423 | 1,373,245 | 2,791,799 | 1,278,673 | 16,599 | 8,099 |
+
+The pre-implementation ordinary-only baseline median was `2,881,364 ns/op`,
+`2,792,011 B/op`, and `16,600 allocs/op`. The paired control is reported for
+the ratio because it controls for normal benchmark noise. No storage, wire,
+or default-execution behavior changes.

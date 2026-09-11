@@ -3066,11 +3066,15 @@ func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
 }
 
 func (aggregate *sqlStreamAggregate) add(row sqlExecRow) error {
+	return aggregate.addWithGroup([]sqlExecRow{row}, row)
+}
+
+func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExecRow) error {
 	if aggregate.name == "COUNT" && aggregate.arg == nil {
 		aggregate.count++
 		return nil
 	}
-	value := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+	value := evalSQLExpr(*aggregate.arg, group, row)
 	if err := sqlExpressionError(value); err != nil {
 		return err
 	}

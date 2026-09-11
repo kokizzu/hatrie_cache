@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+git add -- Makefile SQL_DATAFLOW_EXECUTOR.md BENCHMARK.md INSPIRATION.md ADOPTED_QUERY_ENGINE_IDEAS.md hat/hatSql/m052c_native_dataflow.go hat/hatSql/m052d_native_aggregate_test.go hat/hatSql/m052e_native_group_test.go hat/hatSql/m052e_native_group_benchmark_test.go hat/hatSql/query.go scripts/test-m052e-native-group.sh scripts/test-race-m052e-native-group.sh scripts/vet-m052e-native-group.sh scripts/benchmark-m052e-native-group.sh scripts/format-m052e-native-group.sh scripts/review-m052e-native-group.sh scripts/commit-m052e-native-group.sh scripts/push-m052e-native-group.sh
+git diff --cached --check
+git commit --only -m 'hatSql: add native grouped dataflow' -- Makefile SQL_DATAFLOW_EXECUTOR.md BENCHMARK.md INSPIRATION.md ADOPTED_QUERY_ENGINE_IDEAS.md hat/hatSql/m052c_native_dataflow.go hat/hatSql/m052d_native_aggregate_test.go hat/hatSql/m052e_native_group_test.go hat/hatSql/m052e_native_group_benchmark_test.go hat/hatSql/query.go scripts/test-m052e-native-group.sh scripts/test-race-m052e-native-group.sh scripts/vet-m052e-native-group.sh scripts/benchmark-m052e-native-group.sh scripts/format-m052e-native-group.sh scripts/review-m052e-native-group.sh scripts/commit-m052e-native-group.sh scripts/push-m052e-native-group.sh

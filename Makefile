@@ -8102,3 +8102,35 @@ commit-m052d-native-aggregate:
 .PHONY: push-m052d-native-aggregate
 push-m052d-native-aggregate:
 	bash ./scripts/push-m052d-native-aggregate.sh
+
+.PHONY: test-m052e-native-group
+test-m052e-native-group:
+	bash ./scripts/test-m052e-native-group.sh
+
+.PHONY: benchmark-m052e-native-group
+benchmark-m052e-native-group:
+	bash ./scripts/benchmark-m052e-native-group.sh
+
+.PHONY: format-m052e-native-group
+format-m052e-native-group:
+	bash ./scripts/format-m052e-native-group.sh
+
+.PHONY: test-race-m052e-native-group
+test-race-m052e-native-group:
+	bash ./scripts/test-race-m052e-native-group.sh
+
+.PHONY: vet-m052e-native-group
+vet-m052e-native-group:
+	bash ./scripts/vet-m052e-native-group.sh
+
+.PHONY: review-m052e-native-group
+review-m052e-native-group:
+	bash ./scripts/review-m052e-native-group.sh
+
+.PHONY: commit-m052e-native-group
+commit-m052e-native-group:
+	bash ./scripts/commit-m052e-native-group.sh
+
+.PHONY: push-m052e-native-group
+push-m052e-native-group:
+	bash ./scripts/push-m052e-native-group.sh

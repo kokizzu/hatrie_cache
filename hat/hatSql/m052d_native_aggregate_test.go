@@ -54,7 +54,6 @@ func TestCompiledSQLNativeDataflowMatchesGlobalAggregates(t *testing.T) {
 func TestCompiledSQLNativeDataflowAggregateRejectsUnsupportedShapes(t *testing.T) {
 	queries := []string{
 		"FROM CACHE('items') AS src SELECT src.id, COUNT(*) AS total",
-		"FROM CACHE('items') AS src SELECT src.id, COUNT(*) AS total GROUP BY src.id",
 		"FROM CACHE('items') AS src SELECT COUNT(*) AS total ORDER BY total",
 	}
 	for _, source := range queries {
