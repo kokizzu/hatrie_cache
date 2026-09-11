@@ -9901,3 +9901,7 @@ commit-expiration-deadline-cleaner:
 .PHONY: push-expiration-deadline-cleaner
 push-expiration-deadline-cleaner:
 	bash scripts/push-expiration-deadline-cleaner.sh
+
+.PHONY: commit-expiration-deadline-cleaner-push-fix
+commit-expiration-deadline-cleaner-push-fix:
+	bash scripts/commit-expiration-deadline-cleaner-push-fix.sh
