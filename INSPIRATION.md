@@ -401,6 +401,12 @@ Materialize's Timely/Differential Dataflow runtime.
   change to the existing SQL executor. See
   [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md) and the benchmark in
   [BENCHMARK.md](BENCHMARK.md#reusable-sql-dataflow-fragment-execution).
+- [x] M052c Add an opt-in built-in executor for single-source `CACHE`/`KEYS`
+  scalar filter/project batches. `CompileNativeDataflow` preserves ordinary
+  SQL semantics for its supported shape and returns
+  `ErrSQLNativeDataflowUnsupported` for unsupported plans; see
+  [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md#built-in-native-batch-path)
+  and [BENCHMARK.md](BENCHMARK.md#native-batch-measurement).
 - [x] M053 Extensible optimizer rule framework. `SQLQueryOptimizer` provides an opt-in ordered rule hook over structural EXPLAIN steps and existing `SQLIndexHint` controls; nil keeps the default path. See [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md) and the measured opt-in cost in [BENCHMARK.md](BENCHMARK.md#opt-in-sql-optimizer-rules).
 - [x] M054 Predicate pushdown before arrangement maintenance.
 - [x] M055 Projection pruning before arrangement maintenance.

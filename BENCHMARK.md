@@ -17991,6 +17991,40 @@ inlined-loop comparison. The
 pre-implementation direct run is retained for audit history, while the paired
 control avoids treating normal benchmark noise as a code-path regression.
 
+## Native SQL Dataflow Batch Execution
+
+M052c adds an opt-in built-in executor for already-resolved single-source
+`CACHE`/`KEYS` queries whose work is limited to scalar `WHERE` filtering and
+`SELECT` projection. It fuses the per-row filter/project boundary without
+changing the ordinary SQL executor or its defaults. Unsupported plans fail
+closed with `ErrSQLNativeDataflowUnsupported` and use the ordinary executor.
+
+Command: `make benchmark-m052c-native-dataflow`.
+
+The workload uses 4,096 map rows and five paired samples. Both paths compile
+the query outside the timed loop and use the same resolved rows; the native
+path receives those rows directly, so this isolates execution overhead from
+storage and wire transfer.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 1,673,810 | 2,657,606 | 12,304 | baseline |
+| Native scalar batch executor | 899,440 | 720,928 | 4,098 | 1.86x faster; 3.69x fewer bytes; 3.00x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1,673,810 | 904,438 | 2,657,605 | 720,928 | 12,304 | 4,098 |
+| 2 | 1,667,308 | 883,108 | 2,657,613 | 720,928 | 12,304 | 4,098 |
+| 3 | 1,659,304 | 883,223 | 2,657,615 | 720,928 | 12,304 | 4,098 |
+| 4 | 1,688,848 | 906,509 | 2,657,606 | 720,928 | 12,304 | 4,098 |
+| 5 | 1,687,189 | 899,440 | 2,657,606 | 720,928 | 12,304 | 4,098 |
+
+The improvement is conditional on the supported scalar plan and on the
+caller already owning a consistent resolved batch. No source lookup,
+snapshot, persistence, or serialization work is removed by this API.
+
 ## Immutable Compiled SQL Template Reuse
 
 The workload executes a static compiled query over a 16-row `VALUES` source.

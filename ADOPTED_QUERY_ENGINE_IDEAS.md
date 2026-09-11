@@ -134,6 +134,7 @@ explicitly opt-in operational control.
 
 | Materialize | Frontier-bound immutable SQL snapshots | Adopted as an explicit provider contract | `BeginSQLFrontierSnapshot` waits for every indexed source partition and requires `BeginSQLSnapshotAt` to bind the physical immutable view to the exact frontier; legacy providers are rejected rather than silently weakened. The default SQL path remains unchanged. [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md) |
 | Materialize | Executable reusable dataflow fragments | Adopted as an additive callback-backed API | `CompileSQLDataflow` and `CompiledSQLQuery.CompileDataflow` validate and snapshot lowered plans, expose upstream outputs without per-fragment input-list allocation, and preserve cancellation and error boundaries. Operator semantics remain caller-owned; existing SQL execution and defaults are unchanged. [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md) |
+| Materialize | Built-in executable dataflow operators | Adopted as an opt-in native scalar batch path | `CompileNativeDataflow` fuses built-in scalar filtering and projection for already-resolved single-source `CACHE`/`KEYS` batches. Unsupported joins, aggregates, windows, ordering, and other shapes fail with `ErrSQLNativeDataflowUnsupported`; ordinary SQL execution remains the fallback. The latest paired 4,096-row benchmark is 1.86x faster with 3.69x fewer bytes and 3.00x fewer allocations. [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md#built-in-native-batch-path) |
 
 ## Deliberately Deferred
 

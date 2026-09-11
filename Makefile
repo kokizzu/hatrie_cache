@@ -8024,6 +8024,7 @@ commit-partition-ownership-consensus:
 	bash ./scripts/commit-partition-ownership-consensus.sh
 
 
+
 .PHONY: test-sql-set-operation-all
 test-sql-set-operation-all:
 	bash ./scripts/test-sql-set-operation-all.sh
@@ -8036,3 +8037,37 @@ format-sql-set-operation-all:
 .PHONY: verify-sql-set-operation-all
 verify-sql-set-operation-all:
 	bash ./scripts/verify-sql-set-operation-all.sh
+.PHONY: inspect-goal-state
+inspect-goal-state:
+	bash ./scripts/inspect-goal-state.sh
+.PHONY: test-m052c-native-dataflow
+test-m052c-native-dataflow:
+	bash ./scripts/test-m052c-native-dataflow.sh
+
+.PHONY: benchmark-m052c-native-dataflow
+benchmark-m052c-native-dataflow:
+	bash ./scripts/benchmark-m052c-native-dataflow.sh
+
+.PHONY: format-m052c-native-dataflow
+format-m052c-native-dataflow:
+	bash ./scripts/format-m052c-native-dataflow.sh
+
+.PHONY: test-race-m052c-native-dataflow
+test-race-m052c-native-dataflow:
+	bash ./scripts/test-race-m052c-native-dataflow.sh
+
+.PHONY: vet-m052c-native-dataflow
+vet-m052c-native-dataflow:
+	bash ./scripts/vet-m052c-native-dataflow.sh
+
+.PHONY: review-m052c-native-dataflow
+review-m052c-native-dataflow:
+	bash ./scripts/review-m052c-native-dataflow.sh
+
+.PHONY: commit-m052c-native-dataflow
+commit-m052c-native-dataflow:
+	bash ./scripts/commit-m052c-native-dataflow.sh
+
+.PHONY: push-m052c-native-dataflow
+push-m052c-native-dataflow:
+	bash ./scripts/push-m052c-native-dataflow.sh

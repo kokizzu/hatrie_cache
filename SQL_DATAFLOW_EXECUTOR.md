@@ -68,6 +68,44 @@ The runnable external-package example is in
 An empty validated plan returns no rows and no error. Nil runners, malformed
 plans, nil contexts, and nil executors return explicit errors.
 
+## Built-In Native Batch Path
+
+`CompiledSQLQuery.CompileNativeDataflow` is an opt-in built-in executor for a
+small, allocation-conscious dataflow shape. It accepts one already-resolved
+`CACHE` or `KEYS` batch and fuses the scalar `WHERE` predicate with scalar
+`SELECT` projection:
+
+```go
+compiled, err := hatSql.CompileSQLQuery(
+    "FROM CACHE('items') AS src SELECT src.id, src.value WHERE src.value >= 2048",
+)
+if err != nil {
+    return err
+}
+
+executor, err := compiled.CompileNativeDataflow()
+if err != nil {
+    return err
+}
+
+rows, err := executor.Execute(ctx, inputRows)
+```
+
+The native handle is reusable. It checks the context before each input row,
+validates typed source fields, preserves row order, duplicates, and SQL
+`NULL` filtering semantics, and does not mutate the input rows. Scalar
+evaluation errors retain the normal SQL behavior. `ErrSQLNativeDataflowUnsupported`
+is returned at compilation time for joins, unions, CTEs, aggregates, grouping,
+window functions, ordering, limits, samples, `DISTINCT`, `*`, custom function
+calls, and other shapes outside scalar filter/project execution. Callers use
+the ordinary `CompiledSQLQuery.Execute` or callback-backed `CompileDataflow`
+path for those queries.
+
+This API does not resolve sources, change query defaults, or replace the
+ordinary SQL executor. It is a lower-level boundary for callers that already
+own a consistent source batch; the source-resolution and snapshot contract
+remain the caller's responsibility.
+
 ## Measurement
 
 Command:
@@ -95,3 +133,37 @@ than an inlined loop. A direct-only pre-implementation run measured
 `141098 ns/op`, `220841 B/op`, and `1290 allocs/op`; the paired control is used
 for the comparison because separate benchmark invocations showed normal CPU
 noise.
+
+### Native Batch Measurement
+
+Command:
+
+```text
+make benchmark-m052c-native-dataflow
+```
+
+The paired benchmark compiles the same single-source query, evaluates it over
+4,096 map rows, and runs five samples for the ordinary compiled executor and
+the opt-in native batch executor. Compilation is outside the timed loop. The
+native path receives the same resolved rows directly, so the comparison
+measures query execution overhead rather than source storage or wire transfer.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 1,673,810 | 2,657,606 | 12,304 | baseline |
+| Native scalar batch executor | 899,440 | 720,928 | 4,098 | 1.86x faster; 3.69x fewer bytes; 3.00x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1,673,810 | 904,438 | 2,657,605 | 720,928 | 12,304 | 4,098 |
+| 2 | 1,667,308 | 883,108 | 2,657,613 | 720,928 | 12,304 | 4,098 |
+| 3 | 1,659,304 | 883,223 | 2,657,615 | 720,928 | 12,304 | 4,098 |
+| 4 | 1,688,848 | 906,509 | 2,657,606 | 720,928 | 12,304 | 4,098 |
+| 5 | 1,687,189 | 899,440 | 2,657,606 | 720,928 | 12,304 | 4,098 |
+
+The gain is conditional on the caller already having a source batch and on
+the query fitting the supported scalar shape. Unsupported plans fail closed
+instead of silently taking a partial semantic path, and the ordinary executor
+remains the compatibility fallback.

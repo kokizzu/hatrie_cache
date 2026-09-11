@@ -62,8 +62,9 @@ type SQLDataflowFragmentRunner func(context.Context, SQLDataflowFragment, SQLDat
 // which lets typed or differential operators share one plan without making
 // the existing SQL execution path pay for this boundary.
 type SQLDataflowExecutor struct {
-	plan   SQLDataflowPlan
-	runner SQLDataflowFragmentRunner
+	plan        SQLDataflowPlan
+	runner      SQLDataflowFragmentRunner
+	nativeQuery *sqlQuery
 }
 
 // CompileSQLDataflow validates and snapshots a reusable fragment plan.
@@ -109,6 +110,12 @@ func (executor *SQLDataflowExecutor) Execute(ctx context.Context, initial []SQLR
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if executor.nativeQuery != nil {
+		return executeNativeSQLDataflow(ctx, executor.nativeQuery, initial)
+	}
+	if executor.runner == nil {
+		return nil, ErrSQLDataflowFragmentRunnerRequired
 	}
 	if len(executor.plan.Fragments) == 0 {
 		return nil, nil
