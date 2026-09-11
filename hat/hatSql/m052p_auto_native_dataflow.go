@@ -122,12 +122,29 @@ func sqlAutoNativeGroupedEligible(query *sqlQuery, resolver SQLSourceResolver, o
 	return ok && validateNativeSQLDataflowQuery(query) == nil
 }
 
+func sqlAutoNativeGroupedOrderedEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
+	if !sqlAutoNativeDataflowBaseEligible(query, resolver, options) {
+		return false
+	}
+	if query.distinct || len(query.groupBy) != 1 || len(query.orderBy) == 0 || query.limit < 0 || query.limitWithTies || query.limitBy != nil || sqlQueryHasWithFill(query) {
+		return false
+	}
+	if sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	_, ok := nativeSQLDataflowGroupedOrderedPlanFor(query)
+	return ok && validateNativeSQLDataflowQuery(query) == nil
+}
+
 func sqlAutoNativeDataflowPlanDetail(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) (string, bool) {
 	if sqlAutoNativeDataflowEligible(query, resolver, options) {
 		return "automatic scalar batch execution", true
 	}
 	if sqlAutoNativeAggregateDistinctEligible(query, resolver, options) {
 		return "automatic aggregate/distinct batch execution", true
+	}
+	if sqlAutoNativeGroupedOrderedEligible(query, resolver, options) {
+		return "automatic grouped ordered top-N batch execution", true
 	}
 	if sqlAutoNativeGroupedEligible(query, resolver, options) {
 		return "automatic grouped batch execution", true

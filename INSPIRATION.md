@@ -881,3 +881,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   and specialized resolver contracts retain their established executor, and
   `DisableNativeDataflow` keeps an explicit fallback. See
   [SQL_AUTO_NATIVE_GROUPED.md](SQL_AUTO_NATIVE_GROUPED.md).
+- [x] M052t Automatic safe grouped ordered Top-N dataflow selection. Grouped
+  aggregates with native-rewritable `HAVING` and finite selected-field ordering
+  use the existing bounded native batch runtime by default; qualified or
+  ambiguous ordering, alias-only unsupported `HAVING`, `WITH TIES`, richer SQL,
+  and specialized resolver contracts retain their established executor. See
+  [SQL_AUTO_NATIVE_GROUPED_ORDERED.md](SQL_AUTO_NATIVE_GROUPED_ORDERED.md).

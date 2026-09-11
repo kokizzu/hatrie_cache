@@ -19158,3 +19158,34 @@ fallback control:
 9044025 9716121 63141
 8847060 9715932 63141
 ```
+## M052t automatic native grouped Top-N
+
+This feature automatically selects the existing native grouped Top-N runtime for
+a one-field grouped `COUNT` plus `SUM`, native-rewritable `HAVING`, and finite
+`ORDER BY` page over 20,000 rows and 257 groups. The benchmark uses five
+samples and `-benchmem`; the fallback sets
+`SQLQueryOptions.DisableNativeDataflow = true`. The fallback is the exact
+pre-feature executor for this query shape.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native grouped Top-N | 2,923,901 | 3,033,458 | 21,201 | 4.46x faster, 6.08x less heap, 4.91x fewer allocations |
+| Existing materialized fallback | 13,031,295 | 18,441,776 | 104,165 | control / before |
+
+Raw samples (`ns/op B/op allocs/op`):
+
+```text
+automatic native grouped Top-N:
+2923901 3033471 21201
+2885495 3033472 21201
+2949460 3033458 21201
+2957616 3033457 21201
+2887457 3033458 21201
+
+fallback control / before:
+13031295 18441925 104165
+13999502 18441890 104164
+12924647 18441583 104165
+13150878 18441660 104164
+12916100 18441776 104165
+```

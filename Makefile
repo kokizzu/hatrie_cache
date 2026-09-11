@@ -8573,3 +8573,27 @@ commit-m052s-auto-native-grouped:
 
 push-m052s-auto-native-grouped:
 	bash scripts/push-m052s-auto-native-grouped.sh
+.PHONY: test-m052t-auto-native-grouped-ordered benchmark-m052t-auto-native-grouped-ordered format-m052t-auto-native-grouped-ordered test-race-m052t-auto-native-grouped-ordered vet-m052t-auto-native-grouped-ordered review-m052t-auto-native-grouped-ordered commit-m052t-auto-native-grouped-ordered push-m052t-auto-native-grouped-ordered
+test-m052t-auto-native-grouped-ordered:
+	bash scripts/test-m052t-auto-native-grouped-ordered.sh
+
+benchmark-m052t-auto-native-grouped-ordered:
+	bash scripts/benchmark-m052t-auto-native-grouped-ordered.sh
+
+format-m052t-auto-native-grouped-ordered:
+	bash scripts/format-m052t-auto-native-grouped-ordered.sh
+
+test-race-m052t-auto-native-grouped-ordered:
+	bash scripts/test-race-m052t-auto-native-grouped-ordered.sh
+
+vet-m052t-auto-native-grouped-ordered:
+	bash scripts/vet-m052t-auto-native-grouped-ordered.sh
+
+review-m052t-auto-native-grouped-ordered:
+	bash scripts/review-m052t-auto-native-grouped-ordered.sh
+
+commit-m052t-auto-native-grouped-ordered:
+	bash scripts/commit-m052t-auto-native-grouped-ordered.sh
+
+push-m052t-auto-native-grouped-ordered:
+	bash scripts/push-m052t-auto-native-grouped-ordered.sh
