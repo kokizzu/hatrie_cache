@@ -81,6 +81,7 @@ security guidance before exposing it on a network.
 - Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
+- Optional managed-refresh freshness thresholds: [MANAGED_REFRESH_FRESHNESS.md](MANAGED_REFRESH_FRESHNESS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - Opt-in persistent-store disk reserve admission: [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md)
 - Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)

@@ -22,12 +22,34 @@ type ManagedRefreshSchedulerOptions struct {
 	MaxCycleDuration time.Duration
 }
 
+// ManagedRefreshTaskOptions controls one refresh task. MaxStaleness is an
+// optional observability threshold; zero disables stale reporting.
+type ManagedRefreshTaskOptions struct {
+	Every        time.Duration
+	MaxStaleness time.Duration
+}
+
 // ManagedRefreshRun records one view or rollup refresh attempt.
 type ManagedRefreshRun struct {
 	Name       string
 	StartedAt  time.Time
 	FinishedAt time.Time
 	Error      string
+}
+
+// ManagedRefreshStatus describes one task's scheduling and freshness state.
+// A task with MaxStaleness enabled is stale before its first successful refresh
+// and once the time since its last successful refresh reaches that threshold.
+type ManagedRefreshStatus struct {
+	Name          string
+	Every         time.Duration
+	NextRun       time.Time
+	Running       bool
+	MaxStaleness  time.Duration
+	LastAttemptAt time.Time
+	LastSuccessAt time.Time
+	LastError     string
+	Stale         bool
 }
 
 // ManagedRefreshScheduler runs named materialized-view and rollup refreshes
@@ -41,10 +63,14 @@ type ManagedRefreshScheduler struct {
 }
 
 type managedRefreshTask struct {
-	every   time.Duration
-	next    time.Time
-	running bool
-	run     func(context.Context) error
+	every         time.Duration
+	maxStaleness  time.Duration
+	next          time.Time
+	running       bool
+	lastAttemptAt time.Time
+	lastSuccessAt time.Time
+	lastError     string
+	run           func(context.Context) error
 }
 
 func NewManagedRefreshScheduler(options ManagedRefreshSchedulerOptions) (*ManagedRefreshScheduler, error) {
@@ -69,6 +95,12 @@ func NewManagedRefreshScheduler(options ManagedRefreshSchedulerOptions) (*Manage
 // dependencies. It does not publish partial data because RefreshChanged keeps
 // the existing snapshot on an execution error.
 func (scheduler *ManagedRefreshScheduler) AddMaterializedView(name string, views *MaterializedViews, viewName string, resolver SourceResolver, options QueryOptions, every time.Duration) error {
+	return scheduler.AddMaterializedViewWithOptions(name, views, viewName, resolver, options, ManagedRefreshTaskOptions{Every: every})
+}
+
+// AddMaterializedViewWithOptions registers a materialized-view refresh with
+// optional freshness reporting.
+func (scheduler *ManagedRefreshScheduler) AddMaterializedViewWithOptions(name string, views *MaterializedViews, viewName string, resolver SourceResolver, options QueryOptions, taskOptions ManagedRefreshTaskOptions) error {
 	if views == nil {
 		return fmt.Errorf("materialized views are nil")
 	}
@@ -76,7 +108,7 @@ func (scheduler *ManagedRefreshScheduler) AddMaterializedView(name string, views
 	if viewName == "" {
 		return fmt.Errorf("materialized view name is required")
 	}
-	return scheduler.add(name, every, func(ctx context.Context) error {
+	return scheduler.add(name, taskOptions, func(ctx context.Context) error {
 		view, exists := views.Get(viewName)
 		if !exists {
 			return fmt.Errorf("materialized view %q does not exist", viewName)
@@ -89,27 +121,96 @@ func (scheduler *ManagedRefreshScheduler) AddMaterializedView(name string, views
 // AddRollup registers one caller-supplied rollup refresh. The callback is
 // expected to perform an atomic publish or retain its prior result on error.
 func (scheduler *ManagedRefreshScheduler) AddRollup(name string, every time.Duration, refresh func(context.Context) error) error {
+	return scheduler.AddRollupWithOptions(name, ManagedRefreshTaskOptions{Every: every}, refresh)
+}
+
+// AddRollupWithOptions registers a rollup refresh with optional freshness
+// reporting.
+func (scheduler *ManagedRefreshScheduler) AddRollupWithOptions(name string, taskOptions ManagedRefreshTaskOptions, refresh func(context.Context) error) error {
 	if refresh == nil {
 		return fmt.Errorf("rollup refresh is required")
 	}
-	return scheduler.add(name, every, refresh)
+	return scheduler.add(name, taskOptions, refresh)
 }
 
-func (scheduler *ManagedRefreshScheduler) add(name string, every time.Duration, run func(context.Context) error) error {
+func (scheduler *ManagedRefreshScheduler) add(name string, options ManagedRefreshTaskOptions, run func(context.Context) error) error {
 	if scheduler == nil {
 		return fmt.Errorf("managed refresh scheduler is nil")
 	}
 	name = strings.TrimSpace(name)
-	if name == "" || every <= 0 {
+	if name == "" || options.Every <= 0 {
 		return fmt.Errorf("refresh name and positive interval are required")
+	}
+	if options.MaxStaleness < 0 {
+		return fmt.Errorf("refresh max staleness must not be negative")
 	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	if _, exists := scheduler.tasks[name]; exists {
 		return fmt.Errorf("refresh %q already exists", name)
 	}
-	scheduler.tasks[name] = managedRefreshTask{every: every, next: scheduler.now(), run: run}
+	scheduler.tasks[name] = managedRefreshTask{every: options.Every, maxStaleness: options.MaxStaleness, next: scheduler.now(), run: run}
 	return nil
+}
+
+// StatusAt returns one task's status evaluated at now.
+func (scheduler *ManagedRefreshScheduler) StatusAt(name string, now time.Time) (ManagedRefreshStatus, bool) {
+	if scheduler == nil {
+		return ManagedRefreshStatus{}, false
+	}
+	name = strings.TrimSpace(name)
+	scheduler.mu.RLock()
+	task, exists := scheduler.tasks[name]
+	scheduler.mu.RUnlock()
+	if !exists {
+		return ManagedRefreshStatus{}, false
+	}
+	return managedRefreshStatus(name, task, now), true
+}
+
+// Status returns one task's status evaluated at the scheduler clock.
+func (scheduler *ManagedRefreshScheduler) Status(name string) (ManagedRefreshStatus, bool) {
+	if scheduler == nil {
+		return ManagedRefreshStatus{}, false
+	}
+	return scheduler.StatusAt(name, scheduler.now())
+}
+
+// StatusesAt returns all task statuses in deterministic name order.
+func (scheduler *ManagedRefreshScheduler) StatusesAt(now time.Time) []ManagedRefreshStatus {
+	if scheduler == nil {
+		return nil
+	}
+	scheduler.mu.RLock()
+	names := make([]string, 0, len(scheduler.tasks))
+	for name := range scheduler.tasks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	statuses := make([]ManagedRefreshStatus, 0, len(names))
+	for _, name := range names {
+		statuses = append(statuses, managedRefreshStatus(name, scheduler.tasks[name], now))
+	}
+	scheduler.mu.RUnlock()
+	return statuses
+}
+
+func managedRefreshStatus(name string, task managedRefreshTask, now time.Time) ManagedRefreshStatus {
+	stale := false
+	if task.maxStaleness > 0 {
+		stale = task.lastSuccessAt.IsZero() || !now.Before(task.lastSuccessAt.Add(task.maxStaleness))
+	}
+	return ManagedRefreshStatus{
+		Name:          name,
+		Every:         task.every,
+		NextRun:       task.next,
+		Running:       task.running,
+		MaxStaleness:  task.maxStaleness,
+		LastAttemptAt: task.lastAttemptAt,
+		LastSuccessAt: task.lastSuccessAt,
+		LastError:     task.lastError,
+		Stale:         stale,
+	}
 }
 
 // RunDue executes due refreshes in deterministic name order.
@@ -163,6 +264,7 @@ func (scheduler *ManagedRefreshScheduler) run(ctx context.Context, name string, 
 	}
 	task.running = true
 	task.next = nextJobRun(task.next, task.every, now)
+	task.lastAttemptAt = now
 	scheduler.tasks[name] = task
 	scheduler.mu.Unlock()
 
@@ -175,6 +277,13 @@ func (scheduler *ManagedRefreshScheduler) run(ctx context.Context, name string, 
 	scheduler.mu.Lock()
 	task = scheduler.tasks[name]
 	task.running = false
+	task.lastAttemptAt = run.FinishedAt
+	if err == nil {
+		task.lastSuccessAt = run.FinishedAt
+		task.lastError = ""
+	} else {
+		task.lastError = err.Error()
+	}
 	scheduler.tasks[name] = task
 	scheduler.mu.Unlock()
 	return run, err

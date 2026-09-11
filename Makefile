@@ -8937,3 +8937,39 @@ commit-tt044-migration-preview:
 .PHONY: push-tt044-migration-preview
 push-tt044-migration-preview:
 	@bash ./scripts/push-tt044-migration-preview.sh
+
+.PHONY: test-mz041-refresh-freshness
+test-mz041-refresh-freshness:
+	@bash ./scripts/test-mz041-refresh-freshness.sh
+
+.PHONY: format-mz041-refresh-freshness
+format-mz041-refresh-freshness:
+	@bash ./scripts/format-mz041-refresh-freshness.sh
+
+.PHONY: benchmark-mz041-refresh-freshness
+benchmark-mz041-refresh-freshness:
+	@bash ./scripts/benchmark-mz041-refresh-freshness.sh
+
+.PHONY: verify-mz041-docs
+verify-mz041-docs:
+	@bash ./scripts/verify-mz041-docs.sh
+
+.PHONY: test-race-mz041-refresh-freshness
+test-race-mz041-refresh-freshness:
+	@bash ./scripts/test-race-mz041-refresh-freshness.sh
+
+.PHONY: vet-mz041-refresh-freshness
+vet-mz041-refresh-freshness:
+	@bash ./scripts/vet-mz041-refresh-freshness.sh
+
+.PHONY: review-mz041-refresh-freshness
+review-mz041-refresh-freshness:
+	@bash ./scripts/review-mz041-refresh-freshness.sh
+
+.PHONY: commit-mz041-refresh-freshness
+commit-mz041-refresh-freshness:
+	@bash ./scripts/commit-mz041-refresh-freshness.sh
+
+.PHONY: push-mz041-refresh-freshness
+push-mz041-refresh-freshness:
+	@bash ./scripts/push-mz041-refresh-freshness.sh

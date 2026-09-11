@@ -14471,6 +14471,26 @@ Memory summary:
 ```
 
 <!-- END GENERATED COMMAND BENCHMARK RAW RESULTS -->
+## Managed Refresh Freshness Status
+
+This benchmark executes one successful managed refresh, then repeatedly reads
+`StatusesAt` for the one registered task. The freshness status path is
+control-plane-only.
+
+| Operation | Median time | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| `StatusesAt` for one task | 129.4 ns | 144 | 1 |
+
+Raw output from `make benchmark-mz041-refresh-freshness` (five runs):
+
+```text
+BenchmarkManagedRefreshSchedulerStatuses-32    	 8972113	       129.4 ns/op	     144 B/op	       1 allocs/op
+BenchmarkManagedRefreshSchedulerStatuses-32    	 9240472	       129.8 ns/op	     144 B/op	       1 allocs/op
+BenchmarkManagedRefreshSchedulerStatuses-32    	 9303223	       131.4 ns/op	     144 B/op	       1 allocs/op
+BenchmarkManagedRefreshSchedulerStatuses-32    	 9328905	       128.5 ns/op	     144 B/op	       1 allocs/op
+BenchmarkManagedRefreshSchedulerStatuses-32    	 9274581	       128.1 ns/op	     144 B/op	       1 allocs/op
+```
+
 ## Schema Migration Dry Run
 
 This benchmark previews a one-source add-column migration. It measures the
