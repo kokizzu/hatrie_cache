@@ -7974,3 +7974,24 @@ verify-differential-intersect:
 .PHONY: commit-differential-intersect
 commit-differential-intersect:
 	bash ./scripts/commit-differential-intersect.sh
+
+.PHONY: benchmark-sql-set-operation-all
+benchmark-sql-set-operation-all:
+	bash ./scripts/benchmark-sql-set-operation-all.sh
+
+.PHONY: commit-sql-set-operation-all
+commit-sql-set-operation-all:
+	bash ./scripts/commit-sql-set-operation-all.sh
+
+.PHONY: test-sql-set-operation-all
+test-sql-set-operation-all:
+	bash ./scripts/test-sql-set-operation-all.sh
+
+
+.PHONY: format-sql-set-operation-all
+format-sql-set-operation-all:
+	bash ./scripts/format-sql-set-operation-all.sh
+
+.PHONY: verify-sql-set-operation-all
+verify-sql-set-operation-all:
+	bash ./scripts/verify-sql-set-operation-all.sh

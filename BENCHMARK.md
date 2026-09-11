@@ -18357,3 +18357,59 @@ A follow-up attempt reused the validation map between `Apply` calls. It was
 rolled back because the same workload moved from a median `371,747 ns/op` to
 `415,847 ns/op`, from `657,530` to `657,978 B/op`, and from `2,837` to `2,840`
 allocations. Reusing the map's buckets did not offset the clearing overhead.
+
+## SQL `INTERSECT ALL` and `EXCEPT ALL`
+
+The new SQL multiset forms were measured against the existing distinct
+`INTERSECT` path on the same compiled 1,024-row branches. The branch values
+contain duplicates, so the `ALL` paths preserve multiplicity rather than
+performing early duplicate elimination. Five samples used `-benchmem
+-count=5` on Linux amd64/AMD Ryzen 9 5950X.
+
+| Implementation | Median ns/op | Median B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change `INTERSECT` distinct | 2,420,824 | 2,401,416 | 31,783 | baseline |
+| Post-change `INTERSECT` distinct control | 3,036,611 | 2,401,970 | 31,783 | same semantics; run-to-run CPU noise |
+| SQL `INTERSECT ALL` | 2,425,637 | 2,232,813 | 26,659 | 0.998x pre-change CPU, 7.0% fewer cumulative bytes, 16.1% fewer allocations |
+| SQL `EXCEPT ALL` | 2,112,497 | 2,232,822 | 26,659 | 1.15x faster than pre-change, 7.0% fewer cumulative bytes, 16.1% fewer allocations |
+
+Raw pre-change distinct baseline:
+
+```text
+BenchmarkSQLSetOperationAll/IntersectDistinct-32:
+2586207 ns/op 2401470 B/op 31783 allocs/op
+2420824 ns/op 2401416 B/op 31783 allocs/op
+2379367 ns/op 2401467 B/op 31783 allocs/op
+2396973 ns/op 2401398 B/op 31783 allocs/op
+2430420 ns/op 2401400 B/op 31783 allocs/op
+```
+
+Raw post-change run:
+
+```text
+BenchmarkSQLSetOperationAll/IntersectDistinct-32:
+3075107 ns/op 2402036 B/op 31783 allocs/op
+3036611 ns/op 2401925 B/op 31783 allocs/op
+2936343 ns/op 2401939 B/op 31783 allocs/op
+2740017 ns/op 2402089 B/op 31783 allocs/op
+3211081 ns/op 2401970 B/op 31783 allocs/op
+
+BenchmarkSQLSetOperationAll/IntersectAll-32:
+2736682 ns/op 2232801 B/op 26658 allocs/op
+2637549 ns/op 2232818 B/op 26659 allocs/op
+2325299 ns/op 2232829 B/op 26659 allocs/op
+2373940 ns/op 2232813 B/op 26659 allocs/op
+2425637 ns/op 2232778 B/op 26658 allocs/op
+
+BenchmarkSQLSetOperationAll/ExceptAll-32:
+2358544 ns/op 2232842 B/op 26659 allocs/op
+2235998 ns/op 2232769 B/op 26658 allocs/op
+2112497 ns/op 2232731 B/op 26658 allocs/op
+2042884 ns/op 2232822 B/op 26659 allocs/op
+2059323 ns/op 2232876 B/op 26659 allocs/op
+```
+
+`B/op` is cumulative allocation volume, not retained or peak heap. The
+existing distinct path remains unchanged; the lower `ALL` allocation totals
+come from using one count map instead of a membership map followed by a
+distinct pass.

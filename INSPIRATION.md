@@ -362,6 +362,9 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M038e Stateful duplicate-preserving differential `INTERSECT ALL`
   maintenance with checked multiplicities, atomic validation, and incremental
   output deltas; see [DIFFERENTIAL_INTERSECT.md](DIFFERENTIAL_INTERSECT.md).
+- [x] M038f SQL parser and executor support for duplicate-preserving
+  `INTERSECT ALL` and `EXCEPT ALL`, including collation-aware multiplicity and
+  left-order output; see [SQL_SET_OPERATIONS.md](SQL_SET_OPERATIONS.md).
 - [x] M039 Compaction constrained by active read frontiers.
 - [x] M040 Append-only fast path selected from source metadata via typed-table change metadata, validating aggregate dispatch, compatibility tests, and benchmark guide.
 - [x] M041 Upsert-source semantics with key replacement. `TypedTable.Upsert` replaces one keyed row and emits ordered before/after changes; see [UPSERT_SOURCES.md](UPSERT_SOURCES.md).

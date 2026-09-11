@@ -5721,9 +5721,6 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 		p.next()
 		union := sqlUnion{kind: kind}
 		if p.keyword("ALL") {
-			if kind != "UNION" {
-				return nil, p.diagnostic(p.current(), kind+" ALL is not supported")
-			}
 			union.all = true
 			p.next()
 		}
@@ -11246,6 +11243,29 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			result.Rows = unique
 		case "INTERSECT":
+			if union.all {
+				available := make(map[string]int, len(right.Rows))
+				for _, row := range right.Rows {
+					key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))
+					available[key]++
+				}
+				filtered := result.Rows[:0]
+				for _, row := range result.Rows {
+					key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))
+					count := available[key]
+					if count == 0 {
+						continue
+					}
+					filtered = append(filtered, row)
+					if count == 1 {
+						delete(available, key)
+					} else {
+						available[key] = count - 1
+					}
+				}
+				result.Rows = filtered
+				break
+			}
 			available := make(map[string]struct{}, len(right.Rows))
 			for _, row := range right.Rows {
 				available[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))] = struct{}{}
@@ -11258,6 +11278,29 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			result.Rows = distinctSQLQueryRows(filtered, sqlQueryCollation(q))
 		case "EXCEPT":
+			if union.all {
+				excluded := make(map[string]int, len(right.Rows))
+				for _, row := range right.Rows {
+					key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))
+					excluded[key]++
+				}
+				filtered := result.Rows[:0]
+				for _, row := range result.Rows {
+					key := sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))
+					count := excluded[key]
+					if count > 0 {
+						if count == 1 {
+							delete(excluded, key)
+						} else {
+							excluded[key] = count - 1
+						}
+						continue
+					}
+					filtered = append(filtered, row)
+				}
+				result.Rows = filtered
+				break
+			}
 			excluded := make(map[string]struct{}, len(right.Rows))
 			for _, row := range right.Rows {
 				excluded[sqlOutputRowKeyWithCollation(row, sqlQueryCollation(q))] = struct{}{}

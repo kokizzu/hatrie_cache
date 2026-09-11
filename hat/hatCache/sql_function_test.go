@@ -369,7 +369,7 @@ func TestSQLKeywordInventoryReportsContextualDiagnostics(t *testing.T) {
 		{"group_requires_by", "FROM VALUES (1) AS a(value) GROUP value SELECT value", "expected BY"},
 		{"order_requires_by", "FROM VALUES (1) AS a(value) SELECT value ORDER value", "expected BY"},
 		{"is_requires_null", "FROM VALUES (NULL) AS a(value) WHERE value IS TRUE SELECT value", "expected NULL"},
-		{"intersect_all_is_rejected", "FROM VALUES (1) AS a(value) SELECT value INTERSECT ALL FROM VALUES (1) AS b(value) SELECT value", "INTERSECT ALL is not supported"},
+		{"intersect_all_requires_query", "FROM VALUES (1) AS a(value) SELECT value INTERSECT ALL", "INTERSECT ALL requires a query after it"},
 		{"fetch_conflicts_with_limit", "FROM VALUES (1) AS a(value) SELECT value LIMIT 1 FETCH FIRST 1 ROWS ONLY", "FETCH cannot be combined with LIMIT"},
 		{"case_requires_then", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 'one' END", "expected THEN"},
 		{"case_requires_end", "FROM VALUES (1) AS a(value) SELECT CASE WHEN value = 1 THEN 'one'", "expected END"},
