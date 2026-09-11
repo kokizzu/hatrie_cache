@@ -18097,6 +18097,45 @@ The pre-implementation ordinary-only run measured `2881364 ns/op`,
 reported above because it controls for normal benchmark noise. The feature is
 opt-in and changes no storage, wire, or default SQL behavior.
 
+## Native SQL Dataflow Composite Ordered Limit
+
+Command:
+
+```text
+make benchmark-m052i-native-composite-ordered-limit
+```
+
+This measures `WHERE value >= 0 ORDER BY region ASC, value DESC LIMIT 32 OFFSET
+512` over 4,096 already resolved rows with three projected fields. The native
+executor reuses the bounded Top-N heap for multiple direct source fields and
+projects only the final page. Five paired `-benchmem` samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 9,495,353 | 3,851,112 | 20,629 | baseline |
+| Native composite ordered executor | 2,185,798 | 238,344 | 4,740 | 4.34x faster; 16.16x fewer bytes; 4.35x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 9,696,095 | 2,185,798 | 3,851,380 | 238,402 | 20,632 | 4,740 |
+| 2 | 9,515,386 | 2,178,980 | 3,850,801 | 238,288 | 20,628 | 4,739 |
+| 3 | 9,491,665 | 2,185,246 | 3,851,070 | 238,339 | 20,629 | 4,740 |
+| 4 | 9,495,353 | 2,218,513 | 3,851,112 | 238,440 | 20,629 | 4,741 |
+| 5 | 9,317,209 | 2,213,933 | 3,851,263 | 238,344 | 20,630 | 4,740 |
+
+The pre-implementation ordinary-only baseline median was `9,533,094 ns/op`,
+`3,851,264 B/op`, and `20,630 allocs/op`. Projected aliases and non-field
+ordering expressions remain on the ordinary executor.
+
+### Rejected M052i Stack-Backed Key Scratch
+
+The scratch-array alternative was reverted: its native median was about `2.34
+ms` and `632 KB`, compared with `2.19 ms` and `238 KB` for the retained slice
+implementation, with no allocation reduction.
+
 ## Native SQL Dataflow Ordered Limit
 
 Command:

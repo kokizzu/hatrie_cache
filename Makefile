@@ -8230,3 +8230,35 @@ commit-m052h-native-ordered-limit:
 .PHONY: push-m052h-native-ordered-limit
 push-m052h-native-ordered-limit:
 	bash ./scripts/push-m052h-native-ordered-limit.sh
+
+.PHONY: test-m052i-native-composite-ordered-limit
+test-m052i-native-composite-ordered-limit:
+	bash ./scripts/test-m052i-native-composite-ordered-limit.sh
+
+.PHONY: benchmark-m052i-native-composite-ordered-limit
+benchmark-m052i-native-composite-ordered-limit:
+	bash ./scripts/benchmark-m052i-native-composite-ordered-limit.sh
+
+.PHONY: format-m052i-native-composite-ordered-limit
+format-m052i-native-composite-ordered-limit:
+	bash ./scripts/format-m052i-native-composite-ordered-limit.sh
+
+.PHONY: test-race-m052i-native-composite-ordered-limit
+test-race-m052i-native-composite-ordered-limit:
+	bash ./scripts/test-race-m052i-native-composite-ordered-limit.sh
+
+.PHONY: vet-m052i-native-composite-ordered-limit
+vet-m052i-native-composite-ordered-limit:
+	bash ./scripts/vet-m052i-native-composite-ordered-limit.sh
+
+.PHONY: review-m052i-native-composite-ordered-limit
+review-m052i-native-composite-ordered-limit:
+	bash ./scripts/review-m052i-native-composite-ordered-limit.sh
+
+.PHONY: commit-m052i-native-composite-ordered-limit
+commit-m052i-native-composite-ordered-limit:
+	bash ./scripts/commit-m052i-native-composite-ordered-limit.sh
+
+.PHONY: push-m052i-native-composite-ordered-limit
+push-m052i-native-composite-ordered-limit:
+	bash ./scripts/push-m052i-native-composite-ordered-limit.sh

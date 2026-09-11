@@ -100,20 +100,25 @@ type nativeSQLDataflowDistinctPlan struct {
 }
 
 type nativeSQLDataflowOrderedPlan struct {
-	order sqlOrder
+	orders []sqlOrder
 }
 
 func nativeSQLDataflowOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowOrderedPlan, bool) {
-	if query == nil || query.limit < 0 || query.limitWithTies || len(query.orderBy) != 1 || query.orderBy[0].expr.kind != "field" || query.distinct || len(query.groupBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+	if query == nil || query.limit < 0 || query.limitWithTies || len(query.orderBy) == 0 || query.distinct || len(query.groupBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return nativeSQLDataflowOrderedPlan{}, false
 	}
 	if len(query.selects) == 0 {
 		return nativeSQLDataflowOrderedPlan{}, false
 	}
-	if query.orderBy[0].expr.qualifier == "" {
-		for _, item := range query.selects {
-			if item.alias != "" && strings.EqualFold(item.alias, query.orderBy[0].expr.name) {
-				return nativeSQLDataflowOrderedPlan{}, false
+	for _, order := range query.orderBy {
+		if order.expr.kind != "field" {
+			return nativeSQLDataflowOrderedPlan{}, false
+		}
+		if order.expr.qualifier == "" {
+			for _, item := range query.selects {
+				if item.alias != "" && strings.EqualFold(item.alias, order.expr.name) {
+					return nativeSQLDataflowOrderedPlan{}, false
+				}
 			}
 		}
 	}
@@ -122,7 +127,7 @@ func nativeSQLDataflowOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowOrderedP
 			return nativeSQLDataflowOrderedPlan{}, false
 		}
 	}
-	return nativeSQLDataflowOrderedPlan{order: query.orderBy[0]}, true
+	return nativeSQLDataflowOrderedPlan{orders: append([]sqlOrder(nil), query.orderBy...)}, true
 }
 
 func nativeSQLDataflowDistinctPlanFor(query *sqlQuery) (nativeSQLDataflowDistinctPlan, bool) {
@@ -279,7 +284,7 @@ func executeNativeSQLDataflowOrdered(ctx context.Context, query *sqlQuery, initi
 		return []SQLRow{}, nil
 	}
 	capacity := sqlTopNStreamCapacity(query, len(initial))
-	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: query.orderBy}
+	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: plan.orders}
 	heap.Init(&candidates)
 	ordinal := 0
 	for index, input := range initial {
@@ -304,23 +309,35 @@ func executeNativeSQLDataflowOrdered(ctx context.Context, query *sqlQuery, initi
 				continue
 			}
 		}
-		orderValue, err := evalSQLStreamExpr(plan.order.expr, execRow, nil)
-		if err != nil {
-			return nil, fmt.Errorf("native dataflow ORDER BY row %d: %w", index+1, err)
+		candidate := sqlTopNStreamItem{row: row, ordinal: ordinal}
+		if len(plan.orders) == 1 {
+			orderValue, err := evalSQLStreamExpr(plan.orders[0].expr, execRow, nil)
+			if err != nil {
+				return nil, fmt.Errorf("native dataflow ORDER BY row %d: %w", index+1, err)
+			}
+			candidate.key = orderValue
+		} else {
+			candidate.keys = make([]interface{}, len(plan.orders))
+			for orderIndex, order := range plan.orders {
+				orderValue, err := evalSQLStreamExpr(order.expr, execRow, nil)
+				if err != nil {
+					return nil, fmt.Errorf("native dataflow ORDER BY row %d column %d: %w", index+1, orderIndex+1, err)
+				}
+				candidate.keys[orderIndex] = orderValue
+			}
 		}
-		candidate := sqlTopNStreamItem{row: row, key: orderValue, ordinal: ordinal}
 		ordinal++
 		if candidates.Len() < capacity {
 			heap.Push(&candidates, candidate)
 			continue
 		}
-		if sqlTopNStreamBefore(candidate, candidates.items[0], query.orderBy) {
+		if sqlTopNStreamBefore(candidate, candidates.items[0], plan.orders) {
 			candidates.items[0] = candidate
 			heap.Fix(&candidates, 0)
 		}
 	}
 	sort.SliceStable(candidates.items, func(left, right int) bool {
-		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], query.orderBy)
+		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], plan.orders)
 	})
 	start := query.offset
 	if start > len(candidates.items) {

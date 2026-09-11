@@ -93,7 +93,6 @@ func TestCompiledSQLNativeDataflowOrderedLimitChecksContext(t *testing.T) {
 func TestCompiledSQLNativeDataflowOrderedLimitRejectsUnsupportedShapes(t *testing.T) {
 	queries := []string{
 		"FROM CACHE('items') AS src SELECT src.id AS id ORDER BY src.id",
-		"FROM CACHE('items') AS src SELECT src.id AS id ORDER BY src.id, src.score LIMIT 1",
 		"FROM CACHE('items') AS src SELECT src.id AS id ORDER BY LOWER(src.id) LIMIT 1",
 		"FROM CACHE('items') AS src SELECT src.score AS rank ORDER BY rank LIMIT 1",
 		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) GROUP BY src.group ORDER BY src.group LIMIT 1",
