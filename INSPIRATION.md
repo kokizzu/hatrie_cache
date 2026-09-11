@@ -899,3 +899,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   distinct, `WITH TIES`, richer SQL, and specialized resolver contracts retain
   their established executor. See
   [SQL_AUTO_NATIVE_DISTINCT_LIMIT.md](SQL_AUTO_NATIVE_DISTINCT_LIMIT.md).
+- [x] M052x Automatic safe global aggregate finite-window selection. Global
+  aggregates with `LIMIT`/`OFFSET` over ordinary row resolvers now use the
+  existing one-row native aggregate runtime by default; `LIMIT 0`, positive
+  offsets, richer SQL, and specialized resolver contracts preserve established
+  behavior. See
+  [SQL_AUTO_NATIVE_AGGREGATE_LIMIT.md](SQL_AUTO_NATIVE_AGGREGATE_LIMIT.md).

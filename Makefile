@@ -8645,3 +8645,27 @@ commit-m052w-auto-native-distinct-limit:
 
 push-m052w-auto-native-distinct-limit:
 	bash scripts/push-m052w-auto-native-distinct-limit.sh
+.PHONY: test-m052x-auto-native-aggregate-limit benchmark-m052x-auto-native-aggregate-limit format-m052x-auto-native-aggregate-limit test-race-m052x-auto-native-aggregate-limit vet-m052x-auto-native-aggregate-limit review-m052x-auto-native-aggregate-limit commit-m052x-auto-native-aggregate-limit push-m052x-auto-native-aggregate-limit
+test-m052x-auto-native-aggregate-limit:
+	bash scripts/test-m052x-auto-native-aggregate-limit.sh
+
+benchmark-m052x-auto-native-aggregate-limit:
+	bash scripts/benchmark-m052x-auto-native-aggregate-limit.sh
+
+format-m052x-auto-native-aggregate-limit:
+	bash scripts/format-m052x-auto-native-aggregate-limit.sh
+
+test-race-m052x-auto-native-aggregate-limit:
+	bash scripts/test-race-m052x-auto-native-aggregate-limit.sh
+
+vet-m052x-auto-native-aggregate-limit:
+	bash scripts/vet-m052x-auto-native-aggregate-limit.sh
+
+review-m052x-auto-native-aggregate-limit:
+	bash scripts/review-m052x-auto-native-aggregate-limit.sh
+
+commit-m052x-auto-native-aggregate-limit:
+	bash scripts/commit-m052x-auto-native-aggregate-limit.sh
+
+push-m052x-auto-native-aggregate-limit:
+	bash scripts/push-m052x-auto-native-aggregate-limit.sh

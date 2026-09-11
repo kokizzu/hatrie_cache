@@ -83,9 +83,6 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 		return nil
 	}
 	if _, ok := nativeSQLDataflowAggregatePlan(query); ok {
-		if hasOutputWindow {
-			return fmt.Errorf("%w: aggregate query requires materialized state", ErrSQLNativeDataflowUnsupported)
-		}
 		return nil
 	}
 	if len(query.selects) == 0 {
@@ -658,6 +655,9 @@ func executeNativeSQLDataflowAggregates(ctx context.Context, query *sqlQuery, in
 	row := SQLRow{}
 	for index, aggregate := range aggregates {
 		row[columns[index]] = aggregate.result()
+	}
+	if query.limit == 0 || query.offset > 0 {
+		return []SQLRow{}, nil
 	}
 	return []SQLRow{row}, nil
 }

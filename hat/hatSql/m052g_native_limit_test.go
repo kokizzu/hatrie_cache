@@ -76,9 +76,8 @@ func TestCompiledSQLNativeDataflowLimitZeroReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestCompiledSQLNativeDataflowLimitRejectsStatefulShapes(t *testing.T) {
+func TestCompiledSQLNativeDataflowLimitRejectsGroupedShape(t *testing.T) {
 	queries := []string{
-		"FROM CACHE('items') AS src SELECT COUNT(*) LIMIT 1",
 		"FROM CACHE('items') AS src SELECT src.group AS bucket, COUNT(*) GROUP BY src.group LIMIT 1",
 	}
 	for _, source := range queries {

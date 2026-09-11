@@ -19249,3 +19249,33 @@ fallback control / before:
 16999290 20102091 180090
 17609081 20101978 180090
 ```
+## M052x automatic native aggregate LIMIT/OFFSET
+
+This feature automatically selects the existing native aggregate runtime for a
+global `COUNT` plus `SUM` query with `LIMIT 1` over 20,000 rows. The benchmark
+uses five samples and `-benchmem`; the fallback sets
+`SQLQueryOptions.DisableNativeDataflow = true`. The fallback is the exact
+pre-feature executor for this query shape.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to fallback |
+| --- | ---: | ---: | ---: | --- |
+| Automatic native aggregate window | 894,473 | 2,196 | 18 | 6.78x faster, 5,405x less heap, 3,336x fewer allocations |
+| Existing materialized fallback | 6,065,976 | 11,870,829 | 60,042 | control / before |
+
+Raw samples (`ns/op B/op allocs/op`):
+
+```text
+automatic native aggregate window:
+908840 2196 18
+909462 2196 18
+853483 2192 18
+892054 2192 18
+894473 2196 18
+
+fallback control / before:
+6094681 11870885 60042
+6045771 11870837 60042
+6065976 11870616 60042
+5979106 11870829 60042
+6235149 11870418 60042
+```
