@@ -9821,3 +9821,43 @@ commit-mz019-resource-pools:
 .PHONY: push-mz019-resource-pools
 push-mz019-resource-pools:
 	bash scripts/push-mz019-resource-pools.sh
+
+.PHONY: test-mz022-index-readiness
+test-mz022-index-readiness:
+	bash scripts/test-mz022-index-readiness.sh
+
+.PHONY: benchmark-mz022-index-readiness
+benchmark-mz022-index-readiness:
+	bash scripts/benchmark-mz022-index-readiness.sh
+
+.PHONY: format-mz022-index-readiness
+format-mz022-index-readiness:
+	bash scripts/format-mz022-index-readiness.sh
+
+.PHONY: test-race-mz022-index-readiness
+test-race-mz022-index-readiness:
+	bash scripts/test-race-mz022-index-readiness.sh
+
+.PHONY: test-mz022-broad
+test-mz022-broad:
+	bash scripts/test-mz022-broad.sh
+
+.PHONY: verify-mz022-index-readiness-docs
+verify-mz022-index-readiness-docs:
+	bash scripts/verify-mz022-index-readiness-docs.sh
+
+.PHONY: review-mz022-index-readiness
+review-mz022-index-readiness:
+	bash scripts/review-mz022-index-readiness.sh
+
+.PHONY: status-mz022-index-readiness
+status-mz022-index-readiness:
+	bash scripts/status-mz022-index-readiness.sh
+
+.PHONY: commit-mz022-index-readiness
+commit-mz022-index-readiness:
+	bash scripts/commit-mz022-index-readiness.sh
+
+.PHONY: push-mz022-index-readiness
+push-mz022-index-readiness:
+	bash scripts/push-mz022-index-readiness.sh

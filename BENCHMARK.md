@@ -20850,3 +20850,44 @@ make benchmark-mz019-resource-pools
 ```
 
 Raw output is written to `build/benchmarks/mz019-resource-pools.txt`.
+
+<a id="mz-022-sql-json-index-readiness"></a>
+## MZ-022 SQL JSON Index Readiness
+
+This benchmark compares the existing current-index maintenance status call
+with the new `HatTrie.WaitSQLJSONIndexReady` barrier on an already-current
+one-row SQL JSON field index. The barrier is an operational readiness feature:
+when an index is unready or stale it schedules and runs a cooperative rebuild;
+the benchmark isolates the no-rebuild check. Five samples were collected on an
+AMD Ryzen 9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Existing status, before | 151.1; 149.8; 149.1; 149.6; 162.2 | 0; 0; 0; 0; 0 | 0; 0; 0; 0; 0 |
+| Existing status, after | 165.0; 162.4; 165.6; 163.8; 160.1 | 0; 0; 0; 0; 0 | 0; 0; 0; 0; 0 |
+| Ready barrier, current index | 176.9; 173.7; 162.6; 166.1; 175.7 | 0; 0; 0; 0; 0 | 0; 0; 0; 0; 0 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to same-run status |
+| --- | ---: | ---: | ---: | --- |
+| Existing status, before | 149.8 | 0 | 0 | `1.00x` |
+| Existing status, after | 163.8 | 0 | 0 | `1.00x` control |
+| Ready barrier, current index | 173.7 | 0 | 0 | `1.06x` time, same memory |
+
+The barrier adds a small branch and method-call cost while preserving zero
+allocations. Its value is deterministic readiness and direct rebuild errors,
+not query throughput. Unready/stale calls are dominated by the actual index
+rebuild and should be measured with the source size and index kind that the
+deployment uses. See [SQL_JSON_INDEX_READINESS.md](SQL_JSON_INDEX_READINESS.md)
+for the contract and cancellation behavior.
+
+The exact command was:
+
+```sh
+make benchmark-mz022-index-readiness
+```
+
+Raw output is written to `build/benchmarks/mz022-index-readiness.txt`.

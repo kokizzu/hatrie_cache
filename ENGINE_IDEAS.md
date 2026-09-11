@@ -103,7 +103,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-019 | Per-cluster resource isolation | Partially adopted: `NamespaceQueryGovernor` supports opt-in named per-namespace `hatPipeline` compute pools with independent worker and queue admission; the default remains caller-goroutine execution, and process-wide RSS enforcement or dynamic resizing remain deferred. | Medium |
 | MZ-020 | Worker scaling coordination | No online worker resize protocol that preserves frontier correctness. | High |
 | MZ-021 | Replica hot handoff | No ready replica transfer that avoids a cold query-state rebuild. | High |
-| MZ-022 | Index hydration readiness | Index creation has no public ready frontier that callers can await. | Medium |
+| MZ-022 | Index hydration readiness | Partially adopted: `HatTrie.WaitSQLJSONIndexReady` is a synchronous, context-aware readiness barrier that coalesces and runs one cooperative rebuild until the configured index is current; background scheduling and incremental frontier reporting remain available separately. | Medium |
 | MZ-023 | `IN CLUSTER` index placement | Indexes cannot be assigned to an isolated compute pool. | Medium |
 | MZ-024 | Automatic arrangement key selection | No planner explains or chooses a compact key for shared maintained state. | Medium |
 | MZ-025 | Arrangement sharing by logical key | Existing sharing is definition-based; no canonical equivalence for semantically equal plans. | Medium |
