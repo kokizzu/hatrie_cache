@@ -2165,6 +2165,7 @@ func (rollback *publicCommandBatchRollback) restore(trie *HatTrie) error {
 	defer trie.mu.Unlock()
 	err := trie.rollbackRestoreLocked(rollback.created, rollback.operations, trie.currentTime())
 	trie.mutationEpoch = rollback.mutationEpoch
+	trie.clearSQLPlannerStatistics()
 	trie.restoreCacheStatsLocked(rollback.stats)
 	trie.hotValid = false
 	return err

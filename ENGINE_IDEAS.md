@@ -186,13 +186,13 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-047 | Expiration wheel | TTL cleanup has no hierarchical timer wheel for low-overhead mass expiration. | Medium |
 | TT-048 | Queue/priority space primitive | No durable priority queue data structure with claim, retry, and visibility timeout. | Medium |
 | TT-049 | Pessimistic row locks | No `SELECT FOR UPDATE`-style lock lease for callers that need serialized reads/mutations. | High |
-| TT-050 | SQL planner statistics | No persistent `ANALYZE` histograms/cardinality statistics for cost-based index choice. | Medium |
+| TT-050 | SQL planner statistics | Partial: explicit source-versioned `ANALYZE` statistics now feed what-if planning; durable on-disk statistics and a full cost model remain. | Medium |
 
 ## Selection order
 
 The first implementation candidates beyond the adopted rows should be additive
 and measurable: persistent backup manifests, background task
-metrics, SQL planner statistics, and bounded TTL expiration. Consensus,
+metrics, source-versioned SQL planner statistics, and bounded TTL expiration. Consensus,
 distributed fan-out, durable dataflow state, and automatic repartitioning need
 separate designs because they affect backup, recovery, and correctness across
 nodes.

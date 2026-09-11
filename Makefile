@@ -8952,6 +8952,7 @@ push-ch039-approx-stream:
 test-ch041-grouping-identifiers:
 	bash scripts/test-ch041-grouping-identifiers.sh
 
+
 format-ch041-grouping-identifiers:
 	bash scripts/format-ch041-grouping-identifiers.sh
 
@@ -9371,3 +9372,34 @@ commit-mz042-dependency-graph:
 .PHONY: push-mz042-dependency-graph
 push-mz042-dependency-graph:
 	@bash ./scripts/push-mz042-dependency-graph.sh
+.PHONY: test-tt050-sql-planner-statistics
+test-tt050-sql-planner-statistics:
+	bash scripts/test-tt050-sql-planner-statistics.sh
+
+.PHONY: format-tt050-sql-planner-statistics
+format-tt050-sql-planner-statistics:
+	bash scripts/format-tt050-sql-planner-statistics.sh
+
+.PHONY: benchmark-tt050-sql-planner-statistics
+benchmark-tt050-sql-planner-statistics:
+	bash scripts/benchmark-tt050-sql-planner-statistics.sh
+
+.PHONY: test-race-tt050-sql-planner-statistics
+test-race-tt050-sql-planner-statistics:
+	bash scripts/test-race-tt050-sql-planner-statistics.sh
+
+.PHONY: verify-tt050-sql-planner-statistics-docs
+verify-tt050-sql-planner-statistics-docs:
+	bash scripts/verify-tt050-sql-planner-statistics-docs.sh
+
+.PHONY: review-tt050-sql-planner-statistics
+review-tt050-sql-planner-statistics:
+	bash scripts/review-tt050-sql-planner-statistics.sh
+
+.PHONY: commit-tt050-sql-planner-statistics
+commit-tt050-sql-planner-statistics:
+	bash scripts/commit-tt050-sql-planner-statistics.sh
+
+.PHONY: push-tt050-sql-planner-statistics
+push-tt050-sql-planner-statistics:
+	bash scripts/push-tt050-sql-planner-statistics.sh

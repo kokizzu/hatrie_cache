@@ -40,12 +40,20 @@ type SQLWhatIfRequest struct {
 // SQLWhatIfFieldStatistics is optional aggregate metadata for one source
 // field. Minimum and Maximum are used only for numeric range estimates.
 type SQLWhatIfFieldStatistics struct {
-	Rows              int         `json:"rows"`
-	NullRows          int         `json:"null_rows,omitempty"`
-	DistinctValues    int         `json:"distinct_values,omitempty"`
-	Minimum           interface{} `json:"minimum,omitempty"`
-	Maximum           interface{} `json:"maximum,omitempty"`
-	AverageValueBytes int         `json:"average_value_bytes,omitempty"`
+	Rows               int                        `json:"rows"`
+	NullRows           int                        `json:"null_rows,omitempty"`
+	DistinctValues     int                        `json:"distinct_values,omitempty"`
+	Minimum            interface{}                `json:"minimum,omitempty"`
+	Maximum            interface{}                `json:"maximum,omitempty"`
+	AverageValueBytes  int                        `json:"average_value_bytes,omitempty"`
+	FrequencyHistogram []SQLWhatIfFrequencyBucket `json:"frequency_histogram,omitempty"`
+}
+
+// SQLWhatIfFrequencyBucket reports how many distinct values occur at a given
+// frequency. It stores distribution shape without retaining the source values.
+type SQLWhatIfFrequencyBucket struct {
+	RowsPerValue   int `json:"rows_per_value"`
+	DistinctValues int `json:"distinct_values"`
 }
 
 // SQLWhatIfSourceStatistics contains bounded source metadata used to avoid a

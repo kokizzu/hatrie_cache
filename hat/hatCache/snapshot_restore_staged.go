@@ -176,6 +176,7 @@ func (ht *HatTrie) adoptSnapshotRestoreStage(stage *HatTrie) error {
 		adoptSnapshotDiskOwnership(ht.disks, stage.disks)
 		swapSnapshotOwnedDataLocked(ht, stage)
 		ht.mutationEpoch++
+		ht.clearSQLPlannerStatistics()
 		ht.memoryCompactionEpoch = 0
 		return nil
 	}
@@ -217,6 +218,7 @@ func (ht *HatTrie) adoptSnapshotRestoreStage(stage *HatTrie) error {
 		adoptSnapshotDiskOwnership(child.disks, stagedChild.disks)
 		swapSnapshotOwnedDataLocked(child, stagedChild)
 		child.mutationEpoch++
+		child.clearSQLPlannerStatistics()
 		child.memoryCompactionEpoch = 0
 	}
 	return nil

@@ -3699,6 +3699,8 @@ type HatTrie struct {
 	sqlJSONTextIndexes                map[string]map[string]*sqlJSONTextIndex
 	sqlJSONCompositeIndexes           map[string]map[string]*sqlJSONCompositeIndex
 	sqlJSONPartialIndexes             map[string]map[string]*sqlJSONPartialIndex
+	sqlPlannerStatisticsMu            sync.RWMutex
+	sqlPlannerStatistics              map[string]sqlPlannerStatisticsEntry
 	sqlJSONIndexMaintenance           map[string]map[string]*sqlJSONIndexMaintenance
 	sqlJSONIndexRebuildPending        map[string]map[string]bool
 	sqlJSONIndexRebuildQueue          []sqlJSONIndexRebuildRequest

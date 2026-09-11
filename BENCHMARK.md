@@ -20239,3 +20239,54 @@ Raw output after the change, grouping identifiers:
 31033 ns/op 29502 B/op 286 allocs/op
 31342 ns/op 29502 B/op 286 allocs/op
 ```
+## TT-050 SQL Planner Statistics
+
+The explicit source-versioned statistics cache was measured against the
+existing fallback that decodes the 10,000-row JSON source for every what-if
+request. Five runs were collected with:
+
+```text
+make benchmark-tt050-sql-planner-statistics
+```
+
+### Median Summary
+
+| Path | Time | Bytes/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| What-if without `ANALYZE` | 18.18 ms | 8,054,021 | 230,036 | 1.00x |
+| What-if with cached `ANALYZE` | 3.19 us | 4,032 | 22 | 5,701x faster / 1,998x lower bytes / 10,456x fewer allocs |
+| One-time `ANALYZE` of 10,000 rows | 14.44 ms | 5,917,007 | 190,044 | upfront cost |
+| Cached statistics lookup | 536 ns | 1,040 | 5 | 33,923x faster than uncached what-if |
+
+Raw samples:
+
+```text
+BenchmarkSQLPlannerStatisticsAnalyze-32  14559978 ns/op  5917007 B/op 190044 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  14391388 ns/op  5917102 B/op 190044 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  14442519 ns/op  5917134 B/op 190044 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  13989478 ns/op  5916966 B/op 190044 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  14441359 ns/op  5916889 B/op 190043 allocs/op
+
+BenchmarkSQLPlannerStatisticsLookup-32  535.7 ns/op 1040 B/op 5 allocs/op
+BenchmarkSQLPlannerStatisticsLookup-32  517.9 ns/op 1040 B/op 5 allocs/op
+BenchmarkSQLPlannerStatisticsLookup-32  535.9 ns/op 1040 B/op 5 allocs/op
+BenchmarkSQLPlannerStatisticsLookup-32  549.1 ns/op 1040 B/op 5 allocs/op
+BenchmarkSQLPlannerStatisticsLookup-32  543.2 ns/op 1040 B/op 5 allocs/op
+
+BenchmarkSQLPlannerStatisticsWhatIf/WithoutAnalyze-32  17614931 ns/op 8054054 B/op 230036 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithoutAnalyze-32  18574502 ns/op 8054019 B/op 230036 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithoutAnalyze-32  17790571 ns/op 8054135 B/op 230036 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithoutAnalyze-32  18179046 ns/op 8053931 B/op 230036 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithoutAnalyze-32  18583906 ns/op 8054021 B/op 230036 allocs/op
+
+BenchmarkSQLPlannerStatisticsWhatIf/WithAnalyze-32  3189 ns/op 4032 B/op 22 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithAnalyze-32  3202 ns/op 4032 B/op 22 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithAnalyze-32  3173 ns/op 4032 B/op 22 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithAnalyze-32  3187 ns/op 4032 B/op 22 allocs/op
+BenchmarkSQLPlannerStatisticsWhatIf/WithAnalyze-32  3395 ns/op 4032 B/op 22 allocs/op
+```
+
+The improvement is limited to explicitly analyzed, unchanged sources. The
+cache is in-memory derived metadata, is bounded to 128 source entries, and is
+cleared across mutation-safe restore paths. It does not change command wire
+format, backup bytes, or persistence layout.

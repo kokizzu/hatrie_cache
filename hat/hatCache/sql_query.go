@@ -121,6 +121,7 @@ type SQLWhatIfIndexKind = hatSql.SQLWhatIfIndexKind
 type SQLWhatIfIndex = hatSql.SQLWhatIfIndex
 type SQLWhatIfRequest = hatSql.SQLWhatIfRequest
 type SQLWhatIfFieldStatistics = hatSql.SQLWhatIfFieldStatistics
+type SQLWhatIfFrequencyBucket = hatSql.SQLWhatIfFrequencyBucket
 type SQLWhatIfSourceStatistics = hatSql.SQLWhatIfSourceStatistics
 type SQLWhatIfSourceStatisticsResolver = hatSql.SQLWhatIfSourceStatisticsResolver
 type SQLWhatIfReport = hatSql.SQLWhatIfReport

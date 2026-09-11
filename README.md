@@ -85,6 +85,7 @@ security guidance before exposing it on a network.
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - Optional managed-refresh freshness thresholds: [MANAGED_REFRESH_FRESHNESS.md](MANAGED_REFRESH_FRESHNESS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- Opt-in source-versioned SQL `ANALYZE` statistics for what-if planning: [SQL_PLANNER_STATISTICS.md](SQL_PLANNER_STATISTICS.md)
 - Opt-in persistent-store disk reserve admission: [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md)
 - Opt-in persistent-store run Bloom filters: [PERSISTENT_STORE_BLOOM_FILTER.md](PERSISTENT_STORE_BLOOM_FILTER.md)
 - Materialized-view dependency invalidation: [MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md](MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md)
