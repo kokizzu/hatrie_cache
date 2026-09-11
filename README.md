@@ -104,6 +104,7 @@ security guidance before exposing it on a network.
 - Opt-in durable command-journal subscriptions: [MZ010_JOURNAL_SUBSCRIPTIONS.md](MZ010_JOURNAL_SUBSCRIPTIONS.md)
 - Importable at-least-once command-journal sink runners: [MZ011_SINK_CONNECTORS.md](MZ011_SINK_CONNECTORS.md)
 - Sink-owned exactly-once journal checkpoints: [MZ012_EXACTLY_ONCE_SINK.md](MZ012_EXACTLY_ONCE_SINK.md)
+- Opt-in source connector checkpoints tied to journal progress: [MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md](MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md)
 - Context-aware SQL source frontier barriers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md#bounded-snapshot-barrier)
 - Incremental rank windows with opt-in mutable retractions: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
 - Incremental LAG/LEAD windows: [INCREMENTAL_OFFSET_WINDOW.md](INCREMENTAL_OFFSET_WINDOW.md)

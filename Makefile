@@ -9650,3 +9650,23 @@ commit-mz012:
 	bash scripts/commit-mz012.sh
 push-mz012:
 	bash scripts/push-mz012.sh
+benchmark-mz013-source:
+	bash scripts/benchmark-mz013-source.sh
+test-mz013-source:
+	bash scripts/test-mz013-source.sh
+format-mz013-source:
+	bash scripts/format-mz013-source.sh
+test-race-mz013-source:
+	bash scripts/test-race-mz013-source.sh
+test-mz013-broad:
+	bash scripts/test-mz013-broad.sh
+verify-mz013-docs:
+	bash scripts/verify-mz013-docs.sh
+review-mz013:
+	bash scripts/review-mz013.sh
+status-mz013:
+	bash scripts/status-mz013.sh
+commit-mz013:
+	bash scripts/commit-mz013.sh
+push-mz013:
+	bash scripts/push-mz013.sh

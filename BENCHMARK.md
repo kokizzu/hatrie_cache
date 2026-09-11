@@ -20610,3 +20610,37 @@ The exact command was:
 ```sh
 make benchmark-mz012-sink
 ```
+
+## MZ-013 Source Connector Checkpoints
+
+This benchmark compares the existing empty persistence barrier with the
+opt-in source checkpoint coordinator. The coordinator uses a 3-byte binary
+offset and an in-memory no-op store, isolating API and ownership-copy cost
+from disk or network persistence. Five samples were collected on an AMD Ryzen
+9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `MZ013BaselinePersistenceBarrier` | 5.432, 5.020, 5.466, 5.463, 5.510 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `MZ013SourceCheckpointCommit` | 32.17, 31.67, 31.77, 31.57, 31.49 | 8, 8, 8, 8, 8 | 1, 1, 1, 1, 1 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative to empty barrier |
+| --- | ---: | ---: | ---: | --- |
+| Existing empty persistence barrier | 5.463 | 0 | 0 | `1.00x` |
+| Source checkpoint commit | 31.67 | 8 | 1 | `5.80x` CPU, +8 bytes, +1 allocation |
+
+This is an opt-in correctness and recovery control, not a faster journal
+path. The extra work is the binary offset ownership copy, validation, method
+dispatch, and checkpoint callback. A real durable store will dominate the
+no-op-store measurement. Ordinary journal writes do not instantiate this
+coordinator and retain their existing cost.
+
+The exact command was:
+
+```sh
+make benchmark-mz013-source
+```
