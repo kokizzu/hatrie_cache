@@ -8071,3 +8071,34 @@ commit-m052c-native-dataflow:
 .PHONY: push-m052c-native-dataflow
 push-m052c-native-dataflow:
 	bash ./scripts/push-m052c-native-dataflow.sh
+
+.PHONY: test-m052d-native-aggregate
+test-m052d-native-aggregate:
+	bash ./scripts/test-m052d-native-aggregate.sh
+
+.PHONY: benchmark-m052d-native-aggregate
+benchmark-m052d-native-aggregate:
+	bash ./scripts/benchmark-m052d-native-aggregate.sh
+
+.PHONY: format-m052d-native-aggregate
+format-m052d-native-aggregate:
+	bash ./scripts/format-m052d-native-aggregate.sh
+.PHONY: test-race-m052d-native-aggregate
+test-race-m052d-native-aggregate:
+	bash ./scripts/test-race-m052d-native-aggregate.sh
+
+.PHONY: vet-m052d-native-aggregate
+vet-m052d-native-aggregate:
+	bash ./scripts/vet-m052d-native-aggregate.sh
+
+.PHONY: review-m052d-native-aggregate
+review-m052d-native-aggregate:
+	bash ./scripts/review-m052d-native-aggregate.sh
+
+.PHONY: commit-m052d-native-aggregate
+commit-m052d-native-aggregate:
+	bash ./scripts/commit-m052d-native-aggregate.sh
+
+.PHONY: push-m052d-native-aggregate
+push-m052d-native-aggregate:
+	bash ./scripts/push-m052d-native-aggregate.sh

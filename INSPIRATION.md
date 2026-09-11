@@ -407,6 +407,11 @@ Materialize's Timely/Differential Dataflow runtime.
   `ErrSQLNativeDataflowUnsupported` for unsupported plans; see
   [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md#built-in-native-batch-path)
   and [BENCHMARK.md](BENCHMARK.md#native-batch-measurement).
+- [x] M052d Extend the opt-in built-in executor to aggregate-only single-source
+  `CACHE`/`KEYS` batches for `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` with an
+  optional scalar filter. Mixed projections, grouping, ordering, limits,
+  aggregate filters, and other unsupported shapes fail closed; see the
+  aggregate measurement in [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-global-aggregates).
 - [x] M053 Extensible optimizer rule framework. `SQLQueryOptimizer` provides an opt-in ordered rule hook over structural EXPLAIN steps and existing `SQLIndexHint` controls; nil keeps the default path. See [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md) and the measured opt-in cost in [BENCHMARK.md](BENCHMARK.md#opt-in-sql-optimizer-rules).
 - [x] M054 Predicate pushdown before arrangement maintenance.
 - [x] M055 Projection pruning before arrangement maintenance.

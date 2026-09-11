@@ -44,6 +44,9 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	if query.where.kind != "" && !sqlStreamScalarExpr(query.where) {
 		return fmt.Errorf("%w: WHERE expression is not scalar", ErrSQLNativeDataflowUnsupported)
 	}
+	if _, ok := nativeSQLDataflowAggregatePlan(query); ok {
+		return nil
+	}
 	if len(query.selects) == 0 {
 		return fmt.Errorf("%w: projection is empty", ErrSQLNativeDataflowUnsupported)
 	}
@@ -55,7 +58,47 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 	return nil
 }
 
+func nativeSQLDataflowAggregatePlan(query *sqlQuery) ([]sqlStreamAggregate, bool) {
+	if query == nil || len(query.selects) == 0 || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return nil, false
+	}
+	aggregates := make([]sqlStreamAggregate, len(query.selects))
+	for index, item := range query.selects {
+		expr := item.expr
+		if expr.kind != "func" || expr.window != nil || expr.filter != nil || sqlExprHasCustomFunction(expr, nil) {
+			return nil, false
+		}
+		aggregate := sqlStreamAggregate{name: expr.name}
+		switch expr.name {
+		case "COUNT":
+			if len(expr.args) > 1 {
+				return nil, false
+			}
+			if len(expr.args) == 1 && expr.args[0].kind != "star" {
+				argument := expr.args[0]
+				if !sqlStreamScalarExpr(argument) {
+					return nil, false
+				}
+				aggregate.arg = &argument
+			}
+		case "SUM", "AVG", "MIN", "MAX":
+			if len(expr.args) != 1 || expr.args[0].kind == "star" || !sqlStreamScalarExpr(expr.args[0]) {
+				return nil, false
+			}
+			argument := expr.args[0]
+			aggregate.arg = &argument
+		default:
+			return nil, false
+		}
+		aggregates[index] = aggregate
+	}
+	return aggregates, true
+}
+
 func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQLRow) ([]SQLRow, error) {
+	if aggregates, ok := nativeSQLDataflowAggregatePlan(query); ok {
+		return executeNativeSQLDataflowAggregates(ctx, query, initial, aggregates)
+	}
 	columns := sqlColumns(query.selects)
 	result := make([]SQLRow, 0, len(initial))
 	for index, input := range initial {
@@ -91,4 +134,41 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 		result = append(result, projected)
 	}
 	return result, nil
+}
+
+func executeNativeSQLDataflowAggregates(ctx context.Context, query *sqlQuery, initial []SQLRow, aggregates []sqlStreamAggregate) ([]SQLRow, error) {
+	for index, input := range initial {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := input
+		if len(query.from.fieldTypes) != 0 {
+			validated, err := validateSQLSourceFieldTypeRow(*query.from, input, index+1)
+			if err != nil {
+				return nil, err
+			}
+			row = validated
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, row)
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, []sqlExecRow{execRow}, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return nil, fmt.Errorf("native dataflow WHERE row %d: %w", index+1, err)
+			}
+			if !sqlTruthy(value) {
+				continue
+			}
+		}
+		for aggregateIndex := range aggregates {
+			if err := aggregates[aggregateIndex].add(execRow); err != nil {
+				return nil, fmt.Errorf("native dataflow aggregate row %d column %d: %w", index+1, aggregateIndex+1, err)
+			}
+		}
+	}
+	columns := sqlColumns(query.selects)
+	row := SQLRow{}
+	for index, aggregate := range aggregates {
+		row[columns[index]] = aggregate.result()
+	}
+	return []SQLRow{row}, nil
 }

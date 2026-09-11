@@ -85,7 +85,6 @@ func TestCompiledSQLNativeDataflowMatchesScalarExpressions(t *testing.T) {
 
 func TestCompiledSQLNativeDataflowRejectsUnsupportedPlans(t *testing.T) {
 	queries := []string{
-		"FROM CACHE('items') AS src SELECT COUNT(*)",
 		"FROM CACHE('items') AS src SELECT src.id ORDER BY src.id",
 		"FROM CACHE('items') AS src JOIN CACHE('other') AS other ON src.id = other.id SELECT src.id",
 		"FROM CACHE('items') AS src SELECT LOWER(src.name)",

@@ -95,11 +95,20 @@ The native handle is reusable. It checks the context before each input row,
 validates typed source fields, preserves row order, duplicates, and SQL
 `NULL` filtering semantics, and does not mutate the input rows. Scalar
 evaluation errors retain the normal SQL behavior. `ErrSQLNativeDataflowUnsupported`
-is returned at compilation time for joins, unions, CTEs, aggregates, grouping,
-window functions, ordering, limits, samples, `DISTINCT`, `*`, custom function
-calls, and other shapes outside scalar filter/project execution. Callers use
-the ordinary `CompiledSQLQuery.Execute` or callback-backed `CompileDataflow`
-path for those queries.
+is returned at compilation time for joins, unions, CTEs, mixed aggregate and
+non-aggregate projections, grouping, window functions, ordering, limits,
+samples, `DISTINCT`, `*`, custom function calls, and other shapes outside the
+supported built-in paths. Callers use the ordinary `CompiledSQLQuery.Execute`
+or callback-backed `CompileDataflow` path for those queries.
+
+Aggregate-only single-source queries are also supported when every selected
+expression is one of `COUNT`, `SUM`, `AVG`, `MIN`, or `MAX`, with an optional
+scalar `WHERE` predicate and no `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`,
+`DISTINCT`, aggregate `FILTER`, window, join, or custom function. The native
+executor returns one row, including an empty-input result with SQL-compatible
+`COUNT` and `NULL` results for aggregates without values. It evaluates the
+same typed source and SQL null semantics as the ordinary global aggregate
+executor.
 
 This API does not resolve sources, change query defaults, or replace the
 ordinary SQL executor. It is a lower-level boundary for callers that already
@@ -167,3 +176,38 @@ The gain is conditional on the caller already having a source batch and on
 the query fitting the supported scalar shape. Unsupported plans fail closed
 instead of silently taking a partial semantic path, and the ordinary executor
 remains the compatibility fallback.
+
+### Native Global Aggregate Measurement
+
+Command:
+
+```text
+make benchmark-m052d-native-aggregate
+```
+
+The paired benchmark evaluates five global aggregates over 4,096 already
+resolved rows, with a scalar `WHERE` predicate. Compilation is outside the
+timed loop. The ordinary compiled executor and native aggregate executor use
+the same rows and five paired samples.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 1,920,319 | 2,996,500 | 16,475 | baseline |
+| Native global aggregate executor | 1,122,827 | 1,379,473 | 12,317 | 1.71x faster; 2.17x fewer bytes; 1.34x fewer allocations |
+
+Raw paired samples:
+
+| Run | Ordinary ns/op | Native ns/op | Ordinary B/op | Native B/op | Ordinary allocs/op | Native allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1,829,136 | 1,122,827 | 2,996,837 | 1,379,473 | 16,478 | 12,317 |
+| 2 | 1,944,206 | 1,087,612 | 2,996,500 | 1,379,444 | 16,475 | 12,317 |
+| 3 | 1,805,740 | 1,102,521 | 2,996,626 | 1,379,474 | 16,476 | 12,317 |
+| 4 | 1,920,319 | 1,130,396 | 2,996,483 | 1,379,449 | 16,475 | 12,317 |
+| 5 | 1,930,984 | 1,151,369 | 2,996,477 | 1,379,498 | 16,475 | 12,317 |
+
+The pre-implementation ordinary-only control measured 2,052,401 ns/op,
+2,996,887 B/op, and 16,479 allocations/op across five samples. The paired
+control is used for the reported ratio because it runs beside the native path
+and avoids treating separate benchmark invocations as a code-path change.
+The optimization is limited to the aggregate-only shape; ordinary SQL
+execution remains the compatibility path for richer queries.

@@ -18025,6 +18025,41 @@ The improvement is conditional on the supported scalar plan and on the
 caller already owning a consistent resolved batch. No source lookup,
 snapshot, persistence, or serialization work is removed by this API.
 
+## Native SQL Dataflow Global Aggregates
+
+M052d extends the opt-in native dataflow executor to aggregate-only
+single-source queries using `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`. It keeps
+the ordinary executor unchanged and rejects mixed projections, grouping,
+ordering, limits, aggregate filters, and other unsupported shapes.
+
+Command: `make benchmark-m052d-native-aggregate`.
+
+The workload evaluates five global aggregates over 4,096 already resolved map
+rows with a scalar `WHERE` predicate. Both queries are compiled outside the
+timed loop and receive the same rows. Five paired `-benchmem` samples were
+used on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+|---|---:|---:|---:|---|
+| Ordinary compiled executor | 1,920,319 | 2,996,500 | 16,475 | baseline |
+| Native global aggregate executor | 1,122,827 | 1,379,473 | 12,317 | 1.71x faster; 2.17x fewer bytes; 1.34x fewer allocations |
+
+Raw paired samples:
+
+```text
+ordinary: 1829136, 1944206, 1805740, 1920319, 1930984 ns/op;
+  2996837, 2996500, 2996626, 2996483, 2996477 B/op;
+  16478, 16475, 16476, 16475, 16475 allocs/op
+native: 1122827, 1087612, 1102521, 1130396, 1151369 ns/op;
+  1379473, 1379444, 1379474, 1379449, 1379498 B/op;
+  12317, 12317, 12317, 12317, 12317 allocs/op
+```
+
+A separate pre-implementation ordinary-only run measured `2052401 ns/op`,
+`2996887 B/op`, and `16479 allocs/op` at its median. The paired control is
+reported above because it controls for normal CPU noise. No storage, wire, or
+default-execution behavior changes.
+
 ## Immutable Compiled SQL Template Reuse
 
 The workload executes a static compiled query over a 16-row `VALUES` source.
