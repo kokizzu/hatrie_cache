@@ -3741,6 +3741,7 @@ type HatTrie struct {
 	localPartitions                   atomic.Pointer[localPartitionSet]
 	expires                           map[string]uint32
 	expirations                       expirationHeap
+	expirationCleanerSignals          *expirationCleanerSignalSet
 	hotKey                            string
 	hotValue                          HatValue
 	hotValid                          bool
@@ -4506,33 +4507,20 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 		ctx = context.Background()
 	}
 
-	ticker := time.NewTicker(interval)
-	done := make(chan struct{})
-	stopped := make(chan struct{})
-	var stopOnce sync.Once
+	state := newExpirationCleanerState()
+	tries := expirationCleanerTries(ht)
+	registerExpirationCleaner(tries, state)
 
 	go func() {
-		defer close(stopped)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				if !ht.vacuumExpiredIfOpen() {
-					return
-				}
-			case <-ctx.Done():
-				return
-			case <-done:
-				return
-			}
-		}
+		defer close(state.stopped)
+		defer unregisterExpirationCleaner(tries, state)
+		ht.runExpirationCleaner(ctx, interval, state)
 	}()
 
 	return func() {
-		stopOnce.Do(func() {
-			close(done)
-			<-stopped
+		state.stopOnce.Do(func() {
+			close(state.done)
+			<-state.stopped
 		})
 	}
 }
@@ -5500,12 +5488,13 @@ func (ht *HatTrie) expireAtLocked(key string, at time.Time) (bool, bool) {
 func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue) HatValue {
 	if index, ok := ht.expires[key]; ok {
 		return ht.setExpirationAtIndexLocked(key, at, rawPtr, hval, int(index))
-	} else {
-		if ht.expires == nil {
-			ht.expires = make(map[string]uint32)
-		}
-		ht.expirations.Push(expirationEntry{key: key, at: at}, ht.expires)
 	}
+	before, hadBefore := ht.expirationCleanerHeadLocked()
+	if ht.expires == nil {
+		ht.expires = make(map[string]uint32)
+	}
+	ht.expirations.Push(expirationEntry{key: key, at: at}, ht.expires)
+	ht.signalExpirationCleanerForDeadlineLocked(at, before, hadBefore)
 	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
 	if rawPtr != nil {
 		*rawPtr = hval.toValue()
@@ -5514,7 +5503,9 @@ func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value
 }
 
 func (ht *HatTrie) setExpirationAtIndexLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue, index int) HatValue {
+	before, hadBefore := ht.expirationCleanerHeadLocked()
 	ht.expirations.Update(key, at, index, ht.expires)
+	ht.signalExpirationCleanerForDeadlineLocked(at, before, hadBefore)
 	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
 	if rawPtr != nil {
 		*rawPtr = hval.toValue()

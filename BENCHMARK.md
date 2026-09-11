@@ -20891,3 +20891,42 @@ make benchmark-mz022-index-readiness
 ```
 
 Raw output is written to `build/benchmarks/mz022-index-readiness.txt`.
+
+<a id="tt-047-deadline-aware-expiration-cleaner"></a>
+## TT-047 Deadline-Aware Expiration Cleaner
+
+This change keeps the existing indexed expiration min-heap and changes only
+the opt-in cleaner scheduler. The pre-change cleaner used a fixed ticker, so a
+25 ms TTL with a one-second interval remained present beyond the 400 ms
+regression-test window. The post-change cleaner observes the heap deadline and
+passes the same test for both an existing deadline and a newly-added earlier
+deadline. A partitioned-trie test verifies that child scheduling wakes the
+root-owned cleaner.
+
+The benchmark uses five samples from
+`make benchmark-expiration-deadline-cleaner` on the same Linux amd64 host. All
+paths report zero bytes and zero allocations per operation.
+
+### Raw Samples
+
+| Workload | Before ns/op | After ns/op |
+| --- | --- | --- |
+| TTL update without cleaner | 125.6; 129.4; 126.5; 130.3; 129.9 | 133.2; 123.4; 123.8; 123.6; 145.2 |
+| TTL update with cleaner | 117.3; 117.3; 118.0; 118.7; 128.7 | 135.5; 138.1; 126.2; 129.8; 138.5 |
+| TTL update with two local partitions and cleaner | 138.9; 135.8; 150.0; 148.3; 164.2 | 154.0; 168.9; 158.1; 159.9; 161.0 |
+
+### Median Comparison
+
+| Workload | Before median | After median | Relative result | Memory |
+| --- | ---: | ---: | --- | --- |
+| TTL update without cleaner | 129.4 ns | 123.8 ns | `1.05x` faster, within run variance | 0 B/op, 0 allocs/op |
+| TTL update with cleaner | 118.0 ns | 135.5 ns | `1.15x` slower | 0 B/op, 0 allocs/op |
+| Two local partitions with cleaner | 148.3 ns | 159.9 ns | `1.08x` slower | 0 B/op, 0 allocs/op |
+
+The measurable cost is limited to the explicitly enabled cleaner path. The
+benefit is lower expiration latency without scanning all keys or adding a
+per-update allocation. A first global-registry prototype was rejected after
+measuring approximately 800 ns/op on active TTL refreshes, about 6.8x the
+baseline; the accepted implementation uses a lazily allocated per-trie signal
+set instead. A full timing-wheel replacement remains unimplemented pending a
+separate mass-expiration benchmark.

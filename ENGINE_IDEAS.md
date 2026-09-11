@@ -183,7 +183,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-044 | Schema migration dry run | Implemented as importable `hatSchema.Preview`, which validates a migration on an independent schema copy without publication. | Low |
 | TT-045 | Tuple-level compression | Individual large values/tuples lack transparent compressed storage with size thresholds. | Medium |
 | TT-046 | Slab/memory accounting | No per-structure allocator accounting and bounded eviction/admission telemetry. | Medium |
-| TT-047 | Expiration wheel | TTL cleanup has no hierarchical timer wheel for low-overhead mass expiration. | Medium |
+| TT-047 | Expiration wheel | Partially adopted: the opt-in cleaner now sleeps until the indexed min-heap deadline and wakes for newly earlier deadlines, including local partitions; a hierarchical wheel remains deferred because exact heap deadlines preserve bounded live entries and simpler recovery semantics. | Medium |
 | TT-048 | Queue/priority space primitive | No durable priority queue data structure with claim, retry, and visibility timeout. | Medium |
 | TT-049 | Pessimistic row locks | No `SELECT FOR UPDATE`-style lock lease for callers that need serialized reads/mutations. | High |
 | TT-050 | SQL planner statistics | Partial: explicit source-versioned `ANALYZE` statistics now feed what-if planning; durable on-disk statistics and a full cost model remain. | Medium |

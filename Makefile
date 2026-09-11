@@ -9861,3 +9861,43 @@ commit-mz022-index-readiness:
 .PHONY: push-mz022-index-readiness
 push-mz022-index-readiness:
 	bash scripts/push-mz022-index-readiness.sh
+
+.PHONY: test-expiration-deadline-cleaner
+test-expiration-deadline-cleaner:
+	bash scripts/test-expiration-deadline-cleaner.sh
+
+.PHONY: benchmark-expiration-deadline-cleaner
+benchmark-expiration-deadline-cleaner:
+	bash scripts/benchmark-expiration-deadline-cleaner.sh
+
+.PHONY: format-expiration-deadline-cleaner
+format-expiration-deadline-cleaner:
+	bash scripts/format-expiration-deadline-cleaner.sh
+
+.PHONY: test-race-expiration-deadline-cleaner
+test-race-expiration-deadline-cleaner:
+	bash scripts/test-race-expiration-deadline-cleaner.sh
+
+.PHONY: test-expiration-deadline-cleaner-broad
+test-expiration-deadline-cleaner-broad:
+	bash scripts/test-expiration-deadline-cleaner-broad.sh
+
+.PHONY: vet-expiration-deadline-cleaner
+vet-expiration-deadline-cleaner:
+	bash scripts/vet-expiration-deadline-cleaner.sh
+
+.PHONY: verify-expiration-deadline-cleaner
+verify-expiration-deadline-cleaner:
+	bash scripts/verify-expiration-deadline-cleaner.sh
+
+.PHONY: review-expiration-deadline-cleaner
+review-expiration-deadline-cleaner:
+	bash scripts/review-expiration-deadline-cleaner.sh
+
+.PHONY: commit-expiration-deadline-cleaner
+commit-expiration-deadline-cleaner:
+	bash scripts/commit-expiration-deadline-cleaner.sh
+
+.PHONY: push-expiration-deadline-cleaner
+push-expiration-deadline-cleaner:
+	bash scripts/push-expiration-deadline-cleaner.sh

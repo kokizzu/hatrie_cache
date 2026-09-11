@@ -3311,8 +3311,12 @@ runtime scheduling pauses can delay a refresh. Injected test clocks remain
 exact. Monotonic timers and operational deadlines continue to use the standard
 Go clock.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
-`VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for periodic
-background cleanup. Use `StartExpirationCleanerContext` when cleaner lifetime
+`VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for opt-in
+background cleanup. The cleaner uses the indexed expiration heap and sleeps
+until the next deadline, waking early when a newly scheduled deadline is
+earlier; its interval remains the maximum fallback wake period. See the
+[deadline-aware expiration cleaner](EXPIRATION_CLEANER.md) design and
+measurements. Use `StartExpirationCleanerContext` when cleaner lifetime
 should follow a parent service context. Use `VacuumExpiredOnMemoryPressure` or
 `StartMemoryPressureVacuum` to remove expired keys only when heap allocation is
 above a configured threshold; `StartMemoryPressureVacuumContext` also stops on
