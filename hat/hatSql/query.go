@@ -3079,17 +3079,18 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 }
 
 type sqlStreamAggregate struct {
-	name      string
-	arg       *sqlExpr
-	order     *sqlExpr
-	filter    *sqlExpr
-	collation SQLCollation
-	count     int64
-	sum       float64
-	value     float64
-	selected  interface{}
-	extreme   interface{}
-	seen      bool
+	name        string
+	arg         *sqlExpr
+	order       *sqlExpr
+	filter      *sqlExpr
+	approximate *sqlApproximateStreamState
+	collation   SQLCollation
+	count       int64
+	sum         float64
+	value       float64
+	selected    interface{}
+	extreme     interface{}
+	seen        bool
 }
 
 // sqlGlobalStreamAggregates recognizes the constant-state aggregate subset.
@@ -3127,6 +3128,12 @@ func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
 			}
 			argument, order := expr.args[0], expr.args[1]
 			aggregate.arg, aggregate.order, aggregate.collation = &argument, &order, expr.collation
+		case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE":
+			state, ok := newSQLApproximateStreamState(expr)
+			if !ok {
+				return nil, false
+			}
+			aggregate.approximate = state
 		default:
 			return nil, false
 		}
@@ -3148,6 +3155,9 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 		if !sqlTruthy(value) {
 			return nil
 		}
+	}
+	if aggregate.approximate != nil {
+		return aggregate.approximate.add(group, row)
 	}
 	if sqlArgExtremeAggregate(aggregate.name) {
 		if aggregate.arg == nil || aggregate.order == nil {
@@ -3203,6 +3213,9 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 }
 
 func (aggregate sqlStreamAggregate) result() interface{} {
+	if aggregate.approximate != nil {
+		return aggregate.approximate.result()
+	}
 	switch aggregate.name {
 	case "COUNT":
 		return aggregate.count
@@ -3228,6 +3241,18 @@ func (aggregate sqlStreamAggregate) result() interface{} {
 
 func sqlSimpleStreamAggregateExpr(expr sqlExpr) bool {
 	return expr.kind == "field" || expr.kind == "literal"
+}
+
+func sqlApproximateDirectSourcePlan(query *sqlQuery, aggregates []sqlStreamAggregate) bool {
+	if query == nil || query.where.kind != "" || len(aggregates) == 0 {
+		return false
+	}
+	for _, aggregate := range aggregates {
+		if aggregate.approximate == nil || aggregate.filter != nil || len(aggregate.approximate.expr.args) == 0 || !sqlSimpleStreamAggregateExpr(aggregate.approximate.expr.args[0]) {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlStreamAggregateSourceValue(expr sqlExpr, row SQLRow, alias string) (interface{}, bool) {
@@ -3270,6 +3295,7 @@ func (aggregate *sqlStreamAggregate) addSourceRow(row SQLRow, alias string) erro
 
 func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error, aggregates []sqlStreamAggregate) error {
 	directArgExtreme := sqlArgExtremeDirectSourcePlan(query, aggregates)
+	directApproximate := sqlApproximateDirectSourcePlan(query, aggregates)
 	inputRows := 0
 	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
 		if err := control.check(); err != nil {
@@ -3294,6 +3320,14 @@ func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resol
 			}
 			for index := range aggregates {
 				if err := aggregates[index].addSourceRow(sourceRow, query.from.alias); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if directApproximate {
+			for index := range aggregates {
+				if err := aggregates[index].approximate.addSourceRow(sourceRow, query.from.alias); err != nil {
 					return err
 				}
 			}
@@ -7847,6 +7881,28 @@ func executeSQLQueryWithMetrics(q *sqlQuery, resolver SQLSourceResolver, ctes ma
 	return executeSQLQueryWithMetricsOuter(q, resolver, ctes, metrics, control, nil)
 }
 
+func executeSQLApproximateAggregateResultStream(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, bool, error) {
+	if q == nil || q.sample != nil || q.limitBy != nil || q.limitWithTies || q.prewhere.kind != "" || q.offset != 0 || q.limit == 0 || control == nil {
+		return SQLQueryResult{}, false, nil
+	}
+	aggregates, ok := sqlGlobalStreamAggregates(q)
+	if !ok || len(aggregates) == 0 {
+		return SQLQueryResult{}, false, nil
+	}
+	for _, aggregate := range aggregates {
+		if aggregate.approximate == nil {
+			return SQLQueryResult{}, false, nil
+		}
+	}
+	var result SQLQueryResult
+	err := executeSQLGlobalAggregateStream(control.ctx, q, resolver, control, func(columns []string, row SQLRow) error {
+		result.Columns = append([]string(nil), columns...)
+		result.Rows = []SQLRow{row}
+		return nil
+	}, aggregates)
+	return result, true, err
+}
+
 // executeSQLColumnarScan keeps predicate columns separate from projected
 // columns. It only accepts a single-source field projection with a simple
 // field/literal predicate, so every other query keeps the general executor.
@@ -10368,6 +10424,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return SQLQueryResult{}, err
 		}
 		ctes[cte.name] = rows
+	}
+	if outer == nil {
+		if result, handled, streamErr := executeSQLApproximateAggregateResultStream(q, resolver, control); handled {
+			return result, streamErr
+		}
 	}
 	if !sqlQueryHasWithFill(q) && q.limitBy == nil {
 		if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {

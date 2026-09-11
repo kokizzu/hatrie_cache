@@ -27,6 +27,107 @@ type sqlApproxTopKEntry struct {
 	key string
 }
 
+type sqlApproximateStreamState struct {
+	expr      sqlExpr
+	hll       *hatDataStructure.HyperLogLog
+	quantile  *hatDataStructure.QuantileSketch
+	quantileP float64
+}
+
+func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, bool) {
+	state := &sqlApproximateStreamState{expr: expr}
+	switch expr.name {
+	case "APPROX_COUNT_DISTINCT":
+		if len(expr.args) < 1 || len(expr.args) > 2 {
+			return nil, false
+		}
+		precision := hatDataStructure.DefaultHyperLogLogPrecision
+		if len(expr.args) == 2 {
+			value, err := sqlApproximateIntegerArgument(expr.args[1], "APPROX_COUNT_DISTINCT precision")
+			if err != nil || value > math.MaxUint8 {
+				return nil, false
+			}
+			precision = uint8(value)
+		}
+		sketch, err := hatDataStructure.NewHyperLogLog(precision)
+		if err != nil {
+			return nil, false
+		}
+		state.hll = &sketch
+		return state, true
+	case "APPROX_PERCENTILE":
+		if len(expr.args) < 2 || len(expr.args) > 3 {
+			return nil, false
+		}
+		quantile, err := sqlApproximateNumberArgument(expr.args[1], "APPROX_PERCENTILE quantile")
+		if err != nil || quantile < 0 || quantile > 1 {
+			return nil, false
+		}
+		epsilon := hatDataStructure.DefaultQuantileSketchEpsilon
+		if len(expr.args) == 3 {
+			epsilon, err = sqlApproximateNumberArgument(expr.args[2], "APPROX_PERCENTILE epsilon")
+			if err != nil {
+				return nil, false
+			}
+		}
+		sketch, err := hatDataStructure.NewQuantileSketch(epsilon)
+		if err != nil {
+			return nil, false
+		}
+		state.quantile, state.quantileP = &sketch, quantile
+		return state, true
+	default:
+		return nil, false
+	}
+}
+
+func (state *sqlApproximateStreamState) add(group []sqlExecRow, row sqlExecRow) error {
+	value := evalSQLExpr(state.expr.args[0], group, row)
+	if err := sqlExpressionError(value); err != nil {
+		return err
+	}
+	return state.addValue(value)
+}
+
+func (state *sqlApproximateStreamState) addSourceRow(row SQLRow, alias string) error {
+	value, ok := sqlStreamAggregateSourceValue(state.expr.args[0], row, alias)
+	if !ok {
+		return fmt.Errorf("%s aggregate argument is not a direct source expression", state.expr.name)
+	}
+	return state.addValue(value)
+}
+
+func (state *sqlApproximateStreamState) addValue(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	if state.hll != nil {
+		encoded, err := sqlApproximateValueKey(value)
+		if err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		state.hll.AddJSONString(encoded)
+		return nil
+	}
+	if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
+		state.quantile.Add(number)
+	}
+	return nil
+}
+
+func (state *sqlApproximateStreamState) result() interface{} {
+	if state.hll != nil {
+		return state.hll.Count()
+	}
+	if state.quantile != nil {
+		estimate, ok := state.quantile.Estimate(state.quantileP)
+		if ok {
+			return estimate.Value
+		}
+	}
+	return nil
+}
+
 func evalSQLApproximateAggregate(expr sqlExpr, group []sqlExecRow) interface{} {
 	switch expr.name {
 	case "APPROX_COUNT_DISTINCT":

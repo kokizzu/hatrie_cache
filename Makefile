@@ -8931,6 +8931,24 @@ commit-ch038-aggregate-if:
 push-ch038-aggregate-if:
 	bash scripts/push-ch038-aggregate-if.sh
 
+test-ch039-approx-stream:
+	bash scripts/test-ch039-approx-stream.sh
+
+format-ch039-approx-stream:
+	bash scripts/format-ch039-approx-stream.sh
+
+benchmark-ch039-approx-stream:
+	bash scripts/benchmark-ch039-approx-stream.sh
+
+review-ch039-approx-stream:
+	bash scripts/review-ch039-approx-stream.sh
+
+commit-ch039-approx-stream:
+	bash scripts/commit-ch039-approx-stream.sh
+
+push-ch039-approx-stream:
+	bash scripts/push-ch039-approx-stream.sh
+
 
 
 

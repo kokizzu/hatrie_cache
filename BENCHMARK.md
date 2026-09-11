@@ -20138,3 +20138,43 @@ BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  344  3509066 ns/op  6646978 B/o
 BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  342  3325672 ns/op  6646975 B/op  30028 allocs/op
 BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  333  3299914 ns/op  6646976 B/op  30028 allocs/op
 ```
+
+## CH-039 streaming approximate aggregate state
+
+The workload contains 10,000 rows and runs `APPROX_COUNT_DISTINCT` plus
+`APPROX_PERCENTILE` through the same `ExecuteSQLQuery` API. Ten samples were
+collected before and after enabling direct streaming state. The pre-change
+materialized median was 6,562,801 ns/op, 4,684,427 B/op, and 40,230 allocs/op.
+The post-change median was 4,347,983 ns/op, 193,019 B/op, and 20,157 allocs/op:
+1.509x faster, 24.269x less heap, and 1.996x fewer allocations. Full raw
+samples and eligibility limits are in [SQL_APPROXIMATE_STREAM.md](SQL_APPROXIMATE_STREAM.md).
+
+Raw output from `make benchmark-ch039-approx-stream` before the change:
+
+```text
+6673456 ns/op 4684286 B/op 40228 allocs/op
+6568300 ns/op 4684450 B/op 40230 allocs/op
+6669351 ns/op 4684583 B/op 40230 allocs/op
+6518109 ns/op 4684370 B/op 40228 allocs/op
+6468033 ns/op 4684403 B/op 40229 allocs/op
+6561648 ns/op 4684237 B/op 40227 allocs/op
+6509151 ns/op 4684746 B/op 40233 allocs/op
+6474060 ns/op 4683639 B/op 40221 allocs/op
+6563953 ns/op 4683831 B/op 40223 allocs/op
+6570719 ns/op 4684451 B/op 40230 allocs/op
+```
+
+Raw output after the change:
+
+```text
+4342659 ns/op 193318 B/op 20160 allocs/op
+4343402 ns/op 193065 B/op 20157 allocs/op
+4335609 ns/op 193116 B/op 20157 allocs/op
+4328339 ns/op 192872 B/op 20155 allocs/op
+4352564 ns/op 193067 B/op 20157 allocs/op
+4318578 ns/op 192824 B/op 20154 allocs/op
+4373709 ns/op 193021 B/op 20157 allocs/op
+4356227 ns/op 193017 B/op 20156 allocs/op
+4362350 ns/op 192826 B/op 20154 allocs/op
+4354967 ns/op 192827 B/op 20154 allocs/op
+```
