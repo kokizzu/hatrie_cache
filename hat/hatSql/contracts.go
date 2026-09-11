@@ -1209,6 +1209,14 @@ type TextIndexedSourceResolver interface {
 	ResolveSQLTextSource(name, key, field, query string) ([]Row, bool, error)
 }
 
+// TextPrefixIndexedSourceResolver optionally resolves a single-token prefix
+// query against a configured text field. Implementations must return only
+// candidate rows; the executor evaluates CONTAINS_PREFIX again before
+// returning results.
+type TextPrefixIndexedSourceResolver interface {
+	ResolveSQLTextPrefixSource(name, key, field, prefix string) ([]Row, bool, error)
+}
+
 // ExternalSourceResolver supplies a named, imported external table. It is
 // used only by EXTERNAL('name') sources and never receives a filesystem path.
 type ExternalSourceResolver interface {

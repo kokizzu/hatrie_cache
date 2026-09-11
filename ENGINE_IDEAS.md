@@ -160,7 +160,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-021 | RTREE spatial index | No multidimensional geographic index and bounding-box query API exists. | High |
 | TT-022 | BITSET index | No bitmap index for low-cardinality integer membership. | Medium |
 | TT-023 | HASH equality index | No dedicated hash index path for exact unique/non-unique equality lookups. | Low |
-| TT-024 | Full-text index | No token-position index with phrase and prefix search. | High |
+| TT-024 | Full-text phrase/position index | `CONTAINS_PREFIX` now uses an opt-in sorted token-key sidecar; token positions and phrase search remain absent. | High |
 | TT-025 | Online uniqueness validation | Unique index creation has no staged validation before atomic publication. | Medium |
 | TT-026 | Versioned tuple format | Stored rows have no schema version and migration decoder boundary. | High |
 | TT-027 | Generated columns | No write-maintained expression columns with dependency validation. | Medium |

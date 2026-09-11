@@ -105,6 +105,7 @@ type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
 type SQLPrefixIndexedSourceResolver = hatSql.PrefixIndexedSourceResolver
 type SQLBorrowedPrefixIndexedSourceResolver = hatSql.BorrowedPrefixIndexedSourceResolver
 type SQLTextIndexedSourceResolver = hatSql.TextIndexedSourceResolver
+type SQLTextPrefixIndexedSourceResolver = hatSql.TextPrefixIndexedSourceResolver
 type SQLOrderedSourceResolver = hatSql.OrderedSourceResolver
 type SQLOrderedRangeSourceResolver = hatSql.OrderedRangeSourceResolver
 type SQLOrderedStreamSourceResolver = hatSql.OrderedStreamSourceResolver
@@ -607,8 +608,9 @@ type sqlJSONTypedInt64Entry struct {
 }
 type sqlJSONTextIndex struct {
 	sqlJSONIndexState
-	rows   []SQLRow
-	tokens map[string][]int
+	rows      []SQLRow
+	tokens    map[string][]int
+	tokenKeys []string
 }
 type sqlJSONCompositeIndex struct {
 	sqlJSONIndexState
@@ -3521,7 +3523,7 @@ func refreshSQLJSONTextIndexSourceRows(index *sqlJSONTextIndex, field string, so
 		}
 	}
 	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
-	index.rows, index.tokens = rows, tokens
+	index.rows, index.tokens, index.tokenKeys = rows, tokens, sortedSQLTextTokenKeys(tokens)
 	return nil
 }
 

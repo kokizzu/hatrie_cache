@@ -43,3 +43,16 @@ func textContains(value, query string) bool {
 	}
 	return true
 }
+
+func textContainsPrefix(value, prefix string) bool {
+	prefixTokens := TextTokens(prefix)
+	if len(prefixTokens) != 1 {
+		return false
+	}
+	for _, token := range TextTokens(value) {
+		if strings.HasPrefix(token, prefixTokens[0]) {
+			return true
+		}
+	}
+	return false
+}

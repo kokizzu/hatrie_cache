@@ -20078,3 +20078,29 @@ Raw final samples from `make benchmark-m065u-parallel-row-binary`:
 565288 1986362 26802
 588758 1986356 26802
 ```
+
+## TT-024 SQL text token-prefix lookup
+
+The new opt-in `CONTAINS_PREFIX` path was compared with the ordinary scan on
+the same 10,000-row JSON source. The prefix matched 100 rows and the indexed
+field contained five distinct tokens. Medians across five samples were
+71,786 ns/op for sorted token postings versus 15,348,738 ns/op for the scan:
+213.8x lower CPU time, 107.9x lower transient bytes, and 220.7x fewer
+allocations. These are per-query transient figures; the sorted token-key slice
+adds one pointer per distinct token and is rebuilt with the existing text
+postings. Phrase/token-position search remains deferred.
+
+Raw output from `make benchmark-tt024-text-prefix`:
+
+```text
+BenchmarkSQLTextPrefixScanVsIndex/scan-32          78  15106885 ns/op  8906136 B/op  160237 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/scan-32          68  15523546 ns/op  8906138 B/op  160237 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/scan-32          74  15083938 ns/op  8906135 B/op  160237 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/scan-32          75  15348738 ns/op  8906210 B/op  160237 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/scan-32          73  15374864 ns/op  8906138 B/op  160237 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  15990  73769 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  16708  73721 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  17280  69037 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  16590  71786 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
+BenchmarkSQLTextPrefixScanVsIndex/sorted_token_postings-32  17202  71033 ns/op  5 unique_tokens  82568 B/op  726 allocs/op
+```

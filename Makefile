@@ -8895,6 +8895,33 @@ push-ch048-numeric-predicate-kernel:
 audit-next-engine-idea:
 	bash scripts/audit-next-engine-idea.sh
 
+test-tt024-text-prefix:
+	bash scripts/test-tt024-text-prefix.sh
+
+format-tt024-text-prefix:
+	bash scripts/format-tt024-text-prefix.sh
+
+benchmark-tt024-text-prefix:
+	bash scripts/benchmark-tt024-text-prefix.sh
+
+review-tt024-text-prefix:
+	bash scripts/review-tt024-text-prefix.sh
+
+commit-tt024-text-prefix:
+	bash scripts/commit-tt024-text-prefix.sh
+
+push-tt024-text-prefix:
+	bash scripts/push-tt024-text-prefix.sh
+
+
+
+inspect-sql-text-resolver:
+	bash scripts/inspect-sql-text-resolver.sh
+
+
+inspect-text-index-implementation:
+	bash scripts/inspect-text-index-implementation.sh
+
 test-ch036-asof-join:
 	bash scripts/test-ch036-asof-join.sh
 

@@ -286,7 +286,7 @@ func sqlRewriteFoldable(expr sqlExpr) bool {
 
 func sqlRewriteFoldableFunction(name string) bool {
 	switch name {
-	case "LOWER", "COALESCE", "NULLIF", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "REGEXP_LIKE", "REGEXP_EXTRACT", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "CONTAINS":
+	case "LOWER", "COALESCE", "NULLIF", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "REGEXP_LIKE", "REGEXP_EXTRACT", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "CONTAINS", "CONTAINS_PREFIX":
 		return true
 	default:
 		return false

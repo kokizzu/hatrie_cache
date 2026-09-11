@@ -274,6 +274,14 @@ func (resolver monitoringSQLResolver) ResolveSQLTextSource(name, key, field, que
 	return indexed.ResolveSQLTextSource(name, key, field, query)
 }
 
+func (resolver monitoringSQLResolver) ResolveSQLTextPrefixSource(name, key, field, prefix string) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(SQLTextPrefixIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLTextPrefixSource(name, key, field, prefix)
+}
+
 func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
 	indexed, ok := resolver.source.(SQLCompositeIndexedSourceResolver)
 	if !ok {
