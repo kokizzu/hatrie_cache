@@ -2,6 +2,7 @@
 set -euo pipefail
 
 git add scripts/inspect-native-dataflow.sh
+git add hat/hatSql/m052o_native_composite_group_test.go
 
 git add \
   SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md \

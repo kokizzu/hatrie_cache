@@ -75,7 +75,6 @@ func TestCompiledSQLNativeDataflowCompositeGroupRejectsUnsupportedRuntimeKey(t *
 
 func TestCompiledSQLNativeDataflowCompositeGroupRejectsMaterializedShapes(t *testing.T) {
 	queries := []string{
-		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, COUNT(*) AS total GROUP BY src.region, src.tier ORDER BY total DESC LIMIT 1",
 		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, COUNT(*) AS total GROUP BY src.region, src.tier HAVING COUNT(*) > 1",
 		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.value AS value, COUNT(*) AS total GROUP BY src.region, src.tier, src.value",
 	}
