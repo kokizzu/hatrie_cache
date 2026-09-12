@@ -3886,3 +3886,4 @@ invalid, or incomplete segment statistics, larger conjunctions, and all other
 SQL shapes retain the original predicate order. See
 [BENCHMARK.md](BENCHMARK.md#sql-numeric-predicate-reordering) for the measured
 CPU, allocation, and fallback tradeoffs.
+- Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)

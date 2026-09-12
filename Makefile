@@ -10718,3 +10718,31 @@ race-m-u09-frontier:
 .PHONY: vet-m-u09-frontier
 vet-m-u09-frontier:
 	bash ./scripts/vet-m-u09-frontier.sh
+
+.PHONY: format-t-u02-session
+format-t-u02-session:
+	bash ./scripts/format-t-u02-session.sh
+
+.PHONY: test-t-u02-session
+test-t-u02-session:
+	bash ./scripts/test-t-u02-session.sh
+
+.PHONY: test-t-u02-session-package
+test-t-u02-session-package:
+	bash ./scripts/test-t-u02-session-package.sh
+
+.PHONY: race-t-u02-session
+race-t-u02-session:
+	bash ./scripts/race-t-u02-session.sh
+
+.PHONY: vet-t-u02-session
+vet-t-u02-session:
+	bash ./scripts/vet-t-u02-session.sh
+
+.PHONY: benchmark-t-u02-session
+benchmark-t-u02-session:
+	bash ./scripts/benchmark-t-u02-session.sh
+
+.PHONY: publish-t-u02-session
+publish-t-u02-session:
+	bash ./scripts/publish-t-u02-session.sh
