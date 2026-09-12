@@ -21632,3 +21632,16 @@ the opt-in bounded policy registry:
 The registry adds no allocations. Its cost is an explicit map lookup and,
 when configured, a bounded source-priority scan; callers that need only the
 existing global ordering can keep using the direct resolver.
+
+## T-U15: Named space catalog
+
+The optional catalog stores validated source and index metadata with clone-safe
+reads. Five local runs over 64 spaces:
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Lookup one cloned definition | 161.7 | 176 | 3 |
+| List all definitions, sorted | 16,922 | 19,640 | 196 |
+
+The catalog has no effect on existing schema or SQL execution until an
+integration opts into it; listing cost includes deep copies and sorting.

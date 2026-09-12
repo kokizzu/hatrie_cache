@@ -11026,3 +11026,15 @@ benchmark-t-u11:
 
 verify-t-u11:
 	bash ./scripts/verify-t-u11.sh
+
+test-t-u15:
+	bash ./scripts/test-t-u15.sh
+
+format-t-u15:
+	bash ./scripts/format-t-u15.sh
+
+benchmark-t-u15:
+	bash ./scripts/benchmark-t-u15.sh
+
+verify-t-u15:
+	bash ./scripts/verify-t-u15.sh

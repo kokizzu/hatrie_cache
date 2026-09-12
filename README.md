@@ -64,6 +64,7 @@ security guidance before exposing it on a network.
 - Clock-independent bounded replica RPO status: [REPLICA_RPO_STATUS.md](REPLICA_RPO_STATUS.md)
 - Online snapshot manifest with exact journal coordinate: [SNAPSHOT_MANIFEST.md](SNAPSHOT_MANIFEST.md)
 - Per-space conflict policy registry: [CONFLICT_POLICY.md](CONFLICT_POLICY.md)
+- Named versioned space catalog: [SPACE_CATALOG.md](SPACE_CATALOG.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
