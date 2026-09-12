@@ -11050,3 +11050,15 @@ benchmark-t-u42:
 
 verify-t-u42:
 	bash ./scripts/verify-t-u42.sh
+
+format-m201:
+	bash ./scripts/format-m201.sh
+
+test-m201:
+	bash ./scripts/test-m201.sh
+
+benchmark-m201:
+	bash ./scripts/benchmark-m201.sh
+
+verify-m201:
+	bash ./scripts/verify-m201.sh

@@ -21680,3 +21680,32 @@ BenchmarkCursorTokenOperations/decode-for-32     	 1715613	       700.7 ns/op	  
 PASS
 ok  	hatrie_cache/hat/hatDataStructure	28.397s
 ```
+## M201 Changefeed Progress Frontier
+
+Materialize-inspired monotonic progress watermark benchmark, five runs:
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Progress | 0.4741 | 0 | 0 |
+| Advance | 2.3690 | 0 | 0 |
+
+Raw output:
+
+```text
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatReplication
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkChangefeedFrontierProgress-32    	1000000000	         0.4743 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierProgress-32    	1000000000	         0.4752 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierProgress-32    	1000000000	         0.4741 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierProgress-32    	1000000000	         0.4717 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierProgress-32    	1000000000	         0.4707 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierAdvance-32     	510223965	         2.369 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierAdvance-32     	504788715	         2.274 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierAdvance-32     	534993169	         2.428 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierAdvance-32     	503683930	         2.416 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedFrontierAdvance-32     	502224992	         2.361 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatReplication	9.875s
+```
