@@ -102,6 +102,7 @@ security guidance before exposing it on a network.
 - Persistent SQL query history: [PERSISTENT_QUERY_LOG.md](PERSISTENT_QUERY_LOG.md)
 - Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
+- Compaction scheduler queue/run age telemetry: [CH027_COMPACTION_SCHEDULER_OBSERVABILITY.md](CH027_COMPACTION_SCHEDULER_OBSERVABILITY.md)
 - Opt-in cross-source SQL read snapshots: [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md)
 - Indexed common source frontiers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
 - Frontier-bound SQL snapshots: [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)

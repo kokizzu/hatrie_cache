@@ -10126,3 +10126,39 @@ push-tt046-memory-accounting:
 .PHONY: amend-tt046-memory-accounting
 amend-tt046-memory-accounting:
 	sh scripts/amend-tt046-memory-accounting.sh
+
+.PHONY: benchmark-ch027-scheduler-observability
+benchmark-ch027-scheduler-observability:
+	sh scripts/benchmark-ch027-scheduler-observability.sh
+
+.PHONY: test-ch027-scheduler-observability
+test-ch027-scheduler-observability:
+	sh scripts/test-ch027-scheduler-observability.sh
+
+.PHONY: format-ch027-scheduler-observability
+format-ch027-scheduler-observability:
+	sh scripts/format-ch027-scheduler-observability.sh
+
+.PHONY: verify-ch027-docs
+verify-ch027-docs:
+	sh scripts/verify-ch027-docs.sh
+
+.PHONY: race-ch027-scheduler-observability
+race-ch027-scheduler-observability:
+	sh scripts/race-ch027-scheduler-observability.sh
+
+.PHONY: vet-ch027-scheduler-observability
+vet-ch027-scheduler-observability:
+	sh scripts/vet-ch027-scheduler-observability.sh
+
+.PHONY: review-ch027-scheduler-observability
+review-ch027-scheduler-observability:
+	sh scripts/review-ch027-scheduler-observability.sh
+
+.PHONY: commit-ch027-scheduler-observability
+commit-ch027-scheduler-observability:
+	sh scripts/commit-ch027-scheduler-observability.sh
+
+.PHONY: push-ch027-scheduler-observability
+push-ch027-scheduler-observability:
+	sh scripts/push-ch027-scheduler-observability.sh

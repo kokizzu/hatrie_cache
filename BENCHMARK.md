@@ -21124,6 +21124,27 @@ The default-off predicate was within measurement noise of the legacy
 predicate and introduced no allocations. Enabling the mode changes behavior
 by rejecting public writes; it is not a performance optimization.
 
+## CH-027 Compaction Scheduler Observability
+
+This feature adds `CompactionScheduler.Ages()` and caller-supplied age helpers
+for the oldest pending and running maintenance task. It leaves the existing
+`Stats()` shape and fast path unchanged. The benchmark was run with
+`make benchmark-ch027-scheduler-observability` on Linux/amd64 with an AMD Ryzen
+9 5950X; each row contains five `-count=5` samples over 64 queued tasks.
+
+| Path | Samples (ns/op) | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing `Stats()`, before feature | 12.81, 11.60, 11.70, 12.54, 12.69 | 12.54 | 0 | 0 |
+| Existing `Stats()`, final implementation control | 13.01, 12.95, 12.16, 11.64, 11.62 | 12.16 | 0 | 0 |
+| Final `Stats()` benchmark path | 11.68, 11.79, 11.71, 11.99, 12.61 | 11.79 | 0 | 0 |
+
+The final control was `1.03x` faster in the same run and remained allocation-free;
+the small difference is within normal microbenchmark noise. An earlier design
+that calculated age inside every `Stats()` call measured about `56.9 ns/op`
+versus the `12.54 ns/op` baseline, so it was removed. The accepted design
+keeps age calculation off `Stats()` and exposes timestamps through the separate
+`Ages()` snapshot.
+
 ## TT-046 Per-Structure Memory Accounting
 
 This diagnostic feature exposes the native trie and each typed backing pool via

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
@@ -42,6 +43,10 @@ type compactionTask struct {
 	run  func(context.Context) error
 }
 
+type compactionPendingTask struct {
+	run func(context.Context) error
+}
+
 // CompactionScheduler coalesces compaction requests by task name and bounds
 // maintenance concurrency. It is independent of any particular storage
 // engine; callers typically schedule a closure around an engine's Compact
@@ -51,8 +56,11 @@ type CompactionScheduler struct {
 	mu    sync.Mutex
 
 	maxConcurrent int
-	pending       map[string]func(context.Context) error
+	pending       map[string]compactionPendingTask
 	running       map[string]struct{}
+	now           func() time.Time
+	oldestPending time.Time
+	oldestRunning time.Time
 	scheduled     uint64
 	completed     uint64
 	failed        uint64
@@ -69,8 +77,9 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 	}
 	return &CompactionScheduler{
 		maxConcurrent: options.MaxConcurrent,
-		pending:       make(map[string]func(context.Context) error),
+		pending:       make(map[string]compactionPendingTask),
 		running:       make(map[string]struct{}),
+		now:           time.Now,
 	}, nil
 }
 
@@ -93,7 +102,10 @@ func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Con
 	if _, exists := scheduler.running[name]; exists {
 		return false, nil
 	}
-	scheduler.pending[name] = run
+	if scheduler.oldestPending.IsZero() {
+		scheduler.oldestPending = scheduler.now()
+	}
+	scheduler.pending[name] = compactionPendingTask{run: run}
 	return true, nil
 }
 
@@ -154,6 +166,7 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	scheduler.oldestRunning = time.Time{}
 	failures := make([]error, 0)
 	for index, task := range tasks {
 		err := errs[index]
@@ -166,7 +179,10 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 		result.Failed++
 		scheduler.failed++
 		if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
-			scheduler.pending[task.name] = task.run
+			if scheduler.oldestPending.IsZero() {
+				scheduler.oldestPending = scheduler.now()
+			}
+			scheduler.pending[task.name] = compactionPendingTask{run: task.run}
 		}
 		failures = append(failures, fmt.Errorf("compaction task %q: %w", task.name, err))
 	}
@@ -179,12 +195,18 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 func (scheduler *CompactionScheduler) takePending() []compactionTask {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	if len(scheduler.pending) == 0 {
+		return nil
+	}
+	startedAt := scheduler.now()
 	tasks := make([]compactionTask, 0, len(scheduler.pending))
-	for name, run := range scheduler.pending {
-		tasks = append(tasks, compactionTask{name: name, run: run})
+	for name, pending := range scheduler.pending {
+		tasks = append(tasks, compactionTask{name: name, run: pending.run})
 		delete(scheduler.pending, name)
 		scheduler.running[name] = struct{}{}
 	}
+	scheduler.oldestPending = time.Time{}
+	scheduler.oldestRunning = startedAt
 	scheduler.scheduled += uint64(len(tasks))
 	return tasks
 }
