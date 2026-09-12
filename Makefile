@@ -11349,3 +11349,28 @@ test-c208-full:
 	bash ./scripts/test-c208-full.sh
 
 verify-c208: format-c208 test-c208-metrics test-c208-package race-c208 vet-c208
+test-c209-stats:
+	bash ./scripts/test-c209-stats.sh
+
+benchmark-c209:
+	bash ./scripts/benchmark-c209.sh
+
+format-c209:
+	bash ./scripts/format-c209.sh
+
+test-c209-package:
+	bash ./scripts/test-c209-package.sh
+
+race-c209:
+	bash ./scripts/race-c209.sh
+
+vet-c209:
+	bash ./scripts/vet-c209.sh
+
+test-c209-full:
+	bash ./scripts/test-c209-full.sh
+
+verify-c209: format-c209 test-c209-stats test-c209-package race-c209 vet-c209
+
+commit-c209:
+	bash ./scripts/commit-c209.sh

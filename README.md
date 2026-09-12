@@ -43,6 +43,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired point-read and subscription consistency fences: [M249_READ_FENCE.md](M249_READ_FENCE.md)
 - Materialize-inspired bounded journal subscriptions: [M204_BOUNDED_SUBSCRIPTIONS.md](M204_BOUNDED_SUBSCRIPTIONS.md)
 - ClickHouse-inspired result-cache hit, miss, bypass, and eviction metrics: [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md)
+- ClickHouse-inspired typed-table column statistics: [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
