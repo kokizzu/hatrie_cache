@@ -154,6 +154,7 @@ type SQLSecondaryIndexedSourceResolver = SecondaryIndexedSourceResolver
 type SQLCoveringIndexedSourceResolver = CoveringIndexedSourceResolver
 type SQLJSONIndexFrequencyBucket = JSONIndexFrequencyBucket
 type SQLJSONIndexStats = JSONIndexStats
+type SQLSourceCardinalityResolver = SourceCardinalityResolver
 type SQLSourceResolverFunc = SourceResolverFunc
 type SQLFunctionDefinition = FunctionDefinition
 type SQLFunctionCall = FunctionCall
@@ -7943,6 +7944,9 @@ func (metrics *sqlExecutionMetrics) recordScanRows(source sqlSource, rows []SQLR
 // pushdown on the established executor: those forms have ordering or null
 // preservation semantics that must not be changed by a cost optimization.
 func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, maxRows int) ([]sqlExecRow, bool, error) {
+	if rows, handled, err := executeSQLReorderedInnerHashJoinsFromStats(q, resolver, ctes, metrics, control, maxRows); handled {
+		return rows, true, err
+	}
 	if q.from == nil || q.sample != nil || len(q.joins) < 2 || q.where.kind != "" {
 		return nil, false, nil
 	}

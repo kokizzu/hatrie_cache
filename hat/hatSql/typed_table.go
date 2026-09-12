@@ -539,6 +539,25 @@ func (table *TypedTable) ResolveSQLSource(name string, key string) ([]Row, error
 	return table.Rows(), nil
 }
 
+// SQLSourceCardinality returns the current active row count without creating
+// row maps. It is a planning hint and is read under the same table lock as
+// Rows, so deleted patch-part rows are excluded consistently.
+func (table *TypedTable) SQLSourceCardinality(name string, key string) (int, bool, bool, error) {
+	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
+		return 0, false, false, nil
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	rows := len(table.keys)
+	if table.patchParts != nil {
+		rows -= table.patchParts.deletedCount
+	}
+	if rows < 0 {
+		rows = 0
+	}
+	return rows, true, true, nil
+}
+
 // ResolveSQLColumnarSource exposes only requested primitive columns so the
 // existing SQL columnar path can avoid constructing source row maps.
 func (table *TypedTable) ResolveSQLColumnarSource(name string, key string, fields []string) (ColumnarBatch, bool, error) {

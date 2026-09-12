@@ -45,6 +45,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired result-cache hit, miss, bypass, and eviction metrics: [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md)
 - ClickHouse-inspired typed-table column statistics: [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md)
 - ClickHouse-inspired compact typed-table histograms: [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md)
+- ClickHouse-inspired statistics-driven join ordering with deterministic fallback: [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)

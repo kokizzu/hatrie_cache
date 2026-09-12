@@ -40,7 +40,7 @@ operator control remain the preferred deployment model.
 - [x] C208 Query-cache hit, miss, bypass, and eviction metrics via `ResultCache`; see [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md).
 - [x] C209 Automatic basic column statistics for row count, null count, min, and max via `TypedTable.Stats()`; see [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md).
 - [x] C210 Compact histograms for cardinality and selectivity estimates via `TypedTable.Histogram()`; see [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md).
-- [ ] C211 Statistics-driven join-order selection with deterministic fallback.
+- [x] C211 Statistics-driven join-order selection with deterministic fallback via `SourceCardinalityResolver`; see [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md).
 - [ ] C212 Precomputed hash and software-prefetch hooks for hot hash-table probes.
 - [ ] C213 Cached JIT expression plans with bounded compilation memory.
 - [x] C214 Resource-bounded WebAssembly UDF execution; see [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md).

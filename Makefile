@@ -11399,3 +11399,38 @@ verify-c210: format-c210 test-c210-histogram test-c210-package race-c210 vet-c21
 
 commit-c210:
 	bash ./scripts/commit-c210.sh
+.PHONY: benchmark-c211-before
+benchmark-c211-before:
+	bash ./scripts/benchmark-c211-before.sh
+
+.PHONY: test-c211
+test-c211:
+	bash ./scripts/test-c211.sh
+
+.PHONY: format-c211
+format-c211:
+	bash ./scripts/format-c211.sh
+
+.PHONY: benchmark-c211
+benchmark-c211:
+	bash ./scripts/benchmark-c211.sh
+
+.PHONY: commit-c211
+commit-c211:
+	bash ./scripts/commit-c211.sh
+
+.PHONY: test-c211-package
+test-c211-package:
+	bash ./scripts/test-c211-package.sh
+
+.PHONY: race-c211
+race-c211:
+	bash ./scripts/race-c211.sh
+
+.PHONY: vet-c211
+vet-c211:
+	bash ./scripts/vet-c211.sh
+
+.PHONY: test-c211-full
+test-c211-full:
+	bash ./scripts/test-c211-full.sh

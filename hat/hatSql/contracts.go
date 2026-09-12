@@ -55,6 +55,15 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// SourceCardinalityResolver optionally exposes a current row-count estimate
+// without materializing source rows. The estimate is a planning hint only;
+// the executor always resolves and rechecks the source rows before producing
+// results. Implementations should return available=false when the estimate is
+// unavailable and may return exact=false for an approximate count.
+type SourceCardinalityResolver interface {
+	SQLSourceCardinality(name string, key string) (rows int, exact bool, available bool, err error)
+}
+
 // SQLSourcePartition is one ordered physical partition of a logical SQL
 // source. Rows are read-only for the duration of a query; the executor keeps
 // their existing row semantics and does not deduplicate rows across

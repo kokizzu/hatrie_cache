@@ -123,6 +123,20 @@ func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error
 	return resolver.Source.ResolveSQLSource(name, key)
 }
 
+// SQLSourceCardinality forwards optional source row-count metadata. Catalog
+// pseudo-sources intentionally remain unavailable so the SQL planner falls
+// back to its established exact source resolution path for mixed queries.
+func (resolver CatalogResolver) SQLSourceCardinality(name, key string) (int, bool, bool, error) {
+	if resolver.Source == nil {
+		return 0, false, false, nil
+	}
+	cardinality, ok := resolver.Source.(SourceCardinalityResolver)
+	if !ok {
+		return 0, false, false, nil
+	}
+	return cardinality.SQLSourceCardinality(name, key)
+}
+
 // ResolveSQLSourcePartitions forwards partitioned application sources while
 // leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]SQLSourcePartition, bool, error) {
