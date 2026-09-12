@@ -44,6 +44,39 @@ all protobuf messages, enum types and constants, the service descriptor, and
 the protobuf file descriptor. Applications do not need to import the
 repository's `internal` generated package.
 
+## HTTP command helper
+
+For callers that prefer language-neutral HTTP/JSON, the importable
+`hat/hatMonitoring` package provides a typed helper for `POST /api/commands`:
+
+```go
+import (
+	"context"
+
+	"hatrie_cache/hat/hatCommand"
+	"hatrie_cache/hat/hatMonitoring"
+)
+
+client := hatMonitoring.NewClient("http://127.0.0.1:8080", "read-write-token")
+response, err := client.Command(ctx, hatCommand.Request{
+	Command: "SETSTR",
+	Key:     "name",
+	Value:   "ivi",
+})
+```
+
+The equivalent wire request is usable from any language with an HTTP client:
+
+```sh
+curl -sS \
+  -H 'Authorization: Bearer read-write-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"SETSTR","key":"name","value":"ivi"}' \
+  http://127.0.0.1:8080/api/commands
+```
+
+`Client.Health` and `Client.Entries` remain available for monitoring reads.
+
 ## Other languages
 
 Install `protoc` and the gRPC plugin for the language and version used by the
@@ -64,7 +97,7 @@ the `.proto` file from the same compatibility version.
 ## Compatibility
 
 This package is an import and naming surface only. It aliases the existing
-generated protobuf types, so it does not change field numbers, enum values,
+generated protobuf types, so it does not change field numbers, enum values, RPC
 RPC names, streaming behavior, serialization, or storage formats. A client
 must still use the server's configured address, transport security, and
 authentication policy.

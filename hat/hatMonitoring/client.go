@@ -1,6 +1,7 @@
 package hatMonitoring
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"hatrie_cache/hat/hatCommand"
 )
 
 const maxErrorBytes = 1 << 20
@@ -51,7 +54,22 @@ func (client *Client) Entries(ctx context.Context, request EntriesRequest) (Entr
 	return entries, client.get(ctx, "/api/entries", query, &entries)
 }
 
+// Command executes one public cache command over the JSON HTTP contract.
+func (client *Client) Command(ctx context.Context, command hatCommand.Request) (hatCommand.Response, error) {
+	body, err := json.Marshal(command)
+	if err != nil {
+		return hatCommand.Response{}, err
+	}
+	var response hatCommand.Response
+	err = client.do(ctx, http.MethodPost, "/api/commands", nil, bytes.NewReader(body), "application/json", &response)
+	return response, err
+}
+
 func (client *Client) get(ctx context.Context, path string, query url.Values, target interface{}) error {
+	return client.do(ctx, http.MethodGet, path, query, nil, "", target)
+}
+
+func (client *Client) do(ctx context.Context, method string, path string, query url.Values, body io.Reader, contentType string, target interface{}) error {
 	if client == nil || strings.TrimSpace(client.BaseURL) == "" {
 		return fmt.Errorf("monitoring base URL is required")
 	}
@@ -61,9 +79,12 @@ func (client *Client) get(ctx context.Context, path string, query url.Values, ta
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + path
 	base.RawQuery = query.Encode()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, method, base.String(), body)
 	if err != nil {
 		return err
+	}
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
 	}
 	if client.Token != "" {
 		request.Header.Set("Authorization", "Bearer "+client.Token)

@@ -10471,3 +10471,35 @@ commit-visibility-queue-epoch:
 
 push-visibility-queue-epoch:
 	sh scripts/push-visibility-queue-epoch.sh
+
+.PHONY: test-monitoring-command-client
+test-monitoring-command-client:
+	sh scripts/test-monitoring-command-client.sh
+
+.PHONY: format-monitoring-command-client
+format-monitoring-command-client:
+	sh scripts/format-monitoring-command-client.sh
+
+.PHONY: benchmark-monitoring-command-client
+benchmark-monitoring-command-client:
+	sh scripts/benchmark-monitoring-command-client.sh
+
+.PHONY: vet-monitoring-command-client
+vet-monitoring-command-client:
+	sh scripts/vet-monitoring-command-client.sh
+
+.PHONY: race-monitoring-command-client
+race-monitoring-command-client:
+	sh scripts/race-monitoring-command-client.sh
+
+.PHONY: review-monitoring-command-client
+review-monitoring-command-client:
+	sh scripts/review-monitoring-command-client.sh
+
+.PHONY: commit-monitoring-command-client
+commit-monitoring-command-client:
+	sh scripts/commit-monitoring-command-client.sh
+
+.PHONY: push-monitoring-command-client
+push-monitoring-command-client:
+	sh scripts/push-monitoring-command-client.sh

@@ -21385,3 +21385,21 @@ Raw samples: early/all-fast `1831, 1825, 1857 ns/op`; early/slow
 ns/op`; wait-all/all-fast `1302, 1316, 1319 ns/op`. The early-return path is
 kept opt-in because its tail-latency gain comes with coordination overhead and
 it can return before every replica has completed.
+
+## Language-neutral command client
+
+The `hatMonitoring.Client.Command` helper was compared with an equivalent
+hand-written JSON HTTP request. Both paths marshal the same request, use the
+same `httptest` transport, decode the same response, and run with
+`-benchmem -count=5`; the table reports the median sample on the local AMD
+Ryzen 9 5950X.
+
+| Path | ns/op | B/op | allocs/op | Relative CPU | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Manual JSON HTTP | 65,073 | 9,448 | 97 | 1.00x | 1.00x | 1.00x |
+| `Client.Command` | 66,630 | 9,831 | 101 | 1.02x | 1.04x | 1.04x |
+
+This is an additive usability feature, not a cache hot-path optimization. The
+small measured overhead is the cost of URL validation and the typed helper; no
+server runtime path changes. Reproduce it with
+`make benchmark-monitoring-command-client`.
