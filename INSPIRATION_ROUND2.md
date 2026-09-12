@@ -39,7 +39,7 @@ operator control remain the preferred deployment model.
 - [ ] C207 Query-condition cache with data-generation invalidation for repeated filters.
 - [x] C208 Query-cache hit, miss, bypass, and eviction metrics via `ResultCache`; see [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md).
 - [x] C209 Automatic basic column statistics for row count, null count, min, and max via `TypedTable.Stats()`; see [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md).
-- [ ] C210 Compact histograms for cardinality and selectivity estimates.
+- [x] C210 Compact histograms for cardinality and selectivity estimates via `TypedTable.Histogram()`; see [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md).
 - [ ] C211 Statistics-driven join-order selection with deterministic fallback.
 - [ ] C212 Precomputed hash and software-prefetch hooks for hot hash-table probes.
 - [ ] C213 Cached JIT expression plans with bounded compilation memory.

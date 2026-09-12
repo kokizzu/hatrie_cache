@@ -11374,3 +11374,28 @@ verify-c209: format-c209 test-c209-stats test-c209-package race-c209 vet-c209
 
 commit-c209:
 	bash ./scripts/commit-c209.sh
+test-c210-histogram:
+	bash ./scripts/test-c210-histogram.sh
+
+format-c210:
+	bash ./scripts/format-c210.sh
+
+benchmark-c210:
+	bash ./scripts/benchmark-c210.sh
+
+test-c210-package:
+	bash ./scripts/test-c210-package.sh
+
+race-c210:
+	bash ./scripts/race-c210.sh
+
+vet-c210:
+	bash ./scripts/vet-c210.sh
+
+test-c210-full:
+	bash ./scripts/test-c210-full.sh
+
+verify-c210: format-c210 test-c210-histogram test-c210-package race-c210 vet-c210
+
+commit-c210:
+	bash ./scripts/commit-c210.sh
