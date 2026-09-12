@@ -178,7 +178,7 @@ tradeoffs are documented and its commit is published.
 | T-U47 | Cancellation/deadline propagation to peer calls | `hatPeer.ConnectionPool.DoWithLifecycleContext` now composes caller cancellation/deadlines with pool shutdown for opt-in gRPC, HTTP/2, and compact-protocol handlers; legacy `Do` remains unchanged for zero-allocation callers. | Connection reuse, partial response, and leak tests. |
 | T-U48 | Idempotent remote-call retry policy | `hatPeer.RetryPolicy` now provides opt-in method-aware bounded retries with stable idempotency keys, fencing tokens, cancellation-aware exponential backoff/jitter, and observer events; remote handlers still enforce deduplication. | No duplicate mutation, jitter, and observability. |
 | T-U49 | Replica-set request hedging | `hatTopology.ExecuteReplicaHedged` now provides opt-in bounded read hedging with delayed fallback, first-success cancellation, deterministic failures, observer events, and a zero-allocation single-candidate fast path. | Tail-latency versus duplicate load and consistency. |
-| T-U50 | Cluster-wide configuration watch | Local configuration can be observed, but there is no authenticated versioned watch stream with replay/resume across cluster members. | Gap recovery, authorization, and bounded history. |
+| T-U50 | Cluster-wide configuration watch | `hatTopology.ConfigWatchLog` now provides an authenticated bounded versioned log with replay cursors, context-aware wait/resume, deterministic history-gap errors, value-copy isolation, and no per-client idle goroutine; transport and consensus remain caller-owned. | Gap recovery, authorization, and bounded history. |
 
 ## Selection Policy
 
