@@ -32,6 +32,7 @@ var (
 type TupleFieldOffsetCache struct {
 	data    []byte
 	offsets []uint32
+	valid   []bool
 }
 
 // NewTupleFieldOffsetCache builds offsets over data using one length per
@@ -97,6 +98,19 @@ func (cache TupleFieldOffsetCache) Field(index int) ([]byte, error) {
 	return cache.data[start:end], nil
 }
 
+// FieldValid reports whether field index is non-NULL. Caches built by the
+// existing constructors mark every field valid; typed tuple formats use the
+// validity bitmap to preserve NULL separately from empty bytes.
+func (cache TupleFieldOffsetCache) FieldValid(index int) (bool, error) {
+	if _, _, err := cache.Offset(index); err != nil {
+		return false, err
+	}
+	if len(cache.valid) == 0 {
+		return true, nil
+	}
+	return cache.valid[index], nil
+}
+
 // FieldInto copies field index into dst, reusing dst's backing array when it
 // has enough capacity. It is useful when the caller needs ownership instead of
 // a borrowed field slice.
@@ -137,6 +151,7 @@ func (cache TupleFieldOffsetCache) Clone() TupleFieldOffsetCache {
 	clone := TupleFieldOffsetCache{
 		data:    append([]byte(nil), cache.data...),
 		offsets: append([]uint32(nil), cache.offsets...),
+		valid:   append([]bool(nil), cache.valid...),
 	}
 	return clone
 }

@@ -101,6 +101,7 @@ func (cache TupleFieldOffsetCache) ApplyUpdates(updates []TupleFieldUpdate) (Tup
 	if sameLengths {
 		data := make([]byte, len(cache.data))
 		copy(data, cache.data)
+		valid := tupleFieldValidityCopy(cache)
 		for _, update := range updates {
 			start, end, _ := cache.Offset(update.Index)
 			switch update.Kind {
@@ -112,8 +113,11 @@ func (cache TupleFieldOffsetCache) ApplyUpdates(updates []TupleFieldUpdate) (Tup
 				value := int64(binary.BigEndian.Uint64(data[start:end]))
 				binary.BigEndian.PutUint64(data[start:end], uint64(value+update.Delta))
 			}
+			if valid != nil {
+				valid[update.Index] = true
+			}
 		}
-		return TupleFieldOffsetCache{data: data, offsets: cache.offsets}, nil
+		return TupleFieldOffsetCache{data: data, offsets: cache.offsets, valid: valid}, nil
 	}
 
 	data := make([]byte, int(total))
@@ -121,6 +125,7 @@ func (cache TupleFieldOffsetCache) ApplyUpdates(updates []TupleFieldUpdate) (Tup
 	if !sameLengths {
 		offsets = make([]uint32, fieldCount+1)
 	}
+	valid := tupleFieldValidityCopy(cache)
 	var offset uint64
 	for index := 0; index < fieldCount; index++ {
 		start, end, _ := cache.Offset(index)
@@ -147,11 +152,25 @@ func (cache TupleFieldOffsetCache) ApplyUpdates(updates []TupleFieldUpdate) (Tup
 			copy(data[offset:], field)
 			offset += uint64(len(field))
 		}
+		if valid != nil {
+			if _, ok := tupleFieldUpdateAt(updates, index); ok {
+				valid[index] = true
+			}
+		}
 		if !sameLengths {
 			offsets[index+1] = uint32(offset)
 		}
 	}
-	return TupleFieldOffsetCache{data: data, offsets: offsets}, nil
+	return TupleFieldOffsetCache{data: data, offsets: offsets, valid: valid}, nil
+}
+
+func tupleFieldValidityCopy(cache TupleFieldOffsetCache) []bool {
+	if cache.valid == nil {
+		return nil
+	}
+	valid := make([]bool, cache.FieldCount())
+	copy(valid, cache.valid)
+	return valid
 }
 
 func tupleFieldUpdateAt(updates []TupleFieldUpdate, index int) (TupleFieldUpdate, bool) {
