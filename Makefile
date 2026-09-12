@@ -11002,3 +11002,15 @@ benchmark-t-u07:
 
 verify-t-u07:
 	bash ./scripts/verify-t-u07.sh
+
+test-t-u08:
+	bash ./scripts/test-t-u08.sh
+
+format-t-u08:
+	bash ./scripts/format-t-u08.sh
+
+benchmark-t-u08:
+	bash ./scripts/benchmark-t-u08.sh
+
+verify-t-u08:
+	bash ./scripts/verify-t-u08.sh

@@ -62,6 +62,7 @@ security guidance before exposing it on a network.
 - Opt-in adaptive per-peer circuit cooldowns: [ADAPTIVE_PEER_BREAKER.md](ADAPTIVE_PEER_BREAKER.md)
 - Authenticated bounded compact-peer listener: [COMPACT_PEER_LISTENER.md](COMPACT_PEER_LISTENER.md)
 - Clock-independent bounded replica RPO status: [REPLICA_RPO_STATUS.md](REPLICA_RPO_STATUS.md)
+- Online snapshot manifest with exact journal coordinate: [SNAPSHOT_MANIFEST.md](SNAPSHOT_MANIFEST.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)

@@ -21602,3 +21602,18 @@ replica applied sequences into bounded lag/RPO status values. Five local runs:
 Median: **1,208 ns/op**, **4,096 B/op**, **1 alloc/op**. The helper does not
 use a map, sorting, or wall-clock reads; the single allocation is the result
 slice for the requested batch.
+
+## T-U08: Online snapshot manifest
+
+The existing snapshot writer stays unchanged; the opt-in manifest writer adds
+the exact journal sequence, byte count, and SHA-256 for a 64-entry binary
+snapshot. Five local runs:
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing writer | 47,180 | 119,072 | 202 |
+| With manifest | 50,254 | 119,408 | 207 |
+
+The opt-in path measured about 6.5% higher latency, 336 extra bytes, and five
+extra allocations in this workload. The default writer path has no manifest
+hashing cost and snapshot bytes remain unchanged.

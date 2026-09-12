@@ -25,6 +25,16 @@ type Metadata struct {
 	JournalSequence uint64
 }
 
+// Manifest identifies one streamed snapshot and the exact journal coordinate
+// from which a receiver can continue replay. SHA256 covers the bytes emitted
+// to the snapshot writer, including compression framing.
+type Manifest struct {
+	JournalSequence uint64 `json:"journal_sequence"`
+	Format          Format `json:"format"`
+	SizeBytes       int64  `json:"size_bytes"`
+	SHA256          string `json:"sha256"`
+}
+
 // ParseFormat canonicalizes supported snapshot format names and aliases.
 func ParseFormat(value string) (Format, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
