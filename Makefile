@@ -10194,3 +10194,34 @@ commit-ch028-max-threads:
 .PHONY: push-ch028-max-threads
 push-ch028-max-threads:
 	sh scripts/push-ch028-max-threads.sh
+.PHONY: test-ch029-sql-quotas
+test-ch029-sql-quotas:
+	sh scripts/test-ch029-sql-quotas.sh
+
+.PHONY: benchmark-ch029-sql-quotas
+benchmark-ch029-sql-quotas:
+	sh scripts/benchmark-ch029-sql-quotas.sh
+.PHONY: format-ch029-sql-quotas
+format-ch029-sql-quotas:
+	sh scripts/format-ch029-sql-quotas.sh
+
+.PHONY: race-ch029-sql-quotas
+race-ch029-sql-quotas:
+	sh scripts/race-ch029-sql-quotas.sh
+
+.PHONY: vet-ch029-sql-quotas
+vet-ch029-sql-quotas:
+	sh scripts/vet-ch029-sql-quotas.sh
+.PHONY: verify-ch029-docs
+verify-ch029-docs:
+	sh scripts/verify-ch029-docs.sh
+.PHONY: review-ch029-sql-quotas
+review-ch029-sql-quotas:
+	sh scripts/review-ch029-sql-quotas.sh
+.PHONY: commit-ch029-sql-quotas
+commit-ch029-sql-quotas:
+	sh scripts/commit-ch029-sql-quotas.sh
+
+.PHONY: push-ch029-sql-quotas
+push-ch029-sql-quotas:
+	sh scripts/push-ch029-sql-quotas.sh

@@ -203,6 +203,12 @@ type SQLQueryOptions struct {
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers int
+	// Quota optionally applies a caller-owned rolling quota registry. Nil keeps
+	// the existing unmetered path.
+	Quota *SQLQuotaRegistry
+	// QuotaKey identifies the user, tenant, token, or other caller identity in
+	// Quota. Empty uses the registry's bounded default key.
+	QuotaKey string
 	// DisableNativeDataflow keeps the general materialized executor for plain
 	// scalar row projections. The automatic native batch path is enabled by
 	// default only for ordinary row resolvers; specialized resolvers and richer
@@ -673,8 +679,17 @@ func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
 func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
+	var quotaReservation SQLQuotaReservation
+	var quotaActive bool
 	result.QueryID = observation.id
 	defer func() {
+		if quotaActive {
+			quotaErr := quotaReservation.finish(int64(sqlRowsBytes(result.Rows)), time.Since(observation.started))
+			if err == nil && quotaErr != nil {
+				result = SQLQueryResult{QueryID: observation.id}
+				err = quotaErr
+			}
+		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
@@ -724,6 +739,13 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, err
 	}
 	control.options = options
+	if options.Quota != nil {
+		quotaReservation, err = options.Quota.begin(options.QuotaKey)
+		if err != nil {
+			return result, err
+		}
+		quotaActive = true
+	}
 	if err = validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
 		return result, err
 	}
@@ -871,7 +893,15 @@ var (
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) (err error) {
 	observation := newSQLQueryObservation(options)
 	outputRows, outputColumns, resultBytes := 0, 0, observation.resultBytes(nil)
+	var quotaReservation SQLQuotaReservation
+	var quotaActive bool
+	var quotaBytes int64
 	defer func() {
+		if quotaActive {
+			if quotaErr := quotaReservation.finish(quotaBytes, time.Since(observation.started)); err == nil && quotaErr != nil {
+				err = quotaErr
+			}
+		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		// A row callback may be backed by NDJSON, an SDK iterator, or an
 		// application sink. It is the one operator common to every streamed
@@ -932,6 +962,13 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	control.options = options
+	if options.Quota != nil {
+		quotaReservation, err = options.Quota.begin(options.QuotaKey)
+		if err != nil {
+			return err
+		}
+		quotaActive = true
+	}
 	if err := validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
 		return err
 	}
@@ -950,6 +987,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 			return err
 		}
 		outputRows++
+		quotaBytes += int64(sqlRowBytes(row))
 		if resultBytes >= 0 {
 			resultBytes += sqlRowBytes(row)
 		}

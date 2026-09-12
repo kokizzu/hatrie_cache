@@ -92,6 +92,7 @@ security guidance before exposing it on a network.
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - Optional managed-refresh freshness thresholds: [MANAGED_REFRESH_FRESHNESS.md](MANAGED_REFRESH_FRESHNESS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- Opt-in keyed SQL query quotas: [SQL_QUOTAS.md](SQL_QUOTAS.md)
 - Optional SQL compute/storage admission pool: [SQL_COMPUTE_STORAGE_SEPARATION.md](SQL_COMPUTE_STORAGE_SEPARATION.md)
 - Optional per-namespace SQL compute pools: [SQL_NAMESPACE_COMPUTE_POOLS.md](SQL_NAMESPACE_COMPUTE_POOLS.md)
 - Context-aware SQL JSON index readiness barrier: [SQL_JSON_INDEX_READINESS.md](SQL_JSON_INDEX_READINESS.md)

@@ -1,5 +1,41 @@
 # Benchmark
 
+## CH-029 User/key SQL quotas
+
+This benchmark compares the existing query path with and without an opt-in
+`SQLQuotaRegistry`. It uses one small `FROM VALUES` query, one quota key, and
+five `-count=5` samples on Linux `amd64` with an AMD Ryzen 9 5950X.
+
+Command:
+
+```text
+make benchmark-ch029-sql-quotas
+```
+
+Raw samples:
+
+```text
+BenchmarkCH029BaselineQueryExecution-32  7283 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH029BaselineQueryExecution-32  6733 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH029BaselineQueryExecution-32  6470 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH029BaselineQueryExecution-32  5860 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH029BaselineQueryExecution-32  6218 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH029QuotaQueryExecution-32     9172 ns/op  11027 B/op  94 allocs/op
+BenchmarkCH029QuotaQueryExecution-32     8827 ns/op  11027 B/op  94 allocs/op
+BenchmarkCH029QuotaQueryExecution-32     8843 ns/op  11027 B/op  94 allocs/op
+BenchmarkCH029QuotaQueryExecution-32     8677 ns/op  11027 B/op  94 allocs/op
+BenchmarkCH029QuotaQueryExecution-32     8990 ns/op  11027 B/op  94 allocs/op
+```
+
+| Case | Median ns/op | B/op | Allocs/op | Relative time | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Quota disabled | 6470 | 10304 | 62 | 1.00x | 1.00x | 1.00x |
+| Quota enabled | 8843 | 11027 | 94 | 1.37x | 1.07x | 1.52x |
+
+Quota accounting is deliberately opt-in. The disabled path retains its prior
+allocation profile; callers should enable quotas when per-key admission and
+rolling result/time budgets justify the measured request overhead.
+
 ## CH-028 Query `max_threads`
 
 Command:
