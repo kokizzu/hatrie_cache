@@ -109,6 +109,7 @@ security guidance before exposing it on a network.
 - First-class half-open SQL temporal validity predicates: [SQL_TEMPORAL_VALIDITY.md](SQL_TEMPORAL_VALIDITY.md)
 - Opt-in durable command-journal subscriptions: [MZ010_JOURNAL_SUBSCRIPTIONS.md](MZ010_JOURNAL_SUBSCRIPTIONS.md)
 - Opt-in logical-space journal changefeeds: [TT040_SPACE_CHANGEFEED.md](TT040_SPACE_CHANGEFEED.md)
+- Opt-in gRPC command multiplexing with correlated responses: [TT032_IPROTO_MULTIPLEXING.md](TT032_IPROTO_MULTIPLEXING.md)
 - Importable at-least-once command-journal sink runners: [MZ011_SINK_CONNECTORS.md](MZ011_SINK_CONNECTORS.md)
 - Sink-owned exactly-once journal checkpoints: [MZ012_EXACTLY_ONCE_SINK.md](MZ012_EXACTLY_ONCE_SINK.md)
 - Opt-in source connector checkpoints tied to journal progress: [MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md](MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md)

@@ -21077,3 +21077,32 @@ changed from `2,443 ns/op`, `1,184 B/op`, and `23 allocs/op` before this feature
 to `2,466 ns/op`, `1,184 B/op`, and `23 allocs/op` afterward. The measured
 allocation profile is unchanged and the small timing difference is within the
 run-to-run variance of this microbenchmark.
+<a id="tt-032-iproto-style-command-multiplexing"></a>
+## TT-032 IProto-Style Command Multiplexing
+
+Command: `make benchmark-tt032-multiplexing`.
+
+This benchmark sends 32 independent missing-key reads before receiving their
+responses. `LegacyOrdered` uses the zero-ID serialized stream. `Multiplexed4`
+uses nonzero request IDs and four bounded server workers. Five one-second
+samples use `-benchmem -count=5` on Linux amd64 with an AMD Ryzen 9 5950X.
+
+### Raw Samples
+
+| Mode | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Legacy ordered, 32 requests | 113,469; 105,259; 106,548; 103,320; 108,327 | 40,773; 40,404; 40,317; 40,244; 40,229 | 858; 857; 857; 857; 857 |
+| Multiplexed, 4 workers, 32 requests | 125,747; 133,534; 131,708; 122,669; 127,010 | 49,091; 48,982; 48,953; 48,914; 48,892 | 914; 914; 914; 914; 914 |
+
+### Median Comparison
+
+| Mode | Median ns/op | Median B/op | Median allocs/op | Relative to legacy ordered |
+| --- | ---: | ---: | ---: | --- |
+| Legacy ordered, 32 requests | 106,548 | 40,317 | 857 | `1.00x` |
+| Multiplexed, 4 workers, 32 requests | 127,010 | 48,953 | 914 | `1.19x` slower, `1.46x` higher bytes, `1.07x` more allocations |
+
+The workload is deliberately small and local, so the worker coordination cost
+is visible and there is no throughput win. The feature remains opt-in because
+its value is response correlation and latency hiding for independent commands
+whose execution or downstream work is slower than this microbenchmark. Zero-ID
+clients retain the legacy path and its ordering semantics.

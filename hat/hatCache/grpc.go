@@ -64,6 +64,10 @@ type CacheGRPCOptions struct {
 	// ProtocolVersions is the inclusive gRPC protocol range this server accepts.
 	// A zero value defaults to the current protocol version for compatibility.
 	ProtocolVersions hatCommand.ProtocolVersionRange
+	// CommandStreamWorkers bounds opt-in request-ID multiplexing. Zero preserves
+	// the legacy serialized stream behavior; values above the safety cap are
+	// clamped during server construction.
+	CommandStreamWorkers int
 }
 
 type CacheGRPCServer struct {
@@ -96,6 +100,7 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 	if options.ProtocolVersions.Min == 0 && options.ProtocolVersions.Max == 0 {
 		options.ProtocolVersions = hatCommand.SupportedProtocolVersions
 	}
+	options.CommandStreamWorkers = normalizedCommandStreamWorkers(options.CommandStreamWorkers)
 	return &CacheGRPCServer{trie: trie, options: options}
 }
 
@@ -302,21 +307,35 @@ func (server *CacheGRPCServer) CommandStream(stream hatriecachev1.CacheService_C
 		return err
 	}
 	request := new(hatriecachev1.CommandRequest)
+	if err := stream.RecvMsg(request); errors.Is(err, io.EOF) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if request.GetRequestId() != 0 {
+		return server.commandStreamMultiplexed(ctx, stream, request)
+	}
+	return server.commandStreamOrdered(ctx, stream, request)
+}
+
+func (server *CacheGRPCServer) commandStreamOrdered(ctx context.Context, stream hatriecachev1.CacheService_CommandStreamServer, first *hatriecachev1.CommandRequest) error {
+	request := first
 	for {
-		*request = hatriecachev1.CommandRequest{}
-		err := stream.RecvMsg(request)
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		response, err := server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/CommandStream")
+		response, err := server.executeGRPCCommandStreamRequest(ctx, request)
 		if err != nil {
 			return err
 		}
 		if err := stream.Send(response); err != nil {
 			return err
+		}
+		*request = hatriecachev1.CommandRequest{}
+		if err := stream.RecvMsg(request); errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if request.GetRequestId() != 0 {
+			return status.Error(codes.InvalidArgument, "CommandStream request_id must be zero for serialized requests")
 		}
 	}
 }

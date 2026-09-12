@@ -287,11 +287,15 @@ func newGRPCBenchmarkExecutorMode(b *testing.B, streaming bool) (benchmarkComman
 }
 
 func newGRPCBenchmarkClient(b *testing.B, extraDialOptions ...grpc.DialOption) (hatriecachev1.CacheServiceClient, func()) {
+	return newGRPCBenchmarkClientWithOptions(b, CacheGRPCOptions{NodeName: "bench"}, extraDialOptions...)
+}
+
+func newGRPCBenchmarkClientWithOptions(b *testing.B, options CacheGRPCOptions, extraDialOptions ...grpc.DialOption) (hatriecachev1.CacheServiceClient, func()) {
 	b.Helper()
 	ht := CreateHatTrie()
 	listener := bufconn.Listen(testGRPCBufferSize)
 	server := grpc.NewServer()
-	RegisterCacheGRPCServer(server, NewCacheGRPCServer(ht, CacheGRPCOptions{NodeName: "bench"}))
+	RegisterCacheGRPCServer(server, NewCacheGRPCServer(ht, options))
 	go func() {
 		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
 			b.Errorf("grpc Serve() error = %v", err)

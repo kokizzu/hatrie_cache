@@ -85,6 +85,7 @@ message CommandRequest {
 	repeated CommandRequest batch = 10;
 	bytes binary_value = 11;
 	string idempotency_key = 12;
+	uint64 request_id = 13;
 }
 
 message CommandResponse {
@@ -92,8 +93,9 @@ message CommandResponse {
   string message = 2;
   string value = 3;
   repeated CommandResponse responses = 4;
-  // Stable machine-readable error classification; empty for successful responses.
-  string code = 5;
+	// Stable machine-readable error classification; empty for successful responses.
+	string code = 5;
+	uint64 request_id = 6;
 }
 
 message CommandBatchRequest {

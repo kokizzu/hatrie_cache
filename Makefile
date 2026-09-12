@@ -10024,3 +10024,25 @@ push-expiration-deadline-cleaner:
 .PHONY: commit-expiration-deadline-cleaner-push-fix
 commit-expiration-deadline-cleaner-push-fix:
 	bash scripts/commit-expiration-deadline-cleaner-push-fix.sh
+test-tt032-multiplexing:
+	sh scripts/test-tt032-multiplexing.sh
+benchmark-tt032-multiplexing:
+	sh scripts/benchmark-tt032-multiplexing.sh
+format-tt032-multiplexing:
+	sh scripts/format-tt032-multiplexing.sh
+test-race-tt032-multiplexing:
+	sh scripts/test-race-tt032-multiplexing.sh
+
+vet-tt032-multiplexing:
+	sh scripts/vet-tt032-multiplexing.sh
+test-tt032-package:
+	sh scripts/test-tt032-package.sh
+verify-tt032-docs:
+	sh scripts/verify-tt032-docs.sh
+review-tt032-multiplexing:
+	sh scripts/review-tt032-multiplexing.sh
+commit-tt032-multiplexing:
+	sh scripts/commit-tt032-multiplexing.sh
+
+push-tt032-multiplexing:
+	sh scripts/push-tt032-multiplexing.sh

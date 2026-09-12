@@ -167,8 +167,8 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-028 | Upsert conflict handlers | Public mutation commands lack declarative merge-on-conflict callbacks or policies. | Medium |
 | TT-029 | General before/after replace triggers | Trigger scope is not a complete pre/post mutation lifecycle for every command. | Medium |
 | TT-030 | Transactional DDL | Schema/index changes cannot be atomically grouped with data mutations. | High |
-| TT-031 | Stream API | No request stream abstraction batches commands while preserving ordered responses. | Medium |
-| TT-032 | IProto-style multiplexing | Wire clients cannot multiplex independent requests with bounded backpressure. | High |
+| TT-031 | Stream API | Implemented: public gRPC `CommandStream` and `CommandBatchStream` provide request streaming with ordered responses for the legacy path. | Medium |
+| TT-032 | IProto-style multiplexing | Partially adopted: opt-in nonzero `request_id` correlation and bounded `CommandStreamWorkers` allow independent commands to overlap; zero-ID streams and the default worker count preserve legacy ordering. | High |
 | TT-033 | Fiber scheduler quotas | Cooperative tasks lack per-tenant CPU and queue budgets. | Medium |
 | TT-034 | Cooperative task cancellation | Background fibers do not share a standard cancellation token and drain state. | Low |
 | TT-035 | Per-request deadlines | Command APIs lack a consistent deadline propagated through storage and replication. | Low |
