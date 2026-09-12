@@ -10939,3 +10939,18 @@ benchmark-t-u48:
 .PHONY: publish-t-u48
 publish-t-u48:
 	@bash scripts/publish-t-u48.sh
+
+benchmark-t-u49-baseline:
+	bash ./scripts/benchmark-t-u49-baseline.sh
+
+test-t-u49:
+	bash ./scripts/test-t-u49.sh
+
+format-t-u49:
+	bash ./scripts/format-t-u49.sh
+
+benchmark-t-u49:
+	bash ./scripts/benchmark-t-u49.sh
+
+verify-t-u49:
+	bash ./scripts/verify-t-u49.sh
