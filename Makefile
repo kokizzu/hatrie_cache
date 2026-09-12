@@ -10616,3 +10616,7 @@ commit-t-async-batcher:
 .PHONY: publish-t-async-batcher
 publish-t-async-batcher:
 	bash ./scripts/publish-t-async-batcher.sh
+
+.PHONY: audit-product-idea-gaps
+audit-product-idea-gaps:
+	bash ./scripts/audit-product-idea-gaps.sh
