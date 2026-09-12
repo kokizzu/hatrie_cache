@@ -11215,3 +11215,36 @@ test-t243-full:
 .PHONY: commit-t243
 commit-t243:
 	bash ./scripts/commit-t243.sh
+.PHONY: inspect-offset-fairness
+inspect-offset-fairness:
+	bash ./scripts/inspect-offset-fairness.sh
+
+.PHONY: inspect-wasm-c246
+inspect-wasm-c246:
+	bash ./scripts/inspect-wasm-c246.sh
+
+test-c214-wasm-limits:
+	bash ./scripts/test-c214-wasm-limits.sh
+
+format-c214:
+	bash ./scripts/format-c214.sh
+
+benchmark-c214:
+	bash ./scripts/benchmark-c214.sh
+
+test-c214-package:
+	bash ./scripts/test-c214-package.sh
+
+race-c214:
+	bash ./scripts/race-c214.sh
+
+vet-c214:
+	bash ./scripts/vet-c214.sh
+
+test-c214-full:
+	bash ./scripts/test-c214-full.sh
+
+verify-c214: format-c214 test-c214-package race-c214 vet-c214
+
+commit-c214:
+	bash ./scripts/commit-c214.sh

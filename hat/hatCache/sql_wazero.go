@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -15,16 +16,21 @@ import (
 // function name. It is deliberately Wasm, not JavaScript source: JS needs a
 // separately versioned compiler and vector ABI.
 type sqlWASMFunction struct {
-	definition SQLFunctionDefinition
-	runtime    wazero.Runtime
-	function   api.Function
-	result     api.ValueType
-	mu         sync.Mutex
+	definition       SQLFunctionDefinition
+	runtime          wazero.Runtime
+	function         api.Function
+	result           api.ValueType
+	executionTimeout time.Duration
+	mu               sync.Mutex
 }
 
 func (function *sqlWASMFunction) Close() {
 	function.mu.Lock()
 	defer function.mu.Unlock()
+	function.closeLocked()
+}
+
+func (function *sqlWASMFunction) closeLocked() {
 	if function.runtime != nil {
 		_ = function.runtime.Close(context.Background())
 		function.runtime = nil
@@ -52,13 +58,17 @@ func validateSQLWASMDefinition(definition SQLFunctionDefinition) error {
 	return nil
 }
 
-func newSQLWASMFunction(definition SQLFunctionDefinition) (_ sqlFunctionRuntime, err error) {
+func newSQLWASMFunction(definition SQLFunctionDefinition, options SQLFunctionRegistryOptions) (_ sqlFunctionRuntime, err error) {
 	wasm, err := base64.StdEncoding.DecodeString(strings.TrimSpace(definition.Source))
 	if err != nil {
 		return nil, err
 	}
 	ctx := context.Background()
-	runtime := wazero.NewRuntime(ctx)
+	runtimeConfig := wazero.NewRuntimeConfig().WithMemoryLimitPages(options.WASMMemoryLimitPages)
+	if options.WASMExecutionTimeout > 0 {
+		runtimeConfig = runtimeConfig.WithCloseOnContextDone(true)
+	}
+	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
 	compiled, err := runtime.CompileModule(ctx, wasm)
 	if err != nil {
 		runtime.Close(ctx)
@@ -85,7 +95,13 @@ func newSQLWASMFunction(definition SQLFunctionDefinition) (_ sqlFunctionRuntime,
 			return nil, sqlWASMError(definition, fmt.Sprintf("export %q parameter %d must be Wasm value type %d for SQL %s", definition.Name, i+1, want, definition.ArgumentTypes[i]))
 		}
 	}
-	return &sqlWASMFunction{definition: definition, runtime: runtime, function: function, result: results[0]}, nil
+	return &sqlWASMFunction{
+		definition:       definition,
+		runtime:          runtime,
+		function:         function,
+		result:           results[0],
+		executionTimeout: options.WASMExecutionTimeout,
+	}, nil
 }
 
 func sqlWASMError(definition SQLFunctionDefinition, message string) error {
@@ -111,6 +127,12 @@ func (function *sqlWASMFunction) Evaluate(calls []SQLFunctionCall) ([]interface{
 	if function.function == nil {
 		return nil, sqlWASMError(function.definition, "runtime is closed")
 	}
+	ctx := context.Background()
+	if function.executionTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, function.executionTimeout)
+		defer cancel()
+	}
 	values := make([]interface{}, len(calls))
 	for row, call := range calls {
 		if len(call.Arguments) != len(function.definition.Arguments) {
@@ -127,8 +149,11 @@ func (function *sqlWASMFunction) Evaluate(calls []SQLFunctionCall) ([]interface{
 			}
 			params[i] = encoded
 		}
-		result, err := function.function.Call(context.Background(), params...)
+		result, err := function.function.Call(ctx, params...)
 		if err != nil {
+			if ctx.Err() != nil {
+				function.closeLocked()
+			}
 			return nil, sqlWASMError(function.definition, fmt.Sprintf("runtime error on row %d: %v", row+1, err))
 		}
 		values[row] = sqlWASMDecodeValue(function.result, result[0])

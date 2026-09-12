@@ -41,11 +41,24 @@ type SQLFunctionRegistryOptions struct {
 	// PersistencePath stores normalized function definitions. OpenSQLFunctionRegistry
 	// reloads and recompiles this file so registered functions survive a restart.
 	// An empty path keeps the registry in-memory only.
-	PersistencePath    string
-	JavyPath           string
+	PersistencePath string
+	JavyPath        string
+
 	JSCompileTimeout   time.Duration
 	JSExecutionTimeout time.Duration
+
+	// WASMExecutionTimeout limits one EvaluateSQLFunction batch. A positive value
+	// enables interruptible execution; a non-positive value keeps the fast path
+	// and does not impose a deadline.
+	WASMExecutionTimeout time.Duration
+	// WASMMemoryLimitPages limits each WebAssembly memory to 64 KiB pages. A
+	// zero value uses the 256-page (16 MiB) default.
+	WASMMemoryLimitPages uint32
 }
+
+const (
+	defaultSQLWASMMemoryLimitPages = 256
+)
 
 func NewSQLFunctionRegistry() *SQLFunctionRegistry {
 	return NewSQLFunctionRegistryWithOptions(SQLFunctionRegistryOptions{})
@@ -57,6 +70,9 @@ func NewSQLFunctionRegistryWithOptions(options SQLFunctionRegistryOptions) *SQLF
 	}
 	if options.JSExecutionTimeout <= 0 {
 		options.JSExecutionTimeout = time.Second
+	}
+	if options.WASMMemoryLimitPages == 0 {
+		options.WASMMemoryLimitPages = defaultSQLWASMMemoryLimitPages
 	}
 	registry := &SQLFunctionRegistry{options: options}
 	registry.core = hatSql.NewRegistry(func(definition hatSql.FunctionDefinition) (hatSql.FunctionDefinition, hatSql.FunctionRuntime, error) {
@@ -108,7 +124,7 @@ func (registry *SQLFunctionRegistry) compile(definition SQLFunctionDefinition) (
 	case "LUA":
 		compiled, err = newSQLLuaFunction(definition)
 	case "WASM":
-		compiled, err = newSQLWASMFunction(definition)
+		compiled, err = newSQLWASMFunction(definition, registry.options)
 	case "JS":
 		compiled, err = newSQLJSFunction(definition, registry.options)
 	default:

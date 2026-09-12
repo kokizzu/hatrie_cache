@@ -43,7 +43,7 @@ operator control remain the preferred deployment model.
 - [ ] C211 Statistics-driven join-order selection with deterministic fallback.
 - [ ] C212 Precomputed hash and software-prefetch hooks for hot hash-table probes.
 - [ ] C213 Cached JIT expression plans with bounded compilation memory.
-- [ ] C214 Resource-bounded WebAssembly UDF execution.
+- [x] C214 Resource-bounded WebAssembly UDF execution; see [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md).
 - [ ] C215 External dictionary reloads with TTL and last-known-good retention.
 - [ ] C216 Dictionary layout selection based on key cardinality and lookup shape.
 - [ ] C217 Time-series `WITH FILL` gap generation over ordered results.
