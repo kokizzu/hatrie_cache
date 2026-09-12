@@ -11038,3 +11038,15 @@ benchmark-t-u15:
 
 verify-t-u15:
 	bash ./scripts/verify-t-u15.sh
+
+format-t-u42:
+	bash ./scripts/format-t-u42.sh
+
+test-t-u42:
+	bash ./scripts/test-t-u42.sh
+
+benchmark-t-u42:
+	bash ./scripts/benchmark-t-u42.sh
+
+verify-t-u42:
+	bash ./scripts/verify-t-u42.sh

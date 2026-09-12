@@ -21645,3 +21645,38 @@ reads. Five local runs over 64 spaces:
 
 The catalog has no effect on existing schema or SQL execution until an
 integration opts into it; listing cost includes deep copies and sorting.
+## T-U42 Cursor Pagination Token
+
+Authenticated continuation-token benchmark, five runs on the publish host:
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| encode | 672.7 | 864 | 9 |
+| decode | 675.4 | 648 | 9 |
+| decode-for | 700.7 | 648 | 9 |
+
+Raw output:
+
+```text
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatDataStructure
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkCursorTokenOperations/encode-32         	 1745132	       672.7 ns/op	     864 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/encode-32         	 1794166	       660.7 ns/op	     864 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/encode-32         	 1805503	       672.0 ns/op	     864 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/encode-32         	 1775823	       679.3 ns/op	     864 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/encode-32         	 1771962	       673.0 ns/op	     864 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-32         	 1788243	       675.4 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-32         	 1749841	       671.7 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-32         	 1777534	       670.7 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-32         	 1760985	       693.2 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-32         	 1788327	       681.5 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-for-32     	 1712546	       701.6 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-for-32     	 1716172	       694.8 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-for-32     	 1718566	       706.4 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-for-32     	 1694636	       694.8 ns/op	     648 B/op	       9 allocs/op
+BenchmarkCursorTokenOperations/decode-for-32     	 1715613	       700.7 ns/op	     648 B/op	       9 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatDataStructure	28.397s
+```
