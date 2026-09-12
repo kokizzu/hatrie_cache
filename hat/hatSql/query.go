@@ -786,6 +786,9 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 			return result, nil
 		}
 	}
+	if options.ResultCache != nil {
+		options.ResultCache.RecordBypass()
+	}
 	result, err = executeSQLQueryUncached(ctx, source, query, resolver, options, control, observation, &operatorSteps)
 	return result, err
 }

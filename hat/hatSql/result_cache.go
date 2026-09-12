@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	json "github.com/goccy/go-json"
 )
@@ -12,11 +13,29 @@ import (
 // unchanged. It is portable because the owner supplies both execution and
 // invalidation; cache-server adapters can use their mutation epoch directly.
 type ResultCache struct {
-	mu       sync.Mutex
-	capacity int
-	entries  map[string]resultCacheEntry
-	order    []string
+	mu        sync.Mutex
+	capacity  int
+	entries   map[string]resultCacheEntry
+	order     []string
+	hits      uint64
+	misses    uint64
+	bypasses  uint64
+	evictions uint64
 }
+
+// ResultCacheStats reports cache reuse and retention outcomes. Misses count
+// enabled-cache lookups that did not return a matching entry; bypasses count
+// requests that could not use or retain the cache.
+type ResultCacheStats struct {
+	Entries   int
+	Hits      uint64
+	Misses    uint64
+	Bypasses  uint64
+	Evictions uint64
+}
+
+// SQLResultCacheStats is the SQL-facing name for ResultCacheStats.
+type SQLResultCacheStats = ResultCacheStats
 
 // SQLResultCache is the typed result-cache view used by SQL execution. It
 // shares the bounded LRU implementation with ResultCache while preserving SQL
@@ -43,6 +62,33 @@ func NewSQLResultCache(capacity int) *SQLResultCache {
 	return NewResultCache(capacity)
 }
 
+// Stats returns a stable snapshot of cache entries and cumulative counters.
+func (cache *ResultCache) Stats() ResultCacheStats {
+	if cache == nil {
+		return ResultCacheStats{}
+	}
+	cache.mu.Lock()
+	entries := len(cache.entries)
+	cache.mu.Unlock()
+	return ResultCacheStats{
+		Entries:   entries,
+		Hits:      atomic.LoadUint64(&cache.hits),
+		Misses:    atomic.LoadUint64(&cache.misses),
+		Bypasses:  atomic.LoadUint64(&cache.bypasses),
+		Evictions: atomic.LoadUint64(&cache.evictions),
+	}
+}
+
+// RecordBypass records an eligible request that intentionally bypassed result
+// cache lookup or retention. It is useful to cache-server adapters that reject
+// a query before calling Execute or ExecuteVersioned.
+func (cache *ResultCache) RecordBypass() {
+	if cache == nil {
+		return
+	}
+	atomic.AddUint64(&cache.bypasses, 1)
+}
+
 // Execute reuses one result only when epoch reports the same value before and
 // after the supplied query execution. Returned results never alias the cache.
 func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() uint64, execute func(context.Context) (QueryResult, error)) (QueryResult, error) {
@@ -50,6 +96,9 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 		return QueryResult{}, errors.New("hatSql: result cache executor is nil")
 	}
 	if cache == nil || cache.capacity <= 0 {
+		if cache != nil {
+			cache.RecordBypass()
+		}
 		return execute(ctx)
 	}
 	if epoch == nil {
@@ -60,14 +109,21 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 	entry, ok := cache.entries[key]
 	cache.mu.Unlock()
 	if ok && !entry.typed && entry.epoch == before {
+		atomic.AddUint64(&cache.hits, 1)
 		return cloneResultCacheResult(entry.result), nil
 	}
+	atomic.AddUint64(&cache.misses, 1)
 	result, err := execute(ctx)
-	if err != nil || epoch() != before {
+	if err != nil {
 		return result, err
+	}
+	if epoch() != before {
+		cache.RecordBypass()
+		return result, nil
 	}
 	stored, err := snapshotResultCacheResult(result)
 	if err != nil {
+		cache.RecordBypass()
 		return result, nil
 	}
 	cache.mu.Lock()
@@ -80,6 +136,7 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 		oldest := cache.order[0]
 		cache.order = cache.order[1:]
 		delete(cache.entries, oldest)
+		atomic.AddUint64(&cache.evictions, 1)
 	}
 	return result, nil
 }
@@ -94,6 +151,9 @@ func (cache *ResultCache) ExecuteVersioned(ctx context.Context, key string, vers
 		return QueryResult{}, errors.New("hatSql: result cache executor is nil")
 	}
 	if cache == nil || cache.capacity <= 0 {
+		if cache != nil {
+			cache.RecordBypass()
+		}
 		return execute(ctx)
 	}
 	if version == nil {
@@ -101,20 +161,24 @@ func (cache *ResultCache) ExecuteVersioned(ctx context.Context, key string, vers
 	}
 	before, available := version()
 	if !available || before == "" {
+		cache.RecordBypass()
 		return execute(ctx)
 	}
 	cache.mu.Lock()
 	entry, ok := cache.entries[key]
 	cache.mu.Unlock()
 	if ok && entry.typed && entry.version == before {
+		atomic.AddUint64(&cache.hits, 1)
 		return cloneResultCacheResult(entry.result), nil
 	}
+	atomic.AddUint64(&cache.misses, 1)
 	result, err := execute(ctx)
 	if err != nil {
 		return result, err
 	}
 	after, available := version()
 	if !available || after != before {
+		cache.RecordBypass()
 		return result, nil
 	}
 	stored := cloneResultCacheResult(result)
@@ -128,6 +192,7 @@ func (cache *ResultCache) ExecuteVersioned(ctx context.Context, key string, vers
 		oldest := cache.order[0]
 		cache.order = cache.order[1:]
 		delete(cache.entries, oldest)
+		atomic.AddUint64(&cache.evictions, 1)
 	}
 	return result, nil
 }

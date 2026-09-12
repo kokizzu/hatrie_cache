@@ -37,7 +37,7 @@ operator control remain the preferred deployment model.
 - [ ] C205 Query-cache controls scoped to individual subqueries.
 - [ ] C206 Query-cache eligibility checks that reject nondeterministic expressions.
 - [ ] C207 Query-condition cache with data-generation invalidation for repeated filters.
-- [ ] C208 Query-cache hit, miss, bypass, and eviction metrics.
+- [x] C208 Query-cache hit, miss, bypass, and eviction metrics via `ResultCache`; see [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md).
 - [ ] C209 Automatic basic column statistics for row count, null count, min, and max.
 - [ ] C210 Compact histograms for cardinality and selectivity estimates.
 - [ ] C211 Statistics-driven join-order selection with deterministic fallback.

@@ -11323,3 +11323,29 @@ verify-m204: format-m204 test-m204-bounded test-m204-package race-m204 vet-m204
 
 commit-m204:
 	bash ./scripts/commit-m204.sh
+.PHONY: inspect-next-inspiration
+test-c208-metrics:
+	bash ./scripts/test-c208-metrics.sh
+
+format-c208:
+	bash ./scripts/format-c208.sh
+
+benchmark-c208:
+	bash ./scripts/benchmark-c208.sh
+
+commit-c208:
+	bash ./scripts/commit-c208.sh
+
+test-c208-package:
+	bash ./scripts/test-c208-package.sh
+
+race-c208:
+	bash ./scripts/race-c208.sh
+
+vet-c208:
+	bash ./scripts/vet-c208.sh
+
+test-c208-full:
+	bash ./scripts/test-c208-full.sh
+
+verify-c208: format-c208 test-c208-metrics test-c208-package race-c208 vet-c208
