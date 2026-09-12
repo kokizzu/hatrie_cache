@@ -10584,3 +10584,35 @@ commit-inspiration-backlog:
 .PHONY: push-inspiration-backlog
 push-inspiration-backlog:
 	sh scripts/push-inspiration-backlog.sh
+
+.PHONY: test-t-async-batcher
+test-t-async-batcher:
+	bash ./scripts/test-t-async-batcher.sh
+
+.PHONY: format-t-async-batcher
+format-t-async-batcher:
+	bash ./scripts/format-t-async-batcher.sh
+
+.PHONY: test-t-async-batcher-package
+test-t-async-batcher-package:
+	bash ./scripts/test-t-async-batcher-package.sh
+
+.PHONY: race-t-async-batcher
+race-t-async-batcher:
+	bash ./scripts/race-t-async-batcher.sh
+
+.PHONY: vet-t-async-batcher
+vet-t-async-batcher:
+	bash ./scripts/vet-t-async-batcher.sh
+
+.PHONY: benchmark-t-async-batcher
+benchmark-t-async-batcher:
+	bash ./scripts/benchmark-t-async-batcher.sh
+
+.PHONY: commit-t-async-batcher
+commit-t-async-batcher:
+	bash ./scripts/commit-t-async-batcher.sh
+
+.PHONY: publish-t-async-batcher
+publish-t-async-batcher:
+	bash ./scripts/publish-t-async-batcher.sh

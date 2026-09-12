@@ -7,6 +7,7 @@ server. It is intended for controlled deployments; review the operations and
 security guidance before exposing it on a network.
 
 ## Start Here
+- ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
