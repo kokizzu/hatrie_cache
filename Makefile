@@ -10907,3 +10907,19 @@ benchmark-t-u47:
 .PHONY: publish-t-u47
 publish-t-u47:
 	@bash scripts/publish-t-u47.sh
+
+.PHONY: test-t-u46
+test-t-u46:
+	@bash scripts/test-t-u46.sh
+
+.PHONY: format-t-u46
+format-t-u46:
+	@bash scripts/format-t-u46.sh
+
+.PHONY: benchmark-t-u46
+benchmark-t-u46:
+	@bash scripts/benchmark-t-u46.sh
+
+.PHONY: publish-t-u46
+publish-t-u46:
+	@bash scripts/publish-t-u46.sh

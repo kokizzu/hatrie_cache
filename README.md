@@ -55,6 +55,7 @@ security guidance before exposing it on a network.
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
 - Opt-in per-space operation statistics: [SPACE_OPERATION_STATS.md](SPACE_OPERATION_STATS.md)
 - Opt-in peer-call lifecycle cancellation: [PEER_CALL_CANCELLATION.md](PEER_CALL_CANCELLATION.md)
+- Opt-in index cardinality and hot-key statistics: [INDEX_STATS.md](INDEX_STATS.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
