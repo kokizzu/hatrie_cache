@@ -1042,6 +1042,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | --- | --- | ---: | ---: | ---: | --- |
 | Earlier | [HTTP protobuf command wire](README.md#serialization-tradeoffs) | JSON: 15,012 ns; 3,185 wire B | Protobuf: 12,637 ns; 3,146 wire B | 1.19x faster, 1.2% smaller wire | Heap is 0.6% higher; complex values retain JSON fallback |
 | Current pass | [Immutable SQL index source snapshot](#sql-immutable-index-source-snapshot), 100k-row generic indexed range | Copied JSON source: 820.841 us; 3,076,561 B; 1,991 allocs | Immutable source string: 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation | Applies to generic field indexes backed by immutable cache strings; byte/cold and specialized index sources retain checked fallback handling |
+| Current pass | [Bounded compiled SQL plan cache](#bounded-compiled-sql-plan-cache), repeated compile of one SQL source | Direct compile: 3,839 ns; 6,080 B; 19 allocs | Cache hit: 18.06 ns; 0 B; 0 allocs | 212.6x faster compile lookup; 100% lower measured transient bytes and allocations | Opt-in bounded retention; estimated bytes are not RSS, and cold misses still compile normally |
 | Current pass | [Streamed indexed ORDER BY LIMIT materialization](#sql-indexed-order-by-limit-materialization), 100k JSON rows, `ORDER BY id DESC LIMIT 10` | Ordered-index source clone: 214.952 ms; 177,320,348 B; 2,000,123 allocs | Ordered-index stream: 40.286 ms; 63,705,298 B; 500,112 allocs | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations | Compatible direct-field, no-predicate, default-collation query shape only; it scans the whole source to retain `MaxRows` rejection semantics |
 | Current pass | [Streamed non-indexed ORDER BY LIMIT materialization](#sql-non-indexed-order-by-limit-materialization), 20k JSON rows, `ORDER BY score DESC LIMIT 50` | Full materialized sort: 67.34 ms; 27,868,570 B; 320,052 allocs | Bounded top-N stream: 37.59 ms; 23,579,755 B; 360,084 allocs | 1.79x faster; 1.18x lower allocation volume | 12.5% more allocation events from streaming JSON decode; index, metrics, and unsupported query paths retain existing behavior |
 | Current pass | [Columnar LIMIT pushdown](#columnar-limit-pushdown), warmed 20k-row scan, `LIMIT 50` | Full predicate loop: 59.19 us; 17,832 B; 108 allocs | Stop after page: 10.19 us; 17,832 B; 108 allocs | 5.81x faster; same allocation volume and count | Applies only to metrics-disabled, supported columnar shapes; instrumented plans retain complete match counters |
@@ -17785,6 +17786,40 @@ This is a targeted hot-query optimization, not a replacement for the bounded
 cache: compiling a query once adds the retained plan's memory and has no
 payback for one-shot execution. `ExecuteRows` uses the same handle and keeps
 the streaming contract.
+
+<a id="bounded-compiled-sql-plan-cache"></a>
+## Bounded Compiled SQL Plan Cache
+
+This pass adds an opt-in LRU cache for immutable `CompiledSQLQuery` handles.
+Unlike the earlier compiled-handle section above, this measures repeated
+compilation calls and the cache-hit lookup itself. The cache is bounded by both
+entry count and conservative estimated plan weight; the estimate is not RSS.
+Five samples used `-benchmem -cpu=1` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `CompileSQLQuery` | 3,839 | 6,080 | 19 | baseline |
+| Bounded cache hit | 18.06 | 0 | 0 | 212.6x faster; 100% lower measured transient bytes; 100% fewer measured allocations |
+
+Raw output from `make benchmark-c213`:
+
+```text
+BenchmarkC213CompilePlanBaseline 283357 4103 ns/op 6080 B/op 19 allocs/op
+BenchmarkC213CompilePlanBaseline 302404 3842 ns/op 6080 B/op 19 allocs/op
+BenchmarkC213CompilePlanBaseline 315150 3839 ns/op 6080 B/op 19 allocs/op
+BenchmarkC213CompilePlanBaseline 304734 3729 ns/op 6080 B/op 19 allocs/op
+BenchmarkC213CompilePlanBaseline 304388 3777 ns/op 6080 B/op 19 allocs/op
+BenchmarkC213CompilePlanCached 68178110 18.02 ns/op 0 B/op 0 allocs/op
+BenchmarkC213CompilePlanCached 58818849 18.18 ns/op 0 B/op 0 allocs/op
+BenchmarkC213CompilePlanCached 67496380 18.06 ns/op 0 B/op 0 allocs/op
+BenchmarkC213CompilePlanCached 65352187 18.06 ns/op 0 B/op 0 allocs/op
+BenchmarkC213CompilePlanCached 68264565 17.67 ns/op 0 B/op 0 allocs/op
+```
+
+The cache does not make execution 212.6x faster: the benchmark isolates
+compilation. A retained plan is the explicit memory cost, and cold misses still
+compile normally. Default behavior remains unchanged because callers must set
+`SQLQueryOptions.CompiledCache`.
 ## SQL Trigger Definition Parsing
 
 The strict row-level `CREATE TRIGGER` parser was measured independently from

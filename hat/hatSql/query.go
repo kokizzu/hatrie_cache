@@ -260,6 +260,10 @@ type SQLQueryOptions struct {
 	// PreparedSchemaVersion participates in the prepared-plan cache key. Set it
 	// when a schema, index, or projection change should force a fresh template.
 	PreparedSchemaVersion string
+	// CompiledCache optionally reuses bounded immutable compiled query handles.
+	// It is disabled by default. PreparedSchemaVersion also namespaces compiled
+	// handles so schema, index, or projection changes can invalidate one version.
+	CompiledCache *SQLCompiledQueryCache
 	// compiledTemplate is set only by CompiledSQLQuery and is intentionally not
 	// exported. It bypasses parsing and cache lookup. Static default executions
 	// may use the immutable template directly; other executions clone it.
@@ -719,20 +723,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err = control.check(); err != nil {
 		return result, err
 	}
-	var query *sqlQuery
-	var parseErr error
-	if options.compiledTemplate != nil {
-		if options.compiledTemplateReadOnly {
-			query = options.compiledTemplate
-		} else {
-			query, parseErr = bindSQLQueryParameters(options.compiledTemplate, parameters)
-			if parseErr == nil {
-				rewriteSQLQuery(query)
-			}
-		}
-	} else {
-		query, parseErr = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
-	}
+	query, parseErr := prepareSQLQueryForExecution(source, parameters, &options)
 	if parseErr != nil {
 		return result, parseErr
 	}
@@ -946,19 +937,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	defer cancel()
-	var query *sqlQuery
-	if options.compiledTemplate != nil {
-		if options.compiledTemplateReadOnly {
-			query = options.compiledTemplate
-		} else {
-			query, err = bindSQLQueryParameters(options.compiledTemplate, parameters)
-			if err == nil {
-				rewriteSQLQuery(query)
-			}
-		}
-	} else {
-		query, err = parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
-	}
+	query, err := prepareSQLQueryForExecution(source, parameters, &options)
 	if err != nil {
 		return err
 	}

@@ -11466,3 +11466,42 @@ test-c212-full:
 .PHONY: commit-c212
 commit-c212:
 	bash ./scripts/commit-c212.sh
+.PHONY: format-c213
+format-c213:
+	bash ./scripts/format-c213.sh
+
+.PHONY: test-c213
+test-c213:
+	bash ./scripts/test-c213.sh
+
+.PHONY: test-c213-package
+test-c213-package:
+	bash ./scripts/test-c213-package.sh
+
+.PHONY: test-c213-full
+test-c213-full:
+	bash ./scripts/test-c213-full.sh
+
+.PHONY: race-c213
+race-c213:
+	bash ./scripts/race-c213.sh
+
+.PHONY: vet-c213
+vet-c213:
+	bash ./scripts/vet-c213.sh
+
+.PHONY: benchmark-c213
+benchmark-c213:
+	bash ./scripts/benchmark-c213.sh
+
+.PHONY: status-c213
+status-c213:
+	bash ./scripts/status-c213.sh
+
+.PHONY: commit-c213
+commit-c213:
+	bash ./scripts/commit-c213.sh
+
+.PHONY: push-c213
+push-c213:
+	bash ./scripts/push-c213.sh

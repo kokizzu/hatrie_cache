@@ -47,6 +47,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired compact typed-table histograms: [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md)
 - ClickHouse-inspired statistics-driven join ordering with deterministic fallback: [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md)
 - ClickHouse-inspired precomputed typed join probe keys with allocation-free numeric and boolean hot paths: [C212_PRECOMPUTED_JOIN_HASH.md](C212_PRECOMPUTED_JOIN_HASH.md)
+- ClickHouse/Materialize/Tarantool-inspired bounded compiled SQL plan cache: [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)

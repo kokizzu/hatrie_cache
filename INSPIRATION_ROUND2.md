@@ -42,7 +42,7 @@ operator control remain the preferred deployment model.
 - [x] C210 Compact histograms for cardinality and selectivity estimates via `TypedTable.Histogram()`; see [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md).
 - [x] C211 Statistics-driven join-order selection with deterministic fallback via `SourceCardinalityResolver`; see [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md).
 - [x] C212 Precomputed typed join probe keys for hot hash-table paths; numeric and boolean probes avoid canonical-string allocation, while strings retain the native map path; architecture-specific software prefetch remains intentionally deferred. See [C212_PRECOMPUTED_JOIN_HASH.md](C212_PRECOMPUTED_JOIN_HASH.md).
-- [ ] C213 Cached JIT expression plans with bounded compilation memory.
+- [x] C213 Cached compiled SQL plan handles with bounded entry and estimated-byte memory; opt-in through `SQLQueryOptions.CompiledCache`. Machine-code JIT remains intentionally out of scope. See [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md).
 - [x] C214 Resource-bounded WebAssembly UDF execution; see [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md).
 - [ ] C215 External dictionary reloads with TTL and last-known-good retention.
 - [ ] C216 Dictionary layout selection based on key cardinality and lookup shape.
