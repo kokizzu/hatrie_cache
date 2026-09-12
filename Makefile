@@ -11298,3 +11298,28 @@ verify-m249: format-m249 test-m249-package race-m249 vet-m249
 
 commit-m249:
 	bash ./scripts/commit-m249.sh
+test-m204-bounded:
+	bash ./scripts/test-m204-bounded.sh
+
+format-m204:
+	bash ./scripts/format-m204.sh
+
+benchmark-m204:
+	bash ./scripts/benchmark-m204.sh
+
+test-m204-package:
+	bash ./scripts/test-m204-package.sh
+
+race-m204:
+	bash ./scripts/race-m204.sh
+
+vet-m204:
+	bash ./scripts/vet-m204.sh
+
+test-m204-full:
+	bash ./scripts/test-m204-full.sh
+
+verify-m204: format-m204 test-m204-bounded test-m204-package race-m204 vet-m204
+
+commit-m204:
+	bash ./scripts/commit-m204.sh

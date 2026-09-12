@@ -20,6 +20,7 @@ var (
 	ErrCommandJournalSubscriptionReplayLimit   = errors.New("hatriecache: journal subscription replay limit exceeded")
 	ErrCommandJournalSubscriptionOverflow      = errors.New("hatriecache: journal subscription buffer overflowed")
 	ErrCommandJournalSubscriptionSpaceRequired = errors.New("hatriecache: journal subscription space is required")
+	ErrCommandJournalSubscriptionRange         = errors.New("hatriecache: journal subscription upper sequence must be greater than after sequence")
 )
 
 const commandJournalSubscriptionEventBuffer = 1
@@ -35,11 +36,15 @@ type commandJournalSubscriptionCoalesceState struct {
 
 // CommandJournalSubscribeOptions controls an opt-in subscription to durable
 // command-journal records. AfterSequence is exclusive: sequence n starts
-// delivery at n+1. SkipReplay starts at the current journal tail for consumers
-// that already hold the current state; when set, AfterSequence is ignored. A
-// zero ReplayLimit, Buffer, or PollInterval selects its corresponding default.
+// delivery at n+1. UpToSequence is an optional exclusive upper bound: sequence
+// n is never delivered when n >= UpToSequence, and the subscription closes
+// after the bounded interval is consumed. SkipReplay starts at the current
+// journal tail for consumers that already hold the current state; when set,
+// AfterSequence is ignored. A zero ReplayLimit, Buffer, or PollInterval selects
+// its corresponding default.
 type CommandJournalSubscribeOptions struct {
 	AfterSequence uint64
+	UpToSequence  uint64
 	ReplayLimit   int
 	Buffer        int
 	PollInterval  time.Duration
@@ -58,14 +63,15 @@ type CommandJournalSubscribeOptions struct {
 // Err reports cancellation, overflow, compaction, or journal errors after the
 // records channel has closed (or while shutdown is in progress).
 type CommandJournalSubscription struct {
-	records   chan CommandJournalRecord
-	events    chan CommandJournalRecord
-	stop      chan struct{}
-	done      chan struct{}
-	wake      <-chan struct{}
-	spaceKey  string
-	keyPrefix string
-	coalesce  *commandJournalSubscriptionCoalesceState
+	records      chan CommandJournalRecord
+	events       chan CommandJournalRecord
+	stop         chan struct{}
+	done         chan struct{}
+	wake         <-chan struct{}
+	spaceKey     string
+	keyPrefix    string
+	upToSequence uint64
+	coalesce     *commandJournalSubscriptionCoalesceState
 
 	stopOnce sync.Once
 	errMu    sync.RWMutex
@@ -112,12 +118,13 @@ func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJou
 		return nil, err
 	}
 	subscription := &CommandJournalSubscription{
-		records:   make(chan CommandJournalRecord, buffer),
-		events:    make(chan CommandJournalRecord, commandJournalSubscriptionEventBuffer),
-		stop:      make(chan struct{}),
-		done:      make(chan struct{}),
-		spaceKey:  spaceKey,
-		keyPrefix: options.KeyPrefix,
+		records:      make(chan CommandJournalRecord, buffer),
+		events:       make(chan CommandJournalRecord, commandJournalSubscriptionEventBuffer),
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
+		spaceKey:     spaceKey,
+		keyPrefix:    options.KeyPrefix,
+		upToSequence: options.UpToSequence,
 	}
 	if options.Coalesce {
 		subscription.coalesce = &commandJournalSubscriptionCoalesceState{
@@ -128,6 +135,10 @@ func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJou
 	var tail CommandJournalTail
 	if options.SkipReplay {
 		tail, err = journal.commandJournalSubscriptionCurrentTail(replayLimit)
+	} else if options.UpToSequence != 0 {
+		// Bounded replays use the complete journal tail so ReplayLimit can
+		// distinguish records inside the requested interval from later ones.
+		tail, err = journal.commandJournalSubscriptionTail(options.AfterSequence, replayLimit)
 	} else if spaceKey == "" && options.KeyPrefix == "" {
 		tail, err = journal.commandJournalSubscriptionTail(options.AfterSequence, replayLimit)
 	} else {
@@ -137,7 +148,11 @@ func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJou
 		journal.unregisterCommandJournalSubscription(subscription)
 		return nil, err
 	}
-	if tail.HasMore {
+	boundedRecords := uint64(0)
+	if !options.SkipReplay && options.UpToSequence > options.AfterSequence {
+		boundedRecords = options.UpToSequence - options.AfterSequence - 1
+	}
+	if tail.HasMore && (options.UpToSequence == 0 || boundedRecords > uint64(replayLimit)) {
 		journal.unregisterCommandJournalSubscription(subscription)
 		return nil, fmt.Errorf("%w: after sequence %d has more than %d records", ErrCommandJournalSubscriptionReplayLimit, options.AfterSequence, replayLimit)
 	}
@@ -154,6 +169,9 @@ func normalizeCommandJournalSubscriptionOptions(options CommandJournalSubscribeO
 	}
 	if replayLimit < 0 || replayLimit > MaxCommandJournalTailLimit {
 		return 0, 0, 0, fmt.Errorf("hatriecache: journal subscription replay limit must be between 1 and %d", MaxCommandJournalTailLimit)
+	}
+	if !options.SkipReplay && options.UpToSequence != 0 && options.UpToSequence <= options.AfterSequence {
+		return 0, 0, 0, ErrCommandJournalSubscriptionRange
 	}
 
 	buffer := options.Buffer
@@ -267,6 +285,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 		}
 		return
 	}
+	if subscription.reachedUpperBound(nextSequence) {
+		return
+	}
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -294,6 +315,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 							}
 							return
 						}
+						if subscription.reachedUpperBound(nextSequence) {
+							return
+						}
 						continue
 					}
 					if record.Sequence <= nextSequence {
@@ -301,6 +325,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 					}
 					if !subscription.matches(record) {
 						nextSequence = record.Sequence
+						if subscription.reachedUpperBound(nextSequence) {
+							return
+						}
 						continue
 					}
 					if record.Sequence > nextSequence+1 && !subscription.allowsSequenceGaps() {
@@ -316,6 +343,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 						return
 					}
 					nextSequence = record.Sequence
+					if subscription.reachedUpperBound(nextSequence) {
+						return
+					}
 				default:
 					if !subscription.stopped() {
 						subscription.setError(ErrCommandJournalClosed)
@@ -333,6 +363,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 					}
 					return
 				}
+				if subscription.reachedUpperBound(nextSequence) {
+					return
+				}
 				continue
 			}
 			if record.Sequence <= nextSequence {
@@ -340,6 +373,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 			}
 			if !subscription.matches(record) {
 				nextSequence = record.Sequence
+				if subscription.reachedUpperBound(nextSequence) {
+					return
+				}
 				continue
 			}
 			if record.Sequence > nextSequence+1 && !subscription.allowsSequenceGaps() {
@@ -361,6 +397,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 				return
 			}
 			nextSequence = record.Sequence
+			if subscription.reachedUpperBound(nextSequence) {
+				return
+			}
 		case <-wake:
 			wake = journal.commandJournalSubscriptionWake()
 			var err error
@@ -369,6 +408,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 				if !subscription.stopped() {
 					subscription.setError(err)
 				}
+				return
+			}
+			if subscription.reachedUpperBound(nextSequence) {
 				return
 			}
 		case <-ticker.C:
@@ -381,6 +423,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 				}
 				return
 			}
+			if subscription.reachedUpperBound(nextSequence) {
+				return
+			}
 		}
 	}
 }
@@ -388,6 +433,9 @@ func (subscription *CommandJournalSubscription) run(ctx context.Context, journal
 func (subscription *CommandJournalSubscription) replayRecords(ctx context.Context, replay []CommandJournalRecord) error {
 	if !subscription.coalescing() {
 		for _, record := range replay {
+			if !subscription.beforeUpperBound(record.Sequence) {
+				continue
+			}
 			if !subscription.matches(record) {
 				continue
 			}
@@ -405,6 +453,9 @@ func (subscription *CommandJournalSubscription) replayRecords(ctx context.Contex
 	latest := make(map[string]CommandJournalRecord, len(replay))
 	order := make([]string, 0, len(replay))
 	for _, record := range replay {
+		if !subscription.beforeUpperBound(record.Sequence) {
+			continue
+		}
 		if !subscription.matches(record) {
 			continue
 		}
@@ -548,6 +599,9 @@ func (journal *CommandJournal) notifyCommandJournalSubscriptions(records ...Comm
 	if len(records) > 0 {
 		for subscription := range journal.subscriptions {
 			for _, record := range records {
+				if !subscription.beforeUpperBound(record.Sequence) {
+					continue
+				}
 				if !subscription.matches(record) {
 					continue
 				}
@@ -609,6 +663,14 @@ func (subscription *CommandJournalSubscription) deliverLive(ctx context.Context,
 	}
 }
 
+func (subscription *CommandJournalSubscription) beforeUpperBound(sequence uint64) bool {
+	return subscription.upToSequence == 0 || sequence < subscription.upToSequence
+}
+
+func (subscription *CommandJournalSubscription) reachedUpperBound(sequence uint64) bool {
+	return subscription.upToSequence != 0 && sequence >= subscription.upToSequence-1
+}
+
 func (journal *CommandJournal) commandJournalSubscriptionWake() <-chan struct{} {
 	journal.subscriptionWakeMu.Lock()
 	defer journal.subscriptionWakeMu.Unlock()
@@ -619,6 +681,9 @@ func (journal *CommandJournal) commandJournalSubscriptionWake() <-chan struct{} 
 }
 
 func (subscription *CommandJournalSubscription) poll(ctx context.Context, journal *CommandJournal, nextSequence uint64) (uint64, error) {
+	if subscription.reachedUpperBound(nextSequence) {
+		return nextSequence, nil
+	}
 	for {
 		tail, err := journal.Tail(nextSequence, DefaultCommandJournalTailLimit)
 		if err != nil {
@@ -628,8 +693,14 @@ func (subscription *CommandJournalSubscription) poll(ctx context.Context, journa
 			if record.Sequence <= nextSequence {
 				continue
 			}
+			if !subscription.beforeUpperBound(record.Sequence) {
+				return subscription.upToSequence - 1, nil
+			}
 			if !subscription.matches(record) {
 				nextSequence = record.Sequence
+				if subscription.reachedUpperBound(nextSequence) {
+					return nextSequence, nil
+				}
 				continue
 			}
 			if subscription.coalescing() {
@@ -641,6 +712,9 @@ func (subscription *CommandJournalSubscription) poll(ctx context.Context, journa
 			select {
 			case subscription.records <- record:
 				nextSequence = record.Sequence
+				if subscription.reachedUpperBound(nextSequence) {
+					return nextSequence, nil
+				}
 			case <-subscription.stop:
 				return nextSequence, nil
 			default:
@@ -652,6 +726,9 @@ func (subscription *CommandJournalSubscription) poll(ctx context.Context, journa
 			nextSequence, err = subscription.deliverPending(ctx, nextSequence)
 			if err != nil {
 				return nextSequence, err
+			}
+			if subscription.reachedUpperBound(nextSequence) {
+				return nextSequence, nil
 			}
 		}
 		if !tail.HasMore {
