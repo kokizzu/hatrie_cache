@@ -10162,3 +10162,35 @@ commit-ch027-scheduler-observability:
 .PHONY: push-ch027-scheduler-observability
 push-ch027-scheduler-observability:
 	sh scripts/push-ch027-scheduler-observability.sh
+.PHONY: test-ch028-max-threads
+test-ch028-max-threads:
+	sh scripts/test-ch028-max-threads.sh
+
+.PHONY: benchmark-ch028-max-threads
+benchmark-ch028-max-threads:
+	sh scripts/benchmark-ch028-max-threads.sh
+.PHONY: format-ch028-max-threads
+format-ch028-max-threads:
+	sh scripts/format-ch028-max-threads.sh
+.PHONY: race-ch028-max-threads
+race-ch028-max-threads:
+	sh scripts/race-ch028-max-threads.sh
+
+.PHONY: vet-ch028-max-threads
+vet-ch028-max-threads:
+	sh scripts/vet-ch028-max-threads.sh
+.PHONY: verify-ch028-docs
+verify-ch028-docs:
+	sh scripts/verify-ch028-docs.sh
+
+.PHONY: review-ch028-max-threads
+review-ch028-max-threads:
+	sh scripts/review-ch028-max-threads.sh
+
+.PHONY: commit-ch028-max-threads
+commit-ch028-max-threads:
+	sh scripts/commit-ch028-max-threads.sh
+
+.PHONY: push-ch028-max-threads
+push-ch028-max-threads:
+	sh scripts/push-ch028-max-threads.sh

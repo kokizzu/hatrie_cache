@@ -68,6 +68,7 @@ security guidance before exposing it on a network.
 - Codec byte and CPU accounting: [codec metrics](CODEC_METRICS.md)
 - Bounded independently scheduled processing stages: [Pipeline stages](PIPELINE_STAGES.md)
 - Deterministic ordered parallel map: [ORDERED_MAP.md](ORDERED_MAP.md)
+- Bounded per-query SQL worker setting: [CH028_MAX_THREADS.md](CH028_MAX_THREADS.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)

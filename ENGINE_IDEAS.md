@@ -54,7 +54,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-025 | Merge-pool prioritization | Compaction lacks a user-visible priority scheduler balancing freshness and space. | Medium |
 | CH-026 | Merge selector policies | No configurable size-tiered or time-aware merge selector. | Medium |
 | CH-027 | Background-task observability | Implemented generic `CompactionScheduler.Ages()` timestamps and caller-supplied age helpers alongside existing queue/outcome stats; task-specific bytes and TTL metrics remain provider-owned. | Low |
-| CH-028 | Query `max_threads` setting | Worker count is not exposed as a stable SQL/session setting with admission checks. | Low |
+| CH-028 | Query `max_threads` setting | Implemented bounded per-query `SETTINGS max_threads = N` over the existing worker path; session-wide defaults remain caller-owned. | Low |
 | CH-029 | User/key quotas | No rolling per-user query/bytes/CPU quota enforcement. | Medium |
 | CH-030 | Query complexity limits | Partially adopted: SQL options already bound rows, joins, results, bytes, skew, and now total `GROUP BY` keys; per-expression and CPU quotas remain future work. | Medium |
 | CH-031 | Persistent query log | Implemented as an opt-in privacy-safe newline-delimited JSON log attached to `SQLQueryManager`; terminal status survives process restart without retaining SQL text, sources, parameters, or cancellation reasons. | Low |

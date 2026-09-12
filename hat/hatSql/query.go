@@ -177,6 +177,11 @@ type FunctionRuntime interface {
 const maxSQLQueryRows = 100000
 const maxSQLPageSize = 10000
 
+// MaxSQLQueryThreads bounds SQL SETTINGS max_threads requests. The default is
+// still zero workers; this limit only prevents one query from admitting an
+// unbounded number of operator workers.
+const MaxSQLQueryThreads = 256
+
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
@@ -715,6 +720,10 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if parseErr != nil {
 		return result, parseErr
 	}
+	if err = applySQLMaxThreads(query, &options); err != nil {
+		return result, err
+	}
+	control.options = options
 	if err = validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
 		return result, err
 	}
@@ -919,6 +928,10 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err != nil {
 		return err
 	}
+	if err = applySQLMaxThreads(query, &options); err != nil {
+		return err
+	}
+	control.options = options
 	if err := validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
 		return err
 	}
@@ -5536,6 +5549,7 @@ func sqlQueryOutputsTie(order []sqlOrder, left, right sqlQueryOutput) bool {
 
 type sqlQuery struct {
 	indexHint          SQLIndexHint
+	maxThreads         int
 	ctes               []sqlCTE
 	selects            []sqlSelectItem
 	from               *sqlSource
@@ -5992,11 +6006,37 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.offset = value
+		case p.keyword("SETTINGS"):
+			if q.maxThreads != 0 {
+				return nil, p.diagnostic(p.current(), "SETTINGS appears more than once")
+			}
+			p.next()
+			setting, err := p.expectIdentifier("a SQL setting", nil)
+			if err != nil {
+				return nil, err
+			}
+			if !strings.EqualFold(setting.text, "max_threads") {
+				return nil, p.diagnostic(setting, fmt.Sprintf("unsupported SQL setting %q", setting.text))
+			}
+			if err := p.expectKind(sqlTokenEqual, "="); err != nil {
+				return nil, err
+			}
+			threads, err := p.parseInteger("max_threads")
+			if err != nil {
+				return nil, err
+			}
+			if threads == 0 {
+				return nil, p.diagnostic(setting, "max_threads must be greater than zero")
+			}
+			if threads > MaxSQLQueryThreads {
+				return nil, p.diagnostic(setting, fmt.Sprintf("max_threads exceeds %d", MaxSQLQueryThreads))
+			}
+			q.maxThreads = threads
 		default:
 			if strings.EqualFold(p.current().text, "JION") {
 				return nil, p.expected(p.current(), "JOIN", []string{"JOIN"})
 			}
-			return nil, p.expected(p.current(), "SELECT, FROM, JOIN, WHERE, PREWHERE, GROUP BY, HAVING, ORDER BY, LIMIT, or OFFSET", []string{"SELECT", "FROM", "JOIN", "LEFT", "CROSS", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET"})
+			return nil, p.expected(p.current(), "SELECT, FROM, JOIN, WHERE, PREWHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, or SETTINGS", []string{"SELECT", "FROM", "JOIN", "LEFT", "CROSS", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS"})
 		}
 	}
 	if q.from == nil {
@@ -7529,13 +7569,13 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
 }
 func sqlSuspectedClauseTypo(value string) bool {
-	return nearestSQLName(value, []string{"SELECT", "FROM", "JOIN", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET"}) != ""
+	return nearestSQLName(value, []string{"SELECT", "FROM", "JOIN", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS"}) != ""
 }
 
 type sqlExecRow struct {
@@ -7613,6 +7653,19 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}, cancel, nil
 	}
 	return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}, func() {}, nil
+}
+
+func applySQLMaxThreads(query *sqlQuery, options *SQLQueryOptions) error {
+	if query == nil || options == nil || query.maxThreads == 0 {
+		return nil
+	}
+	if query.maxThreads < 1 || query.maxThreads > MaxSQLQueryThreads {
+		return fmt.Errorf("max_threads must be between 1 and %d", MaxSQLQueryThreads)
+	}
+	if options.Workers == 0 || options.Workers > query.maxThreads {
+		options.Workers = query.maxThreads
+	}
+	return nil
 }
 
 func sqlQueryMaxRows(options SQLQueryOptions) int {

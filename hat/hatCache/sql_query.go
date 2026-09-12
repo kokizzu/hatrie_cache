@@ -76,6 +76,7 @@ const (
 	DefaultSQLQueryManagerHistoryCapacity      = hatSql.DefaultSQLQueryManagerHistoryCapacity
 	DefaultSQLQueryManagerComputeQueueCapacity = hatSql.DefaultSQLQueryManagerComputeQueueCapacity
 	MaxSQLQueryManagerComputeWorkers           = hatSql.MaxSQLQueryManagerComputeWorkers
+	MaxSQLQueryThreads                         = hatSql.MaxSQLQueryThreads
 	MaxSQLQueryManagerComputeQueueCapacity     = hatSql.MaxSQLQueryManagerComputeQueueCapacity
 	MaxNamespaceComputeWorkers                 = hatSql.MaxSQLQueryManagerComputeWorkers
 	MaxNamespaceComputeQueueCapacity           = hatSql.MaxSQLQueryManagerComputeQueueCapacity

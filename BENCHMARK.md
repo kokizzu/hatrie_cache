@@ -1,5 +1,42 @@
 # Benchmark
 
+## CH-028 Query `max_threads`
+
+Command:
+
+```text
+make benchmark-ch028-max-threads
+```
+
+The benchmark ran five samples per case on `linux/amd64`, Go's `-32` benchmark
+worker, AMD Ryzen 9 5950X 16-Core Processor. It executes an eight-row `VALUES`
+projection and reports the median sample to avoid presenting one noisy run as
+a precise result.
+
+### Raw output
+
+```text
+BenchmarkCH028BaselineQueryExecution-32       174912  6287 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH028BaselineQueryExecution-32       183282  6329 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH028BaselineQueryExecution-32       180464  6419 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH028BaselineQueryExecution-32       198243  6232 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH028BaselineQueryExecution-32       195806  6087 ns/op  10304 B/op  62 allocs/op
+BenchmarkCH028MaxThreadsQueryExecution-32      71288 16945 ns/op  11401 B/op  73 allocs/op
+BenchmarkCH028MaxThreadsQueryExecution-32      62311 18630 ns/op  11400 B/op  73 allocs/op
+BenchmarkCH028MaxThreadsQueryExecution-32      67929 18721 ns/op  11400 B/op  73 allocs/op
+BenchmarkCH028MaxThreadsQueryExecution-32      61938 19307 ns/op  11400 B/op  73 allocs/op
+BenchmarkCH028MaxThreadsQueryExecution-32      63217 19162 ns/op  11401 B/op  73 allocs/op
+```
+
+| Case | Median ns/op | B/op | allocs/op | Relative time | Relative memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing query, no setting | 6287 | 10304 | 62 | 1.00x | 1.00x |
+| `SETTINGS max_threads = 2` | 18721 | 11400 | 73 | 2.98x | 1.11x |
+
+The setting is opt-in and changes the existing worker count only when the
+caller has not already selected a lower count. Its small-input overhead is
+expected; default queries retain the old sequential path.
+
 ## CH-050: Named Settings Collections
 
 The benchmark compares the named-settings registry with a raw two-entry Go map.
