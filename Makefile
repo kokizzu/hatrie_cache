@@ -10788,3 +10788,21 @@ benchmark-t-u29-stream:
 .PHONY: publish-t-u29-stream
 publish-t-u29-stream:
 	@bash scripts/publish-t-u29-stream.sh
+.PHONY: format-m-u09-snapshot
+format-m-u09-snapshot:
+	@bash scripts/format-m-u09-snapshot.sh
+.PHONY: test-m-u09-snapshot
+test-m-u09-snapshot:
+	@bash scripts/test-m-u09-snapshot.sh
+.PHONY: race-m-u09-snapshot
+race-m-u09-snapshot:
+	@bash scripts/race-m-u09-snapshot.sh
+.PHONY: vet-m-u09-snapshot
+vet-m-u09-snapshot:
+	@bash scripts/vet-m-u09-snapshot.sh
+.PHONY: benchmark-m-u09-snapshot
+benchmark-m-u09-snapshot:
+	@bash scripts/benchmark-m-u09-snapshot.sh
+.PHONY: publish-m-u09-snapshot
+publish-m-u09-snapshot:
+	@bash scripts/publish-m-u09-snapshot.sh

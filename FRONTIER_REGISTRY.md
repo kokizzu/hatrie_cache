@@ -45,8 +45,10 @@ canceled. Multiple waiters share one lazy notification channel.
 `SnapshotAll` is sorted by ID. The default registry limit is 1,024 objects and
 the maximum is 1,048,576. `Unregister` removes one object and wakes its
 waiters. `Close` rejects later registration/advance calls and wakes every
-waiter. State is in-memory; durable frontier snapshots and restart recovery
-remain separate work.
+waiter. State is in-memory by default. Use `MarshalSnapshot` and
+`RestoreSnapshot` for caller-managed durable checkpoints and restart recovery;
+they do not open files or coordinate source/WAL ordering. See
+[FRONTIER_SNAPSHOTS.md](FRONTIER_SNAPSHOTS.md).
 
 ## Performance
 
