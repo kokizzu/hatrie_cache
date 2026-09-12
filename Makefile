@@ -11248,3 +11248,28 @@ verify-c214: format-c214 test-c214-package race-c214 vet-c214
 
 commit-c214:
 	bash ./scripts/commit-c214.sh
+test-m203-snapshot-free:
+	bash ./scripts/test-m203-snapshot-free.sh
+
+format-m203:
+	bash ./scripts/format-m203.sh
+
+benchmark-m203:
+	bash ./scripts/benchmark-m203.sh
+
+test-m203-package:
+	bash ./scripts/test-m203-package.sh
+
+race-m203:
+	bash ./scripts/race-m203.sh
+
+vet-m203:
+	bash ./scripts/vet-m203.sh
+
+test-m203-full:
+	bash ./scripts/test-m203-full.sh
+
+verify-m203: format-m203 test-m203-package race-m203 vet-m203
+
+commit-m203:
+	bash ./scripts/commit-m203.sh

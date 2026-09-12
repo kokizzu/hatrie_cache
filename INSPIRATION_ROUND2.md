@@ -85,7 +85,7 @@ operator control remain the preferred deployment model.
 
 - [x] M201 Changefeed progress messages that certify a timestamp frontier. `hatReplication.ChangefeedFrontier` publishes allocation-free monotonic sequence progress with idempotent equal advances and regression rejection; see [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md).
 - [x] M202 Durable subscription resume from a persisted `AS OF` frontier. `hatReplication.ChangefeedCheckpoint` provides a strict source-bound binary checkpoint that advances only from valid monotonic progress; see [CHANGEFEED_CHECKPOINT.md](CHANGEFEED_CHECKPOINT.md).
-- [ ] M203 Snapshot-free subscription mode for consumers that already have state.
+- [x] M203 Snapshot-free subscription mode for consumers that already have state; see [M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md](M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md).
 - [ ] M204 Bounded subscriptions with an exclusive `UP TO` timestamp.
 - [x] M205 Deterministic within-timestamp ordering for changefeed batches. Opt-in `QuerySubscriptionDefinition.DeterministicOrder` sorts differential initial, update, progress-safe, and reset batch phases by canonical row key without changing default behavior; see [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md).
 - [ ] M206 Upsert envelopes that expose a stable key and current row image.

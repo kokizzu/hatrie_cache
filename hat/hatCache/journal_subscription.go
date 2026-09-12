@@ -35,13 +35,16 @@ type commandJournalSubscriptionCoalesceState struct {
 
 // CommandJournalSubscribeOptions controls an opt-in subscription to durable
 // command-journal records. AfterSequence is exclusive: sequence n starts
-// delivery at n+1. A zero ReplayLimit, Buffer, or PollInterval selects its
-// corresponding default.
+// delivery at n+1. SkipReplay starts at the current journal tail for consumers
+// that already hold the current state; when set, AfterSequence is ignored. A
+// zero ReplayLimit, Buffer, or PollInterval selects its corresponding default.
 type CommandJournalSubscribeOptions struct {
 	AfterSequence uint64
 	ReplayLimit   int
 	Buffer        int
 	PollInterval  time.Duration
+	// SkipReplay starts at the current sequence instead of replaying history.
+	SkipReplay bool
 	// KeyPrefix limits delivery to command keys with this prefix. An empty
 	// prefix leaves the existing all-key subscription behavior unchanged.
 	KeyPrefix string
@@ -123,7 +126,9 @@ func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJou
 	}
 	wake := journal.registerCommandJournalSubscription(subscription)
 	var tail CommandJournalTail
-	if spaceKey == "" && options.KeyPrefix == "" {
+	if options.SkipReplay {
+		tail, err = journal.commandJournalSubscriptionCurrentTail(replayLimit)
+	} else if spaceKey == "" && options.KeyPrefix == "" {
 		tail, err = journal.commandJournalSubscriptionTail(options.AfterSequence, replayLimit)
 	} else {
 		tail, err = journal.commandJournalSubscriptionKeyTail(options.AfterSequence, replayLimit, spaceKey, options.KeyPrefix)
@@ -186,6 +191,19 @@ func (journal *CommandJournal) commandJournalSubscriptionTail(afterSequence uint
 	}
 	journal.mu.Unlock()
 	return journal.Tail(afterSequence, limit)
+}
+
+func (journal *CommandJournal) commandJournalSubscriptionCurrentTail(limit int) (CommandJournalTail, error) {
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return CommandJournalTail{}, ErrCommandJournalClosed
+	}
+	return CommandJournalTail{
+		LastSequence: journal.lastSequenceLocked(),
+		Limit:        limit,
+		Entries:      []CommandJournalRecord{},
+	}, nil
 }
 
 func (journal *CommandJournal) commandJournalSubscriptionSpaceTail(afterSequence uint64, limit int, spaceKey string) (CommandJournalTail, error) {

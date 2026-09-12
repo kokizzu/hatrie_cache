@@ -39,6 +39,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style post-window `QUALIFY` filtering: [C220_QUALIFY.md](C220_QUALIFY.md)
 - Tarantool-inspired mutual TLS peer authentication with restart-free certificate rotation: [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md)
 - ClickHouse-inspired bounded WebAssembly UDF memory with opt-in execution deadlines: [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md)
+- Materialize-inspired snapshot-free command-journal subscriptions: [M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md](M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
