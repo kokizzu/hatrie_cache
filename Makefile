@@ -10515,3 +10515,15 @@ commit-monitoring-command-batch:
 .PHONY: push-monitoring-command-batch
 push-monitoring-command-batch:
 	sh scripts/push-monitoring-command-batch.sh
+
+.PHONY: review-t103-decision
+review-t103-decision:
+	sh scripts/review-t103-decision.sh
+
+.PHONY: commit-t103-decision
+commit-t103-decision:
+	sh scripts/commit-t103-decision.sh
+
+.PHONY: push-t103-decision
+push-t103-decision:
+	sh scripts/push-t103-decision.sh
