@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(pwd)
+files=(
+	hat/hatPeer/connection_pool.go
+	hat/hatPeer/connection_pool_test.go
+	PEER_CONNECTION_POOL.md
+	PRODUCT_IDEA_GAPS.md
+	scripts/benchmark-t-peer-pool.sh
+	scripts/format-t-peer-pool.sh
+	scripts/publish-t-peer-pool.sh
+	scripts/race-t-peer-pool.sh
+	scripts/test-t-peer-pool-package.sh
+	scripts/test-t-peer-pool.sh
+	scripts/vet-t-peer-pool.sh
+)
+
+git fetch origin master
+base=$(git rev-parse origin/master)
+worktree=$(mktemp -d /tmp/hatrie-cache-peer-pool.XXXXXX)
+cleanup() {
+	git -C "$root" worktree remove --force "$worktree" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+git -C "$root" worktree add --detach "$worktree" "$base"
+for file in "${files[@]}"; do
+	destination="$worktree/$file"
+	mkdir -p "$(dirname "$destination")"
+	cp "$root/$file" "$destination"
+done
+
+if ! rg -q 'PEER_CONNECTION_POOL.md' "$worktree/README.md"; then
+	awk '
+		{ print }
+		!inserted && $0 == "## Start Here" {
+			print "- Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)"
+			inserted = 1
+		}
+		END {
+			if (!inserted) {
+				print "- Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)"
+			}
+		}
+	' "$worktree/README.md" > "$worktree/README.md.peer-pool"
+	mv "$worktree/README.md.peer-pool" "$worktree/README.md"
+fi
+
+if ! rg -q '^test-t-peer-pool:' "$worktree/Makefile"; then
+	printf '\n.PHONY: test-t-peer-pool format-t-peer-pool test-t-peer-pool-package race-t-peer-pool vet-t-peer-pool benchmark-t-peer-pool publish-t-peer-pool\ntest-t-peer-pool:\n\tbash ./scripts/test-t-peer-pool.sh\nformat-t-peer-pool:\n\tbash ./scripts/format-t-peer-pool.sh\ntest-t-peer-pool-package:\n\tbash ./scripts/test-t-peer-pool-package.sh\nrace-t-peer-pool:\n\tbash ./scripts/race-t-peer-pool.sh\nvet-t-peer-pool:\n\tbash ./scripts/vet-t-peer-pool.sh\nbenchmark-t-peer-pool:\n\tbash ./scripts/benchmark-t-peer-pool.sh\npublish-t-peer-pool:\n\tbash ./scripts/publish-t-peer-pool.sh\n' >> "$worktree/Makefile"
+fi
+
+make -C "$worktree" format-t-peer-pool
+make -C "$worktree" test-t-peer-pool-package
+make -C "$worktree" race-t-peer-pool
+make -C "$worktree" vet-t-peer-pool
+make -C "$worktree" benchmark-t-peer-pool
+make -C "$worktree" audit-product-idea-gaps
+go test -C "$worktree" ./... -timeout 90s -p 1 -skip '^TestRunRestoreRehearsalVerifiesBackupPath$' -count=1
+
+git -C "$worktree" add Makefile README.md "${files[@]}"
+git -C "$worktree" diff --cached --check
+git -C "$worktree" commit -m 'feat(peer): add bounded connection pool'
+git -C "$worktree" push origin HEAD:master
+git -C "$worktree" rev-parse HEAD

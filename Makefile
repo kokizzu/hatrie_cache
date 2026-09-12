@@ -10620,3 +10620,19 @@ publish-t-async-batcher:
 .PHONY: audit-product-idea-gaps
 audit-product-idea-gaps:
 	bash ./scripts/audit-product-idea-gaps.sh
+
+.PHONY: test-t-peer-pool format-t-peer-pool test-t-peer-pool-package race-t-peer-pool vet-t-peer-pool benchmark-t-peer-pool publish-t-peer-pool
+test-t-peer-pool:
+	bash ./scripts/test-t-peer-pool.sh
+format-t-peer-pool:
+	bash ./scripts/format-t-peer-pool.sh
+test-t-peer-pool-package:
+	bash ./scripts/test-t-peer-pool-package.sh
+race-t-peer-pool:
+	bash ./scripts/race-t-peer-pool.sh
+vet-t-peer-pool:
+	bash ./scripts/vet-t-peer-pool.sh
+benchmark-t-peer-pool:
+	bash ./scripts/benchmark-t-peer-pool.sh
+publish-t-peer-pool:
+	bash ./scripts/publish-t-peer-pool.sh

@@ -129,7 +129,7 @@ tradeoffs are documented and its commit is published.
 
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
-| T-U01 | Pooled peer connections | HTTP/gRPC clients exist, but there is no reusable peer pool with bounded in-flight calls, reconnect, and backoff. | Cancellation, auth, pool shutdown, and connection reuse benchmark. |
+| T-U51 | Per-peer pool health breaker | `hatPeer` now bounds and reuses connections, but it has no peer-specific circuit-breaker state that temporarily rejects unhealthy dials and exposes recovery transitions. | Avoid reconnect storms, preserve cancellation, and benchmark false-open/false-closed behavior. |
 | T-U02 | Compact multiplexed binary protocol | Protobuf/gRPC and HTTP exist, but peers lack an iProto-like compact multiplexed command path with correlation IDs. | Framing, compatibility, authentication, and head-of-line behavior. |
 | T-U03 | Stored procedure registry | External extension boundaries exist, but no trusted in-process stored function registry exposes stable call semantics. | Authorization, panic isolation, and versioning. |
 | T-U04 | Sandboxed stored Lua/runtime functions | There is no resource-limited embedded scripting runtime for stored procedures. | Sandbox escape resistance, CPU/memory limits, and disable-by-default policy. |

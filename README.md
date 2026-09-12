@@ -7,6 +7,7 @@ server. It is intended for controlled deployments; review the operations and
 security guidance before exposing it on a network.
 
 ## Start Here
+- Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
 
