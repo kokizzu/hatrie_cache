@@ -49,7 +49,7 @@ operator control remain the preferred deployment model.
 - [ ] C217 Time-series `WITH FILL` gap generation over ordered results.
 - [ ] C218 Interpolation policies for filled time-series values.
 - [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
-- [ ] C220 Post-window `QUALIFY` filtering without materializing unused rows.
+- [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
 - [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.
 - [ ] C222 Approximate top-K aggregation with mergeable bounded state.
 - [ ] C223 Mergeable approximate distinct and quantile aggregate states.

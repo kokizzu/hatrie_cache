@@ -1211,6 +1211,19 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
 	}
+	if query.qualify.kind != "" {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			return err
+		}
+		columns := sqlColumns(query.selects)
+		for _, row := range result.Rows {
+			if err := visit(columns, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if _, handled, err := executeSQLColumnarVectorGroupAggregateRows(query, resolver, control, nil, visit); handled {
 		return err
 	}
@@ -5598,6 +5611,7 @@ type sqlQuery struct {
 	groupingSets       [][]sqlExpr
 	groupingDimensions []sqlExpr
 	having             sqlExpr
+	qualify            sqlExpr
 	orderBy            []sqlOrder
 	windows            map[string]sqlWindow
 	sample             *sqlTableSample
@@ -5973,6 +5987,16 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 				}
 				p.next()
 			}
+		case p.keyword("QUALIFY"):
+			if q.qualify.kind != "" {
+				return nil, p.diagnostic(p.current(), "QUALIFY appears more than once")
+			}
+			p.next()
+			expr, err := p.parseCondition()
+			if err != nil {
+				return nil, err
+			}
+			q.qualify = expr
 		case p.keyword("ORDER"):
 			if q.orderBy != nil {
 				return nil, p.diagnostic(p.current(), "ORDER BY appears more than once")
@@ -6074,7 +6098,7 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 			if strings.EqualFold(p.current().text, "JION") {
 				return nil, p.expected(p.current(), "JOIN", []string{"JOIN"})
 			}
-			return nil, p.expected(p.current(), "SELECT, FROM, JOIN, WHERE, PREWHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, or SETTINGS", []string{"SELECT", "FROM", "JOIN", "LEFT", "CROSS", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS"})
+			return nil, p.expected(p.current(), "SELECT, FROM, JOIN, WHERE, PREWHERE, GROUP BY, HAVING, WINDOW, QUALIFY, ORDER BY, LIMIT, OFFSET, or SETTINGS", []string{"SELECT", "FROM", "JOIN", "LEFT", "CROSS", "WHERE", "PREWHERE", "GROUP", "HAVING", "WINDOW", "QUALIFY", "ORDER", "LIMIT", "OFFSET", "SETTINGS"})
 		}
 	}
 	if q.from == nil {
@@ -6115,6 +6139,14 @@ func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
 	}
 	if err := p.resolveSQLNamedWindows(q); err != nil {
 		return nil, err
+	}
+	if q.qualify.kind != "" {
+		if !sqlQueryHasSelectWindow(q) {
+			return nil, p.diagnostic(q.qualify.token, "QUALIFY requires a window function in SELECT")
+		}
+		if sqlExprHasWindow(q.qualify) {
+			return nil, p.diagnostic(q.qualify.token, "QUALIFY window expressions must be selected with an alias and referenced by that alias")
+		}
 	}
 	if err := sqlExpandGroupingSets(q); err != nil {
 		return nil, p.diagnostic(p.current(), err.Error())
@@ -7353,6 +7385,9 @@ func (p *sqlQueryParser) resolveSQLNamedWindows(query *sqlQuery) error {
 			return err
 		}
 	}
+	if err := resolve(&query.qualify); err != nil {
+		return err
+	}
 	if query.limitBy != nil {
 		for index := range query.limitBy.expressions {
 			if err := resolve(&query.limitBy.expressions[index]); err != nil {
@@ -7613,7 +7648,7 @@ func sqlClauseKeyword(value string) bool {
 	return false
 }
 func sqlSuspectedClauseTypo(value string) bool {
-	return nearestSQLName(value, []string{"SELECT", "FROM", "JOIN", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS"}) != ""
+	return nearestSQLName(value, []string{"SELECT", "FROM", "JOIN", "WHERE", "PREWHERE", "GROUP", "HAVING", "WINDOW", "QUALIFY", "ORDER", "LIMIT", "OFFSET", "SETTINGS"}) != ""
 }
 
 type sqlExecRow struct {
@@ -7627,6 +7662,7 @@ type sqlExecRow struct {
 	columnarRow   int
 	outer         *sqlExecRow
 	environment   *sqlEvalEnvironment
+	projected     SQLRow
 }
 
 func newSQLSingleSourceExecRow(alias string, row SQLRow) sqlExecRow {
@@ -11505,6 +11541,27 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			out[index].row[result.Columns[column]] = values[index]
 		}
 	}
+	if q.qualify.kind != "" {
+		started = time.Now()
+		inputRows := len(out)
+		filtered := out[:0]
+		for _, output := range out {
+			evaluationRow := sqlExecRow{projected: output.row}
+			if len(output.group) > 0 {
+				evaluationRow = output.group[0]
+				evaluationRow.projected = output.row
+			}
+			value := evalSQLExpr(q.qualify, output.group, evaluationRow)
+			if err := sqlExpressionError(value); err != nil {
+				return SQLQueryResult{}, err
+			}
+			if sqlTruthy(value) {
+				filtered = append(filtered, output)
+			}
+		}
+		out = filtered
+		metrics.record("QUALIFY", sqlExplainExpression(q.qualify), inputRows, len(out), started)
+	}
 	if metrics != nil {
 		projectedBytes := 0
 		for _, output := range out {
@@ -12130,6 +12187,9 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "HAVING", Detail: sqlExplainExpression(query.having)})
 	}
 	*steps = append(*steps, SQLExplainStep{Node: prefix + "PROJECT", Detail: sqlExplainSelects(query.selects), Lineage: sqlExplainLineage(query.selects)})
+	if query.qualify.kind != "" {
+		*steps = append(*steps, SQLExplainStep{Node: prefix + "QUALIFY", Detail: sqlExplainExpression(query.qualify)})
+	}
 	if query.distinct {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "DISTINCT", Detail: "deduplicate projected rows"})
 	}
@@ -15726,12 +15786,27 @@ func sqlQueryHasWindow(q *sqlQuery) bool {
 	if sqlExprHasWindow(q.having) || sqlExprHasWindow(q.where) || sqlExprHasWindow(q.prewhere) {
 		return true
 	}
+	if sqlExprHasWindow(q.qualify) {
+		return true
+	}
 	for _, item := range q.groupBy {
 		if sqlExprHasWindow(item) {
 			return true
 		}
 	}
 	for _, item := range q.orderBy {
+		if sqlExprHasWindow(item.expr) {
+			return true
+		}
+	}
+	return false
+}
+
+func sqlQueryHasSelectWindow(q *sqlQuery) bool {
+	if q == nil {
+		return false
+	}
+	for _, item := range q.selects {
 		if sqlExprHasWindow(item.expr) {
 			return true
 		}
@@ -16331,6 +16406,11 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 }
 func sqlField(row sqlExecRow, qualifier, name string) interface{} {
 	for current := &row; current != nil; current = current.outer {
+		if qualifier == "" && current.projected != nil {
+			if value, ok := current.projected[name]; ok {
+				return value
+			}
+		}
 		if current.columnar != nil {
 			if qualifier != "" && qualifier == current.singleAlias {
 				value, _ := current.columnar.Value(name, current.columnarRow)

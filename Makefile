@@ -11152,3 +11152,31 @@ vet-m205:
 .PHONY: verify-m205
 verify-m205:
 	@bash scripts/verify-m205.sh
+
+.PHONY: test-c220
+test-c220:
+	@bash scripts/test-c220.sh
+
+.PHONY: test-c220-package
+test-c220-package:
+	@bash scripts/test-c220-package.sh
+
+.PHONY: format-c220
+format-c220:
+	@bash scripts/format-c220.sh
+
+.PHONY: benchmark-c220
+benchmark-c220:
+	@bash scripts/benchmark-c220.sh
+
+.PHONY: race-c220
+race-c220:
+	@bash scripts/race-c220.sh
+
+.PHONY: vet-c220
+vet-c220:
+	@bash scripts/vet-c220.sh
+
+.PHONY: verify-c220
+verify-c220:
+	@bash scripts/verify-c220.sh
