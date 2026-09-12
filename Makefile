@@ -10538,3 +10538,23 @@ commit-monitoring-command-wire:
 .PHONY: push-monitoring-command-wire
 push-monitoring-command-wire:
 	sh scripts/push-monitoring-command-wire.sh
+
+.PHONY: audit-inspiration-inventory
+audit-inspiration-inventory:
+	sh scripts/audit-inspiration-inventory.sh
+
+.PHONY: verify-inspiration-backlog
+verify-inspiration-backlog:
+	sh scripts/audit-inspiration-inventory.sh
+
+.PHONY: review-inspiration-backlog
+review-inspiration-backlog:
+	sh scripts/review-inspiration-backlog.sh
+
+.PHONY: commit-inspiration-backlog
+commit-inspiration-backlog:
+	sh scripts/commit-inspiration-backlog.sh
+
+.PHONY: push-inspiration-backlog
+push-inspiration-backlog:
+	sh scripts/push-inspiration-backlog.sh

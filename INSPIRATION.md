@@ -927,6 +927,6 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   single-core inputs retain the serial path. The wire format is unchanged.
   See [SQL_PARALLEL_ROW_BINARY.md](SQL_PARALLEL_ROW_BINARY.md) and
   [BENCHMARK.md](BENCHMARK.md#ch-047-parallel-rowbinary-decode).
-- [x] T151 ClickHouse-style optional gzip compression for public command and
+- [x] T156 ClickHouse-style optional gzip compression for public command and
   batch request bodies. JSON remains the default; `Client.CommandCompressionThreshold`
   enables bandwidth reduction for larger JSON or protobuf requests.
