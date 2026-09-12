@@ -10086,3 +10086,43 @@ commit-tt043-maintenance-read-only:
 .PHONY: push-tt043-maintenance-read-only
 push-tt043-maintenance-read-only:
 	sh scripts/push-tt043-maintenance-read-only.sh
+
+.PHONY: benchmark-tt046-memory-accounting
+benchmark-tt046-memory-accounting:
+	sh scripts/benchmark-tt046-memory-accounting.sh
+
+.PHONY: test-tt046-memory-accounting
+test-tt046-memory-accounting:
+	sh scripts/test-tt046-memory-accounting.sh
+
+.PHONY: format-tt046-memory-accounting
+format-tt046-memory-accounting:
+	sh scripts/format-tt046-memory-accounting.sh
+
+.PHONY: verify-tt046-docs
+verify-tt046-docs:
+	sh scripts/verify-tt046-docs.sh
+
+.PHONY: race-tt046-memory-accounting
+race-tt046-memory-accounting:
+	sh scripts/race-tt046-memory-accounting.sh
+
+.PHONY: vet-tt046-memory-accounting
+vet-tt046-memory-accounting:
+	sh scripts/vet-tt046-memory-accounting.sh
+
+.PHONY: review-tt046-memory-accounting
+review-tt046-memory-accounting:
+	sh scripts/review-tt046-memory-accounting.sh
+
+.PHONY: commit-tt046-memory-accounting
+commit-tt046-memory-accounting:
+	sh scripts/commit-tt046-memory-accounting.sh
+
+.PHONY: push-tt046-memory-accounting
+push-tt046-memory-accounting:
+	sh scripts/push-tt046-memory-accounting.sh
+
+.PHONY: amend-tt046-memory-accounting
+amend-tt046-memory-accounting:
+	sh scripts/amend-tt046-memory-accounting.sh

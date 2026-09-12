@@ -111,6 +111,7 @@ security guidance before exposing it on a network.
 - Opt-in logical-space journal changefeeds: [TT040_SPACE_CHANGEFEED.md](TT040_SPACE_CHANGEFEED.md)
 - Opt-in gRPC command multiplexing with correlated responses: [TT032_IPROTO_MULTIPLEXING.md](TT032_IPROTO_MULTIPLEXING.md)
 - Default-off maintenance read-only mode for public cache traffic: [TT043_MAINTENANCE_READ_ONLY.md](TT043_MAINTENANCE_READ_ONLY.md)
+- Read-only per-structure native/backing memory accounting: [TT046_MEMORY_ACCOUNTING.md](TT046_MEMORY_ACCOUNTING.md)
 - Importable at-least-once command-journal sink runners: [MZ011_SINK_CONNECTORS.md](MZ011_SINK_CONNECTORS.md)
 - Sink-owned exactly-once journal checkpoints: [MZ012_EXACTLY_ONCE_SINK.md](MZ012_EXACTLY_ONCE_SINK.md)
 - Opt-in source connector checkpoints tied to journal progress: [MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md](MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md)

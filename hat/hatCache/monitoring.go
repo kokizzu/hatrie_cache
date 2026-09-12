@@ -619,6 +619,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/openapi.json", handler.handleOpenAPI)
 	server.HandleFunc("/api/config", handler.handleConfig)
 	server.HandleFunc("/api/stats", handler.handleStats)
+	server.HandleFunc("/api/memory/structures", handler.handleMemoryStructures)
 	server.HandleFunc("/api/memory", handler.handleMemory)
 	server.HandleFunc("/api/scheduler", handler.handleScheduler)
 	server.HandleFunc("/api/entries", handler.handleEntries)
@@ -926,6 +927,21 @@ func (handler *MonitoringHandler) handleMemory(w http.ResponseWriter, r *http.Re
 	writeJSON(w, hatMonitoring.ReadMemoryReport())
 }
 
+func (handler *MonitoringHandler) handleMemoryStructures(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, handler.trie.MemoryAccounting())
+}
+
 // ReadMonitoringMemoryReport returns an on-demand runtime allocator snapshot.
 func ReadMonitoringMemoryReport() MonitoringMemoryReport {
 	return hatMonitoring.ReadMemoryReport()
@@ -992,6 +1008,15 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusHelp(&builder, "hatrie_cache_disk_spill_bytes", "Bytes currently spilled to disk by the cache.")
 	writePrometheusType(&builder, "hatrie_cache_disk_spill_bytes", "gauge")
 	fmt.Fprintf(&builder, "hatrie_cache_disk_spill_bytes{node=\"%s\"} %d\n", node, handler.trie.diskSpillBytes())
+	accounting := handler.trie.MemoryAccounting()
+	writePrometheusGauge(&builder, "hatrie_cache_native_trie_bytes", "Estimated bytes retained by the native HAT-trie.", node, accounting.NativeTrieBytes)
+	writePrometheusGauge(&builder, "hatrie_cache_backing_bytes", "Estimated bytes retained by typed Go backing pools and auxiliary indexes.", node, accounting.TotalBackingBytes)
+	writePrometheusGauge(&builder, "hatrie_cache_total_owned_bytes", "Estimated native trie plus typed backing bytes owned by the cache.", node, accounting.TotalBytes)
+	writePrometheusHelp(&builder, "hatrie_cache_structure_backing_bytes", "Estimated backing bytes retained by one typed storage pool or auxiliary index.")
+	writePrometheusType(&builder, "hatrie_cache_structure_backing_bytes", "gauge")
+	for _, structure := range accounting.Structures {
+		fmt.Fprintf(&builder, "hatrie_cache_structure_backing_bytes{node=\"%s\",structure=\"%s\"} %d\n", node, prometheusLabelValue(structure.Name), structure.BackingBytes)
+	}
 	partitioning := handler.trie.LocalPartitioningStats()
 	writePrometheusGauge(&builder, "hatrie_cache_local_partitions", "Number of enabled in-process HAT-trie partitions; zero means disabled.", node, uint64(partitioning.Partitions))
 	if partitioning.Enabled {
@@ -1458,6 +1483,14 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 			},
 		},
 	}
+	memoryAccountingResponse := map[string]interface{}{
+		"description": "HAT-trie native and typed backing-storage memory estimate",
+		"content": map[string]interface{}{
+			"application/json": map[string]interface{}{
+				"schema": map[string]interface{}{"$ref": "#/components/schemas/MemoryAccountingReport"},
+			},
+		},
+	}
 	schedulerResponse := map[string]interface{}{
 		"description": "Go scheduler and goroutine snapshot",
 		"content": map[string]interface{}{
@@ -1467,14 +1500,15 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 		},
 	}
 	paths := map[string]interface{}{
-		"/api/health":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
-		"/api/memory":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getMemory", "responses": map[string]interface{}{"200": memoryResponse}}},
-		"/api/scheduler":      map[string]interface{}{"get": map[string]interface{}{"operationId": "getScheduler", "responses": map[string]interface{}{"200": schedulerResponse}}},
-		"/api/entries":        map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
-		"/api/sql":            map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
-		"/api/commands":       map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
-		"/api/grafana/search": map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
-		"/api/grafana/query":  map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/health":            map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/memory":            map[string]interface{}{"get": map[string]interface{}{"operationId": "getMemory", "responses": map[string]interface{}{"200": memoryResponse}}},
+		"/api/memory/structures": map[string]interface{}{"get": map[string]interface{}{"operationId": "getMemoryStructures", "responses": map[string]interface{}{"200": memoryAccountingResponse}}},
+		"/api/scheduler":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getScheduler", "responses": map[string]interface{}{"200": schedulerResponse}}},
+		"/api/entries":           map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/sql":               map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/commands":          map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/grafana/search":    map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/grafana/query":     map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
 	}
 	if asyncCommands {
 		paths["/api/commands/status"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncCommandStatus", "responses": map[string]interface{}{"200": jsonResponse}}}
@@ -1489,9 +1523,10 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},
 			"schemas": map[string]interface{}{
-				"SQLQueryRequest": map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
-				"MemoryReport":    monitoringMemoryReportOpenAPISchema(),
-				"SchedulerReport": monitoringSchedulerReportOpenAPISchema(),
+				"SQLQueryRequest":        map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
+				"MemoryReport":           monitoringMemoryReportOpenAPISchema(),
+				"MemoryAccountingReport": monitoringMemoryAccountingOpenAPISchema(),
+				"SchedulerReport":        monitoringSchedulerReportOpenAPISchema(),
 			},
 		},
 	}
@@ -1556,6 +1591,28 @@ func monitoringMemoryReportOpenAPISchema() map[string]interface{} {
 			"os_stacks_class_bytes":     uint64Property,
 			"other_class_bytes":         uint64Property,
 			"total_class_bytes":         uint64Property,
+		},
+	}
+}
+
+func monitoringMemoryAccountingOpenAPISchema() map[string]interface{} {
+	uint64Property := map[string]interface{}{"type": "integer", "format": "uint64"}
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"native_trie_bytes":   uint64Property,
+			"total_backing_bytes": uint64Property,
+			"total_bytes":         uint64Property,
+			"structures": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name":          map[string]interface{}{"type": "string"},
+						"backing_bytes": uint64Property,
+					},
+				},
+			},
 		},
 	}
 }

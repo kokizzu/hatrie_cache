@@ -665,6 +665,13 @@ func (ht *HatTrie) memoryBackingBytesLocked() uint64 {
 	return total
 }
 
+func (ht *HatTrie) nativeTrieBytesLocked() uint64 {
+	if ht == nil || ht.root == nil {
+		return 0
+	}
+	return uint64(C.hattrie_memory_bytes(ht.root))
+}
+
 func storageSliceBytes[T any](values []T) uint64 {
 	var value T
 	return uint64(cap(values)) * uint64(unsafe.Sizeof(value))

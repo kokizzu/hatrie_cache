@@ -21123,3 +21123,25 @@ throughput. The focused predicate benchmark was run with
 The default-off predicate was within measurement noise of the legacy
 predicate and introduced no allocations. Enabling the mode changes behavior
 by rejecting public writes; it is not a performance optimization.
+
+## TT-046 Per-Structure Memory Accounting
+
+This diagnostic feature exposes the native trie and each typed backing pool via
+`HatTrie.MemoryAccounting()`, `/api/memory/structures`, and Prometheus. The
+focused benchmark uses the same 256-string fixture for the existing accounting
+helper and the new detailed report. It was run with
+`make benchmark-tt046-memory-accounting` on Linux/amd64 with an AMD Ryzen 9
+5950X; each row contains five `-count=5` samples.
+
+| Path | Samples (ns/op) | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing direct backing total, before feature | 19.70, 24.94, 24.38, 20.55, 19.26 | 20.55 | 0 | 0 |
+| Existing direct backing total, final implementation | 20.44, 20.55, 20.54, 20.36, 20.46 | 20.46 | 0 | 0 |
+| Detailed `MemoryAccounting()` report | 5,295, 5,435, 5,285, 5,337, 5,302 | 5,302 | 640 | 1 |
+
+The existing path stayed allocation-free and was effectively unchanged (`1.00x`
+median). The detailed report is intentionally on-demand: it pays about `259x`
+the baseline CPU time and one 640-byte allocation to materialize 26 named rows,
+while ordinary cache operations pay no new work. An intermediate refactor that
+reused the row-value array for the existing helper measured `26.30 ns/op` versus
+the `20.55 ns/op` baseline and was removed before the final implementation.

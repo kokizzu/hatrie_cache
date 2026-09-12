@@ -182,7 +182,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-043 | Maintenance read-only mode | Implemented as default-off public command gating for HTTP and gRPC; reads, snapshots, backups, and internal replay paths remain available. | Low |
 | TT-044 | Schema migration dry run | Implemented as importable `hatSchema.Preview`, which validates a migration on an independent schema copy without publication. | Low |
 | TT-045 | Tuple-level compression | Individual large values/tuples lack transparent compressed storage with size thresholds. | Medium |
-| TT-046 | Slab/memory accounting | No per-structure allocator accounting and bounded eviction/admission telemetry. | Medium |
+| TT-046 | Slab/memory accounting | Implemented read-only per-structure native/backing accounting and monitoring; bounded eviction/admission telemetry remains a separate follow-up. | Medium |
 | TT-047 | Expiration wheel | Partially adopted: the opt-in cleaner now sleeps until the indexed min-heap deadline and wakes for newly earlier deadlines, including local partitions; a hierarchical wheel remains deferred because exact heap deadlines preserve bounded live entries and simpler recovery semantics. | Medium |
 | TT-048 | Queue/priority space primitive | No durable priority queue data structure with claim, retry, and visibility timeout. | Medium |
 | TT-049 | Pessimistic row locks | No `SELECT FOR UPDATE`-style lock lease for callers that need serialized reads/mutations. | High |
