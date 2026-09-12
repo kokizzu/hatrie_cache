@@ -11180,3 +11180,38 @@ vet-c220:
 .PHONY: verify-c220
 verify-c220:
 	@bash scripts/verify-c220.sh
+.PHONY: test-t243-tls-rotation
+test-t243-tls-rotation:
+	bash ./scripts/test-t243-tls-rotation.sh
+
+.PHONY: format-t243
+format-t243:
+	bash ./scripts/format-t243.sh
+
+.PHONY: benchmark-t243
+benchmark-t243:
+	bash ./scripts/benchmark-t243.sh
+
+.PHONY: test-t243-package
+test-t243-package:
+	bash ./scripts/test-t243-package.sh
+
+.PHONY: race-t243
+race-t243:
+	bash ./scripts/race-t243.sh
+
+.PHONY: vet-t243
+vet-t243:
+	bash ./scripts/vet-t243.sh
+
+.PHONY: verify-t243
+verify-t243:
+	bash ./scripts/verify-t243.sh
+
+.PHONY: test-t243-full
+test-t243-full:
+	bash ./scripts/test-t243-full.sh
+
+.PHONY: commit-t243
+commit-t243:
+	bash ./scripts/commit-t243.sh

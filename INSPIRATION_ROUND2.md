@@ -178,7 +178,7 @@ operator control remain the preferred deployment model.
 - [x] T240 Request cancellation and deadline propagation through the protocol. `CompactPeerSessionOptions.EnableRequestCancellation` sends a best-effort reserved request that cancels the matching remote handler context; the default remains off. See [T240_COMPACT_REQUEST_CANCELLATION.md](T240_COMPACT_REQUEST_CANCELLATION.md).
 - [ ] T241 Role-based authentication and per-space authorization.
 - [ ] T242 Append-only audit logging for administrative and data operations.
-- [ ] T243 Mutual TLS authentication with certificate rotation.
+- [x] T243 Mutual TLS authentication with certificate rotation; see [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md).
 - [ ] T244 Queue task delay and deadline scheduling.
 - [ ] T245 Queue visibility timeouts for worker crash recovery.
 - [ ] T246 Priority queues with starvation bounds.
