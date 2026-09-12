@@ -76,3 +76,32 @@ The benchmark reports zero bytes and zero allocations per steady-state
 operation. The 256-active-lease case is slower than the one-active case because
 it exercises indexed expiry removal among 256 live leases. See the raw samples
 and the comparison caveat in [BENCHMARK.md](BENCHMARK.md#visibility-timeout-queue).
+# Epoch-fenced leases
+
+For leases that can cross a process or storage boundary, construct the queue
+with `NewVisibilityQueueWithEpoch` and use `LeaseWithToken`, `AckToken`, and
+`NackToken`. The token contains both the queue epoch and the monotonic lease
+ID, so a token from an older process incarnation cannot acknowledge or nack a
+new lease that reused the same numeric ID.
+
+Epoch `0` uses `DefaultVisibilityQueueEpoch` (`1`). Persist the epoch with the
+queue ownership metadata and advance it before restoring the queue in a new
+process. The legacy `Lease`, `Ack(id)`, and `Nack(id, ...)` methods remain
+available and retain their original behavior; use the token API for restart
+fencing.
+
+## Benchmark
+
+Linux, AMD Ryzen 9 5950X, Go benchmarks with `-benchmem`; each value is the
+median of three runs:
+
+| Workload | ns/op | B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Legacy lease + raw-ID ack, one active item | 107.0 | 0 | 0 | Baseline |
+| Epoch token lease + token ack, one active item | 115.2 | 0 | 0 | 1.08x CPU |
+| Legacy lease + raw-ID ack, 256 resident items | 545.1 | 0 | 0 | Baseline |
+| Epoch token lease + token ack, 256 resident items | 593.4 | 0 | 0 | 1.09x CPU |
+
+The added epoch is one `uint64` per queue. The legacy hot path keeps the same
+item layout and remains allocation-free; the token path is also allocation-free
+but pays a small explicit validation cost for restart safety.

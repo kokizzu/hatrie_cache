@@ -6,10 +6,32 @@ import "time"
 // constructors that receive a non-positive timeout.
 const DefaultVisibilityQueueTimeout = time.Minute
 
+// DefaultVisibilityQueueEpoch is used by the zero-value queue and constructors
+// that receive a zero epoch. Restarting consumers should persist and advance
+// the epoch, then use NewVisibilityQueueWithEpoch.
+const DefaultVisibilityQueueEpoch uint64 = 1
+
+// VisibilityQueueLeaseToken identifies a lease across a process or storage
+// handoff. Both fields must match the queue that owns the lease.
+type VisibilityQueueLeaseToken struct {
+	Epoch uint64 `json:"epoch"`
+	ID    uint64 `json:"id"`
+}
+
 // VisibilityQueueItem is a leased queue item returned by VisibilityQueue.Lease.
 // The ID remains stable when the item is nacked or requeued after expiry.
 type VisibilityQueueItem[T any] struct {
 	ID         uint64
+	Value      T
+	Attempts   uint32
+	LeaseUntil time.Time
+}
+
+// VisibilityQueueLease is an epoch-fenced lease returned by LeaseWithToken.
+// Use its token with AckToken or NackToken when the lease can cross a process
+// or storage boundary.
+type VisibilityQueueLease[T any] struct {
+	Token      VisibilityQueueLeaseToken
 	Value      T
 	Attempts   uint32
 	LeaseUntil time.Time
@@ -50,22 +72,35 @@ type VisibilityQueue[T any] struct {
 	nextID            uint64
 	capacity          int
 	visibilityTimeout time.Duration
+	epoch             uint64
 }
 
 // NewVisibilityQueue creates a visibility queue. A non-positive capacity means
 // unbounded, and a non-positive timeout selects DefaultVisibilityQueueTimeout.
 func NewVisibilityQueue[T any](capacity int, visibilityTimeout time.Duration) *VisibilityQueue[T] {
+	return NewVisibilityQueueWithEpoch[T](capacity, visibilityTimeout, DefaultVisibilityQueueEpoch)
+}
+
+// NewVisibilityQueueWithEpoch creates a visibility queue with an explicit
+// restart epoch. A zero epoch uses DefaultVisibilityQueueEpoch. Persist the
+// epoch with queue ownership metadata and advance it before restoring a queue
+// in a new process so old lease tokens cannot acknowledge new leases.
+func NewVisibilityQueueWithEpoch[T any](capacity int, visibilityTimeout time.Duration, epoch uint64) *VisibilityQueue[T] {
 	if capacity < 0 {
 		capacity = 0
 	}
 	if visibilityTimeout <= 0 {
 		visibilityTimeout = DefaultVisibilityQueueTimeout
 	}
+	if epoch == 0 {
+		epoch = DefaultVisibilityQueueEpoch
+	}
 	return &VisibilityQueue[T]{
 		pending:           NewDelayQueue[visibilityQueueEntry[T]](capacity),
 		leases:            make(map[uint64]visibilityQueueLease[T]),
 		capacity:          capacity,
 		visibilityTimeout: visibilityTimeout,
+		epoch:             epoch,
 	}
 }
 
@@ -88,6 +123,18 @@ func (queue *VisibilityQueue[T]) timeout() time.Duration {
 		return DefaultVisibilityQueueTimeout
 	}
 	return queue.visibilityTimeout
+}
+
+// Epoch returns the queue's lease epoch. It initializes a zero-value queue to
+// DefaultVisibilityQueueEpoch when needed.
+func (queue *VisibilityQueue[T]) Epoch() uint64 {
+	if queue == nil {
+		return 0
+	}
+	if queue.epoch == 0 {
+		queue.epoch = DefaultVisibilityQueueEpoch
+	}
+	return queue.epoch
 }
 
 // Len returns the number of pending and leased items.
@@ -157,6 +204,21 @@ func (queue *VisibilityQueue[T]) Lease(now time.Time) (VisibilityQueueItem[T], b
 	return queue.LeaseFor(now, queue.timeout())
 }
 
+// LeaseWithToken returns the next ready item with an epoch-fenced token. Use
+// this form when the lease can outlive the process that created it.
+func (queue *VisibilityQueue[T]) LeaseWithToken(now time.Time) (VisibilityQueueLease[T], bool) {
+	item, ok := queue.Lease(now)
+	if !ok {
+		return VisibilityQueueLease[T]{}, false
+	}
+	return VisibilityQueueLease[T]{
+		Token:      VisibilityQueueLeaseToken{Epoch: queue.Epoch(), ID: item.ID},
+		Value:      item.Value,
+		Attempts:   item.Attempts,
+		LeaseUntil: item.LeaseUntil,
+	}, true
+}
+
 // LeaseFor returns the next ready item and uses timeout for this lease. A
 // non-positive timeout uses the queue's configured timeout.
 func (queue *VisibilityQueue[T]) LeaseFor(now time.Time, timeout time.Duration) (VisibilityQueueItem[T], bool) {
@@ -214,6 +276,22 @@ func (queue *VisibilityQueue[T]) Ack(id uint64) bool {
 	return true
 }
 
+// AckToken permanently removes an active lease when both its epoch and ID
+// match the queue. Use this form when a lease token can outlive the process
+// that created it.
+func (queue *VisibilityQueue[T]) AckToken(token VisibilityQueueLeaseToken) bool {
+	if queue == nil || token.ID == 0 || token.Epoch == 0 || token.Epoch != queue.Epoch() {
+		return false
+	}
+	lease, ok := queue.leases[token.ID]
+	if !ok {
+		return false
+	}
+	queue.expiryRemove(lease.expiryIndex)
+	delete(queue.leases, token.ID)
+	return true
+}
+
 // Nack makes an active lease available again at readyAt. The item ID and
 // attempt count are retained for retry tracking.
 func (queue *VisibilityQueue[T]) Nack(id uint64, readyAt time.Time) bool {
@@ -226,6 +304,22 @@ func (queue *VisibilityQueue[T]) Nack(id uint64, readyAt time.Time) bool {
 	}
 	queue.expiryRemove(lease.expiryIndex)
 	delete(queue.leases, id)
+	queue.pendingQueue().Push(readyAt, lease.entry)
+	return true
+}
+
+// NackToken makes an active lease available again when both its epoch and ID
+// match the queue. The item ID and attempt count remain unchanged.
+func (queue *VisibilityQueue[T]) NackToken(token VisibilityQueueLeaseToken, readyAt time.Time) bool {
+	if queue == nil || token.ID == 0 || token.Epoch == 0 || token.Epoch != queue.Epoch() {
+		return false
+	}
+	lease, ok := queue.leases[token.ID]
+	if !ok {
+		return false
+	}
+	queue.expiryRemove(lease.expiryIndex)
+	delete(queue.leases, token.ID)
 	queue.pendingQueue().Push(readyAt, lease.entry)
 	return true
 }

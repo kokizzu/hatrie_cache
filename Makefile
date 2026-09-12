@@ -10434,3 +10434,40 @@ commit-write-quorum-fastpath:
 
 push-write-quorum-fastpath:
 	sh scripts/push-write-quorum-fastpath.sh
+
+.PHONY: remote-status
+
+remote-status:
+	sh scripts/remote-status.sh
+
+.PHONY: test-visibility-queue-epoch
+
+test-visibility-queue-epoch:
+	sh scripts/test-visibility-queue-epoch.sh
+
+.PHONY: benchmark-visibility-queue-epoch
+
+benchmark-visibility-queue-epoch:
+	sh scripts/benchmark-visibility-queue-epoch.sh
+
+.PHONY: format-visibility-queue-epoch race-visibility-queue-epoch vet-visibility-queue-epoch
+
+format-visibility-queue-epoch:
+	sh scripts/format-visibility-queue-epoch.sh
+
+race-visibility-queue-epoch:
+	sh scripts/race-visibility-queue-epoch.sh
+
+vet-visibility-queue-epoch:
+	sh scripts/vet-visibility-queue-epoch.sh
+
+.PHONY: review-visibility-queue-epoch commit-visibility-queue-epoch push-visibility-queue-epoch
+
+review-visibility-queue-epoch:
+	sh scripts/review-visibility-queue-epoch.sh
+
+commit-visibility-queue-epoch:
+	sh scripts/commit-visibility-queue-epoch.sh
+
+push-visibility-queue-epoch:
+	sh scripts/push-visibility-queue-epoch.sh
