@@ -21561,3 +21561,27 @@ Raw command:
 ```text
 make benchmark-t-u52
 ```
+
+## Authenticated Compact Peer Listener
+
+The opt-in `hatPeer.CompactPeerListener` performs a fixed-size handshake before
+creating a `CompactPeerSession`. It negotiates version/features, requires an
+authorization callback, optionally enforces a TLS wrapper, bounds admission,
+and cancels accepted sessions on close. The benchmark measures the client
+handshake path over an in-memory `net.Conn` on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Five raw ns/op samples | Median | Memory | Allocations |
+| --- | ---: | ---: | ---: |
+| 265.6, 263.8, 263.3, 261.2, 260.3 | 263.3 ns/op | 240 B/op | 7 allocs/op |
+
+The handshake is connection setup work, not per-request work. The fixed-size
+header prevents unbounded negotiation allocation; the main tradeoff is one
+pre-session exchange and an authorization callback in return for bounded
+admission and an explicit authentication/compatibility boundary. No listener
+starts by default.
+
+Raw command:
+
+```text
+make benchmark-t-u02
+```

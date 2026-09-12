@@ -10978,3 +10978,15 @@ benchmark-t-u52:
 
 verify-t-u52:
 	bash ./scripts/verify-t-u52.sh
+
+test-t-u02:
+	bash ./scripts/test-t-u02.sh
+
+format-t-u02:
+	bash ./scripts/format-t-u02.sh
+
+benchmark-t-u02:
+	bash ./scripts/benchmark-t-u02.sh
+
+verify-t-u02:
+	bash ./scripts/verify-t-u02.sh
