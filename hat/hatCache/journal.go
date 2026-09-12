@@ -1604,6 +1604,30 @@ func (journal *CommandJournal) WithPersistenceBarrier(persist func(uint64) error
 	return persist(journal.lastSequenceLocked())
 }
 
+// WithReadFence runs read while journaled mutations are paused and returns the
+// sequence after the read succeeds. A caller can pass that sequence as
+// CommandJournalSubscribeOptions.AfterSequence without leaving a gap between
+// a point read and the following subscription. The callback must not call
+// journal methods that acquire journal.mu or mutate the trie through a
+// different, non-journaled path.
+func (journal *CommandJournal) WithReadFence(read func() error) (uint64, error) {
+	if journal == nil {
+		return 0, ErrNilCommandJournal
+	}
+	if read == nil {
+		return 0, errors.New("hatriecache: read fence callback is nil")
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return 0, ErrCommandJournalClosed
+	}
+	if err := read(); err != nil {
+		return 0, err
+	}
+	return journal.lastSequenceLocked(), nil
+}
+
 func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
 	return journal.appendLockedWithIdempotency(request, nil)
 }

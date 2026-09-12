@@ -131,7 +131,7 @@ operator control remain the preferred deployment model.
 - [ ] M246 Per-object history-retention policies with bounded storage accounting.
 - [ ] M247 Resume errors that identify when a requested frontier has expired.
 - [ ] M248 Reusable maintained-result cache for identical read expressions.
-- [ ] M249 Consistency fencing between a point read and a subsequent subscription.
+- [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
 - [ ] M250 Temporal join alignment that waits for both input frontiers.
 
 ## Tarantool: 50 Additional Ideas

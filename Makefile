@@ -11273,3 +11273,28 @@ verify-m203: format-m203 test-m203-package race-m203 vet-m203
 
 commit-m203:
 	bash ./scripts/commit-m203.sh
+test-m249-read-fence:
+	bash ./scripts/test-m249-read-fence.sh
+
+format-m249:
+	bash ./scripts/format-m249.sh
+
+benchmark-m249:
+	bash ./scripts/benchmark-m249.sh
+
+test-m249-package:
+	bash ./scripts/test-m249-package.sh
+
+race-m249:
+	bash ./scripts/race-m249.sh
+
+vet-m249:
+	bash ./scripts/vet-m249.sh
+
+test-m249-full:
+	bash ./scripts/test-m249-full.sh
+
+verify-m249: format-m249 test-m249-package race-m249 vet-m249
+
+commit-m249:
+	bash ./scripts/commit-m249.sh
