@@ -21709,3 +21709,44 @@ BenchmarkChangefeedFrontierAdvance-32     	502224992	         2.361 ns/op	      
 PASS
 ok  	hatrie_cache/hat/hatReplication	9.875s
 ```
+## M202 Durable Changefeed Checkpoint
+
+Materialize-inspired source-bound checkpoint benchmark, five runs:
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| advance | 5.49 | 0 | 0 |
+| marshal | 23.90 | 24 | 1 |
+| unmarshal | 20.16 | 8 | 1 |
+| advance-prepared | 5.29 | 0 | 0 |
+
+Raw output:
+
+```text
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatReplication
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkChangefeedCheckpointOperations/advance-32         	194067318	         6.209 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-32         	214918528	         5.493 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-32         	193538088	         5.763 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-32         	217534698	         5.371 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-32         	216012006	         5.414 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/marshal-32         	46064860	        25.02 ns/op	      24 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/marshal-32         	45780470	        24.34 ns/op	      24 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/marshal-32         	44546175	        23.19 ns/op	      24 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/marshal-32         	51008228	        23.40 ns/op	      24 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/marshal-32         	48343232	        23.90 ns/op	      24 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/unmarshal-32       	55135608	        21.10 ns/op	       8 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/unmarshal-32       	50027538	        21.28 ns/op	       8 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/unmarshal-32       	53040216	        20.16 ns/op	       8 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/unmarshal-32       	56514270	        19.72 ns/op	       8 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/unmarshal-32       	58745998	        19.56 ns/op	       8 B/op	       1 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	230541694	         5.192 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	233985523	         5.314 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	232703864	         5.293 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	227061721	         5.372 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	228529995	         5.095 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatReplication	30.034s
+```

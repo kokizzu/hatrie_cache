@@ -11062,3 +11062,15 @@ benchmark-m201:
 
 verify-m201:
 	bash ./scripts/verify-m201.sh
+
+format-m202:
+	bash ./scripts/format-m202.sh
+
+test-m202:
+	bash ./scripts/test-m202.sh
+
+benchmark-m202:
+	bash ./scripts/benchmark-m202.sh
+
+verify-m202:
+	bash ./scripts/verify-m202.sh
