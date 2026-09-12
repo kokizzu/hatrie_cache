@@ -17064,6 +17064,23 @@ BenchmarkCommandJournalReplayParallel/parallel-32       1  28786873 ns/op 273159
 No parallel replay code remains in the tree, and the existing serial `Replay`
 path is unchanged.
 
+A follow-up prototype using the current bounded key-lane implementation was
+also rejected. It replayed 256 independent plain `SETSTR` records into a fresh
+trie and used the same three-sample benchmark target as the implementation
+experiment:
+
+| Path | Median time | Median heap | Median allocations | Result |
+| --- | ---: | ---: | ---: | --- |
+| Existing serial `Replay` | 349,027 ns | 82,971 B | 1,306 | Baseline |
+| Rejected current key-lane replay | 605,716 ns | 100,093 B | 1,321 | 1.74x slower; 1.21x more heap; 1.01x allocations |
+
+Raw output:
+
+```text
+BenchmarkCommandJournalParallelReplay/Serial-32: 282443, 349027, 526646 ns/op; 82969-82971 B/op; 1306 allocs/op
+BenchmarkCommandJournalParallelReplay/Parallel-32: 603474, 607114, 605716 ns/op; 100089-100108 B/op; 1321 allocs/op
+```
+
 ## Explicit Read Quorum
 
 `BenchmarkExecuteReadQuorum` reads three named targets with two matching values.

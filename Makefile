@@ -10327,6 +10327,8 @@ commit-visibility-fencing:
 push-visibility-fencing:
 	sh scripts/push-visibility-fencing.sh
 
+
+
 .PHONY: test-connection-pool
 test-connection-pool:
 	sh scripts/test-connection-pool.sh
@@ -10362,3 +10364,13 @@ commit-connection-pool:
 .PHONY: push-connection-pool
 push-connection-pool:
 	sh scripts/push-connection-pool.sh
+.PHONY: review-replay-rollback commit-replay-rollback push-replay-rollback
+
+review-replay-rollback:
+	sh scripts/review-replay-rollback.sh
+
+commit-replay-rollback:
+	sh scripts/commit-replay-rollback.sh
+
+push-replay-rollback:
+	sh scripts/push-replay-rollback.sh
