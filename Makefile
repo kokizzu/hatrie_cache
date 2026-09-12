@@ -10767,3 +10767,24 @@ benchmark-t-u28-lifecycle:
 .PHONY: publish-t-u28-lifecycle
 publish-t-u28-lifecycle:
 	@bash scripts/publish-t-u28-lifecycle.sh
+.PHONY: format-t-u29-stream
+format-t-u29-stream:
+	@bash scripts/format-t-u29-stream.sh
+.PHONY: test-t-u29-stream
+test-t-u29-stream:
+	@bash scripts/test-t-u29-stream.sh
+.PHONY: test-t-u29-package
+test-t-u29-package:
+	@bash scripts/test-t-u29-package.sh
+.PHONY: race-t-u29-stream
+race-t-u29-stream:
+	@bash scripts/race-t-u29-stream.sh
+.PHONY: vet-t-u29-stream
+vet-t-u29-stream:
+	@bash scripts/vet-t-u29-stream.sh
+.PHONY: benchmark-t-u29-stream
+benchmark-t-u29-stream:
+	@bash scripts/benchmark-t-u29-stream.sh
+.PHONY: publish-t-u29-stream
+publish-t-u29-stream:
+	@bash scripts/publish-t-u29-stream.sh
