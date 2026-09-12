@@ -35,6 +35,7 @@ security guidance before exposing it on a network.
 - Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
 - Flat native `[]int64` and `[]string` array columns for lower retained storage: [NATIVE_ARRAY_COLUMNS.md](NATIVE_ARRAY_COLUMNS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- Deterministic differential subscription ordering: [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)

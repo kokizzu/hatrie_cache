@@ -71,10 +71,18 @@ func (subscription *QueryDifferentialSubscription) Close() {
 }
 
 func querySubscriptionInitialDelta(snapshot QuerySubscriptionSnapshot) QuerySubscriptionDeltaBatch {
-	return querySubscriptionDeltaBatch(snapshot, QueryResult{}, false)
+	return querySubscriptionInitialDeltaWithOrder(snapshot, false)
+}
+
+func querySubscriptionInitialDeltaWithOrder(snapshot QuerySubscriptionSnapshot, deterministic bool) QuerySubscriptionDeltaBatch {
+	return querySubscriptionDeltaBatchWithOrder(snapshot, QueryResult{}, false, deterministic)
 }
 
 func querySubscriptionDeltaBatch(snapshot QuerySubscriptionSnapshot, previous QueryResult, hasPrevious bool) QuerySubscriptionDeltaBatch {
+	return querySubscriptionDeltaBatchWithOrder(snapshot, previous, hasPrevious, false)
+}
+
+func querySubscriptionDeltaBatchWithOrder(snapshot QuerySubscriptionSnapshot, previous QueryResult, hasPrevious, deterministic bool) QuerySubscriptionDeltaBatch {
 	batch := QuerySubscriptionDeltaBatch{
 		ID:       snapshot.ID,
 		Revision: snapshot.Revision,
@@ -87,26 +95,37 @@ func querySubscriptionDeltaBatch(snapshot QuerySubscriptionSnapshot, previous Qu
 		return batch
 	}
 	if !hasPrevious {
-		batch.Deltas = querySubscriptionPositiveRows(snapshot.Result.Rows)
+		batch.Deltas = querySubscriptionPositiveRowsWithOrder(snapshot.Result.Rows, deterministic)
 		return batch
 	}
-	batch.Deltas = querySubscriptionRowDeltas(previous.Rows, snapshot.Result.Rows)
+	batch.Deltas = querySubscriptionRowDeltasWithOrder(previous.Rows, snapshot.Result.Rows, deterministic)
 	return batch
 }
 
 func querySubscriptionResetDelta(snapshot QuerySubscriptionSnapshot, result QueryResult) QuerySubscriptionDeltaBatch {
-	batch := querySubscriptionDeltaBatch(snapshot, QueryResult{}, false)
+	return querySubscriptionResetDeltaWithOrder(snapshot, result, false)
+}
+
+func querySubscriptionResetDeltaWithOrder(snapshot QuerySubscriptionSnapshot, result QueryResult, deterministic bool) QuerySubscriptionDeltaBatch {
+	batch := querySubscriptionDeltaBatchWithOrder(snapshot, QueryResult{}, false, deterministic)
 	batch.Reset = true
-	batch.Deltas = querySubscriptionPositiveRows(result.Rows)
+	batch.Deltas = querySubscriptionPositiveRowsWithOrder(result.Rows, deterministic)
 	batch.Columns = append([]string(nil), result.Columns...)
 	return batch
 }
 
 func querySubscriptionPositiveRows(rows []Row) []QuerySubscriptionDelta {
+	return querySubscriptionPositiveRowsWithOrder(rows, false)
+}
+
+func querySubscriptionPositiveRowsWithOrder(rows []Row, deterministic bool) []QuerySubscriptionDelta {
 	if len(rows) == 0 {
 		return nil
 	}
 	groups, order := querySubscriptionRowGroups(rows)
+	if deterministic {
+		sort.Strings(order)
+	}
 	deltas := make([]QuerySubscriptionDelta, 0, len(order))
 	for _, key := range order {
 		group := groups[key]
@@ -116,8 +135,16 @@ func querySubscriptionPositiveRows(rows []Row) []QuerySubscriptionDelta {
 }
 
 func querySubscriptionRowDeltas(previous, current []Row) []QuerySubscriptionDelta {
+	return querySubscriptionRowDeltasWithOrder(previous, current, false)
+}
+
+func querySubscriptionRowDeltasWithOrder(previous, current []Row, deterministic bool) []QuerySubscriptionDelta {
 	previousGroups, previousOrder := querySubscriptionRowGroups(previous)
 	currentGroups, currentOrder := querySubscriptionRowGroups(current)
+	if deterministic {
+		sort.Strings(previousOrder)
+		sort.Strings(currentOrder)
+	}
 	deltas := make([]QuerySubscriptionDelta, 0, len(previousOrder)+len(currentOrder))
 	for _, key := range previousOrder {
 		before := previousGroups[key]
@@ -194,13 +221,13 @@ func enqueueQuerySubscriptionDifferential(subscription *QuerySubscription, batch
 		select {
 		case <-subscription.differentialUpdates:
 		default:
-			reset := querySubscriptionResetDelta(QuerySubscriptionSnapshot{
+			reset := querySubscriptionResetDeltaWithOrder(QuerySubscriptionSnapshot{
 				ID:       batch.ID,
 				Revision: batch.Revision,
 				Frontier: batch.Frontier,
 				Progress: batch.Progress,
 				Complete: batch.Complete,
-			}, resetResult)
+			}, resetResult, subscription.definition.DeterministicOrder)
 			select {
 			case subscription.differentialUpdates <- reset:
 			default:

@@ -11129,3 +11129,26 @@ vet-t240:
 .PHONY: verify-t240
 verify-t240:
 	sh scripts/verify-t240.sh
+.PHONY: test-m205
+test-m205:
+	@bash scripts/test-m205.sh
+
+.PHONY: format-m205
+format-m205:
+	@bash scripts/format-m205.sh
+
+.PHONY: benchmark-m205
+benchmark-m205:
+	@bash scripts/benchmark-m205.sh
+
+.PHONY: race-m205
+race-m205:
+	@bash scripts/race-m205.sh
+
+.PHONY: vet-m205
+vet-m205:
+	@bash scripts/vet-m205.sh
+
+.PHONY: verify-m205
+verify-m205:
+	@bash scripts/verify-m205.sh

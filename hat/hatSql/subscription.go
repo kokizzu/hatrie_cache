@@ -21,6 +21,9 @@ type QuerySubscriptionDefinition struct {
 	// StartLive validates the query at registration but suppresses its initial
 	// result. The first relevant refresh publishes revision one.
 	StartLive bool
+	// DeterministicOrder sorts each differential batch's removal and addition
+	// phases by canonical row key. It has no effect on normal snapshots.
+	DeterministicOrder bool
 }
 
 // QuerySubscriptionSnapshot is one immutable query-result version.
@@ -153,7 +156,7 @@ func (registry *QuerySubscriptions) subscribe(ctx context.Context, definition Qu
 	registry.subs[subscription.id] = subscription
 	registry.mu.Unlock()
 	if differential && initialRevision > 0 {
-		subscription.differentialUpdates <- querySubscriptionInitialDelta(subscription.snapshot)
+		subscription.differentialUpdates <- querySubscriptionInitialDeltaWithOrder(subscription.snapshot, definition.DeterministicOrder)
 	}
 	return subscription, nil
 }
@@ -359,7 +362,7 @@ func (subscription *QuerySubscription) publishAt(result QueryResult, frontier ui
 		}
 	}
 	if subscription.differentialUpdates != nil {
-		envelope := querySubscriptionDeltaBatch(update, previous, true)
+		envelope := querySubscriptionDeltaBatchWithOrder(update, previous, true, subscription.definition.DeterministicOrder)
 		enqueueQuerySubscriptionDifferential(subscription, envelope, update.Result)
 	}
 	if subscription.durableSink != nil {
@@ -414,7 +417,7 @@ func (subscription *QuerySubscription) publishProgress(frontier uint64, complete
 		}
 	}
 	if subscription.differentialUpdates != nil {
-		envelope := querySubscriptionDeltaBatch(update, subscription.snapshot.Result, true)
+		envelope := querySubscriptionDeltaBatchWithOrder(update, subscription.snapshot.Result, true, subscription.definition.DeterministicOrder)
 		envelope.Columns = append([]string(nil), subscription.snapshot.Result.Columns...)
 		enqueueQuerySubscriptionDifferential(subscription, envelope, subscription.snapshot.Result)
 	}
