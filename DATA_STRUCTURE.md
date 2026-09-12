@@ -17,6 +17,7 @@ Send these JSON requests to `POST /api/commands`. The CLI equivalent is
 | `command` | string | Required, case-insensitive command. |
 | `key` | string | Required except for `BATCH`. |
 | `value` | string | One text or textual numeric argument. |
+| `expected_value` | string | Expected existing string for `CAS`. |
 | `values` | JSON array | Multiple values. |
 | `subkey` | string | Secondary key, count, prefix, or numeric argument. |
 | `pairs` | JSON object | Map fields or named creation options. |
@@ -79,7 +80,7 @@ The final child output is `{"ok":true,"message":"ok","value":"42"}`.
 | Data structure | Commands | Input | Output |
 | --- | --- | --- | --- |
 | Counter | `SETINT`, `SETINTX`, `INC` | Signed 32-bit `value`; `*X` also takes `ttl_seconds`; `INC` defaults to `1`. | Mutation succeeds; `GET` returns decimal value. Overflow is rejected. |
-| String | `SET`, `SETSTR`, `SETX`, `SETSTRX` | Text `value`; `*X` also takes `ttl_seconds`. | Mutation succeeds; `GET`/`GETSTR` returns the text. |
+| String | `SET`, `SETSTR`, `SETX`, `SETSTRX`, `CAS` | Text `value`; `*X` also takes `ttl_seconds`; `CAS` compares `expected_value`. | Mutation succeeds; `GET`/`GETSTR` returns the text; CAS returns `1` or `0`. |
 | Bytes | Go API plus snapshot/persistence codecs; `GET`/`DUMP` inspect the canonical form. | Use the Go API when raw byte identity is needed. | Binary snapshot and replication paths preserve raw bytes. |
 
 Input:
@@ -191,6 +192,7 @@ always described in [Response fields](#response-fields).
 | `DUMP` | `name="Ivi"` | `{"key":"name"}` | tagged JSON entry containing `Ivi` | unchanged |
 | `EXISTS` | `name=∅` | `{"key":"name"}` | `value:"0"` | unchanged |
 | `SET` | `name=∅` | `{"key":"name","value":"Ivi"}` | `stored string` | `name="Ivi"` |
+| `CAS` | `name="Ivi"` | `{"key":"name","expected_value":"Ivi","value":"Ada"}` | `value:"1"` | `name="Ada"` |
 | `SETX` | `name=∅` | `{"key":"name","value":"Ivi","ttl_seconds":60}` | `stored string with ttl` | `name="Ivi"`, expires in 60 s |
 | `SETINT` | `views=∅` | `{"key":"views","value":"41"}` | `stored counter` | `views=41` |
 | `SETINTX` | `views=∅` | `{"key":"views","value":"41","ttl_seconds":60}` | `stored counter with ttl` | `views=41`, expires in 60 s |
@@ -203,7 +205,10 @@ always described in [Response fields](#response-fields).
 | `BATCH` | `views=∅` | `{"batch":[{"command":"SETINT","key":"views","value":"41"},{"command":"INC","key":"views","value":"1"},{"command":"GET","key":"views"}]}` | three ordered `responses`; last is `42` | `views=42` |
 
 `GETSTR` is an alias of `GET`; `SETSTR` is an alias of `SET`; `SETSTRX` is an
-alias of `SETX`. `SET`, `SETINT`, and every `CREATE*` command replace a live
+alias of `SETX`. `COMPARESET` and `COMPARE_AND_SWAP` are aliases of `CAS`.
+`CAS` only replaces an existing string when `expected_value` matches, preserves
+an existing TTL, and returns `value:"0"` without changing state on a mismatch.
+`SET`, `SETINT`, and every `CREATE*` command replace a live
 value of another type at the same key. `INC` rejects non-counters and 32-bit
 overflow. A positive `ttl_seconds` is required for `*X` and `EXPIRE`.
 
@@ -342,6 +347,7 @@ canonical command in the state tables.
 | `GET` | `GETSTR` |
 | `SET` | `SETSTR` |
 | `SETX` | `SETSTRX` |
+| `CAS` | `COMPARESET`, `COMPARE_AND_SWAP` |
 | `PUSHPQ` | `PUSHPRIORITY` |
 | `PEEKPQ` | `PEEKPRIORITY` |
 | `POPPQ` | `POPPRIORITY` |

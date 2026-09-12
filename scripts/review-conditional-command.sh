@@ -4,6 +4,7 @@ set -eu
 git diff --check -- \
 	BENCHMARK.md \
 	CLIENT_SDK.md \
+	DATA_STRUCTURE.md \
 	INSPIRATION_BACKLOG.md \
 	Makefile \
 	README.md \
@@ -26,6 +27,7 @@ printf '%s\n' '== changed files =='
 git status --short -- \
 	BENCHMARK.md \
 	CLIENT_SDK.md \
+	DATA_STRUCTURE.md \
 	INSPIRATION_BACKLOG.md \
 	Makefile \
 	README.md \
@@ -47,6 +49,7 @@ git status --short -- \
 git diff --stat -- \
 	BENCHMARK.md \
 	CLIENT_SDK.md \
+	DATA_STRUCTURE.md \
 	INSPIRATION_BACKLOG.md \
 	Makefile \
 	README.md \
@@ -60,6 +63,8 @@ git diff --stat -- \
 	internal/gen/hatriecache/v1/cache.pb.go \
 	proto/hatriecache/v1/cache.proto \
 	scripts/benchmark-conditional-command.sh \
+	scripts/commit-conditional-command.sh \
+	scripts/push-conditional-command.sh \
 	scripts/format-conditional-command.sh \
 	scripts/race-conditional-command.sh \
 	scripts/review-conditional-command.sh \
