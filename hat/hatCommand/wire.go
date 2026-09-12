@@ -393,6 +393,7 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) Request
 	}
 	out := Request{
 		Command:        request.GetCommand(),
+		Atomic:         request.GetAtomic(),
 		Key:            request.GetKey(),
 		Value:          request.GetValue(),
 		Subkey:         request.GetSubkey(),
@@ -495,6 +496,7 @@ func cacheCommandRequestToProto(request Request) (*hatriecachev1.CommandRequest,
 	}
 	out := &hatriecachev1.CommandRequest{
 		Command:        request.Command,
+		Atomic:         request.Atomic,
 		Key:            request.Key,
 		Value:          request.Value,
 		Subkey:         request.Subkey,
@@ -590,6 +592,7 @@ func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request Req
 		return err
 	}
 	out.Command = request.Command
+	out.Atomic = request.Atomic
 	out.Key = request.Key
 	out.Value = request.Value
 	out.Subkey = request.Subkey

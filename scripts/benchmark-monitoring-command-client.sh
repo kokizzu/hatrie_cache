@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-go test ./hat/hatMonitoring -run '^$' -bench 'Benchmark(Client|Manual)(Command|Batch)JSON' -benchmem -count=5
+go test ./hat/hatMonitoring -run '^$' -bench 'Benchmark(Client|Manual)(Command|Batch)(JSON|Protobuf)' -benchmem -count=5

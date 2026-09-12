@@ -1,13 +1,17 @@
 package hatMonitoring_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
 	"hatrie_cache/hat/hatCommand"
+	"hatrie_cache/hat/hatGrpc"
 	"hatrie_cache/hat/hatMonitoring"
 )
 
@@ -95,5 +99,132 @@ func TestClientBatchUsesExistingBatchCommandContract(t *testing.T) {
 	}
 	if received.Batch[0].Key != "one" || received.Batch[1].Key != "two" {
 		t.Fatalf("received batch entries = %#v, want one and two", received.Batch)
+	}
+}
+
+func TestClientCommandWithFormatUsesProtobufWireContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("authorization = %q, want bearer token", request.Header.Get("Authorization"))
+		}
+		if request.Header.Get("Content-Type") != hatCommand.ContentTypeProtobuf || request.Header.Get("Accept") != hatCommand.ContentTypeProtobuf {
+			t.Fatalf("wire headers = %q/%q, want protobuf", request.Header.Get("Content-Type"), request.Header.Get("Accept"))
+		}
+		payload, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read protobuf request: %v", err)
+		}
+		decoded, err := hatCommand.DecodeRequestProtobuf(bytes.NewReader(payload), 1<<20)
+		if err != nil {
+			t.Fatalf("DecodeRequestProtobuf() error = %v", err)
+		}
+		if decoded.Command != "SETSTR" || decoded.Key != "name" || decoded.Value != "ivi" {
+			t.Fatalf("decoded request = %#v, want SETSTR name ivi", decoded)
+		}
+		responsePayload, err := proto.Marshal(&hatGrpc.CommandResponse{Ok: true, Message: "binary"})
+		if err != nil {
+			t.Fatalf("marshal protobuf response: %v", err)
+		}
+		writer.Header().Set("Content-Type", hatCommand.ContentTypeProtobuf)
+		_, _ = writer.Write(responsePayload)
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	response, err := client.CommandWithFormat(context.Background(), hatCommand.Request{
+		Command: "SETSTR",
+		Key:     "name",
+		Value:   "ivi",
+	}, hatCommand.CommandWireFormatProtobuf)
+	if err != nil {
+		t.Fatalf("CommandWithFormat() error = %v", err)
+	}
+	if !response.OK || response.Message != "binary" {
+		t.Fatalf("CommandWithFormat() response = %#v, want binary response", response)
+	}
+}
+
+func TestClientBatchWithFormatUsesProtobufWireContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Fatalf("authorization = %q, want Bearer secret", got)
+		}
+		if got := request.Header.Get("Content-Type"); got != hatCommand.ContentTypeProtobuf {
+			t.Fatalf("content type = %q, want %q", got, hatCommand.ContentTypeProtobuf)
+		}
+		if got := request.Header.Get("Accept"); got != hatCommand.ContentTypeProtobuf {
+			t.Fatalf("accept = %q, want %q", got, hatCommand.ContentTypeProtobuf)
+		}
+		decoded, err := hatCommand.DecodeRequestProtobuf(request.Body, 1<<20)
+		if err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if decoded.Command != "BATCH" {
+			t.Fatalf("command = %q, want BATCH", decoded.Command)
+		}
+		if !decoded.Atomic {
+			t.Fatal("atomic = false, want true")
+		}
+		if len(decoded.Batch) != 2 || decoded.Batch[0].Key != "first" || decoded.Batch[1].Value != "two" {
+			t.Fatalf("batch = %#v, want two decoded commands", decoded.Batch)
+		}
+		payload, err := proto.Marshal(&hatGrpc.CommandResponse{Ok: true, Message: "batch-binary"})
+		if err != nil {
+			t.Fatalf("marshal response: %v", err)
+		}
+		writer.Header().Set("Content-Type", hatCommand.ContentTypeProtobuf)
+		_, _ = writer.Write(payload)
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	response, err := client.BatchWithFormat(
+		context.Background(),
+		[]hatCommand.Request{
+			{Command: "SETSTR", Key: "first", Value: "one"},
+			{Command: "SETSTR", Key: "second", Value: "two"},
+		},
+		true,
+		hatCommand.CommandWireFormatProtobuf,
+	)
+	if err != nil {
+		t.Fatalf("BatchWithFormat() error = %v", err)
+	}
+	if !response.OK || response.Message != "batch-binary" {
+		t.Fatalf("BatchWithFormat() response = %#v, want batch-binary response", response)
+	}
+}
+
+func TestClientCommandUsesConfiguredProtobufWireFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Content-Type") != hatCommand.ContentTypeProtobuf {
+			t.Fatalf("content type = %q, want %q", request.Header.Get("Content-Type"), hatCommand.ContentTypeProtobuf)
+		}
+		if request.Header.Get("Accept") != hatCommand.ContentTypeProtobuf {
+			t.Fatalf("accept = %q, want %q", request.Header.Get("Accept"), hatCommand.ContentTypeProtobuf)
+		}
+		if _, err := hatCommand.DecodeRequestProtobuf(request.Body, 1<<20); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		payload, err := proto.Marshal(&hatGrpc.CommandResponse{Ok: true, Message: "configured"})
+		if err != nil {
+			t.Fatalf("marshal response: %v", err)
+		}
+		writer.Header().Set("Content-Type", hatCommand.ContentTypeProtobuf)
+		_, _ = writer.Write(payload)
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandWireFormat = hatCommand.CommandWireFormatProtobuf
+	response, err := client.Command(context.Background(), hatCommand.Request{Command: "SETSTR", Key: "name", Value: "ivi"})
+	if err != nil {
+		t.Fatalf("Command() error = %v", err)
+	}
+	if !response.OK || response.Message != "configured" {
+		t.Fatalf("Command() response = %#v, want configured response", response)
 	}
 }

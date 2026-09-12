@@ -10527,3 +10527,14 @@ commit-t103-decision:
 .PHONY: push-t103-decision
 push-t103-decision:
 	sh scripts/push-t103-decision.sh
+.PHONY: review-monitoring-command-wire
+review-monitoring-command-wire:
+	sh scripts/review-monitoring-command-wire.sh
+
+.PHONY: commit-monitoring-command-wire
+commit-monitoring-command-wire:
+	sh scripts/commit-monitoring-command-wire.sh
+
+.PHONY: push-monitoring-command-wire
+push-monitoring-command-wire:
+	sh scripts/push-monitoring-command-wire.sh

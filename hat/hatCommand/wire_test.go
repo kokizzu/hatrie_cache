@@ -4,7 +4,35 @@ import (
 	"bytes"
 	"io"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 )
+
+func TestWirePublicAPIProtobufPreservesAtomicBatch(t *testing.T) {
+	want := Request{
+		Command: "BATCH",
+		Atomic:  true,
+		Batch: []Request{
+			{Command: "SETSTR", Key: "first", Value: "one"},
+			{Command: "SETSTR", Key: "second", Value: "two"},
+		},
+	}
+	message, err := RequestToProto(want)
+	if err != nil {
+		t.Fatalf("RequestToProto() error = %v", err)
+	}
+	wireData, err := proto.Marshal(message)
+	if err != nil {
+		t.Fatalf("proto.Marshal() error = %v", err)
+	}
+	got, err := DecodeRequestProtobuf(bytes.NewReader(wireData), int64(len(wireData)))
+	if err != nil {
+		t.Fatalf("DecodeRequestProtobuf() error = %v", err)
+	}
+	if !got.Atomic || got.Command != want.Command || len(got.Batch) != len(want.Batch) {
+		t.Fatalf("decoded request = %#v, want atomic batch %#v", got, want)
+	}
+}
 
 func TestWirePublicAPIJSONRoundTrip(t *testing.T) {
 	body, contentType, contentEncoding, err := CommandRequestBody(Request{

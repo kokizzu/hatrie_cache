@@ -76,6 +76,26 @@ response, err := client.Batch(ctx, []hatCommand.Request{
 }, false)
 ```
 
+`Command` and `Batch` use JSON by default. For clients where wire bandwidth is
+more important than single-command CPU, select the protobuf command contract
+once on the client:
+
+```go
+client.CommandWireFormat = hatCommand.CommandWireFormatProtobuf
+response, err := client.Command(ctx, hatCommand.Request{
+	Command: "SETSTR",
+	Key:     "name",
+	Value:   "ivi",
+})
+```
+
+The equivalent per-call methods are `CommandWithFormat` and `BatchWithFormat`.
+They send `Content-Type` and `Accept: application/x-protobuf` and require the
+same protobuf response content type. JSON remains the default because the
+repository benchmark shows protobuf is a bandwidth win and a batched latency
+win, but is slower for one small command or ten separate requests. See
+`BENCHMARK.md` for the measured CPU, heap, allocation, and wire-size results.
+
 The equivalent wire request is usable from any language with an HTTP client:
 
 ```sh
@@ -108,9 +128,11 @@ the `.proto` file from the same compatibility version.
 ## Compatibility
 
 This package is an import and naming surface only. It aliases the existing
-generated protobuf types, so it does not change field numbers, enum values, RPC
-RPC names, streaming behavior, serialization, or storage formats. A client
-must still use the server's configured address, transport security, and
+generated protobuf types, so it does not change enum values, RPC names,
+streaming behavior, or storage formats. The HTTP command helper additionally
+supports the opt-in protobuf wire format; its `atomic` batch flag is field 14
+and remains backward-compatible with older protobuf readers. A client must
+still use the server's configured address, transport security, and
 authentication policy.
 
 For HTTP clients, use the existing HTTP/JSON or NDJSON endpoints documented in

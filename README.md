@@ -191,6 +191,7 @@ security guidance before exposing it on a network.
 - Reproducible Jupyter SQL analysis: [NOTEBOOK.md](NOTEBOOK.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
+- Importable language-neutral HTTP/gRPC clients and JSON/protobuf command-wire selection: [CLIENT_SDK.md](CLIENT_SDK.md)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Opt-in asynchronous HTTP command admission and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)

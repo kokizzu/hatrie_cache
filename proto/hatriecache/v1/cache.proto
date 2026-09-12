@@ -86,6 +86,7 @@ message CommandRequest {
 	bytes binary_value = 11;
 	string idempotency_key = 12;
 	uint64 request_id = 13;
+	bool atomic = 14;
 }
 
 message CommandResponse {

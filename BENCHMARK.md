@@ -21422,3 +21422,41 @@ latency win. The compact JSON body itself is 9.2% larger for this tiny
 workload because of the `BATCH` envelope; that overhead becomes relatively
 smaller as command payloads grow. Reproduce it with
 `make benchmark-monitoring-command-client`.
+
+## Optional protobuf command wire format
+
+The public HTTP command client also supports the existing protobuf command
+contract through `CommandWithFormat`, `BatchWithFormat`, and the
+`Client.CommandWireFormat` setting. This is a wire-efficiency feature, not a
+universal CPU optimization. The benchmark uses the same `httptest` server,
+`SETSTR` payload, successful response, and five `-benchmem` samples for each
+path. `wire-B/op` is the encoded request body only; response bytes and HTTP
+headers are excluded. `B/op` is Go heap allocation volume, not retained RSS.
+
+Median on Linux/amd64, AMD Ryzen 9 5950X:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Wire B/op | CPU vs JSON | Heap vs JSON | Wire vs JSON |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JSON one command | 76,652 | 9,923 | 101 | 54 | 1.00x | 1.00x | 1.00x |
+| Protobuf one command | 80,739 | 9,638 | 97 | 26 | 1.05x slower | 0.97x | 0.48x |
+| JSON batch of 10 | 86,174 | 10,856 | 102 | 568 | 1.00x | 1.00x | 1.00x |
+| Protobuf batch of 10 | 85,956 | 9,748 | 98 | 267 | 1.00x | 0.90x | 0.47x |
+| JSON 10 separate commands | 734,473 | 101,596 | 1,015 | 520 | 1.00x | 1.00x | 1.00x |
+| Protobuf 10 separate commands | 836,178 | 97,053 | 975 | 240 | 1.14x slower | 0.96x | 0.46x |
+
+Raw `ns/op` samples in command order:
+
+```text
+JSON one:       78379, 77136, 76652, 75188, 70687
+Protobuf one:   82711, 80739, 79700, 78169, 86404
+JSON batch-10:  86174, 86927, 86233, 81498, 84118
+Proto batch-10: 85956, 84301, 88971, 84935, 87595
+JSON x10:       746671, 734473, 720926, 747049, 730466
+Proto x10:      836178, 855068, 865552, 793256, 828070
+```
+
+Protobuf is therefore retained as an opt-in for clients where bandwidth is
+the limiting resource, especially when callers can use one batch request. It
+does not replace JSON as the default: the common one-command path is slower,
+and ten separate protobuf requests are slower despite their smaller bodies.
+Reproduce the measurements with `make benchmark-monitoring-command-client`.

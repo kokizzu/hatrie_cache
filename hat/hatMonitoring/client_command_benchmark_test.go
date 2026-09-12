@@ -9,13 +9,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
 	"hatrie_cache/hat/hatCommand"
+	"hatrie_cache/hat/hatGrpc"
 	"hatrie_cache/hat/hatMonitoring"
 )
 
 func newCommandBenchmarkServer() *httptest.Server {
+	protobufResponse, err := proto.Marshal(&hatGrpc.CommandResponse{Ok: true, Message: "stored"})
+	if err != nil {
+		panic(err)
+	}
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		_, _ = io.Copy(io.Discard, request.Body)
+		if request.Header.Get("Accept") == hatCommand.ContentTypeProtobuf {
+			writer.Header().Set("Content-Type", hatCommand.ContentTypeProtobuf)
+			_, _ = writer.Write(protobufResponse)
+			return
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"ok":true,"message":"stored"}`))
 	}))
@@ -27,11 +38,34 @@ func BenchmarkClientCommandJSON(b *testing.B) {
 	client := hatMonitoring.NewClient(server.URL, "secret")
 	client.HTTP = server.Client()
 	command := hatCommand.Request{Command: "SETSTR", Key: "benchmark", Value: "value"}
+	wireBody, err := json.Marshal(command)
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
+	b.ReportMetric(float64(len(wireBody)), "wire-B/op")
 	for index := 0; index < b.N; index++ {
 		if _, err := client.Command(context.Background(), command); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientCommandProtobuf(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	command := hatCommand.Request{Command: "SETSTR", Key: "benchmark", Value: "value"}
+	wireBytes := benchmarkCommandWireBytesFormat(command, hatCommand.CommandWireFormatProtobuf)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.CommandWithFormat(context.Background(), command, hatCommand.CommandWireFormatProtobuf); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -89,6 +123,21 @@ func benchmarkCommandWireBytes(commands []hatCommand.Request) int {
 	return total
 }
 
+func benchmarkCommandWireBytesFormat(request hatCommand.Request, format hatCommand.CommandWireFormat) int {
+	body, _, _, err := hatCommand.CommandRequestBody(request, format, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	if closer, ok := body.(io.Closer); ok {
+		defer closer.Close()
+	}
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		panic(err)
+	}
+	return len(payload)
+}
+
 func BenchmarkClientBatchJSON10(b *testing.B) {
 	server := newCommandBenchmarkServer()
 	defer server.Close()
@@ -110,6 +159,27 @@ func BenchmarkClientBatchJSON10(b *testing.B) {
 	}
 }
 
+func BenchmarkClientBatchProtobuf10(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	commands := benchmarkCommands(10)
+	wireBytes := benchmarkCommandWireBytesFormat(
+		hatCommand.Request{Command: "BATCH", Batch: commands},
+		hatCommand.CommandWireFormatProtobuf,
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.BatchWithFormat(context.Background(), commands, false, hatCommand.CommandWireFormatProtobuf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkClientCommandJSON10(b *testing.B) {
 	server := newCommandBenchmarkServer()
 	defer server.Close()
@@ -123,6 +193,25 @@ func BenchmarkClientCommandJSON10(b *testing.B) {
 	for index := 0; index < b.N; index++ {
 		for _, command := range commands {
 			if _, err := client.Command(context.Background(), command); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkClientCommandProtobuf10(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	commands := benchmarkCommands(10)
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(benchmarkCommandWireBytesFormat(commands[0], hatCommand.CommandWireFormatProtobuf)*len(commands)), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		for _, command := range commands {
+			if _, err := client.CommandWithFormat(context.Background(), command, hatCommand.CommandWireFormatProtobuf); err != nil {
 				b.Fatal(err)
 			}
 		}
