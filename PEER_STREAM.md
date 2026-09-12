@@ -87,10 +87,10 @@ small request/reply loop over `net.Pipe`:
 
 | Path | Time | Memory | Allocations |
 |---|---:|---:|---:|
-| Raw compact session call | 5.411-6.196 us/op | 496-497 B/op | 9 allocs/op |
-| Stream call | 5.433-5.848 us/op | 608 B/op | 10 allocs/op |
+| Raw compact session call | 5.368-5.538 us/op | 496-497 B/op | 9 allocs/op |
+| Stream call | 5.187-5.436 us/op | 576 B/op | 10 allocs/op |
 
-The stream boundary adds about `111-112 B/op` and one allocation for its
+The stream boundary adds about `79-80 B/op` and one allocation for its
 versioned envelope. It is a semantic feature, not a throughput optimization;
 the extra cost buys multiplexed transaction identity and server-side state
 validation. The benchmark keeps the existing raw session path as the control.
