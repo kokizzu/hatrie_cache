@@ -30,6 +30,23 @@ is applied. This keeps aggregate values attached to existing buckets and makes
 aliases resolve against the public output column name. `WITH FILL` does not
 change source data or create persistent rollups.
 
+For generated values, add an optional policy list after `STEP`:
+
+```sql
+ORDER BY ts WITH FILL
+FROM TIMESTAMP '2026-01-01T00:00:00Z'
+TO TIMESTAMP '2026-01-01T00:04:00Z'
+STEP DURATION '1m'
+INTERPOLATE (value LINEAR, status PREVIOUS)
+```
+
+`PREVIOUS` and `NEXT` copy values from observed rows on either side of a gap.
+`LINEAR` interpolates finite numeric endpoints and returns `NULL` when an
+endpoint is missing or unsupported. Omitting a policy means `PREVIOUS`; the
+policy applies only to generated rows. See
+[`C218_WITH_FILL_INTERPOLATION.md`](C218_WITH_FILL_INTERPOLATION.md) for the
+full contract and benchmark.
+
 Focused coverage is in `hat/hatSql/with_fill_query_test.go`, including missing
 buckets, empty input, alias resolution, limits, streaming output, invalid
 forms, and an allocation-reporting benchmark.

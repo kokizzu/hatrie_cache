@@ -11505,3 +11505,43 @@ commit-c213:
 .PHONY: push-c213
 push-c213:
 	bash ./scripts/push-c213.sh
+
+.PHONY: format-c218
+format-c218:
+	bash ./scripts/format-c218.sh
+
+.PHONY: test-c218
+test-c218:
+	bash ./scripts/test-c218.sh
+
+.PHONY: test-c218-package
+test-c218-package:
+	bash ./scripts/test-c218-package.sh
+
+.PHONY: test-c218-race
+test-c218-race:
+	bash ./scripts/test-c218-race.sh
+
+.PHONY: test-c218-full
+test-c218-full:
+	bash ./scripts/test-c218-full.sh
+
+.PHONY: vet-c218
+vet-c218:
+	bash ./scripts/vet-c218.sh
+
+.PHONY: benchmark-c218
+benchmark-c218:
+	bash ./scripts/benchmark-c218.sh
+
+.PHONY: status-c218
+status-c218:
+	bash ./scripts/status-c218.sh
+
+.PHONY: commit-c218
+commit-c218:
+	bash ./scripts/commit-c218.sh
+
+.PHONY: push-c218
+push-c218:
+	bash ./scripts/push-c218.sh

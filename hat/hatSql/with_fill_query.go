@@ -54,6 +54,14 @@ func (p *sqlQueryParser) parseSQLWithFillSpec(column string) (SQLWithFillSpec, e
 	if err != nil || spec.Step <= 0 {
 		return SQLWithFillSpec{}, p.diagnostic(p.previous(), "WITH FILL STEP requires a positive DURATION literal")
 	}
+	if p.keyword("INTERPOLATE") {
+		p.next()
+		interpolation, err := p.parseSQLWithFillInterpolation()
+		if err != nil {
+			return SQLWithFillSpec{}, err
+		}
+		spec.Interpolation = interpolation
+	}
 	if spec.From.IsZero() || spec.To.IsZero() || !spec.To.After(spec.From) {
 		return SQLWithFillSpec{}, p.diagnostic(p.previous(), "WITH FILL requires non-zero bounds with TO after FROM")
 	}
@@ -128,9 +136,69 @@ func applySQLWithFill(query *sqlQuery, columns []string, rows []SQLRow, maxRows 
 	for _, column := range columns {
 		spec.Template[column] = nil
 	}
+	interpolation, err := resolveSQLWithFillInterpolations(spec.Interpolation, columns)
+	if err != nil {
+		return nil, err
+	}
+	spec.Interpolation = interpolation
 	return fillSQLRowsBounded(rows, spec, maxRows)
 }
 
 func sqlExplainWithFill(spec SQLWithFillSpec) string {
-	return fmt.Sprintf(" WITH FILL FROM TIMESTAMP '%s' TO TIMESTAMP '%s' STEP DURATION '%s'", spec.From.Format(time.RFC3339Nano), spec.To.Format(time.RFC3339Nano), spec.Step)
+	explanation := fmt.Sprintf(" WITH FILL FROM TIMESTAMP '%s' TO TIMESTAMP '%s' STEP DURATION '%s'", spec.From.Format(time.RFC3339Nano), spec.To.Format(time.RFC3339Nano), spec.Step)
+	if len(spec.Interpolation) == 0 {
+		return explanation
+	}
+	columns := sortedSQLWithFillInterpolationColumns(spec.Interpolation)
+	explanation += " INTERPOLATE ("
+	for index, column := range columns {
+		if index > 0 {
+			explanation += ", "
+		}
+		explanation += fmt.Sprintf("%s %s", column, spec.Interpolation[column])
+	}
+	return explanation + ")"
+}
+
+func (p *sqlQueryParser) parseSQLWithFillInterpolation() (map[string]SQLWithFillInterpolation, error) {
+	if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+		return nil, err
+	}
+	interpolation := make(map[string]SQLWithFillInterpolation)
+	for {
+		if p.current().kind == sqlTokenRightParen {
+			return nil, p.diagnostic(p.current(), "WITH FILL INTERPOLATE requires at least one column")
+		}
+		column, err := p.expectIdentifier("interpolation column", nil)
+		if err != nil {
+			return nil, err
+		}
+		for existing := range interpolation {
+			if strings.EqualFold(existing, column.text) {
+				return nil, p.diagnostic(column, fmt.Sprintf("duplicate WITH FILL INTERPOLATE column %q", column.text))
+			}
+		}
+		policy := SQLWithFillInterpolationPrevious
+		switch {
+		case p.keyword("PREVIOUS"):
+			p.next()
+		case p.keyword("NEXT"):
+			policy = SQLWithFillInterpolationNext
+			p.next()
+		case p.keyword("LINEAR"):
+			policy = SQLWithFillInterpolationLinear
+			p.next()
+		case p.current().kind == sqlTokenComma || p.current().kind == sqlTokenRightParen:
+		default:
+			return nil, p.expected(p.current(), "interpolation policy", []string{"PREVIOUS", "NEXT", "LINEAR"})
+		}
+		interpolation[column.text] = policy
+		if p.current().kind == sqlTokenRightParen {
+			p.next()
+			return interpolation, nil
+		}
+		if err := p.expectKind(sqlTokenComma, ","); err != nil {
+			return nil, err
+		}
+	}
 }

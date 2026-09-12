@@ -13,11 +13,12 @@ var ErrSQLWithFillInvalid = errors.New("hatSql: invalid WITH FILL specification"
 // From is inclusive and To is exclusive. Existing rows are expected to be in
 // ascending order by Column; generated rows use Template as their base row.
 type SQLWithFillSpec struct {
-	Column   string
-	From     time.Time
-	To       time.Time
-	Step     time.Duration
-	Template Row
+	Column        string
+	From          time.Time
+	To            time.Time
+	Step          time.Duration
+	Template      Row
+	Interpolation map[string]SQLWithFillInterpolation
 }
 
 // FillSQLRows inserts template rows at missing time steps without mutating
@@ -40,6 +41,12 @@ func fillSQLRowsBounded(rows []SQLRow, spec SQLWithFillSpec, maxRows int) ([]SQL
 	bucketCount, err := sqlFillBucketCount(spec)
 	if err != nil {
 		return nil, err
+	}
+	if err := validateSQLWithFillInterpolations(spec.Interpolation); err != nil {
+		return nil, err
+	}
+	if len(spec.Interpolation) > 0 {
+		return fillSQLRowsInterpolated(rows, spec, bucketCount, maxRows)
 	}
 	capacity := len(rows)
 	if maxRows > 0 {

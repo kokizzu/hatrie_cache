@@ -44,10 +44,10 @@ operator control remain the preferred deployment model.
 - [x] C212 Precomputed typed join probe keys for hot hash-table paths; numeric and boolean probes avoid canonical-string allocation, while strings retain the native map path; architecture-specific software prefetch remains intentionally deferred. See [C212_PRECOMPUTED_JOIN_HASH.md](C212_PRECOMPUTED_JOIN_HASH.md).
 - [x] C213 Cached compiled SQL plan handles with bounded entry and estimated-byte memory; opt-in through `SQLQueryOptions.CompiledCache`. Machine-code JIT remains intentionally out of scope. See [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md).
 - [x] C214 Resource-bounded WebAssembly UDF execution; see [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md).
-- [ ] C215 External dictionary reloads with TTL and last-known-good retention.
+- [x] C215 External dictionary reloads with TTL and last-known-good retention; see [SQL_EXTERNAL_DICTIONARIES.md](SQL_EXTERNAL_DICTIONARIES.md).
 - [ ] C216 Dictionary layout selection based on key cardinality and lookup shape.
-- [ ] C217 Time-series `WITH FILL` gap generation over ordered results.
-- [ ] C218 Interpolation policies for filled time-series values.
+- [x] C217 Time-series `WITH FILL` gap generation over ordered results; see [WITH_FILL.md](WITH_FILL.md).
+- [x] C218 Interpolation policies for filled time-series values; see [C218_WITH_FILL_INTERPOLATION.md](C218_WITH_FILL_INTERPOLATION.md).
 - [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
 - [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
 - [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.

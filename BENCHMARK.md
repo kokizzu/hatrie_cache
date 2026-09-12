@@ -1028,6 +1028,38 @@ The combined benchmark process reached 99,824 KiB maximum RSS. These rows are
 diagnostic workloads rather than CI thresholds; each optimization section
 keeps the same fixture and reports its own before/after ratio.
 
+<a id="with-fill-interpolation"></a>
+## `WITH FILL` interpolation
+
+C218 compares the existing `FillSQLRows` path with the same 100-hour fill range
+when one numeric column uses opt-in `LINEAR` interpolation. The fixture has two
+observed rows and one generated value for each hourly bucket. Five samples were
+run with `-cpu=1`:
+
+```text
+BenchmarkC218FillInterpolationBaseline   16338 ns/op  38112 B/op  305 allocs/op
+BenchmarkC218FillInterpolationBaseline   16374 ns/op  38112 B/op  305 allocs/op
+BenchmarkC218FillInterpolationBaseline   19657 ns/op  38112 B/op  305 allocs/op
+BenchmarkC218FillInterpolationBaseline   14956 ns/op  38112 B/op  305 allocs/op
+BenchmarkC218FillInterpolationBaseline   14991 ns/op  38112 B/op  305 allocs/op
+BenchmarkC218FillInterpolationLinear     22088 ns/op  38120 B/op  306 allocs/op
+BenchmarkC218FillInterpolationLinear     21931 ns/op  38120 B/op  306 allocs/op
+BenchmarkC218FillInterpolationLinear     21937 ns/op  38120 B/op  306 allocs/op
+BenchmarkC218FillInterpolationLinear     21913 ns/op  38120 B/op  306 allocs/op
+BenchmarkC218FillInterpolationLinear     22316 ns/op  38120 B/op  306 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing fill without interpolation | 16,338 | 38,112 | 305 |
+| One opt-in `LINEAR` column | 21,937 | 38,120 | 306 |
+
+The policy path is `1.34x` slower in this focused CPU measurement, with only
+8 additional bytes and one additional allocation. This is expected feature
+cost and is paid only when interpolation is configured; the existing no-policy
+path remains the default and is kept separate. Reproduce it with
+`make benchmark-c218`.
+
 <a id="final-architecture-improvements"></a>
 ## Measured Improvement Summary
 
@@ -1043,6 +1075,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [HTTP protobuf command wire](README.md#serialization-tradeoffs) | JSON: 15,012 ns; 3,185 wire B | Protobuf: 12,637 ns; 3,146 wire B | 1.19x faster, 1.2% smaller wire | Heap is 0.6% higher; complex values retain JSON fallback |
 | Current pass | [Immutable SQL index source snapshot](#sql-immutable-index-source-snapshot), 100k-row generic indexed range | Copied JSON source: 820.841 us; 3,076,561 B; 1,991 allocs | Immutable source string: 159.089 us; 184,249 B; 1,990 allocs | 5.16x faster; 16.70x lower heap; one fewer allocation | Applies to generic field indexes backed by immutable cache strings; byte/cold and specialized index sources retain checked fallback handling |
 | Current pass | [Bounded compiled SQL plan cache](#bounded-compiled-sql-plan-cache), repeated compile of one SQL source | Direct compile: 3,839 ns; 6,080 B; 19 allocs | Cache hit: 18.06 ns; 0 B; 0 allocs | 212.6x faster compile lookup; 100% lower measured transient bytes and allocations | Opt-in bounded retention; estimated bytes are not RSS, and cold misses still compile normally |
+| Current pass | [`WITH FILL` interpolation](#with-fill-interpolation), 100-hour fill with one linear column | No interpolation: 16,338 ns; 38,112 B; 305 allocs | Opt-in `LINEAR`: 21,937 ns; 38,120 B; 306 allocs | Feature path costs 1.34x CPU; default path unchanged | Opt-in only; linear values are `float64`, and missing or nonnumeric endpoints remain `NULL` |
 | Current pass | [Streamed indexed ORDER BY LIMIT materialization](#sql-indexed-order-by-limit-materialization), 100k JSON rows, `ORDER BY id DESC LIMIT 10` | Ordered-index source clone: 214.952 ms; 177,320,348 B; 2,000,123 allocs | Ordered-index stream: 40.286 ms; 63,705,298 B; 500,112 allocs | 5.34x faster; 2.78x lower heap; 4.00x fewer allocations | Compatible direct-field, no-predicate, default-collation query shape only; it scans the whole source to retain `MaxRows` rejection semantics |
 | Current pass | [Streamed non-indexed ORDER BY LIMIT materialization](#sql-non-indexed-order-by-limit-materialization), 20k JSON rows, `ORDER BY score DESC LIMIT 50` | Full materialized sort: 67.34 ms; 27,868,570 B; 320,052 allocs | Bounded top-N stream: 37.59 ms; 23,579,755 B; 360,084 allocs | 1.79x faster; 1.18x lower allocation volume | 12.5% more allocation events from streaming JSON decode; index, metrics, and unsupported query paths retain existing behavior |
 | Current pass | [Columnar LIMIT pushdown](#columnar-limit-pushdown), warmed 20k-row scan, `LIMIT 50` | Full predicate loop: 59.19 us; 17,832 B; 108 allocs | Stop after page: 10.19 us; 17,832 B; 108 allocs | 5.81x faster; same allocation volume and count | Applies only to metrics-disabled, supported columnar shapes; instrumented plans retain complete match counters |
