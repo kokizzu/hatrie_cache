@@ -10827,3 +10827,19 @@ benchmark-m-u33-retention:
 .PHONY: publish-m-u33-retention
 publish-m-u33-retention:
 	@bash scripts/publish-m-u33-retention.sh
+
+.PHONY: format-t-u40
+format-t-u40:
+	@bash scripts/format-t-u40.sh
+
+.PHONY: test-t-u40
+test-t-u40:
+	@bash scripts/test-t-u40.sh
+
+.PHONY: benchmark-t-u40
+benchmark-t-u40:
+	@bash scripts/benchmark-t-u40.sh
+
+.PHONY: publish-t-u40
+publish-t-u40:
+	@bash scripts/publish-t-u40.sh
