@@ -18,6 +18,9 @@ type QuerySubscriptionDefinition struct {
 	AsOf         uint64
 	UpTo         uint64
 	EmitProgress bool
+	// StartLive validates the query at registration but suppresses its initial
+	// result. The first relevant refresh publishes revision one.
+	StartLive bool
 }
 
 // QuerySubscriptionSnapshot is one immutable query-result version.
@@ -38,10 +41,12 @@ type QuerySubscription struct {
 	id         uint64
 	definition QuerySubscriptionDefinition
 
-	mu       sync.RWMutex
-	snapshot QuerySubscriptionSnapshot
-	updates  chan QuerySubscriptionSnapshot
-	closed   bool
+	mu                  sync.RWMutex
+	snapshot            QuerySubscriptionSnapshot
+	updates             chan QuerySubscriptionSnapshot
+	differentialUpdates chan QuerySubscriptionDeltaBatch
+	durableSink         func(QuerySubscriptionSnapshot)
+	closed              bool
 }
 
 // QuerySubscriptions manages query-result subscriptions. NotifyChanged is
@@ -95,6 +100,10 @@ func NewQuerySubscriptions(buffer int) *QuerySubscriptions {
 // Subscribe evaluates definition once and returns a handle initialized at
 // revision one. No update is emitted for the initial result; use Snapshot.
 func (registry *QuerySubscriptions) Subscribe(ctx context.Context, definition QuerySubscriptionDefinition, resolver SourceResolver, options QueryOptions) (*QuerySubscription, error) {
+	return registry.subscribe(ctx, definition, resolver, options, false)
+}
+
+func (registry *QuerySubscriptions) subscribe(ctx context.Context, definition QuerySubscriptionDefinition, resolver SourceResolver, options QueryOptions, differential bool) (*QuerySubscription, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("query subscriptions are nil")
 	}
@@ -110,6 +119,18 @@ func (registry *QuerySubscriptions) Subscribe(ctx context.Context, definition Qu
 	if err != nil {
 		return nil, err
 	}
+	initialRevision := uint64(1)
+	if definition.StartLive {
+		initialRevision = 0
+		result = QueryResult{}
+	}
+	differentialBuffer := 0
+	if differential {
+		differentialBuffer = registry.buffer
+		if differentialBuffer < 2 {
+			differentialBuffer = 2
+		}
+	}
 
 	registry.mu.Lock()
 	registry.nextID++
@@ -119,14 +140,21 @@ func (registry *QuerySubscriptions) Subscribe(ctx context.Context, definition Qu
 		definition: definition,
 		snapshot: QuerySubscriptionSnapshot{
 			ID:       registry.nextID,
-			Revision: 1,
+			Revision: initialRevision,
 			Frontier: definition.AsOf,
 			Result:   cloneQueryResult(result),
 		},
-		updates: make(chan QuerySubscriptionSnapshot, registry.buffer),
+		updates:             make(chan QuerySubscriptionSnapshot, registry.buffer),
+		differentialUpdates: make(chan QuerySubscriptionDeltaBatch, differentialBuffer),
+	}
+	if !differential {
+		subscription.differentialUpdates = nil
 	}
 	registry.subs[subscription.id] = subscription
 	registry.mu.Unlock()
+	if differential && initialRevision > 0 {
+		subscription.differentialUpdates <- querySubscriptionInitialDelta(subscription.snapshot)
+	}
 	return subscription, nil
 }
 
@@ -286,6 +314,9 @@ func (registry *QuerySubscriptions) remove(subscription *QuerySubscription) {
 	if !subscription.closed {
 		subscription.closed = true
 		close(subscription.updates)
+		if subscription.differentialUpdates != nil {
+			close(subscription.differentialUpdates)
+		}
 	}
 	subscription.mu.Unlock()
 }
@@ -296,16 +327,17 @@ func (subscription *QuerySubscription) publish(result QueryResult) {
 
 func (subscription *QuerySubscription) publishAt(result QueryResult, frontier uint64, complete bool) {
 	subscription.mu.Lock()
-	defer subscription.mu.Unlock()
-	if subscription.closed || sameQuerySubscriptionResult(subscription.snapshot.Result, result) {
+	if subscription.closed || subscription.snapshot.Revision != 0 && sameQuerySubscriptionResult(subscription.snapshot.Result, result) {
 		if !subscription.closed && frontier > subscription.snapshot.Frontier {
 			subscription.snapshot.Frontier = frontier
 		}
 		if !subscription.closed && complete {
 			subscription.snapshot.Complete = true
 		}
+		subscription.mu.Unlock()
 		return
 	}
+	previous := subscription.snapshot.Result
 	subscription.snapshot.Revision++
 	subscription.snapshot.Result = cloneQueryResult(result)
 	if frontier > subscription.snapshot.Frontier {
@@ -326,6 +358,14 @@ func (subscription *QuerySubscription) publishAt(result QueryResult, frontier ui
 		default:
 		}
 	}
+	if subscription.differentialUpdates != nil {
+		envelope := querySubscriptionDeltaBatch(update, previous, true)
+		enqueueQuerySubscriptionDifferential(subscription, envelope, update.Result)
+	}
+	if subscription.durableSink != nil {
+		subscription.durableSink(update)
+	}
+	subscription.mu.Unlock()
 }
 
 func (subscription *QuerySubscription) advanceFrontier(frontier uint64) {
@@ -344,8 +384,8 @@ func (subscription *QuerySubscription) publishProgress(frontier uint64, complete
 		return
 	}
 	subscription.mu.Lock()
-	defer subscription.mu.Unlock()
 	if subscription.closed {
+		subscription.mu.Unlock()
 		return
 	}
 	if frontier > subscription.snapshot.Frontier {
@@ -373,6 +413,28 @@ func (subscription *QuerySubscription) publishProgress(frontier uint64, complete
 		default:
 		}
 	}
+	if subscription.differentialUpdates != nil {
+		envelope := querySubscriptionDeltaBatch(update, subscription.snapshot.Result, true)
+		envelope.Columns = append([]string(nil), subscription.snapshot.Result.Columns...)
+		enqueueQuerySubscriptionDifferential(subscription, envelope, subscription.snapshot.Result)
+	}
+	if subscription.durableSink != nil {
+		subscription.durableSink(update)
+	}
+	subscription.mu.Unlock()
+}
+
+func (subscription *QuerySubscription) setDurableSink(sink func(QuerySubscriptionSnapshot)) bool {
+	if subscription == nil {
+		return false
+	}
+	subscription.mu.Lock()
+	defer subscription.mu.Unlock()
+	if subscription.closed {
+		return false
+	}
+	subscription.durableSink = sink
+	return true
 }
 
 func (subscription *QuerySubscription) complete() {
