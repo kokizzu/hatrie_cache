@@ -3914,3 +3914,5 @@ CPU, allocation, and fallback tradeoffs.
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
 
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)
+
+- [Compact request cancellation](T240_COMPACT_REQUEST_CANCELLATION.md)

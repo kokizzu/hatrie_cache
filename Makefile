@@ -11104,3 +11104,28 @@ format-t239:
 .PHONY: verify-t239
 verify-t239:
 	sh scripts/verify-t239.sh
+
+
+.PHONY: test-t240
+test-t240:
+	sh scripts/test-t240.sh
+
+.PHONY: format-t240
+format-t240:
+	sh scripts/format-t240.sh
+
+.PHONY: benchmark-t240
+benchmark-t240:
+	sh scripts/benchmark-t240.sh
+
+.PHONY: race-t240
+race-t240:
+	sh scripts/race-t240.sh
+
+.PHONY: vet-t240
+vet-t240:
+	sh scripts/vet-t240.sh
+
+.PHONY: verify-t240
+verify-t240:
+	sh scripts/verify-t240.sh

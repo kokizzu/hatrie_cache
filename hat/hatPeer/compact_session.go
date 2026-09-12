@@ -1,6 +1,7 @@
 package hatPeer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +21,9 @@ var (
 	// ErrCompactPeerHandlerRequired indicates that a request arrived without a
 	// server handler.
 	ErrCompactPeerHandlerRequired = errors.New("hatPeer: compact peer request handler is required")
+	// ErrCompactPeerCancellationInvalid indicates a malformed reserved
+	// cancellation request.
+	ErrCompactPeerCancellationInvalid = errors.New("hatPeer: compact peer cancellation request is invalid")
 	// ErrCompactPeerInFlightLimit indicates that a peer sent too many requests
 	// while all handler slots were busy.
 	ErrCompactPeerInFlightLimit = errors.New("hatPeer: compact peer in-flight limit reached")
@@ -31,6 +35,8 @@ const (
 	DefaultCompactPeerMaxInFlight = DefaultCompactMultiplexerMaxPending
 	maxCompactPeerMaxInFlight     = 1 << 20
 )
+
+var compactPeerCancellationCommand = []byte("_hat.peer.cancel.v1")
 
 // CompactPeerHandler handles one inbound compact request. The returned frame
 // is normalized to a response carrying the request's ID and command. Handler
@@ -48,6 +54,10 @@ type CompactPeerSessionOptions struct {
 	Handler     CompactPeerHandler
 	Lifecycle   *PeerLifecycleRegistry
 	PeerID      string
+	// EnableRequestCancellation sends a best-effort reserved request when a
+	// caller context cancels. The remote session cancels the matching handler
+	// context. It is disabled by default to preserve existing wire behavior.
+	EnableRequestCancellation bool
 }
 
 // CompactPeerSession adapts CompactProtocol and CompactMultiplexer to a
@@ -56,22 +66,28 @@ type CompactPeerSessionOptions struct {
 // opt-in adapter; it does not open listeners, select authentication, or
 // replace the existing HTTP/gRPC/replication servers.
 type CompactPeerSession struct {
-	conn       net.Conn
-	protocol   CompactProtocol
-	multiplex  *CompactMultiplexer
-	handler    CompactPeerHandler
-	inflight   chan struct{}
-	context    context.Context
-	cancel     context.CancelFunc
-	lifecycle  *PeerLifecycleRegistry
-	peerID     string
-	done       chan struct{}
-	readDone   chan struct{}
-	closeOnce  sync.Once
-	writeMu    sync.Mutex
-	stateMu    sync.Mutex
-	closed     bool
-	closeError error
+	conn         net.Conn
+	protocol     CompactProtocol
+	multiplex    *CompactMultiplexer
+	handler      CompactPeerHandler
+	inflight     chan struct{}
+	context      context.Context
+	cancel       context.CancelFunc
+	lifecycle    *PeerLifecycleRegistry
+	peerID       string
+	done         chan struct{}
+	readDone     chan struct{}
+	closeOnce    sync.Once
+	writeMu      sync.Mutex
+	stateMu      sync.Mutex
+	cancellation *compactPeerCancellationState
+	closed       bool
+	closeError   error
+}
+
+type compactPeerCancellationState struct {
+	mu     sync.Mutex
+	active map[uint64]context.CancelFunc
 }
 
 // NewCompactPeerSession starts a bounded reader loop on conn. Both peers may
@@ -102,18 +118,23 @@ func NewCompactPeerSession(conn net.Conn, options CompactPeerSessionOptions) (*C
 		cancel()
 		return nil, fmt.Errorf("%w: multiplexer: %v", ErrCompactPeerOptionsInvalid, err)
 	}
+	var cancellation *compactPeerCancellationState
+	if options.EnableRequestCancellation {
+		cancellation = &compactPeerCancellationState{active: make(map[uint64]context.CancelFunc)}
+	}
 	session := &CompactPeerSession{
-		conn:      conn,
-		protocol:  protocol,
-		multiplex: multiplexer,
-		handler:   options.Handler,
-		inflight:  make(chan struct{}, maxInFlight),
-		context:   ctx,
-		cancel:    cancel,
-		lifecycle: options.Lifecycle,
-		peerID:    options.PeerID,
-		done:      make(chan struct{}),
-		readDone:  make(chan struct{}),
+		conn:         conn,
+		protocol:     protocol,
+		multiplex:    multiplexer,
+		handler:      options.Handler,
+		inflight:     make(chan struct{}, maxInFlight),
+		context:      ctx,
+		cancel:       cancel,
+		lifecycle:    options.Lifecycle,
+		peerID:       options.PeerID,
+		done:         make(chan struct{}),
+		readDone:     make(chan struct{}),
+		cancellation: cancellation,
 	}
 	go session.readLoop()
 	go session.watchContext()
@@ -149,6 +170,7 @@ func (session *CompactPeerSession) Call(ctx context.Context, command, payload []
 	if err != nil {
 		if ctx.Err() != nil {
 			session.multiplex.Cancel(request.RequestID)
+			session.sendRequestCancellation(request.RequestID)
 			return CompactFrame{}, ctx.Err()
 		}
 		return CompactFrame{}, err
@@ -204,6 +226,14 @@ func (session *CompactPeerSession) readLoop() {
 				return
 			}
 		case CompactRequest:
+			if bytes.Equal(frame.Command, compactPeerCancellationCommand) {
+				if len(frame.Payload) != 0 {
+					session.writeError(frame, ErrCompactPeerCancellationInvalid)
+					continue
+				}
+				session.cancelInbound(frame.RequestID)
+				continue
+			}
 			session.dispatch(frame)
 		}
 	}
@@ -216,15 +246,27 @@ func (session *CompactPeerSession) dispatch(request CompactFrame) {
 	}
 	select {
 	case session.inflight <- struct{}{}:
-		go session.handle(request)
+		handlerContext := session.context
+		var cancel context.CancelFunc
+		if session.cancellation != nil {
+			handlerContext, cancel = context.WithCancel(session.context)
+			session.registerInbound(request.RequestID, cancel)
+		}
+		go session.handle(handlerContext, request, cancel)
 	default:
 		session.writeError(request, ErrCompactPeerInFlightLimit)
 	}
 }
 
-func (session *CompactPeerSession) handle(request CompactFrame) {
+func (session *CompactPeerSession) handle(ctx context.Context, request CompactFrame, cancel context.CancelFunc) {
 	defer func() { <-session.inflight }()
-	response, err := session.handler(session.context, request)
+	if cancel != nil {
+		defer func() {
+			session.unregisterInbound(request.RequestID)
+			cancel()
+		}()
+	}
+	response, err := session.handler(ctx, request)
 	if err != nil {
 		response = CompactFrame{Kind: CompactError, Command: request.Command, Payload: compactPeerErrorPayload(session.protocol, err)}
 	} else {
@@ -237,6 +279,53 @@ func (session *CompactPeerSession) handle(request CompactFrame) {
 	if err := session.write(response); err != nil {
 		session.fail(err)
 	}
+}
+
+func (session *CompactPeerSession) registerInbound(requestID uint64, cancel context.CancelFunc) {
+	state := session.cancellation
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	state.active[requestID] = cancel
+	state.mu.Unlock()
+}
+
+func (session *CompactPeerSession) unregisterInbound(requestID uint64) {
+	state := session.cancellation
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	delete(state.active, requestID)
+	state.mu.Unlock()
+}
+
+func (session *CompactPeerSession) cancelInbound(requestID uint64) {
+	if requestID == 0 {
+		return
+	}
+	state := session.cancellation
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	cancel := state.active[requestID]
+	state.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (session *CompactPeerSession) sendRequestCancellation(requestID uint64) {
+	if session == nil || session.cancellation == nil || requestID == 0 {
+		return
+	}
+	_ = session.write(CompactFrame{
+		Kind:      CompactRequest,
+		RequestID: requestID,
+		Command:   compactPeerCancellationCommand,
+	})
 }
 
 func (session *CompactPeerSession) writeError(request CompactFrame, err error) {
