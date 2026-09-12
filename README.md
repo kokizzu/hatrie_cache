@@ -3912,3 +3912,5 @@ CPU, allocation, and fallback tradeoffs.
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
 
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
+
+- [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)

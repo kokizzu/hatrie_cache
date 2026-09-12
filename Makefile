@@ -11089,3 +11089,18 @@ format-m207:
 .PHONY: verify-m207
 verify-m207:
 	sh scripts/verify-m207.sh
+.PHONY: test-t239
+test-t239:
+	sh scripts/test-t239.sh
+
+.PHONY: benchmark-t239
+benchmark-t239:
+	sh scripts/benchmark-t239.sh
+
+.PHONY: format-t239
+format-t239:
+	sh scripts/format-t239.sh
+
+.PHONY: verify-t239
+verify-t239:
+	sh scripts/verify-t239.sh

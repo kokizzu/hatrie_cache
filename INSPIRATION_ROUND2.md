@@ -174,7 +174,7 @@ operator control remain the preferred deployment model.
 - [ ] T236 Low-overhead mailbox channels between independent workers.
 - [ ] T237 Connection pools with health checks and reconnect backoff.
 - [ ] T238 Batched binary protocol requests with ordered responses.
-- [ ] T239 Prepared request templates that reuse encoded field metadata.
+- [x] T239 Prepared request templates that reuse encoded field metadata. `hatPeer.CompactRequestTemplate` copies command metadata once and supports caller-buffer reuse without changing the wire format; the paired benchmark measured `23-25 ns/op`, `0 B/op`, and `0 allocs/op` versus direct marshal at `36-38 ns/op`, `32 B/op`, and `1 alloc/op`; see [T239_COMPACT_REQUEST_TEMPLATE.md](T239_COMPACT_REQUEST_TEMPLATE.md).
 - [ ] T240 Request cancellation and deadline propagation through the protocol.
 - [ ] T241 Role-based authentication and per-space authorization.
 - [ ] T242 Append-only audit logging for administrative and data operations.
