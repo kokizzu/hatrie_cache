@@ -47,6 +47,7 @@ security guidance before exposing it on a network.
 - Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
 - Tarantool-style compact multiplexed peer frames: [COMPACT_PEER_PROTOCOL.md](COMPACT_PEER_PROTOCOL.md)
 - Materialize-style connector lifecycle registry: [CONNECTOR_LIFECYCLE.md](CONNECTOR_LIFECYCLE.md)
+- Materialize-style named lower/upper frontier registry: [FRONTIER_REGISTRY.md](FRONTIER_REGISTRY.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)

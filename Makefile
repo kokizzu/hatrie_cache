@@ -10694,3 +10694,27 @@ race-t-u02-compact-protocol:
 .PHONY: vet-t-u02-compact-protocol
 vet-t-u02-compact-protocol:
 	bash ./scripts/vet-t-u02-compact-protocol.sh
+
+.PHONY: test-m-u09-frontier
+test-m-u09-frontier:
+	bash ./scripts/test-m-u09-frontier.sh
+
+.PHONY: format-m-u09-frontier
+format-m-u09-frontier:
+	bash ./scripts/format-m-u09-frontier.sh
+
+.PHONY: benchmark-m-u09-frontier
+benchmark-m-u09-frontier:
+	bash ./scripts/benchmark-m-u09-frontier.sh
+
+.PHONY: test-m-u09-package
+test-m-u09-package:
+	bash ./scripts/test-m-u09-package.sh
+
+.PHONY: race-m-u09-frontier
+race-m-u09-frontier:
+	bash ./scripts/race-m-u09-frontier.sh
+
+.PHONY: vet-m-u09-frontier
+vet-m-u09-frontier:
+	bash ./scripts/vet-m-u09-frontier.sh
