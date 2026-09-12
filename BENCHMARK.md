@@ -21261,3 +21261,27 @@ per-operation memory than delivering all 128 records, at the cost of seven
 additional allocations per subscription setup. The before/after exact-key
 rows are a control; their small difference is normal benchmark noise, not a
 claimed optimization.
+
+## T042b Cached WAL Replay Metadata
+
+This change removes the redundant discovery scan from ordinary journal replay.
+The journal caches the validated latest sequence and compaction boundary during
+open and updates them whenever the in-process journal writes a checkpoint or
+compacts. `ReplayWithProgress` is intentionally unchanged because it needs a
+discovery pass to calculate `Total`.
+
+Workload: the existing `BenchmarkCommandJournalReplayProgress` benchmark with
+the same 256-record binary journal on `linux/amd64`, AMD Ryzen 9 5950X, and
+`-count=3` samples from `make benchmark-journal-replay`.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | CPU improvement | Memory improvement | Allocation improvement |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy replay, before cache | 404,014; 462,104; 555,715 | 462,104 | 153,403 | 2,599 | 1.00x | 1.00x | 1.00x |
+| Ordinary replay, after cache | 295,956; 330,922; 530,634 | 330,922 | 83,131 | 1.40x | 1.84x | 1.99x |
+| Progress replay, after cache | 559,900; 565,184; 559,774 | 559,774 | 153,547 | 0.82x vs legacy | 1.00x | 1.00x |
+
+The ordinary replay result is a clear win with no new per-entry storage or
+configuration. Progress replay retains its prior cost by design. Correctness
+coverage includes reopen-after-compaction, compacted-boundary rejection,
+segmented journals, snapshot checkpoints, replay target validation, and the
+full package test suite.

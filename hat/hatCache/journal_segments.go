@@ -269,6 +269,9 @@ func (journal *CommandJournal) writeCheckpointWithoutSyncLocked(sequence uint64)
 	if n != len(data) {
 		return io.ErrShortWrite
 	}
+	if sequence > journal.compactedThrough {
+		journal.compactedThrough = sequence
+	}
 	return nil
 }
 

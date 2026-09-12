@@ -221,6 +221,7 @@ type CommandJournal struct {
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
 	retainedBytes         int64
+	compactedThrough      uint64
 	activeSegmentStart    uint64
 	groupCommitJobs       chan *commandJournalJob
 	groupCommitDone       chan struct{}
@@ -276,10 +277,14 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	}
 	var maxSequence uint64
 	var earliestOutboxSequence uint64
+	var compactedThrough uint64
 	idempotency := newCommandIdempotencyState(options.IdempotencyCapacity)
 	validBytes, err := scanCommandJournalSet(path, options.SegmentMaxBytes > 0, func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
+		}
+		if entry.Checkpoint && entry.Sequence > compactedThrough {
+			compactedThrough = entry.Sequence
 		}
 		if entry.Outbox != nil && (earliestOutboxSequence == 0 || entry.Sequence < earliestOutboxSequence) {
 			earliestOutboxSequence = entry.Sequence
@@ -314,6 +319,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		if err := writeCommandJournalCheckpointWithFormat(path, maxSequence, format); err != nil {
 			return nil, err
 		}
+		compactedThrough = maxSequence
 	}
 	file, err := openCommandJournalAppendFile(path)
 	if err != nil {
@@ -330,6 +336,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
 		retainedBytes:         options.RetainedBytes,
+		compactedThrough:      compactedThrough,
 		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
 		outboxRetainFrom:      earliestOutboxSequence,
 		subscriptionWake:      make(chan struct{}),
@@ -1254,19 +1261,24 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	var maxSequence uint64
 	var compactedThrough uint64
 	var totalEntries uint64
-	if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
-		if entry.Sequence > maxSequence {
-			maxSequence = entry.Sequence
+	if progress != nil {
+		if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+			if entry.Sequence > maxSequence {
+				maxSequence = entry.Sequence
+			}
+			if entry.Checkpoint && entry.Sequence > compactedThrough {
+				compactedThrough = entry.Sequence
+			}
+			if !entry.Checkpoint && entry.Sequence > afterSequence && (targetSequence == 0 || entry.Sequence <= targetSequence) {
+				totalEntries++
+			}
+			return nil
+		}); err != nil {
+			return 0, err
 		}
-		if entry.Checkpoint && entry.Sequence > compactedThrough {
-			compactedThrough = entry.Sequence
-		}
-		if progress != nil && !entry.Checkpoint && entry.Sequence > afterSequence && (targetSequence == 0 || entry.Sequence <= targetSequence) {
-			totalEntries++
-		}
-		return nil
-	}); err != nil {
-		return 0, err
+	} else {
+		maxSequence = journal.lastSequenceLocked()
+		compactedThrough = journal.compactedThrough
 	}
 	if progress != nil {
 		progress.setTotal(totalEntries)
@@ -1824,7 +1836,11 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 		}
 		return err
 	}
-	return journal.ensureAppendFileLocked()
+	if err := journal.ensureAppendFileLocked(); err != nil {
+		return err
+	}
+	journal.compactedThrough = throughSequence
+	return nil
 }
 
 func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
@@ -1849,6 +1865,7 @@ func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
 		journal.nextSequence = sequence + 1
 		journal.sequenceExhausted = false
 	}
+	journal.compactedThrough = sequence
 	journal.activeSegmentStart = journal.nextSequence
 	return journal.ensureAppendFileLocked()
 }

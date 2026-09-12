@@ -10253,3 +10253,27 @@ push-tg42-key-watchers:
 	sh scripts/push-tg42-key-watchers.sh
 
 .PHONY: test-tg42-key-watchers benchmark-tg42-key-watchers format-tg42-key-watchers test-tg42-package race-tg42-key-watchers vet-tg42-key-watchers review-tg42-key-watchers commit-tg42-key-watchers push-tg42-key-watchers
+
+.PHONY: benchmark-journal-replay
+benchmark-journal-replay:
+	sh scripts/benchmark-journal-replay.sh
+
+.PHONY: test-journal-replay
+test-journal-replay:
+	sh scripts/test-journal-replay.sh
+
+.PHONY: format-journal-replay
+format-journal-replay:
+	sh scripts/format-journal-replay.sh
+
+.PHONY: review-journal-replay
+review-journal-replay:
+	sh scripts/review-journal-replay.sh
+
+.PHONY: commit-journal-replay
+commit-journal-replay:
+	sh scripts/commit-journal-replay.sh
+
+.PHONY: push-journal-replay
+push-journal-replay:
+	sh scripts/push-journal-replay.sh

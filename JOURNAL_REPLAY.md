@@ -36,11 +36,37 @@ allocations and effectively unchanged total bytes. The focused command-path
 result is larger because journal decoding remains the dominant cost for a full
 recovery.
 
+## Cached Replay Metadata
+
+The journal already validates its complete tail and checkpoint boundary while
+opening. In-process checkpoint writes and compaction update the same cached
+metadata. Ordinary `Replay` and `ReplayThrough` reuse those values while the
+journal mutex is held, so they no longer rescan the journal once to discover
+metadata and then scan it again to apply commands. `ReplayWithProgress` still
+performs the discovery scan because it must count the selected entries for
+progress reporting.
+
+The focused benchmark used the existing 256-record binary journal on an AMD
+Ryzen 9 5950X with three samples per path:
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Legacy replay, before cache | 404,014; 462,104; 555,715 | 462,104 | 153,403 | 2,599 |
+| Ordinary replay, after cache | 295,956; 330,922; 530,634 | 330,922 | 83,131 | 1,308 |
+| Progress replay, after cache | 559,900; 565,184; 559,774 | 559,774 | 153,547 | 2,600 |
+
+Compared with the before-cache median, ordinary replay is `1.40x` faster,
+uses `1.84x` less allocated memory, and performs `1.99x` fewer allocations.
+Progress replay remains on the original two-scan path and is included to show
+that progress accounting was not traded away.
+
 Verification uses:
 
 ```text
 make test-journal-replay-fastpath
 make race-journal-replay-fastpath
 make benchmark-journal-replay-fastpath
+make test-journal-replay
+make benchmark-journal-replay
 make test
 ```
