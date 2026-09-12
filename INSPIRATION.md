@@ -767,7 +767,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T100 Streaming query results.
 - [x] T101 Response backpressure.
 - [x] T102 Stored functions/UDFs for supported languages.
-- [ ] T103 Native FFI extension boundary.
+- [-] T103 Native FFI extension boundary - deferred. Native C remains an internal cgo acceleration detail; public extensions use the versioned in-process registry or the safer WASM boundary, avoiding shared-object ABI, unload, memory-ownership, portability, and attack-surface costs without a measured workload win.
 - [x] T104 Sandboxed UDF execution.
 - [x] T105 Hot module loading with version checks. Added an opt-in in-process `hatSql.PluginRegistry` with atomic version-checked load/replace/unload, monotonic generations, and deterministic metadata snapshots; see [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md). Native shared-library loading remains intentionally out of scope for the security boundary.
 - [x] T106 Triggers and update hooks for supported collections.
