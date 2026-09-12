@@ -10806,3 +10806,24 @@ benchmark-m-u09-snapshot:
 .PHONY: publish-m-u09-snapshot
 publish-m-u09-snapshot:
 	@bash scripts/publish-m-u09-snapshot.sh
+.PHONY: format-m-u33-retention
+format-m-u33-retention:
+	@bash scripts/format-m-u33-retention.sh
+.PHONY: test-m-u33-retention
+test-m-u33-retention:
+	@bash scripts/test-m-u33-retention.sh
+.PHONY: test-m-u33-package
+test-m-u33-package:
+	@bash scripts/test-m-u33-package.sh
+.PHONY: race-m-u33-retention
+race-m-u33-retention:
+	@bash scripts/race-m-u33-retention.sh
+.PHONY: vet-m-u33-retention
+vet-m-u33-retention:
+	@bash scripts/vet-m-u33-retention.sh
+.PHONY: benchmark-m-u33-retention
+benchmark-m-u33-retention:
+	@bash scripts/benchmark-m-u33-retention.sh
+.PHONY: publish-m-u33-retention
+publish-m-u33-retention:
+	@bash scripts/publish-m-u33-retention.sh
