@@ -53,6 +53,7 @@ security guidance before exposing it on a network.
 - Tarantool-style tuple format version negotiation: [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
+- Opt-in per-space operation statistics: [SPACE_OPERATION_STATS.md](SPACE_OPERATION_STATS.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
