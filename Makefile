@@ -10315,6 +10315,18 @@ commit-visibility-queue:
 push-visibility-queue:
 	sh scripts/push-visibility-queue.sh
 
+.PHONY: review-visibility-fencing
+review-visibility-fencing:
+	sh scripts/review-visibility-fencing.sh
+
+.PHONY: commit-visibility-fencing
+commit-visibility-fencing:
+	sh scripts/commit-visibility-fencing.sh
+
+.PHONY: push-visibility-fencing
+push-visibility-fencing:
+	sh scripts/push-visibility-fencing.sh
+
 .PHONY: test-connection-pool
 test-connection-pool:
 	sh scripts/test-connection-pool.sh

@@ -254,7 +254,7 @@ func (queue *VisibilityQueue[T]) RequeueExpired(now time.Time) int {
 	return recovered
 }
 
-// Clear removes pending items and active leases and resets lease IDs.
+// Clear removes pending items and active leases without reusing lease IDs.
 func (queue *VisibilityQueue[T]) Clear() {
 	if queue == nil {
 		return
@@ -264,7 +264,6 @@ func (queue *VisibilityQueue[T]) Clear() {
 	}
 	queue.expirations.items = nil
 	queue.leases = nil
-	queue.nextID = 0
 }
 
 func visibilityQueueExpiryBefore(left, right visibilityQueueExpiry) bool {

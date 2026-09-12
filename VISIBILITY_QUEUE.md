@@ -21,6 +21,8 @@ workers without adding a background goroutine or changing the existing
 - A positive capacity counts both pending and leased values. Zero capacity is
   unbounded.
 - The zero value is usable and uses a one-minute visibility timeout.
+- `Clear` drops all state but keeps lease IDs monotonic, so a stale handle cannot
+  acknowledge a later lease after the queue is reused.
 
 The expiry index removes acknowledged or negatively acknowledged deadlines in
 O(log n). This avoids retaining stale timeout entries until their old deadline.

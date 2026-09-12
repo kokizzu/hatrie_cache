@@ -207,3 +207,32 @@ func TestVisibilityQueueClearAndZeroValue(t *testing.T) {
 		t.Fatal("Enqueue failed after Clear")
 	}
 }
+
+func TestVisibilityQueueClearDoesNotReuseLeaseIDs(t *testing.T) {
+	now := time.Unix(450, 0).UTC()
+	queue := NewVisibilityQueue[int](2, time.Minute)
+	if !queue.Enqueue(1) {
+		t.Fatal("initial Enqueue returned false")
+	}
+	old, ok := queue.Lease(now)
+	if !ok {
+		t.Fatal("initial Lease returned no item")
+	}
+	queue.Clear()
+	if !queue.Enqueue(2) {
+		t.Fatal("second Enqueue returned false")
+	}
+	current, ok := queue.Lease(now)
+	if !ok {
+		t.Fatal("second Lease returned no item")
+	}
+	if current.ID == old.ID {
+		t.Fatalf("Clear reused lease ID %d", current.ID)
+	}
+	if queue.Ack(old.ID) {
+		t.Fatal("stale Ack returned true")
+	}
+	if !queue.Ack(current.ID) {
+		t.Fatal("current Ack returned false")
+	}
+}
