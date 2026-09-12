@@ -10046,3 +10046,43 @@ commit-tt032-multiplexing:
 
 push-tt032-multiplexing:
 	sh scripts/push-tt032-multiplexing.sh
+
+.PHONY: test-tt043-maintenance-read-only
+test-tt043-maintenance-read-only:
+	sh scripts/test-tt043-maintenance-read-only.sh
+
+.PHONY: format-tt043-maintenance-read-only
+format-tt043-maintenance-read-only:
+	sh scripts/format-tt043-maintenance-read-only.sh
+
+.PHONY: benchmark-tt043-maintenance-read-only
+benchmark-tt043-maintenance-read-only:
+	sh scripts/benchmark-tt043-maintenance-read-only.sh
+
+.PHONY: verify-tt043-docs
+verify-tt043-docs:
+	sh scripts/verify-tt043-docs.sh
+
+.PHONY: test-tt043-package
+test-tt043-package:
+	sh scripts/test-tt043-package.sh
+
+.PHONY: test-race-tt043-maintenance-read-only
+test-race-tt043-maintenance-read-only:
+	sh scripts/test-race-tt043-maintenance-read-only.sh
+
+.PHONY: vet-tt043-maintenance-read-only
+vet-tt043-maintenance-read-only:
+	sh scripts/vet-tt043-maintenance-read-only.sh
+
+.PHONY: review-tt043-maintenance-read-only
+review-tt043-maintenance-read-only:
+	sh scripts/review-tt043-maintenance-read-only.sh
+
+.PHONY: commit-tt043-maintenance-read-only
+commit-tt043-maintenance-read-only:
+	sh scripts/commit-tt043-maintenance-read-only.sh
+
+.PHONY: push-tt043-maintenance-read-only
+push-tt043-maintenance-read-only:
+	sh scripts/push-tt043-maintenance-read-only.sh

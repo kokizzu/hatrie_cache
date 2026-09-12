@@ -21106,3 +21106,20 @@ is visible and there is no throughput win. The feature remains opt-in because
 its value is response correlation and latency hiding for independent commands
 whose execution or downstream work is slower than this microbenchmark. Zero-ID
 clients retain the legacy path and its ordering semantics.
+## TT-043 Maintenance Read-Only Admission
+
+This safety feature adds a boolean admission check only after the existing
+journaled-command classification. It is not intended to improve command
+throughput. The focused predicate benchmark was run with
+`make benchmark-tt043-maintenance-read-only` on Linux/amd64 with an AMD Ryzen
+9 5950X; each row is one of five samples from `-count=5`.
+
+| Path | Samples (ns/op) | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Legacy journaled-command predicate | 20.59, 20.24, 19.02, 20.86, 22.17 | 20.59 | 0 | 0 |
+| Maintenance flag off | 20.35, 20.41, 20.82, 20.11, 19.15 | 20.35 | 0 | 0 |
+| Maintenance flag on | 22.40, 20.84, 19.12, 19.56, 20.11 | 20.11 | 0 | 0 |
+
+The default-off predicate was within measurement noise of the legacy
+predicate and introduced no allocations. Enabling the mode changes behavior
+by rejecting public writes; it is not a performance optimization.

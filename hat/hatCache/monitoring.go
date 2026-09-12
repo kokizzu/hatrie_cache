@@ -86,7 +86,10 @@ type MonitoringOptions struct {
 	ReplicationAuthPreviousExpiresAt time.Time
 	AuditLog                         *AuditLogger
 	WriteProtected                   bool
-	RateLimiter                      *RateLimiter
+	// MaintenanceReadOnly rejects public cache writes while preserving reads,
+	// snapshots, and backup operations. It is disabled by default.
+	MaintenanceReadOnly bool
+	RateLimiter         *RateLimiter
 	// SQLRateLimiter limits read-only SQL requests per authenticated caller (or
 	// remote address when monitoring authentication is not configured).
 	SQLRateLimiter *RateLimiter
@@ -806,6 +809,12 @@ func (handler *MonitoringHandler) rejectDangerousCommandHTTP(w http.ResponseWrit
 		writeCommandResponseWire(w, r, http.StatusForbidden, response, format)
 		return true
 	}
+	if handler.options.MaintenanceReadOnly && commandShouldJournal(request) {
+		response := commandError(maintenanceReadOnlyMessage)
+		handler.auditCommandHTTP(r, request, response, false, http.StatusLocked)
+		writeCommandResponseWire(w, r, http.StatusLocked, response, format)
+		return true
+	}
 	if handler.options.RateLimiter != nil && !handler.options.RateLimiter.Allow(monitoringRateLimitKey(r)) {
 		handler.options.Metrics.RecordRateLimitRejection()
 		response := commandError("rate limit exceeded")
@@ -1005,6 +1014,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusCounter(&builder, "hatrie_cache_write_protection_rejections_total", "Total dangerous API actions rejected by write protection.", node, apiMetrics.WriteProtectionRejectionsTotal)
 	writePrometheusCounter(&builder, "hatrie_cache_rate_limit_rejections_total", "Total dangerous API actions rejected by rate limiting.", node, apiMetrics.RateLimitRejectionsTotal)
 	writePrometheusGauge(&builder, "hatrie_cache_write_protection_enabled", "Whether dangerous API writes are currently blocked by write protection.", node, boolGauge(handler.options.WriteProtected))
+	writePrometheusGauge(&builder, "hatrie_cache_maintenance_read_only_enabled", "Whether public cache writes are blocked by maintenance read-only mode.", node, boolGauge(handler.options.MaintenanceReadOnly))
 	writePrometheusGauge(&builder, "hatrie_cache_rate_limit_per_second", "Configured dangerous API action rate limit per caller per second; zero means disabled.", node, uint64(handler.options.RateLimiter.Limit()))
 	handler.writePrometheusSourceFrontierMetrics(&builder, node)
 	handler.writePrometheusOperatorMemoryMetrics(&builder, node)

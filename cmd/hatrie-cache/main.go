@@ -65,6 +65,7 @@ type config struct {
 	diagnosticsProfiling                 bool
 	auditLogPath                         string
 	writeProtection                      bool
+	maintenanceReadOnly                  bool
 	rateLimit                            int
 	keyStatsMode                         string
 	keyStatsCapacity                     int
@@ -452,6 +453,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,
 		AuditLog:                         auditLog,
 		WriteProtected:                   cfg.writeProtection,
+		MaintenanceReadOnly:              cfg.maintenanceReadOnly,
 		RateLimiter:                      rateLimiter,
 		Metrics:                          apiMetrics,
 		Snapshot:                         snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
@@ -616,6 +618,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.BoolVar(&cfg.diagnosticsProfiling, "diagnostics-profiling", cfg.diagnosticsProfiling, "enable authenticated bounded runtime profile capture")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
+	flags.BoolVar(&cfg.maintenanceReadOnly, "maintenance-read-only", cfg.maintenanceReadOnly, "reject public cache writes while allowing reads and backups")
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
 	flags.StringVar(&cfg.keyStatsMode, "key-stats-mode", cfg.keyStatsMode, "per-key telemetry retention: bounded, full, or off")
 	flags.IntVar(&cfg.keyStatsCapacity, "key-stats-capacity", cfg.keyStatsCapacity, "maximum keys with retained telemetry in bounded mode")
@@ -1255,6 +1258,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"diagnostics_profiling":                    cfg.diagnosticsProfiling,
 		"audit_log_path":                           cfg.auditLogPath,
 		"write_protection":                         cfg.writeProtection,
+		"maintenance_read_only":                    cfg.maintenanceReadOnly,
 		"rate_limit":                               cfg.rateLimit,
 		"key_stats_mode":                           cfg.keyStatsMode,
 		"key_stats_capacity":                       cfg.keyStatsCapacity,
@@ -1776,6 +1780,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,
 		AuditLog:                         auditLog,
 		WriteProtected:                   cfg.writeProtection,
+		MaintenanceReadOnly:              cfg.maintenanceReadOnly,
 		RateLimiter:                      rateLimiter,
 		Metrics:                          apiMetrics,
 		Snapshot:                         snapshot,

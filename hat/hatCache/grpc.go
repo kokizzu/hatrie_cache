@@ -37,18 +37,21 @@ type CacheGRPCOptions struct {
 	ReplicationAuthPreviousExpiresAt time.Time
 	AuditLog                         *AuditLogger
 	WriteProtected                   bool
-	RateLimiter                      *RateLimiter
-	Metrics                          *APIMetrics
-	StartAt                          time.Time
-	Snapshot                         func() error
-	Journal                          *CommandJournal
-	DirtyTracker                     *LevelDBDirtyTracker
-	Topology                         *TopologyStore
-	Election                         *ElectionStore
-	Replicator                       *HTTPReplicator
-	ReplicationSafety                *ReplicationSafetyStore
-	EnforceLeaderWrites              bool
-	RequireHealthyReplicaReads       bool
+	// MaintenanceReadOnly rejects public cache writes while preserving reads,
+	// snapshots, and backup operations. It is disabled by default.
+	MaintenanceReadOnly        bool
+	RateLimiter                *RateLimiter
+	Metrics                    *APIMetrics
+	StartAt                    time.Time
+	Snapshot                   func() error
+	Journal                    *CommandJournal
+	DirtyTracker               *LevelDBDirtyTracker
+	Topology                   *TopologyStore
+	Election                   *ElectionStore
+	Replicator                 *HTTPReplicator
+	ReplicationSafety          *ReplicationSafetyStore
+	EnforceLeaderWrites        bool
+	RequireHealthyReplicaReads bool
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
 	// WriteQuorum synchronously requires this many acknowledgements, including
@@ -219,6 +222,17 @@ func (server *CacheGRPCServer) rejectDangerousGRPC(action string, event AuditEve
 	return nil
 }
 
+func (server *CacheGRPCServer) rejectMaintenanceReadOnlyGRPC(action string, event AuditEvent) error {
+	if !server.options.MaintenanceReadOnly {
+		return nil
+	}
+	event.Action = action
+	event.OK = false
+	event.Message = maintenanceReadOnlyMessage
+	server.auditGRPC(event)
+	return status.Error(codes.FailedPrecondition, maintenanceReadOnlyMessage)
+}
+
 func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
 	ctx, err := server.requestContext(ctx)
 	if err != nil {
@@ -382,6 +396,9 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 			Method:  method,
 		}
 		if err := server.rejectDangerousGRPC("command", audit); err != nil {
+			return nil, err
+		}
+		if err := server.rejectMaintenanceReadOnlyGRPC("command", audit); err != nil {
 			return nil, err
 		}
 	}
