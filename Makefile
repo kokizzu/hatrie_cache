@@ -10666,3 +10666,31 @@ race-mu01-connector-lifecycle:
 .PHONY: vet-mu01-connector-lifecycle
 vet-mu01-connector-lifecycle:
 	bash ./scripts/vet-mu01-connector-lifecycle.sh
+
+.PHONY: test-t-u02-compact-protocol
+test-t-u02-compact-protocol:
+	bash ./scripts/test-t-u02-compact-protocol.sh
+
+.PHONY: format-t-u02-compact-protocol
+format-t-u02-compact-protocol:
+	bash ./scripts/format-t-u02-compact-protocol.sh
+
+.PHONY: benchmark-t-u02-compact-protocol
+benchmark-t-u02-compact-protocol:
+	bash ./scripts/benchmark-t-u02-compact-protocol.sh
+
+.PHONY: measure-t-u02-wire-size
+measure-t-u02-wire-size:
+	bash ./scripts/measure-t-u02-wire-size.sh
+
+.PHONY: test-t-u02-compact-package
+test-t-u02-compact-package:
+	bash ./scripts/test-t-u02-compact-package.sh
+
+.PHONY: race-t-u02-compact-protocol
+race-t-u02-compact-protocol:
+	bash ./scripts/race-t-u02-compact-protocol.sh
+
+.PHONY: vet-t-u02-compact-protocol
+vet-t-u02-compact-protocol:
+	bash ./scripts/vet-t-u02-compact-protocol.sh

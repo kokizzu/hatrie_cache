@@ -130,7 +130,7 @@ tradeoffs are documented and its commit is published.
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
 | T-U52 | Per-peer adaptive breaker policy | `hatPeer` now has a threshold/cooldown breaker, but it does not adapt thresholds or cooldowns from peer-specific failure classes and observed recovery. | Preserve deterministic operator bounds, avoid false opens, and keep the default disabled. |
-| T-U02 | Compact multiplexed binary protocol | Protobuf/gRPC and HTTP exist, but peers lack an iProto-like compact multiplexed command path with correlation IDs. | Framing, compatibility, authentication, and head-of-line behavior. |
+| T-U02 | Compact multiplexed peer transport adapter | `hatPeer.CompactProtocol` now provides bounded iProto-like frames and `CompactMultiplexer` routes correlation IDs, but no daemon peer adapter uses this wire path yet. | End-to-end adapter integration, compatibility negotiation, authentication, flow control, and head-of-line behavior. |
 | T-U03 | Stored procedure registry | External extension boundaries exist, but no trusted in-process stored function registry exposes stable call semantics. | Authorization, panic isolation, and versioning. |
 | T-U04 | Sandboxed stored Lua/runtime functions | There is no resource-limited embedded scripting runtime for stored procedures. | Sandbox escape resistance, CPU/memory limits, and disable-by-default policy. |
 | T-U05 | Session transaction settings | Transactions exist, but client/session defaults for isolation, timeout, read-only, and durability are not a unified contract. | Inheritance, reset, and authorization. |
@@ -147,7 +147,7 @@ tradeoffs are documented and its commit is published.
 | T-U16 | Selectable memtx-style row engine | HAT-trie and typed layouts exist, but no per-space predictable in-memory tuple engine is selectable. | Memory overhead, tuple access, and benchmark crossover. |
 | T-U17 | Selectable vinyl-style LSM engine | Pebble persistence exists, but no user-selectable table engine exposes explicit LSM read/write tradeoffs. | Compaction, read amplification, backup, and recovery. |
 | T-U18 | Explicit volatile cache engine | TTL/cache commands exist, but durability intent is not represented by a separate memory-only engine contract. | Eviction, memory accounting, and operator safety. |
-| T-U19 | Generic tuple field-operation batch | Typed tuple updates exist in selected APIs, but no allocation-light generic field assignment/add/splice batch is available. | Overflow, type errors, atomic rollback, and allocation benchmark. |
+| T-U19 | Durable tuple field-operation journal | Allocation-light generic tuple assignment/add/splice batches exist, but those field operations are not represented by a durable replayable journal record. | Overflow/type recovery, atomic replay, version compatibility, and bounded record size. |
 | T-U20 | Online space upgrade | Schema validation exists, but records cannot be converted in the background while compatible reads/writes continue. | Dual-format reads, progress, cutover, and crash recovery. |
 | T-U21 | Versioned space migration manager | There is no durable named migration plan with preconditions, progress, mixed-version clients, and rollback. | Resume after crash and dependency validation. |
 | T-U22 | Cross-index unique constraints | Hash/ordered/functional indexes exist, but a named space cannot atomically enforce uniqueness across multiple maintained indexes. | Concurrent writes, rollback, and error determinism. |
