@@ -79,6 +79,8 @@ func TestConnectionPoolValidatesOptionsAndNilReceiver(t *testing.T) {
 		{name: "dial", want: ErrConnectionPoolDialRequired},
 		{name: "max open", want: ErrConnectionPoolMaxOpenInvalid, options: ConnectionPoolOptions{MaxOpen: -1, Dial: func(context.Context) (Connection, error) { return nil, nil }}},
 		{name: "max idle", want: ErrConnectionPoolMaxIdleInvalid, options: ConnectionPoolOptions{MaxIdle: -1, Dial: func(context.Context) (Connection, error) { return nil, nil }}},
+		{name: "breaker threshold", want: ErrConnectionPoolCircuitThresholdInvalid, options: ConnectionPoolOptions{Breaker: &ConnectionPoolCircuitBreakerOptions{FailureThreshold: -1}, Dial: func(context.Context) (Connection, error) { return nil, nil }}},
+		{name: "breaker interval", want: ErrConnectionPoolCircuitIntervalInvalid, options: ConnectionPoolOptions{Breaker: &ConnectionPoolCircuitBreakerOptions{OpenInterval: -1}, Dial: func(context.Context) (Connection, error) { return nil, nil }}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -96,6 +98,9 @@ func TestConnectionPoolValidatesOptionsAndNilReceiver(t *testing.T) {
 	}
 	if got := nilPool.Stats(); got != (ConnectionPoolStats{}) {
 		t.Fatalf("nil Stats() = %#v, want zero", got)
+	}
+	if got := nilPool.CircuitBreakerStats(); got != (ConnectionPoolCircuitBreakerStats{}) {
+		t.Fatalf("nil CircuitBreakerStats() = %#v, want zero", got)
 	}
 }
 
@@ -235,6 +240,121 @@ func TestConnectionPoolCloseWaitsForActiveHandler(t *testing.T) {
 	}
 }
 
+func TestConnectionPoolCircuitBreakerOpensAndRecovers(t *testing.T) {
+	var dialed atomic.Int32
+	p, err := NewConnectionPool(ConnectionPoolOptions{
+		MaxDialAttempts: 1,
+		Breaker: &ConnectionPoolCircuitBreakerOptions{
+			FailureThreshold: 2,
+			OpenInterval:     10 * time.Millisecond,
+		},
+		Dial: func(context.Context) (Connection, error) {
+			switch dialed.Add(1) {
+			case 1, 2:
+				return nil, errors.New("peer unavailable")
+			default:
+				return &connectionPoolTestConnection{}, nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewConnectionPool() error = %v", err)
+	}
+	for range 2 {
+		if err := p.Do(context.Background(), func(context.Context, Connection) error { return nil }); err == nil {
+			t.Fatal("Do() unexpectedly succeeded while peer was unavailable")
+		}
+	}
+	if err := p.Do(context.Background(), func(context.Context, Connection) error { return nil }); !errors.Is(err, ErrConnectionPoolCircuitOpen) {
+		t.Fatalf("open-circuit Do() error = %v, want %v", err, ErrConnectionPoolCircuitOpen)
+	}
+	if got := dialed.Load(); got != 2 {
+		t.Fatalf("dial count while circuit open = %d, want 2", got)
+	}
+	stats := p.CircuitBreakerStats()
+	if !stats.Enabled || stats.State != ConnectionPoolCircuitOpen || stats.Opens != 1 || stats.Rejects != 1 {
+		t.Fatalf("CircuitBreakerStats() = %#v, want one open and one rejection", stats)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := p.Do(context.Background(), func(context.Context, Connection) error { return nil })
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrConnectionPoolCircuitOpen) {
+			t.Fatalf("recovery Do() error = %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("circuit did not enter half-open recovery")
+		}
+		runtime.Gosched()
+	}
+	if got := dialed.Load(); got != 3 {
+		t.Fatalf("dial count after recovery = %d, want 3", got)
+	}
+	stats = p.CircuitBreakerStats()
+	if stats.State != ConnectionPoolCircuitClosed || stats.ConsecutiveFailures != 0 || stats.Probes != 1 {
+		t.Fatalf("recovered CircuitBreakerStats() = %#v, want closed state", stats)
+	}
+	if err := p.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestConnectionPoolCircuitBreakerIgnoresContextFailures(t *testing.T) {
+	var dialed atomic.Int32
+	p, err := NewConnectionPool(ConnectionPoolOptions{
+		MaxDialAttempts: 1,
+		Breaker: &ConnectionPoolCircuitBreakerOptions{
+			FailureThreshold: 1,
+			OpenInterval:     time.Hour,
+		},
+		Dial: func(context.Context) (Connection, error) {
+			dialed.Add(1)
+			return nil, context.Canceled
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewConnectionPool() error = %v", err)
+	}
+	for range 2 {
+		if err := p.Do(context.Background(), func(context.Context, Connection) error { return nil }); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Do() error = %v, want context canceled", err)
+		}
+	}
+	if got := dialed.Load(); got != 2 {
+		t.Fatalf("dial count = %d, want 2", got)
+	}
+	stats := p.CircuitBreakerStats()
+	if stats.State != ConnectionPoolCircuitClosed || stats.ConsecutiveFailures != 0 || stats.Opens != 0 {
+		t.Fatalf("CircuitBreakerStats() = %#v, want unchanged closed state", stats)
+	}
+	if err := p.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestConnectionPoolCircuitBreakerAbortedProbeReopens(t *testing.T) {
+	breaker := &connectionPoolCircuitBreaker{
+		failureThreshold: 1,
+		openInterval:     time.Millisecond,
+		state:            ConnectionPoolCircuitClosed,
+	}
+	if !breaker.failure() {
+		t.Fatal("failure() did not open the circuit")
+	}
+	time.Sleep(2 * time.Millisecond)
+	if err := breaker.allow(); err != nil {
+		t.Fatalf("allow() error = %v, want half-open probe", err)
+	}
+	breaker.abortProbe()
+	stats := breaker.stats()
+	if stats.State != ConnectionPoolCircuitOpen || stats.Probes != 1 {
+		t.Fatalf("stats after aborted probe = %#v, want open state", stats)
+	}
+}
+
 func BenchmarkConnectionPoolDo(b *testing.B) {
 	p, err := NewConnectionPool(ConnectionPoolOptions{
 		MaxOpen:         1,
@@ -317,5 +437,60 @@ func BenchmarkConnectionPoolDialEachCallWithHandshake(b *testing.B) {
 		if err := connection.Close(); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkConnectionPoolDialStormWithoutBreaker(b *testing.B) {
+	wantErr := errors.New("peer unavailable")
+	var dialed atomic.Int64
+	p, err := NewConnectionPool(ConnectionPoolOptions{
+		MaxDialAttempts: 1,
+		Dial: func(context.Context) (Connection, error) {
+			dialed.Add(1)
+			return nil, wantErr
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_ = p.Do(context.Background(), func(context.Context, Connection) error { return nil })
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(dialed.Load()), "dial-calls")
+	if err := p.Close(context.Background()); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkConnectionPoolDialStormWithBreaker(b *testing.B) {
+	wantErr := errors.New("peer unavailable")
+	var dialed atomic.Int64
+	p, err := NewConnectionPool(ConnectionPoolOptions{
+		MaxDialAttempts: 1,
+		Breaker: &ConnectionPoolCircuitBreakerOptions{
+			FailureThreshold: 1,
+			OpenInterval:     time.Hour,
+		},
+		Dial: func(context.Context) (Connection, error) {
+			dialed.Add(1)
+			return nil, wantErr
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	_ = p.Do(context.Background(), func(context.Context, Connection) error { return nil })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_ = p.Do(context.Background(), func(context.Context, Connection) error { return nil })
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(dialed.Load()), "dial-calls")
+	if err := p.Close(context.Background()); err != nil {
+		b.Fatal(err)
 	}
 }

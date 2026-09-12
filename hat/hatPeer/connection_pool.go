@@ -9,30 +9,36 @@ import (
 )
 
 var (
-	ErrConnectionPoolNil                  = errors.New("hatPeer: connection pool is nil")
-	ErrConnectionPoolDialRequired         = errors.New("hatPeer: connection pool dial function is required")
-	ErrConnectionPoolMaxOpenInvalid       = errors.New("hatPeer: connection pool max open is invalid")
-	ErrConnectionPoolMaxIdleInvalid       = errors.New("hatPeer: connection pool max idle is invalid")
-	ErrConnectionPoolDialAttemptsInvalid  = errors.New("hatPeer: connection pool max dial attempts is invalid")
-	ErrConnectionPoolRetryDelayInvalid    = errors.New("hatPeer: connection pool retry delay is invalid")
-	ErrConnectionPoolRetryMaxDelayInvalid = errors.New("hatPeer: connection pool maximum retry delay is invalid")
-	ErrConnectionPoolHandlerRequired      = errors.New("hatPeer: connection pool handler is required")
-	ErrConnectionPoolContextRequired      = errors.New("hatPeer: connection pool context is required")
-	ErrConnectionPoolClosed               = errors.New("hatPeer: connection pool is closed")
-	ErrConnectionPoolConnectionNil        = errors.New("hatPeer: dial returned a nil connection")
+	ErrConnectionPoolNil                     = errors.New("hatPeer: connection pool is nil")
+	ErrConnectionPoolDialRequired            = errors.New("hatPeer: connection pool dial function is required")
+	ErrConnectionPoolMaxOpenInvalid          = errors.New("hatPeer: connection pool max open is invalid")
+	ErrConnectionPoolMaxIdleInvalid          = errors.New("hatPeer: connection pool max idle is invalid")
+	ErrConnectionPoolDialAttemptsInvalid     = errors.New("hatPeer: connection pool max dial attempts is invalid")
+	ErrConnectionPoolRetryDelayInvalid       = errors.New("hatPeer: connection pool retry delay is invalid")
+	ErrConnectionPoolRetryMaxDelayInvalid    = errors.New("hatPeer: connection pool maximum retry delay is invalid")
+	ErrConnectionPoolHandlerRequired         = errors.New("hatPeer: connection pool handler is required")
+	ErrConnectionPoolContextRequired         = errors.New("hatPeer: connection pool context is required")
+	ErrConnectionPoolClosed                  = errors.New("hatPeer: connection pool is closed")
+	ErrConnectionPoolConnectionNil           = errors.New("hatPeer: dial returned a nil connection")
+	ErrConnectionPoolCircuitThresholdInvalid = errors.New("hatPeer: connection pool circuit failure threshold is invalid")
+	ErrConnectionPoolCircuitIntervalInvalid  = errors.New("hatPeer: connection pool circuit open interval is invalid")
+	ErrConnectionPoolCircuitOpen             = errors.New("hatPeer: connection pool circuit is open")
 )
 
 const (
-	DefaultConnectionPoolMaxOpen         = 8
-	DefaultConnectionPoolMaxIdle         = 8
-	DefaultConnectionPoolMaxDialAttempts = 3
-	MaxConnectionPoolMaxOpen             = 4096
-	MaxConnectionPoolDialAttempts        = 8
+	DefaultConnectionPoolMaxOpen          = 8
+	DefaultConnectionPoolMaxIdle          = 8
+	DefaultConnectionPoolMaxDialAttempts  = 3
+	MaxConnectionPoolMaxOpen              = 4096
+	MaxConnectionPoolDialAttempts         = 8
+	DefaultConnectionPoolCircuitThreshold = 5
+	MaxConnectionPoolCircuitThreshold     = 1024
 )
 
 const (
-	DefaultConnectionPoolDialRetryDelay    = 10 * time.Millisecond
-	DefaultConnectionPoolDialRetryMaxDelay = 250 * time.Millisecond
+	DefaultConnectionPoolDialRetryDelay      = 10 * time.Millisecond
+	DefaultConnectionPoolDialRetryMaxDelay   = 250 * time.Millisecond
+	DefaultConnectionPoolCircuitOpenInterval = 5 * time.Second
 )
 
 // Connection is the minimal lifecycle contract required by ConnectionPool.
@@ -45,6 +51,33 @@ type Connection interface {
 // shutdown and request cancellation can interrupt slow connection attempts.
 type DialFunc func(ctx context.Context) (Connection, error)
 
+// ConnectionPoolCircuitBreakerOptions enables the optional peer circuit
+// breaker when assigned to ConnectionPoolOptions.Breaker.
+type ConnectionPoolCircuitBreakerOptions struct {
+	FailureThreshold int
+	OpenInterval     time.Duration
+}
+
+// ConnectionPoolCircuitState identifies the current breaker state.
+type ConnectionPoolCircuitState uint8
+
+const (
+	ConnectionPoolCircuitDisabled ConnectionPoolCircuitState = iota
+	ConnectionPoolCircuitClosed
+	ConnectionPoolCircuitOpen
+	ConnectionPoolCircuitHalfOpen
+)
+
+// ConnectionPoolCircuitBreakerStats is a point-in-time breaker snapshot.
+type ConnectionPoolCircuitBreakerStats struct {
+	Enabled             bool
+	State               ConnectionPoolCircuitState
+	ConsecutiveFailures int
+	Opens               uint64
+	Rejects             uint64
+	Probes              uint64
+}
+
 // ConnectionPoolOptions configures a ConnectionPool. Zero values use sane
 // bounded defaults; negative values are rejected.
 type ConnectionPoolOptions struct {
@@ -54,6 +87,7 @@ type ConnectionPoolOptions struct {
 	DialRetryDelay    time.Duration
 	DialRetryMaxDelay time.Duration
 	Dial              DialFunc
+	Breaker           *ConnectionPoolCircuitBreakerOptions
 }
 
 // ConnectionPoolStats is a point-in-time pool snapshot.
@@ -76,6 +110,7 @@ type ConnectionPool struct {
 	maxDialAttempts   int
 	dialRetryDelay    time.Duration
 	dialRetryMaxDelay time.Duration
+	breaker           *connectionPoolCircuitBreaker
 
 	slots   chan struct{}
 	idle    chan Connection
@@ -131,6 +166,27 @@ func NewConnectionPool(options ConnectionPoolOptions) (*ConnectionPool, error) {
 	if options.DialRetryMaxDelay < options.DialRetryDelay {
 		return nil, ErrConnectionPoolRetryMaxDelayInvalid
 	}
+	var breaker *connectionPoolCircuitBreaker
+	if options.Breaker != nil {
+		breakerOptions := *options.Breaker
+		if breakerOptions.FailureThreshold < 0 || breakerOptions.FailureThreshold > MaxConnectionPoolCircuitThreshold {
+			return nil, ErrConnectionPoolCircuitThresholdInvalid
+		}
+		if breakerOptions.FailureThreshold == 0 {
+			breakerOptions.FailureThreshold = DefaultConnectionPoolCircuitThreshold
+		}
+		if breakerOptions.OpenInterval < 0 {
+			return nil, ErrConnectionPoolCircuitIntervalInvalid
+		}
+		if breakerOptions.OpenInterval == 0 {
+			breakerOptions.OpenInterval = DefaultConnectionPoolCircuitOpenInterval
+		}
+		breaker = &connectionPoolCircuitBreaker{
+			failureThreshold: breakerOptions.FailureThreshold,
+			openInterval:     breakerOptions.OpenInterval,
+			state:            ConnectionPoolCircuitClosed,
+		}
+	}
 
 	poolContext, cancel := context.WithCancel(context.Background())
 	return &ConnectionPool{
@@ -140,6 +196,7 @@ func NewConnectionPool(options ConnectionPoolOptions) (*ConnectionPool, error) {
 		maxDialAttempts:   options.MaxDialAttempts,
 		dialRetryDelay:    options.DialRetryDelay,
 		dialRetryMaxDelay: options.DialRetryMaxDelay,
+		breaker:           breaker,
 		slots:             make(chan struct{}, options.MaxOpen),
 		idle:              make(chan Connection, options.MaxIdle),
 		closed:            make(chan struct{}),
@@ -226,6 +283,15 @@ func (pool *ConnectionPool) Stats() ConnectionPoolStats {
 		DialAttempts: pool.dialAttempts,
 		DialFailures: pool.dialFailures,
 	}
+}
+
+// CircuitBreakerStats reports the optional peer circuit-breaker state. The
+// zero value means that the breaker is disabled.
+func (pool *ConnectionPool) CircuitBreakerStats() ConnectionPoolCircuitBreakerStats {
+	if pool == nil || pool.breaker == nil {
+		return ConnectionPoolCircuitBreakerStats{}
+	}
+	return pool.breaker.stats()
 }
 
 func (pool *ConnectionPool) begin() error {
@@ -318,17 +384,32 @@ func (pool *ConnectionPool) dialWithRetry(ctx context.Context) (Connection, erro
 		if pool.isClosed() {
 			return nil, ErrConnectionPoolClosed
 		}
+		if pool.breaker != nil {
+			if err := pool.breaker.allow(); err != nil {
+				return nil, err
+			}
+		}
 		pool.mu.Lock()
 		pool.dialAttempts++
 		pool.mu.Unlock()
 		connection, err := pool.dial(dialContext)
 		if err == nil && connection != nil {
+			if pool.breaker != nil {
+				pool.breaker.success()
+			}
 			return connection, nil
 		}
 		if err == nil {
 			err = ErrConnectionPoolConnectionNil
 		}
 		lastErr = err
+		if pool.breaker != nil {
+			if connectionPoolContextError(err) {
+				pool.breaker.abortProbe()
+			} else if pool.breaker.failure() {
+				return nil, ErrConnectionPoolCircuitOpen
+			}
+		}
 		pool.mu.Lock()
 		pool.dialFailures++
 		pool.mu.Unlock()
@@ -417,4 +498,84 @@ func (pool *ConnectionPool) isClosed() bool {
 	closed := pool.closedState
 	pool.mu.Unlock()
 	return closed
+}
+
+func connectionPoolContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+type connectionPoolCircuitBreaker struct {
+	mu               sync.Mutex
+	failureThreshold int
+	openInterval     time.Duration
+	state            ConnectionPoolCircuitState
+	consecutive      int
+	openedAt         time.Time
+	opens            uint64
+	rejects          uint64
+	probes           uint64
+}
+
+func (breaker *connectionPoolCircuitBreaker) allow() error {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	switch breaker.state {
+	case ConnectionPoolCircuitClosed:
+		return nil
+	case ConnectionPoolCircuitOpen:
+		if time.Since(breaker.openedAt) < breaker.openInterval {
+			breaker.rejects++
+			return ErrConnectionPoolCircuitOpen
+		}
+		breaker.state = ConnectionPoolCircuitHalfOpen
+		breaker.probes++
+		return nil
+	case ConnectionPoolCircuitHalfOpen:
+		breaker.rejects++
+		return ErrConnectionPoolCircuitOpen
+	default:
+		return ErrConnectionPoolCircuitOpen
+	}
+}
+
+func (breaker *connectionPoolCircuitBreaker) success() {
+	breaker.mu.Lock()
+	breaker.state = ConnectionPoolCircuitClosed
+	breaker.consecutive = 0
+	breaker.mu.Unlock()
+}
+
+func (breaker *connectionPoolCircuitBreaker) failure() bool {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	breaker.consecutive++
+	if breaker.state == ConnectionPoolCircuitHalfOpen || breaker.consecutive >= breaker.failureThreshold {
+		breaker.state = ConnectionPoolCircuitOpen
+		breaker.openedAt = time.Now()
+		breaker.opens++
+		return true
+	}
+	return false
+}
+
+func (breaker *connectionPoolCircuitBreaker) abortProbe() {
+	breaker.mu.Lock()
+	if breaker.state == ConnectionPoolCircuitHalfOpen {
+		breaker.state = ConnectionPoolCircuitOpen
+		breaker.openedAt = time.Now()
+	}
+	breaker.mu.Unlock()
+}
+
+func (breaker *connectionPoolCircuitBreaker) stats() ConnectionPoolCircuitBreakerStats {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	return ConnectionPoolCircuitBreakerStats{
+		Enabled:             true,
+		State:               breaker.state,
+		ConsecutiveFailures: breaker.consecutive,
+		Opens:               breaker.opens,
+		Rejects:             breaker.rejects,
+		Probes:              breaker.probes,
+	}
 }

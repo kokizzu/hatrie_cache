@@ -7,11 +7,13 @@ files=(
 	hat/hatPeer/connection_pool_test.go
 	PEER_CONNECTION_POOL.md
 	PRODUCT_IDEA_GAPS.md
+	scripts/benchmark-t-peer-breaker.sh
 	scripts/benchmark-t-peer-pool.sh
 	scripts/format-t-peer-pool.sh
 	scripts/publish-t-peer-pool.sh
 	scripts/race-t-peer-pool.sh
 	scripts/test-t-peer-pool-package.sh
+	scripts/test-t-peer-breaker.sh
 	scripts/test-t-peer-pool.sh
 	scripts/vet-t-peer-pool.sh
 )
@@ -48,11 +50,15 @@ if ! rg -q 'PEER_CONNECTION_POOL.md' "$worktree/README.md"; then
 fi
 
 if ! rg -q '^test-t-peer-pool:' "$worktree/Makefile"; then
-	printf '\n.PHONY: test-t-peer-pool format-t-peer-pool test-t-peer-pool-package race-t-peer-pool vet-t-peer-pool benchmark-t-peer-pool publish-t-peer-pool\ntest-t-peer-pool:\n\tbash ./scripts/test-t-peer-pool.sh\nformat-t-peer-pool:\n\tbash ./scripts/format-t-peer-pool.sh\ntest-t-peer-pool-package:\n\tbash ./scripts/test-t-peer-pool-package.sh\nrace-t-peer-pool:\n\tbash ./scripts/race-t-peer-pool.sh\nvet-t-peer-pool:\n\tbash ./scripts/vet-t-peer-pool.sh\nbenchmark-t-peer-pool:\n\tbash ./scripts/benchmark-t-peer-pool.sh\npublish-t-peer-pool:\n\tbash ./scripts/publish-t-peer-pool.sh\n' >> "$worktree/Makefile"
+	printf '\n.PHONY: test-t-peer-pool format-t-peer-pool test-t-peer-pool-package test-t-peer-breaker race-t-peer-pool vet-t-peer-pool benchmark-t-peer-pool benchmark-t-peer-breaker publish-t-peer-pool\ntest-t-peer-pool:\n\tbash ./scripts/test-t-peer-pool.sh\nformat-t-peer-pool:\n\tbash ./scripts/format-t-peer-pool.sh\ntest-t-peer-pool-package:\n\tbash ./scripts/test-t-peer-pool-package.sh\ntest-t-peer-breaker:\n\tbash ./scripts/test-t-peer-breaker.sh\nrace-t-peer-pool:\n\tbash ./scripts/race-t-peer-pool.sh\nvet-t-peer-pool:\n\tbash ./scripts/vet-t-peer-pool.sh\nbenchmark-t-peer-pool:\n\tbash ./scripts/benchmark-t-peer-pool.sh\nbenchmark-t-peer-breaker:\n\tbash ./scripts/benchmark-t-peer-breaker.sh\npublish-t-peer-pool:\n\tbash ./scripts/publish-t-peer-pool.sh\n' >> "$worktree/Makefile"
+fi
+if ! rg -q '^test-t-peer-breaker:' "$worktree/Makefile"; then
+	printf '\n.PHONY: test-t-peer-breaker benchmark-t-peer-breaker\ntest-t-peer-breaker:\n\tbash ./scripts/test-t-peer-breaker.sh\nbenchmark-t-peer-breaker:\n\tbash ./scripts/benchmark-t-peer-breaker.sh\n' >> "$worktree/Makefile"
 fi
 
 make -C "$worktree" format-t-peer-pool
 make -C "$worktree" test-t-peer-pool-package
+make -C "$worktree" test-t-peer-breaker
 make -C "$worktree" race-t-peer-pool
 make -C "$worktree" vet-t-peer-pool
 benchmark_log="$worktree/peer-pool-benchmark.log"
@@ -61,6 +67,7 @@ if ! make -C "$worktree" benchmark-t-peer-pool > "$benchmark_log"; then
 	exit 1
 fi
 tail -n 80 "$benchmark_log"
+make -C "$worktree" benchmark-t-peer-breaker
 make -C "$worktree" audit-product-idea-gaps
 full_test_log="$worktree/peer-pool-full-test.log"
 if ! go test -C "$worktree" ./... -timeout 90s -p 1 -skip '^TestRunRestoreRehearsalVerifiesBackupPath$' -count=1 > "$full_test_log"; then

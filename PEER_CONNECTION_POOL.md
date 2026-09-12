@@ -62,6 +62,29 @@ idle pool.
   protocol health checks remain the responsibility of `DialFunc` and the
   wrapped connection.
 
+## Optional Circuit Breaker
+
+Set `ConnectionPoolOptions.Breaker` to enable a per-pool peer circuit breaker.
+It is disabled when the pointer is `nil`, which is the default and preserves
+the pool's healthy reuse path.
+
+```go
+pool, err := hatPeer.NewConnectionPool(hatPeer.ConnectionPoolOptions{
+	Breaker: &hatPeer.ConnectionPoolCircuitBreakerOptions{
+		FailureThreshold: 5,
+		OpenInterval:     5 * time.Second,
+	},
+	Dial: dialPeer,
+})
+```
+
+Only non-context dial failures count toward the threshold. Once open, the
+breaker rejects dials without invoking `DialFunc`; after the interval it lets
+one half-open probe through. A successful probe closes the breaker, while a
+failed probe opens it again. `CircuitBreakerStats` exposes state, opens,
+rejections, probes, and consecutive failures. Handler errors do not affect
+breaker health.
+
 ## Benchmark
 
 Measured with `make benchmark-t-peer-pool` on an AMD Ryzen 9 5950X, Linux,
@@ -83,6 +106,25 @@ to its necessary bounds and synchronization. That is a known tradeoff, not a
 reason to use a pool for already-local object reuse. In production, retained
 memory and file descriptors are bounded by `MaxOpen` and `MaxIdle`; the pool
 does not allocate per successful reuse in this benchmark.
+
+For outage protection, the benchmark also compares repeated failed dials with
+and without the breaker. With the breaker enabled and a one-failure threshold,
+only the first operation reaches `DialFunc`; later operations are rejected
+locally until the open interval expires. This bounds reconnect work and is the
+primary benefit of the feature, rather than a promise that every rejected
+operation is cheaper than an arbitrary synthetic error path.
+
+The measured outage samples were:
+
+| Case | Time | Memory | Dial calls |
+| --- | ---: | ---: | ---: |
+| Failed dials without breaker | 431.1–447.4 ns/op | 224 B/op, 4 allocs/op | 2.65–2.76 million |
+| Failed dials with breaker | 433.7–481.0 ns/op | 224 B/op, 4 allocs/op | 1 |
+
+The enabled breaker has similar local CPU cost, with a measured 0–10% range
+relative to the no-breaker failure path, but prevents essentially all repeated
+dials after the first failure. It is therefore a resource-protection feature,
+not a microbenchmark speedup. The healthy default-off path is unchanged.
 
 ## Inspiration
 

@@ -10636,3 +10636,9 @@ benchmark-t-peer-pool:
 	bash ./scripts/benchmark-t-peer-pool.sh
 publish-t-peer-pool:
 	bash ./scripts/publish-t-peer-pool.sh
+
+.PHONY: test-t-peer-breaker benchmark-t-peer-breaker
+test-t-peer-breaker:
+	bash ./scripts/test-t-peer-breaker.sh
+benchmark-t-peer-breaker:
+	bash ./scripts/benchmark-t-peer-breaker.sh
