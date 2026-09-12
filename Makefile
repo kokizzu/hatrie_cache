@@ -10746,3 +10746,24 @@ benchmark-t-u02-session:
 .PHONY: publish-t-u02-session
 publish-t-u02-session:
 	bash ./scripts/publish-t-u02-session.sh
+.PHONY: format-t-u28-lifecycle
+format-t-u28-lifecycle:
+	@bash scripts/format-t-u28-lifecycle.sh
+.PHONY: test-t-u28-lifecycle
+test-t-u28-lifecycle:
+	@bash scripts/test-t-u28-lifecycle.sh
+.PHONY: test-t-u28-package
+test-t-u28-package:
+	@bash scripts/test-t-u28-package.sh
+.PHONY: race-t-u28-lifecycle
+race-t-u28-lifecycle:
+	@bash scripts/race-t-u28-lifecycle.sh
+.PHONY: vet-t-u28-lifecycle
+vet-t-u28-lifecycle:
+	@bash scripts/vet-t-u28-lifecycle.sh
+.PHONY: benchmark-t-u28-lifecycle
+benchmark-t-u28-lifecycle:
+	@bash scripts/benchmark-t-u28-lifecycle.sh
+.PHONY: publish-t-u28-lifecycle
+publish-t-u28-lifecycle:
+	@bash scripts/publish-t-u28-lifecycle.sh

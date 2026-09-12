@@ -46,6 +46,8 @@ type CompactPeerSessionOptions struct {
 	MaxInFlight int
 	Context     context.Context
 	Handler     CompactPeerHandler
+	Lifecycle   *PeerLifecycleRegistry
+	PeerID      string
 }
 
 // CompactPeerSession adapts CompactProtocol and CompactMultiplexer to a
@@ -61,6 +63,8 @@ type CompactPeerSession struct {
 	inflight   chan struct{}
 	context    context.Context
 	cancel     context.CancelFunc
+	lifecycle  *PeerLifecycleRegistry
+	peerID     string
 	done       chan struct{}
 	readDone   chan struct{}
 	closeOnce  sync.Once
@@ -106,11 +110,14 @@ func NewCompactPeerSession(conn net.Conn, options CompactPeerSessionOptions) (*C
 		inflight:  make(chan struct{}, maxInFlight),
 		context:   ctx,
 		cancel:    cancel,
+		lifecycle: options.Lifecycle,
+		peerID:    options.PeerID,
 		done:      make(chan struct{}),
 		readDone:  make(chan struct{}),
 	}
 	go session.readLoop()
 	go session.watchContext()
+	session.emitLifecycle(PeerLifecycleEvent{Kind: PeerLifecycleConnected})
 	return session, nil
 }
 
@@ -158,7 +165,7 @@ func (session *CompactPeerSession) Close() error {
 	if session == nil {
 		return ErrCompactPeerClosed
 	}
-	session.fail(ErrCompactPeerClosed)
+	session.terminate(ErrCompactPeerClosed, true)
 	<-session.readDone
 	return nil
 }
@@ -262,6 +269,10 @@ func (session *CompactPeerSession) watchContext() {
 }
 
 func (session *CompactPeerSession) fail(err error) {
+	session.terminate(err, false)
+}
+
+func (session *CompactPeerSession) terminate(err error, shutdown bool) {
 	if err == nil {
 		err = ErrCompactPeerClosed
 	}
@@ -274,7 +285,29 @@ func (session *CompactPeerSession) fail(err error) {
 		session.multiplex.Close(err)
 		_ = session.conn.Close()
 		close(session.done)
+		if session.lifecycle != nil {
+			go session.emitTerminalLifecycle(err, shutdown)
+		}
 	})
+}
+
+func (session *CompactPeerSession) emitLifecycle(event PeerLifecycleEvent) {
+	if session.lifecycle == nil {
+		return
+	}
+	event.PeerID = session.peerID
+	_ = session.lifecycle.Emit(event)
+}
+
+func (session *CompactPeerSession) emitTerminalLifecycle(err error, shutdown bool) {
+	event := PeerLifecycleEvent{Kind: PeerLifecycleDisconnected}
+	if err != nil {
+		event.Error = err.Error()
+	}
+	session.emitLifecycle(event)
+	if shutdown {
+		session.emitLifecycle(PeerLifecycleEvent{Kind: PeerLifecycleShutdown, Error: event.Error})
+	}
 }
 
 func compactPeerErrorPayload(protocol CompactProtocol, err error) []byte {

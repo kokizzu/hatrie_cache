@@ -3887,3 +3887,4 @@ SQL shapes retain the original predicate order. See
 [BENCHMARK.md](BENCHMARK.md#sql-numeric-predicate-reordering) for the measured
 CPU, allocation, and fallback tradeoffs.
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
+- Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
