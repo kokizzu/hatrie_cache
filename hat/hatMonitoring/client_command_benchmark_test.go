@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -124,7 +125,11 @@ func benchmarkCommandWireBytes(commands []hatCommand.Request) int {
 }
 
 func benchmarkCommandWireBytesFormat(request hatCommand.Request, format hatCommand.CommandWireFormat) int {
-	body, _, _, err := hatCommand.CommandRequestBody(request, format, 0, 0)
+	return benchmarkCommandWireBytesFormatWithThreshold(request, format, 0)
+}
+
+func benchmarkCommandWireBytesFormatWithThreshold(request hatCommand.Request, format hatCommand.CommandWireFormat, compressionThreshold int) int {
+	body, _, _, err := hatCommand.CommandRequestBody(request, format, 0, compressionThreshold)
 	if err != nil {
 		panic(err)
 	}
@@ -136,6 +141,181 @@ func benchmarkCommandWireBytesFormat(request hatCommand.Request, format hatComma
 		panic(err)
 	}
 	return len(payload)
+}
+
+func benchmarkLargeCommands(count int) []hatCommand.Request {
+	commands := make([]hatCommand.Request, count)
+	value := strings.Repeat("value-", 256)
+	for index := range commands {
+		commands[index] = hatCommand.Request{
+			Command: "SETSTR",
+			Key:     "large-batch-" + string(rune('a'+index)),
+			Value:   value,
+		}
+	}
+	return commands
+}
+
+func BenchmarkClientCommandJSONLarge(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	command := hatCommand.Request{Command: "SETSTR", Key: "large", Value: strings.Repeat("value-", 256)}
+	wireBytes := benchmarkCommandWireBytesFormat(command, hatCommand.CommandWireFormatJSON)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.Command(context.Background(), command); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientCommandJSONLargeGzip(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandCompressionThreshold = 1
+	command := hatCommand.Request{Command: "SETSTR", Key: "large", Value: strings.Repeat("value-", 256)}
+	wireBytes := benchmarkCommandWireBytesFormatWithThreshold(command, hatCommand.CommandWireFormatJSON, 1)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.Command(context.Background(), command); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientCommandProtobufLarge(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	command := hatCommand.Request{Command: "SETSTR", Key: "large", Value: strings.Repeat("value-", 256)}
+	wireBytes := benchmarkCommandWireBytesFormat(command, hatCommand.CommandWireFormatProtobuf)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.CommandWithFormat(context.Background(), command, hatCommand.CommandWireFormatProtobuf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientCommandProtobufLargeGzip(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandCompressionThreshold = 1
+	command := hatCommand.Request{Command: "SETSTR", Key: "large", Value: strings.Repeat("value-", 256)}
+	wireBytes := benchmarkCommandWireBytesFormatWithThreshold(command, hatCommand.CommandWireFormatProtobuf, 1)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.CommandWithFormat(context.Background(), command, hatCommand.CommandWireFormatProtobuf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientBatchJSON10Large(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	commands := benchmarkLargeCommands(10)
+	wireBytes := benchmarkCommandWireBytesFormat(
+		hatCommand.Request{Command: "BATCH", Batch: commands},
+		hatCommand.CommandWireFormatJSON,
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.Batch(context.Background(), commands, false); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientBatchJSON10LargeGzip(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandCompressionThreshold = 1
+	commands := benchmarkLargeCommands(10)
+	wireBytes := benchmarkCommandWireBytesFormatWithThreshold(
+		hatCommand.Request{Command: "BATCH", Batch: commands},
+		hatCommand.CommandWireFormatJSON,
+		1,
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.Batch(context.Background(), commands, false); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientBatchProtobuf10Large(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	commands := benchmarkLargeCommands(10)
+	wireBytes := benchmarkCommandWireBytesFormat(
+		hatCommand.Request{Command: "BATCH", Batch: commands},
+		hatCommand.CommandWireFormatProtobuf,
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.BatchWithFormat(context.Background(), commands, false, hatCommand.CommandWireFormatProtobuf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientBatchProtobuf10LargeGzip(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandCompressionThreshold = 1
+	commands := benchmarkLargeCommands(10)
+	wireBytes := benchmarkCommandWireBytesFormatWithThreshold(
+		hatCommand.Request{Command: "BATCH", Batch: commands},
+		hatCommand.CommandWireFormatProtobuf,
+		1,
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(wireBytes), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.BatchWithFormat(context.Background(), commands, false, hatCommand.CommandWireFormatProtobuf); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func BenchmarkClientBatchJSON10(b *testing.B) {

@@ -1,7 +1,6 @@
 package hatMonitoring
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"hatrie_cache/hat/hatCommand"
+	"hatrie_cache/internal/jsonwire"
 )
 
 const maxErrorBytes = 1 << 20
@@ -26,6 +26,9 @@ type Client struct {
 	// CommandWireFormat selects the default command request/response format.
 	// The zero value preserves the language-neutral JSON contract.
 	CommandWireFormat hatCommand.CommandWireFormat
+	// CommandCompressionThreshold enables gzip for command request bodies whose
+	// encoded size reaches the threshold. Zero or a negative value disables it.
+	CommandCompressionThreshold int
 }
 
 // NewClient creates a client using the default HTTP transport.
@@ -71,13 +74,27 @@ func (client *Client) commandWireFormat() hatCommand.CommandWireFormat {
 	return hatCommand.CommandWireFormatJSON
 }
 
+func (client *Client) commandCompressionThreshold() int {
+	if client == nil || client.CommandCompressionThreshold <= 0 {
+		return 0
+	}
+	return client.CommandCompressionThreshold
+}
+
 func (client *Client) commandJSON(ctx context.Context, command hatCommand.Request) (hatCommand.Response, error) {
 	body, err := json.Marshal(command)
 	if err != nil {
 		return hatCommand.Response{}, err
 	}
+	bodyReader, contentEncoding, err := jsonwire.EncodedRequestBody(body, client.commandCompressionThreshold())
+	if err != nil {
+		return hatCommand.Response{}, err
+	}
+	if closer, ok := bodyReader.(io.Closer); ok {
+		defer closer.Close()
+	}
 	var response hatCommand.Response
-	err = client.do(ctx, http.MethodPost, "/api/commands", nil, bytes.NewReader(body), "application/json", &response)
+	err = client.doWithContentEncoding(ctx, http.MethodPost, "/api/commands", nil, bodyReader, "application/json", contentEncoding, &response)
 	return response, err
 }
 
@@ -87,7 +104,7 @@ func (client *Client) CommandWithFormat(ctx context.Context, command hatCommand.
 	if format == hatCommand.CommandWireFormatJSON {
 		return client.commandJSON(ctx, command)
 	}
-	body, contentType, contentEncoding, err := hatCommand.CommandRequestBody(command, format, 0, 0)
+	body, contentType, contentEncoding, err := hatCommand.CommandRequestBody(command, format, 0, client.commandCompressionThreshold())
 	if err != nil {
 		return hatCommand.Response{}, err
 	}
@@ -115,7 +132,11 @@ func (client *Client) get(ctx context.Context, path string, query url.Values, ta
 }
 
 func (client *Client) do(ctx context.Context, method string, path string, query url.Values, body io.Reader, contentType string, target interface{}) error {
-	httpClient, request, err := client.newRequest(ctx, method, path, query, body, contentType, "")
+	return client.doWithContentEncoding(ctx, method, path, query, body, contentType, "", target)
+}
+
+func (client *Client) doWithContentEncoding(ctx context.Context, method string, path string, query url.Values, body io.Reader, contentType string, contentEncoding string, target interface{}) error {
+	httpClient, request, err := client.newRequest(ctx, method, path, query, body, contentType, contentEncoding)
 	if err != nil {
 		return err
 	}

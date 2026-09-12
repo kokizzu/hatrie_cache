@@ -2,6 +2,7 @@ package hatMonitoring_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -26,6 +27,9 @@ func TestClientCommandUsesAuthenticatedJSONContract(t *testing.T) {
 		}
 		if request.Header.Get("Content-Type") != "application/json" {
 			t.Fatalf("content type = %q, want application/json", request.Header.Get("Content-Type"))
+		}
+		if request.Header.Get("Content-Encoding") != "" {
+			t.Fatalf("content encoding = %q, want uncompressed default", request.Header.Get("Content-Encoding"))
 		}
 		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
 			t.Fatalf("decode command request: %v", err)
@@ -52,6 +56,115 @@ func TestClientCommandUsesAuthenticatedJSONContract(t *testing.T) {
 	}
 	if received.Command != "SETSTR" || received.Key != "name" || received.Value != "ivi" {
 		t.Fatalf("received request = %#v, want SETSTR name ivi", received)
+	}
+}
+
+func TestClientCommandUsesConfiguredRequestCompression(t *testing.T) {
+	var received hatCommand.Request
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("content type = %q, want application/json", request.Header.Get("Content-Type"))
+		}
+		if request.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("content encoding = %q, want gzip", request.Header.Get("Content-Encoding"))
+		}
+		compressed, err := gzip.NewReader(request.Body)
+		if err != nil {
+			t.Fatalf("new gzip reader: %v", err)
+		}
+		defer compressed.Close()
+		if err := json.NewDecoder(compressed).Decode(&received); err != nil {
+			t.Fatalf("decode compressed command request: %v", err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(hatCommand.Response{OK: true, Message: "compressed"})
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandCompressionThreshold = 1
+	response, err := client.Command(context.Background(), hatCommand.Request{
+		Command: "SETSTR",
+		Key:     "compressed-name",
+		Value:   "compressed-value",
+	})
+	if err != nil {
+		t.Fatalf("Command() error = %v", err)
+	}
+	if !response.OK || response.Message != "compressed" {
+		t.Fatalf("Command() response = %#v, want compressed response", response)
+	}
+	if received.Command != "SETSTR" || received.Key != "compressed-name" || received.Value != "compressed-value" {
+		t.Fatalf("received request = %#v, want compressed command", received)
+	}
+}
+
+func TestClientCommandUsesConfiguredRequestCompressionForProtobuf(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Content-Type") != hatCommand.ContentTypeProtobuf {
+			t.Fatalf("content type = %q, want %q", request.Header.Get("Content-Type"), hatCommand.ContentTypeProtobuf)
+		}
+		if request.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("content encoding = %q, want gzip", request.Header.Get("Content-Encoding"))
+		}
+		compressed, err := gzip.NewReader(request.Body)
+		if err != nil {
+			t.Fatalf("new gzip reader: %v", err)
+		}
+		defer compressed.Close()
+		payload, err := io.ReadAll(compressed)
+		if err != nil {
+			t.Fatalf("read compressed protobuf request: %v", err)
+		}
+		decoded, err := hatCommand.DecodeRequestProtobuf(bytes.NewReader(payload), 1<<20)
+		if err != nil {
+			t.Fatalf("decode protobuf request: %v", err)
+		}
+		if decoded.Command != "SETSTR" || decoded.Key != "compressed-name" || decoded.Value != "compressed-value" {
+			t.Fatalf("decoded request = %#v, want compressed command", decoded)
+		}
+		responsePayload, err := proto.Marshal(&hatGrpc.CommandResponse{Ok: true, Message: "compressed-protobuf"})
+		if err != nil {
+			t.Fatalf("marshal response: %v", err)
+		}
+		writer.Header().Set("Content-Type", hatCommand.ContentTypeProtobuf)
+		_, _ = writer.Write(responsePayload)
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	client.CommandWireFormat = hatCommand.CommandWireFormatProtobuf
+	client.CommandCompressionThreshold = 1
+	response, err := client.Command(context.Background(), hatCommand.Request{
+		Command: "SETSTR",
+		Key:     "compressed-name",
+		Value:   "compressed-value",
+	})
+	if err != nil {
+		t.Fatalf("Command() error = %v", err)
+	}
+	if !response.OK || response.Message != "compressed-protobuf" {
+		t.Fatalf("Command() response = %#v, want compressed protobuf response", response)
+	}
+}
+
+func TestClientCommandJSONAcceptsNonJSONResponseContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = writer.Write([]byte(`{"ok":true,"message":"legacy-response"}`))
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	response, err := client.Command(context.Background(), hatCommand.Request{Command: "PING"})
+	if err != nil {
+		t.Fatalf("Command() error = %v, want legacy JSON response compatibility", err)
+	}
+	if !response.OK || response.Message != "legacy-response" {
+		t.Fatalf("Command() response = %#v, want legacy-response", response)
 	}
 }
 

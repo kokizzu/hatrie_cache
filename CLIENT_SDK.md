@@ -138,3 +138,19 @@ authentication policy.
 For HTTP clients, use the existing HTTP/JSON or NDJSON endpoints documented in
 the main README. The protobuf/gRPC API is useful when a strongly typed client,
 streaming, or lower protocol overhead is preferred.
+## Command Request Compression
+
+Command and `BATCH` requests are uncompressed by default. To reduce bandwidth
+for larger JSON or protobuf requests, set a positive byte threshold on the
+client:
+
+```go
+client := hatMonitoring.NewClient("http://127.0.0.1:8080", token)
+client.CommandCompressionThreshold = 64 << 10
+```
+
+Requests whose encoded body reaches the threshold use `Content-Encoding: gzip`.
+The setting applies to both `Command`/`Batch` and their `WithFormat` variants;
+the threshold is evaluated after JSON or protobuf encoding. Keep it at `0`
+(the default) for small commands or CPU-sensitive links because gzip adds
+compression work and allocations, and can make tiny bodies larger.

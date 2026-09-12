@@ -21460,3 +21460,46 @@ the limiting resource, especially when callers can use one batch request. It
 does not replace JSON as the default: the common one-command path is slower,
 and ten separate protobuf requests are slower despite their smaller bodies.
 Reproduce the measurements with `make benchmark-monitoring-command-client`.
+## Public Command Request Compression
+
+This measures the new opt-in `hatMonitoring.Client.CommandCompressionThreshold`
+path against the same large command and ten-command batch without request
+compression. The payload uses a repeated 1,581-byte JSON command value and was
+run on Linux/amd64 with an AMD Ryzen 9 5950X using:
+
+```text
+make benchmark-monitoring-command-client
+```
+
+Each row is the median of five samples. `wire-B/op` is the request body only;
+`B/op` and allocations include the client request path. Compression uses the
+existing pooled best-speed gzip writer.
+
+| Workload | Mode | ns/op | B/op | allocs/op | wire-B/op | CPU vs plain | wire reduction |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 command, JSON | plain | 70,447 | 12,451 | 102 | 1,581 | 1.00x | 1.00x |
+| 1 command, JSON | gzip | 127,879 | 11,932 | 114 | 96 | 1.82x slower | 16.47x smaller |
+| 1 command, protobuf | plain | 79,790 | 9,109 | 98 | 1,554 | 1.00x | 1.00x |
+| 1 command, protobuf | gzip | 126,484 | 9,604 | 110 | 78 | 1.59x slower | 19.92x smaller |
+| 10-command batch, JSON | plain | 107,782 | 42,627 | 105 | 15,938 | 1.00x | 1.00x |
+| 10-command batch, JSON | gzip | 164,640 | 28,592 | 115 | 254 | 1.53x slower | 62.75x smaller |
+| 10-command batch, protobuf | plain | 91,645 | 9,289 | 98 | 15,657 | 1.00x | 1.00x |
+| 10-command batch, protobuf | gzip | 131,872 | 9,720 | 110 | 229 | 1.44x slower | 68.37x smaller |
+
+Raw samples, in the same order as the table:
+
+```text
+JSON large plain:          70861 70279 70137 71993 70447 ns/op
+JSON large gzip:          128330 137121 127879 124914 126295 ns/op
+protobuf large plain:      74883 74448 83469 83493 79790 ns/op
+protobuf large gzip:      124691 126484 125738 128654 131695 ns/op
+JSON batch-10 plain:      102474 106489 107782 109429 110798 ns/op
+JSON batch-10 gzip:       168714 164640 163435 168288 157334 ns/op
+protobuf batch-10 plain:   91645 89530 90857 92242 93103 ns/op
+protobuf batch-10 gzip:   132997 131872 131816 131774 131876 ns/op
+```
+
+The result is an opt-in bandwidth feature, not a faster default: gzip is
+roughly 1.45x-1.75x slower on this CPU and adds 12 allocations per request.
+The default remains uncompressed so existing low-latency and small-command
+workloads pay no compression cost.
