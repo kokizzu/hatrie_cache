@@ -21403,3 +21403,22 @@ This is an additive usability feature, not a cache hot-path optimization. The
 small measured overhead is the cost of URL validation and the typed helper; no
 server runtime path changes. Reproduce it with
 `make benchmark-monitoring-command-client`.
+
+## Client-side command batching
+
+Ten logical `SETSTR` commands were compared as ten `Client.Command` calls or
+one `Client.Batch` call. Both paths use the same `httptest` transport and
+response decoder; the table reports the median of five benchmark samples. Heap
+bytes are Go allocations, while wire bytes are the JSON request-body total for
+the ten logical commands.
+
+| Path | ns/op per 10 | B/op per 10 | allocs/op per 10 | wire body bytes | Per-command CPU improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Client.Command` x10 | 667,892 | 99,442 | 1,014 | 520 | 1.00x |
+| `Client.Batch` x1 | 69,567 | 10,572 | 102 | 568 | 9.60x |
+
+Batching removes nine HTTP request/response cycles and is the meaningful
+latency win. The compact JSON body itself is 9.2% larger for this tiny
+workload because of the `BATCH` envelope; that overhead becomes relatively
+smaller as command payloads grow. Reproduce it with
+`make benchmark-monitoring-command-client`.

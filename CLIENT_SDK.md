@@ -65,6 +65,17 @@ response, err := client.Command(ctx, hatCommand.Request{
 })
 ```
 
+For several commands, `Client.Batch` reuses the server's `BATCH` command and
+sends them in one HTTP request. Pass `true` for the existing atomic batch mode
+when all commands must succeed together.
+
+```go
+response, err := client.Batch(ctx, []hatCommand.Request{
+	{Command: "SETSTR", Key: "one", Value: "1"},
+	{Command: "SETSTR", Key: "two", Value: "2"},
+}, false)
+```
+
 The equivalent wire request is usable from any language with an HTTP client:
 
 ```sh

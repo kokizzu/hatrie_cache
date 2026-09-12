@@ -63,3 +63,37 @@ func TestClientCommandReportsHTTPError(t *testing.T) {
 		t.Fatal("Command() error = nil, want HTTP error")
 	}
 }
+
+func TestClientBatchUsesExistingBatchCommandContract(t *testing.T) {
+	var received hatCommand.Request
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/commands" {
+			t.Fatalf("request = %s %s, want POST /api/commands", request.Method, request.URL.Path)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatalf("decode batch request: %v", err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(hatCommand.Response{OK: true, Message: "batch stored"})
+	}))
+	defer server.Close()
+
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	response, err := client.Batch(context.Background(), []hatCommand.Request{
+		{Command: "SETSTR", Key: "one", Value: "1"},
+		{Command: "SETSTR", Key: "two", Value: "2"},
+	}, true)
+	if err != nil {
+		t.Fatalf("Batch() error = %v", err)
+	}
+	if !response.OK || response.Message != "batch stored" {
+		t.Fatalf("Batch() response = %#v, want successful batch response", response)
+	}
+	if received.Command != "BATCH" || !received.Atomic || len(received.Batch) != 2 {
+		t.Fatalf("received batch request = %#v, want atomic batch of two commands", received)
+	}
+	if received.Batch[0].Key != "one" || received.Batch[1].Key != "two" {
+		t.Fatalf("received batch entries = %#v, want one and two", received.Batch)
+	}
+}

@@ -67,3 +67,64 @@ func BenchmarkManualCommandJSON(b *testing.B) {
 		_ = response.Body.Close()
 	}
 }
+
+func benchmarkCommands(count int) []hatCommand.Request {
+	commands := make([]hatCommand.Request, count)
+	for index := range commands {
+		commands[index] = hatCommand.Request{
+			Command: "SETSTR",
+			Key:     "batch-" + string(rune('a'+index)),
+			Value:   "value",
+		}
+	}
+	return commands
+}
+
+func benchmarkCommandWireBytes(commands []hatCommand.Request) int {
+	total := 0
+	for _, command := range commands {
+		body, _ := json.Marshal(command)
+		total += len(body)
+	}
+	return total
+}
+
+func BenchmarkClientBatchJSON10(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	commands := benchmarkCommands(10)
+	batchBody, err := json.Marshal(hatCommand.Request{Command: "BATCH", Batch: commands})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(batchBody)), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		if _, err := client.Batch(context.Background(), commands, false); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkClientCommandJSON10(b *testing.B) {
+	server := newCommandBenchmarkServer()
+	defer server.Close()
+	client := hatMonitoring.NewClient(server.URL, "secret")
+	client.HTTP = server.Client()
+	commands := benchmarkCommands(10)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(benchmarkCommandWireBytes(commands)), "wire-B/op")
+	for index := 0; index < b.N; index++ {
+		for _, command := range commands {
+			if _, err := client.Command(context.Background(), command); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}

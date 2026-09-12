@@ -10503,3 +10503,15 @@ commit-monitoring-command-client:
 .PHONY: push-monitoring-command-client
 push-monitoring-command-client:
 	sh scripts/push-monitoring-command-client.sh
+
+.PHONY: review-monitoring-command-batch
+review-monitoring-command-batch:
+	sh scripts/review-monitoring-command-batch.sh
+
+.PHONY: commit-monitoring-command-batch
+commit-monitoring-command-batch:
+	sh scripts/commit-monitoring-command-batch.sh
+
+.PHONY: push-monitoring-command-batch
+push-monitoring-command-batch:
+	sh scripts/push-monitoring-command-batch.sh

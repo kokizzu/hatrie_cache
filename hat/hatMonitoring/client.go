@@ -65,6 +65,11 @@ func (client *Client) Command(ctx context.Context, command hatCommand.Request) (
 	return response, err
 }
 
+// Batch executes multiple public cache commands in one HTTP request.
+func (client *Client) Batch(ctx context.Context, commands []hatCommand.Request, atomic bool) (hatCommand.Response, error) {
+	return client.Command(ctx, hatCommand.Request{Command: "BATCH", Batch: commands, Atomic: atomic})
+}
+
 func (client *Client) get(ctx context.Context, path string, query url.Values, target interface{}) error {
 	return client.do(ctx, http.MethodGet, path, query, nil, "", target)
 }
