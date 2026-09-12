@@ -3760,6 +3760,9 @@ type HatTrie struct {
 	levelDBSpillKeys                   map[string]struct{}
 	levelDBHotBytes                    int64
 	levelDBHotValues                   map[string]int64
+	keyWatchers                        map[string]map[uint64]*KeyWatcher
+	keyPrefixWatchers                  map[string]map[uint64]*KeyWatcher
+	nextKeyWatcherID                   uint64
 	mutationEpoch                      uint64
 	memoryCompactionEpoch              uint64
 	replicationMerkle                  *replicationMerkleIndex
@@ -3847,6 +3850,8 @@ func (ht *HatTrie) Destroy() {
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+
+	ht.closeKeyWatchersLocked()
 
 	if ht.root == nil {
 		return
@@ -4936,6 +4941,7 @@ func (ht *HatTrie) recordWriteMutationLocked(keys ...string) {
 	ht.updateReplicationMerkleLocked(keys...)
 	ht.mutationEpoch++
 	for _, key := range keys {
+		ht.notifyKeyWatchersLocked(key, KeyChangeSet)
 		ht.clearHotKeyLocked(key)
 		ht.updateLevelDBSpillCandidateForKeyLocked(key)
 		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
@@ -5052,6 +5058,7 @@ func (ht *HatTrie) recordDeleteBatchLocked(batch *batchTelemetry, key string) {
 		ht.keyStatsGlobal.Deletes++
 	}
 	ht.recordWriteBatchLocked(batch)
+	ht.notifyKeyWatchersLocked(key, KeyChangeDelete)
 	ht.deleteLevelDBSpillCandidateLocked(key)
 	ht.deleteLevelDBHotByteAccountingLocked(key)
 	ht.removeKeyStatsLocked(key)
