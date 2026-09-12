@@ -10225,3 +10225,31 @@ commit-ch029-sql-quotas:
 .PHONY: push-ch029-sql-quotas
 push-ch029-sql-quotas:
 	sh scripts/push-ch029-sql-quotas.sh
+test-tg42-key-watchers:
+	sh scripts/test-tg42-key-watchers.sh
+
+benchmark-tg42-key-watchers:
+	sh scripts/benchmark-tg42-key-watchers.sh
+
+format-tg42-key-watchers:
+	sh scripts/format-tg42-key-watchers.sh
+
+test-tg42-package:
+	sh scripts/test-tg42-package.sh
+
+race-tg42-key-watchers:
+	sh scripts/race-tg42-key-watchers.sh
+
+vet-tg42-key-watchers:
+	sh scripts/vet-tg42-key-watchers.sh
+
+review-tg42-key-watchers:
+	sh scripts/review-tg42-key-watchers.sh
+
+commit-tg42-key-watchers:
+	sh scripts/commit-tg42-key-watchers.sh
+
+push-tg42-key-watchers:
+	sh scripts/push-tg42-key-watchers.sh
+
+.PHONY: test-tg42-key-watchers benchmark-tg42-key-watchers format-tg42-key-watchers test-tg42-package race-tg42-key-watchers vet-tg42-key-watchers review-tg42-key-watchers commit-tg42-key-watchers push-tg42-key-watchers

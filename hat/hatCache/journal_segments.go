@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"hatrie_cache/hat/hatJournal"
 )
@@ -359,6 +360,10 @@ func readCommandJournalTailSet(path string, segmented bool, afterSequence uint64
 }
 
 func readCommandJournalSpaceTailSet(path string, segmented bool, afterSequence uint64, limit int, spaceKey string) (CommandJournalTail, error) {
+	return readCommandJournalKeyTailSet(path, segmented, afterSequence, limit, spaceKey, "")
+}
+
+func readCommandJournalKeyTailSet(path string, segmented bool, afterSequence uint64, limit int, spaceKey, keyPrefix string) (CommandJournalTail, error) {
 	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
 	if limit > 0 {
 		tail.Limit = limit
@@ -371,7 +376,13 @@ func readCommandJournalSpaceTailSet(path string, segmented bool, afterSequence u
 		if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
 			tail.CompactedThrough = entry.Sequence
 		}
-		if entry.Checkpoint || entry.Sequence <= afterSequence || entry.Request.Key != spaceKey {
+		if entry.Checkpoint || entry.Sequence <= afterSequence {
+			return nil
+		}
+		if spaceKey != "" && entry.Request.Key != spaceKey {
+			return nil
+		}
+		if keyPrefix != "" && !strings.HasPrefix(entry.Request.Key, keyPrefix) {
 			return nil
 		}
 		if limit > 0 && len(tail.Entries) >= limit {

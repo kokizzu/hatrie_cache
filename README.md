@@ -112,6 +112,7 @@ security guidance before exposing it on a network.
 - First-class half-open SQL temporal validity predicates: [SQL_TEMPORAL_VALIDITY.md](SQL_TEMPORAL_VALIDITY.md)
 - Opt-in durable command-journal subscriptions: [MZ010_JOURNAL_SUBSCRIPTIONS.md](MZ010_JOURNAL_SUBSCRIPTIONS.md)
 - Opt-in logical-space journal changefeeds: [TT040_SPACE_CHANGEFEED.md](TT040_SPACE_CHANGEFEED.md)
+- Opt-in key-prefix journal watchers and bounded coalescing: [TT040_SPACE_CHANGEFEED.md](TT040_SPACE_CHANGEFEED.md#prefix-watchers-and-coalescing)
 - Opt-in gRPC command multiplexing with correlated responses: [TT032_IPROTO_MULTIPLEXING.md](TT032_IPROTO_MULTIPLEXING.md)
 - Default-off maintenance read-only mode for public cache traffic: [TT043_MAINTENANCE_READ_ONLY.md](TT043_MAINTENANCE_READ_ONLY.md)
 - Read-only per-structure native/backing memory accounting: [TT046_MEMORY_ACCOUNTING.md](TT046_MEMORY_ACCOUNTING.md)

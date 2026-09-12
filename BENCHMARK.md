@@ -21239,3 +21239,25 @@ the baseline CPU time and one 640-byte allocation to materialize 26 named rows,
 while ordinary cache operations pay no new work. An intermediate refactor that
 reused the row-value array for the existing helper measured `26.30 ns/op` versus
 the `20.55 ns/op` baseline and was removed before the final implementation.
+
+## T-G42 Key Watchers
+
+The focused benchmark uses a 256-record journal on `linux/amd64` with an AMD
+Ryzen 9 5950X. Final rows contain three `-count=3` samples from
+`make benchmark-tg42-key-watchers`, with `-benchtime=500ms -benchmem`; the
+historical before-feature control retains its original five samples.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Control CPU / new CPU | Control B/op / new B/op |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Existing exact-key replay, before feature | 127,204; 125,511; 127,951; 130,460; 129,414 | 127,951 | 90,154 | 1,302 | - | - |
+| Existing exact-key replay, final control | 131,652; 128,001; 128,106 | 128,106 | 90,188 | 1,302 | - | - |
+| Prefix watcher, same 64 matches | 129,165; 126,605; 128,252 | 128,252 | 90,187 | 1,302 | 1.00x | 1.00x |
+| Prefix replay, 128 records, uncoalesced | 139,059; 147,350; 148,298 | 147,350 | 117,579 | 1,302 | - | - |
+| Prefix replay, 2 newest records, coalesced | 133,097; 139,010; 136,793 | 136,793 | 100,082 | 1,309 | 1.08x | 1.17x |
+
+The prefix path is allocation-neutral versus the final exact-key control. In
+the repeated-key workload, coalescing is `1.08x` faster and uses `1.17x` less
+per-operation memory than delivering all 128 records, at the cost of seven
+additional allocations per subscription setup. The before/after exact-key
+rows are a control; their small difference is normal benchmark noise, not a
+claimed optimization.
