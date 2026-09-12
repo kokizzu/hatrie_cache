@@ -10966,3 +10966,15 @@ benchmark-t-u50:
 
 verify-t-u50:
 	bash ./scripts/verify-t-u50.sh
+
+test-t-u52:
+	bash ./scripts/test-t-u52.sh
+
+format-t-u52:
+	bash ./scripts/format-t-u52.sh
+
+benchmark-t-u52:
+	bash ./scripts/benchmark-t-u52.sh
+
+verify-t-u52:
+	bash ./scripts/verify-t-u52.sh

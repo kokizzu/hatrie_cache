@@ -59,6 +59,7 @@ security guidance before exposing it on a network.
 - Opt-in method-aware peer retries: [RETRY_POLICY.md](RETRY_POLICY.md)
 - Opt-in bounded replica read hedging: [REPLICA_HEDGING.md](REPLICA_HEDGING.md)
 - Bounded authenticated versioned configuration watch: [CONFIG_WATCH.md](CONFIG_WATCH.md)
+- Opt-in adaptive per-peer circuit cooldowns: [ADAPTIVE_PEER_BREAKER.md](ADAPTIVE_PEER_BREAKER.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)

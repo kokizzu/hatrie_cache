@@ -21534,3 +21534,30 @@ The result is an opt-in bandwidth feature, not a faster default: gzip is
 roughly 1.45x-1.75x slower on this CPU and adds 12 allocations per request.
 The default remains uncompressed so existing low-latency and small-command
 workloads pay no compression cost.
+
+## Adaptive Peer Circuit Breaker
+
+The opt-in `hatPeer.ConnectionPool` adaptive breaker backs off the cooldown after
+a failed half-open probe and halves it after a successful probe. Disabled and
+fixed-breaker configurations retain their existing behavior. The benchmark uses
+a failing single-attempt dial storm on Linux/amd64, AMD Ryzen 9 5950X, with five
+samples per mode and `-benchmem`.
+
+| Mode | Five raw ns/op samples | Median | Memory | Allocations | Dial calls |
+| --- | --- | ---: | ---: | ---: | ---: |
+| No breaker | 409.5, 405.2, 407.1, 402.0, 408.5 | 407.1 | 224 B/op | 4 allocs/op | about 2.9M/sample |
+| Fixed breaker | 447.0, 438.0, 453.0, 457.5, 452.7 | 452.7 | 224 B/op | 4 allocs/op | 1/sample |
+| Adaptive breaker | 430.1, 425.9, 428.7, 445.2, 432.8 | 430.1 | 224 B/op | 4 allocs/op | 1/sample |
+
+Adaptive is 1.05x lower latency than the fixed-breaker median in this run, with
+no measured memory or allocation change. Its operational improvement is fewer
+probe attempts during a sustained outage: with a five-second base and one-minute
+cap, probes occur around 5, 15, and 35 seconds during the first 60 seconds,
+versus roughly eleven fixed five-second probes. The tradeoff is slower detection
+of recovery while backed off; each successful probe halves the interval.
+
+Raw command:
+
+```text
+make benchmark-t-u52
+```

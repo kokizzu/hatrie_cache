@@ -129,7 +129,7 @@ tradeoffs are documented and its commit is published.
 
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
-| T-U52 | Per-peer adaptive breaker policy | `hatPeer` now has a threshold/cooldown breaker, but it does not adapt thresholds or cooldowns from peer-specific failure classes and observed recovery. | Preserve deterministic operator bounds, avoid false opens, and keep the default disabled. |
+| T-U52 | Per-peer adaptive breaker policy | `hatPeer.ConnectionPool` now supports opt-in bounded cooldown backoff after failed probes and decay after recovery; failure-class-specific thresholds remain caller policy. | Preserve deterministic operator bounds, avoid false opens, keep the default disabled, and validate recovery behavior. |
 | T-U02 | Authenticated compact peer daemon integration | `hatPeer.CompactPeerSession` now adapts bounded compact frames and multiplexed correlation over a `net.Conn`, but the daemon still has no listener integration, compatibility negotiation, or authenticated transport policy. | Listener integration, negotiation, authentication, flow control, and head-of-line behavior. |
 | T-U03 | Stored procedure registry | External extension boundaries exist, but no trusted in-process stored function registry exposes stable call semantics. | Authorization, panic isolation, and versioning. |
 | T-U04 | Sandboxed stored Lua/runtime functions | There is no resource-limited embedded scripting runtime for stored procedures. | Sandbox escape resistance, CPU/memory limits, and disable-by-default policy. |
