@@ -11434,3 +11434,35 @@ vet-c211:
 .PHONY: test-c211-full
 test-c211-full:
 	bash ./scripts/test-c211-full.sh
+.PHONY: benchmark-c212-before
+benchmark-c212-before:
+	bash ./scripts/benchmark-c212-before.sh
+.PHONY: test-c212
+test-c212:
+	bash ./scripts/test-c212.sh
+.PHONY: format-c212
+format-c212:
+	bash ./scripts/format-c212.sh
+.PHONY: benchmark-c212
+benchmark-c212:
+	bash ./scripts/benchmark-c212.sh
+.PHONY: test-c212-package
+test-c212-package:
+	bash ./scripts/test-c212-package.sh
+
+.PHONY: race-c212
+race-c212:
+	bash ./scripts/race-c212.sh
+
+.PHONY: vet-c212
+vet-c212:
+	bash ./scripts/vet-c212.sh
+.PHONY: benchmark-c212-index
+benchmark-c212-index:
+	bash ./scripts/benchmark-c212-index.sh
+.PHONY: test-c212-full
+test-c212-full:
+	bash ./scripts/test-c212-full.sh
+.PHONY: commit-c212
+commit-c212:
+	bash ./scripts/commit-c212.sh

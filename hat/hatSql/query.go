@@ -8021,22 +8021,16 @@ func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, 
 		right := rowsByAlias[sources[bestSource].alias]
 		inputRows := len(rows) + len(right)
 		joinStarted := time.Now()
-		buckets := make(map[string][]int, len(right))
+		buckets := newSQLJoinHashIndex(len(right))
 		for rightIndex, row := range right {
 			if err := control.addJoinWork(1); err != nil {
 				return nil, true, err
 			}
-			if key, ok := sqlHashJoinKey(sqlField(row, sources[bestSource].alias, rightField)); ok {
-				buckets[key] = append(buckets[key], rightIndex)
-			}
+			buckets.Add(sqlField(row, sources[bestSource].alias, rightField), rightIndex)
 		}
 		var next []sqlExecRow
 		for _, left := range rows {
-			key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
-			if !ok {
-				continue
-			}
-			for _, rightIndex := range buckets[key] {
+			for _, rightIndex := range buckets.Lookup(sqlField(left, leftQualifier, leftField)) {
 				if err := control.addJoinWork(1); err != nil {
 					return nil, true, err
 				}
