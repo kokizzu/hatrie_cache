@@ -3113,10 +3113,11 @@ topology owners.
 `GET /api/journal?after_sequence=...&limit=...` returns the command journal tail
 when journaling is configured. `POST /api/journal` pulls a remote journal tail
 from `source` and applies it locally.
-`POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
+`POST /api/commands` accepts `command`, `key`, optional `value`, `expected_value`, `values`,
 `batch`, `subkey`, `pairs`, `idempotency_key`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
-supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
+supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `CAS`, `COMPARESET`,
+`COMPARE_AND_SWAP`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
@@ -3141,6 +3142,12 @@ request key, and `INTERNALSET` is the snapshot-entry JSON fallback.
 commands and are accepted only for internal replication traffic.
 `INTERNALDIGESTV1` is the read-only, topology-scoped digest page used by
 anti-entropy and is also accepted only for authenticated internal replication.
+`CAS`, `COMPARESET`, and `COMPARE_AND_SWAP` atomically compare an existing
+string key with `expected_value` and replace it with `value`. They return
+`value: "1"` when the swap happens and `value: "0"` for a missing key,
+non-string key, or mismatch; a failed comparison never creates or changes a
+key. Existing expiration is preserved, and expiration options are rejected for
+this command.
 `BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
 with ordinary command requests to reduce client/server round trips. It executes
 subcommands in order, returns one response per subcommand in `responses`, and is
@@ -3547,6 +3554,7 @@ build files have not been generated.
 any type:
   BATCH [command request...]
   SET/SETSTR/SETINT key value
+  CAS/COMPARESET/COMPARE_AND_SWAP key expected_value value
   SETX/SETSTRX/SETINTX key ttl value
   EXISTS/GET/GETSTR/DUMP key
    check the value on the hat_map

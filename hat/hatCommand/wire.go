@@ -396,6 +396,7 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) Request
 		Atomic:         request.GetAtomic(),
 		Key:            request.GetKey(),
 		Value:          request.GetValue(),
+		ExpectedValue:  request.GetExpectedValue(),
 		Subkey:         request.GetSubkey(),
 		IdempotencyKey: request.GetIdempotencyKey(),
 		BinaryValue:    append([]byte(nil), request.GetBinaryValue()...),
@@ -499,6 +500,7 @@ func cacheCommandRequestToProto(request Request) (*hatriecachev1.CommandRequest,
 		Atomic:         request.Atomic,
 		Key:            request.Key,
 		Value:          request.Value,
+		ExpectedValue:  request.ExpectedValue,
 		Subkey:         request.Subkey,
 		IdempotencyKey: request.IdempotencyKey,
 		BinaryValue:    append([]byte(nil), request.BinaryValue...),
@@ -595,6 +597,7 @@ func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request Req
 	out.Atomic = request.Atomic
 	out.Key = request.Key
 	out.Value = request.Value
+	out.ExpectedValue = request.ExpectedValue
 	out.Subkey = request.Subkey
 	out.IdempotencyKey = request.IdempotencyKey
 	out.TtlSeconds = request.TTLSeconds

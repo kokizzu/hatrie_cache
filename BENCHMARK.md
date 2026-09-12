@@ -14005,7 +14005,7 @@ payload shape before assuming it beats HTTP JSON.
 
 ## HAT-trie Command Families
 
-HAT-trie cache currently has 93 canonical command groups in `ExecuteCommand`,
+HAT-trie cache currently has 94 canonical command groups in `ExecuteCommand`,
 plus Redis-style aliases for several probabilistic and compact structures. The
 command set is strongest where Redis is also strong as a data-structure server:
 strings, counters, TTLs, lists/queues, sets, priority queues/sorted-set-like
@@ -14017,7 +14017,7 @@ reservoir samples, and Fenwick trees.
 
 | Family | Canonical HAT-trie commands |
 | --- | --- |
-| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, `INTERNALBATCHV2`, `INTERNALDIGESTV1`, `TTL`, `EXPIRE`, `EXPIREAT`, `PERSIST` |
+| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `CAS`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, `INTERNALBATCHV2`, `INTERNALDIGESTV1`, `TTL`, `EXPIRE`, `EXPIREAT`, `PERSIST` |
 | Map/hash fields | `PUTMAP`, `PEEKMAP`, `TAKEMAP` |
 | Slice/list/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` |
@@ -21460,6 +21460,37 @@ the limiting resource, especially when callers can use one batch request. It
 does not replace JSON as the default: the common one-command path is slower,
 and ten separate protobuf requests are slower despite their smaller bodies.
 Reproduce the measurements with `make benchmark-monitoring-command-client`.
+## Tarantool-Style Atomic String CAS
+
+This measures the new `CompareAndSwapString` primitive against the existing
+non-atomic GET-then-SET sequence for the same alternating `old`/`new` values.
+The CAS path compares and replaces under one trie lock, preserves expiration,
+and returns a boolean without heap allocation. The GET-then-SET rows are a
+latency baseline only: they are not equivalent under concurrent writers.
+
+Command: `make benchmark-conditional-command` (`-benchmem -count=3`), Linux/
+amd64, AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Direct CAS API | 148.0 | 0 | 0 | 1.12x faster |
+| Direct GET then SET | 165.4 | 0 | 0 | 1.00x |
+| Public CAS command | 223.4 | 0 | 0 | 1.48x faster |
+| Public GET then SET commands | 330.9 | 0 | 0 | 1.00x |
+
+Raw samples, in the same order as the table:
+
+```text
+Direct CAS API:             148.0 147.3 148.8 ns/op; 0 B/op; 0 allocs/op
+Direct GET then SET:        170.7 165.2 165.4 ns/op; 0 B/op; 0 allocs/op
+Public CAS command:         223.4 235.7 216.0 ns/op; 0 B/op; 0 allocs/op
+Public GET then SET:        329.9 330.9 332.2 ns/op; 0 B/op; 0 allocs/op
+```
+
+The improvement comes from combining the read and write into one atomic
+operation; it does not change the cost of ordinary `SETSTR` or make a single
+unconditional write faster. Reproduce with `make benchmark-conditional-command`.
+
 ## Public Command Request Compression
 
 This measures the new opt-in `hatMonitoring.Client.CommandCompressionThreshold`

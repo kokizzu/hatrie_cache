@@ -1090,6 +1090,32 @@ push-command-concurrency:
 test-command-protocol:
 	sh ./scripts/test-command-protocol.sh
 
+.PHONY: test-conditional-command
+test-conditional-command:
+	sh ./scripts/test-conditional-command.sh
+
+.PHONY: benchmark-conditional-command
+benchmark-conditional-command:
+	sh ./scripts/benchmark-conditional-command.sh
+
+.PHONY: format-conditional-command
+format-conditional-command:
+	sh ./scripts/format-conditional-command.sh
+
+.PHONY: race-conditional-command
+race-conditional-command:
+	sh ./scripts/race-conditional-command.sh
+
+.PHONY: review-conditional-command commit-conditional-command push-conditional-command
+review-conditional-command:
+	sh ./scripts/review-conditional-command.sh
+
+commit-conditional-command:
+	sh ./scripts/commit-conditional-command.sh
+
+push-conditional-command:
+	sh ./scripts/push-conditional-command.sh
+
 format-command-protocol:
 	sh ./scripts/format-command-protocol.sh
 

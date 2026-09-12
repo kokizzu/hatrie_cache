@@ -87,6 +87,7 @@ message CommandRequest {
 	string idempotency_key = 12;
 	uint64 request_id = 13;
 	bool atomic = 14;
+	string expected_value = 15;
 }
 
 message CommandResponse {

@@ -204,6 +204,18 @@ func (ht *HatTrie) executeCommand(request CacheCommandRequest) CacheCommandRespo
 			return response
 		}
 		return CacheCommandResponse{OK: true, Message: "stored string"}
+	case "CAS", "COMPARESET", "COMPARE_AND_SWAP":
+		if request.TTLSeconds != nil || request.UnixSeconds != nil {
+			return commandError("CAS does not accept expiration options")
+		}
+		swapped, err := ht.CompareAndSwapString(key, request.ExpectedValue, request.Value)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if swapped {
+			return CacheCommandResponse{OK: true, Message: "swapped", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "not swapped", Value: "0"}
 	case "SETX", "SETSTRX":
 		ttl, ok := requirePositiveTTL(request.TTLSeconds)
 		if !ok {

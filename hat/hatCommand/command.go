@@ -9,6 +9,7 @@ type Request struct {
 	Atomic         bool           `json:"atomic,omitempty"` // BATCH only: apply all subcommands or roll back.
 	Key            string         `json:"key"`
 	Value          string         `json:"value,omitempty"`
+	ExpectedValue  string         `json:"expected_value,omitempty"` // CAS only: compare before replacing Value.
 	Values         []any          `json:"values,omitempty"`
 	Batch          []Request      `json:"batch,omitempty"`
 	Subkey         string         `json:"subkey,omitempty"`

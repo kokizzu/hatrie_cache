@@ -161,7 +161,7 @@ before/after measurement when its motivation is performance.
 | TR-29 | Reverse index iterators with stable bounds | Efficient newest-first reads | Mutation and cursor semantics | [ ] |
 | TR-30 | Index selectivity and distribution statistics | Improve index choice | Statistics maintenance | [ ] |
 | TR-31 | Automatic index choice with explainable fallback | Reduce caller tuning | Planner regressions | [ ] |
-| TR-32 | Conditional compare-and-swap update primitive | Avoid read-modify-write races | Predicate semantics | [ ] |
+| TR-32 | Conditional compare-and-swap update primitive | Avoid read-modify-write races | Predicate semantics | [x] |
 | TR-33 | Returning old and new tuple values from mutations | Build changefeeds without rereads | Copy cost and API shape | [ ] |
 | TR-34 | Nested transaction savepoints | Roll back part of a complex operation | Undo-log complexity | [ ] |
 | TR-35 | MVCC snapshot read views | Stable reads during concurrent writes | Version retention | [ ] |
@@ -180,4 +180,3 @@ before/after measurement when its motivation is performance.
 | TR-48 | Audit-event sampling and export sinks | Operate high-volume audit safely | Dropped-event visibility | [ ] |
 | TR-49 | Queue partition ownership and online migration | Scale queues without implicit sharding | Movement and backup semantics | [ ] |
 | TR-50 | Rate-aware WAL and replication backpressure | Preserve foreground latency under bursts | Lower write throughput | [ ] |
-

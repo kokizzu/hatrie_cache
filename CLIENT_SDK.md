@@ -90,6 +90,10 @@ response, err := client.Command(ctx, hatCommand.Request{
 ```
 
 The equivalent per-call methods are `CommandWithFormat` and `BatchWithFormat`.
+For an atomic string compare-and-swap, send `hatCommand.Request{Command: "CAS",
+Key: "name", ExpectedValue: "old", Value: "new"}`. The response uses
+`Value == "1"` for a swap and `Value == "0"` when the key is absent, not a
+string, or has changed. CAS keeps an existing expiration.
 They send `Content-Type` and `Accept: application/x-protobuf` and require the
 same protobuf response content type. JSON remains the default because the
 repository benchmark shows protobuf is a bandwidth win and a batched latency
