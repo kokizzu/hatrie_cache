@@ -11545,3 +11545,34 @@ commit-c218:
 .PHONY: push-c218
 push-c218:
 	bash ./scripts/push-c218.sh
+benchmark-c216:
+	bash ./scripts/benchmark-c216.sh
+
+.PHONY: benchmark-c216 test-c216-package test-c216-race test-c216-full vet-c216 review-c216
+
+test-c216-package:
+	bash ./scripts/test-c216-package.sh
+
+test-c216-race:
+	bash ./scripts/test-c216-race.sh
+
+vet-c216:
+	bash ./scripts/vet-c216.sh
+
+test-c216-full:
+	bash ./scripts/test-c216-full.sh
+
+.PHONY: format-c216
+format-c216:
+	bash ./scripts/format-c216.sh
+
+.PHONY: test-c216
+test-c216:
+	bash ./scripts/test-c216.sh
+
+.PHONY: commit-c216 push-c216
+commit-c216:
+	bash ./scripts/commit-c216.sh
+
+push-c216:
+	bash ./scripts/push-c216.sh

@@ -21777,6 +21777,45 @@ BenchmarkChangefeedFrontierAdvance-32     	502224992	         2.361 ns/op	      
 PASS
 ok  	hatrie_cache/hat/hatReplication	9.875s
 ```
+## C216 Lookup-Aware Columnar Dictionary Admission
+
+The C216 selector chooses a repeated-string layout from cardinality, retained
+size, and the caller's dominant lookup shape. The default
+`EncodeRepeatedStrings` path is unchanged. The controlled fixture has 1,024
+rows, 768 unique four-byte strings, and one CPU; the benchmark uses five runs
+at `-benchtime=200ms`.
+
+The estimated retained layout is 20,480 bytes plain versus 19,456 bytes
+dictionary, a 1.05x retained-memory reduction. Construction itself measured
+113,464 B/op and 32 allocations for dictionary-admitted shapes versus 112,312
+B/op and 31 allocations for plain shapes, so the selector is a memory-layout
+option rather than a universal construction-speed win.
+
+| Shape | Selected layout | Median selection ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Automatic | dictionary | 84,442 | 113,464 | 32 |
+| Equality | dictionary | 83,077 | 113,464 | 32 |
+| Grouping | dictionary | 82,781 | 113,464 | 32 |
+| Ordering | plain | 81,859 | 112,312 | 31 |
+| Projection | plain | 74,646 | 112,312 | 31 |
+
+Generic `ColumnarBatch.Value` reads intentionally expose the cost of using a
+dictionary outside a code-aware operation:
+
+| Shape | Median read ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Automatic | 43,591 | 16,384 | 1,024 |
+| Equality | 48,213 | 16,384 | 1,024 |
+| Grouping | 44,642 | 16,384 | 1,024 |
+| Ordering | 26,637 | 0 | 0 |
+| Projection | 26,590 | 0 | 0 |
+
+The raw five-sample tables and exact command are in
+[`C216_COLUMNAR_DICTIONARY_SHAPES.md`](C216_COLUMNAR_DICTIONARY_SHAPES.md).
+Because generic dictionary reads are about 1.8x slower than the plain fixture,
+the feature remains explicit opt-in and existing producers are not silently
+changed.
+
 ## M202 Durable Changefeed Checkpoint
 
 Materialize-inspired source-bound checkpoint benchmark, five runs:

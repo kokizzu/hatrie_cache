@@ -172,6 +172,20 @@ const (
 	ColumnarNumericFloat64
 )
 
+// ColumnarDictionaryLookupShape identifies the dominant access pattern for a
+// string column. Equality and grouping lookups can benefit from dictionary
+// codes even at exact memory break-even; projection and ordering retain the
+// stricter size-saving admission rule.
+type ColumnarDictionaryLookupShape uint8
+
+const (
+	ColumnarDictionaryLookupAutomatic ColumnarDictionaryLookupShape = iota
+	ColumnarDictionaryLookupEquality
+	ColumnarDictionaryLookupGrouping
+	ColumnarDictionaryLookupOrdering
+	ColumnarDictionaryLookupProjection
+)
+
 // ColumnarNumericColumn stores int64 or float64 values as little-endian
 // 64-bit words. Validity is nil when every row is non-NULL; otherwise it
 // contains one bit per row with set bits marking non-NULL values. It is an
@@ -967,9 +981,21 @@ func (batch *ColumnarBatch) PackDictionaryCodes() {
 }
 
 // EncodeRepeatedStrings replaces all-string columns with a dictionary when the
-// estimated retained layout is smaller. The estimate accounts for row count,
-// string width, dictionary codes, and unique string headers.
+// estimated retained layout is smaller. It preserves the automatic lookup
+// shape for compatibility; callers that know the dominant access pattern can
+// use EncodeRepeatedStringsForLookup.
 func (batch *ColumnarBatch) EncodeRepeatedStrings() {
+	batch.EncodeRepeatedStringsForLookup(ColumnarDictionaryLookupAutomatic)
+}
+
+// EncodeRepeatedStringsForLookup selects a string layout using cardinality,
+// retained-size estimates, and the dominant lookup shape. Equality and
+// grouping permit a dictionary at exact memory break-even because their
+// dictionary-code paths avoid repeated string-key work. Ordering and
+// projection require at least 10% retained-size savings to offset value
+// indirection. Automatic and unknown shapes retain the strict size-saving
+// rule.
+func (batch *ColumnarBatch) EncodeRepeatedStringsForLookup(shape ColumnarDictionaryLookupShape) {
 	if batch == nil || batch.Rows < 4 || batch.Columns == nil {
 		return
 	}
@@ -1049,7 +1075,7 @@ func (batch *ColumnarBatch) EncodeRepeatedStrings() {
 				codes[index] = code
 			}
 		}
-		if !allStrings || tooManyUnique || !columnarDictionaryLayoutSmaller(len(values), len(strings), totalStringBytes, uniqueStringBytes) {
+		if !allStrings || tooManyUnique || !columnarDictionaryLayoutPreferred(shape, len(values), len(strings), totalStringBytes, uniqueStringBytes) {
 			continue
 		}
 		if codes == nil {
@@ -1072,17 +1098,51 @@ func columnarDictionaryMaximumUnique(rows int) int {
 }
 
 func columnarDictionaryLayoutSmaller(rows, unique, totalStringBytes, uniqueStringBytes int) bool {
-	if rows < 4 || unique == 0 || uniqueStringBytes < 0 || totalStringBytes < uniqueStringBytes {
+	return columnarDictionaryLayoutFits(rows, unique, totalStringBytes, uniqueStringBytes, false)
+}
+
+func columnarDictionaryLayoutPreferred(shape ColumnarDictionaryLookupShape, rows, unique, totalStringBytes, uniqueStringBytes int) bool {
+	switch shape {
+	case ColumnarDictionaryLookupEquality, ColumnarDictionaryLookupGrouping:
+		return columnarDictionaryLayoutFits(rows, unique, totalStringBytes, uniqueStringBytes, true)
+	case ColumnarDictionaryLookupOrdering, ColumnarDictionaryLookupProjection:
+		return columnarDictionaryLayoutStronglySmaller(rows, unique, totalStringBytes, uniqueStringBytes)
+	default:
+		return columnarDictionaryLayoutFits(rows, unique, totalStringBytes, uniqueStringBytes, false)
+	}
+}
+
+func columnarDictionaryLayoutFits(rows, unique, totalStringBytes, uniqueStringBytes int, allowEqual bool) bool {
+	plainBytes, dictionaryBytes, ok := columnarDictionaryLayoutBytes(rows, unique, totalStringBytes, uniqueStringBytes)
+	if !ok {
 		return false
+	}
+	if allowEqual {
+		return dictionaryBytes <= plainBytes
+	}
+	return dictionaryBytes < plainBytes
+}
+
+func columnarDictionaryLayoutStronglySmaller(rows, unique, totalStringBytes, uniqueStringBytes int) bool {
+	plainBytes, dictionaryBytes, ok := columnarDictionaryLayoutBytes(rows, unique, totalStringBytes, uniqueStringBytes)
+	if !ok || dictionaryBytes >= plainBytes {
+		return false
+	}
+	return plainBytes-dictionaryBytes >= plainBytes/10
+}
+
+func columnarDictionaryLayoutBytes(rows, unique, totalStringBytes, uniqueStringBytes int) (uint64, uint64, bool) {
+	if rows < 4 || unique == 0 || uniqueStringBytes < 0 || totalStringBytes < uniqueStringBytes {
+		return 0, 0, false
 	}
 	// Keep the dictionary's fixed code and string-header storage lower than the
 	// plain interface slice even when repeated strings share backing bytes.
 	if uint64(unique)*4 > uint64(rows)*3 {
-		return false
+		return 0, 0, false
 	}
 	plainBytes := uint64(rows)*16 + uint64(totalStringBytes)
 	dictionaryBytes := uint64(rows)*4 + uint64(unique)*16 + uint64(uniqueStringBytes)
-	return dictionaryBytes < plainBytes
+	return plainBytes, dictionaryBytes, true
 }
 
 // ColumnarSourceResolver optionally supplies selected source fields in

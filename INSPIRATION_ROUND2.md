@@ -45,7 +45,7 @@ operator control remain the preferred deployment model.
 - [x] C213 Cached compiled SQL plan handles with bounded entry and estimated-byte memory; opt-in through `SQLQueryOptions.CompiledCache`. Machine-code JIT remains intentionally out of scope. See [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md).
 - [x] C214 Resource-bounded WebAssembly UDF execution; see [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md).
 - [x] C215 External dictionary reloads with TTL and last-known-good retention; see [SQL_EXTERNAL_DICTIONARIES.md](SQL_EXTERNAL_DICTIONARIES.md).
-- [ ] C216 Dictionary layout selection based on key cardinality and lookup shape.
+- [x] C216 Dictionary layout selection based on key cardinality and lookup shape; see [C216_COLUMNAR_DICTIONARY_SHAPES.md](C216_COLUMNAR_DICTIONARY_SHAPES.md).
 - [x] C217 Time-series `WITH FILL` gap generation over ordered results; see [WITH_FILL.md](WITH_FILL.md).
 - [x] C218 Interpolation policies for filled time-series values; see [C218_WITH_FILL_INTERPOLATION.md](C218_WITH_FILL_INTERPOLATION.md).
 - [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
