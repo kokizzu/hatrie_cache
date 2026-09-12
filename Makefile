@@ -10374,3 +10374,33 @@ commit-replay-rollback:
 
 push-replay-rollback:
 	sh scripts/push-replay-rollback.sh
+.PHONY: inspect-open-inspiration-local-clean
+
+inspect-open-inspiration-local-clean:
+	sh scripts/inspect-open-inspiration-local-clean.sh
+
+.PHONY: inspect-files
+
+inspect-files:
+	sh scripts/inspect-files.sh $(FILES)
+
+.PHONY: search-files
+
+search-files:
+	sh scripts/search-files.sh "$(PATTERN)" $(FILES)
+
+.PHONY: inspect-timestamp-ordering
+
+inspect-timestamp-ordering:
+	sh scripts/inspect-timestamp-ordering.sh
+
+.PHONY: review-inspection-tools commit-inspection-tools push-inspection-tools
+
+review-inspection-tools:
+	sh scripts/review-inspection-tools.sh
+
+commit-inspection-tools:
+	sh scripts/commit-inspection-tools.sh
+
+push-inspection-tools:
+	sh scripts/push-inspection-tools.sh
