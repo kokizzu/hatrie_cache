@@ -10404,3 +10404,33 @@ commit-inspection-tools:
 
 push-inspection-tools:
 	sh scripts/push-inspection-tools.sh
+
+.PHONY: test-write-quorum-fastpath benchmark-write-quorum-fastpath
+
+test-write-quorum-fastpath:
+	sh scripts/test-write-quorum-fastpath.sh
+
+benchmark-write-quorum-fastpath:
+	sh scripts/benchmark-write-quorum-fastpath.sh
+
+.PHONY: format-write-quorum-fastpath race-write-quorum-fastpath vet-write-quorum-fastpath
+
+format-write-quorum-fastpath:
+	sh scripts/format-write-quorum-fastpath.sh
+
+race-write-quorum-fastpath:
+	sh scripts/race-write-quorum-fastpath.sh
+
+vet-write-quorum-fastpath:
+	sh scripts/vet-write-quorum-fastpath.sh
+
+.PHONY: review-write-quorum-fastpath commit-write-quorum-fastpath push-write-quorum-fastpath
+
+review-write-quorum-fastpath:
+	sh scripts/review-write-quorum-fastpath.sh
+
+commit-write-quorum-fastpath:
+	sh scripts/commit-write-quorum-fastpath.sh
+
+push-write-quorum-fastpath:
+	sh scripts/push-write-quorum-fastpath.sh

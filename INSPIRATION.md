@@ -665,7 +665,8 @@ explicit regional partitioning and simple backups over automatic sharding.
 
 ### Replication And Topology
 
-- [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics and rollback-free cluster-wide commit remain open.
+- [ ] T047 Synchronous replication with an explicit quorum. The public single-command path and atomic `BATCH` quorum semantics are implemented and tested through opt-in `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; rollback-free cluster-wide commit remains open.
+- [x] T047a Quorum fast acknowledgement. `hatReplication.ExecuteWriteQuorumUntilSatisfied` returns once a required quorum is available or impossible, cancels pending context-aware callbacks, and leaves the existing wait-for-all API and default replication behavior unchanged; see [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T047d Atomic public `BATCH` write quorum. Eligible all-write batches validate direct quorum before mutation, preserve local atomic commit semantics when remote acknowledgements are insufficient, and send one grouped `INTERNALBATCHV2` per target; rollback-free cluster-wide commit remains open. See [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T047c Public HTTP and unary gRPC single-write commands enforce an opt-in direct write quorum at the shared command executor; `0` remains the default and asynchronous replication is rejected before mutation when quorum is enabled. See [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T047b HTTPReplicator exposes an opt-in direct ReplicateCommandWithQuorum API that counts the local result and remote acknowledgements without changing the asynchronous default.

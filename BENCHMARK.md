@@ -21364,3 +21364,24 @@ configuration. Progress replay retains its prior cost by design. Correctness
 coverage includes reopen-after-compaction, compacted-boundary rejection,
 segmented journals, snapshot checkpoints, replay target validation, and the
 full package test suite.
+## Opt-in quorum early acknowledgement
+
+`hatReplication.ExecuteWriteQuorumUntilSatisfied` was measured against the
+existing wait-for-all quorum API with three targets. It returns after the
+required acknowledgements arrive or the quorum becomes impossible, and cancels
+pending context-aware callbacks. The default replication path is unchanged.
+
+Representative medians of three `-benchmem` runs on Linux, AMD Ryzen 9 5950X:
+
+| Workload | ns/op | B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Existing wait-for-all, all fast | 1,316 | 544 | 10 | Baseline |
+| Early acknowledgement, all fast | 1,831 | 944 | 13 | 1.39x CPU, 1.74x bytes, 1.30x allocations |
+| Existing wait-for-all, one 100 us slow target | 1,062,951 | 792 | 13 | Baseline |
+| Early acknowledgement, one 100 us slow target | 2,913 | 1,303 | 16 | 364.9x lower latency, 1.65x bytes, 1.23x allocations |
+
+Raw samples: early/all-fast `1831, 1825, 1857 ns/op`; early/slow
+`2909, 2913, 2937 ns/op`; wait-all/slow `1063206, 1062951, 1062621
+ns/op`; wait-all/all-fast `1302, 1316, 1319 ns/op`. The early-return path is
+kept opt-in because its tail-latency gain comes with coordination overhead and
+it can return before every replica has completed.

@@ -90,3 +90,32 @@ durability latency and is why the setting remains opt-in.
 The cost includes one goroutine and result bookkeeping per target. This is a
 durability/resilience feature, not a throughput optimization; it is disabled
 unless the caller explicitly invokes it.
+# Opt-in early acknowledgement
+
+`hatReplication.ExecuteWriteQuorumUntilSatisfied` is an opt-in variant for
+latency-sensitive callers. It starts target callbacks concurrently and returns
+when the required acknowledgements are available or cannot be reached. Pending
+callbacks receive a canceled context, so callbacks must honor cancellation and
+remain safe for concurrent calls. The existing `ExecuteWriteQuorum` function
+still waits for every target and remains unchanged.
+
+The returned `WriteQuorumEarlyResult` contains completed attempts in input
+order and a `Pending` count for callbacks that were outstanding at return. A
+successful early result does not imply that pending replicas applied the write;
+callers that need repair details should continue using the wait-for-all API.
+
+## Benchmark
+
+Linux, AMD Ryzen 9 5950X, Go benchmark with three targets and `-benchmem`;
+reported values are representative medians of three runs:
+
+| Workload | ns/op | B/op | allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Existing wait-for-all, all fast | 1,316 | 544 | 10 | Baseline |
+| Early acknowledgement, all fast | 1,831 | 944 | 13 | 1.39x CPU, 1.74x bytes, 1.30x allocations |
+| Existing wait-for-all, one 100 us slow target | 1,062,951 | 792 | 13 | Baseline |
+| Early acknowledgement, one 100 us slow target | 2,913 | 1,303 | 16 | 364.9x lower latency, 1.65x bytes, 1.23x allocations |
+
+The API is therefore deliberately opt-in: it is a large tail-latency win when
+slow replicas are common, but it costs coordination overhead on an all-fast
+path and returns before every replica has completed.
