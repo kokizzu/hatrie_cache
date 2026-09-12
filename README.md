@@ -3910,3 +3910,5 @@ CPU, allocation, and fallback tradeoffs.
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
 - Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
+
+- [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)

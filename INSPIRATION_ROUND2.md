@@ -89,7 +89,7 @@ operator control remain the preferred deployment model.
 - [ ] M204 Bounded subscriptions with an exclusive `UP TO` timestamp.
 - [ ] M205 Deterministic within-timestamp ordering for changefeed batches.
 - [ ] M206 Upsert envelopes that expose a stable key and current row image.
-- [ ] M207 Debezium envelopes with before/after images and operation type.
+- [x] M207 Debezium envelopes with before/after images and operation type. `hatSql.DebeziumChangefeed` requires declared unique key columns, emits snapshot/create/update/delete payloads, preserves subscription frontier metadata, and rejects ambiguous multiplicity; the optimized adapter measured about 16x lower latency, 18x lower allocated bytes, and 10x fewer allocations than its full-state-copy baseline; see [M207_DEBEZIUM_CHANGEFEED.md](M207_DEBEZIUM_CHANGEFEED.md).
 - [ ] M208 Differential multiplicity folding for insert/delete update streams.
 - [ ] M209 Monotone logical timestamp frontiers for read and stream APIs.
 - [ ] M210 Historical `AS OF` reads against retained logical state.

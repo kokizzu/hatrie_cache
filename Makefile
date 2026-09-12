@@ -11074,3 +11074,18 @@ benchmark-m202:
 
 verify-m202:
 	bash ./scripts/verify-m202.sh
+.PHONY: test-m207
+test-m207:
+	sh scripts/test-m207.sh
+
+.PHONY: benchmark-m207
+benchmark-m207:
+	sh scripts/benchmark-m207.sh
+
+.PHONY: format-m207
+format-m207:
+	sh scripts/format-m207.sh
+
+.PHONY: verify-m207
+verify-m207:
+	sh scripts/verify-m207.sh
