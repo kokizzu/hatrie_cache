@@ -756,6 +756,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T093 Cooperative yielding in bounded worker loops.
 - [x] T094 Channels for typed producer-consumer exchange. `hat/hatPipeline.Channel[T]` provides bounded buffering, context-aware send/receive, and idempotent close with drain semantics. See [CHANNELS.md](CHANNELS.md).
 - [x] T095 Net.box-like binary client path.
+- [x] T095a Net.box-style pooled peer connections. Importable generic `hatReplication.ConnectionPool` provides bounded open connections, context-aware acquisition, idle reuse, explicit discard, close wake-up, and point-in-time stats while leaving dial/authentication/backoff policy with the caller. See [CONNECTION_POOL.md](CONNECTION_POOL.md) and [BENCHMARK.md](BENCHMARK.md#connection-pool-reuse).
 - [x] T096 IProto-like compact protocol path.
 - [x] T097 Prepared calls and prepared SQL statements.
 - [x] T098 Batched requests.

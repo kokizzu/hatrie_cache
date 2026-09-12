@@ -16447,6 +16447,35 @@ visibility_lease_ack_resident256: 515.0, 496.0, 552.5 ns/op; 0 B/op; 0 allocs/op
 visibility_requeue_expired: 118.3, 115.7, 115.0 ns/op; 0 B/op; 0 allocs/op
 ```
 
+<a id="connection-pool-reuse"></a>
+## Connection Pool Reuse
+
+Command: `make benchmark-connection-pool`.
+
+The benchmark runs five samples per case on the same AMD Ryzen 9 5950X host.
+The pool is warmed with one connection, then repeatedly acquires and releases
+that idle connection. The direct control invokes side-effecting in-process dial
+and close stubs every iteration. It does not model network, TLS, or
+authentication latency; it measures only the local coordination cost of reuse.
+
+| Workload | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `ConnectionPool` acquire + release | 43.11 | 0 | 0 |
+| Direct dial + close control | 3.639 | 0 | 0 |
+| Pool coordination cost in this stub | **11.85x higher CPU** | **same** | **same** |
+
+The pool's value is avoiding a real connection setup on every operation while
+enforcing `MaxOpen`; the synthetic direct control is intentionally too cheap to
+represent that setup. No production network speedup is inferred from this
+microbenchmark.
+
+Raw samples:
+
+```text
+connection_pool: 44.85, 43.11, 45.10, 42.39, 41.59 ns/op; 0 B/op; 0 allocs/op
+direct_dial_close: 3.425, 3.899, 3.598, 3.639, 3.843 ns/op; 0 B/op; 0 allocs/op
+```
+
 ## CLI Output Formatting
 
 Command: make benchmark-cli-output.

@@ -10314,3 +10314,39 @@ commit-visibility-queue:
 .PHONY: push-visibility-queue
 push-visibility-queue:
 	sh scripts/push-visibility-queue.sh
+
+.PHONY: test-connection-pool
+test-connection-pool:
+	sh scripts/test-connection-pool.sh
+
+.PHONY: benchmark-connection-pool
+benchmark-connection-pool:
+	sh scripts/benchmark-connection-pool.sh
+
+.PHONY: format-connection-pool
+format-connection-pool:
+	sh scripts/format-connection-pool.sh
+
+.PHONY: test-connection-pool-package
+test-connection-pool-package:
+	sh scripts/test-connection-pool-package.sh
+
+.PHONY: race-connection-pool
+race-connection-pool:
+	sh scripts/race-connection-pool.sh
+
+.PHONY: vet-connection-pool
+vet-connection-pool:
+	sh scripts/vet-connection-pool.sh
+
+.PHONY: review-connection-pool
+review-connection-pool:
+	sh scripts/review-connection-pool.sh
+
+.PHONY: commit-connection-pool
+commit-connection-pool:
+	sh scripts/commit-connection-pool.sh
+
+.PHONY: push-connection-pool
+push-connection-pool:
+	sh scripts/push-connection-pool.sh
