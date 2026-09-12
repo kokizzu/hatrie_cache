@@ -10277,3 +10277,40 @@ commit-journal-replay:
 .PHONY: push-journal-replay
 push-journal-replay:
 	sh scripts/push-journal-replay.sh
+
+
+.PHONY: benchmark-visibility-queue
+benchmark-visibility-queue:
+	sh scripts/benchmark-visibility-queue.sh
+
+.PHONY: test-visibility-queue
+test-visibility-queue:
+	sh scripts/test-visibility-queue.sh
+
+.PHONY: format-visibility-queue
+format-visibility-queue:
+	sh scripts/format-visibility-queue.sh
+
+.PHONY: test-visibility-queue-package
+test-visibility-queue-package:
+	sh scripts/test-visibility-queue-package.sh
+
+.PHONY: race-visibility-queue
+race-visibility-queue:
+	sh scripts/race-visibility-queue.sh
+
+.PHONY: vet-visibility-queue
+vet-visibility-queue:
+	sh scripts/vet-visibility-queue.sh
+
+.PHONY: review-visibility-queue
+review-visibility-queue:
+	sh scripts/review-visibility-queue.sh
+
+.PHONY: commit-visibility-queue
+commit-visibility-queue:
+	sh scripts/commit-visibility-queue.sh
+
+.PHONY: push-visibility-queue
+push-visibility-queue:
+	sh scripts/push-visibility-queue.sh

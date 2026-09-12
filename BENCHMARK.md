@@ -16414,6 +16414,39 @@ delay_queue: 259.9, 277.7, 314.1, 298.4, 288.8 ns/op; 0 B/op; 0 allocs/op
 container_heap_reference: 291.9, 292.8, 298.5, 309.7, 293.7 ns/op; 96 B/op; 2 allocs/op
 ```
 
+<a id="visibility-timeout-queue"></a>
+## Visibility Timeout Queue
+
+Command: `make benchmark-visibility-queue`.
+
+The benchmark runs three samples per case on the same AMD Ryzen 9 5950X host.
+The `DelayQueue` control keeps 256 items resident and measures push/pop. The
+visibility queue cases measure the actual lease protocol. They are useful
+reference points, not apples-to-apples speed claims: the lease cases include
+acknowledgement or expiry bookkeeping, and the 256-active case maintains an
+indexed expiry heap of 256 live leases.
+
+| Workload | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `DelayQueue` push/pop, 256 resident | 282.0 | 0 | 0 |
+| `VisibilityQueue` lease + ack, one active lease | 110.2 | 0 | 0 |
+| `VisibilityQueue` lease + ack, 256 active leases | 515.0 | 0 | 0 |
+| `VisibilityQueue` lease + expiry recovery, one active lease | 115.7 | 0 | 0 |
+
+The 256-active lease path is about 4.68x the one-active lease path because it
+removes arbitrary deadlines from a larger heap, but it remains allocation-free
+in steady state. No universal improvement over `DelayQueue` is claimed because
+the operations and resident-state shapes differ.
+
+Raw samples:
+
+```text
+delay_queue: 281.9, 288.0, 282.0 ns/op; 0 B/op; 0 allocs/op
+visibility_lease_ack: 108.6, 115.5, 110.2 ns/op; 0 B/op; 0 allocs/op
+visibility_lease_ack_resident256: 515.0, 496.0, 552.5 ns/op; 0 B/op; 0 allocs/op
+visibility_requeue_expired: 118.3, 115.7, 115.0 ns/op; 0 B/op; 0 allocs/op
+```
+
 ## CLI Output Formatting
 
 Command: make benchmark-cli-output.
