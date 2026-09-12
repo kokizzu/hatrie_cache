@@ -21585,3 +21585,20 @@ Raw command:
 ```text
 make benchmark-t-u02
 ```
+
+## T-U07: Replica RPO status batch
+
+`hatReplication.BuildReplicaRPOStatuses` converts one source sequence and 64
+replica applied sequences into bounded lag/RPO status values. Five local runs:
+
+| Run | ns/op | B/op | allocs/op |
+| ---: | ---: | ---: | ---: |
+| 1 | 1223 | 4096 | 1 |
+| 2 | 1216 | 4096 | 1 |
+| 3 | 1208 | 4096 | 1 |
+| 4 | 1187 | 4096 | 1 |
+| 5 | 1197 | 4096 | 1 |
+
+Median: **1,208 ns/op**, **4,096 B/op**, **1 alloc/op**. The helper does not
+use a map, sorting, or wall-clock reads; the single allocation is the result
+slice for the requested batch.

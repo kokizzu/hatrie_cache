@@ -10990,3 +10990,15 @@ benchmark-t-u02:
 
 verify-t-u02:
 	bash ./scripts/verify-t-u02.sh
+
+test-t-u07:
+	bash ./scripts/test-t-u07.sh
+
+format-t-u07:
+	bash ./scripts/format-t-u07.sh
+
+benchmark-t-u07:
+	bash ./scripts/benchmark-t-u07.sh
+
+verify-t-u07:
+	bash ./scripts/verify-t-u07.sh
