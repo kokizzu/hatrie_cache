@@ -7,196 +7,105 @@ server. It is intended for controlled deployments; review the operations and
 security guidance before exposing it on a network.
 
 ## Start Here
-- Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
-- Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
-- ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - New to the SQL interface: [SQL.md](SQL.md)
-- Explicit ClickHouse-style early SQL filter: [SQL PREWHERE](SQL_PREWHERE.md)
-- Ordered SQL range pruning: [SQL_ORDERED_RANGE_PRUNING.md](SQL_ORDERED_RANGE_PRUNING.md)
-- SQL partition range pruning: [SQL_PARTITION_RANGE_PRUNING.md](SQL_PARTITION_RANGE_PRUNING.md)
-- SQL value-at-extreme aggregates: [SQL_ARG_EXTREME.md](SQL_ARG_EXTREME.md)
-- Compiled SQL performance path: [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md)
-- Incremental numeric RANGE windows: [INCREMENTAL_RANGE_WINDOW.md](INCREMENTAL_RANGE_WINDOW.md)
-- Read-only SQL operational catalog: [SQL system tables](SYSTEM_TABLES.md)
-- Importable Cartesian R-tree for selective rectangle and point queries: [R-tree spatial index](SPATIAL_RTREE.md)
-- Bit-preserving XOR-window float encoding: [Gorilla float codec](GORILLA_FLOAT.md)
-- Entropy-based codec selection: [codec selection](CODEC_SELECTION.md)
-- Per-client compression-level negotiation: [compression negotiation](COMPRESSION_NEGOTIATION.md)
-- Object-store backup targets: [object-store backup](OBJECT_STORE_BACKUP.md)
-- Region-local filtered backup and restore: [region-local backup](REGION_LOCAL_BACKUP.md)
-- Selective key-prefix snapshot bundles: [selective backups](SELECTIVE_BACKUP.md)
-- Interrupted restore recovery: [restore resume checkpoints](RESTORE_RESUME.md)
-- Leader election independent from query workers: [leader election](LEADER_ELECTION.md)
-- Split-brain fencing tokens: [split-brain fencing](SPLIT_BRAIN_FENCING.md)
-- Persistent shard ownership leases: [persistent shard leases](PERSISTENT_SHARD_LEASES.md)
-- Restart-safe local node generations: [persistent node epochs](PERSISTENT_NODE_EPOCHS.md)
-- Process-local causal timestamps: [timestamp oracle](TIMESTAMP_ORACLE.md)
-- Consensus-bound global timestamp ranges: [global timestamp oracle](GLOBAL_TIMESTAMP_ORACLE.md)
-- gRPC rolling-upgrade compatibility gates: [gRPC protocol compatibility](GRPC_PROTOCOL_COMPATIBILITY.md)
-- Cross-region replication policy: [cross-region replication](CROSS_REGION_REPLICATION.md)
-- Failure-domain-aware replica placement: [failure-domain placement](FAILURE_DOMAIN_PLACEMENT.md)
-- Deterministic weighted disk placement: [disk placement](DISK_PLACEMENT.md)
-- Age-based hot, warm, and cold tiers: [storage tiers](STORAGE_TIERS.md)
-- Caller-driven bounded persistent compaction scheduling: [COMPACTION_SCHEDULER.md](COMPACTION_SCHEDULER.md)
-- Compaction scheduler queue and outcome telemetry: [COMPACTION_SCHEDULER_STATS.md](COMPACTION_SCHEDULER_STATS.md)
-- Remote immutable parts with local metadata: [remote parts](REMOTE_PARTS.md)
-- Offset-based array and nested column layout: [columnar nested layout](COLUMNAR_NESTED_LAYOUT.md)
-- Zero-copy-friendly immutable-part transfer: [immutable part transfer](ZERO_COPY_PARTS.md)
-- Deterministic part-cache admission and eviction: [part cache policy](PART_CACHE_POLICY.md)
-- Per-part and per-column read amplification accounting: [read amplification](READ_AMPLIFICATION.md)
-- Generic `(data, time, diff)` state: [differential multiset](DIFFERENTIAL_MULTISET.md)
-- Batch consolidation of equal updates and opposite diffs: [differential row batches](DIFFERENTIAL_ROWS.md)
-- Nested cancellable worker scopes for pipeline operators: [pipeline scopes](PIPELINE_SCOPES.md)
-- Typed bounded producer-consumer channels: [CHANNELS.md](CHANNELS.md)
-- Opt-in typed generated columns: [GENERATED_COLUMNS.md](GENERATED_COLUMNS.md)
-- External and remote equality lookup arrangements: [LOOKUP_ARRANGEMENTS.md](LOOKUP_ARRANGEMENTS.md)
-- Bounded cooperative task scheduling: [SCHEDULER.md](SCHEDULER.md)
-- Opt-in queue-local work stealing: [WORK_STEALING.md](WORK_STEALING.md)
-- SQL spatial predicates: [SPATIAL_SQL.md](SPATIAL_SQL.md)
-- Explicit bounded-lateness decisions: [late-data policy](LATE_DATA_POLICY.md)
-- Monotone stream frontiers: [watermark propagation](WATERMARK.md) and [differential watermarks](DIFFERENTIAL_WATERMARK.md)
-- Indexed weighted temporal equi-joins: [differential temporal join](DIFFERENTIAL_TEMPORAL_JOIN.md)
-- Inclusive temporal distance intervals: [differential interval join](DIFFERENTIAL_INTERVAL_JOIN.md)
-- Differential COUNT group updates: [differential GROUP BY](DIFFERENTIAL_GROUP_BY.md)
-- Differential DISTINCT multiplicity transitions: [differential DISTINCT](DIFFERENTIAL_DISTINCT.md)
-- Generic signed differential filter/map/flat-map/union/join operators: [differential operators](DIFFERENTIAL_OPERATORS.md)
-- Append-only typed-table aggregate path: [monotone aggregate](MONOTONE_AGGREGATE.md)
-- Per-operator retained-memory metrics: [operator memory](OPERATOR_MEMORY.md)
-- Per-collection size and compaction metrics: [collection metrics](COLLECTION_METRICS.md)
-- Deterministic replica replay checks: [replay digest](REPLAY_DIGEST.md)
-- Read replicas with explicit staleness bounds: [read-replica policy](READ_REPLICA_POLICY.md)
-- First-success parallel and hedged replica reads: [PARALLEL_REPLICA_READS.md](PARALLEL_REPLICA_READS.md)
-- Codec byte and CPU accounting: [codec metrics](CODEC_METRICS.md)
-- Bounded independently scheduled processing stages: [Pipeline stages](PIPELINE_STAGES.md)
-- Deterministic ordered parallel map: [ORDERED_MAP.md](ORDERED_MAP.md)
-- Bounded per-query SQL worker setting: [CH028_MAX_THREADS.md](CH028_MAX_THREADS.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
-- Durable SQL index rebuild checkpoints: [SQL_INDEX_REBUILD_CHECKPOINT.md](SQL_INDEX_REBUILD_CHECKPOINT.md)
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
-- Opt-in SQL text token-prefix indexes: [SQL_TEXT_PREFIX_INDEX.md](SQL_TEXT_PREFIX_INDEX.md)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
-- Opt-in bounded SQL query profiler samples: [SQL_QUERY_PROFILER.md](SQL_QUERY_PROFILER.md)
-- Versioned named SQL query/storage settings collections: [SQL_NAMED_SETTINGS.md](SQL_NAMED_SETTINGS.md)
-- Opt-in SQL source frontier freshness rejection: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
+- Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
+- Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
+- ClickHouse/Materialize-style mergeable aggregate states: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
+- Opt-in bounded retries for transient SQL source reads: [SQL_REMOTE_READ_RETRIES.md](SQL_REMOTE_READ_RETRIES.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
-- Transactional SQL trigger orchestration: [SQL_TRIGGERS.md](SQL_TRIGGERS.md)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
 - Opt-in journal replay progress and ETA: [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md)
 - SDK-neutral OpenTelemetry-compatible SQL query and operator spans: [QUERY_TRACING.md](QUERY_TRACING.md)
-- W3C traceparent propagation through HTTP and gRPC replication: [TRACE_PROPAGATION.md](TRACE_PROPAGATION.md)
 - Replication queue and wire-byte metrics: [REPLICATION_METRICS.md](REPLICATION_METRICS.md)
 - Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
-- Optional managed-refresh freshness thresholds: [MANAGED_REFRESH_FRESHNESS.md](MANAGED_REFRESH_FRESHNESS.md)
+- Shared compiled JSON subcolumn paths for repeated lookups: [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md)
+- Canonical CDC envelopes for downstream consumers: [CDC_ENVELOPE.md](CDC_ENVELOPE.md)
+- Key-replacing CDC upsert state for materialized consumers: [CDC_UPSERT.md](CDC_UPSERT.md)
+- Typed-table monotonicity analysis for selecting the existing fast path: [MONOTONICITY_ANALYSIS.md](MONOTONICITY_ANALYSIS.md)
+- Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
+- Flat native `[]int64` and `[]string` array columns for lower retained storage: [NATIVE_ARRAY_COLUMNS.md](NATIVE_ARRAY_COLUMNS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
-- Opt-in keyed SQL query quotas: [SQL_QUOTAS.md](SQL_QUOTAS.md)
-- Optional SQL compute/storage admission pool: [SQL_COMPUTE_STORAGE_SEPARATION.md](SQL_COMPUTE_STORAGE_SEPARATION.md)
-- Optional per-namespace SQL compute pools: [SQL_NAMESPACE_COMPUTE_POOLS.md](SQL_NAMESPACE_COMPUTE_POOLS.md)
-- Context-aware SQL JSON index readiness barrier: [SQL_JSON_INDEX_READINESS.md](SQL_JSON_INDEX_READINESS.md)
-- Opt-in source-versioned SQL `ANALYZE` statistics for what-if planning: [SQL_PLANNER_STATISTICS.md](SQL_PLANNER_STATISTICS.md)
-- ClickHouse-style refreshable external SQL dictionaries: [SQL_EXTERNAL_DICTIONARIES.md](SQL_EXTERNAL_DICTIONARIES.md)
-- Opt-in persistent-store disk reserve admission: [PERSISTENT_STORAGE_DISK_RESERVE.md](PERSISTENT_STORAGE_DISK_RESERVE.md)
-- Opt-in persistent-store run Bloom filters: [PERSISTENT_STORE_BLOOM_FILTER.md](PERSISTENT_STORE_BLOOM_FILTER.md)
-- Materialized-view dependency invalidation: [MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md](MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md)
-- Persistent SQL query history: [PERSISTENT_QUERY_LOG.md](PERSISTENT_QUERY_LOG.md)
-- Version-checked in-process plugin replacement: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
-- Compaction scheduler queue/run age telemetry: [CH027_COMPACTION_SCHEDULER_OBSERVABILITY.md](CH027_COMPACTION_SCHEDULER_OBSERVABILITY.md)
-- Opt-in cross-source SQL read snapshots: [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md)
-- Indexed common source frontiers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md)
-- Frontier-bound SQL snapshots: [SQL_FRONTIER_SNAPSHOTS.md](SQL_FRONTIER_SNAPSHOTS.md)
-- Opt-in historical frontier-bound SQL reads: [SQL_AS_OF.md](SQL_AS_OF.md)
-- First-class half-open SQL temporal validity predicates: [SQL_TEMPORAL_VALIDITY.md](SQL_TEMPORAL_VALIDITY.md)
-- Opt-in durable command-journal subscriptions: [MZ010_JOURNAL_SUBSCRIPTIONS.md](MZ010_JOURNAL_SUBSCRIPTIONS.md)
-- Opt-in logical-space journal changefeeds: [TT040_SPACE_CHANGEFEED.md](TT040_SPACE_CHANGEFEED.md)
-- Opt-in key-prefix journal watchers and bounded coalescing: [TT040_SPACE_CHANGEFEED.md](TT040_SPACE_CHANGEFEED.md#prefix-watchers-and-coalescing)
-- Opt-in gRPC command multiplexing with correlated responses: [TT032_IPROTO_MULTIPLEXING.md](TT032_IPROTO_MULTIPLEXING.md)
-- Default-off maintenance read-only mode for public cache traffic: [TT043_MAINTENANCE_READ_ONLY.md](TT043_MAINTENANCE_READ_ONLY.md)
-- Read-only per-structure native/backing memory accounting: [TT046_MEMORY_ACCOUNTING.md](TT046_MEMORY_ACCOUNTING.md)
-- Importable at-least-once command-journal sink runners: [MZ011_SINK_CONNECTORS.md](MZ011_SINK_CONNECTORS.md)
-- Sink-owned exactly-once journal checkpoints: [MZ012_EXACTLY_ONCE_SINK.md](MZ012_EXACTLY_ONCE_SINK.md)
-- Opt-in source connector checkpoints tied to journal progress: [MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md](MZ013_SOURCE_CONNECTOR_CHECKPOINTS.md)
-- Importable CDC/upsert source-batch consolidation: [MZ014_UPSERT_BATCH.md](MZ014_UPSERT_BATCH.md)
-- Context-aware SQL source frontier barriers: [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md#bounded-snapshot-barrier)
-- Incremental rank windows with opt-in mutable retractions: [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md)
-- Incremental LAG/LEAD windows: [INCREMENTAL_OFFSET_WINDOW.md](INCREMENTAL_OFFSET_WINDOW.md)
-- Incremental bounded COUNT/SUM frame windows: [INCREMENTAL_FRAME_WINDOW.md](INCREMENTAL_FRAME_WINDOW.md)
-- Incremental bounded MIN/MAX frame windows: [INCREMENTAL_EXTREMA_FRAME_WINDOW.md](INCREMENTAL_EXTREMA_FRAME_WINDOW.md)
-- Incremental bounded AVG frame windows: [INCREMENTAL_AVERAGE_FRAME_WINDOW.md](INCREMENTAL_AVERAGE_FRAME_WINDOW.md)
-- Incremental bounded COUNT DISTINCT frame windows: [INCREMENTAL_DISTINCT_FRAME_WINDOW.md](INCREMENTAL_DISTINCT_FRAME_WINDOW.md)
-- Mutable incremental bounded frame windows: [INCREMENTAL_MUTABLE_FRAME_WINDOW.md](INCREMENTAL_MUTABLE_FRAME_WINDOW.md)
-- Incremental FIRST_VALUE/LAST_VALUE windows: [INCREMENTAL_BOUNDARY_WINDOW.md](INCREMENTAL_BOUNDARY_WINDOW.md)
-- Incremental NTH_VALUE windows: [INCREMENTAL_NTH_VALUE_WINDOW.md](INCREMENTAL_NTH_VALUE_WINDOW.md)
-- Incremental recursive reachability with opt-in mutable retractions: [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md)
-- Consensus-bound topology commits and fencing: [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md)
-- Deterministic local partition split and merge planning: [PARTITION_RESIZE.md](PARTITION_RESIZE.md)
-- Bounded local-partition snapshot hydration workers: [SNAPSHOT_RESTORE_WORKERS.md](SNAPSHOT_RESTORE_WORKERS.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)
+- Typed functional secondary index: [FUNCTIONAL_INDEX.md](FUNCTIONAL_INDEX.md)
+- Exact compact-slot bitset index: [BITSET_INDEX.md](BITSET_INDEX.md)
+- Opt-in replica health and locality-aware read routing: [REPLICA_HEALTH.md](REPLICA_HEALTH.md)
+- Opt-in SQL-readable telemetry catalog: [SYSTEM_METRICS.md](SYSTEM_METRICS.md)
+- Concurrent consumer-group queue with visibility leases: [CONSUMER_GROUP.md](CONSUMER_GROUP.md)
+- ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
+- Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
+- Materialize-style connector lifecycle registry: [CONNECTOR_LIFECYCLE.md](CONNECTOR_LIFECYCLE.md)
+- Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
 - ClickHouse-style opt-in two-level columnar aggregation: [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md)
 - ClickHouse-style SQL constant folding: [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md)
 - Tarantool-style delay queue operations: [DELAY_QUEUE.md](DELAY_QUEUE.md)
-- Tarantool-style visibility-timeout queue leases: [VISIBILITY_QUEUE.md](VISIBILITY_QUEUE.md)
-- Tarantool-style pooled peer connections: [CONNECTION_POOL.md](CONNECTION_POOL.md)
 - Runtime allocator and GC diagnostics: [MEMORY_REPORT.md](MEMORY_REPORT.md)
 - Read-only hypothetical SQL index/projection cost analysis: [SQL_WHATIF.md](SQL_WHATIF.md)
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)
 - JSON `LIKE 'prefix%'` scans through ordered indexes: [SQL LIKE prefix index](SQL_LIKE_PREFIX_INDEX.md)
-- JSON text `CONTAINS_PREFIX` scans through token postings: [SQL text prefix index](SQL_TEXT_PREFIX_INDEX.md)
-- ClickHouse-style conditional aggregate names: [SQL aggregate `If` combinators](SQL_AGGREGATE_IF.md)
-- ClickHouse-style streaming approximate aggregates: [Approximate aggregate stream state](SQL_APPROXIMATE_STREAM.md)
-- ClickHouse-style grouping identifiers: [SQL grouping identifiers](SQL_GROUPING_IDENTIFIERS.md)
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)
-- Tie-preserving ordered limits: [SQL `LIMIT WITH TIES`](LIMIT_WITH_TIES.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
-- Opt-in dictionary-coded string group keys for typed aggregates: set `TypedTableAggregateDefinition.DictionaryEncodeGroups` to reduce retained arrangement key state; the default remains the legacy representation. See [the measured tradeoff](BENCHMARK.md#per-column-dictionary-coded-aggregate-groups).
+- Materialize-style guarded SQL columnar dictionary compression: [SQL_COLUMNAR_DICTIONARY.md](SQL_COLUMNAR_DICTIONARY.md)
+- Opt-in frontier-driven append-only recursive dataflow maintenance: [RECURSIVE_DATAFLOW.md](RECURSIVE_DATAFLOW.md)
+- Source-metadata selection for append-only aggregate maintenance: [SOURCE_APPEND_ONLY_METADATA.md](SOURCE_APPEND_ONLY_METADATA.md)
+- Kafka-style SQL source offset tracking: [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
+- Atomic SQL source transaction grouping: [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md)
+- SQL sink progress and acknowledged frontiers: [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md)
+- Opt-in deterministic parallel mapping for independent CPU-bound work: [PARALLEL_MAP.md](PARALLEL_MAP.md)
+- Opt-in incremental foreign-key enforcement: [FOREIGN_KEY_INDEX.md](FOREIGN_KEY_INDEX.md)
+- Independent topology leader election: [LEADER_ELECTION.md](LEADER_ELECTION.md)
+- Opt-in cross-region read routing: [CROSS_REGION_READ_POLICY.md](CROSS_REGION_READ_POLICY.md)
+- Cross-region backup restore drill: [CROSS_REGION_RESTORE_DRILL.md](CROSS_REGION_RESTORE_DRILL.md)
+- Partition ownership quorum certificates: [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md)
+- Remote immutable part metadata references: [REMOTE_PARTS.md](REMOTE_PARTS.md)
+- Opt-in checksum-verified immutable part envelopes: [REPLICATED_PARTS.md](REPLICATED_PARTS.md)
+- Opt-in zero-copy immutable part views: [ZERO_COPY_PARTS.md](ZERO_COPY_PARTS.md)
+- Distributed join movement accounting for adapters: [DISTRIBUTED_JOIN_ACCOUNTING.md](DISTRIBUTED_JOIN_ACCOUNTING.md)
+- Opt-in bounded synchronous write quorums: [QUORUM_WRITES.md](QUORUM_WRITES.md)
+- Eventual and session read-consistency policies: [READ_CONSISTENCY.md](READ_CONSISTENCY.md)
+- Independent topology epochs and local lease fencing: [EPOCH_LEASES.md](EPOCH_LEASES.md)
+- Deterministic opt-in SQL transaction triggers: [SQL_TRANSACTION_TRIGGERS.md](SQL_TRANSACTION_TRIGGERS.md)
 - Arrangement ownership and reuse snapshots: call `Snapshot()` on typed aggregate or join arrangement registries to inspect active leases, checkpoints, source sequences, and staleness.
-- Arrangement memory and compaction telemetry: call `Stats()` on a typed aggregate arrangement registry or lease to inspect groups, distinct values, estimated retained bytes, checkpoints, and compaction state. See [typed arrangement telemetry](TYPED_TABLE_ARRANGEMENT_TELEMETRY.md).
 - Structural EXPLAIN dataflow graphs: call `BuildExplainDataflowGraph`, `MarshalExplainDataflowJSON`, or `ExplainDataflowDOT` to inspect nested subplans and pipeline edges without changing query execution.
 - Structured optimizer alternatives and notices: inspect `ExplainStep.Alternatives` and `ExplainStep.Notices` on `EXPLAIN ANALYZE` plans. See [SQL_EXPLAIN_OPTIMIZER.md](SQL_EXPLAIN_OPTIMIZER.md).
-- Opt-in SQL optimizer rules over existing planner controls: [SQL_OPTIMIZER_RULES.md](SQL_OPTIMIZER_RULES.md)
 - Literal-independent SQL fingerprints: call `SQLQueryFingerprint` to group structurally identical queries without retaining literal values; identifiers, operators, literal types, and parameter positions remain significant.
 - Schema-aware RowBinary-style SQL row transfer: use `EncodeSQLRowBinary` and `DecodeSQLRowBinary`; the existing JSON/protobuf wire defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).
-- Adaptive numeric RowBinary codec selection: [adaptive RowBinary](ROW_BINARY_ADAPTIVE.md)
-- Shared JSON path metadata: [JSON subcolumns](JSON_SUBCOLUMNS.md)
-- Compact nullable RowBinary markers: [nullable bitmap](ROW_BINARY_NULLABLE_BITMAP.md)
-- Per-namespace SQL workload classes: [SQL workload classes](SQL_WORKLOAD_CLASSES.md)
-- Pre-scan SQL admission control: [SQL admission control](SQL_ADMISSION_CONTROL.md)
 - Stateful RowBinary dictionary batches: use `NewSQLRowBinaryDictionaryEncoder` and `NewSQLRowBinaryDictionaryDecoder` for repeated string-like values across batches; plain RowBinary remains the default. See [ROW_BINARY_DICTIONARY.md](ROW_BINARY_DICTIONARY.md).
 - RowBinary column statistics: use `EncodeSQLRowBinaryWithStats`, `DecodeSQLRowBinaryWithStats`, or `BuildSQLRowBinaryColumnStats` for exact counts and typed min/max metadata; the ordinary RowBinary path remains unchanged. See [ROW_BINARY_STATS.md](ROW_BINARY_STATS.md).
 - Independent compressed block streams: use `EncodeCompressedBlocks` and `DecodeCompressedBlocks` when block-local checksums and bounded recovery matter; existing JSON, protobuf, and gzip defaults remain unchanged. See [COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
 - External Parquet tables: `ExternalTables` supports `ExportParquet`, `ImportParquet`, and `WriteParquet` alongside CSV, JSON, NDJSON, and Arrow formats.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
-- Columnar merges that load only requested fields: [vertical merge](COLUMNAR_VERTICAL_MERGE.md)
-- Latest-row replacement merge primitive: [replacing merge](REPLACING_MERGE.md)
-- Sign-based row cancellation merge: [collapsing merge](COLLAPSING_MERGE.md)
-- Merge-time numeric summation: [summing merge](SUMMING_MERGE.md)
-- TTL-safe fixed-width rollups: [TTL rollup](TTL_ROLLUP.md)
-- Deterministic partition-stable SQL sampling: [deterministic sample](DETERMINISTIC_SAMPLE.md)
-- Reusable partial aggregate states: [aggregate combinators](AGGREGATE_COMBINATORS.md)
-- Bounded timestamp gap filling: [SQL WITH FILL](WITH_FILL.md)
-- Row-and-width based compact-part selection: [columnar part format](COLUMNAR_PART_FORMAT.md)
-- Selectivity-driven columnar granules: [granule sizing](GRANULE_SIZING.md)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
 - Reproducible Jupyter SQL analysis: [NOTEBOOK.md](NOTEBOOK.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
-- Importable language-neutral HTTP/gRPC clients and JSON/protobuf command-wire selection: [CLIENT_SDK.md](CLIENT_SDK.md)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Opt-in asynchronous HTTP command admission and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
+- Opt-in durable SQL subscription history, progress, and resume cursors: [DURABLE_SUBSCRIPTIONS.md](DURABLE_SUBSCRIPTIONS.md)
+- Opt-in schema-enforced complete source replacements: [SCHEMA_BOUND_WRITES.md](SCHEMA_BOUND_WRITES.md)
+- Opt-in structured source lag, retry, and health records: [SOURCE_HEALTH.md](SOURCE_HEALTH.md)
+- Opt-in bounded async command failure retention and replay: [ASYNC_COMMAND_DEAD_LETTERS.md](ASYNC_COMMAND_DEAD_LETTERS.md)
+- Opt-in exact-key mutation watchers for local invalidation: [KEY_CHANGE_WATCHERS.md](KEY_CHANGE_WATCHERS.md)
+- Latest ClickHouse/Materialize/Tarantool gap audit: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md)
+- 150-item ClickHouse/Materialize/Tarantool adoption gap catalog: [IDEA_GAP_CATALOG.md](IDEA_GAP_CATALOG.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
 - API and configuration examples: [Development](#development)
 
@@ -1032,11 +941,6 @@ atomic backup bundles do not need archived segments: they contain either a
 point-in-time snapshot or a native Pebble checkpoint plus a journal checkpoint
 at the same sequence.
 
-For region-oriented deployments, snapshot bundles can be restricted to one or
-more logical key prefixes with `BackupBundleOptions.KeyPrefixes`. The selected
-scope is recorded in the bundle manifest and is restored as a complete
-snapshot of those keys. See [SELECTIVE_BACKUP.md](SELECTIVE_BACKUP.md).
-
 Archived segments can also be bounded by count and, explicitly, by total bytes.
 `JOURNAL_RETAINED_BYTES=0` is the default and preserves count-only retention;
 see [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md) before lowering history on a
@@ -1190,7 +1094,6 @@ Restore an atomic backup bundle after verification:
 ```
 make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data
 make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data RESTORE_BUNDLE_OVERWRITE=true
-make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data RESTORE_BUNDLE_RESUME=true
 ```
 
 Bundle and incremental-repository restore use a sibling staging directory.
@@ -1203,13 +1106,6 @@ components, and source/destination overlap. The measured checkpoint restore is
 1.24x faster with half the payload passes and 1.03x less timed heap; small local
 repository restore is 1.09x slower because durability now includes staged-file
 fsync. See [BENCHMARK.md](BENCHMARK.md#single-pass-staged-restore).
-
-For a large restore that was interrupted after files were staged, opt into a
-deterministic sibling checkpoint with `RESTORE_BUNDLE_RESUME=true`. Matching
-payloads are revalidated and reused on retry; the default remains disabled and
-the normal random staging directory is cleaned up on failure. See
-[RESTORE_RESUME.md](RESTORE_RESUME.md) for the recovery procedure and measured
-CPU/allocation tradeoff.
 
 For a server-side atomic backup bundle, ask the monitoring API to write a
 tar.gz bundle. The sane `auto` default is `snapshot`, which contains
@@ -1832,21 +1728,10 @@ the 16-partition restore is 1.46x faster with 1.80x less heap and 1.80x fewer
 allocations. Malformed or failed restores leave the live generation unchanged.
 See [BENCHMARK.md](BENCHMARK.md#atomic-generation-snapshot-restore).
 
-Partitioned restore and Pebble startup also use partition-stable workers. The
-default restore policy is `0`, which chooses `min(GOMAXPROCS, local partitions)`.
-Go callers can cap the pool, or force serial hydration, without changing the
-snapshot or persistence format:
-
-```go
-if err := trie.ConfigureSnapshotRestoreWorkers(8); err != nil {
-	return err
-}
-```
-
-The historical 100,000-record comparison measured Pebble startup at 1.18x
-faster. Worker-policy CPU, memory, and allocation measurements are in
-[SNAPSHOT_RESTORE_WORKERS.md](SNAPSHOT_RESTORE_WORKERS.md) and
-[BENCHMARK.md](BENCHMARK.md#mz-017-bounded-partition-restore-workers).
+Partitioned restore and Pebble startup also use partition-stable workers bounded
+by `GOMAXPROCS`. The historical 100,000-record comparison measured Pebble
+startup at 1.18x faster. See
+[BENCHMARK.md](BENCHMARK.md#parallel-partition-restore).
 
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
 separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key
@@ -3116,11 +3001,10 @@ topology owners.
 `GET /api/journal?after_sequence=...&limit=...` returns the command journal tail
 when journaling is configured. `POST /api/journal` pulls a remote journal tail
 from `source` and applies it locally.
-`POST /api/commands` accepts `command`, `key`, optional `value`, `expected_value`, `values`,
+`POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
 `batch`, `subkey`, `pairs`, `idempotency_key`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
-supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `CAS`, `COMPARESET`,
-`COMPARE_AND_SWAP`, `SETX`, `SETSTRX`,
+supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
@@ -3145,12 +3029,6 @@ request key, and `INTERNALSET` is the snapshot-entry JSON fallback.
 commands and are accepted only for internal replication traffic.
 `INTERNALDIGESTV1` is the read-only, topology-scoped digest page used by
 anti-entropy and is also accepted only for authenticated internal replication.
-`CAS`, `COMPARESET`, and `COMPARE_AND_SWAP` atomically compare an existing
-string key with `expected_value` and replace it with `value`. They return
-`value: "1"` when the swap happens and `value: "0"` for a missing key,
-non-string key, or mismatch; a failed comparison never creates or changes a
-key. Existing expiration is preserved, and expiration options are rejected for
-this command.
 `BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
 with ordinary command requests to reduce client/server round trips. It executes
 subcommands in order, returns one response per subcommand in `responses`, and is
@@ -3348,12 +3226,8 @@ runtime scheduling pauses can delay a refresh. Injected test clocks remain
 exact. Monotonic timers and operational deadlines continue to use the standard
 Go clock.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
-`VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for opt-in
-background cleanup. The cleaner uses the indexed expiration heap and sleeps
-until the next deadline, waking early when a newly scheduled deadline is
-earlier; its interval remains the maximum fallback wake period. See the
-[deadline-aware expiration cleaner](EXPIRATION_CLEANER.md) design and
-measurements. Use `StartExpirationCleanerContext` when cleaner lifetime
+`VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for periodic
+background cleanup. Use `StartExpirationCleanerContext` when cleaner lifetime
 should follow a parent service context. Use `VacuumExpiredOnMemoryPressure` or
 `StartMemoryPressureVacuum` to remove expired keys only when heap allocation is
 above a configured threshold; `StartMemoryPressureVacuumContext` also stops on
@@ -3557,7 +3431,6 @@ build files have not been generated.
 any type:
   BATCH [command request...]
   SET/SETSTR/SETINT key value
-  CAS/COMPARESET/COMPARE_AND_SWAP key expected_value value
   SETX/SETSTRX/SETINTX key ttl value
   EXISTS/GET/GETSTR/DUMP key
    check the value on the hat_map
@@ -3997,151 +3870,6 @@ unless explicitly set to `true`. This changes neither wire nor persistence
 formats. See [BENCHMARK.md](BENCHMARK.md#sql-sparse-primary-mark-pruning) for
 the measured selective-query result and full-range control.
 
-## SQL Compressed Columnar Batches
-
-Typed-table columnar caches can optionally use compact per-column batch
-representations. The option is disabled by default:
-
-```go
-schema := hatSql.TypedTableSchema{
-	Name:    "events",
-	Columns: []hatSql.TypedTableColumn{
-		{Name: "team", Kind: hatSql.TypedTableString},
-		{Name: "points", Kind: hatSql.TypedTableInt64},
-	},
-	ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
-		Enabled:           true,
-		CompressedBatches: true,
-	},
-}
-```
-
-When enabled, the cache keeps low-cardinality strings in packed dictionaries,
-fixed-width numeric values in byte vectors, booleans in bitmaps, and sparse
-nullable values in validity-bitmaps plus dense values. Each representation is
-selected only when its estimated retained payload is smaller. CompressedBatches
-does not change logical values, SQL results, persistence, or wire formats, and
-the cache byte budget includes all packed payloads and metadata.
-
-This is a memory-first mode, not a universal speed setting. The recorded
-4,096-row mixed batch used about 4.53x less retained column payload
-(213,904 vs 47,224 bytes), while the warmed SQL read was 1.13x slower and
-allocated 1.97x as many objects. Leave it off for read-heavy workloads unless
-the cache residency reduction is more valuable than that CPU/allocation cost.
-See [BENCHMARK.md](BENCHMARK.md#compressed-typed-table-columnar-batches) for
-the raw run.
-
-## SQL Columnar Metadata Counts
-
-Direct predicate-free `COUNT(*)` queries over a columnar `CACHE` source use the
-batch's validated row-count metadata instead of visiting every row. This has
-no new configuration or storage/wire format and preserves `MaxRows`,
-`LIMIT`/`OFFSET`, empty-source, and cancellation checks. Queries with a
-`WHERE` clause, `COUNT(field)`, or any richer aggregate shape retain the
-existing scan path. On the 100,000-row benchmark this reduced execution time
-from `838.151 us` to `2.647 us` (about `316.6x`) with unchanged `2,688 B/op`
-and `14 allocs/op`; see [BENCHMARK.md](BENCHMARK.md#columnar-metadata-count).
-
-## SQL Columnar Metadata MIN/MAX
-
-Direct predicate-free `MIN(numeric_field)` and `MAX(numeric_field)` queries on
-columnar `CACHE` sources combine complete numeric segment bounds instead of
-reading every row. `COUNT(*)` can use the same path in a mixed aggregate query.
-The executor requires complete finite bounds for every segment; missing,
-invalid, nullable-only, or ambiguous metadata falls back to the established
-row scan, and filtered or richer aggregates are unchanged. There is no new
-configuration flag, persistence format, or wire-format change.
-
-The measured 100,000-row read went from a 6.373 ms median row scan to a
-6.141 us median metadata read, about 1,037.8x faster, with the same 3,456 B/op
-and 17 allocations/op. See
-[BENCHMARK.md](BENCHMARK.md#columnar-metadata-minmax) for the raw five-run
-comparison.
-
-## SQL Columnar Dictionary Membership Counts
-
-Pure `COUNT(*)` queries over trusted low-cardinality string dictionaries can
-answer absent-value predicates from dictionary membership without decoding row
-codes. `team = 'missing'` and `team IN ('missing-a', 'missing-b')` return zero;
-`team != 'missing'` and `team <> 'missing'` return the batch row count. A
-matching literal, `COUNT(team)`, a conjunction, or another richer shape keeps
-the established row scan.
-
-The fast path is enabled only for dictionaries produced by the validated
-`EncodeRepeatedStrings` path used by typed-table columnar batches. The trust
-marker is internal and is not serialized; manually supplied or decoded
-dictionaries retain the existing per-row code validation. There is no new
-configuration, persistence, or wire-format change.
-
-On 100,000 rows, the same absent equality predicate improved from a 953.206 us
-median row scan to 3.846 us (247.8x), and the absent `IN` predicate improved
-from 927.006 us to 4.135 us (224.1x). Each pair kept its original B/op and
-allocation count. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-membership-count)
-for raw samples.
-
-## SQL Columnar Dictionary Segment Marks
-
-Typed-table columnar caches also build exact per-segment membership masks for
-trusted dictionaries with at most 64 values. Equality and literal `IN`
-predicates skip segments whose mask cannot match; inequality predicates skip a
-segment only when it contains no value other than the excluded code. Remaining
-rows still use the ordinary dictionary evaluator, so the marks are a pruning
-hint and never replace result validation.
-
-This is automatic when the existing `ColumnarCache.Enabled` option is enabled;
-there is no new flag and the default columnar cache remains disabled. The
-existing `RowsPerSegment` setting controls the mark granularity. Untrusted,
-malformed, or wider dictionaries do not receive marks and retain the existing
-scan behavior. The sidecar is cache metadata only and changes neither
-persistence nor wire formats. Its retained accounting is 64 bytes per indexed
-field plus 8 bytes per segment; a 99,840-row, 256-row segment layout uses
-about 3,184 bytes for one dictionary field.
-
-On the clustered 99,840-row benchmark, a matching equality query improved from
-930,130 ns to 13,002 ns median (71.5x) with identical 3,936 B/op and 24
-allocations/op. Building the marks costs 170,312 ns and 3,712 B/op in that
-one-time layout-build benchmark, so the feature is valuable for a warm cache
-with repeated selective reads. See
-[BENCHMARK.md](BENCHMARK.md#columnar-dictionary-segment-marks) for all raw
-samples and the build/query tradeoff.
-
-## SQL Result Cache
-
-Read-only materialized SQL queries can opt into a bounded, typed result cache
-when the resolver implements `SourceVersionResolver`:
-
-```go
-cache := hatSql.NewSQLResultCache(256)
-result, err := hatSql.ExecuteSQLQueryParameters(
-	ctx,
-	"SELECT id FROM CACHE('events') WHERE team = $1",
-	resolver,
-	[]interface{}{"core"},
-	hatSql.SQLQueryOptions{ResultCache: cache},
-)
-```
-
-The default is off: `ResultCache` is nil and the ordinary SQL executor is
-unchanged. Every `CACHE` or `EXTERNAL` source referenced by a query must report
-a non-empty version that changes whenever observable rows or values change.
-The cache checks all source versions before and after a miss, so a source that
-changes during execution is not retained. Resolvers without version metadata
-fall back to normal execution.
-
-Cache keys include the exact SQL text, positional parameter values, collation,
-and prepared schema version. Returned rows and plans are independently cloned
-with their SQL value types preserved, and each invocation receives its current
-`QueryID`. The cache is caller-owned and should be scoped to one resolver or
-tenant. It conservatively bypasses queries with samples, volatile functions,
-custom functions, explicit resource budgets, projections, hints, optimizer
-rules, or instrumentation options. Streaming row APIs are unchanged.
-
-The measured 1,024-row hit path was 225,920 ns, 360,416 B, and 2,091
-allocations versus 816,510 ns, 1,231,422 B, and 6,169 allocations for the
-uncached control: 3.61x faster, 3.42x lower transient heap, and 2.95x fewer
-allocations. The hit still pays for result cloning to preserve isolation. See
-[BENCHMARK.md](BENCHMARK.md#sql-result-cache) for raw runs.
-
 ## SQL Numeric Predicate Reordering
 
 Columnar SQL scans automatically evaluate direct numeric predicates in a
@@ -4156,378 +3884,3 @@ invalid, or incomplete segment statistics, larger conjunctions, and all other
 SQL shapes retain the original predicate order. See
 [BENCHMARK.md](BENCHMARK.md#sql-numeric-predicate-reordering) for the measured
 CPU, allocation, and fallback tradeoffs.
-
-## SIMD Predicate Kernels
-
-Allocation-free typed int64 predicate masks use an AVX2 kernel for equality and inequality when supported, with portable fallback elsewhere. See [C015 SIMD predicate kernels](C015_SIMD.md) for the API, validation, and measurements.
-
-## SQL Packed Numeric Predicate Kernel
-
-Direct numeric `WHERE` predicates over packed columnar `int64` or `float64`
-fields now compare fixed-width bytes and validity bits without per-row
-interface boxing. Legacy columns, NULLs, malformed packed metadata, and wider
-predicate shapes retain the existing evaluator. The change is automatic and
-has no wire or persistence-format impact. See
-[SQL packed numeric predicate kernel](SQL_PACKED_NUMERIC_PREDICATE.md) and the
-[raw benchmark](BENCHMARK.md#sql-packed-numeric-predicate-kernel).
-
-- [Quorum policy](QUORUM_POLICY.md)
-- [Read quorum](READ_QUORUM.md)
-
-- [Cross-region restore drill](CROSS_REGION_RESTORE_DRILL.md)
-
-- [Source frontier monitoring](SOURCE_FRONTIER_MONITORING.md)
-
-- [Operator memory monitoring](OPERATOR_MEMORY_MONITORING.md)
-
-## Delta Joins
-
-`hatSql.DifferentialTemporalJoin` incrementally maintains weighted temporal
-inner joins with equality-key arrangements. Positive changes probe only the
-matching counterpart group, while negative changes use retained row identity
-and do not rescan the complete opposite input. See
-[DELTA_JOINS.md](DELTA_JOINS.md) for the contract and validation guarantees.
-
-## Linear Indexed Joins
-
-`hatSql.TypedTableJoin` maintains typed equality indexes and matched key pairs
-incrementally. Inserts, updates, and deletes touch only the affected value
-bucket, while ordered changes and independently owned result rows preserve
-correctness for reusable consumers. See
-[LINEAR_INDEXED_JOINS.md](LINEAR_INDEXED_JOINS.md) for the arrangement
-contract.
-
-## Replica Lag Routing
-
-`hatReplication.SelectReadReplica` filters candidates by required frontier and
-maximum lag before deterministic freshness and health selection. A zero lag
-bound requires a replica at or ahead of the observed frontier; no transport or
-endpoint discovery is implied. See
-[REPLICA_LAG_ROUTING.md](REPLICA_LAG_ROUTING.md) for the policy contract.
-
-## Replica Locality Routing
-
-`hatReplication.SelectReadReplicaWithConsistency` can optionally prefer an
-ordered list of node regions after consistency filtering, with fallback to any
-eligible region. The default empty preference preserves existing routing. See
-[REPLICA_LOCALITY_ROUTING.md](REPLICA_LOCALITY_ROUTING.md) for the contract.
-
-## Deterministic Conflict Resolution
-
-`hatReplication.ResolveConflictVersion` chooses the larger valid timestamp,
-node-ID, and sequence tuple independent of arrival order. It is a pure
-decision primitive; replication, quorum acknowledgement, and metadata
-consensus remain separate concerns. See
-[CONFLICT_RESOLUTION.md](CONFLICT_RESOLUTION.md) for the ordering contract.
-
-## Upsert Sources
-
-`hatSql.TypedTable.Upsert` keeps one current row per application key and emits
-ordered `INSERT` or `UPDATE` changes with before/after values; `Delete` emits
-`DELETE`. Consumers can apply these CDC-shaped changes to arrangements without
-rescanning the source. See [UPSERT_SOURCES.md](UPSERT_SOURCES.md) for the
-contract and its scope.
-
-## CDC Envelopes
-
-`hatSql.TypedTableChange` normalizes typed-table mutations as ordered
-`INSERT`, `UPDATE`, or `DELETE` envelopes with key and before/after rows.
-Arrangements and projections can consume the same validated shape. External
-broker offsets, source transaction IDs, and acknowledgements remain separate.
-
-For dynamic external change streams, `hatSql.CDCEnvelope` and
-`hatSql.NormalizeCDCEnvelope` provide the same canonical operation names
-without converting rows to a fixed schema. Debezium-style `c`, `r`, `u`, and
-`d`, plus common `create`, `snapshot`, `insert`, `update`, `delete`, `remove`,
-`replace`, and `upsert` spellings are accepted. Inserts require `After`,
-updates require both `Before` and `After`, and deletes require a key with no
-`After` row. `hatSql.DecodeCDCEnvelopeJSON` accepts either `op` or
-`operation`. The hot path borrows row maps, does not mutate them, and measured
-zero additional bytes or allocations; callers that retain mutable source maps
-must copy them at their own ownership boundary. Source-specific conversion
-and differential `diff` interpretation remain connector-owned. See
-[CDC_ENVELOPES.md](CDC_ENVELOPES.md) and the
-[MZ-015 benchmark](BENCHMARK.md#mz-015-cdc-envelope-normalization).
-
-## Parallel NDJSON Input Parsing
-
-`hatSql.ParseNDJSONParallel` and `ExternalTables.ImportNDJSONParallel` provide
-an opt-in bounded worker pool for independent NDJSON records. Rows retain
-source order, errors select the lowest invalid line deterministically, and a
-failed import does not replace an existing external-table snapshot. The
-existing sequential importer remains available. See
-[PARALLEL_INPUT.md](PARALLEL_INPUT.md) for the API and benchmark tradeoff.
-
-## Read Consistency
-
-`hatReplication.SelectReadReplicaWithConsistency` supports explicit
-`eventual`, `bounded-staleness`, and `read-after-write` freshness levels.
-`SelectReadReplica` remains the backward-compatible read-after-write default.
-See [READ_CONSISTENCY.md](READ_CONSISTENCY.md) for configuration, API usage,
-selection rules, and operational guidance.
-
-## Adaptive Monotone Maintenance
-
-`hatSql.TypedTableAggregate.ApplyAuto` classifies each change batch and uses
-the insert-only maintenance fast path only when the batch proves it is safe;
-updates and deletes fall back to the existing general path. See
-[MONOTONE_MAINTENANCE.md](MONOTONE_MAINTENANCE.md) for the contract and
-benchmark.
-
-## Partial Merge Join
-
-`hatSql.MergeSortedTypedTableJoin` streams an exact inner join from two inputs
-that are already ordered by their join fields. It handles duplicate keys,
-validates ordering and key kinds, and keeps the complete result out of memory.
-See [PARTIAL_MERGE_JOIN.md](PARTIAL_MERGE_JOIN.md) for the contract and
-benchmark.
-
-## Semijoin Reduction
-
-`hatSql.NewTypedTableJoinWithOptions` can keep unmatched rows as compact
-pending-key metadata while preserving live join correctness when counterparts
-arrive later. The option is disabled by default; see
-[SEMIJOIN_REDUCTION.md](SEMIJOIN_REDUCTION.md) for the contract and measured
-tradeoff.
-
-## Append-Only Source Metadata
-
-`hatSql.TypedTable.ChangeMetadata` and
-`TypedTableAggregate.ApplyWithMetadata` let a source-owned append-only fact
-select the monotone aggregate path without rescanning the batch. The metadata
-path is optional and keeps the existing default behavior; see
-[SOURCE_APPEND_ONLY_METADATA.md](SOURCE_APPEND_ONLY_METADATA.md) for the
-contract and benchmark.
-
-## Incremental Sort Arrangement
-
-`hatSql.NewTypedTableSortedArrangement` maintains a reusable ordered typed-row
-view for point updates, with explicit descending and NULL/NaN ordering. It is
-opt-in and large batches can favor a full rebuild; see
-[INCREMENTAL_SORT.md](INCREMENTAL_SORT.md) for the contract and benchmark.
-
-## Distributed Partial Aggregation
-
-`hatSql.TypedTableAggregate.MergePartial` and `MergePartials` combine exact
-partition-local `COUNT`, `SUM`, `MIN`, `MAX`, and `COUNT DISTINCT` state without
-replaying every source change. The API is explicit and does not deduplicate
-retries; see [DISTRIBUTED_PARTIAL_AGGREGATION.md](DISTRIBUTED_PARTIAL_AGGREGATION.md)
-for the contract, usage, and benchmark.
-
-## Distributed Join Data Movement
-
-`hatSql.TypedTableJoinOptions.TrackDataMovement` enables cumulative per-side
-change, row-image, and logical-byte accounting; it is disabled by default so
-ordinary joins pay no tracking cost. See
-[DISTRIBUTED_JOIN_DATA_MOVEMENT.md](DISTRIBUTED_JOIN_DATA_MOVEMENT.md) for
-the exact accounting definition and benchmark.
-
-## SQL Source Offset Tracking
-
-`hatSql.SQLSourceOffsetTracker` keeps compact monotone high-watermarks per
-source partition with atomic batch updates and deterministic snapshots. It is
-thread-safe checkpoint metadata, disabled from table behavior unless callers
-explicitly use it; see [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
-for usage and exactly-once boundaries.
-
-## SQL Source Transaction Grouping
-
-`hatSql.SQLSourceOffsetTracker.AdvanceTransaction` atomically advances a
-group of source partition offsets when every member is newer. See
-[SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md) for
-the contract, memory boundary, and measured cost.
-
-## Source Ingestion Coordination
-
-`hatSql.SQLSourceIngestionCoordinator` adds an opt-in idempotency gate for
-source transaction retries, with offset-group validation, conflict detection,
-single-flight behavior, and snapshot/restore. See
-[SQL_SOURCE_INGESTION.md](SQL_SOURCE_INGESTION.md) for the contract,
-durability boundary, and measured metadata cost.
-
-## SQL Sink Progress
-
-`hatSql.SQLSinkProgressTracker` records monotone acknowledged frontiers for
-sink partitions with deterministic snapshot and restore support. See
-[SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md) for the contract and measured
-cost; it does not claim exactly-once sink delivery.
-
-## SQL Sink Commit Coordination
-
-`hatSql.SQLSinkCommitCoordinator` adds an opt-in idempotent commit gate for
-sink transaction retries, including single-flight behavior for concurrent
-attempts and snapshot/restore support. See [SQL_SINK_COMMIT.md](SQL_SINK_COMMIT.md)
-for the contract, durability boundary, and measured cost. The caller must
-persist the commit record atomically with the sink effect or make the sink
-operation idempotent; the coordinator alone cannot guarantee external
-exactly-once delivery.
-
-## Read Replica Retries
-
-`hatSql.ReadReplicaSet.ExecuteWithRetry` provides opt-in bounded retries for
-read-only queries. The default remains one attempt; enabling retries requires
-an explicit transient-error classifier and is capped at eight attempts. See
-[READ_REPLICA_RETRIES.md](READ_REPLICA_RETRIES.md) for context-aware backoff,
-usage, and measured duplicate-work cost.
-
-## Explicit Write Quorum
-
-`hatReplication.ExecuteWriteQuorum` provides an opt-in concurrent write gate
-with explicit replica names and acknowledgement thresholds. It leaves normal
-asynchronous replication unchanged and reports failed targets for repair; it
-does not roll back partial external writes. See [WRITE_QUORUM.md](WRITE_QUORUM.md)
-for the contract and measured cost. For ordinary single HTTP or unary gRPC
-commands, set `MonitoringOptions.WriteQuorum` or `CacheGRPCOptions.WriteQuorum`
-to a positive threshold; the default `0` keeps the existing behavior. The
-command path applies locally before waiting for remote acknowledgements, so an
-unsatisfied quorum is a failed durability response rather than a rollback.
-Eligible atomic public `BATCH` write requests use the same threshold and one
-grouped replication envelope; see [WRITE_QUORUM.md](WRITE_QUORUM.md) for the
-eligibility and failure semantics.
-
-## Explicit Read Quorum
-
-`hatReplication.ExecuteReadQuorum` provides an opt-in concurrent read gate
-that requires a matching value from an explicit number of named replicas. It
-reports per-target errors and distinguishes an insufficient number of healthy
-responses from inconsistent successful values. Normal read routing and
-asynchronous replication remain unchanged. See [READ_QUORUM.md](READ_QUORUM.md)
-for the contract and measured cost.
-## HTTP Protocol Compatibility
-
-The monitoring HTTP command endpoint supports opt-in rolling-upgrade gates via
-`MonitoringOptions.ProtocolVersions`; the zero value keeps the current v1
-compatibility behavior. `HTTPReplicatorOptions.ProtocolVersions` optionally
-advertises a client range on HTTP replication requests, while zero omits the
-header for legacy peers. See [HTTP_PROTOCOL_COMPATIBILITY.md](HTTP_PROTOCOL_COMPATIBILITY.md)
-for headers, status codes, and the upgrade contract.
-## Automatic SQL DML Triggers
-
-Registered row-level triggers can be connected to direct SQL mutations with
-`SQLQueryOptions.TriggerRegistry`. The option is nil by default, preserving the
-existing caller-owned trigger behavior. The supported automatic path covers one
-key-targeted `INSERT`, `UPDATE`, or `DELETE` without expiration fields and
-prepares triggers before the primary write. Trigger commit failures roll back
-the primary string/counter mutation. Complex or multi-row mutation shapes are
-rejected while the option is enabled rather than silently bypassing triggers;
-see [SQL_TRIGGERS.md](SQL_TRIGGERS.md) and the measured opt-in cost in
-[BENCHMARK.md](BENCHMARK.md#automatic-sql-dml-trigger-dispatch).
-## Compiled SQL Dataflow IR
-
-`hatSql.CompileSQLQuery` exposes an immutable logical plan snapshot through
-`CompiledSQLQuery.Dataflow()`. The returned `SQLDataflowIR` has deterministic
-stage IDs, input links, a root ID, and the original SQL source for routing,
-admission, explain tooling, or plan registries. Each call returns independent
-slices. Execution still uses the existing cloned compiled-query path, so this
-adds no storage or wire format and does not change query results. See
-[COMPILED_DATAFLOW_IR.md](COMPILED_DATAFLOW_IR.md) and the measured metadata
-cost in [BENCHMARK.md](BENCHMARK.md#compiled-sql-dataflow-ir).
-
-`hatSchema.CheckRollingCompatibility` provides a conservative deployment
-preflight for rolling schema changes. It reports deterministic reasons and
-allows only append-only nullable columns or relaxed nullability; the existing
-exact replication fingerprint gate remains unchanged. See
-[SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
-
-Use `hatSchema.Preview` to validate a versioned migration against a cloned
-schema without publishing it; see [SCHEMA_MIGRATION_DRY_RUN.md](SCHEMA_MIGRATION_DRY_RUN.md).
-
-During an explicit rolling transition, pass a
-`ReplicationSchemaCompatibilityPolicy` built from the current schema and
-known compatible previous schemas to `MonitoringOptions` or
-`CacheGRPCOptions`. The policy is opt-in; nil retains exact version and
-fingerprint matching, and unknown contracts are still rejected.
-
-Compiled queries can also expose a cached, versioned fragment plan with
-`CompiledSQLQuery.LowerDataflow()`. The plan is initialized only when requested
-and each returned snapshot is independent, so it can be retained by routing,
-explain, or incremental-processing coordinators without changing SQL
-execution. See [SQL_DATAFLOW_LOWERING.md](SQL_DATAFLOW_LOWERING.md) for the
-contract, execution boundary, and measurements. Reusable callback-backed
-fragment composition is documented in [SQL_DATAFLOW_EXECUTOR.md](SQL_DATAFLOW_EXECUTOR.md).
-
-## Partitioned SQL Sources
-
-Expose region, tenant, or time partitions as one logical SQL source with the
-opt-in [`PartitionedSourceResolver`](PARTITIONED_SQL_SOURCES.md) contract.
-Use [`PartitionPruningSourceResolver`](PARTITION_PRUNING.md) to skip
-provably irrelevant partitions for literal equality and `IN` predicates.
-
-## Columnar Range Skipping
-
-Columnar sources that implement the existing segmented-columnar resolver can
-also skip numeric segments whose min/max bounds cannot match a direct `WHERE`
-comparison. The row matcher remains authoritative; see
-[`COLUMNAR_RANGE_SKIPPING.md`](COLUMNAR_RANGE_SKIPPING.md).
-
-## SQL Packed Boolean Predicates
-
-Direct `WHERE` comparisons against explicitly packed boolean columns use a
-bitmap kernel without per-row interface materialization. `=`, `!=`, and `<>`
-preserve NULL behavior; legacy columns and unsupported expressions retain the
-existing evaluator. See
-[`SQL_PACKED_BOOLEAN_PREDICATE.md`](SQL_PACKED_BOOLEAN_PREDICATE.md) and the
-raw measurements in [`BENCHMARK.md`](BENCHMARK.md#m065t-sql-packed-boolean-predicate-kernel).
-
-## Parallel RowBinary Decode
-
-Large RowBinary payloads automatically index row boundaries once and decode
-independent ranges in parallel while preserving order and the existing wire
-format. Small payloads and single-core processes retain the serial path. The
-explicit API is [`hatSql.DecodeSQLRowBinaryParallel`](SQL_PARALLEL_ROW_BINARY.md);
-see the measured CPU and transient-memory tradeoff in
-[`SQL_PARALLEL_ROW_BINARY.md`](SQL_PARALLEL_ROW_BINARY.md) and
-[`BENCHMARK.md`](BENCHMARK.md#ch-047-parallel-rowbinary-decode).
-
-## SQL ASOF JOIN
-
-Use `ASOF JOIN` for nearest temporal matches within an equality key, or
-`ASOF LEFT JOIN` when unmatched left rows must be retained. The supported
-syntax, null behavior, limits, and examples are documented in
-[SQL_ASOF_JOIN.md](SQL_ASOF_JOIN.md).
-
-## SQL GROUP BY Key Limit
-
-High-cardinality aggregations can be bounded per query with
-`hatSql.SQLQueryOptions.MaxGroupKeys`, or per namespace with
-`hatSql.NamespaceResourceLimits.MaxGroupKeys`. The default `0` keeps the
-existing behavior. See [SQL group key limits](SQL_GROUP_KEY_LIMIT.md) for
-error semantics, fast-path fallback rules, and measurements.
-
-## Explicit Regional Routing
-
-Use [`hatPartition.PrefixRouter`](REGIONAL_PARTITION_ROUTING.md) when keys have
-operator-defined regional prefixes. Longest-prefix matching is immutable and
-allocation-free; unmatched keys are rejected by the router rather than sent to
-an implicit default partition.
-
-## Region-Local Backup And Restore
-
-Use `-partition-local` with `backup` to create a snapshot containing only keys
-covered by explicit partition prefixes. The default remains a complete
-snapshot, and Pebble checkpoint/incremental modes remain whole-store artifacts:
-
-```sh
-make cli ARGS='backup -path backup/sg.tar.gz -mode snapshot -partition-local -partitions sg -partition-prefixes sg:'
-make cli ARGS='doctor -path backup/sg.tar.gz'
-make cli ARGS='restore-bundle -bundle backup/sg.tar.gz -data-dir data-sg -partitions sg -partition-prefixes sg:'
-```
-
-Restore selectors are checked before publication and reject a different
-partition or a non-local backup. See [REGION_LOCAL_BACKUP.md](REGION_LOCAL_BACKUP.md)
-for the HTTP request shape, recovery rules, and rehearsal workflow.
-## Product Inspiration Audit
-
-The source-product research ledger contains 50 canonical ClickHouse, Materialize,
-and Tarantool ideas with their current adopted, open, deferred, or rejected
-status: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md).
-## Rolling Schema Deployment
-
-The opt-in state machine and sequential, retry-safe coordinator for validated
-replica schema transitions are documented in [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).
-
-## Topology Consensus
-
-The opt-in compare-and-swap topology commit and quorum decision contract is
-documented in [TOPOLOGY_CONSENSUS.md](TOPOLOGY_CONSENSUS.md). It adds fencing
-and retry-safe metadata admission without changing the default data path.

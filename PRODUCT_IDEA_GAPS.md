@@ -74,7 +74,7 @@ tradeoffs are documented and its commit is published.
 
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
-| M-U01 | First-class connector lifecycle | Source-health records exist, but there is no connector object that owns create/start/pause/drop lifecycle and status transitions. | Restart state, bounded status history, and no query-path overhead. |
+| M-U01 | Durable connector lifecycle state | `hatPipeline.ConnectorRegistry` now owns create/start/pause/resume/stop transitions and bounded status history, but lifecycle state is in-memory and is not restored across restart. | Crash/restart recovery, version compatibility, bounded persistence, and no query-path overhead. |
 | M-U02 | Connector schema evolution | SQL sources do not coordinate upstream add/drop-column changes with dependent objects. | Mixed-version reads, atomic catalog update, and rollback. |
 | M-U03 | External source snapshot ingestion | There is no production connector for Kafka/Postgres/CDC snapshot ingestion; callers provide resolver data. | Authentication, offsets, backpressure, and recovery. |
 | M-U04 | Multi-source snapshot coordinator | Frontier barriers exist, but no coordinator captures independent source snapshots and their live tails as one initial view. | Blocking, source failure, and exact version retention. |

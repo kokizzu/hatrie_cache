@@ -10642,3 +10642,27 @@ test-t-peer-breaker:
 	bash ./scripts/test-t-peer-breaker.sh
 benchmark-t-peer-breaker:
 	bash ./scripts/benchmark-t-peer-breaker.sh
+
+.PHONY: test-mu01-connector-lifecycle
+test-mu01-connector-lifecycle:
+	bash ./scripts/test-mu01-connector-lifecycle.sh
+
+.PHONY: format-mu01-connector-lifecycle
+format-mu01-connector-lifecycle:
+	bash ./scripts/format-mu01-connector-lifecycle.sh
+
+.PHONY: benchmark-mu01-connector-lifecycle
+benchmark-mu01-connector-lifecycle:
+	bash ./scripts/benchmark-mu01-connector-lifecycle.sh
+
+.PHONY: test-mu01-connector-package
+test-mu01-connector-package:
+	bash ./scripts/test-mu01-connector-package.sh
+
+.PHONY: race-mu01-connector-lifecycle
+race-mu01-connector-lifecycle:
+	bash ./scripts/race-mu01-connector-lifecycle.sh
+
+.PHONY: vet-mu01-connector-lifecycle
+vet-mu01-connector-lifecycle:
+	bash ./scripts/vet-mu01-connector-lifecycle.sh
