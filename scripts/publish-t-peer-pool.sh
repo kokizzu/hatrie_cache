@@ -55,9 +55,19 @@ make -C "$worktree" format-t-peer-pool
 make -C "$worktree" test-t-peer-pool-package
 make -C "$worktree" race-t-peer-pool
 make -C "$worktree" vet-t-peer-pool
-make -C "$worktree" benchmark-t-peer-pool
+benchmark_log="$worktree/peer-pool-benchmark.log"
+if ! make -C "$worktree" benchmark-t-peer-pool > "$benchmark_log"; then
+	tail -n 120 "$benchmark_log"
+	exit 1
+fi
+tail -n 80 "$benchmark_log"
 make -C "$worktree" audit-product-idea-gaps
-go test -C "$worktree" ./... -timeout 90s -p 1 -skip '^TestRunRestoreRehearsalVerifiesBackupPath$' -count=1
+full_test_log="$worktree/peer-pool-full-test.log"
+if ! go test -C "$worktree" ./... -timeout 90s -p 1 -skip '^TestRunRestoreRehearsalVerifiesBackupPath$' -count=1 > "$full_test_log"; then
+	tail -n 160 "$full_test_log"
+	exit 1
+fi
+tail -n 40 "$full_test_log"
 
 git -C "$worktree" add Makefile README.md "${files[@]}"
 git -C "$worktree" diff --cached --check
