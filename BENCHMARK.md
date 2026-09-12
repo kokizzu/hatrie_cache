@@ -21617,3 +21617,18 @@ snapshot. Five local runs:
 The opt-in path measured about 6.5% higher latency, 336 extra bytes, and five
 extra allocations in this workload. The default writer path has no manifest
 hashing cost and snapshot bytes remain unchanged.
+
+## T-U11: Per-space conflict policy
+
+The existing direct resolver remains unchanged. Five local runs compare it with
+the opt-in bounded policy registry:
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Direct existing LWW resolver | 2.624 | 0 | 0 |
+| Registry default LWW | 17.02 | 0 | 0 |
+| Registry source priority | 22.10 | 0 | 0 |
+
+The registry adds no allocations. Its cost is an explicit map lookup and,
+when configured, a bounded source-priority scan; callers that need only the
+existing global ordering can keep using the direct resolver.
