@@ -1,8 +1,10 @@
 package hatSql
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
@@ -15,9 +17,14 @@ var (
 	// ErrSQLSourceFrontierBehind indicates that a required source is behind the
 	// query's minimum frontier.
 	ErrSQLSourceFrontierBehind = errors.New("hatSql: SQL source frontier is behind requirement")
+	// ErrSQLSourceFrontierWaitTimeout indicates that a required frontier did not
+	// become ready before the configured wait timeout.
+	ErrSQLSourceFrontierWaitTimeout = errors.New("hatSql: SQL source frontier wait timed out")
 )
 
-func validateSQLSourceFrontierRequirement(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) error {
+const defaultSQLSourceFrontierWaitInterval = 10 * time.Millisecond
+
+func validateSQLSourceFrontierRequirement(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) error {
 	if !options.RequireSourceFrontier || query == nil {
 		return nil
 	}
@@ -28,8 +35,56 @@ func validateSQLSourceFrontierRequirement(query *sqlQuery, resolver SQLSourceRes
 		}
 		return nil
 	}
-	visited := make(map[sqlRequiredSourceFrontierKey]struct{})
-	return validateSQLQueryFrontierSources(query, frontiers, options.RequiredSourceFrontier, visited)
+	validate := func() error {
+		visited := make(map[sqlRequiredSourceFrontierKey]struct{})
+		return validateSQLQueryFrontierSources(query, frontiers, options.RequiredSourceFrontier, visited)
+	}
+	if options.SourceFrontierWaitTimeout <= 0 {
+		return validate()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(options.SourceFrontierWaitTimeout)
+	for {
+		err := validate()
+		if err == nil {
+			return nil
+		}
+		if !sqlSourceFrontierWaitable(err) {
+			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("%w: %v", ErrSQLSourceFrontierWaitTimeout, err)
+		}
+		interval := options.SourceFrontierWaitInterval
+		if interval <= 0 {
+			interval = defaultSQLSourceFrontierWaitInterval
+		}
+		if interval > remaining {
+			interval = remaining
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func sqlSourceFrontierWaitable(err error) bool {
+	return errors.Is(err, ErrSQLSourceFrontierNotReady) || errors.Is(err, ErrSQLSourceFrontierBehind)
 }
 
 type sqlRequiredSourceFrontierKey struct {

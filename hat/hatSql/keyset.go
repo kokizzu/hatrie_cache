@@ -53,6 +53,9 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 	if parseErr != nil {
 		return result, parseErr
 	}
+	if err = validateSQLSourceFrontierRequirement(ctx, query, resolver, options); err != nil {
+		return result, err
+	}
 	if err = options.IndexHint.validate(); err != nil {
 		return result, err
 	}

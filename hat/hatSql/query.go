@@ -334,6 +334,12 @@ type SQLQueryOptions struct {
 	// resolver implementing SQLSourceFrontierResolver.
 	RequireSourceFrontier  bool
 	RequiredSourceFrontier uint64
+	// SourceFrontierWaitTimeout optionally waits for a required source frontier
+	// to become ready. Zero preserves immediate rejection, which is the default.
+	SourceFrontierWaitTimeout time.Duration
+	// SourceFrontierWaitInterval controls polling while waiting. Zero or a
+	// negative value uses the package default interval.
+	SourceFrontierWaitInterval time.Duration
 	// AsOfFrontier requests an immutable historical view at the pointed
 	// frontier. Nil preserves the live/default execution path; a non-nil
 	// pointer also permits an explicit frontier of zero.
@@ -794,7 +800,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		}
 		quotaActive = true
 	}
-	if err = validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
+	if err = validateSQLSourceFrontierRequirement(ctx, query, resolver, options); err != nil {
 		return result, err
 	}
 	if err = options.IndexHint.validate(); err != nil {
@@ -1008,7 +1014,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		}
 		quotaActive = true
 	}
-	if err := validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
+	if err := validateSQLSourceFrontierRequirement(ctx, query, resolver, options); err != nil {
 		return err
 	}
 	if err := options.IndexHint.validate(); err != nil {
@@ -5120,7 +5126,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	if parseErr != nil {
 		return result, parseErr
 	}
-	if err = validateSQLSourceFrontierRequirement(query, resolver, options); err != nil {
+	if err = validateSQLSourceFrontierRequirement(ctx, query, resolver, options); err != nil {
 		return result, err
 	}
 	if err = options.IndexHint.validate(); err != nil {

@@ -23351,3 +23351,37 @@ The opt-in path adds `302 ns/op`, `594 B/op`, and `6 allocs/op` in this
 fixture. The snapshot is disabled by default, and cache keys isolate enabled
 results from ordinary results. See [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md)
 for usage, semantics, and raw samples.
+
+## MZ-018 Source Frontier Wait
+
+This measures the Materialize-inspired opt-in bounded wait for a required SQL
+source frontier. The wait-enabled case is already fresh, so it measures only
+the control-path cost and not time spent waiting for source progress. Samples
+use Linux `amd64`, Go benchmark workers `-32`, an AMD Ryzen 9 5950X, and five
+runs per case.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Immediate check, default | 4,749 | 4,912 | 29 | 1.00x | 1.00x |
+| Wait enabled, already fresh | 4,628 | 4,912 | 29 | 0.97x | 1.00x |
+
+The five-sample medians were within normal benchmark noise, with identical
+bytes and allocation counts. The latest median was 121 ns/op lower for the
+opt-in case, but this is not a claimed speedup. A real stale-source wait adds
+the configured polling delay by design. Raw output and semantics are in
+[MZ018_SOURCE_FRONTIER_WAIT.md](MZ018_SOURCE_FRONTIER_WAIT.md).
+
+Raw output:
+
+```text
+BenchmarkMZ018SourceFrontierDefault-32         257816  4749 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierDefault-32         223078  4698 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierDefault-32         275752  4529 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierDefault-32         269367  4798 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierDefault-32         237644  5000 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierWaitEnabled-32     239570  4628 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierWaitEnabled-32     242877  4656 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierWaitEnabled-32     248450  4692 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierWaitEnabled-32     246478  4557 ns/op  4912 B/op  29 allocs/op
+BenchmarkMZ018SourceFrontierWaitEnabled-32     239206  4312 ns/op  4912 B/op  29 allocs/op
+```

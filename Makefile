@@ -13128,5 +13128,26 @@ commit-mz050:
 push-mz050:
 	@bash scripts/push-mz050.sh
 
+test-mz018-source-frontier:
+	@bash scripts/test-mz018-source-frontier.sh
+
+format-mz018-source-frontier:
+	@bash scripts/format-mz018-source-frontier.sh
+
+benchmark-mz018-source-frontier:
+	@bash scripts/benchmark-mz018-source-frontier.sh
+
+race-mz018-source-frontier:
+	@bash scripts/race-mz018-source-frontier.sh
+
+vet-mz018-source-frontier:
+	@bash scripts/vet-mz018-source-frontier.sh
+
+commit-mz018-source-frontier:
+	@bash scripts/commit-mz018-source-frontier.sh
+
+push-mz018-source-frontier:
+	@bash scripts/push-mz018-source-frontier.sh
+
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh
