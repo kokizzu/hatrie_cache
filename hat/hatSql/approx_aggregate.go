@@ -32,11 +32,23 @@ type sqlApproximateStreamState struct {
 	hll       *hatDataStructure.HyperLogLog
 	quantile  *hatDataStructure.QuantileSketch
 	quantileP float64
+	auto      *sqlAutoDistinctState
 }
 
 func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, bool) {
 	state := &sqlApproximateStreamState{expr: expr}
 	switch expr.name {
+	case "AUTO_COUNT_DISTINCT":
+		config, err := sqlAutoDistinctConfigFromExpr(expr)
+		if err != nil {
+			return nil, false
+		}
+		auto, err := newSQLAutoDistinctState(config)
+		if err != nil {
+			return nil, false
+		}
+		state.auto = auto
+		return state, true
 	case "APPROX_COUNT_DISTINCT":
 		if len(expr.args) < 1 || len(expr.args) > 2 {
 			return nil, false
@@ -101,6 +113,12 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 	if value == nil {
 		return nil
 	}
+	if state.auto != nil {
+		if err := state.auto.addValue(value); err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		return nil
+	}
 	if state.hll != nil {
 		encoded, err := sqlApproximateValueKey(value)
 		if err != nil {
@@ -116,6 +134,9 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 }
 
 func (state *sqlApproximateStreamState) result() interface{} {
+	if state.auto != nil {
+		return state.auto.count()
+	}
 	if state.hll != nil {
 		return state.hll.Count()
 	}
@@ -130,6 +151,8 @@ func (state *sqlApproximateStreamState) result() interface{} {
 
 func evalSQLApproximateAggregate(expr sqlExpr, group []sqlExecRow) interface{} {
 	switch expr.name {
+	case "AUTO_COUNT_DISTINCT":
+		return evalSQLAutoCountDistinct(expr, group)
 	case "APPROX_COUNT_DISTINCT":
 		return evalSQLApproxCountDistinct(expr, group)
 	case "APPROX_PERCENTILE":

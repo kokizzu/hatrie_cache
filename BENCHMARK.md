@@ -22590,3 +22590,47 @@ at these medians:
 
 The paired rerun is included because the control varied between benchmark
 invocations; both paths in each table use the same workload shape.
+
+## CH-039 Automatic Distinct State Selection
+
+This benchmark compares the existing HyperLogLog distinct aggregate with
+`AUTO_COUNT_DISTINCT` on 10,000 rows. The low-cardinality workload has 64
+distinct values; the high-cardinality workload has 10,000. It ran on
+Linux/amd64 with an AMD Ryzen 9 5950X, five samples, and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| `APPROX_COUNT_DISTINCT`, low cardinality | 1,493,541 | 341,238 | 20,027 | control |
+| `AUTO_COUNT_DISTINCT`, exact low cardinality | 1,568,518 | 332,044 | 20,037 | exact result, 5.0% slower, 2.7% lower B/op |
+| `APPROX_COUNT_DISTINCT`, high cardinality | 1,662,580 | 341,247 | 20,028 | control |
+| `AUTO_COUNT_DISTINCT`, promoted HLL | 1,677,995 | 355,059 | 20,042 | 0.9% slower, 4.0% higher B/op |
+
+The automatic state is exact below its threshold and bounded after promotion.
+It is an accuracy and bounded-state feature, not a universal speedup; use
+`APPROX_COUNT_DISTINCT` when an estimate is sufficient and promotion overhead
+is undesirable.
+
+Raw output from `make benchmark-ch039-after`:
+
+```text
+BenchmarkSQLAutoDistinct/approx-low-32 764 1483096 ns/op 341249 B/op 20027 allocs/op
+BenchmarkSQLAutoDistinct/approx-low-32 790 1493541 ns/op 341239 B/op 20027 allocs/op
+BenchmarkSQLAutoDistinct/approx-low-32 811 1501353 ns/op 341234 B/op 20027 allocs/op
+BenchmarkSQLAutoDistinct/approx-low-32 802 1481127 ns/op 341238 B/op 20027 allocs/op
+BenchmarkSQLAutoDistinct/approx-low-32 784 1493592 ns/op 341236 B/op 20027 allocs/op
+BenchmarkSQLAutoDistinct/auto-low-exact-32 754 1542016 ns/op 332048 B/op 20037 allocs/op
+BenchmarkSQLAutoDistinct/auto-low-exact-32 763 1557046 ns/op 332043 B/op 20037 allocs/op
+BenchmarkSQLAutoDistinct/auto-low-exact-32 757 1568518 ns/op 332043 B/op 20037 allocs/op
+BenchmarkSQLAutoDistinct/auto-low-exact-32 740 1683461 ns/op 332046 B/op 20037 allocs/op
+BenchmarkSQLAutoDistinct/auto-low-exact-32 667 1673223 ns/op 332044 B/op 20037 allocs/op
+BenchmarkSQLAutoDistinct/approx-high-32 692 1662580 ns/op 341252 B/op 20028 allocs/op
+BenchmarkSQLAutoDistinct/approx-high-32 698 1676612 ns/op 341247 B/op 20028 allocs/op
+BenchmarkSQLAutoDistinct/approx-high-32 710 1664161 ns/op 341243 B/op 20028 allocs/op
+BenchmarkSQLAutoDistinct/approx-high-32 728 1660194 ns/op 341246 B/op 20028 allocs/op
+BenchmarkSQLAutoDistinct/approx-high-32 714 1653818 ns/op 341257 B/op 20028 allocs/op
+BenchmarkSQLAutoDistinct/auto-high-hll-32 711 1682157 ns/op 355059 B/op 20042 allocs/op
+BenchmarkSQLAutoDistinct/auto-high-hll-32 694 1650402 ns/op 355059 B/op 20042 allocs/op
+BenchmarkSQLAutoDistinct/auto-high-hll-32 717 1677995 ns/op 355057 B/op 20042 allocs/op
+BenchmarkSQLAutoDistinct/auto-high-hll-32 715 1676094 ns/op 355056 B/op 20042 allocs/op
+BenchmarkSQLAutoDistinct/auto-high-hll-32 712 1684963 ns/op 355061 B/op 20042 allocs/op
+```

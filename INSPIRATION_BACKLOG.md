@@ -58,7 +58,7 @@ before/after measurement when its motivation is performance.
 | CH-36 | SQL aggregate combinators such as If, OrNull, State, and Merge | Reuse partial aggregate states in SQL | Parser and type-system growth | [ ] |
 | CH-37 | argMin and argMax aggregate states | Select values associated with extrema | Tie and NULL semantics | [ ] |
 | CH-38 | Bitmap aggregate and set-operation functions | Fast membership and cardinality analytics | Bitmap memory | [x] |
-| CH-39 | Automatic selection among exact and approximate uniq states | Match error targets to workload | Result stability and configuration | [ ] |
+| CH-39 | Automatic selection among exact and approximate uniq states | Match error targets to workload | Result stability and configuration | [x] |
 | CH-40 | TDigest and GK quantile state variants | Better tail quantile accuracy choices | State size and merge cost | [ ] |
 | CH-41 | Bounded groupArray aggregate state | Retain representative grouped values safely | Truncation semantics | [x] |
 | CH-42 | Window frame exclusion and group-frame semantics | Cover more analytical SQL | Complex incremental maintenance | [ ] |

@@ -12250,3 +12250,51 @@ commit-ch038:
 .PHONY: push-ch038
 push-ch038:
 	bash ./scripts/push-ch038.sh
+
+.PHONY: test-ch039
+test-ch039:
+	bash ./scripts/test-ch039.sh
+
+.PHONY: benchmark-ch039-before
+benchmark-ch039-before:
+	bash ./scripts/benchmark-ch039-before.sh
+
+.PHONY: format-ch039
+format-ch039:
+	bash ./scripts/format-ch039.sh
+
+.PHONY: benchmark-ch039-after
+benchmark-ch039-after:
+	bash ./scripts/benchmark-ch039-after.sh
+
+.PHONY: test-ch039-all
+test-ch039-all:
+	bash ./scripts/test-ch039-all.sh
+
+.PHONY: test-ch039-repo
+test-ch039-repo:
+	bash ./scripts/test-ch039-repo.sh
+
+.PHONY: race-ch039
+race-ch039:
+	bash ./scripts/race-ch039.sh
+
+.PHONY: vet-ch039
+vet-ch039:
+	bash ./scripts/vet-ch039.sh
+
+.PHONY: check-ch039
+check-ch039:
+	bash ./scripts/check-ch039.sh
+
+.PHONY: review-ch039
+review-ch039:
+	bash ./scripts/review-ch039.sh
+
+.PHONY: commit-ch039
+commit-ch039:
+	bash ./scripts/commit-ch039.sh
+
+.PHONY: push-ch039
+push-ch039:
+	bash ./scripts/push-ch039.sh
