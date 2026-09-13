@@ -4785,6 +4785,63 @@ push-sql-decimal:
 git-context-sql-decimal:
 	sh ./scripts/git-context-sql-decimal.sh
 
+inspect-mz037:
+	sh ./scripts/inspect-mz037.sh
+
+inspect-mz037-exchange:
+	sh ./scripts/inspect-mz037-exchange.sh
+
+inspect-mz037-core:
+	sh ./scripts/inspect-mz037-core.sh
+
+inspect-mz037-batcher:
+	sh ./scripts/inspect-mz037-batcher.sh
+
+inspect-mz037-benchmark:
+	sh ./scripts/inspect-mz037-benchmark.sh
+
+test-mz037:
+	sh ./scripts/test-mz037.sh
+
+inspect-mz037-test:
+	sh ./scripts/inspect-mz037-test.sh
+
+inspect-mz037-worker-benchmark:
+	sh ./scripts/inspect-mz037-worker-benchmark.sh
+
+inspect-mz037-docs:
+	sh ./scripts/inspect-mz037-docs.sh
+
+inspect-mz037-test-script:
+	sh ./scripts/inspect-mz037-test-script.sh
+
+format-mz037:
+	sh ./scripts/format-mz037.sh
+
+benchmark-mz037-after:
+	sh ./scripts/benchmark-mz037-after.sh
+
+test-mz037-full:
+	sh ./scripts/test-mz037-full.sh
+
+race-mz037:
+	sh ./scripts/race-mz037.sh
+
+vet-mz037:
+	sh ./scripts/vet-mz037.sh
+
+review-mz037:
+	sh ./scripts/review-mz037.sh
+
+commit-mz037:
+	sh ./scripts/commit-mz037.sh
+
+push-mz037:
+	sh ./scripts/push-mz037.sh
+
+benchmark-mz037-before:
+	sh ./scripts/benchmark-mz037-before.sh
+
 .PHONY: test-sql-decimal
 test-sql-decimal:
 	sh ./scripts/test-sql-decimal.sh

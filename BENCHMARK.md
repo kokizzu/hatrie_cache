@@ -22921,3 +22921,36 @@ BenchmarkSQLRowBinaryIPTyped-32 225354 1068 ns/op 1656 B/op 23 allocs/op
 BenchmarkSQLRowBinaryIPTyped-32 204595 1084 ns/op 1656 B/op 23 allocs/op
 BenchmarkSQLRowBinaryIPTyped-32 198498 1097 ns/op 1656 B/op 23 allocs/op
 ```
+
+## MZ-037 Worker-Local Exchange Batching
+
+This compares per-record partition dispatch with the opt-in worker-local
+exchange on Linux `amd64`, AMD Ryzen 9 5950X, five samples, and
+`-benchtime=200ms -benchmem`. Both workloads use the same sequential stream
+across four partitions; the optimized path uses four worker-local buffers and
+batch size 64.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Per-record dispatch baseline | 94.48 | 0 | 0 | control |
+| Worker-local exchange | 12.87 | 0 | 0 | 7.34x faster |
+
+The worker-local path keeps allocation-free steady-state buffers through a
+bounded reuse pool. It retains bounded local and queued batches, and partial
+local batches still require `Flush` or `Close`. See
+[MZ037_WORKER_LOCAL_EXCHANGE.md](MZ037_WORKER_LOCAL_EXCHANGE.md).
+
+Raw output from `make benchmark-mz037-after`:
+
+```text
+BenchmarkMZ037PerRecordDispatchBaseline-32 2469949 100.4 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037PerRecordDispatchBaseline-32 2568999 86.35 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037PerRecordDispatchBaseline-32 2771029 87.98 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037PerRecordDispatchBaseline-32 2913554 105.4 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037PerRecordDispatchBaseline-32 2597743 94.48 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037WorkerLocalExchange-32 17542320 12.87 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037WorkerLocalExchange-32 17601980 12.66 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037WorkerLocalExchange-32 17855104 12.95 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037WorkerLocalExchange-32 19707151 12.53 ns/op 0 B/op 0 allocs/op
+BenchmarkMZ037WorkerLocalExchange-32 17867918 12.87 ns/op 0 B/op 0 allocs/op
+```

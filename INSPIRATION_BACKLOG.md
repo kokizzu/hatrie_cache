@@ -111,7 +111,7 @@ before/after measurement when its motivation is performance.
 | MZ-34 | Online index build scheduler with admission limits | Build indexes without starving queries | Build latency | [ ] |
 | MZ-35 | Arrangement shard locality hints | Keep hot keys near their consumers | Skew and rebalancing | [ ] |
 | MZ-36 | Dataflow operator placement constraints by failure domain | Improve locality and resilience | Placement solver complexity | [ ] |
-| MZ-37 | Worker-local exchange batching | Reduce per-record coordination | Batch latency | [ ] |
+| MZ-37 | Worker-local exchange batching | Reduce per-record coordination | Batch latency | [x] |
 | MZ-38 | Dynamic dataflow worker scaling | Match compute to changing load | State movement and rebalance | [ ] |
 | MZ-39 | Operator fuel or yield budgets | Bound a single operator monopolization | More scheduler checks | [ ] |
 | MZ-40 | Recursive convergence diagnostics and iteration bounds | Make recursive dataflows operable | Additional state and errors | [ ] |

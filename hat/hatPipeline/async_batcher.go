@@ -21,6 +21,9 @@ var (
 	ErrAsyncBatcherFlushIntervalInvalid = errors.New("hatPipeline: async batcher flush interval is invalid")
 	// ErrAsyncBatcherClosed indicates that the batcher no longer accepts items.
 	ErrAsyncBatcherClosed = errors.New("hatPipeline: async batcher is closed")
+	// ErrAsyncBatcherBatchTooLarge indicates that a submitted batch exceeds the
+	// configured maximum batch size.
+	ErrAsyncBatcherBatchTooLarge = errors.New("hatPipeline: async batcher batch is too large")
 )
 
 const (
@@ -62,11 +65,13 @@ type AsyncBatcherStats struct {
 const (
 	asyncBatcherItem uint8 = iota
 	asyncBatcherFlush
+	asyncBatcherBatch
 )
 
 type asyncBatcherRequest[T any] struct {
 	kind   uint8
 	value  T
+	values []T
 	result chan error
 }
 
@@ -163,6 +168,45 @@ func (batcher *AsyncBatcher[T]) Submit(ctx context.Context, value T) error {
 	case <-ctx.Done():
 		batcher.pending.Add(-1)
 		batcher.rejected.Add(1)
+		batcher.stateMu.Unlock()
+		return ctx.Err()
+	}
+}
+
+// SubmitBatch queues one already grouped batch. The values slice is transferred
+// to the batcher and must not be mutated after SubmitBatch returns. The batch
+// consumes one queue request and one handler call; Capacity therefore bounds
+// grouped requests rather than individual values when this method is used.
+func (batcher *AsyncBatcher[T]) SubmitBatch(ctx context.Context, values []T) error {
+	if batcher == nil {
+		return ErrAsyncBatcherNil
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	if len(values) > batcher.maxSize {
+		batcher.rejected.Add(uint64(len(values)))
+		return ErrAsyncBatcherBatchTooLarge
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	batcher.stateMu.Lock()
+	if batcher.closed {
+		batcher.stateMu.Unlock()
+		batcher.rejected.Add(uint64(len(values)))
+		return ErrAsyncBatcherClosed
+	}
+	batcher.pending.Add(int64(len(values)))
+	request := asyncBatcherRequest[T]{kind: asyncBatcherBatch, values: values}
+	select {
+	case batcher.requests <- request:
+		batcher.submitted.Add(uint64(len(values)))
+		batcher.stateMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		batcher.pending.Add(-int64(len(values)))
+		batcher.rejected.Add(uint64(len(values)))
 		batcher.stateMu.Unlock()
 		return ctx.Err()
 	}
@@ -298,6 +342,15 @@ func (batcher *AsyncBatcher[T]) run() {
 						}
 						continue
 					}
+					if request.kind == asyncBatcherBatch {
+						if len(batch) > 0 {
+							pendingErr = errors.Join(pendingErr, batcher.flushBatch(batch))
+							batch = batch[:0]
+						}
+						stopTimer()
+						pendingErr = errors.Join(pendingErr, batcher.flushBatch(request.values))
+						continue
+					}
 					if request.kind == asyncBatcherFlush {
 						if len(batch) > 0 {
 							pendingErr = errors.Join(pendingErr, batcher.flushBatch(batch))
@@ -343,6 +396,13 @@ func (batcher *AsyncBatcher[T]) run() {
 				err := pendingErr
 				pendingErr = nil
 				request.result <- err
+			case asyncBatcherBatch:
+				if len(batch) > 0 {
+					pendingErr = errors.Join(pendingErr, batcher.flushBatch(batch))
+					batch = batch[:0]
+				}
+				stopTimer()
+				pendingErr = errors.Join(pendingErr, batcher.flushBatch(request.values))
 			}
 		case <-timerC:
 			pendingErr = errors.Join(pendingErr, batcher.flushBatch(batch))
