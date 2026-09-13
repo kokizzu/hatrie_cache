@@ -35,7 +35,7 @@ before/after measurement when its motivation is performance.
 | CH-13 | Mutation throttling with maintenance windows | Protect foreground queries | Longer mutation completion time | [ ] |
 | CH-14 | Mutation dependency graph with resumable progress | Make overlapping mutations safe to operate | Persistent metadata | [ ] |
 | CH-15 | TTL movement executor across hot, warm, and cold volumes | Automate tier placement | I/O movement and recovery complexity | [ ] |
-| CH-16 | Tier-aware remote prefetch and read fallback | Hide object-store latency for sequential scans | Extra bandwidth and cache pollution | [ ] |
+| CH-16 | Tier-aware remote prefetch and read fallback | Hide object-store latency for sequential scans | Extra bandwidth and cache pollution | [x] |
 | CH-17 | Workload-driven projection creation advisor | Find high-value projections without guesswork | Bad recommendations can waste disk | [ ] |
 | CH-18 | Projection refresh lag and failure state | Make stale materialized data visible | More status bookkeeping | [ ] |
 | CH-19 | Projection storage budget and admission policy | Prevent projections from consuming all disk | Rejected refreshes need operator handling | [ ] |

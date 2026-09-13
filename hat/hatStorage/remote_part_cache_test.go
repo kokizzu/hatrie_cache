@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"hatrie_cache/hat/hatStorage"
 )
@@ -222,5 +223,109 @@ func TestRemotePartCacheConcurrentReleaseIsIdempotent(t *testing.T) {
 		return []byte("x"), nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRemotePartCachePrefetchesWithBoundedConcurrency(t *testing.T) {
+	cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: 4, MaxEntries: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := make([]hatStorage.RemotePartReference, 4)
+	for index := range references {
+		name := string(rune('a' + index))
+		references[index], err = hatStorage.NewRemotePartReference(
+			"s3://bucket/parts/"+name,
+			"parts/"+name+".json",
+			"sha256:"+name,
+			1,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var active atomic.Int32
+	var maximum atomic.Int32
+	loader := func(context.Context, hatStorage.RemotePartReference) ([]byte, error) {
+		current := active.Add(1)
+		for {
+			observed := maximum.Load()
+			if observed >= current || maximum.CompareAndSwap(observed, current) {
+				break
+			}
+		}
+		time.Sleep(time.Millisecond)
+		active.Add(-1)
+		return []byte("x"), nil
+	}
+	if err := cache.Prefetch(context.Background(), references, hatStorage.RemotePartPrefetchOptions{
+		MaxConcurrent: 2,
+		Priority:      3,
+	}, loader); err != nil {
+		t.Fatal(err)
+	}
+	if got := maximum.Load(); got != 2 {
+		t.Fatalf("maximum concurrent loads = %d, want 2", got)
+	}
+	stats := cache.Stats()
+	if stats.Entries != len(references) || stats.Bytes != uint64(len(references)) || stats.Loads != uint64(len(references)) {
+		t.Fatalf("prefetch stats = %#v, want four cached one-byte parts", stats)
+	}
+}
+
+func TestRemotePartCachePrefetchDeduplicatesAndStopsOnError(t *testing.T) {
+	cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: 2, MaxEntries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeReference := func(name string) hatStorage.RemotePartReference {
+		reference, createErr := hatStorage.NewRemotePartReference(
+			"s3://bucket/parts/"+name,
+			"parts/"+name+".json",
+			"sha256:"+name,
+			1,
+		)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return reference
+	}
+	first := makeReference("first")
+	second := makeReference("second")
+	var calls atomic.Int32
+	loader := func(_ context.Context, reference hatStorage.RemotePartReference) ([]byte, error) {
+		calls.Add(1)
+		if reference.ObjectURI() == first.ObjectURI() {
+			return nil, errors.New("remote read failed")
+		}
+		return []byte("x"), nil
+	}
+	if err := cache.Prefetch(context.Background(), []hatStorage.RemotePartReference{first, first}, hatStorage.RemotePartPrefetchOptions{MaxConcurrent: 1}, loader); err == nil {
+		t.Fatal("prefetch error = nil, want loader failure")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("duplicate failing loads = %d, want one", got)
+	}
+	if err := cache.Prefetch(context.Background(), []hatStorage.RemotePartReference{second, second}, hatStorage.RemotePartPrefetchOptions{MaxConcurrent: 1}, loader); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("duplicate successful loads = %d, want two total", got)
+	}
+}
+
+func TestRemotePartCachePrefetchRejectsInvalidConcurrency(t *testing.T) {
+	cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := hatStorage.NewRemotePartReference("s3://bucket/parts/invalid", "parts/invalid.json", "sha256:invalid", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Prefetch(context.Background(), []hatStorage.RemotePartReference{reference}, hatStorage.RemotePartPrefetchOptions{MaxConcurrent: -1}, func(context.Context, hatStorage.RemotePartReference) ([]byte, error) {
+		return []byte("x"), nil
+	}); !errors.Is(err, hatStorage.ErrRemotePartCacheInvalidConfig) {
+		t.Fatalf("invalid concurrency error = %v", err)
 	}
 }

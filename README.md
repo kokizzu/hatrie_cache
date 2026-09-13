@@ -107,6 +107,7 @@ security guidance before exposing it on a network.
 - Tail-aware t-digest percentile aggregates: [SQL t-digest percentile](SQL_TDIGEST_PERCENTILE.md)
 - SQL window frame exclusion: [SQL window frame exclusion](SQL_WINDOW_FRAME_EXCLUSION.md)
 - ClickHouse-inspired bounded remote-part cache: [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md)
+- ClickHouse-inspired bounded remote-part prefetch: [REMOTE_PART_PREFETCH.md](REMOTE_PART_PREFETCH.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)

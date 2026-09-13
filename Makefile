@@ -12399,6 +12399,7 @@ push-ch042:
 review-inspiration-next:
 	bash ./scripts/review-inspiration-next.sh
 
+.PHONY: audit-next-clickhouse
 .PHONY: benchmark-remote-part-cache-before
 benchmark-remote-part-cache-before:
 	bash ./scripts/benchmark-remote-part-cache-before.sh
@@ -12450,3 +12451,16 @@ commit-remote-part-cache:
 .PHONY: push-remote-part-cache
 push-remote-part-cache:
 	bash ./scripts/push-remote-part-cache.sh
+.PHONY: benchmark-remote-part-prefetch-after
+benchmark-remote-part-prefetch-after:
+	bash ./scripts/benchmark-remote-part-prefetch-after.sh
+.PHONY: review-remote-part-prefetch
+review-remote-part-prefetch:
+	bash ./scripts/review-remote-part-prefetch.sh
+.PHONY: commit-remote-part-prefetch
+commit-remote-part-prefetch:
+	bash ./scripts/commit-remote-part-prefetch.sh
+
+.PHONY: push-remote-part-prefetch
+push-remote-part-prefetch:
+	bash ./scripts/push-remote-part-prefetch.sh

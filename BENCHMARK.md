@@ -22759,3 +22759,31 @@ BenchmarkSQLAutoDistinct/auto-high-hll-32 717 1677995 ns/op 355057 B/op 20042 al
 BenchmarkSQLAutoDistinct/auto-high-hll-32 715 1676094 ns/op 355056 B/op 20042 allocs/op
 BenchmarkSQLAutoDistinct/auto-high-hll-32 712 1684963 ns/op 355061 B/op 20042 allocs/op
 ```
+## CH-016 Remote-Part Prefetch
+
+The explicit bounded prefetch API is documented in
+[`REMOTE_PART_PREFETCH.md`](REMOTE_PART_PREFETCH.md). The benchmark uses 16
+unique 4 KiB parts and a two-worker prefetch pass. The remote-latency case
+adds a 100 microsecond loader delay to model object-store wait time.
+
+| Workload | Sequential median | Prefetch median | Improvement |
+| --- | ---: | ---: | ---: |
+| Zero-latency loader | 46,513 ns/op | 69,509 ns/op | 0.67x (1.49x slower) |
+| 100 us loader latency | 16,892,372 ns/op | 8,507,850 ns/op | 1.99x |
+
+Raw three-sample output from `make benchmark-remote-part-prefetch-after`:
+
+```text
+BenchmarkRemotePartCachePrefetch/zero-latency/sequential-32 2482 42554 ns/op 139017 B/op 87 allocs/op
+BenchmarkRemotePartCachePrefetch/zero-latency/sequential-32 2628 47189 ns/op 139017 B/op 87 allocs/op
+BenchmarkRemotePartCachePrefetch/zero-latency/sequential-32 2661 46513 ns/op 139017 B/op 87 allocs/op
+BenchmarkRemotePartCachePrefetch/zero-latency/bounded-2-32 1618 68112 ns/op 142427 B/op 100 allocs/op
+BenchmarkRemotePartCachePrefetch/zero-latency/bounded-2-32 1462 69509 ns/op 142415 B/op 100 allocs/op
+BenchmarkRemotePartCachePrefetch/zero-latency/bounded-2-32 1759 72233 ns/op 142397 B/op 100 allocs/op
+BenchmarkRemotePartCachePrefetch/remote-latency/sequential-32 7 16804209 ns/op 139112 B/op 90 allocs/op
+BenchmarkRemotePartCachePrefetch/remote-latency/sequential-32 7 16892372 ns/op 139108 B/op 90 allocs/op
+BenchmarkRemotePartCachePrefetch/remote-latency/sequential-32 7 16996397 ns/op 139108 B/op 90 allocs/op
+BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 15 8541742 ns/op 142692 B/op 104 allocs/op
+BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 13 8507850 ns/op 142584 B/op 103 allocs/op
+BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 14 8504019 ns/op 142585 B/op 103 allocs/op
+```

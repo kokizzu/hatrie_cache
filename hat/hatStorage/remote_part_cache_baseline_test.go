@@ -3,6 +3,7 @@ package hatStorage_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"hatrie_cache/hat/hatStorage"
 )
@@ -66,5 +67,79 @@ func BenchmarkRemotePartCache(b *testing.B) {
 			remotePartCacheBenchmarkSink ^= lease.Bytes()[0]
 			lease.Release()
 		}
+	})
+}
+
+func remotePartCachePrefetchBenchmarkInput(b testing.TB) ([]hatStorage.RemotePartReference, []byte) {
+	b.Helper()
+	payload := make([]byte, 4096)
+	for index := range payload {
+		payload[index] = byte(index)
+	}
+	references := make([]hatStorage.RemotePartReference, 16)
+	for index := range references {
+		name := string(rune('a' + index))
+		reference, err := hatStorage.NewRemotePartReference(
+			"s3://bucket/parts/prefetch-"+name,
+			"parts/prefetch-"+name+".json",
+			"sha256:prefetch-"+name,
+			uint64(len(payload)),
+		)
+		if err != nil {
+			b.Fatal(err)
+		}
+		references[index] = reference
+	}
+	return references, payload
+}
+
+func benchmarkRemotePartCachePrefetch(b *testing.B, concurrency int, latency time.Duration) {
+	references, payload := remotePartCachePrefetchBenchmarkInput(b)
+	loader := func(_ context.Context, _ hatStorage.RemotePartReference) ([]byte, error) {
+		if latency > 0 {
+			time.Sleep(latency)
+		}
+		return append([]byte(nil), payload...), nil
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{
+			MaxBytes:   uint64(len(payload) * len(references)),
+			MaxEntries: len(references),
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+		if concurrency == 1 {
+			for _, reference := range references {
+				if _, err := cache.Get(context.Background(), reference, 1, loader); err != nil {
+					b.Fatal(err)
+				}
+			}
+		} else if err := cache.Prefetch(context.Background(), references, hatStorage.RemotePartPrefetchOptions{
+			MaxConcurrent: concurrency,
+			Priority:      1,
+		}, loader); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkRemotePartCachePrefetch(b *testing.B) {
+	b.Run("zero-latency/sequential", func(b *testing.B) {
+		benchmarkRemotePartCachePrefetch(b, 1, 0)
+	})
+	b.Run("zero-latency/bounded-2", func(b *testing.B) {
+		benchmarkRemotePartCachePrefetch(b, 2, 0)
+	})
+	b.Run("remote-latency/sequential", func(b *testing.B) {
+		benchmarkRemotePartCachePrefetch(b, 1, 100*time.Microsecond)
+	})
+	b.Run("remote-latency/bounded-2", func(b *testing.B) {
+		benchmarkRemotePartCachePrefetch(b, 2, 100*time.Microsecond)
 	})
 }

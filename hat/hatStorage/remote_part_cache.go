@@ -20,12 +20,24 @@ var (
 // caller supplies only a byte budget.
 const DefaultRemotePartCacheMaxEntries = 1024
 
+// DefaultRemotePartPrefetchConcurrency bounds concurrent remote reads when a
+// caller leaves MaxConcurrent at zero.
+const DefaultRemotePartPrefetchConcurrency = 2
+
 // RemotePartCacheOptions controls the bounded immutable remote-part cache.
 // MaxBytes is required; MaxEntries uses DefaultRemotePartCacheMaxEntries when
 // zero. The cache allocates no part storage until the first miss.
 type RemotePartCacheOptions struct {
 	MaxBytes   uint64
 	MaxEntries int
+}
+
+// RemotePartPrefetchOptions controls one explicit bounded read-ahead pass.
+// Priority is applied to every prefetched part. MaxConcurrent uses
+// DefaultRemotePartPrefetchConcurrency when zero.
+type RemotePartPrefetchOptions struct {
+	MaxConcurrent int
+	Priority      int
 }
 
 // RemotePartCacheLoader fetches one immutable remote part. The returned slice
@@ -124,6 +136,115 @@ func (cache *RemotePartCache) Acquire(ctx context.Context, reference RemotePartR
 		return nil, err
 	}
 	return &RemotePartHandle{cache: cache, entry: entry, data: data}, nil
+}
+
+// Prefetch loads an explicit set of immutable remote parts into the bounded
+// cache. It returns only after all admitted work completes. Duplicate
+// references are loaded once, MaxConcurrent bounds in-flight loaders, and a
+// failed load cancels the remaining prefetch work without affecting the
+// caller's context or existing cache entries.
+func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemotePartReference, options RemotePartPrefetchOptions, loader RemotePartCacheLoader) error {
+	if cache == nil {
+		return ErrRemotePartCacheNil
+	}
+	if ctx == nil {
+		return ErrRemotePartCacheContextRequired
+	}
+	if loader == nil {
+		return ErrRemotePartCacheLoaderRequired
+	}
+	if options.MaxConcurrent < 0 {
+		return ErrRemotePartCacheInvalidConfig
+	}
+	unique := make([]RemotePartReference, 0, len(references))
+	seen := make(map[remotePartCacheKey]struct{}, len(references))
+	for _, reference := range references {
+		key, err := validateRemotePartCacheReference(reference)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, reference)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	concurrency := options.MaxConcurrent
+	if concurrency == 0 {
+		concurrency = DefaultRemotePartPrefetchConcurrency
+	}
+	if concurrency > len(unique) {
+		concurrency = len(unique)
+	}
+	if concurrency == 1 {
+		for _, reference := range unique {
+			if _, err := cache.Get(ctx, reference, options.Priority, loader); err != nil {
+				return err
+			}
+		}
+		return ctx.Err()
+	}
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan RemotePartReference)
+	var workers sync.WaitGroup
+	var errorsMu sync.Mutex
+	var firstErr error
+	recordError := func(err error) {
+		if err == nil {
+			return
+		}
+		errorsMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		errorsMu.Unlock()
+	}
+	worker := func() {
+		defer workers.Done()
+		for {
+			select {
+			case <-workCtx.Done():
+				return
+			case reference, ok := <-jobs:
+				if !ok {
+					return
+				}
+				if _, err := cache.Get(workCtx, reference, options.Priority, loader); err != nil {
+					recordError(err)
+					return
+				}
+			}
+		}
+	}
+	workers.Add(concurrency)
+	for range concurrency {
+		go worker()
+	}
+
+	for _, reference := range unique {
+		select {
+		case <-workCtx.Done():
+			break
+		case jobs <- reference:
+		}
+		if workCtx.Err() != nil {
+			break
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	errorsMu.Lock()
+	err := firstErr
+	errorsMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 // Bytes returns the immutable part bytes. It returns nil for a nil handle.
