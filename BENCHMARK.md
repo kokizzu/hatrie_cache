@@ -23241,3 +23241,76 @@ The existing `UPDATE ... RETURNING` path was measured before adding `SQLMutation
 | After | 7,637 | 8,664 | 39 | 0.96x | 1.00x | 1.03x |
 
 The CPU difference is within normal benchmark noise. The feature adds one before-row slice only when `RETURNING` is used and a row was affected: `+8 B/op`, `+1 alloc/op` in this fixture. Non-`RETURNING` mutations do not capture before rows.
+## CH-050: RowBinary Bulk Import
+
+This measures the ClickHouse-inspired self-describing SQL RowBinary stream
+used by the new bounded importer. The fixture contains 10,000 string key/value
+rows on Linux `amd64`, Go benchmark workers `-32`, an AMD Ryzen 9 5950X, and
+five samples per benchmark. The JSON case is the test-first row-payload
+decode baseline; the stream decoder keeps only the current row, while the
+materialized RowBinary case uses the existing complete-buffer decoder.
+
+Commands:
+
+```text
+make benchmark-ch050-baseline
+make benchmark-ch050-rowbinary-import
+make measure-ch050-rowbinary-import
+```
+
+Payload sizing:
+
+```text
+JSON bytes=480001 RowBinary bytes=280143 ratio=1.71x
+```
+
+Raw baseline samples:
+
+```text
+BenchmarkCH050JSONRowsDecode-32  273 4044726 ns/op 118.67 MB/s 4912677 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32  296 4168862 ns/op 115.14 MB/s 4909143 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32  288 4164047 ns/op 115.27 MB/s 4923543 B/op 80008 allocs/op
+BenchmarkCH050JSONRowsDecode-32  295 4541999 ns/op 105.68 MB/s 4920027 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32  306 4205927 ns/op 114.12 MB/s 4918060 B/op 80007 allocs/op
+```
+
+Raw post-change samples:
+
+```text
+BenchmarkCH050JSONRowsDecode-32                       292 3991243 ns/op 120.26 MB/s 4910282 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32                       285 4083850 ns/op 117.54 MB/s 4910773 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32                       271 4319896 ns/op 111.11 MB/s 4919697 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32                       286 4194789 ns/op 114.43 MB/s 4920010 B/op 80007 allocs/op
+BenchmarkCH050JSONRowsDecode-32                       286 4177781 ns/op 114.89 MB/s 4916316 B/op 80007 allocs/op
+BenchmarkCH050RowBinaryStreamDecode-32                370 3237056 ns/op 86.54 MB/s 4325156 B/op 80020 allocs/op
+BenchmarkCH050RowBinaryStreamDecode-32                390 2966603 ns/op 94.43 MB/s 4325154 B/op 80020 allocs/op
+BenchmarkCH050RowBinaryStreamDecode-32                412 2833287 ns/op 98.88 MB/s 4325153 B/op 80020 allocs/op
+BenchmarkCH050RowBinaryStreamDecode-32                416 2767411 ns/op 101.23 MB/s 4325153 B/op 80020 allocs/op
+BenchmarkCH050RowBinaryStreamDecode-32                441 2833379 ns/op 98.87 MB/s 4325156 B/op 80020 allocs/op
+BenchmarkCH050RowBinaryStreamMaterializedDecode-32    994 1245292 ns/op 224.96 MB/s 4389687 B/op 60092 allocs/op
+BenchmarkCH050RowBinaryStreamMaterializedDecode-32   1003 1268356 ns/op 220.87 MB/s 4389469 B/op 60091 allocs/op
+BenchmarkCH050RowBinaryStreamMaterializedDecode-32    981 1268427 ns/op 220.86 MB/s 4389497 B/op 60091 allocs/op
+BenchmarkCH050RowBinaryStreamMaterializedDecode-32    885 1268465 ns/op 220.85 MB/s 4389446 B/op 60091 allocs/op
+BenchmarkCH050RowBinaryStreamMaterializedDecode-32    945 1254931 ns/op 223.23 MB/s 4389473 B/op 60091 allocs/op
+BenchmarkCH050RowBinaryImport-32                       86 19871113 ns/op 21.43 MB/s 8751524 B/op 80305 allocs/op
+BenchmarkCH050RowBinaryImport-32                       79 17752627 ns/op 15.78 MB/s 8757331 B/op 80306 allocs/op
+BenchmarkCH050RowBinaryImport-32                       72 17442601 ns/op 16.06 MB/s 8753664 B/op 80306 allocs/op
+BenchmarkCH050RowBinaryImport-32                       81 16929442 ns/op 16.55 MB/s 8755178 B/op 80306 allocs/op
+BenchmarkCH050RowBinaryImport-32                       84 12410286 ns/op 22.57 MB/s 8757322 B/op 80305 allocs/op
+```
+
+| Case | Median ns/op | B/op | Allocs/op | Payload | Relative result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| JSON decode baseline | 4,168,862 | 4,918,060 | 80,007 | 480,001 B | 1.00x |
+| Streaming RowBinary decode | 2,833,379 | 4,325,156 | 80,020 | 280,143 B | 1.47x faster; 1.14x lower bytes |
+| Existing materialized RowBinary decode | 1,268,356 | 4,389,473 | 60,091 | 280,143 B | 2.23x faster than streaming; 1.01x higher bytes |
+| RowBinary import plus cache writes | 17,442,601 | 8,755,178 | 80,306 | 280,143 B | 10,000 rows; includes storage writes |
+
+The feature's measurable win is wire size and bounded import memory: the
+RowBinary payload is `1.71x` smaller, and streaming decode uses about 12%
+fewer transient bytes than JSON in this fixture. The streaming reader is
+`2.23x` slower than the existing parallel complete-buffer decoder and performs
+29 more allocations per 10,000-row result; that is the explicit cost of
+bounded, incremental consumption. Import timing includes cache writes and is
+not compared to decode-only timing. The endpoint is opt-in and the existing
+JSON/NDJSON defaults are unchanged.

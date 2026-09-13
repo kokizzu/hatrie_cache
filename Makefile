@@ -13072,3 +13072,23 @@ commit-tr033:
 
 push-tr033:
 	@bash scripts/push-tr033.sh
+benchmark-ch050-baseline:
+	@bash scripts/benchmark-ch050-baseline.sh
+
+benchmark-ch050-rowbinary-import:
+	@bash scripts/benchmark-ch050-rowbinary-import.sh
+
+format-ch050-rowbinary-import:
+	@bash scripts/format-ch050-rowbinary-import.sh
+
+measure-ch050-rowbinary-import:
+	@bash scripts/measure-ch050-rowbinary-import.sh
+
+review-ch050-rowbinary-import:
+	@bash scripts/review-ch050-rowbinary-import.sh
+
+commit-ch050-rowbinary-import:
+	@bash scripts/commit-ch050-rowbinary-import.sh
+
+push-ch050-rowbinary-import:
+	@bash scripts/push-ch050-rowbinary-import.sh

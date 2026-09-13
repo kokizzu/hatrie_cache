@@ -932,33 +932,7 @@ func (insert sqlInsertSelect) request(columns []string, row SQLRow) (CacheComman
 }
 
 func sqlInsertSelectValue(value interface{}) (sqlValue, error) {
-	if value == nil {
-		return sqlValue{json: true}, nil
-	}
-	switch typed := value.(type) {
-	case string:
-		return sqlValue{text: typed}, nil
-	case bool:
-		return sqlValue{text: strconv.FormatBool(typed)}, nil
-	case int:
-		return sqlValue{text: strconv.Itoa(typed)}, nil
-	case int64:
-		return sqlValue{text: strconv.FormatInt(typed, 10)}, nil
-	case float64:
-		return sqlValue{text: strconv.FormatFloat(typed, 'f', -1, 64)}, nil
-	case json.Number:
-		return sqlValue{text: typed.String()}, nil
-	case sqlDate:
-		return sqlValue{text: string(typed)}, nil
-	case sqlDecimal:
-		return sqlValue{text: string(typed)}, nil
-	case sqlIPv4:
-		return sqlValue{text: typed.String()}, nil
-	case sqlIPv6:
-		return sqlValue{text: typed.String()}, nil
-	default:
-		return sqlValue{}, fmt.Errorf("must be a scalar, got %T", value)
-	}
+	return sqlRowBinaryImportValue(value, hatSql.SQLRowBinaryColumn{})
 }
 
 func sqlTokenByteOffset(source string, token sqlToken) (int, error) {

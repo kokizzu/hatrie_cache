@@ -366,6 +366,12 @@ func readSQLRowBinaryStreamHeader(reader *bufio.Reader) ([]SQLRowBinaryColumn, e
 const maxSQLRowBinaryStreamValueBytes = 64 << 20
 
 func readSQLRowBinaryStreamRow(reader *bufio.Reader, columns []SQLRowBinaryColumn, rowIndex int) (Row, error) {
+	if _, err := reader.Peek(1); err != nil {
+		if err == io.EOF {
+			return nil, io.EOF
+		}
+		return nil, err
+	}
 	row := make(Row, len(columns))
 	started := false
 	for _, column := range columns {
@@ -430,7 +436,7 @@ func readSQLRowBinaryStreamValue(reader *bufio.Reader, kind SQLRowBinaryType, ro
 		if size == 0 {
 			return nil, fmt.Errorf("unsupported physical type %d", kind)
 		}
-		var fixed [16]byte
+		var fixed [32]byte
 		if _, err := io.ReadFull(reader, fixed[:size]); err != nil {
 			return nil, err
 		}

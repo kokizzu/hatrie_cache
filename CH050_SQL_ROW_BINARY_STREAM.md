@@ -1,4 +1,4 @@
-# HTTP SQL RowBinary Streaming
+# HTTP SQL RowBinary Streaming and Import
 
 Hatrie-cache supports an opt-in, self-describing binary stream for large
 SQL result sets. It is inspired by ClickHouse RowBinary, but uses a small
@@ -41,6 +41,35 @@ existing `application/x-ndjson` streaming response remains unchanged. This
 feature does not change materialized JSON responses, SQL semantics, auth,
 RBAC, pagination, or the default wire format.
 
+Bulk import uses the same self-describing stream in the opposite direction.
+The `query` URL parameter supplies only the target column list; it must be an
+`INSERT INTO CACHE(...)` target without `VALUES` or `SELECT`. Incoming columns
+are mapped positionally, just like the existing `INSERT ... SELECT` path:
+
+```sh
+curl -sS \
+  -H 'Content-Type: application/x-hatrie-rowbinary' \
+  --data-binary @rows.hrs \
+  'http://127.0.0.1:8080/api/sql/import?query=INSERT%20INTO%20CACHE%28key%2C%20value%29'
+```
+
+The embedded API is useful when the source is already an `io.Reader`:
+
+```go
+result, err := hatCache.ExecuteSQLRowBinaryInsert(ctx, trie,
+    "INSERT INTO CACHE(key, value)", input,
+    hatCache.SQLRowBinaryImportOptions{})
+```
+
+The default batch size is 4,096 rows, configurable through
+`SQLRowBinaryImportOptions.BatchSize` or the HTTP `batch_size` query
+parameter. Each batch is atomic and the result reports `Affected` and
+`Batches`; a later decode or write error can leave earlier completed batches
+applied. HTTP imports are write operations, so monitoring auth, SQL RBAC,
+write protection, maintenance read-only mode, and the 1 GiB default body cap
+apply. The body cap can be changed with
+`MonitoringOptions.SQLRowBinaryImportMaxBytes`.
+
 ## Wire Format
 
 The stream is ordered as follows:
@@ -54,15 +83,16 @@ The stream is ordered as follows:
      "format": "hatrie-rowbinary",
      "version": 1,
      "columns": [
-       {"name":"id","type":"Int64","nullable":true},
-       {"name":"name","type":"String","nullable":true}
+       {"name":"id","type":1,"nullable":true},
+       {"name":"name","type":5,"nullable":true}
      ]
    }
    ```
 
-4. Each row, in declared column order. Every value starts with one marker:
-   `0` means NULL and `1` means a non-NULL value. Non-NULL values use the
-   existing bounded SQL RowBinary codec for their declared type.
+4. Each row, in declared column order. Nullable values start with one marker:
+   `1` means NULL and `0` means a non-NULL value. Non-NULL values use the
+   existing bounded SQL RowBinary codec for their declared type. Non-nullable
+   values have no marker.
 
 The header is emitted even when the result has zero rows. A stream is limited
 to the existing SQL row limit, a 1 MiB schema header, and 64 MiB for one
@@ -116,5 +146,8 @@ make benchmark-ch050-after
 ```
 
 The focused tests cover typed values, NULLs, empty results, malformed/truncated
-input, HTTP content negotiation, the Go client iterator, and compatibility
-with the existing NDJSON path.
+input, all RowBinary scalar types, bounded import batches, HTTP content
+negotiation and write protection, the Go client iterator, and compatibility
+with the existing NDJSON path. Import and stream benchmarks are run with
+`make benchmark-ch050-rowbinary-import` and payload sizing with
+`make measure-ch050-rowbinary-import`.

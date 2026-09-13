@@ -96,7 +96,10 @@ type MonitoringOptions struct {
 	// SQLQueryOptions is enforced for every monitoring SQL request, including
 	// streaming and paginated reads. Zero keeps the engine defaults.
 	SQLQueryOptions SQLQueryOptions
-	Metrics         *APIMetrics
+	// SQLRowBinaryImportMaxBytes bounds one HTTP RowBinary import body. A
+	// non-positive value uses the 1 GiB default.
+	SQLRowBinaryImportMaxBytes int64
+	Metrics                    *APIMetrics
 	// SourceFrontier optionally exposes per-source progress in /metrics. It is
 	// disabled when nil for backward compatibility.
 	SourceFrontier *hatMetrics.SourceFrontierRegistry
@@ -459,6 +462,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.Metrics == nil {
 		options.Metrics = NewAPIMetrics()
 	}
+	if options.SQLRowBinaryImportMaxBytes <= 0 {
+		options.SQLRowBinaryImportMaxBytes = defaultSQLRowBinaryImportMaxBytes
+	}
 	if options.Election == nil && options.Topology != nil {
 		options.Election = NewElectionStore(options.Topology, ElectionOptions{})
 		_ = options.Election.Heartbeat(options.NodeName)
@@ -630,6 +636,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/scheduler", handler.handleScheduler)
 	server.HandleFunc("/api/entries", handler.handleEntries)
 	server.HandleFunc("/api/sql", handler.handleSQL)
+	server.HandleFunc("/api/sql/import", handler.handleSQLRowBinaryImport)
 	server.HandleFunc("/api/sql/catalog", handler.handleSQLCatalog)
 	server.HandleFunc("/api/sql/functions", handler.handleSQLFunctions)
 	server.HandleFunc("/api/grafana/search", handler.handleGrafanaSearch)
@@ -1517,6 +1524,7 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 		"/api/scheduler":         map[string]interface{}{"get": map[string]interface{}{"operationId": "getScheduler", "responses": map[string]interface{}{"200": schedulerResponse}}},
 		"/api/entries":           map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/sql":               map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/sql/import":        map[string]interface{}{"post": map[string]interface{}{"operationId": "importSQLRowBinary", "parameters": []map[string]interface{}{{"name": "query", "in": "query", "required": true, "schema": map[string]interface{}{"type": "string"}}, {"name": "batch_size", "in": "query", "schema": map[string]interface{}{"type": "integer", "minimum": 1}}}, "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{hatSql.SQLRowBinaryStreamContentType: map[string]interface{}{"schema": map[string]interface{}{"type": "string", "format": "binary"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/commands":          map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/grafana/search":    map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/grafana/query":     map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},

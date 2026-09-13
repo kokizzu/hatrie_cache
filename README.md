@@ -9,6 +9,7 @@ security guidance before exposing it on a network.
 ## Start Here
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
+- ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
