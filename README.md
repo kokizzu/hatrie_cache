@@ -104,6 +104,7 @@ security guidance before exposing it on a network.
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - ClickHouse-style compressed SQL bitmap aggregates and set operations: [SQL bitmap aggregates](SQL_BITMAP_AGGREGATES.md)
 - Automatic exact-to-approximate distinct counting: [SQL automatic distinct counting](SQL_AUTO_COUNT_DISTINCT.md)
+- Tail-aware t-digest percentile aggregates: [SQL t-digest percentile](SQL_TDIGEST_PERCENTILE.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)

@@ -12298,3 +12298,51 @@ commit-ch039:
 .PHONY: push-ch039
 push-ch039:
 	bash ./scripts/push-ch039.sh
+
+.PHONY: test-ch040
+test-ch040:
+	bash ./scripts/test-ch040.sh
+
+.PHONY: format-ch040
+format-ch040:
+	bash ./scripts/format-ch040.sh
+
+.PHONY: benchmark-ch040-before
+benchmark-ch040-before:
+	bash ./scripts/benchmark-ch040-before.sh
+
+.PHONY: benchmark-ch040-after
+benchmark-ch040-after:
+	bash ./scripts/benchmark-ch040-after.sh
+
+.PHONY: test-ch040-all
+test-ch040-all:
+	bash ./scripts/test-ch040-all.sh
+
+.PHONY: test-ch040-repo
+test-ch040-repo:
+	bash ./scripts/test-ch040-repo.sh
+
+.PHONY: race-ch040
+race-ch040:
+	bash ./scripts/race-ch040.sh
+
+.PHONY: vet-ch040
+vet-ch040:
+	bash ./scripts/vet-ch040.sh
+
+.PHONY: check-ch040
+check-ch040:
+	bash ./scripts/check-ch040.sh
+
+.PHONY: review-ch040
+review-ch040:
+	bash ./scripts/review-ch040.sh
+
+.PHONY: commit-ch040
+commit-ch040:
+	bash ./scripts/commit-ch040.sh
+
+.PHONY: push-ch040
+push-ch040:
+	bash ./scripts/push-ch040.sh

@@ -32,6 +32,8 @@ type sqlApproximateStreamState struct {
 	hll       *hatDataStructure.HyperLogLog
 	quantile  *hatDataStructure.QuantileSketch
 	quantileP float64
+	tdigest   *hatDataStructure.TDigest
+	tdigestP  float64
 	auto      *sqlAutoDistinctState
 }
 
@@ -88,6 +90,28 @@ func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, boo
 		}
 		state.quantile, state.quantileP = &sketch, quantile
 		return state, true
+	case "APPROX_TDIGEST_PERCENTILE":
+		if len(expr.args) < 2 || len(expr.args) > 3 {
+			return nil, false
+		}
+		quantile, err := sqlApproximateNumberArgument(expr.args[1], "APPROX_TDIGEST_PERCENTILE quantile")
+		if err != nil || quantile < 0 || quantile > 1 {
+			return nil, false
+		}
+		compression := hatDataStructure.DefaultTDigestCompression
+		if len(expr.args) == 3 {
+			value, parseErr := sqlApproximateIntegerArgument(expr.args[2], "APPROX_TDIGEST_PERCENTILE compression")
+			if parseErr != nil || uint64(value) > uint64(hatDataStructure.MaxTDigestCompression) {
+				return nil, false
+			}
+			compression = uint32(value)
+		}
+		digest, err := hatDataStructure.NewTDigest(compression)
+		if err != nil {
+			return nil, false
+		}
+		state.tdigest, state.tdigestP = &digest, quantile
+		return state, true
 	default:
 		return nil, false
 	}
@@ -127,6 +151,12 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 		state.hll.AddJSONString(encoded)
 		return nil
 	}
+	if state.tdigest != nil {
+		if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
+			state.tdigest.Add(number)
+		}
+		return nil
+	}
 	if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
 		state.quantile.Add(number)
 	}
@@ -139,6 +169,13 @@ func (state *sqlApproximateStreamState) result() interface{} {
 	}
 	if state.hll != nil {
 		return state.hll.Count()
+	}
+	if state.tdigest != nil {
+		estimate, ok := state.tdigest.Estimate(state.tdigestP)
+		if ok {
+			return estimate.Value
+		}
+		return nil
 	}
 	if state.quantile != nil {
 		estimate, ok := state.quantile.Estimate(state.quantileP)
@@ -157,6 +194,8 @@ func evalSQLApproximateAggregate(expr sqlExpr, group []sqlExecRow) interface{} {
 		return evalSQLApproxCountDistinct(expr, group)
 	case "APPROX_PERCENTILE":
 		return evalSQLApproxPercentile(expr, group)
+	case "APPROX_TDIGEST_PERCENTILE":
+		return evalSQLApproxTDigestPercentile(expr, group)
 	case "APPROX_TOP_K":
 		return evalSQLApproxTopK(expr, group)
 	default:
@@ -232,6 +271,48 @@ func evalSQLApproxPercentile(expr sqlExpr, group []sqlExecRow) interface{} {
 		}
 	}
 	estimate, ok := sketch.Estimate(quantile)
+	if !ok {
+		return nil
+	}
+	return estimate.Value
+}
+
+func evalSQLApproxTDigestPercentile(expr sqlExpr, group []sqlExecRow) interface{} {
+	if len(expr.args) < 2 || len(expr.args) > 3 {
+		return sqlApproximateAggregateError(expr, "APPROX_TDIGEST_PERCENTILE expects a value expression, quantile, and optional compression")
+	}
+	quantile, err := sqlApproximateNumberArgument(expr.args[1], "APPROX_TDIGEST_PERCENTILE quantile")
+	if err != nil || quantile < 0 || quantile > 1 {
+		if err == nil {
+			err = fmt.Errorf("APPROX_TDIGEST_PERCENTILE quantile must be between 0 and 1")
+		}
+		return sqlApproximateAggregateError(expr, err.Error())
+	}
+	compression := hatDataStructure.DefaultTDigestCompression
+	if len(expr.args) == 3 {
+		value, parseErr := sqlApproximateIntegerArgument(expr.args[2], "APPROX_TDIGEST_PERCENTILE compression")
+		if parseErr != nil {
+			return sqlApproximateAggregateError(expr, parseErr.Error())
+		}
+		if uint64(value) > uint64(hatDataStructure.MaxTDigestCompression) {
+			return sqlApproximateAggregateError(expr, "APPROX_TDIGEST_PERCENTILE compression is out of range")
+		}
+		compression = uint32(value)
+	}
+	digest, err := hatDataStructure.NewTDigest(compression)
+	if err != nil {
+		return sqlApproximateAggregateError(expr, err.Error())
+	}
+	for _, row := range group {
+		value := evalSQLExpr(expr.args[0], nil, row)
+		if err := sqlExpressionError(value); err != nil {
+			return sqlEvaluationFailure(err)
+		}
+		if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
+			digest.Add(number)
+		}
+	}
+	estimate, ok := digest.Estimate(quantile)
 	if !ok {
 		return nil
 	}

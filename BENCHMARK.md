@@ -22591,6 +22591,48 @@ at these medians:
 The paired rerun is included because the control varied between benchmark
 invocations; both paths in each table use the same workload shape.
 
+## CH-040 t-digest percentile
+
+This benchmark compares the existing GK-style `APPROX_PERCENTILE` aggregate
+with the opt-in `APPROX_TDIGEST_PERCENTILE` aggregate on 10,000 rows. The
+workload has a dense low-value range and a high-value tail, requests p99, and
+uses five samples with `-benchmem` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Algorithm | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| `APPROX_PERCENTILE` (GK control) | 2,935,121 | 17,528 | 36 | control |
+| `APPROX_TDIGEST_PERCENTILE` | 3,946,271 | 35,200 | 38 | 1.34x slower, 2.01x B/op, +2 allocs; improved tail resolution |
+
+This is an accuracy-oriented opt-in, not a general performance improvement.
+In the adversarial p99.9 correctness test, the exact first tail value was
+`1,000,000`; GK estimated `10,900,000`, while t-digest estimated
+`1,000,000`.
+
+Raw control output from `make benchmark-ch040-before`:
+
+```text
+BenchmarkSQLTDigestPercentile/gk-control-32             405   2942819 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             408   2942992 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             412   2972937 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             411   2942558 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             405   2938534 ns/op   17528 B/op  36 allocs/op
+```
+
+Raw paired output from `make benchmark-ch040-after`:
+
+```text
+BenchmarkSQLTDigestPercentile/gk-control-32             399   3098594 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             390   2992689 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             415   2916888 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             414   2935121 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/gk-control-32             406   2920824 ns/op   17528 B/op  36 allocs/op
+BenchmarkSQLTDigestPercentile/tdigest-32                309   3917850 ns/op   35200 B/op  38 allocs/op
+BenchmarkSQLTDigestPercentile/tdigest-32                298   3946271 ns/op   35200 B/op  38 allocs/op
+BenchmarkSQLTDigestPercentile/tdigest-32                306   3897133 ns/op   35200 B/op  38 allocs/op
+BenchmarkSQLTDigestPercentile/tdigest-32                304   4037437 ns/op   35200 B/op  38 allocs/op
+BenchmarkSQLTDigestPercentile/tdigest-32                296   4015994 ns/op   35200 B/op  38 allocs/op
+```
+
 ## CH-039 Automatic Distinct State Selection
 
 This benchmark compares the existing HyperLogLog distinct aggregate with
