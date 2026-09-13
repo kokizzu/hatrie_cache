@@ -11850,6 +11850,10 @@ commit-ch007:
 push-ch007:
 	bash ./scripts/push-ch007.sh
 
+.PHONY: audit-ch008
+audit-ch008:
+	bash ./scripts/audit-ch008.sh
+
 .PHONY: test-ch004-red benchmark-ch004-baseline test-ch004-package race-ch004 vet-ch004 format-ch004 check-ch004 benchmark-ch004
 test-ch004-red:
 	bash ./scripts/test-ch004.sh red
@@ -11886,3 +11890,42 @@ push-ch004:
 	bash ./scripts/push-ch004.sh
 
 deliver-ch004: check-ch004 commit-ch004 push-ch004
+.PHONY: test-ch008-red
+test-ch008-red:
+	bash ./scripts/test-ch008-red.sh
+
+.PHONY: benchmark-ch008-baseline
+benchmark-ch008-baseline:
+	bash ./scripts/benchmark-ch008-baseline.sh
+
+.PHONY: benchmark-ch008
+benchmark-ch008:
+	bash ./scripts/benchmark-ch008.sh
+
+.PHONY: format-ch008
+format-ch008:
+	bash ./scripts/format-ch008.sh
+
+.PHONY: test-ch008-package
+test-ch008-package:
+	bash ./scripts/test-ch008-package.sh
+
+.PHONY: race-ch008
+race-ch008:
+	bash ./scripts/race-ch008.sh
+
+.PHONY: vet-ch008
+vet-ch008:
+	bash ./scripts/vet-ch008.sh
+
+.PHONY: check-ch008
+check-ch008:
+	bash ./scripts/check-ch008.sh
+
+.PHONY: commit-ch008
+commit-ch008:
+	bash ./scripts/commit-ch008.sh
+
+.PHONY: push-ch008
+push-ch008:
+	bash ./scripts/push-ch008.sh

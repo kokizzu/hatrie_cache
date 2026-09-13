@@ -22273,3 +22273,49 @@ was intentionally not counted as a win because segment pruning left too little
 repeated decoding to recover the cache overhead.
 
 Reproduce with `make benchmark-ch007-baseline` and `make benchmark-ch007`.
+
+## CH-002 Settings-Aware Result-Cache Keys
+
+The result-cache key benchmark exercises the same parameterized `CACHE` query
+with the default empty settings namespace and with a compact 40-byte settings
+fingerprint. The baseline is the pre-change `c75220608ecb425164f9d5736ec6e67548b07aac`
+revision; the final run uses the CH-002 implementation. Five one-second
+samples ran on Linux/amd64 with `-benchmem` on an AMD Ryzen 9 5950X.
+
+| Operation | Before median ns/op | After median ns/op | Change | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Default empty settings namespace | 3,170 | 2,882 | 1.10x faster, within short-run noise | 2,612 | 2,612 | 29 | 29 |
+| Compact settings fingerprint namespace | n/a | 2,879 | 1.00x vs default, within short-run noise | n/a | 2,612 | n/a | 29 |
+
+The default path adds no fingerprint bytes to the key and showed no measured
+allocation or memory regression. An opted-in fingerprint adds its bounded
+length to the retained key namespace, but the benchmark stayed at the same
+allocator size. Oversized fingerprints are rejected from cache use. This is a
+correctness and isolation feature; it is not expected to improve query CPU.
+
+Raw before-change output from `make benchmark-ch008-baseline`:
+
+```text
+BenchmarkSQLResultCacheKeyDefault-32  362182  3474 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32  369494  3103 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32  399367  3170 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32  354531  3192 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32  393967  2929 ns/op  2612 B/op  29 allocs/op
+```
+
+Raw final output from `make benchmark-ch008`:
+
+```text
+BenchmarkSQLResultCacheKeyDefault-32             390393  2862 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32             419084  2847 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32             394770  2882 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32             390606  2927 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeyDefault-32             400228  2890 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeySettingsFingerprint-32 363022  2948 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeySettingsFingerprint-32 421396  2924 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeySettingsFingerprint-32 415430  2845 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeySettingsFingerprint-32 390897  2872 ns/op  2612 B/op  29 allocs/op
+BenchmarkSQLResultCacheKeySettingsFingerprint-32 408286  2879 ns/op  2612 B/op  29 allocs/op
+```
+
+Reproduce with `make benchmark-ch008-baseline` and `make benchmark-ch008`.

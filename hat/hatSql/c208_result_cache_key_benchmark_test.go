@@ -1,0 +1,26 @@
+package hatSql
+
+import "testing"
+
+var benchmarkSQLResultCacheKeySink string
+
+func BenchmarkSQLResultCacheKeyDefault(b *testing.B) {
+	benchmarkSQLResultCacheKey(b, SQLQueryOptions{})
+}
+
+func BenchmarkSQLResultCacheKeySettingsFingerprint(b *testing.B) {
+	benchmarkSQLResultCacheKey(b, SQLQueryOptions{ResultCacheSettingsFingerprint: "sha256:0123456789abcdef0123456789abcdef"})
+}
+
+func benchmarkSQLResultCacheKey(b *testing.B, options SQLQueryOptions) {
+	parameters := []interface{}{int64(42), "active", true}
+	source := "SELECT id FROM CACHE('events') WHERE state = $1 AND enabled = $2"
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		key, ok := sqlResultCacheKey(source, parameters, options)
+		if !ok {
+			b.Fatal("sqlResultCacheKey() rejected benchmark input")
+		}
+		benchmarkSQLResultCacheKeySink = key
+	}
+}

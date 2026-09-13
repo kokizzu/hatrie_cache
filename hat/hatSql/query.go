@@ -280,6 +280,12 @@ type SQLQueryOptions struct {
 	// referenced source reports the same non-empty version. Nil preserves the
 	// ordinary executor and is the default.
 	ResultCache *SQLResultCache
+	// ResultCacheSettingsFingerprint namespaces result-cache entries by the
+	// caller's effective session or tenant settings. Set a stable compact
+	// fingerprint when resolver or function behavior depends on settings that
+	// are outside this query and source version. Empty preserves the default
+	// cache key. Oversized fingerprints bypass result-cache use.
+	ResultCacheSettingsFingerprint string
 	// AdaptivePlanner learns index candidate cardinality from prior queries.
 	// Nil preserves the deterministic estimate-only planner.
 	AdaptivePlanner *AdaptivePlanner

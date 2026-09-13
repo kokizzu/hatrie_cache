@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// MaxSQLResultCacheSettingsFingerprintBytes bounds the caller-provided opaque
+// namespace used to separate results produced under different settings.
+// Callers should pass a digest or similarly compact stable value.
+const MaxSQLResultCacheSettingsFingerprintBytes = 256
+
 type sqlResultCacheSource struct {
 	kind string
 	key  string
@@ -36,16 +41,22 @@ func sqlResultCacheKey(source string, parameters []interface{}, options SQLQuery
 	if !sqlResultCacheOptionsEligible(options) || sqlResultCacheSourceIsVolatile(source) {
 		return "", false
 	}
+	if len(options.ResultCacheSettingsFingerprint) > MaxSQLResultCacheSettingsFingerprintBytes {
+		return "", false
+	}
 	var encoded bytes.Buffer
 	if err := gob.NewEncoder(&encoded).Encode(parameters); err != nil {
 		return "", false
 	}
 	var key strings.Builder
-	key.WriteString("hatsql-result-cache-v1")
+	key.WriteString("hatsql-result-cache-v2")
 	appendSQLResultCachePart(&key, source)
 	appendSQLResultCachePart(&key, encoded.String())
 	appendSQLResultCachePart(&key, string(options.Collation))
 	appendSQLResultCachePart(&key, options.PreparedSchemaVersion)
+	if options.ResultCacheSettingsFingerprint != "" {
+		appendSQLResultCachePart(&key, options.ResultCacheSettingsFingerprint)
+	}
 	return key.String(), true
 }
 

@@ -21,6 +21,26 @@ _ = result
 
 `RecordBypass` is available to adapters that reject a query before calling the cache. The SQL executor records ineligible result-cache requests automatically. Existing prepared-query and condition-selection cache behavior is unchanged.
 
+## Settings-Aware Keys
+
+Callers whose resolver or SQL function behavior depends on external session or
+tenant settings can isolate entries with a stable compact fingerprint:
+
+```go
+result, err := hatSql.ExecuteSQLQueryParameters(ctx, query, resolver, nil, hatSql.SQLQueryOptions{
+	ResultCache:                    cache,
+	ResultCacheSettingsFingerprint: tenantSettingsDigest,
+})
+```
+
+The fingerprint is part of the result-cache namespace, so equal SQL and source
+versions under different settings cannot share a result. An empty fingerprint
+keeps the default key shape. Values over
+`hatSql.MaxSQLResultCacheSettingsFingerprintBytes` (256 bytes) bypass result
+cache lookup and retention instead of creating an unbounded key. The caller
+must provide a stable value that changes whenever an external setting can
+change the result.
+
 ## Compatibility and cost
 
 The API is additive. The default query path remains unchanged when `ResultCache` is nil. Counters use atomic increments alongside the existing cache mutex, so they add no allocations.

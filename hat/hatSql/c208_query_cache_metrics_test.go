@@ -3,6 +3,7 @@ package hatSql
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -109,6 +110,56 @@ func TestSQLQueryResultCacheStatsCountIneligibleQueryBypass(t *testing.T) {
 	}
 	if stats := cache.Stats(); stats.Bypasses != 1 {
 		t.Fatalf("ineligible query stats = %#v, want one bypass", stats)
+	}
+}
+
+func TestSQLResultCacheSettingsFingerprintSeparatesEntries(t *testing.T) {
+	cache := NewSQLResultCache(2)
+	resolver := &c208ResultCacheResolver{}
+	query := "SELECT id FROM CACHE('events')"
+
+	first, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, nil, SQLQueryOptions{
+		ResultCache:                    cache,
+		ResultCacheSettingsFingerprint: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("first query error = %v", err)
+	}
+	second, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, nil, SQLQueryOptions{
+		ResultCache:                    cache,
+		ResultCacheSettingsFingerprint: "tenant-b",
+	})
+	if err != nil {
+		t.Fatalf("second query error = %v", err)
+	}
+	third, err := ExecuteSQLQueryParameters(context.Background(), query, resolver, nil, SQLQueryOptions{
+		ResultCache:                    cache,
+		ResultCacheSettingsFingerprint: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("third query error = %v", err)
+	}
+	if len(first.Rows) != 1 || len(second.Rows) != 1 || len(third.Rows) != 1 {
+		t.Fatalf("row counts = %d, %d, %d; want one row each", len(first.Rows), len(second.Rows), len(third.Rows))
+	}
+	stats := cache.Stats()
+	if stats.Hits != 1 || stats.Misses != 2 || stats.Entries != 2 {
+		t.Fatalf("cache stats = %#v, want one hit, two misses, two entries", stats)
+	}
+}
+
+func TestSQLResultCacheOversizedSettingsFingerprintBypasses(t *testing.T) {
+	cache := NewSQLResultCache(1)
+	resolver := &c208ResultCacheResolver{}
+	_, err := ExecuteSQLQueryParameters(context.Background(), "SELECT id FROM CACHE('events')", resolver, nil, SQLQueryOptions{
+		ResultCache:                    cache,
+		ResultCacheSettingsFingerprint: strings.Repeat("x", MaxSQLResultCacheSettingsFingerprintBytes+1),
+	})
+	if err != nil {
+		t.Fatalf("query error = %v", err)
+	}
+	if stats := cache.Stats(); stats.Bypasses != 1 || stats.Entries != 0 {
+		t.Fatalf("oversized fingerprint stats = %#v, want one bypass and no entry", stats)
 	}
 }
 
