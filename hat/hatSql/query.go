@@ -5702,9 +5702,10 @@ type sqlWindow struct {
 	frame     *sqlWindowFrame
 }
 type sqlWindowFrame struct {
-	kind  string
-	start sqlWindowFrameBound
-	end   sqlWindowFrameBound
+	kind    string
+	start   sqlWindowFrameBound
+	end     sqlWindowFrameBound
+	exclude string
 }
 type sqlWindowFrameBound struct {
 	kind   string
@@ -7268,7 +7269,32 @@ func (p *sqlQueryParser) parseSQLWindowFrame(kind string) (sqlWindowFrame, error
 	if sqlWindowFrameBoundPosition(start) > sqlWindowFrameBoundPosition(end) {
 		return sqlWindowFrame{}, p.diagnostic(p.previous(), kind+" frame start must not follow its end")
 	}
-	return sqlWindowFrame{kind: kind, start: start, end: end}, nil
+	exclude := ""
+	if p.keyword("EXCLUDE") {
+		p.next()
+		switch {
+		case p.keyword("CURRENT"):
+			p.next()
+			if err := p.expectKeyword("ROW"); err != nil {
+				return sqlWindowFrame{}, err
+			}
+			exclude = "CURRENT ROW"
+		case p.keyword("GROUP"):
+			p.next()
+			exclude = "GROUP"
+		case p.keyword("TIES"):
+			p.next()
+			exclude = "TIES"
+		case p.keyword("NO"):
+			p.next()
+			if err := p.expectKeyword("OTHERS"); err != nil {
+				return sqlWindowFrame{}, err
+			}
+		default:
+			return sqlWindowFrame{}, p.expected(p.current(), "CURRENT ROW, GROUP, TIES, or NO OTHERS after EXCLUDE", nil)
+		}
+	}
+	return sqlWindowFrame{kind: kind, start: start, end: end, exclude: exclude}, nil
 }
 
 func (p *sqlQueryParser) parseSQLWindowDefinition() (sqlWindow, error) {
@@ -7472,6 +7498,43 @@ func sqlWindowFrameBounds(frame *sqlWindowFrame, position, length int) (int, int
 		end = length - 1
 	}
 	return start, end
+}
+
+func sqlWindowFramePositionIncluded(frame *sqlWindowFrame, framePosition, position int, indexes []int, out []sqlQueryOutput, orders []sqlOrder) bool {
+	if frame == nil {
+		return true
+	}
+	switch frame.exclude {
+	case "CURRENT ROW":
+		return framePosition != position
+	case "GROUP":
+		return framePosition != position && !sqlWindowRowsPeers(framePosition, position, indexes, out, orders)
+	case "TIES":
+		return framePosition == position || !sqlWindowRowsPeers(framePosition, position, indexes, out, orders)
+	default:
+		return true
+	}
+}
+
+func sqlWindowRowsPeers(leftPosition, rightPosition int, indexes []int, out []sqlQueryOutput, orders []sqlOrder) bool {
+	if len(orders) == 0 {
+		return true
+	}
+	left := out[indexes[leftPosition]]
+	right := out[indexes[rightPosition]]
+	leftRow, rightRow := sqlExecRow{}, sqlExecRow{}
+	if len(left.group) > 0 {
+		leftRow = left.group[0]
+	}
+	if len(right.group) > 0 {
+		rightRow = right.group[0]
+	}
+	for _, order := range orders {
+		if sqlCompare(evalSQLExpr(order.expr, left.group, leftRow), evalSQLExpr(order.expr, right.group, rightRow)) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlRangeWindowFrameBounds(frame *sqlWindowFrame, order sqlOrder, values []interface{}, position int) (int, int, error) {
@@ -11451,6 +11514,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					}
 					var values []float64
 					for framePosition := start; framePosition <= end; framePosition++ {
+						if item.expr.window.frame != nil && item.expr.window.frame.exclude != "" && !sqlWindowFramePositionIncluded(item.expr.window.frame, framePosition, position, indexes, out, item.expr.window.order) {
+							continue
+						}
 						frameRow := sqlExecRow{}
 						if len(out[indexes[framePosition]].group) > 0 {
 							frameRow = out[indexes[framePosition]].group[0]
@@ -11475,6 +11541,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					}
 					frame := make([]sqlExecRow, 0, end-start+1)
 					for framePosition := start; framePosition <= end; framePosition++ {
+						if item.expr.window.frame != nil && item.expr.window.frame.exclude != "" && !sqlWindowFramePositionIncluded(item.expr.window.frame, framePosition, position, indexes, out, item.expr.window.order) {
+							continue
+						}
 						frame = append(frame, out[indexes[framePosition]].group...)
 					}
 					value, err := evalSQLArgExtreme(item.expr, frame)

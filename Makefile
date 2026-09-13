@@ -12346,3 +12346,51 @@ commit-ch040:
 .PHONY: push-ch040
 push-ch040:
 	bash ./scripts/push-ch040.sh
+
+.PHONY: test-ch042
+test-ch042:
+	bash ./scripts/test-ch042.sh
+
+.PHONY: format-ch042
+format-ch042:
+	bash ./scripts/format-ch042.sh
+
+.PHONY: benchmark-ch042-before
+benchmark-ch042-before:
+	bash ./scripts/benchmark-ch042-before.sh
+
+.PHONY: benchmark-ch042-after
+benchmark-ch042-after:
+	bash ./scripts/benchmark-ch042-after.sh
+
+.PHONY: test-ch042-all
+test-ch042-all:
+	bash ./scripts/test-ch042-all.sh
+
+.PHONY: test-ch042-repo
+test-ch042-repo:
+	bash ./scripts/test-ch042-repo.sh
+
+.PHONY: race-ch042
+race-ch042:
+	bash ./scripts/race-ch042.sh
+
+.PHONY: vet-ch042
+vet-ch042:
+	bash ./scripts/vet-ch042.sh
+
+.PHONY: check-ch042
+check-ch042:
+	bash ./scripts/check-ch042.sh
+
+.PHONY: review-ch042
+review-ch042:
+	bash ./scripts/review-ch042.sh
+
+.PHONY: commit-ch042
+commit-ch042:
+	bash ./scripts/commit-ch042.sh
+
+.PHONY: push-ch042
+push-ch042:
+	bash ./scripts/push-ch042.sh

@@ -22633,6 +22633,49 @@ BenchmarkSQLTDigestPercentile/tdigest-32                304   4037437 ns/op   35
 BenchmarkSQLTDigestPercentile/tdigest-32                296   4015994 ns/op   35200 B/op  38 allocs/op
 ```
 
+## CH-042 window frame exclusion
+
+This benchmark compares the existing rolling `SUM` window path with an
+explicit `EXCLUDE CURRENT ROW` frame over 2,000 rows and a ten-row frame.
+Each case ran five samples with `-benchmem` on Linux/amd64 with an AMD Ryzen
+9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing frame, control before change | 2,763,366 | 2,535,977 | 24,006 | baseline |
+| Existing frame, paired after change | 2,757,736 | 2,535,979 | 24,006 | 1.00x, no meaningful regression |
+| `EXCLUDE CURRENT ROW` | 3,008,585 | 2,535,752 | 24,000 | 1.09x CPU, 6 fewer allocations |
+
+The exclusion path has a bounded cost because it performs the requested frame
+membership check; default windows bypass that check. Correctness coverage
+also verifies `EXCLUDE GROUP`, `EXCLUDE TIES`, `EXCLUDE NO OTHERS`, and
+`ARGMAX`.
+
+Raw control output from `make benchmark-ch042-before`:
+
+```text
+BenchmarkSQLWindowFrameExclusion/control-32             404   2729605 ns/op  2535987 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             463   2730053 ns/op  2535976 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             436   2773026 ns/op  2535977 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             435   2809565 ns/op  2535979 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             410   2763366 ns/op  2535975 B/op  24006 allocs/op
+```
+
+Raw paired output from `make benchmark-ch042-after`:
+
+```text
+BenchmarkSQLWindowFrameExclusion/control-32             424   2702193 ns/op  2535990 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             435   2812374 ns/op  2535976 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             417   2802783 ns/op  2535979 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             420   2718020 ns/op  2535972 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/control-32             472   2757736 ns/op  2535988 B/op  24006 allocs/op
+BenchmarkSQLWindowFrameExclusion/exclude-current-32     381   3148773 ns/op  2535771 B/op  24000 allocs/op
+BenchmarkSQLWindowFrameExclusion/exclude-current-32     385   2996220 ns/op  2535752 B/op  24000 allocs/op
+BenchmarkSQLWindowFrameExclusion/exclude-current-32     382   2955129 ns/op  2535754 B/op  24000 allocs/op
+BenchmarkSQLWindowFrameExclusion/exclude-current-32     396   3033129 ns/op  2535752 B/op  24000 allocs/op
+BenchmarkSQLWindowFrameExclusion/exclude-current-32     391   3008585 ns/op  2535751 B/op  24000 allocs/op
+```
+
 ## CH-039 Automatic Distinct State Selection
 
 This benchmark compares the existing HyperLogLog distinct aggregate with
