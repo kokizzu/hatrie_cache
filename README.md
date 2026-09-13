@@ -48,6 +48,7 @@ security guidance before exposing it on a network.
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - Materialize-inspired frontier compaction debt and blocked-lease metrics: [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics)
+- ClickHouse-inspired skip-index usefulness telemetry: [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry)
 - Deterministic differential subscription ordering: [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md)
 - ClickHouse-style post-window `QUALIFY` filtering: [C220_QUALIFY.md](C220_QUALIFY.md)
 - Tarantool-inspired mutual TLS peer authentication with restart-free certificate rotation: [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md)

@@ -23028,6 +23028,39 @@ state. Full semantics and raw commands are in
 Reproduce with `make benchmark-mz04-before` and
 `make benchmark-mz04-after`.
 
+## CH-24: Skip-Index Usefulness Telemetry
+
+This explain-only change adds skipped, scanned, matched, residual, and
+residual-false-positive-rate counters to existing columnar segment and primary
+mark skip nodes. The benchmark uses a four-row numeric columnar source, five
+samples, `-benchtime=1000x`, and an AMD Ryzen 9 5950X.
+
+| Operation | Before | After | Relative change |
+| --- | ---: | ---: | ---: |
+| `EXPLAIN ANALYZE` | 13,078 ns/op | 13,162 ns/op | 1.006x CPU; +0.64% |
+| Heap allocation | 11,810 B/op | 11,947 B/op | 1.012x; +1.16% |
+| Allocations | 104 allocs/op | 107 allocs/op | 1.029x; +2.88% |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+before: 13611 11810 104
+before: 13313 11811 104
+before: 12817 11810 104
+before: 13078 11810 104
+before: 12984 11810 104
+after:  14727 11947 107
+after:  13012 11947 107
+after:  14438 11947 107
+after:  13162 11947 107
+after:  13125 11948 107
+```
+
+The extra formatting runs only when explain/observation metrics are enabled;
+ordinary query results and pruning behavior are unchanged. Full definitions
+and reproduction commands are in
+[CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md).
+
 ## CH-009: Bounded Async Insert Buffer
 
 The opt-in `hatCache.AsyncInsertBuffer` batches caller admission into bounded

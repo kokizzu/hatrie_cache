@@ -12848,6 +12848,33 @@ commit-mz04:
 push-mz04:
 	bash ./scripts/push-mz04.sh
 
+test-ch024:
+	bash ./scripts/test-ch024.sh
+
+format-ch024:
+	bash ./scripts/format-ch024.sh
+
+test-ch024-race:
+	bash ./scripts/test-ch024-race.sh
+
+test-ch024-full:
+	bash ./scripts/test-ch024-full.sh
+
+benchmark-ch024-before:
+	bash ./scripts/benchmark-ch024-before.sh
+
+benchmark-ch024-after:
+	bash ./scripts/benchmark-ch024-after.sh
+
+status-ch024:
+	bash ./scripts/status-ch024.sh
+
+commit-ch024:
+	bash ./scripts/commit-ch024.sh
+
+push-ch024:
+	bash ./scripts/push-ch024.sh
+
 
 
 format-tr017:

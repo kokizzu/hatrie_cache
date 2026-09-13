@@ -43,7 +43,7 @@ before/after measurement when its motivation is performance.
 | CH-21 | Read-in-order planning for early LIMIT completion | Stop ordered scans sooner | Planner restrictions | [ ] |
 | CH-22 | Explain output for index decisions, marks, and skipped ranges | Make pruning measurable | More explain plumbing | [ ] |
 | CH-23 | Automatic primary-key prefix tuning from workload history | Improve common range scans | Layout changes are expensive | [ ] |
-| CH-24 | Skip-index false-positive and usefulness telemetry | Retire indexes that do not pay back | Metrics overhead | [ ] |
+| CH-24 | Skip-index false-positive and usefulness telemetry | Retire indexes that do not pay back | Metrics overhead | [x] Implemented as explain-only residual pruning counters; see [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md) and [BENCHMARK.md#ch-24-skip-index-usefulness-telemetry](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry). |
 | CH-25 | Full-text inverted postings index | Accelerate token and phrase search | Index size and update cost | [ ] |
 | CH-26 | Phrase and proximity search over text postings | Improve search precision | More postings metadata | [x] Implemented by `CONTAINS_PHRASE` and `CONTAINS_PROXIMITY` over the existing opt-in text index; see [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md) and [BENCHMARK.md#ch-026-sql-phrase-and-proximity-search](BENCHMARK.md#ch-026-sql-phrase-and-proximity-search). |
 | CH-27 | External dictionary cache with bounded refresh | Fast dimension lookups | Source failures and stale values | [ ] |

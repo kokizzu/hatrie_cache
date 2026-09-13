@@ -3,6 +3,7 @@ package hatSql
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -74,20 +75,20 @@ func TestSQLColumnarNumericAggregateUsesSegmentedBatchWhenAvailable(t *testing.T
 func TestSQLColumnarNumericFilterSkipsDisjointSegments(t *testing.T) {
 	t.Parallel()
 	probe := &sqlSegmentedColumnarSourceProbe{
-		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": {float64(1), float64(2), float64(100), float64(101)}}, Rows: 4},
+		batch: ColumnarBatch{Columns: map[string][]interface{}{"id": {float64(1), float64(2), float64(50), float64(101)}}, Rows: 4},
 		segments: &ColumnarNumericSegments{
 			RowsPerSegment: 2,
 			Columns: map[string][]ColumnarNumericSegment{
-				"id": {{Minimum: 1, Maximum: 2, Valid: true}, {Minimum: 100, Maximum: 101, Valid: true}},
+				"id": {{Minimum: 1, Maximum: 2, Valid: true}, {Minimum: 50, Maximum: 101, Valid: true}},
 			},
 		},
-		rows: []Row{{"id": float64(1)}, {"id": float64(2)}, {"id": float64(100)}, {"id": float64(101)}},
+		rows: []Row{{"id": float64(1)}, {"id": float64(2)}, {"id": float64(50)}, {"id": float64(101)}},
 	}
 	result, err := ExecuteSQLQueryParameters(context.Background(), "FROM CACHE('events') AS event WHERE event.id >= 100 SELECT event.id", probe, nil, SQLQueryOptions{})
 	if err != nil {
 		t.Fatalf("ExecuteSQLQueryParameters() error = %v", err)
 	}
-	if want := []Row{{"id": float64(100)}, {"id": float64(101)}}; !reflect.DeepEqual(result.Rows, want) {
+	if want := []Row{{"id": float64(101)}}; !reflect.DeepEqual(result.Rows, want) {
 		t.Fatalf("ExecuteSQLQueryParameters() rows = %#v, want %#v", result.Rows, want)
 	}
 	analysis, err := ExecuteSQLQueryParameters(context.Background(), "EXPLAIN ANALYZE FROM CACHE('events') AS event WHERE event.id >= 100 SELECT event.id", probe, nil, SQLQueryOptions{})
@@ -96,6 +97,17 @@ func TestSQLColumnarNumericFilterSkipsDisjointSegments(t *testing.T) {
 	}
 	for _, row := range analysis.Rows {
 		if row["node"] == "COLUMNAR NUMERIC SEGMENT SKIP" {
+			detail, _ := row["detail"].(string)
+			for _, token := range []string{
+				"skipped_rows=2",
+				"scanned_rows=2",
+				"matched_rows=1",
+				"residual_false_positive_rate=50.00%",
+			} {
+				if !strings.Contains(detail, token) {
+					t.Fatalf("segment skip detail = %q, missing %q", detail, token)
+				}
+			}
 			return
 		}
 	}

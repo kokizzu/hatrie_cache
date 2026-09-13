@@ -8025,6 +8025,25 @@ func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outpu
 	metrics.recordBytes(node, detail, inputRows, outputRows, -1, -1, started)
 }
 
+func (metrics *sqlExecutionMetrics) recordPruning(node, detail string, totalRows, skippedRows, scannedRows, matchedRows int, started time.Time) {
+	if metrics == nil {
+		return
+	}
+	if scannedRows < 0 {
+		scannedRows = 0
+	}
+	residualRows := scannedRows - matchedRows
+	if residualRows < 0 {
+		residualRows = 0
+	}
+	falsePositiveRate := 0.0
+	if scannedRows > 0 {
+		falsePositiveRate = float64(residualRows) * 100 / float64(scannedRows)
+	}
+	detail = fmt.Sprintf("%s skipped_rows=%d scanned_rows=%d matched_rows=%d residual_rows=%d residual_false_positive_rate=%.2f%%", detail, skippedRows, scannedRows, matchedRows, residualRows, falsePositiveRate)
+	metrics.record(node, detail, totalRows, skippedRows, started)
+}
+
 func (metrics *sqlExecutionMetrics) recordBytes(node, detail string, inputRows, outputRows, inputBytes, outputBytes int, started time.Time) {
 	if metrics == nil {
 		return
@@ -8440,7 +8459,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		result, matched, scanned := sqlColumnarStringBloomMaterialize(q, batch, projectionFields, segments, field, value, metrics != nil)
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
-				metrics.record("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+				metrics.recordPruning("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
 			}
 			metrics.record("COLUMNAR STRING FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -8462,7 +8481,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; useNGram && skippedRows > 0 {
-				metrics.record("COLUMNAR NGRAM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+				metrics.recordPruning("COLUMNAR NGRAM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
 			}
 			metrics.record("COLUMNAR LIKE FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -8490,7 +8509,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		result, matched, scanned := sqlColumnarNumericMaterialize(q, batch, projectionFields, segments, predicates, metrics != nil)
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
-				metrics.record("COLUMNAR NUMERIC SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+				metrics.recordPruning("COLUMNAR NUMERIC SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
 			}
 			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -9768,7 +9787,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			filterName = "COLUMNAR DICTIONARY IN FILTER"
 		}
 		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
-			metrics.record("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+			metrics.recordPruning("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scannedRows, matched, filterStarted)
 		}
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
@@ -10088,7 +10107,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			if sparsePrimary {
 				node = "COLUMNAR PRIMARY MARK SKIP"
 			}
-			metrics.record(node, sqlExplainExpression(q.where), batch.Rows, skippedRows, filterStarted)
+			metrics.recordPruning(node, sqlExplainExpression(q.where), batch.Rows, skippedRows, scannedRows, matched, filterStarted)
 		}
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
