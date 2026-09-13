@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"errors"
+	"time"
 )
 
 const typedTablePatchPartsDefaultMergeThreshold = 1024
@@ -87,6 +88,12 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	if state == nil || state.deletedCount == 0 {
 		return
 	}
+	physicalRowsBefore := len(table.keys)
+	deletedRows := state.deletedCount
+	started := time.Time{}
+	if table.storageEvents != nil {
+		started = time.Now()
+	}
 	table.clearColumnarLayoutsLocked()
 	write := 0
 	for read, key := range table.keys {
@@ -109,5 +116,8 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	state.deletedCount = 0
 	for column := range table.columns {
 		table.columns[column].truncate(write)
+	}
+	if table.storageEvents != nil {
+		table.recordStorageEventLocked(TypedTableStorageEventPatchPartMerged, physicalRowsBefore, write, 0, deletedRows, time.Since(started))
 	}
 }

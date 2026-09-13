@@ -22108,3 +22108,57 @@ BenchmarkCH004RotatingSQLQueryLogAppend/age-check-32   459073  2515 ns/op  369 B
 
 Reproduce with `make benchmark-ch004-baseline` before the implementation
 revision and `make benchmark-ch004` after it.
+
+## CH-005 Typed-table Storage Events
+
+This benchmark measures the same typed-table patch-delete and resurrection
+cycle before and after adding the optional ClickHouse-style storage lifecycle
+log. It ran on Linux/amd64 with an AMD Ryzen 9 5950X, five fixed 100,000-cycle
+samples, and `-benchmem`. One cycle deletes and then reinserts one of 256
+preloaded keys. The baseline and default-disabled paths use the same workload;
+the enabled path also records a bounded patch event for each delete.
+
+| Case | Median ns/op | B/op | Allocs/op | Relative time | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before, no event log | 775.0 | 1056 | 4 | 1.00x | 1.00x | 1.00x |
+| After, event log disabled | 777.1 | 1056 | 4 | 1.00x | 1.00x | 1.00x |
+| After, event log enabled, capacity 256 | 801.8 | 1056 | 4 | 1.03x | 1.00x | 1.00x |
+
+The default remains off, so existing tables retain the prior allocation and
+CPU path. Enabling the ring adds about 3% CPU in this small mutation workload,
+with no measured per-operation byte or allocation increase; it adds bounded
+retained memory for the configured event slots and one timestamp per event.
+This is an observability feature rather than a query-speed optimization.
+
+Raw before-change output:
+
+```text
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  971.6 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  659.3 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  753.4 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  829.4 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  775.0 ns/op  1056 B/op  4 allocs/op
+```
+
+Raw after-change output:
+
+```text
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  922.3 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  777.4 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  717.4 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  722.6 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005BaselineTypedTablePatchDeleteUpsert-32  100000  700.5 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsDisabled-32                100000  780.4 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsDisabled-32                100000  841.5 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsDisabled-32                100000  676.1 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsDisabled-32                100000  766.2 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsDisabled-32                100000  777.1 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsEnabled-32                 100000  757.8 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsEnabled-32                 100000  899.2 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsEnabled-32                 100000  748.1 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsEnabled-32                 100000  803.3 ns/op  1056 B/op  4 allocs/op
+BenchmarkCH005StorageEventsEnabled-32                 100000  801.8 ns/op  1056 B/op  4 allocs/op
+```
+
+Reproduce with `make benchmark-ch005-baseline` before the implementation
+revision and `make benchmark-ch005` after it.

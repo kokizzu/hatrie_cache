@@ -67,6 +67,7 @@ type TypedTableSchema struct {
 	Columns       []TypedTableColumn
 	ColumnarCache TypedTableColumnarCacheOptions
 	PatchParts    TypedTablePatchOptions
+	StorageEvents TypedTableStorageEventLogOptions
 	MVCC          TypedTableMVCCOptions
 }
 
@@ -295,17 +296,18 @@ func (storage *typedTableColumnStorage) releaseDictionaryValue(code uint32) {
 // TypedTable is a schema-checked row store with per-column primitive slices.
 // It is opt-in and implements the established source-resolver contracts.
 type TypedTable struct {
-	mu         sync.RWMutex
-	schema     TypedTableSchema
-	columns    []typedTableColumnStorage
-	byName     map[string]int
-	keys       []string
-	positions  map[string]int
-	generated  bool
-	columnar   typedTableColumnarCache
-	patchParts *typedTablePatchState
-	mvcc       *typedTableMVCCState
-	appendOnly bool
+	mu            sync.RWMutex
+	schema        TypedTableSchema
+	columns       []typedTableColumnStorage
+	byName        map[string]int
+	keys          []string
+	positions     map[string]int
+	generated     bool
+	columnar      typedTableColumnarCache
+	patchParts    *typedTablePatchState
+	storageEvents *typedTableStorageEventLog
+	mvcc          *typedTableMVCCState
+	appendOnly    bool
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -327,6 +329,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 	}
 	schema.ColumnarCache = normalizeTypedTableColumnarCacheOptions(schema.ColumnarCache)
 	schema.PatchParts = normalizeTypedTablePatchOptions(schema.PatchParts)
+	schema.StorageEvents = normalizeTypedTableStorageEventLogOptions(schema.StorageEvents)
 	table := &TypedTable{
 		schema:    schema,
 		byName:    make(map[string]int, len(schema.Columns)),
@@ -363,6 +366,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 			table.columns[index].dictionaryPositions = make(map[string]uint32)
 		}
 	}
+	table.storageEvents = newTypedTableStorageEventLog(schema.StorageEvents)
 	return table, nil
 }
 
@@ -411,6 +415,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	}
 	table.clearColumnarLayoutsLocked()
 	index, exists := table.positions[key]
+	newBasePart := !exists && len(table.keys) == 0
 	change := TypedTableChange{Key: key, After: cloneTypedTableValues(values)}
 	if exists && !table.typedTableRowDeletedLocked(index) {
 		change.Operation = "UPDATE"
@@ -440,7 +445,11 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 			table.columns[column].append(values[column])
 		}
 	}
-	return table.appendChangeLocked(change), nil
+	change = table.appendChangeLocked(change)
+	if newBasePart {
+		table.recordStorageEventLocked(TypedTableStorageEventBasePartCreated, 0, len(table.keys), 0, 0, 0)
+	}
+	return change, nil
 }
 
 // Delete removes key in O(columns) time and returns false only when key does
@@ -460,10 +469,16 @@ func (table *TypedTable) Delete(key string) (TypedTableChange, error) {
 	table.appendOnly = false
 	change := TypedTableChange{Operation: "DELETE", Key: key, Before: table.rowLocked(index)}
 	if table.patchParts != nil {
+		pendingDeletesBefore := table.patchParts.deletedCount
 		table.patchParts.deleted[index] = true
 		table.patchParts.deletedCount++
+		change = table.appendChangeLocked(change)
+		if pendingDeletesBefore == 0 {
+			physicalRows := len(table.keys)
+			table.recordStorageEventLocked(TypedTableStorageEventPatchPartCreated, physicalRows, physicalRows, table.patchParts.deletedCount, 1, 0)
+		}
 		table.scheduleTypedTablePatchCompactionLocked()
-		return table.appendChangeLocked(change), nil
+		return change, nil
 	}
 	last := len(table.keys) - 1
 	if index != last {
