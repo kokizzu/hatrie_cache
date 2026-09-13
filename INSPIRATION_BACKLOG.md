@@ -78,7 +78,7 @@ before/after measurement when its motivation is performance.
 | MZ-01 | Durable persisted collections with blob and consensus handles | Recover arrangements without full recompute | Storage protocol and GC complexity | [ ] |
 | MZ-02 | Public since and upper read holds | Pin historical reads safely | Leaked holds block compaction | [ ] |
 | MZ-03 | Frontier-aware logical compaction scheduler | Bound retained differential history | Scheduler and prioritization cost | [ ] |
-| MZ-04 | Compaction debt and blocked-frontier metrics | Explain storage growth | More telemetry state | [ ] |
+| MZ-04 | Compaction debt and blocked-frontier metrics | Explain storage growth | More telemetry state | [x] Implemented as allocation-free fields on `hatPipeline.FrontierRetentionSnapshot`; see [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md) and [BENCHMARK.md#mz-04-frontier-compaction-debt-metrics](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics). |
 | MZ-05 | Immutable sealed batch/run format for persisted updates | Stream compaction efficiently | New on-disk format | [ ] |
 | MZ-06 | Blob garbage collection at a verified safe frontier | Reclaim durable history safely | Recovery coordination | [ ] |
 | MZ-07 | Frontier-aware source backpressure | Avoid unbounded lagging input | Source throughput reduction | [ ] |

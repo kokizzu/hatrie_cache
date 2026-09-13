@@ -12821,6 +12821,34 @@ commit-ch009:
 push-ch009:
 	bash ./scripts/push-ch009.sh
 
+test-mz04:
+	bash ./scripts/test-mz04.sh
+
+format-mz04:
+	bash ./scripts/format-mz04.sh
+
+test-mz04-race:
+	bash ./scripts/test-mz04-race.sh
+
+test-mz04-full:
+	bash ./scripts/test-mz04-full.sh
+
+benchmark-mz04-before:
+	bash ./scripts/benchmark-mz04-before.sh
+
+benchmark-mz04-after:
+	bash ./scripts/benchmark-mz04-after.sh
+
+status-mz04:
+	bash ./scripts/status-mz04.sh
+
+commit-mz04:
+	bash ./scripts/commit-mz04.sh
+
+push-mz04:
+	bash ./scripts/push-mz04.sh
+
+
 
 format-tr017:
 	bash ./scripts/format-tr017.sh

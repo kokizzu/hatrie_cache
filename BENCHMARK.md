@@ -23004,6 +23004,30 @@ allocs/op` to `265,601 ns/op`, `12,320 B/op`, and `80 allocs/op`: `7.77x` faster
 
 Raw samples and the reproducible commands are in
 [TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md).
+## MZ-04: Frontier Compaction Debt Metrics
+
+This is an allocation-free observability addition to
+`hatPipeline.FrontierRetentionSnapshot`. The benchmark repeatedly snapshots
+one frontier with one active lease, using five samples and
+`-benchtime=100000x` on an AMD Ryzen 9 5950X.
+
+| Operation | Before | After | Relative change |
+| --- | ---: | ---: | ---: |
+| Retention snapshot | 57.45 ns/op | 61.53 ns/op | 1.07x CPU; +4.08 ns (+7.1%) |
+| Heap allocation | 0 B/op | 0 B/op | unchanged |
+| Allocations | 0 allocs/op | 0 allocs/op | unchanged |
+
+The first implementation scanned leases on every snapshot and was about 1.7x
+slower; the retained implementation maintains the minimum-lease count during
+lease lifecycle operations. It reports current lower/upper frontiers, logical
+compaction debt, whether a lease blocks compaction, and how many leases share
+the blocking minimum. It does not change compaction behavior or add persistent
+state. Full semantics and raw commands are in
+[MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md).
+
+Reproduce with `make benchmark-mz04-before` and
+`make benchmark-mz04-after`.
+
 ## CH-009: Bounded Async Insert Buffer
 
 The opt-in `hatCache.AsyncInsertBuffer` batches caller admission into bounded

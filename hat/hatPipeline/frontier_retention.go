@@ -57,11 +57,17 @@ type FrontierRetentionSnapshot struct {
 	LeaseCount           int
 	MinimumRequired      uint64
 	SafeCompactionBefore uint64
+	CurrentLower         uint64
+	CurrentUpper         uint64
+	CompactionDebt       uint64
+	BlockedByLease       bool
+	BlockingLeaseCount   int
 }
 
 type frontierRetentionState struct {
-	leases  map[uint64]FrontierRetentionLease
-	minimum uint64
+	leases             map[uint64]FrontierRetentionLease
+	minimum            uint64
+	blockingLeaseCount int
 }
 
 // FrontierRetentionRegistry coordinates bounded historical-read leases with a
@@ -133,6 +139,9 @@ func (registry *FrontierRetentionRegistry) Acquire(frontierID string, asOf uint6
 	state.leases[lease.ID] = lease
 	if len(state.leases) == 1 || asOf < state.minimum {
 		state.minimum = asOf
+		state.blockingLeaseCount = 1
+	} else if asOf == state.minimum {
+		state.blockingLeaseCount++
 	}
 	registry.leaseCount++
 	return lease, nil
@@ -163,10 +172,18 @@ func (registry *FrontierRetentionRegistry) Release(lease FrontierRetentionLease)
 		return nil
 	}
 	if lease.AsOf == state.minimum {
+		if state.blockingLeaseCount > 1 {
+			state.blockingLeaseCount--
+			return nil
+		}
 		state.minimum = 0
+		state.blockingLeaseCount = 0
 		for _, active := range state.leases {
-			if state.minimum == 0 || active.AsOf < state.minimum {
+			if state.blockingLeaseCount == 0 || active.AsOf < state.minimum {
 				state.minimum = active.AsOf
+				state.blockingLeaseCount = 1
+			} else if active.AsOf == state.minimum {
+				state.blockingLeaseCount++
 			}
 		}
 	}
@@ -226,9 +243,11 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	state := registry.states[frontierID]
 	leaseCount := 0
 	minimum := uint64(0)
+	blockingLeaseCount := 0
 	if state != nil {
 		leaseCount = len(state.leases)
 		minimum = state.minimum
+		blockingLeaseCount = state.blockingLeaseCount
 	}
 	registry.mu.RUnlock()
 	frontier, err := registry.frontierSnapshot(frontierID)
@@ -242,11 +261,25 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	if state == nil {
 		minimum = frontier.Lower
 	}
+	debt := uint64(0)
+	blockedByLease := false
+	if safe < frontier.Lower {
+		debt = frontier.Lower - safe
+		blockedByLease = state != nil && minimum < frontier.Lower
+	}
+	if !blockedByLease {
+		blockingLeaseCount = 0
+	}
 	return FrontierRetentionSnapshot{
 		FrontierID:           frontierID,
 		LeaseCount:           leaseCount,
 		MinimumRequired:      minimum,
 		SafeCompactionBefore: safe,
+		CurrentLower:         frontier.Lower,
+		CurrentUpper:         frontier.Upper,
+		CompactionDebt:       debt,
+		BlockedByLease:       blockedByLease,
+		BlockingLeaseCount:   blockingLeaseCount,
 	}, nil
 }
 
