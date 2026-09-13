@@ -13127,3 +13127,6 @@ commit-mz050:
 
 push-mz050:
 	@bash scripts/push-mz050.sh
+
+commit-mz050-push-wrapper:
+	@bash scripts/commit-mz050-push-wrapper.sh
