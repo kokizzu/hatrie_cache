@@ -13170,5 +13170,26 @@ commit-tr036-read-only-transaction:
 push-tr036-read-only-transaction:
 	@bash scripts/push-tr036-read-only-transaction.sh
 
+test-ch019-materialized-view-budget:
+	@bash scripts/test-ch019-materialized-view-budget.sh
+
+format-ch019-materialized-view-budget:
+	@bash scripts/format-ch019-materialized-view-budget.sh
+
+benchmark-ch019-materialized-view-budget:
+	@bash scripts/benchmark-ch019-materialized-view-budget.sh
+
+race-ch019-materialized-view-budget:
+	@bash scripts/race-ch019-materialized-view-budget.sh
+
+vet-ch019-materialized-view-budget:
+	@bash scripts/vet-ch019-materialized-view-budget.sh
+
+commit-ch019-materialized-view-budget:
+	@bash scripts/commit-ch019-materialized-view-budget.sh
+
+push-ch019-materialized-view-budget:
+	@bash scripts/push-ch019-materialized-view-budget.sh
+
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh

@@ -2,12 +2,17 @@ package hatSql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// ErrMaterializedViewBudgetExceeded indicates that a create or refresh would
+// exceed the configured aggregate materialized-view storage budget.
+var ErrMaterializedViewBudgetExceeded = errors.New("materialized view storage budget exceeded")
 
 // MaterializedViewDefinition declares a query and the source keys that can
 // invalidate its materialized result. Dependencies are explicit so callers can
@@ -26,6 +31,22 @@ type MaterializedViewStatus struct {
 	RefreshedAt  time.Time
 }
 
+// MaterializedViewsOptions bounds the aggregate logical result retained by a
+// MaterializedViews registry. A zero limit is unlimited for compatibility.
+type MaterializedViewsOptions struct {
+	MaxRows  int
+	MaxBytes int64
+}
+
+// MaterializedViewStorageUsage reports logical rows and encoded row bytes
+// retained by a registry. Bytes are accounted when MaxBytes is configured.
+type MaterializedViewStorageUsage struct {
+	Rows     int
+	Bytes    int64
+	MaxRows  int
+	MaxBytes int64
+}
+
 // MaterializedView combines a snapshot's status with its query result.
 type MaterializedView struct {
 	Status MaterializedViewStatus
@@ -38,6 +59,10 @@ type MaterializedViews struct {
 	mu         sync.RWMutex
 	views      map[string]materializedView
 	dependents map[string][]string
+	maxRows    int
+	maxBytes   int64
+	rows       int
+	bytes      int64
 }
 
 type materializedView struct {
@@ -45,14 +70,59 @@ type materializedView struct {
 	snapshot       MaterializedView
 	sourceVersions map[string]string
 	collation      SQLCollation
+	storedRows     int
+	storedBytes    int64
 }
 
 // NewMaterializedViews creates an empty materialized-view registry.
 func NewMaterializedViews() *MaterializedViews {
+	views, _ := NewMaterializedViewsWithOptions(MaterializedViewsOptions{})
+	return views
+}
+
+// NewMaterializedViewsWithOptions creates a registry with optional aggregate
+// row and logical-byte admission limits. Limits are checked before a new
+// snapshot is published; a rejected refresh keeps the prior snapshot.
+func NewMaterializedViewsWithOptions(options MaterializedViewsOptions) (*MaterializedViews, error) {
+	if options.MaxRows < 0 || options.MaxBytes < 0 {
+		return nil, fmt.Errorf("materialized view storage limits must not be negative")
+	}
 	return &MaterializedViews{
 		views:      make(map[string]materializedView),
 		dependents: make(map[string][]string),
+		maxRows:    options.MaxRows,
+		maxBytes:   options.MaxBytes,
+	}, nil
+}
+
+// Usage returns the registry's current aggregate logical storage accounting.
+func (views *MaterializedViews) Usage() MaterializedViewStorageUsage {
+	if views == nil {
+		return MaterializedViewStorageUsage{}
 	}
+	views.mu.RLock()
+	usage := MaterializedViewStorageUsage{
+		Rows: views.rows, Bytes: views.bytes, MaxRows: views.maxRows, MaxBytes: views.maxBytes,
+	}
+	views.mu.RUnlock()
+	return usage
+}
+
+func (views *MaterializedViews) storageBytes(result QueryResult) int64 {
+	if views == nil || views.maxBytes <= 0 {
+		return 0
+	}
+	return int64(sqlRowsBytes(result.Rows))
+}
+
+func (views *MaterializedViews) checkStorageBudget(rows int, bytes int64) error {
+	if views.maxRows > 0 && rows > views.maxRows {
+		return fmt.Errorf("%w: rows %d exceeds maximum %d", ErrMaterializedViewBudgetExceeded, rows, views.maxRows)
+	}
+	if views.maxBytes > 0 && bytes > views.maxBytes {
+		return fmt.Errorf("%w: bytes %d exceeds maximum %d", ErrMaterializedViewBudgetExceeded, bytes, views.maxBytes)
+	}
+	return nil
 }
 
 // Create evaluates and publishes a new materialized view. The view name must
@@ -81,6 +151,11 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 	if _, exists := views.views[definition.Name]; exists {
 		return MaterializedViewStatus{}, fmt.Errorf("materialized view %q already exists", definition.Name)
 	}
+	storedRows := len(result.Rows)
+	storedBytes := views.storageBytes(result)
+	if err := views.checkStorageBudget(views.rows+storedRows, views.bytes+storedBytes); err != nil {
+		return MaterializedViewStatus{}, err
+	}
 	status := MaterializedViewStatus{
 		Name:         definition.Name,
 		Dependencies: append([]string(nil), definition.Dependencies...),
@@ -95,7 +170,11 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 			Status: status,
 			Result: cloneQueryResult(result),
 		},
+		storedRows:  storedRows,
+		storedBytes: storedBytes,
 	}
+	views.rows += storedRows
+	views.bytes += storedBytes
 	for _, dependency := range definition.Dependencies {
 		views.dependents[dependency] = append(views.dependents[dependency], definition.Name)
 	}
@@ -156,6 +235,8 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 
 	results := make(map[string]QueryResult, len(candidates))
 	versions := make(map[string]map[string]string, len(candidates))
+	resultRows := make(map[string]int, len(candidates))
+	resultBytes := make(map[string]int64, len(candidates))
 	for _, candidate := range candidates {
 		result, sourceVersions, err := executeMaterializedViewQuery(ctx, candidate.definition.Query, candidate.definition.Dependencies, resolver, options)
 		if err != nil {
@@ -163,12 +244,26 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 		}
 		results[candidate.definition.Name] = cloneQueryResult(result)
 		versions[candidate.definition.Name] = sourceVersions
+		resultRows[candidate.definition.Name] = len(result.Rows)
+		resultBytes[candidate.definition.Name] = views.storageBytes(result)
 	}
 
 	refreshedAt := time.Now().UTC()
 	statuses := make([]MaterializedViewStatus, 0, len(candidates))
 	views.mu.Lock()
 	defer views.mu.Unlock()
+	nextRows, nextBytes := views.rows, views.bytes
+	for _, candidate := range candidates {
+		current, exists := views.views[candidate.definition.Name]
+		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
+			continue
+		}
+		nextRows += resultRows[candidate.definition.Name] - current.storedRows
+		nextBytes += resultBytes[candidate.definition.Name] - current.storedBytes
+	}
+	if err := views.checkStorageBudget(nextRows, nextBytes); err != nil {
+		return nil, err
+	}
 	for _, candidate := range candidates {
 		current, exists := views.views[candidate.definition.Name]
 		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
@@ -179,9 +274,13 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 		current.collation = normalizedMaterializedViewCollation(options.Collation)
 		current.snapshot.Status.Revision++
 		current.snapshot.Status.RefreshedAt = refreshedAt
+		current.storedRows = resultRows[candidate.definition.Name]
+		current.storedBytes = resultBytes[candidate.definition.Name]
 		views.views[candidate.definition.Name] = current
 		statuses = append(statuses, cloneMaterializedViewStatus(current.snapshot.Status))
 	}
+	views.rows = nextRows
+	views.bytes = nextBytes
 	return statuses, nil
 }
 

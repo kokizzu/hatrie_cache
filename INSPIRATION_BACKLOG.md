@@ -38,7 +38,7 @@ before/after measurement when its motivation is performance.
 | CH-16 | Tier-aware remote prefetch and read fallback | Hide object-store latency for sequential scans | Extra bandwidth and cache pollution | [x] |
 | CH-17 | Workload-driven projection creation advisor | Find high-value projections without guesswork | Bad recommendations can waste disk | [ ] |
 | CH-18 | Projection refresh lag and failure state | Make stale materialized data visible | More status bookkeeping | [ ] |
-| CH-19 | Projection storage budget and admission policy | Prevent projections from consuming all disk | Rejected refreshes need operator handling | [ ] |
+| CH-19 | Projection storage budget and admission policy | Prevent projections from consuming all disk | Rejected refreshes need operator handling | [x] Implemented by `MaterializedViewsOptions` and atomic create/refresh admission; see [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission). |
 | CH-20 | Parallel-replica read coordinator | Spread large reads over replicas | Coordination and duplicate work | [ ] |
 | CH-21 | Read-in-order planning for early LIMIT completion | Stop ordered scans sooner | Planner restrictions | [ ] |
 | CH-22 | Explain output for index decisions, marks, and skipped ranges | Make pruning measurable | More explain plumbing | [x] Implemented as typed `ExplainStep.Pruning` data and tabular EXPLAIN ANALYZE fields; see [CH022_EXPLAIN_PRUNING.md](CH022_EXPLAIN_PRUNING.md) and [BENCHMARK.md#ch-022-structured-explain-pruning-telemetry](BENCHMARK.md#ch-022-structured-explain-pruning-telemetry). |

@@ -23386,6 +23386,42 @@ BenchmarkMZ018SourceFrontierWaitEnabled-32     246478  4557 ns/op  4912 B/op  29
 BenchmarkMZ018SourceFrontierWaitEnabled-32     239206  4312 ns/op  4912 B/op  29 allocs/op
 ```
 
+## CH-019 Materialized-View Storage Admission
+
+This measures the ClickHouse-inspired opt-in aggregate row and logical-byte
+budget for materialized-view snapshots. The unbounded case retains the legacy
+registry behavior; the bounded case checks both `MaxRows` and `MaxBytes` on
+each refresh. Samples use Linux `amd64`, Go benchmark workers `-32`, an AMD
+Ryzen 9 5950X, and five runs per case.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Unbounded refresh | 4,903 | 5,456 | 32 | 1.00x | 1.00x |
+| Row+byte budget refresh | 5,828 | 5,657 | 40 | 1.19x | 1.04x |
+
+The bounded refresh adds 925 ns/op, 201 B/op, and 8 allocs/op in this small
+fixture because logical byte admission serializes the refreshed rows. That
+cost is opt-in and occurs only on create/refresh; the retained row and byte
+limits prevent successful snapshots from consuming unbounded registry space.
+Use `MaxRows` alone when a row bound is sufficient and byte accounting is not
+needed. See [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md)
+for semantics and raw samples.
+
+Raw output:
+
+```text
+BenchmarkCH019MaterializedViewsStorageAdmission/unbounded-32  239092  4658 ns/op  5456 B/op  32 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/unbounded-32  252177  4903 ns/op  5456 B/op  32 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/unbounded-32  235615  4903 ns/op  5456 B/op  32 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/unbounded-32  224392  4963 ns/op  5456 B/op  32 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/unbounded-32  240271  4852 ns/op  5456 B/op  32 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/bounded-32    194594  5900 ns/op  5657 B/op  40 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/bounded-32    197152  5828 ns/op  5657 B/op  40 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/bounded-32    213727  5723 ns/op  5657 B/op  40 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/bounded-32    197476  5644 ns/op  5657 B/op  40 allocs/op
+BenchmarkCH019MaterializedViewsStorageAdmission/bounded-32    207129  5839 ns/op  5657 B/op  40 allocs/op
+```
+
 ## TR-036 Read-Only SQL Transactions
 
 This measures the Tarantool-inspired opt-in transaction mutation guard. The
