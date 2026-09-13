@@ -1,5 +1,26 @@
 # Benchmark
 
+## CH-49: Encrypted Object-Store Backups
+
+The opt-in `hatBackup.ObjectStoreTarget` encryption path uses AES-256-GCM
+chunked payloads and an authenticated manifest envelope. The default
+`NewObjectStoreTarget` path remains the unencrypted baseline. These measurements
+use one 10,240-byte payload file, the in-memory object-store test double, five
+samples, and an AMD Ryzen 9 5950X. `stored-bytes` excludes the separately stored
+manifest object.
+
+| Operation | Unencrypted median | Encrypted median | Relative cost | Stored bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Backup | 53,477 ns/op; 40,263 B; 76 allocs | 57,976 ns/op; 77,828 B; 94 allocs | 1.08x CPU; 1.93x transient bytes; 1.24x allocs | 10,240 -> 10,280 |
+| Restore | 1,672,541 ns/op; 52,900 B; 122 allocs | 1,728,067 ns/op; 78,397 B; 139 allocs | 1.03x CPU; 1.48x transient bytes; 1.14x allocs | 10,240 -> 10,280 |
+
+This is a security capability rather than a speed optimization. The payload
+expansion is 40 bytes for this single-frame fixture (0.39%); the higher
+transient allocation cost comes from authenticated framing and test-double
+copies. Full details, key rotation usage, compatibility, and raw samples are
+in [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md). Reproduce with
+`make benchmark-ch049-before` and `make benchmark-ch049-after`.
+
 ## C232 SQL intermediate row guard
 
 This is a safety benchmark, not a throughput feature. It compares the existing

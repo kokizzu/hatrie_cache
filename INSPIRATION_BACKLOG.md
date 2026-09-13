@@ -68,7 +68,7 @@ before/after measurement when its motivation is performance.
 | CH-46 | Kafka table source with durable offset checkpoints | Ingest streams without an external adapter | Exactly-once and connector lifecycle | [ ] |
 | CH-47 | S3 and URL table functions with ranged reads | Query external files selectively | Remote failures and credentials | [ ] |
 | CH-48 | External-format schema inference with controlled type promotion | Reduce ingestion setup | Surprising type changes | [ ] |
-| CH-49 | Encrypted backups with key rotation metadata | Protect durable snapshots | Key management and restore tooling | [ ] |
+| CH-49 | Encrypted backups with key rotation metadata | Protect durable snapshots | Key management and restore tooling | [x] Opt-in AES-256-GCM object-store payload/manifest encryption with keyring rotation and authenticated restore; local tar/Pebble bundles remain a separate follow-up. See [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md) |
 | CH-50 | SQL RowBinary streaming import and export | Minimize large SQL transfer overhead | Format compatibility and limits | [x] Additive HTTP export via `Accept: application/x-hatrie-rowbinary`; import remains a separate follow-up. See [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md) |
 
 ## Materialize (50 candidates)

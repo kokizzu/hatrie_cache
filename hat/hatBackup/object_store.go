@@ -42,12 +42,20 @@ type ObjectStore interface {
 // prefix. The manifest is written last, so a reader never treats an incomplete
 // upload as a complete backup.
 type ObjectStoreTarget struct {
-	store  ObjectStore
-	prefix string
+	store      ObjectStore
+	prefix     string
+	encryption *objectStoreEncryptionConfig
 }
 
 // NewObjectStoreTarget validates an object-store target prefix.
 func NewObjectStoreTarget(store ObjectStore, prefix string) (*ObjectStoreTarget, error) {
+	return NewObjectStoreTargetWithOptions(store, prefix, ObjectStoreTargetOptions{})
+}
+
+// NewObjectStoreTargetWithOptions validates an object-store target prefix and
+// optional encryption keyring. Restores accept any key in the keyring while
+// new backups use ActiveEncryptionKeyID.
+func NewObjectStoreTargetWithOptions(store ObjectStore, prefix string, options ObjectStoreTargetOptions) (*ObjectStoreTarget, error) {
 	if store == nil {
 		return nil, ErrObjectStoreNil
 	}
@@ -55,7 +63,11 @@ func NewObjectStoreTarget(store ObjectStore, prefix string) (*ObjectStoreTarget,
 	if err != nil {
 		return nil, err
 	}
-	return &ObjectStoreTarget{store: store, prefix: normalized}, nil
+	encryption, err := newObjectStoreEncryptionConfig(options)
+	if err != nil {
+		return nil, err
+	}
+	return &ObjectStoreTarget{store: store, prefix: normalized, encryption: encryption}, nil
 }
 
 // Backup scans source, streams every regular file to the object store, and
@@ -100,6 +112,17 @@ func (target *ObjectStoreTarget) Backup(ctx context.Context, source string, mani
 	if manifest.CreatedAt.IsZero() {
 		manifest.CreatedAt = time.Now().UTC()
 	}
+	if target.encryption == nil {
+		if manifest.Encryption != nil {
+			return BundleManifest{}, fmt.Errorf("%w: encrypted manifest requires an encryption-enabled target", ErrObjectStoreEncryptionInvalid)
+		}
+	} else {
+		keyID, _, err := target.encryption.active()
+		if err != nil {
+			return BundleManifest{}, err
+		}
+		manifest.Encryption = encryptionMetadataForKey(keyID)
+	}
 	manifest.Files = make([]BundleFile, 0, len(paths))
 	for _, relative := range paths {
 		if err := checkObjectStoreContext(ctx); err != nil {
@@ -114,7 +137,7 @@ func (target *ObjectStoreTarget) Backup(ctx context.Context, source string, mani
 	if err := validateObjectStoreManifest(manifest); err != nil {
 		return BundleManifest{}, err
 	}
-	encoded, err := json.Marshal(manifest)
+	encoded, err := target.encodeManifest(manifest)
 	if err != nil {
 		return BundleManifest{}, fmt.Errorf("hatriecache: encode object backup manifest: %w", err)
 	}
@@ -164,7 +187,11 @@ func (target *ObjectStoreTarget) Restore(ctx context.Context, destination string
 		if err != nil {
 			return BundleManifest{}, fmt.Errorf("hatriecache: download object backup file %q: %w", file.Path, err)
 		}
-		err = restoreObjectFile(ctx, body, path, file)
+		reader, readerErr := target.payloadReader(ctx, body, file, manifest)
+		err = readerErr
+		if err == nil {
+			err = restoreObjectFile(ctx, reader, path, file)
+		}
 		closeErr := body.Close()
 		if err != nil {
 			return BundleManifest{}, err
@@ -204,7 +231,11 @@ func (target *ObjectStoreTarget) Verify(ctx context.Context) (BundleManifest, er
 			return BundleManifest{}, fmt.Errorf("hatriecache: verify object backup file %q: %w", file.Path, err)
 		}
 		digest := sha256.New()
-		reader := io.Reader(&objectStoreContextReader{ctx: ctx, reader: body})
+		reader, readerErr := target.payloadReader(ctx, body, file, manifest)
+		if readerErr != nil {
+			_ = body.Close()
+			return BundleManifest{}, readerErr
+		}
 		if file.Size < math.MaxInt64 {
 			reader = io.LimitReader(reader, file.Size+1)
 		}
@@ -224,6 +255,48 @@ func (target *ObjectStoreTarget) Verify(ctx context.Context) (BundleManifest, er
 		}
 	}
 	return manifest, nil
+}
+
+func (target *ObjectStoreTarget) encodeManifest(manifest BundleManifest) ([]byte, error) {
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("hatriecache: encode object backup manifest: %w", err)
+	}
+	if len(data) > DefaultObjectStoreManifestMaxBytes {
+		return nil, fmt.Errorf("%w: manifest exceeds %d bytes", ErrObjectStoreManifestInvalid, DefaultObjectStoreManifestMaxBytes)
+	}
+	if target.encryption == nil {
+		return data, nil
+	}
+	keyID, key, err := target.encryption.active()
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := encryptObjectStoreManifest(data, keyID, key)
+	if err != nil {
+		return nil, fmt.Errorf("hatriecache: encrypt object backup manifest: %w", err)
+	}
+	if len(encoded) > maxObjectStoreEncryptedManifestBytes {
+		return nil, fmt.Errorf("%w: encrypted manifest exceeds %d bytes", ErrObjectStoreManifestInvalid, DefaultObjectStoreManifestMaxBytes)
+	}
+	return encoded, nil
+}
+
+func (target *ObjectStoreTarget) payloadReader(ctx context.Context, body io.Reader, file BundleFile, manifest BundleManifest) (io.Reader, error) {
+	if manifest.Encryption == nil {
+		return &objectStoreContextReader{ctx: ctx, reader: body}, nil
+	}
+	if err := validateObjectStoreEncryptionMetadata(manifest.Encryption); err != nil {
+		return nil, err
+	}
+	if target.encryption == nil {
+		return nil, fmt.Errorf("%w: encryption keyring is required for key %q", ErrObjectStoreEncryptionInvalid, manifest.Encryption.KeyID)
+	}
+	key, ok := target.encryption.lookup(manifest.Encryption.KeyID)
+	if !ok {
+		return nil, fmt.Errorf("%w: encryption key %q is not available", ErrObjectStoreEncryptionInvalid, manifest.Encryption.KeyID)
+	}
+	return newObjectStorePayloadDecryptReader(ctx, body, file.Path, *manifest.Encryption, file.Size, key)
 }
 
 func (target *ObjectStoreTarget) validate(ctx context.Context) error {
@@ -257,9 +330,28 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 	}
 	size := info.Size()
 	digest := sha256.New()
-	counted := &countingObjectReader{reader: io.LimitReader(file, size)}
-	body := &objectStoreContextReader{ctx: ctx, reader: io.TeeReader(counted, digest)}
-	err = target.store.Put(ctx, target.objectKey(relative), body, size)
+	plaintext := &countingObjectReader{reader: io.LimitReader(file, size)}
+	plaintextReader := io.Reader(io.TeeReader(plaintext, digest))
+	transferSize := size
+	if target.encryption != nil {
+		_, key, activeErr := target.encryption.active()
+		if activeErr != nil {
+			_ = file.Close()
+			return BundleFile{}, activeErr
+		}
+		transferSize, err = encryptedObjectSize(size, DefaultObjectStoreEncryptionChunkSize)
+		if err != nil {
+			_ = file.Close()
+			return BundleFile{}, err
+		}
+		plaintextReader, err = newObjectStorePayloadEncryptReader(ctx, plaintextReader, relative, size, key, DefaultObjectStoreEncryptionChunkSize)
+		if err != nil {
+			_ = file.Close()
+			return BundleFile{}, err
+		}
+	}
+	transferred := &countingObjectReader{reader: &objectStoreContextReader{ctx: ctx, reader: plaintextReader}}
+	err = target.store.Put(ctx, target.objectKey(relative), transferred, transferSize)
 	closeErr := file.Close()
 	if err != nil {
 		return BundleFile{}, fmt.Errorf("hatriecache: upload object backup file %q: %w", relative, err)
@@ -267,8 +359,11 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 	if closeErr != nil {
 		return BundleFile{}, fmt.Errorf("hatriecache: close object backup file %q: %w", relative, closeErr)
 	}
-	if counted.count != size {
-		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q read %d bytes, want %d", relative, counted.count, size)
+	if plaintext.count != size {
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q read %d plaintext bytes, want %d", relative, plaintext.count, size)
+	}
+	if transferred.count != transferSize {
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q uploaded %d bytes, want %d", relative, transferred.count, transferSize)
 	}
 	if err := checkObjectStoreContext(ctx); err != nil {
 		return BundleFile{}, err
@@ -288,7 +383,7 @@ func (target *ObjectStoreTarget) downloadManifest(ctx context.Context) (BundleMa
 	if err != nil {
 		return BundleManifest{}, fmt.Errorf("hatriecache: download object backup manifest: %w", err)
 	}
-	data, readErr := io.ReadAll(io.LimitReader(&objectStoreContextReader{ctx: ctx, reader: body}, DefaultObjectStoreManifestMaxBytes+1))
+	raw, readErr := io.ReadAll(io.LimitReader(&objectStoreContextReader{ctx: ctx, reader: body}, maxObjectStoreEncryptedManifestBytes+1))
 	closeErr := body.Close()
 	if readErr != nil {
 		return BundleManifest{}, fmt.Errorf("hatriecache: read object backup manifest: %w", readErr)
@@ -296,12 +391,26 @@ func (target *ObjectStoreTarget) downloadManifest(ctx context.Context) (BundleMa
 	if closeErr != nil {
 		return BundleManifest{}, fmt.Errorf("hatriecache: close object backup manifest: %w", closeErr)
 	}
+	if len(raw) > maxObjectStoreEncryptedManifestBytes {
+		return BundleManifest{}, fmt.Errorf("%w: manifest exceeds %d bytes", ErrObjectStoreManifestInvalid, DefaultObjectStoreManifestMaxBytes)
+	}
+	data, keyID, encrypted, err := decryptObjectStoreManifest(raw, target.encryption)
+	if err != nil {
+		return BundleManifest{}, err
+	}
 	if len(data) > DefaultObjectStoreManifestMaxBytes {
 		return BundleManifest{}, fmt.Errorf("%w: manifest exceeds %d bytes", ErrObjectStoreManifestInvalid, DefaultObjectStoreManifestMaxBytes)
 	}
 	var manifest BundleManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return BundleManifest{}, fmt.Errorf("%w: decode: %v", ErrObjectStoreManifestInvalid, err)
+	}
+	if encrypted {
+		if manifest.Encryption == nil || manifest.Encryption.KeyID != keyID {
+			return BundleManifest{}, fmt.Errorf("%w: encrypted manifest metadata does not match its envelope", ErrObjectStoreEncryptionInvalid)
+		}
+	} else if manifest.Encryption != nil {
+		return BundleManifest{}, fmt.Errorf("%w: unencrypted manifest declares encryption metadata", ErrObjectStoreEncryptionInvalid)
 	}
 	if err := validateObjectStoreManifest(manifest); err != nil {
 		return BundleManifest{}, err
@@ -352,6 +461,9 @@ func collectObjectStoreFiles(root string) ([]string, error) {
 func validateObjectStoreManifest(manifest BundleManifest) error {
 	if manifest.Version != BundleVersion {
 		return fmt.Errorf("%w: version %d, want %d", ErrObjectStoreManifestInvalid, manifest.Version, BundleVersion)
+	}
+	if err := validateObjectStoreEncryptionMetadata(manifest.Encryption); err != nil {
+		return err
 	}
 	if len(manifest.Files) > maxObjectStoreManifestFiles {
 		return fmt.Errorf("%w: file count %d exceeds %d", ErrObjectStoreManifestInvalid, len(manifest.Files), maxObjectStoreManifestFiles)

@@ -144,6 +144,7 @@ security guidance before exposing it on a network.
 - Reproducible Jupyter SQL analysis: [NOTEBOOK.md](NOTEBOOK.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
+- Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Opt-in asynchronous HTTP command admission and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
 - Opt-in durable SQL subscription history, progress, and resume cursors: [DURABLE_SUBSCRIPTIONS.md](DURABLE_SUBSCRIPTIONS.md)

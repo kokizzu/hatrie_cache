@@ -195,6 +195,9 @@ func validateBackupChainManifest(manifest BundleManifest) error {
 	if manifest.Version != BundleVersion {
 		return fmt.Errorf("hatriecache: backup %q has unsupported manifest version %d", manifest.BackupID, manifest.Version)
 	}
+	if err := validateObjectStoreEncryptionMetadata(manifest.Encryption); err != nil {
+		return fmt.Errorf("hatriecache: backup %q: %w", manifest.BackupID, err)
+	}
 	if manifest.Mode != ModePebbleIncremental {
 		return fmt.Errorf("hatriecache: backup %q is not an incremental Pebble manifest", manifest.BackupID)
 	}
@@ -255,5 +258,9 @@ func cloneBackupManifest(input BundleManifest) BundleManifest {
 	output := input
 	output.Files = append([]BundleFile(nil), input.Files...)
 	output.Partition = ClonePartitionMetadata(input.Partition)
+	if input.Encryption != nil {
+		encryption := *input.Encryption
+		output.Encryption = &encryption
+	}
 	return output
 }

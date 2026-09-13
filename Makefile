@@ -12110,3 +12110,47 @@ commit-ch026:
 .PHONY: push-ch026
 push-ch026:
 	bash ./scripts/push-ch026.sh
+
+.PHONY: benchmark-ch049-before
+benchmark-ch049-before:
+	bash ./scripts/benchmark-ch049-before.sh
+
+.PHONY: test-ch049-encryption-red
+test-ch049-encryption-red:
+	bash ./scripts/test-ch049-encryption-red.sh
+
+.PHONY: format-ch049
+format-ch049:
+	bash ./scripts/format-ch049.sh
+
+.PHONY: test-ch049
+test-ch049:
+	bash ./scripts/test-ch049.sh
+
+.PHONY: race-ch049
+race-ch049:
+	bash ./scripts/race-ch049.sh
+
+.PHONY: vet-ch049
+vet-ch049:
+	bash ./scripts/vet-ch049.sh
+
+.PHONY: check-ch049
+check-ch049:
+	bash ./scripts/check-ch049.sh
+
+.PHONY: benchmark-ch049-after
+benchmark-ch049-after:
+	bash ./scripts/benchmark-ch049-after.sh
+
+.PHONY: test-ch049-all
+test-ch049-all:
+	bash ./scripts/test-ch049-all.sh
+
+.PHONY: commit-ch049
+commit-ch049:
+	bash ./scripts/commit-ch049.sh
+
+.PHONY: push-ch049
+push-ch049:
+	bash ./scripts/push-ch049.sh

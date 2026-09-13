@@ -39,32 +39,41 @@ type BundleFile struct {
 	SHA256 string `json:"sha256"`
 }
 
+// EncryptionMetadata identifies the authenticated envelope used for a
+// backup. The key itself is intentionally never stored in the manifest.
+type EncryptionMetadata struct {
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"key_id"`
+	ChunkSize int    `json:"chunk_size"`
+}
+
 // BundleManifest describes a recoverable cache backup bundle.
 type BundleManifest struct {
-	Version           int                `json:"version"`
-	CreatedAt         time.Time          `json:"created_at"`
-	Mode              Mode               `json:"mode,omitempty"`
-	Snapshot          string             `json:"snapshot,omitempty"`
-	SnapshotFormat    string             `json:"snapshot_format,omitempty"`
-	Store             string             `json:"store,omitempty"`
-	StorageBackend    string             `json:"storage_backend,omitempty"`
-	StorageFormat     string             `json:"storage_format,omitempty"`
-	StorageGeneration uint64             `json:"storage_generation,omitempty"`
-	StorageIdentity   string             `json:"storage_identity,omitempty"`
-	BackupID          string             `json:"backup_id,omitempty"`
-	ParentBackupID    string             `json:"parent_backup_id,omitempty"`
-	Incremental       bool               `json:"incremental,omitempty"`
-	NewObjects        int                `json:"new_objects,omitempty"`
-	ReusedObjects     int                `json:"reused_objects,omitempty"`
-	NewObjectBytes    int64              `json:"new_object_bytes,omitempty"`
-	ReusedObjectBytes int64              `json:"reused_object_bytes,omitempty"`
-	Journal           string             `json:"journal,omitempty"`
-	JournalFormat     string             `json:"journal_format,omitempty"`
-	JournalSequence   uint64             `json:"journal_sequence"`
-	KeyPrefixes       []string           `json:"key_prefixes,omitempty"`
-	Partition         *PartitionMetadata `json:"partition,omitempty"`
-	Files             []BundleFile       `json:"files"`
-	RestoreHint       string             `json:"restore_hint"`
+	Version           int                 `json:"version"`
+	CreatedAt         time.Time           `json:"created_at"`
+	Mode              Mode                `json:"mode,omitempty"`
+	Snapshot          string              `json:"snapshot,omitempty"`
+	SnapshotFormat    string              `json:"snapshot_format,omitempty"`
+	Store             string              `json:"store,omitempty"`
+	StorageBackend    string              `json:"storage_backend,omitempty"`
+	StorageFormat     string              `json:"storage_format,omitempty"`
+	StorageGeneration uint64              `json:"storage_generation,omitempty"`
+	StorageIdentity   string              `json:"storage_identity,omitempty"`
+	BackupID          string              `json:"backup_id,omitempty"`
+	ParentBackupID    string              `json:"parent_backup_id,omitempty"`
+	Incremental       bool                `json:"incremental,omitempty"`
+	NewObjects        int                 `json:"new_objects,omitempty"`
+	ReusedObjects     int                 `json:"reused_objects,omitempty"`
+	NewObjectBytes    int64               `json:"new_object_bytes,omitempty"`
+	ReusedObjectBytes int64               `json:"reused_object_bytes,omitempty"`
+	Journal           string              `json:"journal,omitempty"`
+	JournalFormat     string              `json:"journal_format,omitempty"`
+	JournalSequence   uint64              `json:"journal_sequence"`
+	KeyPrefixes       []string            `json:"key_prefixes,omitempty"`
+	Partition         *PartitionMetadata  `json:"partition,omitempty"`
+	Encryption        *EncryptionMetadata `json:"encryption,omitempty"`
+	Files             []BundleFile        `json:"files"`
+	RestoreHint       string              `json:"restore_hint"`
 }
 
 // ParseMode parses one supported backup mode.
