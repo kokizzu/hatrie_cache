@@ -223,6 +223,7 @@ func cloneResultCacheResult(result QueryResult) QueryResult {
 	for index, step := range result.Plan {
 		clone.Plan[index] = cloneResultCachePlanStep(step)
 	}
+	clone.PlanSnapshot = cloneSQLPlanSnapshot(result.PlanSnapshot)
 	if result.Stats != nil {
 		stats := *result.Stats
 		clone.Stats = &stats

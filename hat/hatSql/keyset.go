@@ -22,7 +22,10 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
-	defer func() { observation.finish(result, err, operatorSteps, source, parameters) }()
+	defer func() {
+		observation.attachPlanSnapshot(&result, operatorSteps)
+		observation.finish(result, err, operatorSteps, source, parameters)
+	}()
 	if options.AsOfFrontier != nil {
 		snapshotResolver, snapshotRelease, snapshotErr := beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
 		if snapshotErr != nil {

@@ -300,8 +300,8 @@ type SQLQueryOptions struct {
 	// Nil preserves the deterministic estimate-only planner.
 	AdaptivePlanner *AdaptivePlanner
 	// QueryID is returned with materialized results and included in every
-	// observation event. When Observer is set but QueryID is empty, execution
-	// assigns a unique ID.
+	// observation event. When Observer, SlowQueryRecorder, or PlanSnapshot is
+	// set but QueryID is empty, execution assigns a unique ID.
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
@@ -338,6 +338,9 @@ type SQLQueryOptions struct {
 	// frontier. Nil preserves the live/default execution path; a non-nil
 	// pointer also permits an explicit frontier of zero.
 	AsOfFrontier *uint64
+	// PlanSnapshot enables an immutable explain snapshot on the returned
+	// materialized result, including any source-frontier requirements.
+	PlanSnapshot *SQLPlanSnapshotOptions
 }
 
 // QueryOptions bounds one query. It is the package-native name for
@@ -611,29 +614,57 @@ func ExecuteQueryContext(ctx context.Context, source string, resolver SourceReso
 var sqlQueryIDSequence atomic.Uint64
 
 type sqlQueryObservation struct {
-	id        string
-	observer  SQLQueryObserver
-	recorder  *SQLSlowQueryRecorder
-	started   time.Time
-	threshold time.Duration
+	id                     string
+	observer               SQLQueryObserver
+	recorder               *SQLSlowQueryRecorder
+	started                time.Time
+	threshold              time.Duration
+	planSnapshotEnabled    bool
+	requiredSourceFrontier *uint64
+	asOfFrontier           *uint64
 }
 
 func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 	id := strings.TrimSpace(options.QueryID)
-	if id == "" && (options.Observer != nil || options.SlowQueryRecorder != nil) {
+	if id == "" && (options.Observer != nil || options.SlowQueryRecorder != nil || options.PlanSnapshot != nil) {
 		id = fmt.Sprintf("sql-%d", sqlQueryIDSequence.Add(1))
 	}
-	return sqlQueryObservation{
-		id:        id,
-		observer:  options.Observer,
-		recorder:  options.SlowQueryRecorder,
-		started:   time.Now(),
-		threshold: options.SlowQueryThreshold,
+	observation := sqlQueryObservation{
+		id:                  id,
+		observer:            options.Observer,
+		recorder:            options.SlowQueryRecorder,
+		started:             time.Now(),
+		threshold:           options.SlowQueryThreshold,
+		planSnapshotEnabled: options.PlanSnapshot != nil,
 	}
+	if observation.planSnapshotEnabled {
+		if options.RequireSourceFrontier {
+			observation.requiredSourceFrontier = cloneSQLPlanSnapshotFrontier(&options.RequiredSourceFrontier)
+		}
+		observation.asOfFrontier = cloneSQLPlanSnapshotFrontier(options.AsOfFrontier)
+	}
+	return observation
 }
 
 func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
 	observation.finishSummary(len(result.Rows), len(result.Columns), observation.resultBytes(result.Rows), err, steps, source, parameters)
+}
+
+func (observation sqlQueryObservation) attachPlanSnapshot(result *SQLQueryResult, steps []SQLExplainStep) {
+	if result == nil || !observation.planSnapshotEnabled {
+		return
+	}
+	if len(steps) == 0 {
+		steps = result.Plan
+	}
+	result.PlanSnapshot = &SQLPlanSnapshot{
+		Format:                 SQLPlanSnapshotFormat,
+		QueryID:                result.QueryID,
+		StartedAtUnixNano:      observation.started.UnixNano(),
+		RequiredSourceFrontier: cloneSQLPlanSnapshotFrontier(observation.requiredSourceFrontier),
+		AsOfFrontier:           cloneSQLPlanSnapshotFrontier(observation.asOfFrontier),
+		Steps:                  cloneSQLPlanSnapshotSteps(steps),
+	}
 }
 
 func (observation sqlQueryObservation) resultBytes(rows []SQLRow) int {
@@ -720,6 +751,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 			}
 		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
+		observation.attachPlanSnapshot(&result, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
 	var snapshotResolver SQLSourceResolver
@@ -5057,7 +5089,10 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
-	defer func() { observation.finish(result, err, operatorSteps, source, parameters) }()
+	defer func() {
+		observation.attachPlanSnapshot(&result, operatorSteps)
+		observation.finish(result, err, operatorSteps, source, parameters)
+	}()
 	if options.AsOfFrontier != nil {
 		snapshotResolver, snapshotRelease, snapshotErr := beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
 		if snapshotErr != nil {

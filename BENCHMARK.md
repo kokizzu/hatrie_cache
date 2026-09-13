@@ -23333,3 +23333,21 @@ fewer transient bytes than JSON in this fixture. The streaming reader is
 bounded, incremental consumption. Import timing includes cache writes and is
 not compared to decode-only timing. The endpoint is opt-in and the existing
 JSON/NDJSON defaults are unchanged.
+
+## MZ-050 SQL Plan Snapshots
+
+This measures the Materialize-inspired opt-in `SQLPlanSnapshot` metadata on a
+materialized `EXPLAIN` result. The default case is the existing execution
+contract; the enabled case deep-copies plan steps and records temporal
+requirements. The fixture uses Go benchmark workers `-32`, an AMD Ryzen 9
+5950X, and five samples per case.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Snapshot disabled | 3,302 | 5,360 | 22 | 1.00x | 1.00x |
+| Snapshot enabled | 3,604 | 5,954 | 28 | 1.09x | 1.11x |
+
+The opt-in path adds `302 ns/op`, `594 B/op`, and `6 allocs/op` in this
+fixture. The snapshot is disabled by default, and cache keys isolate enabled
+results from ordinary results. See [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md)
+for usage, semantics, and raw samples.

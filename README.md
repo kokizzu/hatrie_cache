@@ -53,6 +53,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired TAIL progress heartbeats: [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-25-tail-progress-and-heartbeats)
 - Materialize-inspired compact multi-dimensional frontier antichains: [MZ008_FRONTIER_ANTICHAIN.md](MZ008_FRONTIER_ANTICHAIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-08-compact-frontier-antichain)
 - Materialize-inspired exact-frontier subscription snapshot export: [MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md](MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-26-exact-frontier-subscription-snapshot-export)
+- Materialize-inspired SQL plan snapshots: [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-050-sql-plan-snapshots)
 - ClickHouse-inspired skip-index usefulness telemetry: [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry)
 - ClickHouse-inspired structured EXPLAIN pruning telemetry: [CH022_EXPLAIN_PRUNING.md](CH022_EXPLAIN_PRUNING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-022-structured-explain-pruning-telemetry)
 - Deterministic differential subscription ordering: [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md)

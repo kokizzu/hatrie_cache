@@ -13107,3 +13107,23 @@ commit-tr015:
 
 push-tr015:
 	@bash scripts/push-tr015.sh
+test-mz050:
+	@bash scripts/test-mz050.sh
+
+format-mz050:
+	@bash scripts/format-mz050.sh
+
+benchmark-mz050:
+	@bash scripts/benchmark-mz050.sh
+
+race-mz050:
+	@bash scripts/race-mz050.sh
+
+vet-mz050:
+	@bash scripts/vet-mz050.sh
+
+commit-mz050:
+	@bash scripts/commit-mz050.sh
+
+push-mz050:
+	@bash scripts/push-mz050.sh

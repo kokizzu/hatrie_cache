@@ -340,6 +340,7 @@ func cloneQueryResult(result QueryResult) QueryResult {
 	result.Columns = append([]string(nil), result.Columns...)
 	result.Rows = CloneRows(result.Rows)
 	result.Plan = cloneMaterializedExplainSteps(result.Plan)
+	result.PlanSnapshot = cloneSQLPlanSnapshot(result.PlanSnapshot)
 	if result.Stats != nil {
 		stats := *result.Stats
 		result.Stats = &stats

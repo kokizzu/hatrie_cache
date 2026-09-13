@@ -54,6 +54,7 @@ func sqlResultCacheKey(source string, parameters []interface{}, options SQLQuery
 	appendSQLResultCachePart(&key, encoded.String())
 	appendSQLResultCachePart(&key, string(options.Collation))
 	appendSQLResultCachePart(&key, options.PreparedSchemaVersion)
+	appendSQLResultCachePart(&key, strconv.FormatBool(options.PlanSnapshot != nil))
 	if options.ResultCacheSettingsFingerprint != "" {
 		appendSQLResultCachePart(&key, options.ResultCacheSettingsFingerprint)
 	}

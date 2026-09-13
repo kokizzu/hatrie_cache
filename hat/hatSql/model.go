@@ -17,13 +17,14 @@ type Row map[string]interface{}
 
 // QueryResult is a materialized SQL response. Streaming clients use QueryRows.
 type QueryResult struct {
-	QueryID    string        `json:"query_id,omitempty"`
-	Columns    []string      `json:"columns"`
-	Rows       []Row         `json:"rows"`
-	Plan       []ExplainStep `json:"plan,omitempty"`
-	Stats      *QueryStats   `json:"stats,omitempty"`
-	HasMore    bool          `json:"has_more,omitempty"`
-	NextCursor string        `json:"next_cursor,omitempty"`
+	QueryID      string           `json:"query_id,omitempty"`
+	Columns      []string         `json:"columns"`
+	Rows         []Row            `json:"rows"`
+	Plan         []ExplainStep    `json:"plan,omitempty"`
+	PlanSnapshot *SQLPlanSnapshot `json:"plan_snapshot,omitempty"`
+	Stats        *QueryStats      `json:"stats,omitempty"`
+	HasMore      bool             `json:"has_more,omitempty"`
+	NextCursor   string           `json:"next_cursor,omitempty"`
 }
 
 // ExplainStep is one stable operation in an EXPLAIN plan.
