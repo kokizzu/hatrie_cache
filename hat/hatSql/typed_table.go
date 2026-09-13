@@ -40,23 +40,26 @@ type TypedTableColumn struct {
 }
 
 const (
-	typedTableColumnarCacheDefaultMaxBytes       = 4 << 20
-	typedTableColumnarCacheDefaultMinReads       = 2
-	typedTableColumnarCacheDefaultRowsPerSegment = 256
+	typedTableColumnarCacheDefaultMaxBytes           = 4 << 20
+	typedTableColumnarCacheDefaultMinReads           = 2
+	typedTableColumnarCacheDefaultRowsPerSegment     = 256
+	typedTableColumnarCacheDefaultSparseMarkMaxBytes = 1 << 20
 )
 
 // TypedTableColumnarCacheOptions configures the optional immutable SQL layout
 // cache. It is disabled by default so existing typed tables keep their current
 // memory behavior.
 type TypedTableColumnarCacheOptions struct {
-	Enabled            bool
-	CompressedBatches  bool
-	MaxBytes           int
-	MinReads           int
-	RowsPerSegment     int
-	AdaptiveSegments   bool
-	SparsePrimaryIndex bool
-	SparsePrimaryField string
+	Enabled                   bool
+	CompressedBatches         bool
+	MaxBytes                  int
+	MinReads                  int
+	RowsPerSegment            int
+	AdaptiveSegments          bool
+	SparsePrimaryIndex        bool
+	SparsePrimaryField        string
+	SparsePrimaryMarkCache    bool
+	SparsePrimaryMarkMaxBytes int
 }
 
 // TypedTableSchema describes one compact table. Name is used as the SQL source
@@ -127,12 +130,13 @@ type typedTableColumnarLayout struct {
 }
 
 type typedTableColumnarCache struct {
-	mu           sync.Mutex
-	options      TypedTableColumnarCacheOptions
-	layouts      map[string]typedTableColumnarLayout
-	observations map[string]int
-	bytes        int
-	tick         uint64
+	mu                 sync.Mutex
+	options            TypedTableColumnarCacheOptions
+	layouts            map[string]typedTableColumnarLayout
+	observations       map[string]int
+	sparsePrimaryMarks typedTableSparsePrimaryMarkCache
+	bytes              int
+	tick               uint64
 }
 
 func (storage *typedTableColumnStorage) append(value TypedTableValue) {
@@ -391,6 +395,12 @@ func normalizeTypedTableColumnarCacheOptions(options TypedTableColumnarCacheOpti
 	} else {
 		options.SparsePrimaryField = ""
 	}
+	if !options.SparsePrimaryMarkCache || !options.SparsePrimaryIndex {
+		options.SparsePrimaryMarkCache = false
+		options.SparsePrimaryMarkMaxBytes = 0
+	} else if options.SparsePrimaryMarkMaxBytes <= 0 {
+		options.SparsePrimaryMarkMaxBytes = typedTableColumnarCacheDefaultSparseMarkMaxBytes
+	}
 	return options
 }
 
@@ -612,7 +622,11 @@ func (table *TypedTable) BorrowSQLColumnarSourceSegments(name string, key string
 	defer table.mu.RUnlock()
 	layout, found := table.lookupColumnarLayoutWithSegmentsLocked(typedTableColumnarLayoutKey(fields))
 	if !found {
-		return ColumnarBatch{}, nil, false, nil
+		segments, found := table.columnar.lookupSparsePrimaryMarkLocked(typedTableColumnarLayoutKey(fields))
+		if !found {
+			return ColumnarBatch{}, nil, false, nil
+		}
+		return table.columnarBatchLocked(fields), segments, true, nil
 	}
 	return layout.batch, layout.segments, true, nil
 }
@@ -723,6 +737,7 @@ func (table *TypedTable) lookupColumnarLayoutWithSegmentsLocked(key string) (typ
 	cache.tick++
 	layout.touched = cache.tick
 	cache.layouts[key] = layout
+	cache.touchSparsePrimaryMarkLocked(key)
 	return layout, true
 }
 
@@ -751,6 +766,9 @@ func (table *TypedTable) observeColumnarLayoutLocked(key string, batch ColumnarB
 	cache.mu.Unlock()
 
 	segments := table.columnarNumericSegmentsLocked(batch)
+	cache.mu.Lock()
+	cache.observeSparsePrimaryMarkLocked(key, segments)
+	cache.mu.Unlock()
 	bytes := typedTableColumnarBatchBytes(batch, segments)
 	if bytes > cache.options.MaxBytes {
 		return
@@ -802,6 +820,7 @@ func (table *TypedTable) clearColumnarLayoutsLocked() {
 	cache.observations = nil
 	cache.bytes = 0
 	cache.tick = 0
+	cache.clearSparsePrimaryMarksLocked()
 	cache.mu.Unlock()
 }
 

@@ -11762,6 +11762,50 @@ commit-ch005:
 push-ch005:
 	bash ./scripts/push-ch005.sh
 
+.PHONY: test-ch006-red
+test-ch006-red:
+	bash ./scripts/test-ch006.sh red
+
+.PHONY: benchmark-ch006-baseline
+benchmark-ch006-baseline:
+	bash ./scripts/test-ch006.sh baseline
+
+.PHONY: test-ch006-package
+test-ch006-package:
+	bash ./scripts/test-ch006.sh package
+
+.PHONY: race-ch006
+race-ch006:
+	bash ./scripts/test-ch006.sh race
+
+.PHONY: vet-ch006
+vet-ch006:
+	bash ./scripts/test-ch006.sh vet
+
+.PHONY: format-ch006
+format-ch006:
+	bash ./scripts/test-ch006.sh format
+
+.PHONY: check-ch006
+check-ch006:
+	bash ./scripts/test-ch006.sh check
+
+.PHONY: benchmark-ch006
+benchmark-ch006:
+	bash ./scripts/test-ch006.sh benchmark
+
+.PHONY: status-ch006
+status-ch006:
+	bash ./scripts/status-ch006.sh
+
+.PHONY: commit-ch006
+commit-ch006:
+	bash ./scripts/commit-ch006.sh
+
+.PHONY: push-ch006
+push-ch006:
+	bash ./scripts/push-ch006.sh
+
 .PHONY: test-ch004-red benchmark-ch004-baseline test-ch004-package race-ch004 vet-ch004 format-ch004 check-ch004 benchmark-ch004
 test-ch004-red:
 	bash ./scripts/test-ch004.sh red

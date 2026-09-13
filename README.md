@@ -20,6 +20,7 @@ security guidance before exposing it on a network.
 - Static soft/hard namespace admission previews: [SQL_NAMESPACE_ADMISSION.md](SQL_NAMESPACE_ADMISSION.md)
 - Privacy-safe SQL query-log retention and rotation: [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md)
 - Opt-in bounded typed-table part and merge lifecycle events: [TYPED_TABLE_STORAGE_EVENTS.md](TYPED_TABLE_STORAGE_EVENTS.md)
+- Opt-in LRU sparse-primary marks separate from typed-table data layouts: [TYPED_TABLE_SPARSE_MARK_CACHE.md](TYPED_TABLE_SPARSE_MARK_CACHE.md)
 - Opt-in ClickHouse-style SQL intermediate row limits: [C232_INTERMEDIATE_ROWS.md](C232_INTERMEDIATE_ROWS.md)
 - Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
 - ClickHouse/Materialize-style mergeable aggregate states: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)

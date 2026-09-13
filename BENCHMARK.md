@@ -22162,3 +22162,60 @@ BenchmarkCH005StorageEventsEnabled-32                 100000  801.8 ns/op  1056 
 
 Reproduce with `make benchmark-ch005-baseline` before the implementation
 revision and `make benchmark-ch005` after it.
+
+## CH-006 LRU Sparse-primary Mark Cache
+
+This benchmark measures an ordered 65,536-row typed table with a full-layout
+cache limit of one byte, forcing the data batch to be rebuilt on every read.
+The sparse-primary mark cache can retain the 256 compact numeric bounds while
+the full batch is absent. It ran on Linux/amd64 with an AMD Ryzen 9 5950X,
+five fixed 20-iteration samples, and `-benchmem`. The query selects one row by
+primary-field equality; the source case isolates batch-plus-sidecar hydration.
+
+| Case | Median ns/op | B/op | Allocs/op | Relative time | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQL query before | 5,020,697 | 1,582,615 | 65,317 | 1.00x | 1.00x | 1.00x |
+| SQL query after, mark cache disabled | 4,906,676 | 1,582,616 | 65,318 | 1.02x faster | 1.00x | 1.00x |
+| SQL query after, mark cache enabled | 1,473,648 | 1,575,992 | 65,312 | 3.41x faster | 1.00x | 1.00x |
+| Source resolver before | 3,147,667 | 1,577,881 | 65,289 | 1.00x | 1.00x | 1.00x |
+| Source resolver after, mark cache enabled | 1,571,528 | 1,571,280 | 65,286 | 2.00x faster | 1.00x | 1.00x |
+
+The end-to-end win comes from both reusing the bounds and allowing the SQL
+executor to scan only the matching primary segment. The disabled path remains
+the existing behavior. The enabled path reduces transient bytes slightly and
+does not add per-operation allocations; its retained mark memory is separately
+bounded by `SparsePrimaryMarkMaxBytes`.
+
+Raw before-change output:
+
+```text
+BenchmarkCH006BaselineSparsePrimaryMarkQuery-32   20  4965534 ns/op  1584006 B/op  65318 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkQuery-32   20  5089968 ns/op  1583170 B/op  65317 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkQuery-32   20  5020697 ns/op  1582610 B/op  65317 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkQuery-32   20  5230321 ns/op  1582615 B/op  65317 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkQuery-32   20  4857586 ns/op  1582611 B/op  65317 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkSource-32  20  3262237 ns/op  1578159 B/op  65289 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkSource-32  20  3265875 ns/op  1577881 B/op  65289 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkSource-32  20  3117319 ns/op  1578159 B/op  65289 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkSource-32  20  3147667 ns/op  1577880 B/op  65289 allocs/op
+BenchmarkCH006BaselineSparsePrimaryMarkSource-32  20  3123211 ns/op  1577880 B/op  65289 allocs/op
+```
+
+Raw after-change output:
+
+```text
+BenchmarkCH006SparsePrimaryMarkCache/enabled-32  20  1525175 ns/op  1575992 B/op  65312 allocs/op
+BenchmarkCH006SparsePrimaryMarkCache/enabled-32  20  1525994 ns/op  1575992 B/op  65312 allocs/op
+BenchmarkCH006SparsePrimaryMarkCache/enabled-32  20  1371269 ns/op  1575992 B/op  65312 allocs/op
+BenchmarkCH006SparsePrimaryMarkCache/enabled-32  20  1447549 ns/op  1575992 B/op  65312 allocs/op
+BenchmarkCH006SparsePrimaryMarkCache/enabled-32  20  1473648 ns/op  1575992 B/op  65312 allocs/op
+BenchmarkCH006SparsePrimaryMarkSource/enabled-32  20  1544212 ns/op  1571280 B/op  65286 allocs/op
+BenchmarkCH006SparsePrimaryMarkSource/enabled-32  20  1571528 ns/op  1571280 B/op  65286 allocs/op
+BenchmarkCH006SparsePrimaryMarkSource/enabled-32  20  1532581 ns/op  1571280 B/op  65286 allocs/op
+BenchmarkCH006SparsePrimaryMarkSource/enabled-32  20  1594368 ns/op  1571280 B/op  65286 allocs/op
+BenchmarkCH006SparsePrimaryMarkSource/enabled-32  20  1648360 ns/op  1571281 B/op  65286 allocs/op
+```
+
+The complete disabled and post-change baseline samples are reproducible with
+`make benchmark-ch006`. Reproduce the archived pre-change samples with
+`make benchmark-ch006-baseline`.
