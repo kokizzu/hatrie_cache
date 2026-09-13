@@ -79,6 +79,11 @@ before/after measurement when its motivation is performance.
   CH-31, not full nested subcolumn storage. See
   [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md) and
   [BENCHMARK.md#ch-030a-prepared-sqljson-path-programs](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs).
+- **CH-051 prepared SQL regex programs**: literal patterns are compiled once
+  for `REGEXP_LIKE`, `REGEXP_EXTRACT`, and row-mode `REGEXP` predicates;
+  dynamic patterns retain runtime compilation. See
+  [CH051_PREPARED_REGEX_PROGRAMS.md](CH051_PREPARED_REGEX_PROGRAMS.md) and
+  [BENCHMARK.md#ch-051-prepared-sql-regex-programs](BENCHMARK.md#ch-051-prepared-sql-regex-programs).
 
 ## Materialize (50 candidates)
 

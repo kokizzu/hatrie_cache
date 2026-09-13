@@ -13219,6 +13219,33 @@ commit-ch030-json-path-program:
 push-ch030-json-path-program:
 	@bash scripts/push-ch030-json-path-program.sh
 
+.PHONY: test-ch051-regex-program
+test-ch051-regex-program:
+	@bash scripts/test-ch051-regex-program.sh
+
+.PHONY: benchmark-ch051-regex-program
+benchmark-ch051-regex-program:
+	@bash scripts/benchmark-ch051-regex-program.sh
+
+.PHONY: format-ch051-regex-program
+format-ch051-regex-program:
+	@bash scripts/format-ch051-regex-program.sh
+
+.PHONY: race-ch051-regex-program
+race-ch051-regex-program:
+	@bash scripts/race-ch051-regex-program.sh
+
+.PHONY: vet-ch051-regex-program
+vet-ch051-regex-program:
+	@bash scripts/vet-ch051-regex-program.sh
+
+.PHONY: commit-ch051-regex-program
+commit-ch051-regex-program:
+	@bash scripts/commit-ch051-regex-program.sh
+
+.PHONY: push-ch051-regex-program
+push-ch051-regex-program:
+	@bash scripts/push-ch051-regex-program.sh
 
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh

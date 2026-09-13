@@ -5,6 +5,44 @@ import (
 	"regexp"
 )
 
+type sqlRegexProgram struct {
+	source   string
+	compiled *regexp.Regexp
+	err      error
+}
+
+func compileSQLRegexProgram(pattern string) *sqlRegexProgram {
+	compiled, err := regexp.Compile(pattern)
+	return &sqlRegexProgram{source: pattern, compiled: compiled, err: err}
+}
+
+func prepareSQLRegexExpr(expr *sqlExpr) {
+	if expr == nil {
+		return
+	}
+	var patternValue interface{}
+	switch {
+	case expr.kind == "binary" && (expr.op == "REGEXP" || expr.op == "NOT REGEXP") && expr.right != nil && expr.right.kind == "literal":
+		patternValue = expr.right.value
+	case expr.kind == "func" && (expr.name == "REGEXP_LIKE" || expr.name == "REGEXP_EXTRACT") && len(expr.args) >= 2 && expr.args[1].kind == "literal":
+		patternValue = expr.args[1].value
+	default:
+		return
+	}
+	pattern, ok := patternValue.(string)
+	if !ok {
+		return
+	}
+	expr.regexProgram = compileSQLRegexProgram(pattern)
+}
+
+func sqlRegexProgramFor(expr sqlExpr, pattern string) (*regexp.Regexp, error) {
+	if expr.regexProgram != nil && expr.regexProgram.source == pattern {
+		return expr.regexProgram.compiled, expr.regexProgram.err
+	}
+	return regexp.Compile(pattern)
+}
+
 // sqlColumnarRegexpPredicate accepts a direct text field/literal REGEXP
 // comparison when every requested column value is text or NULL. Invalid and
 // mixed-type predicates stay on the general evaluator to preserve its errors.
@@ -16,7 +54,7 @@ func sqlColumnarRegexpPredicate(expr sqlExpr, alias string, batch ColumnarBatch)
 	if !text {
 		return "", nil, false, false
 	}
-	compiled, err := regexp.Compile(pattern)
+	compiled, err := sqlRegexProgramFor(expr, pattern)
 	if err != nil {
 		return "", nil, false, false
 	}
@@ -32,6 +70,10 @@ func sqlColumnarRegexpPredicate(expr sqlExpr, alias string, batch ColumnarBatch)
 }
 
 func evalSQLRegexPredicate(left, right interface{}, op string, token sqlToken) interface{} {
+	return evalSQLRegexPredicateWithProgram(left, right, op, token, nil)
+}
+
+func evalSQLRegexPredicateWithProgram(left, right interface{}, op string, token sqlToken, program *sqlRegexProgram) interface{} {
 	if left == nil || right == nil {
 		return nil
 	}
@@ -40,7 +82,7 @@ func evalSQLRegexPredicate(left, right interface{}, op string, token sqlToken) i
 	if !textOK || !patternOK {
 		return sqlEvalError{err: fmt.Errorf("REGEXP expects TEXT operands"), token: token}
 	}
-	compiled, err := regexp.Compile(pattern)
+	compiled, err := sqlRegexProgramFor(sqlExpr{regexProgram: program}, pattern)
 	if err != nil {
 		return sqlEvalError{err: fmt.Errorf("invalid regular expression: %w", err), token: token}
 	}
@@ -74,7 +116,7 @@ func evalSQLRegexFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) inte
 	if !textOK || !patternOK {
 		return sqlEvalError{err: fmt.Errorf("%s expects TEXT input and pattern", expr.name), token: expr.token}
 	}
-	compiled, err := regexp.Compile(pattern)
+	compiled, err := sqlRegexProgramFor(expr, pattern)
 	if err != nil {
 		return sqlEvalError{err: fmt.Errorf("invalid regular expression: %w", err), token: expr.token}
 	}

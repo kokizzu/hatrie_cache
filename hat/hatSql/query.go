@@ -5495,6 +5495,7 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 		}
 	}
 	prepareSQLJSONPathExpr(expr)
+	prepareSQLRegexExpr(expr)
 	return nil
 }
 
@@ -5745,6 +5746,7 @@ type sqlExpr struct {
 	token                     sqlToken
 	collation                 SQLCollation
 	jsonPath                  *sqlJSONPathProgram
+	regexProgram              *sqlRegexProgram
 }
 
 // sqlParameter is retained only in an immutable parsed template when a
@@ -16539,7 +16541,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return sqlEvaluationFailure(err)
 		}
 		if expr.op == "REGEXP" || expr.op == "NOT REGEXP" {
-			return evalSQLRegexPredicate(left, right, expr.op, expr.token)
+			return evalSQLRegexPredicateWithProgram(left, right, expr.op, expr.token, expr.regexProgram)
 		}
 		return sqlBinaryValueWithCollation(expr.op, left, right, expr.collation)
 	}
@@ -17169,7 +17171,7 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 				continue
 			}
 			if expr.op == "REGEXP" || expr.op == "NOT REGEXP" {
-				out[i] = evalSQLRegexPredicate(left[i], right[i], expr.op, expr.token)
+				out[i] = evalSQLRegexPredicateWithProgram(left[i], right[i], expr.op, expr.token, expr.regexProgram)
 				continue
 			}
 			out[i] = sqlBinaryValueWithCollation(expr.op, left[i], right[i], expr.collation)
