@@ -12202,3 +12202,51 @@ commit-ch041:
 .PHONY: push-ch041
 push-ch041:
 	bash ./scripts/push-ch041.sh
+
+.PHONY: test-ch038
+test-ch038:
+	bash ./scripts/test-ch038.sh
+
+.PHONY: benchmark-ch038-before
+benchmark-ch038-before:
+	bash ./scripts/benchmark-ch038-before.sh
+
+.PHONY: format-ch038
+format-ch038:
+	bash ./scripts/format-ch038.sh
+
+.PHONY: benchmark-ch038-after
+benchmark-ch038-after:
+	bash ./scripts/benchmark-ch038-after.sh
+
+.PHONY: test-ch038-all
+test-ch038-all:
+	bash ./scripts/test-ch038-all.sh
+
+.PHONY: test-ch038-repo
+test-ch038-repo:
+	bash ./scripts/test-ch038-repo.sh
+
+.PHONY: race-ch038
+race-ch038:
+	bash ./scripts/race-ch038.sh
+
+.PHONY: vet-ch038
+vet-ch038:
+	bash ./scripts/vet-ch038.sh
+
+.PHONY: check-ch038
+check-ch038:
+	bash ./scripts/check-ch038.sh
+
+.PHONY: review-ch038
+review-ch038:
+	bash ./scripts/review-ch038.sh
+
+.PHONY: commit-ch038
+commit-ch038:
+	bash ./scripts/commit-ch038.sh
+
+.PHONY: push-ch038
+push-ch038:
+	bash ./scripts/push-ch038.sh

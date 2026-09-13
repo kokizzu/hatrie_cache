@@ -22547,3 +22547,46 @@ BenchmarkSQLBoundedGroupArray/filtered-bounded-32 100 11104607 ns/op 19499230 B/
 The filtered comparison is a final-path control, not a pre-feature baseline;
 it isolates the additional benefit from avoiding the full temporary filtered
 row slice while applying the bound.
+
+## CH-038 SQL Bitmap Aggregates
+
+This benchmark compares the existing distinct interface-slice aggregate with
+the Roaring-backed `BITMAP_COUNT(BITMAP_AGG(value))` path for 16,384 rows,
+64 groups, and a 4,096-member value domain. It ran on Linux/amd64 with an AMD
+Ryzen 9 5950X, five samples, and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Existing `GROUP_UNIQ_ARRAY(value)` | 19,642,776 | 16,125,142 | 82,867 | baseline |
+| `BITMAP_COUNT(BITMAP_AGG(value))` | 10,553,468 | 15,521,651 | 83,123 | 1.86x faster, 3.7% lower B/op, 0.3% more allocations |
+
+The SQL bitmap is a typed compressed value. `BITMAP_AGG` skips NULLs and
+rejects values outside the uint32 range. JSON output remains a sorted value
+array for compatibility; in-process set operations do not mutate their
+inputs.
+
+Raw output from `make benchmark-ch038-after`:
+
+```text
+BenchmarkSQLBitmapCardinality/group-uniq-array-32 61 19732789 ns/op 16124904 B/op 82867 allocs/op
+BenchmarkSQLBitmapCardinality/group-uniq-array-32 56 19341296 ns/op 16124597 B/op 82866 allocs/op
+BenchmarkSQLBitmapCardinality/group-uniq-array-32 60 19563512 ns/op 16124722 B/op 82866 allocs/op
+BenchmarkSQLBitmapCardinality/group-uniq-array-32 60 20077070 ns/op 16125108 B/op 82867 allocs/op
+BenchmarkSQLBitmapCardinality/group-uniq-array-32 61 19717317 ns/op 16124670 B/op 82867 allocs/op
+BenchmarkSQLBitmapCardinality/bitmap-cardinality-32 100 10932283 ns/op 15522061 B/op 83123 allocs/op
+BenchmarkSQLBitmapCardinality/bitmap-cardinality-32 100 10553468 ns/op 15521651 B/op 83123 allocs/op
+BenchmarkSQLBitmapCardinality/bitmap-cardinality-32 100 10069641 ns/op 15521629 B/op 83122 allocs/op
+BenchmarkSQLBitmapCardinality/bitmap-cardinality-32 100 10614816 ns/op 15522399 B/op 83124 allocs/op
+BenchmarkSQLBitmapCardinality/bitmap-cardinality-32 100 10023346 ns/op 15521578 B/op 83122 allocs/op
+```
+
+A final corrected-tree rerun paired the existing control with the bitmap path
+at these medians:
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| `GROUP_UNIQ_ARRAY(value)` control | 21,833,893 | 16,124,711 | 82,867 | paired control |
+| `BITMAP_COUNT(BITMAP_AGG(value))` | 10,930,271 | 15,521,877 | 83,123 | 2.00x faster, 3.7% lower B/op, 0.3% more allocations |
+
+The paired rerun is included because the control varied between benchmark
+invocations; both paths in each table use the same workload shape.

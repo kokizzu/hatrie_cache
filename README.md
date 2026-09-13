@@ -102,6 +102,7 @@ security guidance before exposing it on a network.
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)
 - JSON `LIKE 'prefix%'` scans through ordered indexes: [SQL LIKE prefix index](SQL_LIKE_PREFIX_INDEX.md)
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
+- ClickHouse-style compressed SQL bitmap aggregates and set operations: [SQL bitmap aggregates](SQL_BITMAP_AGGREGATES.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)

@@ -7152,7 +7152,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
-				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF":
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF":
 				default:
 					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
 				}
@@ -15834,7 +15834,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -16111,12 +16111,24 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				}
 			}
 			return false
+		case "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR":
+			value, err := evalSQLBitmapFunction(expr, group, row)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return value
 		case "ARRAY_AGG", "GROUP_ARRAY":
 			values, err := sqlAggregateCollectionValues(expr, group)
 			if err != nil {
 				return sqlEvaluationFailure(err)
 			}
 			return values
+		case "BITMAP_AGG":
+			bitmap, err := sqlAggregateBitmapValues(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return bitmap
 		case "GROUP_UNIQ_ARRAY":
 			values, err := sqlAggregateCollectionValues(expr, group)
 			if err != nil {
@@ -16624,7 +16636,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false
