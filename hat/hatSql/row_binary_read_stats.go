@@ -101,6 +101,10 @@ func skipSQLRowBinaryValue(kind SQLRowBinaryType, encoded []byte, offset, row in
 		return next, nil
 	case SQLRowBinaryUUID:
 		return skipSQLRowBinaryFixed(encoded, offset, 16, row, column)
+	case SQLRowBinaryIPv4:
+		return skipSQLRowBinaryFixed(encoded, offset, 4, row, column)
+	case SQLRowBinaryIPv6:
+		return skipSQLRowBinaryFixed(encoded, offset, 16, row, column)
 	default:
 		return offset, fmt.Errorf("RowBinary read column %q has unsupported type %d", column, kind)
 	}

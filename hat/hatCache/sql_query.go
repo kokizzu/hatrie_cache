@@ -57,7 +57,16 @@ type SQLCodedError = hatSql.CodedError
 type SQLDate = hatSql.SQLDate
 type SQLDecimal = hatSql.SQLDecimal
 type SQLUUID = hatSql.SQLUUID
+type SQLIPv4 = hatSql.SQLIPv4
+type SQLIPv6 = hatSql.SQLIPv6
 type SQLDuration = hatSql.SQLDuration
+
+// ParseSQLIPv4 parses a strict IPv4 address for cache SQL callers.
+func ParseSQLIPv4(value string) (SQLIPv4, error) { return hatSql.ParseSQLIPv4(value) }
+
+// ParseSQLIPv6 parses a strict IPv6 address for cache SQL callers.
+func ParseSQLIPv6(value string) (SQLIPv6, error) { return hatSql.ParseSQLIPv6(value) }
+
 type SQLQueryRequest = hatSql.QueryRequest
 type SQLRow = hatSql.Row
 type SQLQueryResult = hatSql.QueryResult
@@ -552,6 +561,8 @@ func sqlInteger(value interface{}) (int64, bool) { return hatSql.Integer(value) 
 type sqlDate = SQLDate
 type sqlDecimal = SQLDecimal
 type sqlUUID = SQLUUID
+type sqlIPv4 = SQLIPv4
+type sqlIPv6 = SQLIPv6
 type sqlDuration = SQLDuration
 
 func sqlBinaryValue(op string, left, right interface{}) interface{} {

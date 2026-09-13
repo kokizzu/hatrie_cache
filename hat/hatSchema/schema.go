@@ -19,6 +19,8 @@ const (
 	TypeDate      Type = "DATE"
 	TypeTimestamp Type = "TIMESTAMP"
 	TypeUUID      Type = "UUID"
+	TypeIPv4      Type = "IPV4"
+	TypeIPv6      Type = "IPV6"
 	TypeDuration  Type = "DURATION"
 	TypeBinary    Type = "BINARY"
 	TypeJSON      Type = "JSON"
@@ -291,7 +293,7 @@ func validateColumn(column Column) error {
 		return errors.New("hatSchema: column name is required")
 	}
 	switch column.Type {
-	case TypeText, TypeNumber, TypeInteger, TypeDecimal, TypeBoolean, TypeDate, TypeTimestamp, TypeUUID, TypeDuration, TypeBinary, TypeJSON:
+	case TypeText, TypeNumber, TypeInteger, TypeDecimal, TypeBoolean, TypeDate, TypeTimestamp, TypeUUID, TypeIPv4, TypeIPv6, TypeDuration, TypeBinary, TypeJSON:
 		return nil
 	default:
 		return fmt.Errorf("hatSchema: unsupported column type %q", column.Type)

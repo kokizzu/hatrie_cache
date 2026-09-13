@@ -117,6 +117,10 @@ func modelGoType(columnType Type) (string, string, error) {
 		return "time.Time", "time", nil
 	case TypeUUID:
 		return "hatSql.SQLUUID", "hatrie_cache/hat/hatSql", nil
+	case TypeIPv4:
+		return "hatSql.SQLIPv4", "hatrie_cache/hat/hatSql", nil
+	case TypeIPv6:
+		return "hatSql.SQLIPv6", "hatrie_cache/hat/hatSql", nil
 	case TypeDuration:
 		return "time.Duration", "time", nil
 	case TypeBinary:

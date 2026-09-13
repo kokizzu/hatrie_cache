@@ -200,6 +200,20 @@ func decodeSQLRowBinaryBitmapValue(kind SQLRowBinaryType, encoded []byte, offset
 		var uuid [16]byte
 		copy(uuid[:], value)
 		return uuid, next, nil
+	case SQLRowBinaryIPv4:
+		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 4, row, column)
+		if err != nil {
+			return nil, offset, err
+		}
+		return SQLIPv4(binary.BigEndian.Uint32(value)), next, nil
+	case SQLRowBinaryIPv6:
+		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 16, row, column)
+		if err != nil {
+			return nil, offset, err
+		}
+		var ip SQLIPv6
+		copy(ip[:], value)
+		return ip, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary bitmap column %q has unsupported type %d", column, kind)
 	}

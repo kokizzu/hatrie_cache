@@ -26,6 +26,8 @@ const (
 	SQLRowBinaryDuration
 	SQLRowBinaryUUID
 	SQLRowBinaryJSON
+	SQLRowBinaryIPv4
+	SQLRowBinaryIPv6
 )
 
 // SQLRowBinaryColumn describes one schema-ordered RowBinary field. The
@@ -287,7 +289,7 @@ func validateSQLRowBinaryColumns(columns []SQLRowBinaryColumn) error {
 }
 
 func validSQLRowBinaryType(kind SQLRowBinaryType) bool {
-	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryJSON
+	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryIPv6
 }
 
 func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value interface{}, row int, column string) ([]byte, error) {
@@ -370,6 +372,20 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 		converted, ok := value.([16]byte)
 		if !ok {
 			return nil, fmt.Errorf("RowBinary row %d column %q expects [16]byte, got %T", row, column, value)
+		}
+		return append(destination, converted[:]...), nil
+	case SQLRowBinaryIPv4:
+		converted, ok := value.(SQLIPv4)
+		if !ok {
+			return nil, fmt.Errorf("RowBinary row %d column %q expects SQLIPv4, got %T", row, column, value)
+		}
+		var encoded [4]byte
+		binary.BigEndian.PutUint32(encoded[:], uint32(converted))
+		return append(destination, encoded[:]...), nil
+	case SQLRowBinaryIPv6:
+		converted, ok := value.(SQLIPv6)
+		if !ok {
+			return nil, fmt.Errorf("RowBinary row %d column %q expects SQLIPv6, got %T", row, column, value)
 		}
 		return append(destination, converted[:]...), nil
 	case SQLRowBinaryJSON:
@@ -469,6 +485,20 @@ func decodeSQLRowBinaryValue(kind SQLRowBinaryType, encoded []byte, offset, row 
 		var uuid [16]byte
 		copy(uuid[:], value)
 		return uuid, next, nil
+	case SQLRowBinaryIPv4:
+		value, next, err := readFixed(4)
+		if err != nil {
+			return nil, offset, err
+		}
+		return SQLIPv4(binary.BigEndian.Uint32(value)), next, nil
+	case SQLRowBinaryIPv6:
+		value, next, err := readFixed(16)
+		if err != nil {
+			return nil, offset, err
+		}
+		var ip SQLIPv6
+		copy(ip[:], value)
+		return ip, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary column %q has unsupported type %d", column, kind)
 	}

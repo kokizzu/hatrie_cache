@@ -480,6 +480,8 @@ func init() {
 	gob.Register(sqlDecimal(""))
 	gob.Register(sqlUUID(""))
 	gob.Register(sqlDuration(""))
+	gob.Register(sqlIPv4(0))
+	gob.Register(sqlIPv6{})
 	gob.Register(time.Time{})
 }
 
@@ -6469,14 +6471,14 @@ func (p *sqlQueryParser) parseSourceFieldTypes() (map[string]sqlSourceFieldType,
 		}
 		typeToken := p.current()
 		if typeToken.kind != sqlTokenIdentifier {
-			return nil, p.expected(typeToken, "a field type after "+field.text, []string{"TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "DURATION", "BINARY", "JSON"})
+			return nil, p.expected(typeToken, "a field type after "+field.text, []string{"TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "IPV4", "IPV6", "DURATION", "BINARY", "JSON"})
 		}
 		p.next()
 		typeName := strings.ToUpper(typeToken.text)
 		switch typeName {
-		case "TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "DURATION", "BINARY", "JSON":
+		case "TEXT", "NUMBER", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "IPV4", "IPV6", "DURATION", "BINARY", "JSON":
 		default:
-			return nil, p.diagnostic(typeToken, "unsupported JSON field type "+strconv.Quote(typeToken.text)+"; expected TEXT, NUMBER, INTEGER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, DURATION, BINARY, or JSON")
+			return nil, p.diagnostic(typeToken, "unsupported JSON field type "+strconv.Quote(typeToken.text)+"; expected TEXT, NUMBER, INTEGER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, IPV4, IPV6, DURATION, BINARY, or JSON")
 		}
 		if _, exists := fields[field.text]; exists {
 			return nil, p.diagnostic(field, "JSON field "+strconv.Quote(field.text)+" is declared more than once")
@@ -6826,6 +6828,10 @@ func sqlLiteralTypeName(value interface{}) string {
 		return "UUID"
 	case sqlDuration:
 		return "DURATION"
+	case sqlIPv4:
+		return "IPV4"
+	case sqlIPv6:
+		return "IPV6"
 	case []byte:
 		return "BINARY"
 	case string:
@@ -7061,6 +7067,30 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			}
 			return sqlExpr{kind: "literal", value: uuid}, nil
 		}
+		if upper == "IPV4" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "an IPv4 address string after IPV4", nil)
+			}
+			p.next()
+			ip, err := ParseSQLIPv4(value.text)
+			if err != nil {
+				return sqlExpr{}, p.diagnostic(value, "IPV4 requires a dotted-decimal address such as '192.0.2.1'")
+			}
+			return sqlExpr{kind: "literal", value: ip}, nil
+		}
+		if upper == "IPV6" {
+			value := p.current()
+			if value.kind != sqlTokenString {
+				return sqlExpr{}, p.expected(value, "an IPv6 address string after IPV6", nil)
+			}
+			p.next()
+			ip, err := ParseSQLIPv6(value.text)
+			if err != nil {
+				return sqlExpr{}, p.diagnostic(value, "IPV6 requires an IPv6 address such as '2001:db8::1'")
+			}
+			return sqlExpr{kind: "literal", value: ip}, nil
+		}
 		if upper == "DURATION" {
 			value := p.current()
 			if value.kind != sqlTokenString {
@@ -7108,14 +7138,14 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			}
 			target := p.current()
 			if target.kind != sqlTokenIdentifier {
-				return sqlExpr{}, p.expected(target, "a CAST target type (TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, DURATION, or BINARY)", nil)
+				return sqlExpr{}, p.expected(target, "a CAST target type (TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, IPV4, IPV6, DURATION, or BINARY)", nil)
 			}
 			p.next()
 			targetType := strings.ToUpper(target.text)
 			switch targetType {
-			case "TEXT", "NUMBER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "DURATION", "BINARY":
+			case "TEXT", "NUMBER", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "UUID", "IPV4", "IPV6", "DURATION", "BINARY":
 			default:
-				return sqlExpr{}, p.diagnostic(target, fmt.Sprintf("unsupported CAST target %q; expected TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, DURATION, or BINARY", target.text))
+				return sqlExpr{}, p.diagnostic(target, fmt.Sprintf("unsupported CAST target %q; expected TEXT, NUMBER, DECIMAL, BOOLEAN, DATE, TIMESTAMP, UUID, IPV4, IPV6, DURATION, or BINARY", target.text))
 			}
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return sqlExpr{}, err
@@ -12820,6 +12850,26 @@ func sqlTypedJSONFieldValue(value interface{}, typeName string) (interface{}, bo
 		}
 		uuid, ok := parseSQLUUID(text)
 		return uuid, ok
+	case "IPV4":
+		if ip, ok := value.(sqlIPv4); ok {
+			return ip, true
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		ip, err := ParseSQLIPv4(text)
+		return ip, err == nil
+	case "IPV6":
+		if ip, ok := value.(sqlIPv6); ok {
+			return ip, true
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		ip, err := ParseSQLIPv6(text)
+		return ip, err == nil
 	case "DURATION":
 		if duration, ok := value.(sqlDuration); ok {
 			return duration, true
@@ -16475,6 +16525,26 @@ func sqlCastValue(value interface{}, target string) (interface{}, error) {
 			}
 		}
 		return fail()
+	case "IPV4":
+		switch typed := value.(type) {
+		case sqlIPv4:
+			return typed, nil
+		case string:
+			if ip, err := ParseSQLIPv4(typed); err == nil {
+				return ip, nil
+			}
+		}
+		return fail()
+	case "IPV6":
+		switch typed := value.(type) {
+		case sqlIPv6:
+			return typed, nil
+		case string:
+			if ip, err := ParseSQLIPv6(typed); err == nil {
+				return ip, nil
+			}
+		}
+		return fail()
 	case "DURATION":
 		switch typed := value.(type) {
 		case sqlDuration:
@@ -16617,6 +16687,30 @@ func sqlCompare(left, right interface{}) int {
 				}
 				return 0
 			}
+		}
+	}
+	if a, ok := left.(sqlIPv4); ok {
+		if b, ok := right.(sqlIPv4); ok {
+			if a < b {
+				return -1
+			}
+			if a > b {
+				return 1
+			}
+			return 0
+		}
+	}
+	if a, ok := left.(sqlIPv6); ok {
+		if b, ok := right.(sqlIPv6); ok {
+			for index := range a {
+				if a[index] < b[index] {
+					return -1
+				}
+				if a[index] > b[index] {
+					return 1
+				}
+			}
+			return 0
 		}
 	}
 	if a, ok := left.([]byte); ok {

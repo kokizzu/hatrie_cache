@@ -12464,3 +12464,46 @@ commit-remote-part-prefetch:
 .PHONY: push-remote-part-prefetch
 push-remote-part-prefetch:
 	bash ./scripts/push-remote-part-prefetch.sh
+.PHONY: benchmark-sql-ip-types-before
+benchmark-sql-ip-types-before:
+	bash ./scripts/benchmark-sql-ip-types-before.sh
+
+.PHONY: test-sql-ip-types
+test-sql-ip-types:
+	bash ./scripts/test-sql-ip-types.sh
+
+.PHONY: test-sql-ip-types-integration
+test-sql-ip-types-integration:
+	bash ./scripts/test-sql-ip-types-integration.sh
+
+.PHONY: format-sql-ip-types
+format-sql-ip-types:
+	bash ./scripts/format-sql-ip-types.sh
+
+.PHONY: race-sql-ip-types
+race-sql-ip-types:
+	bash ./scripts/race-sql-ip-types.sh
+
+.PHONY: vet-sql-ip-types
+vet-sql-ip-types:
+	bash ./scripts/vet-sql-ip-types.sh
+
+.PHONY: check-sql-ip-types
+check-sql-ip-types:
+	bash ./scripts/check-sql-ip-types.sh
+
+.PHONY: review-sql-ip-types
+review-sql-ip-types:
+	bash ./scripts/review-sql-ip-types.sh
+
+.PHONY: commit-sql-ip-types
+commit-sql-ip-types:
+	bash ./scripts/commit-sql-ip-types.sh
+
+.PHONY: push-sql-ip-types
+push-sql-ip-types:
+	bash ./scripts/push-sql-ip-types.sh
+
+.PHONY: benchmark-sql-ip-types-after
+benchmark-sql-ip-types-after:
+	bash ./scripts/benchmark-sql-ip-types-after.sh

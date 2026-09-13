@@ -415,6 +415,10 @@ func sqlRowBinaryStreamFixedWidth(kind SQLRowBinaryType) int {
 		return 4
 	case SQLRowBinaryUUID:
 		return 16
+	case SQLRowBinaryIPv4:
+		return 4
+	case SQLRowBinaryIPv6:
+		return 16
 	default:
 		return 0
 	}
@@ -466,6 +470,10 @@ func inferSQLRowBinaryStreamType(value interface{}) SQLRowBinaryType {
 		return SQLRowBinaryDate
 	case sqlUUID:
 		return SQLRowBinaryUUID
+	case sqlIPv4:
+		return SQLRowBinaryIPv4
+	case sqlIPv6:
+		return SQLRowBinaryIPv6
 	case sqlDecimal, sqlDuration:
 		return SQLRowBinaryString
 	case []byte:
@@ -595,6 +603,32 @@ func normalizeSQLRowBinaryStreamValue(kind SQLRowBinaryType, value interface{}) 
 		return converted, nil
 	case SQLRowBinaryUUID:
 		return normalizeSQLRowBinaryStreamUUID(value)
+	case SQLRowBinaryIPv4:
+		switch converted := value.(type) {
+		case sqlIPv4:
+			return converted, nil
+		case string:
+			parsed, err := ParseSQLIPv4(converted)
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expects IPv4 string or SQLIPv4, got %T", value)
+		}
+	case SQLRowBinaryIPv6:
+		switch converted := value.(type) {
+		case sqlIPv6:
+			return converted, nil
+		case string:
+			parsed, err := ParseSQLIPv6(converted)
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expects IPv6 string or SQLIPv6, got %T", value)
+		}
 	case SQLRowBinaryJSON:
 		if raw, ok := value.(json.RawMessage); ok {
 			if !json.Valid(raw) {

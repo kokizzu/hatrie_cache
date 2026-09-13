@@ -944,6 +944,10 @@ func sqlInsertSelectValue(value interface{}) (sqlValue, error) {
 		return sqlValue{text: string(typed)}, nil
 	case sqlDecimal:
 		return sqlValue{text: string(typed)}, nil
+	case sqlIPv4:
+		return sqlValue{text: typed.String()}, nil
+	case sqlIPv6:
+		return sqlValue{text: typed.String()}, nil
 	default:
 		return sqlValue{}, fmt.Errorf("must be a scalar, got %T", value)
 	}

@@ -53,7 +53,7 @@ before/after measurement when its motivation is performance.
 | CH-31 | Automatic typed subcolumn materialization for JSON paths | Turn hot JSON paths into compact columns | Schema churn and disk use | [ ] |
 | CH-32 | Decimal128 and Decimal256 physical codecs | Exact high-precision analytics | Arithmetic CPU and overflow rules | [ ] |
 | CH-33 | UUID typed encoding and scalar functions | Compact stable identifiers | Type compatibility | [ ] |
-| CH-34 | IPv4 and IPv6 typed encoding and functions | Compact network analytics | Parsing and ordering semantics | [ ] |
+| CH-34 | IPv4 and IPv6 typed encoding and functions | Compact network analytics | Parsing and ordering semantics | [x] |
 | CH-35 | Enum physical encoding and schema validation | Compact categorical values | Schema evolution constraints | [ ] |
 | CH-36 | SQL aggregate combinators such as If, OrNull, State, and Merge | Reuse partial aggregate states in SQL | Parser and type-system growth | [ ] |
 | CH-37 | argMin and argMax aggregate states | Select values associated with extrema | Tie and NULL semantics | [ ] |

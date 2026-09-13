@@ -349,6 +349,18 @@ func normalizeSQLRowBinaryStatsValue(kind SQLRowBinaryType, value interface{}, r
 			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects [16]byte, got %T", row, column, value)
 		}
 		return converted, true, nil
+	case SQLRowBinaryIPv4:
+		converted, ok := value.(SQLIPv4)
+		if !ok {
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects SQLIPv4, got %T", row, column, value)
+		}
+		return converted, true, nil
+	case SQLRowBinaryIPv6:
+		converted, ok := value.(SQLIPv6)
+		if !ok {
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects SQLIPv6, got %T", row, column, value)
+		}
+		return converted, true, nil
 	case SQLRowBinaryJSON:
 		if _, ok := value.(json.RawMessage); !ok {
 			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects json.RawMessage, got %T", row, column, value)
@@ -367,7 +379,7 @@ func cloneSQLRowBinaryStatsValue(kind SQLRowBinaryType, value interface{}) inter
 }
 
 func sqlRowBinaryStatsSupportsMinMax(kind SQLRowBinaryType) bool {
-	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryUUID
+	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryUUID || kind == SQLRowBinaryIPv4 || kind == SQLRowBinaryIPv6
 }
 
 func compareSQLRowBinaryStatsValues(kind SQLRowBinaryType, left, right interface{}) int {
@@ -433,6 +445,24 @@ func compareSQLRowBinaryStatsValues(kind SQLRowBinaryType, left, right interface
 		}
 	case SQLRowBinaryUUID:
 		leftValue, rightValue := left.([16]byte), right.([16]byte)
+		for index := range leftValue {
+			if leftValue[index] < rightValue[index] {
+				return -1
+			}
+			if leftValue[index] > rightValue[index] {
+				return 1
+			}
+		}
+	case SQLRowBinaryIPv4:
+		leftValue, rightValue := left.(SQLIPv4), right.(SQLIPv4)
+		if leftValue < rightValue {
+			return -1
+		}
+		if leftValue > rightValue {
+			return 1
+		}
+	case SQLRowBinaryIPv6:
+		leftValue, rightValue := left.(SQLIPv6), right.(SQLIPv6)
 		for index := range leftValue {
 			if leftValue[index] < rightValue[index] {
 				return -1

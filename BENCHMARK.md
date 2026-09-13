@@ -22787,3 +22787,42 @@ BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 15 8541742 ns/op 14
 BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 13 8507850 ns/op 142584 B/op 103 allocs/op
 BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 14 8504019 ns/op 142585 B/op 103 allocs/op
 ```
+
+## CH-034 Typed IPv4/IPv6 RowBinary
+
+This benchmark compares the existing string representation with fixed-width
+typed IPv4/IPv6 values for the same four-row encode/decode workload on Linux
+amd64 with an AMD Ryzen 9 5950X, five samples, and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Payload | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| String control | 1,356 | 1,904 | 32 | 104 B | control |
+| Typed IPv4/IPv6 | 1,084 | 1,656 | 23 | 80 B | 1.25x faster CPU, 1.15x lower B/op, 1.39x fewer allocs, 1.30x lower payload |
+
+The typed path is an opt-in schema choice. It improves the measured codec path;
+it does not remove the cost of parsing input strings or formatting results.
+
+Raw pre-change baseline output from `make benchmark-sql-ip-types-before`:
+
+```text
+BenchmarkSQLRowBinaryIPStringBaseline-32 135321 1548 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 137097 1547 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 158320 1520 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 158000 1434 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 172926 1390 ns/op 1904 B/op 32 allocs/op
+```
+
+Raw post-change output from `make benchmark-sql-ip-types-after`:
+
+```text
+BenchmarkSQLRowBinaryIPStringBaseline-32 160634 1363 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 163384 1356 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 157804 1409 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 165924 1344 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPStringBaseline-32 164949 1355 ns/op 1904 B/op 32 allocs/op
+BenchmarkSQLRowBinaryIPTyped-32 203262 1090 ns/op 1656 B/op 23 allocs/op
+BenchmarkSQLRowBinaryIPTyped-32 216105 1065 ns/op 1656 B/op 23 allocs/op
+BenchmarkSQLRowBinaryIPTyped-32 225354 1068 ns/op 1656 B/op 23 allocs/op
+BenchmarkSQLRowBinaryIPTyped-32 204595 1084 ns/op 1656 B/op 23 allocs/op
+BenchmarkSQLRowBinaryIPTyped-32 198498 1097 ns/op 1656 B/op 23 allocs/op
+```
