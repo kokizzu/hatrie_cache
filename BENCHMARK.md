@@ -21952,4 +21952,60 @@ BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	227061721	 
 BenchmarkChangefeedCheckpointOperations/advance-prepared-32         	228529995	         5.095 ns/op	       0 B/op	       0 allocs/op
 PASS
 ok  	hatrie_cache/hat/hatReplication	30.034s
+
+## CH-001 Named Settings Profile Inheritance And Validation
+
+ClickHouse-inspired profile inheritance and setting validation were measured
+against a manual three-map merge. The benchmark ran on Linux/amd64 with an
+AMD Ryzen 9 5950X, five one-second samples, and `-benchmem`.
+
+| Operation | Before median ns/op | After median ns/op | Change | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Manual inherited merge | 286.9 | 282.9 | 1.01x faster | 336 | 336 | 2 | 2 |
+| Parentless registry resolve | 280.4 | 282.1 | 0.99x, within run noise | 336 | 336 | 2 | 2 |
+| Inherited registry resolve vs manual merge | 286.9 | 380.4 | 1.33x slower | 336 | 336 | 2 | 2 |
+
+The inherited registry path adds snapshot and parent-traversal CPU, but the
+bounded stack-backed chain removes its temporary allocation. Parentless
+profiles keep the existing direct-clone path. Validation runs only on profile
+publication and caller overrides, not on immutable inherited values already
+accepted by the registry.
+
+Raw before-change output:
+
+```text
+BenchmarkCH001BaselineManualInheritedResolve-32             4179974  285.6 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4236064  287.3 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4093039  282.6 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4077877  288.9 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4212412  286.9 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4295920  280.4 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4262896  279.4 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4174285  279.4 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     3949983  299.0 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     3894109  296.9 ns/op  336 B/op  2 allocs/op
+```
+
+Raw after-change output:
+
+```text
+BenchmarkCH001BaselineManualInheritedResolve-32             4201695  280.7 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4305573  280.3 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4318818  283.9 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4239374  288.8 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineManualInheritedResolve-32             4207141  282.9 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4282371  279.0 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4239877  282.1 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4296590  280.1 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4195448  283.6 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001BaselineNamedSettingsResolveParentless-32     4267245  283.0 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001NamedSettingsResolveInherited-32              3142090  381.4 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001NamedSettingsResolveInherited-32              3152679  375.4 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001NamedSettingsResolveInherited-32              3170348  382.2 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001NamedSettingsResolveInherited-32              3202861  378.8 ns/op  336 B/op  2 allocs/op
+BenchmarkCH001NamedSettingsResolveInherited-32              3202335  380.4 ns/op  336 B/op  2 allocs/op
+```
+
+Reproduce with `make benchmark-ch001-baseline` before the implementation
+revision and `make benchmark-ch001` after it.
 ```

@@ -11641,3 +11641,38 @@ amend-c232:
 	bash ./scripts/commit-c232.sh amend
 push-c232:
 	bash ./scripts/push-c232.sh
+.PHONY: audit-next-goal
+.PHONY: inspect-named-settings
+.PHONY: test-ch001-red benchmark-ch001-baseline test-ch001-package race-ch001 vet-ch001 format-ch001 benchmark-ch001
+test-ch001-red:
+	bash ./scripts/test-ch001.sh red
+
+benchmark-ch001-baseline:
+	bash ./scripts/test-ch001.sh baseline
+
+test-ch001-package:
+	bash ./scripts/test-ch001.sh package
+
+race-ch001:
+	bash ./scripts/test-ch001.sh race
+
+vet-ch001:
+	bash ./scripts/test-ch001.sh vet
+
+format-ch001:
+	bash ./scripts/test-ch001.sh format
+
+.PHONY: check-ch001 commit-ch001 push-ch001 deliver-ch001
+check-ch001:
+	bash ./scripts/test-ch001.sh check
+
+benchmark-ch001:
+	bash ./scripts/test-ch001.sh benchmark
+
+commit-ch001:
+	bash ./scripts/commit-ch001.sh
+
+push-ch001:
+	bash ./scripts/push-ch001.sh
+
+deliver-ch001: commit-ch001 push-ch001
