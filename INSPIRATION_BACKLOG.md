@@ -82,7 +82,7 @@ before/after measurement when its motivation is performance.
 | MZ-05 | Immutable sealed batch/run format for persisted updates | Stream compaction efficiently | New on-disk format | [ ] |
 | MZ-06 | Blob garbage collection at a verified safe frontier | Reclaim durable history safely | Recovery coordination | [ ] |
 | MZ-07 | Frontier-aware source backpressure | Avoid unbounded lagging input | Source throughput reduction | [ ] |
-| MZ-08 | Compact antichain representation for multi-dimensional frontiers | Reduce timestamp metadata | Harder comparison code | [ ] |
+| MZ-08 | Compact antichain representation for multi-dimensional frontiers | Reduce timestamp metadata | Harder comparison code | [x] Implemented by the bounded flat `hatPipeline.FrontierAntichain`; see [MZ008_FRONTIER_ANTICHAIN.md](MZ008_FRONTIER_ANTICHAIN.md) and [BENCHMARK.md#mz-08-compact-frontier-antichain](BENCHMARK.md#mz-08-compact-frontier-antichain). |
 | MZ-09 | Timestamp-domain leases for independent source clocks | Prevent timestamp collisions | Lease expiry and coordination | [ ] |
 | MZ-10 | Cross-source snapshot cutover coordinator | Start a consistent multi-source view | Connector synchronization | [ ] |
 | MZ-11 | Kafka partition offset frontiers | Expose exact source completeness | Offset and timestamp mapping | [ ] |

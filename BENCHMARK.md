@@ -23068,6 +23068,30 @@ does not alter ordinary subscriptions. Full semantics and raw commands are in
 
 Reproduce with `make benchmark-mz025`.
 
+## MZ-08: Compact Frontier Antichain
+
+This benchmark measures the standalone bounded flat antichain building block
+against a nested-slice reference on Linux `amd64`, AMD Ryzen 9 5950X, with five
+`-benchmem` samples. The workload inserts 256 incomparable four-dimensional
+points.
+
+| Operation | Median CPU | Allocated memory | Allocations |
+| --- | ---: | ---: | ---: |
+| Flat antichain, lazy growth | 135,320 ns/op | 25,184 B/op | 10 allocs/op |
+| Flat antichain, presized | 127,779 ns/op | 8,192 B/op | 1 alloc/op |
+| Nested-slice reference | 132,264 ns/op | 14,720 B/op | 257 allocs/op |
+| `Covers` readiness check | 3.445 ns/op | 0 B/op | 0 allocs/op |
+| Flat `Snapshot` | 1,493 ns/op | 8,192 B/op | 1 alloc/op |
+
+With a known point bound, presizing is about `1.04x` faster than the nested
+reference, uses `44%` less allocated memory, and performs `256x` fewer
+allocations. Lazy growth is intentionally not presented as a universal memory
+win: its cumulative allocation is higher because the backing slice grows
+geometrically. Full semantics and raw commands are in
+[MZ008_FRONTIER_ANTICHAIN.md](MZ008_FRONTIER_ANTICHAIN.md).
+
+Reproduce with `make benchmark-mz008`.
+
 ## CH-24: Skip-Index Usefulness Telemetry
 
 This explain-only change adds skipped, scanned, matched, residual, and
