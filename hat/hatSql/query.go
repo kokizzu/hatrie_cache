@@ -5494,6 +5494,7 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 			}
 		}
 	}
+	prepareSQLJSONPathExpr(expr)
 	return nil
 }
 
@@ -5743,6 +5744,7 @@ type sqlExpr struct {
 	filter                    *sqlExpr
 	token                     sqlToken
 	collation                 SQLCollation
+	jsonPath                  *sqlJSONPathProgram
 }
 
 // sqlParameter is retained only in an immutable parsed template when a

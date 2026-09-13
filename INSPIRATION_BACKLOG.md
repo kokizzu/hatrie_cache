@@ -71,6 +71,15 @@ before/after measurement when its motivation is performance.
 | CH-49 | Encrypted backups with key rotation metadata | Protect durable snapshots | Key management and restore tooling | [x] Opt-in AES-256-GCM object-store payload/manifest encryption with keyring rotation and authenticated restore; local tar/Pebble bundles remain a separate follow-up. See [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md) |
 | CH-50 | SQL RowBinary streaming import and export | Minimize large SQL transfer overhead | Format compatibility and limits | [x] Additive HTTP export via `Accept: application/x-hatrie-rowbinary` plus bounded embedded/HTTP import via `ExecuteSQLRowBinaryInsert`; see [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md) |
 
+### Delivered follow-up
+
+- **CH-030a prepared SQL/JSON path programs**: literal and bound-parameter
+  paths are compiled once per prepared expression; dynamic paths retain
+  runtime parsing. This is an incremental planner step toward CH-30 and
+  CH-31, not full nested subcolumn storage. See
+  [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md) and
+  [BENCHMARK.md#ch-030a-prepared-sqljson-path-programs](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs).
+
 ## Materialize (50 candidates)
 
 | ID | Candidate gap | Intended value | Main cost or risk | State |

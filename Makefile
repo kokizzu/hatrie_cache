@@ -13191,5 +13191,34 @@ commit-ch019-materialized-view-budget:
 push-ch019-materialized-view-budget:
 	@bash scripts/push-ch019-materialized-view-budget.sh
 
+.PHONY: test-ch030-json-path-program
+test-ch030-json-path-program:
+	@bash scripts/test-ch030-json-path-program.sh
+
+.PHONY: benchmark-ch030-json-path-program
+benchmark-ch030-json-path-program:
+	@bash scripts/benchmark-ch030-json-path-program.sh
+
+.PHONY: format-ch030-json-path-program
+format-ch030-json-path-program:
+	@bash scripts/format-ch030-json-path-program.sh
+
+.PHONY: race-ch030-json-path-program
+race-ch030-json-path-program:
+	@bash scripts/race-ch030-json-path-program.sh
+
+.PHONY: vet-ch030-json-path-program
+vet-ch030-json-path-program:
+	@bash scripts/vet-ch030-json-path-program.sh
+
+.PHONY: commit-ch030-json-path-program
+commit-ch030-json-path-program:
+	@bash scripts/commit-ch030-json-path-program.sh
+
+.PHONY: push-ch030-json-path-program
+push-ch030-json-path-program:
+	@bash scripts/push-ch030-json-path-program.sh
+
+
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh

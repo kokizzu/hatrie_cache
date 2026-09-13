@@ -13,6 +13,33 @@ type sqlJSONPathSegment struct {
 	isIndex bool
 }
 
+type sqlJSONPathProgram struct {
+	source   string
+	segments []sqlJSONPathSegment
+	err      error
+}
+
+func compileSQLJSONPath(path string) *sqlJSONPathProgram {
+	segments, err := parseSQLJSONPath(path)
+	return &sqlJSONPathProgram{source: path, segments: segments, err: err}
+}
+
+func prepareSQLJSONPathExpr(expr *sqlExpr) {
+	if expr == nil || expr.kind != "func" || len(expr.args) != 2 {
+		return
+	}
+	switch expr.name {
+	case "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS":
+	default:
+		return
+	}
+	path, ok := expr.args[1].value.(string)
+	if expr.args[1].kind != "literal" || !ok {
+		return
+	}
+	expr.jsonPath = compileSQLJSONPath(path)
+}
+
 // NormalizeJSONPath validates a restricted SQL/JSON path and returns its canonical form.
 func NormalizeJSONPath(path string) (string, error) {
 	segments, err := parseSQLJSONPath(path)
@@ -237,7 +264,18 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 	if !ok {
 		return sqlEvalError{err: fmt.Errorf("%s expects a TEXT JSON path", expr.name), token: expr.token}
 	}
-	value, exists, err := JSONPathValue(input, path)
+	var err error
+	var segments []sqlJSONPathSegment
+	if expr.jsonPath != nil && expr.jsonPath.source == path {
+		segments = expr.jsonPath.segments
+		err = expr.jsonPath.err
+	} else {
+		segments, err = parseSQLJSONPath(path)
+	}
+	if err != nil {
+		return sqlEvalError{err: err, token: expr.token}
+	}
+	value, exists, err := sqlJSONPathValue(input, segments)
 	if err != nil {
 		return sqlEvalError{err: err, token: expr.token}
 	}

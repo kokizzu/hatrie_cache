@@ -49,6 +49,7 @@ security guidance before exposing it on a network.
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)
+- ClickHouse-inspired prepared literal SQL/JSON path programs: [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs)
 - Materialize-inspired frontier compaction debt and blocked-lease metrics: [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics)
 - Materialize-inspired active read-hold diagnostics: [MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics)
 - Materialize-inspired TAIL progress heartbeats: [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-25-tail-progress-and-heartbeats)

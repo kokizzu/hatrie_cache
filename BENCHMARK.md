@@ -23446,3 +23446,39 @@ BenchmarkTR036ReadOnlySQLTransactionGuard-32  87995312  14.65 ns/op  0 B/op  0 a
 BenchmarkTR036ReadOnlySQLTransactionGuard-32  81138364  15.31 ns/op  0 B/op  0 allocs/op
 BenchmarkTR036ReadOnlySQLTransactionGuard-32  73909237  13.80 ns/op  0 B/op  0 allocs/op
 ```
+
+## CH-030a Prepared SQL/JSON Path Programs
+
+This measures the ClickHouse-inspired prepared-path follow-up to CH-030. The
+baseline reparses a literal path for every row evaluation. The optimized
+variant compiles that immutable path when the SQL expression is bound. The
+benchmark uses a decoded nested object, so it isolates path-program overhead;
+JSON text decoding remains unchanged.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before preparation | 166.7 | 176 | 2 | 1.00x | 1.00x |
+| Prepared literal path | 124.9 | 112 | 1 | 0.75x | 0.64x |
+
+The prepared path is 1.33x faster, removes one allocation, and lowers bytes
+per operation by 36.4%. Dynamic paths and public `JSONPathValue` calls retain
+their existing runtime behavior. See [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md)
+for scope, verification commands, and raw samples.
+
+Raw output:
+
+```text
+# Before preparation
+BenchmarkCH030JSONPathLiteralEvaluation-32    6978637  168.5 ns/op  176 B/op  2 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    7204611  164.4 ns/op  176 B/op  2 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    7388232  166.1 ns/op  176 B/op  2 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    7307899  166.7 ns/op  176 B/op  2 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    7023122  173.0 ns/op  176 B/op  2 allocs/op
+
+# Prepared literal path
+BenchmarkCH030JSONPathLiteralEvaluation-32    9510499  128.0 ns/op  112 B/op  1 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    9457512  124.0 ns/op  112 B/op  1 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    9612483  125.8 ns/op  112 B/op  1 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    9243722  124.9 ns/op  112 B/op  1 allocs/op
+BenchmarkCH030JSONPathLiteralEvaluation-32    9426471  125.7 ns/op  112 B/op  1 allocs/op
+```
