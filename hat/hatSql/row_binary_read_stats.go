@@ -67,6 +67,9 @@ func AnalyzeSQLRowBinaryRead(columns []SQLRowBinaryColumn, encoded []byte) (SQLR
 			if err != nil {
 				return SQLRowBinaryReadStats{}, err
 			}
+			if err := validateSQLRowBinaryEncodedEnumValue(column, encoded, offset, stats.Rows); err != nil {
+				return SQLRowBinaryReadStats{}, err
+			}
 			offset = next
 			stats.Columns[index].Bytes += offset - start
 		}
@@ -75,10 +78,39 @@ func AnalyzeSQLRowBinaryRead(columns []SQLRowBinaryColumn, encoded []byte) (SQLR
 	return stats, nil
 }
 
+func validateSQLRowBinaryEncodedEnumValue(column SQLRowBinaryColumn, encoded []byte, offset, row int) error {
+	var size int
+	switch column.Type {
+	case SQLRowBinaryEnum8:
+		size = 1
+	case SQLRowBinaryEnum16:
+		size = 2
+	default:
+		return nil
+	}
+	if offset < 0 || size > len(encoded)-offset {
+		return fmt.Errorf("RowBinary read row %d column %q is truncated", row, column.Name)
+	}
+	var code uint64
+	if size == 1 {
+		code = uint64(encoded[offset])
+	} else {
+		code = uint64(binary.LittleEndian.Uint16(encoded[offset : offset+size]))
+	}
+	if code >= uint64(len(column.EnumValues)) {
+		return fmt.Errorf("RowBinary read row %d column %q enum code %d exceeds %d labels", row, column.Name, code, len(column.EnumValues))
+	}
+	return nil
+}
+
 func skipSQLRowBinaryValue(kind SQLRowBinaryType, encoded []byte, offset, row int, column string) (int, error) {
 	switch kind {
 	case SQLRowBinaryInt64, SQLRowBinaryUint64, SQLRowBinaryFloat64, SQLRowBinaryDateTime, SQLRowBinaryDuration:
 		return skipSQLRowBinaryFixed(encoded, offset, 8, row, column)
+	case SQLRowBinaryEnum8:
+		return skipSQLRowBinaryFixed(encoded, offset, 1, row, column)
+	case SQLRowBinaryEnum16:
+		return skipSQLRowBinaryFixed(encoded, offset, 2, row, column)
 	case SQLRowBinaryBool:
 		if offset < 0 || offset >= len(encoded) {
 			return offset, fmt.Errorf("RowBinary read row %d column %q is truncated", row, column)

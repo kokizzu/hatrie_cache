@@ -119,6 +119,9 @@ func compareRollingSource(previous, next Source, addChange func(SchemaCompatibil
 		if previousColumn.Type != nextColumn.Type {
 			addChange(SchemaCompatibilityChange{Kind: "column_type_changed", Source: previous.Name, Column: previousColumn.Name, Detail: fmt.Sprintf("%s -> %s", previousColumn.Type, nextColumn.Type)}, false)
 		}
+		if !reflect.DeepEqual(previousColumn.EnumValues, nextColumn.EnumValues) {
+			addChange(SchemaCompatibilityChange{Kind: "enum_values_changed", Source: previous.Name, Column: previousColumn.Name}, false)
+		}
 		if previousColumn.NotNull != nextColumn.NotNull {
 			if previousColumn.NotNull && !nextColumn.NotNull {
 				addChange(SchemaCompatibilityChange{Kind: "nullability_relaxed", Source: previous.Name, Column: previousColumn.Name}, true)

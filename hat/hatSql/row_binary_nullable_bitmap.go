@@ -43,7 +43,7 @@ func EncodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, rows []SQLRow) ([]by
 				continue
 			}
 			var err error
-			encoded, err = appendSQLRowBinaryValue(encoded, column.Type, value, rowIndex, column.Name)
+			encoded, err = appendSQLRowBinaryColumnValue(encoded, column, value, rowIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -91,6 +91,9 @@ func DecodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, encoded []byte) ([]S
 			}
 			value, next, err := decodeSQLRowBinaryBitmapValue(column.Type, encoded, offset, len(rows), column.Name)
 			if err != nil {
+				return nil, err
+			}
+			if err := validateSQLRowBinaryEnumDecodedValue(column, value, len(rows)); err != nil {
 				return nil, err
 			}
 			row[column.Name] = value
@@ -214,6 +217,18 @@ func decodeSQLRowBinaryBitmapValue(kind SQLRowBinaryType, encoded []byte, offset
 		var ip SQLIPv6
 		copy(ip[:], value)
 		return ip, next, nil
+	case SQLRowBinaryEnum8:
+		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 1, row, column)
+		if err != nil {
+			return nil, offset, err
+		}
+		return SQLEnum8(value[0]), next, nil
+	case SQLRowBinaryEnum16:
+		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 2, row, column)
+		if err != nil {
+			return nil, offset, err
+		}
+		return SQLEnum16(binary.LittleEndian.Uint16(value)), next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary bitmap column %q has unsupported type %d", column, kind)
 	}

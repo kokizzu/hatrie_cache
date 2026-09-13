@@ -4604,6 +4604,114 @@ inspect-sql-prefix-index-delivery-script:
 audit-next-inspiration:
 	sh ./scripts/audit-next-inspiration.sh
 
+.PHONY: inspect-ch035
+inspect-ch035:
+	sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-row
+inspect-ch035-row:
+	SECTION=row sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-nullable
+inspect-ch035-nullable:
+	SECTION=nullable sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-stream
+inspect-ch035-stream:
+	SECTION=stream sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-stream-normalize
+inspect-ch035-stream-normalize:
+	SECTION=stream-normalize sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-stream-header
+inspect-ch035-stream-header:
+	SECTION=stream-header sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-delta
+inspect-ch035-delta:
+	SECTION=delta sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-stats
+inspect-ch035-stats:
+	SECTION=stats sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-read-stats
+inspect-ch035-read-stats:
+	SECTION=read-stats sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-stats-pruning
+inspect-ch035-stats-pruning:
+	SECTION=stats-pruning sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-schema
+inspect-ch035-schema:
+	SECTION=schema sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-schema-validation
+inspect-ch035-schema-validation:
+	SECTION=schema-validation sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-fingerprint
+inspect-ch035-fingerprint:
+	SECTION=fingerprint sh ./scripts/inspect-ch035.sh
+
+.PHONY: inspect-ch035-docs
+inspect-ch035-docs:
+	SECTION=docs sh ./scripts/inspect-ch035.sh
+
+.PHONY: benchmark-sql-enum-before
+benchmark-sql-enum-before:
+	sh ./scripts/benchmark-sql-enum-before.sh
+
+.PHONY: test-sql-enum
+test-sql-enum:
+	sh ./scripts/test-sql-enum.sh
+
+.PHONY: benchmark-sql-enum-after
+benchmark-sql-enum-after:
+	sh ./scripts/benchmark-sql-enum-after.sh
+
+.PHONY: format-sql-enum
+format-sql-enum:
+	sh ./scripts/format-sql-enum.sh
+
+.PHONY: benchmark-sql-enum-comparison
+benchmark-sql-enum-comparison:
+	sh ./scripts/benchmark-sql-enum-comparison.sh
+
+.PHONY: benchmark-sql-enum-default
+benchmark-sql-enum-default:
+	sh ./scripts/benchmark-sql-enum-default.sh
+
+.PHONY: benchmark-sql-enum-encode
+benchmark-sql-enum-encode:
+	sh ./scripts/benchmark-sql-enum-encode.sh
+
+.PHONY: test-sql-enum-full
+test-sql-enum-full:
+	sh ./scripts/test-sql-enum-full.sh
+
+.PHONY: race-sql-enum
+race-sql-enum:
+	sh ./scripts/race-sql-enum.sh
+
+.PHONY: vet-sql-enum
+vet-sql-enum:
+	sh ./scripts/vet-sql-enum.sh
+
+.PHONY: review-sql-enum
+review-sql-enum:
+	sh ./scripts/review-sql-enum.sh
+
+.PHONY: commit-sql-enum
+commit-sql-enum:
+	sh ./scripts/commit-sql-enum.sh
+
+.PHONY: push-sql-enum
+push-sql-enum:
+	sh ./scripts/push-sql-enum.sh
+
 .PHONY: audit-inspiration-unchecked
 audit-inspiration-unchecked:
 	sh ./scripts/audit-inspiration-unchecked.sh

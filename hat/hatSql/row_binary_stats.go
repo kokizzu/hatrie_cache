@@ -71,11 +71,11 @@ func EncodeSQLRowBinaryWithStats(columns []SQLRowBinaryColumn, rows []SQLRow) ([
 		metadata = appendSQLRowBinaryStatsUvarint(metadata, columnStats.ValueCount)
 		if columnStats.HasMinMax {
 			metadata = append(metadata, 1)
-			metadata, err = appendSQLRowBinaryValue(metadata, column.Type, columnStats.Min, -1, column.Name)
+			metadata, err = appendSQLRowBinaryColumnValue(metadata, column, columnStats.Min, -1)
 			if err != nil {
 				return nil, err
 			}
-			metadata, err = appendSQLRowBinaryValue(metadata, column.Type, columnStats.Max, -1, column.Name)
+			metadata, err = appendSQLRowBinaryColumnValue(metadata, column, columnStats.Max, -1)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +129,7 @@ func encodeSQLRowBinaryRowsAndStats(columns []SQLRowBinaryColumn, rows []SQLRow)
 				return nil, nil, err
 			}
 			var err error
-			payload, err = appendSQLRowBinaryValue(payload, column.Type, value, rowIndex, column.Name)
+			payload, err = appendSQLRowBinaryColumnValue(payload, column, value, rowIndex)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -199,9 +199,15 @@ func DecodeSQLRowBinaryWithStats(columns []SQLRowBinaryColumn, encoded []byte) (
 			if err != nil {
 				return nil, nil, err
 			}
+			if err := validateSQLRowBinaryEnumDecodedValue(column, min, -1); err != nil {
+				return nil, nil, err
+			}
 			metadataOffset = next
 			max, next, err := decodeSQLRowBinaryValue(column.Type, metadata, metadataOffset, -1, column.Name)
 			if err != nil {
+				return nil, nil, err
+			}
+			if err := validateSQLRowBinaryEnumDecodedValue(column, max, -1); err != nil {
 				return nil, nil, err
 			}
 			metadataOffset = next
@@ -255,7 +261,7 @@ func DecodeSQLRowBinaryWithStats(columns []SQLRowBinaryColumn, encoded []byte) (
 
 func accumulateSQLRowBinaryColumnStats(stats *SQLRowBinaryColumnStats, column SQLRowBinaryColumn, value interface{}, row int) error {
 	stats.ValueCount++
-	normalized, orderable, err := normalizeSQLRowBinaryStatsValue(column.Type, value, row, column.Name)
+	normalized, orderable, err := normalizeSQLRowBinaryStatsColumnValue(column, value, row)
 	if err != nil {
 		return err
 	}
@@ -281,93 +287,111 @@ func accumulateSQLRowBinaryColumnStats(stats *SQLRowBinaryColumnStats, column SQ
 	return nil
 }
 
-func normalizeSQLRowBinaryStatsValue(kind SQLRowBinaryType, value interface{}, row int, column string) (interface{}, bool, error) {
+func normalizeSQLRowBinaryStatsValue(kind SQLRowBinaryType, value interface{}, row int, columnName string) (interface{}, bool, error) {
+	return normalizeSQLRowBinaryStatsColumnValue(SQLRowBinaryColumn{Name: columnName, Type: kind}, value, row)
+}
+
+func normalizeSQLRowBinaryStatsColumnValue(column SQLRowBinaryColumn, value interface{}, row int) (interface{}, bool, error) {
+	kind := column.Type
+	columnName := column.Name
 	switch kind {
 	case SQLRowBinaryInt64:
 		converted, ok := sqlRowBinaryInt64(value)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects int64, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects int64, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryUint64:
 		converted, ok := sqlRowBinaryUint64(value)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects uint64, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects uint64, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryFloat64:
 		converted, ok := sqlRowBinaryFloat64(value)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects float64, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects float64, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryBool:
 		converted, ok := value.(bool)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects bool, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects bool, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryString:
 		converted, ok := value.(string)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects string, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects string, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryBytes:
 		converted, ok := value.([]byte)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects []byte, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects []byte, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryDate:
 		converted, ok := value.(time.Time)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects time.Time, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects time.Time, got %T", row, columnName, value)
 		}
 		utc := converted.UTC()
 		midnight := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 		days := midnight.Unix() / (24 * 60 * 60)
 		if days < math.MinInt32 || days > math.MaxInt32 {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q date is out of range", row, column)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q date is out of range", row, columnName)
 		}
 		return time.Unix(days*24*60*60, 0).UTC(), true, nil
 	case SQLRowBinaryDateTime:
 		converted, ok := value.(time.Time)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects time.Time, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects time.Time, got %T", row, columnName, value)
 		}
 		return time.Unix(0, converted.UnixNano()).UTC(), true, nil
 	case SQLRowBinaryDuration:
 		converted, ok := sqlRowBinaryDuration(value)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects time.Duration, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects time.Duration, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryUUID:
 		converted, ok := value.([16]byte)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects [16]byte, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects [16]byte, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryIPv4:
 		converted, ok := value.(SQLIPv4)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects SQLIPv4, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects SQLIPv4, got %T", row, columnName, value)
 		}
 		return converted, true, nil
 	case SQLRowBinaryIPv6:
 		converted, ok := value.(SQLIPv6)
 		if !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects SQLIPv6, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects SQLIPv6, got %T", row, column.Name, value)
 		}
 		return converted, true, nil
+	case SQLRowBinaryEnum8:
+		code, err := sqlRowBinaryEnumCode(column, value, row)
+		if err != nil {
+			return nil, false, err
+		}
+		return SQLEnum8(code), true, nil
+	case SQLRowBinaryEnum16:
+		code, err := sqlRowBinaryEnumCode(column, value, row)
+		if err != nil {
+			return nil, false, err
+		}
+		return SQLEnum16(code), true, nil
 	case SQLRowBinaryJSON:
 		if _, ok := value.(json.RawMessage); !ok {
-			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects json.RawMessage, got %T", row, column, value)
+			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects json.RawMessage, got %T", row, columnName, value)
 		}
 		return nil, false, nil
 	default:
-		return nil, false, fmt.Errorf("RowBinary stats column %q has unsupported type %d", column, kind)
+		return nil, false, fmt.Errorf("RowBinary stats column %q has unsupported type %d", columnName, kind)
 	}
 }
 
@@ -379,7 +403,7 @@ func cloneSQLRowBinaryStatsValue(kind SQLRowBinaryType, value interface{}) inter
 }
 
 func sqlRowBinaryStatsSupportsMinMax(kind SQLRowBinaryType) bool {
-	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryUUID || kind == SQLRowBinaryIPv4 || kind == SQLRowBinaryIPv6
+	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryUUID || kind == SQLRowBinaryIPv4 || kind == SQLRowBinaryIPv6 || kind == SQLRowBinaryEnum8 || kind == SQLRowBinaryEnum16
 }
 
 func compareSQLRowBinaryStatsValues(kind SQLRowBinaryType, left, right interface{}) int {
@@ -470,6 +494,22 @@ func compareSQLRowBinaryStatsValues(kind SQLRowBinaryType, left, right interface
 			if leftValue[index] > rightValue[index] {
 				return 1
 			}
+		}
+	case SQLRowBinaryEnum8:
+		leftValue, rightValue := left.(SQLEnum8), right.(SQLEnum8)
+		if leftValue < rightValue {
+			return -1
+		}
+		if leftValue > rightValue {
+			return 1
+		}
+	case SQLRowBinaryEnum16:
+		leftValue, rightValue := left.(SQLEnum16), right.(SQLEnum16)
+		if leftValue < rightValue {
+			return -1
+		}
+		if leftValue > rightValue {
+			return 1
 		}
 	}
 	return 0

@@ -1,31 +1,24 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -u
 
-printf '%s\n' '== inspiration status =='
-printf '%s\n' 'sample entries:'
-rg -n 'C001|C073|M001|T001' INSPIRATION.md | head -n 12 || true
-for marker in x ' ' - '>'; do
-  count="$(rg -c "^[[:space:]]*-[[:space:]]+\\[$marker\\][[:space:]]+[CMT][0-9]+" INSPIRATION.md || true)"
-  printf 'marker [%s]: %s\n' "$marker" "$count"
-done
-printf '%s\n' '== documentation anchors =='
-rg -n 'INSPIRATION|ADOPTED_QUERY|SQL_TWO|SQL_VECTORIZED|vectorized|two-level|Two-Level' README.md ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md | head -n 180 || true
-printf '%s\n' 'unresolved examples:'
-rg -n '^[[:space:]]*-[[:space:]]+\[[ -]\][[:space:]]+[CMT][0-9]+' INSPIRATION.md | head -n 25 || true
-
-printf '%s\n' '== expression evaluation symbols =='
-rg -n 'type sqlExpr|func evalSQLExpr|case "(function|case|in|between|is|unary|binary)"|func .*Function' hat/hatSql/*.go | head -n 220 || true
-printf '%s\n' '== parser/rewrite entry points =='
-rg -n 'func (parse|bind|rewrite)SQL|parseSQLQuery|rewriteSQLQuery' hat/hatSql/*.go | head -n 180 || true
-printf '%s\n' '== query execution entry points =='
-rg -n 'func (ExecuteSQLQuery|ExecuteSQLQueryContext|executeSQL.*Query|executeSQL.*Rows)' hat/hatSql/query.go | head -n 180 || true
-printf '%s\n' '== evaluator excerpt =='
-sed -n '14340,14630p' hat/hatSql/query.go
-printf '%s\n' '== execution panic boundary =='
-sed -n '9550,9610p' hat/hatSql/query.go
-printf '%s\n' '== execution control construction =='
-rg -n 'type sqlExecutionControl|newSQLExecutionControl|sqlExecutionControl\{' hat/hatSql/*.go | head -n 180 || true
-sed -n '6900,7010p' hat/hatSql/query.go
-
-printf '%s\n' '== worktree =='
-git status --short
+printf '%s\n' 'Candidate backlog rows:'
+rg -n '^\| (CH-32|CH-35|MZ-37|MZ-39|TR-14|TR-17|TR-24|TR-30|TR-43) \|' INSPIRATION_BACKLOG.md
+printf '%s\n' 'Exact enum/decimal implementations:'
+rg -l -i 'enum8|enum16|decimal128|decimal256' hat/hatSchema hat/hatSql hat/hatCache --glob '*.go'
+printf '%s\n' 'Existing index-statistics/covering implementations:'
+rg -l -i 'selectivity|frequency.?histogram|covering.?index|index.?stats' hat/hatSql hat/hatCache --glob '*.go'
+printf '%s\n' 'Existing batching/yield implementations:'
+rg -l -i 'worker.?local|exchange|yield|fuel|operator.?budget' hat/hatSql --glob '*.go'
+printf '%s\n' 'Existing run-filter implementations:'
+rg -l -i 'run.?filter|bloom' hat/hatStorage hat/hatCache --glob '*.go'
+printf '%s\n' 'Enum codec call sites:'
+rg -l 'appendSQLRowBinaryValue|validateSQLRowBinaryColumns|SQLRowBinaryColumn' hat/hatSql --glob '*.go'
+printf '%s\n' 'Schema metadata consumers:'
+rg -l 'Column\{|\.Columns|SchemaFingerprint|json:"columns"' hat/hatSchema hat/hatCache --glob '*.go'
+printf '%s\n' 'Adaptive/fixed-width codec boundaries:'
+rg -n 'EncodeSQLRowBinary|Delta|DoubleDelta|validSQLRowBinaryType' hat/hatSql/row_binary_adaptive_codec.go hat/hatSql/row_binary.go hat/hatSql/row_binary_delta_codec.go
+printf '%s\n' 'RowBinary type and value boundaries:'
+rg -n 'type SQLRowBinaryColumn|SQLRowBinary[A-Za-z0-9]+ =|func .*SQLRowBinary|validSQLRowBinaryType|appendSQLRowBinaryValue|decodeSQLRowBinaryValue' hat/hatSql --glob '*.go'
+printf '%s\n' 'Schema type and generation boundaries:'
+rg -n 'type Column|SQLType|SchemaFingerprint|Generate.*Model|ColumnType' hat/hatSchema --glob '*.go'
+exit 0

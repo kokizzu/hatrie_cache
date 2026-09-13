@@ -28,15 +28,18 @@ const (
 	SQLRowBinaryJSON
 	SQLRowBinaryIPv4
 	SQLRowBinaryIPv6
+	SQLRowBinaryEnum8
+	SQLRowBinaryEnum16
 )
 
 // SQLRowBinaryColumn describes one schema-ordered RowBinary field. The
 // payload does not include column names or types; both sides must use the
 // same ordered schema.
 type SQLRowBinaryColumn struct {
-	Name     string
-	Type     SQLRowBinaryType
-	Nullable bool
+	Name       string
+	Type       SQLRowBinaryType
+	Nullable   bool
+	EnumValues []string
 }
 
 const (
@@ -77,7 +80,7 @@ func EncodeSQLRowBinary(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, er
 				encoded = append(encoded, 0)
 			}
 			var err error
-			encoded, err = appendSQLRowBinaryValue(encoded, column.Type, value, rowIndex, column.Name)
+			encoded, err = appendSQLRowBinaryColumnValue(encoded, column, value, rowIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -93,13 +96,42 @@ func DecodeSQLRowBinary(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow,
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
+	return decodeSQLRowBinaryValidated(columns, encoded)
+}
+
+func decodeSQLRowBinaryValidated(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
 	if len(encoded) == 0 {
 		return nil, nil
 	}
-	if len(encoded) < sqlRowBinaryParallelMinBytes || runtime.GOMAXPROCS(0) < 2 {
+	if !sqlRowBinaryShouldDecodeParallel(columns, encoded) {
 		return decodeSQLRowBinarySerial(columns, encoded)
 	}
 	return decodeSQLRowBinaryParallelValidated(columns, encoded)
+}
+
+func sqlRowBinaryShouldDecodeParallel(columns []SQLRowBinaryColumn, encoded []byte) bool {
+	if runtime.GOMAXPROCS(0) < 2 {
+		return false
+	}
+	if len(encoded) >= sqlRowBinaryParallelMinBytes {
+		return true
+	}
+	rowWidth := 0
+	compactEnum := false
+	for _, column := range columns {
+		width := sqlRowBinaryStreamFixedWidth(column.Type)
+		if width == 0 {
+			return false
+		}
+		rowWidth += width
+		if column.Nullable {
+			rowWidth++
+		}
+		if column.Type == SQLRowBinaryEnum8 || column.Type == SQLRowBinaryEnum16 {
+			compactEnum = true
+		}
+	}
+	return compactEnum && rowWidth > 0 && len(encoded)%rowWidth == 0 && len(encoded)/rowWidth >= sqlRowBinaryParallelMinRows
 }
 
 // DecodeSQLRowBinaryParallel decodes a RowBinary stream using independent row
@@ -262,6 +294,9 @@ func decodeSQLRowBinaryRow(columns []SQLRowBinaryColumn, encoded []byte, offset,
 		if err != nil {
 			return nil, offset, err
 		}
+		if err := validateSQLRowBinaryEnumDecodedValue(column, value, rowIndex); err != nil {
+			return nil, offset, err
+		}
 		row[column.Name] = value
 		offset = next
 	}
@@ -269,6 +304,10 @@ func decodeSQLRowBinaryRow(columns []SQLRowBinaryColumn, encoded []byte, offset,
 }
 
 func validateSQLRowBinaryColumns(columns []SQLRowBinaryColumn) error {
+	return validateSQLRowBinaryColumnsWithEnumLabels(columns, true)
+}
+
+func validateSQLRowBinaryColumnsWithEnumLabels(columns []SQLRowBinaryColumn, requireEnumLabels bool) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("RowBinary schema must contain at least one column")
 	}
@@ -284,20 +323,37 @@ func validateSQLRowBinaryColumns(columns []SQLRowBinaryColumn) error {
 		if !validSQLRowBinaryType(column.Type) {
 			return fmt.Errorf("RowBinary column %q has unsupported type %d", column.Name, column.Type)
 		}
+		if requireEnumLabels || len(column.EnumValues) != 0 {
+			if err := validateSQLRowBinaryEnumColumn(column); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
+func validateSQLRowBinaryStreamColumns(columns []SQLRowBinaryColumn) error {
+	return validateSQLRowBinaryColumnsWithEnumLabels(columns, false)
+}
+
 func validSQLRowBinaryType(kind SQLRowBinaryType) bool {
-	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryIPv6
+	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryEnum16
 }
 
 func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value interface{}, row int, column string) ([]byte, error) {
+	return appendSQLRowBinaryValueWithLabels(destination, kind, value, row, column, nil)
+}
+
+func appendSQLRowBinaryColumnValue(destination []byte, column SQLRowBinaryColumn, value interface{}, row int) ([]byte, error) {
+	return appendSQLRowBinaryValueWithLabels(destination, column.Type, value, row, column.Name, column.EnumValues)
+}
+
+func appendSQLRowBinaryValueWithLabels(destination []byte, kind SQLRowBinaryType, value interface{}, row int, columnName string, enumValues []string) ([]byte, error) {
 	switch kind {
 	case SQLRowBinaryInt64:
 		converted, ok := sqlRowBinaryInt64(value)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects int64, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects int64, got %T", row, columnName, value)
 		}
 		var encoded [8]byte
 		binary.LittleEndian.PutUint64(encoded[:], uint64(converted))
@@ -305,7 +361,7 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryUint64:
 		converted, ok := sqlRowBinaryUint64(value)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects uint64, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects uint64, got %T", row, columnName, value)
 		}
 		var encoded [8]byte
 		binary.LittleEndian.PutUint64(encoded[:], converted)
@@ -313,7 +369,7 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryFloat64:
 		converted, ok := sqlRowBinaryFloat64(value)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects float64, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects float64, got %T", row, columnName, value)
 		}
 		var encoded [8]byte
 		binary.LittleEndian.PutUint64(encoded[:], math.Float64bits(converted))
@@ -321,7 +377,7 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryBool:
 		converted, ok := value.(bool)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects bool, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects bool, got %T", row, columnName, value)
 		}
 		if converted {
 			return append(destination, 1), nil
@@ -330,24 +386,24 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryString:
 		converted, ok := value.(string)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects string, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects string, got %T", row, columnName, value)
 		}
 		return appendSQLRowBinaryBytes(destination, []byte(converted)), nil
 	case SQLRowBinaryBytes:
 		converted, ok := value.([]byte)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects []byte, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects []byte, got %T", row, columnName, value)
 		}
 		return appendSQLRowBinaryBytes(destination, converted), nil
 	case SQLRowBinaryDate:
 		converted, ok := value.(time.Time)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects time.Time, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects time.Time, got %T", row, columnName, value)
 		}
 		midnight := time.Date(converted.UTC().Year(), converted.UTC().Month(), converted.UTC().Day(), 0, 0, 0, 0, time.UTC)
 		days := midnight.Unix() / (24 * 60 * 60)
 		if days < math.MinInt32 || days > math.MaxInt32 {
-			return nil, fmt.Errorf("RowBinary row %d column %q date is out of range", row, column)
+			return nil, fmt.Errorf("RowBinary row %d column %q date is out of range", row, columnName)
 		}
 		var encoded [4]byte
 		binary.LittleEndian.PutUint32(encoded[:], uint32(int32(days)))
@@ -355,7 +411,7 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryDateTime:
 		converted, ok := value.(time.Time)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects time.Time, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects time.Time, got %T", row, columnName, value)
 		}
 		var encoded [8]byte
 		binary.LittleEndian.PutUint64(encoded[:], uint64(converted.UnixNano()))
@@ -363,7 +419,7 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryDuration:
 		converted, ok := sqlRowBinaryDuration(value)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects time.Duration, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects time.Duration, got %T", row, columnName, value)
 		}
 		var encoded [8]byte
 		binary.LittleEndian.PutUint64(encoded[:], uint64(converted))
@@ -371,13 +427,13 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryUUID:
 		converted, ok := value.([16]byte)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects [16]byte, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects [16]byte, got %T", row, columnName, value)
 		}
 		return append(destination, converted[:]...), nil
 	case SQLRowBinaryIPv4:
 		converted, ok := value.(SQLIPv4)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects SQLIPv4, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects SQLIPv4, got %T", row, columnName, value)
 		}
 		var encoded [4]byte
 		binary.BigEndian.PutUint32(encoded[:], uint32(converted))
@@ -385,17 +441,31 @@ func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value in
 	case SQLRowBinaryIPv6:
 		converted, ok := value.(SQLIPv6)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects SQLIPv6, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects SQLIPv6, got %T", row, columnName, value)
 		}
 		return append(destination, converted[:]...), nil
+	case SQLRowBinaryEnum8:
+		code, err := sqlRowBinaryEnumCode(SQLRowBinaryColumn{Name: columnName, Type: kind, EnumValues: enumValues}, value, row)
+		if err != nil {
+			return nil, err
+		}
+		return append(destination, byte(code)), nil
+	case SQLRowBinaryEnum16:
+		code, err := sqlRowBinaryEnumCode(SQLRowBinaryColumn{Name: columnName, Type: kind, EnumValues: enumValues}, value, row)
+		if err != nil {
+			return nil, err
+		}
+		var encoded [2]byte
+		binary.LittleEndian.PutUint16(encoded[:], uint16(code))
+		return append(destination, encoded[:]...), nil
 	case SQLRowBinaryJSON:
 		converted, ok := value.(json.RawMessage)
 		if !ok {
-			return nil, fmt.Errorf("RowBinary row %d column %q expects json.RawMessage, got %T", row, column, value)
+			return nil, fmt.Errorf("RowBinary row %d column %q expects json.RawMessage, got %T", row, columnName, value)
 		}
 		return appendSQLRowBinaryBytes(destination, converted), nil
 	default:
-		return nil, fmt.Errorf("RowBinary column %q has unsupported type %d", column, kind)
+		return nil, fmt.Errorf("RowBinary column %q has unsupported type %d", columnName, kind)
 	}
 }
 
@@ -499,6 +569,18 @@ func decodeSQLRowBinaryValue(kind SQLRowBinaryType, encoded []byte, offset, row 
 		var ip SQLIPv6
 		copy(ip[:], value)
 		return ip, next, nil
+	case SQLRowBinaryEnum8:
+		value, next, err := readFixed(1)
+		if err != nil {
+			return nil, offset, err
+		}
+		return SQLEnum8(value[0]), next, nil
+	case SQLRowBinaryEnum16:
+		value, next, err := readFixed(2)
+		if err != nil {
+			return nil, offset, err
+		}
+		return SQLEnum16(binary.LittleEndian.Uint16(value)), next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary column %q has unsupported type %d", column, kind)
 	}

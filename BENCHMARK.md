@@ -22788,6 +22788,41 @@ BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 13 8507850 ns/op 14
 BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2-32 14 8504019 ns/op 142585 B/op 103 allocs/op
 ```
 
+## CH-035: Compact SQL Enum RowBinary Values
+
+This ClickHouse-inspired feature encodes schema-aware categorical values as
+zero-based Enum8/Enum16 codes instead of repeating labels. The fixture is
+10,000 rows cycling through four labels on an AMD Ryzen 9 5950X Linux host.
+
+| Operation | String control | Typed enum | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode median | 252,013 ns/op; 285,432 B/op; 22 allocs/op | 210,750 ns/op; 46,584 B/op; 16 allocs/op | 1.20x CPU; 6.13x lower B/op; 1.38x fewer allocs |
+| Default decode median | 1,049,397 ns/op; 3,988,640 B/op; 40,077 allocs/op | 945,255 ns/op; 3,748,750 B/op; 20,076 allocs/op | 1.11x CPU; 1.06x lower B/op; 2.00x fewer allocs |
+| Wire payload | 67,500 bytes | 10,000 bytes | 6.75x smaller |
+| Serial decode median | 1,855,304 ns/op; 3,910,392 B/op; 40,018 allocs/op | 1,607,696 ns/op; 3,670,395 B/op; 20,018 allocs/op | 1.15x CPU; 1.07x lower B/op; 2.00x fewer allocs |
+| Forced parallel decode median | 1,057,517 ns/op; 3,988,640 B/op; 40,077 allocs/op | 920,112 ns/op; 3,748,748 B/op; 20,076 allocs/op | 1.15x CPU; 1.06x lower B/op; 2.00x fewer allocs |
+
+The default decoder keeps small payloads serial and uses parallel decoding for
+compact fixed-width enum batches with at least 256 rows. The complete API,
+tradeoff notes, and raw samples are in [SQL_ENUM_TYPES.md](SQL_ENUM_TYPES.md).
+
+Raw final samples:
+
+```text
+BenchmarkSQLRowBinaryEnumStringBaselineEncode-32 4287 254657 ns/op 67500 payload-bytes 285435 B/op 22 allocs/op
+BenchmarkSQLRowBinaryEnumStringBaselineEncode-32 4418 247417 ns/op 67500 payload-bytes 285432 B/op 22 allocs/op
+BenchmarkSQLRowBinaryEnumStringBaselineEncode-32 4506 252013 ns/op 67500 payload-bytes 285432 B/op 22 allocs/op
+BenchmarkSQLRowBinaryEnumTypedEncode-32 5713 208674 ns/op 10000 payload-bytes 46584 B/op 16 allocs/op
+BenchmarkSQLRowBinaryEnumTypedEncode-32 5480 210750 ns/op 10000 payload-bytes 46584 B/op 16 allocs/op
+BenchmarkSQLRowBinaryEnumTypedEncode-32 5067 222568 ns/op 10000 payload-bytes 46584 B/op 16 allocs/op
+BenchmarkSQLRowBinaryEnumStringBaselineDecode-32 1117 1039284 ns/op 67500 payload-bytes 3988831 B/op 40077 allocs/op
+BenchmarkSQLRowBinaryEnumStringBaselineDecode-32 1156 1055157 ns/op 67500 payload-bytes 3988640 B/op 40077 allocs/op
+BenchmarkSQLRowBinaryEnumStringBaselineDecode-32 1183 1049397 ns/op 67500 payload-bytes 3988631 B/op 40076 allocs/op
+BenchmarkSQLRowBinaryEnumTypedDecode-32 1342 950610 ns/op 10000 payload-bytes 3748757 B/op 20076 allocs/op
+BenchmarkSQLRowBinaryEnumTypedDecode-32 1254 945255 ns/op 10000 payload-bytes 3748750 B/op 20076 allocs/op
+BenchmarkSQLRowBinaryEnumTypedDecode-32 1245 916937 ns/op 10000 payload-bytes 3748740 B/op 20076 allocs/op
+```
+
 ## CH-034 Typed IPv4/IPv6 RowBinary
 
 This benchmark compares the existing string representation with fixed-width

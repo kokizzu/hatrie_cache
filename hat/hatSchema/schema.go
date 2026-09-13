@@ -24,13 +24,16 @@ const (
 	TypeDuration  Type = "DURATION"
 	TypeBinary    Type = "BINARY"
 	TypeJSON      Type = "JSON"
+	TypeEnum8     Type = "ENUM8"
+	TypeEnum16    Type = "ENUM16"
 )
 
 // Column describes one ordered source field. NotNull defaults to false.
 type Column struct {
-	Name    string `json:"name"`
-	Type    Type   `json:"type"`
-	NotNull bool   `json:"not_null,omitempty"`
+	Name       string   `json:"name"`
+	Type       Type     `json:"type"`
+	NotNull    bool     `json:"not_null,omitempty"`
+	EnumValues []string `json:"enum_values,omitempty"`
 }
 
 // Source is one named SQL source and its ordered schema.
@@ -294,6 +297,31 @@ func validateColumn(column Column) error {
 	}
 	switch column.Type {
 	case TypeText, TypeNumber, TypeInteger, TypeDecimal, TypeBoolean, TypeDate, TypeTimestamp, TypeUUID, TypeIPv4, TypeIPv6, TypeDuration, TypeBinary, TypeJSON:
+		if len(column.EnumValues) != 0 {
+			return fmt.Errorf("hatSchema: column %q has enum values but type %q is not an enum", column.Name, column.Type)
+		}
+		return nil
+	case TypeEnum8, TypeEnum16:
+		if len(column.EnumValues) == 0 {
+			return fmt.Errorf("hatSchema: enum column %q requires at least one value", column.Name)
+		}
+		maxValues := 1 << 16
+		if column.Type == TypeEnum8 {
+			maxValues = 1 << 8
+		}
+		if len(column.EnumValues) > maxValues {
+			return fmt.Errorf("hatSchema: enum column %q has %d values, maximum is %d", column.Name, len(column.EnumValues), maxValues)
+		}
+		seenValues := make(map[string]struct{}, len(column.EnumValues))
+		for _, value := range column.EnumValues {
+			if value == "" {
+				return fmt.Errorf("hatSchema: enum column %q has an empty value", column.Name)
+			}
+			if _, exists := seenValues[value]; exists {
+				return fmt.Errorf("hatSchema: enum column %q has duplicate value %q", column.Name, value)
+			}
+			seenValues[value] = struct{}{}
+		}
 		return nil
 	default:
 		return fmt.Errorf("hatSchema: unsupported column type %q", column.Type)
@@ -325,7 +353,12 @@ func sourceConstraintIndex(source Source, name string) int {
 }
 
 func cloneSource(source Source) Source {
-	source.Columns = append([]Column(nil), source.Columns...)
+	columns := make([]Column, len(source.Columns))
+	copy(columns, source.Columns)
+	for index := range columns {
+		columns[index].EnumValues = append([]string(nil), source.Columns[index].EnumValues...)
+	}
+	source.Columns = columns
 	source.Constraints = cloneConstraints(source.Constraints)
 	return source
 }

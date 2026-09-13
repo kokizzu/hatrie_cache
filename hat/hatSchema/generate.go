@@ -127,6 +127,10 @@ func modelGoType(columnType Type) (string, string, error) {
 		return "[]byte", "", nil
 	case TypeJSON:
 		return "any", "", nil
+	case TypeEnum8:
+		return "hatSql.SQLEnum8", "hatrie_cache/hat/hatSql", nil
+	case TypeEnum16:
+		return "hatSql.SQLEnum16", "hatrie_cache/hat/hatSql", nil
 	default:
 		return "", "", fmt.Errorf("hatSchema: unsupported column type %q", columnType)
 	}

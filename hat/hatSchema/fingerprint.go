@@ -34,6 +34,12 @@ func (schema Schema) Fingerprint() string {
 			} else {
 				part("0")
 			}
+			if len(column.EnumValues) != 0 {
+				part(strconv.Itoa(len(column.EnumValues)))
+				for _, enumValue := range column.EnumValues {
+					part(enumValue)
+				}
+			}
 		}
 		for _, constraint := range source.Constraints {
 			part(constraint.Name)

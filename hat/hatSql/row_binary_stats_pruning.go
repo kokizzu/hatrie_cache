@@ -63,7 +63,7 @@ func CanSkipSQLRowBinaryStats(columns []SQLRowBinaryColumn, stats []SQLRowBinary
 	if predicate.Value == nil {
 		return false, fmt.Errorf("RowBinary stats predicate value is required")
 	}
-	value, orderable, err := normalizeSQLRowBinaryStatsValue(column.Type, predicate.Value, -1, column.Name)
+	value, orderable, err := normalizeSQLRowBinaryStatsColumnValue(column, predicate.Value, -1)
 	if err != nil {
 		return false, err
 	}
@@ -74,7 +74,7 @@ func CanSkipSQLRowBinaryStats(columns []SQLRowBinaryColumn, stats []SQLRowBinary
 		if predicate.UpperValue == nil {
 			return false, fmt.Errorf("RowBinary stats BETWEEN upper value is required")
 		}
-		upper, upperOrderable, upperErr := normalizeSQLRowBinaryStatsValue(column.Type, predicate.UpperValue, -1, column.Name)
+		upper, upperOrderable, upperErr := normalizeSQLRowBinaryStatsColumnValue(column, predicate.UpperValue, -1)
 		if upperErr != nil {
 			return false, upperErr
 		}
