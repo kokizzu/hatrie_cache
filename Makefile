@@ -4839,6 +4839,48 @@ commit-mz037:
 push-mz037:
 	sh ./scripts/push-mz037.sh
 
+inspect-mz039:
+	sh ./scripts/inspect-mz039.sh
+
+inspect-mz039-core:
+	sh ./scripts/inspect-mz039-core.sh
+
+inspect-mz039-control:
+	sh ./scripts/inspect-mz039-control.sh
+
+benchmark-mz039-before:
+	sh ./scripts/benchmark-mz039-before.sh
+
+test-mz039:
+	sh ./scripts/test-mz039.sh
+
+format-mz039:
+	sh ./scripts/format-mz039.sh
+
+test-mz039-full:
+	sh ./scripts/test-mz039-full.sh
+
+race-mz039:
+	sh ./scripts/race-mz039.sh
+
+vet-mz039:
+	sh ./scripts/vet-mz039.sh
+
+review-mz039:
+	sh ./scripts/review-mz039.sh
+
+commit-mz039:
+	sh ./scripts/commit-mz039.sh
+
+push-mz039:
+	sh ./scripts/push-mz039.sh
+
+benchmark-mz039-after:
+	sh ./scripts/benchmark-mz039-after.sh
+
+inspect-mz039-native:
+	sh ./scripts/inspect-mz039-native.sh
+
 benchmark-mz037-before:
 	sh ./scripts/benchmark-mz037-before.sh
 

@@ -22954,3 +22954,39 @@ BenchmarkMZ037WorkerLocalExchange-32 17855104 12.95 ns/op 0 B/op 0 allocs/op
 BenchmarkMZ037WorkerLocalExchange-32 19707151 12.53 ns/op 0 B/op 0 allocs/op
 BenchmarkMZ037WorkerLocalExchange-32 17867918 12.87 ns/op 0 B/op 0 allocs/op
 ```
+
+## MZ-039 Operator Yield Budgets
+
+This measures the opt-in cooperative fairness quantum on the native scalar
+dataflow path over 4,096 rows on Linux `amd64`, AMD Ryzen 9 5950X, five
+samples, and `-benchtime=200ms -benchmem`. `yields/op` reports the observed
+runtime yields.
+
+| Workload | Median ns/op | B/op | Allocs/op | Yields/op | Tradeoff |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Default, disabled (`0`) | 1,376,788 | 1,409,630 | 8,199 | 0 | control |
+| Quantum `64` | 1,504,495 | 1,409,651 | 8,200 | 64.03 | 9.27% slower CPU |
+| Quantum `1024` | 1,391,944 | 1,409,652 | 8,200 | 4.00 | 1.10% slower CPU |
+
+The default remains disabled, and the feature changes fairness rather than
+throughput. See [MZ039_OPERATOR_YIELD.md](MZ039_OPERATOR_YIELD.md).
+
+Raw output from `make benchmark-mz039-after`:
+
+```text
+BenchmarkMZ039SQLDataflowBaseline-32 165 1414858 ns/op 0 yields/op 1409630 B/op 8199 allocs/op
+BenchmarkMZ039SQLDataflowBaseline-32 169 1363507 ns/op 0 yields/op 1409629 B/op 8199 allocs/op
+BenchmarkMZ039SQLDataflowBaseline-32 162 1492725 ns/op 0 yields/op 1409631 B/op 8199 allocs/op
+BenchmarkMZ039SQLDataflowBaseline-32 164 1351553 ns/op 0 yields/op 1409667 B/op 8199 allocs/op
+BenchmarkMZ039SQLDataflowBaseline-32 170 1376788 ns/op 0 yields/op 1409630 B/op 8199 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery64-32 163 1580127 ns/op 64.03 yields/op 1409650 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery64-32 139 1546365 ns/op 64.03 yields/op 1409652 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery64-32 157 1464381 ns/op 64.03 yields/op 1409651 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery64-32 164 1484666 ns/op 64.03 yields/op 1409651 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery64-32 151 1504495 ns/op 64.03 yields/op 1409651 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery1024-32 166 1391944 ns/op 4.000 yields/op 1409652 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery1024-32 159 1428950 ns/op 4.000 yields/op 1409651 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery1024-32 164 1425295 ns/op 4.000 yields/op 1409653 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery1024-32 171 1352787 ns/op 4.000 yields/op 1409653 B/op 8200 allocs/op
+BenchmarkMZ039SQLDataflowYieldEvery1024-32 166 1348512 ns/op 4.000 yields/op 1409651 B/op 8200 allocs/op
+```

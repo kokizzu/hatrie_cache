@@ -17,6 +17,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -183,6 +184,9 @@ const maxSQLPageSize = 10000
 // unbounded number of operator workers.
 const MaxSQLQueryThreads = 256
 
+// MaxSQLOperatorYieldEvery bounds the opt-in cooperative fuel quantum.
+const MaxSQLOperatorYieldEvery = 1 << 20
+
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
@@ -208,6 +212,12 @@ type SQLQueryOptions struct {
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers int
+	// OperatorYieldEvery inserts a cooperative runtime yield after this many
+	// execution-control checks. Zero disables scheduler yielding and preserves
+	// the existing context-check-only behavior. This is a fairness quantum, not
+	// a total query-work limit; custom functions must still return to the query
+	// executor for the next check.
+	OperatorYieldEvery int
 	// Quota optionally applies a caller-owned rolling quota registry. Nil keeps
 	// the existing unmetered path.
 	Quota *SQLQuotaRegistry
@@ -7770,12 +7780,31 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 }
 
 type sqlExecutionControl struct {
-	ctx      context.Context
-	maxRows  int
-	options  SQLQueryOptions
-	joinWork int
-	sources  map[string][]SQLRow
-	arena    sqlExecutionArena
+	ctx        context.Context
+	maxRows    int
+	options    SQLQueryOptions
+	joinWork   int
+	sources    map[string][]SQLRow
+	arena      sqlExecutionArena
+	yieldEvery uint64
+	yieldFuel  atomic.Uint64
+	yields     atomic.Uint64
+}
+
+// sqlExecutionControlContext preserves the normal context contract while
+// letting native operators consume the same cooperative fuel through their
+// existing ctx.Err checks.
+type sqlExecutionControlContext struct {
+	context.Context
+	control *sqlExecutionControl
+}
+
+func (executionContext sqlExecutionControlContext) Err() error {
+	return executionContext.control.check()
+}
+
+func (control *sqlExecutionControl) executionContext() context.Context {
+	return sqlExecutionControlContext{Context: control.ctx, control: control}
 }
 
 // sqlExecutionArena reuses row backing only while one query is executing. Its
@@ -7804,17 +7833,28 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
+	}
+	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
+		return nil, func() {}, fmt.Errorf("SQL operator yield quantum exceeds the maximum %d", MaxSQLOperatorYieldEvery)
 	}
 	if !options.Collation.valid() {
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
+	newControl := func(controlContext context.Context) *sqlExecutionControl {
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}
+		if options.OperatorYieldEvery > 0 {
+			control.yieldEvery = uint64(options.OperatorYieldEvery)
+			control.yieldFuel.Store(control.yieldEvery)
+		}
+		return control
+	}
 	if options.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(ctx, options.Timeout)
-		return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}, cancel, nil
+		return newControl(ctx), cancel, nil
 	}
-	return &sqlExecutionControl{ctx: ctx, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}, func() {}, nil
+	return newControl(ctx), func() {}, nil
 }
 
 func applySQLMaxThreads(query *sqlQuery, options *SQLQueryOptions) error {
@@ -7844,7 +7884,31 @@ func (control *sqlExecutionControl) check() error {
 	if control == nil {
 		return nil
 	}
-	return control.ctx.Err()
+	if err := control.ctx.Err(); err != nil {
+		return err
+	}
+	control.maybeYield()
+	return nil
+}
+
+func (control *sqlExecutionControl) maybeYield() {
+	if control.yieldEvery == 0 {
+		return
+	}
+	for {
+		remaining := control.yieldFuel.Load()
+		if remaining > 1 {
+			if control.yieldFuel.CompareAndSwap(remaining, remaining-1) {
+				return
+			}
+			continue
+		}
+		if control.yieldFuel.CompareAndSwap(remaining, control.yieldEvery) {
+			control.yields.Add(1)
+			runtime.Gosched()
+			return
+		}
+	}
 }
 func (control *sqlExecutionControl) addJoinWork(work int) error {
 	if control == nil || control.options.MaxJoinWork == 0 {

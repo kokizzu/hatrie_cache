@@ -30,7 +30,11 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 	}
 	started := time.Now()
-	resultRows, err := executeNativeSQLDataflow(control.ctx, query, rows)
+	nativeContext := control.ctx
+	if control.yieldEvery > 0 {
+		nativeContext = control.executionContext()
+	}
+	resultRows, err := executeNativeSQLDataflow(nativeContext, query, rows)
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}

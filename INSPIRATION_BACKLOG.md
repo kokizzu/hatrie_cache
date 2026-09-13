@@ -113,7 +113,7 @@ before/after measurement when its motivation is performance.
 | MZ-36 | Dataflow operator placement constraints by failure domain | Improve locality and resilience | Placement solver complexity | [ ] |
 | MZ-37 | Worker-local exchange batching | Reduce per-record coordination | Batch latency | [x] |
 | MZ-38 | Dynamic dataflow worker scaling | Match compute to changing load | State movement and rebalance | [ ] |
-| MZ-39 | Operator fuel or yield budgets | Bound a single operator monopolization | More scheduler checks | [ ] |
+| MZ-39 | Operator fuel or yield budgets | Bound a single operator monopolization | More scheduler checks | [x] |
 | MZ-40 | Recursive convergence diagnostics and iteration bounds | Make recursive dataflows operable | Additional state and errors | [ ] |
 | MZ-41 | Recursive negative differential propagation | Support deletions in recursive results | Non-monotone fixpoint complexity | [ ] |
 | MZ-42 | Dataflow dependency graph introspection | Explain rebuild and invalidation impact | Graph retention | [ ] |
