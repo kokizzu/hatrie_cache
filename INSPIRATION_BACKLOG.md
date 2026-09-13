@@ -158,7 +158,7 @@ before/after measurement when its motivation is performance.
 | TR-26 | Bitmap indexes for low-cardinality fields | Fast set intersections | Update and memory cost | [ ] |
 | TR-27 | Spatial R-tree index for bounded geometry queries | Avoid full spatial scans | Complex update semantics | [ ] |
 | TR-28 | Cursor pagination resume tokens | Resume scans without offset work | Token signing and invalidation | [ ] |
-| TR-29 | Reverse index iterators with stable bounds | Efficient newest-first reads | Mutation and cursor semantics | [ ] |
+| TR-29 | Reverse index iterators with stable bounds | Efficient newest-first reads | Mutation and cursor semantics | [x] Implemented by `OrderedIndex.Last`, reverse seeks, and `LastSnapshotCursor`; see [TR029_REVERSE_ITERATORS.md](TR029_REVERSE_ITERATORS.md) and [BENCHMARK.md](BENCHMARK.md#tr-029-reverse-ordered-index-iterators). |
 | TR-30 | Index selectivity and distribution statistics | Improve index choice | Statistics maintenance | [ ] |
 | TR-31 | Automatic index choice with explainable fallback | Reduce caller tuning | Planner regressions | [ ] |
 | TR-32 | Conditional compare-and-swap update primitive | Avoid read-modify-write races | Predicate semantics | [x] |

@@ -53,6 +53,7 @@ type OrderedIndexIterator[T any, K any] struct {
 	entries    []OrderedIndexEntry[T, K]
 	generation uint64
 	position   int
+	reverse    bool
 	closed     bool
 	released   bool
 }
@@ -197,8 +198,9 @@ func (index *OrderedIndex[T, K]) SnapshotInto(dst []OrderedIndexEntry[T, K]) []O
 	return append(dst, index.entries...)
 }
 
-// Next returns the current entry and advances the iterator. A mutation after
-// iterator creation returns ErrOrderedIndexIteratorInvalidated.
+// Next returns the current entry and advances the iterator in its configured
+// direction. A mutation after iterator creation returns
+// ErrOrderedIndexIteratorInvalidated.
 func (iterator *OrderedIndexIterator[T, K]) Next() (OrderedIndexEntry[T, K], bool, error) {
 	if iterator == nil || iterator.index == nil {
 		return OrderedIndexEntry[T, K]{}, false, ErrOrderedIndexIteratorNil
@@ -213,6 +215,15 @@ func (iterator *OrderedIndexIterator[T, K]) Next() (OrderedIndexEntry[T, K], boo
 	}
 	if iterator.released {
 		return OrderedIndexEntry[T, K]{}, false, nil
+	}
+	if iterator.reverse {
+		if iterator.position < 0 {
+			iterator.release()
+			return OrderedIndexEntry[T, K]{}, false, nil
+		}
+		entry := iterator.entries[iterator.position]
+		iterator.position--
+		return entry, true, nil
 	}
 	if iterator.position >= len(iterator.entries) {
 		iterator.release()

@@ -11969,3 +11969,44 @@ commit-mz024:
 .PHONY: push-mz024
 push-mz024:
 	bash ./scripts/push-mz024.sh
+
+.PHONY: audit-inspiration
+audit-inspiration:
+	bash ./scripts/audit-inspiration.sh
+
+
+.PHONY: test-tr29-reverse-red
+test-tr29-reverse-red:
+	bash ./scripts/test-tr29-reverse-red.sh
+
+.PHONY: format-tr29
+format-tr29:
+	bash ./scripts/format-tr29.sh
+
+.PHONY: test-tr29
+test-tr29:
+	bash ./scripts/test-tr29.sh
+
+.PHONY: benchmark-tr29
+benchmark-tr29:
+	bash ./scripts/benchmark-tr29.sh
+
+.PHONY: race-tr29
+race-tr29:
+	bash ./scripts/race-tr29.sh
+
+.PHONY: vet-tr29
+vet-tr29:
+	bash ./scripts/vet-tr29.sh
+
+.PHONY: check-tr29
+check-tr29:
+	bash ./scripts/check-tr29.sh
+
+.PHONY: commit-tr29
+commit-tr29:
+	bash ./scripts/commit-tr29.sh
+
+.PHONY: push-tr29
+push-tr29:
+	bash ./scripts/push-tr29.sh

@@ -22368,3 +22368,41 @@ BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  323647  685.2 ns/op  2
 
 Reproduce with `make benchmark-mz024`. See [MZ024_JOURNAL_CURSOR.md](MZ024_JOURNAL_CURSOR.md)
 for the HTTP contract and configuration details.
+
+## TR-029 Reverse Ordered Index Iterators
+
+This benchmark compares descending traversal of 1,024 entries using a reused
+materialized slice, an allocating materialized slice, and the new zero-copy
+reverse iterator. It ran on Linux/amd64 with an AMD Ryzen 9 5950X, five fixed
+200 ms samples, and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Reused materialized slice baseline | 862.2 | 0 | 0 | fastest when caller already reuses scratch |
+| Allocating materialized slice baseline | 3,647 | 24,576 | 1 | baseline |
+| Zero-copy reverse iterator | 2,255 | 0 | 0 | 1.62x faster and 24,576 B lower than allocating baseline |
+
+Raw output from `make benchmark-tr29`:
+
+```text
+BenchmarkOrderedIndexDescendingMaterializeBaseline-32         270985  858.5 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeBaseline-32         271587  862.2 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeBaseline-32         267916  881.3 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeBaseline-32         277462  849.7 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeBaseline-32         282949  878.1 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeAllocBaseline-32     70556 3353 ns/op 24576 B/op     1 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeAllocBaseline-32     64177 3798 ns/op 24576 B/op     1 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeAllocBaseline-32     78674 3562 ns/op 24576 B/op     1 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeAllocBaseline-32     66612 3647 ns/op 24576 B/op     1 allocs/op
+BenchmarkOrderedIndexDescendingMaterializeAllocBaseline-32     62504 3809 ns/op 24576 B/op     1 allocs/op
+BenchmarkOrderedIndexDescendingReverseIterator-32             105951 2255 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingReverseIterator-32             103639 2254 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingReverseIterator-32             107080 2270 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingReverseIterator-32             109298 2210 ns/op     0 B/op     0 allocs/op
+BenchmarkOrderedIndexDescendingReverseIterator-32             109111 2370 ns/op     0 B/op     0 allocs/op
+```
+
+The reverse iterator has no new per-entry allocation and retains only the
+existing immutable entry slice. It is a memory/streaming win against an
+allocating materialization, not a CPU win over a caller with an already-sized
+reusable destination.

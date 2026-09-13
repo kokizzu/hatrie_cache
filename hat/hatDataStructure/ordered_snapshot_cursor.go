@@ -25,6 +25,7 @@ type OrderedIndexSnapshotCursor[T any, K any] struct {
 	index    *OrderedIndex[T, K]
 	entries  []OrderedIndexEntry[T, K]
 	position int
+	reverse  bool
 	closed   bool
 	released bool
 }
@@ -46,8 +47,8 @@ func (index *OrderedIndex[T, K]) SnapshotCursor() (OrderedIndexSnapshotCursor[T,
 	return OrderedIndexSnapshotCursor[T, K]{index: index, entries: index.entries}, true
 }
 
-// Next returns the next entry from the stable snapshot. Reaching EOF releases
-// the snapshot's copy-on-write protection.
+// Next returns the next entry from the stable snapshot in its configured
+// direction. Reaching EOF releases the snapshot's copy-on-write protection.
 func (cursor *OrderedIndexSnapshotCursor[T, K]) Next() (OrderedIndexEntry[T, K], bool, error) {
 	if cursor == nil || cursor.index == nil {
 		return OrderedIndexEntry[T, K]{}, false, ErrOrderedIndexSnapshotCursorNil
@@ -57,6 +58,15 @@ func (cursor *OrderedIndexSnapshotCursor[T, K]) Next() (OrderedIndexEntry[T, K],
 	}
 	if cursor.released {
 		return OrderedIndexEntry[T, K]{}, false, nil
+	}
+	if cursor.reverse {
+		if cursor.position < 0 {
+			cursor.release()
+			return OrderedIndexEntry[T, K]{}, false, nil
+		}
+		entry := cursor.entries[cursor.position]
+		cursor.position--
+		return entry, true, nil
 	}
 	if cursor.position >= len(cursor.entries) {
 		cursor.release()
