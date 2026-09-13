@@ -162,7 +162,7 @@ before/after measurement when its motivation is performance.
 | TR-30 | Index selectivity and distribution statistics | Improve index choice | Statistics maintenance | [ ] |
 | TR-31 | Automatic index choice with explainable fallback | Reduce caller tuning | Planner regressions | [ ] |
 | TR-32 | Conditional compare-and-swap update primitive | Avoid read-modify-write races | Predicate semantics | [x] |
-| TR-33 | Returning old and new tuple values from mutations | Build changefeeds without rereads | Copy cost and API shape | [ ] |
+| TR-33 | Returning old and new tuple values from mutations | Build changefeeds without rereads | Copy cost and API shape | [x] Implemented as `SQLMutationResult.BeforeRows` for affected SQL mutations with `RETURNING`; existing `Rows` remains the post-state (or deleted row). See [TR033_SQL_RETURNING_BEFORE_ROWS.md](TR033_SQL_RETURNING_BEFORE_ROWS.md) and [BENCHMARK.md#tr-033-sql-returning-before-rows](BENCHMARK.md#tr-033-sql-returning-before-rows). |
 | TR-34 | Nested transaction savepoints | Roll back part of a complex operation | Undo-log complexity | [ ] |
 | TR-35 | MVCC snapshot read views | Stable reads during concurrent writes | Version retention | [ ] |
 | TR-36 | Explicit read-only transaction mode | Protect analytical clients from writes | API and enforcement work | [ ] |

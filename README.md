@@ -3987,3 +3987,4 @@ CPU, allocation, and fallback tradeoffs.
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)
 
 - [Compact request cancellation](T240_COMPACT_REQUEST_CANCELLATION.md)
+SQL mutation changefeed consumers can request pre- and post-state rows with `RETURNING`; see [TR033_SQL_RETURNING_BEFORE_ROWS.md](TR033_SQL_RETURNING_BEFORE_ROWS.md).

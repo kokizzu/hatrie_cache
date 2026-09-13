@@ -23231,3 +23231,13 @@ Raw command:
 ```text
 make benchmark-ch022-explain-pruning
 ```
+## TR-033 SQL `RETURNING` before rows
+
+The existing `UPDATE ... RETURNING` path was measured before adding `SQLMutationResult.BeforeRows`, then rerun with the same fixture and benchmark command (`make benchmark-tr033`).
+
+| Variant | Median ns/op | B/op | allocs/op | Relative CPU | Relative bytes | Relative allocations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before | 7,990 | 8,656 | 38 | 1.00x | 1.00x | 1.00x |
+| After | 7,637 | 8,664 | 39 | 0.96x | 1.00x | 1.03x |
+
+The CPU difference is within normal benchmark noise. The feature adds one before-row slice only when `RETURNING` is used and a row was affected: `+8 B/op`, `+1 alloc/op` in this fixture. Non-`RETURNING` mutations do not capture before rows.

@@ -4503,7 +4503,7 @@ LIMIT 1`, SQLSourceResolverFunc(nil))
 	if result.Stats.OutputRows != 1 || result.Stats.OutputColumns != 1 || result.Stats.ResultBytes <= 0 || result.Stats.PlanSteps != len(result.Plan) || result.Stats.ElapsedNanos < 0 {
 		t.Fatalf("EXPLAIN ANALYZE stats = %#v, plan = %#v", result.Stats, result.Plan)
 	}
-	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns"}; !reflect.DeepEqual(result.Columns, want) {
+	if want := []string{"node", "detail", "estimated_rows", "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns", "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate"}; !reflect.DeepEqual(result.Columns, want) {
 		t.Fatalf("EXPLAIN ANALYZE columns = %#v, want %#v", result.Columns, want)
 	}
 	last := result.Rows[len(result.Rows)-1]

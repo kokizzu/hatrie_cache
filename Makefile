@@ -13050,3 +13050,25 @@ commit-ch022:
 .PHONY: push-ch022
 push-ch022:
 	@bash ./scripts/push-ch022.sh
+
+benchmark-tr033:
+	@bash scripts/benchmark-tr033.sh
+test-tr033:
+	@bash scripts/test-tr033.sh
+format-tr033:
+	@bash scripts/format-tr033.sh
+
+test-tr033-race:
+	@bash scripts/test-tr033-race.sh
+
+test-tr033-full:
+	@bash scripts/test-tr033-full.sh
+
+review-tr033:
+	@bash scripts/review-tr033.sh
+
+commit-tr033:
+	@bash scripts/commit-tr033.sh
+
+push-tr033:
+	@bash scripts/push-tr033.sh

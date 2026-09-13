@@ -17,10 +17,11 @@ type SQLDiagnostic = hatSql.Diagnostic
 // SQLMutationResult describes one SQL mutation execution. INSERT ... SELECT
 // reports the number of rows staged into its atomic cache-command batch.
 type SQLMutationResult struct {
-	Affected int                  `json:"affected"`
-	Response CacheCommandResponse `json:"response"`
-	Columns  []string             `json:"columns,omitempty"`
-	Rows     []SQLRow             `json:"rows,omitempty"`
+	Affected   int                  `json:"affected"`
+	Response   CacheCommandResponse `json:"response"`
+	Columns    []string             `json:"columns,omitempty"`
+	Rows       []SQLRow             `json:"rows,omitempty"`
+	BeforeRows []SQLRow             `json:"before_rows,omitempty"`
 }
 
 // ExecuteSQLMutation executes direct command-SQL mutations and INSERT ...
@@ -58,6 +59,10 @@ func executeSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 		if conflictAction == sqlInsertConflictUpdate {
 			condition = sqlMergeConditionAny
 		}
+		before, beforeOK, err := sqlMutationReturningRow(trie, insertConflict.Key, returning)
+		if err != nil {
+			return SQLMutationResult{}, err
+		}
 		response, applied := trie.executeSQLMerge(insertConflict, condition)
 		if !response.OK {
 			return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
@@ -66,7 +71,7 @@ func executeSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 		if applied {
 			result.Affected = 1
 		}
-		return sqlMutationReturningResult(trie, result, insertConflict, returning, nil, false)
+		return sqlMutationReturningResult(trie, result, insertConflict, returning, before, beforeOK)
 	}
 	merge, mergeStatement, err := parseSQLMerge(mutationSource)
 	if err != nil {
@@ -724,6 +729,9 @@ func sqlMutationReturningResult(trie *HatTrie, result SQLMutationResult, request
 		return result, nil
 	}
 	result.Columns = append([]string(nil), columns...)
+	if beforeOK {
+		result.BeforeRows = []SQLRow{before}
+	}
 	if normalizedCommand(request.Command) == "DEL" {
 		if beforeOK {
 			result.Rows = []SQLRow{before}
