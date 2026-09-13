@@ -13149,5 +13149,26 @@ commit-mz018-source-frontier:
 push-mz018-source-frontier:
 	@bash scripts/push-mz018-source-frontier.sh
 
+test-tr036-read-only-transaction:
+	@bash scripts/test-tr036-read-only-transaction.sh
+
+format-tr036-read-only-transaction:
+	@bash scripts/format-tr036-read-only-transaction.sh
+
+benchmark-tr036-read-only-transaction:
+	@bash scripts/benchmark-tr036-read-only-transaction.sh
+
+race-tr036-read-only-transaction:
+	@bash scripts/race-tr036-read-only-transaction.sh
+
+vet-tr036-read-only-transaction:
+	@bash scripts/vet-tr036-read-only-transaction.sh
+
+commit-tr036-read-only-transaction:
+	@bash scripts/commit-tr036-read-only-transaction.sh
+
+push-tr036-read-only-transaction:
+	@bash scripts/push-tr036-read-only-transaction.sh
+
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh

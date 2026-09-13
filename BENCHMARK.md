@@ -23385,3 +23385,28 @@ BenchmarkMZ018SourceFrontierWaitEnabled-32     248450  4692 ns/op  4912 B/op  29
 BenchmarkMZ018SourceFrontierWaitEnabled-32     246478  4557 ns/op  4912 B/op  29 allocs/op
 BenchmarkMZ018SourceFrontierWaitEnabled-32     239206  4312 ns/op  4912 B/op  29 allocs/op
 ```
+
+## TR-036 Read-Only SQL Transactions
+
+This measures the Tarantool-inspired opt-in transaction mutation guard. The
+benchmark opens one read-only snapshot transaction and repeatedly attempts a
+mutation. Rejected writes return before SQL compilation and execution.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Read-only mutation guard | 14.65 | 0 | 0 | 1.00x | 1.00x |
+
+The guard is allocation-free and does not alter the default writable
+transaction, query, wire, journal, snapshot, or persistence paths. This is a
+safety feature, not a throughput claim. Raw samples and the exact commands are
+in [TR036_READ_ONLY_TRANSACTIONS.md](TR036_READ_ONLY_TRANSACTIONS.md).
+
+Raw output:
+
+```text
+BenchmarkTR036ReadOnlySQLTransactionGuard-32  78076374  14.80 ns/op  0 B/op  0 allocs/op
+BenchmarkTR036ReadOnlySQLTransactionGuard-32  80599699  13.23 ns/op  0 B/op  0 allocs/op
+BenchmarkTR036ReadOnlySQLTransactionGuard-32  87995312  14.65 ns/op  0 B/op  0 allocs/op
+BenchmarkTR036ReadOnlySQLTransactionGuard-32  81138364  15.31 ns/op  0 B/op  0 allocs/op
+BenchmarkTR036ReadOnlySQLTransactionGuard-32  73909237  13.80 ns/op  0 B/op  0 allocs/op
+```

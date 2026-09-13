@@ -1,9 +1,14 @@
 package hatCache
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrSQLTransactionReadOnly is returned when a mutation is attempted through
+// a transaction opened with ReadOnly enabled.
+var ErrSQLTransactionReadOnly = errors.New("SQL transaction is read-only")
 
 // SQLTransactionIsolation controls how a SQLTransaction coordinates with
 // concurrent command-path mutations.
@@ -50,6 +55,9 @@ func ParseSQLTransactionIsolation(value string) (SQLTransactionIsolation, error)
 // SQLTransactionOptions configures BeginSQLTransactionWithOptions.
 type SQLTransactionOptions struct {
 	Isolation SQLTransactionIsolation
+	// ReadOnly rejects Execute mutations while retaining snapshot reads. It is
+	// disabled by the zero value for backward compatibility.
+	ReadOnly bool
 }
 
 func (options SQLTransactionOptions) normalized() (SQLTransactionOptions, error) {

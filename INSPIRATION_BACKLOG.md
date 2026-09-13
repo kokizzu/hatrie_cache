@@ -165,7 +165,7 @@ before/after measurement when its motivation is performance.
 | TR-33 | Returning old and new tuple values from mutations | Build changefeeds without rereads | Copy cost and API shape | [x] Implemented as `SQLMutationResult.BeforeRows` for affected SQL mutations with `RETURNING`; existing `Rows` remains the post-state (or deleted row). See [TR033_SQL_RETURNING_BEFORE_ROWS.md](TR033_SQL_RETURNING_BEFORE_ROWS.md) and [BENCHMARK.md#tr-033-sql-returning-before-rows](BENCHMARK.md#tr-033-sql-returning-before-rows). |
 | TR-34 | Nested transaction savepoints | Roll back part of a complex operation | Undo-log complexity | [ ] |
 | TR-35 | MVCC snapshot read views | Stable reads during concurrent writes | Version retention | [ ] |
-| TR-36 | Explicit read-only transaction mode | Protect analytical clients from writes | API and enforcement work | [ ] |
+| TR-36 | Explicit read-only transaction mode | Protect analytical clients from writes | API and enforcement work | [x] Implemented by `SQLTransactionOptions.ReadOnly`; see [TR036_READ_ONLY_TRANSACTIONS.md](TR036_READ_ONLY_TRANSACTIONS.md) and [BENCHMARK.md](BENCHMARK.md#tr-036-read-only-sql-transactions). |
 | TR-37 | Deadlock detection with a wait-for graph | Fail blocked transactions deterministically | Graph overhead | [ ] |
 | TR-38 | Transaction and statement timeouts | Bound stuck work | Partial rollback behavior | [ ] |
 | TR-39 | Fiber-local allocation pools and context | Lower scheduler-path allocations | Lifetime leaks | [ ] |

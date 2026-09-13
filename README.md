@@ -3176,6 +3176,12 @@ conflict check rather than being silently overwritten. Use
 `SQLTransaction.Savepoint`, `RollbackTo`, and `ReleaseSavepoint` provide
 partial rollback inside the private transaction snapshot; releasing or
 rolling back a savepoint never publishes writes to the live cache.
+For clients that must only inspect a snapshot, set `ReadOnly: true` in
+`SQLTransactionOptions`. Such transactions allow `Query`, reject `Execute`
+with `ErrSQLTransactionReadOnly` before parsing, and make `Commit` a successful
+no-op. The default remains writable. See
+[TR036_READ_ONLY_TRANSACTIONS.md](TR036_READ_ONLY_TRANSACTIONS.md) for the
+measured guard path.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons. The comparison includes single-command

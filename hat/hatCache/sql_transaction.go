@@ -19,6 +19,7 @@ type SQLTransaction struct {
 	snapshot             *HatTrie
 	epoch                uint64
 	isolation            SQLTransactionIsolation
+	readOnly             bool
 	serializableLockHeld bool
 	staged               []CacheCommandRequest
 	savepoints           []sqlTransactionSavepoint
@@ -93,6 +94,7 @@ func BeginSQLTransactionWithOptions(trie *HatTrie, options SQLTransactionOptions
 		snapshot:             snapshot,
 		epoch:                epoch,
 		isolation:            options.Isolation,
+		readOnly:             options.ReadOnly,
 		serializableLockHeld: serializableLockHeld,
 	}, nil
 }
@@ -106,6 +108,12 @@ func (transaction *SQLTransaction) Isolation() SQLTransactionIsolation {
 	return transaction.isolation
 }
 
+// ReadOnly reports whether this transaction rejects staged mutations. A nil
+// transaction reports the backward-compatible writable default.
+func (transaction *SQLTransaction) ReadOnly() bool {
+	return transaction != nil && transaction.readOnly
+}
+
 // Execute stages one or more scalar command-SQL mutations. SELECT and CALL
 // reads are intentionally rejected; use Query for relational snapshot reads.
 func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, error) {
@@ -113,6 +121,9 @@ func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, er
 	defer transaction.mu.Unlock()
 	if transaction.closed {
 		return SQLMutationResult{}, fmt.Errorf("SQL transaction is closed")
+	}
+	if transaction.readOnly {
+		return SQLMutationResult{}, ErrSQLTransactionReadOnly
 	}
 	request, err := CompileSQL(source)
 	if err != nil {
