@@ -3758,6 +3758,7 @@ type HatTrie struct {
 	keyStatsFree                       []uint32
 	keyStatsHand                       int
 	levelDBSpillKeys                   map[string]struct{}
+	storagePinnedKeys                  map[string]struct{}
 	levelDBHotBytes                    int64
 	levelDBHotValues                   map[string]int64
 	keyWatchers                        map[string]map[uint64]*KeyWatcher

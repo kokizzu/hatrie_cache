@@ -1087,6 +1087,11 @@ func (trie *HatTrie) appendLevelDBSpillCandidateLocked(candidates *[]levelDBSpil
 	if valueBytes < options.MinValueBytes {
 		return
 	}
+	if trie.storagePinnedKeys != nil {
+		if _, pinned := trie.storagePinnedKeys[entry.Key]; pinned {
+			return
+		}
+	}
 	candidate := levelDBSpillCandidate{
 		key:        entry.Key,
 		value:      entry.Value,

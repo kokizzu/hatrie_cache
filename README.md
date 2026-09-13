@@ -2268,6 +2268,15 @@ Prometheus exposes `hatrie_cache_storage_last_spill_keys`,
 `hatrie_cache_storage_last_spill_hot_bytes_before`, and
 `hatrie_cache_storage_last_spill_hot_bytes_after`.
 
+Use `PinStorageKey`, `UnpinStorageKey`, `IsStorageKeyPinned`, and
+`PinnedStorageKeys` when a value must remain materialized during explicit
+LevelDB or Pebble cold spilling. Pinning is disabled by default, applies to
+both spill backends, hydrates an already-cold value, and is process-local so
+it is not included in snapshots or backups. Pinned bytes still count toward
+the soft hot-byte cap, so the cap can remain above target when pins alone are
+larger than the limit. See [TR016_STORAGE_PINNING.md](TR016_STORAGE_PINNING.md)
+and the [TR-16 benchmark](BENCHMARK.md#tr-16-storage-key-pinning).
+
 Set `SNAPSHOT_PATH` to load a snapshot at startup and save it on shutdown.
 Snapshots save as storage-optimized gzip binary by default
 (`SNAPSHOT_FORMAT=gzip-best-binary`) and still load binary, gzip binary, older

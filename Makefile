@@ -12965,3 +12965,30 @@ commit-mz008:
 
 push-mz008:
 	bash ./scripts/push-mz008.sh
+
+test-tr016:
+	bash ./scripts/test-tr016.sh
+
+benchmark-tr016:
+	bash ./scripts/benchmark-tr016.sh
+
+format-tr016:
+	bash ./scripts/format-tr016.sh
+
+test-tr016-race:
+	bash ./scripts/test-tr016-race.sh
+
+test-tr016-full:
+	bash ./scripts/test-tr016-full.sh
+
+status-tr016:
+	bash ./scripts/status-tr016.sh
+
+review-tr016:
+	bash ./scripts/review-tr016.sh
+
+commit-tr016:
+	bash ./scripts/commit-tr016.sh
+
+push-tr016:
+	bash ./scripts/push-tr016.sh

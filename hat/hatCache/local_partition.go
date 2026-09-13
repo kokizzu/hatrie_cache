@@ -161,6 +161,14 @@ func (ht *HatTrie) ConfigureLocalPartitions(count int) error {
 		}
 		return err
 	}
+	for key := range ht.storagePinnedKeys {
+		child := set.tries[hatPartition.Index(key, len(set.tries))]
+		if child.storagePinnedKeys == nil {
+			child.storagePinnedKeys = make(map[string]struct{})
+		}
+		child.storagePinnedKeys[key] = struct{}{}
+	}
+	ht.storagePinnedKeys = nil
 	ht.localPartitions.Store(set)
 	return nil
 }

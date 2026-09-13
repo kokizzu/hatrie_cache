@@ -15022,6 +15022,38 @@ Memory summary:
 ```
 
 <!-- END GENERATED COMMAND BENCHMARK RAW RESULTS -->
+
+## TR-16: Storage Key Pinning
+
+The storage key pinning policy keeps explicitly selected values materialized
+during LevelDB and Pebble `SpillCold` passes. The policy is off by default and
+does not add a map allocation to normal trie operations. The admission check
+is shared by both backends.
+
+Command:
+
+```text
+make benchmark-tr016
+```
+
+Measured on an AMD Ryzen 9 5950X:
+
+| Case | ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Default off | 11.48 | 0 | 0 | 1.00x |
+| Active unrelated pin | 16.74 | 0 | 0 | 0.69x of default-off throughput |
+| Active matching pin | 10.29 | 0 | 0 | 1.12x of default-off throughput |
+
+The active unrelated-pin case is the relevant overhead when a pin set exists
+but the scanned key is not pinned: one map lookup costs about 1.46x CPU and no
+heap. The matching case is faster because it skips candidate construction; it
+is not a general query or write speedup. The five raw samples were
+`12.20, 11.43, 11.12, 11.48, 11.54`, `17.49, 16.74, 17.11, 16.23, 16.17`,
+and `10.29, 10.44, 10.36, 10.29, 10.15` in the table's order. The feature intentionally trades
+potentially higher retained memory for residency. Pinned values remain part
+of hot-byte accounting, and a soft cap may stay above target if pinned bytes
+cannot be evicted. See [TR016_STORAGE_PINNING.md](TR016_STORAGE_PINNING.md)
+for API and recovery semantics.
 ## Managed Refresh Freshness Status
 
 This benchmark executes one successful managed refresh, then repeatedly reads
