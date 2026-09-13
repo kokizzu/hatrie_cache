@@ -132,10 +132,14 @@ checked:
 	return code, nil
 }
 
-func validateSQLRowBinaryEnumDecodedValue(column SQLRowBinaryColumn, value interface{}, row int) error {
-	if column.Type != SQLRowBinaryEnum8 && column.Type != SQLRowBinaryEnum16 {
+func validateSQLRowBinaryDecodedValue(column SQLRowBinaryColumn, value interface{}, row int) error {
+	switch column.Type {
+	case SQLRowBinaryEnum8, SQLRowBinaryEnum16:
+		_, err := sqlRowBinaryEnumCode(column, value, row)
+		return err
+	case SQLRowBinaryDecimal128, SQLRowBinaryDecimal256:
+		return validateSQLRowBinaryDecimalValue(column, value, row)
+	default:
 		return nil
 	}
-	_, err := sqlRowBinaryEnumCode(column, value, row)
-	return err
 }

@@ -67,7 +67,7 @@ func AnalyzeSQLRowBinaryRead(columns []SQLRowBinaryColumn, encoded []byte) (SQLR
 			if err != nil {
 				return SQLRowBinaryReadStats{}, err
 			}
-			if err := validateSQLRowBinaryEncodedEnumValue(column, encoded, offset, stats.Rows); err != nil {
+			if err := validateSQLRowBinaryEncodedFixedValue(column, encoded, offset, stats.Rows); err != nil {
 				return SQLRowBinaryReadStats{}, err
 			}
 			offset = next
@@ -78,27 +78,41 @@ func AnalyzeSQLRowBinaryRead(columns []SQLRowBinaryColumn, encoded []byte) (SQLR
 	return stats, nil
 }
 
-func validateSQLRowBinaryEncodedEnumValue(column SQLRowBinaryColumn, encoded []byte, offset, row int) error {
+func validateSQLRowBinaryEncodedFixedValue(column SQLRowBinaryColumn, encoded []byte, offset, row int) error {
 	var size int
 	switch column.Type {
 	case SQLRowBinaryEnum8:
 		size = 1
 	case SQLRowBinaryEnum16:
 		size = 2
+	case SQLRowBinaryDecimal128:
+		size = 16
+	case SQLRowBinaryDecimal256:
+		size = 32
 	default:
 		return nil
 	}
 	if offset < 0 || size > len(encoded)-offset {
 		return fmt.Errorf("RowBinary read row %d column %q is truncated", row, column.Name)
 	}
-	var code uint64
-	if size == 1 {
-		code = uint64(encoded[offset])
-	} else {
-		code = uint64(binary.LittleEndian.Uint16(encoded[offset : offset+size]))
-	}
-	if code >= uint64(len(column.EnumValues)) {
-		return fmt.Errorf("RowBinary read row %d column %q enum code %d exceeds %d labels", row, column.Name, code, len(column.EnumValues))
+	if column.Type == SQLRowBinaryEnum8 || column.Type == SQLRowBinaryEnum16 {
+		var code uint64
+		if size == 1 {
+			code = uint64(encoded[offset])
+		} else {
+			code = uint64(binary.LittleEndian.Uint16(encoded[offset : offset+size]))
+		}
+		if code >= uint64(len(column.EnumValues)) {
+			return fmt.Errorf("RowBinary read row %d column %q enum code %d exceeds %d labels", row, column.Name, code, len(column.EnumValues))
+		}
+	} else if column.Type == SQLRowBinaryDecimal128 || column.Type == SQLRowBinaryDecimal256 {
+		value, _, err := decodeSQLRowBinaryValue(column.Type, encoded, offset, row, column.Name)
+		if err != nil {
+			return err
+		}
+		if err := validateSQLRowBinaryDecodedValue(column, value, row); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -137,6 +151,10 @@ func skipSQLRowBinaryValue(kind SQLRowBinaryType, encoded []byte, offset, row in
 		return skipSQLRowBinaryFixed(encoded, offset, 4, row, column)
 	case SQLRowBinaryIPv6:
 		return skipSQLRowBinaryFixed(encoded, offset, 16, row, column)
+	case SQLRowBinaryDecimal128:
+		return skipSQLRowBinaryFixed(encoded, offset, 16, row, column)
+	case SQLRowBinaryDecimal256:
+		return skipSQLRowBinaryFixed(encoded, offset, 32, row, column)
 	default:
 		return offset, fmt.Errorf("RowBinary read column %q has unsupported type %d", column, kind)
 	}

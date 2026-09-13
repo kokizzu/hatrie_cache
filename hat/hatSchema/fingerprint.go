@@ -40,6 +40,10 @@ func (schema Schema) Fingerprint() string {
 					part(enumValue)
 				}
 			}
+			if column.Type == TypeDecimal128 || column.Type == TypeDecimal256 || column.DecimalScale != 0 || column.DecimalPrecision != 0 {
+				part(strconv.Itoa(int(column.DecimalScale)))
+				part(strconv.Itoa(int(column.DecimalPrecision)))
+			}
 		}
 		for _, constraint := range source.Constraints {
 			part(constraint.Name)

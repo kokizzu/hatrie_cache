@@ -199,7 +199,7 @@ func DecodeSQLRowBinaryWithStats(columns []SQLRowBinaryColumn, encoded []byte) (
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := validateSQLRowBinaryEnumDecodedValue(column, min, -1); err != nil {
+			if err := validateSQLRowBinaryDecodedValue(column, min, -1); err != nil {
 				return nil, nil, err
 			}
 			metadataOffset = next
@@ -207,7 +207,7 @@ func DecodeSQLRowBinaryWithStats(columns []SQLRowBinaryColumn, encoded []byte) (
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := validateSQLRowBinaryEnumDecodedValue(column, max, -1); err != nil {
+			if err := validateSQLRowBinaryDecodedValue(column, max, -1); err != nil {
 				return nil, nil, err
 			}
 			metadataOffset = next
@@ -385,6 +385,12 @@ func normalizeSQLRowBinaryStatsColumnValue(column SQLRowBinaryColumn, value inte
 			return nil, false, err
 		}
 		return SQLEnum16(code), true, nil
+	case SQLRowBinaryDecimal128, SQLRowBinaryDecimal256:
+		converted, err := normalizeSQLRowBinaryDecimalValue(column, value, row)
+		if err != nil {
+			return nil, false, err
+		}
+		return converted, true, nil
 	case SQLRowBinaryJSON:
 		if _, ok := value.(json.RawMessage); !ok {
 			return nil, false, fmt.Errorf("RowBinary stats row %d column %q expects json.RawMessage, got %T", row, columnName, value)
@@ -403,7 +409,7 @@ func cloneSQLRowBinaryStatsValue(kind SQLRowBinaryType, value interface{}) inter
 }
 
 func sqlRowBinaryStatsSupportsMinMax(kind SQLRowBinaryType) bool {
-	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryUUID || kind == SQLRowBinaryIPv4 || kind == SQLRowBinaryIPv6 || kind == SQLRowBinaryEnum8 || kind == SQLRowBinaryEnum16
+	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryUUID || kind == SQLRowBinaryIPv4 || kind == SQLRowBinaryIPv6 || kind == SQLRowBinaryEnum8 || kind == SQLRowBinaryEnum16 || kind == SQLRowBinaryDecimal128 || kind == SQLRowBinaryDecimal256
 }
 
 func compareSQLRowBinaryStatsValues(kind SQLRowBinaryType, left, right interface{}) int {
@@ -511,6 +517,12 @@ func compareSQLRowBinaryStatsValues(kind SQLRowBinaryType, left, right interface
 		if leftValue > rightValue {
 			return 1
 		}
+	case SQLRowBinaryDecimal128:
+		leftValue, rightValue := left.(SQLDecimal128), right.(SQLDecimal128)
+		return compareSQLDecimalFixed(leftValue[:], rightValue[:])
+	case SQLRowBinaryDecimal256:
+		leftValue, rightValue := left.(SQLDecimal256), right.(SQLDecimal256)
+		return compareSQLDecimalFixed(leftValue[:], rightValue[:])
 	}
 	return 0
 }

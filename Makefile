@@ -4712,6 +4712,84 @@ commit-sql-enum:
 push-sql-enum:
 	sh ./scripts/push-sql-enum.sh
 
+.PHONY: inspect-ch032
+inspect-ch032:
+	sh ./scripts/inspect-ch032.sh
+
+.PHONY: inspect-ch032-decimal
+inspect-ch032-decimal:
+	SECTION=decimal sh ./scripts/inspect-ch032.sh
+
+.PHONY: inspect-ch032-decimal-code
+inspect-ch032-decimal-code:
+	SECTION=decimal-code sh ./scripts/inspect-ch032.sh
+
+inspect-ch032-decimal-test:
+	sh ./scripts/inspect-ch032-decimal-test.sh
+
+inspect-ch032-decimal-head:
+	sh ./scripts/inspect-ch032-decimal-head.sh
+
+.PHONY: inspect-ch032-row
+inspect-ch032-row:
+	SECTION=row sh ./scripts/inspect-ch032.sh
+
+.PHONY: inspect-ch032-stream
+inspect-ch032-stream:
+	SECTION=stream sh ./scripts/inspect-ch032.sh
+
+inspect-ch032-stream-head:
+	sh ./scripts/inspect-ch032-stream-head.sh
+
+inspect-ch032-uses:
+	sh ./scripts/inspect-ch032-uses.sh
+
+inspect-ch032-dictionary:
+	sh ./scripts/inspect-ch032-dictionary.sh
+
+inspect-readme-ch032:
+	sh ./scripts/inspect-readme-ch032.sh
+
+inspect-benchmark-ch032:
+	sh ./scripts/inspect-benchmark-ch032.sh
+
+.PHONY: inspect-ch032-schema
+inspect-ch032-schema:
+	SECTION=schema sh ./scripts/inspect-ch032.sh
+
+.PHONY: benchmark-sql-decimal-before
+benchmark-sql-decimal-before:
+	sh ./scripts/benchmark-sql-decimal-before.sh
+
+benchmark-sql-decimal-after:
+	sh ./scripts/benchmark-sql-decimal-after.sh
+
+review-sql-decimal:
+	sh ./scripts/review-sql-decimal.sh
+
+test-sql-decimal-full:
+	sh ./scripts/test-sql-decimal-full.sh
+
+race-sql-decimal:
+	sh ./scripts/race-sql-decimal.sh
+
+vet-sql-decimal:
+	sh ./scripts/vet-sql-decimal.sh
+
+commit-sql-decimal:
+	sh ./scripts/commit-sql-decimal.sh
+
+push-sql-decimal:
+	sh ./scripts/push-sql-decimal.sh
+
+.PHONY: test-sql-decimal
+test-sql-decimal:
+	sh ./scripts/test-sql-decimal.sh
+
+.PHONY: format-sql-decimal
+format-sql-decimal:
+	sh ./scripts/format-sql-decimal.sh
+
 .PHONY: audit-inspiration-unchecked
 audit-inspiration-unchecked:
 	sh ./scripts/audit-inspiration-unchecked.sh

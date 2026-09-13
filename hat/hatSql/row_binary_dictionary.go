@@ -163,7 +163,7 @@ func (e *SQLRowBinaryDictionaryEncoder) Encode(rows []SQLRow) ([]byte, error) {
 				continue
 			}
 			var err error
-			rowPayload, err = appendSQLRowBinaryValue(rowPayload, column.Type, value, rowIndex, column.Name)
+			rowPayload, err = appendSQLRowBinaryColumnValue(rowPayload, column, value, rowIndex)
 			if err != nil {
 				return nil, err
 			}

@@ -51,7 +51,7 @@ before/after measurement when its motivation is performance.
 | CH-29 | Dictionary-backed join execution | Avoid materializing small dimensions | Refresh consistency | [ ] |
 | CH-30 | Map key/value subcolumn pruning | Read only the needed nested vector | Planner and null semantics | [ ] |
 | CH-31 | Automatic typed subcolumn materialization for JSON paths | Turn hot JSON paths into compact columns | Schema churn and disk use | [ ] |
-| CH-32 | Decimal128 and Decimal256 physical codecs | Exact high-precision analytics | Arithmetic CPU and overflow rules | [ ] |
+| CH-32 | Decimal128 and Decimal256 physical codecs | Exact high-precision analytics | Arithmetic CPU and overflow rules | [x] Implemented by `hatSql.SQLDecimal128`, `hatSql.SQLDecimal256`, fixed-width RowBinary codecs, explicit stream metadata, schema validation, and exact stats/pruning support; see [SQL_DECIMAL_TYPES.md](SQL_DECIMAL_TYPES.md) and [BENCHMARK.md](BENCHMARK.md#ch-032-fixed-width-sql-decimal-rowbinary). |
 | CH-33 | UUID typed encoding and scalar functions | Compact stable identifiers | Type compatibility | [ ] |
 | CH-34 | IPv4 and IPv6 typed encoding and functions | Compact network analytics | Parsing and ordering semantics | [x] |
 | CH-35 | Enum physical encoding and schema validation | Compact categorical values | Schema evolution constraints | [x] Implemented by `hatSql.SQLRowBinaryEnum8`, `hatSql.SQLRowBinaryEnum16`, schema-aware enum labels, strict code validation, and generated `hatSchema` enum model types; see [SQL_ENUM_TYPES.md](SQL_ENUM_TYPES.md) and [BENCHMARK.md](BENCHMARK.md#ch-035-compact-sql-enum-rowbinary-values). |

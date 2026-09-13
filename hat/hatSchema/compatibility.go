@@ -122,6 +122,9 @@ func compareRollingSource(previous, next Source, addChange func(SchemaCompatibil
 		if !reflect.DeepEqual(previousColumn.EnumValues, nextColumn.EnumValues) {
 			addChange(SchemaCompatibilityChange{Kind: "enum_values_changed", Source: previous.Name, Column: previousColumn.Name}, false)
 		}
+		if previousColumn.DecimalScale != nextColumn.DecimalScale || previousColumn.DecimalPrecision != nextColumn.DecimalPrecision {
+			addChange(SchemaCompatibilityChange{Kind: "decimal_metadata_changed", Source: previous.Name, Column: previousColumn.Name}, false)
+		}
 		if previousColumn.NotNull != nextColumn.NotNull {
 			if previousColumn.NotNull && !nextColumn.NotNull {
 				addChange(SchemaCompatibilityChange{Kind: "nullability_relaxed", Source: previous.Name, Column: previousColumn.Name}, true)

@@ -93,7 +93,7 @@ func DecodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, encoded []byte) ([]S
 			if err != nil {
 				return nil, err
 			}
-			if err := validateSQLRowBinaryEnumDecodedValue(column, value, len(rows)); err != nil {
+			if err := validateSQLRowBinaryDecodedValue(column, value, len(rows)); err != nil {
 				return nil, err
 			}
 			row[column.Name] = value
@@ -229,6 +229,22 @@ func decodeSQLRowBinaryBitmapValue(kind SQLRowBinaryType, encoded []byte, offset
 			return nil, offset, err
 		}
 		return SQLEnum16(binary.LittleEndian.Uint16(value)), next, nil
+	case SQLRowBinaryDecimal128:
+		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 16, row, column)
+		if err != nil {
+			return nil, offset, err
+		}
+		var decimal SQLDecimal128
+		copy(decimal[:], value)
+		return decimal, next, nil
+	case SQLRowBinaryDecimal256:
+		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 32, row, column)
+		if err != nil {
+			return nil, offset, err
+		}
+		var decimal SQLDecimal256
+		copy(decimal[:], value)
+		return decimal, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary bitmap column %q has unsupported type %d", column, kind)
 	}

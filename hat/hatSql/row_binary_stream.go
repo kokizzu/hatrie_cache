@@ -25,10 +25,12 @@ var sqlRowBinaryStreamMagic = [4]byte{'H', 'R', 'S', '1'}
 // SQLRowBinaryStreamColumn is the schema metadata carried in a stream
 // prelude. The row payload itself remains the compact schema-ordered format.
 type SQLRowBinaryStreamColumn struct {
-	Name       string           `json:"name"`
-	Type       SQLRowBinaryType `json:"type"`
-	Nullable   bool             `json:"nullable"`
-	EnumValues []string         `json:"enum_values,omitempty"`
+	Name             string           `json:"name"`
+	Type             SQLRowBinaryType `json:"type"`
+	Nullable         bool             `json:"nullable"`
+	EnumValues       []string         `json:"enum_values,omitempty"`
+	DecimalScale     uint8            `json:"decimal_scale,omitempty"`
+	DecimalPrecision uint8            `json:"decimal_precision,omitempty"`
 }
 
 // SQLRowBinaryStreamHeader describes the versioned stream prelude.
@@ -42,13 +44,14 @@ type SQLRowBinaryStreamHeader struct {
 // retaining the result set. Every inferred column is nullable so a later row
 // can legally contain NULL even when the first row did not.
 type SQLRowBinaryStreamWriter struct {
-	writer        io.Writer
-	columnNames   []string
-	columns       []SQLRowBinaryColumn
-	headerWritten bool
-	finished      bool
-	rows          int
-	buffer        []byte
+	writer          io.Writer
+	columnNames     []string
+	columns         []SQLRowBinaryColumn
+	columnsProvided bool
+	headerWritten   bool
+	finished        bool
+	rows            int
+	buffer          []byte
 }
 
 // SQLRowBinaryStreamReader incrementally decodes one self-describing stream.
@@ -159,6 +162,25 @@ func NewSQLRowBinaryStreamWriter(writer io.Writer, columnNames []string) *SQLRow
 	}
 }
 
+// NewSQLRowBinaryStreamWriterWithColumns creates a streaming encoder with an
+// explicit physical schema. Typed Decimal128/Decimal256 values use the
+// supplied scale and precision because those values carry only their integer
+// coefficient.
+func NewSQLRowBinaryStreamWriterWithColumns(writer io.Writer, columns []SQLRowBinaryColumn) (*SQLRowBinaryStreamWriter, error) {
+	if writer == nil {
+		return nil, fmt.Errorf("SQL RowBinary stream writer destination is nil")
+	}
+	if err := validateSQLRowBinaryColumns(columns); err != nil {
+		return nil, err
+	}
+	copied := make([]SQLRowBinaryColumn, len(columns))
+	copy(copied, columns)
+	for index := range copied {
+		copied[index].EnumValues = append([]string(nil), columns[index].EnumValues...)
+	}
+	return &SQLRowBinaryStreamWriter{writer: writer, columns: copied, columnsProvided: true}, nil
+}
+
 // WriteRow infers the physical schema from the first row and writes one row.
 // Columns whose first value is NULL use JSON as a lossless conservative type.
 func (writer *SQLRowBinaryStreamWriter) WriteRow(row Row) error {
@@ -174,7 +196,7 @@ func (writer *SQLRowBinaryStreamWriter) WriteRow(row Row) error {
 	if writer.rows >= maxSQLRowBinaryRows {
 		return fmt.Errorf("SQL RowBinary stream row count exceeds limit %d", maxSQLRowBinaryRows)
 	}
-	if !writer.headerWritten {
+	if !writer.headerWritten && !writer.columnsProvided {
 		columns, err := inferSQLRowBinaryStreamColumns(writer.columnNames, row)
 		if err != nil {
 			return err
@@ -212,7 +234,7 @@ func (writer *SQLRowBinaryStreamWriter) Finish() error {
 	if writer.writer == nil {
 		return fmt.Errorf("SQL RowBinary stream writer destination is nil")
 	}
-	if !writer.headerWritten {
+	if !writer.headerWritten && !writer.columnsProvided {
 		columns, err := inferSQLRowBinaryStreamColumns(writer.columnNames, nil)
 		if err != nil {
 			return err
@@ -231,10 +253,12 @@ func (writer *SQLRowBinaryStreamWriter) writeHeader() error {
 	headerColumns := make([]SQLRowBinaryStreamColumn, len(writer.columns))
 	for index, column := range writer.columns {
 		headerColumns[index] = SQLRowBinaryStreamColumn{
-			Name:       column.Name,
-			Type:       column.Type,
-			Nullable:   column.Nullable,
-			EnumValues: append([]string(nil), column.EnumValues...),
+			Name:             column.Name,
+			Type:             column.Type,
+			Nullable:         column.Nullable,
+			EnumValues:       append([]string(nil), column.EnumValues...),
+			DecimalScale:     column.DecimalScale,
+			DecimalPrecision: column.DecimalPrecision,
 		}
 	}
 	header, err := json.Marshal(SQLRowBinaryStreamHeader{
@@ -295,7 +319,7 @@ func splitSQLRowBinaryStream(encoded []byte) ([]SQLRowBinaryColumn, []byte, erro
 	}
 	columns := make([]SQLRowBinaryColumn, len(header.Columns))
 	for index, column := range header.Columns {
-		columns[index] = SQLRowBinaryColumn{Name: column.Name, Type: column.Type, Nullable: column.Nullable, EnumValues: append([]string(nil), column.EnumValues...)}
+		columns[index] = SQLRowBinaryColumn{Name: column.Name, Type: column.Type, Nullable: column.Nullable, EnumValues: append([]string(nil), column.EnumValues...), DecimalScale: column.DecimalScale, DecimalPrecision: column.DecimalPrecision}
 	}
 	if err := validateSQLRowBinaryStreamColumns(columns); err != nil {
 		return nil, nil, err
@@ -331,7 +355,7 @@ func readSQLRowBinaryStreamHeader(reader *bufio.Reader) ([]SQLRowBinaryColumn, e
 	}
 	columns := make([]SQLRowBinaryColumn, len(header.Columns))
 	for index, column := range header.Columns {
-		columns[index] = SQLRowBinaryColumn{Name: column.Name, Type: column.Type, Nullable: column.Nullable, EnumValues: append([]string(nil), column.EnumValues...)}
+		columns[index] = SQLRowBinaryColumn{Name: column.Name, Type: column.Type, Nullable: column.Nullable, EnumValues: append([]string(nil), column.EnumValues...), DecimalScale: column.DecimalScale, DecimalPrecision: column.DecimalPrecision}
 	}
 	if err := validateSQLRowBinaryStreamColumns(columns); err != nil {
 		return nil, err
@@ -367,7 +391,7 @@ func readSQLRowBinaryStreamRow(reader *bufio.Reader, columns []SQLRowBinaryColum
 		if err != nil {
 			return nil, fmt.Errorf("SQL RowBinary stream row %d column %q: %w", rowIndex, column.Name, unexpectedSQLRowBinaryStreamEOF(err))
 		}
-		if err := validateSQLRowBinaryEnumDecodedValue(column, value, rowIndex); err != nil {
+		if err := validateSQLRowBinaryDecodedValue(column, value, rowIndex); err != nil {
 			return nil, err
 		}
 		started = true
@@ -433,6 +457,10 @@ func sqlRowBinaryStreamFixedWidth(kind SQLRowBinaryType) int {
 		return 1
 	case SQLRowBinaryEnum16:
 		return 2
+	case SQLRowBinaryDecimal128:
+		return 16
+	case SQLRowBinaryDecimal256:
+		return 32
 	default:
 		return 0
 	}
@@ -461,7 +489,12 @@ func inferSQLRowBinaryStreamColumns(names []string, row Row) ([]SQLRowBinaryColu
 		seen[name] = struct{}{}
 		kind := SQLRowBinaryJSON
 		if row != nil {
-			kind = inferSQLRowBinaryStreamType(row[name])
+			value := row[name]
+			kind = inferSQLRowBinaryStreamType(value)
+			switch value.(type) {
+			case SQLDecimal128, SQLDecimal256:
+				return nil, fmt.Errorf("SQL RowBinary stream column %q requires explicit decimal scale and precision", name)
+			}
 		}
 		columns[index] = SQLRowBinaryColumn{Name: name, Type: kind, Nullable: true}
 	}
@@ -492,6 +525,10 @@ func inferSQLRowBinaryStreamType(value interface{}) SQLRowBinaryType {
 		return SQLRowBinaryEnum8
 	case SQLEnum16:
 		return SQLRowBinaryEnum16
+	case SQLDecimal128:
+		return SQLRowBinaryDecimal128
+	case SQLDecimal256:
+		return SQLRowBinaryDecimal256
 	case sqlDecimal, sqlDuration:
 		return SQLRowBinaryString
 	case []byte:
@@ -514,11 +551,16 @@ func appendSQLRowBinaryStreamRow(destination []byte, columns []SQLRowBinaryColum
 			value = row[column.Name]
 		}
 		if value == nil {
+			if !column.Nullable {
+				return nil, fmt.Errorf("SQL RowBinary stream row %d column %q is NULL but not nullable", rowIndex, column.Name)
+			}
 			destination = append(destination, 1)
 			continue
 		}
-		destination = append(destination, 0)
-		normalized, err := normalizeSQLRowBinaryStreamValue(column.Type, value)
+		if column.Nullable {
+			destination = append(destination, 0)
+		}
+		normalized, err := normalizeSQLRowBinaryStreamValue(column, value)
 		if err != nil {
 			return nil, fmt.Errorf("SQL RowBinary stream row %d column %q: %w", rowIndex, column.Name, err)
 		}
@@ -530,8 +572,8 @@ func appendSQLRowBinaryStreamRow(destination []byte, columns []SQLRowBinaryColum
 	return destination, nil
 }
 
-func normalizeSQLRowBinaryStreamValue(kind SQLRowBinaryType, value interface{}) (interface{}, error) {
-	switch kind {
+func normalizeSQLRowBinaryStreamValue(column SQLRowBinaryColumn, value interface{}) (interface{}, error) {
+	switch column.Type {
 	case SQLRowBinaryInt64:
 		switch converted := value.(type) {
 		case int:
@@ -665,6 +707,44 @@ func normalizeSQLRowBinaryStreamValue(kind SQLRowBinaryType, value interface{}) 
 		default:
 			return nil, fmt.Errorf("expects SQLEnum16, got %T", value)
 		}
+	case SQLRowBinaryDecimal128:
+		switch converted := value.(type) {
+		case SQLDecimal128:
+			return converted, nil
+		case SQLDecimal:
+			parsed, err := ParseSQLDecimal128(string(converted), column.DecimalScale)
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		case string:
+			parsed, err := ParseSQLDecimal128(converted, column.DecimalScale)
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expects SQLDecimal128 or decimal string, got %T", value)
+		}
+	case SQLRowBinaryDecimal256:
+		switch converted := value.(type) {
+		case SQLDecimal256:
+			return converted, nil
+		case SQLDecimal:
+			parsed, err := ParseSQLDecimal256(string(converted), column.DecimalScale)
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		case string:
+			parsed, err := ParseSQLDecimal256(converted, column.DecimalScale)
+			if err != nil {
+				return nil, err
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expects SQLDecimal256 or decimal string, got %T", value)
+		}
 	case SQLRowBinaryJSON:
 		if raw, ok := value.(json.RawMessage); ok {
 			if !json.Valid(raw) {
@@ -678,7 +758,7 @@ func normalizeSQLRowBinaryStreamValue(kind SQLRowBinaryType, value interface{}) 
 		}
 		return json.RawMessage(encoded), nil
 	default:
-		return nil, fmt.Errorf("unsupported physical type %d", kind)
+		return nil, fmt.Errorf("unsupported physical type %d", column.Type)
 	}
 }
 

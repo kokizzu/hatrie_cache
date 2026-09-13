@@ -482,6 +482,8 @@ func init() {
 	gob.Register(sqlDuration(""))
 	gob.Register(sqlIPv4(0))
 	gob.Register(sqlIPv6{})
+	gob.Register(SQLDecimal128{})
+	gob.Register(SQLDecimal256{})
 	gob.Register(time.Time{})
 }
 

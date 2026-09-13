@@ -22823,6 +22823,66 @@ BenchmarkSQLRowBinaryEnumTypedDecode-32 1254 945255 ns/op 10000 payload-bytes 37
 BenchmarkSQLRowBinaryEnumTypedDecode-32 1245 916937 ns/op 10000 payload-bytes 3748740 B/op 20076 allocs/op
 ```
 
+## CH-032 Fixed-width SQL Decimal RowBinary
+
+This ClickHouse-inspired feature stores a decimal as a fixed-width signed
+coefficient rather than a length-prefixed decimal string. The workload uses
+10,000 rows with a 20-digit integer part and four fractional digits on an AMD
+Ryzen 9 5950X Linux host. Typed coefficients are parsed before timing. Each
+case ran five `-count=5` samples with `-benchmem`; the string control is run in
+the same benchmark command for comparable conditions.
+
+| Operation | String control | Decimal128 | Decimal256 | Improvement / tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| Encode time | 375,037 ns/op | 428,953 ns/op | 611,345 ns/op | Decimal128 0.87x speed (1.14x slower); Decimal256 0.61x (1.63x slower) |
+| Decode time | 1,042,821 ns/op | 1,026,659 ns/op | 1,020,983 ns/op | Decimal128 1.02x faster; Decimal256 1.02x faster |
+| Payload | 260,000 B | 160,000 B | 320,000 B | Decimal128 1.63x smaller; Decimal256 1.23x larger |
+| Encode heap | 1,186,537 B/op | 686,832 B/op | 1,538,784 B/op | Decimal128 1.73x lower; Decimal256 1.30x higher |
+| Decode heap | 4,228,764 B/op | 3,908,759 B/op | 4,068,756 B/op | Decimal128 1.08x lower; Decimal256 1.04x lower |
+| Encode allocations | 26 | 24 | 26 | Decimal128 1.08x fewer; Decimal256 neutral |
+| Decode allocations | 40,076 | 30,076 | 30,076 | Both 1.33x fewer |
+
+Decimal128 is useful when fixed precision and lower wire/storage width justify
+the small encode CPU increase. Decimal256 is a precision representation, not
+a general compression choice. Existing `DECIMAL` remains the default because
+short values are smaller as strings and automatic scale inference would be
+unsafe. See [SQL_DECIMAL_TYPES.md](SQL_DECIMAL_TYPES.md).
+
+Raw final samples from `make benchmark-sql-decimal-after`:
+
+```text
+BenchmarkSQLRowBinaryDecimalStringBaselineEncode-32 3124 381925 ns/op 260000 payload-bytes 1186541 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineEncode-32 2947 393214 ns/op 260000 payload-bytes 1186537 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineEncode-32 3189 398397 ns/op 260000 payload-bytes 1186537 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineEncode-32 2994 395901 ns/op 260000 payload-bytes 1186537 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineEncode-32 3096 374692 ns/op 260000 payload-bytes 1186537 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineDecode-32 1135 1060897 ns/op 260000 payload-bytes 4228981 B/op 40077 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineDecode-32 1141 1042821 ns/op 260000 payload-bytes 4228764 B/op 40076 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineDecode-32 1213 1030318 ns/op 260000 payload-bytes 4228764 B/op 40076 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineDecode-32 1154 1044909 ns/op 260000 payload-bytes 4228736 B/op 40076 allocs/op
+BenchmarkSQLRowBinaryDecimalStringBaselineDecode-32 1153 1036934 ns/op 260000 payload-bytes 4228774 B/op 40076 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedEncode-32 2390 430515 ns/op 160000 payload-bytes 686832 B/op 24 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedEncode-32 2493 422704 ns/op 160000 payload-bytes 686832 B/op 24 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedEncode-32 2604 428953 ns/op 160000 payload-bytes 686832 B/op 24 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedEncode-32 2462 422007 ns/op 160000 payload-bytes 686832 B/op 24 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedEncode-32 2527 432051 ns/op 160000 payload-bytes 686832 B/op 24 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedDecode-32 1135 1026659 ns/op 160000 payload-bytes 3908770 B/op 30077 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedDecode-32 1092 1064485 ns/op 160000 payload-bytes 3908766 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedDecode-32 1092 1037039 ns/op 160000 payload-bytes 3908733 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedDecode-32 1095 1020441 ns/op 160000 payload-bytes 3908759 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal128TypedDecode-32 1117 1002816 ns/op 160000 payload-bytes 3908744 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedEncode-32 1791 580718 ns/op 320000 payload-bytes 1538784 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedEncode-32 1861 614932 ns/op 320000 payload-bytes 1538784 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedEncode-32 1911 610700 ns/op 320000 payload-bytes 1538784 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedEncode-32 1794 611345 ns/op 320000 payload-bytes 1538784 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedEncode-32 1795 612756 ns/op 320000 payload-bytes 1538784 B/op 26 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedDecode-32 1178 1020266 ns/op 320000 payload-bytes 4068759 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedDecode-32 1278 1029664 ns/op 320000 payload-bytes 4068755 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedDecode-32 1170 994271 ns/op 320000 payload-bytes 4068753 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedDecode-32 1170 1032257 ns/op 320000 payload-bytes 4068763 B/op 30076 allocs/op
+BenchmarkSQLRowBinaryDecimal256TypedDecode-32 1177 1020983 ns/op 320000 payload-bytes 4068756 B/op 30076 allocs/op
+```
+
 ## CH-034 Typed IPv4/IPv6 RowBinary
 
 This benchmark compares the existing string representation with fixed-width

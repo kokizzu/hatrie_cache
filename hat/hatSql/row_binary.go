@@ -30,16 +30,20 @@ const (
 	SQLRowBinaryIPv6
 	SQLRowBinaryEnum8
 	SQLRowBinaryEnum16
+	SQLRowBinaryDecimal128
+	SQLRowBinaryDecimal256
 )
 
 // SQLRowBinaryColumn describes one schema-ordered RowBinary field. The
 // payload does not include column names or types; both sides must use the
 // same ordered schema.
 type SQLRowBinaryColumn struct {
-	Name       string
-	Type       SQLRowBinaryType
-	Nullable   bool
-	EnumValues []string
+	Name             string
+	Type             SQLRowBinaryType
+	Nullable         bool
+	EnumValues       []string
+	DecimalScale     uint8
+	DecimalPrecision uint8
 }
 
 const (
@@ -294,7 +298,7 @@ func decodeSQLRowBinaryRow(columns []SQLRowBinaryColumn, encoded []byte, offset,
 		if err != nil {
 			return nil, offset, err
 		}
-		if err := validateSQLRowBinaryEnumDecodedValue(column, value, rowIndex); err != nil {
+		if err := validateSQLRowBinaryDecodedValue(column, value, rowIndex); err != nil {
 			return nil, offset, err
 		}
 		row[column.Name] = value
@@ -328,6 +332,9 @@ func validateSQLRowBinaryColumnsWithEnumLabels(columns []SQLRowBinaryColumn, req
 				return err
 			}
 		}
+		if err := validateSQLRowBinaryDecimalColumn(column); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -337,18 +344,18 @@ func validateSQLRowBinaryStreamColumns(columns []SQLRowBinaryColumn) error {
 }
 
 func validSQLRowBinaryType(kind SQLRowBinaryType) bool {
-	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryEnum16
+	return kind >= SQLRowBinaryInt64 && kind <= SQLRowBinaryDecimal256
 }
 
 func appendSQLRowBinaryValue(destination []byte, kind SQLRowBinaryType, value interface{}, row int, column string) ([]byte, error) {
-	return appendSQLRowBinaryValueWithLabels(destination, kind, value, row, column, nil)
+	return appendSQLRowBinaryValueWithMetadata(destination, kind, value, row, column, nil, 0, 0)
 }
 
 func appendSQLRowBinaryColumnValue(destination []byte, column SQLRowBinaryColumn, value interface{}, row int) ([]byte, error) {
-	return appendSQLRowBinaryValueWithLabels(destination, column.Type, value, row, column.Name, column.EnumValues)
+	return appendSQLRowBinaryValueWithMetadata(destination, column.Type, value, row, column.Name, column.EnumValues, column.DecimalScale, column.DecimalPrecision)
 }
 
-func appendSQLRowBinaryValueWithLabels(destination []byte, kind SQLRowBinaryType, value interface{}, row int, columnName string, enumValues []string) ([]byte, error) {
+func appendSQLRowBinaryValueWithMetadata(destination []byte, kind SQLRowBinaryType, value interface{}, row int, columnName string, enumValues []string, decimalScale, decimalPrecision uint8) ([]byte, error) {
 	switch kind {
 	case SQLRowBinaryInt64:
 		converted, ok := sqlRowBinaryInt64(value)
@@ -458,6 +465,18 @@ func appendSQLRowBinaryValueWithLabels(destination []byte, kind SQLRowBinaryType
 		var encoded [2]byte
 		binary.LittleEndian.PutUint16(encoded[:], uint16(code))
 		return append(destination, encoded[:]...), nil
+	case SQLRowBinaryDecimal128:
+		converted, err := sqlRowBinaryDecimal128Value(SQLRowBinaryColumn{Name: columnName, Type: kind, DecimalScale: decimalScale, DecimalPrecision: decimalPrecision}, value, row)
+		if err != nil {
+			return nil, err
+		}
+		return appendSQLDecimal128(destination, converted), nil
+	case SQLRowBinaryDecimal256:
+		converted, err := sqlRowBinaryDecimal256Value(SQLRowBinaryColumn{Name: columnName, Type: kind, DecimalScale: decimalScale, DecimalPrecision: decimalPrecision}, value, row)
+		if err != nil {
+			return nil, err
+		}
+		return appendSQLDecimal256(destination, converted), nil
 	case SQLRowBinaryJSON:
 		converted, ok := value.(json.RawMessage)
 		if !ok {
@@ -581,6 +600,22 @@ func decodeSQLRowBinaryValue(kind SQLRowBinaryType, encoded []byte, offset, row 
 			return nil, offset, err
 		}
 		return SQLEnum16(binary.LittleEndian.Uint16(value)), next, nil
+	case SQLRowBinaryDecimal128:
+		value, next, err := readFixed(16)
+		if err != nil {
+			return nil, offset, err
+		}
+		var decimal SQLDecimal128
+		copy(decimal[:], value)
+		return decimal, next, nil
+	case SQLRowBinaryDecimal256:
+		value, next, err := readFixed(32)
+		if err != nil {
+			return nil, offset, err
+		}
+		var decimal SQLDecimal256
+		copy(decimal[:], value)
+		return decimal, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary column %q has unsupported type %d", column, kind)
 	}

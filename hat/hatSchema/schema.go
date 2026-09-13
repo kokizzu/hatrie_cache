@@ -11,29 +11,33 @@ import (
 type Type string
 
 const (
-	TypeText      Type = "TEXT"
-	TypeNumber    Type = "NUMBER"
-	TypeInteger   Type = "INTEGER"
-	TypeDecimal   Type = "DECIMAL"
-	TypeBoolean   Type = "BOOLEAN"
-	TypeDate      Type = "DATE"
-	TypeTimestamp Type = "TIMESTAMP"
-	TypeUUID      Type = "UUID"
-	TypeIPv4      Type = "IPV4"
-	TypeIPv6      Type = "IPV6"
-	TypeDuration  Type = "DURATION"
-	TypeBinary    Type = "BINARY"
-	TypeJSON      Type = "JSON"
-	TypeEnum8     Type = "ENUM8"
-	TypeEnum16    Type = "ENUM16"
+	TypeText       Type = "TEXT"
+	TypeNumber     Type = "NUMBER"
+	TypeInteger    Type = "INTEGER"
+	TypeDecimal    Type = "DECIMAL"
+	TypeBoolean    Type = "BOOLEAN"
+	TypeDate       Type = "DATE"
+	TypeTimestamp  Type = "TIMESTAMP"
+	TypeUUID       Type = "UUID"
+	TypeIPv4       Type = "IPV4"
+	TypeIPv6       Type = "IPV6"
+	TypeDuration   Type = "DURATION"
+	TypeBinary     Type = "BINARY"
+	TypeJSON       Type = "JSON"
+	TypeEnum8      Type = "ENUM8"
+	TypeEnum16     Type = "ENUM16"
+	TypeDecimal128 Type = "DECIMAL128"
+	TypeDecimal256 Type = "DECIMAL256"
 )
 
 // Column describes one ordered source field. NotNull defaults to false.
 type Column struct {
-	Name       string   `json:"name"`
-	Type       Type     `json:"type"`
-	NotNull    bool     `json:"not_null,omitempty"`
-	EnumValues []string `json:"enum_values,omitempty"`
+	Name             string   `json:"name"`
+	Type             Type     `json:"type"`
+	NotNull          bool     `json:"not_null,omitempty"`
+	EnumValues       []string `json:"enum_values,omitempty"`
+	DecimalScale     uint8    `json:"decimal_scale,omitempty"`
+	DecimalPrecision uint8    `json:"decimal_precision,omitempty"`
 }
 
 // Source is one named SQL source and its ordered schema.
@@ -300,8 +304,14 @@ func validateColumn(column Column) error {
 		if len(column.EnumValues) != 0 {
 			return fmt.Errorf("hatSchema: column %q has enum values but type %q is not an enum", column.Name, column.Type)
 		}
+		if column.DecimalScale != 0 || column.DecimalPrecision != 0 {
+			return fmt.Errorf("hatSchema: column %q has decimal metadata but type %q is not a physical decimal", column.Name, column.Type)
+		}
 		return nil
 	case TypeEnum8, TypeEnum16:
+		if column.DecimalScale != 0 || column.DecimalPrecision != 0 {
+			return fmt.Errorf("hatSchema: enum column %q cannot have decimal metadata", column.Name)
+		}
 		if len(column.EnumValues) == 0 {
 			return fmt.Errorf("hatSchema: enum column %q requires at least one value", column.Name)
 		}
@@ -321,6 +331,24 @@ func validateColumn(column Column) error {
 				return fmt.Errorf("hatSchema: enum column %q has duplicate value %q", column.Name, value)
 			}
 			seenValues[value] = struct{}{}
+		}
+		return nil
+	case TypeDecimal128, TypeDecimal256:
+		if len(column.EnumValues) != 0 {
+			return fmt.Errorf("hatSchema: decimal column %q cannot have enum values", column.Name)
+		}
+		maxPrecision := uint8(76)
+		if column.Type == TypeDecimal128 {
+			maxPrecision = 38
+		}
+		if column.DecimalScale > maxPrecision {
+			return fmt.Errorf("hatSchema: decimal column %q scale %d exceeds maximum precision %d", column.Name, column.DecimalScale, maxPrecision)
+		}
+		if column.DecimalPrecision != 0 && column.DecimalPrecision > maxPrecision {
+			return fmt.Errorf("hatSchema: decimal column %q precision %d exceeds maximum precision %d", column.Name, column.DecimalPrecision, maxPrecision)
+		}
+		if column.DecimalPrecision != 0 && column.DecimalScale > column.DecimalPrecision {
+			return fmt.Errorf("hatSchema: decimal column %q scale %d exceeds precision %d", column.Name, column.DecimalScale, column.DecimalPrecision)
 		}
 		return nil
 	default:
