@@ -283,6 +283,39 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	}, nil
 }
 
+// ActiveLeases returns a detached, deterministic copy of the active leases for
+// one registered frontier. The returned slice and lease values may be changed
+// by the caller without affecting retention state.
+func (registry *FrontierRetentionRegistry) ActiveLeases(frontierID string) ([]FrontierRetentionLease, error) {
+	if registry == nil {
+		return nil, ErrFrontierRetentionRegistryNil
+	}
+	if frontierID == "" {
+		return nil, ErrFrontierIDEmpty
+	}
+	registry.mu.RLock()
+	if registry.closed {
+		registry.mu.RUnlock()
+		return nil, ErrFrontierRetentionClosed
+	}
+	state := registry.states[frontierID]
+	var leases []FrontierRetentionLease
+	if state != nil {
+		leases = make([]FrontierRetentionLease, 0, len(state.leases))
+		for _, lease := range state.leases {
+			leases = append(leases, lease)
+		}
+	}
+	registry.mu.RUnlock()
+	if _, err := registry.frontierSnapshot(frontierID); err != nil {
+		return nil, err
+	}
+	if len(leases) > 1 {
+		sort.Slice(leases, func(i, j int) bool { return leases[i].ID < leases[j].ID })
+	}
+	return leases, nil
+}
+
 // SnapshotAll returns retention state sorted by frontier ID.
 func (registry *FrontierRetentionRegistry) SnapshotAll() []FrontierRetentionSnapshot {
 	if registry == nil {

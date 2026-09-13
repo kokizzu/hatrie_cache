@@ -101,7 +101,7 @@ before/after measurement when its motivation is performance.
 | MZ-24 | Resumable TAIL cursor tokens | Reconnect subscriptions without full replay | Cursor retention and invalidation | [x] |
 | MZ-25 | TAIL progress and heartbeat records | Distinguish idle from stalled streams | Protocol surface | [ ] |
 | MZ-26 | Subscription snapshot export at an exact frontier | Bootstrap downstream consumers deterministically | Snapshot cost | [ ] |
-| MZ-27 | Read-hold lifecycle and compaction pin diagnostics | Find clients blocking compaction | Handle tracking | [ ] |
+| MZ-27 | Read-hold lifecycle and compaction pin diagnostics | Find clients blocking compaction | Handle tracking | [x] Implemented by `hatPipeline.FrontierRetentionRegistry.ActiveLeases`; see [MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md) and [BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics](BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics). |
 | MZ-28 | Temporal join arrangements keyed by valid-time intervals | Maintain time-aware dimensions incrementally | Interval update complexity | [ ] |
 | MZ-29 | Differential interval-join maintenance | Avoid rescanning overlapping ranges | Index memory | [ ] |
 | MZ-30 | Lookup-join cache invalidation by source frontier | Keep lookup results consistent | Cache coordination | [ ] |

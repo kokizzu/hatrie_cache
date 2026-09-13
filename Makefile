@@ -12894,3 +12894,26 @@ commit-tr017:
 
 push-tr017:
 	bash ./scripts/push-tr017.sh
+format-mz027:
+	bash ./scripts/format-mz027.sh
+
+test-mz027:
+	bash ./scripts/test-mz027.sh
+
+benchmark-mz027:
+	bash ./scripts/benchmark-mz027.sh
+
+test-mz027-race:
+	bash ./scripts/test-mz027-race.sh
+
+test-mz027-full:
+	bash ./scripts/test-mz027-full.sh
+
+status-mz027:
+	bash ./scripts/status-mz027.sh
+
+commit-mz027:
+	bash ./scripts/commit-mz027.sh
+
+push-mz027:
+	bash ./scripts/push-mz027.sh

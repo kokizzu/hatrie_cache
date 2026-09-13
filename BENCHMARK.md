@@ -23028,6 +23028,27 @@ state. Full semantics and raw commands are in
 Reproduce with `make benchmark-mz04-before` and
 `make benchmark-mz04-after`.
 
+## MZ-27: Read-Hold Lifecycle Diagnostics
+
+This benchmark compares the existing compact retention summary with the new
+on-demand detailed lease listing on Linux `amd64`, AMD Ryzen 9 5950X, with five
+samples. The detailed operation copies and sorts 64 active leases; it is not on
+the normal query or compaction path.
+
+| Operation | Median CPU | Allocated memory | Allocations |
+| --- | ---: | ---: | ---: |
+| Existing `Snapshot` summary, 64 holds | 50.43 ns/op | 0 B/op | 0 allocs/op |
+| New `ActiveLeases`, 64 holds | 5,220 ns/op | 2,408 B/op | 4 allocs/op |
+| New `ActiveLeases`, no holds | 34.10 ns/op | 0 B/op | 0 allocs/op |
+
+The detailed listing is approximately 104x slower than the compact summary when
+64 lease records must be copied, which is expected for a diagnostic endpoint.
+The no-hold path is allocation-free and was optimized from approximately 65 ns
+and 24 B/op to 34 ns and 0 B/op. Full semantics and raw commands are in
+[MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md).
+
+Reproduce with `make benchmark-mz027`.
+
 ## CH-24: Skip-Index Usefulness Telemetry
 
 This explain-only change adds skipped, scanned, matched, residual, and
