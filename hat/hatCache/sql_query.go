@@ -627,9 +627,11 @@ type sqlJSONTypedInt64Entry struct {
 }
 type sqlJSONTextIndex struct {
 	sqlJSONIndexState
-	rows      []SQLRow
-	tokens    map[string][]int
-	tokenKeys []string
+	rows           []SQLRow
+	tokens         map[string][]int
+	tokenKeys      []string
+	positions      map[string][]sqlJSONTextPosition
+	positionsReady bool
 }
 type sqlJSONCompositeIndex struct {
 	sqlJSONIndexState
@@ -3502,6 +3504,8 @@ func refreshSQLJSONTextIndexSourceRows(index *sqlJSONTextIndex, field string, so
 	}
 	index.sqlJSONIndexState = sqlJSONIndexState{raw: source.raw, generation: source.generation, ready: true}
 	index.rows, index.tokens, index.tokenKeys = rows, tokens, sortedSQLTextTokenKeys(tokens)
+	index.positions = nil
+	index.positionsReady = false
 	return nil
 }
 

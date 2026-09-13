@@ -22395,6 +22395,50 @@ NULL marker per column per row; columns with unknown or NULL-first values use
 the bounded JSON representation. Full protocol and usage details are in
 [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md).
 
+## CH-026 SQL Phrase And Proximity Search
+
+This benchmark compares the exact full-scan positional matcher with the
+warm indexed SQL query over the same deterministic 20,000-row fixture. Forty
+rows contain the phrase `alpha beta gamma`; the indexed query uses an explicit
+`CreateSQLJSONTextIndex` and lazily-built positional sidecar. Five samples ran
+with `-benchmem` on Linux/amd64 and an AMD Ryzen 9 5950X.
+
+| Metric | Full-scan matcher baseline | Warm indexed SQL query | Improvement / cost |
+| --- | ---: | ---: | --- |
+| CPU per query | 6,347,532 ns | 38,063 ns | 166.7x faster |
+| Allocated bytes per query | 2,560,004 B | 44,088 B | 58.1x lower |
+| Allocations per query | 40,000 | 306 | 130.7x fewer |
+| Result rows | 40 | 40 | Same result |
+| Retained positional postings | n/a | 100,000 postings | Lazy sidecar; 800,000 B raw `uint32` payload before map/slice overhead |
+
+`B/op` measures allocations during the timed query, not retained index memory.
+The positional sidecar is built only on the first phrase/proximity query and is
+invalidated with the existing text-index snapshot on source replacement.
+Ordinary `CONTAINS` and `CONTAINS_PREFIX` queries do not build it. There is no
+wire or persistence-format change. The direct field/literal indexed shape is
+rechecked by the normal evaluator, and unsupported shapes or missing indexes
+fall back to the full scan.
+
+Raw output from `make benchmark-ch026-after`:
+
+```text
+BenchmarkCH026PhraseBaseline-32 183 6359174 ns/op 2560004 B/op 40000 allocs/op
+BenchmarkCH026PhraseBaseline-32 192 6292481 ns/op 2560005 B/op 40000 allocs/op
+BenchmarkCH026PhraseBaseline-32 188 6257231 ns/op 2560005 B/op 40000 allocs/op
+BenchmarkCH026PhraseBaseline-32 188 6347532 ns/op 2560004 B/op 40000 allocs/op
+BenchmarkCH026PhraseBaseline-32 186 6601975 ns/op 2560004 B/op 40000 allocs/op
+BenchmarkCH026PhraseIndexed-32 31518 38741 ns/op 100000 position_postings 40.00 rows/result 44088 B/op 306 allocs/op
+BenchmarkCH026PhraseIndexed-32 33465 36528 ns/op 100000 position_postings 40.00 rows/result 44088 B/op 306 allocs/op
+BenchmarkCH026PhraseIndexed-32 31693 42122 ns/op 100000 position_postings 40.00 rows/result 44088 B/op 306 allocs/op
+BenchmarkCH026PhraseIndexed-32 31020 37307 ns/op 100000 position_postings 40.00 rows/result 44088 B/op 306 allocs/op
+BenchmarkCH026PhraseIndexed-32 32400 38063 ns/op 100000 position_postings 40.00 rows/result 44088 B/op 306 allocs/op
+```
+
+The baseline is intentionally the matcher itself rather than a second JSON
+execution harness, so the comparison isolates scan-versus-postings work. The
+indexed result still includes SQL parsing, candidate materialization, and the
+final predicate recheck.
+
 ## TR-029 Reverse Ordered Index Iterators
 
 This benchmark compares descending traversal of 1,024 entries using a reused

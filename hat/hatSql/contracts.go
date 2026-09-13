@@ -1313,6 +1313,15 @@ type TextPrefixIndexedSourceResolver interface {
 	ResolveSQLTextPrefixSource(name, key, field, prefix string) ([]Row, bool, error)
 }
 
+// TextProximityIndexedSourceResolver optionally resolves ordered phrase or
+// proximity predicates against a positional text index. maxGap is the number
+// of intervening tokens allowed between consecutive query tokens; zero is an
+// exact phrase. Implementations return candidates only, and the executor
+// evaluates the complete predicate again before returning results.
+type TextProximityIndexedSourceResolver interface {
+	ResolveSQLTextProximitySource(name, key, field, query string, maxGap int) ([]Row, bool, error)
+}
+
 // ExternalSourceResolver supplies a named, imported external table. It is
 // used only by EXTERNAL('name') sources and never receives a filesystem path.
 type ExternalSourceResolver interface {

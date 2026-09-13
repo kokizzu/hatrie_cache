@@ -3948,6 +3948,9 @@ CPU, allocation, and fallback tradeoffs.
 - Opt-in HTTP SQL RowBinary streaming for lower CPU, allocations, and wire
   size: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 
+- Opt-in SQL phrase and ordered proximity search over JSON text indexes:
+  [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md)
+
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
 
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)

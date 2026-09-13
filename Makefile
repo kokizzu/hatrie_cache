@@ -12006,6 +12006,14 @@ commit-ch050:
 push-ch050:
 	bash ./scripts/push-ch050.sh
 
+.PHONY: test-ch026-text-phrase-red
+test-ch026-text-phrase-red:
+	bash ./scripts/test-ch026-text-phrase-red.sh
+
+.PHONY: benchmark-ch026-before
+benchmark-ch026-before:
+	bash ./scripts/benchmark-ch026-before.sh
+
 
 .PHONY: format-ch050
 format-ch050:
@@ -12066,3 +12074,39 @@ commit-tr29:
 .PHONY: push-tr29
 push-tr29:
 	bash ./scripts/push-tr29.sh
+
+.PHONY: format-ch026
+format-ch026:
+	bash ./scripts/format-ch026.sh
+
+.PHONY: test-ch026
+test-ch026:
+	bash ./scripts/test-ch026.sh
+
+.PHONY: race-ch026
+race-ch026:
+	bash ./scripts/race-ch026.sh
+
+.PHONY: vet-ch026
+vet-ch026:
+	bash ./scripts/vet-ch026.sh
+
+.PHONY: check-ch026
+check-ch026:
+	bash ./scripts/check-ch026.sh
+
+.PHONY: benchmark-ch026-after
+benchmark-ch026-after:
+	bash ./scripts/benchmark-ch026-after.sh
+
+.PHONY: test-ch026-all
+test-ch026-all:
+	bash ./scripts/test-ch026-all.sh
+
+.PHONY: commit-ch026
+commit-ch026:
+	bash ./scripts/commit-ch026.sh
+
+.PHONY: push-ch026
+push-ch026:
+	bash ./scripts/push-ch026.sh

@@ -12853,6 +12853,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if rows, indexed, err := resolveSQLTextPrefixIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
+	if rows, indexed, err := resolveSQLTextProximityIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if rows, indexed, err := resolveSQLTextIndexedSource(source, condition, resolver, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
@@ -16037,9 +16040,13 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return evalSQLGeoFunction(expr, group, row)
 		case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
 			return evalSQLApproximateAggregate(expr, group)
-		case "CONTAINS", "CONTAINS_PREFIX":
-			if len(expr.args) != 2 {
-				return sqlEvalError{err: fmt.Errorf("%s expects exactly two arguments", expr.name), token: expr.token}
+		case "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY":
+			argumentCount := 2
+			if strings.EqualFold(expr.name, "CONTAINS_PROXIMITY") {
+				argumentCount = 3
+			}
+			if len(expr.args) != argumentCount {
+				return sqlEvalError{err: fmt.Errorf("%s expects exactly %d arguments", expr.name, argumentCount), token: expr.token}
 			}
 			value := evalSQLExpr(expr.args[0], group, row)
 			if err := sqlExpressionError(value); err != nil {
@@ -16059,6 +16066,20 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			}
 			if strings.EqualFold(expr.name, "CONTAINS_PREFIX") {
 				return textContainsPrefix(text, search)
+			}
+			if strings.EqualFold(expr.name, "CONTAINS_PHRASE") {
+				return textContainsPhrase(text, search)
+			}
+			if strings.EqualFold(expr.name, "CONTAINS_PROXIMITY") {
+				distance := evalSQLExpr(expr.args[2], group, row)
+				if err := sqlExpressionError(distance); err != nil {
+					return sqlEvaluationFailure(err)
+				}
+				gap, err := sqlTextProximityGap(distance)
+				if err != nil {
+					return sqlEvalError{err: err, token: expr.token}
+				}
+				return textContainsProximity(text, search, gap)
 			}
 			return textContains(text, search)
 		case "ARRAY_CONTAINS":
@@ -16603,7 +16624,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false
