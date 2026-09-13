@@ -21816,45 +21816,6 @@ Because generic dictionary reads are about 1.8x slower than the plain fixture,
 the feature remains explicit opt-in and existing producers are not silently
 changed.
 
-## C201 Adaptive Asynchronous-Batch Flush
-
-ClickHouse-inspired adaptive flushing was measured against the fixed batcher
-before the change. Every row below is the median of five one-second runs with
-`-cpu=1 -benchmem`; the raw samples are kept in the command output artifact
-`/tmp/hatrie-cache-c201-benchmark.txt` during a run.
-
-| Workload | Before C201 | C201 fixed | C201 adaptive | C201 adaptive / fixed |
-|---|---:|---:|---:|---:|
-| `Submit`, `MaxBatchSize=64` | 99.61 ns/op | 105.9 ns/op | 105.3 ns/op | 0.99x |
-| `Submit`, `MaxBatchSize=1` | 210.9 ns/op | not separately measured | not separately measured | n/a |
-| Synthetic arrival observation | n/a | n/a | 18.03 ns/op | n/a |
-
-Raw samples:
-
-```text
-before: BenchmarkAsyncBatcherSubmit 106.3 106.2 99.61 97.64 98.22 ns/op
-before: BenchmarkAsyncBatcherSubmitMaxOne 210.9 207.6 208.8 243.6 216.3 ns/op
-after baseline-shaped submit: 103.5 105.7 101.1 101.9 102.0 ns/op
-after baseline-shaped max-one: 216.3 242.6 218.7 216.6 235.5 ns/op
-after C201 fixed: 109.5 102.4 105.9 111.0 100.2 ns/op
-after C201 adaptive: 104.7 105.3 104.9 118.8 117.0 ns/op
-after observation: 19.56 18.03 17.71 18.11 18.02 ns/op
-```
-
-Both modes report `0 B/op` and `0 allocs/op`. Adaptive mode has a small
-worker-side controller cost, but the final same-harness medians are effectively
-equal and are not claimed as a raw throughput win. Its benefit is bounded
-latency adaptation without adding allocation or lock cost to `Submit`: a
-32-value target selects about 4 ms at 1,000 values/s and 40 ms at 100 values/s
-under the focused behavior tests. `AdaptiveFlush` is disabled by default, so
-existing callers retain the original path.
-
-The reproducible target is:
-
-```text
-make benchmark-c201
-```
-
 ## M202 Durable Changefeed Checkpoint
 
 Materialize-inspired source-bound checkpoint benchmark, five runs:

@@ -11576,35 +11576,3 @@ commit-c216:
 
 push-c216:
 	bash ./scripts/push-c216.sh
-
-.PHONY: format-c201
-format-c201:
-	bash ./scripts/format-c201.sh
-
-.PHONY: benchmark-c201
-benchmark-c201:
-	bash ./scripts/benchmark-c201.sh
-
-.PHONY: test-c201
-test-c201:
-	bash ./scripts/test-c201.sh
-
-.PHONY: test-c201-package
-test-c201-package:
-	bash ./scripts/test-c201-package.sh
-
-.PHONY: test-c201-race
-test-c201-race:
-	bash ./scripts/test-c201-race.sh
-
-.PHONY: vet-c201
-vet-c201:
-	bash ./scripts/vet-c201.sh
-
-.PHONY: commit-c201
-commit-c201:
-	bash ./scripts/commit-c201.sh
-
-.PHONY: push-c201
-push-c201:
-	bash ./scripts/push-c201.sh

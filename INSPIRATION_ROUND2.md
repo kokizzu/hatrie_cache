@@ -30,7 +30,7 @@ operator control remain the preferred deployment model.
 
 ## ClickHouse: 50 Additional Ideas
 
-- [x] C201 Adaptive asynchronous-insert flush timeout based on arrival rate. See [C201_ADAPTIVE_ASYNC_BATCHER.md](C201_ADAPTIVE_ASYNC_BATCHER.md) and [BENCHMARK.md](BENCHMARK.md#c201-adaptive-asynchronous-batch-flush).
+- [ ] C201 Adaptive asynchronous-insert flush timeout based on arrival rate.
 - [ ] C202 Per-shard asynchronous-insert buffer affinity to reduce cross-shard coordination.
 - [ ] C203 Explicit `wait_for_async_insert` durability modes with visible acknowledgment semantics.
 - [ ] C204 Idempotency-token propagation across asynchronous inserts and dependent materialized views.

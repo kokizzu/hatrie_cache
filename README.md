@@ -58,7 +58,6 @@ security guidance before exposing it on a network.
 - Opt-in SQL-readable telemetry catalog: [SYSTEM_METRICS.md](SYSTEM_METRICS.md)
 - Concurrent consumer-group queue with visibility leases: [CONSUMER_GROUP.md](CONSUMER_GROUP.md)
 - ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
-- ClickHouse-style opt-in adaptive asynchronous-batch flushing: [C201_ADAPTIVE_ASYNC_BATCHER.md](C201_ADAPTIVE_ASYNC_BATCHER.md)
 - Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
 - Tarantool-style compact multiplexed peer frames: [COMPACT_PEER_PROTOCOL.md](COMPACT_PEER_PROTOCOL.md)
 - Materialize-style connector lifecycle registry: [CONNECTOR_LIFECYCLE.md](CONNECTOR_LIFECYCLE.md)
