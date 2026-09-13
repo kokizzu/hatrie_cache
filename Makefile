@@ -12917,3 +12917,27 @@ commit-mz027:
 
 push-mz027:
 	bash ./scripts/push-mz027.sh
+
+test-mz025:
+	bash ./scripts/test-mz025.sh
+
+format-mz025:
+	bash ./scripts/format-mz025.sh
+
+test-mz025-race:
+	bash ./scripts/test-mz025-race.sh
+
+test-mz025-full:
+	bash ./scripts/test-mz025-full.sh
+
+benchmark-mz025:
+	bash ./scripts/benchmark-mz025.sh
+
+status-mz025:
+	bash ./scripts/status-mz025.sh
+
+commit-mz025:
+	bash ./scripts/commit-mz025.sh
+
+push-mz025:
+	bash ./scripts/push-mz025.sh

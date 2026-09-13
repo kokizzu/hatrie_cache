@@ -99,7 +99,7 @@ before/after measurement when its motivation is performance.
 | MZ-22 | Adaptive sink batching and flush deadlines | Improve throughput without large latency spikes | Tuning complexity | [ ] |
 | MZ-23 | Sink delivery audit trail with source frontier | Diagnose missing or delayed output | Event volume | [ ] |
 | MZ-24 | Resumable TAIL cursor tokens | Reconnect subscriptions without full replay | Cursor retention and invalidation | [x] |
-| MZ-25 | TAIL progress and heartbeat records | Distinguish idle from stalled streams | Protocol surface | [ ] |
+| MZ-25 | TAIL progress and heartbeat records | Distinguish idle from stalled streams | Protocol surface | [x] Implemented by `hatSql.QuerySubscriptions.Heartbeat` plus opt-in `EmitProgress`; see [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md) and [BENCHMARK.md#mz-25-tail-progress-and-heartbeats](BENCHMARK.md#mz-25-tail-progress-and-heartbeats). |
 | MZ-26 | Subscription snapshot export at an exact frontier | Bootstrap downstream consumers deterministically | Snapshot cost | [ ] |
 | MZ-27 | Read-hold lifecycle and compaction pin diagnostics | Find clients blocking compaction | Handle tracking | [x] Implemented by `hatPipeline.FrontierRetentionRegistry.ActiveLeases`; see [MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md) and [BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics](BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics). |
 | MZ-28 | Temporal join arrangements keyed by valid-time intervals | Maintain time-aware dimensions incrementally | Interval update complexity | [ ] |

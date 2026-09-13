@@ -180,6 +180,40 @@ func (registry *QuerySubscriptions) NotifyChangedAt(ctx context.Context, frontie
 	return registry.notifyChangedAt(ctx, frontier, changed, resolver, options)
 }
 
+// Heartbeat publishes a progress-only snapshot to subscriptions that opt in
+// with EmitProgress. It does not evaluate queries or change revisions, and it
+// is safe to call when a source has advanced without producing row changes.
+func (registry *QuerySubscriptions) Heartbeat(frontier uint64) error {
+	if registry == nil {
+		return fmt.Errorf("query subscriptions are nil")
+	}
+	if frontier == 0 {
+		return fmt.Errorf("query subscription frontier must be positive")
+	}
+	registry.mu.RLock()
+	subscriptions := make([]*QuerySubscription, 0, len(registry.subs))
+	for _, subscription := range registry.subs {
+		subscriptions = append(subscriptions, subscription)
+	}
+	registry.mu.RUnlock()
+	for _, subscription := range subscriptions {
+		if subscription == nil || !subscription.definition.EmitProgress {
+			continue
+		}
+		effectiveFrontier := frontier
+		complete := false
+		if subscription.definition.UpTo > 0 && frontier >= subscription.definition.UpTo {
+			effectiveFrontier = subscription.definition.UpTo
+			complete = true
+		}
+		subscription.publishProgress(effectiveFrontier, complete)
+		if complete {
+			subscription.complete()
+		}
+	}
+	return nil
+}
+
 func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontier uint64, changed []string, resolver SourceResolver, options QueryOptions) error {
 	if registry == nil {
 		return fmt.Errorf("query subscriptions are nil")

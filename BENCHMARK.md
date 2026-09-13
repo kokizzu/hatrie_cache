@@ -23049,6 +23049,25 @@ and 24 B/op to 34 ns and 0 B/op. Full semantics and raw commands are in
 
 Reproduce with `make benchmark-mz027`.
 
+## MZ-25: TAIL Progress And Heartbeats
+
+This benchmark compares the new direct idle-heartbeat operation with the
+previous way to publish progress by calling `NotifyChangedAt` without changed
+dependencies. It uses 64 progress-enabled subscriptions, five samples, and
+`-benchmem` on Linux `amd64` with an AMD Ryzen 9 5950X.
+
+| Operation | Median CPU | Allocated memory | Allocations |
+| --- | ---: | ---: | ---: |
+| Idle `NotifyChangedAt` progress | 8,230 ns/op | 10,752 B/op | 2 allocs/op |
+| `Heartbeat` progress | 4,235 ns/op | 512 B/op | 1 alloc/op |
+
+The direct heartbeat is about `1.94x` faster, uses `21x` less allocated memory,
+and performs `2x` fewer allocations for this idle workload. It is opt-in and
+does not alter ordinary subscriptions. Full semantics and raw commands are in
+[MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md).
+
+Reproduce with `make benchmark-mz025`.
+
 ## CH-24: Skip-Index Usefulness Telemetry
 
 This explain-only change adds skipped, scanned, matched, residual, and

@@ -49,6 +49,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - Materialize-inspired frontier compaction debt and blocked-lease metrics: [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics)
 - Materialize-inspired active read-hold diagnostics: [MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics)
+- Materialize-inspired TAIL progress heartbeats: [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-25-tail-progress-and-heartbeats)
 - ClickHouse-inspired skip-index usefulness telemetry: [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry)
 - Deterministic differential subscription ordering: [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md)
 - ClickHouse-style post-window `QUALIFY` filtering: [C220_QUALIFY.md](C220_QUALIFY.md)
