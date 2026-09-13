@@ -2394,6 +2394,16 @@ force the previous wire format. This setting is independent of
 `GET /api/journal` clients continue to receive JSON unless they explicitly
 request `application/vnd.hatrie-cache.journal-tail`.
 
+For reconnect-safe pagination, set `-monitoring-journal-cursor-secret` (or
+`MonitoringOptions.JournalCursorSecret`) to a random secret of at least 16
+bytes. With this opt-in setting, a bounded `GET /api/journal?limit=N` response
+returns `next_cursor` in JSON, or `X-Hatrie-Journal-Next-Cursor` for the binary
+wire format; send that value as `cursor=...` for the next page. `cursor` and
+`after_sequence` cannot be combined. The default is off, and existing
+sequence-based clients are unchanged. Cursors are signed continuation values,
+not authentication credentials. See [MZ024_JOURNAL_CURSOR.md](MZ024_JOURNAL_CURSOR.md)
+and [BENCHMARK.md](BENCHMARK.md#mz-024-signed-journal-tail-cursors).
+
 For a 10,000-command `SETINT` tail, binary encode plus decode is 5.16x faster,
 uses 4.69x less cumulative heap, performs 2,510x fewer allocations, and transfers
 2.79x fewer body bytes than JSON. Binary is intended for service-to-service

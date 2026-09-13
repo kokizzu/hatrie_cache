@@ -11929,3 +11929,43 @@ commit-ch008:
 .PHONY: push-ch008
 push-ch008:
 	bash ./scripts/push-ch008.sh
+
+.PHONY: test-mz024-red
+test-mz024-red:
+	bash ./scripts/test-mz024-red.sh
+
+.PHONY: format-mz024
+format-mz024:
+	bash ./scripts/format-mz024.sh
+
+.PHONY: test-mz024-cli-red
+test-mz024-cli-red:
+	bash ./scripts/test-mz024-cli-red.sh
+
+.PHONY: benchmark-mz024
+benchmark-mz024:
+	bash ./scripts/benchmark-mz024.sh
+
+.PHONY: test-mz024
+test-mz024:
+	bash ./scripts/test-mz024.sh
+
+.PHONY: race-mz024
+race-mz024:
+	bash ./scripts/race-mz024.sh
+
+.PHONY: vet-mz024
+vet-mz024:
+	bash ./scripts/vet-mz024.sh
+
+.PHONY: check-mz024
+check-mz024:
+	bash ./scripts/check-mz024.sh
+
+.PHONY: commit-mz024
+commit-mz024:
+	bash ./scripts/commit-mz024.sh
+
+.PHONY: push-mz024
+push-mz024:
+	bash ./scripts/push-mz024.sh

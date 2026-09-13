@@ -98,7 +98,7 @@ before/after measurement when its motivation is performance.
 | MZ-21 | Sink idempotency tokens derived from frontier and batch | Make retries safe | Token retention | [ ] |
 | MZ-22 | Adaptive sink batching and flush deadlines | Improve throughput without large latency spikes | Tuning complexity | [ ] |
 | MZ-23 | Sink delivery audit trail with source frontier | Diagnose missing or delayed output | Event volume | [ ] |
-| MZ-24 | Resumable TAIL cursor tokens | Reconnect subscriptions without full replay | Cursor retention and invalidation | [ ] |
+| MZ-24 | Resumable TAIL cursor tokens | Reconnect subscriptions without full replay | Cursor retention and invalidation | [x] |
 | MZ-25 | TAIL progress and heartbeat records | Distinguish idle from stalled streams | Protocol surface | [ ] |
 | MZ-26 | Subscription snapshot export at an exact frontier | Bootstrap downstream consumers deterministically | Snapshot cost | [ ] |
 | MZ-27 | Read-hold lifecycle and compaction pin diagnostics | Find clients blocking compaction | Handle tracking | [ ] |

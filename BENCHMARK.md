@@ -22319,3 +22319,52 @@ BenchmarkSQLResultCacheKeySettingsFingerprint-32 408286  2879 ns/op  2612 B/op  
 ```
 
 Reproduce with `make benchmark-ch008-baseline` and `make benchmark-ch008`.
+
+## MZ-024 Signed Journal Tail Cursors
+
+This benchmark measures the opt-in cursor codec and the JSON tail envelope with
+the cursor field disabled and enabled. It ran on Linux/amd64 with an AMD Ryzen
+9 5950X, five fixed 200 ms samples, and `-benchmem`. The existing binary
+journal-tail payload is unchanged; binary clients receive the cursor in an HTTP
+header.
+
+| Operation | Disabled or baseline median | Enabled median | Change |
+| --- | ---: | ---: | --- |
+| Cursor encode | n/a | 856 ns/op, 1,040 B/op, 11 allocs/op, 116 token B | opt-in cost |
+| Cursor decode | n/a | 843 ns/op, 688 B/op, 10 allocs/op | opt-in cost |
+| JSON tail envelope | 563 ns/op, 272 B/op, 2 allocs/op, 146 wire B | 691 ns/op, 400 B/op, 2 allocs/op, 279 wire B | 1.23x CPU, +128 B heap, +133 wire B |
+
+The feature is disabled by default, so ordinary journal reads do not pay these
+costs. The first implementation used a 64-byte hex journal binding and
+produced a 186-byte token; the final 16-byte binary binding produces a 116-byte
+token. Against that internal baseline, encode is 1.49x faster with 30.1% less
+heap and three fewer allocations; decode is 1.39x faster with 30.6% less heap
+and two fewer allocations.
+
+Raw final output from `make benchmark-mz024`:
+
+```text
+BenchmarkCommandJournalCursorCodec/encode-32  237051  875.7 ns/op  116.0 token-B  1040 B/op  11 allocs/op
+BenchmarkCommandJournalCursorCodec/encode-32  245865  847.3 ns/op  116.0 token-B  1040 B/op  11 allocs/op
+BenchmarkCommandJournalCursorCodec/encode-32  249616  841.4 ns/op  116.0 token-B  1040 B/op  11 allocs/op
+BenchmarkCommandJournalCursorCodec/encode-32  248244  855.5 ns/op  116.0 token-B  1040 B/op  11 allocs/op
+BenchmarkCommandJournalCursorCodec/encode-32  246021  858.0 ns/op  116.0 token-B  1040 B/op  11 allocs/op
+BenchmarkCommandJournalCursorCodec/decode-32  256519  842.6 ns/op  688 B/op  10 allocs/op
+BenchmarkCommandJournalCursorCodec/decode-32  268078  832.1 ns/op  688 B/op  10 allocs/op
+BenchmarkCommandJournalCursorCodec/decode-32  282039  816.4 ns/op  688 B/op  10 allocs/op
+BenchmarkCommandJournalCursorCodec/decode-32  249832  857.2 ns/op  688 B/op  10 allocs/op
+BenchmarkCommandJournalCursorCodec/decode-32  271802  849.3 ns/op  688 B/op  10 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/disabled-32  380638  563.7 ns/op  146.0 wire-B  272 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/disabled-32  382676  566.6 ns/op  146.0 wire-B  272 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/disabled-32  386414  550.9 ns/op  146.0 wire-B  272 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/disabled-32  380841  562.9 ns/op  146.0 wire-B  272 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/disabled-32  436443  559.6 ns/op  146.0 wire-B  272 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  323299  691.2 ns/op  279.0 wire-B  400 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  319770  690.9 ns/op  279.0 wire-B  400 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  336282  701.4 ns/op  279.0 wire-B  400 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  309892  687.5 ns/op  279.0 wire-B  400 B/op  2 allocs/op
+BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  323647  685.2 ns/op  279.0 wire-B  400 B/op  2 allocs/op
+```
+
+Reproduce with `make benchmark-mz024`. See [MZ024_JOURNAL_CURSOR.md](MZ024_JOURNAL_CURSOR.md)
+for the HTTP contract and configuration details.

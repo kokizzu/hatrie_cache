@@ -59,6 +59,7 @@ type config struct {
 	monitoringAuthToken                  string
 	monitoringAuthPreviousToken          string
 	monitoringAuthPreviousExpiry         time.Time
+	monitoringJournalCursorSecret        string
 	monitoringAsyncCommands              bool
 	monitoringAsyncCommandStatusCapacity int
 	rbacPolicyPath                       string
@@ -444,6 +445,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		AuthToken:                        cfg.monitoringAuthToken,
 		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
 		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		JournalCursorSecret:              cfg.monitoringJournalCursorSecret,
 		AsyncCommands:                    cfg.monitoringAsyncCommands,
 		AsyncCommandStatusCapacity:       cfg.monitoringAsyncCommandStatusCapacity,
 		RBACPolicy:                       rbacPolicy,
@@ -612,6 +614,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.monitoringAuthPreviousToken, "monitoring-auth-previous-token", "", "previous monitoring bearer token accepted only until its expiry")
 	flags.Func("monitoring-auth-previous-token-expires-at", "absolute RFC3339 expiry for the previous monitoring bearer token", rfc3339TimeFlag(&cfg.monitoringAuthPreviousExpiry))
+	flags.StringVar(&cfg.monitoringJournalCursorSecret, "monitoring-journal-cursor-secret", "", "optional secret for signed resumable GET /api/journal cursors")
 	flags.BoolVar(&cfg.monitoringAsyncCommands, "monitoring-async-commands", cfg.monitoringAsyncCommands, "enable opt-in asynchronous HTTP command admission")
 	flags.IntVar(&cfg.monitoringAsyncCommandStatusCapacity, "monitoring-async-command-status-capacity", hatriecache.DefaultMonitoringAsyncCommandStatusCapacity, "maximum retained HTTP async command statuses")
 	flags.StringVar(&cfg.rbacPolicyPath, "rbac-policy", cfg.rbacPolicyPath, "optional JSON role-based access policy; requires monitoring authentication")
@@ -729,6 +732,10 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	cfg.monitoringAuthToken = strings.TrimSpace(cfg.monitoringAuthToken)
 	cfg.monitoringAuthPreviousToken = strings.TrimSpace(cfg.monitoringAuthPreviousToken)
+	cfg.monitoringJournalCursorSecret = strings.TrimSpace(cfg.monitoringJournalCursorSecret)
+	if cfg.monitoringJournalCursorSecret != "" && len([]byte(cfg.monitoringJournalCursorSecret)) < 16 {
+		return config{}, errors.New("monitoring journal cursor secret must be at least 16 bytes")
+	}
 	cfg.rbacPolicyPath = strings.TrimSpace(cfg.rbacPolicyPath)
 	cfg.replicationAuthToken = strings.TrimSpace(cfg.replicationAuthToken)
 	cfg.replicationAuthPreviousToken = strings.TrimSpace(cfg.replicationAuthPreviousToken)
@@ -1252,6 +1259,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"monitoring_tls_key":                       cfg.monitoringTLSKey,
 		"monitoring_auth_token":                    redactedSecret(cfg.monitoringAuthToken),
 		"monitoring_auth_previous_token":           redactedSecret(cfg.monitoringAuthPreviousToken),
+		"monitoring_journal_cursor_secret":         redactedSecret(cfg.monitoringJournalCursorSecret),
 		"monitoring_async_commands":                cfg.monitoringAsyncCommands,
 		"monitoring_async_command_status_capacity": cfg.monitoringAsyncCommandStatusCapacity,
 		"rbac_policy":                              cfg.rbacPolicyPath,

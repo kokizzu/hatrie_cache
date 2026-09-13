@@ -112,6 +112,9 @@ type MonitoringOptions struct {
 	LevelDBDirtyTracker  *LevelDBDirtyTracker
 	BackupSnapshotFormat SnapshotFormat
 	Journal              *CommandJournal
+	// JournalCursorSecret enables signed resumable cursors for GET /api/journal.
+	// It is disabled when empty and must be at least 16 bytes when configured.
+	JournalCursorSecret string
 	// AsyncCommands enables the opt-in HTTP async command admission protocol.
 	// It is disabled by default and requires a journal with idempotency enabled.
 	AsyncCommands              bool
@@ -176,6 +179,8 @@ type MonitoringHandler struct {
 	replicationAuthTokens hatAuth.TokenSet
 	identityProvider      hatAuth.IdentityProvider
 	profileCapture        *hatMonitoring.ProfileCapture
+	journalCursor         *commandJournalCursorCodec
+	journalCursorErr      error
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
 	sqlFunctions          *SQLFunctionRegistry
@@ -478,6 +483,7 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.AsyncCommands {
 		handler.asyncCommands = make(map[string]monitoringAsyncCommandEntry, options.AsyncCommandStatusCapacity)
 	}
+	handler.journalCursor, handler.journalCursorErr = newCommandJournalCursorCodec(options.JournalCursorSecret)
 	if options.DiagnosticsProfiling {
 		handler.profileCapture = &hatMonitoring.ProfileCapture{}
 	}
@@ -3549,7 +3555,24 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 		return
 	}
 	afterSequence := uint64(0)
-	if raw := strings.TrimSpace(r.URL.Query().Get("after_sequence")); raw != "" {
+	rawAfterSequence := strings.TrimSpace(r.URL.Query().Get("after_sequence"))
+	rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	if rawAfterSequence != "" && rawCursor != "" {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("cursor and after_sequence cannot be used together"))
+		return
+	}
+	if rawCursor != "" {
+		if handler.journalCursorErr != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(handler.journalCursorErr.Error()))
+			return
+		}
+		afterSequence, err = handler.journalCursor.decode(handler.options.Journal, rawCursor)
+		if err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+			return
+		}
+	} else if rawAfterSequence != "" {
+		raw := rawAfterSequence
 		value, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil {
 			writeJSONStatus(w, http.StatusBadRequest, commandError("after_sequence must be an unsigned integer"))
@@ -3565,6 +3588,16 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 		}
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
+	}
+	if tail.HasMore && len(tail.Entries) > 0 && handler.journalCursorErr == nil && handler.journalCursor != nil {
+		tail.NextCursor, err = handler.journalCursor.encode(handler.options.Journal, tail.Entries[len(tail.Entries)-1].Sequence)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+			return
+		}
+	}
+	if tail.NextCursor != "" {
+		w.Header().Set(commandJournalNextCursorHeader, tail.NextCursor)
 	}
 	if commandJournalRequestAcceptsBinary(r.Header.Get("Accept")) {
 		data, err := marshalCommandJournalTailBinary(tail)
@@ -3915,6 +3948,9 @@ func fetchCommandJournalTailAuthorizedWithFormat(ctx context.Context, client *ht
 	}
 	if err != nil {
 		return CommandJournalTail{}, resp.StatusCode, err
+	}
+	if nextCursor := strings.TrimSpace(resp.Header.Get(commandJournalNextCursorHeader)); nextCursor != "" {
+		tail.NextCursor = nextCursor
 	}
 	return tail, resp.StatusCode, nil
 }

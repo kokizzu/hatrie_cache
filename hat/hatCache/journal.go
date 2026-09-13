@@ -150,6 +150,7 @@ type CommandJournalTail struct {
 	CompactedThrough uint64                 `json:"compacted_through,omitempty"`
 	Limit            int                    `json:"limit,omitempty"`
 	HasMore          bool                   `json:"has_more,omitempty"`
+	NextCursor       string                 `json:"next_cursor,omitempty"`
 	Entries          []CommandJournalRecord `json:"entries"`
 	wireFormat       CommandJournalWireFormat
 	compactEntries   []compactCommandJournalRecord
