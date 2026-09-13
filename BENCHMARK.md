@@ -22056,3 +22056,55 @@ BenchmarkCH003DryRunNamespaceAdmission-32     3741546  318.6 ns/op  64 B/op  2 a
 Reproduce with `make benchmark-ch003-baseline` before the implementation
 revision and `make benchmark-ch003` after it.
 ```
+
+## CH-004 Retained Query-Log Rotation
+
+The existing append-only query log was measured before and after adding
+optional byte/age rotation and bounded numbered archives. The benchmark ran on
+Linux/amd64 with an AMD Ryzen 9 5950X, five one-second samples, and
+`-benchmem`. The baseline and post-change no-rotation paths use the same
+workload; rotation is opt-in.
+
+| Operation | Before median ns/op | After median ns/op | Change | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Append with default no rotation | 2307 | 2402 | 0.96x, within host filesystem noise | 369 | 369 | 4 | 4 |
+| Append with age threshold check | n/a | 2501 | new opt-in path, 1.08x vs baseline | n/a | 369 | n/a | 4 |
+| Append with 64 KiB rotation | n/a | 4764 | new opt-in path, 2.07x vs baseline | n/a | 374 | n/a | 4 |
+
+Age checks add a small per-append CPU cost when enabled. Byte rotation is
+deliberately more expensive because it periodically syncs, closes, renames,
+and recreates files; it trades that cost for bounded local diagnostic history.
+The default path keeps the existing allocation count and does not rotate.
+
+Raw before-change output:
+
+```text
+BenchmarkCH004BaselineSQLQueryLogAppend-32  475825  2330 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32  494335  2338 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32  490132  2307 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32  489357  2295 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32  504777  2280 ns/op  369 B/op  4 allocs/op
+```
+
+Raw after-change output:
+
+```text
+BenchmarkCH004BaselineSQLQueryLogAppend-32             491053  2312 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32             485454  2326 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32             489404  2390 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32             487046  2440 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004BaselineSQLQueryLogAppend-32             433953  2635 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/bytes-32       242493  4775 ns/op  374 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/bytes-32       270670  4527 ns/op  374 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/bytes-32       241936  4817 ns/op  374 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/bytes-32       286473  5164 ns/op  374 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/bytes-32       284042  4666 ns/op  374 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/age-check-32   444330  2489 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/age-check-32   474950  2501 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/age-check-32   426414  2503 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/age-check-32   482792  2475 ns/op  369 B/op  4 allocs/op
+BenchmarkCH004RotatingSQLQueryLogAppend/age-check-32   459073  2515 ns/op  369 B/op  4 allocs/op
+```
+
+Reproduce with `make benchmark-ch004-baseline` before the implementation
+revision and `make benchmark-ch004` after it.

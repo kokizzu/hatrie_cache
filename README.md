@@ -18,6 +18,7 @@ security guidance before exposing it on a network.
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
 - Opt-in named SQL settings profiles with bounded inheritance: [SQL_NAMED_SETTINGS.md](SQL_NAMED_SETTINGS.md)
 - Static soft/hard namespace admission previews: [SQL_NAMESPACE_ADMISSION.md](SQL_NAMESPACE_ADMISSION.md)
+- Privacy-safe SQL query-log retention and rotation: [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md)
 - Opt-in ClickHouse-style SQL intermediate row limits: [C232_INTERMEDIATE_ROWS.md](C232_INTERMEDIATE_ROWS.md)
 - Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
 - ClickHouse/Materialize-style mergeable aggregate states: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)

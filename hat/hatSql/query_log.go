@@ -17,7 +17,11 @@ const (
 	// DefaultSQLQueryLogMaxRecordBytes bounds one durable record and prevents
 	// malformed input from forcing unbounded allocation during recovery.
 	DefaultSQLQueryLogMaxRecordBytes = 64 << 10
-	maxSQLQueryLogRecordBytes        = 1 << 20
+	// DefaultSQLQueryLogRetainedFiles is used when rotation is enabled without
+	// an explicit archive count. It retains the active file plus seven archives.
+	DefaultSQLQueryLogRetainedFiles = 7
+	maxSQLQueryLogRecordBytes       = 1 << 20
+	maxSQLQueryLogRetainedFiles     = 1024
 )
 
 var (
@@ -31,8 +35,19 @@ var (
 // completion path lightweight. Call Sync explicitly at operational checkpoints
 // when the default is selected.
 type SQLQueryLogOptions struct {
-	SyncOnAppend   bool
+	SyncOnAppend bool
+	// MaxRecordBytes bounds one encoded record. A nonpositive value selects the
+	// default.
 	MaxRecordBytes int
+	// MaxFileBytes rotates before an append would exceed the active file limit;
+	// zero disables size rotation.
+	MaxFileBytes int64
+	// MaxFileAge rotates a non-empty active file before the next append once its
+	// age reaches this duration; zero disables age rotation.
+	MaxFileAge time.Duration
+	// MaxRetainedFiles controls numbered archives beside Path. Zero selects
+	// DefaultSQLQueryLogRetainedFiles when rotation is enabled.
+	MaxRetainedFiles int
 }
 
 // SQLQueryLogEntry is the privacy-safe durable form of SQLQueryStatus. Query
@@ -48,14 +63,20 @@ type SQLQueryLogEntry struct {
 }
 
 // SQLQueryLog appends completed query entries to a local, operator-readable
-// newline-delimited JSON file. It is safe for concurrent Append, Sync, Read,
-// and Close calls.
+// newline-delimited JSON file with optional numbered archives. It is safe for
+// concurrent Append, Sync, Read, and Close calls.
 type SQLQueryLog struct {
-	mu            sync.Mutex
-	path          string
-	file          *os.File
-	maxRecordSize int
-	syncOnAppend  bool
+	mu               sync.Mutex
+	path             string
+	file             *os.File
+	maxRecordSize    int
+	syncOnAppend     bool
+	maxFileBytes     int64
+	maxFileAge       time.Duration
+	maxRetainedFiles int
+	rotationEnabled  bool
+	fileBytes        int64
+	segmentStartedAt time.Time
 }
 
 // OpenSQLQueryLog opens or creates a privacy-safe query log with restrictive
@@ -64,8 +85,8 @@ func OpenSQLQueryLog(path string) (*SQLQueryLog, error) {
 	return OpenSQLQueryLogWithOptions(path, SQLQueryLogOptions{})
 }
 
-// OpenSQLQueryLogWithOptions opens a query log with explicit durability and
-// record-size settings.
+// OpenSQLQueryLogWithOptions opens a query log with explicit durability,
+// record-size, and optional rotation settings.
 func OpenSQLQueryLogWithOptions(path string, options SQLQueryLogOptions) (*SQLQueryLog, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -77,6 +98,24 @@ func OpenSQLQueryLogWithOptions(path string, options SQLQueryLogOptions) (*SQLQu
 	}
 	if maxRecordSize > maxSQLQueryLogRecordBytes {
 		return nil, fmt.Errorf("hatSql: SQL query log record limit exceeds %d bytes", maxSQLQueryLogRecordBytes)
+	}
+	if options.MaxFileBytes < 0 {
+		return nil, errors.New("hatSql: SQL query log max file bytes must not be negative")
+	}
+	if options.MaxFileAge < 0 {
+		return nil, errors.New("hatSql: SQL query log max file age must not be negative")
+	}
+	if options.MaxRetainedFiles < 0 {
+		return nil, errors.New("hatSql: SQL query log retained files must not be negative")
+	}
+	maxRetainedFiles := options.MaxRetainedFiles
+	if options.MaxFileBytes > 0 || options.MaxFileAge > 0 {
+		if maxRetainedFiles == 0 {
+			maxRetainedFiles = DefaultSQLQueryLogRetainedFiles
+		}
+	}
+	if maxRetainedFiles > maxSQLQueryLogRetainedFiles {
+		return nil, fmt.Errorf("hatSql: SQL query log retained files exceed %d", maxSQLQueryLogRetainedFiles)
 	}
 	absolutePath, err := filepath.Abs(path)
 	if err != nil {
@@ -95,20 +134,157 @@ func OpenSQLQueryLogWithOptions(path string, options SQLQueryLogOptions) (*SQLQu
 	if err := os.MkdirAll(filepath.Dir(absolutePath), 0o700); err != nil {
 		return nil, fmt.Errorf("hatSql: create SQL query log directory: %w", err)
 	}
-	file, err := os.OpenFile(absolutePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, info, err := openSQLQueryLogFile(absolutePath)
 	if err != nil {
-		return nil, fmt.Errorf("hatSql: open SQL query log: %w", err)
+		return nil, err
+	}
+	return &SQLQueryLog{
+		path:             absolutePath,
+		file:             file,
+		maxRecordSize:    maxRecordSize,
+		syncOnAppend:     options.SyncOnAppend,
+		maxFileBytes:     options.MaxFileBytes,
+		maxFileAge:       options.MaxFileAge,
+		maxRetainedFiles: maxRetainedFiles,
+		rotationEnabled:  options.MaxFileBytes > 0 || options.MaxFileAge > 0,
+		fileBytes:        info.Size(),
+		segmentStartedAt: info.ModTime(),
+	}, nil
+}
+
+func openSQLQueryLogFile(path string) (*os.File, os.FileInfo, error) {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, nil, fmt.Errorf("hatSql: SQL query log path must not be a symlink")
+		}
+		if !info.Mode().IsRegular() {
+			return nil, nil, fmt.Errorf("hatSql: SQL query log path is not a regular file")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("hatSql: inspect SQL query log path: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hatSql: open SQL query log: %w", err)
 	}
 	if err := file.Chmod(0o600); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("hatSql: restrict SQL query log permissions: %w", err)
+		return nil, nil, fmt.Errorf("hatSql: restrict SQL query log permissions: %w", err)
 	}
-	return &SQLQueryLog{
-		path:          absolutePath,
-		file:          file,
-		maxRecordSize: maxRecordSize,
-		syncOnAppend:  options.SyncOnAppend,
-	}, nil
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("hatSql: stat SQL query log: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("hatSql: SQL query log path is not a regular file")
+	}
+	return file, info, nil
+}
+
+func createSQLQueryLogFile(path string) (*os.File, os.FileInfo, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hatSql: create SQL query log segment: %w", err)
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("hatSql: restrict SQL query log segment permissions: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("hatSql: stat SQL query log segment: %w", err)
+	}
+	return file, info, nil
+}
+
+func (log *SQLQueryLog) shouldRotateLocked(nextBytes int64) bool {
+	if log.maxFileBytes <= 0 && log.maxFileAge <= 0 {
+		return false
+	}
+	if log.fileBytes <= 0 {
+		return false
+	}
+	if log.maxFileBytes > 0 && log.fileBytes > log.maxFileBytes-nextBytes {
+		return true
+	}
+	return log.maxFileAge > 0 && !log.segmentStartedAt.IsZero() && time.Since(log.segmentStartedAt) >= log.maxFileAge
+}
+
+func (log *SQLQueryLog) rotateLocked() error {
+	if log.maxRetainedFiles <= 0 {
+		return errors.New("hatSql: SQL query log rotation requires retained files")
+	}
+	if err := log.file.Sync(); err != nil {
+		return fmt.Errorf("hatSql: sync SQL query log before rotation: %w", err)
+	}
+	closeErr := log.file.Close()
+	log.file = nil
+	if closeErr != nil {
+		reopenErr := log.reopenAfterRotationFailure()
+		return errors.Join(fmt.Errorf("hatSql: close SQL query log before rotation: %w", closeErr), reopenErr)
+	}
+	if err := rotateSQLQueryLogFiles(log.path, log.maxRetainedFiles); err != nil {
+		reopenErr := log.reopenAfterRotationFailure()
+		return errors.Join(fmt.Errorf("hatSql: rotate SQL query log: %w", err), reopenErr)
+	}
+	file, info, err := createSQLQueryLogFile(log.path)
+	if err != nil {
+		reopenErr := log.reopenAfterRotationFailure()
+		return errors.Join(err, reopenErr)
+	}
+	log.file = file
+	log.fileBytes = info.Size()
+	log.segmentStartedAt = info.ModTime()
+	return nil
+}
+
+func (log *SQLQueryLog) reopenAfterRotationFailure() error {
+	file, info, err := openSQLQueryLogFile(log.path)
+	if err != nil {
+		return fmt.Errorf("hatSql: reopen SQL query log after rotation: %w", err)
+	}
+	log.file = file
+	log.fileBytes = info.Size()
+	log.segmentStartedAt = info.ModTime()
+	return nil
+}
+
+func rotateSQLQueryLogFiles(path string, retainedFiles int) error {
+	if err := removeSQLQueryLogPath(sqlQueryLogRotatedPath(path, retainedFiles)); err != nil {
+		return err
+	}
+	for index := retainedFiles - 1; index >= 1; index-- {
+		if err := renameSQLQueryLogPath(sqlQueryLogRotatedPath(path, index), sqlQueryLogRotatedPath(path, index+1)); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(path, sqlQueryLogRotatedPath(path, 1)); err != nil {
+		return fmt.Errorf("rename active segment: %w", err)
+	}
+	return nil
+}
+
+func sqlQueryLogRotatedPath(path string, index int) string {
+	return fmt.Sprintf("%s.%d", path, index)
+}
+
+func removeSQLQueryLogPath(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func renameSQLQueryLogPath(source, destination string) error {
+	err := os.Rename(source, destination)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // Path returns the absolute path associated with the log.
@@ -150,7 +326,30 @@ func (log *SQLQueryLog) AppendEntry(entry SQLQueryLogEntry) error {
 	if log.file == nil {
 		return ErrSQLQueryLogClosed
 	}
+	if !log.rotationEnabled {
+		written, err := log.file.Write(encoded)
+		if err != nil {
+			return fmt.Errorf("hatSql: append SQL query log entry: %w", err)
+		}
+		if written != len(encoded) {
+			return fmt.Errorf("hatSql: append SQL query log entry: %w", io.ErrShortWrite)
+		}
+		if log.syncOnAppend {
+			if err := log.file.Sync(); err != nil {
+				return fmt.Errorf("hatSql: sync SQL query log entry: %w", err)
+			}
+		}
+		return nil
+	}
+	if log.shouldRotateLocked(int64(len(encoded))) {
+		if err := log.rotateLocked(); err != nil {
+			return err
+		}
+	}
 	written, err := log.file.Write(encoded)
+	if written > 0 {
+		log.fileBytes += int64(written)
+	}
 	if err != nil {
 		return fmt.Errorf("hatSql: append SQL query log entry: %w", err)
 	}
@@ -187,13 +386,65 @@ func (log *SQLQueryLog) Read() ([]SQLQueryLogEntry, error) {
 	}
 	log.mu.Lock()
 	defer log.mu.Unlock()
-	file, err := os.Open(log.path)
+	if log.file == nil {
+		return nil, ErrSQLQueryLogClosed
+	}
+	paths, err := log.readSegmentPathsLocked()
 	if err != nil {
-		return nil, fmt.Errorf("hatSql: read SQL query log: %w", err)
+		return nil, err
+	}
+	entries := make([]SQLQueryLogEntry, 0)
+	for _, path := range paths {
+		segmentEntries, err := readSQLQueryLogSegment(path, log.maxRecordSize)
+		if err != nil {
+			return nil, fmt.Errorf("hatSql: read SQL query log segment %q: %w", path, err)
+		}
+		entries = append(entries, segmentEntries...)
+	}
+	return entries, nil
+}
+
+func (log *SQLQueryLog) readSegmentPathsLocked() ([]string, error) {
+	paths := make([]string, 0, log.maxRetainedFiles+1)
+	for index := log.maxRetainedFiles; index >= 1; index-- {
+		path := sqlQueryLogRotatedPath(log.path, index)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("hatSql: inspect SQL query log segment %q: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("hatSql: SQL query log segment %q must not be a symlink", path)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("hatSql: SQL query log segment %q is not a regular file", path)
+		}
+		paths = append(paths, path)
+	}
+	paths = append(paths, log.path)
+	return paths, nil
+}
+
+func readSQLQueryLogSegment(path string, maxRecordSize int) ([]SQLQueryLogEntry, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("SQL query log segment must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("SQL query log segment is not a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024), log.maxRecordSize)
+	scanner.Buffer(make([]byte, 1024), maxRecordSize)
 	entries := make([]SQLQueryLogEntry, 0)
 	for scanner.Scan() {
 		line := scanner.Bytes()

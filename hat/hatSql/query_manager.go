@@ -84,7 +84,8 @@ type SQLQueryManagerOptions struct {
 	// retains every status, preserving the legacy behavior.
 	HistorySampleEvery int
 	// QueryLog persists every terminal status in a privacy-safe append-only
-	// record. Nil preserves the default in-memory-only behavior.
+	// record, with optional size/age rotation configured on the log. Nil
+	// preserves the default in-memory-only behavior.
 	QueryLog *SQLQueryLog
 	// ComputeWorkers enables an independently scheduled SQL compute pool.
 	// Zero preserves the legacy caller-goroutine execution path.

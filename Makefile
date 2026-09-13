@@ -11713,3 +11713,44 @@ push-ch003:
 	bash ./scripts/push-ch003.sh
 
 deliver-ch003: check-ch003 commit-ch003 push-ch003
+
+.PHONY: audit-inspiration-backlog
+audit-inspiration-backlog:
+	bash ./scripts/audit-inspiration-backlog.sh
+
+.PHONY: test-ch004-red benchmark-ch004-baseline test-ch004-package race-ch004 vet-ch004 format-ch004 check-ch004 benchmark-ch004
+test-ch004-red:
+	bash ./scripts/test-ch004.sh red
+
+benchmark-ch004-baseline:
+	bash ./scripts/test-ch004.sh baseline
+
+test-ch004-package:
+	bash ./scripts/test-ch004.sh package
+
+race-ch004:
+	bash ./scripts/test-ch004.sh race
+
+vet-ch004:
+	bash ./scripts/test-ch004.sh vet
+
+format-ch004:
+	bash ./scripts/test-ch004.sh format
+
+check-ch004:
+	bash ./scripts/test-ch004.sh check
+
+benchmark-ch004:
+	bash ./scripts/test-ch004.sh benchmark
+
+.PHONY: status-ch004 commit-ch004 push-ch004 deliver-ch004
+status-ch004:
+	bash ./scripts/commit-ch004.sh status
+
+commit-ch004:
+	bash ./scripts/commit-ch004.sh commit
+
+push-ch004:
+	bash ./scripts/push-ch004.sh
+
+deliver-ch004: check-ch004 commit-ch004 push-ch004
