@@ -22,7 +22,7 @@ before/after measurement when its motivation is performance.
 | --- | --- | --- | --- | --- |
 | CH-01 | Named settings profiles with inheritance and validation | Repeatable per-tenant query policy | Configuration complexity | [x] Implemented by `hat/hatSql.SQLNamedSettingsProfile`, bounded parent resolution, and optional `SQLNamedSettingValidator`; see [SQL_NAMED_SETTINGS.md](SQL_NAMED_SETTINGS.md) and [BENCHMARK.md](BENCHMARK.md#ch-001-named-settings-profile-inheritance-and-validation). |
 | CH-02 | Include the effective settings fingerprint in result-cache keys | Prevent unsafe cache reuse | Larger keys and invalidation surface | [ ] |
-| CH-03 | Soft and hard resource profiles with a dry-run admission result | Make workload limits explainable | More admission branches | [ ] |
+| CH-03 | Soft and hard resource profiles with a dry-run admission result | Make workload limits explainable | More admission branches | [x] Implemented by `hat/hatSql.NamespaceResourceProfile`, `NewNamespaceQueryGovernorWithProfiles`, and `NamespaceQueryGovernor.DryRun`; see [SQL_NAMESPACE_ADMISSION.md](SQL_NAMESPACE_ADMISSION.md) and [BENCHMARK.md](BENCHMARK.md#ch-003-soft-and-hard-namespace-admission-profiles). |
 | CH-04 | Retained query-log tables with time and size rotation | Diagnose historical workload regressions | Disk usage and PII handling | [ ] |
 | CH-05 | Retained part and merge event log | Explain compaction and read amplification | Event volume | [ ] |
 | CH-06 | LRU sparse-mark cache separate from data-part cache | Avoid repeated mark reads on hot ranges | Cache memory and invalidation | [ ] |

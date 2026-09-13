@@ -22008,4 +22008,51 @@ BenchmarkCH001NamedSettingsResolveInherited-32              3202335  380.4 ns/op
 
 Reproduce with `make benchmark-ch001-baseline` before the implementation
 revision and `make benchmark-ch001` after it.
+
+## CH-003 Soft And Hard Namespace Admission Profiles
+
+The existing hard-limit application path was measured before and after adding
+the opt-in soft/hard profile registry and static `DryRun` admission preview.
+The benchmark ran on Linux/amd64 with an AMD Ryzen 9 5950X, five one-second
+samples, and `-benchmem`. The existing execution path remained allocation-free;
+the preview is a new opt-in operation and therefore has no before value.
+
+| Operation | Before median ns/op | After median ns/op | Change | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Existing namespace limit application | 31.36 | 32.30 | 0.97x, within short-run noise | 0 | 0 | 0 | 0 |
+| Static `DryRun` admission preview | n/a | 318.9 | new opt-in path | n/a | 64 | n/a | 2 |
+
+The profile constructor validates and normalizes policies once. `Execute`
+continues to use only hard limits, so callers that do not use `DryRun` retain
+the previous runtime path. `DryRun` allocates the returned clamp and warning
+lists when they are non-empty; it does not reserve concurrency, consume quota,
+enqueue work, or execute SQL.
+
+Raw before-change output:
+
+```text
+BenchmarkCH003BaselineNamespaceLimitsApply-32  38101738  32.17 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  39903702  29.02 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  41432005  31.27 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  38373145  31.63 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  38018576  31.36 ns/op  0 B/op  0 allocs/op
+```
+
+Raw after-change output:
+
+```text
+BenchmarkCH003BaselineNamespaceLimitsApply-32  37043384  31.81 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  40879160  31.74 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  37993311  32.53 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  38089706  32.30 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003BaselineNamespaceLimitsApply-32  31810947  32.73 ns/op  0 B/op  0 allocs/op
+BenchmarkCH003DryRunNamespaceAdmission-32     3610320  321.9 ns/op  64 B/op  2 allocs/op
+BenchmarkCH003DryRunNamespaceAdmission-32     3803565  320.4 ns/op  64 B/op  2 allocs/op
+BenchmarkCH003DryRunNamespaceAdmission-32     3802456  315.6 ns/op  64 B/op  2 allocs/op
+BenchmarkCH003DryRunNamespaceAdmission-32     3714078  318.9 ns/op  64 B/op  2 allocs/op
+BenchmarkCH003DryRunNamespaceAdmission-32     3741546  318.6 ns/op  64 B/op  2 allocs/op
+```
+
+Reproduce with `make benchmark-ch003-baseline` before the implementation
+revision and `make benchmark-ch003` after it.
 ```

@@ -11676,3 +11676,40 @@ push-ch001:
 	bash ./scripts/push-ch001.sh
 
 deliver-ch001: commit-ch001 push-ch001
+
+.PHONY: test-ch003-red benchmark-ch003-baseline test-ch003-package race-ch003 vet-ch003 format-ch003 check-ch003 benchmark-ch003
+test-ch003-red:
+	bash ./scripts/test-ch003.sh red
+
+benchmark-ch003-baseline:
+	bash ./scripts/test-ch003.sh baseline
+
+test-ch003-package:
+	bash ./scripts/test-ch003.sh package
+
+race-ch003:
+	bash ./scripts/test-ch003.sh race
+
+vet-ch003:
+	bash ./scripts/test-ch003.sh vet
+
+format-ch003:
+	bash ./scripts/test-ch003.sh format
+
+check-ch003:
+	bash ./scripts/test-ch003.sh check
+
+benchmark-ch003:
+	bash ./scripts/test-ch003.sh benchmark
+
+.PHONY: status-ch003 commit-ch003 push-ch003 deliver-ch003
+status-ch003:
+	bash ./scripts/commit-ch003.sh status
+
+commit-ch003:
+	bash ./scripts/commit-ch003.sh commit
+
+push-ch003:
+	bash ./scripts/push-ch003.sh
+
+deliver-ch003: check-ch003 commit-ch003 push-ch003

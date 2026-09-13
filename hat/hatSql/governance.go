@@ -60,6 +60,26 @@ type NamespaceResourceLimits struct {
 	SpillDirectory      string
 }
 
+// NamespaceResourceProfile separates advisory soft limits from enforced hard
+// limits. Soft limits are reported by DryRun; hard limits retain the existing
+// Execute behavior and tighten requested SQL options.
+type NamespaceResourceProfile struct {
+	Soft NamespaceResourceLimits `json:"soft"`
+	Hard NamespaceResourceLimits `json:"hard"`
+}
+
+// NamespaceQueryAdmission describes the static policy result for one query.
+// DryRun never reserves a concurrency slot, consumes quota, or starts query
+// work, so callers can use it for admission explanations and dashboards.
+type NamespaceQueryAdmission struct {
+	Namespace        string                  `json:"namespace"`
+	EffectiveOptions SQLQueryOptions         `json:"-"`
+	HardLimits       NamespaceResourceLimits `json:"hard_limits"`
+	SoftLimits       NamespaceResourceLimits `json:"soft_limits"`
+	HardClamps       []string                `json:"hard_clamps,omitempty"`
+	SoftWarnings     []string                `json:"soft_warnings,omitempty"`
+}
+
 // Apply tightens options to this namespace policy. Positive policies are upper
 // bounds; a caller's stricter value remains intact. A zero MaxRows is the
 // executor's safe default, so a policy larger than that default cannot loosen it.
@@ -156,8 +176,10 @@ func (limits NamespaceResourceLimits) validate() error {
 // NamespaceQueryGovernor applies immutable default and per-namespace resource
 // limits before delegating to the package's single SQL execution path.
 type NamespaceQueryGovernor struct {
-	defaults   NamespaceResourceLimits
-	namespaces map[string]NamespaceResourceLimits
+	defaults       NamespaceResourceLimits
+	defaultSoft    NamespaceResourceLimits
+	namespaces     map[string]NamespaceResourceLimits
+	softNamespaces map[string]NamespaceResourceLimits
 
 	mu                 sync.Mutex
 	gates              map[string]*namespaceQueryGate
@@ -171,39 +193,58 @@ type NamespaceQueryGovernor struct {
 // Per-namespace values only tighten defaults, which prevents accidental policy
 // escalation in configuration overlays.
 func NewNamespaceQueryGovernor(defaults NamespaceResourceLimits, namespaces map[string]NamespaceResourceLimits) (*NamespaceQueryGovernor, error) {
-	if err := defaults.validate(); err != nil {
+	profiles := make(map[string]NamespaceResourceProfile, len(namespaces))
+	for namespace, limits := range namespaces {
+		profiles[namespace] = NamespaceResourceProfile{Hard: limits}
+	}
+	return NewNamespaceQueryGovernorWithProfiles(NamespaceResourceProfile{Hard: defaults}, profiles)
+}
+
+// NewNamespaceQueryGovernorWithProfiles validates and copies hard and soft
+// namespace policies. Hard policies are enforced by Execute; soft policies
+// are advisory and appear only in DryRun results.
+func NewNamespaceQueryGovernorWithProfiles(defaults NamespaceResourceProfile, namespaces map[string]NamespaceResourceProfile) (*NamespaceQueryGovernor, error) {
+	defaults, err := normalizeNamespaceResourceProfile(defaults)
+	if err != nil {
 		return nil, err
 	}
-	defaults = normalizeNamespaceResourceLimits(defaults)
-	copyNamespaces := make(map[string]NamespaceResourceLimits, len(namespaces))
-	for namespace, limits := range namespaces {
+	copyNamespaces := make(map[string]NamespaceResourceProfile, len(namespaces))
+	for namespace, profile := range namespaces {
 		if strings.TrimSpace(namespace) == "" {
 			return nil, fmt.Errorf("namespace resource policy name is required")
 		}
-		if err := limits.validate(); err != nil {
+		profile, err = normalizeNamespaceResourceProfile(profile)
+		if err != nil {
 			return nil, fmt.Errorf("namespace %q: %w", namespace, err)
 		}
-		limits = normalizeNamespaceResourceLimits(limits)
-		copyNamespaces[namespace] = tightenNamespaceLimits(defaults, limits)
+		profile.Hard = tightenNamespaceLimits(defaults.Hard, profile.Hard)
+		profile.Soft = capNamespaceSoftLimits(tightenNamespaceLimits(defaults.Soft, profile.Soft), profile.Hard)
+		copyNamespaces[namespace] = profile
 	}
 	governor := &NamespaceQueryGovernor{
-		defaults:   defaults,
-		namespaces: copyNamespaces,
-		gates:      make(map[string]*namespaceQueryGate),
-		quotas:     make(map[string]*namespaceQueryQuota),
+		defaults:       defaults.Hard,
+		defaultSoft:    defaults.Soft,
+		namespaces:     make(map[string]NamespaceResourceLimits, len(copyNamespaces)),
+		softNamespaces: make(map[string]NamespaceResourceLimits, len(copyNamespaces)),
+		gates:          make(map[string]*namespaceQueryGate),
+		quotas:         make(map[string]*namespaceQueryQuota),
 	}
-	if defaults.ComputeWorkers > 0 {
-		pool, err := newNamespaceComputePool(defaults)
+	for namespace, profile := range copyNamespaces {
+		governor.namespaces[namespace] = profile.Hard
+		governor.softNamespaces[namespace] = profile.Soft
+	}
+	if defaults.Hard.ComputeWorkers > 0 {
+		pool, err := newNamespaceComputePool(defaults.Hard)
 		if err != nil {
 			return nil, err
 		}
 		governor.defaultComputePool = pool
 	}
-	for namespace, limits := range copyNamespaces {
-		if limits.ComputeWorkers <= 0 {
+	for namespace, profile := range copyNamespaces {
+		if profile.Hard.ComputeWorkers <= 0 {
 			continue
 		}
-		pool, err := newNamespaceComputePool(limits)
+		pool, err := newNamespaceComputePool(profile.Hard)
 		if err != nil {
 			_ = governor.Close()
 			return nil, fmt.Errorf("namespace %q: %w", namespace, err)
@@ -229,6 +270,55 @@ func normalizeNamespaceResourceLimits(limits NamespaceResourceLimits) NamespaceR
 		limits.QueryWindow = defaultNamespaceQueryWindow
 	}
 	return limits
+}
+
+func normalizeNamespaceResourceProfile(profile NamespaceResourceProfile) (NamespaceResourceProfile, error) {
+	if err := profile.Soft.validate(); err != nil {
+		return NamespaceResourceProfile{}, fmt.Errorf("soft profile: %w", err)
+	}
+	if err := profile.Hard.validate(); err != nil {
+		return NamespaceResourceProfile{}, fmt.Errorf("hard profile: %w", err)
+	}
+	profile.Soft = normalizeNamespaceResourceLimits(profile.Soft)
+	profile.Hard = normalizeNamespaceResourceLimits(profile.Hard)
+	profile.Soft = capNamespaceSoftLimits(profile.Soft, profile.Hard)
+	return profile, nil
+}
+
+func capNamespaceSoftLimits(soft, hard NamespaceResourceLimits) NamespaceResourceLimits {
+	soft.MaxConcurrentQueries = capNamespaceLimit(soft.MaxConcurrentQueries, hard.MaxConcurrentQueries)
+	soft.MaxQueuedQueries = capNamespaceLimit(soft.MaxQueuedQueries, hard.MaxQueuedQueries)
+	soft.ComputeWorkers = capNamespaceLimit(soft.ComputeWorkers, hard.ComputeWorkers)
+	soft.ComputeQueueCapacity = capNamespaceLimit(soft.ComputeQueueCapacity, hard.ComputeQueueCapacity)
+	soft.MaxQueriesPerWindow = capNamespaceLimit(soft.MaxQueriesPerWindow, hard.MaxQueriesPerWindow)
+	soft.MaxRows = capNamespaceLimit(soft.MaxRows, hard.MaxRows)
+	soft.MaxIntermediateRows = capNamespaceLimit(soft.MaxIntermediateRows, hard.MaxIntermediateRows)
+	soft.MaxJoinWork = capNamespaceLimit(soft.MaxJoinWork, hard.MaxJoinWork)
+	soft.MaxJoinBytes = capNamespaceLimit(soft.MaxJoinBytes, hard.MaxJoinBytes)
+	soft.MaxResultBytes = capNamespaceLimit(soft.MaxResultBytes, hard.MaxResultBytes)
+	soft.MaxWorkers = capNamespaceLimit(soft.MaxWorkers, hard.MaxWorkers)
+	soft.MaxSortBytes = capNamespaceLimit(soft.MaxSortBytes, hard.MaxSortBytes)
+	soft.MaxGroupBytes = capNamespaceLimit(soft.MaxGroupBytes, hard.MaxGroupBytes)
+	soft.MaxGroupKeys = capNamespaceLimit(soft.MaxGroupKeys, hard.MaxGroupKeys)
+	soft.MaxSetBytes = capNamespaceLimit(soft.MaxSetBytes, hard.MaxSetBytes)
+	soft.MaxSpillBytes = capNamespaceLimit(soft.MaxSpillBytes, hard.MaxSpillBytes)
+	soft.MaxRecursionDepth = capNamespaceLimit(soft.MaxRecursionDepth, hard.MaxRecursionDepth)
+	soft.Timeout = capNamespaceDuration(soft.Timeout, hard.Timeout)
+	return soft
+}
+
+func capNamespaceLimit(soft, hard int) int {
+	if soft > 0 && hard > 0 && soft > hard {
+		return hard
+	}
+	return soft
+}
+
+func capNamespaceDuration(soft, hard time.Duration) time.Duration {
+	if soft > 0 && hard > 0 && soft > hard {
+		return hard
+	}
+	return soft
 }
 
 func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) NamespaceResourceLimits {
@@ -278,6 +368,77 @@ func (governor *NamespaceQueryGovernor) limitsFor(namespace string) NamespaceRes
 		return limits
 	}
 	return governor.defaults
+}
+
+func (governor *NamespaceQueryGovernor) softLimitsFor(namespace string) NamespaceResourceLimits {
+	if limits, ok := governor.softNamespaces[namespace]; ok {
+		return limits
+	}
+	return governor.defaultSoft
+}
+
+// DryRun returns the static namespace policy that would be applied to a query.
+// It does not reserve concurrency, consume quota, submit compute work, or
+// otherwise change governor state.
+func (governor *NamespaceQueryGovernor) DryRun(namespace string, options SQLQueryOptions) (NamespaceQueryAdmission, error) {
+	if governor == nil {
+		return NamespaceQueryAdmission{}, fmt.Errorf("namespace query governor is required")
+	}
+	if strings.TrimSpace(namespace) == "" {
+		return NamespaceQueryAdmission{}, fmt.Errorf("namespace is required")
+	}
+	governor.mu.Lock()
+	closed := governor.closed
+	governor.mu.Unlock()
+	if closed {
+		return NamespaceQueryAdmission{}, ErrNamespaceQueryGovernorClosed
+	}
+	hard := governor.limitsFor(namespace)
+	soft := governor.softLimitsFor(namespace)
+	effective := hard.Apply(options)
+	hardClamps, softWarnings := namespaceQueryAdmissionChanges(options, effective, soft)
+	return NamespaceQueryAdmission{
+		Namespace:        namespace,
+		EffectiveOptions: effective,
+		HardLimits:       hard,
+		SoftLimits:       soft,
+		HardClamps:       hardClamps,
+		SoftWarnings:     softWarnings,
+	}, nil
+}
+
+func namespaceQueryAdmissionChanges(requested, effective SQLQueryOptions, soft NamespaceResourceLimits) ([]string, []string) {
+	fields := [...]struct {
+		name                       string
+		requested, effective, soft int64
+	}{
+		{"max_rows", int64(requested.MaxRows), int64(effective.MaxRows), int64(soft.MaxRows)},
+		{"max_intermediate_rows", int64(requested.MaxIntermediateRows), int64(effective.MaxIntermediateRows), int64(soft.MaxIntermediateRows)},
+		{"max_join_work", int64(requested.MaxJoinWork), int64(effective.MaxJoinWork), int64(soft.MaxJoinWork)},
+		{"max_join_bytes", int64(requested.MaxJoinBytes), int64(effective.MaxJoinBytes), int64(soft.MaxJoinBytes)},
+		{"max_result_bytes", int64(requested.MaxResultBytes), int64(effective.MaxResultBytes), int64(soft.MaxResultBytes)},
+		{"workers", int64(requested.Workers), int64(effective.Workers), int64(soft.MaxWorkers)},
+		{"max_sort_bytes", int64(requested.MaxSortBytes), int64(effective.MaxSortBytes), int64(soft.MaxSortBytes)},
+		{"max_group_bytes", int64(requested.MaxGroupBytes), int64(effective.MaxGroupBytes), int64(soft.MaxGroupBytes)},
+		{"max_group_keys", int64(requested.MaxGroupKeys), int64(effective.MaxGroupKeys), int64(soft.MaxGroupKeys)},
+		{"max_set_bytes", int64(requested.MaxSetBytes), int64(effective.MaxSetBytes), int64(soft.MaxSetBytes)},
+		{"max_spill_bytes", int64(requested.MaxSpillBytes), int64(effective.MaxSpillBytes), int64(soft.MaxSpillBytes)},
+		{"max_recursion_depth", int64(requested.MaxRecursionDepth), int64(effective.MaxRecursionDepth), int64(soft.MaxRecursionDepth)},
+		{"timeout", int64(requested.Timeout), int64(effective.Timeout), int64(soft.Timeout)},
+	}
+	var hardClamps, softWarnings []string
+	for _, field := range fields {
+		if field.requested != field.effective {
+			hardClamps = append(hardClamps, field.name)
+		}
+		if field.requested > 0 && field.soft > 0 && field.requested > field.soft {
+			softWarnings = append(softWarnings, field.name)
+		}
+	}
+	if requested.SpillDirectory != effective.SpillDirectory {
+		hardClamps = append(hardClamps, "spill_directory")
+	}
+	return hardClamps, softWarnings
 }
 
 func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits NamespaceResourceLimits) *namespaceQueryGate {
