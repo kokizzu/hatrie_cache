@@ -12992,3 +12992,30 @@ commit-tr016:
 
 push-tr016:
 	bash ./scripts/push-tr016.sh
+
+test-mz026-snapshot-export:
+	bash ./scripts/test-mz026-snapshot-export.sh
+
+format-mz026:
+	bash ./scripts/format-mz026.sh
+
+test-mz026-race:
+	bash ./scripts/test-mz026-race.sh
+
+test-mz026-full:
+	bash ./scripts/test-mz026-full.sh
+
+benchmark-mz026:
+	bash ./scripts/benchmark-mz026.sh
+
+status-mz026:
+	bash ./scripts/status-mz026.sh
+
+review-mz026:
+	bash ./scripts/review-mz026.sh
+
+commit-mz026:
+	bash ./scripts/commit-mz026.sh
+
+push-mz026:
+	bash ./scripts/push-mz026.sh

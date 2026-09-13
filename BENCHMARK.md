@@ -23124,6 +23124,26 @@ geometrically. Full semantics and raw commands are in
 
 Reproduce with `make benchmark-mz008`.
 
+## MZ-26: Exact-Frontier Subscription Snapshot Export
+
+This benchmark compares the existing current-snapshot loop with the new
+explicit export of eight active query subscriptions at one historical
+frontier. It runs on Linux `amd64`, AMD Ryzen 9 5950X, with five `-benchmem`
+samples.
+
+| Operation | Median CPU | Allocated memory | Allocations | Relative cost |
+| --- | ---: | ---: | ---: | ---: |
+| Existing current `Snapshot()` loop | 2,445 ns/op | 3,008 B/op | 32 allocs/op | `1.00x` |
+| Exact-frontier export | 43,133 ns/op | 45,944 B/op | 252 allocs/op | `17.64x` CPU, `15.27x` bytes |
+
+The export intentionally re-evaluates and clones all eight queries, so this is
+an on-demand bootstrap/recovery cost rather than a live-path optimization. It
+does not advance revisions or publish subscription updates. Raw samples in
+the command output were `2,447, 2,422, 2,459, 2,445, 2,288` ns/op for the
+current-snapshot loop and `39,534, 44,882, 43,133, 41,678, 43,805` ns/op for
+exact-frontier export. Full semantics are in
+[MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md](MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md).
+
 ## CH-24: Skip-Index Usefulness Telemetry
 
 This explain-only change adds skipped, scanned, matched, residual, and
