@@ -13019,3 +13019,34 @@ commit-mz026:
 
 push-mz026:
 	bash ./scripts/push-mz026.sh
+.PHONY: test-ch022-explain-pruning
+test-ch022-explain-pruning:
+	@bash ./scripts/test-ch022-explain-pruning.sh
+
+.PHONY: benchmark-ch022-explain-pruning
+benchmark-ch022-explain-pruning:
+	@bash ./scripts/benchmark-ch022-explain-pruning.sh
+
+.PHONY: format-ch022
+format-ch022:
+	@bash ./scripts/format-ch022.sh
+
+.PHONY: test-ch022-race
+test-ch022-race:
+	@bash ./scripts/test-ch022-race.sh
+
+.PHONY: test-ch022-full
+test-ch022-full:
+	@bash ./scripts/test-ch022-full.sh
+
+.PHONY: review-ch022
+review-ch022:
+	@bash ./scripts/review-ch022.sh
+
+.PHONY: commit-ch022
+commit-ch022:
+	@bash ./scripts/commit-ch022.sh
+
+.PHONY: push-ch022
+push-ch022:
+	@bash ./scripts/push-ch022.sh

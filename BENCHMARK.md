@@ -23204,3 +23204,30 @@ on the durable path is the cost of retaining per-command receipts and response
 objects; the buffer remains bounded by `Capacity` and releases its request
 slice after completion. Storage and wire bandwidth are unchanged because each
 command remains a scalar journal record.
+## CH-022: Structured EXPLAIN Pruning Telemetry
+
+Workload: `BenchmarkCH022ExplainAnalyze`, a deterministic eight-row columnar
+Top-N query with two skipped segments. The baseline is the implementation
+before structured `ExplainStep.Pruning` data; the after run is the same query
+and fixture with typed pruning fields and tabular EXPLAIN columns.
+
+| Variant | Sample 1 | Sample 2 | Sample 3 | Sample 4 | Sample 5 | Median ns/op | B/op | allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Before | 10,751 | 10,173 | 9,703 | 10,514 | 9,752 | 10,173 | 11,521 | 97 |
+| After | 12,752 | 12,443 | 12,242 | 11,569 | 11,834 | 12,242 | 12,174 | 102 |
+
+Relative to baseline, the structured EXPLAIN path costs `1.20x` CPU, `1.06x`
+allocation bytes, and five allocations. This is an opt-in diagnostic path;
+ordinary queries do not allocate explain metrics. The added fields make
+index, mark, and segment pruning measurable without parsing `detail` text.
+
+The same plan serialized as JSON was `330` bytes before and `459` bytes after,
+adding `129` bytes (`1.39x`) to the EXPLAIN plan payload. Raw wire-size samples
+from the same run were `legacy_plan_bytes` 330, 330, 330, 332, 331 and
+`structured_plan_bytes` 459, 459, 459, 461, 460.
+
+Raw command:
+
+```text
+make benchmark-ch022-explain-pruning
+```

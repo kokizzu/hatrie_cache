@@ -8042,6 +8042,14 @@ func (metrics *sqlExecutionMetrics) recordPruning(node, detail string, totalRows
 	}
 	detail = fmt.Sprintf("%s skipped_rows=%d scanned_rows=%d matched_rows=%d residual_rows=%d residual_false_positive_rate=%.2f%%", detail, skippedRows, scannedRows, matchedRows, residualRows, falsePositiveRate)
 	metrics.record(node, detail, totalRows, skippedRows, started)
+	metrics.steps[len(metrics.steps)-1].Pruning = &ExplainPruning{
+		TotalRows:                 totalRows,
+		SkippedRows:               skippedRows,
+		ScannedRows:               scannedRows,
+		MatchedRows:               matchedRows,
+		ResidualRows:              residualRows,
+		ResidualFalsePositiveRate: falsePositiveRate,
+	}
 }
 
 func (metrics *sqlExecutionMetrics) recordBytes(node, detail string, inputRows, outputRows, inputBytes, outputBytes int, started time.Time) {
@@ -8848,10 +8856,14 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	}
 	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
 	heap.Init(&candidates)
+	matchedRows := 0
 	scanRows := func(start, end int) bool {
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if !matches(rowIndex) {
 				continue
+			}
+			if metrics != nil {
+				matchedRows++
 			}
 			candidate := sqlTopNStreamItem{ordinal: rowIndex}
 			if len(orderFields) == 1 {
@@ -8902,7 +8914,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		return SQLQueryResult{}, false, nil
 	}
 	if metrics != nil && skippedRows > 0 {
-		metrics.record("COLUMNAR TOP-N SEGMENT SKIP", sqlExplainOrders(q.orderBy), batch.Rows, skippedRows, started)
+		metrics.recordPruning("COLUMNAR TOP-N SEGMENT SKIP", sqlExplainOrders(q.orderBy), batch.Rows, skippedRows, batch.Rows-skippedRows, matchedRows, started)
 	}
 	sort.SliceStable(candidates.items, func(left, right int) bool {
 		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], q.orderBy)
@@ -12265,7 +12277,16 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	result.Plan = metrics.steps
 	result.Rows = result.Rows[:0]
 	for _, step := range result.Plan {
-		row := SQLRow{"node": step.Node, "detail": step.Detail, "actual_input_rows": *step.ActualInputRows, "actual_output_rows": *step.ActualOutputRows, "elapsed_ns": *step.ElapsedNanos}
+		rowCapacity := 3
+		if step.Pruning != nil {
+			rowCapacity = 12
+		}
+		row := make(SQLRow, rowCapacity)
+		row["node"] = step.Node
+		row["detail"] = step.Detail
+		row["actual_input_rows"] = *step.ActualInputRows
+		row["actual_output_rows"] = *step.ActualOutputRows
+		row["elapsed_ns"] = *step.ElapsedNanos
 		if step.ActualInputBytes != nil {
 			row["actual_input_bytes"] = *step.ActualInputBytes
 		}
@@ -12281,9 +12302,17 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.EstimateErrorPercent != nil {
 			row["estimate_error_percent"] = *step.EstimateErrorPercent
 		}
+		if step.Pruning != nil {
+			row["total_rows"] = step.Pruning.TotalRows
+			row["skipped_rows"] = step.Pruning.SkippedRows
+			row["scanned_rows"] = step.Pruning.ScannedRows
+			row["matched_rows"] = step.Pruning.MatchedRows
+			row["residual_rows"] = step.Pruning.ResidualRows
+			row["residual_false_positive_rate"] = step.Pruning.ResidualFalsePositiveRate
+		}
 		result.Rows = append(result.Rows, row)
 	}
-	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
+	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns", "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate")
 	result.Rows = append(result.Rows, SQLRow{
 		"node":         "ANALYZE",
 		"detail":       "execution summary",

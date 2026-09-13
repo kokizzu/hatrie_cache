@@ -28,22 +28,35 @@ type QueryResult struct {
 
 // ExplainStep is one stable operation in an EXPLAIN plan.
 type ExplainStep struct {
-	Node                 string          `json:"node"`
-	Detail               string          `json:"detail"`
+	Node                 string               `json:"node"`
+	Detail               string               `json:"detail"`
 	Alternatives         []ExplainAlternative `json:"alternatives,omitempty"`
-	Notices              []ExplainNotice `json:"notices,omitempty"`
-	Stage                int             `json:"stage,omitempty"`
-	Worker               int             `json:"worker,omitempty"`
-	Workers              int             `json:"workers,omitempty"`
-	Lineage              []ColumnLineage `json:"lineage,omitempty"`
-	EstimatedRows        *int            `json:"estimated_rows,omitempty"`
-	ActualInputRows      *int            `json:"actual_input_rows,omitempty"`
-	ActualOutputRows     *int            `json:"actual_output_rows,omitempty"`
-	ActualInputBytes     *int            `json:"actual_input_bytes,omitempty"`
-	ActualOutputBytes    *int            `json:"actual_output_bytes,omitempty"`
-	EstimateErrorRows    *int            `json:"estimate_error_rows,omitempty"`
-	EstimateErrorPercent *float64        `json:"estimate_error_percent,omitempty"`
-	ElapsedNanos         *int64          `json:"elapsed_ns,omitempty"`
+	Notices              []ExplainNotice      `json:"notices,omitempty"`
+	Pruning              *ExplainPruning      `json:"pruning,omitempty"`
+	Stage                int                  `json:"stage,omitempty"`
+	Worker               int                  `json:"worker,omitempty"`
+	Workers              int                  `json:"workers,omitempty"`
+	Lineage              []ColumnLineage      `json:"lineage,omitempty"`
+	EstimatedRows        *int                 `json:"estimated_rows,omitempty"`
+	ActualInputRows      *int                 `json:"actual_input_rows,omitempty"`
+	ActualOutputRows     *int                 `json:"actual_output_rows,omitempty"`
+	ActualInputBytes     *int                 `json:"actual_input_bytes,omitempty"`
+	ActualOutputBytes    *int                 `json:"actual_output_bytes,omitempty"`
+	EstimateErrorRows    *int                 `json:"estimate_error_rows,omitempty"`
+	EstimateErrorPercent *float64             `json:"estimate_error_percent,omitempty"`
+	ElapsedNanos         *int64               `json:"elapsed_ns,omitempty"`
+}
+
+// ExplainPruning contains machine-readable row counts for an index, mark, or
+// segment pruning decision observed by EXPLAIN ANALYZE. It is omitted for
+// operators that do not perform pruning.
+type ExplainPruning struct {
+	TotalRows                 int     `json:"total_rows"`
+	SkippedRows               int     `json:"skipped_rows"`
+	ScannedRows               int     `json:"scanned_rows"`
+	MatchedRows               int     `json:"matched_rows"`
+	ResidualRows              int     `json:"residual_rows"`
+	ResidualFalsePositiveRate float64 `json:"residual_false_positive_rate"`
 }
 
 // ExplainAlternative describes an optimizer strategy considered for one plan

@@ -41,7 +41,7 @@ before/after measurement when its motivation is performance.
 | CH-19 | Projection storage budget and admission policy | Prevent projections from consuming all disk | Rejected refreshes need operator handling | [ ] |
 | CH-20 | Parallel-replica read coordinator | Spread large reads over replicas | Coordination and duplicate work | [ ] |
 | CH-21 | Read-in-order planning for early LIMIT completion | Stop ordered scans sooner | Planner restrictions | [ ] |
-| CH-22 | Explain output for index decisions, marks, and skipped ranges | Make pruning measurable | More explain plumbing | [ ] |
+| CH-22 | Explain output for index decisions, marks, and skipped ranges | Make pruning measurable | More explain plumbing | [x] Implemented as typed `ExplainStep.Pruning` data and tabular EXPLAIN ANALYZE fields; see [CH022_EXPLAIN_PRUNING.md](CH022_EXPLAIN_PRUNING.md) and [BENCHMARK.md#ch-022-structured-explain-pruning-telemetry](BENCHMARK.md#ch-022-structured-explain-pruning-telemetry). |
 | CH-23 | Automatic primary-key prefix tuning from workload history | Improve common range scans | Layout changes are expensive | [ ] |
 | CH-24 | Skip-index false-positive and usefulness telemetry | Retire indexes that do not pay back | Metrics overhead | [x] Implemented as explain-only residual pruning counters; see [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md) and [BENCHMARK.md#ch-24-skip-index-usefulness-telemetry](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry). |
 | CH-25 | Full-text inverted postings index | Accelerate token and phrase search | Index size and update cost | [ ] |
