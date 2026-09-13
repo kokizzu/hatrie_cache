@@ -58,6 +58,7 @@ func appendSQLResultCachePart(key *strings.Builder, value string) {
 func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
 	return options.compiledTemplate == nil &&
 		options.MaxRows == 0 &&
+		options.MaxIntermediateRows == 0 &&
 		options.MaxJoinWork == 0 &&
 		options.MaxJoinBytes == 0 &&
 		!options.SpillBloom &&

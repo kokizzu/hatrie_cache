@@ -11616,3 +11616,28 @@ commit-c216:
 
 push-c216:
 	bash ./scripts/push-c216.sh
+.PHONY: test-c232-red test-c232 test-c232-package race-c232 vet-c232 benchmark-c232 format-c232
+test-c232-red:
+	bash ./scripts/test-c232.sh red
+test-c232:
+	bash ./scripts/test-c232.sh unit
+test-c232-package:
+	bash ./scripts/test-c232.sh package
+race-c232:
+	bash ./scripts/test-c232.sh race
+vet-c232:
+	bash ./scripts/test-c232.sh vet
+benchmark-c232:
+	bash ./scripts/test-c232.sh bench
+format-c232:
+	bash ./scripts/test-c232.sh format
+
+.PHONY: status-c232 commit-c232 amend-c232 push-c232
+status-c232:
+	bash ./scripts/commit-c232.sh status
+commit-c232:
+	bash ./scripts/commit-c232.sh
+amend-c232:
+	bash ./scripts/commit-c232.sh amend
+push-c232:
+	bash ./scripts/push-c232.sh

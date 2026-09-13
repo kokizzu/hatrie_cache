@@ -186,8 +186,12 @@ const MaxSQLQueryThreads = 256
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
-	MaxRows     int
-	MaxJoinWork int
+	MaxRows int
+	// MaxIntermediateRows tightens the row bound applied to query stages such
+	// as joins, array joins, and streamed operators. Zero keeps the existing
+	// MaxRows/default behavior.
+	MaxIntermediateRows int
+	MaxJoinWork         int
 	// MaxJoinBytes bounds in-memory hash partitions. Combined with
 	// SpillDirectory and MaxSpillBytes it enables a streamed spill hash join
 	// for a direct two-source INNER equality join. Zero keeps the existing
@@ -792,8 +796,8 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		query = sqlQueryWithCombinedPrewhere(query)
 	}
 	if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
-		if control.options.MaxRows > 0 && len(projection.Rows) > control.options.MaxRows {
-			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.options.MaxRows)
+		if (control.options.MaxRows > 0 || control.options.MaxIntermediateRows > 0) && len(projection.Rows) > control.maxRows {
+			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.maxRows)
 		}
 		if control.options.MaxResultBytes > 0 && sqlRowsBytes(projection.Rows) > control.options.MaxResultBytes {
 			return result, fmt.Errorf("SQL result exceeds the %d byte limit", control.options.MaxResultBytes)
@@ -7699,7 +7703,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if !options.Collation.valid() {
@@ -7726,10 +7730,14 @@ func applySQLMaxThreads(query *sqlQuery, options *SQLQueryOptions) error {
 }
 
 func sqlQueryMaxRows(options SQLQueryOptions) int {
+	maxRows := maxSQLQueryRows
 	if options.MaxRows > 0 {
-		return options.MaxRows
+		maxRows = options.MaxRows
 	}
-	return maxSQLQueryRows
+	if options.MaxIntermediateRows > 0 && options.MaxIntermediateRows < maxRows {
+		maxRows = options.MaxIntermediateRows
+	}
+	return maxRows
 }
 func (control *sqlExecutionControl) check() error {
 	if control == nil {

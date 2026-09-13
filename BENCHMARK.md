@@ -1,5 +1,52 @@
 # Benchmark
 
+## C232 SQL intermediate row guard
+
+This is a safety benchmark, not a throughput feature. It compares the existing
+join path from the pre-change `c7e56f91` source archive with the working tree
+after adding `MaxIntermediateRows`. The query joins two 64-row sources and
+produces 512 rows. Each row below is a raw `-count=5` sample on Linux `amd64`
+with an AMD Ryzen 9 5950X.
+
+Commands:
+
+```text
+make benchmark-c232-baseline
+make benchmark-c232
+```
+
+Archived pre-change baseline:
+
+```text
+BenchmarkSQLIntermediateRowsBaseline-32  475549 ns/op  736116 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  442109 ns/op  736116 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  422339 ns/op  736115 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  454224 ns/op  736115 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  467969 ns/op  736114 B/op  4311 allocs/op
+```
+
+Working-tree default path and guarded path:
+
+```text
+BenchmarkSQLIntermediateRowsBaseline-32  539791 ns/op  736114 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  512841 ns/op  736118 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  527484 ns/op  736115 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  623477 ns/op  736123 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsBaseline-32  511202 ns/op  736114 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsGuarded-32   499406 ns/op  736114 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsGuarded-32   519944 ns/op  736114 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsGuarded-32   508975 ns/op  736114 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsGuarded-32   516265 ns/op  736114 B/op  4311 allocs/op
+BenchmarkSQLIntermediateRowsGuarded-32   510405 ns/op  736114 B/op  4311 allocs/op
+```
+
+The archived baseline median is `454224 ns/op`; the working-tree default and
+guarded medians are `527484 ns/op` and `510405 ns/op` respectively. The
+cross-process CPU samples are noisy and do not establish a speed improvement;
+the guarded/default median ratio is approximately `1.03x` in this run. Memory
+and allocation cost are unchanged at `736 KB/op` and `4311 allocs/op`, so the
+feature is retained for its bounded-resource behavior rather than throughput.
+
 ## CH-029 User/key SQL quotas
 
 This benchmark compares the existing query path with and without an opt-in

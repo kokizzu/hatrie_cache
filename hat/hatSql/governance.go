@@ -45,6 +45,7 @@ type NamespaceResourceLimits struct {
 	MaxQueriesPerWindow int
 	QueryWindow         time.Duration
 	MaxRows             int
+	MaxIntermediateRows int
 	MaxJoinWork         int
 	MaxJoinBytes        int
 	MaxResultBytes      int
@@ -64,6 +65,7 @@ type NamespaceResourceLimits struct {
 // executor's safe default, so a policy larger than that default cannot loosen it.
 func (limits NamespaceResourceLimits) Apply(options SQLQueryOptions) SQLQueryOptions {
 	options.MaxRows = applyRowLimit(options.MaxRows, limits.MaxRows)
+	options.MaxIntermediateRows = applyPositiveLimit(options.MaxIntermediateRows, limits.MaxIntermediateRows)
 	options.MaxJoinWork = applyPositiveLimit(options.MaxJoinWork, limits.MaxJoinWork)
 	options.MaxJoinBytes = applyPositiveLimit(options.MaxJoinBytes, limits.MaxJoinBytes)
 	options.MaxResultBytes = applyPositiveLimit(options.MaxResultBytes, limits.MaxResultBytes)
@@ -119,6 +121,7 @@ func (limits NamespaceResourceLimits) validate() error {
 		{"compute queue capacity", limits.ComputeQueueCapacity},
 		{"max queries per window", limits.MaxQueriesPerWindow},
 		{"max rows", limits.MaxRows},
+		{"max intermediate rows", limits.MaxIntermediateRows},
 		{"max join work", limits.MaxJoinWork},
 		{"max join bytes", limits.MaxJoinBytes},
 		{"max result bytes", limits.MaxResultBytes},
@@ -237,6 +240,7 @@ func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) Namespac
 		MaxQueriesPerWindow:  applyPositiveLimit(defaults.MaxQueriesPerWindow, override.MaxQueriesPerWindow),
 		QueryWindow:          tightenQueryWindow(defaults.QueryWindow, override.QueryWindow),
 		MaxRows:              applyPositiveLimit(defaults.MaxRows, override.MaxRows),
+		MaxIntermediateRows:  applyPositiveLimit(defaults.MaxIntermediateRows, override.MaxIntermediateRows),
 		MaxJoinWork:          applyPositiveLimit(defaults.MaxJoinWork, override.MaxJoinWork),
 		MaxJoinBytes:         applyPositiveLimit(defaults.MaxJoinBytes, override.MaxJoinBytes),
 		MaxResultBytes:       applyPositiveLimit(defaults.MaxResultBytes, override.MaxResultBytes),

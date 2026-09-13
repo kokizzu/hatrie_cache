@@ -61,7 +61,7 @@ operator control remain the preferred deployment model.
 - [ ] C229 Join overflow policies that explicitly reject, spill, or truncate.
 - [ ] C230 Memory-overcommit wait queues before query cancellation.
 - [ ] C231 Workload groups with per-class concurrency and memory budgets.
-- [ ] C232 Query-complexity limits for rows, joins, and intermediate results.
+- [x] C232 Query-complexity limits for rows, joins, and intermediate results.
 - [ ] C233 Per-query CPU-time budgets with cooperative cancellation.
 - [ ] C234 Query profiler records for stage time, bytes, and allocations.
 - [ ] C235 Read/write task profiler aggregation by table part and column.

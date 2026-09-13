@@ -16,6 +16,7 @@ security guidance before exposing it on a network.
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
+- Opt-in ClickHouse-style SQL intermediate row limits: [C232_INTERMEDIATE_ROWS.md](C232_INTERMEDIATE_ROWS.md)
 - Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
 - ClickHouse/Materialize-style mergeable aggregate states: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
 - Opt-in bounded retries for transient SQL source reads: [SQL_REMOTE_READ_RETRIES.md](SQL_REMOTE_READ_RETRIES.md)
