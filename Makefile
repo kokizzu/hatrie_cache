@@ -4782,6 +4782,9 @@ commit-sql-decimal:
 push-sql-decimal:
 	sh ./scripts/push-sql-decimal.sh
 
+git-context-sql-decimal:
+	sh ./scripts/git-context-sql-decimal.sh
+
 .PHONY: test-sql-decimal
 test-sql-decimal:
 	sh ./scripts/test-sql-decimal.sh
