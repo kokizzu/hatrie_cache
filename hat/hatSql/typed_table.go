@@ -40,10 +40,13 @@ type TypedTableColumn struct {
 }
 
 const (
-	typedTableColumnarCacheDefaultMaxBytes           = 4 << 20
-	typedTableColumnarCacheDefaultMinReads           = 2
-	typedTableColumnarCacheDefaultRowsPerSegment     = 256
-	typedTableColumnarCacheDefaultSparseMarkMaxBytes = 1 << 20
+	typedTableColumnarCacheDefaultMaxBytes                  = 4 << 20
+	typedTableColumnarCacheDefaultMinReads                  = 2
+	typedTableColumnarCacheDefaultRowsPerSegment            = 256
+	typedTableColumnarCacheDefaultSparseMarkMaxBytes        = 1 << 20
+	typedTableColumnarCacheDefaultDecompressedBlockMaxBytes = 1 << 20
+	typedTableColumnarCacheDefaultDecompressedBlockRows     = 256
+	typedTableColumnarCacheDefaultDecompressedBlockMinReads = 2
 )
 
 // TypedTableColumnarCacheOptions configures the optional immutable SQL layout
@@ -52,6 +55,10 @@ const (
 type TypedTableColumnarCacheOptions struct {
 	Enabled                   bool
 	CompressedBatches         bool
+	DecompressedBlockCache    bool
+	DecompressedBlockMaxBytes int
+	DecompressedBlockRows     int
+	DecompressedBlockMinReads int
 	MaxBytes                  int
 	MinReads                  int
 	RowsPerSegment            int
@@ -387,6 +394,22 @@ func normalizeTypedTableColumnarCacheOptions(options TypedTableColumnarCacheOpti
 	if options.RowsPerSegment <= 0 {
 		options.RowsPerSegment = typedTableColumnarCacheDefaultRowsPerSegment
 	}
+	if !options.CompressedBatches || !options.DecompressedBlockCache {
+		options.DecompressedBlockCache = false
+		options.DecompressedBlockMaxBytes = 0
+		options.DecompressedBlockRows = 0
+		options.DecompressedBlockMinReads = 0
+	} else {
+		if options.DecompressedBlockMaxBytes <= 0 {
+			options.DecompressedBlockMaxBytes = typedTableColumnarCacheDefaultDecompressedBlockMaxBytes
+		}
+		if options.DecompressedBlockRows <= 0 {
+			options.DecompressedBlockRows = typedTableColumnarCacheDefaultDecompressedBlockRows
+		}
+		if options.DecompressedBlockMinReads <= 0 {
+			options.DecompressedBlockMinReads = typedTableColumnarCacheDefaultDecompressedBlockMinReads
+		}
+	}
 	if options.SparsePrimaryIndex {
 		options.SparsePrimaryField = strings.TrimSpace(options.SparsePrimaryField)
 		if options.SparsePrimaryField == "" {
@@ -714,6 +737,13 @@ func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {
 	batch.EncodeRepeatedStrings()
 	if table.columnar.options.CompressedBatches {
 		batch.PackCompressedColumns()
+		if table.columnar.options.DecompressedBlockCache && batch.hasDecompressedBlockColumns() {
+			batch.decompressedBlockCache = newColumnarDecompressedBlockCache(batch,
+				table.columnar.options.DecompressedBlockMaxBytes,
+				table.columnar.options.DecompressedBlockRows,
+				table.columnar.options.DecompressedBlockMinReads,
+			)
+		}
 	}
 	return batch
 }

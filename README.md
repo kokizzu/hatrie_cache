@@ -41,6 +41,7 @@ security guidance before exposing it on a network.
 - Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
 - Flat native `[]int64` and `[]string` array columns for lower retained storage: [NATIVE_ARRAY_COLUMNS.md](NATIVE_ARRAY_COLUMNS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
+- ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Deterministic differential subscription ordering: [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md)
 - ClickHouse-style post-window `QUALIFY` filtering: [C220_QUALIFY.md](C220_QUALIFY.md)

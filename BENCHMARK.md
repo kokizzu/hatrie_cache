@@ -22219,3 +22219,57 @@ BenchmarkCH006SparsePrimaryMarkSource/enabled-32  20  1648360 ns/op  1571281 B/o
 The complete disabled and post-change baseline samples are reproducible with
 `make benchmark-ch006`. Reproduce the archived pre-change samples with
 `make benchmark-ch006-baseline`.
+
+## CH-007 Decompressed Column Block Cache With Admission
+
+This benchmark measures a 65,536-row typed table with one fixed-width numeric
+column, compressed columnar batches, and a repeated duplicate projection over a
+full-range predicate. The first query warms the immutable layout; timed queries
+reuse it. It ran on Linux/amd64 with an AMD Ryzen 9 5950X, five fixed
+20-iteration samples, and `-benchmem`. The baseline was the CH-006 revision
+`4932bae2`; the current run compares the feature disabled and enabled.
+
+| Metric | Baseline median | Disabled median | Enabled median | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Query time | 17,672,903 ns/op | 17,169,304 ns/op | 14,624,483 ns/op | 1.17x faster than disabled; 1.21x faster than baseline |
+| Cumulative allocation | 25,845,896 B/op | 25,845,915 B/op | 24,801,426 B/op | 1.04x lower, 4.0% less |
+| Allocations | 261,683 allocs/op | 261,683 allocs/op | 131,123 allocs/op | 2.00x fewer, 49.9% less |
+| Retained decoded-block cache | 0 bytes | 0 bytes | 1,073,152 bytes | 1.02 MiB resident cost per cached layout |
+
+Raw baseline samples from `make benchmark-ch007-baseline`:
+
+```text
+17672903 ns/op 25848413 B/op 261686 allocs/op
+17891144 ns/op 25845894 B/op 261683 allocs/op
+17504378 ns/op 25845896 B/op 261683 allocs/op
+17429452 ns/op 25845896 B/op 261683 allocs/op
+17754912 ns/op 25845896 B/op 261683 allocs/op
+```
+
+Raw disabled samples from `make benchmark-ch007`:
+
+```text
+17313457 ns/op 25845909 B/op 261683 allocs/op
+16775014 ns/op 25845907 B/op 261683 allocs/op
+17203370 ns/op 25845916 B/op 261683 allocs/op
+17039652 ns/op 25845915 B/op 261683 allocs/op
+17169304 ns/op 25845918 B/op 261683 allocs/op
+```
+
+Raw enabled samples from `make benchmark-ch007`:
+
+```text
+14542734 ns/op 24801427 B/op 131123 allocs/op
+14624483 ns/op 24801427 B/op 131123 allocs/op
+14727476 ns/op 24801426 B/op 131123 allocs/op
+13986653 ns/op 24801426 B/op 131123 allocs/op
+14899266 ns/op 24801425 B/op 131123 allocs/op
+```
+
+The retained-cache metric was `0` when disabled and `1,073,152` bytes when
+enabled. This is an in-process CPU/memory optimization; it does not change
+wire bandwidth or persisted backup size. A separate selective equality probe
+was intentionally not counted as a win because segment pruning left too little
+repeated decoding to recover the cache overhead.
+
+Reproduce with `make benchmark-ch007-baseline` and `make benchmark-ch007`.

@@ -203,14 +203,15 @@ type ColumnarNumericColumn struct {
 // contain Rows logical values; absent JSON fields are nil in a plain column
 // and are not dictionary encoded.
 type ColumnarBatch struct {
-	Columns        map[string][]interface{}
-	Dictionaries   map[string]DictionaryColumn
-	PackedColumns  map[string]ColumnarPackedColumn
-	BoolColumns    map[string]ColumnarBoolColumn
-	NumericColumns map[string]ColumnarNumericColumn
-	ListColumns    map[string]ColumnarListColumn
-	NestedColumns  map[string]ColumnarNestedColumn
-	Rows           int
+	Columns                map[string][]interface{}
+	Dictionaries           map[string]DictionaryColumn
+	PackedColumns          map[string]ColumnarPackedColumn
+	BoolColumns            map[string]ColumnarBoolColumn
+	NumericColumns         map[string]ColumnarNumericColumn
+	ListColumns            map[string]ColumnarListColumn
+	NestedColumns          map[string]ColumnarNestedColumn
+	Rows                   int
+	decompressedBlockCache *columnarDecompressedBlockCache
 }
 
 // PackCompressedColumns applies the specialized compact representations to
@@ -383,6 +384,24 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 	if row < 0 {
 		return nil, false
 	}
+	if cache := batch.decompressedBlockCache; cache != nil {
+		key, offset, eligible := cache.blockKey(field, row)
+		if !eligible {
+			return batch.valueWithoutDecompressedCache(field, row)
+		}
+		if value, valid, found := cache.lookup(key, offset); found {
+			return value, valid
+		}
+		if cache.beginLoad(key) {
+			decoded := batch.decodeDecompressedBlock(field, key.block)
+			cache.finishLoad(key, decoded)
+			return decoded.values[offset], decoded.validAt(offset)
+		}
+	}
+	return batch.valueWithoutDecompressedCache(field, row)
+}
+
+func (batch ColumnarBatch) valueWithoutDecompressedCache(field string, row int) (interface{}, bool) {
 	if dictionary, ok := batch.Dictionaries[field]; ok {
 		code, ok := dictionary.CodeAt(row)
 		if !ok {
