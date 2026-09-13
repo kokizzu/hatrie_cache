@@ -103,6 +103,7 @@ security guidance before exposing it on a network.
 - JSON `LIKE 'prefix%'` scans through ordered indexes: [SQL LIKE prefix index](SQL_LIKE_PREFIX_INDEX.md)
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
+- Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)
 - Optional `WITH FILL` interpolation policies: [C218 interpolation](C218_WITH_FILL_INTERPOLATION.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)

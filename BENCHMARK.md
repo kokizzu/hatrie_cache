@@ -22497,3 +22497,53 @@ The reverse iterator has no new per-entry allocation and retains only the
 existing immutable entry slice. It is a memory/streaming win against an
 allocating materialization, not a CPU win over a caller with an already-sized
 reusable destination.
+
+## CH-041 Bounded `GROUP_ARRAY`
+
+This benchmark compares the existing unbounded grouped collection with the
+new literal-bounded form for one 16,384-row group. It ran on Linux/amd64 with
+an AMD Ryzen 9 5950X, five samples, and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Unbounded `GROUP_ARRAY(value)` | 11,848,019 | 21,591,538 | 81,984 | baseline |
+| `GROUP_ARRAY(value, 16)` | 10,666,839 | 19,495,764 | 65,615 | 1.11x faster, 9.7% lower B/op, 20.0% fewer allocations |
+| Filtered unbounded control | 14,044,706 | 23,428,621 | 98,375 | post-change control |
+| Filtered `GROUP_ARRAY(value, 16)` | 11,130,795 | 19,499,335 | 65,638 | 1.26x faster, 16.8% lower B/op, 33.3% fewer allocations vs. control |
+
+The bounded form retains only the first 16 values per group, after `FILTER`,
+and stops evaluating later rows. The one-argument form remains unchanged.
+
+Raw output from `make benchmark-ch041-after`:
+
+```text
+BenchmarkSQLBoundedGroupArray/unbounded-32 99 11577452 ns/op 21591651 B/op 81984 allocs/op
+BenchmarkSQLBoundedGroupArray/unbounded-32 102 11560712 ns/op 21591315 B/op 81984 allocs/op
+BenchmarkSQLBoundedGroupArray/unbounded-32 96 11641505 ns/op 21591492 B/op 81984 allocs/op
+BenchmarkSQLBoundedGroupArray/unbounded-32 94 11914195 ns/op 21591478 B/op 81984 allocs/op
+BenchmarkSQLBoundedGroupArray/unbounded-32 99 11702942 ns/op 21591316 B/op 81984 allocs/op
+BenchmarkSQLBoundedGroupArray/bounded-32 100 10482441 ns/op 19495829 B/op 65616 allocs/op
+BenchmarkSQLBoundedGroupArray/bounded-32 100 10688965 ns/op 19496118 B/op 65616 allocs/op
+BenchmarkSQLBoundedGroupArray/bounded-32 116 10584671 ns/op 19495726 B/op 65615 allocs/op
+BenchmarkSQLBoundedGroupArray/bounded-32 100 10666839 ns/op 19495863 B/op 65615 allocs/op
+BenchmarkSQLBoundedGroupArray/bounded-32 100 11250678 ns/op 19495764 B/op 65615 allocs/op
+```
+
+The same target's filtered sub-benchmarks measured:
+
+```text
+BenchmarkSQLBoundedGroupArray/filtered-unbounded-32 86 14119080 ns/op 23428565 B/op 98375 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-unbounded-32 79 14044706 ns/op 23428600 B/op 98375 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-unbounded-32 80 14219607 ns/op 23428719 B/op 98374 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-unbounded-32 74 13675187 ns/op 23428621 B/op 98375 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-unbounded-32 74 13943967 ns/op 23428681 B/op 98375 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-bounded-32 93 11193414 ns/op 19499335 B/op 65638 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-bounded-32 98 11130795 ns/op 19499300 B/op 65637 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-bounded-32 118 11339902 ns/op 19499414 B/op 65638 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-bounded-32 100 10719715 ns/op 19499525 B/op 65638 allocs/op
+BenchmarkSQLBoundedGroupArray/filtered-bounded-32 100 11104607 ns/op 19499230 B/op 65637 allocs/op
+```
+
+The filtered comparison is a final-path control, not a pre-feature baseline;
+it isolates the additional benefit from avoiding the full temporary filtered
+row slice while applying the bound.

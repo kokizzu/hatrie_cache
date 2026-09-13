@@ -60,7 +60,7 @@ before/after measurement when its motivation is performance.
 | CH-38 | Bitmap aggregate and set-operation functions | Fast membership and cardinality analytics | Bitmap memory | [ ] |
 | CH-39 | Automatic selection among exact and approximate uniq states | Match error targets to workload | Result stability and configuration | [ ] |
 | CH-40 | TDigest and GK quantile state variants | Better tail quantile accuracy choices | State size and merge cost | [ ] |
-| CH-41 | Bounded groupArray aggregate state | Retain representative grouped values safely | Truncation semantics | [ ] |
+| CH-41 | Bounded groupArray aggregate state | Retain representative grouped values safely | Truncation semantics | [x] |
 | CH-42 | Window frame exclusion and group-frame semantics | Cover more analytical SQL | Complex incremental maintenance | [ ] |
 | CH-43 | ASOF temporal join | Match each row to the latest earlier dimension value | Ordering and timestamp edge cases | [ ] |
 | CH-44 | Interval join maintenance | Join rows whose validity intervals overlap | Retained interval indexes | [ ] |

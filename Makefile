@@ -12154,3 +12154,51 @@ commit-ch049:
 .PHONY: push-ch049
 push-ch049:
 	bash ./scripts/push-ch049.sh
+
+.PHONY: test-ch041
+test-ch041:
+	bash ./scripts/test-ch041.sh
+
+.PHONY: benchmark-ch041-before
+benchmark-ch041-before:
+	bash ./scripts/benchmark-ch041-before.sh
+
+.PHONY: benchmark-ch041-after
+benchmark-ch041-after:
+	bash ./scripts/benchmark-ch041-after.sh
+
+.PHONY: format-ch041
+format-ch041:
+	bash ./scripts/format-ch041.sh
+
+.PHONY: test-ch041-all
+test-ch041-all:
+	bash ./scripts/test-ch041-all.sh
+
+.PHONY: test-ch041-repo
+test-ch041-repo:
+	bash ./scripts/test-ch041-repo.sh
+
+.PHONY: race-ch041
+race-ch041:
+	bash ./scripts/race-ch041.sh
+
+.PHONY: vet-ch041
+vet-ch041:
+	bash ./scripts/vet-ch041.sh
+
+.PHONY: check-ch041
+check-ch041:
+	bash ./scripts/check-ch041.sh
+
+.PHONY: review-ch041
+review-ch041:
+	bash ./scripts/review-ch041.sh
+
+.PHONY: commit-ch041
+commit-ch041:
+	bash ./scripts/commit-ch041.sh
+
+.PHONY: push-ch041
+push-ch041:
+	bash ./scripts/push-ch041.sh

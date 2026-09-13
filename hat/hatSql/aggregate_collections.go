@@ -9,22 +9,82 @@ import (
 // order. NULL values are retained; callers choose whether to preserve or
 // de-duplicate them.
 func sqlAggregateCollectionValues(expr sqlExpr, group []sqlExecRow) ([]interface{}, error) {
-	if len(expr.args) != 1 {
-		return nil, fmt.Errorf("%s expects exactly one argument", expr.name)
-	}
-	rows, err := sqlAggregateFilterRows(expr, group)
+	limit, err := sqlAggregateCollectionLimit(expr)
 	if err != nil {
 		return nil, err
 	}
-	values := make([]interface{}, 0, len(rows))
-	for _, row := range rows {
+	capacity := len(group)
+	if limit >= 0 && capacity > limit {
+		capacity = limit
+	}
+	values := make([]interface{}, 0, capacity)
+	if limit == 0 {
+		return values, nil
+	}
+	for _, row := range group {
+		if expr.filter != nil {
+			matched := evalSQLExpr(*expr.filter, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(matched); err != nil {
+				return nil, err
+			}
+			if !sqlTruthy(matched) {
+				continue
+			}
+		}
 		value := evalSQLExpr(expr.args[0], []sqlExecRow{row}, row)
 		if err := sqlExpressionError(value); err != nil {
 			return nil, err
 		}
 		values = append(values, value)
+		if limit >= 0 && len(values) == limit {
+			break
+		}
 	}
 	return values, nil
+}
+
+func sqlAggregateCollectionLimit(expr sqlExpr) (int, error) {
+	if expr.name != "GROUP_ARRAY" || len(expr.args) == 1 {
+		if len(expr.args) != 1 {
+			return 0, fmt.Errorf("%s expects exactly one argument", expr.name)
+		}
+		return -1, nil
+	}
+	if len(expr.args) != 2 {
+		return 0, fmt.Errorf("%s expects one value and an optional limit", expr.name)
+	}
+	limitExpr := expr.args[1]
+	if limitExpr.kind != "literal" {
+		return 0, fmt.Errorf("%s limit must be a non-negative integer literal", expr.name)
+	}
+	maxInt := int(^uint(0) >> 1)
+	switch value := limitExpr.value.(type) {
+	case int:
+		if value < 0 {
+			return 0, fmt.Errorf("%s limit must be non-negative", expr.name)
+		}
+		return value, nil
+	case int64:
+		if value < 0 {
+			return 0, fmt.Errorf("%s limit must be non-negative", expr.name)
+		}
+		if value > int64(maxInt) {
+			return 0, fmt.Errorf("%s limit is too large", expr.name)
+		}
+		return int(value), nil
+	case uint:
+		if value > uint(maxInt) {
+			return 0, fmt.Errorf("%s limit is too large", expr.name)
+		}
+		return int(value), nil
+	case uint64:
+		if value > uint64(maxInt) {
+			return 0, fmt.Errorf("%s limit is too large", expr.name)
+		}
+		return int(value), nil
+	default:
+		return 0, fmt.Errorf("%s limit must be a non-negative integer literal", expr.name)
+	}
 }
 
 func sqlAggregateUniqueCollection(values []interface{}) []interface{} {
