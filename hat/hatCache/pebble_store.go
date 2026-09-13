@@ -955,7 +955,10 @@ func pebbleProperties(db *pebble.DB) LevelDBProperties {
 	}
 	metrics := db.Metrics()
 	return LevelDBProperties{
-		Stats:    metrics.String(),
-		SSTables: fmt.Sprintf("levels=%d", len(metrics.Levels)),
+		Stats:             metrics.String(),
+		SSTables:          fmt.Sprintf("levels=%d", len(metrics.Levels)),
+		ReadAmplification: metrics.ReadAmp(),
+		FilterHits:        metrics.Filter.Hits,
+		FilterMisses:      metrics.Filter.Misses,
 	}
 }

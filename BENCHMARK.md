@@ -1,5 +1,24 @@
 # Benchmark
 
+## TR-015 Persistent Filter and Read Amplification Telemetry
+
+Workload: five runs of `BenchmarkPebblePropertiesBaseline` on an empty Pebble
+store. The implementation only copies counters already returned by Pebble's
+`Metrics()` method.
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `ns/op` median | 83,659 | 83,812 | 0.18% higher |
+| `B/op` median | 19,882 | 19,874 | 0.04% lower |
+| `allocs/op` median | 400 | 400 | unchanged |
+
+Raw samples before: `82,837 84,054 114,305 83,659 82,977 ns/op`; after:
+`86,983 87,732 82,931 83,812 82,768 ns/op`. The result is effectively flat,
+so this is an observability win with no measured CPU or memory tradeoff. It
+also reports Pebble's filter hits/misses and read amplification through the
+existing persistent-store inspection surface; LevelDB leaves those fields
+zero-valued.
+
 ## CH-49: Encrypted Object-Store Backups
 
 The opt-in `hatBackup.ObjectStoreTarget` encryption path uses AES-256-GCM

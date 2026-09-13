@@ -18,14 +18,17 @@ const (
 	CapabilityCheckpoint  Capability = "checkpoint"
 )
 
-// Properties contains portable, diagnostic-only engine properties. Values are
-// intentionally strings because both LevelDB and Pebble expose engine-native
-// textual diagnostics.
+// Properties contains portable, diagnostic-only engine properties. Textual
+// fields preserve engine-native diagnostics; numeric fields expose counters
+// when the backend provides them and otherwise remain zero.
 type Properties struct {
-	Stats      string `json:"stats,omitempty"`
-	SSTables   string `json:"sstables,omitempty"`
-	WriteDelay string `json:"write_delay,omitempty"`
-	BlockPool  string `json:"block_pool,omitempty"`
+	Stats             string `json:"stats,omitempty"`
+	SSTables          string `json:"sstables,omitempty"`
+	WriteDelay        string `json:"write_delay,omitempty"`
+	BlockPool         string `json:"block_pool,omitempty"`
+	ReadAmplification int    `json:"read_amplification,omitempty"`
+	FilterHits        int64  `json:"filter_hits,omitempty"`
+	FilterMisses      int64  `json:"filter_misses,omitempty"`
 }
 
 // Inspector is the narrow, read-only contract required to inspect a store.

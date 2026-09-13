@@ -13092,3 +13092,18 @@ commit-ch050-rowbinary-import:
 
 push-ch050-rowbinary-import:
 	@bash scripts/push-ch050-rowbinary-import.sh
+
+test-tr015:
+	@bash scripts/test-tr015.sh
+
+benchmark-tr015:
+	@bash scripts/benchmark-tr015.sh
+
+format-tr015:
+	@bash scripts/format-tr015.sh
+
+commit-tr015:
+	@bash scripts/commit-tr015.sh
+
+push-tr015:
+	@bash scripts/push-tr015.sh
