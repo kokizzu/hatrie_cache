@@ -15,6 +15,7 @@ git add \
   scripts/benchmark-mz018-source-frontier.sh \
   scripts/commit-mz018-source-frontier.sh \
   scripts/format-mz018-source-frontier.sh \
+  scripts/push-mz018-source-frontier.sh \
   scripts/race-mz018-source-frontier.sh \
   scripts/test-mz018-source-frontier.sh \
   scripts/vet-mz018-source-frontier.sh
