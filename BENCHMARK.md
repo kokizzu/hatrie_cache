@@ -22369,6 +22369,32 @@ BenchmarkCommandJournalTailJSONCursorEnvelope/enabled-32  323647  685.2 ns/op  2
 Reproduce with `make benchmark-mz024`. See [MZ024_JOURNAL_CURSOR.md](MZ024_JOURNAL_CURSOR.md)
 for the HTTP contract and configuration details.
 
+## CH-050 HTTP SQL RowBinary Streaming
+
+The ClickHouse-inspired HTTP RowBinary stream is opt-in through
+`Accept: application/x-hatrie-rowbinary`. The baseline is the pre-feature
+NDJSON stream for the same 2,048-row result. Both benchmarks use the same
+Go amd64 host and `-count=5`; medians are reported below.
+
+| Metric | NDJSON baseline | RowBinary stream | Improvement |
+| --- | ---: | ---: | ---: |
+| CPU per result | 1,890,697 ns | 355,768 ns | 5.31x faster |
+| Encoded result size | 187,007 B | 63,843 B | 2.93x smaller |
+| Allocated bytes | 1,035,890 B | 228,729 B | 4.53x lower |
+| Allocations | 20,516 | 5,912 | 3.47x lower |
+
+Raw representative lines:
+
+```text
+BenchmarkCH050NDJSONBaseline-32 644 1890697 ns/op 187007 bytes/result 1035890 B/op 20516 allocs/op
+BenchmarkCH050RowBinaryStream-32 3325 355768 ns/op 63843 bytes/result 228729 B/op 5912 allocs/op
+```
+
+The default NDJSON response is unchanged. RowBinary adds a schema prelude and
+NULL marker per column per row; columns with unknown or NULL-first values use
+the bounded JSON representation. Full protocol and usage details are in
+[CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md).
+
 ## TR-029 Reverse Ordered Index Iterators
 
 This benchmark compares descending traversal of 1,024 entries using a reused

@@ -11974,6 +11974,62 @@ push-mz024:
 audit-inspiration:
 	bash ./scripts/audit-inspiration.sh
 
+.PHONY: test-ch050-row-binary-stream-red
+test-ch050-row-binary-stream-red:
+	bash ./scripts/test-ch050-row-binary-stream-red.sh
+
+.PHONY: test-ch050
+test-ch050:
+	bash ./scripts/test-ch050.sh
+
+.PHONY: race-ch050
+race-ch050:
+	bash ./scripts/race-ch050.sh
+
+.PHONY: vet-ch050
+vet-ch050:
+	bash ./scripts/vet-ch050.sh
+
+.PHONY: check-ch050
+check-ch050:
+	bash ./scripts/check-ch050.sh
+
+.PHONY: test-ch050-all
+test-ch050-all:
+	bash ./scripts/test-ch050-all.sh
+
+.PHONY: commit-ch050
+commit-ch050:
+	bash ./scripts/commit-ch050.sh
+
+.PHONY: push-ch050
+push-ch050:
+	bash ./scripts/push-ch050.sh
+
+
+.PHONY: format-ch050
+format-ch050:
+	bash ./scripts/format-ch050.sh
+
+.PHONY: benchmark-ch050-before
+benchmark-ch050-before:
+	bash ./scripts/benchmark-ch050-before.sh
+
+.PHONY: benchmark-ch050-after
+benchmark-ch050-after:
+	bash ./scripts/benchmark-ch050-after.sh
+
+
+.PHONY: inspect-aggregates
+inspect-aggregates:
+	bash ./scripts/inspect-aggregates.sh
+
+
+
+.PHONY: inspect-mutation-api
+inspect-mutation-api:
+	bash ./scripts/inspect-mutation-api.sh
+
 
 .PHONY: test-tr29-reverse-red
 test-tr29-reverse-red:

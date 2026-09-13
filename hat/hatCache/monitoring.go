@@ -1383,6 +1383,11 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 			writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))
 			return
 		}
+		w.Header().Set("Vary", "Accept")
+		if monitoringSQLRequestAcceptsRowBinary(r.Header.Get("Accept")) {
+			handler.handleSQLRowBinaryStream(w, r, request, query, sources)
+			return
+		}
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.WriteHeader(http.StatusOK)
 		encoder := json.NewEncoder(w)

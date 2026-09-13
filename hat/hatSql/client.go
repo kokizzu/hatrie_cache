@@ -76,6 +76,10 @@ func (conn *Conn) queryRequest(ctx context.Context, payload QueryRequest) (Query
 }
 
 func (conn *Conn) streamRequest(ctx context.Context, payload QueryRequest) (*http.Response, error) {
+	return conn.streamRequestWithAccept(ctx, payload, "application/x-ndjson")
+}
+
+func (conn *Conn) streamRequestWithAccept(ctx context.Context, payload QueryRequest, accept string) (*http.Response, error) {
 	if conn == nil || strings.TrimSpace(conn.BaseURL) == "" {
 		return nil, fmt.Errorf("SQL connection URL is required")
 	}
@@ -87,7 +91,7 @@ func (conn *Conn) streamRequest(ctx context.Context, payload QueryRequest) (*htt
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "application/x-ndjson")
+	request.Header.Set("Accept", accept)
 	request.Header.Set("Content-Type", "application/json")
 	if strings.TrimSpace(conn.Token) != "" {
 		request.Header.Set("Authorization", "Bearer "+conn.Token)
@@ -142,6 +146,21 @@ func QueryIterator[T any](ctx context.Context, conn *Conn, query string, paramet
 		return nil, err
 	}
 	return &RowIterator[T]{response: response, decoder: json.NewDecoder(response.Body)}, nil
+}
+
+// QueryRowBinaryIterator opens a pull-based typed RowBinary row iterator.
+// The stream is decoded incrementally and does not materialize all rows.
+func QueryRowBinaryIterator(ctx context.Context, conn *Conn, query string, parameters []interface{}) (*SQLRowBinaryStreamReader, error) {
+	response, err := conn.streamRequestWithAccept(ctx, QueryRequest{Query: query, Parameters: parameters, Stream: true}, SQLRowBinaryStreamContentType)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := NewSQLRowBinaryStreamReader(response.Body)
+	if err != nil {
+		_ = response.Body.Close()
+		return nil, err
+	}
+	return reader, nil
 }
 
 // Next advances to the next row. It returns false at completion or when Err
