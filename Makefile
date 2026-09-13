@@ -10609,6 +10609,46 @@ vet-t-async-batcher:
 benchmark-t-async-batcher:
 	bash ./scripts/benchmark-t-async-batcher.sh
 
+.PHONY: format-c202
+format-c202:
+	bash ./scripts/format-c202.sh
+
+.PHONY: test-c202
+test-c202:
+	bash ./scripts/test-c202.sh
+
+.PHONY: test-c202-package
+test-c202-package:
+	bash ./scripts/test-c202-package.sh
+
+.PHONY: race-c202
+race-c202:
+	bash ./scripts/race-c202.sh
+
+.PHONY: vet-c202
+vet-c202:
+	bash ./scripts/vet-c202.sh
+
+.PHONY: benchmark-c202
+benchmark-c202:
+	bash ./scripts/benchmark-c202.sh
+
+.PHONY: benchmark-c202-serial
+benchmark-c202-serial:
+	bash ./scripts/benchmark-c202-serial.sh
+
+.PHONY: benchmark-c202-setup
+benchmark-c202-setup:
+	bash ./scripts/benchmark-c202-setup.sh
+
+.PHONY: commit-c202
+commit-c202:
+	bash ./scripts/commit-c202.sh
+
+.PHONY: push-c202
+push-c202:
+	bash ./scripts/push-c202.sh
+
 .PHONY: commit-t-async-batcher
 commit-t-async-batcher:
 	bash ./scripts/commit-t-async-batcher.sh

@@ -21816,6 +21816,55 @@ Because generic dictionary reads are about 1.8x slower than the plain fixture,
 the feature remains explicit opt-in and existing producers are not silently
 changed.
 
+## C201 Rejected Adaptive Asynchronous-Batch Flush
+
+The adaptive async-insert controller was rejected after an end-to-end
+64-concurrent-command measurement. The existing static worker completed in
+about `158-164 us/op`, `66,5xx B/op`, and `331 allocs/op`; the adaptive path
+completed in about `432-478 us/op`, `67,0xx B/op`, and `334 allocs/op`. That is
+roughly 2.8-3.0x slower with extra allocations, so the feature was reverted
+and remains disabled rather than being carried as an opt-in default.
+
+## C202 Partition-Affine Asynchronous Batching
+
+This benchmark compares the existing one-worker `AsyncBatcher` with the
+explicit four-partition `PartitionedAsyncBatcher`. The workload uses balanced
+partitions and 32 rounds of integer mixing per value. Each result is the median
+of five one-second samples with `-benchmem`.
+
+| Workload | Global worker | Four partition workers | Improvement |
+|---|---:|---:|---:|
+| CPU work per value, 32 CPUs | 215.8 ns/op | 69.85 ns/op | 3.09x faster |
+| No handler work, 32 CPUs | 182.0 ns/op | 78.85 ns/op | 2.31x faster |
+| CPU work per value, `-cpu=1` | 186.3 ns/op | 174.4 ns/op | 1.07x faster |
+| No handler work, `-cpu=1` | 110.0 ns/op | 104.0 ns/op | 1.06x faster |
+
+All timed submit cases report `0 B/op` and `0 allocs/op`. The post-change
+global control was 215.8 ns/op versus the before-implementation 216.4 ns/op,
+so the existing global path was neutral in this run. Four-worker construction
+and close cost 9,045 ns/op, 31,912 B/op, and 58 allocations versus 2,626
+ns/op, 28,528 B/op, and 10 allocations for one worker. That setup overhead is
+the reason the API is explicit and should be used only when partition handlers
+can run independently.
+
+Raw samples:
+
+```text
+32 CPUs, CPU work global: 206.8 219.9 211.1 215.8 216.3 ns/op
+32 CPUs, CPU work partitioned: 78.55 69.60 74.54 69.85 68.09 ns/op
+32 CPUs, no work global: 176.9 187.1 176.2 182.0 186.4 ns/op
+32 CPUs, no work partitioned: 103.3 77.99 78.85 87.53 72.60 ns/op
+1 CPU, CPU work global: 198.5 170.6 175.0 186.3 199.1 ns/op
+1 CPU, CPU work partitioned: 172.0 193.8 180.3 174.4 171.0 ns/op
+1 CPU, no work global: 110.0 103.4 114.5 115.6 103.4 ns/op
+1 CPU, no work partitioned: 104.0 102.0 102.9 104.1 105.6 ns/op
+setup global: 2881 2600 2592 2626 3089 ns/op, 28528 B/op, 10 allocs/op
+setup partitioned: 9589 9045 8762 9119 8628 ns/op, 31912 B/op, 58 allocs/op
+```
+
+Reproduce with `make benchmark-c202`, `make benchmark-c202-serial`, and
+`make benchmark-c202-setup`.
+
 ## M202 Durable Changefeed Checkpoint
 
 Materialize-inspired source-bound checkpoint benchmark, five runs:
