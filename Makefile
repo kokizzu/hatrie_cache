@@ -12394,3 +12394,59 @@ commit-ch042:
 .PHONY: push-ch042
 push-ch042:
 	bash ./scripts/push-ch042.sh
+
+.PHONY: review-inspiration-next
+review-inspiration-next:
+	bash ./scripts/review-inspiration-next.sh
+
+.PHONY: benchmark-remote-part-cache-before
+benchmark-remote-part-cache-before:
+	bash ./scripts/benchmark-remote-part-cache-before.sh
+
+.PHONY: test-remote-part-cache-before
+test-remote-part-cache-before:
+	bash ./scripts/test-remote-part-cache-before.sh
+
+.PHONY: test-remote-part-cache
+test-remote-part-cache:
+	bash ./scripts/test-remote-part-cache.sh
+
+.PHONY: format-remote-part-cache
+format-remote-part-cache:
+	bash ./scripts/format-remote-part-cache.sh
+
+.PHONY: benchmark-remote-part-cache-after
+benchmark-remote-part-cache-after:
+	bash ./scripts/benchmark-remote-part-cache-after.sh
+
+.PHONY: test-remote-part-cache-all
+test-remote-part-cache-all:
+	bash ./scripts/test-remote-part-cache-all.sh
+
+.PHONY: race-remote-part-cache
+race-remote-part-cache:
+	bash ./scripts/race-remote-part-cache.sh
+
+.PHONY: vet-remote-part-cache
+vet-remote-part-cache:
+	bash ./scripts/vet-remote-part-cache.sh
+
+.PHONY: check-remote-part-cache
+check-remote-part-cache:
+	bash ./scripts/check-remote-part-cache.sh
+
+.PHONY: test-remote-part-cache-repo
+test-remote-part-cache-repo:
+	bash ./scripts/test-remote-part-cache-repo.sh
+
+.PHONY: review-remote-part-cache
+review-remote-part-cache:
+	bash ./scripts/review-remote-part-cache.sh
+
+.PHONY: commit-remote-part-cache
+commit-remote-part-cache:
+	bash ./scripts/commit-remote-part-cache.sh
+
+.PHONY: push-remote-part-cache
+push-remote-part-cache:
+	bash ./scripts/push-remote-part-cache.sh

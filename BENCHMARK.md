@@ -22674,6 +22674,46 @@ BenchmarkSQLWindowFrameExclusion/exclude-current-32     385   2996220 ns/op  253
 BenchmarkSQLWindowFrameExclusion/exclude-current-32     382   2955129 ns/op  2535754 B/op  24000 allocs/op
 BenchmarkSQLWindowFrameExclusion/exclude-current-32     396   3033129 ns/op  2535752 B/op  24000 allocs/op
 BenchmarkSQLWindowFrameExclusion/exclude-current-32     391   3008585 ns/op  2535751 B/op  24000 allocs/op
+
+## CH-008 remote-part cache
+
+This benchmark compares a direct 64 KiB part copy with a warm cache hit. The
+cache is explicitly bounded and retains the warmed part in memory.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement versus direct load |
+| --- | ---: | ---: | ---: | --- |
+| Direct loader baseline | 9,723 | 65,536 | 1 | baseline |
+| Warm cached `Get` | 66.79 | 0 | 0 | 145.6x CPU; 100% fewer per-read bytes and allocations |
+| Warm pinned `Acquire`/`Release` | 102.5 | 64 | 1 | 94.9x CPU; 99.9% fewer per-read bytes |
+
+The retained entry is 65,536 part bytes, bounded by `MaxBytes`; cache metadata
+is additional. `Get` has no warm-hit allocation. `Acquire` allocates one
+64-byte handle per read to provide explicit pinning.
+
+### Raw baseline samples
+
+```text
+BenchmarkRemotePartCacheBaseline-32          102004  10965 ns/op  65536 B/op  1 allocs/op
+BenchmarkRemotePartCacheBaseline-32          117493  10706 ns/op  65536 B/op  1 allocs/op
+BenchmarkRemotePartCacheBaseline-32          106098   9723 ns/op  65536 B/op  1 allocs/op
+BenchmarkRemotePartCacheBaseline-32          153018   7623 ns/op  65536 B/op  1 allocs/op
+BenchmarkRemotePartCacheBaseline-32          196177   6873 ns/op  65536 B/op  1 allocs/op
+```
+
+### Raw cache samples
+
+```text
+BenchmarkRemotePartCache/cached-get-32                 17660246  70.84 ns/op   0 B/op  0 allocs/op
+BenchmarkRemotePartCache/cached-get-32                 17300818  66.79 ns/op   0 B/op  0 allocs/op
+BenchmarkRemotePartCache/cached-get-32                 18303783  70.68 ns/op   0 B/op  0 allocs/op
+BenchmarkRemotePartCache/cached-get-32                 16360238  62.76 ns/op   0 B/op  0 allocs/op
+BenchmarkRemotePartCache/cached-get-32                 18097149  62.37 ns/op   0 B/op  0 allocs/op
+BenchmarkRemotePartCache/pinned-acquire-release-32     10651934 102.5 ns/op  64 B/op  1 allocs/op
+BenchmarkRemotePartCache/pinned-acquire-release-32     11411455 102.1 ns/op  64 B/op  1 allocs/op
+BenchmarkRemotePartCache/pinned-acquire-release-32     11504829 102.0 ns/op  64 B/op  1 allocs/op
+BenchmarkRemotePartCache/pinned-acquire-release-32     11645782 103.1 ns/op  64 B/op  1 allocs/op
+BenchmarkRemotePartCache/pinned-acquire-release-32     11313973 103.2 ns/op  64 B/op  1 allocs/op
+```
 ```
 
 ## CH-039 Automatic Distinct State Selection
