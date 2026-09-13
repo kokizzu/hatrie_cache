@@ -143,10 +143,10 @@ before/after measurement when its motivation is performance.
 | TR-11 | Hot-backup consistent file-set coordination | Copy live storage without torn state | Snapshot coordination | [ ] |
 | TR-12 | Memtx and Vinyl-style hot and cold storage migration | Match storage to access temperature | Movement and consistency | [ ] |
 | TR-13 | Vinyl-style compaction debt scheduler | Smooth LSM rewrite pressure | Background I/O | [ ] |
-| TR-14 | LSM-run Bloom-filter sidecars | Skip cold runs on point lookups | Filter memory and false positives | [ ] |
+| TR-14 | LSM-run Bloom-filter sidecars | Skip cold runs on point lookups | Filter memory and false positives | [x] Already implemented as the opt-in native LevelDB/Pebble Bloom policy documented as `TT-017`; the default remains off because the measured warm workload increased storage without a general CPU win. |
 | TR-15 | Bloom false-positive and run-read telemetry | Tune filters from evidence | Metrics overhead | [ ] |
 | TR-16 | Page-cache admission and pinning policy | Keep hot pages resident | Memory pressure | [ ] |
-| TR-17 | Tuple arena or slab allocation | Reduce per-tuple allocator overhead | Fragmentation and lifetime rules | [ ] |
+| TR-17 | Tuple arena or slab allocation | Reduce per-tuple allocator overhead | Fragmentation and lifetime rules | [x] Implemented as the safe single-source execution-row fast path and projection-map pre-sizing; multi-source join tuples retain their required merge maps. See [TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md). |
 | TR-18 | Zero-copy tuple field slices | Avoid copying large values on reads | Borrowed-memory lifetime hazards | [ ] |
 | TR-19 | Tuple field-offset cache | Accelerate repeated field access | Schema invalidation | [ ] |
 | TR-20 | Tuple schema-version validation on every boundary | Reject incompatible records early | Version metadata | [ ] |

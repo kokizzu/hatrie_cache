@@ -1403,7 +1403,7 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		if query.limit >= 0 && emitted >= query.limit {
 			return errSQLStreamLimitReached
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
 			if err != nil {
@@ -2335,7 +2335,7 @@ func executeSQLLeadWindowStream(ctx context.Context, query *sqlQuery, resolver S
 	emitAvailable := func(final bool) error {
 		for len(pending) > 0 && (final || len(pending) > maximumOffset) {
 			current := pending[0]
-			row := SQLRow{}
+			row := make(SQLRow, len(columns))
 			for column, item := range query.selects {
 				if definition, ok := definitions[column]; ok {
 					value := interface{}(nil)
@@ -2390,7 +2390,7 @@ func executeSQLLeadWindowStream(ctx context.Context, query *sqlQuery, resolver S
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		current := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		current := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value := evalSQLExpr(query.where, []sqlExecRow{current}, current)
 			if err := sqlExpressionError(value); err != nil {
@@ -2532,7 +2532,7 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value := evalSQLExpr(query.where, []sqlExecRow{execRow}, execRow)
 			if err := sqlExpressionError(value); err != nil {
@@ -2542,7 +2542,7 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 				return nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			if states[index] != nil {
 				value, err := states[index].add(execRow)
@@ -2681,7 +2681,7 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value := evalSQLExpr(query.where, nil, execRow)
 			if err := sqlExpressionError(value); err != nil {
@@ -2691,7 +2691,7 @@ func executeSQLTopNStream(ctx context.Context, query *sqlQuery, resolver SQLSour
 				return nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			value := evalSQLExpr(item.expr, nil, execRow)
 			if err := sqlExpressionError(value); err != nil {
@@ -2869,7 +2869,7 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -2879,7 +2879,7 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 				return nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
 			if err != nil {
@@ -3011,7 +3011,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -3021,7 +3021,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 				return nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
 			if err != nil {
@@ -3446,7 +3446,7 @@ func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resol
 			}
 			return nil
 		}
-		row := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		row := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value := evalSQLExpr(query.where, []sqlExecRow{row}, row)
 			if err := sqlExpressionError(value); err != nil {
@@ -3470,7 +3470,7 @@ func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resol
 		return nil
 	}
 	columns := sqlColumns(query.selects)
-	row := SQLRow{}
+	row := make(SQLRow, len(columns))
 	for index, aggregate := range aggregates {
 		row[columns[index]] = aggregate.result()
 	}
@@ -3527,7 +3527,7 @@ func executeSQLIndexedGroupAggregateStream(ctx context.Context, query *sqlQuery,
 		if query.limit >= 0 && emitted >= query.limit {
 			return errSQLStreamLimitReached
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(projections))
 		for index, projection := range projections {
 			if projection.group {
 				row[projection.column] = groupValue
@@ -3559,7 +3559,7 @@ func executeSQLIndexedGroupAggregateStream(ctx context.Context, query *sqlQuery,
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -3691,7 +3691,7 @@ func executeSQLIndexedOrderStreamWithLimitBehavior(ctx context.Context, query *s
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -3711,7 +3711,7 @@ func executeSQLIndexedOrderStreamWithLimitBehavior(ctx context.Context, query *s
 			}
 			return nil
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
 			if err != nil {
@@ -3797,7 +3797,7 @@ func executeSQLIndexedDistinctStream(ctx context.Context, query *sqlQuery, resol
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -3915,7 +3915,7 @@ func executeSQLIndexedRankWindowStream(ctx context.Context, query *sqlQuery, res
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -3934,7 +3934,7 @@ func executeSQLIndexedRankWindowStream(ctx context.Context, query *sqlQuery, res
 			rank, denseRank = position, denseRank+1
 			previousOrderValue, havePrevious = orderValue, true
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			if item.expr.window != nil {
 				switch strings.ToUpper(item.expr.name) {
@@ -4132,7 +4132,7 @@ func executeSQLIndexedRunningAggregateWindowStream(ctx context.Context, query *s
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -4142,7 +4142,7 @@ func executeSQLIndexedRunningAggregateWindowStream(ctx context.Context, query *s
 				return nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			if states[index] != nil {
 				value, err := states[index].add(execRow)
@@ -4227,7 +4227,7 @@ func executeSQLIndexedLeadWindowStream(ctx context.Context, query *sqlQuery, res
 	emitAvailable := func(final bool) error {
 		for len(pending) > 0 && (final || len(pending) > maximumOffset) {
 			current := pending[0]
-			row := SQLRow{}
+			row := make(SQLRow, len(columns))
 			for column, item := range query.selects {
 				if definition, ok := definitions[column]; ok {
 					value := interface{}(nil)
@@ -4282,7 +4282,7 @@ func executeSQLIndexedLeadWindowStream(ctx context.Context, query *sqlQuery, res
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		current := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		current := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value := evalSQLExpr(query.where, []sqlExecRow{current}, current)
 			if err := sqlExpressionError(value); err != nil {
@@ -4350,7 +4350,7 @@ func executeSQLIndexedLagWindowStream(ctx context.Context, query *sqlQuery, reso
 		if inputRows > control.maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{query.from.alias: sourceRow}, order: []string{query.from.alias}}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
 		if query.where.kind != "" {
 			value, err := evalSQLStreamExpr(query.where, execRow, functions)
 			if err != nil {
@@ -4360,7 +4360,7 @@ func executeSQLIndexedLagWindowStream(ctx context.Context, query *sqlQuery, reso
 				return nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
 			if states[index] != nil {
 				value, err := states[index].add(execRow)
@@ -4463,7 +4463,7 @@ func streamSQLSourceRowsWithPartitionPredicates(ctx context.Context, source sqlS
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			row := SQLRow{}
+			row := make(SQLRow, len(source.columns))
 			for index, column := range source.columns {
 				if index < len(values) {
 					row[column] = values[index]
@@ -4681,7 +4681,7 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 						sqlExecRow{sources: map[string]SQLRow{query.from.alias: leftEntry.Row}, order: []string{query.from.alias}},
 						sqlExecRow{sources: map[string]SQLRow{query.joins[0].source.alias: rightEntry.Row}, order: []string{query.joins[0].source.alias}},
 					)
-					row := SQLRow{}
+					row := make(SQLRow, len(columns))
 					for column, item := range query.selects {
 						value := evalSQLExpr(item.expr, []sqlExecRow{combined}, combined)
 						if err := sqlExpressionError(value); err != nil {
@@ -11417,7 +11417,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				return sqlQueryOutput{}, false, nil
 			}
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(q.selects))
 		for idx, item := range q.selects {
 			if item.expr.kind == "star" {
 				for _, source := range representative.order {
@@ -13371,7 +13371,7 @@ func resolveSQLJoinPushedSource(source sqlSource, condition sqlExpr, resolver SQ
 		if err := control.check(); err != nil {
 			return nil, err
 		}
-		execRow := sqlExecRow{sources: map[string]SQLRow{source.alias: row}, order: []string{source.alias}}
+		execRow := newSQLSingleSourceExecRow(source.alias, row)
 		value := evalSQLExpr(condition, []sqlExecRow{execRow}, execRow)
 		if err := sqlExpressionError(value); err != nil {
 			return nil, err
@@ -13704,7 +13704,7 @@ func valuesSQLRows(values [][]interface{}, columns []string) []SQLRow {
 	}
 	out := make([]SQLRow, 0, len(values))
 	for _, source := range values {
-		row := SQLRow{}
+		row := make(SQLRow, len(columns))
 		for i, value := range source {
 			if i < len(columns) {
 				row[columns[i]] = value
@@ -15561,7 +15561,7 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 		if groupCount == 0 {
 			return nil
 		}
-		row := SQLRow{}
+		row := make(SQLRow, len(projections))
 		for index, projection := range projections {
 			if projection.group {
 				row[projection.column] = groupValue
@@ -15913,7 +15913,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 		}
 		groupCount++
 		if position >= q.offset && (q.limit < 0 || emitted < q.limit) {
-			row := SQLRow{}
+			row := make(SQLRow, len(projections))
 			for index, projection := range projections {
 				if projection.group {
 					row[projection.column] = record.Value

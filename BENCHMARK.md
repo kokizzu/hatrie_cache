@@ -22990,3 +22990,17 @@ BenchmarkMZ039SQLDataflowYieldEvery1024-32 164 1425295 ns/op 4.000 yields/op 140
 BenchmarkMZ039SQLDataflowYieldEvery1024-32 171 1352787 ns/op 4.000 yields/op 1409653 B/op 8200 allocs/op
 BenchmarkMZ039SQLDataflowYieldEvery1024-32 166 1348512 ns/op 4.000 yields/op 1409651 B/op 8200 allocs/op
 ```
+## TR-017 Single-Source SQL Row Fast Paths
+
+Direct single-source SQL stream operators now use the existing scalar execution
+row representation instead of allocating a one-entry source map and alias slice
+for every input row. Result maps are pre-sized from their projection width.
+Joins retain their required multi-source merge maps.
+
+On a 16,384-row ordered stream with two projected fields and `LIMIT 32 OFFSET
+8192`, the median moved from `2,063,615 ns/op`, `4,468,780 B/op`, and `49,232
+allocs/op` to `265,601 ns/op`, `12,320 B/op`, and `80 allocs/op`: `7.77x` faster,
+`362.66x` lower allocated bytes, and `615.40x` fewer allocations.
+
+Raw samples and the reproducible commands are in
+[TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md).

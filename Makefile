@@ -12795,3 +12795,21 @@ push-sql-ip-types:
 .PHONY: benchmark-sql-ip-types-after
 benchmark-sql-ip-types-after:
 	bash ./scripts/benchmark-sql-ip-types-after.sh
+.PHONY: format-tr017 test-tr017 benchmark-tr017-before benchmark-tr017-after commit-tr017 push-tr017
+format-tr017:
+	bash ./scripts/format-tr017.sh
+
+test-tr017:
+	go test ./hat/hatSql -run '^TestTR017' -count=1
+
+benchmark-tr017-before:
+	bash ./scripts/benchmark-tr017.sh
+
+benchmark-tr017-after:
+	bash ./scripts/benchmark-tr017.sh
+
+commit-tr017:
+	bash ./scripts/commit-tr017.sh
+
+push-tr017:
+	bash ./scripts/push-tr017.sh
