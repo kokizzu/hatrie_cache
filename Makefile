@@ -12795,7 +12795,33 @@ push-sql-ip-types:
 .PHONY: benchmark-sql-ip-types-after
 benchmark-sql-ip-types-after:
 	bash ./scripts/benchmark-sql-ip-types-after.sh
-.PHONY: format-tr017 test-tr017 benchmark-tr017-before benchmark-tr017-after commit-tr017 push-tr017
+.PHONY: format-tr017 test-tr017 benchmark-tr017-before benchmark-tr017-after commit-tr017 push-tr017 format-ch009 test-ch009 test-ch009-race benchmark-ch009-before benchmark-ch009-after status-ch009 commit-ch009 push-ch009
+
+format-ch009:
+	bash ./scripts/format-ch009.sh
+
+test-ch009:
+	bash ./scripts/test-ch009.sh
+
+test-ch009-race:
+	bash ./scripts/test-ch009-race.sh
+
+benchmark-ch009-before:
+	bash ./scripts/benchmark-ch009-before.sh
+
+benchmark-ch009-after:
+	bash ./scripts/benchmark-ch009-after.sh
+
+status-ch009:
+	bash ./scripts/status-ch009.sh
+
+commit-ch009:
+	bash ./scripts/commit-ch009.sh
+
+push-ch009:
+	bash ./scripts/push-ch009.sh
+
+
 format-tr017:
 	bash ./scripts/format-tr017.sh
 

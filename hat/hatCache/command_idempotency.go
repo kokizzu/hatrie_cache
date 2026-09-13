@@ -195,8 +195,9 @@ func cloneCacheCommandResponse(response CacheCommandResponse) CacheCommandRespon
 	if len(response.Responses) == 0 {
 		return response
 	}
-	response.Responses = make([]CacheCommandResponse, len(response.Responses))
-	for index, nested := range response.Responses {
+	nestedResponses := response.Responses
+	response.Responses = make([]CacheCommandResponse, len(nestedResponses))
+	for index, nested := range nestedResponses {
 		response.Responses[index] = cloneCacheCommandResponse(nested)
 	}
 	return response

@@ -23004,3 +23004,30 @@ allocs/op` to `265,601 ns/op`, `12,320 B/op`, and `80 allocs/op`: `7.77x` faster
 
 Raw samples and the reproducible commands are in
 [TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md).
+## CH-009: Bounded Async Insert Buffer
+
+The opt-in `hatCache.AsyncInsertBuffer` batches caller admission into bounded
+flush groups and feeds individual records through the existing journal
+group-commit queue. It preserves scalar journal replay and sequence numbers;
+it does not change journal bytes or provide cross-command atomicity.
+
+Measured with `make benchmark-ch009-before` and
+`make benchmark-ch009-after`, using Go `-benchmem -benchtime=1000x -count=5`
+on an AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement |
+| --- | ---: | ---: | ---: |
+| Caller admission, ns/op | 12,244 | 135.1 | 90.6x faster |
+| Caller admission, B/op | 1,139 | 299 | 3.8x lower |
+| Caller admission, allocs/op | 4 | 1 | 4x fewer |
+| Durable write, ns/write | 34,575 | 12,611 | 2.7x faster |
+| Durable write, B/write | 884 | 1,290 | 1.46x higher |
+| Durable write, allocs/write | 3.00 | 4.19 | 1.40x higher |
+
+Raw runs and the exact semantics are in
+[CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md). The durability
+comparison uses 64 writes per buffered flush operation. The allocation increase
+on the durable path is the cost of retaining per-command receipts and response
+objects; the buffer remains bounded by `Capacity` and releases its request
+slice after completion. Storage and wire bandwidth are unchanged because each
+command remains a scalar journal record.

@@ -46,6 +46,7 @@ security guidance before exposing it on a network.
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
+- ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - Deterministic differential subscription ordering: [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md)
 - ClickHouse-style post-window `QUALIFY` filtering: [C220_QUALIFY.md](C220_QUALIFY.md)
 - Tarantool-inspired mutual TLS peer authentication with restart-free certificate rotation: [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md)
