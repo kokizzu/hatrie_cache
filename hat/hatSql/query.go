@@ -8527,6 +8527,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if field, values, in := sqlColumnarStringLiteralINPredicate(q.where, q.from.alias); in {
+		filterStarted := time.Now()
+		result, matched, scanned := sqlColumnarStringBloomINMaterialize(q, batch, projectionFields, segments, field, values, metrics != nil)
+		if metrics != nil {
+			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
+				metrics.recordPruning("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
+			}
+			metrics.record("COLUMNAR STRING IN FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
 		filterStarted := time.Now()
 		program, collation := q.where.likeProgram, q.where.collation
@@ -9419,6 +9430,24 @@ func sqlColumnarStringEqualityPredicate(expr sqlExpr, alias string) (field, valu
 	return "", "", false
 }
 
+func sqlColumnarStringLiteralINPredicate(expr sqlExpr, alias string) (field string, values []string, ok bool) {
+	if expr.kind != "in" || expr.op != "IN" || expr.collation.normalized() != SQLCollationBinary || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) == 0 {
+		return "", nil, false
+	}
+	values = make([]string, len(expr.args))
+	for index, argument := range expr.args {
+		if argument.kind != "literal" {
+			return "", nil, false
+		}
+		value, stringValue := argument.value.(string)
+		if !stringValue {
+			return "", nil, false
+		}
+		values[index] = value
+	}
+	return expr.left.name, values, true
+}
+
 func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches func(int) bool) (SQLQueryResult, int) {
 	return sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, matches, false)
 }
@@ -9456,6 +9485,78 @@ func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			candidate, _ := batch.Value(field, rowIndex)
 			text, equal := candidate.(string)
 			if !equal || text != value {
+				continue
+			}
+			position := matched
+			matched++
+			if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+				continue
+			}
+			row := make(SQLRow, len(projectionFields))
+			for selectIndex, item := range q.selects {
+				row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+			}
+			result.Rows = append(result.Rows, row)
+		}
+	}
+	return result, matched, scanned
+}
+
+// sqlColumnarStringBloomINMaterialize skips only segments that cannot contain
+// any literal. Every visited row still uses exact string equality, so Bloom
+// false positives cannot change query results.
+func sqlColumnarStringBloomINMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field string, values []string, scanAll bool) (SQLQueryResult, int, int) {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	matched, scanned := 0, 0
+	rowsPerSegment := batch.Rows
+	filters := []ColumnarStringBloomSegment(nil)
+	if segments != nil && segments.RowsPerSegment > 0 {
+		rowsPerSegment = segments.RowsPerSegment
+		filters = segments.StringBloomFilters[field]
+	}
+	probes := make([]columnarStringBloomProbe, len(values))
+	for index, value := range values {
+		probes[index] = newColumnarStringBloomProbe(value)
+	}
+	for start := 0; start < batch.Rows; start += rowsPerSegment {
+		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		segmentIndex := start / rowsPerSegment
+		if segmentIndex < len(filters) {
+			mayContain := false
+			for _, probe := range probes {
+				if filters[segmentIndex].mayContainProbe(probe) {
+					mayContain = true
+					break
+				}
+			}
+			if !mayContain {
+				continue
+			}
+		}
+		end := start + rowsPerSegment
+		if end > batch.Rows {
+			end = batch.Rows
+		}
+		scanned += end - start
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+				break
+			}
+			candidate, _ := batch.Value(field, rowIndex)
+			text, stringValue := candidate.(string)
+			if !stringValue {
+				continue
+			}
+			match := false
+			for _, value := range values {
+				if text == value {
+					match = true
+					break
+				}
+			}
+			if !match {
 				continue
 			}
 			position := matched

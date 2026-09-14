@@ -13682,3 +13682,29 @@ commit-tr048-audit-sampling:
 .PHONY: push-tr048-audit-sampling
 push-tr048-audit-sampling:
 	bash ./scripts/push-tr048-audit-sampling.sh
+.PHONY: inspect-client-sdk
+inspect-client-sdk:
+	bash ./scripts/inspect-client-sdk.sh
+.PHONY: test-c166-string-bloom-in
+test-c166-string-bloom-in:
+	bash ./scripts/test-c166-string-bloom-in.sh
+
+.PHONY: benchmark-c166-string-bloom-in
+benchmark-c166-string-bloom-in:
+	bash ./scripts/benchmark-c166-string-bloom-in.sh
+
+.PHONY: format-c166-string-bloom-in
+format-c166-string-bloom-in:
+	bash ./scripts/format-c166-string-bloom-in.sh
+
+.PHONY: review-c166-string-bloom-in
+review-c166-string-bloom-in:
+	bash ./scripts/review-c166-string-bloom-in.sh
+
+.PHONY: commit-c166-string-bloom-in
+commit-c166-string-bloom-in:
+	bash ./scripts/commit-c166-string-bloom-in.sh
+
+.PHONY: push-c166-string-bloom-in
+push-c166-string-bloom-in:
+	bash ./scripts/push-c166-string-bloom-in.sh

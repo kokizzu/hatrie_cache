@@ -290,6 +290,7 @@ name.
 - [x] C163 ClickHouse-style dictionary membership shortcuts for filtered `COUNT(*)`; validated low-cardinality dictionaries answer absent equality, inequality, and `IN` predicates without decoding row codes, while matching, richer, untrusted, or invalid inputs retain the established scan and validation behavior. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-membership-count).
 - [x] C164 ClickHouse-style exact low-cardinality set marks per columnar segment; trusted typed-table dictionaries publish compact 64-bit membership masks so compatible equality, inequality, and literal `IN` scans skip impossible segments while all remaining rows retain normal validation. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-segment-marks).
 - [x] C165 ClickHouse-style range data skipping for general columnar filters. Ordinary field-only numeric `CACHE` scans now use valid per-segment min/max bounds to skip disjoint segments while retaining the existing row matcher and fallback behavior; see [COLUMNAR_RANGE_SKIPPING.md](COLUMNAR_RANGE_SKIPPING.md).
+- [x] C166 ClickHouse-style Bloom membership pruning for literal string `IN` predicates. Eligible binary-collation cached columnar layouts combine all literal probes per segment, skip only definitive misses, and retain exact row rechecks for false positives; see [COLUMNAR_BLOOM_FILTERS.md](COLUMNAR_BLOOM_FILTERS.md).
 
 ## Materialize Ideas
 

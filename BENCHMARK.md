@@ -24174,3 +24174,24 @@ Failures and denials remain lossless. The no-op sink adds no measured heap
 cost beyond the existing recent-event path, but adds about 15% CPU in this
 controlled run; real external sink latency depends on the implementation and
 backpressure policy.
+## ClickHouse-style string Bloom literal IN
+
+Command: `make benchmark-c166-string-bloom-in`
+Workload: 20,000 JSON rows, 256-row segments, two string literals (`tag-19999`
+and an absent `tag-999999`), one result row, five benchmark samples per case.
+CPU: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+Baseline: existing executor at `87530853` before the literal-`IN` path. The
+post-change borrowed case has no segment sidecar and measures the specialized
+exact `IN` scan; the trie case also measures Bloom pruning.
+
+| Case | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before, borrowed full scan | 5,069,044; 4,968,166; 5,131,695; 5,164,416; 4,956,141 | 5,069,044 | 7,226,112 | 20,034 | baseline |
+| After, borrowed exact `IN` scan | 626,588; 654,201; 632,736; 612,517; 643,827 | 632,736 | 5,235 | 29 | 8.01x CPU, 1,380.35x fewer bytes, 690.83x fewer allocs |
+| Before, trie full scan | 5,343,191; 5,165,076; 4,926,425; 5,045,606; 5,233,784 | 5,165,076 | 7,231,053 | 20,038 | baseline |
+| After, trie Bloom-pruned scan | 168,282; 161,655; 160,278; 163,580; 167,944 | 163,580 | 5,264 | 30 | 31.58x CPU, 1,373.68x fewer bytes, 667.93x fewer allocs |
+
+The trie case skips the segment that cannot contain either literal and still
+rechecks every visited row with exact string equality. The optimization is
+limited to direct literal string `IN`; unsupported shapes retain the existing
+path, and no storage or wire format changes are required.
