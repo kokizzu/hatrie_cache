@@ -14210,3 +14210,7 @@ commit-mz033-timestamp-oracle:
 
 push-mz033-timestamp-oracle:
 	@bash scripts/push-mz033-timestamp-oracle.sh
+
+.PHONY: inspect-mz034-c203
+inspect-mz034-c203:
+	@bash scripts/inspect-mz034-c203.sh
