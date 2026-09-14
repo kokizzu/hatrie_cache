@@ -23939,3 +23939,38 @@ BenchmarkTR004ReplicationKeyPrefixMatcher/Miss-32  17868464  11.81 ns/op  0 B/op
 PASS
 ok  hatrie_cache/hat/hatCache  5.161s
 ```
+
+<a id="tr-018-zero-copy-row-binary"></a>
+## TR-018 Zero-Copy RowBinary Reader
+
+This compares the existing materializing RowBinary decoder with the opt-in
+Tarantool-inspired borrowed-field reader. Both paths use the same 512-row,
+five-column payload; the borrowed benchmark consumes every returned field
+through a checksum. The reader reuses one field slice and returns raw ranges
+backed by the encoded input. Command: `make benchmark-tr018-zero-copy-row-binary`.
+
+| Path | Raw `ns/op` samples | Median | Throughput median | Heap | Allocs | Relative |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Existing copied decoder | 206590; 194326; 206074; 198648; 202964 | 202964 | 214.85 MB/s | 243129 B/op | 3998 | 1.00x |
+| Borrowed reader | 67649; 64886; 68990; 76339; 70687 | 68990 | 632.06 MB/s | 0 B/op | 0 | 2.94x faster |
+
+Raw output:
+
+```text
+BenchmarkTR018CopiedRowBinaryDecode-32       5360  206590 ns/op  211.07 MB/s  243130 B/op  3998 allocs/op
+BenchmarkTR018CopiedRowBinaryDecode-32       5506  194326 ns/op  224.40 MB/s  243129 B/op  3998 allocs/op
+BenchmarkTR018CopiedRowBinaryDecode-32       6145  206074 ns/op  211.60 MB/s  243129 B/op  3998 allocs/op
+BenchmarkTR018CopiedRowBinaryDecode-32       5929  198648 ns/op  219.51 MB/s  243129 B/op  3998 allocs/op
+BenchmarkTR018CopiedRowBinaryDecode-32       5715  202964 ns/op  214.85 MB/s  243129 B/op  3998 allocs/op
+BenchmarkTR018BorrowedRowBinaryDecode-32   18106   67649 ns/op  644.59 MB/s       0 B/op     0 allocs/op
+BenchmarkTR018BorrowedRowBinaryDecode-32   17949   64886 ns/op  672.04 MB/s       0 B/op     0 allocs/op
+BenchmarkTR018BorrowedRowBinaryDecode-32   16939   68990 ns/op  632.06 MB/s       0 B/op     0 allocs/op
+BenchmarkTR018BorrowedRowBinaryDecode-32   17138   76339 ns/op  571.21 MB/s       0 B/op     0 allocs/op
+BenchmarkTR018BorrowedRowBinaryDecode-32   16975   70687 ns/op  616.89 MB/s       0 B/op     0 allocs/op
+PASS
+```
+
+The wire payload is identical. This only reduces receiver-side allocations
+and typed materialization; callers must copy fields they retain and keep the
+complete encoded buffer alive while using borrowed slices. The default
+`DecodeSQLRowBinary` path is unchanged.

@@ -161,7 +161,7 @@ before/after measurement when its motivation is performance.
 | TR-15 | Bloom false-positive and run-read telemetry | Tune filters from evidence | Metrics overhead | [x] Exposes Pebble filter hits/misses and LSM read amplification through portable persistent-store inspection; LevelDB remains zero-valued and defaults/storage behavior are unchanged. See [TR015_PERSISTENT_FILTER_TELEMETRY.md](TR015_PERSISTENT_FILTER_TELEMETRY.md) and [BENCHMARK.md#tr-015-persistent-filter-and-read-amplification-telemetry](BENCHMARK.md#tr-015-persistent-filter-and-read-amplification-telemetry). |
 | TR-16 | Page-cache admission and pinning policy | Keep hot pages resident | Memory pressure | [x] Implemented in [TR016_STORAGE_PINNING.md](TR016_STORAGE_PINNING.md) |
 | TR-17 | Tuple arena or slab allocation | Reduce per-tuple allocator overhead | Fragmentation and lifetime rules | [x] Implemented as the safe single-source execution-row fast path and projection-map pre-sizing; multi-source join tuples retain their required merge maps. See [TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md). |
-| TR-18 | Zero-copy tuple field slices | Avoid copying large values on reads | Borrowed-memory lifetime hazards | [ ] |
+| TR-18 | Zero-copy tuple field slices | Avoid copying large values on reads | Borrowed-memory lifetime hazards | [x] Implemented in [TR018_ZERO_COPY_ROW_BINARY.md](TR018_ZERO_COPY_ROW_BINARY.md) |
 | TR-19 | Tuple field-offset cache | Accelerate repeated field access | Schema invalidation | [ ] |
 | TR-20 | Tuple schema-version validation on every boundary | Reject incompatible records early | Version metadata | [ ] |
 | TR-21 | Online secondary-index build | Add indexes without blocking writes | Build/replay resource usage | [ ] |

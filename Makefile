@@ -13486,3 +13486,35 @@ commit-tr004-replication-key-filter:
 .PHONY: push-tr004-replication-key-filter
 push-tr004-replication-key-filter:
 	bash ./scripts/push-tr004-replication-key-filter.sh
+
+.PHONY: benchmark-tr018-zero-copy-row-binary
+benchmark-tr018-zero-copy-row-binary:
+	bash ./scripts/benchmark-tr018-zero-copy-row-binary.sh
+
+.PHONY: test-tr018-zero-copy-row-binary
+test-tr018-zero-copy-row-binary:
+	bash ./scripts/test-tr018-zero-copy-row-binary.sh
+
+.PHONY: format-tr018-zero-copy-row-binary
+format-tr018-zero-copy-row-binary:
+	bash ./scripts/format-tr018-zero-copy-row-binary.sh
+
+.PHONY: race-tr018-zero-copy-row-binary
+race-tr018-zero-copy-row-binary:
+	bash ./scripts/race-tr018-zero-copy-row-binary.sh
+
+.PHONY: vet-tr018-zero-copy-row-binary
+vet-tr018-zero-copy-row-binary:
+	bash ./scripts/vet-tr018-zero-copy-row-binary.sh
+
+.PHONY: review-tr018-zero-copy-row-binary
+review-tr018-zero-copy-row-binary:
+	bash ./scripts/review-tr018-zero-copy-row-binary.sh
+
+.PHONY: commit-tr018-zero-copy-row-binary
+commit-tr018-zero-copy-row-binary:
+	bash ./scripts/commit-tr018-zero-copy-row-binary.sh
+
+.PHONY: push-tr018-zero-copy-row-binary
+push-tr018-zero-copy-row-binary:
+	bash ./scripts/push-tr018-zero-copy-row-binary.sh
