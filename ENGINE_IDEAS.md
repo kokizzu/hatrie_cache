@@ -112,7 +112,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-028 | Adaptive arrangement compaction | No feedback loop that changes compaction cadence from memory and update rates. | Medium |
 | MZ-029 | Spillable arrangements | Adopted as an opt-in bounded local payload spill tier with binary records, CRC validation, disk limits, exact cold reads, and explicit compaction; fully disk-resident arrangement indexes and reopen/restore remain future work. | High |
 | MZ-030 | Differential join delta maintenance | Adopted as a reusable exact inner-join maintainer with signed multiplicities, atomic batches, deterministic snapshots, and a replacement fast path; SQL planner wiring and outer/temporal joins remain future work. | High |
-| MZ-031 | Skew-aware join exchange | No runtime detection and mitigation for hot join keys. | High |
+| MZ-031 | Skew-aware join exchange | Adopted as an imported deterministic routing policy with bounded heavy-key tracking, build-side broadcast, probe-side spreading, and generation-fenced rebalancing; automatic planner/executor integration remains future work. | High |
 | MZ-032 | Late-data reclocking | No operator that maps event-time updates into a controlled processing-time frontier. | High |
 | MZ-033 | Timestamp oracle | No globally coordinated logical timestamp allocator across independent writers. | High |
 | MZ-034 | Generic negative-diff operators | Signed retractions are not supported by every SQL operator. | High |

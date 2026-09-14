@@ -365,3 +365,12 @@ exact cold reads, and compacts stale records explicitly. The measured cost is
 copy-on-read in-memory lookup; existing defaults are unchanged. Fully
 disk-resident indexes and reopen/restore are intentionally still open.
 See [MZ029_SPILLABLE_ARRANGEMENT.md](MZ029_SPILLABLE_ARRANGEMENT.md).
+### Materialize MZ-031: Skew-Aware Join Exchange
+
+Implemented as the imported `hatSql.SkewAwareJoinExchange` routing policy. It
+keeps cold keys single-owner, broadcasts hot build-side rows, spreads hot
+probe-side rows by source key, bounds cold frequency tracking, and exposes a
+generation fence for caller-controlled rehydration. Routing is allocation-free
+but measured 11.4x slower than a bare join-key hash while reducing the tested
+maximum worker load 3.4x; automatic planner/executor integration remains open.
+See [MZ031_SKEW_AWARE_JOIN_EXCHANGE.md](MZ031_SKEW_AWARE_JOIN_EXCHANGE.md).

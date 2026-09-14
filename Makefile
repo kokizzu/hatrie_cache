@@ -14071,3 +14071,30 @@ commit-mz029-spillable-arrangement:
 
 push-mz029-spillable-arrangement:
 	@bash scripts/push-mz029-spillable-arrangement.sh
+
+.PHONY: test-mz031-skew-aware-join-exchange benchmark-mz031-skew-aware-join-exchange format-mz031-skew-aware-join-exchange race-mz031-skew-aware-join-exchange vet-mz031-skew-aware-join-exchange review-mz031-skew-aware-join-exchange verify-mz031-skew-aware-join-exchange commit-mz031-skew-aware-join-exchange push-mz031-skew-aware-join-exchange
+test-mz031-skew-aware-join-exchange:
+	@bash scripts/test-mz031-skew-aware-join-exchange.sh
+benchmark-mz031-skew-aware-join-exchange:
+	@bash scripts/benchmark-mz031-skew-aware-join-exchange.sh
+
+format-mz031-skew-aware-join-exchange:
+	@bash scripts/format-mz031-skew-aware-join-exchange.sh
+
+race-mz031-skew-aware-join-exchange:
+	@bash scripts/race-mz031-skew-aware-join-exchange.sh
+
+vet-mz031-skew-aware-join-exchange:
+	@bash scripts/vet-mz031-skew-aware-join-exchange.sh
+
+review-mz031-skew-aware-join-exchange:
+	@bash scripts/review-mz031-skew-aware-join-exchange.sh
+
+verify-mz031-skew-aware-join-exchange:
+	@bash scripts/verify-mz031-skew-aware-join-exchange.sh
+
+commit-mz031-skew-aware-join-exchange:
+	@bash scripts/commit-mz031-skew-aware-join-exchange.sh
+
+push-mz031-skew-aware-join-exchange:
+	@bash scripts/push-mz031-skew-aware-join-exchange.sh

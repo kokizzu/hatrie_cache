@@ -4043,3 +4043,4 @@ SQL mutation changefeed consumers can request pre- and post-state rows with `RET
 
 - [Materialize-style incremental interval join](MZ029_INCREMENTAL_INTERVAL_JOIN.md)
 - [Materialize-style spillable arrangements](MZ029_SPILLABLE_ARRANGEMENT.md)
+- [Materialize-style skew-aware join exchange](MZ031_SKEW_AWARE_JOIN_EXCHANGE.md)

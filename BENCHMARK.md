@@ -24565,3 +24565,34 @@ BenchmarkSpillableArrangementColdGet-32
 
 This is deliberately opt-in: it protects retained memory at the cost of cold
 read latency and local segment I/O. Existing in-memory behavior is unchanged.
+<a id="mz-031-skew-aware-join-exchange"></a>
+## Materialize MZ-031 Skew-Aware Join Exchange
+
+The workload processes 100,000 left-side events on four workers: 80,000 use
+one hot join key and 20,000 use 1,000 cold keys.
+
+| Policy | Median ns per 100k events | B/op | Allocs/op | Max worker load | Tradeoff |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Naive join-key hash | 351,651 | 0 | 0 | 85,000 | 1.00x routing CPU |
+| Skew-aware exchange | 4,019,681 | 0 | 0 | 25,000 | 11.4x CPU, 3.4x lower max load |
+
+Raw five-sample output:
+
+```text
+BenchmarkMZ031NaiveJoinExchange-32
+355623 ns/op  85000 max-load  0 B/op  0 allocs/op
+346113 ns/op  85000 max-load  0 B/op  0 allocs/op
+349141 ns/op  85000 max-load  0 B/op  0 allocs/op
+356571 ns/op  85000 max-load  0 B/op  0 allocs/op
+351651 ns/op  85000 max-load  0 B/op  0 allocs/op
+
+BenchmarkMZ031SkewAwareJoinExchange-32
+4019681 ns/op  25000 max-load  0 B/op  0 allocs/op
+3878043 ns/op  25000 max-load  0 B/op  0 allocs/op
+3709334 ns/op  25000 max-load  0 B/op  0 allocs/op
+4043679 ns/op  25000 max-load  0 B/op  0 allocs/op
+4127233 ns/op  25000 max-load  0 B/op  0 allocs/op
+```
+
+This is opt-in: it spends routing CPU to reduce hot-key worker skew. The
+generation fence and rehydration remain caller-owned.
