@@ -163,6 +163,37 @@ default unversioned API. Fallbacks can improve availability but may serve
 older data, so they remain disabled unless the caller opts into miss or error
 fallback and inspects the result provenance.
 
+## CH-029: Dictionary-Backed Join
+
+Command: `make benchmark-ch029-dictionary-join-c203`. The benchmark executes
+the same equality join with 1,000 fact rows and a 10,000-row dimension. The
+full-scan case materializes the entire external dimension; the lookup case
+uses a warm `hatDictionary` and probes only the fact-side keys. Five samples
+were collected on Linux amd64 with an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full external scan | 4,763,606 | 7,421,610 | 50,086 | baseline |
+| Warm dictionary point lookup | 1,927,972 | 2,579,790 | 18,046 | 2.47x faster; 65.2% less memory; 64.0% fewer allocations |
+
+Raw `-benchmem -count=5` samples:
+
+```text
+FullExternalScan ns/op:       4722716 4808816 4728890 4763606 4770770
+FullExternalScan B/op:        7421684 7421613 7421608 7421610 7421610
+FullExternalScan allocs/op:   50086 50086 50086 50086 50086
+
+WarmDictionaryLookup ns/op:   2064259 1926077 1927972 1893550 1986021
+WarmDictionaryLookup B/op:    2579792 2579789 2579791 2579790 2579787
+WarmDictionaryLookup allocs/op: 18046 18046 18046 18046 18046
+```
+
+This is a dimension-size and cache-warmth dependent result: point lookups add
+per-fact probe work and retain dictionary entries, while a full scan may be
+preferable when most of the dimension is needed or the dictionary is cold.
+The SQL path remains exact because lookup candidates are rechecked against the
+complete `ON` expression.
+
 ## TR-015 Persistent Filter and Read Amplification Telemetry
 
 Workload: five runs of `BenchmarkPebblePropertiesBaseline` on an empty Pebble

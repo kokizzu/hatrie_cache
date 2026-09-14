@@ -83,6 +83,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired content-addressed incremental part backup: [CH022_INCREMENTAL_PART_BACKUP.md](CH022_INCREMENTAL_PART_BACKUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-022-incremental-part-backup)
 - ClickHouse-inspired bounded external dictionary cache: [CH027_EXTERNAL_DICTIONARY_CACHE.md](CH027_EXTERNAL_DICTIONARY_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-027-external-dictionary-cache)
 - ClickHouse-inspired dictionary version and fallback semantics: [CH028_DICTIONARY_VERSION_FALLBACK.md](CH028_DICTIONARY_VERSION_FALLBACK.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-028-dictionary-version-and-fallback)
+- ClickHouse-inspired dictionary-backed joins: [CH029_DICTIONARY_BACKED_JOIN.md](CH029_DICTIONARY_BACKED_JOIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-029-dictionary-backed-join)
 - Materialize-inspired bounded typed-table sorted ordinal projections: [C212_TYPED_TABLE_ORDER_CACHE.md](C212_TYPED_TABLE_ORDER_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-038-typed-table-sorted-ordinal-projection)
 - Materialize-inspired exact weighted incremental Top-K maintenance: [MZ037_INCREMENTAL_TOP_K.md](MZ037_INCREMENTAL_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-037-incremental-weighted-top-k)
 - Materialize-inspired stateful incremental distinct maintenance: [MZ039_INCREMENTAL_DISTINCT.md](MZ039_INCREMENTAL_DISTINCT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-039-incremental-distinct)

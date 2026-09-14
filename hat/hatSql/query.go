@@ -11305,11 +11305,15 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					}
 				}
 			}
-			if indexJoin && !rightPushed && !forceHashJoin && join.source.kind == "CACHE" {
+			if indexJoin && !rightPushed && !forceHashJoin {
 				var resolveIndexed func(string, string, string, interface{}) ([]SQLRow, bool, error)
 				probed := false
 				available := false
-				if borrowed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
+				if join.source.kind == "EXTERNAL" {
+					if lookup, ok := resolver.(LookupSourceResolver); ok {
+						resolveIndexed = lookup.ResolveSQLLookupSource
+					}
+				} else if borrowed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
 					var err error
 					_, available, err = borrowed.BorrowSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
 					if err != nil {
@@ -11320,7 +11324,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 						resolveIndexed = borrowed.BorrowSQLIndexedSource
 					}
 				}
-				if resolveIndexed == nil {
+				if resolveIndexed == nil && join.source.kind == "CACHE" {
 					if indexed, ok := resolver.(SQLIndexedSourceResolver); ok {
 						resolveIndexed = indexed.ResolveSQLIndexedSource
 						probed = false
@@ -11354,9 +11358,18 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 									if err := control.addJoinWork(1); err != nil {
 										return SQLQueryResult{}, err
 									}
+									combined := mergeSQLRows(left, sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}})
+									if join.source.kind == "EXTERNAL" {
+										on := evalSQLExpr(join.on, []sqlExecRow{combined}, combined)
+										if err := sqlExpressionError(on); err != nil {
+											return SQLQueryResult{}, err
+										}
+										if !sqlTruthy(on) {
+											continue
+										}
+									}
 									matched = true
-									wrappedCandidate := sqlExecRow{sources: map[string]SQLRow{join.source.alias: candidate}, order: []string{join.source.alias}}
-									next = append(next, mergeSQLRows(left, wrappedCandidate))
+									next = append(next, combined)
 									if len(next) > maxRows {
 										return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 									}
@@ -11368,7 +11381,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 							}
 						}
 						detail := join.kind + " JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
-						metrics.record("INDEX JOIN", detail, inputRows, len(next), started)
+						operator := "INDEX JOIN"
+						if join.source.kind == "EXTERNAL" {
+							operator = "LOOKUP JOIN"
+						}
+						metrics.record(operator, detail, inputRows, len(next), started)
 						rows = next
 						leftAliases = append(leftAliases, join.source.alias)
 						continue

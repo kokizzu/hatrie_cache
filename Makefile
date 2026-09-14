@@ -1,3 +1,30 @@
+.PHONY: verify-ch029-dictionary-join-c203
+verify-ch029-dictionary-join-c203:
+	bash ./scripts/verify-ch029-dictionary-join-c203.sh
+.PHONY: benchmark-ch029-dictionary-join-c203
+benchmark-ch029-dictionary-join-c203:
+	bash ./scripts/benchmark-ch029-dictionary-join-c203.sh
+.PHONY: format-ch029-dictionary-join-c203
+format-ch029-dictionary-join-c203:
+	bash ./scripts/format-ch029-dictionary-join-c203.sh
+.PHONY: test-ch029-dictionary-join-c203
+test-ch029-dictionary-join-c203:
+	bash ./scripts/test-ch029-dictionary-join-c203.sh
+.PHONY: inspect-ch029-dictionary-join-c203
+inspect-ch029-dictionary-join-c203:
+	bash ./scripts/inspect-ch029-dictionary-join-c203.sh
+.PHONY: inspect-staged-ch029-dictionary-join-c203
+inspect-staged-ch029-dictionary-join-c203:
+	bash ./scripts/inspect-staged-ch029-dictionary-join-c203.sh
+.PHONY: stage-ch029-dictionary-join-c203
+stage-ch029-dictionary-join-c203:
+	bash ./scripts/stage-ch029-dictionary-join-c203.sh
+.PHONY: commit-ch029-dictionary-join-c203
+commit-ch029-dictionary-join-c203:
+	bash ./scripts/commit-ch029-dictionary-join-c203.sh
+.PHONY: push-ch029-dictionary-join-c203
+push-ch029-dictionary-join-c203:
+	bash ./scripts/push-ch029-dictionary-join-c203.sh
 MONITORING_ADDR ?= 127.0.0.1:8080
 MONITORING_WEB_DIR ?= svelte-mpa/dist
 MONITORING_TLS_CERT ?=
