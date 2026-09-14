@@ -13708,3 +13708,47 @@ commit-c166-string-bloom-in:
 .PHONY: push-c166-string-bloom-in
 push-c166-string-bloom-in:
 	bash ./scripts/push-c166-string-bloom-in.sh
+
+.PHONY: test-ch021-ordered-limit
+test-ch021-ordered-limit:
+	bash ./scripts/test-ch021-ordered-limit.sh
+
+.PHONY: benchmark-ch021-ordered-limit
+benchmark-ch021-ordered-limit:
+	bash ./scripts/benchmark-ch021-ordered-limit.sh
+
+.PHONY: format-ch021-ordered-limit
+format-ch021-ordered-limit:
+	bash ./scripts/format-ch021-ordered-limit.sh
+
+.PHONY: inspect-ch021-failure
+inspect-ch021-failure:
+	bash ./scripts/inspect-ch021-failure.sh
+
+.PHONY: review-ch021-ordered-limit
+review-ch021-ordered-limit:
+	bash ./scripts/review-ch021-ordered-limit.sh
+
+.PHONY: commit-ch021-ordered-limit
+commit-ch021-ordered-limit:
+	bash ./scripts/commit-ch021-ordered-limit.sh
+
+.PHONY: push-ch021-ordered-limit
+push-ch021-ordered-limit:
+	bash ./scripts/push-ch021-ordered-limit.sh
+
+.PHONY: inspect-ch021-read-order
+inspect-ch021-read-order:
+	bash ./scripts/inspect-ch021-read-order.sh
+
+.PHONY: inspect-ch021-flow-c203
+inspect-ch021-flow-c203:
+	bash ./scripts/inspect-ch021-flow-c203.sh
+
+.PHONY: inspect-ch021-dispatch-c203
+inspect-ch021-dispatch-c203:
+	bash ./scripts/inspect-ch021-dispatch-c203.sh
+
+.PHONY: inspect-ch021-order-functions-c203
+inspect-ch021-order-functions-c203:
+	bash ./scripts/inspect-ch021-order-functions-c203.sh

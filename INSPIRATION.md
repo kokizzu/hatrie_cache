@@ -291,6 +291,7 @@ name.
 - [x] C164 ClickHouse-style exact low-cardinality set marks per columnar segment; trusted typed-table dictionaries publish compact 64-bit membership masks so compatible equality, inequality, and literal `IN` scans skip impossible segments while all remaining rows retain normal validation. See [BENCHMARK.md](BENCHMARK.md#columnar-dictionary-segment-marks).
 - [x] C165 ClickHouse-style range data skipping for general columnar filters. Ordinary field-only numeric `CACHE` scans now use valid per-segment min/max bounds to skip disjoint segments while retaining the existing row matcher and fallback behavior; see [COLUMNAR_RANGE_SKIPPING.md](COLUMNAR_RANGE_SKIPPING.md).
 - [x] C166 ClickHouse-style Bloom membership pruning for literal string `IN` predicates. Eligible binary-collation cached columnar layouts combine all literal probes per segment, skip only definitive misses, and retain exact row rechecks for false positives; see [COLUMNAR_BLOOM_FILTERS.md](COLUMNAR_BLOOM_FILTERS.md).
+- [x] C167 ClickHouse-style read-in-order early `LIMIT` completion. The materialized ordered-index path now propagates the existing stream stop signal when no explicit source-row budget requires a full scan, preserving `OFFSET`, `LIMIT 0`, and `MaxRows` semantics without storing a full ordered result; see [CH021_READ_IN_ORDER.md](CH021_READ_IN_ORDER.md).
 
 ## Materialize Ideas
 

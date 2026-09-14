@@ -3674,7 +3674,10 @@ func sqlIndexedMaterializedOrderStreamable(query *sqlQuery, resolver SQLSourceRe
 
 func executeSQLIndexedOrderMaterializedStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
 	result := SQLQueryResult{Columns: sqlColumns(query.selects)}
-	err := executeSQLIndexedOrderStreamWithLimitBehavior(ctx, query, resolver, control, false, func(_ []string, row SQLRow) error {
+	// An explicit MaxRows is a source budget, so it must continue reading far
+	// enough to reject an oversized source even when LIMIT is already satisfied.
+	stopAtLimit := control.options.MaxRows <= 0
+	err := executeSQLIndexedOrderStreamWithLimitBehavior(ctx, query, resolver, control, stopAtLimit, func(_ []string, row SQLRow) error {
 		result.Rows = append(result.Rows, row)
 		return nil
 	})

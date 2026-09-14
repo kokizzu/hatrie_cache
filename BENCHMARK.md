@@ -24195,3 +24195,21 @@ The trie case skips the segment that cannot contain either literal and still
 rechecks every visited row with exact string equality. The optimization is
 limited to direct literal string `IN`; unsupported shapes retain the existing
 path, and no storage or wire format changes are required.
+
+## CH-021: Read-in-order early LIMIT completion
+
+Command: `make benchmark-ch021-ordered-limit`
+
+Workload: 20,000 JSON rows with an ordered `id` index, selecting three rows
+(`LIMIT 3`) and two projected fields. The baseline is the materialized ordered
+stream path before propagating the stop signal; the post-change path stops the
+ordered source after the requested rows.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before, full ordered materialization | 3,845,476; 3,628,914; 3,630,599; 4,003,287; 3,701,185 | 3,701,185 | 6,774,116 | 40,962 | baseline |
+| After, early ordered stop | 4,797; 4,664; 4,700; 4,681; 4,758 | 4,700 | 6,065 | 30 | 787.49x CPU, 1,116.92x fewer bytes, 1,365.40x fewer allocs |
+
+The result remains exact for `OFFSET`: the executor visits only the rows
+needed to reach `OFFSET + LIMIT`, while `WITH TIES`, `LIMIT BY`, joins, and
+other unsupported shapes retain their established execution paths.
