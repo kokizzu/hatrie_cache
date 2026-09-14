@@ -1,5 +1,35 @@
 # Benchmark
 
+## CH-007: Row TTL
+
+The opt-in `TypedTable` row TTL policy supports processing-time deadlines and
+event-time expiry from an `int64` Unix-nanosecond column. The default remains
+disabled. These measurements use `make benchmark-ch007-row-ttl-c203`, five
+samples per case, a 4,096-row two-int64-column table, and an AMD Ryzen 9 5950X
+on Linux amd64. All rows were visible during the `Rows` benchmark.
+
+| Operation | Disabled | Processing time | Event time | Relative to disabled |
+| --- | ---: | ---: | ---: | ---: |
+| `Rows` median | 1,057,828 ns/op | 996,522 ns/op | 1,189,982 ns/op | 0.94x / 1.13x |
+| `Rows` allocated bytes/op | 1,865,738 | 1,865,738 | 1,865,736 | approximately unchanged |
+| `Rows` allocations/op | 20,225 | 20,225 | 20,225 | unchanged |
+| `SQLSourceCardinality` median | 15.36 ns/op | 12,832 ns/op | 45,426 ns/op | 835x / 2,958x slower |
+| `SQLSourceCardinality` allocated bytes/op | 0 | 0 | 0 | unchanged |
+| Retained TTL deadline sidecar | 0 bytes | 32,768 bytes | 0 bytes | 8 bytes/physical row for processing time |
+
+Raw `Rows` samples in collection order: disabled `1,100,393 1,060,817
+1,057,828 938,466 976,380`; processing time `996,522 1,034,180 1,003,385
+991,527 952,743`; event time `1,123,518 1,190,051 1,121,036 1,189,982
+1,270,673` ns/op. Raw cardinality samples: disabled `16.02 15.36 14.92 14.63
+15.92`; processing time `12,942 12,595 12,832 12,960 12,787`; event time
+`45,426 45,511 40,915 41,042 45,468` ns/op.
+
+The `Rows` path is dominated by its existing row-map allocations, so TTL is
+effectively neutral there. Exact TTL cardinality must scan current deadlines or
+event timestamps, which is the measured cost; the implementation does not
+hide an approximate count or start a background scheduler. TTL-enabled stats
+and histograms also recompute instead of returning time-stale cached values.
+
 ## TR-015 Persistent Filter and Read Amplification Telemetry
 
 Workload: five runs of `BenchmarkPebblePropertiesBaseline` on an empty Pebble

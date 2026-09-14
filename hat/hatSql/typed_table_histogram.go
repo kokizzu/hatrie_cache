@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"time"
 )
 
 const (
@@ -53,7 +54,9 @@ type TypedTableHistogram struct {
 
 // Histogram returns a compact, exact-count histogram for an int64 or float64
 // column over active rows. The first request for a field/bin pair scans the
-// existing typed storage; repeated requests reuse a bounded snapshot.
+// existing typed storage; repeated requests reuse a bounded snapshot when TTL
+// is disabled. TTL-enabled tables recompute the snapshot because time can
+// change the active row set without a mutation.
 func (table *TypedTable) Histogram(field string, options TypedTableHistogramOptions) (TypedTableHistogram, error) {
 	if table == nil {
 		return TypedTableHistogram{}, fmt.Errorf("typed table is nil")
@@ -64,17 +67,21 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 	}
 	cacheKey := typedTableHistogramCacheKey{field: field, bins: bins}
 	table.mu.RLock()
-	if cached, found := table.histogramCache[cacheKey]; found {
-		histogram := cloneTypedTableHistogram(cached)
-		table.mu.RUnlock()
-		return histogram, nil
+	if table.ttl == nil {
+		if cached, found := table.histogramCache[cacheKey]; found {
+			histogram := cloneTypedTableHistogram(cached)
+			table.mu.RUnlock()
+			return histogram, nil
+		}
 	}
 	table.mu.RUnlock()
 
 	table.mu.Lock()
 	defer table.mu.Unlock()
-	if cached, found := table.histogramCache[cacheKey]; found {
-		return cloneTypedTableHistogram(cached), nil
+	if table.ttl == nil {
+		if cached, found := table.histogramCache[cacheKey]; found {
+			return cloneTypedTableHistogram(cached), nil
+		}
 	}
 	columnIndex, found := table.byName[field]
 	if !found {
@@ -85,10 +92,18 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		return TypedTableHistogram{}, fmt.Errorf("typed table histogram field %q has unsupported kind %d", field, storage.kind)
 	}
 	histogram := TypedTableHistogram{Field: field, Kind: storage.kind}
+	var now time.Time
+	if table.ttl != nil {
+		now = table.typedTableTTLNow()
+	}
 	var minInt, maxInt int64
 	var minFloat, maxFloat float64
 	for row := range table.keys {
-		if table.typedTableRowDeletedLocked(row) {
+		if table.ttl != nil {
+			if table.typedTableRowHiddenLocked(row, now) {
+				continue
+			}
+		} else if table.typedTableRowDeletedLocked(row) {
 			continue
 		}
 		histogram.RowCount++
@@ -138,7 +153,9 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		}
 	}
 	if !histogram.HasMinMax {
-		table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+		if table.ttl == nil {
+			table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+		}
 		return cloneTypedTableHistogram(histogram), nil
 	}
 	if storage.kind == TypedTableInt64 {
@@ -149,13 +166,19 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 			histogram.Bins[index] = TypedTableHistogramBin{Lower: TypedInt64(lower), Upper: TypedInt64(upper)}
 		}
 		for row := range table.keys {
-			if table.typedTableRowDeletedLocked(row) || !storage.valid[row] {
+			if table.ttl != nil {
+				if table.typedTableRowHiddenLocked(row, now) || !storage.valid[row] {
+					continue
+				}
+			} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] {
 				continue
 			}
 			index := typedTableIntHistogramIndex(storage.int64s[row], minInt, maxInt, bins)
 			histogram.Bins[index].Count++
 		}
-		table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+		if table.ttl == nil {
+			table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+		}
 		return cloneTypedTableHistogram(histogram), nil
 	}
 	if span := maxFloat - minFloat; span == 0 || math.IsInf(span, 0) {
@@ -167,7 +190,11 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		histogram.Bins[index] = TypedTableHistogramBin{Lower: TypedFloat64(lower), Upper: TypedFloat64(upper)}
 	}
 	for row := range table.keys {
-		if table.typedTableRowDeletedLocked(row) || !storage.valid[row] {
+		if table.ttl != nil {
+			if table.typedTableRowHiddenLocked(row, now) || !storage.valid[row] {
+				continue
+			}
+		} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] {
 			continue
 		}
 		value := storage.floats[row]
@@ -177,7 +204,9 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		index := typedTableFloatHistogramIndex(value, minFloat, maxFloat, bins)
 		histogram.Bins[index].Count++
 	}
-	table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+	if table.ttl == nil {
+		table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+	}
 	return cloneTypedTableHistogram(histogram), nil
 }
 

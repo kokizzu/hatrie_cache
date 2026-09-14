@@ -33,7 +33,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-004 | `FINAL` read semantics | No query-time reconciliation of replacing or collapsing versions. | High |
 | CH-005 | Lightweight delete bitmap | Deletes are not represented as compact immutable bitmaps over stored parts. | High |
 | CH-006 | Mutation dependency queue | No durable dependency-aware queue for ALTER/DELETE mutations. | High |
-| CH-007 | Row TTL | No declarative expiration of old rows by event or processing time. | Medium |
+| CH-007 | Row TTL | Partially adopted as an opt-in `TypedTable` processing-time or event-time policy with explicit purge; background scheduling and durable processing-time deadlines remain deferred. | Medium |
 | CH-008 | Column TTL | No independent removal or masking of expired wide columns. | Medium |
 | CH-009 | TTL rollup | No background aggregation of expired detail rows into coarser summaries. | High |
 | CH-010 | Materialized/default columns | No stored expression column maintained during writes with schema validation. | Medium |

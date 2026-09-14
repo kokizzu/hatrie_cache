@@ -14214,3 +14214,40 @@ push-mz033-timestamp-oracle:
 .PHONY: inspect-mz034-c203
 inspect-mz034-c203:
 	@bash scripts/inspect-mz034-c203.sh
+
+
+.PHONY: test-ch007-row-ttl-c203
+test-ch007-row-ttl-c203:
+	@bash scripts/test-ch007-row-ttl-c203.sh
+
+.PHONY: format-ch007-row-ttl-c203
+format-ch007-row-ttl-c203:
+	@bash scripts/format-ch007-row-ttl-c203.sh
+
+.PHONY: inspect-ch007-ttl-c203
+inspect-ch007-ttl-c203:
+	@bash scripts/inspect-ch007-ttl-c203.sh
+
+.PHONY: benchmark-ch007-row-ttl-c203
+benchmark-ch007-row-ttl-c203:
+	@bash scripts/benchmark-ch007-row-ttl-c203.sh
+
+.PHONY: verify-ch007-row-ttl-c203
+verify-ch007-row-ttl-c203:
+	@bash scripts/verify-ch007-row-ttl-c203.sh
+
+.PHONY: stage-ch007-row-ttl-c203
+stage-ch007-row-ttl-c203:
+	@bash scripts/stage-ch007-row-ttl-c203.sh
+
+.PHONY: inspect-staged-ch007-row-ttl-c203
+inspect-staged-ch007-row-ttl-c203:
+	@bash scripts/inspect-staged-ch007-row-ttl-c203.sh
+
+.PHONY: commit-ch007-row-ttl-c203
+commit-ch007-row-ttl-c203:
+	@bash scripts/commit-ch007-row-ttl-c203.sh
+
+.PHONY: push-ch007-row-ttl-c203
+push-ch007-row-ttl-c203:
+	@bash scripts/push-ch007-row-ttl-c203.sh

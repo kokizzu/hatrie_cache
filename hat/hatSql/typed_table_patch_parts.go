@@ -107,6 +107,9 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 			for column := range table.columns {
 				table.columns[column].copy(write, read)
 			}
+			if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
+				table.ttl.deadlines[write] = table.ttl.deadlines[read]
+			}
 		}
 		state.deleted[write] = false
 		write++
@@ -116,6 +119,9 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	state.deletedCount = 0
 	for column := range table.columns {
 		table.columns[column].truncate(write)
+	}
+	if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
+		table.ttl.deadlines = table.ttl.deadlines[:write]
 	}
 	if table.storageEvents != nil {
 		table.recordStorageEventLocked(TypedTableStorageEventPatchPartMerged, physicalRowsBefore, write, 0, deletedRows, time.Since(started))
