@@ -14,6 +14,7 @@ git add \
   scripts/benchmark-ch025-token-postings.sh \
   scripts/commit-ch025-token-postings.sh \
   scripts/format-ch025-token-postings.sh \
+  scripts/push-ch025-token-postings.sh \
   scripts/race-ch025-token-postings.sh \
   scripts/report-ch025-token-postings-memory.sh \
   scripts/review-ch025-token-postings.sh \
