@@ -33,6 +33,11 @@ type SQLMutationResult struct {
 // are validated before one atomic command batch is applied, so an invalid
 // selected row cannot leave preceding writes behind.
 func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
+	if options.MutationAdmission != nil {
+		if err := options.MutationAdmission.Wait(ctx); err != nil {
+			return SQLMutationResult{}, err
+		}
+	}
 	if options.TriggerRegistry != nil {
 		return executeSQLMutationWithTriggers(ctx, trie, source, parameters, options)
 	}
@@ -73,6 +78,11 @@ func ExecuteSQLMutationIdempotent(ctx context.Context, journal *CommandJournal, 
 	}
 	if err := ctx.Err(); err != nil {
 		return SQLMutationResult{}, err
+	}
+	if options.MutationAdmission != nil {
+		if err := options.MutationAdmission.Wait(ctx); err != nil {
+			return SQLMutationResult{}, err
+		}
 	}
 	mutationSource, returning, err := parseSQLMutationReturning(source)
 	if err != nil {

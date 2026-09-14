@@ -32,7 +32,7 @@ before/after measurement when its motivation is performance.
 | CH-10 | Insert deduplication tokens for retried client batches | Make retries idempotent | Token retention and namespace rules | [x] Implemented by the opt-in journal-backed `ExecuteSQLMutationIdempotent`; see [CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md) and [BENCHMARK.md#ch-057-sql-mutation-idempotency](BENCHMARK.md#ch-057-sql-mutation-idempotency). |
 | CH-11 | Client-facing insert quorum separate from replica write quorum | Expose durability acknowledgement explicitly | Added latency and failure modes | [ ] |
 | CH-12 | Delete bitmap compaction scheduler | Compact logical-delete bitmap integrated with existing threshold compaction so scans skip tombstoned rows efficiently | Background CPU and rewrite spikes | [x] |
-| CH-13 | Mutation throttling with maintenance windows | Protect foreground queries | Longer mutation completion time | [ ] |
+| CH-13 | Mutation throttling with maintenance windows | Protect foreground queries | Longer mutation completion time | [x] |
 | CH-14 | Mutation dependency graph with resumable progress | Make overlapping mutations safe to operate | Persistent metadata | [ ] |
 | CH-15 | TTL movement executor across hot, warm, and cold volumes | Automate tier placement | I/O movement and recovery complexity | [ ] |
 | CH-16 | Tier-aware remote prefetch and read fallback | Hide object-store latency for sequential scans | Extra bandwidth and cache pollution | [x] |

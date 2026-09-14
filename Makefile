@@ -14473,3 +14473,39 @@ commit-ch012-c203:
 .PHONY: push-ch012-c203
 push-ch012-c203:
 	bash ./scripts/push-ch012-c203.sh
+
+.PHONY: test-ch013-c203
+test-ch013-c203:
+	bash ./scripts/test-ch013-c203.sh
+
+.PHONY: benchmark-ch013-c203
+benchmark-ch013-c203:
+	bash ./scripts/benchmark-ch013-c203.sh
+
+.PHONY: benchmark-ch013-gate-c203
+benchmark-ch013-gate-c203:
+	bash ./scripts/benchmark-ch013-gate-c203.sh
+
+.PHONY: format-ch013-c203
+format-ch013-c203:
+	bash ./scripts/format-ch013-c203.sh
+
+.PHONY: verify-ch013-c203
+verify-ch013-c203:
+	bash ./scripts/verify-ch013-c203.sh
+
+.PHONY: stage-ch013-c203
+stage-ch013-c203:
+	bash ./scripts/stage-ch013-c203.sh
+
+.PHONY: inspect-staged-ch013-c203
+inspect-staged-ch013-c203:
+	bash ./scripts/inspect-staged-ch013-c203.sh
+
+.PHONY: commit-ch013-c203
+commit-ch013-c203:
+	bash ./scripts/commit-ch013-c203.sh
+
+.PHONY: push-ch013-c203
+push-ch013-c203:
+	bash ./scripts/push-ch013-c203.sh

@@ -552,6 +552,61 @@ See [CH012_DELETE_BITMAP.md](CH012_DELETE_BITMAP.md) for the full raw
 end-to-end samples, representation details, correctness coverage, and
 tradeoffs.
 
+## CH-013: Mutation Admission Throttling
+
+CH-013 adds an opt-in `SQLMutationAdmission` gate. A nil gate leaves direct
+SQL mutation execution unchanged; a configured gate can reserve serialized
+future slots and wait through daily or overnight maintenance windows.
+
+| Workload | Baseline | Current | Improvement |
+| --- | ---: | ---: | ---: |
+| `SET` mutation | 8,345 ns/op | 8,230 ns/op | 1.01x faster |
+| `ON CONFLICT DO NOTHING` | 6,510 ns/op | 6,765 ns/op | 0.96x, 3.9% slower |
+| `ON CONFLICT DO UPDATE` | 6,184 ns/op | 6,294 ns/op | 0.98x, 1.8% slower |
+| Zero-interval gate paired workload | 6,259 ns/op | 6,461 ns/op | 0.97x, 3.2% slower |
+
+The first three rows compare the pre-change legacy benchmark with the
+post-change default path. The zero-interval row compares the paired
+`legacy-default` and `zero-interval-gate` sub-benchmarks after the change.
+Every row retained its original bytes/op and allocations/op: 14,960 B/29 for
+`SET`, 11,824 B/18 for `DO NOTHING`, 9,008 B/16 for `DO UPDATE`, and
+8,096 B/18 for the paired workload. CPU movement is mixed and within ordinary
+run variance; the intentional cost is the wait introduced by a positive
+interval or an active maintenance window.
+
+Commands:
+
+```text
+make benchmark-ch013-c203
+make benchmark-ch013-gate-c203
+```
+
+Raw pre-change legacy samples:
+
+```text
+BenchmarkExecuteSQLMutationSetString: 8237, 8522, 8438, 7662, 8345 ns/op; 14960 B/op; 29 allocs/op
+BenchmarkExecuteSQLMutationOnConflictNothingHit: 6803, 6510, 6186, 7084, 6459 ns/op; 11824 B/op; 18 allocs/op
+BenchmarkExecuteSQLMutationOnConflictUpdateHit: 6178, 6109, 6184, 6209, 6226 ns/op; 9008 B/op; 16 allocs/op
+```
+
+Raw post-change legacy samples:
+
+```text
+BenchmarkExecuteSQLMutationSetString: 8661, 8230, 8229, 8070, 8260 ns/op; 14960 B/op; 29 allocs/op
+BenchmarkExecuteSQLMutationOnConflictNothingHit: 6521, 6816, 6892, 6519, 6765 ns/op; 11824 B/op; 18 allocs/op
+BenchmarkExecuteSQLMutationOnConflictUpdateHit: 6294, 6101, 6314, 6538, 6284 ns/op; 9008 B/op; 16 allocs/op
+```
+
+Raw paired gate samples:
+
+```text
+legacy-default: 6410, 6231, 6272, 6107, 6259 ns/op; 8096 B/op; 18 allocs/op
+zero-interval-gate: 6092, 6516, 6531, 6322, 6461 ns/op; 8096 B/op; 18 allocs/op
+```
+
+See [CH013_MUTATION_ADMISSION.md](CH013_MUTATION_ADMISSION.md) for API
+semantics, defaults, maintenance-window examples, and cancellation behavior.
+
 ## CH-049: Refreshable External Dictionaries
 
 The benchmark compares the new dictionary's direct read path with the raw Go

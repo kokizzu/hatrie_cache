@@ -266,7 +266,10 @@ type SQLQueryOptions struct {
 	// Automatic dispatch currently covers one key-targeted INSERT, UPDATE, or
 	// DELETE without expiration; complex and multi-row mutations are rejected
 	// when this option is enabled until their event contract is defined.
-	TriggerRegistry       *SQLTriggerRegistry
+	TriggerRegistry *SQLTriggerRegistry
+	// MutationAdmission optionally spaces direct SQL mutations and blocks
+	// configured maintenance windows. Nil keeps the legacy unthrottled path.
+	MutationAdmission     *SQLMutationAdmission
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
 	Timeout               time.Duration
