@@ -13586,3 +13586,39 @@ commit-ch025-token-postings:
 .PHONY: push-ch025-token-postings
 push-ch025-token-postings:
 	bash ./scripts/push-ch025-token-postings.sh
+
+.PHONY: test-mz043-operator-frontier
+test-mz043-operator-frontier:
+	bash ./scripts/test-mz043-operator-frontier.sh
+
+.PHONY: format-mz043-operator-frontier
+format-mz043-operator-frontier:
+	bash ./scripts/format-mz043-operator-frontier.sh
+
+.PHONY: benchmark-mz043-operator-frontier
+benchmark-mz043-operator-frontier:
+	bash ./scripts/benchmark-mz043-operator-frontier.sh
+
+.PHONY: review-mz043-operator-frontier
+review-mz043-operator-frontier:
+	bash ./scripts/review-mz043-operator-frontier.sh
+
+.PHONY: race-mz043-operator-frontier
+race-mz043-operator-frontier:
+	bash ./scripts/race-mz043-operator-frontier.sh
+
+.PHONY: vet-mz043-operator-frontier
+vet-mz043-operator-frontier:
+	bash ./scripts/vet-mz043-operator-frontier.sh
+
+.PHONY: test-mz043-restore-regression
+test-mz043-restore-regression:
+	bash ./scripts/test-mz043-restore-regression.sh
+
+.PHONY: commit-mz043-operator-frontier
+commit-mz043-operator-frontier:
+	bash ./scripts/commit-mz043-operator-frontier.sh
+
+.PHONY: push-mz043-operator-frontier
+push-mz043-operator-frontier:
+	bash ./scripts/push-mz043-operator-frontier.sh

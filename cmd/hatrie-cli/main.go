@@ -1512,7 +1512,7 @@ func buildRestoreRehearsalServerBinary(ctx context.Context, stderr io.Writer) (s
 		_ = os.RemoveAll(dir)
 	}
 	binary := filepath.Join(dir, "hatrie-cache")
-	cmd := exec.CommandContext(cliContext(ctx), "go", "build", "-o", binary, "./cmd/hatrie-cache")
+	cmd := exec.CommandContext(cliContext(ctx), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/hatrie-cache")
 	cmd.Dir = root
 	cmd.Stdout = cliWriter(stderr)
 	cmd.Stderr = cliWriter(stderr)

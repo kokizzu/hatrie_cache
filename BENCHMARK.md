@@ -23975,6 +23975,45 @@ and typed materialization; callers must copy fields they retain and keep the
 complete encoded buffer alive while using borrowed slices. The default
 `DecodeSQLRowBinary` path is unchanged.
 
+<a id="mz-043-operator-frontier-lag"></a>
+## MZ-043: Per-Operator Frontier Lag
+
+Materialize-inspired progress observability was added as an opt-in registry
+and Prometheus exporter. The implementation is compared with the existing
+source-frontier registry for equivalent update/snapshot work, and the scrape
+benchmark compares the exporter disabled with 128 configured operators.
+
+Environment: Linux amd64, AMD Ryzen 9 5950X, Go benchmark runner, five samples
+(`-count=5`). Values below are medians; lower is better except response bytes
+are shown as bandwidth consumed by one scrape.
+
+| Path | Baseline | MZ-043 | Relative time | Memory / allocations | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Registry advance, 128 names | 33.12 ns, 0 B, 0 allocs | 31.38 ns, 0 B, 0 allocs | 0.95x | unchanged | Within benchmark noise; no meaningful update penalty |
+| Registry snapshot, 128 names | 12,004 ns, 7,680 B, 2 allocs | 11,754 ns, 7,680 B, 2 allocs | 0.98x | unchanged | Same snapshot cost as source registry |
+| `/metrics` scrape, exporter disabled | 145,748 ns, 6,572 bytes | 219,176 ns, 25,229 bytes | 1.50x | 68,150 B, 592 allocs -> 185,720 B, 606 allocs | Expected opt-in series and wire-size cost |
+
+The scrape delta is not a free performance win: 128 operators add 18,657
+response bytes and about 73 microseconds in this workload. The default path
+remains unchanged because the registry is nil unless configured. The exporter
+was also optimized during implementation: the initial `fmt.Fprintf` version
+measured 249,413 ns/op, 195,041 B/op, and 1,248 allocs/op with 128 operators;
+direct builder writes measured 219,176 ns/op, 185,720 B/op, and 606 allocs/op
+in the final run, a 12.1% CPU, 4.8% memory, and 51.4% allocation reduction.
+
+### Raw Results
+
+Command: `make benchmark-mz043-operator-frontier`
+
+```text
+BenchmarkMZ043SourceFrontierRegistryAdvance-32: 33.12, 30.82, 33.96, 30.62, 34.31 ns/op; 0 B/op; 0 allocs/op
+BenchmarkMZ043OperatorFrontierRegistryAdvance-32: 31.38, 31.96, 31.49, 28.95, 30.83 ns/op; 0 B/op; 0 allocs/op
+BenchmarkMZ043SourceFrontierRegistrySnapshot-32: 11277, 12004, 12513, 11873, 12014 ns/op; 7680 B/op; 2 allocs/op
+BenchmarkMZ043OperatorFrontierRegistrySnapshot-32: 12425, 11754, 11193, 11303, 11824 ns/op; 7680 B/op; 2 allocs/op
+BenchmarkMonitoringMetricsWithoutOperatorFrontier-32: 156133, 143822, 145748, 144992, 147440 ns/op; 6572 metrics_bytes/op; 68143-68156 B/op; 592 allocs/op
+BenchmarkMonitoringMetricsWithOperatorFrontier-32: 220037, 222571, 219039, 219097, 219176 ns/op; 25229 metrics_bytes/op; 185715-185747 B/op; 606 allocs/op
+```
+
 <a id="ch-025-token-postings-index"></a>
 ## CH-025 Token Postings Index
 
