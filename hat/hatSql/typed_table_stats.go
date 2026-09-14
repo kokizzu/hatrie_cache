@@ -23,15 +23,33 @@ type TypedTableStats struct {
 	Columns  []TypedTableColumnStats
 }
 
-// Stats computes exact row, NULL, value, and supported scalar min/max counts
-// for the current active rows. It is read-only and safe to call concurrently
-// with table readers and writers.
+// Stats returns exact row, NULL, value, and supported scalar min/max counts for
+// the current active rows. The snapshot is cached until a row mutation and is
+// read-only and safe to call concurrently with table readers and writers.
 func (table *TypedTable) Stats() TypedTableStats {
 	if table == nil {
 		return TypedTableStats{}
 	}
 	table.mu.RLock()
-	defer table.mu.RUnlock()
+	if table.statsCacheValid {
+		stats := cloneTypedTableStats(table.statsCache)
+		table.mu.RUnlock()
+		return stats
+	}
+	table.mu.RUnlock()
+
+	table.mu.Lock()
+	defer table.mu.Unlock()
+	if table.statsCacheValid {
+		return cloneTypedTableStats(table.statsCache)
+	}
+	stats := table.computeStatsLocked()
+	table.statsCache = stats
+	table.statsCacheValid = true
+	return cloneTypedTableStats(stats)
+}
+
+func (table *TypedTable) computeStatsLocked() TypedTableStats {
 	stats := TypedTableStats{Columns: make([]TypedTableColumnStats, len(table.schema.Columns))}
 	for index, column := range table.schema.Columns {
 		stats.Columns[index] = TypedTableColumnStats{Name: column.Name, Kind: column.Kind}
@@ -66,6 +84,14 @@ func (table *TypedTable) Stats() TypedTableStats {
 			}
 		}
 	}
+	return stats
+}
+
+func cloneTypedTableStats(stats TypedTableStats) TypedTableStats {
+	if stats.Columns == nil {
+		return stats
+	}
+	stats.Columns = append([]TypedTableColumnStats(nil), stats.Columns...)
 	return stats
 }
 

@@ -85,6 +85,93 @@ func TestTypedTableStatsPreservesSchemaOrderAndNilSafety(t *testing.T) {
 	}
 }
 
+func TestTypedTableStatsCacheInvalidatesAndReturnsIndependentSnapshots(t *testing.T) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name: "cached",
+		Columns: []TypedTableColumn{
+			{Name: "score", Kind: TypedTableInt64},
+			{Name: "active", Kind: TypedTableBool},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upsertTypedTableStatsTestRow(t, table, "a", 10, true)
+
+	first := table.Stats()
+	if !table.statsCacheValid {
+		t.Fatal("Stats() did not populate the cache")
+	}
+	first.Columns[0].Name = "mutated"
+	first.Columns[0].Min = TypedInt64(999)
+	second := table.Stats()
+	if second.Columns[0].Name != "score" || second.Columns[0].Min != TypedInt64(10) {
+		t.Fatalf("cached Stats() snapshot was mutated through the caller: %#v", second.Columns[0])
+	}
+
+	upsertTypedTableStatsTestRow(t, table, "b", 20, false)
+	if table.statsCacheValid {
+		t.Fatal("Upsert() left stale statistics marked valid")
+	}
+	second = table.Stats()
+	if second.RowCount != 2 || second.Columns[0].Max != TypedInt64(20) {
+		t.Fatalf("Stats() after Upsert() = %#v", second)
+	}
+
+	if _, err := table.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	if table.statsCacheValid {
+		t.Fatal("Delete() left stale statistics marked valid")
+	}
+	second = table.Stats()
+	if second.RowCount != 1 || second.Columns[0].Min != TypedInt64(20) {
+		t.Fatalf("Stats() after Delete() = %#v", second)
+	}
+}
+
+func TestTypedTableStatsCacheSurvivesPatchCompaction(t *testing.T) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name:       "patched",
+		PatchParts: TypedTablePatchOptions{Enabled: true, MergeThreshold: 100},
+		Columns:    []TypedTableColumn{{Name: "score", Kind: TypedTableInt64}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := table.Upsert("a", []TypedTableValue{TypedInt64(10)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := table.Upsert("b", []TypedTableValue{TypedInt64(20)}); err != nil {
+		t.Fatal(err)
+	}
+	_ = table.Stats()
+	if _, err := table.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	_ = table.Stats()
+	if !table.statsCacheValid {
+		t.Fatal("Stats() did not repopulate the cache before compaction")
+	}
+	if err := table.CompactPatchParts(); err != nil {
+		t.Fatal(err)
+	}
+	if !table.statsCacheValid {
+		t.Fatal("CompactPatchParts() invalidated statistics that did not change")
+	}
+	stats := table.Stats()
+	if stats.RowCount != 1 || stats.Columns[0].Min != TypedInt64(20) || stats.Columns[0].Max != TypedInt64(20) {
+		t.Fatalf("Stats() after patch compaction = %#v", stats)
+	}
+}
+
+func upsertTypedTableStatsTestRow(t *testing.T, table *TypedTable, key string, score int64, active bool) {
+	t.Helper()
+	if _, err := table.Upsert(key, []TypedTableValue{TypedInt64(score), TypedBool(active)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func assertTypedTableColumnStats(t *testing.T, stats TypedTableStats, name string, rows, nulls int, minimum, maximum TypedTableValue) {
 	t.Helper()
 	column := typedTableColumnStats(t, stats, name)

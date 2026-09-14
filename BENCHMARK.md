@@ -20848,6 +20848,31 @@ The improvement is limited to explicitly analyzed, unchanged sources. The
 cache is in-memory derived metadata, is bounded to 128 source entries, and is
 cleared across mutation-safe restore paths. It does not change command wire
 format, backup bytes, or persistence layout.
+
+### TypedTable exact stats cache
+
+`make benchmark-c209` was run before and after the invalidation-aware
+`TypedTable.Stats()` cache on the same 10,000-row, four-column fixture. Five
+samples were collected with `-benchmem` on an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Uncached scan (before) | 825,310 | 640 | 1 | 1.00x |
+| Cached snapshot (after) | 132.2 | 640 | 1 | 6,243x faster; equal transient bytes and allocations |
+
+The cache retains one schema-sized column-statistics slice per table. It does
+not retain row storage or add per-row bookkeeping. Successful `Upsert` and
+`Delete` invalidate it; physical patch compaction preserves it because active
+rows and values do not change. The neighboring `TypedTableColumnarSource`
+control remained at 1,020,138 B/op and 29,768 allocs/op, so this change does
+not claim an improvement for columnar materialization.
+
+Raw `BenchmarkTypedTableStats` samples:
+
+```text
+Before: 825310, 815681, 912413, 819387, 825470 ns/op; 640 B/op; 1 alloc/op
+After:  124.4, 126.9, 138.5, 132.2, 172.1 ns/op; 640 B/op; 1 alloc/op
+```
 ## MZ-007 source frontier requirement
 
 `make benchmark-mz007-frontier-rejection` (five samples, `-benchmem`, AMD Ryzen 9 5950X):

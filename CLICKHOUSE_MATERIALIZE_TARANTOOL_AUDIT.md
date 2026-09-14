@@ -168,6 +168,7 @@ or intentionally deferred, and `[-]` rejected or rolled back.
 - [x] T047d Atomic public `BATCH` write quorum. Eligible all-write batches validate direct quorum before mutation, preserve local atomic commit semantics when remote acknowledgements are insufficient, and send one grouped `INTERNALBATCHV2` per target; rollback-free cluster-wide commit remains open. See [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T048 Replication sets and peer topology.
 - [x] T049 Vector-clock exposure for every replica - replication queue results expose an immutable observational `vector_clock` containing the local sequence and all current topology members' acknowledged sequences; it does not change quorum or conflict semantics.
+- [x] T050 LSN or journal sequence exposure.
 
 ## Currently Open Or Deferred
 

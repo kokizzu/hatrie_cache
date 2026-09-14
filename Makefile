@@ -13835,3 +13835,35 @@ commit-differential-average:
 .PHONY: push-differential-average
 push-differential-average:
 	@bash scripts/push-differential-average.sh
+
+.PHONY: test-tt050-typed-table-cache
+test-tt050-typed-table-cache:
+	@bash scripts/test-tt050-typed-table-cache.sh
+
+.PHONY: benchmark-tt050-typed-table-cache
+benchmark-tt050-typed-table-cache:
+	@bash scripts/benchmark-tt050-typed-table-cache.sh
+
+.PHONY: format-tt050-typed-table-cache
+format-tt050-typed-table-cache:
+	@bash scripts/format-tt050-typed-table-cache.sh
+
+.PHONY: race-tt050-typed-table-cache
+race-tt050-typed-table-cache:
+	@bash scripts/race-tt050-typed-table-cache.sh
+
+.PHONY: vet-tt050-typed-table-cache
+vet-tt050-typed-table-cache:
+	@bash scripts/vet-tt050-typed-table-cache.sh
+
+.PHONY: verify-tt050-typed-table-cache
+verify-tt050-typed-table-cache:
+	@bash scripts/verify-tt050-typed-table-cache.sh
+
+.PHONY: commit-tt050-typed-table-cache
+commit-tt050-typed-table-cache:
+	@bash scripts/commit-tt050-typed-table-cache.sh
+
+.PHONY: push-tt050-typed-table-cache
+push-tt050-typed-table-cache:
+	@bash scripts/push-tt050-typed-table-cache.sh

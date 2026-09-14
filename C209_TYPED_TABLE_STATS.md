@@ -23,20 +23,23 @@ for _, column := range stats.Columns {
   table storage.
 - The nil receiver returns the zero-value `TypedTableStats`.
 
-The snapshot scans existing typed column storage under the table read lock. It
-does not add per-write bookkeeping, duplicate min/max maps, or retained state;
-the default SQL execution path is unchanged unless a caller explicitly asks
-for statistics.
+The first snapshot scans existing typed column storage under the table lock and
+then retains only the schema-sized result. Subsequent reads clone that result
+without scanning rows. Successful `Upsert` and `Delete` invalidate the cache;
+physical patch compaction preserves it because it only reorders active rows.
+The cache adds no per-row bookkeeping, and the default SQL execution path is
+unchanged unless a caller explicitly asks for statistics.
 
 ## Benchmark
 
-Five samples, Go benchmark `-benchmem`, AMD Ryzen 9 5950X. The first comparison
-uses the same 10,000-row typed table with four columns and compares the stats
-snapshot with the existing columnar source materialization.
+Five samples, Go benchmark `-benchmem`, AMD Ryzen 9 5950X. The original
+uncached comparison is retained below for provenance; it uses the same
+10,000-row typed table with four columns and compares the stats snapshot with
+the existing columnar source materialization.
 
 | Workload | Median ns/op | B/op | allocs/op | Relative result |
 | --- | ---: | ---: | ---: | --- |
-| `TypedTable.Stats()` | 810,177 | 640 | 1 | baseline |
+| Uncached `TypedTable.Stats()` (original) | 810,177 | 640 | 1 | baseline |
 | Existing columnar materialization | 996,471 | 1,020,138 | 29,768 | stats is 1.23x faster, 1,594x lower B/op, 29,768x fewer allocations |
 
 The existing 100,000-row SQL min/max benchmark was also rerun to detect a
@@ -50,6 +53,20 @@ Raw final samples:
 ```text
 TypedTable.Stats(): 810177, 759974, 754241, 838865, 826469 ns/op
 Columnar materialization: 1059249, 996471, 985230, 1078862, 990233 ns/op
+```
+
+The current invalidation-aware cache was then measured with the same fixture:
+
+| Workload | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Uncached scan (before) | 825,310 | 640 | 1 | 1.00x |
+| Cached snapshot (after) | 132.2 | 640 | 1 | 6,243x faster |
+
+Raw cache samples:
+
+```text
+Before: 825310, 815681, 912413, 819387, 825470 ns/op
+After: 124.4, 126.9, 138.5, 132.2, 172.1 ns/op
 ```
 
 Verification:
