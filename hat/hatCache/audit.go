@@ -12,6 +12,9 @@ type AuditEvent = hatAudit.AuditEvent
 
 // AuditLogger is retained at the root API for compatibility.
 type AuditLogger = hatAudit.AuditLogger
+type AuditLoggerOptions = hatAudit.AuditLoggerOptions
+type AuditSink = hatAudit.AuditSink
+type AuditSinkFunc = hatAudit.AuditSinkFunc
 type AuditQuery = hatAudit.Query
 type WorkloadTrace = hatAudit.Trace
 type WorkloadTraceRecorder = hatAudit.TraceRecorder
@@ -23,8 +26,16 @@ func NewAuditLogger(writer io.Writer) *AuditLogger {
 	return hatAudit.NewAuditLogger(writer)
 }
 
+func NewAuditLoggerWithOptions(writer io.Writer, options AuditLoggerOptions) (*AuditLogger, error) {
+	return hatAudit.NewAuditLoggerWithOptions(writer, options)
+}
+
 func OpenAuditLogger(path string) (*AuditLogger, error) {
 	return hatAudit.OpenAuditLogger(path)
+}
+
+func OpenAuditLoggerWithOptions(path string, options AuditLoggerOptions) (*AuditLogger, error) {
+	return hatAudit.OpenAuditLoggerWithOptions(path, options)
 }
 
 // NewWorkloadTraceRecorder records an ordered replay workload. The optional

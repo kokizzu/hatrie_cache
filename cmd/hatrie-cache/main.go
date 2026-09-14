@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -65,6 +66,7 @@ type config struct {
 	rbacPolicyPath                       string
 	diagnosticsProfiling                 bool
 	auditLogPath                         string
+	auditSuccessSampleRate               float64
 	writeProtection                      bool
 	maintenanceReadOnly                  bool
 	rateLimit                            int
@@ -214,7 +216,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if err != nil {
 		return err
 	}
-	auditLog, err := openAuditLogIfConfigured(cfg.auditLogPath)
+	auditLog, err := openAuditLogIfConfigured(cfg.auditLogPath, cfg.auditSuccessSampleRate)
 	if err != nil {
 		return err
 	}
@@ -622,6 +624,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.rbacPolicyPath, "rbac-policy", cfg.rbacPolicyPath, "optional JSON role-based access policy; requires monitoring authentication")
 	flags.BoolVar(&cfg.diagnosticsProfiling, "diagnostics-profiling", cfg.diagnosticsProfiling, "enable authenticated bounded runtime profile capture")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
+	flags.Float64Var(&cfg.auditSuccessSampleRate, "audit-success-sample-rate", cfg.auditSuccessSampleRate, "sample rate for successful audit events; use 0 to retain all successes; failures are always retained")
 	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
 	flags.BoolVar(&cfg.maintenanceReadOnly, "maintenance-read-only", cfg.maintenanceReadOnly, "reject public cache writes while allowing reads and backups")
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
@@ -788,6 +791,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.rateLimit < 0 {
 		return config{}, errors.New("rate limit must be non-negative")
+	}
+	if math.IsNaN(cfg.auditSuccessSampleRate) || cfg.auditSuccessSampleRate < 0 || cfg.auditSuccessSampleRate > 1 {
+		return config{}, errors.New("audit success sample rate must be between 0 and 1")
 	}
 	cfg.keyStatsMode = strings.ToLower(strings.TrimSpace(cfg.keyStatsMode))
 	switch hatriecache.KeyStatsMode(cfg.keyStatsMode) {
@@ -1284,6 +1290,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"rbac_policy":                              cfg.rbacPolicyPath,
 		"diagnostics_profiling":                    cfg.diagnosticsProfiling,
 		"audit_log_path":                           cfg.auditLogPath,
+		"audit_success_sample_rate":                cfg.auditSuccessSampleRate,
 		"write_protection":                         cfg.writeProtection,
 		"maintenance_read_only":                    cfg.maintenanceReadOnly,
 		"rate_limit":                               cfg.rateLimit,
@@ -1758,12 +1765,12 @@ func parseReplicationOutboxFormat(format string) (string, error) {
 	}
 }
 
-func openAuditLogIfConfigured(path string) (*hatriecache.AuditLogger, error) {
+func openAuditLogIfConfigured(path string, successSampleRate float64) (*hatriecache.AuditLogger, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, nil
 	}
-	logger, err := hatriecache.OpenAuditLogger(path)
+	logger, err := hatriecache.OpenAuditLoggerWithOptions(path, hatriecache.AuditLoggerOptions{SuccessSampleRate: successSampleRate})
 	if err != nil {
 		return nil, fmt.Errorf("open audit log: %w", err)
 	}

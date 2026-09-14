@@ -1707,12 +1707,20 @@ names and keys but intentionally omit command values:
 
 ```
 make monitoring-server AUDIT_LOG_PATH=data/audit.jsonl
+make monitoring-server AUDIT_LOG_PATH=data/audit.jsonl AUDIT_SUCCESS_SAMPLE_RATE=0.1
 ```
 
 The Svelte MPA Admin page requires explicit confirmation before running flush,
 compact, or replication sync operations. It also shows the bounded in-memory
 recent audit view from `GET /api/audit?limit=25`; the full durable trail stays
 in the JSONL file configured by `AUDIT_LOG_PATH`.
+
+Audit logging is lossless by default. Set `AUDIT_SUCCESS_SAMPLE_RATE` between
+`0` and `1` to sample successful events for high-volume installations; failed
+and denied events are always retained. Go embedders can add structured
+`hatAudit.AuditSink` exporters with `NewAuditLoggerWithOptions`. See
+[TR048_AUDIT_SAMPLING.md](TR048_AUDIT_SAMPLING.md) for the CLI/API contract,
+security behavior, and measurements.
 
 Set `WRITE_PROTECTION=true` to reject dangerous write/admin actions while still
 allowing read-only health, stats, entry listing, metrics, and status endpoints.

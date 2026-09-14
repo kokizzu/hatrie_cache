@@ -12,6 +12,7 @@ async_commands=${MONITORING_ASYNC_COMMANDS:-false}
 async_command_status_capacity=${MONITORING_ASYNC_COMMAND_STATUS_CAPACITY:-1024}
 diagnostics_profiling=${DIAGNOSTICS_PROFILING:-false}
 audit_log_path=${AUDIT_LOG_PATH:-}
+audit_success_sample_rate=${AUDIT_SUCCESS_SAMPLE_RATE:-0}
 write_protection=${WRITE_PROTECTION:-false}
 rate_limit=${RATE_LIMIT:-0}
 key_stats_mode=${KEY_STATS_MODE:-off}
@@ -107,6 +108,8 @@ set -- \
 	-monitoring-async-command-status-capacity "$async_command_status_capacity" \
 	-diagnostics-profiling="$diagnostics_profiling" \
 	-audit-log-path "$audit_log_path" \
+	-audit-log-path "$audit_log_path" \
+	-audit-success-sample-rate "$audit_success_sample_rate" \
 	-write-protection="$write_protection" \
 	-rate-limit "$rate_limit" \
 	-key-stats-mode "$key_stats_mode" \

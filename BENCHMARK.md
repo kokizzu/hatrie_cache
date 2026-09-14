@@ -24147,3 +24147,30 @@ The command object check is about 21% slower in isolation, while the source
 object check is about 5% slower. Both remain sub-0.1-microsecond checks and
 retain zero heap allocations. Endpoint behavior is covered by exact command,
 SQL-source, batch, and RowBinary fail-closed tests.
+## TR-048 Audit-Event Sampling And Export Sinks
+
+The focused benchmark ran five samples with `make benchmark-tr048-audit-sampling`
+on the local AMD Ryzen 9 5950X host with `GOMAXPROCS=1`. The default row uses the existing
+lossless logger with no writer; the sampled row retains 10% of successful
+events, and the sink row invokes a no-op structured sink.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Default lossless logger, no writer | 139.7 | 32 | 1 | 1.00x |
+| 10% successful-event sampling | 22.06 | 3 | 0 | 6.33x faster |
+| Lossless logger with no-op structured sink | 160.3 | 32 | 1 | 1.15x slower |
+
+Raw samples:
+
+```text
+BenchmarkAuditLoggerDefaultLog: 161.1, 137.0, 137.0, 139.7, 150.4 ns/op; 32 B/op; 1 alloc/op
+BenchmarkAuditLoggerSampledLog: 22.03, 22.31, 21.90, 22.06, 23.03 ns/op; 3 B/op; 0 alloc/op
+BenchmarkAuditLoggerSinkLog: 149.0, 161.5, 169.5, 160.3, 158.5 ns/op; 32 B/op; 1 alloc/op
+```
+
+Sampling intentionally omits most successful events, so its CPU and memory
+reduction is the operating tradeoff rather than a complete-audit speedup.
+Failures and denials remain lossless. The no-op sink adds no measured heap
+cost beyond the existing recent-event path, but adds about 15% CPU in this
+controlled run; real external sink latency depends on the implementation and
+backpressure policy.

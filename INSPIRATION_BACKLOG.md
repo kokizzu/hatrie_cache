@@ -191,7 +191,7 @@ before/after measurement when its motivation is performance.
 | TR-45 | Connection circuit breaker and health scoring | Stop sending to failing peers | Recovery tuning | [ ] |
 | TR-46 | Schema and DDL discovery protocol | Keep clients compatible during changes | Version drift | [ ] |
 | TR-47 | Role and object-grant authorization model | Narrow access beyond bearer authentication | Policy administration | [x] Implemented by optional `hatAuth.Rule.Objects` and `Policy.AuthorizeObject`; see [TR047_OBJECT_GRANTS.md](TR047_OBJECT_GRANTS.md) and [BENCHMARK.md](BENCHMARK.md#tr-047-object-scoped-rbac-grants). |
-| TR-48 | Audit-event sampling and export sinks | Operate high-volume audit safely | Dropped-event visibility | [ ] |
+| TR-48 | Audit-event sampling and export sinks | Operate high-volume audit safely | Dropped-event visibility | [x] Implemented by `AuditLoggerOptions.SuccessSampleRate`, lossless failures, and `AuditSink`; see [TR048_AUDIT_SAMPLING.md](TR048_AUDIT_SAMPLING.md) and [BENCHMARK.md](BENCHMARK.md#tr-048-audit-event-sampling-and-export-sinks). |
 | TR-49 | Queue partition ownership and online migration | Scale queues without implicit sharding | Movement and backup semantics | [ ] |
 | TR-50 | Rate-aware WAL and replication backpressure | Preserve foreground latency under bursts | Lower write throughput | [ ] |
 
