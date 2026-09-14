@@ -14251,3 +14251,40 @@ commit-ch007-row-ttl-c203:
 .PHONY: push-ch007-row-ttl-c203
 push-ch007-row-ttl-c203:
 	@bash scripts/push-ch007-row-ttl-c203.sh
+
+
+.PHONY: inspect-ch022-incremental-backup-c203
+inspect-ch022-incremental-backup-c203:
+	@bash scripts/inspect-ch022-incremental-backup-c203.sh
+
+.PHONY: test-ch022-incremental-part-backup-c203
+test-ch022-incremental-part-backup-c203:
+	@bash scripts/test-ch022-incremental-part-backup-c203.sh
+
+.PHONY: format-ch022-incremental-part-backup-c203
+format-ch022-incremental-part-backup-c203:
+	@bash scripts/format-ch022-incremental-part-backup-c203.sh
+
+.PHONY: benchmark-ch022-incremental-part-backup-c203
+benchmark-ch022-incremental-part-backup-c203:
+	@bash scripts/benchmark-ch022-incremental-part-backup-c203.sh
+
+.PHONY: verify-ch022-incremental-part-backup-c203
+verify-ch022-incremental-part-backup-c203:
+	@bash scripts/verify-ch022-incremental-part-backup-c203.sh
+
+.PHONY: stage-ch022-incremental-part-backup-c203
+stage-ch022-incremental-part-backup-c203:
+	@bash scripts/stage-ch022-incremental-part-backup-c203.sh
+
+.PHONY: inspect-staged-ch022-incremental-part-backup-c203
+inspect-staged-ch022-incremental-part-backup-c203:
+	@bash scripts/inspect-staged-ch022-incremental-part-backup-c203.sh
+
+.PHONY: commit-ch022-incremental-part-backup-c203
+commit-ch022-incremental-part-backup-c203:
+	@bash scripts/commit-ch022-incremental-part-backup-c203.sh
+
+.PHONY: push-ch022-incremental-part-backup-c203
+push-ch022-incremental-part-backup-c203:
+	@bash scripts/push-ch022-incremental-part-backup-c203.sh

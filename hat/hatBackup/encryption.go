@@ -47,13 +47,16 @@ type ObjectStoreEncryptionKey struct {
 	Key []byte
 }
 
-// ObjectStoreTargetOptions configures optional object-store encryption. An
-// empty keyring preserves the historical unencrypted object format. When a
-// keyring is provided, ActiveEncryptionKeyID selects the key for new backups;
-// all keys remain available for restoring older rotated backups.
+// ObjectStoreTargetOptions configures optional object-store encryption and
+// payload addressing. An empty keyring preserves the historical unencrypted
+// object format. When a keyring is provided, ActiveEncryptionKeyID selects the
+// key for new backups; all keys remain available for restoring older rotated
+// backups. ObjectStoreLayoutAuto keeps path addressing for snapshots and selects
+// content-addressed objects for incremental Pebble backups.
 type ObjectStoreTargetOptions struct {
 	EncryptionKeys        []ObjectStoreEncryptionKey
 	ActiveEncryptionKeyID string
+	Layout                ObjectStoreLayout
 }
 
 type objectStoreEncryptionConfig struct {

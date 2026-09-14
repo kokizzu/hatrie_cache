@@ -20,8 +20,20 @@ import (
 
 const (
 	objectStoreManifestName            = "manifest.json"
+	objectStoreContentPrefix           = "objects"
 	DefaultObjectStoreManifestMaxBytes = 8 << 20
 	maxObjectStoreManifestFiles        = 1_000_000
+)
+
+// ObjectStoreLayout controls how payload objects are addressed. Auto keeps
+// legacy path keys for snapshots and uses content-addressed keys for
+// incremental Pebble backups.
+type ObjectStoreLayout string
+
+const (
+	ObjectStoreLayoutAuto             ObjectStoreLayout = ""
+	ObjectStoreLayoutPath             ObjectStoreLayout = "path"
+	ObjectStoreLayoutContentAddressed ObjectStoreLayout = "content-addressed"
 )
 
 var (
@@ -38,6 +50,13 @@ type ObjectStore interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 }
 
+// ObjectStoreObjectExists is an optional capability used by content-addressed
+// incremental backups. Stores that implement it can skip uploading objects
+// already present under their immutable hash key.
+type ObjectStoreObjectExists interface {
+	Exists(ctx context.Context, key string) (bool, error)
+}
+
 // ObjectStoreTarget uploads and restores a backup bundle below one object-key
 // prefix. The manifest is written last, so a reader never treats an incomplete
 // upload as a complete backup.
@@ -45,6 +64,7 @@ type ObjectStoreTarget struct {
 	store      ObjectStore
 	prefix     string
 	encryption *objectStoreEncryptionConfig
+	layout     ObjectStoreLayout
 }
 
 // NewObjectStoreTarget validates an object-store target prefix.
@@ -67,7 +87,85 @@ func NewObjectStoreTargetWithOptions(store ObjectStore, prefix string, options O
 	if err != nil {
 		return nil, err
 	}
-	return &ObjectStoreTarget{store: store, prefix: normalized, encryption: encryption}, nil
+	layout, err := normalizeObjectStoreLayout(options.Layout)
+	if err != nil {
+		return nil, err
+	}
+	return &ObjectStoreTarget{store: store, prefix: normalized, encryption: encryption, layout: layout}, nil
+}
+
+func normalizeObjectStoreLayout(value ObjectStoreLayout) (ObjectStoreLayout, error) {
+	switch ObjectStoreLayout(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case ObjectStoreLayoutAuto:
+		return ObjectStoreLayoutAuto, nil
+	case ObjectStoreLayoutPath:
+		return ObjectStoreLayoutPath, nil
+	case ObjectStoreLayoutContentAddressed:
+		return ObjectStoreLayoutContentAddressed, nil
+	default:
+		return "", fmt.Errorf("%w: unsupported object layout %q", ErrObjectStoreManifestInvalid, value)
+	}
+}
+
+func (target *ObjectStoreTarget) backupLayout(manifest BundleManifest) (ObjectStoreLayout, error) {
+	requested, err := normalizeObjectStoreLayout(ObjectStoreLayout(manifest.ObjectLayout))
+	if err != nil {
+		return "", err
+	}
+	if requested != ObjectStoreLayoutAuto {
+		if target.layout != ObjectStoreLayoutAuto && target.layout != requested {
+			return "", fmt.Errorf("%w: manifest layout %q conflicts with target layout %q", ErrObjectStoreManifestInvalid, requested, target.layout)
+		}
+		return requested, nil
+	}
+	if target.layout != ObjectStoreLayoutAuto {
+		return target.layout, nil
+	}
+	if manifest.Mode == ModePebbleIncremental {
+		return ObjectStoreLayoutContentAddressed, nil
+	}
+	return ObjectStoreLayoutPath, nil
+}
+
+func restoreObjectStoreLayout(manifest BundleManifest) (ObjectStoreLayout, error) {
+	if strings.TrimSpace(manifest.ObjectLayout) == "" {
+		return ObjectStoreLayoutPath, nil
+	}
+	return normalizeObjectStoreLayout(ObjectStoreLayout(manifest.ObjectLayout))
+}
+
+func (target *ObjectStoreTarget) fileObjectKey(layout ObjectStoreLayout, file BundleFile, manifest BundleManifest) (string, string, error) {
+	switch layout {
+	case ObjectStoreLayoutPath:
+		return target.objectKey(file.Path), file.Path, nil
+	case ObjectStoreLayoutContentAddressed:
+		keyID := ""
+		if manifest.Encryption != nil {
+			keyID = manifest.Encryption.KeyID
+		}
+		relative, err := contentObjectRelative(file.SHA256, keyID)
+		if err != nil {
+			return "", "", fmt.Errorf("%w: invalid content object for %q: %v", ErrObjectStoreManifestInvalid, file.Path, err)
+		}
+		return target.objectKey(relative), relative, nil
+	default:
+		return "", "", fmt.Errorf("%w: unsupported object layout %q", ErrObjectStoreManifestInvalid, layout)
+	}
+}
+
+func contentObjectRelative(hash, encryptionKeyID string) (string, error) {
+	hash = strings.ToLower(strings.TrimSpace(hash))
+	if decoded, err := hex.DecodeString(hash); err != nil || len(decoded) != sha256.Size {
+		return "", fmt.Errorf("invalid SHA-256 hash %q", hash)
+	}
+	if strings.TrimSpace(encryptionKeyID) == "" {
+		return path.Join(objectStoreContentPrefix, hash), nil
+	}
+	keyID, err := normalizeObjectStoreEncryptionKeyID(encryptionKeyID)
+	if err != nil {
+		return "", err
+	}
+	return path.Join(objectStoreContentPrefix, keyID, hash), nil
 }
 
 // Backup scans source, streams every regular file to the object store, and
@@ -123,16 +221,42 @@ func (target *ObjectStoreTarget) Backup(ctx context.Context, source string, mani
 		}
 		manifest.Encryption = encryptionMetadataForKey(keyID)
 	}
+	layout, err := target.backupLayout(manifest)
+	if err != nil {
+		return BundleManifest{}, err
+	}
+	manifest.ObjectLayout = string(layout)
+	encryptionKeyID := ""
+	if manifest.Encryption != nil {
+		encryptionKeyID = manifest.Encryption.KeyID
+	}
+	manifest.NewObjects = 0
+	manifest.ReusedObjects = 0
+	manifest.NewObjectBytes = 0
+	manifest.ReusedObjectBytes = 0
+	manifest.NewObjectHashes = nil
+	manifest.ReusedObjectHashes = nil
 	manifest.Files = make([]BundleFile, 0, len(paths))
+	seenObjects := make(map[string]struct{}, len(paths))
 	for _, relative := range paths {
 		if err := checkObjectStoreContext(ctx); err != nil {
 			return BundleManifest{}, err
 		}
-		file, err := target.uploadFile(ctx, root, relative)
+		result, err := target.uploadFile(ctx, root, relative, layout, encryptionKeyID, seenObjects)
 		if err != nil {
 			return BundleManifest{}, err
 		}
-		manifest.Files = append(manifest.Files, file)
+		manifest.Files = append(manifest.Files, result.file)
+		if result.newObject {
+			manifest.NewObjects++
+			manifest.NewObjectBytes += result.file.Size
+			manifest.NewObjectHashes = append(manifest.NewObjectHashes, result.file.SHA256)
+		}
+		if result.reusedObject {
+			manifest.ReusedObjects++
+			manifest.ReusedObjectBytes += result.file.Size
+			manifest.ReusedObjectHashes = append(manifest.ReusedObjectHashes, result.file.SHA256)
+		}
 	}
 	if err := validateObjectStoreManifest(manifest); err != nil {
 		return BundleManifest{}, err
@@ -165,6 +289,10 @@ func (target *ObjectStoreTarget) Restore(ctx context.Context, destination string
 	if err != nil {
 		return BundleManifest{}, err
 	}
+	layout, err := restoreObjectStoreLayout(manifest)
+	if err != nil {
+		return BundleManifest{}, err
+	}
 	restore, err := prepareObjectStoreRestoreDestination(destination, overwrite)
 	if err != nil {
 		return BundleManifest{}, err
@@ -183,11 +311,15 @@ func (target *ObjectStoreTarget) Restore(ctx context.Context, destination string
 		if err != nil {
 			return BundleManifest{}, err
 		}
-		body, err := target.store.Get(ctx, target.objectKey(file.Path))
+		objectKey, objectRelative, keyErr := target.fileObjectKey(layout, file, manifest)
+		if keyErr != nil {
+			return BundleManifest{}, keyErr
+		}
+		body, err := target.store.Get(ctx, objectKey)
 		if err != nil {
 			return BundleManifest{}, fmt.Errorf("hatriecache: download object backup file %q: %w", file.Path, err)
 		}
-		reader, readerErr := target.payloadReader(ctx, body, file, manifest)
+		reader, readerErr := target.payloadReader(ctx, body, file, manifest, objectRelative)
 		err = readerErr
 		if err == nil {
 			err = restoreObjectFile(ctx, reader, path, file)
@@ -222,16 +354,24 @@ func (target *ObjectStoreTarget) Verify(ctx context.Context) (BundleManifest, er
 	if err != nil {
 		return BundleManifest{}, err
 	}
+	layout, err := restoreObjectStoreLayout(manifest)
+	if err != nil {
+		return BundleManifest{}, err
+	}
 	for _, file := range manifest.Files {
 		if err := checkObjectStoreContext(ctx); err != nil {
 			return BundleManifest{}, err
 		}
-		body, err := target.store.Get(ctx, target.objectKey(file.Path))
+		objectKey, objectRelative, keyErr := target.fileObjectKey(layout, file, manifest)
+		if keyErr != nil {
+			return BundleManifest{}, keyErr
+		}
+		body, err := target.store.Get(ctx, objectKey)
 		if err != nil {
 			return BundleManifest{}, fmt.Errorf("hatriecache: verify object backup file %q: %w", file.Path, err)
 		}
 		digest := sha256.New()
-		reader, readerErr := target.payloadReader(ctx, body, file, manifest)
+		reader, readerErr := target.payloadReader(ctx, body, file, manifest, objectRelative)
 		if readerErr != nil {
 			_ = body.Close()
 			return BundleManifest{}, readerErr
@@ -282,7 +422,7 @@ func (target *ObjectStoreTarget) encodeManifest(manifest BundleManifest) ([]byte
 	return encoded, nil
 }
 
-func (target *ObjectStoreTarget) payloadReader(ctx context.Context, body io.Reader, file BundleFile, manifest BundleManifest) (io.Reader, error) {
+func (target *ObjectStoreTarget) payloadReader(ctx context.Context, body io.Reader, file BundleFile, manifest BundleManifest, objectRelative string) (io.Reader, error) {
 	if manifest.Encryption == nil {
 		return &objectStoreContextReader{ctx: ctx, reader: body}, nil
 	}
@@ -296,7 +436,7 @@ func (target *ObjectStoreTarget) payloadReader(ctx context.Context, body io.Read
 	if !ok {
 		return nil, fmt.Errorf("%w: encryption key %q is not available", ErrObjectStoreEncryptionInvalid, manifest.Encryption.KeyID)
 	}
-	return newObjectStorePayloadDecryptReader(ctx, body, file.Path, *manifest.Encryption, file.Size, key)
+	return newObjectStorePayloadDecryptReader(ctx, body, objectRelative, *manifest.Encryption, file.Size, key)
 }
 
 func (target *ObjectStoreTarget) validate(ctx context.Context) error {
@@ -313,8 +453,56 @@ func (target *ObjectStoreTarget) objectKey(relative string) string {
 	return target.prefix + "/" + relative
 }
 
-func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative string) (BundleFile, error) {
+type objectStoreFileResult struct {
+	file         BundleFile
+	newObject    bool
+	reusedObject bool
+}
+
+func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative string, layout ObjectStoreLayout, encryptionKeyID string, seenObjects map[string]struct{}) (objectStoreFileResult, error) {
 	filePath := filepath.Join(root, filepath.FromSlash(relative))
+	if layout != ObjectStoreLayoutContentAddressed {
+		file, err := target.uploadFileAtKey(ctx, filePath, relative, relative, nil)
+		if err != nil {
+			return objectStoreFileResult{}, err
+		}
+		return objectStoreFileResult{file: file}, nil
+	}
+
+	file, err := hashObjectStoreFile(ctx, filePath, relative)
+	if err != nil {
+		return objectStoreFileResult{}, err
+	}
+	hash := strings.ToLower(file.SHA256)
+	file.SHA256 = hash
+	objectRelative, err := contentObjectRelative(hash, encryptionKeyID)
+	if err != nil {
+		return objectStoreFileResult{}, err
+	}
+	if _, exists := seenObjects[hash]; exists {
+		return objectStoreFileResult{file: file}, nil
+	}
+	if checker, ok := target.store.(ObjectStoreObjectExists); ok {
+		if err := checkObjectStoreContext(ctx); err != nil {
+			return objectStoreFileResult{}, err
+		}
+		exists, err := checker.Exists(ctx, target.objectKey(objectRelative))
+		if err != nil {
+			return objectStoreFileResult{}, fmt.Errorf("hatriecache: check existing object %q: %w", hash, err)
+		}
+		if exists {
+			seenObjects[hash] = struct{}{}
+			return objectStoreFileResult{file: file, reusedObject: true}, nil
+		}
+	}
+	if _, err := target.uploadFileAtKey(ctx, filePath, relative, objectRelative, &file); err != nil {
+		return objectStoreFileResult{}, err
+	}
+	seenObjects[hash] = struct{}{}
+	return objectStoreFileResult{file: file, newObject: true}, nil
+}
+
+func hashObjectStoreFile(ctx context.Context, filePath, relative string) (BundleFile, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return BundleFile{}, fmt.Errorf("hatriecache: open object backup file %q: %w", relative, err)
@@ -330,6 +518,51 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 	}
 	size := info.Size()
 	digest := sha256.New()
+	counted := &countingObjectReader{reader: &objectStoreContextReader{ctx: ctx, reader: io.LimitReader(file, size)}}
+	_, readErr := io.Copy(io.Discard, io.TeeReader(counted, digest))
+	closeErr := file.Close()
+	if readErr != nil {
+		return BundleFile{}, fmt.Errorf("hatriecache: hash object backup file %q: %w", relative, readErr)
+	}
+	if closeErr != nil {
+		return BundleFile{}, fmt.Errorf("hatriecache: close hashed object backup file %q: %w", relative, closeErr)
+	}
+	if counted.count != size {
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q read %d bytes, want %d", relative, counted.count, size)
+	}
+	if err := checkObjectStoreContext(ctx); err != nil {
+		return BundleFile{}, err
+	}
+	latest, err := os.Stat(filePath)
+	if err != nil {
+		return BundleFile{}, fmt.Errorf("hatriecache: restat object backup file %q: %w", relative, err)
+	}
+	if latest.Size() != size {
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q changed while hashing", relative)
+	}
+	return BundleFile{Path: relative, Size: size, SHA256: hex.EncodeToString(digest.Sum(nil))}, nil
+}
+
+func (target *ObjectStoreTarget) uploadFileAtKey(ctx context.Context, filePath, relative, objectRelative string, expected *BundleFile) (BundleFile, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return BundleFile{}, fmt.Errorf("hatriecache: open object backup file %q: %w", relative, err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return BundleFile{}, fmt.Errorf("hatriecache: stat object backup file %q: %w", relative, err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q is not regular", relative)
+	}
+	size := info.Size()
+	if expected != nil && expected.Size != size {
+		_ = file.Close()
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q changed between reads", relative)
+	}
+	digest := sha256.New()
 	plaintext := &countingObjectReader{reader: io.LimitReader(file, size)}
 	plaintextReader := io.Reader(io.TeeReader(plaintext, digest))
 	transferSize := size
@@ -344,14 +577,14 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 			_ = file.Close()
 			return BundleFile{}, err
 		}
-		plaintextReader, err = newObjectStorePayloadEncryptReader(ctx, plaintextReader, relative, size, key, DefaultObjectStoreEncryptionChunkSize)
+		plaintextReader, err = newObjectStorePayloadEncryptReader(ctx, plaintextReader, objectRelative, size, key, DefaultObjectStoreEncryptionChunkSize)
 		if err != nil {
 			_ = file.Close()
 			return BundleFile{}, err
 		}
 	}
 	transferred := &countingObjectReader{reader: &objectStoreContextReader{ctx: ctx, reader: plaintextReader}}
-	err = target.store.Put(ctx, target.objectKey(relative), transferred, transferSize)
+	err = target.store.Put(ctx, target.objectKey(objectRelative), transferred, transferSize)
 	closeErr := file.Close()
 	if err != nil {
 		return BundleFile{}, fmt.Errorf("hatriecache: upload object backup file %q: %w", relative, err)
@@ -375,7 +608,11 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 	if latest.Size() != size {
 		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q changed during upload", relative)
 	}
-	return BundleFile{Path: relative, Size: size, SHA256: hex.EncodeToString(digest.Sum(nil))}, nil
+	result := BundleFile{Path: relative, Size: size, SHA256: hex.EncodeToString(digest.Sum(nil))}
+	if expected != nil && result.SHA256 != expected.SHA256 {
+		return BundleFile{}, fmt.Errorf("hatriecache: object backup file %q changed during upload", relative)
+	}
+	return result, nil
 }
 
 func (target *ObjectStoreTarget) downloadManifest(ctx context.Context) (BundleManifest, error) {
@@ -463,6 +700,9 @@ func validateObjectStoreManifest(manifest BundleManifest) error {
 		return fmt.Errorf("%w: version %d, want %d", ErrObjectStoreManifestInvalid, manifest.Version, BundleVersion)
 	}
 	if err := validateObjectStoreEncryptionMetadata(manifest.Encryption); err != nil {
+		return err
+	}
+	if _, err := restoreObjectStoreLayout(manifest); err != nil {
 		return err
 	}
 	if len(manifest.Files) > maxObjectStoreManifestFiles {

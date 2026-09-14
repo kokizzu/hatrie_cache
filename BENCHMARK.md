@@ -30,6 +30,53 @@ event timestamps, which is the measured cost; the implementation does not
 hide an approximate count or start a background scheduler. TTL-enabled stats
 and histograms also recompute instead of returning time-stale cached values.
 
+## CH-022: Incremental Part Backup
+
+Command: `make benchmark-ch022-incremental-part-backup-c203`. The benchmark
+uses five samples per case, 32 distinct 32 KiB parts (1 MiB total), and an
+in-memory object store implementing `ObjectStoreObjectExists`. The machine was
+an AMD Ryzen 9 5950X on Linux amd64. The base fixture setup is outside the
+timed region.
+
+| Metric | Path fallback | Content-addressed, all objects new | Content-addressed, unchanged | Relative to path (new / unchanged) |
+| --- | ---: | ---: | ---: | --- |
+| Backup median (ns/op) | 2,392,340 | 3,271,000 | 1,338,516 | 1.37x slower / 1.79x faster |
+| Allocated bytes/op | 2,703,868 | 2,776,981 | 111,441 | 1.03x higher / 24.26x lower |
+| Allocations/op | 1,573 | 2,162 | 1,150 | 1.37x higher / 1.37x lower |
+| Payload bytes/op | 1,048,576 | 1,048,576 | 0 | unchanged / 100% less |
+| Payload puts/op | 32 | 32 | 0 | unchanged / 100% fewer |
+
+Raw `-benchmem -count=5` samples:
+
+```text
+PathFull ns/op:                  3286580 2390753 2441529 2392340 2370228
+PathFull B/op:                   2703875 2703782 2704216 2703461 2703868
+PathFull allocs/op:              1572 1573 1573 1572 1573
+PathFull payload bytes/op:       1048576
+PathFull payload puts/op:        32.00
+
+ContentAddressedUnchanged ns/op: 1433115 1344958 1336482 1325122 1338516
+ContentAddressedUnchanged B/op:  111377 111500 111478 111251 111441
+ContentAddressedUnchanged allocs/op: 1150 1150 1150 1150 1150
+ContentAddressedUnchanged payload bytes/op: 0
+ContentAddressedUnchanged payload puts/op:  0
+
+ContentAddressedNew ns/op:        3217110 3270173 3284988 3276830 3271000
+ContentAddressedNew B/op:         2775530 2777284 2776981 2777053 2776649
+ContentAddressedNew allocs/op:    2161 2162 2162 2162 2162
+ContentAddressedNew payload bytes/op: 1048576
+ContentAddressedNew payload puts/op:  32.00
+```
+
+The result is workload-dependent. A cold backup with every part changed pays
+for the hash pass and is 1.37x slower with 1.03x more allocated memory, so the
+path layout remains available as a compatibility fallback. An unchanged
+incremental backup is 1.79x faster, allocates 24.26x less memory, and transfers
+no payload bytes because immutable objects are reused. The benchmark uses an
+in-memory store, so network latency and remote provider pricing are not
+represented; the payload-byte and put-count reductions are the wire-transfer
+benefit.
+
 ## TR-015 Persistent Filter and Read Amplification Telemetry
 
 Workload: five runs of `BenchmarkPebblePropertiesBaseline` on an empty Pebble

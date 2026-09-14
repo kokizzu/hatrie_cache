@@ -38,6 +38,8 @@ type BackupRetentionPlan struct {
 	DeleteBackupIDs    []string
 	KeepObjectHashes   []string
 	DeleteObjectHashes []string
+	KeepObjectKeys     []string
+	DeleteObjectKeys   []string
 }
 
 // PlanBackupChain validates and orders the complete chain ending at latestID.
@@ -113,13 +115,14 @@ func PlanBackupChain(manifests []BundleManifest, latestID string) (BackupChainPl
 			}
 		}
 		for _, file := range manifest.Files {
-			if previousSize, exists := objectSizes[file.SHA256]; exists {
+			objectKey := backupObjectIdentity(manifest, file)
+			if previousSize, exists := objectSizes[objectKey]; exists {
 				if previousSize != file.Size {
-					return BackupChainPlan{}, fmt.Errorf("hatriecache: object %q has conflicting sizes", file.SHA256)
+					return BackupChainPlan{}, fmt.Errorf("hatriecache: object %q has conflicting sizes", objectKey)
 				}
 				continue
 			}
-			objectSizes[file.SHA256] = file.Size
+			objectSizes[objectKey] = file.Size
 		}
 	}
 	plan.ObjectCount = len(objectSizes)
@@ -166,29 +169,56 @@ func PlanBackupRetention(manifests []BundleManifest, latestID string, retain int
 	}
 	sort.Strings(plan.DeleteBackupIDs)
 
-	keepObjects := make(map[string]struct{})
-	allObjects := make(map[string]struct{})
+	keepHashes := make(map[string]struct{})
+	allHashes := make(map[string]struct{})
+	keepObjectKeys := make(map[string]struct{})
+	allObjectKeys := make(map[string]struct{})
 	for _, input := range manifests {
 		for _, file := range input.Files {
-			allObjects[file.SHA256] = struct{}{}
+			allHashes[file.SHA256] = struct{}{}
+			allObjectKeys[backupObjectIdentity(input, file)] = struct{}{}
 		}
 		if _, exists := keep[input.BackupID]; exists {
 			for _, file := range input.Files {
-				keepObjects[file.SHA256] = struct{}{}
+				keepHashes[file.SHA256] = struct{}{}
+				keepObjectKeys[backupObjectIdentity(input, file)] = struct{}{}
 			}
 		}
 	}
-	for hash := range keepObjects {
+	for hash := range keepHashes {
 		plan.KeepObjectHashes = append(plan.KeepObjectHashes, hash)
 	}
-	for hash := range allObjects {
-		if _, exists := keepObjects[hash]; !exists {
+	for hash := range allHashes {
+		if _, exists := keepHashes[hash]; !exists {
 			plan.DeleteObjectHashes = append(plan.DeleteObjectHashes, hash)
 		}
 	}
 	sort.Strings(plan.KeepObjectHashes)
 	sort.Strings(plan.DeleteObjectHashes)
+	for key := range keepObjectKeys {
+		plan.KeepObjectKeys = append(plan.KeepObjectKeys, key)
+	}
+	for key := range allObjectKeys {
+		if _, exists := keepObjectKeys[key]; !exists {
+			plan.DeleteObjectKeys = append(plan.DeleteObjectKeys, key)
+		}
+	}
+	sort.Strings(plan.KeepObjectKeys)
+	sort.Strings(plan.DeleteObjectKeys)
 	return plan, nil
+}
+
+func backupObjectIdentity(manifest BundleManifest, file BundleFile) string {
+	if manifest.ObjectLayout == string(ObjectStoreLayoutContentAddressed) {
+		keyID := ""
+		if manifest.Encryption != nil {
+			keyID = manifest.Encryption.KeyID
+		}
+		if objectKey, err := contentObjectRelative(file.SHA256, keyID); err == nil {
+			return objectKey
+		}
+	}
+	return file.SHA256
 }
 
 func validateBackupChainManifest(manifest BundleManifest) error {
@@ -257,6 +287,8 @@ func validateBackupChainFile(file BundleFile) error {
 func cloneBackupManifest(input BundleManifest) BundleManifest {
 	output := input
 	output.Files = append([]BundleFile(nil), input.Files...)
+	output.NewObjectHashes = append([]string(nil), input.NewObjectHashes...)
+	output.ReusedObjectHashes = append([]string(nil), input.ReusedObjectHashes...)
 	output.Partition = ClonePartitionMetadata(input.Partition)
 	if input.Encryption != nil {
 		encryption := *input.Encryption
