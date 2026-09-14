@@ -19,6 +19,9 @@ type sqlKeysetCursor struct {
 // resolver must implement KeysetOrderedStreamSourceResolver, and the existing
 // offset cursor remains the default for all callers.
 func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (result SQLQueryResult, err error) {
+	if err = options.normalizeSQLSnapshotToken(); err != nil {
+		return result, err
+	}
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id

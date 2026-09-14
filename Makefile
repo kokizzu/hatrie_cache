@@ -13775,3 +13775,36 @@ commit-tr019-columnar-value:
 .PHONY: push-tr019-columnar-value
 push-tr019-columnar-value:
 	bash ./scripts/push-tr019-columnar-value.sh
+.PHONY: inspect-open-backlog-c203
+inspect-open-backlog-c203:
+	bash ./scripts/inspect-open-backlog-c203.sh
+.PHONY: inspect-ch027-dictionary
+inspect-ch027-dictionary:
+	bash ./scripts/inspect-ch027-dictionary.sh
+.PHONY: test-mz044-snapshot-token
+test-mz044-snapshot-token:
+	@bash ./scripts/test-mz044-snapshot-token.sh
+
+.PHONY: format-mz044-snapshot-token
+format-mz044-snapshot-token:
+	@bash ./scripts/format-mz044-snapshot-token.sh
+
+.PHONY: benchmark-mz044-snapshot-token
+benchmark-mz044-snapshot-token:
+	@bash ./scripts/benchmark-mz044-snapshot-token.sh
+
+.PHONY: verify-mz044-snapshot-token
+verify-mz044-snapshot-token:
+	@bash ./scripts/verify-mz044-snapshot-token.sh
+
+.PHONY: review-mz044-snapshot-token
+review-mz044-snapshot-token:
+	@bash ./scripts/review-mz044-snapshot-token.sh
+
+.PHONY: commit-mz044-snapshot-token
+commit-mz044-snapshot-token:
+	@bash ./scripts/commit-mz044-snapshot-token.sh
+
+.PHONY: push-mz044-snapshot-token
+push-mz044-snapshot-token:
+	@bash ./scripts/push-mz044-snapshot-token.sh

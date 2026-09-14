@@ -24232,3 +24232,29 @@ and reads `Columns` directly.
 Specialized, mixed, and malformed layouts retain the established precedence
 and validation behavior. The optimization changes no SQL result, wire format,
 storage format, public API, or allocation profile.
+
+<a id="mz-044-session-snapshot-tokens"></a>
+## MZ-044 Session Snapshot Tokens
+
+Command: `make benchmark-mz044-snapshot-token`
+
+Workload: signed frontier-token encode/decode/application and one small SQL
+query using the existing `BeginSQLSnapshotAt` resolver contract. Five
+`-benchmem` samples were collected on the same AMD Ryzen 9 5950X host. The
+token is opt-in; the default and direct-frontier paths are the comparison
+baselines rather than a claim that tokens improve raw query speed.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative cost |
+| --- | --- | ---: | ---: | ---: | --- |
+| Token encode | 611.3; 621.6; 629.4; 607.8; 611.7 | 611.7 | 736 | 9 | new operation |
+| Token decode | 626.7; 627.1; 616.5; 611.7; 616.8 | 616.8 | 576 | 7 | new operation |
+| Token apply | 639.9; 644.6; 648.4; 651.3; 644.8 | 644.8 | 584 | 8 | new operation |
+| Query with token | 3,790; 3,753; 3,788; 3,862; 3,907 | 3,790 | 4,384 | 27 | 1.27x CPU and +584 B / +8 allocs vs direct frontier |
+| Query with direct `AsOfFrontier` | 3,138; 3,011; 2,993; 2,964; 2,921 | 2,993 | 3,800 | 19 | baseline |
+| Default live query | 2,874; 2,931; 2,924; 2,927; 2,905 | 2,924 | 3,784 | 18 | baseline |
+
+The tokenized query is 1.30x the default query in this small workload and
+uses 600 more bytes plus 9 more allocations. That cost buys a portable,
+time-bounded consistency handle for related queries; it is intentionally
+absent from the default path. Raw benchmark output is preserved in the
+command result and can be regenerated with the target above.

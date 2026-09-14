@@ -132,7 +132,7 @@ before/after measurement when its motivation is performance.
 | MZ-41 | Recursive negative differential propagation | Support deletions in recursive results | Non-monotone fixpoint complexity | [ ] |
 | MZ-42 | Dataflow dependency graph introspection | Explain rebuild and invalidation impact | Graph retention | [ ] |
 | MZ-43 | Per-operator frontier lag metrics | Locate the actual source of staleness | Metrics cardinality | [x] |
-| MZ-44 | Session snapshot consistency tokens | Tie multiple queries to one logical view | Token lifetime | [ ] |
+| MZ-44 | Session snapshot consistency tokens | Tie multiple queries to one logical view | Token lifetime | [x] Implemented by the opt-in HMAC-backed `hatSql.SQLSnapshotTokenCodec`; it maps to the existing `AsOfFrontier` provider path and defaults off. See [MZ044_SNAPSHOT_TOKENS.md](MZ044_SNAPSHOT_TOKENS.md) and [BENCHMARK.md#mz-044-session-snapshot-tokens](BENCHMARK.md#mz-044-session-snapshot-tokens). |
 | MZ-45 | Transactional source-to-sink boundary | Commit a source batch and sink effect together | Distributed commit complexity | [ ] |
 | MZ-46 | Schema migration barrier across dependent dataflows | Prevent mixed-schema results | Planned downtime or buffering | [ ] |
 | MZ-47 | Timeline recovery and frontier reconciliation | Repair partially persisted progress | Recovery duration | [ ] |

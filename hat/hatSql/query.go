@@ -344,6 +344,10 @@ type SQLQueryOptions struct {
 	// frontier. Nil preserves the live/default execution path; a non-nil
 	// pointer also permits an explicit frontier of zero.
 	AsOfFrontier *uint64
+	// SnapshotToken optionally authenticates and selects an immutable frontier
+	// for related queries. Empty preserves the existing query path.
+	SnapshotToken      string
+	SnapshotTokenCodec *SQLSnapshotTokenCodec
 	// PlanSnapshot enables an immutable explain snapshot on the returned
 	// materialized result, including any source-frontier requirements.
 	PlanSnapshot *SQLPlanSnapshotOptions
@@ -743,6 +747,9 @@ func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
 // ExecuteSQLQueryParameters executes source with positional $1, $2, ...
 // values supplied separately from SQL text.
 func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
+	if err = options.normalizeSQLSnapshotToken(); err != nil {
+		return result, err
+	}
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	var quotaReservation SQLQuotaReservation
@@ -948,6 +955,9 @@ var (
 // source is also streamed after each row is validated and converted; it drains
 // the source after LIMIT so declared-field diagnostics match materialization.
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func(columns []string, row SQLRow) error) (err error) {
+	if err = options.normalizeSQLSnapshotToken(); err != nil {
+		return err
+	}
 	observation := newSQLQueryObservation(options)
 	outputRows, outputColumns, resultBytes := 0, 0, observation.resultBytes(nil)
 	var quotaReservation SQLQuotaReservation
@@ -5096,6 +5106,9 @@ type sqlCursor struct {
 // ExecuteSQLQueryPage executes one bounded page. Cursors are opaque and bound
 // to both SQL text and the encoded parameter values.
 func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, pageSize int, cursor string) (result SQLQueryResult, err error) {
+	if err = options.normalizeSQLSnapshotToken(); err != nil {
+		return result, err
+	}
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id

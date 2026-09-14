@@ -22,6 +22,26 @@ import (
 )
 
 type SQLQueryOptions = hatSql.SQLQueryOptions
+type SQLSnapshotToken = hatSql.SQLSnapshotToken
+type SQLSnapshotTokenCodec = hatSql.SQLSnapshotTokenCodec
+type SQLSnapshotTokenCodecOptions = hatSql.SQLSnapshotTokenCodecOptions
+
+const (
+	DefaultSQLSnapshotTokenMaxAge  = hatSql.DefaultSQLSnapshotTokenMaxAge
+	MinSQLSnapshotTokenSecretBytes = hatSql.MinSQLSnapshotTokenSecretBytes
+	MaxSQLSnapshotTokenBytes       = hatSql.MaxSQLSnapshotTokenBytes
+)
+
+var (
+	ErrSQLSnapshotTokenCodecNil       = hatSql.ErrSQLSnapshotTokenCodecNil
+	ErrSQLSnapshotTokenSecretInvalid  = hatSql.ErrSQLSnapshotTokenSecretInvalid
+	ErrSQLSnapshotTokenMaxAgeInvalid  = hatSql.ErrSQLSnapshotTokenMaxAgeInvalid
+	ErrSQLSnapshotTokenInvalid        = hatSql.ErrSQLSnapshotTokenInvalid
+	ErrSQLSnapshotTokenAuthentication = hatSql.ErrSQLSnapshotTokenAuthentication
+	ErrSQLSnapshotTokenExpired        = hatSql.ErrSQLSnapshotTokenExpired
+	ErrSQLSnapshotTokenConflict       = hatSql.ErrSQLSnapshotTokenConflict
+)
+
 type SQLDataflowIR = hatSql.SQLDataflowIR
 type SQLDataflowNode = hatSql.SQLDataflowNode
 type SQLDataflowFragment = hatSql.SQLDataflowFragment

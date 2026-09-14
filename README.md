@@ -42,6 +42,7 @@ security guidance before exposing it on a network.
 - Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
 - Opt-in Materialize-style worker-local exchange batching: [MZ037_WORKER_LOCAL_EXCHANGE.md](MZ037_WORKER_LOCAL_EXCHANGE.md)
 - Opt-in Materialize-style operator yield budgets: [MZ039_OPERATOR_YIELD.md](MZ039_OPERATOR_YIELD.md)
+- Materialize-style signed session snapshot tokens: [MZ044_SNAPSHOT_TOKENS.md](MZ044_SNAPSHOT_TOKENS.md), with measured opt-in overhead in [BENCHMARK.md](BENCHMARK.md#mz-044-session-snapshot-tokens)
 - Tarantool/ClickHouse-inspired single-source SQL row allocation fast paths: [TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md)
 - Flat native `[]int64` and `[]string` array columns for lower retained storage: [NATIVE_ARRAY_COLUMNS.md](NATIVE_ARRAY_COLUMNS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
