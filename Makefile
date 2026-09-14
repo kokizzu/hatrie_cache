@@ -14550,3 +14550,35 @@ commit-ch023-c203:
 .PHONY: push-ch023-c203
 push-ch023-c203:
 	bash ./scripts/push-ch023-c203.sh
+
+.PHONY: benchmark-tr019-c203
+benchmark-tr019-c203:
+	bash ./scripts/benchmark-tr019-c203.sh
+
+.PHONY: test-tr019-c203
+test-tr019-c203:
+	bash ./scripts/test-tr019-c203.sh
+
+.PHONY: format-tr019-c203
+format-tr019-c203:
+	bash ./scripts/format-tr019-c203.sh
+
+.PHONY: verify-tr019-c203
+verify-tr019-c203:
+	bash ./scripts/verify-tr019-c203.sh
+
+.PHONY: stage-tr019-c203
+stage-tr019-c203:
+	bash ./scripts/stage-tr019-c203.sh
+
+.PHONY: inspect-staged-tr019-c203
+inspect-staged-tr019-c203:
+	bash ./scripts/inspect-staged-tr019-c203.sh
+
+.PHONY: commit-tr019-c203
+commit-tr019-c203:
+	bash ./scripts/commit-tr019-c203.sh
+
+.PHONY: push-tr019-c203
+push-tr019-c203:
+	bash ./scripts/push-tr019-c203.sh

@@ -4058,6 +4058,17 @@ The optimization is automatic and additive. Unsupported paths and sources that
 do not provide `MapColumns` use the existing exact SQL path, with no migration,
 wire-format, or configuration change. See [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md)
 and [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning).
+
+## SQL Columnar Field-Offset Cache
+
+Repeated reads from a reused mixed-encoding `ColumnarBatch` can use a
+Tarantool-style immutable field-offset table. Enable it for a typed table with
+`TypedTableColumnarCacheOptions{Enabled: true, FieldOffsetCache: true}`; call
+`ColumnarBatch.PrepareFieldOffsets()` for manually built batches. It is off by
+default, has no wire or storage format change, and is invalidated before the
+existing packing and string-encoding methods mutate a batch. The measured
+lookup and preparation tradeoff is documented in
+[TR019_TUPLE_FIELD_OFFSETS.md](TR019_TUPLE_FIELD_OFFSETS.md).
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
 - Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)

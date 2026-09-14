@@ -55,7 +55,9 @@ const (
 // cache. It is disabled by default so existing typed tables keep their current
 // memory behavior.
 type TypedTableColumnarCacheOptions struct {
-	Enabled                   bool
+	Enabled bool
+	// FieldOffsetCache is built only for cached layouts and is disabled by default.
+	FieldOffsetCache          bool
 	SortedOrderCache          bool
 	CompressedBatches         bool
 	DecompressedBlockCache    bool
@@ -840,6 +842,9 @@ func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {
 				)
 			}
 		}
+		if table.columnar.options.FieldOffsetCache {
+			batch.PrepareFieldOffsets()
+		}
 		return batch
 	}
 	now := table.typedTableTTLNow()
@@ -874,6 +879,9 @@ func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {
 				table.columnar.options.DecompressedBlockMinReads,
 			)
 		}
+	}
+	if table.columnar.options.FieldOffsetCache {
+		batch.PrepareFieldOffsets()
 	}
 	return batch
 }

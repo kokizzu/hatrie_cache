@@ -1,5 +1,24 @@
 # Benchmark
 
+## TR-019 Tuple Field-Offset Cache
+
+Five-run local benchmark on a 128-row batch containing dictionary, packed,
+boolean, numeric, and plain fields. The cached path prepares one immutable
+field-offset table before timing; the default path remains unchanged.
+
+| Path | Median CPU | Memory/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Existing uncached lookup | 48.78 ns | 4 B | 0 | 1.00x |
+| Prepared field-offset lookup | 27.43 ns | 4 B | 0 | 1.78x CPU |
+| One-time preparation | 670.7 ns | 824 B | 8 | paid once per cached batch |
+
+Raw samples: uncached `48.78 48.30 48.96 49.42 48.75` ns/op; prepared
+`27.59 27.43 27.70 27.07 27.27` ns/op; preparation
+`694.5 670.7 669.1 669.0 674.2` ns/op. The opt-in setting is
+`TypedTableColumnarCacheOptions.FieldOffsetCache`; it is off by default.
+See [TR019_TUPLE_FIELD_OFFSETS.md](TR019_TUPLE_FIELD_OFFSETS.md) for usage
+and retained-memory tradeoffs.
+
 ## CH-007: Row TTL
 
 The opt-in `TypedTable` row TTL policy supports processing-time deadlines and

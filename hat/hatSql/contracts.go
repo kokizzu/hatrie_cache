@@ -213,6 +213,7 @@ type ColumnarBatch struct {
 	MapColumns             map[string]ColumnarMapColumn
 	Rows                   int
 	decompressedBlockCache *columnarDecompressedBlockCache
+	fieldOffsets           *columnarFieldOffsets
 }
 
 // PackCompressedColumns applies the specialized compact representations to
@@ -222,6 +223,7 @@ func (batch *ColumnarBatch) PackCompressedColumns() {
 	if batch == nil {
 		return
 	}
+	batch.fieldOffsets = nil
 	// Specialized encodings avoid retaining interface values when their type
 	// and layout permit a smaller representation.
 	batch.PackBooleanColumns()
@@ -394,7 +396,7 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 	if cache := batch.decompressedBlockCache; cache != nil {
 		key, offset, eligible := cache.blockKey(field, row)
 		if !eligible {
-			return batch.valueWithoutDecompressedCache(field, row)
+			return batch.valueAtPreparedField(field, row)
 		}
 		if value, valid, found := cache.lookup(key, offset); found {
 			return value, valid
@@ -405,7 +407,10 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 			return decoded.values[offset], decoded.validAt(offset)
 		}
 	}
-	return batch.valueWithoutDecompressedCache(field, row)
+	if batch.fieldOffsets == nil {
+		return batch.valueWithoutDecompressedCache(field, row)
+	}
+	return batch.valueAtPreparedField(field, row)
 }
 
 func (batch ColumnarBatch) valueWithoutDecompressedCache(field string, row int) (interface{}, bool) {
@@ -530,6 +535,7 @@ func (batch *ColumnarBatch) PackNullableColumns() {
 	if batch == nil || len(batch.Columns) == 0 {
 		return
 	}
+	batch.fieldOffsets = nil
 	for field, values := range batch.Columns {
 		rows := len(values)
 		if rows == 0 {
@@ -628,6 +634,7 @@ func (batch *ColumnarBatch) PackBooleanColumns() {
 	if batch == nil || len(batch.Columns) == 0 {
 		return
 	}
+	batch.fieldOffsets = nil
 	for field, values := range batch.Columns {
 		rows := len(values)
 		if rows == 0 {
@@ -742,6 +749,7 @@ func (batch *ColumnarBatch) PackNumericColumns() {
 	if batch == nil || len(batch.Columns) == 0 {
 		return
 	}
+	batch.fieldOffsets = nil
 	for field, values := range batch.Columns {
 		rows := len(values)
 		if rows == 0 {
@@ -880,6 +888,7 @@ func (batch *ColumnarBatch) PackDictionaryValues() {
 	if batch == nil || len(batch.Dictionaries) == 0 {
 		return
 	}
+	batch.fieldOffsets = nil
 	for field, dictionary := range batch.Dictionaries {
 		if dictionary.Values == nil || len(dictionary.Values) < 2 {
 			continue
@@ -979,6 +988,7 @@ func (batch *ColumnarBatch) PackDictionaryCodes() {
 	if batch == nil || len(batch.Dictionaries) == 0 {
 		return
 	}
+	batch.fieldOffsets = nil
 	for field, dictionary := range batch.Dictionaries {
 		if dictionary.Codes == nil || len(dictionary.Codes) == 0 || dictionary.ValueCount() == 0 {
 			continue
@@ -1037,6 +1047,7 @@ func (batch *ColumnarBatch) EncodeRepeatedStringsForLookup(shape ColumnarDiction
 	if batch == nil || batch.Rows < 4 || batch.Columns == nil {
 		return
 	}
+	batch.fieldOffsets = nil
 	if batch.Dictionaries == nil {
 		batch.Dictionaries = make(map[string]DictionaryColumn)
 	}
