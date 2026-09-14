@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrSQLTransactionReadOnly is returned when a mutation is attempted through
 // a transaction opened with ReadOnly enabled.
 var ErrSQLTransactionReadOnly = errors.New("SQL transaction is read-only")
+
+// ErrSQLTransactionTimeout is returned when a transaction's configured wall
+// clock timeout expires before an operation can complete.
+var ErrSQLTransactionTimeout = errors.New("SQL transaction timed out")
 
 // SQLTransactionIsolation controls how a SQLTransaction coordinates with
 // concurrent command-path mutations.
@@ -58,11 +63,17 @@ type SQLTransactionOptions struct {
 	// ReadOnly rejects Execute mutations while retaining snapshot reads. It is
 	// disabled by the zero value for backward compatibility.
 	ReadOnly bool
+	// Timeout bounds the transaction after its private snapshot is captured. A
+	// zero value disables the timeout and preserves the default fast path.
+	Timeout time.Duration
 }
 
 func (options SQLTransactionOptions) normalized() (SQLTransactionOptions, error) {
 	if options.Isolation > SQLTransactionIsolationSerializable {
 		return SQLTransactionOptions{}, fmt.Errorf("unsupported SQL transaction isolation %d", options.Isolation)
+	}
+	if options.Timeout < 0 {
+		return SQLTransactionOptions{}, fmt.Errorf("SQL transaction timeout cannot be negative")
 	}
 	return options, nil
 }

@@ -55,6 +55,7 @@ make benchmark-c232-baseline
 make benchmark-c232
 ```
 
+
 Archived pre-change baseline:
 
 ```text
@@ -23845,4 +23846,45 @@ BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  157731  7424 ns/op  9237 B
 BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  157591  7653 ns/op  9237 B/op  31 allocs/op
 BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  154558  7364 ns/op  9237 B/op  31 allocs/op
 BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  157245  7584 ns/op  9237 B/op  31 allocs/op
+```
+
+## TR-038 SQL Transaction Timeouts
+
+This measures the transaction deadline guard introduced for the Tarantool-style
+bounded transaction timeout. `disabled` is the default zero-value path and
+`enabled` is an active, non-expired timeout. Both cases report the guard's
+direct cost rather than snapshot creation or SQL execution, isolating the
+overhead that the option adds at transaction boundaries.
+
+| Path | Raw `ns/op` samples | Median | Heap | Allocs | Relative guard cost |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Timeout disabled | 4.599; 4.516; 4.135; 4.227; 3.815 | 4.227 | 0 B/op | 0 | 1.00x |
+| Timeout enabled | 44.24; 48.92; 46.44; 52.56; 47.74 | 47.74 | 0 B/op | 0 | 11.30x |
+
+The enabled setting costs about 43.51 ns more per guard on this host, with no
+heap allocation. A transaction `Execute` checks before compilation, before the
+private mutation, and after it; `Query` checks before and after execution while
+also inheriting the deadline. The default timeout remains off, so ordinary
+transactions do not pay the clock-read cost. Host: AMD Ryzen 9 5950X,
+Linux/amd64. Command: `make benchmark-tr038-transaction-timeout`.
+
+Raw output:
+
+```text
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatCache
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkTR038SQLTransactionTimeoutGuard/disabled-32  303599276  4.599 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/disabled-32  265978140  4.516 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/disabled-32  286029723  4.135 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/disabled-32  276778123  4.227 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/disabled-32  296177182  3.815 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/enabled-32  27168912  44.24 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/enabled-32  26112372  48.92 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/enabled-32  25156940  46.44 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/enabled-32  24592158  52.56 ns/op  0 B/op  0 allocs/op
+BenchmarkTR038SQLTransactionTimeoutGuard/enabled-32  22129327  47.74 ns/op  0 B/op  0 allocs/op
+PASS
+ok  hatrie_cache/hat/hatCache  14.487s
 ```

@@ -181,7 +181,7 @@ before/after measurement when its motivation is performance.
 | TR-35 | MVCC snapshot read views | Stable reads during concurrent writes | Version retention | [ ] |
 | TR-36 | Explicit read-only transaction mode | Protect analytical clients from writes | API and enforcement work | [x] Implemented by `SQLTransactionOptions.ReadOnly`; see [TR036_READ_ONLY_TRANSACTIONS.md](TR036_READ_ONLY_TRANSACTIONS.md) and [BENCHMARK.md](BENCHMARK.md#tr-036-read-only-sql-transactions). |
 | TR-37 | Deadlock detection with a wait-for graph | Fail blocked transactions deterministically | Graph overhead | [ ] |
-| TR-38 | Transaction and statement timeouts | Bound stuck work | Partial rollback behavior | [ ] |
+| TR-38 | Transaction and statement timeouts | Bound stuck work | Partial rollback behavior | [x] Transaction-wide timeout is implemented through `SQLTransactionOptions.Timeout`; existing statement timeout remains `SQLQueryOptions.Timeout`. See [TR038_TRANSACTION_TIMEOUT.md](TR038_TRANSACTION_TIMEOUT.md) and [BENCHMARK.md](BENCHMARK.md#tr-038-sql-transaction-timeouts). |
 | TR-39 | Fiber-local allocation pools and context | Lower scheduler-path allocations | Lifetime leaks | [ ] |
 | TR-40 | Cancellation propagation into fibers | Stop abandoned requests quickly | Cooperative cancellation gaps | [ ] |
 | TR-41 | Net.box-style request multiplexing | Reuse one connection for concurrent calls | Ordering and head-of-line blocking | [ ] |

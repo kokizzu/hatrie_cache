@@ -13420,3 +13420,35 @@ commit-sql-mutation-idempotency:
 .PHONY: push-sql-mutation-idempotency
 push-sql-mutation-idempotency:
 	bash ./scripts/push-sql-mutation-idempotency.sh
+
+.PHONY: test-tr038-transaction-timeout
+test-tr038-transaction-timeout:
+	bash ./scripts/test-tr038-transaction-timeout.sh
+
+.PHONY: format-tr038-transaction-timeout
+format-tr038-transaction-timeout:
+	bash ./scripts/format-tr038-transaction-timeout.sh
+
+.PHONY: benchmark-tr038-transaction-timeout
+benchmark-tr038-transaction-timeout:
+	bash ./scripts/benchmark-tr038-transaction-timeout.sh
+
+.PHONY: race-tr038-transaction-timeout
+race-tr038-transaction-timeout:
+	bash ./scripts/race-tr038-transaction-timeout.sh
+
+.PHONY: vet-tr038-transaction-timeout
+vet-tr038-transaction-timeout:
+	bash ./scripts/vet-tr038-transaction-timeout.sh
+
+.PHONY: review-tr038-transaction-timeout
+review-tr038-transaction-timeout:
+	bash ./scripts/review-tr038-transaction-timeout.sh
+
+.PHONY: commit-tr038-transaction-timeout
+commit-tr038-transaction-timeout:
+	bash ./scripts/commit-tr038-transaction-timeout.sh
+
+.PHONY: push-tr038-transaction-timeout
+push-tr038-transaction-timeout:
+	bash ./scripts/push-tr038-transaction-timeout.sh

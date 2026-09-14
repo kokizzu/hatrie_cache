@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // SQLTransaction is an optimistic snapshot-isolated transaction for scalar
@@ -20,6 +21,8 @@ type SQLTransaction struct {
 	epoch                uint64
 	isolation            SQLTransactionIsolation
 	readOnly             bool
+	deadline             time.Time
+	timedOut             bool
 	serializableLockHeld bool
 	staged               []CacheCommandRequest
 	savepoints           []sqlTransactionSavepoint
@@ -89,12 +92,17 @@ func BeginSQLTransactionWithOptions(trie *HatTrie, options SQLTransactionOptions
 		return nil, err
 	}
 	_ = os.RemoveAll(directory)
+	deadline := time.Time{}
+	if options.Timeout > 0 {
+		deadline = time.Now().Add(options.Timeout)
+	}
 	return &SQLTransaction{
 		live:                 trie,
 		snapshot:             snapshot,
 		epoch:                epoch,
 		isolation:            options.Isolation,
 		readOnly:             options.ReadOnly,
+		deadline:             deadline,
 		serializableLockHeld: serializableLockHeld,
 	}, nil
 }
@@ -120,7 +128,10 @@ func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, er
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
 	if transaction.closed {
-		return SQLMutationResult{}, fmt.Errorf("SQL transaction is closed")
+		return SQLMutationResult{}, transaction.closedError()
+	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return SQLMutationResult{}, err
 	}
 	if transaction.readOnly {
 		return SQLMutationResult{}, ErrSQLTransactionReadOnly
@@ -141,9 +152,15 @@ func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, er
 			return SQLMutationResult{}, fmt.Errorf("SQL transaction Execute supports scalar mutations only")
 		}
 	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return SQLMutationResult{}, err
+	}
 	response := transaction.snapshot.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: payloads})
 	if !response.OK {
 		return SQLMutationResult{Response: response}, fmt.Errorf("SQL transaction mutation failed: %s", response.Message)
+	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return SQLMutationResult{}, err
 	}
 	transaction.staged = append(transaction.staged, payloads...)
 	return SQLMutationResult{Affected: len(payloads), Response: response}, nil
@@ -155,9 +172,22 @@ func (transaction *SQLTransaction) Query(ctx context.Context, source string, par
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
 	if transaction.closed {
-		return SQLQueryResult{}, fmt.Errorf("SQL transaction is closed")
+		return SQLQueryResult{}, transaction.closedError()
 	}
-	return ExecuteSQLQueryParameters(ctx, source, transaction.snapshot, parameters, options)
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return SQLQueryResult{}, err
+	}
+	queryContext := ctx
+	cancel := func() {}
+	if !transaction.deadline.IsZero() {
+		queryContext, cancel = context.WithDeadline(ctx, transaction.deadline)
+	}
+	defer cancel()
+	result, err := ExecuteSQLQueryParameters(queryContext, source, transaction.snapshot, parameters, options)
+	if timeoutErr := transaction.checkTimeoutLocked(); timeoutErr != nil {
+		return SQLQueryResult{}, timeoutErr
+	}
+	return result, err
 }
 
 // Commit atomically publishes staged scalar writes only if the live cache still
@@ -166,7 +196,10 @@ func (transaction *SQLTransaction) Commit() error {
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
 	if transaction.closed {
-		return fmt.Errorf("SQL transaction is closed")
+		return transaction.closedError()
+	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return err
 	}
 	response := transaction.live.executeSQLTransactionBatch(transaction.epoch, transaction.staged)
 	transaction.closeLocked()
@@ -193,7 +226,10 @@ func (transaction *SQLTransaction) Savepoint(name string) error {
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
 	if transaction.closed {
-		return fmt.Errorf("SQL transaction is closed")
+		return transaction.closedError()
+	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return err
 	}
 	name, err := normalizeSQLSavepointName(name)
 	if err != nil {
@@ -208,6 +244,10 @@ func (transaction *SQLTransaction) Savepoint(name string) error {
 	if err != nil {
 		return err
 	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		snapshot.Destroy()
+		return err
+	}
 	transaction.savepoints = append(transaction.savepoints, sqlTransactionSavepoint{name: name, staged: len(transaction.staged), snapshot: snapshot})
 	return nil
 }
@@ -218,7 +258,10 @@ func (transaction *SQLTransaction) RollbackTo(name string) error {
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
 	if transaction.closed {
-		return fmt.Errorf("SQL transaction is closed")
+		return transaction.closedError()
+	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return err
 	}
 	name, err := normalizeSQLSavepointName(name)
 	if err != nil {
@@ -238,6 +281,10 @@ func (transaction *SQLTransaction) RollbackTo(name string) error {
 	if err != nil {
 		return err
 	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		restored.Destroy()
+		return err
+	}
 	transaction.snapshot.Destroy()
 	transaction.snapshot = restored
 	transaction.staged = transaction.staged[:transaction.savepoints[index].staged]
@@ -253,7 +300,10 @@ func (transaction *SQLTransaction) ReleaseSavepoint(name string) error {
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
 	if transaction.closed {
-		return fmt.Errorf("SQL transaction is closed")
+		return transaction.closedError()
+	}
+	if err := transaction.checkTimeoutLocked(); err != nil {
+		return err
 	}
 	name, err := normalizeSQLSavepointName(name)
 	if err != nil {
@@ -325,6 +375,22 @@ func (transaction *SQLTransaction) closeLocked() {
 		}
 	}
 	transaction.savepoints = nil
+}
+
+func (transaction *SQLTransaction) checkTimeoutLocked() error {
+	if transaction.deadline.IsZero() || time.Now().Before(transaction.deadline) {
+		return nil
+	}
+	transaction.timedOut = true
+	transaction.closeLocked()
+	return ErrSQLTransactionTimeout
+}
+
+func (transaction *SQLTransaction) closedError() error {
+	if transaction.timedOut {
+		return ErrSQLTransactionTimeout
+	}
+	return fmt.Errorf("SQL transaction is closed")
 }
 
 func sqlTransactionWritableCommand(command string) bool {
