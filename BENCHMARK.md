@@ -77,6 +77,53 @@ in-memory store, so network latency and remote provider pricing are not
 represented; the payload-byte and put-count reductions are the wire-transfer
 benefit.
 
+## CH-027: External Dictionary Cache
+
+Command: `make benchmark-ch027-external-dictionary-c203`. The benchmark uses a
+one-key in-memory source, a warm dictionary entry, five samples per case, and
+an AMD Ryzen 9 5950X on Linux amd64. The direct-source case models the
+allocation and lookup work without caching; it intentionally excludes network
+latency so the cache's local overhead is visible.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative to matching direct source |
+| --- | ---: | ---: | ---: | --- |
+| Direct source, serial | 183.0 | 336 | 2 | 1.00x |
+| Dictionary hit, serial | 80.54 | 0 | 0 | 2.27x faster |
+| Direct source, parallel | 94.21 | 336 | 2 | 1.00x |
+| Dictionary hit, parallel | 55.53 | 0 | 0 | 1.70x faster |
+
+The warm dictionary retained 16 logical key-plus-value bytes for this fixture;
+the configured defaults additionally cap entries at 4,096 and logical bytes
+at 16 MiB. The cache uses atomic hit bookkeeping and read locking on the hot
+path, while refresh and eviction remain bounded and serialized.
+
+Raw `-benchmem -count=5` samples:
+
+```text
+DirectSource ns/op:           179.3 183.0 189.1 227.7 176.9
+DirectSource B/op:            336 336 336 336 336
+DirectSource allocs/op:       2 2 2 2 2
+
+DirectSourceParallel ns/op:   95.60 93.37 93.10 94.37 94.21
+DirectSourceParallel B/op:    336 336 336 336 336
+DirectSourceParallel allocs/op: 2 2 2 2 2
+
+CachedHit ns/op:              80.74 76.32 80.54 80.02 86.05
+CachedHit B/op:               0 0 0 0 0
+CachedHit allocs/op:          0 0 0 0 0
+CachedHit retained_bytes:     16
+
+CachedHitParallel ns/op:      57.04 55.24 54.46 55.84 55.53
+CachedHitParallel B/op:       0 0 0 0 0
+CachedHitParallel allocs/op:  0 0 0 0 0
+```
+
+The cache is beneficial when source loads are materially more expensive than
+local lookup, which is the expected external-dictionary case. Its explicit
+tradeoff is retained memory and possible staleness; `StaleIfError` is disabled
+by default, and source/network latency is intentionally not hidden in this
+local benchmark.
+
 ## TR-015 Persistent Filter and Read Amplification Telemetry
 
 Workload: five runs of `BenchmarkPebblePropertiesBaseline` on an empty Pebble

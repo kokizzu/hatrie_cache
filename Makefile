@@ -14288,3 +14288,40 @@ commit-ch022-incremental-part-backup-c203:
 .PHONY: push-ch022-incremental-part-backup-c203
 push-ch022-incremental-part-backup-c203:
 	@bash scripts/push-ch022-incremental-part-backup-c203.sh
+
+
+.PHONY: test-ch027-external-dictionary-c203
+test-ch027-external-dictionary-c203:
+	@bash scripts/test-ch027-external-dictionary-c203.sh
+
+.PHONY: inspect-ch027-external-dictionary-c203
+inspect-ch027-external-dictionary-c203:
+	@bash scripts/inspect-ch027-external-dictionary-c203.sh
+
+.PHONY: format-ch027-external-dictionary-c203
+format-ch027-external-dictionary-c203:
+	@bash scripts/format-ch027-external-dictionary-c203.sh
+
+.PHONY: benchmark-ch027-external-dictionary-c203
+benchmark-ch027-external-dictionary-c203:
+	@bash scripts/benchmark-ch027-external-dictionary-c203.sh
+
+.PHONY: verify-ch027-external-dictionary-c203
+verify-ch027-external-dictionary-c203:
+	@bash scripts/verify-ch027-external-dictionary-c203.sh
+
+.PHONY: stage-ch027-external-dictionary-c203
+stage-ch027-external-dictionary-c203:
+	@bash scripts/stage-ch027-external-dictionary-c203.sh
+
+.PHONY: inspect-staged-ch027-external-dictionary-c203
+inspect-staged-ch027-external-dictionary-c203:
+	@bash scripts/inspect-staged-ch027-external-dictionary-c203.sh
+
+.PHONY: commit-ch027-external-dictionary-c203
+commit-ch027-external-dictionary-c203:
+	@bash scripts/commit-ch027-external-dictionary-c203.sh
+
+.PHONY: push-ch027-external-dictionary-c203
+push-ch027-external-dictionary-c203:
+	@bash scripts/push-ch027-external-dictionary-c203.sh
