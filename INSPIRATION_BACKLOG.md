@@ -213,3 +213,12 @@ row while retaining the existing linear comparison and SQL `NULL` semantics.
 Dynamic lists remain unchanged. Measurements and raw samples are in
 [CH053_PREPARED_LITERAL_IN.md](CH053_PREPARED_LITERAL_IN.md) and
 [BENCHMARK.md#ch-053-prepared-literal-in-sets](BENCHMARK.md#ch-053-prepared-literal-in-sets).
+
+## CH-054 Typed Prepared `IN` Search
+
+The ClickHouse-inspired follow-up sorts large homogeneous literal sets in
+place and uses typed binary search, while small, dynamic, mixed, `NULL`, and
+non-binary-collation cases retain the linear comparator. It adds no second
+value backing and measured up to 11.46x lower evaluation CPU; see
+[CH054_TYPED_IN_SEARCH.md](CH054_TYPED_IN_SEARCH.md) and
+[BENCHMARK.md#ch-054-typed-prepared-in-search](BENCHMARK.md#ch-054-typed-prepared-in-search).

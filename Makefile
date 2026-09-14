@@ -13305,3 +13305,31 @@ commit-ch053-in-program:
 .PHONY: push-ch053-in-program
 push-ch053-in-program:
 	@bash scripts/push-ch053-in-program.sh
+
+.PHONY: test-ch054-in-search
+test-ch054-in-search:
+	@bash scripts/test-ch054-in-search.sh
+
+.PHONY: benchmark-ch054-in-search
+benchmark-ch054-in-search:
+	@bash scripts/benchmark-ch054-in-search.sh
+
+.PHONY: format-ch054-in-search
+format-ch054-in-search:
+	@bash scripts/format-ch054-in-search.sh
+
+.PHONY: race-ch054-in-search
+race-ch054-in-search:
+	@bash scripts/race-ch054-in-search.sh
+
+.PHONY: vet-ch054-in-search
+vet-ch054-in-search:
+	@bash scripts/vet-ch054-in-search.sh
+
+.PHONY: commit-ch054-in-search
+commit-ch054-in-search:
+	@bash scripts/commit-ch054-in-search.sh
+
+.PHONY: push-ch054-in-search
+push-ch054-in-search:
+	@bash scripts/push-ch054-in-search.sh

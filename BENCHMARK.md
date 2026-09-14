@@ -23647,3 +23647,70 @@ BenchmarkCH053PreparedLiteralInEvaluation/literal_8_string-32  8525336  141.2 ns
 BenchmarkCH053PreparedLiteralInEvaluation/literal_8_string-32  8402794  141.0 ns/op  0 B/op  0 allocs/op
 BenchmarkCH053PreparedLiteralInEvaluation/literal_8_string-32  7701627  151.7 ns/op  0 B/op  0 allocs/op
 ```
+
+## CH-054 Typed Prepared `IN` Search
+
+This measures the ClickHouse-inspired typed search follow-up to CH-053. Large
+homogeneous literal lists sort their existing value slice in place and use
+binary search; all fallback cases retain the linear comparator.
+
+| Workload | Before ns/op | After ns/op | CPU improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 numeric literals, hit | 151.9 | 40.12 | 3.79x | 0 | 0 | 0 | 0 |
+| 32 numeric literals, hit | 483.9 | 41.46 | 11.67x | 0 | 0 | 0 | 0 |
+| 32 numeric literals, miss | 498.9 | 44.68 | 11.17x | 0 | 0 | 0 | 0 |
+| 8 string literals, hit | 156.1 | 48.15 | 3.24x | 0 | 0 | 0 | 0 |
+
+The typed mode has no additional evaluation heap cost and no second backing
+array. Lists below eight values, dynamic or mixed lists, `NULL` lists, and
+non-binary text collation use the prior linear path. See
+[CH054_TYPED_IN_SEARCH.md](CH054_TYPED_IN_SEARCH.md) for raw samples and
+verification commands.
+
+Raw output:
+
+```text
+# Before, CH-053 prepared linear scan
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  7838455  151.9 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  7948450  148.5 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  8583564  144.2 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  7624726  155.2 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  7875898  152.3 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  2448313  483.9 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  2340613  466.7 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  2746899  478.4 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  2507314  511.9 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  2245411  525.4 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  2113420  554.4 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  2207139  473.4 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  2288974  498.9 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  2580309  554.1 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  2279275  487.4 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  6947762  157.5 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  7326661  156.1 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  7818128  166.0 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  7805478  154.3 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  8106170  149.4 ns/op  0 B/op  0 allocs/op
+
+# After, CH-054 typed binary search
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  29596399  40.12 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  30256676  42.33 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  22543302  46.92 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  29418082  36.99 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_8_hit-32  26447077  40.47 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  29293639  41.46 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  28571700  39.85 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  30425050  39.88 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  27340485  41.52 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_hit-32  30512667  42.72 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  27088730  43.03 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  26015700  44.68 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  26402178  44.51 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  26867592  45.06 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/numeric_32_miss-32  25466389  45.43 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  21014980  54.95 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  25266268  48.15 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  26127102  46.99 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  23786100  47.75 ns/op  0 B/op  0 allocs/op
+BenchmarkCH054InSearchEvaluation/string_8_hit-32  23522499  48.25 ns/op  0 B/op  0 allocs/op
+```
