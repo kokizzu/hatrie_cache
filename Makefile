@@ -14148,3 +14148,37 @@ commit-mz032-late-data-reclock:
 
 push-mz032-late-data-reclock:
 	@bash scripts/push-mz032-late-data-reclock.sh
+
+.PHONY: inspect-mz033-c203
+inspect-mz033-c203:
+	@bash scripts/inspect-mz033-c203.sh
+
+.PHONY: test-mz033-timestamp-oracle
+test-mz033-timestamp-oracle:
+	@bash scripts/test-mz033-timestamp-oracle.sh
+
+.PHONY: benchmark-mz033-timestamp-oracle
+benchmark-mz033-timestamp-oracle:
+	@bash scripts/benchmark-mz033-timestamp-oracle.sh
+
+.PHONY: format-mz033-timestamp-oracle race-mz033-timestamp-oracle vet-mz033-timestamp-oracle review-mz033-timestamp-oracle verify-mz033-timestamp-oracle commit-mz033-timestamp-oracle push-mz033-timestamp-oracle
+format-mz033-timestamp-oracle:
+	@bash scripts/format-mz033-timestamp-oracle.sh
+
+race-mz033-timestamp-oracle:
+	@bash scripts/race-mz033-timestamp-oracle.sh
+
+vet-mz033-timestamp-oracle:
+	@bash scripts/vet-mz033-timestamp-oracle.sh
+
+review-mz033-timestamp-oracle:
+	@bash scripts/review-mz033-timestamp-oracle.sh
+
+verify-mz033-timestamp-oracle:
+	@bash scripts/verify-mz033-timestamp-oracle.sh
+
+commit-mz033-timestamp-oracle:
+	@bash scripts/commit-mz033-timestamp-oracle.sh
+
+push-mz033-timestamp-oracle:
+	@bash scripts/push-mz033-timestamp-oracle.sh
