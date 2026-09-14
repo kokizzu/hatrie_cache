@@ -17,3 +17,9 @@ printf 'MZ-033 Makefile targets:\n'
 rg -n -C 4 'mz033|MZ-033' Makefile
 printf 'MZ-033 Makefile diff:\n'
 git diff --unified=3 -- Makefile | rg -n -C 12 'mz033|MZ-033'
+printf 'Worktree status:\n'
+git status --short
+printf 'Staged summary:\n'
+git diff --cached --stat
+printf 'Unstaged summary:\n'
+git diff --stat

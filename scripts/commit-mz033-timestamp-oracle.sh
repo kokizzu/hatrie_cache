@@ -17,6 +17,6 @@ git add \
   scripts/test-mz033-timestamp-oracle.sh \
   scripts/verify-mz033-timestamp-oracle.sh \
   scripts/vet-mz033-timestamp-oracle.sh
-printf 'n\ny\n' | git add -p -- Makefile
+printf 'n\nn\ny\n' | git add -p -- Makefile
 git diff --cached --check
 git commit -m 'docs: record existing global timestamp oracle'
