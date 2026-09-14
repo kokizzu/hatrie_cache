@@ -118,7 +118,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-034 | Generic negative-diff operators | Signed retractions are not supported by every SQL operator. | High |
 | MZ-035 | Multiset preservation everywhere | Duplicate multiplicities are not retained consistently across all operators. | High |
 | MZ-036 | Recursive fixpoint scheduler | Recursive dataflow lacks a general iterative frontier scheduler. | High |
-| MZ-037 | Incremental Top-K maintenance | Ordered top-k results are not maintained under arbitrary signed updates. | High |
+| MZ-037 | Incremental Top-K maintenance | Partially adopted as importable exact weighted differential maintenance: `hatSql.IncrementalTopK` keeps keyed rows ordered in a treap, applies signed multiplicities atomically, and emits only Top-K transitions; automatic SQL planner/operator wiring remains. | High |
 | MZ-038 | Incremental order arrangement | Partially adopted: opt-in typed-table columnar caches can admit a bounded single-field `[]uint32` order projection after repeated `ORDER BY ... LIMIT` requests; composite orders, range cursors, and fully incremental arbitrary updates remain. | High |
 | MZ-039 | General incremental distinct | Distinct maintenance is not a general relation operator for arbitrary updates. | Medium |
 | MZ-040 | Incremental percentile | Percentiles are not maintained with a bounded or mergeable differential sketch. | High |

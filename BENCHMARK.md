@@ -24377,3 +24377,33 @@ uses 600 more bytes plus 9 more allocations. That cost buys a portable,
 time-bounded consistency handle for related queries; it is intentionally
 absent from the default path. Raw benchmark output is preserved in the
 command result and can be regenerated with the target above.
+
+<a id="mz-037-incremental-weighted-top-k"></a>
+## MZ-037 Incremental Weighted Top-K
+
+Command: `make benchmark-mz037-incremental-top-k`
+
+Workload: 10,000 active rows, `K=20`, and repeated arbitrary row replacement.
+The rebuild baseline sorts the full relation and materializes equivalent
+Top-K transition rows on every update. The incremental path seeds the same
+relation outside the timer, then applies a delete-plus-insert replacement for
+one keyed row. CPU: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64.
+
+| Path | Raw ns/op sample | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Full rebuild, sort, and transition materialization | 76,282; 76,017; 77,328; 76,354; 76,790 | 76,354 | 1,088 | 7 | baseline |
+| Incremental treap update and transition materialization | 2,168; 1,973; 1,727; 1,736; 1,734 | 1,736 | 1,212 | 7 | 43.98x CPU |
+
+Raw samples from five 1-second runs:
+
+```text
+BenchmarkMZ037TopKRebuildBaseline-32: 76282, 76017, 77328, 76354, 76790 ns/op; 1088 B/op; 7 allocs/op
+BenchmarkMZ037TopKIncremental-32: 2168, 1973, 1727, 1736, 1734 ns/op; 1212 B/op; 7 allocs/op
+```
+
+The CPU win comes from avoiding a full relation sort per update. The
+incremental path uses 1.11x more transient `B/op` because it performs atomic
+batch validation, owns row payloads, and returns transition rows; allocations
+per update are equal in this fixture. Its ordered index also retains one node
+per active logical key. It is an explicit imported operator rather than a
+default SQL plan rule.

@@ -13935,3 +13935,23 @@ commit-c212-typed-table-order-cache:
 .PHONY: push-c212-typed-table-order-cache
 push-c212-typed-table-order-cache:
 	@bash scripts/push-c212-typed-table-order-cache.sh
+
+.PHONY: test-mz037-incremental-top-k benchmark-mz037-incremental-top-k format-mz037-incremental-top-k race-mz037-incremental-top-k vet-mz037-incremental-top-k review-mz037-incremental-top-k verify-mz037-incremental-top-k
+test-mz037-incremental-top-k:
+	@bash scripts/test-mz037-incremental-top-k.sh
+benchmark-mz037-incremental-top-k:
+	@bash scripts/benchmark-mz037-incremental-top-k.sh
+format-mz037-incremental-top-k:
+	@bash scripts/format-mz037-incremental-top-k.sh
+race-mz037-incremental-top-k:
+	@bash scripts/race-mz037-incremental-top-k.sh
+vet-mz037-incremental-top-k:
+	@bash scripts/vet-mz037-incremental-top-k.sh
+review-mz037-incremental-top-k:
+	@bash scripts/review-mz037-incremental-top-k.sh
+verify-mz037-incremental-top-k:
+	@bash scripts/verify-mz037-incremental-top-k.sh
+commit-mz037-incremental-top-k:
+	@bash scripts/commit-mz037-incremental-top-k.sh
+push-mz037-incremental-top-k:
+	@bash scripts/push-mz037-incremental-top-k.sh
