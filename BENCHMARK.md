@@ -19,6 +19,26 @@ Raw samples: uncached `48.78 48.30 48.96 49.42 48.75` ns/op; prepared
 See [TR019_TUPLE_FIELD_OFFSETS.md](TR019_TUPLE_FIELD_OFFSETS.md) for usage
 and retained-memory tradeoffs.
 
+## CH-033: UUID Typed-Table Storage Evaluation
+
+This candidate was implemented behind a test-only branch and reverted after
+measurement. A fixed 16-byte UUID column reduced its isolated physical payload
+from `212,992` to `65,536` bytes for 4,096 values (`3.25x` lower), but its
+physical traversal was about `1.99x` slower. Converting the fixed value back to
+the existing public `SQLUUID` string made hot reads about `2.93x` slower and
+added `48 B/op` and one allocation per read, so it is not adopted.
+
+| Path | Median CPU | Retained physical bytes | Memory/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| Existing string-backed storage scan | 1,000 ns | 212,992 | 0 B | 0 |
+| Rejected fixed UUID storage scan | 1,988 ns | 65,536 | 0 B | 0 |
+| Existing public value read | 17.55 ns | n/a | 0 B | 0 |
+| Rejected fixed UUID public value read | 51.41 ns | n/a | 48 B | 1 |
+
+Raw samples: string storage `996.1 1005 946.0 1000 1006` ns/op; fixed storage
+`1957 2076 1950 1992 1988` ns/op; string reads `17.22 17.55 19.17 17.95
+16.61` ns/op; fixed reads `51.52 51.21 51.02 52.39 51.41` ns/op.
+
 ## CH-007: Row TTL
 
 The opt-in `TypedTable` row TTL policy supports processing-time deadlines and

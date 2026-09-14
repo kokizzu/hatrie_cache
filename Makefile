@@ -14582,3 +14582,19 @@ commit-tr019-c203:
 .PHONY: push-tr019-c203
 push-tr019-c203:
 	bash ./scripts/push-tr019-c203.sh
+
+.PHONY: stage-ch033-rejection-c203
+stage-ch033-rejection-c203:
+	bash ./scripts/stage-ch033-rejection-c203.sh
+
+.PHONY: inspect-staged-ch033-rejection-c203
+inspect-staged-ch033-rejection-c203:
+	bash ./scripts/inspect-staged-ch033-rejection-c203.sh
+
+.PHONY: commit-ch033-rejection-c203
+commit-ch033-rejection-c203:
+	bash ./scripts/commit-ch033-rejection-c203.sh
+
+.PHONY: push-ch033-rejection-c203
+push-ch033-rejection-c203:
+	bash ./scripts/push-ch033-rejection-c203.sh
