@@ -172,6 +172,7 @@ security guidance before exposing it on a network.
 - Independent compressed block streams: use `EncodeCompressedBlocks` and `DecodeCompressedBlocks` when block-local checksums and bounded recovery matter; existing JSON, protobuf, and gzip defaults remain unchanged. See [COMPRESSED_BLOCKS.md](COMPRESSED_BLOCKS.md).
 - External Parquet tables: `ExternalTables` supports `ExportParquet`, `ImportParquet`, and `WriteParquet` alongside CSV, JSON, NDJSON, and Arrow formats.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
+- Exact token postings for reusable row-level text filtering: [CH025_TOKEN_POSTINGS_INDEX.md](CH025_TOKEN_POSTINGS_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-025-token-postings-index)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)

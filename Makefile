@@ -13550,3 +13550,39 @@ commit-tr026-bitmap-index:
 .PHONY: push-tr026-bitmap-index
 push-tr026-bitmap-index:
 	bash ./scripts/push-tr026-bitmap-index.sh
+
+.PHONY: test-ch025-token-postings
+test-ch025-token-postings:
+	bash ./scripts/test-ch025-token-postings.sh
+
+.PHONY: benchmark-ch025-token-postings
+benchmark-ch025-token-postings:
+	bash ./scripts/benchmark-ch025-token-postings.sh
+
+.PHONY: format-ch025-token-postings
+format-ch025-token-postings:
+	bash ./scripts/format-ch025-token-postings.sh
+
+.PHONY: race-ch025-token-postings
+race-ch025-token-postings:
+	bash ./scripts/race-ch025-token-postings.sh
+
+.PHONY: vet-ch025-token-postings
+vet-ch025-token-postings:
+	bash ./scripts/vet-ch025-token-postings.sh
+
+.PHONY: report-ch025-token-postings-memory
+report-ch025-token-postings-memory:
+	bash ./scripts/report-ch025-token-postings-memory.sh
+
+.PHONY: review-ch025-token-postings
+review-ch025-token-postings:
+	bash ./scripts/review-ch025-token-postings.sh
+
+.PHONY: commit-ch025-token-postings
+commit-ch025-token-postings:
+	bash ./scripts/commit-ch025-token-postings.sh
+
+.PHONY: push-ch025-token-postings
+push-ch025-token-postings:
+	bash ./scripts/push-ch025-token-postings.sh

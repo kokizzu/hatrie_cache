@@ -23975,6 +23975,65 @@ and typed materialization; callers must copy fields they retain and keep the
 complete encoded buffer alive while using borrowed slices. The default
 `DecodeSQLRowBinary` path is unchanged.
 
+<a id="ch-025-token-postings-index"></a>
+## CH-025 Token Postings Index
+
+This compares a linear exact-token scan with the opt-in public token postings
+index over 100,000 deterministic documents. The build case indexes 20,000
+documents. Command: `make benchmark-ch025-token-postings`.
+
+| Operation | Linear scan median | Indexed median | Improvement | Indexed heap |
+| --- | ---: | ---: | ---: | ---: |
+| One token, returned rows | 841,568 ns/op | 3,848 ns/op | 218.7x faster | 4,864 B/op, 1 alloc |
+| One token, callback visit | 841,568 ns/op | 1,855 ns/op | 453.5x faster | 0 B/op, 0 alloc |
+| All query tokens | 841,568 ns/op | 10,467 ns/op | 80.4x faster | 4,992 B/op, 2 allocs |
+| Any query token | 1,542,656 ns/op | 60,552 ns/op | 25.5x faster | 24,192 B/op, 24 allocs |
+
+The 20,000-row build measured 17.0 ms/op, 14.37 MB/op, and 100,443
+allocations/op. `Info.EncodedBytes` measured 73,632 bytes of Roaring posting
+payload for that build; it excludes Go map, string, slice, and allocator
+overhead. This is an opt-in index because rebuild and update costs are real.
+
+Raw output:
+
+```text
+BenchmarkCH025LinearTokenScan-32       1387 859699 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenScan-32       1408 841568 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenScan-32       1425 825938 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenScan-32       1460 865133 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenScan-32       1300 787019 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenAnyScan-32     841 1570019 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenAnyScan-32     699 1582212 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenAnyScan-32     795 1485028 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenAnyScan-32     705 1532665 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025LinearTokenAnyScan-32     775 1542656 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025TokenPostings/rows_for_token-32 355692 3580 ns/op 4864 B/op 1 allocs/op
+BenchmarkCH025TokenPostings/rows_for_token-32 310552 3579 ns/op 4864 B/op 1 allocs/op
+BenchmarkCH025TokenPostings/rows_for_token-32 316926 3848 ns/op 4864 B/op 1 allocs/op
+BenchmarkCH025TokenPostings/rows_for_token-32 164728 6205 ns/op 4864 B/op 1 allocs/op
+BenchmarkCH025TokenPostings/rows_for_token-32 242976 4550 ns/op 4864 B/op 1 allocs/op
+BenchmarkCH025TokenPostings/visit_token-32 678409 1890 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025TokenPostings/visit_token-32 726703 1855 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025TokenPostings/visit_token-32 652699 1742 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025TokenPostings/visit_token-32 643377 1645 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025TokenPostings/visit_token-32 614534 1920 ns/op 0 B/op 0 allocs/op
+BenchmarkCH025TokenPostings/match_all-32 106569 10503 ns/op 4992 B/op 2 allocs/op
+BenchmarkCH025TokenPostings/match_all-32 107715 10467 ns/op 4992 B/op 2 allocs/op
+BenchmarkCH025TokenPostings/match_all-32 106368 10310 ns/op 4992 B/op 2 allocs/op
+BenchmarkCH025TokenPostings/match_all-32 104314 10499 ns/op 4992 B/op 2 allocs/op
+BenchmarkCH025TokenPostings/match_all-32 108756 10418 ns/op 4992 B/op 2 allocs/op
+BenchmarkCH025TokenPostings/match_any-32 20091 59950 ns/op 24192 B/op 24 allocs/op
+BenchmarkCH025TokenPostings/match_any-32 19360 61309 ns/op 24192 B/op 24 allocs/op
+BenchmarkCH025TokenPostings/match_any-32 19831 60552 ns/op 24192 B/op 24 allocs/op
+BenchmarkCH025TokenPostings/match_any-32 19599 60085 ns/op 24192 B/op 24 allocs/op
+BenchmarkCH025TokenPostings/match_any-32 19843 61241 ns/op 24192 B/op 24 allocs/op
+BenchmarkCH025TokenPostings/build_20k-32 69 17315790 ns/op 14367364 B/op 100443 allocs/op
+BenchmarkCH025TokenPostings/build_20k-32 76 16452016 ns/op 14367358 B/op 100443 allocs/op
+BenchmarkCH025TokenPostings/build_20k-32 60 17447996 ns/op 14367362 B/op 100443 allocs/op
+BenchmarkCH025TokenPostings/build_20k-32 63 17001024 ns/op 14367363 B/op 100443 allocs/op
+BenchmarkCH025TokenPostings/build_20k-32 66 16282285 ns/op 14367361 B/op 100443 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 
