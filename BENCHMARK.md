@@ -23974,3 +23974,53 @@ The wire payload is identical. This only reduces receiver-side allocations
 and typed materialization; callers must copy fields they retain and keep the
 complete encoded buffer alive while using borrowed slices. The default
 `DecodeSQLRowBinary` path is unchanged.
+
+<a id="tr-026-typed-bitmap-index"></a>
+## TR-026 Typed Bitmap Index
+
+This compares a pre-change linear scan with the opt-in typed bitmap index for
+repeated low-cardinality equality filters. The fixture has 100,000 rows and 16
+repeating values. `BitmapIndex.Visit` streams matching row IDs without a result
+allocation; the build benchmark measures the one-time derived-index cost.
+Command: `make benchmark-tr026-bitmap-index`.
+
+| Path | Raw `ns/op` samples | Median | Heap | Allocs | Relative |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Pre-change linear scan | 47272; 48593; 44009; 45626; 48516 | 47272 | 0 B/op | 0 | 1.00x |
+| Post-change linear scan | 44919; 46060; 43741; 42686; 44233 | 44233 | 0 B/op | 0 | 1.07x faster |
+| Bitmap `Visit` lookup | 12328; 11663; 11942; 11648; 11226 | 11663 | 0 B/op | 0 | 4.05x faster |
+| Raw column copy | 18727; 16300; 16741; 18534; 22088 | 18534 | 106496 B/op | 1 | n/a |
+| Bitmap build | 5360669; 5518377; 5398784; 5445355; 5532623 | 5445355 | 672297 B/op | 440 | n/a |
+
+The bitmap's measured `bitmap-bytes` footprint is `200000` for this fixture,
+versus a 100,000-byte raw `uint8` column. The index trades about 2x derived
+bitmap footprint and one-time build allocations for about 4.05x faster
+repeated lookup with zero query allocations. It is not enabled by default;
+high-cardinality or write-heavy fields should avoid the extra index. The wire
+format is unchanged.
+
+Raw output:
+
+```text
+BenchmarkTR026LinearScan-32        24878  44919 ns/op  2226.25 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026LinearScan-32        27933  46060 ns/op  2171.09 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026LinearScan-32        26766  43741 ns/op  2286.19 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026LinearScan-32        27090  42686 ns/op  2342.69 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026LinearScan-32        27759  44233 ns/op  2260.75 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026RawColumnCopy-32     75924  18727 ns/op  5340.00 MB/s  106496 B/op   1 allocs/op
+BenchmarkTR026RawColumnCopy-32     86404  16300 ns/op  6135.13 MB/s  106496 B/op   1 allocs/op
+BenchmarkTR026RawColumnCopy-32     78194  16741 ns/op  5973.51 MB/s  106496 B/op   1 allocs/op
+BenchmarkTR026RawColumnCopy-32     80178  18534 ns/op  5395.56 MB/s  106496 B/op   1 allocs/op
+BenchmarkTR026RawColumnCopy-32     49480  22088 ns/op  4527.42 MB/s  106496 B/op   1 allocs/op
+BenchmarkTR026BitmapVisit-32       93116  12328 ns/op  8111.44 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026BitmapVisit-32      106665  11663 ns/op  8574.08 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026BitmapVisit-32      109675  11942 ns/op  8373.82 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026BitmapVisit-32      100635  11648 ns/op  8584.86 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026BitmapVisit-32      103975  11226 ns/op  8908.26 MB/s       0 B/op   0 allocs/op
+BenchmarkTR026BitmapBuild-32        224 5360669 ns/op    18.65 MB/s 200000 bitmap-bytes 672298 B/op 440 allocs/op
+BenchmarkTR026BitmapBuild-32        229 5518377 ns/op    18.12 MB/s 200000 bitmap-bytes 672297 B/op 440 allocs/op
+BenchmarkTR026BitmapBuild-32        218 5398784 ns/op    18.52 MB/s 200000 bitmap-bytes 672297 B/op 440 allocs/op
+BenchmarkTR026BitmapBuild-32        230 5445355 ns/op    18.36 MB/s 200000 bitmap-bytes 672297 B/op 440 allocs/op
+BenchmarkTR026BitmapBuild-32        211 5532623 ns/op    18.07 MB/s 200000 bitmap-bytes 672300 B/op 440 allocs/op
+PASS
+```

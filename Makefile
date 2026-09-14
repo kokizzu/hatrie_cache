@@ -13518,3 +13518,35 @@ commit-tr018-zero-copy-row-binary:
 .PHONY: push-tr018-zero-copy-row-binary
 push-tr018-zero-copy-row-binary:
 	bash ./scripts/push-tr018-zero-copy-row-binary.sh
+
+.PHONY: test-tr026-bitmap-index
+test-tr026-bitmap-index:
+	bash ./scripts/test-tr026-bitmap-index.sh
+
+.PHONY: format-tr026-bitmap-index
+format-tr026-bitmap-index:
+	bash ./scripts/format-tr026-bitmap-index.sh
+
+.PHONY: race-tr026-bitmap-index
+race-tr026-bitmap-index:
+	bash ./scripts/race-tr026-bitmap-index.sh
+
+.PHONY: vet-tr026-bitmap-index
+vet-tr026-bitmap-index:
+	bash ./scripts/vet-tr026-bitmap-index.sh
+
+.PHONY: benchmark-tr026-bitmap-index
+benchmark-tr026-bitmap-index:
+	bash ./scripts/benchmark-tr026-bitmap-index.sh
+
+.PHONY: review-tr026-bitmap-index
+review-tr026-bitmap-index:
+	bash ./scripts/review-tr026-bitmap-index.sh
+
+.PHONY: commit-tr026-bitmap-index
+commit-tr026-bitmap-index:
+	bash ./scripts/commit-tr026-bitmap-index.sh
+
+.PHONY: push-tr026-bitmap-index
+push-tr026-bitmap-index:
+	bash ./scripts/push-tr026-bitmap-index.sh

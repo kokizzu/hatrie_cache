@@ -169,7 +169,7 @@ before/after measurement when its motivation is performance.
 | TR-23 | Functional indexes over deterministic expressions | Accelerate computed predicates | Expression compatibility | [ ] |
 | TR-24 | Covering indexes with projected payload fields | Avoid primary tuple fetches | Larger indexes and staleness | [ ] |
 | TR-25 | Multi-column prefix range planner | Use composite indexes efficiently | Planner complexity | [ ] |
-| TR-26 | Bitmap indexes for low-cardinality fields | Fast set intersections | Update and memory cost | [ ] |
+| TR-26 | Bitmap indexes for low-cardinality fields | Fast set intersections | Update and memory cost | [x] Implemented by the typed `hatDataStructure.BitmapIndex[K]`; see [TR026_BITMAP_INDEX.md](TR026_BITMAP_INDEX.md) and [BENCHMARK.md#tr-026-typed-bitmap-index](BENCHMARK.md#tr-026-typed-bitmap-index). |
 | TR-27 | Spatial R-tree index for bounded geometry queries | Avoid full spatial scans | Complex update semantics | [ ] |
 | TR-28 | Cursor pagination resume tokens | Resume scans without offset work | Token signing and invalidation | [ ] |
 | TR-29 | Reverse index iterators with stable bounds | Efficient newest-first reads | Mutation and cursor semantics | [x] Implemented by `OrderedIndex.Last`, reverse seeks, and `LastSnapshotCursor`; see [TR029_REVERSE_ITERATORS.md](TR029_REVERSE_ITERATORS.md) and [BENCHMARK.md](BENCHMARK.md#tr-029-reverse-ordered-index-iterators). |
