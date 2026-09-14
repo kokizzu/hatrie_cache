@@ -14098,3 +14098,41 @@ commit-mz031-skew-aware-join-exchange:
 
 push-mz031-skew-aware-join-exchange:
 	@bash scripts/push-mz031-skew-aware-join-exchange.sh
+
+.PHONY: inspect-authoritative-next-idea
+inspect-authoritative-next-idea:
+	@bash scripts/inspect-authoritative-next-idea.sh
+
+.PHONY: inspect-mz032-c203
+inspect-mz032-c203:
+	@bash scripts/inspect-mz032-c203.sh
+
+.PHONY: test-mz032-late-data-reclock
+test-mz032-late-data-reclock:
+	@bash scripts/test-mz032-late-data-reclock.sh
+
+.PHONY: benchmark-mz032-late-data-reclock
+benchmark-mz032-late-data-reclock:
+	@bash scripts/benchmark-mz032-late-data-reclock.sh
+
+.PHONY: format-mz032-late-data-reclock race-mz032-late-data-reclock vet-mz032-late-data-reclock review-mz032-late-data-reclock verify-mz032-late-data-reclock commit-mz032-late-data-reclock push-mz032-late-data-reclock
+format-mz032-late-data-reclock:
+	@bash scripts/format-mz032-late-data-reclock.sh
+
+race-mz032-late-data-reclock:
+	@bash scripts/race-mz032-late-data-reclock.sh
+
+vet-mz032-late-data-reclock:
+	@bash scripts/vet-mz032-late-data-reclock.sh
+
+review-mz032-late-data-reclock:
+	@bash scripts/review-mz032-late-data-reclock.sh
+
+verify-mz032-late-data-reclock:
+	@bash scripts/verify-mz032-late-data-reclock.sh
+
+commit-mz032-late-data-reclock:
+	@bash scripts/commit-mz032-late-data-reclock.sh
+
+push-mz032-late-data-reclock:
+	@bash scripts/push-mz032-late-data-reclock.sh

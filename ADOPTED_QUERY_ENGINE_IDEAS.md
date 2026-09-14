@@ -374,3 +374,11 @@ generation fence for caller-controlled rehydration. Routing is allocation-free
 but measured 11.4x slower than a bare join-key hash while reducing the tested
 maximum worker load 3.4x; automatic planner/executor integration remains open.
 See [MZ031_SKEW_AWARE_JOIN_EXCHANGE.md](MZ031_SKEW_AWARE_JOIN_EXCHANGE.md).
+### MZ-032: Late-data reclocking
+
+`hatPipeline.LateDataReclock` is an opt-in bounded source-to-processing remap
+sidecar. It separates monotone source and processing frontiers, assigns late
+events at their arrival frontier, compacts old remap history behind an anchor,
+and supports CRC-validated binary snapshots. It does not buffer payloads or
+change existing SQL defaults; callers own source watermark inference and
+connector integration.

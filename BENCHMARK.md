@@ -24596,3 +24596,24 @@ BenchmarkMZ031SkewAwareJoinExchange-32
 
 This is opt-in: it spends routing CPU to reduce hot-key worker skew. The
 generation fence and rehydration remain caller-owned.
+## MZ-032 Late-Data Reclock
+
+The public remap lookup uses binary search over a sorted binding slice instead
+of a linear scan. The benchmark includes the public read lock and reports five
+samples at 4,096 bindings.
+
+| Workload | Baseline | Reclock | Improvement | Reclock memory |
+| --- | ---: | ---: | ---: | ---: |
+| Source frontier lookup | 600.8 ns/op | 44.41 ns/op | 13.53x faster | 0 B/op, 0 allocs/op |
+| Processing frontier lookup | 1069 ns/op | 38.74 ns/op | 27.59x faster | 0 B/op, 0 allocs/op |
+
+Command: `make benchmark-mz032-late-data-reclock`
+
+Raw samples:
+
+```text
+BenchmarkMZ032LinearSourceLookup: 604.3, 604.8, 570.8, 551.0, 600.8 ns/op
+BenchmarkMZ032BinarySourceLookup: 43.12, 40.77, 44.64, 44.52, 44.41 ns/op
+BenchmarkMZ032LinearProcessingLookup: 974.4, 1042, 1145, 1069, 1134 ns/op
+BenchmarkMZ032BinaryProcessingLookup: 37.73, 42.70, 38.74, 41.98, 38.60 ns/op
+```
