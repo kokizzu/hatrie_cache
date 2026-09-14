@@ -1201,9 +1201,10 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 		}
 	}
 	if field, pattern, like := sqlColumnarLikePredicate(query.where, query.from.alias); like {
+		program, collation := query.where.likeProgram, query.where.collation
 		return func(rowIndex int) (bool, error) {
 			candidate, _ := batch.Value(field, rowIndex)
-			return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern), nil
+			return sqlLikePredicateMatches(program, candidate, pattern, collation), nil
 		}
 	}
 	if field, expression, inverted, regexp := sqlColumnarRegexpPredicate(query.where, query.from.alias, batch); regexp {
@@ -1230,7 +1231,7 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 			for _, filter := range filters {
 				candidate, _ := batch.Value(filter.field, rowIndex)
 				if filter.like {
-					if candidate == nil || !sqlLike(fmt.Sprint(candidate), filter.pattern) {
+					if !sqlLikePredicateMatches(filter.program, candidate, filter.pattern, filter.collation) {
 						return false, nil
 					}
 					continue
@@ -5499,6 +5500,7 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 	prepareSQLTimeZoneExpr(expr)
 	prepareSQLInExpr(expr)
 	prepareSQLBetweenExpr(expr)
+	prepareSQLLikeExpr(expr)
 	return nil
 }
 
@@ -5753,6 +5755,7 @@ type sqlExpr struct {
 	timeZoneProgram           *sqlTimeZoneProgram
 	inProgram                 *sqlInProgram
 	betweenProgram            *sqlBetweenProgram
+	likeProgram               *sqlLikeProgram
 }
 
 // sqlParameter is retained only in an immutable parsed template when a
@@ -8526,6 +8529,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if field, pattern, like := sqlColumnarLikePredicate(q.where, q.from.alias); like {
 		filterStarted := time.Now()
+		program, collation := q.where.likeProgram, q.where.collation
 		literal, useNGram := sqlColumnarLikeNGramLiteral(pattern)
 		var result SQLQueryResult
 		var matched, scanned int
@@ -8534,7 +8538,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		} else {
 			result, matched = sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 				candidate, _ := batch.Value(field, rowIndex)
-				return candidate != nil && sqlLike(fmt.Sprint(candidate), pattern)
+				return sqlLikePredicateMatches(program, candidate, pattern, collation)
 			}, metrics != nil)
 			scanned = batch.Rows
 		}
@@ -8580,7 +8584,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			for _, filter := range filters {
 				candidate, _ := batch.Value(filter.field, rowIndex)
 				if filter.like {
-					if candidate == nil || !sqlLike(fmt.Sprint(candidate), filter.pattern) {
+					if !sqlLikePredicateMatches(filter.program, candidate, filter.pattern, filter.collation) {
 						return false
 					}
 					continue
@@ -9355,7 +9359,7 @@ func sqlColumnarDictionaryLikePredicate(expr sqlExpr, alias string, batch Column
 		if !valid {
 			return DictionaryColumn{}, nil, false
 		}
-		codes[index] = sqlLike(value, pattern)
+		codes[index] = sqlLikePredicateMatches(expr.likeProgram, value, pattern, expr.collation)
 	}
 	return dictionary, codes, true
 }
@@ -9492,6 +9496,11 @@ func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, project
 		rowsPerSegment = segments.RowsPerSegment
 		filters = segments.StringNGramBloomFilters[field]
 	}
+	if q.where.collation.normalized() != SQLCollationBinary {
+		// NGram filters are byte-sensitive; case-insensitive matching must scan
+		// every segment to avoid false negatives.
+		filters = nil
+	}
 	for start := 0; start < batch.Rows; start += rowsPerSegment {
 		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
 			break
@@ -9510,7 +9519,7 @@ func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, project
 				break
 			}
 			candidate, _ := batch.Value(field, rowIndex)
-			if candidate == nil || !sqlLike(fmt.Sprint(candidate), pattern) {
+			if !sqlLikePredicateMatches(q.where.likeProgram, candidate, pattern, q.where.collation) {
 				continue
 			}
 			position := matched
@@ -10726,11 +10735,13 @@ func sqlColumnarLikePredicate(expr sqlExpr, alias string) (field, pattern string
 }
 
 type sqlColumnarVectorFilter struct {
-	field    string
-	operator string
-	value    float64
-	pattern  string
-	like     bool
+	field     string
+	operator  string
+	value     float64
+	pattern   string
+	program   *sqlLikeProgram
+	collation SQLCollation
+	like      bool
 }
 
 // sqlColumnarVectorConjunction accepts AND trees composed only of existing
@@ -10752,7 +10763,7 @@ func sqlColumnarVectorConjunction(expr sqlExpr, alias string) ([]sqlColumnarVect
 		}
 		field, pattern, like := sqlColumnarLikePredicate(current, alias)
 		if like {
-			filters = append(filters, sqlColumnarVectorFilter{field: field, pattern: pattern, like: true})
+			filters = append(filters, sqlColumnarVectorFilter{field: field, pattern: pattern, program: current.likeProgram, collation: current.collation, like: true})
 		}
 		return like
 	}
@@ -16548,6 +16559,9 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		if expr.op == "IS NOT NULL" {
 			return left != nil
 		}
+		if expr.likeProgram != nil {
+			return expr.likeProgram.evaluate(left, expr.collation)
+		}
 		right := evalSQLExpr(*expr.right, group, row)
 		if err := sqlExpressionError(right); err != nil {
 			return sqlEvaluationFailure(err)
@@ -16910,7 +16924,10 @@ func sqlCompare(left, right interface{}) int {
 	return 0
 }
 func sqlLike(value, pattern string) bool {
-	parts := strings.Split(pattern, "%")
+	return sqlLikeParts(value, pattern, strings.Split(pattern, "%"))
+}
+
+func sqlLikeParts(value, pattern string, parts []string) bool {
 	if len(parts) == 1 {
 		return value == pattern
 	}
@@ -17165,6 +17182,17 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 				} else {
 					out[i] = left[i] != nil
 				}
+			}
+			return out, nil
+		}
+		if expr.op == "LIKE" && expr.likeProgram != nil {
+			out := make([]interface{}, len(rows))
+			for i := range rows {
+				if err := sqlExpressionError(left[i]); err != nil {
+					out[i] = sqlEvaluationFailure(err)
+					continue
+				}
+				out[i] = expr.likeProgram.evaluate(left[i], expr.collation)
 			}
 			return out, nil
 		}

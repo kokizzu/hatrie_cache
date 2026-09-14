@@ -13360,3 +13360,31 @@ commit-ch055-between:
 .PHONY: push-ch055-between
 push-ch055-between:
 	bash ./scripts/push-ch055-between.sh
+
+.PHONY: benchmark-ch056-like
+benchmark-ch056-like:
+	bash ./scripts/benchmark-ch056-like.sh
+
+.PHONY: test-ch056-like
+test-ch056-like:
+	bash ./scripts/test-ch056-like.sh
+
+.PHONY: format-ch056-like
+format-ch056-like:
+	bash ./scripts/format-ch056-like.sh
+
+.PHONY: race-ch056-like
+race-ch056-like:
+	bash ./scripts/race-ch056-like.sh
+
+.PHONY: vet-ch056-like
+vet-ch056-like:
+	bash ./scripts/vet-ch056-like.sh
+
+.PHONY: commit-ch056-like
+commit-ch056-like:
+	bash ./scripts/commit-ch056-like.sh
+
+.PHONY: push-ch056-like
+push-ch056-like:
+	bash ./scripts/push-ch056-like.sh

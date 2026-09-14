@@ -231,3 +231,13 @@ existing evaluator and SQL `NULL`/collation behavior. The scalar benchmark is
 1.37x faster with no allocation change; see
 [CH055_PREPARED_BETWEEN.md](CH055_PREPARED_BETWEEN.md) and
 [BENCHMARK.md#ch-055-prepared-literal-between-bounds](BENCHMARK.md#ch-055-prepared-literal-between-bounds).
+
+## CH-056 Prepared Literal `LIKE` Patterns
+
+The ClickHouse-inspired expression-preparation follow-up caches the
+percent-separated parts of literal string `LIKE` patterns after binding. It
+also routes columnar paths through the prepared matcher and avoids raw NGram
+pruning under non-binary collations. The paired benchmark is 4.72x faster with
+80 B/op and 3 allocs/op reduced to 0 B/op and 0 allocs/op; see
+[CH056_PREPARED_LIKE.md](CH056_PREPARED_LIKE.md) and
+[BENCHMARK.md#ch-056-prepared-literal-like-patterns](BENCHMARK.md#ch-056-prepared-literal-like-patterns).

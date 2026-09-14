@@ -23758,3 +23758,51 @@ BenchmarkCH055LiteralBetween/prepared-32  15189106  74.37 ns/op  0 B/op  0 alloc
 BenchmarkCH055LiteralBetween/prepared-32  18442345  72.40 ns/op  0 B/op  0 allocs/op
 BenchmarkCH055LiteralBetween/prepared-32  14676066  79.45 ns/op  0 B/op  0 allocs/op
 ```
+
+## CH-056 Prepared Literal `LIKE` Patterns
+
+ClickHouse-style bind-time preparation of literal string `LIKE` patterns
+retains the percent-separated parts once and reuses them in scalar, batch, and
+columnar matching. Dynamic patterns retain the existing runtime path. The
+paired 10-sample benchmark has medians of 230.45 ns/op for the baseline and
+48.79 ns/op for the prepared matcher, or 4.72x faster. Allocation volume falls
+from 80 B/op and 3 allocs/op to 0 B/op and 0 allocs/op.
+
+| Scenario | Before | After | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| literal string `LIKE` | 230.45 ns/op | 48.79 ns/op | 4.72x | 80 B/op, 3 allocs/op | 0 B/op, 0 allocs/op |
+
+The benchmark measures repeated expression evaluation after binding. The
+prepared query retains one pattern and its split parts as a one-time cost.
+Full correctness coverage and raw samples are in
+[CH056_PREPARED_LIKE.md](CH056_PREPARED_LIKE.md).
+
+Raw baseline output:
+
+```text
+BenchmarkCH056LiteralLike/baseline-32  5368688  223.6 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  5372401  225.0 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  5226055  229.2 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  5170363  227.8 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  5235564  231.7 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  5310283  226.5 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  4999038  241.5 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  5290582  251.2 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  4898895  250.4 ns/op  80 B/op  3 allocs/op
+BenchmarkCH056LiteralLike/baseline-32  4779208  253.2 ns/op  80 B/op  3 allocs/op
+```
+
+Raw prepared output:
+
+```text
+BenchmarkCH056LiteralLike/prepared-32  24872214  50.18 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  23798206  50.19 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  25149020  53.60 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  24305446  47.98 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  21113809  47.39 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  23239536  47.52 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  24874580  48.32 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  20743996  51.41 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  23270899  49.26 ns/op  0 B/op  0 allocs/op
+BenchmarkCH056LiteralLike/prepared-32  24853663  45.94 ns/op  0 B/op  0 allocs/op
+```
