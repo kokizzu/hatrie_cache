@@ -13995,3 +13995,25 @@ commit-mz040-incremental-percentile:
 	@bash scripts/commit-mz040-incremental-percentile.sh
 push-mz040-incremental-percentile:
 	@bash scripts/push-mz040-incremental-percentile.sh
+
+.PHONY: test-mz030-incremental-join benchmark-mz030-incremental-join format-mz030-incremental-join race-mz030-incremental-join vet-mz030-incremental-join review-mz030-incremental-join verify-mz030-incremental-join commit-mz030-incremental-join push-mz030-incremental-join
+test-mz030-incremental-join:
+	@bash scripts/test-mz030-incremental-join.sh
+benchmark-mz030-incremental-join:
+	@bash scripts/benchmark-mz030-incremental-join.sh
+format-mz030-incremental-join:
+	@bash scripts/format-mz030-incremental-join.sh
+race-mz030-incremental-join:
+	@bash scripts/race-mz030-incremental-join.sh
+vet-mz030-incremental-join:
+	@bash scripts/vet-mz030-incremental-join.sh
+review-mz030-incremental-join:
+	@bash scripts/review-mz030-incremental-join.sh
+verify-mz030-incremental-join:
+	@bash scripts/verify-mz030-incremental-join.sh
+
+commit-mz030-incremental-join:
+	@bash scripts/commit-mz030-incremental-join.sh
+
+push-mz030-incremental-join:
+	@bash scripts/push-mz030-incremental-join.sh

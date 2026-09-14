@@ -24461,3 +24461,39 @@ incremental path still uses about 6.5x the rebuild's transient bytes because
 it owns ordered state and clones the updated and returned rows. It retains one
 treap node and row payload per active key, so it is intended for repeated
 updates and percentile reads, not a one-shot sort.
+<a id="mz-030-incremental-join"></a>
+## MZ-030 Incremental Differential Join
+
+This benchmark compares a full 10,000-result join rebuild with an incremental
+two-record source replacement that emits only affected joined-row deltas.
+Values are medians of five raw samples from the default one-second
+`go test -bench` run.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement vs rebuild |
+| --- | ---: | ---: | ---: | ---: |
+| Full join rebuild | 3,970,549 | 5,530,631 | 60,034 | 1.00x |
+| Incremental differential join | 1,624 | 2,071 | 15 | 2,444.9x time, 2,670.5x bytes, 4,002.3x allocations |
+
+Raw results:
+
+```text
+BenchmarkMZ030DifferentialJoinRebuildBaseline-32
+4111724 ns/op  5530651 B/op  60034 allocs/op
+3970549 ns/op  5530631 B/op  60034 allocs/op
+3993966 ns/op  5530651 B/op  60034 allocs/op
+3891086 ns/op  5530631 B/op  60034 allocs/op
+3959076 ns/op  5530631 B/op  60034 allocs/op
+
+BenchmarkMZ030DifferentialJoinIncremental-32
+1604 ns/op  2071 B/op  15 allocs/op
+1655 ns/op  2071 B/op  15 allocs/op
+1652 ns/op  2071 B/op  15 allocs/op
+1619 ns/op  2071 B/op  15 allocs/op
+1624 ns/op  2071 B/op  15 allocs/op
+```
+
+The incremental path uses more retained state than a one-shot operation
+because it keeps both source indexes and rows available for future deltas.
+For a small update against a large maintained join, the measured work and
+transient allocation are much lower; complete snapshots remain proportional
+to the full joined result.
