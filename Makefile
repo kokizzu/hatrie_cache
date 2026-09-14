@@ -14153,6 +14153,34 @@ push-mz032-late-data-reclock:
 inspect-mz033-c203:
 	@bash scripts/inspect-mz033-c203.sh
 
+.PHONY: test-mz034-c203 benchmark-mz034-c203 format-mz034-c203 race-mz034-c203 vet-mz034-c203 review-mz034-c203 verify-mz034-c203 commit-mz034-c203 push-mz034-c203
+test-mz034-c203:
+	@bash scripts/test-mz034-c203.sh
+
+benchmark-mz034-c203:
+	@bash scripts/benchmark-mz034-c203.sh
+
+format-mz034-c203:
+	@bash scripts/format-mz034-c203.sh
+
+race-mz034-c203:
+	@bash scripts/race-mz034-c203.sh
+
+vet-mz034-c203:
+	@bash scripts/vet-mz034-c203.sh
+
+review-mz034-c203:
+	@bash scripts/review-mz034-c203.sh
+
+verify-mz034-c203:
+	@bash scripts/verify-mz034-c203.sh
+
+commit-mz034-c203:
+	@bash scripts/commit-mz034-c203.sh
+
+push-mz034-c203:
+	@bash scripts/push-mz034-c203.sh
+
 .PHONY: test-mz033-timestamp-oracle
 test-mz033-timestamp-oracle:
 	@bash scripts/test-mz033-timestamp-oracle.sh

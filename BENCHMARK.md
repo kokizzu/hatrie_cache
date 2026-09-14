@@ -24641,3 +24641,25 @@ BenchmarkGlobalTimestampOracle/reserve_range: 56.71, 63.06, 57.95, 56.80, 58.26 
 BenchmarkGlobalTimestampOracle/leased_next: 2.295, 2.249, 2.294, 2.281, 2.322 ns/op
 BenchmarkTimestampOracleNext: 2.109, 2.112, 2.110, 2.105, 2.022 ns/op
 ```
+
+## MZ-034 Generic Negative-Diff Operators
+
+MZ-034 was already substantially present in `hat/hatSql`; this benchmark
+records the existing signed row transformation, set-operation, and grouped
+state paths. The two comparative workloads use the original composition or
+rebuild implementation as the baseline.
+
+| Workload | Baseline | Current | CPU improvement | Memory improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `EXCEPT` composition vs optimized | 3.002 ms/op | 1.005 ms/op | 2.99x | 2.84x | 4.97x |
+| `INTERSECT` rebuild vs incremental | 15.947 ms/op | 0.392 ms/op | 40.65x | 30.97x | 0.63x, or 1.58x more allocations |
+| `FILTER` current path | n/a | 56.498 us/op | baseline | 96,896 B/op | 513 allocs/op |
+| `MAP` current path | n/a | 142.343 us/op | baseline | 298,280 B/op | 1,541 allocs/op |
+| `FLAT MAP` current path | n/a | 150.806 us/op | baseline | 304,424 B/op | 1,797 allocs/op |
+| `UNION` current path | n/a | 138.048 us/op | baseline | 256,552 B/op | 1,029 allocs/op |
+| `JOIN` current path | n/a | 48.591 us/op | baseline | 56,984 B/op | 274 allocs/op |
+
+Command: `make benchmark-mz034-c203`
+
+Raw samples and interpretation are in
+[MZ034_GENERIC_NEGATIVE_DIFF.md](MZ034_GENERIC_NEGATIVE_DIFF.md).
