@@ -24436,3 +24436,28 @@ The incremental path uses about 2.10x more transient bytes because it owns
 the active row for future retractions and returns an independent transition
 payload. It avoids the `O(N)` scan and is intended for update-heavy stateful
 distinct views; it is not an implicit SQL plan rule.
+
+<a id="mz-040-incremental-percentile"></a>
+## MZ-040 Incremental Percentile
+
+Command: `make benchmark-mz040-incremental-percentile`
+
+Workload: 10,000 rows, one delete-plus-insert replacement per operation, and a
+95th-percentile lookup. The rebuild path sorts the full relation for each
+operation. The incremental path seeds the same rows outside the timer and
+uses a persistent weighted treap with nearest-rank selection. Linux `amd64`,
+AMD Ryzen 9 5950X, five samples, `-benchtime=1s -benchmem`.
+
+| Version/path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before fast path: full sort | 74,453; 73,436; 74,688; 74,531; 74,524 | 74,524 | 104 | 4 | baseline |
+| Before fast path: incremental | 895.8; 862.3; 862.0; 881.8; 874.9 | 874.9 | 903 | 6 | 85.2x CPU vs baseline |
+| After fast path: full sort | 74,475; 71,252; 71,465; 69,732; 69,611 | 71,252 | 104 | 4 | baseline |
+| After fast path: incremental | 639.3; 637.8; 639.5; 651.0; 637.8 | 639.3 | 679 | 4 | 111.5x CPU vs baseline |
+
+The two-record replacement fast path improved incremental CPU by about 1.37x,
+reduced transient bytes by about 1.33x, and removed two allocations. The final
+incremental path still uses about 6.5x the rebuild's transient bytes because
+it owns ordered state and clones the updated and returned rows. It retains one
+treap node and row payload per active key, so it is intended for repeated
+updates and percentile reads, not a one-shot sort.

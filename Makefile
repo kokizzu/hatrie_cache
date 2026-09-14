@@ -13975,3 +13975,41 @@ commit-mz039-incremental-distinct:
 	@bash scripts/commit-mz039-incremental-distinct.sh
 push-mz039-incremental-distinct:
 	@bash scripts/push-mz039-incremental-distinct.sh
+
+.PHONY: test-mz040-incremental-percentile benchmark-mz040-incremental-percentile format-mz040-incremental-percentile race-mz040-incremental-percentile vet-mz040-incremental-percentile review-mz040-incremental-percentile verify-mz040-incremental-percentile commit-mz040-incremental-percentile push-mz040-incremental-percentile
+
+test-mz040-incremental-percentile:
+
+	@bash scripts/test-mz040-incremental-percentile.sh
+
+benchmark-mz040-incremental-percentile:
+
+	@bash scripts/benchmark-mz040-incremental-percentile.sh
+
+format-mz040-incremental-percentile:
+
+	@bash scripts/format-mz040-incremental-percentile.sh
+
+race-mz040-incremental-percentile:
+
+	@bash scripts/race-mz040-incremental-percentile.sh
+
+vet-mz040-incremental-percentile:
+
+	@bash scripts/vet-mz040-incremental-percentile.sh
+
+review-mz040-incremental-percentile:
+
+	@bash scripts/review-mz040-incremental-percentile.sh
+
+verify-mz040-incremental-percentile:
+
+	@bash scripts/verify-mz040-incremental-percentile.sh
+
+commit-mz040-incremental-percentile:
+
+	@bash scripts/commit-mz040-incremental-percentile.sh
+
+push-mz040-incremental-percentile:
+
+	@bash scripts/push-mz040-incremental-percentile.sh
