@@ -16508,7 +16508,7 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return sqlEvaluationFailure(err)
 		}
 		if expr.inProgram != nil {
-			return sqlInValueWithCollation(expr.op, left, expr.inProgram.values, expr.collation)
+			return expr.inProgram.evaluate(expr.op, left, expr.collation)
 		}
 		values := make([]interface{}, len(expr.args))
 		for index, argument := range expr.args {
