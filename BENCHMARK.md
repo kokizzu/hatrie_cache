@@ -17309,9 +17309,32 @@ bounded advisor observations:
 The grouped method is 1.38x the CPU time, 2.09x the bytes, and 17.75x the
 allocations of the existing flat recommendation call because it creates fresh
 source-local field lists. This is an explicit reporting call; it adds no work
-when `IndexAdvisor` is nil and does not change query execution or the persisted
-advisor snapshot format. Run `make benchmark-sql-primary-order-advisor` to
+when `IndexAdvisor` is nil and does not change query execution or existing
+recommendation semantics. Run `make benchmark-sql-primary-order-advisor` to
 print all raw samples.
+
+## SQL Primary Prefix Advice (CH-023)
+
+Five-run local benchmark on AMD Ryzen 9 5950X, Go `amd64`. The before run used
+a clean `HEAD` archive; the after run used the implementation worktree. The
+advisor fixture held 128 bounded observations across 16 source keys.
+
+| Path | Before median | After median | CPU x (before/after) | Memory after/before | Allocs after/before |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Slow unindexed observation | 11,504 ns/op, 9,474 B, 96 | 11,932 ns/op, 9,627 B, 98 | 0.96x | 1.02x | 1.02x |
+| Slow covering-shape observation | 12,781 ns/op, 10,213 B, 103 | 13,263 ns/op, 10,365 B, 105 | 0.96x | 1.01x | 1.02x |
+| Existing grouped primary-order report | 7,996 ns/op, 5,856 B, 71 | 8,194 ns/op, 5,856 B, 71 | 0.98x | 1.00x | 1.00x |
+| New composite-prefix report | n/a | 15,388 ns/op, 15,592 B, 28 | n/a | n/a | n/a |
+
+Raw samples were: before slow observation `11,639 11,616 11,490 11,381
+11,504 ns/op`, after `11,835 11,932 12,021 11,702 12,063 ns/op`; before
+covering observation `12,781 12,962 13,194 12,713 12,735 ns/op`, after
+`13,617 13,172 13,500 13,263 13,144 ns/op`; and the new prefix report
+`15,619 15,388 15,558 15,283 15,196 ns/op`. The prefix report returns 16
+source-local recommendations from the same 128 observations. Its reporting
+cost is bounded and explicit; the extra observation cost is paid only when an
+`IndexAdvisor` is configured, and no normal query or storage path changes.
+Run `make benchmark-ch023-c203` to reproduce both baseline and after samples.
 
 ## SQL Query Trace Recorder
 

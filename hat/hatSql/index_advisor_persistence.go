@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 )
 
 const (
@@ -13,21 +15,29 @@ const (
 	DefaultSQLIndexAdvisorSnapshotMaxBytes = 1 << 20
 	maxSQLIndexAdvisorSnapshotEntries      = 4096
 	maxSQLIndexAdvisorSnapshotStringBytes  = 1024
+	maxSQLIndexAdvisorPrefixFields         = 64
 )
 
 // SQLIndexAdvisorSnapshotVersion is the persisted advisor snapshot format
 // version written by Save.
-const SQLIndexAdvisorSnapshotVersion = 1
+const SQLIndexAdvisorSnapshotVersion = 2
 
 type sqlIndexAdvisorSnapshot struct {
-	Version uint8                          `json:"version"`
-	Entries []sqlIndexAdvisorSnapshotEntry `json:"entries"`
+	Version  uint8                                `json:"version"`
+	Entries  []sqlIndexAdvisorSnapshotEntry       `json:"entries"`
+	Prefixes []sqlIndexAdvisorPrefixSnapshotEntry `json:"prefixes,omitempty"`
 }
 
 type sqlIndexAdvisorSnapshotEntry struct {
 	Key         string `json:"key"`
 	Field       string `json:"field"`
 	SlowQueries uint64 `json:"slow_queries"`
+}
+
+type sqlIndexAdvisorPrefixSnapshotEntry struct {
+	Key         string   `json:"key"`
+	Fields      []string `json:"fields"`
+	SlowQueries uint64   `json:"slow_queries"`
 }
 
 // Save writes the advisor's bounded workload observations as a versioned JSON
@@ -48,9 +58,11 @@ func (advisor *SQLIndexAdvisor) Save(writer io.Writer) error {
 			SlowQueries: recommendation.SlowQueries,
 		}
 	}
+	prefixes := advisor.prefixSnapshotEntries()
 	return json.NewEncoder(writer).Encode(sqlIndexAdvisorSnapshot{
-		Version: SQLIndexAdvisorSnapshotVersion,
-		Entries: entries,
+		Version:  SQLIndexAdvisorSnapshotVersion,
+		Entries:  entries,
+		Prefixes: prefixes,
 	})
 }
 
@@ -84,17 +96,23 @@ func (advisor *SQLIndexAdvisor) Load(reader io.Reader) error {
 		}
 		return fmt.Errorf("decode trailing SQL index advisor snapshot data: %w", err)
 	}
-	if snapshot.Version != SQLIndexAdvisorSnapshotVersion {
+	if snapshot.Version != 1 && snapshot.Version != SQLIndexAdvisorSnapshotVersion {
 		return fmt.Errorf("unsupported SQL index advisor snapshot version %d", snapshot.Version)
 	}
 	if len(snapshot.Entries) > maxSQLIndexAdvisorSnapshotEntries {
 		return fmt.Errorf("SQL index advisor snapshot contains too many entries")
 	}
-	if advisor.capacity <= 0 && len(snapshot.Entries) > 0 {
+	if len(snapshot.Prefixes) > maxSQLIndexAdvisorSnapshotEntries {
+		return fmt.Errorf("SQL index advisor snapshot contains too many prefixes")
+	}
+	if advisor.capacity <= 0 && (len(snapshot.Entries) > 0 || len(snapshot.Prefixes) > 0) {
 		return fmt.Errorf("SQL index advisor snapshot contains entries but capacity is %d", advisor.capacity)
 	}
 	if advisor.capacity > 0 && len(snapshot.Entries) > advisor.capacity {
 		return fmt.Errorf("SQL index advisor snapshot contains %d entries, capacity is %d", len(snapshot.Entries), advisor.capacity)
+	}
+	if advisor.capacity > 0 && len(snapshot.Prefixes) > advisor.capacity {
+		return fmt.Errorf("SQL index advisor snapshot contains %d prefixes, capacity is %d", len(snapshot.Prefixes), advisor.capacity)
 	}
 	counts := make(map[sqlIndexAdvisorKey]uint64, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
@@ -113,8 +131,59 @@ func (advisor *SQLIndexAdvisor) Load(reader io.Reader) error {
 		}
 		counts[key] = entry.SlowQueries
 	}
+	prefixCounts := make(map[sqlIndexAdvisorPrefixKey]uint64, len(snapshot.Prefixes))
+	for _, entry := range snapshot.Prefixes {
+		if len(entry.Key) == 0 || len(entry.Key) > maxSQLIndexAdvisorSnapshotStringBytes {
+			return fmt.Errorf("SQL index advisor snapshot prefix key length is invalid")
+		}
+		if len(entry.Fields) == 0 || len(entry.Fields) > maxSQLIndexAdvisorPrefixFields {
+			return fmt.Errorf("SQL index advisor snapshot prefix fields are invalid")
+		}
+		seenFields := make(map[string]struct{}, len(entry.Fields))
+		for _, field := range entry.Fields {
+			if len(field) == 0 || len(field) > maxSQLIndexAdvisorSnapshotStringBytes {
+				return fmt.Errorf("SQL index advisor snapshot prefix field length is invalid")
+			}
+			if _, exists := seenFields[field]; exists {
+				return fmt.Errorf("SQL index advisor snapshot prefix contains duplicate fields")
+			}
+			seenFields[field] = struct{}{}
+		}
+		if entry.SlowQueries == 0 {
+			return fmt.Errorf("SQL index advisor snapshot prefix count must be positive")
+		}
+		key := sqlIndexAdvisorPrefixKey{key: entry.Key, fields: strings.Join(entry.Fields, "\x00")}
+		if _, exists := prefixCounts[key]; exists {
+			return fmt.Errorf("SQL index advisor snapshot contains duplicate prefix")
+		}
+		prefixCounts[key] = entry.SlowQueries
+	}
 	advisor.mu.Lock()
 	advisor.counts = counts
+	advisor.prefixCounts = prefixCounts
 	advisor.mu.Unlock()
 	return nil
+}
+
+func (advisor *SQLIndexAdvisor) prefixSnapshotEntries() []sqlIndexAdvisorPrefixSnapshotEntry {
+	if advisor == nil {
+		return nil
+	}
+	advisor.mu.RLock()
+	entries := make([]sqlIndexAdvisorPrefixSnapshotEntry, 0, len(advisor.prefixCounts))
+	for key, count := range advisor.prefixCounts {
+		entries = append(entries, sqlIndexAdvisorPrefixSnapshotEntry{
+			Key:         key.key,
+			Fields:      strings.Split(key.fields, "\x00"),
+			SlowQueries: count,
+		})
+	}
+	advisor.mu.RUnlock()
+	sort.Slice(entries, func(left, right int) bool {
+		if entries[left].Key != entries[right].Key {
+			return entries[left].Key < entries[right].Key
+		}
+		return strings.Join(entries[left].Fields, "\x00") < strings.Join(entries[right].Fields, "\x00")
+	})
+	return entries
 }

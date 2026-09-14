@@ -34,18 +34,33 @@ type SQLPrimaryOrderRecommendation struct {
 	Fields []string
 }
 
+// SQLPrimaryPrefixRecommendation is a deterministic composite-prefix
+// suggestion derived from repeated slow scans. Equality predicates are placed
+// before range predicates; the advisor never changes a stored layout.
+type SQLPrimaryPrefixRecommendation struct {
+	Key         string
+	Fields      []string
+	SlowQueries uint64
+}
+
 // SQLIndexAdvisor records bounded candidate fields from observed slow scans.
 // It is intended for trusted server-side use, not external telemetry export.
 type SQLIndexAdvisor struct {
 	mu             sync.RWMutex
 	capacity       int
 	counts         map[sqlIndexAdvisorKey]uint64
+	prefixCounts   map[sqlIndexAdvisorPrefixKey]uint64
 	coveringCounts map[sqlCoveringAdvisorKey]uint64
 }
 
 type sqlIndexAdvisorKey struct {
 	key   string
 	field string
+}
+
+type sqlIndexAdvisorPrefixKey struct {
+	key    string
+	fields string
 }
 
 type sqlCoveringAdvisorKey struct {
@@ -56,8 +71,9 @@ type sqlCoveringAdvisorKey struct {
 
 func NewSQLIndexAdvisor(capacity int) *SQLIndexAdvisor {
 	return &SQLIndexAdvisor{
-		capacity: capacity,
-		counts:   make(map[sqlIndexAdvisorKey]uint64),
+		capacity:     capacity,
+		counts:       make(map[sqlIndexAdvisorKey]uint64),
+		prefixCounts: make(map[sqlIndexAdvisorPrefixKey]uint64),
 	}
 }
 
@@ -121,6 +137,70 @@ func (advisor *SQLIndexAdvisor) PrimaryOrderRecommendations() []SQLPrimaryOrderR
 	return recommendations
 }
 
+// PrimaryPrefixRecommendations returns the most frequently observed
+// conjunction prefix for each source. When maxFields is positive, longer
+// observations are grouped by that prefix length; zero returns the complete
+// observed conjunction. Results and field slices are independent copies.
+func (advisor *SQLIndexAdvisor) PrimaryPrefixRecommendations(maxFields int) []SQLPrimaryPrefixRecommendation {
+	if advisor == nil {
+		return nil
+	}
+	type prefixCount struct {
+		key    string
+		fields string
+		count  uint64
+	}
+	advisor.mu.RLock()
+	byPrefix := advisor.prefixCounts
+	if maxFields > 0 {
+		byPrefix = make(map[sqlIndexAdvisorPrefixKey]uint64, len(advisor.prefixCounts))
+		for key, count := range advisor.prefixCounts {
+			prefixKey := sqlIndexAdvisorPrefixKey{key: key.key, fields: sqlIndexAdvisorPrefixLimit(key.fields, maxFields)}
+			byPrefix[prefixKey] += count
+		}
+	}
+	best := make(map[string]prefixCount)
+	for key, count := range byPrefix {
+		candidate := prefixCount{key: key.key, fields: key.fields, count: count}
+		current, exists := best[key.key]
+		if !exists || candidate.count > current.count || (candidate.count == current.count && candidate.fields < current.fields) {
+			best[key.key] = candidate
+		}
+	}
+	recommendations := make([]SQLPrimaryPrefixRecommendation, 0, len(best))
+	for _, candidate := range best {
+		recommendations = append(recommendations, SQLPrimaryPrefixRecommendation{
+			Key:         candidate.key,
+			Fields:      strings.Split(candidate.fields, "\x00"),
+			SlowQueries: candidate.count,
+		})
+	}
+	advisor.mu.RUnlock()
+	sort.Slice(recommendations, func(left, right int) bool {
+		if recommendations[left].Key != recommendations[right].Key {
+			return recommendations[left].Key < recommendations[right].Key
+		}
+		return strings.Join(recommendations[left].Fields, "\x00") < strings.Join(recommendations[right].Fields, "\x00")
+	})
+	return recommendations
+}
+
+func sqlIndexAdvisorPrefixLimit(fields string, maxFields int) string {
+	if maxFields <= 0 {
+		return fields
+	}
+	for index := 0; index < len(fields); index++ {
+		if fields[index] != '\x00' {
+			continue
+		}
+		maxFields--
+		if maxFields == 0 {
+			return fields[:index]
+		}
+	}
+	return fields
+}
+
 // CoveringRecommendations returns stable, bounded recommendations for simple
 // equality projections that could be served by a covering index. The returned
 // columns are copied and sorted so callers can pass them directly to
@@ -166,9 +246,15 @@ func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlEx
 			}
 		}
 	}
-	fields := sqlIndexAdvisorPredicateFields(sqlCombinedWhere(query), query.from.alias)
+	orderedFields := sqlIndexAdvisorPredicateFieldOrder(sqlCombinedWhere(query), query.from.alias)
+	prefixFields := ""
+	if len(orderedFields) > 0 {
+		prefixFields = strings.Join(orderedFields, "\x00")
+	}
+	sort.Strings(orderedFields)
+	fields := orderedFields
 	coveringField, coveringColumns, covering := sqlIndexAdvisorCoveringProjection(query)
-	if len(fields) == 0 && !covering {
+	if len(orderedFields) == 0 && !covering {
 		return
 	}
 	advisor.mu.Lock()
@@ -182,6 +268,15 @@ func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlEx
 			continue
 		}
 		advisor.counts[key]++
+	}
+	if len(orderedFields) > 0 {
+		if advisor.prefixCounts == nil {
+			advisor.prefixCounts = make(map[sqlIndexAdvisorPrefixKey]uint64)
+		}
+		key := sqlIndexAdvisorPrefixKey{key: query.from.key, fields: prefixFields}
+		if _, exists := advisor.prefixCounts[key]; exists || len(advisor.prefixCounts) < advisor.capacity {
+			advisor.prefixCounts[key]++
+		}
 	}
 	if covering {
 		if advisor.coveringCounts == nil {
@@ -220,7 +315,20 @@ func sqlIndexAdvisorCoveringProjection(query *sqlQuery) (string, []string, bool)
 }
 
 func sqlIndexAdvisorPredicateFields(expr sqlExpr, alias string) []string {
+	fields := sqlIndexAdvisorPredicateFieldOrder(expr, alias)
+	sort.Strings(fields)
+	return fields
+}
+
+func sqlIndexAdvisorPredicateFieldOrder(expr sqlExpr, alias string) []string {
+	type fieldCandidate struct {
+		field string
+		rank  int
+		order int
+	}
 	seen := map[string]struct{}{}
+	candidates := make([]fieldCandidate, 0, 4)
+	order := 0
 	var collect func(sqlExpr)
 	collect = func(current sqlExpr) {
 		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
@@ -233,17 +341,38 @@ func sqlIndexAdvisorPredicateFields(expr sqlExpr, alias string) []string {
 		}
 		left, right := *current.left, *current.right
 		if left.kind == "field" && (left.qualifier == "" || left.qualifier == alias) && right.kind == "literal" && sqlColumnarNumericOperator(current.op) {
-			seen[left.name] = struct{}{}
+			if _, exists := seen[left.name]; !exists {
+				seen[left.name] = struct{}{}
+				rank := 1
+				if current.op == "=" || current.op == "==" {
+					rank = 0
+				}
+				candidates = append(candidates, fieldCandidate{field: left.name, rank: rank, order: order})
+				order++
+			}
 		}
 		if right.kind == "field" && (right.qualifier == "" || right.qualifier == alias) && left.kind == "literal" && sqlColumnarNumericOperator(current.op) {
-			seen[right.name] = struct{}{}
+			if _, exists := seen[right.name]; !exists {
+				seen[right.name] = struct{}{}
+				rank := 1
+				if current.op == "=" || current.op == "==" {
+					rank = 0
+				}
+				candidates = append(candidates, fieldCandidate{field: right.name, rank: rank, order: order})
+				order++
+			}
 		}
 	}
 	collect(expr)
-	fields := make([]string, 0, len(seen))
-	for field := range seen {
-		fields = append(fields, field)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		if candidates[left].rank != candidates[right].rank {
+			return candidates[left].rank < candidates[right].rank
+		}
+		return candidates[left].order < candidates[right].order
+	})
+	fields := make([]string, len(candidates))
+	for index, candidate := range candidates {
+		fields[index] = candidate.field
 	}
-	sort.Strings(fields)
 	return fields
 }

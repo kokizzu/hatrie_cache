@@ -3906,6 +3906,22 @@ tie-breaker. The result contains only source keys and field names; it does not
 change an existing index, query plan, or persisted advisor snapshot. A nil
 `IndexAdvisor` preserves the zero-overhead default path.
 
+For composite primary-key advice, use the workload’s repeated conjunction
+shape:
+
+```go
+for _, recommendation := range advisor.PrimaryPrefixRecommendations(3) {
+    fmt.Println(recommendation.Key, recommendation.Fields, recommendation.SlowQueries)
+}
+```
+
+This records no literal values. Equality predicates are placed before range
+predicates, and `maxFields` limits the returned prefix (`0` keeps the complete
+observed conjunction). The recommendation is read-only and does not mutate a
+live layout; applying it requires an explicit new ordered layout or rebuild.
+The additional observation work is paid only by an explicitly configured
+`IndexAdvisor`.
+
 ## SQL Query Trace Export
 
 SQL execution already exposes privacy-safe operator counters through

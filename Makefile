@@ -14509,3 +14509,44 @@ commit-ch013-c203:
 .PHONY: push-ch013-c203
 push-ch013-c203:
 	bash ./scripts/push-ch013-c203.sh
+
+.PHONY: test-ch023-c203
+test-ch023-c203:
+	bash ./scripts/test-ch023-c203.sh
+
+.PHONY: benchmark-ch023-c203
+benchmark-ch023-c203:
+	bash ./scripts/benchmark-ch023-c203.sh before
+	bash ./scripts/benchmark-ch023-c203.sh after
+
+.PHONY: benchmark-ch023-after-c203
+benchmark-ch023-after-c203:
+	bash ./scripts/benchmark-ch023-c203.sh after
+
+.PHONY: format-ch023-c203
+format-ch023-c203:
+	bash ./scripts/format-ch023-c203.sh
+
+.PHONY: verify-ch023-c203
+verify-ch023-c203:
+	bash ./scripts/verify-ch023-c203.sh
+
+.PHONY: verify-ch023-focused-c203
+verify-ch023-focused-c203:
+	bash ./scripts/verify-ch023-focused-c203.sh
+
+.PHONY: stage-ch023-c203
+stage-ch023-c203:
+	bash ./scripts/stage-ch023-c203.sh
+
+.PHONY: inspect-staged-ch023-c203
+inspect-staged-ch023-c203:
+	bash ./scripts/inspect-staged-ch023-c203.sh
+
+.PHONY: commit-ch023-c203
+commit-ch023-c203:
+	bash ./scripts/commit-ch023-c203.sh
+
+.PHONY: push-ch023-c203
+push-ch023-c203:
+	bash ./scripts/push-ch023-c203.sh
