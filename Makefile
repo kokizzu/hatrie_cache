@@ -14044,3 +14044,30 @@ commit-mz029-incremental-interval-join:
 
 push-mz029-incremental-interval-join:
 	@bash scripts/push-mz029-incremental-interval-join.sh
+
+.PHONY: test-mz029-spillable-arrangement benchmark-mz029-spillable-arrangement format-mz029-spillable-arrangement race-mz029-spillable-arrangement vet-mz029-spillable-arrangement review-mz029-spillable-arrangement verify-mz029-spillable-arrangement commit-mz029-spillable-arrangement push-mz029-spillable-arrangement
+test-mz029-spillable-arrangement:
+	@bash scripts/test-mz029-spillable-arrangement.sh
+benchmark-mz029-spillable-arrangement:
+	@bash scripts/benchmark-mz029-spillable-arrangement.sh
+
+format-mz029-spillable-arrangement:
+	@bash scripts/format-mz029-spillable-arrangement.sh
+
+race-mz029-spillable-arrangement:
+	@bash scripts/race-mz029-spillable-arrangement.sh
+
+vet-mz029-spillable-arrangement:
+	@bash scripts/vet-mz029-spillable-arrangement.sh
+
+review-mz029-spillable-arrangement:
+	@bash scripts/review-mz029-spillable-arrangement.sh
+
+verify-mz029-spillable-arrangement:
+	@bash scripts/verify-mz029-spillable-arrangement.sh
+
+commit-mz029-spillable-arrangement:
+	@bash scripts/commit-mz029-spillable-arrangement.sh
+
+push-mz029-spillable-arrangement:
+	@bash scripts/push-mz029-spillable-arrangement.sh

@@ -24531,3 +24531,37 @@ BenchmarkMZ029IncrementalIntervalJoinIncremental-32
 The index retains both source sides and interval metadata, so this is a
 small-update optimization rather than a reduction in total retained data.
 Complete snapshots still scale with the full joined result.
+<a id="mz-029-spillable-arrangement"></a>
+## Materialize MZ-029 Spillable Arrangements
+
+Both paths copy a 256-byte value on every read. The workload loads 4,096 keys
+(1,048,576 bytes of value payload); the spill path uses a 1-byte hot payload
+limit so all values are cold while key/index metadata remains resident.
+Values are medians of five raw samples from the default one-second
+`go test -bench` run.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Tradeoff vs in-memory |
+| --- | ---: | ---: | ---: | ---: |
+| In-memory copy-on-read baseline | 94.06 | 256 | 1 | 1.00x |
+| Cold spill-segment read | 975.0 | 288 | 1 | 10.4x slower, 1.125x bytes |
+
+Raw results:
+
+```text
+BenchmarkSpillableArrangementInMemoryBaseline-32
+95.62 ns/op  256 B/op  1 allocs/op
+96.71 ns/op  256 B/op  1 allocs/op
+91.05 ns/op  256 B/op  1 allocs/op
+91.12 ns/op  256 B/op  1 allocs/op
+94.06 ns/op  256 B/op  1 allocs/op
+
+BenchmarkSpillableArrangementColdGet-32
+977.7 ns/op  288 B/op  1 allocs/op
+1023 ns/op  288 B/op  1 allocs/op
+973.1 ns/op  288 B/op  1 allocs/op
+975.0 ns/op  288 B/op  1 allocs/op
+959.5 ns/op  288 B/op  1 allocs/op
+```
+
+This is deliberately opt-in: it protects retained memory at the cost of cold
+read latency and local segment I/O. Existing in-memory behavior is unchanged.

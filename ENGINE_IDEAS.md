@@ -110,7 +110,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-026 | Dictionary arrangement compression | Repeated arrangement strings are not transparently dictionary encoded. | Medium |
 | MZ-027 | Arrangement memory telemetry | Implemented as an explicit read-only stats API reporting per-arrangement distinct values, bounded retained-byte estimates, checkpoints, source sequence, changelog compaction watermark, and dictionary group-order rebuild counts. | Low |
 | MZ-028 | Adaptive arrangement compaction | No feedback loop that changes compaction cadence from memory and update rates. | Medium |
-| MZ-029 | Spillable arrangements | Large maintained indexes cannot spill cold state to bounded local storage. | High |
+| MZ-029 | Spillable arrangements | Adopted as an opt-in bounded local payload spill tier with binary records, CRC validation, disk limits, exact cold reads, and explicit compaction; fully disk-resident arrangement indexes and reopen/restore remain future work. | High |
 | MZ-030 | Differential join delta maintenance | Adopted as a reusable exact inner-join maintainer with signed multiplicities, atomic batches, deterministic snapshots, and a replacement fast path; SQL planner wiring and outer/temporal joins remain future work. | High |
 | MZ-031 | Skew-aware join exchange | No runtime detection and mitigation for hot join keys. | High |
 | MZ-032 | Late-data reclocking | No operator that maps event-time updates into a controlled processing-time frontier. | High |
