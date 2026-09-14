@@ -14017,3 +14017,30 @@ commit-mz030-incremental-join:
 
 push-mz030-incremental-join:
 	@bash scripts/push-mz030-incremental-join.sh
+
+.PHONY: test-mz029-incremental-interval-join benchmark-mz029-incremental-interval-join format-mz029-incremental-interval-join race-mz029-incremental-interval-join vet-mz029-incremental-interval-join review-mz029-incremental-interval-join verify-mz029-incremental-interval-join commit-mz029-incremental-interval-join push-mz029-incremental-interval-join
+test-mz029-incremental-interval-join:
+	@bash scripts/test-mz029-incremental-interval-join.sh
+benchmark-mz029-incremental-interval-join:
+	@bash scripts/benchmark-mz029-incremental-interval-join.sh
+
+format-mz029-incremental-interval-join:
+	@bash scripts/format-mz029-incremental-interval-join.sh
+
+race-mz029-incremental-interval-join:
+	@bash scripts/race-mz029-incremental-interval-join.sh
+
+vet-mz029-incremental-interval-join:
+	@bash scripts/vet-mz029-incremental-interval-join.sh
+
+review-mz029-incremental-interval-join:
+	@bash scripts/review-mz029-incremental-interval-join.sh
+
+verify-mz029-incremental-interval-join:
+	@bash scripts/verify-mz029-incremental-interval-join.sh
+
+commit-mz029-incremental-interval-join:
+	@bash scripts/commit-mz029-incremental-interval-join.sh
+
+push-mz029-incremental-interval-join:
+	@bash scripts/push-mz029-incremental-interval-join.sh

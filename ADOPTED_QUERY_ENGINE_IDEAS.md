@@ -346,3 +346,12 @@ batches atomically, supports same-key replacement, and exposes deterministic
 snapshots. See [MZ030_INCREMENTAL_JOIN.md](MZ030_INCREMENTAL_JOIN.md) for the
 API, scope, and measured tradeoffs. SQL planner integration, outer joins, and
 temporal interval joins remain open.
+### Materialize MZ-29: Incremental Interval-Join Maintenance
+
+Implemented as the imported `hatSql.IncrementalIntervalJoin` API. It maintains
+exact signed equi-inner join deltas over half-open validity intervals using
+equality buckets and interval pruning, with atomic validation, replacement,
+overflow checks, row cloning, and deterministic snapshots. The separate
+`ENGINE_IDEAS.md` MZ-029 entry is spillable arrangements and remains open.
+See [MZ029_INCREMENTAL_INTERVAL_JOIN.md](MZ029_INCREMENTAL_INTERVAL_JOIN.md)
+for the API and measured tradeoffs.

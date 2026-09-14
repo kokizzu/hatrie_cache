@@ -4039,3 +4039,6 @@ SQL mutation changefeed consumers can request pre- and post-state rows with `RET
 ## Query Engine Notes
 
 - [MZ-030 incremental differential join](MZ030_INCREMENTAL_JOIN.md)
+## Query Engine Notes
+
+- [Materialize-style incremental interval join](MZ029_INCREMENTAL_INTERVAL_JOIN.md)

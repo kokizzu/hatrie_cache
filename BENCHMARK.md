@@ -24497,3 +24497,37 @@ because it keeps both source indexes and rows available for future deltas.
 For a small update against a large maintained join, the measured work and
 transient allocation are much lower; complete snapshots remain proportional
 to the full joined result.
+<a id="mz-029-incremental-interval-join"></a>
+## Materialize MZ-29 Incremental Interval Join
+
+This compares a full rebuild that groups and scans 10,000 source rows per
+side with a warmed indexed interval join processing a one-key replacement.
+Index construction is outside the incremental timer. Values are medians of
+five raw samples from the default one-second `go test -bench` run.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement vs rebuild |
+| --- | ---: | ---: | ---: | ---: |
+| Full interval-join rebuild | 1,940,737 | 1,575,022 | 803 | 1.00x |
+| Incremental indexed interval join | 1,747 | 2,048 | 20 | 1,110.9x time, 769.1x bytes, 40.2x allocations |
+
+Raw results:
+
+```text
+BenchmarkMZ029IncrementalIntervalJoinRebuildBaseline-32
+1965536 ns/op  1575033 B/op  803 allocs/op
+1940737 ns/op  1575022 B/op  803 allocs/op
+1943812 ns/op  1575021 B/op  803 allocs/op
+1936473 ns/op  1575022 B/op  803 allocs/op
+1884658 ns/op  1575021 B/op  803 allocs/op
+
+BenchmarkMZ029IncrementalIntervalJoinIncremental-32
+1757 ns/op  2048 B/op  20 allocs/op
+1737 ns/op  2048 B/op  20 allocs/op
+3275 ns/op  2048 B/op  20 allocs/op
+1746 ns/op  2048 B/op  20 allocs/op
+1747 ns/op  2048 B/op  20 allocs/op
+```
+
+The index retains both source sides and interval metadata, so this is a
+small-update optimization rather than a reduction in total retained data.
+Complete snapshots still scale with the full joined result.
