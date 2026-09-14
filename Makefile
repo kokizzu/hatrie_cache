@@ -13388,3 +13388,35 @@ commit-ch056-like:
 .PHONY: push-ch056-like
 push-ch056-like:
 	bash ./scripts/push-ch056-like.sh
+
+.PHONY: test-sql-mutation-idempotency
+test-sql-mutation-idempotency:
+	bash ./scripts/test-sql-mutation-idempotency.sh
+
+.PHONY: benchmark-sql-mutation-idempotency
+benchmark-sql-mutation-idempotency:
+	bash ./scripts/benchmark-sql-mutation-idempotency.sh
+
+.PHONY: format-sql-mutation-idempotency
+format-sql-mutation-idempotency:
+	bash ./scripts/format-sql-mutation-idempotency.sh
+
+.PHONY: race-sql-mutation-idempotency
+race-sql-mutation-idempotency:
+	bash ./scripts/race-sql-mutation-idempotency.sh
+
+.PHONY: vet-sql-mutation-idempotency
+vet-sql-mutation-idempotency:
+	bash ./scripts/vet-sql-mutation-idempotency.sh
+
+.PHONY: review-sql-mutation-idempotency
+review-sql-mutation-idempotency:
+	bash ./scripts/review-sql-mutation-idempotency.sh
+
+.PHONY: commit-sql-mutation-idempotency
+commit-sql-mutation-idempotency:
+	bash ./scripts/commit-sql-mutation-idempotency.sh
+
+.PHONY: push-sql-mutation-idempotency
+push-sql-mutation-idempotency:
+	bash ./scripts/push-sql-mutation-idempotency.sh

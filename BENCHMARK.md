@@ -23806,3 +23806,43 @@ BenchmarkCH056LiteralLike/prepared-32  20743996  51.41 ns/op  0 B/op  0 allocs/o
 BenchmarkCH056LiteralLike/prepared-32  23270899  49.26 ns/op  0 B/op  0 allocs/op
 BenchmarkCH056LiteralLike/prepared-32  24853663  45.94 ns/op  0 B/op  0 allocs/op
 ```
+
+## CH-057 SQL Mutation Idempotency
+
+ClickHouse-style insert deduplication tokens were measured through
+`ExecuteSQLMutationIdempotent`. The benchmark repeats one SQL insert after
+setup for the retry cases and uses `make benchmark-sql-mutation-idempotency`
+with five samples on Linux/amd64 and an AMD Ryzen 9 5950X.
+
+| Path | Raw `ns/op` samples | Median | Heap | Allocs |
+| --- | --- | ---: | ---: | ---: |
+| Direct SQL mutation, no journal | 6581; 6525; 6474; 6427; 6831 | 6525 | 8960 B/op | 29 |
+| Journaled mutation, no token | 674168; 1196789; 676083; 1909708; 750631 | 750631 | 259-265 B/op | 2 |
+| Idempotent SQL retry | 7520; 7424; 7653; 7364; 7584 | 7520 | 9237 B/op | 31 |
+
+The idempotent retry path is `1.15x` the direct no-journal latency, with
+`1.03x` the measured heap and two additional allocations. The journaled
+no-token path is dominated by synchronous durable writes and has high
+filesystem variance; its sample median is about `0.75 ms/op`. This feature is a
+correctness and duplicate-write suppression improvement, not a faster first
+write, and the default non-idempotent SQL mutation path is unchanged.
+
+Raw output:
+
+```text
+BenchmarkExecuteSQLMutationRetry/direct-no-journal-32  171237  6581 ns/op  8960 B/op  29 allocs/op
+BenchmarkExecuteSQLMutationRetry/direct-no-journal-32  183716  6525 ns/op  8960 B/op  29 allocs/op
+BenchmarkExecuteSQLMutationRetry/direct-no-journal-32  188392  6474 ns/op  8960 B/op  29 allocs/op
+BenchmarkExecuteSQLMutationRetry/direct-no-journal-32  181021  6427 ns/op  8960 B/op  29 allocs/op
+BenchmarkExecuteSQLMutationRetry/direct-no-journal-32  188131  6831 ns/op  8960 B/op  29 allocs/op
+BenchmarkExecuteSQLMutationRetry/journal-no-token-32  1484  674168 ns/op  259 B/op  2 allocs/op
+BenchmarkExecuteSQLMutationRetry/journal-no-token-32  1765  1196789 ns/op  261 B/op  2 allocs/op
+BenchmarkExecuteSQLMutationRetry/journal-no-token-32  1872  676083 ns/op  259 B/op  2 allocs/op
+BenchmarkExecuteSQLMutationRetry/journal-no-token-32  1873  1909708 ns/op  265 B/op  2 allocs/op
+BenchmarkExecuteSQLMutationRetry/journal-no-token-32  1717  750631 ns/op  259 B/op  2 allocs/op
+BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  155104  7520 ns/op  9237 B/op  31 allocs/op
+BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  157731  7424 ns/op  9237 B/op  31 allocs/op
+BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  157591  7653 ns/op  9237 B/op  31 allocs/op
+BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  154558  7364 ns/op  9237 B/op  31 allocs/op
+BenchmarkExecuteSQLMutationRetry/idempotent-retry-32  157245  7584 ns/op  9237 B/op  31 allocs/op
+```

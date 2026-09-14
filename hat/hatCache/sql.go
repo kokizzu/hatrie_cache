@@ -39,6 +39,112 @@ func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, param
 	return executeSQLMutation(ctx, trie, source, parameters, options)
 }
 
+// ExecuteSQLMutationIdempotent executes a journal-backed SQL mutation with a
+// caller-supplied retry token. The token is stored with the exact generated
+// command fingerprint, so retrying the same mutation returns the original
+// successful response with the same mutation result without applying the
+// write again, including after journal replay. The journal must be opened with
+// a positive IdempotencyCapacity.
+// RETURNING, automatic triggers, ON CONFLICT, and MERGE are intentionally
+// rejected because their result or conditional semantics are not represented
+// by the existing public command journal record.
+func ExecuteSQLMutationIdempotent(ctx context.Context, journal *CommandJournal, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions, idempotencyKey string) (SQLMutationResult, error) {
+	if journal == nil {
+		return SQLMutationResult{}, ErrNilCommandJournal
+	}
+	if trie == nil {
+		return SQLMutationResult{}, ErrNilHatTrie
+	}
+	if !journal.idempotency.enabled() {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency requires a positive command journal IdempotencyCapacity")
+	}
+	if options.TriggerRegistry != nil {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency does not support automatic triggers")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency key is required")
+	}
+	if err := validateCommandIdempotencyKey(key); err != nil {
+		return SQLMutationResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return SQLMutationResult{}, err
+	}
+	mutationSource, returning, err := parseSQLMutationReturning(source)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if len(returning) > 0 {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency does not support RETURNING")
+	}
+	if _, _, conflict, err := parseSQLInsertConflict(mutationSource); err != nil {
+		return SQLMutationResult{}, err
+	} else if conflict {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency does not support ON CONFLICT")
+	}
+	if _, mergeStatement, err := parseSQLMerge(mutationSource); err != nil {
+		return SQLMutationResult{}, err
+	} else if mergeStatement {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency does not support MERGE")
+	}
+	insert, insertSelect, err := parseSQLInsertSelect(mutationSource)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if !insertSelect {
+		request, err := CompileSQL(mutationSource)
+		if err != nil {
+			return SQLMutationResult{}, err
+		}
+		request.IdempotencyKey = key
+		if !commandShouldJournal(request) {
+			return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency requires a journaled write command")
+		}
+		response := journal.ExecuteCommand(trie, request)
+		if !response.OK {
+			return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
+		}
+		return SQLMutationResult{Affected: sqlMutationAffected(request), Response: response}, nil
+	}
+	query, err := ExecuteSQLQueryParameters(ctx, insert.query, trie, parameters, options)
+	if err != nil {
+		return SQLMutationResult{}, err
+	}
+	if len(query.Columns) != len(insert.columns) {
+		return SQLMutationResult{}, fmt.Errorf("INSERT ... SELECT returned %d columns for %d target columns", len(query.Columns), len(insert.columns))
+	}
+	requests := make([]CacheCommandRequest, len(query.Rows))
+	for rowIndex, row := range query.Rows {
+		if err := ctx.Err(); err != nil {
+			return SQLMutationResult{}, err
+		}
+		request, err := insert.request(query.Columns, row)
+		if err != nil {
+			return SQLMutationResult{}, fmt.Errorf("INSERT ... SELECT row %d: %w", rowIndex+1, err)
+		}
+		requests[rowIndex] = request
+	}
+	if len(requests) == 0 {
+		return SQLMutationResult{Response: CacheCommandResponse{OK: true, Message: "no rows selected"}}, nil
+	}
+	if len(requests) > maxPublicCommandBatchSize {
+		return SQLMutationResult{}, fmt.Errorf("INSERT ... SELECT produced %d rows; atomic cache command batches are limited to %d", len(requests), maxPublicCommandBatchSize)
+	}
+	batch := CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: requests, IdempotencyKey: key}
+	if !commandShouldJournal(batch) {
+		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency requires a journaled write command batch")
+	}
+	response := journal.ExecuteCommand(trie, batch)
+	if !response.OK {
+		return SQLMutationResult{Response: response}, fmt.Errorf("SQL mutation failed: %s", response.Message)
+	}
+	return SQLMutationResult{Affected: len(requests), Response: response}, nil
+}
+
 func executeSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
 	if trie == nil {
 		return SQLMutationResult{}, ErrNilHatTrie

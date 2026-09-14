@@ -29,7 +29,7 @@ before/after measurement when its motivation is performance.
 | CH-07 | Decompressed column block cache with admission control | Reduce repeated codec CPU | Retained heap and stale blocks | [x] Implemented as the opt-in `TypedTableColumnarCacheOptions.DecompressedBlockCache`; see [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md) and [BENCHMARK.md](BENCHMARK.md#ch-007-decompressed-column-block-cache-with-admission). |
 | CH-08 | Remote-part file cache with pinning and eviction priorities | Make object-store reads predictable | Local disk pressure | [x] Implemented as a bounded immutable cache; see [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md) and [BENCHMARK.md](BENCHMARK.md#ch-008-remote-part-cache). |
 | CH-09 | Asynchronous insert buffer with bounded flush batches | Amortize many tiny inserts | Visibility and crash recovery semantics | [x] Implemented as the opt-in `hat/hatCache.AsyncInsertBuffer`; it uses existing scalar journal records and group commit, with recovery semantics documented in [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md). |
-| CH-10 | Insert deduplication tokens for retried client batches | Make retries idempotent | Token retention and namespace rules | [ ] |
+| CH-10 | Insert deduplication tokens for retried client batches | Make retries idempotent | Token retention and namespace rules | [x] Implemented by the opt-in journal-backed `ExecuteSQLMutationIdempotent`; see [CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md) and [BENCHMARK.md#ch-057-sql-mutation-idempotency](BENCHMARK.md#ch-057-sql-mutation-idempotency). |
 | CH-11 | Client-facing insert quorum separate from replica write quorum | Expose durability acknowledgement explicitly | Added latency and failure modes | [ ] |
 | CH-12 | Delete bitmap compaction scheduler | Keep lightweight deletes from degrading scans | Background CPU and rewrite spikes | [ ] |
 | CH-13 | Mutation throttling with maintenance windows | Protect foreground queries | Longer mutation completion time | [ ] |
@@ -241,3 +241,14 @@ pruning under non-binary collations. The paired benchmark is 4.72x faster with
 80 B/op and 3 allocs/op reduced to 0 B/op and 0 allocs/op; see
 [CH056_PREPARED_LIKE.md](CH056_PREPARED_LIKE.md) and
 [BENCHMARK.md#ch-056-prepared-literal-like-patterns](BENCHMARK.md#ch-056-prepared-literal-like-patterns).
+
+## CH-057 Journal-Backed SQL Mutation Idempotency
+
+The ClickHouse-inspired insert-deduplication follow-up adds the explicit
+`ExecuteSQLMutationIdempotent` API. It records a bounded caller token with the
+exact generated command fingerprint, suppresses duplicate direct or atomic
+`INSERT ... SELECT` writes, rejects conflicting token reuse, and survives
+journal replay. Ordinary SQL mutations remain unchanged; `RETURNING`,
+`ON CONFLICT`, `MERGE`, and automatic triggers are rejected because their
+semantics are not represented by the existing public journal record. See
+[CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md).

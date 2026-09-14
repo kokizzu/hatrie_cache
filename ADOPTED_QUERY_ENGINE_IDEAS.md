@@ -201,6 +201,17 @@ explicitly opt-in operational control.
 
 | Tarantool / ClickHouse | Reverse ordered index iterators | Adopted as an additive zero-copy traversal API | `OrderedIndex.Last`, `SeekBefore`, and `SeekBeforeOrEqual` expose descending live iteration; `LastSnapshotCursor` and reverse cursor seeks preserve a stable view through existing copy-on-write snapshots. No default path, storage format, wire format, or SQL planner behavior changes. The 1,024-entry benchmark is 1.62x faster and 24,576 B/op lower than an allocating materialize-and-reverse baseline, while an already-reused slice remains faster. See [TR029_REVERSE_ITERATORS.md](TR029_REVERSE_ITERATORS.md) and [BENCHMARK.md](BENCHMARK.md#tr-029-reverse-ordered-index-iterators). |
 
+## CH-057: Journal-Backed SQL Mutation Idempotency
+
+ClickHouse-style insert deduplication is adopted as an explicit SQL mutation
+API. `ExecuteSQLMutationIdempotent` stores a bounded caller token with the
+generated command fingerprint in the existing command journal, suppresses
+duplicate direct and atomic `INSERT ... SELECT` writes, rejects conflicting
+reuse, and survives journal replay. The ordinary SQL mutation API remains
+unchanged; `RETURNING`, `ON CONFLICT`, `MERGE`, and automatic triggers remain
+unsupported because their semantics are not represented by the public journal
+record. See [CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md).
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge
