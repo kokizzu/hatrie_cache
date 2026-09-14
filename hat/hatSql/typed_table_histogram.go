@@ -19,6 +19,13 @@ type TypedTableHistogramOptions struct {
 	Bins int
 }
 
+type typedTableHistogramCacheKey struct {
+	field string
+	bins  int
+}
+
+const maxTypedTableHistogramCacheEntries = 8
+
 // TypedTableHistogramBin stores the inclusive range and number of finite
 // values in one histogram bucket. All bins except the last are lower-inclusive
 // and upper-exclusive for floating-point values; integer bounds are exact.
@@ -44,9 +51,9 @@ type TypedTableHistogram struct {
 	Bins            []TypedTableHistogramBin
 }
 
-// Histogram computes a compact, exact-count histogram for an int64 or float64
-// column over active rows. It scans existing typed storage under the table
-// read lock and retains only the bounded result bins.
+// Histogram returns a compact, exact-count histogram for an int64 or float64
+// column over active rows. The first request for a field/bin pair scans the
+// existing typed storage; repeated requests reuse a bounded snapshot.
 func (table *TypedTable) Histogram(field string, options TypedTableHistogramOptions) (TypedTableHistogram, error) {
 	if table == nil {
 		return TypedTableHistogram{}, fmt.Errorf("typed table is nil")
@@ -55,8 +62,20 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 	if err != nil {
 		return TypedTableHistogram{}, err
 	}
+	cacheKey := typedTableHistogramCacheKey{field: field, bins: bins}
 	table.mu.RLock()
-	defer table.mu.RUnlock()
+	if cached, found := table.histogramCache[cacheKey]; found {
+		histogram := cloneTypedTableHistogram(cached)
+		table.mu.RUnlock()
+		return histogram, nil
+	}
+	table.mu.RUnlock()
+
+	table.mu.Lock()
+	defer table.mu.Unlock()
+	if cached, found := table.histogramCache[cacheKey]; found {
+		return cloneTypedTableHistogram(cached), nil
+	}
 	columnIndex, found := table.byName[field]
 	if !found {
 		return TypedTableHistogram{}, fmt.Errorf("typed table histogram field %q is missing", field)
@@ -119,7 +138,8 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		}
 	}
 	if !histogram.HasMinMax {
-		return histogram, nil
+		table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+		return cloneTypedTableHistogram(histogram), nil
 	}
 	if storage.kind == TypedTableInt64 {
 		bins = typedTableIntHistogramBinCount(minInt, maxInt, bins)
@@ -135,7 +155,8 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 			index := typedTableIntHistogramIndex(storage.int64s[row], minInt, maxInt, bins)
 			histogram.Bins[index].Count++
 		}
-		return histogram, nil
+		table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+		return cloneTypedTableHistogram(histogram), nil
 	}
 	if span := maxFloat - minFloat; span == 0 || math.IsInf(span, 0) {
 		bins = 1
@@ -156,7 +177,25 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		index := typedTableFloatHistogramIndex(value, minFloat, maxFloat, bins)
 		histogram.Bins[index].Count++
 	}
-	return histogram, nil
+	table.cacheTypedTableHistogramLocked(cacheKey, histogram)
+	return cloneTypedTableHistogram(histogram), nil
+}
+
+func (table *TypedTable) cacheTypedTableHistogramLocked(key typedTableHistogramCacheKey, histogram TypedTableHistogram) {
+	if table.histogramCache == nil {
+		table.histogramCache = make(map[typedTableHistogramCacheKey]TypedTableHistogram, 1)
+	}
+	if _, exists := table.histogramCache[key]; exists || len(table.histogramCache) < maxTypedTableHistogramCacheEntries {
+		table.histogramCache[key] = histogram
+	}
+}
+
+func cloneTypedTableHistogram(histogram TypedTableHistogram) TypedTableHistogram {
+	if histogram.Bins == nil {
+		return histogram
+	}
+	histogram.Bins = append([]TypedTableHistogramBin(nil), histogram.Bins...)
+	return histogram
 }
 
 func typedTableHistogramBinLimit(requested int) (int, error) {

@@ -321,6 +321,7 @@ type TypedTable struct {
 	appendOnly      bool
 	statsCache      TypedTableStats
 	statsCacheValid bool
+	histogramCache  map[typedTableHistogramCacheKey]TypedTableHistogram
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -449,7 +450,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		return TypedTableChange{}, err
 	}
 	table.clearColumnarLayoutsLocked()
-	table.statsCacheValid = false
+	table.invalidateTypedTableDerivedCachesLocked()
 	index, exists := table.positions[key]
 	newBasePart := !exists && len(table.keys) == 0
 	change := TypedTableChange{Key: key, After: cloneTypedTableValues(values)}
@@ -502,7 +503,7 @@ func (table *TypedTable) Delete(key string) (TypedTableChange, error) {
 		return TypedTableChange{}, fmt.Errorf("typed table key %q does not exist", key)
 	}
 	table.clearColumnarLayoutsLocked()
-	table.statsCacheValid = false
+	table.invalidateTypedTableDerivedCachesLocked()
 	table.appendOnly = false
 	change := TypedTableChange{Operation: "DELETE", Key: key, Before: table.rowLocked(index)}
 	if table.patchParts != nil {

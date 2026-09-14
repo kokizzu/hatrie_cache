@@ -190,6 +190,71 @@ func TestTypedTableHistogramHandlesExtremeAndOnlySpecialFloats(t *testing.T) {
 	}
 }
 
+func TestTypedTableHistogramCacheInvalidatesAndReturnsIndependentSnapshots(t *testing.T) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name:    "cached",
+		Columns: []TypedTableColumn{{Name: "score", Kind: TypedTableInt64}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := table.Upsert("a", []TypedTableValue{TypedInt64(10)}); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := table.Histogram("score", TypedTableHistogramOptions{Bins: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(table.histogramCache) != 1 {
+		t.Fatalf("histogram cache entries = %d, want 1", len(table.histogramCache))
+	}
+	first.Bins[0].Count = 999
+	second, err := table.Histogram("score", TypedTableHistogramOptions{Bins: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RowCount != 1 || second.Bins[0].Count != 1 {
+		t.Fatalf("cached histogram snapshot was mutated through the caller: %#v", second)
+	}
+	for bins := 1; bins <= MaxTypedTableHistogramBins; bins++ {
+		if _, err := table.Histogram("score", TypedTableHistogramOptions{Bins: bins}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(table.histogramCache) != maxTypedTableHistogramCacheEntries {
+		t.Fatalf("histogram cache entries = %d, want cap %d", len(table.histogramCache), maxTypedTableHistogramCacheEntries)
+	}
+
+	if _, err := table.Upsert("b", []TypedTableValue{TypedInt64(20)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(table.histogramCache) != 0 {
+		t.Fatal("Upsert() left stale histogram cache entries")
+	}
+	second, err = table.Histogram("score", TypedTableHistogramOptions{Bins: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RowCount != 2 || second.Max != TypedInt64(20) {
+		t.Fatalf("histogram after Upsert() = %#v", second)
+	}
+
+	if _, err := table.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(table.histogramCache) != 0 {
+		t.Fatal("Delete() left stale histogram cache entries")
+	}
+	second, err = table.Histogram("score", TypedTableHistogramOptions{Bins: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RowCount != 1 || second.Min != TypedInt64(20) || second.Max != TypedInt64(20) {
+		t.Fatalf("histogram after Delete() = %#v", second)
+	}
+}
+
 func histogramBinCount(histogram TypedTableHistogram) int {
 	count := 0
 	for _, bin := range histogram.Bins {

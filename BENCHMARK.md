@@ -20873,6 +20873,13 @@ Raw `BenchmarkTypedTableStats` samples:
 Before: 825310, 815681, 912413, 819387, 825470 ns/op; 640 B/op; 1 alloc/op
 After:  124.4, 126.9, 138.5, 132.2, 172.1 ns/op; 640 B/op; 1 alloc/op
 ```
+
+The same cache policy applies to numeric typed-table histograms. On the
+10,000-row `score` fixture, the five-sample median moved from `90,188 ns/op`
+before caching to `622.1 ns/op` after caching, or `145x` faster. Both paths
+reported `3,456 B/op` and one allocation; the cache retains at most eight
+field/bin variants per table. Full raw samples and invalidation coverage are
+in [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md).
 ## MZ-007 source frontier requirement
 
 `make benchmark-mz007-frontier-rejection` (five samples, `-benchmem`, AMD Ryzen 9 5950X):

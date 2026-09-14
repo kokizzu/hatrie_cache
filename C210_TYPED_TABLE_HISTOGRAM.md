@@ -32,8 +32,12 @@ for _, bin := range histogram.Bins {
 - String and bool histograms are rejected explicitly because a numeric
   fixed-width range histogram would give misleading selectivity estimates for
   those types.
-- The snapshot is computed on demand under the table read lock. It adds no
-  per-write bookkeeping or default retained table state.
+- The first request for a field and normalized bin count is computed under the
+  table lock and retained as a bounded snapshot. Repeated requests clone the
+  bins without rescanning rows. Successful `Upsert` and `Delete` invalidate
+  all histogram snapshots; physical patch compaction preserves them because
+  active rows and values do not change. At most eight field/bin variants are
+  retained per table.
 
 ## Benchmark
 
@@ -45,17 +49,20 @@ histogram API.
 | --- | ---: | ---: | ---: | --- |
 | C209 `TypedTable.Stats()` before C210 | 843,252 | 640 | 1 | four-column stats control |
 | C209 `TypedTable.Stats()` after C210 | 831,005 | 640 | 1 | 1.01x versus the control; within run variance |
-| `TypedTable.Histogram("score", Bins: 32)` | 90,531 | 3,456 | 1 | one numeric column, two scans, bounded 32-bin result |
+| Uncached `TypedTable.Histogram("score", Bins: 32)` (before) | 90,188 | 3,456 | 1 | one numeric column, two scans, bounded 32-bin result |
+| Cached `TypedTable.Histogram("score", Bins: 32)` (after) | 622.1 | 3,456 | 1 | 145x faster; equal transient bytes and allocations |
 
-The histogram retains roughly 3.4 KiB for the 32-bin result and does not
-retain the table rows. Its cost is proportional to the selected column's
-active rows, with a second pass used to fill exact bin counts.
+Each cached 32-bin result retains roughly 3.4 KiB plus map overhead and does
+not retain table rows; the eight-entry cap bounds the retained histogram
+payload. A cold request remains proportional to the selected column's active
+rows, with a second pass used to fill exact bin counts.
 
 Raw final samples:
 
 ```text
 TypedTable.Stats(): 831005, 866445, 848411, 819182, 747001 ns/op
-TypedTable.Histogram(): 87088, 90306, 90531, 90593, 90836 ns/op
+TypedTable.Histogram() before: 90188, 90647, 89674, 90261, 89860 ns/op
+TypedTable.Histogram() after: 620.7, 583.9, 622.1, 693.1, 649.4 ns/op
 ```
 
 Verification:

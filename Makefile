@@ -13867,3 +13867,35 @@ commit-tt050-typed-table-cache:
 .PHONY: push-tt050-typed-table-cache
 push-tt050-typed-table-cache:
 	@bash scripts/push-tt050-typed-table-cache.sh
+
+.PHONY: test-tt051-typed-table-histogram-cache
+test-tt051-typed-table-histogram-cache:
+	@bash scripts/test-tt051-typed-table-histogram-cache.sh
+
+.PHONY: benchmark-tt051-typed-table-histogram-cache
+benchmark-tt051-typed-table-histogram-cache:
+	@bash scripts/benchmark-tt051-typed-table-histogram-cache.sh
+
+.PHONY: format-tt051-typed-table-histogram-cache
+format-tt051-typed-table-histogram-cache:
+	@bash scripts/format-tt051-typed-table-histogram-cache.sh
+
+.PHONY: race-tt051-typed-table-histogram-cache
+race-tt051-typed-table-histogram-cache:
+	@bash scripts/race-tt051-typed-table-histogram-cache.sh
+
+.PHONY: vet-tt051-typed-table-histogram-cache
+vet-tt051-typed-table-histogram-cache:
+	@bash scripts/vet-tt051-typed-table-histogram-cache.sh
+
+.PHONY: verify-tt051-typed-table-histogram-cache
+verify-tt051-typed-table-histogram-cache:
+	@bash scripts/verify-tt051-typed-table-histogram-cache.sh
+
+.PHONY: commit-tt051-typed-table-histogram-cache
+commit-tt051-typed-table-histogram-cache:
+	@bash scripts/commit-tt051-typed-table-histogram-cache.sh
+
+.PHONY: push-tt051-typed-table-histogram-cache
+push-tt051-typed-table-histogram-cache:
+	@bash scripts/push-tt051-typed-table-histogram-cache.sh

@@ -186,7 +186,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-047 | Expiration wheel | Partially adopted: the opt-in cleaner now sleeps until the indexed min-heap deadline and wakes for newly earlier deadlines, including local partitions; a hierarchical wheel remains deferred because exact heap deadlines preserve bounded live entries and simpler recovery semantics. | Medium |
 | TT-048 | Queue/priority space primitive | No durable priority queue data structure with claim, retry, and visibility timeout. | Medium |
 | TT-049 | Pessimistic row locks | No `SELECT FOR UPDATE`-style lock lease for callers that need serialized reads/mutations. | High |
-| TT-050 | SQL planner statistics | Partial: explicit source-versioned `ANALYZE` statistics now feed what-if planning, and `TypedTable.Stats()` reuses an invalidation-aware exact snapshot; durable on-disk statistics and a full cost model remain. | Medium |
+| TT-050 | SQL planner statistics | Partial: explicit source-versioned `ANALYZE` statistics now feed what-if planning, while `TypedTable.Stats()` and numeric `TypedTable.Histogram()` reuse invalidation-aware exact snapshots; durable on-disk statistics and a full cost model remain. | Medium |
 
 ## Selection order
 
