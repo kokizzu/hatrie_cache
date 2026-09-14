@@ -23888,3 +23888,54 @@ BenchmarkTR038SQLTransactionTimeoutGuard/enabled-32  22129327  47.74 ns/op  0 B/
 PASS
 ok  hatrie_cache/hat/hatCache  14.487s
 ```
+
+<a id="tr-04-replication-key-prefix-filter"></a>
+## TR-04 Replication Key-Prefix Filter
+
+This benchmark isolates the allocation-free key-prefix predicate added for
+Tarantool-style explicit replication partitions. It uses
+`make benchmark-tr004-replication-key-filter` with five samples,
+`-benchtime=200ms`, on Linux/amd64 with an AMD Ryzen 9 5950X. The disabled
+case is the default behavior; configured cases show the linear cost of checking
+one or four literal prefixes. This is CPU-only and does not include network
+traffic or trie scanning.
+
+| Path | Raw `ns/op` samples | Median | Heap | Allocs | Relative to disabled |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Filtering disabled | 0.476; 0.475; 0.479; 0.486; 0.475 | 0.476 | 0 B/op | 0 | 1.00x |
+| One prefix, match first | 3.304; 3.385; 3.488; 3.381; 3.348 | 3.381 | 0 B/op | 0 | 7.10x |
+| Four prefixes, match last | 11.20; 11.21; 11.27; 11.19; 11.11 | 11.20 | 0 B/op | 0 | 23.51x |
+| Four prefixes, miss | 11.76; 11.52; 11.79; 11.86; 11.81 | 11.79 | 0 B/op | 0 | 24.74x |
+
+The filter's tradeoff is a small linear CPU check in exchange for avoiding
+out-of-scope live writes and repair payloads. The default path has no added
+allocation and no configured-prefix scan. Digest filtering also disables the
+whole-dataset Merkle shortcut, so end-to-end savings depend on how much traffic
+the selected partition removes.
+
+Raw output:
+
+```text
+BenchmarkTR004ReplicationKeyPrefixMatcher/Disabled-32  479828259  0.4764 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Disabled-32  507433348  0.4747 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Disabled-32  487851848  0.4789 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Disabled-32  494623798  0.4860 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Disabled-32  511938829  0.4752 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchFirst-32  73064053  3.304 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchFirst-32  71867670  3.385 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchFirst-32  73090754  3.488 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchFirst-32  69935306  3.381 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchFirst-32  73008709  3.348 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchLast-32  20776750  11.20 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchLast-32  19974388  11.21 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchLast-32  20949974  11.27 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchLast-32  20525544  11.19 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/MatchLast-32  20901987  11.11 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Miss-32  20527124  11.76 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Miss-32  19762358  11.52 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Miss-32  20896656  11.79 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Miss-32  19202353  11.86 ns/op  0 B/op  0 allocs/op
+BenchmarkTR004ReplicationKeyPrefixMatcher/Miss-32  17868464  11.81 ns/op  0 B/op  0 allocs/op
+PASS
+ok  hatrie_cache/hat/hatCache  5.161s
+```

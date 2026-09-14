@@ -48,14 +48,16 @@ type replicationDigest struct {
 }
 
 type replicationDigestTargetInventory struct {
-	target     TopologyNode
-	prefix     string
-	pageSize   int
-	root       *xxhash.Digest
-	rootSum    uint64
-	entryCount uint64
-	buckets    replicationMerkleBucketMask
-	hasBuckets bool
+	target             TopologyNode
+	prefix             string
+	keyPrefixes        []string
+	keyPrefixesEncoded string
+	pageSize           int
+	root               *xxhash.Digest
+	rootSum            uint64
+	entryCount         uint64
+	buckets            replicationMerkleBucketMask
+	hasBuckets         bool
 }
 
 type replicationDigestChange struct {
@@ -155,7 +157,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			grpcSession = newReplicationGRPCSyncSession(ctx, replicator)
 			defer grpcSession.close()
 		}
-		inventory := newReplicationDigestTargetInventory(singleTarget, prefix, pageSize)
+		inventory := newReplicationDigestTargetInventory(singleTarget, prefix, pageSize, replicator.keyPrefixes)
 		targets, changed, deleted, fallback := replicator.syncDigestTargetFallback(ctx, trie, routing, *inventory, grpcSession)
 		result.Entries = changed
 		result.Targets = targets
@@ -263,7 +265,7 @@ type replicationMerkleTargetPreflight struct {
 
 func (replicator *HTTPReplicator) syncAllMerkle(ctx context.Context, trie *HatTrie, prefix string, pageSize int, routing replicationRoutingSnapshot) (ReplicationResult, bool) {
 	result := ReplicationResult{Command: "SYNC", Key: prefix}
-	if prefix != "" || len(routing.shards) != 1 {
+	if prefix != "" || len(routing.shards) != 1 || len(replicator.keyPrefixes) != 0 {
 		return result, false
 	}
 	if routing.leaders[0].Leader != replicator.self {
@@ -380,7 +382,7 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 		}
 		for _, target := range routing.targets[shardIndex] {
 			if _, ok := inventories[target]; !ok {
-				inventories[target] = newReplicationDigestTargetInventory(target, prefix, pageSize)
+				inventories[target] = newReplicationDigestTargetInventory(target, prefix, pageSize, replicator.keyPrefixes)
 			}
 		}
 	}
@@ -395,6 +397,9 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 		page, err := replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if !replicator.replicationKeyAllowed(entry.Key) {
+				return nil
 			}
 			route, targets, ok := routing.replicationScanRouteForKeyAndTargets(entry.Key)
 			if !ok || route.Leader.Leader != replicator.self {
@@ -412,7 +417,7 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 			for _, target := range targets {
 				inventory := inventories[target]
 				if inventory == nil {
-					inventory = newReplicationDigestTargetInventory(target, prefix, pageSize)
+					inventory = newReplicationDigestTargetInventory(target, prefix, pageSize, replicator.keyPrefixes)
 					inventories[target] = inventory
 				}
 				appendReplicationDigestRoot(inventory.root, entry.Key, digest)
@@ -443,7 +448,7 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 }
 
 func (replicator *HTTPReplicator) replicationDigestInventorySingleTarget(ctx context.Context, trie *HatTrie, prefix string, pageSize int, routing replicationRoutingSnapshot, target TopologyNode) ([]replicationDigestTargetInventory, int, error) {
-	inventory := newReplicationDigestTargetInventory(target, prefix, pageSize)
+	inventory := newReplicationDigestTargetInventory(target, prefix, pageSize, replicator.keyPrefixes)
 	afterKey := ""
 	hasAfterKey := false
 	cursor := &replicationSyncCursor{packedKeys: true}
@@ -454,6 +459,9 @@ func (replicator *HTTPReplicator) replicationDigestInventorySingleTarget(ctx con
 		page, err := replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if !replicator.replicationKeyAllowed(entry.Key) {
+				return nil
 			}
 			route, targets, ok := routing.replicationScanRouteForKeyAndTargets(entry.Key)
 			if !ok || route.Leader.Leader != replicator.self || len(targets) == 0 {
@@ -484,7 +492,7 @@ func (replicator *HTTPReplicator) replicationDigestInventorySingleTarget(ctx con
 }
 
 func (replicator *HTTPReplicator) replicationDigestInventoryForTarget(ctx context.Context, trie *HatTrie, pageSize int, routing replicationRoutingSnapshot, target TopologyNode, buckets replicationMerkleBucketMask) (replicationDigestTargetInventory, error) {
-	inventory := newReplicationDigestTargetInventory(target, "", pageSize)
+	inventory := newReplicationDigestTargetInventory(target, "", pageSize, replicator.keyPrefixes)
 	inventory.buckets = buckets
 	inventory.hasBuckets = true
 	afterKey := ""
@@ -496,6 +504,9 @@ func (replicator *HTTPReplicator) replicationDigestInventoryForTarget(ctx contex
 		page, err := replicationSyncEntriesPageWithCursor(trie, "", afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if !replicator.replicationKeyAllowed(entry.Key) {
+				return nil
 			}
 			if !buckets.ContainsKey(entry.Key) {
 				return nil
@@ -587,6 +598,9 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		}
 		for _, remote := range page.entries {
 			key := remote.Message
+			if !replicationKeyAllowedForPrefixes(inventory.keyPrefixes, key) {
+				continue
+			}
 			route, routed := routing.replicationScanRouteForKey(key)
 			if !strings.HasPrefix(key, inventory.prefix) || (inventory.hasBuckets && !inventory.buckets.ContainsKey(key)) || !routed || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, inventory.target.ID) {
 				pageResult.OK = false
@@ -736,13 +750,18 @@ func (replicator *HTTPReplicator) markReplicationDigestSupported(target Topology
 	replicator.mu.Unlock()
 }
 
-func newReplicationDigestTargetInventory(target TopologyNode, prefix string, pageSize int) *replicationDigestTargetInventory {
-	return &replicationDigestTargetInventory{
+func newReplicationDigestTargetInventory(target TopologyNode, prefix string, pageSize int, keyPrefixes ...[]string) *replicationDigestTargetInventory {
+	inventory := &replicationDigestTargetInventory{
 		target:   target,
 		prefix:   prefix,
 		pageSize: pageSize,
 		root:     xxhash.New(),
 	}
+	if len(keyPrefixes) > 0 {
+		inventory.keyPrefixes = keyPrefixes[0]
+		inventory.keyPrefixesEncoded = encodeReplicationKeyPrefixes(inventory.keyPrefixes)
+	}
+	return inventory
 }
 
 func newReplicationDigestSourceIterator(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory) *replicationDigestSourceIterator {
@@ -908,6 +927,9 @@ func (iterator *replicationDigestSourceIterator) includes(entry Entry) (bool, er
 	if err := iterator.ctx.Err(); err != nil {
 		return false, err
 	}
+	if !replicationKeyAllowedForPrefixes(iterator.inventory.keyPrefixes, entry.Key) {
+		return false, nil
+	}
 	if iterator.mode&replicationDigestSourceInvariantScope != 0 {
 		return true, nil
 	}
@@ -999,6 +1021,9 @@ func prefixDigestRequest(routing replicationRoutingSnapshot, source string, pref
 	}
 	if inventory.hasBuckets {
 		request.Pairs[replicationDigestBucketsMetadata] = encodeReplicationMerkleBucketMask(inventory.buckets)
+	}
+	if inventory.keyPrefixesEncoded != "" {
+		request.Pairs[replicationKeyPrefixesMetadata] = inventory.keyPrefixesEncoded
 	}
 	return request
 }
@@ -1377,6 +1402,9 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 		return commandError("replication digest target node is invalid"), false
 	}
 	if commandPairString(request.Pairs, replicationDigestModeMetadata) == replicationDigestMerkleMode {
+		if commandPairString(request.Pairs, replicationKeyPrefixesMetadata) != "" {
+			return commandError("replication Merkle digest does not support key prefixes"), false
+		}
 		if request.Key != "" || len(routing.shards) != 1 {
 			return commandError("replication Merkle digest requires a whole-dataset single-shard sync"), false
 		}
@@ -1411,13 +1439,17 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 		}
 		hasBuckets = true
 	}
+	keyPrefixes, err := decodeReplicationKeyPrefixes(commandPairString(request.Pairs, replicationKeyPrefixesMetadata))
+	if err != nil {
+		return commandError(err.Error()), false
+	}
 	if !hasAfterKey {
 		if encodedRoot := commandPairString(request.Pairs, replicationDigestRootMetadata); encodedRoot != "" {
 			expected, err := decodeReplicationValueDigest(encodedRoot)
 			if err != nil {
 				return commandError(err.Error()), false
 			}
-			actual, err := trie.replicationDigestRoot(request.Key, routing, source, targetNode, buckets, hasBuckets)
+			actual, err := trie.replicationDigestRoot(request.Key, routing, source, targetNode, buckets, hasBuckets, keyPrefixes)
 			if err != nil {
 				return commandError(err.Error()), false
 			}
@@ -1426,7 +1458,7 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 			}
 		}
 	}
-	page, err := trie.replicationDigestPage(request.Key, request.Subkey, hasAfterKey, limit, routing, source, targetNode, buckets, hasBuckets)
+	page, err := trie.replicationDigestPage(request.Key, request.Subkey, hasAfterKey, limit, routing, source, targetNode, buckets, hasBuckets, keyPrefixes)
 	if err != nil {
 		return commandError(err.Error()), false
 	}
@@ -1447,7 +1479,7 @@ func replicationDigestRequestLimit(priority *int64) (int, error) {
 	return int(*priority), nil
 }
 
-func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAfterKey bool, limit int, routing replicationRoutingSnapshot, source string, targetNode string, buckets replicationMerkleBucketMask, hasBuckets bool) (replicationDigestPage, error) {
+func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAfterKey bool, limit int, routing replicationRoutingSnapshot, source string, targetNode string, buckets replicationMerkleBucketMask, hasBuckets bool, keyPrefixes ...[]string) (replicationDigestPage, error) {
 	if trie == nil {
 		return replicationDigestPage{}, ErrNilHatTrie
 	}
@@ -1470,12 +1502,21 @@ func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAf
 	page := replicationDigestPage{entries: make([]CacheCommandResponse, 0, capacity)}
 	estimatedBytes := 64
 	var scratch []byte
+	var allowedPrefixes []string
+	if len(keyPrefixes) > 0 {
+		allowedPrefixes = keyPrefixes[0]
+	}
 	for {
 		entry, ok := scan.currentLiveEntryLocked(trie, now)
 		if !ok {
 			return page, nil
 		}
 		if hasAfterKey && entry.Key <= afterKey {
+			scan.consume()
+			continue
+		}
+		if !replicationKeyAllowedForPrefixes(allowedPrefixes, entry.Key) {
+			page.nextAfterKey = entry.Key
 			scan.consume()
 			continue
 		}
@@ -1536,7 +1577,7 @@ func replicationRouteTargetsNode(routing replicationRoutingSnapshot, route Elect
 	return false
 }
 
-func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRoutingSnapshot, source string, targetNode string, buckets replicationMerkleBucketMask, hasBuckets bool) (replicationDigest, error) {
+func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRoutingSnapshot, source string, targetNode string, buckets replicationMerkleBucketMask, hasBuckets bool, keyPrefixes ...[]string) (replicationDigest, error) {
 	if trie == nil {
 		return replicationDigest{}, ErrNilHatTrie
 	}
@@ -1555,12 +1596,20 @@ func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRou
 	hasher := xxhash.New()
 	count := uint64(0)
 	var scratch []byte
+	var allowedPrefixes []string
+	if len(keyPrefixes) > 0 {
+		allowedPrefixes = keyPrefixes[0]
+	}
 	for {
 		entry, ok := scan.currentLiveEntryLocked(trie, now)
 		if !ok {
 			return replicationDigest{hash: hasher.Sum64(), size: count}, nil
 		}
 		if hasBuckets && !buckets.ContainsKey(entry.Key) {
+			scan.consume()
+			continue
+		}
+		if !replicationKeyAllowedForPrefixes(allowedPrefixes, entry.Key) {
 			scan.consume()
 			continue
 		}

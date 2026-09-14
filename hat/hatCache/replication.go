@@ -75,6 +75,7 @@ type HTTPReplicatorOptions struct {
 	Topology                 *TopologyStore
 	ReplicationSchema        ReplicationSchemaContract
 	ReplicationRegionPolicy  ReplicationRegionPolicy
+	ReplicationKeyPrefixes   []string
 	Election                 *ElectionStore
 	Client                   *http.Client
 	Timeout                  time.Duration
@@ -107,6 +108,7 @@ type HTTPReplicator struct {
 	topology                 *TopologyStore
 	replicationSchema        ReplicationSchemaContract
 	regionPolicy             ReplicationRegionPolicy
+	keyPrefixes              []string
 	election                 *ElectionStore
 	client                   *http.Client
 	timeout                  time.Duration
@@ -430,6 +432,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		topology:                 options.Topology,
 		replicationSchema:        options.ReplicationSchema,
 		regionPolicy:             options.ReplicationRegionPolicy,
+		keyPrefixes:              normalizeReplicationKeyPrefixes(options.ReplicationKeyPrefixes),
 		election:                 options.Election,
 		client:                   client,
 		timeout:                  timeout,
@@ -1738,6 +1741,11 @@ func (replicator *HTTPReplicator) planReplicationTargets(ctx context.Context, re
 		result.Reason = "command is not replicated"
 		return result, kind, nil, false
 	}
+	if !replicator.replicationKeyAllowed(key) {
+		result.Skipped = true
+		result.Reason = replicationKeyPrefixExcludedReason
+		return result, kind, nil, false
+	}
 
 	route, ok := replicator.routeForKey(key)
 	if !ok {
@@ -1779,6 +1787,11 @@ func (replicator *HTTPReplicator) planLiveReplicationTargets(ctx context.Context
 	if kind == replicationPayloadNone {
 		result.Skipped = true
 		result.Reason = "command is not replicated"
+		return result, kind, liveReplicationTargetSelection{}, false
+	}
+	if !replicator.replicationKeyAllowed(key) {
+		result.Skipped = true
+		result.Reason = replicationKeyPrefixExcludedReason
 		return result, kind, liveReplicationTargetSelection{}, false
 	}
 

@@ -147,7 +147,7 @@ before/after measurement when its motivation is performance.
 | TR-01 | Raft-backed failover with leader leases | Prevent split-brain promotions | Consensus latency and operational complexity | [ ] |
 | TR-02 | Synchronous replication commit barriers | Acknowledge only after durable replicas | Write latency and quorum failures | [ ] |
 | TR-03 | Replica-promotion catch-up barrier | Avoid promoting a stale node | Longer failover | [ ] |
-| TR-04 | Replication filtering by space and key range | Reduce relay bandwidth | Divergent replica contents | [ ] |
+| TR-04 | Replication filtering by space and key range | Reduce relay bandwidth | Divergent replica contents | [x] Implemented as opt-in literal `HTTPReplicatorOptions.ReplicationKeyPrefixes`; see [TR004_REPLICATION_KEY_FILTER.md](TR004_REPLICATION_KEY_FILTER.md) and [BENCHMARK.md#tr-04-replication-key-prefix-filter](BENCHMARK.md#tr-04-replication-key-prefix-filter). |
 | TR-05 | Parallel relay and applier queues with ordering fences | Increase replication throughput | Ordering and backpressure bugs | [ ] |
 | TR-06 | Conflict-resolution hooks for multi-master updates | Make application conflict policy explicit | Non-deterministic user code | [ ] |
 | TR-07 | Adaptive WAL group-commit and fsync policy | Improve write throughput safely | Durability window changes | [ ] |

@@ -2899,13 +2899,19 @@ Set `REPLICATION_SYNC_INTERVAL` to run the command-fanout anti-entropy sync
 periodically from the local leader. It requires `REPLICATION_MODE=command` or
 `REPLICATION_MODE=dual`. The first sync runs immediately at startup, then
 repeats at the configured interval. Set `REPLICATION_SYNC_PREFIX` to limit the
-scheduled sync to one key prefix. See
+scheduled sync to one key prefix. Set `REPLICATION_KEY_PREFIXES` to a
+comma-separated list of literal prefixes to filter live command replication and
+anti-entropy to explicit regional or tenant partitions; empty is the default
+and keeps filtering off. The filter does not change snapshots, backups, or
+local storage. See [TR004_REPLICATION_KEY_FILTER.md](TR004_REPLICATION_KEY_FILTER.md)
+and
 [`BENCHMARK.md`](BENCHMARK.md#incremental-anti-entropy) for equal, 1%-changed,
 and full-transfer CPU, heap, request, and bandwidth measurements:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_SYNC_INTERVAL=30s
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_SYNC_INTERVAL=30s REPLICATION_SYNC_PREFIX=session:
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_KEY_PREFIXES=region:eu:,region:asia:
 ```
 
 Set `REPLICATION_ASYNC=true` with `REPLICATION_MODE=command` or

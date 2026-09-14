@@ -107,6 +107,7 @@ type config struct {
 	replicationMaxTargets                int
 	replicationSyncInterval              time.Duration
 	replicationSyncPrefix                string
+	replicationKeyPrefixes               string
 	enforceLeaderWrites                  bool
 	requireHealthyReplicaReads           bool
 	grpcAddr                             string
@@ -427,6 +428,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			DisableHTTPFallback:      !cfg.replicationHTTPFallback,
 			AuthToken:                cfg.replicationAuthToken,
 			ReplicationBatchMaxBytes: replicationBatchLimit(cfg),
+			ReplicationKeyPrefixes:   parseReplicationKeyPrefixes(cfg.replicationKeyPrefixes),
 			MaxInFlightTargets:       cfg.replicationMaxTargets,
 		})
 		defer replicator.Close()
@@ -662,6 +664,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.replicationMaxTargets, "replication-max-in-flight-targets", cfg.replicationMaxTargets, "maximum concurrent HTTP replication targets; use 1 for serial delivery")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
+	flags.StringVar(&cfg.replicationKeyPrefixes, "replication-key-prefixes", "", "optional comma-separated literal key prefixes for live and anti-entropy replication; empty disables")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.BoolVar(&cfg.requireHealthyReplicaReads, "require-healthy-replica-reads", false, "reject stale-sensitive reads when this node is not a healthy topology replica")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
@@ -974,6 +977,22 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	cfg.journalPullWireFormat = string(journalPullWireFormat)
 	return cfg, nil
+}
+
+func parseReplicationKeyPrefixes(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	prefixes := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			prefixes = append(prefixes, part)
+		}
+	}
+	return prefixes
 }
 
 func applyConfigProfileDefaults(cfg config, profile string) (config, error) {
@@ -1305,6 +1324,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_max_in_flight_targets":        cfg.replicationMaxTargets,
 		"replication_sync_interval":                cfg.replicationSyncInterval.String(),
 		"replication_sync_prefix":                  cfg.replicationSyncPrefix,
+		"replication_key_prefixes":                 cfg.replicationKeyPrefixes,
 		"enforce_leader_writes":                    cfg.enforceLeaderWrites,
 		"require_healthy_replica_reads":            cfg.requireHealthyReplicaReads,
 		"grpc_addr":                                cfg.grpcAddr,

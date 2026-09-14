@@ -50,6 +50,7 @@ replication_batch_max_bytes=${REPLICATION_BATCH_MAX_BYTES:-1048576}
 replication_max_in_flight_targets=${REPLICATION_MAX_IN_FLIGHT_TARGETS:-4}
 replication_sync_interval=${REPLICATION_SYNC_INTERVAL:-0}
 replication_sync_prefix=${REPLICATION_SYNC_PREFIX:-}
+replication_key_prefixes=${REPLICATION_KEY_PREFIXES:-}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
 grpc_tls_cert=${GRPC_TLS_CERT:-}
@@ -143,6 +144,7 @@ set -- \
 	-replication-max-in-flight-targets "$replication_max_in_flight_targets" \
 	-replication-sync-interval "$replication_sync_interval" \
 	-replication-sync-prefix "$replication_sync_prefix" \
+	-replication-key-prefixes "$replication_key_prefixes" \
 	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
 	-grpc-tls-cert "$grpc_tls_cert" \
