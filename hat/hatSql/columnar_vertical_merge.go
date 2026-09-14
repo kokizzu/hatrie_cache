@@ -44,7 +44,8 @@ func (part ColumnarBatchPart) LoadColumn(field string) ([]interface{}, bool, err
 	_, numeric := part.Batch.NumericColumns[field]
 	_, list := part.Batch.ListColumns[field]
 	_, nested := part.Batch.NestedColumns[field]
-	if !plain && !dictionary && !packed && !boolean && !numeric && !list && !nested {
+	_, mapColumn := part.Batch.MapColumns[field]
+	if !plain && !dictionary && !packed && !boolean && !numeric && !list && !nested && !mapColumn {
 		return nil, false, nil
 	}
 	values := make([]interface{}, part.Batch.Rows)

@@ -19,6 +19,14 @@ type sqlJSONPathProgram struct {
 	err      error
 }
 
+type sqlJSONMemberLookup interface {
+	sqlJSONMember(key string) (interface{}, bool)
+}
+
+type sqlJSONMaterializer interface {
+	sqlJSONMaterialize() interface{}
+}
+
 func compileSQLJSONPath(path string) *sqlJSONPathProgram {
 	segments, err := parseSQLJSONPath(path)
 	return &sqlJSONPathProgram{source: path, segments: segments, err: err}
@@ -199,17 +207,29 @@ func sqlJSONPathValue(value interface{}, segments []sqlJSONPathSegment) (interfa
 			current = array[segment.index]
 			continue
 		}
-		object, ok := sqlJSONObject(current)
+		member, exists, ok := sqlJSONMember(current, segment.key)
 		if !ok {
 			return nil, false, nil
 		}
-		value, exists := object[segment.key]
 		if !exists {
 			return nil, false, nil
 		}
-		current = value
+		current = member
 	}
 	return current, true, nil
+}
+
+func sqlJSONMember(value interface{}, key string) (interface{}, bool, bool) {
+	if lookup, ok := value.(sqlJSONMemberLookup); ok {
+		member, exists := lookup.sqlJSONMember(key)
+		return member, exists, true
+	}
+	object, ok := sqlJSONObject(value)
+	if !ok {
+		return nil, false, false
+	}
+	member, exists := object[key]
+	return member, exists, true
 }
 
 func sqlJSONPathInput(value interface{}) (interface{}, error) {
@@ -253,6 +273,9 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 		return sqlEvalError{err: fmt.Errorf("%s expects exactly two arguments", expr.name), token: expr.token}
 	}
 	input := evalSQLExpr(expr.args[0], group, row)
+	if columnarInput, ok := sqlColumnarJSONFieldInput(expr.args[0], row); ok {
+		input = columnarInput
+	}
 	if err := sqlExpressionError(input); err != nil {
 		return sqlEvaluationFailure(err)
 	}
@@ -286,17 +309,24 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 		if !exists {
 			return nil
 		}
-		return value
+		return sqlJSONMaterialize(value)
 	case "JSON_VALUE":
 		if !exists {
 			return nil
 		}
 		switch value.(type) {
-		case map[string]interface{}, SQLRow, []interface{}:
+		case map[string]interface{}, SQLRow, []interface{}, sqlJSONMemberLookup:
 			return sqlEvalError{err: fmt.Errorf("JSON_VALUE requires a scalar path result; use JSON_QUERY"), token: expr.token}
 		}
 		return value
 	default:
 		return sqlEvalError{err: fmt.Errorf("unknown JSON path function %q", expr.name), token: expr.token}
 	}
+}
+
+func sqlJSONMaterialize(value interface{}) interface{} {
+	if materializer, ok := value.(sqlJSONMaterializer); ok {
+		return materializer.sqlJSONMaterialize()
+	}
+	return value
 }

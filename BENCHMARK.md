@@ -194,6 +194,44 @@ preferable when most of the dimension is needed or the dictionary is cold.
 The SQL path remains exact because lookup candidates are rechecked against the
 complete `ON` expression.
 
+## CH-030: Map Key/Value Subcolumn Pruning
+
+Command: `make benchmark-ch030-map-c203`. The benchmark compares the same
+filtered `JSON_VALUE` query on a full-row resolver and a columnar resolver that
+returns only the requested `$.country` map subcolumn. The full-row fixture
+reparses a 4 KiB JSON document per row; the optimized fixture uses a prebuilt
+`ColumnarMapColumn`. Five samples were collected on Linux amd64 with an AMD
+Ryzen 9 5950X.
+
+| Rows | Baseline median | Map subcolumn median | Relative result |
+| ---: | ---: | ---: | --- |
+| 1,024 | 24.02 ms, 11.41 MB, 16,843 allocs | 0.700 ms, 0.726 MB, 7,934 allocs | 34.3x faster, 15.7x less heap, 2.12x fewer allocations |
+| 10,000 | 233.47 ms, 111.22 MB, 164,042 allocs | 6.59 ms, 7.02 MB, 77,048 allocs | 35.4x faster, 15.9x less heap, 2.13x fewer allocations |
+
+Raw `-benchmem -count=5` samples:
+
+```text
+rows=1024/full-row ns/op:       24170918 23902982 24538657 24018977 23713356
+rows=1024/full-row B/op:        11407801 11407788 11407790 11407797 11407788
+rows=1024/full-row allocs/op:   16843 16843 16843 16843 16843
+rows=1024/map-subcolumn ns/op:  698381 699801 707965 698531 701260
+rows=1024/map-subcolumn B/op:   726017 726017 726016 726017 726017
+rows=1024/map-subcolumn allocs/op: 7934 7934 7934 7934 7934
+
+rows=10000/full-row ns/op:       224533696 224632563 233468296 237076661 243912788
+rows=10000/full-row B/op:        111218304 111218307 111218307 111217188 111217185
+rows=10000/full-row allocs/op:   164042 164042 164042 164041 164041
+rows=10000/map-subcolumn ns/op:  6586953 6484446 6521587 6695151 6617499
+rows=10000/map-subcolumn B/op:   7016849 7016849 7016848 7016849 7016849
+rows=10000/map-subcolumn allocs/op: 77048 77048 77048 77048 77048
+```
+
+The result is workload-dependent: the improvement comes from avoiding
+full-document decoding and full-map materialization. A source that has already
+retained decoded full maps will see less benefit, although `Lookup` still
+avoids constructing a map for each JSON path evaluation. Unsupported paths and
+sources that decline the optional contract retain the exact existing executor.
+
 ## TR-015 Persistent Filter and Read Amplification Telemetry
 
 Workload: five runs of `BenchmarkPebblePropertiesBaseline` on an empty Pebble

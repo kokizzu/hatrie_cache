@@ -148,6 +148,20 @@ func (resolver CatalogResolver) ResolveSQLColumnarSource(name, key string, field
 	return columnar.ResolveSQLColumnarSource(name, key, fields)
 }
 
+// ResolveSQLColumnarMapSubcolumns forwards the optional map-subcolumn
+// contract for application sources while keeping information-schema sources
+// local.
+func (resolver CatalogResolver) ResolveSQLColumnarMapSubcolumns(name, key string, fields []string, paths []ColumnarMapSubcolumn) (ColumnarBatch, *ColumnarNumericSegments, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	mapSource, ok := resolver.Source.(ColumnarMapSubcolumnSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	return mapSource.ResolveSQLColumnarMapSubcolumns(name, key, fields, paths)
+}
+
 // BorrowSQLColumnarSource forwards the optional immutable columnar contract
 // for application sources while keeping information-schema sources local.
 func (resolver CatalogResolver) BorrowSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error) {

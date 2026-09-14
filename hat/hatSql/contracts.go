@@ -199,9 +199,9 @@ type ColumnarNumericColumn struct {
 
 // ColumnarBatch stores one source scan as field-aligned value slices, compact
 // dictionary, nullable-packed, bit-packed boolean, or fixed-width numeric
-// columns, or offset-based array/nested columns. Every requested field must
-// contain Rows logical values; absent JSON fields are nil in a plain column
-// and are not dictionary encoded.
+// columns, or offset-based array/nested/map columns. Every requested field
+// must contain Rows logical values; absent JSON fields are nil in a plain
+// column and are not dictionary encoded.
 type ColumnarBatch struct {
 	Columns                map[string][]interface{}
 	Dictionaries           map[string]DictionaryColumn
@@ -210,6 +210,7 @@ type ColumnarBatch struct {
 	NumericColumns         map[string]ColumnarNumericColumn
 	ListColumns            map[string]ColumnarListColumn
 	NestedColumns          map[string]ColumnarNestedColumn
+	MapColumns             map[string]ColumnarMapColumn
 	Rows                   int
 	decompressedBlockCache *columnarDecompressedBlockCache
 }
@@ -376,6 +377,12 @@ func (batch ColumnarBatch) FieldRows(field string) int {
 		}
 		return len(column.Offsets) - 1
 	}
+	if column, ok := batch.MapColumns[field]; ok {
+		if len(column.Offsets) == 0 {
+			return 0
+		}
+		return len(column.Offsets) - 1
+	}
 	return 0
 }
 
@@ -404,7 +411,7 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 func (batch ColumnarBatch) valueWithoutDecompressedCache(field string, row int) (interface{}, bool) {
 	// Plain batches are the common legacy layout. Avoid probing every optional
 	// physical representation when none of them is present.
-	if batch.Dictionaries == nil && batch.PackedColumns == nil && batch.BoolColumns == nil && batch.NumericColumns == nil && batch.ListColumns == nil && batch.NestedColumns == nil {
+	if batch.Dictionaries == nil && batch.PackedColumns == nil && batch.BoolColumns == nil && batch.NumericColumns == nil && batch.ListColumns == nil && batch.NestedColumns == nil && batch.MapColumns == nil {
 		values, ok := batch.Columns[field]
 		if !ok || row >= len(values) {
 			return nil, false
@@ -442,6 +449,9 @@ func (batch ColumnarBatch) valueWithoutDecompressedCache(field string, row int) 
 		return column.Value(row)
 	}
 	if column, ok := batch.NestedColumns[field]; ok {
+		return column.Value(row)
+	}
+	if column, ok := batch.MapColumns[field]; ok {
 		return column.Value(row)
 	}
 	return nil, false
@@ -1178,6 +1188,22 @@ func columnarDictionaryLayoutBytes(rows, unique, totalStringBytes, uniqueStringB
 // whose predicate and projection can retain the established row semantics.
 type ColumnarSourceResolver interface {
 	ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
+}
+
+// ColumnarMapSubcolumn identifies one restricted JSON path rooted at a map
+// field. A resolver may use the request to load only the selected map keys;
+// the executor still applies the complete SQL expression to the returned
+// values. Paths are canonical SQL/JSON paths such as $.country.
+type ColumnarMapSubcolumn struct {
+	Field string
+	Path  string
+}
+
+// ColumnarMapSubcolumnSourceResolver optionally supplies a columnar batch
+// with only the requested map subcolumns. Returning available=false retains
+// the ordinary columnar or row execution path.
+type ColumnarMapSubcolumnSourceResolver interface {
+	ResolveSQLColumnarMapSubcolumns(name, key string, fields []string, paths []ColumnarMapSubcolumn) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }
 
 // BorrowedColumnarSourceResolver optionally supplies an immutable columnar

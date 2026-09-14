@@ -51,6 +51,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)
 - ClickHouse-inspired prepared literal SQL/JSON path programs: [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs)
+- ClickHouse-inspired map key/value subcolumn pruning: [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning)
 - ClickHouse-inspired prepared SQL regex programs: [CH051_PREPARED_REGEX_PROGRAMS.md](CH051_PREPARED_REGEX_PROGRAMS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-051-prepared-sql-regex-programs)
 - ClickHouse-inspired prepared temporal expressions: [CH052_PREPARED_TEMPORAL_EXPRESSIONS.md](CH052_PREPARED_TEMPORAL_EXPRESSIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-052-prepared-temporal-expressions)
 - ClickHouse-inspired prepared literal SQL `IN` sets: [CH053_PREPARED_LITERAL_IN.md](CH053_PREPARED_LITERAL_IN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-053-prepared-literal-in-sets)
@@ -4025,6 +4026,20 @@ invalid, or incomplete segment statistics, larger conjunctions, and all other
 SQL shapes retain the original predicate order. See
 [BENCHMARK.md](BENCHMARK.md#sql-numeric-predicate-reordering) for the measured
 CPU, allocation, and fallback tradeoffs.
+
+## SQL Map Key/Value Subcolumn Pruning
+
+Columnar sources can store JSON object fields as compact sorted key/value
+subcolumns and, when they implement `ColumnarMapSubcolumnSourceResolver`, load
+only the paths requested by a query. Simple one-level expressions such as
+`JSON_VALUE(doc, '$.country')` can then probe the selected key without building
+the complete object for every row. A present `NULL` remains distinct from a
+missing key.
+
+The optimization is automatic and additive. Unsupported paths and sources that
+do not provide `MapColumns` use the existing exact SQL path, with no migration,
+wire-format, or configuration change. See [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md)
+and [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning).
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
 - Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
