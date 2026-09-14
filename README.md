@@ -81,6 +81,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired compact typed-table histograms: [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md)
 - Materialize-inspired bounded typed-table sorted ordinal projections: [C212_TYPED_TABLE_ORDER_CACHE.md](C212_TYPED_TABLE_ORDER_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-038-typed-table-sorted-ordinal-projection)
 - Materialize-inspired exact weighted incremental Top-K maintenance: [MZ037_INCREMENTAL_TOP_K.md](MZ037_INCREMENTAL_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-037-incremental-weighted-top-k)
+- Materialize-inspired stateful incremental distinct maintenance: [MZ039_INCREMENTAL_DISTINCT.md](MZ039_INCREMENTAL_DISTINCT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-039-incremental-distinct)
 - ClickHouse-inspired statistics-driven join ordering with deterministic fallback: [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md)
 - ClickHouse-inspired precomputed typed join probe keys with allocation-free numeric and boolean hot paths: [C212_PRECOMPUTED_JOIN_HASH.md](C212_PRECOMPUTED_JOIN_HASH.md)
 - ClickHouse/Materialize/Tarantool-inspired bounded compiled SQL plan cache: [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md)

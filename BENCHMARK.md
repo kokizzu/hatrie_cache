@@ -24407,3 +24407,32 @@ batch validation, owns row payloads, and returns transition rows; allocations
 per update are equal in this fixture. Its ordered index also retains one node
 per active logical key. It is an explicit imported operator rather than a
 default SQL plan rule.
+
+<a id="mz-039-incremental-distinct"></a>
+## MZ-039 Incremental Distinct
+
+Command: `make benchmark-mz039-incremental-distinct`
+
+Workload: 10,000 active keys, repeated valid add/retract updates, and one
+membership transition per operation. The rebuild baseline scans all 10,000
+counts and materializes an equivalent transition row on every update. The
+incremental path seeds the same relation outside the timer and updates one
+key through its persistent multiplicity map. CPU: AMD Ryzen 9 5950X 16-Core
+Processor, Linux amd64.
+
+| Path | Raw ns/op sample | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Full distinct scan and transition materialization | 3,744; 3,815; 3,784; 3,765; 3,809 | 3,784 | 343 | 2 | baseline |
+| Incremental multiplicity update and transition materialization | 706.2; 588.7; 633.1; 675.4; 583.3 | 633.1 | 722 | 5 | 5.98x CPU |
+
+Raw samples:
+
+```text
+BenchmarkMZ039DistinctRebuildBaseline-32: 3744, 3815, 3784, 3765, 3809 ns/op; 343 B/op; 2 allocs/op
+BenchmarkMZ039DistinctIncremental-32: 706.2, 588.7, 633.1, 675.4, 583.3 ns/op; 722-723 B/op; 5 allocs/op
+```
+
+The incremental path uses about 2.10x more transient bytes because it owns
+the active row for future retractions and returns an independent transition
+payload. It avoids the `O(N)` scan and is intended for update-heavy stateful
+distinct views; it is not an implicit SQL plan rule.

@@ -13955,3 +13955,23 @@ commit-mz037-incremental-top-k:
 	@bash scripts/commit-mz037-incremental-top-k.sh
 push-mz037-incremental-top-k:
 	@bash scripts/push-mz037-incremental-top-k.sh
+
+.PHONY: test-mz039-incremental-distinct benchmark-mz039-incremental-distinct format-mz039-incremental-distinct race-mz039-incremental-distinct vet-mz039-incremental-distinct review-mz039-incremental-distinct verify-mz039-incremental-distinct
+test-mz039-incremental-distinct:
+	@bash scripts/test-mz039-incremental-distinct.sh
+benchmark-mz039-incremental-distinct:
+	@bash scripts/benchmark-mz039-incremental-distinct.sh
+format-mz039-incremental-distinct:
+	@bash scripts/format-mz039-incremental-distinct.sh
+race-mz039-incremental-distinct:
+	@bash scripts/race-mz039-incremental-distinct.sh
+vet-mz039-incremental-distinct:
+	@bash scripts/vet-mz039-incremental-distinct.sh
+review-mz039-incremental-distinct:
+	@bash scripts/review-mz039-incremental-distinct.sh
+verify-mz039-incremental-distinct:
+	@bash scripts/verify-mz039-incremental-distinct.sh
+commit-mz039-incremental-distinct:
+	@bash scripts/commit-mz039-incremental-distinct.sh
+push-mz039-incremental-distinct:
+	@bash scripts/push-mz039-incremental-distinct.sh

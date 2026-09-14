@@ -120,7 +120,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-036 | Recursive fixpoint scheduler | Recursive dataflow lacks a general iterative frontier scheduler. | High |
 | MZ-037 | Incremental Top-K maintenance | Partially adopted as importable exact weighted differential maintenance: `hatSql.IncrementalTopK` keeps keyed rows ordered in a treap, applies signed multiplicities atomically, and emits only Top-K transitions; automatic SQL planner/operator wiring remains. | High |
 | MZ-038 | Incremental order arrangement | Partially adopted: opt-in typed-table columnar caches can admit a bounded single-field `[]uint32` order projection after repeated `ORDER BY ... LIMIT` requests; composite orders, range cursors, and fully incremental arbitrary updates remain. | High |
-| MZ-039 | General incremental distinct | Distinct maintenance is not a general relation operator for arbitrary updates. | Medium |
+| MZ-039 | General incremental distinct | Partially adopted as importable stateful signed distinct maintenance: `hatSql.IncrementalDistinct` retains multiplicities across batches and emits only set-membership transitions; automatic SQL planner/operator wiring remains. | Medium |
 | MZ-040 | Incremental percentile | Percentiles are not maintained with a bounded or mergeable differential sketch. | High |
 | MZ-041 | View freshness SLA | Implemented as optional per-task max-staleness status for managed materialized-view and rollup refreshes; existing scheduling remains unchanged by default. | Medium |
 | MZ-042 | Dependency invalidation graph | Implemented as an automatic reverse source-to-view index for `MaterializedViews.RefreshChanged`; affected candidates are deduplicated and still sorted/published atomically. | Medium |
