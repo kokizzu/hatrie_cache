@@ -5498,6 +5498,7 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 	prepareSQLRegexExpr(expr)
 	prepareSQLTimeZoneExpr(expr)
 	prepareSQLInExpr(expr)
+	prepareSQLBetweenExpr(expr)
 	return nil
 }
 
@@ -5751,6 +5752,7 @@ type sqlExpr struct {
 	regexProgram              *sqlRegexProgram
 	timeZoneProgram           *sqlTimeZoneProgram
 	inProgram                 *sqlInProgram
+	betweenProgram            *sqlBetweenProgram
 }
 
 // sqlParameter is retained only in an immutable parsed template when a
@@ -16522,6 +16524,9 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		left := evalSQLExpr(*expr.left, group, row)
 		if err := sqlExpressionError(left); err != nil {
 			return sqlEvaluationFailure(err)
+		}
+		if expr.betweenProgram != nil {
+			return expr.betweenProgram.evaluate(expr.op, left, expr.collation)
 		}
 		lower := evalSQLExpr(expr.args[0], group, row)
 		upper := evalSQLExpr(expr.args[1], group, row)

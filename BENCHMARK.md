@@ -23714,3 +23714,47 @@ BenchmarkCH054InSearchEvaluation/string_8_hit-32  26127102  46.99 ns/op  0 B/op 
 BenchmarkCH054InSearchEvaluation/string_8_hit-32  23786100  47.75 ns/op  0 B/op  0 allocs/op
 BenchmarkCH054InSearchEvaluation/string_8_hit-32  23522499  48.25 ns/op  0 B/op  0 allocs/op
 ```
+
+## CH-055 Prepared Literal `BETWEEN` Bounds
+
+ClickHouse-style bind-time preparation of literal `BETWEEN` bounds removes
+two per-row literal expression evaluations while leaving dynamic bounds on the
+existing path. The paired 10-sample benchmark has medians of 95.12 ns/op before
+and 69.62 ns/op after, or 1.37x faster, with 0 B/op and 0 allocs/op in both
+runs. Full rationale,
+correctness coverage, and raw samples are in
+[CH055_PREPARED_BETWEEN.md](CH055_PREPARED_BETWEEN.md).
+
+| Scenario | Before | After | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| literal numeric `BETWEEN` | 95.12 ns/op | 69.62 ns/op | 1.37x | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+
+Baseline raw output:
+
+```text
+BenchmarkCH055LiteralBetween/baseline-32  13601598  98.94 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  13159528  94.55 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  13747852  98.49 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  12745404  94.15 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  11747546  95.69 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  13136896  98.46 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  13832829  84.14 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  14613968  100.0 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  12270958  85.85 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/baseline-32  14044575  94.29 ns/op  0 B/op  0 allocs/op
+```
+
+Optimized raw output:
+
+```text
+BenchmarkCH055LiteralBetween/prepared-32  16055967  68.46 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  17176946  68.08 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  17621407  62.66 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  20154252  61.75 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  20180863  67.15 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  15302745  70.77 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  17139667  73.25 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  15189106  74.37 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  18442345  72.40 ns/op  0 B/op  0 allocs/op
+BenchmarkCH055LiteralBetween/prepared-32  14676066  79.45 ns/op  0 B/op  0 allocs/op
+```

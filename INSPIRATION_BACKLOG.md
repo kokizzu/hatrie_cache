@@ -222,3 +222,12 @@ non-binary-collation cases retain the linear comparator. It adds no second
 value backing and measured up to 11.46x lower evaluation CPU; see
 [CH054_TYPED_IN_SEARCH.md](CH054_TYPED_IN_SEARCH.md) and
 [BENCHMARK.md#ch-054-typed-prepared-in-search](BENCHMARK.md#ch-054-typed-prepared-in-search).
+
+## CH-055 Prepared Literal `BETWEEN` Bounds
+
+The ClickHouse-inspired expression-preparation follow-up caches literal
+`BETWEEN` and `NOT BETWEEN` bounds after binding. Dynamic bounds retain the
+existing evaluator and SQL `NULL`/collation behavior. The scalar benchmark is
+1.37x faster with no allocation change; see
+[CH055_PREPARED_BETWEEN.md](CH055_PREPARED_BETWEEN.md) and
+[BENCHMARK.md#ch-055-prepared-literal-between-bounds](BENCHMARK.md#ch-055-prepared-literal-between-bounds).

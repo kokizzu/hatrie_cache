@@ -54,6 +54,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired prepared temporal expressions: [CH052_PREPARED_TEMPORAL_EXPRESSIONS.md](CH052_PREPARED_TEMPORAL_EXPRESSIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-052-prepared-temporal-expressions)
 - ClickHouse-inspired prepared literal SQL `IN` sets: [CH053_PREPARED_LITERAL_IN.md](CH053_PREPARED_LITERAL_IN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-053-prepared-literal-in-sets)
 - ClickHouse-inspired typed binary search for large literal `IN` sets: [CH054_TYPED_IN_SEARCH.md](CH054_TYPED_IN_SEARCH.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-054-typed-prepared-in-search)
+- ClickHouse-inspired prepared literal SQL `BETWEEN` bounds: [CH055_PREPARED_BETWEEN.md](CH055_PREPARED_BETWEEN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-055-prepared-literal-between-bounds)
 - Materialize-inspired frontier compaction debt and blocked-lease metrics: [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics)
 - Materialize-inspired active read-hold diagnostics: [MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics)
 - Materialize-inspired TAIL progress heartbeats: [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-25-tail-progress-and-heartbeats)
