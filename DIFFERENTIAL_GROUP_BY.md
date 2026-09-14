@@ -86,6 +86,34 @@ negative or overflow `int64`. Classify failures with `errors.Is` against
 `hatSql.ErrDifferentialGroupByCountOverflow`. A nil key callback returns
 `hatSql.ErrDifferentialGroupByKeyRequired`.
 
+## Differential grouped AVG
+
+`GroupAverageInt64DifferentialRows` maintains signed `AVG(int64)` transitions
+for callback-defined groups. It retains exact count and sum state internally,
+then exposes `Row["avg"]` as `float64`. Weighted duplicates, negative
+retractions, zero averages, and the retraction-then-insertion output shape are
+preserved without rebuilding the input relation.
+
+```go
+changes, err := hatSql.GroupAverageInt64DifferentialRows(updates,
+	func(row hatSql.SQLRow) string { return row["team"].(string) },
+	func(row hatSql.SQLRow) (int64, error) { return row["points"].(int64), nil },
+)
+```
+
+For values 3 and 4 in group `red`, the output is:
+
+```text
+red  +1 {avg: 3}
+red  -1 {avg: 3}
+red  +1 {avg: 3.5}
+```
+
+The function rejects negative multiplicity, signed value-times-diff
+overflow, sum overflow, and callback errors without returning partial output.
+It is a batch-scoped importable operator; SQL parser integration and automatic
+planner selection remain unchanged.
+
 ## Differential grouped MIN/MAX
 
 `GroupMinMaxInt64DifferentialRows` maintains `MIN` and `MAX` together for

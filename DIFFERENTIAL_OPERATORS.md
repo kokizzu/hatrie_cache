@@ -28,6 +28,8 @@ without losing negative updates or duplicate multiplicity.
   checks.
 - `GroupCountSumInt64DifferentialRows` maintains COUNT and signed integer SUM
   together in one pass, emitting one combined transition row per group change.
+- `GroupAverageInt64DifferentialRows` maintains signed `AVG(int64)` using exact
+  count and sum state, emitting one average transition per group change.
 
 All functions return no partial output when a callback fails. Input rows and
 row maps are not mutated. Callback row maps are private clones and must be

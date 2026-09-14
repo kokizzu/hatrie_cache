@@ -13808,3 +13808,30 @@ commit-mz044-snapshot-token:
 .PHONY: push-mz044-snapshot-token
 push-mz044-snapshot-token:
 	@bash ./scripts/push-mz044-snapshot-token.sh
+
+.PHONY: test-differential-average
+test-differential-average:
+	@bash scripts/test-differential-average.sh
+.PHONY: benchmark-differential-average
+benchmark-differential-average:
+	@bash scripts/benchmark-differential-average.sh
+
+.PHONY: format-differential-average
+format-differential-average:
+	@bash scripts/format-differential-average.sh
+
+.PHONY: verify-differential-average
+verify-differential-average:
+	@bash scripts/verify-differential-average.sh
+
+.PHONY: review-differential-average
+review-differential-average:
+	@bash scripts/review-differential-average.sh
+
+.PHONY: commit-differential-average
+commit-differential-average:
+	@bash scripts/commit-differential-average.sh
+
+.PHONY: push-differential-average
+push-differential-average:
+	@bash scripts/push-differential-average.sh

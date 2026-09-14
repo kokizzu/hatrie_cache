@@ -18150,6 +18150,59 @@ allocations per build. The option remains disabled by default because
 high-cardinality columns can retain dictionary metadata without sharing much
 string data; callers should enable it for repeated, immutable string values.
 
+## Differential Group Average
+
+`GroupAverageInt64DifferentialRows` adds ClickHouse/Materialize-style signed
+`AVG(int64)` maintenance for callback-defined groups. The comparison uses the
+same 1,024 updates across 256 groups as the existing differential aggregate
+benchmarks. The two existing paths are useful baselines: separate COUNT and
+SUM calls, and the one-pass COUNT+SUM state primitive. The new path emits only
+the `avg` field but retains exact count and sum arithmetic internally.
+
+Command: `make benchmark-differential-average`.
+
+Seven samples on Linux/amd64 with an AMD Ryzen 9 5950X, `-benchtime=200ms`:
+
+| Path | Median ns/op | B/op | allocs/op | Candidate comparison |
+| --- | ---: | ---: | ---: | --- |
+| Separate COUNT + SUM | 748,426 | 1,629,607 | 8,462 | 1.88x faster candidate; 2.09x less heap; 1.57x fewer allocations |
+| Combined COUNT + SUM | 407,411 | 776,276 | 4,870 | 1.02x faster candidate; 0.5% more heap; 10.5% more allocations |
+| `AVG(int64)` candidate | 398,156 | 780,357 | 5,380 | Baseline |
+
+The candidate is a capability addition rather than a default SQL rewrite. It
+is substantially faster than separate COUNT and SUM calls and measured
+slightly faster than the combined path in this run. The generic `Row` map
+necessarily adds a small amount of float64 boxing allocation versus the
+lower-level combined integer state path. The ordinary SQL executor and
+defaults are unchanged.
+
+Raw seven-sample output:
+
+```text
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 313 746333 ns/op 1629624 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 318 734417 ns/op 1629608 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 303 762918 ns/op 1629608 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 309 764808 ns/op 1629606 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 315 748426 ns/op 1629607 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 339 721614 ns/op 1629606 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_separate_count_sum-32 304 750989 ns/op 1629607 B/op 8462 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 615 406468 ns/op 776277 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 542 408638 ns/op 776275 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 632 383635 ns/op 776277 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 554 370631 ns/op 776275 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 650 411285 ns/op 776277 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 572 407411 ns/op 776276 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/before_combined_count_sum-32 535 417382 ns/op 776276 B/op 4870 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 579 421881 ns/op 780359 B/op 5380 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 570 410626 ns/op 780357 B/op 5380 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 654 396336 ns/op 780358 B/op 5380 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 648 398156 ns/op 780356 B/op 5380 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 608 411004 ns/op 780366 B/op 5380 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 615 381795 ns/op 780357 B/op 5380 allocs/op
+BenchmarkGroupAverageInt64DifferentialRows/after_average-32 622 356199 ns/op 780355 B/op 5380 allocs/op
+PASS
+```
+
 ## Rejected Generic Keyed Differential Reduction
 
 Workload: 256 weighted rows across 16 groups, comparing an arbitrary

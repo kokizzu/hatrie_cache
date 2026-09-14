@@ -100,6 +100,10 @@ or intentionally deferred, and `[-]` rejected or rolled back.
 - [x] M035 Self-correcting materialized results for typed arrangements.
 - [x] M036 Retractions and insertions on typed updates.
 - [x] M037a Signed negative diffs in the reusable batch primitive.
+- [x] M037h Signed differential int64 `AVG` maintenance. The importable
+  operator retains exact weighted count/sum state, emits signed average
+  transitions, and rejects invalid state atomically; SQL planner integration
+  remains intentionally out of scope. See [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M039 Compaction constrained by active read frontiers.
 - [x] M040 Append-only fast path selected from source metadata via typed-table change metadata, validating aggregate dispatch, compatibility tests, and benchmark guide.
