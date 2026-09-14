@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-sed -n '1,280p' hat/hatBackup/chain.go
-exit 0
 set -euo pipefail
 
 printf 'Backup and restore files:\n'
