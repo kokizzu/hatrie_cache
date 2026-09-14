@@ -95,6 +95,8 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired precomputed typed join probe keys with allocation-free numeric and boolean hot paths: [C212_PRECOMPUTED_JOIN_HASH.md](C212_PRECOMPUTED_JOIN_HASH.md)
 - ClickHouse/Materialize/Tarantool-inspired bounded compiled SQL plan cache: [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
+- Selective bounded compact-peer payload compression: [BENCHMARK.md](BENCHMARK.md#tr-044-selective-compact-peer-payload-compression)
+- Compact peer compression configuration: [TR044_COMPACT_PEER_COMPRESSION.md](TR044_COMPACT_PEER_COMPRESSION.md)
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)

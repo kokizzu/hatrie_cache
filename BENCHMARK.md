@@ -25059,3 +25059,40 @@ Command: `make benchmark-mz034-c203`
 
 Raw samples and interpretation are in
 [MZ034_GENERIC_NEGATIVE_DIFF.md](MZ034_GENERIC_NEGATIVE_DIFF.md).
+
+## TR-044 Selective Compact Peer Payload Compression
+
+The opt-in compact peer adapter now compresses payloads at or above
+`CompactProtocolOptions.CompressPayloadsAbove`, and bounds decompression with
+`MaxDecompressedPayloadBytes`. The default threshold is `0`, so existing
+connections stay uncompressed. The reader accepts plain and flagged gzip
+frames; all peers using compression must support the compact frame flag because
+this change does not add a capability handshake yet.
+
+Three-run local benchmark on a 12.3 KiB highly repetitive payload, using gzip
+best-speed with a four-writer cache:
+
+| Path | Median CPU | Wire bytes | Memory/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Plain write | 1.862 us | 12,304 B | 13,568 B | 1 | 1.00x |
+| Threshold gzip write | 9.418 us | 147 B | 656 B | 5 | 5.06x slower |
+| Plain read | 2.417 us | 12,299 B | 13,632 B | 3 | 1.00x |
+| Gzip read | 18.763 us | 142 B | 67,960 B | 21 | 7.76x slower |
+
+Bandwidth falls about `83.7x`, while write CPU rises about `5.1x`, read CPU
+about `7.8x`, write allocations rise `5x`, and read allocations rise `7x`.
+The feature is therefore useful for known-compressible, bandwidth-bound peer
+classes, but it is not a general latency optimization and remains opt-in.
+The compressor-state pool reduced write memory from about `1.21 MB/op` to
+`656 B/op` versus the unpooled implementation.
+
+Command: `make benchmark-tr044-c203`
+
+Raw samples:
+
+```text
+BenchmarkCompactProtocolPayloadWire/plain: 2138, 2029, 1995 ns/op; 12304 wire-B; 13568 B/op; 1 allocs/op
+BenchmarkCompactProtocolPayloadWire/gzip: 9418, 9490, 9036 ns/op; 147 wire-B; 656 B/op; 5 allocs/op
+BenchmarkCompactProtocolPayloadRead/plain: 2417, 2358, 2418 ns/op; 12299 wire-B; 13632 B/op; 3 allocs/op
+BenchmarkCompactProtocolPayloadRead/gzip: 18763, 18662, 19646 ns/op; 142 wire-B; 67960 B/op; 21 allocs/op
+```

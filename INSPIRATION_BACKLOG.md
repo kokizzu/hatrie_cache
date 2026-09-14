@@ -188,7 +188,7 @@ before/after measurement when its motivation is performance.
 | TR-41 | Net.box-style request multiplexing | Reuse one connection for concurrent calls | Ordering and head-of-line blocking | [ ] |
 | TR-42 | Net.box streaming cursors with backpressure | Process large reads incrementally | Cursor ownership | [ ] |
 | TR-43 | IProto prepared request IDs and response schemas | Reduce repeated parsing | Schema negotiation | [ ] |
-| TR-44 | IProto compression negotiation per request class | Save bandwidth selectively | CPU and protocol fallback | [ ] |
+| TR-44 | IProto compression negotiation per request class | Save bandwidth selectively | CPU and protocol fallback | [x] Compact peer payloads support threshold-based gzip with an explicit frame flag and bounded inflation; disabled by default because the measured CPU tradeoff is significant. Full capability handshake remains future work. See [BENCHMARK.md](BENCHMARK.md#tr-044-selective-compact-peer-payload-compression). |
 | TR-45 | Connection circuit breaker and health scoring | Stop sending to failing peers | Recovery tuning | [ ] |
 | TR-46 | Schema and DDL discovery protocol | Keep clients compatible during changes | Version drift | [ ] |
 | TR-47 | Role and object-grant authorization model | Narrow access beyond bearer authentication | Policy administration | [x] Implemented by optional `hatAuth.Rule.Objects` and `Policy.AuthorizeObject`; see [TR047_OBJECT_GRANTS.md](TR047_OBJECT_GRANTS.md) and [BENCHMARK.md](BENCHMARK.md#tr-047-object-scoped-rbac-grants). |
