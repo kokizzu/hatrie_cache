@@ -23531,3 +23531,52 @@ BenchmarkCH030JSONPathLiteralEvaluation-32    9612483  125.8 ns/op  112 B/op  1 
 BenchmarkCH030JSONPathLiteralEvaluation-32    9243722  124.9 ns/op  112 B/op  1 allocs/op
 BenchmarkCH030JSONPathLiteralEvaluation-32    9426471  125.7 ns/op  112 B/op  1 allocs/op
 ```
+
+## CH-052 Prepared Temporal Expressions
+
+This measures the ClickHouse-inspired prepared temporal expression path.
+Literal IANA zones are resolved once when the expression is bound, and the
+fixed two-argument temporal functions avoid a temporary argument slice.
+Dynamic zones remain runtime-resolved.
+
+| Workload | Before ns/op | After ns/op | CPU improvement | Before B/op | After B/op | Byte improvement | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `PARSE_TIMESTAMP` with literal zone | 5,801 | 435.4 | 13.3x | 1,200 | 144 | 8.3x | 19 | 4 |
+| `PARSE_TIMESTAMP` with dynamic zone | 6,416 | 6,661 | 0.96x | 1,200 | 1,200 | 1.00x | 19 | 19 |
+| `AT TIME ZONE` with row timestamp | 5,531 | 94.31 | 58.7x | 1,088 | 24 | 45.3x | 16 | 1 |
+| `AT TIME ZONE` with timestamp literal | 5,760 | 78.77 | 73.1x | 1,088 | 24 | 45.3x | 16 | 1 |
+| `TIMESTAMP_ADD` with row timestamp | 140.5 | 135.7 | 1.04x | 24 | 24 | 1.00x | 1 | 1 |
+
+Dynamic-zone movement is not a claimed regression or speedup; bytes and
+allocations are unchanged and the medians overlap normal run-to-run noise.
+Fully constant temporal functions were already parser-folded at about 8 ns/op
+with zero allocations. See [CH052_PREPARED_TEMPORAL_EXPRESSIONS.md](CH052_PREPARED_TEMPORAL_EXPRESSIONS.md)
+for raw before/after samples, tradeoffs, and verification commands.
+
+Raw output:
+
+```text
+# Before
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  201634  5857 ns/op  1200 B/op  19 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  209763  5731 ns/op  1200 B/op  19 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  202287  5801 ns/op  1200 B/op  19 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  205314  5760 ns/op  1200 B/op  19 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  211828  5925 ns/op  1200 B/op  19 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    201151  5776 ns/op  1088 B/op  16 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    188666  5955 ns/op  1088 B/op  16 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    224335  5531 ns/op  1088 B/op  16 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    215046  5385 ns/op  1088 B/op  16 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    213396  5366 ns/op  1088 B/op  16 allocs/op
+
+# After
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  2882800  435.4 ns/op  144 B/op  4 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  2760472  426.2 ns/op  144 B/op  4 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  2877477  418.8 ns/op  144 B/op  4 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  2865595  438.3 ns/op  144 B/op  4 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/parse_literal_zone-32  2749321  444.1 ns/op  144 B/op  4 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    11966803  94.31 ns/op  24 B/op  1 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    11688801  98.41 ns/op  24 B/op  1 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    11087845  99.39 ns/op  24 B/op  1 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    12468076  93.42 ns/op  24 B/op  1 allocs/op
+BenchmarkCH052TemporalLiteralEvaluation/timezone_literal-32    13696057  88.31 ns/op  24 B/op  1 allocs/op
+```

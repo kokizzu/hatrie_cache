@@ -13247,5 +13247,33 @@ commit-ch051-regex-program:
 push-ch051-regex-program:
 	@bash scripts/push-ch051-regex-program.sh
 
+.PHONY: test-ch052-temporal-program
+test-ch052-temporal-program:
+	@bash scripts/test-ch052-temporal-program.sh
+
+.PHONY: benchmark-ch052-temporal-program
+benchmark-ch052-temporal-program:
+	@bash scripts/benchmark-ch052-temporal-program.sh
+
+.PHONY: format-ch052-temporal-program
+format-ch052-temporal-program:
+	@bash scripts/format-ch052-temporal-program.sh
+
+.PHONY: race-ch052-temporal-program
+race-ch052-temporal-program:
+	@bash scripts/race-ch052-temporal-program.sh
+
+.PHONY: vet-ch052-temporal-program
+vet-ch052-temporal-program:
+	@bash scripts/vet-ch052-temporal-program.sh
+
+.PHONY: commit-ch052-temporal-program
+commit-ch052-temporal-program:
+	@bash scripts/commit-ch052-temporal-program.sh
+
+.PHONY: push-ch052-temporal-program
+push-ch052-temporal-program:
+	@bash scripts/push-ch052-temporal-program.sh
+
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh

@@ -194,3 +194,13 @@ before/after measurement when its motivation is performance.
 | TR-48 | Audit-event sampling and export sinks | Operate high-volume audit safely | Dropped-event visibility | [ ] |
 | TR-49 | Queue partition ownership and online migration | Scale queues without implicit sharding | Movement and backup semantics | [ ] |
 | TR-50 | Rate-aware WAL and replication backpressure | Preserve foreground latency under bursts | Lower write throughput | [ ] |
+
+## CH-052 Prepared Temporal Expressions
+
+The ClickHouse-inspired constant-expression preparation follow-up caches
+literal IANA time zones in `PARSE_TIMESTAMP` and `AT TIME ZONE`, and removes a
+temporary two-argument slice from the temporal evaluator. Dynamic zones keep
+their runtime behavior. The measured result is 13.3x faster parsing with a
+literal zone and 58.7x faster `AT TIME ZONE`, with lower bytes and allocations;
+see [CH052_PREPARED_TEMPORAL_EXPRESSIONS.md](CH052_PREPARED_TEMPORAL_EXPRESSIONS.md)
+and [BENCHMARK.md#ch-052-prepared-temporal-expressions](BENCHMARK.md#ch-052-prepared-temporal-expressions).

@@ -6,6 +6,43 @@ import (
 	"time"
 )
 
+type sqlTimeZoneProgram struct {
+	source   string
+	location *time.Location
+	err      error
+}
+
+func compileSQLTimeZoneProgram(value interface{}) *sqlTimeZoneProgram {
+	source, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	location, err := sqlTimeZoneLocation(value)
+	return &sqlTimeZoneProgram{source: source, location: location, err: err}
+}
+
+func prepareSQLTimeZoneExpr(expr *sqlExpr) {
+	if expr == nil {
+		return
+	}
+	expr.timeZoneProgram = nil
+	switch {
+	case expr.kind == "timezone" && expr.right != nil && expr.right.kind == "literal":
+		expr.timeZoneProgram = compileSQLTimeZoneProgram(expr.right.value)
+	case expr.kind == "func" && expr.name == "PARSE_TIMESTAMP" && len(expr.args) >= 2 && expr.args[1].kind == "literal":
+		expr.timeZoneProgram = compileSQLTimeZoneProgram(expr.args[1].value)
+	}
+}
+
+func sqlTimeZoneLocationFor(expr sqlExpr, value interface{}) (*time.Location, error) {
+	if expr.timeZoneProgram != nil {
+		if source, ok := value.(string); ok && source == expr.timeZoneProgram.source {
+			return expr.timeZoneProgram.location, expr.timeZoneProgram.err
+		}
+	}
+	return sqlTimeZoneLocation(value)
+}
+
 func evalSQLTimeZoneExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 	value := evalSQLExpr(*expr.left, group, row)
 	if err := sqlExpressionError(value); err != nil {
@@ -15,7 +52,7 @@ func evalSQLTimeZoneExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) inter
 	if err := sqlExpressionError(zoneValue); err != nil {
 		return sqlEvaluationFailure(err)
 	}
-	location, err := sqlTimeZoneLocation(zoneValue)
+	location, err := sqlTimeZoneLocationFor(expr, zoneValue)
 	if err != nil {
 		return sqlEvalError{err: err, token: expr.token}
 	}
@@ -30,53 +67,64 @@ func evalSQLTimeFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) inter
 	if expr.name == "VALID_AT" {
 		return evalSQLValidAtFunction(expr, group, row)
 	}
-	arguments := make([]interface{}, len(expr.args))
-	for index, argument := range expr.args {
-		value := evalSQLExpr(argument, group, row)
-		if err := sqlExpressionError(value); err != nil {
-			return sqlEvaluationFailure(err)
-		}
-		arguments[index] = value
-	}
 	invalid := func(message string) interface{} {
 		return sqlEvalError{err: fmt.Errorf("%s", message), token: expr.token}
 	}
+	if len(expr.args) != 2 {
+		arguments := make([]interface{}, len(expr.args))
+		for index, argument := range expr.args {
+			value := evalSQLExpr(argument, group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			arguments[index] = value
+		}
+		switch expr.name {
+		case "PARSE_TIMESTAMP":
+			return invalid("PARSE_TIMESTAMP expects exactly two arguments")
+		case "TIMESTAMP_ADD":
+			return invalid("TIMESTAMP_ADD expects exactly two arguments")
+		case "TIMESTAMP_DIFF":
+			return invalid("TIMESTAMP_DIFF expects exactly two arguments")
+		default:
+			return invalid("unknown time function " + expr.name)
+		}
+	}
+	first := evalSQLExpr(expr.args[0], group, row)
+	if err := sqlExpressionError(first); err != nil {
+		return sqlEvaluationFailure(err)
+	}
+	second := evalSQLExpr(expr.args[1], group, row)
+	if err := sqlExpressionError(second); err != nil {
+		return sqlEvaluationFailure(err)
+	}
 	switch expr.name {
 	case "PARSE_TIMESTAMP":
-		if len(arguments) != 2 {
-			return invalid("PARSE_TIMESTAMP expects exactly two arguments")
-		}
-		location, err := sqlTimeZoneLocation(arguments[1])
+		location, err := sqlTimeZoneLocationFor(expr, second)
 		if err != nil {
 			return sqlEvalError{err: err, token: expr.token}
 		}
-		timestamp, err := sqlTimestampValue(arguments[0], location)
+		timestamp, err := sqlTimestampValue(first, location)
 		if err != nil {
 			return sqlEvalError{err: err, token: expr.token}
 		}
 		return timestamp
 	case "TIMESTAMP_ADD":
-		if len(arguments) != 2 {
-			return invalid("TIMESTAMP_ADD expects exactly two arguments")
-		}
-		timestamp, err := sqlTimestampValue(arguments[0], time.UTC)
+		timestamp, err := sqlTimestampValue(first, time.UTC)
 		if err != nil {
 			return sqlEvalError{err: err, token: expr.token}
 		}
-		duration, err := sqlDurationValue(arguments[1])
+		duration, err := sqlDurationValue(second)
 		if err != nil {
 			return sqlEvalError{err: err, token: expr.token}
 		}
 		return timestamp.Add(duration)
 	case "TIMESTAMP_DIFF":
-		if len(arguments) != 2 {
-			return invalid("TIMESTAMP_DIFF expects exactly two arguments")
-		}
-		left, err := sqlTimestampValue(arguments[0], time.UTC)
+		left, err := sqlTimestampValue(first, time.UTC)
 		if err != nil {
 			return sqlEvalError{err: err, token: expr.token}
 		}
-		right, err := sqlTimestampValue(arguments[1], time.UTC)
+		right, err := sqlTimestampValue(second, time.UTC)
 		if err != nil {
 			return sqlEvalError{err: err, token: expr.token}
 		}
