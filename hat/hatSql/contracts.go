@@ -402,6 +402,15 @@ func (batch ColumnarBatch) Value(field string, row int) (interface{}, bool) {
 }
 
 func (batch ColumnarBatch) valueWithoutDecompressedCache(field string, row int) (interface{}, bool) {
+	// Plain batches are the common legacy layout. Avoid probing every optional
+	// physical representation when none of them is present.
+	if batch.Dictionaries == nil && batch.PackedColumns == nil && batch.BoolColumns == nil && batch.NumericColumns == nil && batch.ListColumns == nil && batch.NestedColumns == nil {
+		values, ok := batch.Columns[field]
+		if !ok || row >= len(values) {
+			return nil, false
+		}
+		return values[row], true
+	}
 	if dictionary, ok := batch.Dictionaries[field]; ok {
 		code, ok := dictionary.CodeAt(row)
 		if !ok {

@@ -293,6 +293,8 @@ name.
 - [x] C166 ClickHouse-style Bloom membership pruning for literal string `IN` predicates. Eligible binary-collation cached columnar layouts combine all literal probes per segment, skip only definitive misses, and retain exact row rechecks for false positives; see [COLUMNAR_BLOOM_FILTERS.md](COLUMNAR_BLOOM_FILTERS.md).
 - [x] C167 ClickHouse-style read-in-order early `LIMIT` completion. The materialized ordered-index path now propagates the existing stream stop signal when no explicit source-row budget requires a full scan, preserving `OFFSET`, `LIMIT 0`, and `MaxRows` semantics without storing a full ordered result; see [CH021_READ_IN_ORDER.md](CH021_READ_IN_ORDER.md).
 
+- [x] C168 Tarantool/ClickHouse-style plain columnar value dispatch. `ColumnarBatch.Value` now bypasses unused optional physical-layout maps for the common plain `Columns` representation while preserving specialized-layout precedence; see [TR019_COLUMNAR_VALUE_FASTPATH.md](TR019_COLUMNAR_VALUE_FASTPATH.md).
+
 ## Materialize Ideas
 
 Materialize contributes ideas about incremental dataflow, arrangements, logical

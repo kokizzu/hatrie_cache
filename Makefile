@@ -13752,3 +13752,26 @@ inspect-ch021-dispatch-c203:
 .PHONY: inspect-ch021-order-functions-c203
 inspect-ch021-order-functions-c203:
 	bash ./scripts/inspect-ch021-order-functions-c203.sh
+.PHONY: test-tr019-columnar-value
+test-tr019-columnar-value:
+	bash ./scripts/test-tr019-columnar-value.sh
+
+.PHONY: benchmark-tr019-columnar-value
+benchmark-tr019-columnar-value:
+	bash ./scripts/benchmark-tr019-columnar-value.sh
+
+.PHONY: format-tr019-columnar-value
+format-tr019-columnar-value:
+	bash ./scripts/format-tr019-columnar-value.sh
+
+.PHONY: review-tr019-columnar-value
+review-tr019-columnar-value:
+	bash ./scripts/review-tr019-columnar-value.sh
+
+.PHONY: commit-tr019-columnar-value
+commit-tr019-columnar-value:
+	bash ./scripts/commit-tr019-columnar-value.sh
+
+.PHONY: push-tr019-columnar-value
+push-tr019-columnar-value:
+	bash ./scripts/push-tr019-columnar-value.sh

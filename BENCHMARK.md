@@ -24213,3 +24213,22 @@ ordered source after the requested rows.
 The result remains exact for `OFFSET`: the executor visits only the rows
 needed to reach `OFFSET + LIMIT`, while `WITH TIES`, `LIMIT BY`, joins, and
 other unsupported shapes retain their established execution paths.
+
+<a id="tr-019-columnar-value-fastpath"></a>
+## TR-019 Plain Columnar Value Fast Path
+
+Command: `make benchmark-tr019-columnar-value`
+
+Workload: repeated lookup of one integer field in a 1,024-row plain
+`ColumnarBatch`. The baseline retains the pre-change sequence of optional
+physical-layout map probes; the post-change path detects the plain-only layout
+and reads `Columns` directly.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | --- |
+| Before, optional-layout probes | 27.77; 28.44; 28.91; 29.98; 26.27 | 28.44 | 0 | 0 | baseline |
+| After, plain-layout fast path | 12.60; 12.01; 11.63; 12.06; 12.66 | 12.06 | 0 | 0 | 2.36x CPU, unchanged memory and allocations |
+
+Specialized, mixed, and malformed layouts retain the established precedence
+and validation behavior. The optimization changes no SQL result, wire format,
+storage format, public API, or allocation profile.
