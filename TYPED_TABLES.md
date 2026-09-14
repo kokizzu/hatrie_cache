@@ -197,6 +197,27 @@ It never chooses a size above the configured maximum. The tradeoff is retained
 min/max sidecar metadata, so use it for repeated selective numeric filters or
 Top-N queries, not broad scans or layouts that are near `MaxBytes`.
 
+`SortedOrderCache` is independently disabled by default, including when
+`ColumnarCache.Enabled` is true. When enabled, repeated compatible single-field
+`ORDER BY ... LIMIT` queries can admit an immutable `[]uint32` row-ordinal
+projection after eight requests for the same layout and field:
+
+```go
+ColumnarCache: hatSql.TypedTableColumnarCacheOptions{
+    Enabled:          true,
+    SortedOrderCache: true,
+    MaxBytes:         4 << 20,
+    MinReads:         2,
+}
+```
+
+The projection retains four bytes per active row plus normal slice/map
+metadata, and that size is charged against `MaxBytes`; it does not copy row
+values. Writes clear it with the underlying layout. Nullable, NaN, unsupported,
+or otherwise unavailable order fields use the existing columnar Top-N fallback.
+The feature is an opt-in read optimization: its one-time sort/admission work
+and retained ordinal vector are avoided when the flag is left at its default.
+
 ### Optional MVCC Snapshots
 
 `MVCC` is disabled by default. Enable it only when readers need a historical

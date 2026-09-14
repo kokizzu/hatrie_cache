@@ -20880,6 +20880,40 @@ before caching to `622.1 ns/op` after caching, or `145x` faster. Both paths
 reported `3,456 B/op` and one allocation; the cache retains at most eight
 field/bin variants per table. Full raw samples and invalidation coverage are
 in [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md).
+
+## MZ-038 Typed-table sorted ordinal projection
+
+The opt-in typed-table ordinal projection was measured on the same AMD Ryzen 9
+5950X host with a 20,000-row typed table and a 50-row single-field
+`ORDER BY ... LIMIT` query. The baseline was collected before the cache hook was
+implemented; the cached path enabled `SortedOrderCache`, warmed it through its
+eight-request admission threshold, and then measured steady-state execution.
+
+```text
+make benchmark-c212-typed-table-order-cache
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Columnar top-N scan before | 1,321,778 | 169,791 | 17,629 | 1.00x |
+| Admitted sorted ordinal projection after | 15,659 | 21,128 | 122 | 84.4x faster; 8.0x lower bytes; 144.5x fewer allocations |
+
+The retained order vector is exactly `20,000 * 4 = 80,000` bytes in this
+fixture, plus ordinary cache metadata, and is charged to `MaxBytes`. Row values
+are not copied. The tradeoff is the one-time admission sort after eight
+compatible requests and invalidation on every successful write; the feature is
+disabled unless both `ColumnarCache.Enabled` and `SortedOrderCache` are true.
+Unsupported or nullable order fields retain the existing fallback.
+
+Raw samples:
+
+```text
+Before: 1315769, 1321966, 1321778, 1321748, 1385643 ns/op; 169764-169863 B/op; 17628-17631 allocs/op
+After:  15659, 15885, 15734, 15595, 15474 ns/op; 21128 B/op; 122 allocs/op
+```
+
+Full correctness and invalidation coverage is in
+[C212_TYPED_TABLE_ORDER_CACHE.md](C212_TYPED_TABLE_ORDER_CACHE.md).
 ## MZ-007 source frontier requirement
 
 `make benchmark-mz007-frontier-rejection` (five samples, `-benchmem`, AMD Ryzen 9 5950X):

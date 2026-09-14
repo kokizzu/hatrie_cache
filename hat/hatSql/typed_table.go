@@ -54,6 +54,7 @@ const (
 // memory behavior.
 type TypedTableColumnarCacheOptions struct {
 	Enabled                   bool
+	SortedOrderCache          bool
 	CompressedBatches         bool
 	DecompressedBlockCache    bool
 	DecompressedBlockMaxBytes int
@@ -130,10 +131,12 @@ type typedTableColumnStorage struct {
 }
 
 type typedTableColumnarLayout struct {
-	batch    ColumnarBatch
-	segments *ColumnarNumericSegments
-	bytes    int
-	touched  uint64
+	batch          ColumnarBatch
+	segments       *ColumnarNumericSegments
+	orders         map[string][]uint32
+	bytes          int
+	touched        uint64
+	sourceSequence uint64
 }
 
 type typedTableColumnarCache struct {
@@ -141,6 +144,7 @@ type typedTableColumnarCache struct {
 	options            TypedTableColumnarCacheOptions
 	layouts            map[string]typedTableColumnarLayout
 	observations       map[string]int
+	orderObservations  map[typedTableColumnarOrderCacheKey]uint8
 	sparsePrimaryMarks typedTableSparsePrimaryMarkCache
 	bytes              int
 	tick               uint64
@@ -826,7 +830,7 @@ func (table *TypedTable) observeColumnarLayoutLocked(key string, batch ColumnarB
 		cache.layouts = make(map[string]typedTableColumnarLayout)
 	}
 	cache.tick++
-	cache.layouts[key] = typedTableColumnarLayout{batch: batch, segments: segments, bytes: bytes, touched: cache.tick}
+	cache.layouts[key] = typedTableColumnarLayout{batch: batch, segments: segments, bytes: bytes, touched: cache.tick, sourceSequence: table.sequence}
 	cache.bytes += bytes
 }
 
@@ -843,6 +847,11 @@ func (cache *typedTableColumnarCache) evictOldestLocked() {
 	}
 	delete(cache.layouts, oldestKey)
 	cache.bytes -= oldest.bytes
+	for candidate := range cache.orderObservations {
+		if candidate.layout == oldestKey {
+			delete(cache.orderObservations, candidate)
+		}
+	}
 }
 
 func (table *TypedTable) clearColumnarLayoutsLocked() {
@@ -853,6 +862,7 @@ func (table *TypedTable) clearColumnarLayoutsLocked() {
 	cache.mu.Lock()
 	cache.layouts = nil
 	cache.observations = nil
+	cache.orderObservations = nil
 	cache.bytes = 0
 	cache.tick = 0
 	cache.clearSparsePrimaryMarksLocked()

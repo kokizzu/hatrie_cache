@@ -123,6 +123,106 @@ func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error
 	return resolver.Source.ResolveSQLSource(name, key)
 }
 
+func catalogOwnsVirtualSource(name, key string) bool {
+	if !strings.EqualFold(name, "CACHE") {
+		return false
+	}
+	switch strings.ToLower(key) {
+	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+		return true
+	default:
+		return false
+	}
+}
+
+// ResolveSQLColumnarSource forwards the optional columnar contract for
+// application sources while keeping information-schema sources local.
+func (resolver CatalogResolver) ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	columnar, ok := resolver.Source.(ColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return columnar.ResolveSQLColumnarSource(name, key, fields)
+}
+
+// BorrowSQLColumnarSource forwards the optional immutable columnar contract
+// for application sources while keeping information-schema sources local.
+func (resolver CatalogResolver) BorrowSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	borrowed, ok := resolver.Source.(BorrowedColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return borrowed.BorrowSQLColumnarSource(name, key, fields)
+}
+
+// BorrowSQLColumnarSourceSegments forwards the optional immutable segmented
+// columnar contract for application sources while keeping virtual sources local.
+func (resolver CatalogResolver) BorrowSQLColumnarSourceSegments(name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	segmented, ok := resolver.Source.(SegmentedColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	return segmented.BorrowSQLColumnarSourceSegments(name, key, fields)
+}
+
+// BorrowSQLColumnarSourceOrder forwards the optional sorted ordinal contract
+// for application sources while keeping virtual sources local.
+func (resolver CatalogResolver) BorrowSQLColumnarSourceOrder(name, key string, fields []string, orderField string) ([]uint32, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	sorted, ok := resolver.Source.(SortedColumnarSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return sorted.BorrowSQLColumnarSourceOrder(name, key, fields, orderField)
+}
+
+// BorrowSQLColumnarSourceOrderFields forwards the optional composite sorted
+// ordinal contract for application sources while keeping virtual sources local.
+func (resolver CatalogResolver) BorrowSQLColumnarSourceOrderFields(name, key string, fields, orderFields []string) ([]uint32, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	sorted, ok := resolver.Source.(CompositeSortedColumnarSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return sorted.BorrowSQLColumnarSourceOrderFields(name, key, fields, orderFields)
+}
+
+// BorrowSQLColumnarSourceOrderBy forwards the optional directed sorted ordinal
+// contract for application sources while keeping virtual sources local.
+func (resolver CatalogResolver) BorrowSQLColumnarSourceOrderBy(name, key string, fields, orderFields []string, descending []bool) ([]uint32, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	sorted, ok := resolver.Source.(DirectedCompositeSortedColumnarSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return sorted.BorrowSQLColumnarSourceOrderBy(name, key, fields, orderFields, descending)
+}
+
+// PreferSQLColumnarSource forwards the optional columnar preference contract
+// for application sources while keeping virtual sources local.
+func (resolver CatalogResolver) PreferSQLColumnarSource(name, key string, fields []string) bool {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return false
+	}
+	preferred, ok := resolver.Source.(ColumnarSourcePreferenceResolver)
+	return ok && preferred.PreferSQLColumnarSource(name, key, fields)
+}
+
 // SQLSourceCardinality forwards optional source row-count metadata. Catalog
 // pseudo-sources intentionally remain unavailable so the SQL planner falls
 // back to its established exact source resolution path for mixed queries.

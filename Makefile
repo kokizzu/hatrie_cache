@@ -13899,3 +13899,39 @@ commit-tt051-typed-table-histogram-cache:
 .PHONY: push-tt051-typed-table-histogram-cache
 push-tt051-typed-table-histogram-cache:
 	@bash scripts/push-tt051-typed-table-histogram-cache.sh
+
+.PHONY: benchmark-c212-typed-table-order-cache
+benchmark-c212-typed-table-order-cache:
+	@bash scripts/benchmark-c212-typed-table-order-cache.sh
+
+.PHONY: test-c212-typed-table-order-cache
+test-c212-typed-table-order-cache:
+	@bash scripts/test-c212-typed-table-order-cache.sh
+
+.PHONY: format-c212-typed-table-order-cache
+format-c212-typed-table-order-cache:
+	@bash scripts/format-c212-typed-table-order-cache.sh
+
+.PHONY: race-c212-typed-table-order-cache
+race-c212-typed-table-order-cache:
+	@bash scripts/race-c212-typed-table-order-cache.sh
+
+.PHONY: vet-c212-typed-table-order-cache
+vet-c212-typed-table-order-cache:
+	@bash scripts/vet-c212-typed-table-order-cache.sh
+
+.PHONY: review-c212-typed-table-order-cache
+review-c212-typed-table-order-cache:
+	@bash scripts/review-c212-typed-table-order-cache.sh
+
+.PHONY: verify-c212-typed-table-order-cache
+verify-c212-typed-table-order-cache:
+	@bash scripts/verify-c212-typed-table-order-cache.sh
+
+.PHONY: commit-c212-typed-table-order-cache
+commit-c212-typed-table-order-cache:
+	@bash scripts/commit-c212-typed-table-order-cache.sh
+
+.PHONY: push-c212-typed-table-order-cache
+push-c212-typed-table-order-cache:
+	@bash scripts/push-c212-typed-table-order-cache.sh

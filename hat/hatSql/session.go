@@ -135,6 +135,107 @@ func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
 	return session.source.ResolveSQLSource(name, key)
 }
 
+func (session *SQLSession) hasLocalSQLSource(name, key string) bool {
+	if session == nil || !strings.EqualFold(name, "CACHE") {
+		return false
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	key = strings.ToLower(key)
+	_, tableExists := session.tables[key]
+	_, resultExists := session.results[key]
+	_, viewExists := session.views[key]
+	return tableExists || resultExists || viewExists
+}
+
+// ResolveSQLColumnarSource forwards the optional columnar contract to the
+// external source after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	columnar, ok := session.source.(ColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return columnar.ResolveSQLColumnarSource(name, key, fields)
+}
+
+// BorrowSQLColumnarSource forwards the optional immutable columnar contract
+// to the external source after preserving session-local source precedence.
+func (session *SQLSession) BorrowSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	borrowed, ok := session.source.(BorrowedColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return borrowed.BorrowSQLColumnarSource(name, key, fields)
+}
+
+// BorrowSQLColumnarSourceSegments forwards the optional immutable segmented
+// columnar contract to the external source after preserving local precedence.
+func (session *SQLSession) BorrowSQLColumnarSourceSegments(name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	segmented, ok := session.source.(SegmentedColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, nil, false, nil
+	}
+	return segmented.BorrowSQLColumnarSourceSegments(name, key, fields)
+}
+
+// BorrowSQLColumnarSourceOrder forwards the optional sorted ordinal contract
+// to the external source after preserving session-local source precedence.
+func (session *SQLSession) BorrowSQLColumnarSourceOrder(name, key string, fields []string, orderField string) ([]uint32, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	sorted, ok := session.source.(SortedColumnarSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return sorted.BorrowSQLColumnarSourceOrder(name, key, fields, orderField)
+}
+
+// BorrowSQLColumnarSourceOrderFields forwards the optional composite sorted
+// ordinal contract to the external source after preserving local precedence.
+func (session *SQLSession) BorrowSQLColumnarSourceOrderFields(name, key string, fields, orderFields []string) ([]uint32, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	sorted, ok := session.source.(CompositeSortedColumnarSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return sorted.BorrowSQLColumnarSourceOrderFields(name, key, fields, orderFields)
+}
+
+// BorrowSQLColumnarSourceOrderBy forwards the optional directed sorted ordinal
+// contract to the external source after preserving local source precedence.
+func (session *SQLSession) BorrowSQLColumnarSourceOrderBy(name, key string, fields, orderFields []string, descending []bool) ([]uint32, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	sorted, ok := session.source.(DirectedCompositeSortedColumnarSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return sorted.BorrowSQLColumnarSourceOrderBy(name, key, fields, orderFields, descending)
+}
+
+// PreferSQLColumnarSource forwards the optional columnar preference contract
+// to the external source after preserving session-local source precedence.
+func (session *SQLSession) PreferSQLColumnarSource(name, key string, fields []string) bool {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return false
+	}
+	preferred, ok := session.source.(ColumnarSourcePreferenceResolver)
+	return ok && preferred.PreferSQLColumnarSource(name, key, fields)
+}
+
 // ResolveSQLSourcePartitions forwards the optional partition contract to the
 // session's external source after giving session-local tables, results, and
 // views the normal precedence.
