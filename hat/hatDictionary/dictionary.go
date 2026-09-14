@@ -14,13 +14,14 @@ import (
 )
 
 var (
-	ErrDictionaryNil  = errors.New("hatDictionary: dictionary is nil")
-	ErrSourceNil      = errors.New("hatDictionary: source is nil")
-	ErrKeyInvalid     = errors.New("hatDictionary: key is invalid")
-	ErrOptionsInvalid = errors.New("hatDictionary: options are invalid")
-	ErrRefreshLimit   = errors.New("hatDictionary: refresh key limit exceeded")
-	ErrValueTooLarge  = errors.New("hatDictionary: value exceeds cache byte limit")
-	ErrStale          = errors.New("hatDictionary: value is stale")
+	ErrDictionaryNil   = errors.New("hatDictionary: dictionary is nil")
+	ErrSourceNil       = errors.New("hatDictionary: source is nil")
+	ErrKeyInvalid      = errors.New("hatDictionary: key is invalid")
+	ErrOptionsInvalid  = errors.New("hatDictionary: options are invalid")
+	ErrRefreshLimit    = errors.New("hatDictionary: refresh key limit exceeded")
+	ErrValueTooLarge   = errors.New("hatDictionary: value exceeds cache byte limit")
+	ErrStale           = errors.New("hatDictionary: value is stale")
+	ErrVersionMismatch = errors.New("hatDictionary: source version mismatch")
 )
 
 const (
@@ -37,10 +38,31 @@ type Source interface {
 	Load(ctx context.Context, keys []string) (map[string]string, error)
 }
 
+// VersionedSource optionally supplies a version for each source snapshot.
+// Versioned refreshes never publish values whose returned version differs
+// from the caller's expected version.
+type VersionedSource interface {
+	Source
+	LoadVersioned(ctx context.Context, keys []string) (map[string]string, string, error)
+}
+
 // SourceFunc adapts a function into a Source.
 type SourceFunc func(context.Context, []string) (map[string]string, error)
 
 func (function SourceFunc) Load(ctx context.Context, keys []string) (map[string]string, error) {
+	return function(ctx, keys)
+}
+
+// VersionedSourceFunc adapts a version-returning function into a
+// VersionedSource.
+type VersionedSourceFunc func(context.Context, []string) (map[string]string, string, error)
+
+func (function VersionedSourceFunc) Load(ctx context.Context, keys []string) (map[string]string, error) {
+	values, _, err := function(ctx, keys)
+	return values, err
+}
+
+func (function VersionedSourceFunc) LoadVersioned(ctx context.Context, keys []string) (map[string]string, string, error) {
 	return function(ctx, keys)
 }
 
@@ -49,20 +71,25 @@ func (function SourceFunc) Load(ctx context.Context, keys []string) (map[string]
 // default because serving old dimension data must be an explicit availability
 // tradeoff.
 type Options struct {
-	MaxEntries     int
-	MaxBytes       int64
-	TTL            time.Duration
-	MaxRefreshKeys int
-	StaleIfError   bool
-	Now            func() time.Time
+	MaxEntries      int
+	MaxBytes        int64
+	TTL             time.Duration
+	MaxRefreshKeys  int
+	StaleIfError    bool
+	Fallback        Source
+	FallbackOnMiss  bool
+	FallbackOnError bool
+	Now             func() time.Time
 }
 
 // LookupResult describes a dictionary lookup. Value is immutable from the
 // dictionary's perspective because it is represented as a string.
 type LookupResult struct {
-	Value string
-	Found bool
-	Stale bool
+	Value    string
+	Found    bool
+	Stale    bool
+	Version  string
+	Fallback bool
 }
 
 // RefreshResult reports one successful batch refresh.
@@ -72,6 +99,8 @@ type RefreshResult struct {
 	Missing   int
 	Evicted   int
 	Bytes     int64
+	Version   string
+	Fallback  int
 }
 
 // Stats reports current bounded state and cumulative activity counters.
@@ -121,6 +150,8 @@ type dictionaryEntry struct {
 	value     string
 	fetchedAt time.Time
 	touched   uint64
+	version   string
+	fallback  bool
 }
 
 // Dictionary is a concurrency-safe, bounded external dictionary cache.
@@ -146,6 +177,9 @@ func New(source Source, options Options) (*Dictionary, error) {
 		return nil, ErrSourceNil
 	}
 	if options.MaxEntries < 0 || options.MaxBytes < 0 || options.MaxRefreshKeys < 0 || options.TTL < 0 {
+		return nil, ErrOptionsInvalid
+	}
+	if (options.FallbackOnMiss || options.FallbackOnError) && options.Fallback == nil {
 		return nil, ErrOptionsInvalid
 	}
 	if options.MaxEntries == 0 {
@@ -176,6 +210,20 @@ func New(source Source, options Options) (*Dictionary, error) {
 // expired value is returned with Stale=true and a StaleError when refresh
 // fails.
 func (dictionary *Dictionary) Lookup(ctx context.Context, rawKey string) (LookupResult, error) {
+	return dictionary.lookupUnversioned(ctx, rawKey)
+}
+
+// LookupAtVersion returns a value only from the requested source snapshot.
+// An empty expectedVersion preserves normal unversioned lookup behavior.
+func (dictionary *Dictionary) LookupAtVersion(ctx context.Context, rawKey, expectedVersion string) (LookupResult, error) {
+	expectedVersion = strings.TrimSpace(expectedVersion)
+	if expectedVersion == "" {
+		return dictionary.lookupUnversioned(ctx, rawKey)
+	}
+	return dictionary.lookupAtVersion(ctx, rawKey, expectedVersion)
+}
+
+func (dictionary *Dictionary) lookupUnversioned(ctx context.Context, rawKey string) (LookupResult, error) {
 	if dictionary == nil {
 		return LookupResult{}, ErrDictionaryNil
 	}
@@ -189,7 +237,7 @@ func (dictionary *Dictionary) Lookup(ctx context.Context, rawKey string) (Lookup
 	entry, found, fresh := dictionary.readEntry(key)
 	if fresh {
 		dictionary.recordHit()
-		return LookupResult{Value: entry.value, Found: true}, nil
+		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 	}
 	dictionary.recordMiss()
 
@@ -198,14 +246,13 @@ func (dictionary *Dictionary) Lookup(ctx context.Context, rawKey string) (Lookup
 	entry, found, fresh = dictionary.readEntry(key)
 	if fresh {
 		dictionary.recordHit()
-		return LookupResult{Value: entry.value, Found: true}, nil
+		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 	}
 	staleValue := entry.value
-	staleFound := found
-	if _, err := dictionary.refreshBatch(ctx, []string{key}); err != nil {
-		if staleFound && dictionary.options.StaleIfError {
+	if _, err := dictionary.refreshBatch(ctx, []string{key}, ""); err != nil {
+		if found && dictionary.options.StaleIfError {
 			dictionary.recordStaleFallback()
-			return LookupResult{Value: staleValue, Found: true, Stale: true}, &StaleError{Cause: err}
+			return LookupResult{Value: staleValue, Found: true, Stale: true, Version: entry.version, Fallback: entry.fallback}, &StaleError{Cause: err}
 		}
 		return LookupResult{}, err
 	}
@@ -213,7 +260,51 @@ func (dictionary *Dictionary) Lookup(ctx context.Context, rawKey string) (Lookup
 	if !found {
 		return LookupResult{}, nil
 	}
-	return LookupResult{Value: entry.value, Found: true}, nil
+	return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
+}
+
+func (dictionary *Dictionary) lookupAtVersion(ctx context.Context, rawKey, expectedVersion string) (LookupResult, error) {
+	if dictionary == nil {
+		return LookupResult{}, ErrDictionaryNil
+	}
+	key, err := normalizeKey(rawKey)
+	if err != nil {
+		return LookupResult{}, err
+	}
+	if err := contextError(ctx); err != nil {
+		return LookupResult{}, err
+	}
+	entry, found, fresh := dictionary.readEntry(key)
+	if fresh && dictionary.versionMatches(entry.version, expectedVersion) {
+		dictionary.recordHit()
+		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
+	}
+	dictionary.recordMiss()
+
+	dictionary.refreshMu.Lock()
+	defer dictionary.refreshMu.Unlock()
+	entry, found, fresh = dictionary.readEntry(key)
+	if fresh && dictionary.versionMatches(entry.version, expectedVersion) {
+		dictionary.recordHit()
+		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
+	}
+	staleValue := entry.value
+	staleFound := found && dictionary.versionMatches(entry.version, expectedVersion)
+	if _, err := dictionary.refreshBatch(ctx, []string{key}, expectedVersion); err != nil {
+		if staleFound && dictionary.options.StaleIfError {
+			dictionary.recordStaleFallback()
+			return LookupResult{Value: staleValue, Found: true, Stale: true, Version: entry.version, Fallback: entry.fallback}, &StaleError{Cause: err}
+		}
+		return LookupResult{}, err
+	}
+	entry, found, _ = dictionary.readEntry(key)
+	if !found {
+		return LookupResult{}, nil
+	}
+	if !dictionary.versionMatches(entry.version, expectedVersion) {
+		return LookupResult{}, fmt.Errorf("%w: want %q, got %q", ErrVersionMismatch, expectedVersion, entry.version)
+	}
+	return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 }
 
 // Refresh loads and stores a deduplicated batch. It rejects batches larger
@@ -231,7 +322,26 @@ func (dictionary *Dictionary) Refresh(ctx context.Context, rawKeys []string) (Re
 	}
 	dictionary.refreshMu.Lock()
 	defer dictionary.refreshMu.Unlock()
-	return dictionary.refreshBatch(ctx, keys)
+	return dictionary.refreshBatch(ctx, keys, "")
+}
+
+// RefreshAtVersion refreshes a batch and publishes it only if the source
+// returns expectedVersion. It is useful when a caller has already chosen a
+// consistent dictionary snapshot for a query or transaction.
+func (dictionary *Dictionary) RefreshAtVersion(ctx context.Context, rawKeys []string, expectedVersion string) (RefreshResult, error) {
+	if dictionary == nil {
+		return RefreshResult{}, ErrDictionaryNil
+	}
+	keys, err := normalizeKeys(rawKeys, dictionary.options.MaxRefreshKeys)
+	if err != nil {
+		return RefreshResult{}, err
+	}
+	if err := contextError(ctx); err != nil {
+		return RefreshResult{}, err
+	}
+	dictionary.refreshMu.Lock()
+	defer dictionary.refreshMu.Unlock()
+	return dictionary.refreshBatch(ctx, keys, strings.TrimSpace(expectedVersion))
 }
 
 // Len returns the number of retained entries.
@@ -273,7 +383,13 @@ func (dictionary *Dictionary) Stats() Stats {
 	return stats
 }
 
-func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string) (RefreshResult, error) {
+type dictionaryLoadedValue struct {
+	value    string
+	version  string
+	fallback bool
+}
+
+func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string, expectedVersion string) (RefreshResult, error) {
 	result := RefreshResult{Requested: len(keys)}
 	if len(keys) == 0 {
 		return result, nil
@@ -282,24 +398,69 @@ func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string) (
 		return result, err
 	}
 	atomic.AddUint64(&dictionary.stats.refreshes, 1)
-	values, err := dictionary.source.Load(ctx, keys)
+	values, version, err := loadDictionarySource(ctx, dictionary.source, keys)
+	loaded := make(map[string]dictionaryLoadedValue, len(keys))
 	if err != nil {
-		atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
-		return result, err
+		primaryErr := err
+		if !dictionary.options.FallbackOnError || dictionary.options.Fallback == nil {
+			atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
+			return result, err
+		}
+		fallbackValues, fallbackVersion, fallbackErr := loadDictionarySource(ctx, dictionary.options.Fallback, keys)
+		if fallbackErr != nil {
+			atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
+			return result, errors.Join(primaryErr, fmt.Errorf("fallback: %w", fallbackErr))
+		}
+		if err := validateDictionaryVersion(expectedVersion, fallbackVersion); err != nil {
+			atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
+			return result, err
+		}
+		result.Version = fallbackVersion
+		for _, key := range keys {
+			if value, found := fallbackValues[key]; found {
+				loaded[key] = dictionaryLoadedValue{value: value, version: fallbackVersion, fallback: true}
+			}
+		}
+	} else {
+		if err := validateDictionaryVersion(expectedVersion, version); err != nil {
+			atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
+			return result, err
+		}
+		result.Version = version
+		missing := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if value, found := values[key]; found {
+				loaded[key] = dictionaryLoadedValue{value: value, version: version}
+			} else {
+				missing = append(missing, key)
+			}
+		}
+		if dictionary.options.FallbackOnMiss && len(missing) > 0 {
+			fallbackValues, fallbackVersion, fallbackErr := loadDictionarySource(ctx, dictionary.options.Fallback, missing)
+			if fallbackErr != nil {
+				atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
+				return result, fmt.Errorf("fallback: %w", fallbackErr)
+			}
+			for _, key := range missing {
+				if value, found := fallbackValues[key]; found {
+					if err := validateDictionaryVersion(expectedVersion, fallbackVersion); err != nil {
+						atomic.AddUint64(&dictionary.stats.refreshErrors, 1)
+						return result, err
+					}
+					loaded[key] = dictionaryLoadedValue{value: value, version: fallbackVersion, fallback: true}
+				}
+			}
+		}
 	}
-	if values == nil {
-		values = map[string]string{}
-	}
-	for _, key := range keys {
-		value, found := values[key]
-		if found && int64(len(key)+len(value)) > dictionary.options.MaxBytes {
+	for key, value := range loaded {
+		if int64(len(key)+len(value.value)) > dictionary.options.MaxBytes {
 			return result, fmt.Errorf("%w: key %q", ErrValueTooLarge, key)
 		}
 	}
 
 	dictionary.mu.Lock()
 	for _, key := range keys {
-		value, found := values[key]
+		value, found := loaded[key]
 		old, hadOld := dictionary.entries[key]
 		if !found {
 			if hadOld {
@@ -312,11 +473,20 @@ func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string) (
 		if hadOld {
 			dictionary.bytes -= int64(len(key) + len(old.value))
 		}
-		entry := &dictionaryEntry{value: value, fetchedAt: dictionary.now(), touched: atomic.AddUint64(&dictionary.tick, 1)}
+		entry := &dictionaryEntry{
+			value:     value.value,
+			fetchedAt: dictionary.now(),
+			touched:   atomic.AddUint64(&dictionary.tick, 1),
+			version:   value.version,
+			fallback:  value.fallback,
+		}
 		dictionary.entries[key] = entry
-		dictionary.bytes += int64(len(key) + len(value))
+		dictionary.bytes += int64(len(key) + len(value.value))
 		result.Loaded++
-		result.Bytes += int64(len(value))
+		result.Bytes += int64(len(value.value))
+		if value.fallback {
+			result.Fallback++
+		}
 	}
 	for len(dictionary.entries) > dictionary.options.MaxEntries || dictionary.bytes > dictionary.options.MaxBytes {
 		key, ok := dictionary.oldestKeyLocked()
@@ -332,6 +502,25 @@ func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string) (
 	return result, nil
 }
 
+func loadDictionarySource(ctx context.Context, source Source, keys []string) (map[string]string, string, error) {
+	if versioned, ok := source.(VersionedSource); ok {
+		return versioned.LoadVersioned(ctx, keys)
+	}
+	values, err := source.Load(ctx, keys)
+	return values, "", err
+}
+
+func validateDictionaryVersion(expected, actual string) error {
+	if expected != "" && actual != expected {
+		return fmt.Errorf("%w: want %q, got %q", ErrVersionMismatch, expected, actual)
+	}
+	return nil
+}
+
+func (dictionary *Dictionary) versionMatches(actual, expected string) bool {
+	return expected == "" || actual == expected
+}
+
 func (dictionary *Dictionary) readEntry(key string) (dictionaryEntry, bool, bool) {
 	dictionary.mu.RLock()
 	defer dictionary.mu.RUnlock()
@@ -341,7 +530,13 @@ func (dictionary *Dictionary) readEntry(key string) (dictionaryEntry, bool, bool
 	}
 	touched := atomic.AddUint64(&dictionary.tick, 1)
 	atomic.StoreUint64(&entry.touched, touched)
-	return dictionaryEntry{value: entry.value, fetchedAt: entry.fetchedAt, touched: touched}, true, dictionary.now().Before(entry.fetchedAt.Add(dictionary.options.TTL))
+	return dictionaryEntry{
+		value:     entry.value,
+		fetchedAt: entry.fetchedAt,
+		touched:   touched,
+		version:   entry.version,
+		fallback:  entry.fallback,
+	}, true, dictionary.now().Before(entry.fetchedAt.Add(dictionary.options.TTL))
 }
 
 func (dictionary *Dictionary) oldestKeyLocked() (string, bool) {

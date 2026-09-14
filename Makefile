@@ -14325,3 +14325,40 @@ commit-ch027-external-dictionary-c203:
 .PHONY: push-ch027-external-dictionary-c203
 push-ch027-external-dictionary-c203:
 	@bash scripts/push-ch027-external-dictionary-c203.sh
+
+
+.PHONY: test-ch028-dictionary-version-c203
+test-ch028-dictionary-version-c203:
+	@bash scripts/test-ch028-dictionary-version-c203.sh
+
+.PHONY: inspect-ch028-dictionary-version-c203
+inspect-ch028-dictionary-version-c203:
+	@bash scripts/inspect-ch028-dictionary-version-c203.sh
+
+.PHONY: format-ch028-dictionary-version-c203
+format-ch028-dictionary-version-c203:
+	@bash scripts/format-ch028-dictionary-version-c203.sh
+
+.PHONY: benchmark-ch028-dictionary-version-c203
+benchmark-ch028-dictionary-version-c203:
+	@bash scripts/benchmark-ch028-dictionary-version-c203.sh
+
+.PHONY: verify-ch028-dictionary-version-c203
+verify-ch028-dictionary-version-c203:
+	@bash scripts/verify-ch028-dictionary-version-c203.sh
+
+.PHONY: stage-ch028-dictionary-version-c203
+stage-ch028-dictionary-version-c203:
+	@bash scripts/stage-ch028-dictionary-version-c203.sh
+
+.PHONY: inspect-staged-ch028-dictionary-version-c203
+inspect-staged-ch028-dictionary-version-c203:
+	@bash scripts/inspect-staged-ch028-dictionary-version-c203.sh
+
+.PHONY: commit-ch028-dictionary-version-c203
+commit-ch028-dictionary-version-c203:
+	@bash scripts/commit-ch028-dictionary-version-c203.sh
+
+.PHONY: push-ch028-dictionary-version-c203
+push-ch028-dictionary-version-c203:
+	@bash scripts/push-ch028-dictionary-version-c203.sh

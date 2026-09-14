@@ -47,7 +47,7 @@ before/after measurement when its motivation is performance.
 | CH-25 | Full-text inverted postings index | Accelerate token and phrase search | Index size and update cost | [x] |
 | CH-26 | Phrase and proximity search over text postings | Improve search precision | More postings metadata | [x] Implemented by `CONTAINS_PHRASE` and `CONTAINS_PROXIMITY` over the existing opt-in text index; see [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md) and [BENCHMARK.md#ch-026-sql-phrase-and-proximity-search](BENCHMARK.md#ch-026-sql-phrase-and-proximity-search). |
 | CH-27 | External dictionary cache with bounded refresh | Adopted as the public bounded `hat/hatDictionary` cache with batch refresh, TTL, stale-on-error opt-in, and entry/byte limits. | Source failures and stale values | [x] |
-| CH-28 | Dictionary version and fallback semantics | Make lookup changes deterministic | Version coordination | [ ] |
+| CH-28 | Dictionary version and fallback semantics | Adopted optional source versions, version-pinned refresh/lookup, and explicit miss/error fallback with result provenance. | Version coordination | [x] |
 | CH-29 | Dictionary-backed join execution | Avoid materializing small dimensions | Refresh consistency | [ ] |
 | CH-30 | Map key/value subcolumn pruning | Read only the needed nested vector | Planner and null semantics | [ ] |
 | CH-31 | Automatic typed subcolumn materialization for JSON paths | Turn hot JSON paths into compact columns | Schema churn and disk use | [ ] |

@@ -87,10 +87,10 @@ latency so the cache's local overhead is visible.
 
 | Operation | Median ns/op | B/op | Allocs/op | Relative to matching direct source |
 | --- | ---: | ---: | ---: | --- |
-| Direct source, serial | 183.0 | 336 | 2 | 1.00x |
-| Dictionary hit, serial | 80.54 | 0 | 0 | 2.27x faster |
-| Direct source, parallel | 94.21 | 336 | 2 | 1.00x |
-| Dictionary hit, parallel | 55.53 | 0 | 0 | 1.70x faster |
+| Direct source, serial | 186.4 | 336 | 2 | 1.00x |
+| Dictionary hit, serial | 91.89 | 0 | 0 | 2.03x faster |
+| Direct source, parallel | 98.16 | 336 | 2 | 1.00x |
+| Dictionary hit, parallel | 57.33 | 0 | 0 | 1.71x faster |
 
 The warm dictionary retained 16 logical key-plus-value bytes for this fixture;
 the configured defaults additionally cap entries at 4,096 and logical bytes
@@ -100,20 +100,20 @@ path, while refresh and eviction remain bounded and serialized.
 Raw `-benchmem -count=5` samples:
 
 ```text
-DirectSource ns/op:           179.3 183.0 189.1 227.7 176.9
+DirectSource ns/op:           186.4 183.6 185.2 191.0 186.6
 DirectSource B/op:            336 336 336 336 336
 DirectSource allocs/op:       2 2 2 2 2
 
-DirectSourceParallel ns/op:   95.60 93.37 93.10 94.37 94.21
+DirectSourceParallel ns/op:   98.16 98.70 99.51 94.73 95.72
 DirectSourceParallel B/op:    336 336 336 336 336
 DirectSourceParallel allocs/op: 2 2 2 2 2
 
-CachedHit ns/op:              80.74 76.32 80.54 80.02 86.05
+CachedHit ns/op:              91.89 92.87 92.42 88.33 84.37
 CachedHit B/op:               0 0 0 0 0
 CachedHit allocs/op:          0 0 0 0 0
 CachedHit retained_bytes:     16
 
-CachedHitParallel ns/op:      57.04 55.24 54.46 55.84 55.53
+CachedHitParallel ns/op:      57.51 57.45 56.01 56.69 57.33
 CachedHitParallel B/op:       0 0 0 0 0
 CachedHitParallel allocs/op:  0 0 0 0 0
 ```
@@ -123,6 +123,45 @@ local lookup, which is the expected external-dictionary case. Its explicit
 tradeoff is retained memory and possible staleness; `StaleIfError` is disabled
 by default, and source/network latency is intentionally not hidden in this
 local benchmark.
+
+## CH-028: Dictionary Version And Fallback
+
+Command: `make benchmark-ch028-dictionary-version-c203`. The benchmark uses a
+one-key versioned in-memory source, a warm dictionary entry, five samples per
+case, and an AMD Ryzen 9 5950X on Linux amd64. It measures local version-check
+overhead; source/network latency is intentionally excluded.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Cached unversioned hit | 86.88 | 0 | 0 | baseline cache path |
+| Cached expected-version hit | 105.9 | 0 | 0 | 1.68x faster than direct; 21.9% slower than unversioned |
+| Direct versioned source | 178.3 | 336 | 2 | baseline source path |
+
+Both cache modes retain the same zero-allocation hot path. Version pinning adds
+no retained allocation in this fixture and costs 21.9% CPU versus the
+unversioned path; fallback selection is an explicit refresh-time path rather
+than hidden work on fresh hits.
+
+Raw `-benchmem -count=5` samples:
+
+```text
+CachedUnversionedHit ns/op:       90.80 90.53 90.50 86.88 82.72
+CachedUnversionedHit B/op:        0 0 0 0 0
+CachedUnversionedHit allocs/op:   0 0 0 0 0
+
+CachedExpectedVersionHit ns/op:   99.15 111.3 102.2 105.9 106.2
+CachedExpectedVersionHit B/op:    0 0 0 0 0
+CachedExpectedVersionHit allocs/op: 0 0 0 0 0
+
+DirectVersionedSource ns/op:      177.8 178.7 178.3 179.0 177.1
+DirectVersionedSource B/op:       336 336 336 336 336
+DirectVersionedSource allocs/op:  2 2 2 2 2
+```
+
+Version checks provide deterministic snapshot acceptance without changing the
+default unversioned API. Fallbacks can improve availability but may serve
+older data, so they remain disabled unless the caller opts into miss or error
+fallback and inspects the result provenance.
 
 ## TR-015 Persistent Filter and Read Amplification Telemetry
 
