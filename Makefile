@@ -13277,3 +13277,31 @@ push-ch052-temporal-program:
 
 commit-mz050-push-wrapper:
 	@bash scripts/commit-mz050-push-wrapper.sh
+
+.PHONY: test-ch053-in-program
+test-ch053-in-program:
+	@bash scripts/test-ch053-in-program.sh
+
+.PHONY: benchmark-ch053-in-program
+benchmark-ch053-in-program:
+	@bash scripts/benchmark-ch053-in-program.sh
+
+.PHONY: format-ch053-in-program
+format-ch053-in-program:
+	@bash scripts/format-ch053-in-program.sh
+
+.PHONY: race-ch053-in-program
+race-ch053-in-program:
+	@bash scripts/race-ch053-in-program.sh
+
+.PHONY: vet-ch053-in-program
+vet-ch053-in-program:
+	@bash scripts/vet-ch053-in-program.sh
+
+.PHONY: commit-ch053-in-program
+commit-ch053-in-program:
+	@bash scripts/commit-ch053-in-program.sh
+
+.PHONY: push-ch053-in-program
+push-ch053-in-program:
+	@bash scripts/push-ch053-in-program.sh

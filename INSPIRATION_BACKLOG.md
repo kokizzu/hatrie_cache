@@ -204,3 +204,12 @@ their runtime behavior. The measured result is 13.3x faster parsing with a
 literal zone and 58.7x faster `AT TIME ZONE`, with lower bytes and allocations;
 see [CH052_PREPARED_TEMPORAL_EXPRESSIONS.md](CH052_PREPARED_TEMPORAL_EXPRESSIONS.md)
 and [BENCHMARK.md#ch-052-prepared-temporal-expressions](BENCHMARK.md#ch-052-prepared-temporal-expressions).
+
+## CH-053 Prepared Literal `IN` Sets
+
+The ClickHouse-inspired prepared-set follow-up retains literal `IN` and
+`NOT IN` values after binding, eliminating one candidate-slice allocation per
+row while retaining the existing linear comparison and SQL `NULL` semantics.
+Dynamic lists remain unchanged. Measurements and raw samples are in
+[CH053_PREPARED_LITERAL_IN.md](CH053_PREPARED_LITERAL_IN.md) and
+[BENCHMARK.md#ch-053-prepared-literal-in-sets](BENCHMARK.md#ch-053-prepared-literal-in-sets).

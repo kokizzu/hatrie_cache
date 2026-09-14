@@ -5497,6 +5497,7 @@ func bindSQLExpr(expr *sqlExpr, parameters []interface{}) error {
 	prepareSQLJSONPathExpr(expr)
 	prepareSQLRegexExpr(expr)
 	prepareSQLTimeZoneExpr(expr)
+	prepareSQLInExpr(expr)
 	return nil
 }
 
@@ -5749,6 +5750,7 @@ type sqlExpr struct {
 	jsonPath                  *sqlJSONPathProgram
 	regexProgram              *sqlRegexProgram
 	timeZoneProgram           *sqlTimeZoneProgram
+	inProgram                 *sqlInProgram
 }
 
 // sqlParameter is retained only in an immutable parsed template when a
@@ -16504,6 +16506,9 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 		left := evalSQLExpr(*expr.left, group, row)
 		if err := sqlExpressionError(left); err != nil {
 			return sqlEvaluationFailure(err)
+		}
+		if expr.inProgram != nil {
+			return sqlInValueWithCollation(expr.op, left, expr.inProgram.values, expr.collation)
 		}
 		values := make([]interface{}, len(expr.args))
 		for index, argument := range expr.args {
