@@ -54,27 +54,38 @@ expected=$(mktemp)
 trap 'rm -f "$base" "$feature_makefile" "$patch_file" "$staged" "$expected"' EXIT
 
 git show HEAD:Makefile >"$base"
-cp "$base" "$feature_makefile"
-printf '\n%s\n' \
-'.PHONY: test-mz040-incremental-percentile benchmark-mz040-incremental-percentile format-mz040-incremental-percentile race-mz040-incremental-percentile vet-mz040-incremental-percentile review-mz040-incremental-percentile verify-mz040-incremental-percentile commit-mz040-incremental-percentile push-mz040-incremental-percentile' \
-'test-mz040-incremental-percentile:' \
-$'\t@bash scripts/test-mz040-incremental-percentile.sh' \
-'benchmark-mz040-incremental-percentile:' \
-$'\t@bash scripts/benchmark-mz040-incremental-percentile.sh' \
-'format-mz040-incremental-percentile:' \
-$'\t@bash scripts/format-mz040-incremental-percentile.sh' \
-'race-mz040-incremental-percentile:' \
-$'\t@bash scripts/race-mz040-incremental-percentile.sh' \
-'vet-mz040-incremental-percentile:' \
-$'\t@bash scripts/vet-mz040-incremental-percentile.sh' \
-'review-mz040-incremental-percentile:' \
-$'\t@bash scripts/review-mz040-incremental-percentile.sh' \
-'verify-mz040-incremental-percentile:' \
-$'\t@bash scripts/verify-mz040-incremental-percentile.sh' \
-'commit-mz040-incremental-percentile:' \
-$'\t@bash scripts/commit-mz040-incremental-percentile.sh' \
-'push-mz040-incremental-percentile:' \
-$'\t@bash scripts/push-mz040-incremental-percentile.sh' >>"$feature_makefile"
+makefile_block=(
+	'.PHONY: test-mz040-incremental-percentile benchmark-mz040-incremental-percentile format-mz040-incremental-percentile race-mz040-incremental-percentile vet-mz040-incremental-percentile review-mz040-incremental-percentile verify-mz040-incremental-percentile commit-mz040-incremental-percentile push-mz040-incremental-percentile'
+	'test-mz040-incremental-percentile:'
+	$'\t@bash scripts/test-mz040-incremental-percentile.sh'
+	'benchmark-mz040-incremental-percentile:'
+	$'\t@bash scripts/benchmark-mz040-incremental-percentile.sh'
+	'format-mz040-incremental-percentile:'
+	$'\t@bash scripts/format-mz040-incremental-percentile.sh'
+	'race-mz040-incremental-percentile:'
+	$'\t@bash scripts/race-mz040-incremental-percentile.sh'
+	'vet-mz040-incremental-percentile:'
+	$'\t@bash scripts/vet-mz040-incremental-percentile.sh'
+	'review-mz040-incremental-percentile:'
+	$'\t@bash scripts/review-mz040-incremental-percentile.sh'
+	'verify-mz040-incremental-percentile:'
+	$'\t@bash scripts/verify-mz040-incremental-percentile.sh'
+	'commit-mz040-incremental-percentile:'
+	$'\t@bash scripts/commit-mz040-incremental-percentile.sh'
+	'push-mz040-incremental-percentile:'
+	$'\t@bash scripts/push-mz040-incremental-percentile.sh'
+)
+if rg -q '^\.PHONY: test-mz040-incremental-percentile ' "$base"; then
+	awk '
+		/^\.PHONY: test-mz040-incremental-percentile / { in_mz040=1; print; next }
+		in_mz040 && /^\.PHONY:/ { in_mz040=0 }
+		in_mz040 && NF == 0 { next }
+		{ print }
+	' "$base" >"$feature_makefile"
+else
+	cp "$base" "$feature_makefile"
+	printf '%s\n' "${makefile_block[@]}" >>"$feature_makefile"
+fi
 
 diff -u "$base" "$feature_makefile" >"$patch_file" || diff_status=$?
 if [[ ${diff_status:-0} -ne 1 ]]; then
@@ -86,10 +97,19 @@ git apply --cached "$patch_file"
 
 printf '%s\n' "${feature_paths[@]}" | sort >"$expected"
 git diff --cached --name-only | sort >"$staged"
-if ! cmp -s "$expected" "$staged"; then
-	printf '%s\n' 'refusing to commit: staged paths are not limited to MZ-040' >&2
-	git diff --cached --name-only >&2
-	exit 1
+if rg -q '^\.PHONY: test-mz040-incremental-percentile ' "$base"; then
+	while IFS= read -r path; do
+		if ! rg -Fxq "$path" "$expected"; then
+			printf '%s\n' "refusing to commit unexpected staged path: $path" >&2
+			exit 1
+		fi
+	done <"$staged"
+else
+	if ! cmp -s "$expected" "$staged"; then
+		printf '%s\n' 'refusing to commit: staged paths are not limited to MZ-040' >&2
+		git diff --cached --name-only >&2
+		exit 1
+	fi
 fi
 git diff --cached --check
 git commit -m 'feat(hatSql): add incremental percentile operator'
