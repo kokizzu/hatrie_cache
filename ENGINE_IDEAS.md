@@ -31,7 +31,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-002 | Sparse primary-key mark pruning | Ordered JSON indexes now prune literal ranges with binary-search bounds; physical part/mark granularity is still deferred. | Medium |
 | CH-003 | Partition-key pruning | Partially adopted: SQL now forwards validated literal equality, `IN`, and range predicates to opt-in partition resolvers; concrete physical partition metadata remains backend-specific. | Medium |
 | CH-004 | `FINAL` read semantics | No query-time reconciliation of replacing or collapsing versions. | High |
-| CH-005 | Lightweight delete bitmap | Deletes are not represented as compact immutable bitmaps over stored parts. | High |
+| CH-005 | Lightweight delete bitmap | Opt-in typed-table patch parts use a compact in-memory bitmap; persistent immutable stored-part delete bitmaps remain open. | High |
 | CH-006 | Mutation dependency queue | No durable dependency-aware queue for ALTER/DELETE mutations. | High |
 | CH-007 | Row TTL | Partially adopted as an opt-in `TypedTable` processing-time or event-time policy with explicit purge; background scheduling and durable processing-time deadlines remain deferred. | Medium |
 | CH-008 | Column TTL | No independent removal or masking of expired wide columns. | Medium |

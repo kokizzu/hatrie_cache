@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
@@ -484,7 +485,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	} else if exists {
 		change.Operation = "INSERT"
 		if table.patchParts != nil {
-			table.patchParts.deleted[index] = false
+			table.patchParts.deleted.clear(index)
 			table.patchParts.deletedCount--
 		}
 		for column := range table.columns {
@@ -497,7 +498,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		table.positions[key] = index
 		table.keys = append(table.keys, key)
 		if table.patchParts != nil {
-			table.patchParts.deleted = append(table.patchParts.deleted, false)
+			table.patchParts.deleted.ensure(index + 1)
 		}
 		for column := range table.columns {
 			table.columns[column].append(values[column])
@@ -534,7 +535,7 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 	change := TypedTableChange{Operation: "DELETE", Key: table.keys[index], Before: table.rowLocked(index)}
 	if table.patchParts != nil {
 		pendingDeletesBefore := table.patchParts.deletedCount
-		table.patchParts.deleted[index] = true
+		table.patchParts.deleted.set(index)
 		table.patchParts.deletedCount++
 		change = table.appendChangeLocked(change)
 		if pendingDeletesBefore == 0 {
@@ -754,6 +755,20 @@ func (table *TypedTable) Rows() []Row {
 	}
 	if table.ttl == nil {
 		rows := make([]Row, 0, activeRows)
+		if table.patchParts != nil && table.patchParts.deletedCount >= typedTableDeleteBitmapWordBits {
+			physicalRows := len(table.keys)
+			wordCount := (physicalRows + typedTableDeleteBitmapWordBits - 1) / typedTableDeleteBitmapWordBits
+			for wordIndex := 0; wordIndex < wordCount; wordIndex++ {
+				live := table.patchParts.deleted.liveWord(wordIndex, physicalRows)
+				for live != 0 {
+					row := wordIndex*typedTableDeleteBitmapWordBits + bits.TrailingZeros64(live)
+					values := table.rowLocked(row)
+					rows = append(rows, table.rowMapLocked(values))
+					live &= live - 1
+				}
+			}
+			return rows
+		}
 		for row := range table.keys {
 			if table.typedTableRowDeletedLocked(row) {
 				continue

@@ -18,7 +18,7 @@ type TypedTablePatchOptions struct {
 var ErrTypedTablePatchPartsDisabled = errors.New("typed table patch parts disabled")
 
 type typedTablePatchState struct {
-	deleted        []bool
+	deleted        typedTableDeleteBitmap
 	deletedCount   int
 	mergeThreshold int
 	mergeScheduled bool
@@ -42,7 +42,7 @@ func newTypedTablePatchState(options TypedTablePatchOptions) *typedTablePatchSta
 }
 
 func (table *TypedTable) typedTableRowDeletedLocked(index int) bool {
-	return table.patchParts != nil && table.patchParts.deleted[index]
+	return table.patchParts != nil && table.patchParts.deleted.contains(index)
 }
 
 func (table *TypedTable) scheduleTypedTablePatchCompactionLocked() {
@@ -97,7 +97,7 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	table.clearColumnarLayoutsLocked()
 	write := 0
 	for read, key := range table.keys {
-		if state.deleted[read] {
+		if state.deleted.contains(read) {
 			delete(table.positions, key)
 			continue
 		}
@@ -111,11 +111,11 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 				table.ttl.deadlines[write] = table.ttl.deadlines[read]
 			}
 		}
-		state.deleted[write] = false
+		state.deleted.clear(write)
 		write++
 	}
 	table.keys = table.keys[:write]
-	state.deleted = state.deleted[:write]
+	state.deleted.truncate(write)
 	state.deletedCount = 0
 	for column := range table.columns {
 		table.columns[column].truncate(write)

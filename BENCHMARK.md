@@ -505,6 +505,53 @@ This is an opt-in diagnostics API, so these costs are not added to ordinary
 SQL execution. Recording retains bounded state without per-sample allocation;
 inspection allocates a defensive copy so readers cannot mutate live state.
 
+## CH-012: Bitmap-Backed Lightweight Logical Deletes
+
+CH-012 replaces the per-row `[]bool` tombstone mask used by opt-in typed-table
+patch parts with one bit per physical row. The existing threshold compaction
+scheduler remains in place. Dense no-TTL scans classify complete bitmap words;
+sparse masks retain the simple row loop.
+
+| Workload | Baseline | Current | Improvement |
+| --- | ---: | ---: | ---: |
+| Delete-mask backing, 1,024 rows | 1,024 B/op | 128 B/op | 8.00x less memory |
+| Delete-mask backing, 10,000 rows | 10,240 B/op | 1,280 B/op | 8.00x less memory |
+| Delete-mask backing, 100,000 rows | 106,496 B/op | 13,568 B/op | 7.85x less memory |
+| Logical delete/reinsert | 820.5 ns/op | 691.7 ns/op | 1.19x faster |
+| `Rows` after half-delete | 913,811 ns/op | 903,619 ns/op | 1.01x faster |
+| Patch compaction, 1,000 rows | 32,381 ns/op | 31,994 ns/op | 1.01x faster |
+| Patch compaction, 10,000 rows | 522,120 ns/op | 455,353 ns/op | 1.15x faster |
+
+The first three rows are isolated mask-allocation measurements. The remaining
+rows are end-to-end typed-table measurements; delete/reinsert remained at four
+allocations per operation, half-delete `Rows` remained at 19,873 allocations,
+and both compaction sizes remained at zero allocations. The compact mask is
+opt-in through `TypedTablePatchOptions.Enabled`, which remains disabled by
+default.
+
+Commands:
+
+```text
+make benchmark-ch012-mask-c203
+make benchmark-ch012-rows-c203
+make benchmark-ch012-c203
+```
+
+Raw mask samples:
+
+```text
+rows=1024:   bool 245.0, 235.4, 252.3, 256.2, 255.5 ns/op; 1024 B/op
+             bitmap 44.67, 45.21, 44.67, 46.06, 46.13 ns/op; 128 B/op
+rows=10000:  bool 1412, 1546, 1511, 1551, 1479 ns/op; 10240 B/op
+             bitmap 323.1, 299.6, 340.4, 294.2, 296.4 ns/op; 1280 B/op
+rows=100000: bool 11979, 12700, 12654, 12636, 12950 ns/op; 106496 B/op
+             bitmap 2458, 2323, 2376, 2296, 2281 ns/op; 13568 B/op
+```
+
+See [CH012_DELETE_BITMAP.md](CH012_DELETE_BITMAP.md) for the full raw
+end-to-end samples, representation details, correctness coverage, and
+tradeoffs.
+
 ## CH-049: Refreshable External Dictionaries
 
 The benchmark compares the new dictionary's direct read path with the raw Go

@@ -14425,3 +14425,51 @@ commit-ch030-map-c203:
 .PHONY: push-ch030-map-c203
 push-ch030-map-c203:
 	bash ./scripts/push-ch030-map-c203.sh
+
+.PHONY: inspect-ch012-c203
+inspect-ch012-c203:
+	bash ./scripts/inspect-ch012-c203.sh
+
+.PHONY: inspect-inspiration-backlog-c203
+inspect-inspiration-backlog-c203:
+	bash ./scripts/inspect-inspiration-backlog-c203.sh
+
+.PHONY: test-ch012-c203
+test-ch012-c203:
+	bash ./scripts/test-ch012-c203.sh
+
+.PHONY: format-ch012-c203
+format-ch012-c203:
+	bash ./scripts/format-ch012-c203.sh
+
+.PHONY: benchmark-ch012-c203
+benchmark-ch012-c203:
+	bash ./scripts/benchmark-ch012-c203.sh
+
+.PHONY: benchmark-ch012-mask-c203
+benchmark-ch012-mask-c203:
+	bash ./scripts/benchmark-ch012-mask-c203.sh
+
+.PHONY: benchmark-ch012-rows-c203
+benchmark-ch012-rows-c203:
+	bash ./scripts/benchmark-ch012-rows-c203.sh
+
+.PHONY: verify-ch012-c203
+verify-ch012-c203:
+	bash ./scripts/verify-ch012-c203.sh
+
+.PHONY: stage-ch012-c203
+stage-ch012-c203:
+	bash ./scripts/stage-ch012-c203.sh
+
+.PHONY: inspect-staged-ch012-c203
+inspect-staged-ch012-c203:
+	bash ./scripts/inspect-staged-ch012-c203.sh
+
+.PHONY: commit-ch012-c203
+commit-ch012-c203:
+	bash ./scripts/commit-ch012-c203.sh
+
+.PHONY: push-ch012-c203
+push-ch012-c203:
+	bash ./scripts/push-ch012-c203.sh
