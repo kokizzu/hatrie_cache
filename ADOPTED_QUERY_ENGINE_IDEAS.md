@@ -382,3 +382,17 @@ events at their arrival frontier, compacts old remap history behind an anchor,
 and supports CRC-validated binary snapshots. It does not buffer payloads or
 change existing SQL defaults; callers own source watermark inference and
 connector integration.
+### MZ-033: Timestamp oracle
+
+The existing importable `hatReplication` package provides both a process-local
+atomic `TimestampOracle` and a transport-neutral `GlobalTimestampOracle`.
+Global reservations observe caller timestamps, allocate contiguous non-
+overlapping ranges, fence restarted node epochs and coordinator terms, and make
+retries idempotent through per-node sequences. `GlobalTimestampLease` consumes a
+grant locally with an atomic counter and no per-timestamp allocation. The
+coordinator snapshot is deterministic and validated on restore. Consensus,
+replication, and durability remain caller-owned, and existing SQL defaults are
+unchanged.
+
+See [MZ033_TIMESTAMP_ORACLE.md](MZ033_TIMESTAMP_ORACLE.md) and the raw
+measurements in [BENCHMARK.md](BENCHMARK.md).

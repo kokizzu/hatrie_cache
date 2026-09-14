@@ -4045,3 +4045,4 @@ SQL mutation changefeed consumers can request pre- and post-state rows with `RET
 - [Materialize-style spillable arrangements](MZ029_SPILLABLE_ARRANGEMENT.md)
 - [Materialize-style skew-aware join exchange](MZ031_SKEW_AWARE_JOIN_EXCHANGE.md)
 - [Materialize-style late-data reclock](MZ032_LATE_DATA_RECLOCK.md)
+- [Materialize-style timestamp oracle](MZ033_TIMESTAMP_ORACLE.md)

@@ -13836,6 +13836,18 @@ commit-differential-average:
 push-differential-average:
 	@bash scripts/push-differential-average.sh
 
+.PHONY: inspect-idea-inventory
+inspect-idea-inventory:
+	@bash scripts/inspect-idea-inventory.sh
+
+.PHONY: inspect-m032
+inspect-m032:
+	@bash scripts/inspect-m032.sh
+
+.PHONY: inspect-next-candidate
+inspect-next-candidate:
+	@bash scripts/inspect-next-candidate.sh
+
 .PHONY: test-tt050-typed-table-cache
 test-tt050-typed-table-cache:
 	@bash scripts/test-tt050-typed-table-cache.sh

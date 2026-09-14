@@ -114,7 +114,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-030 | Differential join delta maintenance | Adopted as a reusable exact inner-join maintainer with signed multiplicities, atomic batches, deterministic snapshots, and a replacement fast path; SQL planner wiring and outer/temporal joins remain future work. | High |
 | MZ-031 | Skew-aware join exchange | Adopted as an imported deterministic routing policy with bounded heavy-key tracking, build-side broadcast, probe-side spreading, and generation-fenced rebalancing; automatic planner/executor integration remains future work. | High |
 | MZ-032 | Late-data reclocking | Adopted as an importable bounded remap sidecar with monotone source/processing frontiers, late-event assignment, compaction, and CRC-validated snapshots; source inference and automatic SQL/connector wiring remain future work. | High |
-| MZ-033 | Timestamp oracle | No globally coordinated logical timestamp allocator across independent writers. | High |
+| MZ-033 | Timestamp oracle | Adopted in existing importable `hatReplication`: process-local atomic `TimestampOracle` plus transport-neutral `GlobalTimestampOracle` with monotone observed time, contiguous range grants, node-epoch restart fencing, idempotent sequence retries, term fencing, local leases, and validated snapshots; consensus, replication, and durability remain caller-owned. | High |
 | MZ-034 | Generic negative-diff operators | Signed retractions are not supported by every SQL operator. | High |
 | MZ-035 | Multiset preservation everywhere | Duplicate multiplicities are not retained consistently across all operators. | High |
 | MZ-036 | Recursive fixpoint scheduler | Recursive dataflow lacks a general iterative frontier scheduler. | High |

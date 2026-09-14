@@ -24617,3 +24617,27 @@ BenchmarkMZ032BinarySourceLookup: 43.12, 40.77, 44.64, 44.52, 44.41 ns/op
 BenchmarkMZ032LinearProcessingLookup: 974.4, 1042, 1145, 1069, 1134 ns/op
 BenchmarkMZ032BinaryProcessingLookup: 37.73, 42.70, 38.74, 41.98, 38.60 ns/op
 ```
+## MZ-033 Timestamp Oracle
+
+MZ-033 was already present in `hat/hatReplication`; this benchmark records the
+existing process-local clock, global coordinator, and local lease paths. The
+global coordinator is intentionally transport-neutral, so this is an in-process
+microbenchmark rather than a consensus or network benchmark.
+
+| Workload | Median | Memory | Relative result |
+| --- | ---: | ---: | ---: |
+| `GlobalTimestampOracle.reserve_one` | 54.73 ns/op | 0 B/op, 0 allocs/op | Baseline grant cost |
+| `GlobalTimestampOracle.reserve_range` (`Count=1024`) | 57.95 ns/op | 0 B/op, 0 allocs/op | 0.94x vs one-timestamp grant |
+| `GlobalTimestampOracle.leased_next` | 2.294 ns/op | 0 B/op, 0 allocs/op | 23.86x lower latency vs `reserve_one`; 1.088x local-clock latency |
+| `TimestampOracle.Next` | 2.109 ns/op | 0 B/op, 0 allocs/op | Baseline local-only clock |
+
+Command: `make benchmark-mz033-timestamp-oracle`
+
+Raw samples:
+
+```text
+BenchmarkGlobalTimestampOracle/reserve_one: 54.73, 55.44, 56.07, 53.04, 54.39 ns/op
+BenchmarkGlobalTimestampOracle/reserve_range: 56.71, 63.06, 57.95, 56.80, 58.26 ns/op
+BenchmarkGlobalTimestampOracle/leased_next: 2.295, 2.249, 2.294, 2.281, 2.322 ns/op
+BenchmarkTimestampOracleNext: 2.109, 2.112, 2.110, 2.105, 2.022 ns/op
+```
