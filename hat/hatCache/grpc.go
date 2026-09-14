@@ -439,7 +439,7 @@ func (server *CacheGRPCServer) authorizeGRPCCommand(ctx context.Context, request
 		}
 		return true
 	}
-	return server.options.RBACPolicy.Authorize(server.authenticatedPrincipal(ctx), normalizedCommand(request.Command), strings.TrimSpace(request.Key), "")
+	return server.options.RBACPolicy.AuthorizeObject(server.authenticatedPrincipal(ctx), normalizedCommand(request.Command), strings.TrimSpace(request.Key), "", strings.TrimSpace(request.Key))
 }
 
 func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {

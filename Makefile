@@ -13622,3 +13622,34 @@ commit-mz043-operator-frontier:
 .PHONY: push-mz043-operator-frontier
 push-mz043-operator-frontier:
 	bash ./scripts/push-mz043-operator-frontier.sh
+
+
+.PHONY: test-tr047-object-grants
+test-tr047-object-grants:
+	bash ./scripts/test-tr047-object-grants.sh
+
+.PHONY: format-tr047-object-grants
+format-tr047-object-grants:
+	bash ./scripts/format-tr047-object-grants.sh
+.PHONY: benchmark-tr047-object-grants
+benchmark-tr047-object-grants:
+	bash ./scripts/benchmark-tr047-object-grants.sh
+.PHONY: race-tr047-object-grants
+race-tr047-object-grants:
+	bash ./scripts/race-tr047-object-grants.sh
+
+.PHONY: vet-tr047-object-grants
+vet-tr047-object-grants:
+	bash ./scripts/vet-tr047-object-grants.sh
+
+.PHONY: review-tr047-object-grants
+review-tr047-object-grants:
+	bash ./scripts/review-tr047-object-grants.sh
+
+.PHONY: commit-tr047-object-grants
+commit-tr047-object-grants:
+	bash ./scripts/commit-tr047-object-grants.sh
+
+.PHONY: push-tr047-object-grants
+push-tr047-object-grants:
+	bash ./scripts/push-tr047-object-grants.sh

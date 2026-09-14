@@ -2021,6 +2021,14 @@ authentication precedence; an invalid provider result does not make the API
 public. Replication authentication stays separate and cannot grant general
 operator access.
 
+Object-scoped RBAC grants are opt-in through `hatAuth.Rule.Objects`. Command
+and gRPC rules match cache keys; SQL rules match each referenced `CACHE(...)`
+source. Batches check every nested command, and a dynamic RowBinary import is
+denied by an object-only rule because its keys are not known before decoding.
+Rules without `Objects` keep the existing behavior. See
+[TR047_OBJECT_GRANTS.md](TR047_OBJECT_GRANTS.md) for policy examples,
+security semantics, and measured overhead.
+
 ### Credential And Certificate Rotation
 
 Previous operator and replication tokens are opt-in and must have an absolute

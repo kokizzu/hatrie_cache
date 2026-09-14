@@ -1906,13 +1906,13 @@ func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *ht
 	}
 	principal := handler.monitoringRequestPrincipal(r)
 	if len(sources) == 0 {
-		if handler.options.RBACPolicy.Authorize(principal, "SQL", "", "") {
+		if handler.options.RBACPolicy.AuthorizeObject(principal, "SQL", "", "", "") {
 			return false
 		}
 	} else {
 		allowed := true
 		for _, source := range sources {
-			if !handler.options.RBACPolicy.Authorize(principal, "SQL", source, source) {
+			if !handler.options.RBACPolicy.AuthorizeObject(principal, "SQL", source, source, source) {
 				allowed = false
 				break
 			}
@@ -1935,7 +1935,7 @@ func (handler *MonitoringHandler) authorizeCommand(principal string, request Cac
 		}
 		return true
 	}
-	return handler.options.RBACPolicy.Authorize(principal, normalizedCommand(request.Command), strings.TrimSpace(request.Key), "")
+	return handler.options.RBACPolicy.AuthorizeObject(principal, normalizedCommand(request.Command), strings.TrimSpace(request.Key), "", strings.TrimSpace(request.Key))
 }
 
 func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {

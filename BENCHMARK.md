@@ -24122,3 +24122,28 @@ BenchmarkTR026BitmapBuild-32        230 5445355 ns/op    18.36 MB/s 200000 bitma
 BenchmarkTR026BitmapBuild-32        211 5532623 ns/op    18.07 MB/s 200000 bitmap-bytes 672300 B/op 440 allocs/op
 PASS
 ```
+## TR-047 Object-Scoped RBAC Grants
+
+The focused benchmark ran five samples with `make benchmark-tr047-object-grants`
+on the local AMD Ryzen 9 5950X host. All variants performed zero allocations.
+The legacy row uses a rule without `objects`; object and source rows use the
+new selector and matching request dimension.
+
+| Check | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy rule without objects | 81.25 | 0 | 0 | 1.00x |
+| Command object rule | 97.96 | 0 | 0 | 1.21x |
+| SQL source-object rule | 85.66 | 0 | 0 | 1.05x |
+
+Raw samples:
+
+```text
+BenchmarkPolicyAuthorizeLegacy: 81.11, 81.25, 83.04, 81.75, 80.92 ns/op
+BenchmarkPolicyAuthorizeObject: 94.77, 97.96, 95.14, 99.16, 99.54 ns/op
+BenchmarkPolicyAuthorizeObjectSource: 93.57, 88.86, 83.73, 85.66, 84.52 ns/op
+```
+
+The command object check is about 21% slower in isolation, while the source
+object check is about 5% slower. Both remain sub-0.1-microsecond checks and
+retain zero heap allocations. Endpoint behavior is covered by exact command,
+SQL-source, batch, and RowBinary fail-closed tests.
