@@ -26559,3 +26559,60 @@ Raw RSS samples from `make memory-chu04-c243`:
 materialized baseline: Maximum resident set size: 26996 kbytes
 streaming external spill: Maximum resident set size: 24908 kbytes
 ```
+## CH-U05 External Window Streaming
+
+CH-U05 lets a direct `EXTERNAL('name')` source implement
+`ExternalStreamSourceResolver` so `ExecuteSQLQueryRows` can execute the
+bounded, unpartitioned, unordered window subset without materializing the
+result slice. Supported functions are `ROW_NUMBER`, `RANK`, `DENSE_RANK`,
+running `SUM`/`AVG`/`MIN`/`MAX`, and fixed-literal-offset `LAG`/`LEAD`.
+Partitioned, explicitly framed, and window-ordered queries remain outside this
+path. The materialized API and legacy materialized-only resolvers are unchanged.
+
+The workload uses a generated 4,096-row external source and the following
+query:
+
+```sql
+FROM EXTERNAL('events') AS event
+SELECT event.id,
+       ROW_NUMBER() OVER () AS row_number,
+       SUM(event.value) OVER () AS running_sum,
+       LAG(event.value) OVER () AS previous_value
+```
+
+Five `-count=5` runs were measured on an AMD Ryzen 9 5950X. The median
+materialized time is 362.14 ms/op versus 6.56 ms/op for streaming, a 55.2x
+speedup. Cumulative benchmark allocation volume falls from 251,763,026 to
+4,337,313 B/op (58.0x lower), and allocation count falls from 87,217 to
+69,414 (1.26x fewer). One-shot maximum RSS falls from 34,164 to 24,620 KiB,
+27.9% lower. RSS includes process/runtime overhead; `B/op` is cumulative
+allocation volume rather than retained heap.
+
+| Metric | Materialized | Streaming | Materialized / streaming |
+| --- | ---: | ---: | ---: |
+| Median time | 362.14 ms/op | 6.56 ms/op | 55.2x faster |
+| Median cumulative allocation | 251,763,026 B/op | 4,337,313 B/op | 58.0x lower |
+| Median allocation count | 87,217 allocs/op | 69,414 allocs/op | 1.26x fewer |
+| One-shot maximum RSS | 34,164 KiB | 24,620 KiB | 1.39x lower |
+
+Raw output:
+
+```text
+BenchmarkCHU05ExternalWindowMaterialized-32       3  350640709 ns/op  251764890 B/op  87219 allocs/op
+BenchmarkCHU05ExternalWindowMaterialized-32       3  353817799 ns/op  251762882 B/op  87216 allocs/op
+BenchmarkCHU05ExternalWindowMaterialized-32       3  362137328 ns/op  251763042 B/op  87217 allocs/op
+BenchmarkCHU05ExternalWindowMaterialized-32       3  374866016 ns/op  251762968 B/op  87216 allocs/op
+BenchmarkCHU05ExternalWindowMaterialized-32       3  394284699 ns/op  251763026 B/op  87217 allocs/op
+BenchmarkCHU05ExternalWindowStreaming-32        181    6730205 ns/op    4337378 B/op  69414 allocs/op
+BenchmarkCHU05ExternalWindowStreaming-32        180    6576552 ns/op    4337290 B/op  69413 allocs/op
+BenchmarkCHU05ExternalWindowStreaming-32        189    6557837 ns/op    4337398 B/op  69415 allocs/op
+BenchmarkCHU05ExternalWindowStreaming-32        188    6263779 ns/op    4337306 B/op  69414 allocs/op
+BenchmarkCHU05ExternalWindowStreaming-32        195    6306755 ns/op    4337313 B/op  69414 allocs/op
+```
+
+Measured with:
+
+```text
+make benchmark-chu05-c245
+make memory-chu05-c245
+```

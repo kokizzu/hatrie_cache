@@ -1350,10 +1350,10 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlUnionAllStreamable(query) {
 		return executeSQLUnionAllStream(ctx, query, resolver, control, visit)
 	}
-	if sqlLeadWindowStreamable(query) {
+	if sqlLeadWindowStreamable(query, resolver) {
 		return executeSQLLeadWindowStream(ctx, query, resolver, control, visit)
 	}
-	if sqlRunningWindowStreamable(query) {
+	if sqlRunningWindowStreamable(query, resolver) {
 		return executeSQLRunningWindowStream(ctx, query, resolver, control, visit)
 	}
 	if control == nil || control.options.MaxGroupKeys <= 0 {
@@ -2253,8 +2253,23 @@ type sqlRunningWindowState struct {
 // default frame is all qualifying preceding rows through the current row, plus
 // LAG with a literal offset. They need only constant state or a fixed history,
 // never one retained state object per source row.
-func sqlRunningWindowStreamable(query *sqlQuery) bool {
-	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+func sqlWindowSourceStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.from == nil {
+		return false
+	}
+	switch query.from.kind {
+	case "CACHE", "VALUES":
+		return true
+	case "EXTERNAL":
+		_, ok := resolver.(ExternalStreamSourceResolver)
+		return ok
+	default:
+		return false
+	}
+}
+
+func sqlRunningWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || !sqlWindowSourceStreamable(query, resolver) || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return false
 	}
 	hasWindow := false
@@ -2319,8 +2334,8 @@ func sqlRunningWindowLagOffset(args []sqlExpr) (int, bool) {
 // sqlLeadWindowStreamable recognizes the subset that can delay each output by
 // a fixed literal offset. Unlike running windows, LEAD needs future input, but
 // the pending queue is bounded by the largest requested offset.
-func sqlLeadWindowStreamable(query *sqlQuery) bool {
-	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+func sqlLeadWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || !sqlWindowSourceStreamable(query, resolver) || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return false
 	}
 	hasLead := false

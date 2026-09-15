@@ -38,6 +38,49 @@ commit-chu04-c243:
 .PHONY: push-chu04-c243
 push-chu04-c243:
 	@bash ./scripts/push-chu04-c243.sh
+.PHONY: test-chu05-c245
+test-chu05-c245:
+	@bash ./scripts/test-chu05-c245.sh
+
+.PHONY: format-chu05-c245
+format-chu05-c245:
+	@bash ./scripts/format-chu05-c245.sh
+
+.PHONY: benchmark-chu05-c245
+benchmark-chu05-c245:
+	@bash ./scripts/benchmark-chu05-c245.sh
+
+.PHONY: memory-chu05-c245
+memory-chu05-c245:
+	@bash ./scripts/memory-chu05-c245.sh
+
+.PHONY: test-chu05-package-c245
+test-chu05-package-c245:
+	@bash ./scripts/test-chu05-package-c245.sh
+
+.PHONY: race-chu05-c245
+race-chu05-c245:
+	@bash ./scripts/race-chu05-c245.sh
+
+.PHONY: vet-chu05-c245
+vet-chu05-c245:
+	@bash ./scripts/vet-chu05-c245.sh
+
+.PHONY: verify-chu05-docs-c245
+verify-chu05-docs-c245:
+	@bash ./scripts/verify-chu05-docs-c245.sh
+
+.PHONY: stage-chu05-c245
+stage-chu05-c245:
+	@bash ./scripts/stage-chu05-c245.sh
+
+.PHONY: commit-chu05-c245
+commit-chu05-c245:
+	@bash ./scripts/commit-chu05-c245.sh
+
+.PHONY: push-chu05-c245
+push-chu05-c245:
+	@bash ./scripts/push-chu05-c245.sh
 .PHONY: format-chu02-c242
 format-chu02-c242:
 	@bash ./scripts/format-chu02-c242.sh

@@ -52,6 +52,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired durable asynchronous-insert deduplication: [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u01-durable-asynchronous-insert-deduplication)
 - ClickHouse-inspired external-source `ORDER BY` spill: [CHU02_EXTERNAL_ORDER_SPILL.md](CHU02_EXTERNAL_ORDER_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u02-external-order-by-spill)
 - ClickHouse-inspired external-source `DISTINCT` spill: [CHU04_EXTERNAL_DISTINCT_SPILL.md](CHU04_EXTERNAL_DISTINCT_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u04-external-distinct-spill)
+- ClickHouse-inspired external-source bounded window streaming: [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u05-external-window-streaming)
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)
 - ClickHouse-inspired prepared literal SQL/JSON path programs: [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs)
 - ClickHouse-inspired map key/value subcolumn pruning: [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning)
@@ -4132,3 +4133,13 @@ SQL mutation changefeed consumers can request pre- and post-state rows with `RET
 - [Materialize-style late-data reclock](MZ032_LATE_DATA_RECLOCK.md)
 - [Materialize-style timestamp oracle](MZ033_TIMESTAMP_ORACLE.md)
 - [Materialize-style generic negative-diff operators](MZ034_GENERIC_NEGATIVE_DIFF.md)
+### External window streaming
+
+`ExecuteSQLQueryRows` can stream the bounded direct-window subset from an
+`EXTERNAL('name')` source when its resolver implements
+`ExternalStreamSourceResolver`: running rank/number windows, running numeric
+aggregates, and fixed-offset `LAG`/`LEAD`. The callback is consumed in source
+order and the result slice is avoided. Partitioned, explicitly framed, or
+window-ordered external queries retain existing materialization behavior.
+See [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md) and
+the [CH-U05 benchmark](BENCHMARK.md#ch-u05-external-window-streaming).
