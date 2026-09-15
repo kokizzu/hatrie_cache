@@ -14774,3 +14774,31 @@ commit-tr043b-c203:
 .PHONY: push-tr043b-c203
 push-tr043b-c203:
 	@bash ./scripts/push-tr043b-c203.sh
+
+.PHONY: test-ordered-index-c203
+test-ordered-index-c203:
+	bash ./scripts/test-ordered-index-c203.sh
+
+.PHONY: benchmark-ordered-index-c203
+benchmark-ordered-index-c203:
+	bash ./scripts/benchmark-ordered-index-c203.sh
+
+.PHONY: verify-ordered-index-c203
+verify-ordered-index-c203:
+	bash ./scripts/verify-ordered-index-c203.sh
+
+.PHONY: stage-ordered-index-c203
+stage-ordered-index-c203:
+	bash ./scripts/stage-ordered-index-c203.sh
+
+.PHONY: inspect-staged-ordered-index-c203
+inspect-staged-ordered-index-c203:
+	bash ./scripts/inspect-staged-ordered-index-c203.sh
+
+.PHONY: commit-ordered-index-c203
+commit-ordered-index-c203:
+	bash ./scripts/commit-ordered-index-c203.sh
+
+.PHONY: push-ordered-index-c203
+push-ordered-index-c203:
+	bash ./scripts/push-ordered-index-c203.sh

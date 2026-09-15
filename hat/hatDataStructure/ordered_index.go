@@ -23,6 +23,11 @@ var (
 	ErrOrderedIndexIteratorClosed = errors.New("hatDataStructure: ordered index iterator is closed")
 )
 
+// orderedIndexPositionMapThreshold keeps tiny indexes in their sorted vector.
+// Linear ID lookup is faster than a map lookup through this size, while also
+// avoiding the map's retained buckets.
+const orderedIndexPositionMapThreshold = 32
+
 // OrderedIndexEntry is one stable-ID value in key order. Entries with equal
 // keys are ordered by ID.
 type OrderedIndexEntry[T any, K any] struct {
@@ -73,7 +78,6 @@ func NewOrderedIndex[T any, K any](extractor func(T) K, compare func(K, K) int, 
 	index := &OrderedIndex[T, K]{extractor: extractor, compare: compare}
 	if capacity > 0 {
 		index.entries = make([]OrderedIndexEntry[T, K], 0, capacity)
-		index.positions = make(map[uint64]int, capacity)
 	}
 	return index, nil
 }
@@ -87,18 +91,15 @@ func (index *OrderedIndex[T, K]) Upsert(id uint64, value T) error {
 	key := index.extractor(value)
 	index.mu.Lock()
 	defer index.mu.Unlock()
-	index.ensureInitializedLocked()
 	if index.active.Load() == 0 {
-		if position, exists := index.positions[id]; exists {
+		if position, exists := index.positionOfLocked(id); exists {
 			index.removeAtLocked(position)
 		}
 		position := index.searchInsertLocked(index.entries, key, id)
 		index.entries = append(index.entries, OrderedIndexEntry[T, K]{})
 		copy(index.entries[position+1:], index.entries[position:])
 		index.entries[position] = OrderedIndexEntry[T, K]{ID: id, Key: key, Value: value}
-		for current := position; current < len(index.entries); current++ {
-			index.positions[index.entries[current].ID] = current
-		}
+		index.syncPositionsFromLocked(position)
 	} else {
 		index.upsertCopyOnWriteLocked(id, key, value)
 	}
@@ -113,7 +114,7 @@ func (index *OrderedIndex[T, K]) Delete(id uint64) bool {
 	}
 	index.mu.Lock()
 	defer index.mu.Unlock()
-	position, exists := index.positions[id]
+	position, exists := index.positionOfLocked(id)
 	if !exists {
 		return false
 	}
@@ -124,10 +125,10 @@ func (index *OrderedIndex[T, K]) Delete(id uint64) bool {
 		copy(updated, index.entries[:position])
 		copy(updated[position:], index.entries[position+1:])
 		index.entries = updated
-		delete(index.positions, id)
-		for current := position; current < len(updated); current++ {
-			index.positions[updated[current].ID] = current
+		if index.positions != nil {
+			delete(index.positions, id)
 		}
+		index.syncPositionsFromLocked(position)
 	}
 	index.generation.Add(1)
 	return true
@@ -264,9 +265,34 @@ func (index *OrderedIndex[T, K]) seek(key K, strict bool) (OrderedIndexIterator[
 	return OrderedIndexIterator[T, K]{index: index, entries: index.entries, generation: index.generation.Load(), position: position}, true
 }
 
-func (index *OrderedIndex[T, K]) ensureInitializedLocked() {
+func (index *OrderedIndex[T, K]) positionOfLocked(id uint64) (int, bool) {
+	if index.positions != nil {
+		position, exists := index.positions[id]
+		return position, exists
+	}
+	for position, entry := range index.entries {
+		if entry.ID == id {
+			return position, true
+		}
+	}
+	return 0, false
+}
+
+func (index *OrderedIndex[T, K]) syncPositionsFromLocked(start int) {
+	if len(index.entries) <= orderedIndexPositionMapThreshold {
+		index.positions = nil
+		return
+	}
 	if index.positions == nil {
-		index.positions = make(map[uint64]int)
+		capacity := len(index.entries)
+		if entriesCapacity := cap(index.entries); entriesCapacity > capacity {
+			capacity = entriesCapacity
+		}
+		index.positions = make(map[uint64]int, capacity)
+		start = 0
+	}
+	for current := start; current < len(index.entries); current++ {
+		index.positions[index.entries[current].ID] = current
 	}
 }
 
@@ -289,7 +315,7 @@ func (index *OrderedIndex[T, K]) searchInsertExcludingLocked(entries []OrderedIn
 
 func (index *OrderedIndex[T, K]) upsertCopyOnWriteLocked(id uint64, key K, value T) {
 	entries := index.entries
-	oldPosition, exists := index.positions[id]
+	oldPosition, exists := index.positionOfLocked(id)
 	position := len(entries)
 	if exists {
 		position = index.searchInsertExcludingLocked(entries, oldPosition, key, id)
@@ -315,19 +341,17 @@ func (index *OrderedIndex[T, K]) upsertCopyOnWriteLocked(id uint64, key K, value
 		updated[write] = OrderedIndexEntry[T, K]{ID: id, Key: key, Value: value}
 	}
 	index.entries = updated
-	for current := 0; current < len(updated); current++ {
-		index.positions[updated[current].ID] = current
-	}
+	index.syncPositionsFromLocked(0)
 }
 
 func (index *OrderedIndex[T, K]) removeAtLocked(position int) {
 	removed := index.entries[position].ID
 	copy(index.entries[position:], index.entries[position+1:])
 	index.entries = index.entries[:len(index.entries)-1]
-	delete(index.positions, removed)
-	for current := position; current < len(index.entries); current++ {
-		index.positions[index.entries[current].ID] = current
+	if index.positions != nil {
+		delete(index.positions, removed)
 	}
+	index.syncPositionsFromLocked(position)
 }
 
 func (iterator *OrderedIndexIterator[T, K]) release() {

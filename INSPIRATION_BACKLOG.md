@@ -199,6 +199,7 @@ before/after measurement when its motivation is performance.
 | TR-49 | Queue partition ownership and online migration | Scale queues without implicit sharding | Movement and backup semantics | [ ] |
 | TR-50 | Rate-aware WAL and replication backpressure | Preserve foreground latency under bursts | Lower write throughput | [ ] |
 | TR-51 | Compact peer capability negotiation for compression | Avoid sending flagged frames to incompatible peers | One fixed handshake round trip and feature-bit API | [x] Implemented by `CompactPeerFeaturePayloadCompression`; listener-managed sessions enable gzip only after negotiation, while direct sessions remain backward-compatible. See [TR051_COMPACT_PEER_CAPABILITY_NEGOTIATION.md](TR051_COMPACT_PEER_CAPABILITY_NEGOTIATION.md) and [BENCHMARK.md#tr-051-compact-peer-capability-negotiation](BENCHMARK.md#tr-051-compact-peer-capability-negotiation). |
+| TR-52 | Small-vector secondary-index representation | Keep tiny ordered indexes compact and fast | Linear ID lookup below the promotion threshold | [x] Implemented by the bounded linear `OrderedIndex` representation with map promotion above 32 entries; see [TR052_ORDERED_INDEX_SMALL_VECTOR.md](TR052_ORDERED_INDEX_SMALL_VECTOR.md) and [BENCHMARK.md#tr-052-small-vector-orderedindex-representation](BENCHMARK.md#tr-052-small-vector-orderedindex-representation). |
 
 ## CH-052 Prepared Temporal Expressions
 

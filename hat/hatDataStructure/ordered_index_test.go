@@ -150,6 +150,74 @@ func TestOrderedIndexMutationAndAllocs(t *testing.T) {
 	}
 }
 
+func TestOrderedIndexUsesLinearSmallRepresentation(t *testing.T) {
+	const smallLimit = 32
+	index, err := NewOrderedIndex(func(value int) int { return value }, func(left, right int) int {
+		return left - right
+	}, smallLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.positions != nil {
+		t.Fatal("new small index allocated a position map")
+	}
+	for id := uint64(1); id <= smallLimit; id++ {
+		if err := index.Upsert(id, int(id)); err != nil {
+			t.Fatalf("Upsert(%d) error = %v", id, err)
+		}
+	}
+	if index.positions != nil {
+		t.Fatalf("small index allocated a position map at %d entries", smallLimit)
+	}
+	if err := index.Upsert(1, smallLimit+1); err != nil {
+		t.Fatal(err)
+	}
+	if index.positions != nil {
+		t.Fatal("small index allocated a position map while replacing an entry")
+	}
+	iterator, ok := index.First()
+	if !ok {
+		t.Fatal("First() = false for small index")
+	}
+	if err := index.Upsert(smallLimit+1, smallLimit+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, next, err := iterator.Next(); !errors.Is(err, ErrOrderedIndexIteratorInvalidated) || next {
+		t.Fatalf("small iterator invalidation = next=%v err=%v", next, err)
+	}
+	if index.positions == nil {
+		t.Fatalf("index did not allocate a position map above %d entries during copy-on-write", smallLimit)
+	}
+	iterator, ok = index.First()
+	if !ok {
+		t.Fatal("First() = false for promoted index")
+	}
+	if !index.Delete(smallLimit + 1) {
+		t.Fatal("Delete() = false for promoted entry")
+	}
+	if _, next, err := iterator.Next(); !errors.Is(err, ErrOrderedIndexIteratorInvalidated) || next {
+		t.Fatalf("promoted iterator invalidation = next=%v err=%v", next, err)
+	}
+	if index.positions != nil {
+		t.Fatal("index retained a position map after copy-on-write shrink")
+	}
+	if err := index.Upsert(smallLimit+1, smallLimit+1); err != nil {
+		t.Fatal(err)
+	}
+	if index.positions == nil {
+		t.Fatalf("index did not allocate a position map above %d entries", smallLimit)
+	}
+	if !index.Delete(smallLimit + 1) {
+		t.Fatal("Delete() = false for promoted entry")
+	}
+	if index.positions != nil {
+		t.Fatal("index retained a position map after shrinking to the small representation")
+	}
+	if !index.Delete(1) || index.Delete(1) {
+		t.Fatal("Delete() presence result is incorrect after map promotion and release")
+	}
+}
+
 func TestOrderedIndexConcurrentTraversalAndMutation(t *testing.T) {
 	index, err := NewOrderedIndex(func(value int) int { return value }, func(left, right int) int {
 		return left - right

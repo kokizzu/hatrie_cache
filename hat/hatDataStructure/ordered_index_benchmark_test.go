@@ -3,10 +3,81 @@ package hatDataStructure
 import (
 	"errors"
 	"sort"
+	"strconv"
 	"testing"
 )
 
 var orderedIndexBenchmarkSink int
+
+func BenchmarkOrderedIndexPositionLookup(b *testing.B) {
+	for _, size := range []int{1, 4, 8, 16, 32, 64} {
+		b.Run("map-"+strconv.Itoa(size), func(b *testing.B) {
+			positions := make(map[uint64]int, size)
+			for position := 0; position < size; position++ {
+				positions[uint64(position+1)] = position
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				position, ok := positions[uint64(iteration%size+1)]
+				if !ok {
+					b.Fatal("position lookup failed")
+				}
+				orderedIndexBenchmarkSink = position
+			}
+		})
+		b.Run("linear-"+strconv.Itoa(size), func(b *testing.B) {
+			entries := make([]OrderedIndexEntry[int, int], size)
+			for position := range entries {
+				entries[position] = OrderedIndexEntry[int, int]{ID: uint64(position + 1)}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				position, ok := orderedIndexLinearPosition(entries, uint64(iteration%size+1))
+				if !ok {
+					b.Fatal("position lookup failed")
+				}
+				orderedIndexBenchmarkSink = position
+			}
+		})
+	}
+}
+
+func BenchmarkOrderedIndexSmallMutation(b *testing.B) {
+	for _, size := range []int{1, 4, 8, 16, 32, 64} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			index, err := NewOrderedIndex(func(value int) int { return value }, func(left, right int) int {
+				return left - right
+			}, size)
+			if err != nil {
+				b.Fatal(err)
+			}
+			for id := 1; id <= size; id++ {
+				if err := index.Upsert(uint64(id), id); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				id := iteration%size + 1
+				if err := index.Upsert(uint64(id), id); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func orderedIndexLinearPosition(entries []OrderedIndexEntry[int, int], id uint64) (int, bool) {
+	for position, entry := range entries {
+		if entry.ID == id {
+			return position, true
+		}
+	}
+	return 0, false
+}
 
 func BenchmarkOrderedIndexTraversal(b *testing.B) {
 	index, err := NewOrderedIndex(func(value int) int { return value }, func(left, right int) int {

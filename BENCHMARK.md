@@ -25215,3 +25215,33 @@ and `make benchmark-ch051-high-cardinality-stable-c203`.
 
 Raw samples and API guidance are in
 [CH051_LOW_CARDINALITY.md](CH051_LOW_CARDINALITY.md).
+
+## TR-052 Small-Vector OrderedIndex Representation
+
+Small `OrderedIndex` values now omit the position map and linearly scan IDs
+through 32 entries. Entry 33 promotes to the map path; deleting back to 32
+releases it. This reduces retained map buckets and improves the common tiny
+index mutation path without changing public behavior.
+
+Linux/amd64, AMD Ryzen 9 5950X. Baseline values are from the map-backed
+implementation before the change; after values are from the hybrid
+implementation. Both paths reported `0 B/op` and `0 allocs/op` after setup.
+
+| Entries | Before | After | Improvement |
+| ---: | ---: | ---: | ---: |
+| 1 | 47.01 ns/op | 16.09 ns/op | 2.92x faster |
+| 4 | 76.52 ns/op | 25.78 ns/op | 2.97x faster |
+| 8 | 134.5 ns/op | 26.94 ns/op | 4.99x faster |
+| 16 | 254.0 ns/op | 35.09 ns/op | 7.24x faster |
+| 32 | 411.0 ns/op | 41.92 ns/op | 9.80x faster |
+| 64 | 778.7 ns/op | 754.9 ns/op | 1.03x faster; within normal run variance |
+
+The direct position-lookup baseline measured map versus linear lookup at 32
+entries as `6.44 ns/op` versus `5.79 ns/op`; at 64 entries it measured
+`6.51 ns/op` versus `16.26 ns/op`. The 32-entry automatic threshold follows
+that measured crossover. Small indexes retain no position-map buckets; larger
+indexes retain the existing map behavior after one promotion.
+
+Command: `make benchmark-ordered-index-c203`
+
+Details and correctness coverage: [TR052_ORDERED_INDEX_SMALL_VECTOR.md](TR052_ORDERED_INDEX_SMALL_VECTOR.md).
