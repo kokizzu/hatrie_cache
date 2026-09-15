@@ -25,7 +25,7 @@ type FunctionalIndex[T any, K comparable] struct {
 	mu        sync.RWMutex
 	extractor func(T) K
 	entries   map[uint64]functionalIndexEntry[T, K]
-	postings  map[K][]uint64
+	postings  map[K]u64PostingList
 }
 
 // NewFunctionalIndex creates an index using extractor to derive each key.
@@ -40,7 +40,7 @@ func NewFunctionalIndex[T any, K comparable](extractor func(T) K, capacity int) 
 	return &FunctionalIndex[T, K]{
 		extractor: extractor,
 		entries:   make(map[uint64]functionalIndexEntry[T, K], capacity),
-		postings:  make(map[K][]uint64, capacity),
+		postings:  make(map[K]u64PostingList, capacity),
 	}, nil
 }
 
@@ -57,18 +57,18 @@ func (index *FunctionalIndex[T, K]) Upsert(id uint64, value T) error {
 		index.entries = make(map[uint64]functionalIndexEntry[T, K])
 	}
 	if index.postings == nil {
-		index.postings = make(map[K][]uint64)
+		index.postings = make(map[K]u64PostingList)
 	}
 	if current, ok := index.entries[id]; ok {
 		if current.key != key {
 			index.removeFunctionalPostingLocked(current.key, id)
-			index.postings[key] = append(index.postings[key], id)
+			index.appendFunctionalPostingLocked(key, id)
 		}
 		index.entries[id] = functionalIndexEntry[T, K]{key: key, value: value}
 		return nil
 	}
 	index.entries[id] = functionalIndexEntry[T, K]{key: key, value: value}
-	index.postings[key] = append(index.postings[key], id)
+	index.appendFunctionalPostingLocked(key, id)
 	return nil
 }
 
@@ -102,11 +102,26 @@ func (index *FunctionalIndex[T, K]) LookupInto(key K, dst []T) []T {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	ids := index.postings[key]
-	if cap(dst) < len(ids) {
-		dst = make([]T, 0, len(ids))
+	posting, ok := index.postings[key]
+	if !ok {
+		return dst
 	}
-	for _, id := range ids {
+	if posting.rest == nil {
+		if entry, ok := index.entries[posting.first]; ok {
+			dst = append(dst, entry.value)
+		}
+		return dst
+	}
+	if cap(dst) < len(posting.rest.rest)+2 {
+		dst = make([]T, 0, len(posting.rest.rest)+2)
+	}
+	if entry, ok := index.entries[posting.first]; ok {
+		dst = append(dst, entry.value)
+	}
+	if entry, ok := index.entries[posting.rest.first]; ok {
+		dst = append(dst, entry.value)
+	}
+	for _, id := range posting.rest.rest {
 		if entry, ok := index.entries[id]; ok {
 			dst = append(dst, entry.value)
 		}
@@ -128,11 +143,11 @@ func (index *FunctionalIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	ids := index.postings[key]
-	if cap(dst) < len(ids) {
-		dst = make([]uint64, 0, len(ids))
+	posting, ok := index.postings[key]
+	if !ok {
+		return dst
 	}
-	return append(dst, ids...)
+	return posting.values(dst)
 }
 
 // Len returns the number of indexed IDs.
@@ -167,19 +182,25 @@ func (index *FunctionalIndex[T, K]) Clear() {
 }
 
 func (index *FunctionalIndex[T, K]) removeFunctionalPostingLocked(key K, id uint64) {
-	ids := index.postings[key]
-	for position, candidate := range ids {
-		if candidate != id {
-			continue
-		}
-		copy(ids[position:], ids[position+1:])
-		ids[len(ids)-1] = 0
-		ids = ids[:len(ids)-1]
-		if len(ids) == 0 {
-			delete(index.postings, key)
-		} else {
-			index.postings[key] = ids
-		}
+	posting, ok := index.postings[key]
+	if !ok {
 		return
 	}
+	next, removed, empty := posting.removeInOrder(id)
+	if !removed {
+		return
+	}
+	if empty {
+		delete(index.postings, key)
+		return
+	}
+	index.postings[key] = next
+}
+
+func (index *FunctionalIndex[T, K]) appendFunctionalPostingLocked(key K, id uint64) {
+	if posting, ok := index.postings[key]; ok {
+		index.postings[key] = posting.appendInOrder(id)
+		return
+	}
+	index.postings[key] = newU64PostingList(id)
 }

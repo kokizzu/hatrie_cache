@@ -25245,3 +25245,29 @@ indexes retain the existing map behavior after one promotion.
 Command: `make benchmark-ordered-index-c203`
 
 Details and correctness coverage: [TR052_ORDERED_INDEX_SMALL_VECTOR.md](TR052_ORDERED_INDEX_SMALL_VECTOR.md).
+
+## TR-053 Compact Secondary-Index Posting Lists
+
+Functional, non-unique hash, conditional functional, and string multikey
+indexes now store one posting ID inline in the map value. The second ID uses a
+small overflow object, and later IDs use its slice. This avoids the separate
+slice backing allocation for singleton keys while keeping map buckets smaller
+than the rejected 32-byte inline layout. The benchmark uses 10,000 rows and
+reports the median of three samples on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Index and distinct keys | Before | After | Improvement | Allocation bytes | Allocations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Functional, 10,000 | 1.263 ms/op | 0.823 ms/op | 1.54x faster | 1,173,031 -> 873,891 | 10,070 -> 70 |
+| Hash, 10,000 | 1.335 ms/op | 0.840 ms/op | 1.59x faster | 1,173,047 -> 873,909 | 10,070 -> 70 |
+| Functional, 1,000 | 1.058 ms/op | 1.053 ms/op | 1.00x | 1,341,031 -> 1,025,894 | 5,070 -> 5,070 |
+| Hash, 1,000 | 1.190 ms/op | 1.048 ms/op | 1.14x faster | 1,341,047 -> 1,025,909 | 5,070 -> 5,070 |
+| Functional, 100 | 0.936 ms/op | 0.965 ms/op | 0.97x, 3.1% slower | 1,297,030 -> 1,081,096 | 870 -> 970 |
+| Hash, 100 | 1.047 ms/op | 1.047 ms/op | 1.00x | 1,297,047 -> 1,081,110 | 870 -> 970 |
+| Functional, 10 | 0.880 ms/op | 0.934 ms/op | 0.94x, 6.2% slower | 1,345,112 -> 1,126,293 | 190 -> 200 |
+| Hash, 10 | 1.098 ms/op | 0.993 ms/op | 1.11x faster | 1,345,128 -> 1,126,309 | 190 -> 200 |
+
+The compact form reduces allocation bytes by 16.3-25.5% in all tested
+distributions and removes 10,000 singleton backing allocations in the sparse
+case. Repeated-key functional indexes can pay a small CPU and allocation cost;
+the public behavior and ordering remain unchanged. Full details and commands:
+[TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md).

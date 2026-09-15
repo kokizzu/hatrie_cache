@@ -19,7 +19,7 @@ type StringMultikeyIndexOptions struct {
 type StringMultikeyIndex struct {
 	mu      sync.RWMutex
 	options StringMultikeyIndexOptions
-	byKey   map[string][]uint64
+	byKey   map[string]u64PostingList
 	byID    map[uint64][]string
 }
 
@@ -27,7 +27,7 @@ type StringMultikeyIndex struct {
 func NewStringMultikeyIndex(options StringMultikeyIndexOptions) *StringMultikeyIndex {
 	return &StringMultikeyIndex{
 		options: options,
-		byKey:   make(map[string][]uint64),
+		byKey:   make(map[string]u64PostingList),
 		byID:    make(map[uint64][]string),
 	}
 }
@@ -61,7 +61,7 @@ func (index *StringMultikeyIndex) Set(id uint64, keys []string) error {
 		return nil
 	}
 	for _, key := range normalized {
-		index.byKey[key] = insertStringMultikeyID(index.byKey[key], id)
+		index.insertPosting(key, id)
 	}
 	index.byID[id] = normalized
 	return nil
@@ -97,14 +97,14 @@ func (index *StringMultikeyIndex) Lookup(key string, dst []uint64) []uint64 {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	ids := index.byKey[key]
-	if len(ids) == 0 {
+	posting, ok := index.byKey[key]
+	if !ok {
 		if dst != nil {
 			return dst[:0]
 		}
 		return nil
 	}
-	return append(dst[:0], ids...)
+	return posting.values(dst[:0])
 }
 
 // Contains reports whether id is indexed under key.
@@ -114,9 +114,21 @@ func (index *StringMultikeyIndex) Contains(key string, id uint64) bool {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	ids := index.byKey[key]
-	position := sort.Search(len(ids), func(position int) bool { return ids[position] >= id })
-	return position < len(ids) && ids[position] == id
+	posting, ok := index.byKey[key]
+	if !ok {
+		return false
+	}
+	if posting.first == id {
+		return true
+	}
+	if posting.rest == nil {
+		return false
+	}
+	if posting.rest.first == id {
+		return true
+	}
+	position := sort.Search(len(posting.rest.rest), func(position int) bool { return posting.rest.rest[position] >= id })
+	return position < len(posting.rest.rest) && posting.rest.rest[position] == id
 }
 
 // Len returns the number of items with at least one indexed key.
@@ -169,28 +181,26 @@ func stringMultikeyKeysEqual(left, right []string) bool {
 	return true
 }
 
-func insertStringMultikeyID(ids []uint64, id uint64) []uint64 {
-	position := sort.Search(len(ids), func(position int) bool { return ids[position] >= id })
-	if position < len(ids) && ids[position] == id {
-		return ids
-	}
-	ids = append(ids, 0)
-	copy(ids[position+1:], ids[position:])
-	ids[position] = id
-	return ids
-}
-
 func (index *StringMultikeyIndex) removePosting(key string, id uint64) {
-	ids := index.byKey[key]
-	position := sort.Search(len(ids), func(position int) bool { return ids[position] >= id })
-	if position >= len(ids) || ids[position] != id {
+	posting, ok := index.byKey[key]
+	if !ok {
 		return
 	}
-	copy(ids[position:], ids[position+1:])
-	ids = ids[:len(ids)-1]
-	if len(ids) == 0 {
+	next, removed, empty := posting.removeSorted(id)
+	if !removed {
+		return
+	}
+	if empty {
 		delete(index.byKey, key)
 		return
 	}
-	index.byKey[key] = ids
+	index.byKey[key] = next
+}
+
+func (index *StringMultikeyIndex) insertPosting(key string, id uint64) {
+	if posting, ok := index.byKey[key]; ok {
+		index.byKey[key] = posting.insertSorted(id)
+		return
+	}
+	index.byKey[key] = newU64PostingList(id)
 }

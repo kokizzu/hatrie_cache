@@ -154,6 +154,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired fixed-width Decimal128/Decimal256 RowBinary values: [SQL_DECIMAL_TYPES.md](SQL_DECIMAL_TYPES.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Compact small-entry ordered indexes: [TR052_ORDERED_INDEX_SMALL_VECTOR.md](TR052_ORDERED_INDEX_SMALL_VECTOR.md)
+- Compact secondary-index posting lists: [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)
 - Optional `WITH FILL` interpolation policies: [C218 interpolation](C218_WITH_FILL_INTERPOLATION.md)
