@@ -138,6 +138,9 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 	if len(tasks) == 0 {
 		return result, nil
 	}
+	if len(tasks) == 1 {
+		return scheduler.finishSingle(tasks[0], tasks[0].run(ctx))
+	}
 	sort.Slice(tasks, func(left, right int) bool {
 		return tasks[left].name < tasks[right].name
 	})
@@ -190,6 +193,28 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 		return result, errors.Join(failures...)
 	}
 	return result, nil
+}
+
+func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err error) (CompactionRun, error) {
+	result := CompactionRun{Scheduled: 1}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	scheduler.oldestRunning = time.Time{}
+	delete(scheduler.running, task.name)
+	if err == nil {
+		result.Completed = 1
+		scheduler.completed++
+		return result, nil
+	}
+	result.Failed = 1
+	scheduler.failed++
+	if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
+		if scheduler.oldestPending.IsZero() {
+			scheduler.oldestPending = scheduler.now()
+		}
+		scheduler.pending[task.name] = compactionPendingTask{run: task.run}
+	}
+	return result, errors.Join(fmt.Errorf("compaction task %q: %w", task.name, err))
 }
 
 func (scheduler *CompactionScheduler) takePending() []compactionTask {

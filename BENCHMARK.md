@@ -25271,3 +25271,39 @@ distributions and removes 10,000 singleton backing allocations in the sparse
 case. Repeated-key functional indexes can pay a small CPU and allocation cost;
 the public behavior and ordering remain unchanged. Full details and commands:
 [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md).
+
+## TR-054 Single-Task Compaction Scheduler Fast Path
+
+The scheduler now executes a drain directly when exactly one task is queued,
+skipping multi-task sorting, worker startup, the error array, and the wait
+group. The multi-task path remains unchanged in structure. Results are from
+Linux/amd64 on an AMD Ryzen 9 5950X; each row has three samples from
+`make benchmark-compaction-fastpath-c207`.
+
+| Workload | Before median | After median | Relative result | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 task | 1,083 ns | 278.7 ns | 3.89x faster | 184 | 40 | 7 | 2 |
+| 4 tasks | 2,586 ns | 2,596 ns | 1.00x, 0.4% slower | 616 | 616 | 12 | 12 |
+| 64 tasks | 19,178 ns | 19,028 ns | 1.01x faster | 3,400 | 3,400 | 12 | 12 |
+
+Raw before samples:
+
+```text
+tasks-1: 1083 1143 1041 ns/op; 184 B/op; 7 allocs/op
+tasks-4: 2635 2572 2586 ns/op; 616 B/op; 12 allocs/op
+tasks-64: 17978 19496 19178 ns/op; 3400 B/op; 12 allocs/op
+```
+
+Raw after samples:
+
+```text
+tasks-1: 283.1 270.2 278.7 ns/op; 40 B/op; 2 allocs/op
+tasks-4: 2633 2596 2588 ns/op; 616 B/op; 12 allocs/op
+tasks-64: 19028 19141 18562 ns/op; 3400 B/op; 12 allocs/op
+```
+
+The focused test verifies follow-up scheduling, failure requeue, and
+`errors.Is` behavior. Normal, race, and vet checks pass through
+`make verify-compaction-fastpath-c207`. See
+[TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
+for the implementation notes.

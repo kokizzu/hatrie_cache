@@ -14838,3 +14838,28 @@ commit-compact-postings-c204:
 .PHONY: push-compact-postings-c204
 push-compact-postings-c204:
 	bash ./scripts/push-compact-postings-c204.sh
+
+.PHONY: test-compaction-fastpath-c207 benchmark-compaction-fastpath-c207 format-compaction-fastpath-c207 verify-compaction-fastpath-c207 inspect-compaction-fastpath-diff-c207 stage-compaction-fastpath-c207 commit-compaction-fastpath-c207 push-compaction-fastpath-c207
+test-compaction-fastpath-c207:
+	bash ./scripts/test-compaction-fastpath-c207.sh
+
+benchmark-compaction-fastpath-c207:
+	bash ./scripts/benchmark-compaction-fastpath-c207.sh
+
+format-compaction-fastpath-c207:
+	bash ./scripts/format-compaction-fastpath-c207.sh
+
+verify-compaction-fastpath-c207:
+	bash ./scripts/verify-compaction-fastpath-c207.sh
+
+inspect-compaction-fastpath-diff-c207:
+	bash ./scripts/inspect-compaction-fastpath-diff-c207.sh
+
+stage-compaction-fastpath-c207:
+	bash ./scripts/stage-compaction-fastpath-c207.sh
+
+commit-compaction-fastpath-c207:
+	bash ./scripts/commit-compaction-fastpath-c207.sh
+
+push-compaction-fastpath-c207:
+	bash ./scripts/push-compaction-fastpath-c207.sh
