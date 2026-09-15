@@ -14992,3 +14992,26 @@ commit-connection-pool-c212:
 
 push-connection-pool-c212:
 	@bash ./scripts/push-connection-pool-c212.sh
+test-read-replica-policy-c213:
+	@bash ./scripts/test-read-replica-policy-c213.sh
+
+benchmark-read-replica-policy-c213:
+	@bash ./scripts/benchmark-read-replica-policy-c213.sh
+
+format-read-replica-policy-c213:
+	@bash ./scripts/format-read-replica-policy-c213.sh
+
+verify-read-replica-policy-c213:
+	@bash ./scripts/verify-read-replica-policy-c213.sh
+
+inspect-read-replica-diff-c213:
+	@bash ./scripts/inspect-read-replica-diff-c213.sh
+
+stage-read-replica-policy-c213:
+	@bash ./scripts/stage-read-replica-policy-c213.sh
+
+commit-read-replica-policy-c213:
+	@bash ./scripts/commit-read-replica-policy-c213.sh
+
+push-read-replica-policy-c213:
+	@bash ./scripts/push-read-replica-policy-c213.sh

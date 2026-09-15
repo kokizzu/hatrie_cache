@@ -769,6 +769,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T095 Net.box-like binary client path.
 - [x] T095a Net.box-style pooled peer connections. Importable generic `hatReplication.ConnectionPool` provides bounded open connections, context-aware acquisition, idle reuse, explicit discard, close wake-up, and point-in-time stats while leaving dial/authentication/backoff policy with the caller. See [CONNECTION_POOL.md](CONNECTION_POOL.md) and [BENCHMARK.md](BENCHMARK.md#connection-pool-reuse).
 - [x] T095b Idle connection acquire fast path. The pool's nonblocking idle-channel receive no longer takes a redundant mutex; close checks and capacity accounting remain unchanged. The measured median is 1.20x faster with unchanged zero-allocation behavior. See [CONNECTION_POOL_IDLE_FASTPATH.md](CONNECTION_POOL_IDLE_FASTPATH.md).
+- [x] T095c Read replica selection fast paths. A validated singleton candidate returns directly, and multi-candidate preferred-region selection caches the current winner's locality rank; consistency, locality, and deterministic tie-breaking remain unchanged. The measured workloads are 1.17x-1.63x faster with zero allocations. See [READ_REPLICA_SELECTION_FASTPATH.md](READ_REPLICA_SELECTION_FASTPATH.md).
 - [x] T096 IProto-like compact protocol path.
 - [x] T097 Prepared calls and prepared SQL statements.
 - [x] T098 Batched requests.

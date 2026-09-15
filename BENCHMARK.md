@@ -17013,6 +17013,38 @@ Raw idle samples were `46.19, 50.45, 49.28, 51.37, 48.46 ns/op` before and
 `42.76, 39.50, 41.55, 41.09, 40.55 ns/op` after. The optimization changes no
 public pool behavior and has no measured memory or allocation cost.
 
+<a id="read-replica-selection-fast-path"></a>
+## Read Replica Selection Fast Path
+
+Command: `make benchmark-read-replica-policy-c213`.
+
+This compares the original full scan with C213's validated singleton path and
+cached preferred-region rank. Both runs use the same deterministic candidates,
+five samples, and `-benchmem` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One candidate | 27.43 ns/op | 18.47 ns/op | **1.49x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+| Four candidates | 74.90 ns/op | 64.19 ns/op | **1.17x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+| 1,024 ordinary candidates | 12,873 ns/op | 10,807 ns/op | **1.19x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+| 1,024 preferred-region candidates | 32,584 ns/op | 20,022 ns/op | **1.63x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+
+Raw samples, in order, were:
+
+```text
+one before:              27.61, 27.27, 27.43, 26.12, 28.24 ns/op
+one after:               21.26, 20.68, 18.47, 17.82, 17.82 ns/op
+four before:             76.44, 80.55, 73.16, 74.90, 72.59 ns/op
+four after:              63.18, 62.57, 64.19, 64.30, 64.70 ns/op
+1024 ordinary before:    13739, 12926, 12873, 13181, 12793 ns/op
+1024 ordinary after:     10347, 10807, 11445, 10940, 10570 ns/op
+1024 preferred before:   32584, 33149, 34430, 31212, 29956 ns/op
+1024 preferred after:    19287, 19900, 20022, 21478, 20101 ns/op
+```
+
+The optimization has no measured memory or allocation cost and changes no
+public consistency or selection behavior.
+
 Raw samples:
 
 ```text

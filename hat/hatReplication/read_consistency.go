@@ -47,8 +47,33 @@ func SelectReadReplicaWithConsistency(candidates []ReadReplicaProgress, policy R
 	default:
 		return ReadReplicaProgress{}, fmt.Errorf("%w: %q", ErrReadConsistencyInvalid, level)
 	}
+	if len(candidates) == 1 {
+		candidate := candidates[0]
+		node := strings.TrimSpace(candidate.Node)
+		if node == "" {
+			return ReadReplicaProgress{}, ErrReadReplicaNameRequired
+		}
+		candidate.Node = node
+		lag := uint64(0)
+		if policy.ObservedFrontier > candidate.Frontier {
+			lag = policy.ObservedFrontier - candidate.Frontier
+		}
+		switch level {
+		case ReadConsistencyBoundedStaleness:
+			if lag > policy.MaxLag {
+				return ReadReplicaProgress{}, noEligibleReadReplicaError(policy, level)
+			}
+		case ReadConsistencyReadAfterWrite:
+			if candidate.Frontier < policy.RequiredFrontier || lag > policy.MaxLag {
+				return ReadReplicaProgress{}, noEligibleReadReplicaError(policy, level)
+			}
+		}
+		return candidate, nil
+	}
 	var selected ReadReplicaProgress
 	found := false
+	preferredRegionCount := len(policy.PreferredRegions)
+	selectedRegionRank := preferredRegionCount
 	for _, candidate := range candidates {
 		node := strings.TrimSpace(candidate.Node)
 		if node == "" {
@@ -69,13 +94,34 @@ func SelectReadReplicaWithConsistency(candidates []ReadReplicaProgress, policy R
 				continue
 			}
 		}
-		if !found || readReplicaPreferred(candidate, selected, policy) {
+		candidateRegionRank := preferredRegionCount
+		if preferredRegionCount > 0 {
+			candidateRegionRank = readReplicaRegionRank(candidate.Region, policy.PreferredRegions)
+		}
+		if !found {
 			selected = candidate
+			selectedRegionRank = candidateRegionRank
 			found = true
+			continue
+		}
+		if preferredRegionCount > 0 && candidateRegionRank != selectedRegionRank {
+			if candidateRegionRank < selectedRegionRank {
+				selected = candidate
+				selectedRegionRank = candidateRegionRank
+			}
+			continue
+		}
+		if readReplicaPreferredByFreshness(candidate, selected) {
+			selected = candidate
+			selectedRegionRank = candidateRegionRank
 		}
 	}
 	if !found {
-		return ReadReplicaProgress{}, fmt.Errorf("%w: consistency=%s required_frontier=%d observed_frontier=%d max_lag=%d", ErrNoEligibleReadReplica, level, policy.RequiredFrontier, policy.ObservedFrontier, policy.MaxLag)
+		return ReadReplicaProgress{}, noEligibleReadReplicaError(policy, level)
 	}
 	return selected, nil
+}
+
+func noEligibleReadReplicaError(policy ReadReplicaPolicy, level ReadConsistencyLevel) error {
+	return fmt.Errorf("%w: consistency=%s required_frontier=%d observed_frontier=%d max_lag=%d", ErrNoEligibleReadReplica, level, policy.RequiredFrontier, policy.ObservedFrontier, policy.MaxLag)
 }

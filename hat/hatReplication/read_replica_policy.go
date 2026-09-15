@@ -37,17 +37,6 @@ func SelectReadReplica(candidates []ReadReplicaProgress, policy ReadReplicaPolic
 	return SelectReadReplicaWithConsistency(candidates, policy, ReadConsistencyReadAfterWrite)
 }
 
-func readReplicaPreferred(candidate, selected ReadReplicaProgress, policy ReadReplicaPolicy) bool {
-	if len(policy.PreferredRegions) > 0 {
-		candidateRegion := readReplicaRegionRank(candidate.Region, policy.PreferredRegions)
-		selectedRegion := readReplicaRegionRank(selected.Region, policy.PreferredRegions)
-		if candidateRegion != selectedRegion {
-			return candidateRegion < selectedRegion
-		}
-	}
-	return readReplicaPreferredByFreshness(candidate, selected)
-}
-
 func readReplicaPreferredByFreshness(candidate, selected ReadReplicaProgress) bool {
 	if candidate.Frontier != selected.Frontier {
 		return candidate.Frontier > selected.Frontier
