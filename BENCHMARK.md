@@ -25130,6 +25130,39 @@ BenchmarkPerformCompactPeerHandshake: 296.3, 319.1, 300.0, 311.2, 306.7 ns/op; 2
 BenchmarkPerformCompactPeerHandshakeWithCompressionFeature: 297.3, 297.3, 292.2, 296.2, 292.1 ns/op; 240 B/op; 7 allocs/op
 ```
 
+## TR-043a Prepared Compact Peer Calls
+
+`CompactRequestTemplate` was already available as a standalone encoder. The
+session integration adds `CompactPeerSession.CallTemplate`, reuses its plain
+request buffer, and keeps the existing compression writer as an exact
+fallback. Large plain request buffers are released above 64 KiB.
+
+Five-sample local session benchmark on Linux/amd64 with `net.Pipe`, an echo
+handler, and one request per round trip:
+
+| Path | Median CPU | Memory/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Call` | 6.053 us/op | 512 B | 9 | 1.00x |
+| `CallTemplate` | 5.912 us/op | 480 B | 8 | 1.02x faster; 6.25% lower B/op; 1 fewer alloc |
+
+The CPU change is within normal `net.Pipe` scheduling noise, but the memory
+and allocation reduction is consistent with the reused encoder buffer. The
+standalone encoder path measured `62.54 ns/op`, `40 B/op`, and `2 allocs/op`
+versus `24.83 ns/op`, `0 B/op`, and `0 allocs/op` with a reused template
+buffer in the baseline run. Compression-enabled sessions retain the TR-044
+writer path and its documented CPU/bandwidth tradeoff.
+
+Command: `make benchmark-peer-template-c203`
+
+Raw session samples:
+
+```text
+BenchmarkCompactRequestTemplateMarshal/existing: 62.48, 63.40, 63.36, 62.54, 61.16 ns/op; 40 B/op; 2 allocs/op
+BenchmarkCompactRequestTemplateMarshal/prepared_reused: 24.83, 25.20, 24.10, 25.17, 24.07 ns/op; 0 B/op; 0 allocs/op
+BenchmarkCompactPeerSessionCall: 6156, 5932, 6208, 6053, 5930 ns/op; 512 B/op; 9 allocs/op
+BenchmarkCompactPeerSessionCallTemplate: 5971, 6146, 5912, 5841, 5495 ns/op; 480 B/op; 8 allocs/op
+```
+
 ## CH-051 Low-Cardinality String Columns
 
 This opt-in ClickHouse-style dictionary column sorts its dictionary and stores

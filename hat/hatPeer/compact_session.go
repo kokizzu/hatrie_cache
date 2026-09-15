@@ -32,8 +32,9 @@ var (
 const (
 	// DefaultCompactPeerMaxInFlight bounds both outgoing pending calls and
 	// concurrently executing inbound handlers.
-	DefaultCompactPeerMaxInFlight = DefaultCompactMultiplexerMaxPending
-	maxCompactPeerMaxInFlight     = 1 << 20
+	DefaultCompactPeerMaxInFlight          = DefaultCompactMultiplexerMaxPending
+	maxCompactPeerMaxInFlight              = 1 << 20
+	compactPeerTemplateRetainedBufferBytes = 64 << 10
 )
 
 var compactPeerCancellationCommand = []byte("_hat.peer.cancel.v1")
@@ -90,6 +91,7 @@ type CompactPeerSession struct {
 	readDone     chan struct{}
 	closeOnce    sync.Once
 	writeMu      sync.Mutex
+	writeBuffer  []byte
 	stateMu      sync.Mutex
 	cancellation *compactPeerCancellationState
 	closed       bool
@@ -174,6 +176,51 @@ func (session *CompactPeerSession) Call(ctx context.Context, command, payload []
 		return CompactFrame{}, err
 	}
 	if err := session.write(request); err != nil {
+		session.fail(err)
+		return CompactFrame{}, err
+	}
+	response, err := pending.Wait(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			session.multiplex.Cancel(request.RequestID)
+			session.sendRequestCancellation(request.RequestID)
+			return CompactFrame{}, ctx.Err()
+		}
+		return CompactFrame{}, err
+	}
+	if response.Kind == CompactError {
+		return CompactFrame{}, fmt.Errorf("%w: %s", ErrCompactPeerRemote, response.Payload)
+	}
+	return response, nil
+}
+
+// CallTemplate sends a request using a prepared command template. For plain
+// sessions it reuses a bounded per-session encoding buffer; sessions with
+// compression configured use the regular protocol path so compression
+// thresholds and fallback behavior remain unchanged.
+func (session *CompactPeerSession) CallTemplate(ctx context.Context, template CompactRequestTemplate, payload []byte) (CompactFrame, error) {
+	if session == nil {
+		return CompactFrame{}, ErrCompactPeerClosed
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return CompactFrame{}, err
+	}
+	if err := session.Err(); err != nil {
+		return CompactFrame{}, err
+	}
+	request, pending, err := session.multiplex.RequestTemplate(template, payload)
+	if err != nil {
+		return CompactFrame{}, err
+	}
+	if session.protocol.compressPayloadsAbove > 0 {
+		err = session.write(request)
+	} else {
+		err = session.writeTemplate(template, request.RequestID, payload)
+	}
+	if err != nil {
 		session.fail(err)
 		return CompactFrame{}, err
 	}
@@ -358,6 +405,27 @@ func (session *CompactPeerSession) write(frame CompactFrame) error {
 		return err
 	}
 	return session.protocol.Write(session.conn, frame)
+}
+
+func (session *CompactPeerSession) writeTemplate(template CompactRequestTemplate, requestID uint64, payload []byte) error {
+	session.writeMu.Lock()
+	defer session.writeMu.Unlock()
+	if err := session.Err(); err != nil {
+		return err
+	}
+	encoded, err := template.MarshalInto(session.protocol, requestID, payload, session.writeBuffer[:0])
+	if err != nil {
+		return err
+	}
+	if err := writeCompactPeerBytes(session.conn, encoded); err != nil {
+		return err
+	}
+	if len(encoded) <= compactPeerTemplateRetainedBufferBytes {
+		session.writeBuffer = encoded[:0]
+	} else {
+		session.writeBuffer = nil
+	}
+	return nil
 }
 
 func (session *CompactPeerSession) watchContext() {

@@ -25,6 +25,22 @@ defer server.Close()
 response, err := server.Call(ctx, []byte("GET"), []byte("key"))
 ```
 
+For a hot command, prepare its immutable command bytes once and use
+`CallTemplate`:
+
+```go
+get, err := hatPeer.NewCompactRequestTemplate([]byte("GET"))
+if err != nil {
+	return err
+}
+response, err := server.CallTemplate(ctx, get, []byte("key"))
+```
+
+Plain sessions reuse a bounded per-session request buffer. Sessions with
+compression configured use the existing protocol writer so threshold-based
+gzip behavior is unchanged. Buffers larger than 64 KiB are released after the
+write instead of being retained by the session.
+
 The constructor starts the reader loop immediately. `Handler` is optional for
 a client-only session. A handler response is normalized to the request ID and
 `CompactResponse` kind. Returning an error sends a bounded `CompactError`
@@ -66,7 +82,8 @@ single request per round trip, and no filesystem or network latency.
 | --- | ---: | ---: | ---: |
 | Compact marshal baseline | 40.3-41.0 ns/op | 80 B/op | 1/op |
 | Compact read baseline | 100.7-101.7 ns/op | 144 B/op | 3/op |
-| Compact peer session call | 5.39-5.49 us/op | 496-497 B/op | 9/op |
+| Compact peer session call | 5.93-6.21 us/op | 512 B/op | 9/op |
+| Prepared compact peer session call | 5.50-6.15 us/op | 480 B/op | 8/op |
 | JSON marshal baseline | 298.7-301.3 ns/op | 208 B/op | 2/op |
 | JSON unmarshal baseline | 1.394-1.409 us/op | 352 B/op | 7/op |
 

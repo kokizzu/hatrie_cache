@@ -1,6 +1,7 @@
 package hatPeer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -202,6 +203,91 @@ func TestCompactPeerSessionBoundsInboundHandlers(t *testing.T) {
 	}
 	_ = client.Close()
 	_ = server.Close()
+}
+
+func TestCompactPeerSessionCallTemplate(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	server, err := NewCompactPeerSession(serverConn, CompactPeerSessionOptions{
+		Handler: func(_ context.Context, request CompactFrame) (CompactFrame, error) {
+			return CompactFrame{Payload: append([]byte(nil), request.Payload...)}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewCompactPeerSession(server) error = %v", err)
+	}
+	client, err := NewCompactPeerSession(clientConn, CompactPeerSessionOptions{})
+	if err != nil {
+		_ = server.Close()
+		t.Fatalf("NewCompactPeerSession(client) error = %v", err)
+	}
+	template, err := NewCompactRequestTemplate([]byte("ECHO"))
+	if err != nil {
+		_ = client.Close()
+		_ = server.Close()
+		t.Fatalf("NewCompactRequestTemplate() error = %v", err)
+	}
+	response, err := client.CallTemplate(context.Background(), template, []byte("payload"))
+	if err != nil {
+		t.Fatalf("CallTemplate() error = %v", err)
+	}
+	if response.Kind != CompactResponse || string(response.Command) != "ECHO" || string(response.Payload) != "payload" {
+		t.Fatalf("CallTemplate() response = %#v", response)
+	}
+	largePayload := bytes.Repeat([]byte("large-payload"), 8192)
+	if _, err := client.CallTemplate(context.Background(), template, largePayload); err != nil {
+		t.Fatalf("CallTemplate(large payload) error = %v", err)
+	}
+	if client.writeBuffer != nil {
+		t.Fatalf("large request retained %d-byte write buffer, want released", cap(client.writeBuffer))
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("client.Close() error = %v", err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatalf("server.Close() error = %v", err)
+	}
+}
+
+func TestCompactPeerSessionCallTemplatePreservesCompression(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	protocolOptions := CompactProtocolOptions{CompressPayloadsAbove: 1}
+	server, err := NewCompactPeerSession(serverConn, CompactPeerSessionOptions{
+		Protocol: protocolOptions,
+		Handler: func(_ context.Context, request CompactFrame) (CompactFrame, error) {
+			return CompactFrame{Payload: append([]byte(nil), request.Payload...)}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewCompactPeerSession(server) error = %v", err)
+	}
+	client, err := NewCompactPeerSession(clientConn, CompactPeerSessionOptions{Protocol: protocolOptions})
+	if err != nil {
+		_ = server.Close()
+		t.Fatalf("NewCompactPeerSession(client) error = %v", err)
+	}
+	template, err := NewCompactRequestTemplate([]byte("ECHO"))
+	if err != nil {
+		_ = client.Close()
+		_ = server.Close()
+		t.Fatalf("NewCompactRequestTemplate() error = %v", err)
+	}
+	payload := bytes.Repeat([]byte("payload"), 256)
+	response, err := client.CallTemplate(context.Background(), template, payload)
+	if err != nil {
+		t.Fatalf("CallTemplate() error = %v", err)
+	}
+	if response.Flags&CompactFrameFlagPayloadCompressed == 0 {
+		t.Fatalf("response flags = %#x, want compressed", response.Flags)
+	}
+	if !bytes.Equal(response.Payload, payload) {
+		t.Fatal("compressed template response payload changed")
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("client.Close() error = %v", err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatalf("server.Close() error = %v", err)
+	}
 }
 
 type stubConn struct{}

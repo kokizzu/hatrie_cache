@@ -4074,6 +4074,7 @@ lookup and preparation tradeoff is documented in
 [TR019_TUPLE_FIELD_OFFSETS.md](TR019_TUPLE_FIELD_OFFSETS.md).
 - Opt-in ClickHouse-style low-cardinality string columns with packed codes for grouping/order and compact transfer: [CH051_LOW_CARDINALITY.md](CH051_LOW_CARDINALITY.md)
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
+- Prepared compact peer calls: [TR043A_COMPACT_PEER_PREPARED_CALL.md](TR043A_COMPACT_PEER_PREPARED_CALL.md)
 - Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
 
