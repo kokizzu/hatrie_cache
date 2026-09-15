@@ -25987,3 +25987,50 @@ candidate-map cost and is not a universal replacement for tiny direct batches.
 For larger partitions, merge work is bounded by the two summaries rather than
 the event count. The state is approximate by design, so callers should use the
 existing exact replay path when exact top-K counts are required.
+
+<a id="ch-063-compact-mergeable-tdigest-aggregate-state"></a>
+### CH-063 Compact Mergeable TDigest Aggregate State
+
+`hatDataStructure.TDigest` already supports bounded approximate quantiles and
+in-memory merge. It now also supports `MarshalAggregateState`,
+`NewTDigestFromAggregateState`, and `MergeAggregateState`: a fixed-width
+little-endian centroid payload inside the existing HAG1 envelope. Decode checks
+the aggregate kind/version, payload length, centroid count, compression,
+finite sorted means, positive counts, and total-count consistency before
+publishing a state.
+
+Results are from Linux/amd64 on an AMD Ryzen 9 5950X. Each row is the median of
+five samples from `make benchmark-tdigest-aggregate-state-c223`. The JSON
+baseline is `encoding/json` over the existing `TDigestSnapshot`, followed by
+the same snapshot validation and reconstruction path.
+
+| Workload | Compact median | JSON median | Relative CPU | Compact wire | JSON wire | Compact B/op | JSON B/op | Compact allocs/op | JSON allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4,096 values, marshal | 4,448 ns | 41,989 ns | 9.44x faster | 4,980 | 11,381 | 10,752 | 17,766 | 2 | 3 |
+| 4,096 values, unmarshal | 3,724 ns | 176,194 ns | 47.31x faster | 4,980 | 11,381 | 16,136 | 22,088 | 4 | 19 |
+| 16,384 values, marshal | 10,852 ns | 106,264 ns | 9.79x faster | 12,916 | 29,975 | 27,136 | 46,611 | 2 | 3 |
+| 16,384 values, unmarshal | 8,198 ns | 449,896 ns | 54.88x faster | 12,916 | 29,975 | 40,712 | 43,848 | 4 | 20 |
+
+The fixed-width state is 2.29x smaller at 4,096 values and 2.32x smaller at
+16,384 values, or about 56% fewer wire bytes. Encode allocation count drops
+from three to two; decode drops from 19/20 to four. Heap bytes are 1.65x and
+1.72x lower for encode, and 1.37x and 1.08x lower for decode. The new API is
+opt-in, so existing JSON snapshots and command behavior are unchanged.
+
+Raw samples:
+
+```text
+4096 marshal compact: 4447 4448 4717 4546 4431 ns/op; 4980 wire bytes; 10752 B/op; 2 allocs/op
+4096 marshal JSON: 42045 41506 41989 42539 41530 ns/op; 11381 wire bytes; 17759-17774 B/op; 3 allocs/op
+4096 unmarshal compact: 3718 3724 3849 3687 3781 ns/op; 4980 wire bytes; 16136 B/op; 4 allocs/op
+4096 unmarshal JSON: 171927 176264 176194 170902 182517 ns/op; 11381 wire bytes; 22088 B/op; 19 allocs/op
+16384 marshal compact: 10431 10646 10852 10883 10861 ns/op; 12916 wire bytes; 27136 B/op; 2 allocs/op
+16384 marshal JSON: 104665 106264 109323 108083 102635 ns/op; 29975 wire bytes; 46587-46646 B/op; 3 allocs/op
+16384 unmarshal compact: 8164 8258 8198 8295 8196 ns/op; 12916 wire bytes; 40712 B/op; 4 allocs/op
+16384 unmarshal JSON: 454115 447790 458945 448911 449896 ns/op; 29975 wire bytes; 43848 B/op; 20 allocs/op
+```
+
+An initial 65,536-value probe was rejected because the existing TDigest
+builder can leave more centroids than its configured validation bound. That
+is recorded as a separate compaction-bound fix candidate; this codec does not
+silently normalize or discard centroids.

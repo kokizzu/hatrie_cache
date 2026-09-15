@@ -15360,3 +15360,35 @@ commit-topk-merge-c222:
 
 push-topk-merge-c222:
 	bash ./scripts/push-topk-merge-c222.sh
+
+.PHONY: test-tdigest-aggregate-state-c223 format-tdigest-aggregate-state-c223 test-tdigest-aggregate-state-package-c223 race-tdigest-aggregate-state-c223 vet-tdigest-aggregate-state-c223 benchmark-tdigest-aggregate-state-c223 check-tdigest-aggregate-state-c223 stage-tdigest-aggregate-state-c223 commit-tdigest-aggregate-state-c223 push-tdigest-aggregate-state-c223
+
+test-tdigest-aggregate-state-c223:
+	bash ./scripts/run-tdigest-aggregate-state-c223.sh test
+
+format-tdigest-aggregate-state-c223:
+	bash ./scripts/format-tdigest-aggregate-state-c223.sh
+
+test-tdigest-aggregate-state-package-c223:
+	bash ./scripts/run-tdigest-aggregate-state-c223.sh package
+
+race-tdigest-aggregate-state-c223:
+	bash ./scripts/run-tdigest-aggregate-state-c223.sh race
+
+vet-tdigest-aggregate-state-c223:
+	bash ./scripts/run-tdigest-aggregate-state-c223.sh vet
+
+benchmark-tdigest-aggregate-state-c223:
+	bash ./scripts/run-tdigest-aggregate-state-c223.sh benchmark
+
+check-tdigest-aggregate-state-c223:
+	bash ./scripts/check-tdigest-aggregate-state-c223.sh
+
+stage-tdigest-aggregate-state-c223:
+	bash ./scripts/stage-tdigest-aggregate-state-c223.sh
+
+commit-tdigest-aggregate-state-c223:
+	bash ./scripts/commit-tdigest-aggregate-state-c223.sh
+
+push-tdigest-aggregate-state-c223:
+	bash ./scripts/push-tdigest-aggregate-state-c223.sh

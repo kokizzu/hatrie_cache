@@ -25,6 +25,8 @@ const (
 	AggregateStateKindCountMinSketch = "count_min_sketch"
 	// AggregateStateKindTopK identifies an approximate top-K payload.
 	AggregateStateKindTopK = "top_k"
+	// AggregateStateKindTDigest identifies an approximate quantile payload.
+	AggregateStateKindTDigest = "tdigest"
 )
 
 var (
