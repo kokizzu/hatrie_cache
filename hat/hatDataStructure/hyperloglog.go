@@ -24,6 +24,15 @@ var hyperLogLogRankContributions = func() [65]float64 {
 	return values
 }()
 
+// ErrHyperLogLogNil indicates that Merge was called on a nil receiver.
+var ErrHyperLogLogNil = errors.New("hatriecache: hyperloglog receiver is nil")
+
+// ErrHyperLogLogPrecisionMismatch indicates that two states use different precisions.
+var ErrHyperLogLogPrecisionMismatch = errors.New("hatriecache: hyperloglog precision mismatch")
+
+// ErrHyperLogLogStateInvalid indicates that a state has inconsistent registers or metadata.
+var ErrHyperLogLogStateInvalid = errors.New("hatriecache: hyperloglog state is invalid")
+
 type HyperLogLogInfo struct {
 	Precision        uint8  `json:"precision"`
 	RegisterCount    uint64 `json:"register_count"`
@@ -126,6 +135,88 @@ func NewHyperLogLogFromSnapshot(snapshot HyperLogLogSnapshot) (HyperLogLog, erro
 }
 func newHyperLogLogDataFromSnapshot(snapshot HyperLogLogSnapshot) (hyperLogLogData, error) {
 	return NewHyperLogLogFromSnapshot(snapshot)
+}
+
+// Merge combines another HyperLogLog state with hll. Both configured states
+// must use the same precision. A zero-value receiver adopts the source state,
+// while an empty source is a no-op. The operation does not replay raw values.
+func (hll *HyperLogLog) Merge(other HyperLogLog) error {
+	if hll == nil {
+		return ErrHyperLogLogNil
+	}
+	if !hll.validMergeState() || !other.validMergeState() {
+		return ErrHyperLogLogStateInvalid
+	}
+	if hll.precision == 0 {
+		if other.precision == 0 {
+			return nil
+		}
+		hll.precision = other.precision
+		hll.observations = other.observations
+		if len(other.registers) == 0 {
+			return nil
+		}
+		hll.registers = append([]uint8(nil), other.registers...)
+		hll.rebuildSummary()
+		return nil
+	}
+	if other.precision == 0 {
+		return nil
+	}
+	if hll.precision != other.precision {
+		return ErrHyperLogLogPrecisionMismatch
+	}
+
+	hll.observations = saturatingAddUint64HLL(hll.observations, other.observations)
+	if len(other.registers) == 0 {
+		return nil
+	}
+	if len(hll.registers) == 0 {
+		hll.registers = append([]uint8(nil), other.registers...)
+		hll.rebuildSummary()
+		return nil
+	}
+	if !hll.summaryReady() {
+		hll.rebuildSummary()
+	}
+	for index, rank := range other.registers {
+		if rank <= hll.registers[index] {
+			continue
+		}
+		oldRank := hll.registers[index]
+		hll.registers[index] = rank
+		hll.harmonicSum += hyperLogLogRankContribution(rank) - hyperLogLogRankContribution(oldRank)
+		if oldRank == 0 && hll.zeroRegisters > 0 {
+			hll.zeroRegisters--
+		}
+	}
+	return nil
+}
+
+func (hll HyperLogLog) validMergeState() bool {
+	if hll.precision == 0 {
+		return len(hll.registers) == 0 && hll.observations == 0 && hll.harmonicSum == 0 && hll.zeroRegisters == 0
+	}
+	if ValidateHyperLogLogPrecision(hll.precision) != nil {
+		return false
+	}
+	if len(hll.registers) == 0 {
+		return hll.observations == 0 && hll.harmonicSum == 0 && hll.zeroRegisters == 0
+	}
+	if len(hll.registers) != hyperLogLogRegisterCount(hll.precision) {
+		return false
+	}
+	maxRank := hyperLogLogMaxRank(hll.precision)
+	nonZero := uint64(0)
+	for _, rank := range hll.registers {
+		if rank > maxRank {
+			return false
+		}
+		if rank != 0 {
+			nonZero++
+		}
+	}
+	return nonZero <= hll.observations && (hll.observations == 0 || nonZero != 0)
 }
 
 // AddBytes observes byte values and returns how many changed a register.

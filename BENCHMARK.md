@@ -25824,3 +25824,37 @@ The focused test checks lookup boundaries and missing values; the full
 package, race, and vet verification runs through
 `make verify-roaring-lookup-fastpath-c211`. Full notes:
 [TR058_ROARING_BITMAP_LOOKUP_FASTPATH.md](TR058_ROARING_BITMAP_LOOKUP_FASTPATH.md).
+
+## CH-059 Mergeable HyperLogLog Aggregate State
+
+`HyperLogLog.Merge` combines same-precision partial states with per-register
+maxima and a saturated observation count. It supports zero-value receiver
+adoption and rejects invalid or mismatched states without mutation. This is a
+bounded ClickHouse-style aggregate-state primitive for partitioned or
+parallel workers, and it can transfer a Materialize-style partial state
+without replaying every input value. Existing SQL approximate aggregate
+syntax is unchanged; SQL aggregate `State`/`Merge` syntax and quantile-state
+merging remain separate work.
+
+The benchmark uses one precision-14 state built from 4,096 values on
+Linux/amd64, an AMD Ryzen 9 5950X. It compares replaying the raw values with
+merging the precomputed state. Each row is the median of three samples from
+`make benchmark-hyperloglog-merge-c223`.
+
+| Path | Median ns/op | Payload bytes/op | Relative CPU | B/op | Allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Replay raw values | 108,277 | 98,304 raw bytes | 1.00x baseline | 16,384 | 1 |
+| Merge fixed state | 26,119 | 16,384 registers / 21,848 base64 snapshot bytes | 4.14x faster | 16,384 | 1 |
+
+Raw samples:
+
+```text
+replay_raw_values: 114749 106260 108277 ns/op; 98304 raw-bytes/op; 16384 B/op; 1 alloc/op
+merge_fixed_state: 26119 25138 26789 ns/op; 16384 register-bytes/op; 21848 snapshot-bytes/op; 16384 B/op; 1 alloc/op
+```
+
+The snapshot payload is 4.50x smaller, or 77.8% fewer bytes, than replaying
+the raw fixture. The measured heap allocation is equal because both benchmark
+paths construct a fresh target register array; raw values and the source
+state are prepared outside the timed loop. `Merge` itself performs no new
+allocation when the receiver already owns a compatible register array.

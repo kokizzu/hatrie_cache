@@ -15220,3 +15220,31 @@ commit-ordered-append-c222:
 
 push-ordered-append-c222:
 	@bash ./scripts/push-ordered-append-c222.sh
+
+.PHONY: test-hyperloglog-merge-c223
+test-hyperloglog-merge-c223:
+	@bash ./scripts/test-hyperloglog-merge-c223.sh
+
+.PHONY: format-hyperloglog-merge-c223
+format-hyperloglog-merge-c223:
+	@bash ./scripts/format-hyperloglog-merge-c223.sh
+
+.PHONY: benchmark-hyperloglog-merge-c223
+benchmark-hyperloglog-merge-c223:
+	@bash ./scripts/benchmark-hyperloglog-merge-c223.sh
+
+.PHONY: verify-hyperloglog-merge-c223
+verify-hyperloglog-merge-c223:
+	@bash ./scripts/verify-hyperloglog-merge-c223.sh
+
+.PHONY: stage-hyperloglog-merge-c223
+stage-hyperloglog-merge-c223:
+	@bash ./scripts/stage-hyperloglog-merge-c223.sh
+
+.PHONY: commit-hyperloglog-merge-c223
+commit-hyperloglog-merge-c223:
+	@bash ./scripts/commit-hyperloglog-merge-c223.sh
+
+.PHONY: push-hyperloglog-merge-c223
+push-hyperloglog-merge-c223:
+	@bash ./scripts/push-hyperloglog-merge-c223.sh
