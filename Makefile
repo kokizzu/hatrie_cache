@@ -15288,3 +15288,43 @@ commit-countmin-merge-c223:
 .PHONY: push-countmin-merge-c223
 push-countmin-merge-c223:
 	@bash ./scripts/push-countmin-merge-c223.sh
+
+.PHONY: test-aggregate-envelope-c223
+test-aggregate-envelope-c223:
+	@bash ./scripts/run-aggregate-envelope-c223.sh test
+
+.PHONY: format-aggregate-envelope-c223
+format-aggregate-envelope-c223:
+	@bash ./scripts/format-aggregate-envelope-c223.sh
+
+.PHONY: test-aggregate-envelope-package-c223
+test-aggregate-envelope-package-c223:
+	@bash ./scripts/run-aggregate-envelope-c223.sh package
+
+.PHONY: race-aggregate-envelope-c223
+race-aggregate-envelope-c223:
+	@bash ./scripts/run-aggregate-envelope-c223.sh race
+
+.PHONY: vet-aggregate-envelope-c223
+vet-aggregate-envelope-c223:
+	@bash ./scripts/run-aggregate-envelope-c223.sh vet
+
+.PHONY: benchmark-aggregate-envelope-c223
+benchmark-aggregate-envelope-c223:
+	@bash ./scripts/run-aggregate-envelope-c223.sh benchmark
+
+.PHONY: check-aggregate-envelope-c223
+check-aggregate-envelope-c223:
+	@bash ./scripts/check-aggregate-envelope-c223.sh
+
+.PHONY: stage-aggregate-envelope-c223
+stage-aggregate-envelope-c223:
+	@bash ./scripts/stage-aggregate-envelope-c223.sh
+
+.PHONY: commit-aggregate-envelope-c223
+commit-aggregate-envelope-c223:
+	@bash ./scripts/commit-aggregate-envelope-c223.sh
+
+.PHONY: push-aggregate-envelope-c223
+push-aggregate-envelope-c223:
+	@bash ./scripts/push-aggregate-envelope-c223.sh

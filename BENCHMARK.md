@@ -25900,3 +25900,51 @@ partition/worker-transfer optimization for sufficiently large batches, not a
 replacement for direct replay of tiny batches. Both timed paths allocate one
 32 KiB target counter matrix; a receiver that already owns a compatible matrix
 performs the merge loop without a new allocation.
+
+<a id="ch-061-versioned-partial-aggregate-envelope"></a>
+### CH-061 Versioned Partial Aggregate Envelope
+
+`hatDataStructure.AggregateStateEnvelope` adds a bounded, checksummed HAG1
+frame with explicit aggregate kind and state version. HyperLogLog and Count-Min
+Sketch use compact payloads containing shape metadata plus raw register/counter
+bytes, so workers can transfer partial state without replaying input values or
+paying JSON/base64 decoding costs. The API is importable and opt-in; existing
+commands, journals, snapshots, persistence, and wire defaults are unchanged.
+
+Results are from Linux/amd64 on an AMD Ryzen 9 5950X. Each row is the median of
+five samples from `make benchmark-aggregate-envelope-c223`; the JSON rows use
+the existing goccy JSON snapshot path as the comparison baseline.
+
+| Workload | Compact median | JSON median | Relative CPU | Compact wire | JSON wire | Compact B/op | JSON B/op | Compact allocs/op | JSON allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| HyperLogLog marshal | 12,837 ns | 9,973 ns | 0.78x; compact 1.29x slower | 16,413 | 21,900 | 18,432 | 24,667 | 1 | 2 |
+| HyperLogLog unmarshal | 27,466 ns | 76,896 ns | 2.80x faster | 16,413 | 21,900 | 34,832 | 77,999 | 3 | 5 |
+| Count-Min marshal | 18,849 ns | 21,408 ns | 1.14x faster | 32,804 | 43,750 | 40,960 | 49,390 | 1 | 2 |
+| Count-Min unmarshal | 27,750 ns | 131,760 ns | 4.75x faster | 32,804 | 43,750 | 73,744 | 164,042 | 3 | 5 |
+
+The compact frame is 1.33x smaller on the wire for both states, or about 25%
+fewer bytes. Decode allocation volume is 2.24x lower for HLL and 2.23x lower
+for Count-Min. HLL encode is the explicit tradeoff: CRC32 and strict raw-state
+validation make it 1.29x slower than the optimized JSON encoder, although it
+uses one allocation instead of two. Count-Min encode is 1.14x faster and uses
+one allocation instead of two. CRC32 detects accidental corruption only; it is
+not an authentication mechanism, so authenticated transport such as the
+existing TLS/peer controls is still required for hostile networks.
+
+Raw HLL samples:
+
+```text
+compact marshal: 12837 15687 15389 12595 12590 ns/op; 16413 wire bytes; 18432 B/op; 1 alloc/op
+JSON marshal: 9973 10173 9881 9990 9661 ns/op; 21900 wire bytes; 24667 B/op; 2 alloc/op
+compact unmarshal: 26989 27896 27466 26972 27595 ns/op; 16413 wire bytes; 34832 B/op; 3 alloc/op
+JSON unmarshal: 75987 81355 76691 76896 78101 ns/op; 21900 wire bytes; 77999 B/op; 5 alloc/op
+```
+
+Raw Count-Min samples:
+
+```text
+compact marshal: 18849 18852 18238 18299 19149 ns/op; 32804 wire bytes; 40960 B/op; 1 alloc/op
+JSON marshal: 21111 21408 21831 21439 20423 ns/op; 43750 wire bytes; 49390 B/op; 2 alloc/op
+compact unmarshal: 25303 26399 28274 27750 28144 ns/op; 32804 wire bytes; 73744 B/op; 3 alloc/op
+JSON unmarshal: 133368 131571 136353 131760 130624 ns/op; 43750 wire bytes; 164042 B/op; 5 alloc/op
+```

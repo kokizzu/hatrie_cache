@@ -54,7 +54,8 @@ operator control remain the preferred deployment model.
 - [ ] C222 Approximate top-K aggregation with mergeable bounded state.
 - [ ] C223 Mergeable approximate distinct and quantile aggregate states.
 - [x] C223a Mergeable HyperLogLog partial state; `HyperLogLog.Merge` combines same-precision partition states with per-register maxima, supports zero-value receiver adoption, and rejects invalid or mismatched states without mutation. Quantile-state merging and SQL `State`/`Merge` syntax remain open under C223.
-- [x] C223b Mergeable Count-Min Sketch partial state; exported `CountMinSketch` snapshots merge same-shape counter matrices with saturating addition, and `HatTrie.MergeCountMinSketch` imports an owned state without changing existing command defaults. Versioned aggregate envelopes and SQL `State`/`Merge` syntax remain open under C223.
+- [x] C223b Mergeable Count-Min Sketch partial state; exported `CountMinSketch` snapshots merge same-shape counter matrices with saturating addition, and `HatTrie.MergeCountMinSketch` imports an owned state without changing existing command defaults. SQL `State`/`Merge` syntax remains open under C223.
+- [x] C223c Versioned partial aggregate envelopes; importable HLL and Count-Min state APIs now use bounded, checksummed HAG1 frames with compact raw-register/counter payloads, explicit kind/version metadata, and strict decoder validation. SQL `State`/`Merge` integration remains open under C223.
 - [ ] C224 `argMax` and `argMin` aggregate states with deterministic tie handling.
 - [ ] C225 Incremental window-frame state for repeated ordered windows.
 - [ ] C226 Grace-hash join spilling with bounded disk runs.
