@@ -15467,3 +15467,29 @@ commit-cleanup-test-tmp:
 
 push-cleanup-test-tmp:
 	bash ./scripts/push-cleanup-test-tmp.sh
+
+.PHONY: test-frontier-read-hold-c203 benchmark-frontier-read-hold-c203 race-frontier-read-hold-c203 vet-frontier-read-hold-c203 format-frontier-read-hold-c203
+test-frontier-read-hold-c203:
+	bash ./scripts/test-frontier-read-hold-c203.sh
+
+benchmark-frontier-read-hold-c203:
+	bash ./scripts/benchmark-frontier-read-hold-c203.sh
+
+race-frontier-read-hold-c203:
+	bash ./scripts/race-frontier-read-hold-c203.sh
+
+vet-frontier-read-hold-c203:
+	bash ./scripts/vet-frontier-read-hold-c203.sh
+
+format-frontier-read-hold-c203:
+	bash ./scripts/format-frontier-read-hold-c203.sh
+
+.PHONY: stage-frontier-read-hold-c203 commit-frontier-read-hold-c203 push-frontier-read-hold-c203
+stage-frontier-read-hold-c203:
+	bash ./scripts/stage-frontier-read-hold-c203.sh
+
+commit-frontier-read-hold-c203:
+	bash ./scripts/commit-frontier-read-hold-c203.sh
+
+push-frontier-read-hold-c203:
+	bash ./scripts/push-frontier-read-hold-c203.sh
