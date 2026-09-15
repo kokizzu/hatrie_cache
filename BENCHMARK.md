@@ -26201,3 +26201,37 @@ BenchmarkMZ003CompactionAdmissionAfter-32     5216364  40.28 ns/op  0 B/op  0 al
 BenchmarkMZ003CompactionAdmissionAfter-32     5141236  47.15 ns/op  0 B/op  0 allocs/op
 BenchmarkMZ003CompactionAdmissionAfter-32     5139253  41.38 ns/op  0 B/op  0 allocs/op
 ```
+
+<a id="mz-006-verified-object-store-garbage-collection"></a>
+## MZ-006 Verified Object-Store Garbage Collection
+
+This measures the existing manifest-only retention planner against the new
+verified object-store GC planner on Linux `amd64`, an AMD Ryzen 9 5950X, and
+five samples using `-benchtime=200ms -benchmem`. The baseline plans one retained
+manifest. The GC path lists and validates `513` physical content-addressed
+objects, including `512` orphans, so these are intentionally different scopes;
+the comparison describes the added safety work, not a CPU improvement.
+
+| Path | Workload | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing `PlanBackupRetention` | 1 manifest, no object listing | 2,648 | 1,952 | 17 |
+| `PlanGarbageCollection` | 513 listed objects, 512 deletable | 516,004 | 277,552 | 3,125 |
+
+The verified scan costs about `516 us` and `278 KB` transient memory for this
+513-object fixture. That cost is paid only by an explicit GC plan; backup,
+restore, and stores without optional list/delete capabilities are unchanged.
+The value is safe reclamation and an auditable deletion list, not foreground
+throughput. Raw samples:
+
+```text
+BenchmarkMZ006RetentionPlanBaseline-32          87322  2684 ns/op    1952 B/op    17 allocs/op
+BenchmarkMZ006RetentionPlanBaseline-32          85480  2648 ns/op    1952 B/op    17 allocs/op
+BenchmarkMZ006RetentionPlanBaseline-32          93976  2586 ns/op    1952 B/op    17 allocs/op
+BenchmarkMZ006RetentionPlanBaseline-32          96998  2524 ns/op    1952 B/op    17 allocs/op
+BenchmarkMZ006RetentionPlanBaseline-32          80012  2753 ns/op    1952 B/op    17 allocs/op
+BenchmarkMZ006GarbageCollectionPlanAfter-32       476 516004 ns/op  277552 B/op  3125 allocs/op
+BenchmarkMZ006GarbageCollectionPlanAfter-32       475 526049 ns/op  277552 B/op  3125 allocs/op
+BenchmarkMZ006GarbageCollectionPlanAfter-32       439 523804 ns/op  277552 B/op  3125 allocs/op
+BenchmarkMZ006GarbageCollectionPlanAfter-32       465 500123 ns/op  277553 B/op  3125 allocs/op
+BenchmarkMZ006GarbageCollectionPlanAfter-32       493 500451 ns/op  277552 B/op  3125 allocs/op
+```

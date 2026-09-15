@@ -15618,3 +15618,51 @@ test-mz003-package-c227:
 .PHONY: format-mz003-c227
 format-mz003-c227:
 	bash ./scripts/format-mz003-c227.sh
+
+.PHONY: inspect-mz006-c228
+inspect-mz006-c228:
+	bash ./scripts/inspect-mz006-c228.sh
+
+.PHONY: test-mz006-c228
+test-mz006-c228:
+	bash ./scripts/run-mz006-c228.sh
+
+.PHONY: test-mz006-package-c228
+test-mz006-package-c228:
+	bash ./scripts/test-mz006-package-c228.sh
+
+.PHONY: race-mz006-c228
+race-mz006-c228:
+	bash ./scripts/race-mz006-c228.sh
+
+.PHONY: race-mz006-package-c228
+race-mz006-package-c228:
+	bash ./scripts/race-mz006-package-c228.sh
+
+.PHONY: vet-mz006-c228
+vet-mz006-c228:
+	bash ./scripts/vet-mz006-c228.sh
+
+.PHONY: format-mz006-c228
+format-mz006-c228:
+	bash ./scripts/format-mz006-c228.sh
+
+.PHONY: benchmark-mz006-c228
+benchmark-mz006-c228:
+	bash ./scripts/benchmark-mz006-c228.sh
+
+.PHONY: inspect-mz006-status-c228
+inspect-mz006-status-c228:
+	bash ./scripts/inspect-mz006-status-c228.sh
+
+.PHONY: stage-mz006-c228
+stage-mz006-c228:
+	bash ./scripts/stage-mz006-c228.sh
+
+.PHONY: commit-mz006-c228
+commit-mz006-c228:
+	bash ./scripts/commit-mz006-c228.sh
+
+.PHONY: push-mz006-c228
+push-mz006-c228:
+	bash ./scripts/push-mz006-c228.sh
