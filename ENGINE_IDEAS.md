@@ -64,7 +64,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-035 | Remote shard pruning | No shard-level predicate routing before distributed execution. | High |
 | CH-036 | `ASOF JOIN` | Partially adopted: constrained `ASOF [LEFT] JOIN` with one equality and one temporal inequality, keyed right-side buckets, and binary search. | High |
 | CH-037 | `ARRAY JOIN` | No row-expanding array join operator with SQL NULL semantics. | Medium |
-| CH-038 | Aggregate combinators | `COUNT_IF`/`COUNTIF`, numeric `*_IF`, and `ARGMAX_IF`/`ARGMIN_IF` are adopted through the existing filter state; `OrNull`, `State`, and `Merge` variants remain absent. | Medium |
+| CH-038 | Aggregate combinators | `COUNT_IF`/`COUNTIF`, numeric `*_IF`, `ARGMAX_IF`/`ARGMIN_IF`, and opt-in `COUNT_STATE`/`SUM_STATE`/`AVG_STATE`/`MIN_STATE`/`MAX_STATE` with matching `*_MERGE` are adopted; `OrNull` remains absent. | Medium |
 | CH-039 | Approximate distinct/quantile sketches | Partially adopted: global `APPROX_COUNT_DISTINCT` and `APPROX_PERCENTILE` queries now feed bounded sketches while streaming; grouped, top-k, and other complex shapes remain on the materialized evaluator. | Medium |
 | CH-040 | `argMax`/`argMin` aggregates | Implemented for ordinary, grouped, filtered, and window aggregates, with a constant-state stream fast path for eligible global scans. | Low |
 | CH-041 | `GROUPING SETS`/`ROLLUP`/`CUBE` | Partially adopted: existing multi-level expansion now supports `GROUPING(expr)` identifiers folded per branch; native one-pass grouping and multi-argument `GROUPING_ID` remain open. | High |

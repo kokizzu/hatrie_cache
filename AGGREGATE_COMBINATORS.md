@@ -49,3 +49,40 @@ parallel aggregation, materialized views, or caller-owned execution plans.
 Focused coverage is in `hat/hatSql/aggregate_combinator_test.go`, including
 state merge/finalize, invalid and duplicate definitions, sorted names, and
 concurrent lookups.
+
+## Built-In SQL State And Merge
+
+SQL also provides opt-in built-in state combinators for transferring partial
+aggregate work between query workers or materialized views:
+
+```sql
+FROM events
+SELECT region, SUM_STATE(amount) AS amount_state
+GROUP BY region
+```
+
+The matching merge function consumes the returned `[]byte` values:
+
+```sql
+FROM VALUES ($1), ($2) AS partial(state)
+SELECT SUM_MERGE(partial.state) AS amount
+```
+
+The supported pairs are `COUNT_STATE`/`COUNT_MERGE`,
+`SUM_STATE`/`SUM_MERGE`, `AVG_STATE`/`AVG_MERGE`, `MIN_STATE`/`MIN_MERGE`,
+and `MAX_STATE`/`MAX_MERGE`. `COUNT_STATE()` and `COUNT_STATE(*)` count every
+filtered row; `COUNT_STATE(expr)` ignores NULL values. The numeric functions
+ignore NULL and non-numeric values using the same `sqlNumber` rule as the
+ordinary aggregates. Empty numeric states merge to NULL, while an empty count
+state merges to zero.
+
+The SQL state is a compact `HAST` version-1 binary envelope. It is strict about
+the marker, version, kind, flags, count, payload length, and trailing bytes, so
+malformed or wrong-kind input returns an error instead of being interpreted as
+another aggregate. This SQL envelope is separate from the caller-owned
+`SQLAggregateCombinator` registry contract above.
+
+Existing aggregate syntax, commands, journal/storage formats, and defaults are
+unchanged. The feature is useful when a producer can send one partial state
+instead of every input value; it does not make ordinary aggregate execution
+automatically distributed.

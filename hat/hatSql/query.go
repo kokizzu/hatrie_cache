@@ -3249,6 +3249,8 @@ type sqlStreamAggregate struct {
 	order       *sqlExpr
 	filter      *sqlExpr
 	approximate *sqlApproximateStreamState
+	state       *sqlAggregateStateAccumulator
+	stateMerge  bool
 	collation   SQLCollation
 	count       int64
 	sum         float64
@@ -3299,6 +3301,18 @@ func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
 				return nil, false
 			}
 			aggregate.approximate = state
+		case "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
+			kind, merge, ok := sqlAggregateStateSpec(expr.name)
+			if !ok {
+				return nil, false
+			}
+			argument, err := sqlAggregateStateArity(expr, merge, kind)
+			if err != nil {
+				return nil, false
+			}
+			aggregate.state = &sqlAggregateStateAccumulator{kind: kind}
+			aggregate.stateMerge = merge
+			aggregate.arg = argument
 		default:
 			return nil, false
 		}
@@ -3323,6 +3337,26 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 	}
 	if aggregate.approximate != nil {
 		return aggregate.approximate.add(group, row)
+	}
+	if aggregate.state != nil {
+		if aggregate.stateMerge {
+			if aggregate.arg == nil {
+				return fmt.Errorf("%s aggregate state is incomplete", aggregate.name)
+			}
+			value := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			return aggregate.state.mergeValue(value)
+		}
+		if aggregate.arg == nil {
+			return aggregate.state.addCount()
+		}
+		value := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(value); err != nil {
+			return err
+		}
+		return aggregate.state.addValue(value)
 	}
 	if sqlArgExtremeAggregate(aggregate.name) {
 		if aggregate.arg == nil || aggregate.order == nil {
@@ -3380,6 +3414,9 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 func (aggregate sqlStreamAggregate) result() interface{} {
 	if aggregate.approximate != nil {
 		return aggregate.approximate.result()
+	}
+	if aggregate.state != nil {
+		return aggregate.state.result(!aggregate.stateMerge)
 	}
 	switch aggregate.name {
 	case "COUNT":
@@ -7268,7 +7305,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
-				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF":
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
 				default:
 					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
 				}
@@ -16269,7 +16306,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -16576,6 +16613,12 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvaluationFailure(err)
 			}
 			return values
+		case "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
+			value, err := evalSQLAggregateState(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return value
 		case "COUNT":
 			aggregateRows, err := sqlAggregateFilterRows(expr, group)
 			if err != nil {
@@ -17127,7 +17170,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false

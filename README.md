@@ -24,7 +24,7 @@ security guidance before exposing it on a network.
 - Opt-in LRU sparse-primary marks separate from typed-table data layouts: [TYPED_TABLE_SPARSE_MARK_CACHE.md](TYPED_TABLE_SPARSE_MARK_CACHE.md)
 - Opt-in ClickHouse-style SQL intermediate row limits: [C232_INTERMEDIATE_ROWS.md](C232_INTERMEDIATE_ROWS.md)
 - Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
-- ClickHouse/Materialize-style mergeable aggregate states: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
+- ClickHouse/Materialize-style mergeable aggregate states and SQL `STATE`/`MERGE`: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
 - Opt-in bounded retries for transient SQL source reads: [SQL_REMOTE_READ_RETRIES.md](SQL_REMOTE_READ_RETRIES.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)

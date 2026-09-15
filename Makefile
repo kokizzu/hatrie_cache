@@ -15666,3 +15666,39 @@ commit-mz006-c228:
 .PHONY: push-mz006-c228
 push-mz006-c228:
 	bash ./scripts/push-mz006-c228.sh
+
+.PHONY: test-ch036-c231
+test-ch036-c231:
+	bash ./scripts/test-ch036-c231.sh test
+
+.PHONY: test-ch036-package-c236
+test-ch036-package-c236:
+	bash ./scripts/test-ch036-c231.sh package
+
+.PHONY: vet-ch036-c236
+vet-ch036-c236:
+	bash ./scripts/test-ch036-c231.sh vet
+
+.PHONY: race-ch036-c236
+race-ch036-c236:
+	bash ./scripts/test-ch036-c231.sh race
+
+.PHONY: benchmark-ch036-c231
+benchmark-ch036-c231:
+	bash ./scripts/test-ch036-c231.sh benchmark
+
+.PHONY: format-ch036-c236
+format-ch036-c236:
+	bash ./scripts/format-ch036-c236.sh
+
+.PHONY: stage-ch036-c236
+stage-ch036-c236:
+	bash ./scripts/stage-ch036-c236.sh
+
+.PHONY: commit-ch036-c236
+commit-ch036-c236: stage-ch036-c236
+	bash ./scripts/commit-ch036-c236.sh
+
+.PHONY: push-ch036-c236
+push-ch036-c236: commit-ch036-c236
+	bash ./scripts/push-ch036-c236.sh

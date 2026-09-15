@@ -26235,3 +26235,51 @@ BenchmarkMZ006GarbageCollectionPlanAfter-32       439 523804 ns/op  277552 B/op 
 BenchmarkMZ006GarbageCollectionPlanAfter-32       465 500123 ns/op  277553 B/op  3125 allocs/op
 BenchmarkMZ006GarbageCollectionPlanAfter-32       493 500451 ns/op  277552 B/op  3125 allocs/op
 ```
+
+<a id="ch-036-sql-aggregate-state-and-merge"></a>
+## CH-036 SQL Aggregate State And Merge
+
+This compares the existing global streaming `SUM` with the opt-in
+`SUM_STATE` form over 1,024 integer rows on Linux `amd64`, an AMD Ryzen 9
+5950X. The state benchmark reports the scalar payload as eight bytes per
+value and the resulting compact binary state separately; real transport
+overhead depends on the surrounding protocol and row envelope. The merge
+benchmark measures decoding and merging one state on the receiving side.
+
+| Path | Median ns/op | B/op | Allocs/op | Reported payload |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `SUM` baseline | 334,424 | 610,564 | 3,103 | 8,192 scalar bytes |
+| `SUM_STATE` | 291,400 | 584,922 | 3,095 | 17 state bytes |
+| `SUM_MERGE` state receive path | 54.53 | 32 | 2 | 17 state bytes |
+
+The state payload is `8,192 / 17 = 482.0x` smaller for this fixed-width scalar
+comparison. `SUM_STATE` CPU and heap are effectively the same execution shape
+as ordinary `SUM`; its value is avoiding row-by-row transfer and enabling a
+later merge. In this run the state path was `1.15x` faster, with `1.04x` lower
+heap and 8 fewer allocations per operation; the CPU difference is workload-
+and machine-dependent because both paths already use the same streaming
+executor.
+The 17-byte state is a `HAST` version-1 envelope containing the aggregate kind,
+seen flag, count, and sum. State/merge functions are opt-in; ordinary
+aggregate behavior and defaults are unchanged. The table uses the median of
+five `-benchtime=200ms` samples; the payload ratio is deterministic.
+
+Raw output:
+
+```text
+BenchmarkCH036RowAggregateBaseline-32       690 343054 ns/op  610564 B/op 3103 allocs/op
+BenchmarkCH036RowAggregateBaseline-32       717 340743 ns/op  610563 B/op 3103 allocs/op
+BenchmarkCH036RowAggregateBaseline-32       668 314582 ns/op  610572 B/op 3103 allocs/op
+BenchmarkCH036RowAggregateBaseline-32       846 334424 ns/op  610563 B/op 3103 allocs/op
+BenchmarkCH036RowAggregateBaseline-32       675 314376 ns/op  610564 B/op 3103 allocs/op
+BenchmarkCH036StateAggregate-32             769 327578 ns/op  8192 scalar-input-bytes/op 17.00 state-bytes/op 584921 B/op 3095 allocs/op
+BenchmarkCH036StateAggregate-32             926 272762 ns/op  8192 scalar-input-bytes/op 17.00 state-bytes/op 584922 B/op 3095 allocs/op
+BenchmarkCH036StateAggregate-32             967 268360 ns/op  8192 scalar-input-bytes/op 17.00 state-bytes/op 584922 B/op 3095 allocs/op
+BenchmarkCH036StateAggregate-32             800 305395 ns/op  8192 scalar-input-bytes/op 17.00 state-bytes/op 584921 B/op 3095 allocs/op
+BenchmarkCH036StateAggregate-32             770 291400 ns/op  8192 scalar-input-bytes/op 17.00 state-bytes/op 584922 B/op 3095 allocs/op
+BenchmarkCH036AggregateStateMerge-32    4287787  53.94 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
+BenchmarkCH036AggregateStateMerge-32    4205934  54.53 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
+BenchmarkCH036AggregateStateMerge-32    4218529  54.29 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
+BenchmarkCH036AggregateStateMerge-32    4317684  54.57 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
+BenchmarkCH036AggregateStateMerge-32    4362993  57.34 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
+```
