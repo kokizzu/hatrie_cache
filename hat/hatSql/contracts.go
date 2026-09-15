@@ -1382,6 +1382,14 @@ type ExternalSourceResolver interface {
 	ResolveSQLExternalSource(name string) ([]Row, error)
 }
 
+// ExternalStreamSourceResolver optionally streams a named external table to a
+// callback. It is used by bounded-memory operators such as external ORDER BY;
+// implementations must honor context cancellation and must not mutate rows
+// while the callback is running.
+type ExternalStreamSourceResolver interface {
+	StreamSQLExternalSource(ctx context.Context, name string, visit func(Row) error) error
+}
+
 // LookupSourceResolver optionally resolves a literal equality predicate from
 // an arrangement owned by an external or remote source. Returned rows are
 // candidates: the executor evaluates the complete predicate before publishing

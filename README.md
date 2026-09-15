@@ -50,6 +50,7 @@ security guidance before exposing it on a network.
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - ClickHouse-inspired durable asynchronous-insert deduplication: [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u01-durable-asynchronous-insert-deduplication)
+- ClickHouse-inspired external-source `ORDER BY` spill: [CHU02_EXTERNAL_ORDER_SPILL.md](CHU02_EXTERNAL_ORDER_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u02-external-order-by-spill)
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)
 - ClickHouse-inspired prepared literal SQL/JSON path programs: [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs)
 - ClickHouse-inspired map key/value subcolumn pruning: [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning)

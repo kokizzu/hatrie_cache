@@ -26457,3 +26457,56 @@ BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1850	    122574 ns/op	   0.52
 BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1947	    121187 ns/op	   0.53 MB/s	  105474 B/op	     404 allocs/op
 BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1988	    118770 ns/op	   0.54 MB/s	  105414 B/op	     404 allocs/op
 ```
+
+## CH-U02 External `ORDER BY` Spill
+
+CH-U02 lets a direct `EXTERNAL('name')` source implement
+`ExternalStreamSourceResolver` so `ExecuteSQLQueryRows` can feed the existing
+bounded external-sort operator. The materialized API and resolvers without the
+optional method remain unchanged. The benchmark uses a generated 4,096-row
+source, `ORDER BY id DESC`, `MaxSortBytes=16 KiB`, and a 64 MiB spill budget.
+Five local samples were collected on the same AMD Ryzen 9 5950X Linux `amd64`
+host.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing materialized external baseline | 8,252,192 | 5,413,033 | 44,577 | 1.00x |
+| Streaming external spill | 30,652,131 | 9,868,269 | 198,603 | 3.71x slower, 1.82x cumulative bytes, 4.46x allocations |
+
+The streaming path is intentionally opt-in and pays for spill-run encoding,
+filesystem I/O, and merge allocations. Its benefit is bounded sort working
+state (`MaxSortBytes`), not lower cumulative allocation. A separate one-shot
+RSS sample used the same compiled test binary and `-benchtime=1x`:
+
+| Path | Maximum RSS | Sort budget |
+| --- | ---: | ---: |
+| Existing materialized external baseline | 26,044 KiB | unbounded by CH-U02 |
+| Streaming external spill | 25,084 KiB | 16 KiB |
+
+The RSS difference is modest at this fixture size because process/runtime
+overhead dominates; larger streamed inputs avoid retaining the complete source
+inside the sort operator. This feature should be selected when memory pressure
+or source size matters more than latency, and the materialized path remains the
+better choice for small in-memory external tables.
+
+Raw output from `make benchmark-chu02-c242`:
+
+```text
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32          148    8216302 ns/op  5413147 B/op   44577 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32          145    7779984 ns/op  5413144 B/op   44577 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32          140    8761435 ns/op  5413033 B/op   44577 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32          139    8252192 ns/op  5412728 B/op   44577 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32          142    8639284 ns/op  5412974 B/op   44577 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32        39   29414749 ns/op  9868533 B/op  198604 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32        37   30652131 ns/op  9868276 B/op  198603 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32        37   31653336 ns/op  9868269 B/op  198603 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32        38   30057822 ns/op  9868081 B/op  198601 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32        37   31237241 ns/op  9868169 B/op  198601 allocs/op
+```
+
+Raw RSS samples from `make memory-chu02-c242`:
+
+```text
+materialized baseline: Maximum resident set size: 26044 kbytes
+streaming external spill: Maximum resident set size: 25084 kbytes
+```

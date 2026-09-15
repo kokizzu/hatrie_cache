@@ -1,4 +1,82 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: format-chu02-c242
+format-chu02-c242:
+	@bash ./scripts/format-chu02-c242.sh
+
+.PHONY: test-chu02-c242
+test-chu02-c242:
+	@bash ./scripts/test-chu02-c242.sh
+
+.PHONY: benchmark-chu02-c242
+benchmark-chu02-c242:
+	@bash ./scripts/benchmark-chu02-c242.sh
+
+.PHONY: test-chu02-package-c242
+test-chu02-package-c242:
+	@bash ./scripts/test-chu02-package-c242.sh
+
+.PHONY: race-chu02-c242
+race-chu02-c242:
+	@bash ./scripts/race-chu02-c242.sh
+
+.PHONY: vet-chu02-c242
+vet-chu02-c242:
+	@bash ./scripts/vet-chu02-c242.sh
+
+.PHONY: memory-chu02-c242
+memory-chu02-c242:
+	@bash ./scripts/memory-chu02-c242.sh
+
+.PHONY: stage-chu02-c242
+stage-chu02-c242:
+	@bash ./scripts/stage-chu02-c242.sh
+
+.PHONY: commit-chu02-c242
+commit-chu02-c242:
+	@bash ./scripts/commit-chu02-c242.sh
+
+.PHONY: push-chu02-c242
+push-chu02-c242:
+	@bash ./scripts/push-chu02-c242.sh
+.PHONY: format-chu02-c242
+format-chu02-c242:
+	@bash ./scripts/format-chu02-c242.sh
+
+.PHONY: test-chu02-c242
+test-chu02-c242:
+	@bash ./scripts/test-chu02-c242.sh
+
+.PHONY: benchmark-chu02-c242
+benchmark-chu02-c242:
+	@bash ./scripts/benchmark-chu02-c242.sh
+
+.PHONY: test-chu02-package-c242
+test-chu02-package-c242:
+	@bash ./scripts/test-chu02-package-c242.sh
+
+.PHONY: race-chu02-c242
+race-chu02-c242:
+	@bash ./scripts/race-chu02-c242.sh
+
+.PHONY: vet-chu02-c242
+vet-chu02-c242:
+	@bash ./scripts/vet-chu02-c242.sh
+
+.PHONY: memory-chu02-c242
+memory-chu02-c242:
+	@bash ./scripts/memory-chu02-c242.sh
+
+.PHONY: stage-chu02-c242
+stage-chu02-c242:
+	@bash ./scripts/stage-chu02-c242.sh
+
+.PHONY: commit-chu02-c242
+commit-chu02-c242:
+	@bash ./scripts/commit-chu02-c242.sh
+
+.PHONY: push-chu02-c242
+push-chu02-c242:
+	@bash ./scripts/push-chu02-c242.sh
 verify-ch029-dictionary-join-c203:
 	bash ./scripts/verify-ch029-dictionary-join-c203.sh
 .PHONY: benchmark-ch029-dictionary-join-c203

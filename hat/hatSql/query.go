@@ -1385,7 +1385,7 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlIndexedOrderStreamable(query, resolver) {
 		return executeSQLIndexedOrderStream(ctx, query, resolver, control, visit)
 	}
-	if sqlExternalSortStreamable(query, control) {
+	if sqlExternalSortStreamable(query, resolver, control) {
 		return executeSQLExternalSortStream(ctx, query, resolver, control, visit)
 	}
 	if aggregates, ok := sqlGlobalStreamAggregates(query); ok {
@@ -2862,8 +2862,17 @@ func executeSQLTopNMaterializedStream(ctx context.Context, query *sqlQuery, reso
 // that can spill sorted projected records and merge them into QueryRows. A
 // bounded ORDER BY stays on the cheaper in-memory top-N path, while indexed
 // orders remain a direct scan.
-func sqlExternalSortStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
-	if control == nil || control.options.MaxSortBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || query.from == nil || query.limit >= 0 || query.limitWithTies || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) {
+func sqlExternalSortStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
+	if control == nil || control.options.MaxSortBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || query.from == nil || query.limit >= 0 || query.limitWithTies || len(query.orderBy) == 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || sqlExprHasWindow(query.where) {
+		return false
+	}
+	switch query.from.kind {
+	case "CACHE", "VALUES":
+	case "EXTERNAL":
+		if _, ok := resolver.(ExternalStreamSourceResolver); !ok {
+			return false
+		}
+	default:
 		return false
 	}
 	for _, selectItem := range query.selects {
@@ -3908,7 +3917,7 @@ func executeSQLIndexedOrderStreamWithLimitBehavior(ctx context.Context, query *s
 		return sqlRuntimeDiagnostic(err)
 	}
 	if !available {
-		if sqlExternalSortStreamable(query, control) {
+		if sqlExternalSortStreamable(query, resolver, control) {
 			return executeSQLExternalSortStream(ctx, query, resolver, control, visit)
 		}
 		return fmt.Errorf("SQL query cannot stream this ordered scan because the ordered index is unavailable: %w", errSQLOrderedSourceUnavailable)
@@ -4689,6 +4698,12 @@ func streamSQLSourceRowsWithPartitionPredicates(ctx context.Context, source sqlS
 			return err
 		}
 		return visitRows(rows)
+	case "EXTERNAL":
+		streaming, ok := resolver.(ExternalStreamSourceResolver)
+		if !ok {
+			return fmt.Errorf("SQL source %q cannot stream rows yet; use a streaming external source resolver", source.kind)
+		}
+		return streaming.StreamSQLExternalSource(ctx, source.key, visit)
 	default:
 		return fmt.Errorf("SQL source %q cannot stream rows yet", source.kind)
 	}

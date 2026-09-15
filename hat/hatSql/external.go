@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -444,6 +445,31 @@ func (tables *ExternalTables) ResolveSQLExternalSource(name string) ([]Row, erro
 		return nil, fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
 	}
 	return table.Rows, nil
+}
+
+// StreamSQLExternalSource supplies the immutable table snapshot row by row.
+// The table reference is captured under the read lock and the lock is released
+// before callbacks run, so a concurrent Register is not blocked by a query.
+func (tables *ExternalTables) StreamSQLExternalSource(ctx context.Context, name string, visit func(Row) error) error {
+	if ctx == nil {
+		return errors.New("external stream context is nil")
+	}
+	if visit == nil {
+		return errors.New("external stream callback is nil")
+	}
+	table, ok := tables.exportTable(name)
+	if !ok {
+		return fmt.Errorf("external table %q does not exist", strings.TrimSpace(name))
+	}
+	for _, row := range table.Rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ParseJSONRows parses one JSON object or an array of JSON objects.
