@@ -15248,3 +15248,43 @@ commit-hyperloglog-merge-c223:
 .PHONY: push-hyperloglog-merge-c223
 push-hyperloglog-merge-c223:
 	@bash ./scripts/push-hyperloglog-merge-c223.sh
+
+.PHONY: test-countmin-merge-c223
+test-countmin-merge-c223:
+	@bash ./scripts/test-countmin-merge-c223.sh
+
+.PHONY: format-countmin-merge-c223
+format-countmin-merge-c223:
+	@bash ./scripts/format-countmin-merge-c223.sh
+
+.PHONY: test-countmin-package-c223
+test-countmin-package-c223:
+	@bash ./scripts/run-countmin-merge-isolated-c223.sh package
+
+.PHONY: race-countmin-merge-c223
+race-countmin-merge-c223:
+	@bash ./scripts/run-countmin-merge-isolated-c223.sh race
+
+.PHONY: vet-countmin-merge-c223
+vet-countmin-merge-c223:
+	@bash ./scripts/run-countmin-merge-isolated-c223.sh vet
+
+.PHONY: benchmark-countmin-merge-c223
+benchmark-countmin-merge-c223:
+	@bash ./scripts/run-countmin-merge-isolated-c223.sh benchmark
+
+.PHONY: check-countmin-merge-c223
+check-countmin-merge-c223:
+	@bash ./scripts/check-countmin-merge-c223.sh
+
+.PHONY: stage-countmin-merge-c223
+stage-countmin-merge-c223:
+	@bash ./scripts/stage-countmin-merge-c223.sh
+
+.PHONY: commit-countmin-merge-c223
+commit-countmin-merge-c223:
+	@bash ./scripts/commit-countmin-merge-c223.sh
+
+.PHONY: push-countmin-merge-c223
+push-countmin-merge-c223:
+	@bash ./scripts/push-countmin-merge-c223.sh

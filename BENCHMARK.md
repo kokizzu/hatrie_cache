@@ -25858,3 +25858,45 @@ the raw fixture. The measured heap allocation is equal because both benchmark
 paths construct a fresh target register array; raw values and the source
 state are prepared outside the timed loop. `Merge` itself performs no new
 allocation when the receiver already owns a compatible register array.
+
+<a id="ch-060-mergeable-count-min-sketch-partial-state"></a>
+### CH-060 Mergeable Count-Min Sketch Partial State
+
+`hatCache.CountMinSketch` is now an importable bounded state with validated
+portable snapshots and same-shape pointwise saturating merge. `HatTrie.MergeCountMinSketch`
+can replace a missing/non-CMS value with an owned state or merge into an
+existing CMS value. Existing `CREATECMS`/`INCRCMS` commands, journal records,
+snapshots, persistence, and defaults are unchanged.
+
+The focused contract runs the merge against a replayed reference and checks
+zero-value adoption, source-copy isolation, shape mismatch, invalid-state
+rejection, replacement, existing-key merge, snapshot round-trip, and uint32
+counter saturation. The benchmark uses a 2,048 x 4 sketch on Linux/amd64 with
+the same AMD Ryzen 9 5950X host. Each row is the median of three samples from
+`make benchmark-countmin-merge-c223`.
+
+| Workload | Merge state | Replay values | Relative CPU | B/op | Allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: |
+| 128 events | 28,324 ns | 10,008 ns | 0.35x; merge 2.83x slower | 32,768 / 32,768 | 1 / 1 |
+| 4,096 events | 29,256 ns | 106,134 ns | 3.63x faster | 32,768 / 32,768 | 1 / 1 |
+| 65,536 events | 29,169 ns | 1,463,924 ns | 50.19x faster | 32,768 / 32,774 | 1 / 1 |
+
+Raw samples:
+
+```text
+128 merge: 27297 28559 28324 ns/op; 32768 B/op; 1 alloc/op
+128 replay: 10008 10321 9975 ns/op; 32768 B/op; 1 alloc/op
+4096 merge: 28072 30717 29256 ns/op; 32768 B/op; 1 alloc/op
+4096 replay: 104797 108375 106134 ns/op; 32768 B/op; 1 alloc/op
+65536 merge: 29196 30963 29169 ns/op; 32768 B/op; 1 alloc/op
+65536 replay: 1444733 1463924 1536107 ns/op; 32774-32775 B/op; 1 alloc/op
+```
+
+The fixed pair of source states carries 87,384 base64 counter bytes. The raw
+fixture carries 1,152, 36,864, and 589,824 value bytes for 128, 4,096, and
+65,536 events respectively, so state transfer is larger for the two smaller
+fixtures and 6.75x smaller for the largest. The merge path is therefore a
+partition/worker-transfer optimization for sufficiently large batches, not a
+replacement for direct replay of tiny batches. Both timed paths allocate one
+32 KiB target counter matrix; a receiver that already owns a compatible matrix
+performs the merge loop without a new allocation.

@@ -18,6 +18,12 @@ const (
 	maxCountMinSketchCounter   uint32 = ^uint32(0)
 )
 
+var (
+	ErrCountMinSketchNil           = errors.New("hatriecache: count-min sketch is nil")
+	ErrCountMinSketchShapeMismatch = errors.New("hatriecache: count-min sketch shape mismatch")
+	ErrCountMinSketchStateInvalid  = errors.New("hatriecache: count-min sketch state is invalid")
+)
+
 // CountMinSketchInfo reports the shape and fill state of a Count-Min Sketch.
 // The sketch stores approximate frequencies in compact uint32 counters.
 type CountMinSketchInfo struct {
@@ -29,19 +35,29 @@ type CountMinSketchInfo struct {
 	SaturatedCounters uint64 `json:"saturated_counters"`
 }
 
-type countMinSketchSnapshot struct {
+// CountMinSketchSnapshot is the portable representation of a Count-Min
+// Sketch. Counters is base64-encoded little-endian uint32 counters in row
+// order.
+type CountMinSketchSnapshot struct {
 	Width      uint64 `json:"width"`
 	Depth      uint8  `json:"depth"`
 	TotalCount uint64 `json:"total_count"`
 	Counters   string `json:"counters"`
 }
 
-type countMinSketchData struct {
+type countMinSketchSnapshot = CountMinSketchSnapshot
+
+// CountMinSketch stores approximate frequencies in a bounded counter matrix.
+// It is safe to merge sketches with the same width and depth because merging
+// is pointwise saturating addition of the counters.
+type CountMinSketch struct {
 	counters []uint32
 	width    uint64
 	depth    uint8
 	total    uint64
 }
+
+type countMinSketchData = CountMinSketch
 
 func newCountMinSketchData(width uint64, depth uint8) (countMinSketchData, error) {
 	if err := validateCountMinSketchShape(width, depth); err != nil {
@@ -51,6 +67,16 @@ func newCountMinSketchData(width uint64, depth uint8) (countMinSketchData, error
 		width: width,
 		depth: depth,
 	}, nil
+}
+
+// NewCountMinSketch constructs an empty Count-Min Sketch.
+func NewCountMinSketch(width uint64, depth uint8) (CountMinSketch, error) {
+	return newCountMinSketchData(width, depth)
+}
+
+// NewDefaultCountMinSketch constructs a sketch with the default shape.
+func NewDefaultCountMinSketch() CountMinSketch {
+	return newDefaultCountMinSketchData()
 }
 
 func newDefaultCountMinSketchData() countMinSketchData {
@@ -153,6 +179,82 @@ func newCountMinSketchDataFromSnapshot(snapshot countMinSketchSnapshot) (countMi
 		out.counters[idx] = binary.LittleEndian.Uint32(raw[idx*4 : idx*4+4])
 	}
 	return out, nil
+}
+
+// NewCountMinSketchFromSnapshot reconstructs a sketch from a validated
+// portable snapshot.
+func NewCountMinSketchFromSnapshot(snapshot CountMinSketchSnapshot) (CountMinSketch, error) {
+	return newCountMinSketchDataFromSnapshot(snapshot)
+}
+
+func validateCountMinSketchState(sketch CountMinSketch) error {
+	if sketch.width == 0 && sketch.depth == 0 && len(sketch.counters) == 0 && sketch.total == 0 {
+		return nil
+	}
+	if err := validateCountMinSketchShape(sketch.width, sketch.depth); err != nil {
+		return fmt.Errorf("%w: %v", ErrCountMinSketchStateInvalid, err)
+	}
+	expected := int(sketch.width * uint64(sketch.depth))
+	if len(sketch.counters) == 0 {
+		if sketch.total != 0 {
+			return fmt.Errorf("%w: empty counters have total count", ErrCountMinSketchStateInvalid)
+		}
+		return nil
+	}
+	if len(sketch.counters) != expected {
+		return fmt.Errorf("%w: counter length=%d want=%d", ErrCountMinSketchStateInvalid, len(sketch.counters), expected)
+	}
+	for row := uint8(0); row < sketch.depth; row++ {
+		var rowTotal uint64
+		rowOffset := uint64(row) * sketch.width
+		for column := uint64(0); column < sketch.width; column++ {
+			rowTotal += uint64(sketch.counters[rowOffset+column])
+		}
+		if rowTotal > sketch.total || sketch.total <= uint64(maxCountMinSketchCounter) && rowTotal != sketch.total {
+			return fmt.Errorf("%w: row counters do not match total count", ErrCountMinSketchStateInvalid)
+		}
+	}
+	return nil
+}
+
+func cloneCountMinSketch(sketch CountMinSketch) CountMinSketch {
+	clone := sketch
+	if len(sketch.counters) != 0 {
+		clone.counters = append([]uint32(nil), sketch.counters...)
+	}
+	return clone
+}
+
+// Merge combines another sketch with the same shape. The operation preserves
+// the source and saturates uint32 counters and the total count on overflow.
+func (sketch *CountMinSketch) Merge(other CountMinSketch) error {
+	if sketch == nil {
+		return ErrCountMinSketchNil
+	}
+	if err := validateCountMinSketchState(other); err != nil {
+		return err
+	}
+	if err := validateCountMinSketchState(*sketch); err != nil {
+		return err
+	}
+	if other.width == 0 && other.depth == 0 && len(other.counters) == 0 && other.total == 0 {
+		return nil
+	}
+	if sketch.width == 0 && sketch.depth == 0 && len(sketch.counters) == 0 && sketch.total == 0 {
+		*sketch = cloneCountMinSketch(other)
+		return nil
+	}
+	if sketch.width != other.width || sketch.depth != other.depth {
+		return fmt.Errorf("%w: receiver=%dx%d other=%dx%d", ErrCountMinSketchShapeMismatch, sketch.width, sketch.depth, other.width, other.depth)
+	}
+	if len(other.counters) != 0 {
+		sketch.ensureCounters()
+		for idx, counter := range other.counters {
+			sketch.counters[idx] = saturatingAddUint32(sketch.counters[idx], counter)
+		}
+	}
+	sketch.total = saturatingAddUint64(sketch.total, other.total)
+	return nil
 }
 
 func (sketch *countMinSketchData) Add(value interface{}, count uint32) uint64 {
@@ -510,6 +612,51 @@ func (ht *HatTrie) UpsertCountMinSketch(key string, width uint64, depth uint8) e
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.countMinSketches.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}.toValue()
+	ht.recordWriteLocked(key)
+	return nil
+}
+
+// MergeCountMinSketch merges an importable sketch into the value at key. A
+// missing or non-Count-Min value is replaced with an owned copy of other.
+func (ht *HatTrie) MergeCountMinSketch(key string, other CountMinSketch) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.MergeCountMinSketch(key, other)
+	}
+	if err := validateCountMinSketchState(other); err != nil {
+		return err
+	}
+	if other.width == 0 && other.depth == 0 && len(other.counters) == 0 && other.total == 0 {
+		return nil
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return err
+	}
+	if hval.IsCountMinSketch() {
+		if err := ht.countMinSketches.array[hval.Index].Merge(other); err != nil {
+			return err
+		}
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		return nil
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.countMinSketches.AddData(cloneCountMinSketch(other))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
