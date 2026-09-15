@@ -85,6 +85,29 @@ func TestU64PostingListInsertSortedMonotonicIDs(t *testing.T) {
 	}
 }
 
+func TestU64PostingListRemoveSortedTailAndHighID(t *testing.T) {
+	list := newU64PostingList(0)
+	for id := uint64(1); id < 256; id++ {
+		list = list.insertSorted(id)
+	}
+
+	list, removed, empty := list.removeSorted(255)
+	if !removed || empty {
+		t.Fatalf("removeSorted(tail) = removed %v, empty %v", removed, empty)
+	}
+	values := list.values(nil)
+	if len(values) != 255 || values[len(values)-1] != 254 {
+		t.Fatalf("tail removal values = len %d, last %d; want len 255, last 254", len(values), values[len(values)-1])
+	}
+	unchanged, removed, empty := list.removeSorted(999)
+	if removed || empty {
+		t.Fatalf("removeSorted(high missing) = removed %v, empty %v", removed, empty)
+	}
+	if got := unchanged.values(nil); len(got) != len(values) || got[len(got)-1] != 254 {
+		t.Fatalf("high missing changed posting: got len %d, last %d", len(got), got[len(got)-1])
+	}
+}
+
 func TestCompactPostingIndexesHandleSingletonZeroID(t *testing.T) {
 	functional, err := NewFunctionalIndex(func(value int) int { return value }, 1)
 	if err != nil {

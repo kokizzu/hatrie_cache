@@ -17143,6 +17143,37 @@ The one-byte B/op variation in the integrated benchmark is allocator noise;
 allocation counts are unchanged. No additional index memory is retained, and
 non-monotonic workloads continue through the existing `sort.Search` path.
 
+<a id="sorted-posting-removal-boundaries"></a>
+## Sorted Posting Removal Boundaries
+
+Command: `make benchmark-posting-remove-c218`.
+
+C218 uses the sorted posting tail to avoid a binary search for an ID above the
+tail and to remove an existing tail without searching. Middle misses continue
+through the same binary-search path. The benchmark uses five samples per case
+on Linux/amd64 with an AMD Ryzen 9 5950X and keeps a 10,000-ID posting resident.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Missing ID above tail | 9.342 ns/op | 2.182 ns/op | **4.28x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Existing tail ID | 13.67 ns/op | 6.611 ns/op | **2.07x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Missing middle ID control | 8.323 ns/op | 8.196 ns/op | **1.02x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+
+Raw samples:
+
+```text
+missing high before:  9.390, 9.342, 9.220, 8.862, 10.15 ns/op; 0 B/op; 0 alloc/op
+missing high after:   2.182, 2.223, 2.153, 2.117, 2.291 ns/op; 0 B/op; 0 alloc/op
+tail before:         13.39, 13.39, 13.67, 14.71, 14.66 ns/op; 0 B/op; 0 alloc/op
+tail after:           6.915, 6.613, 6.611, 6.354, 6.068 ns/op; 0 B/op; 0 alloc/op
+middle before:        8.061, 8.685, 8.323, 8.089, 8.365 ns/op; 0 B/op; 0 alloc/op
+middle after:         8.196, 8.211, 8.016, 7.866, 8.767 ns/op; 0 B/op; 0 alloc/op
+```
+
+The change adds no retained fields, allocations, or ordering changes. It is
+safe for arbitrary sorted postings; only the boundary cases bypass
+`sort.Search`.
+
 ## Rejected C214 Async Batcher Shared-Read Lock
 
 The ClickHouse-style `AsyncBatcher` already holds an exclusive mutex while a

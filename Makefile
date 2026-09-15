@@ -15103,3 +15103,27 @@ commit-posting-c217:
 
 push-posting-c217:
 	@bash ./scripts/push-posting-c217.sh
+
+test-posting-remove-c218:
+	@bash ./scripts/test-posting-remove-c218.sh
+
+benchmark-posting-remove-c218:
+	@bash ./scripts/benchmark-posting-remove-c218.sh
+
+format-posting-remove-c218:
+	@bash ./scripts/format-posting-remove-c218.sh
+
+verify-posting-remove-c218:
+	@bash ./scripts/verify-posting-remove-c218.sh
+
+inspect-posting-remove-c218:
+	@bash ./scripts/inspect-posting-remove-c218.sh
+
+stage-posting-remove-c218:
+	@bash ./scripts/stage-posting-remove-c218.sh
+
+commit-posting-remove-c218:
+	@bash ./scripts/commit-posting-remove-c218.sh
+
+push-posting-remove-c218:
+	@bash ./scripts/push-posting-remove-c218.sh

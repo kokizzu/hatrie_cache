@@ -129,3 +129,53 @@ func BenchmarkC217HashIndexBuild(b *testing.B) {
 		}
 	}
 }
+
+var compactPostingC218Sink int
+
+func BenchmarkC218PostingRemoveSorted(b *testing.B) {
+	const size = 10000
+	list := newU64PostingList(0)
+	for id := uint64(1); id < size; id++ {
+		list = list.insertSorted(id)
+	}
+
+	b.Run("missing-high", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			_, removed, empty := list.removeSorted(size + 1)
+			if removed || empty {
+				b.Fatal("missing high ID was removed")
+			}
+			compactPostingC218Sink++
+		}
+	})
+	b.Run("existing-tail", func(b *testing.B) {
+		const tail = uint64(size - 1)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			_, removed, empty := list.removeSorted(tail)
+			if !removed || empty {
+				b.Fatal("tail ID was not removed")
+			}
+			list.rest.rest = append(list.rest.rest, tail)
+			compactPostingC218Sink++
+		}
+	})
+	middleList := newU64PostingList(0)
+	for id := uint64(2); id < size; id += 2 {
+		middleList = middleList.insertSorted(id)
+	}
+	b.Run("missing-middle", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			_, removed, empty := middleList.removeSorted(size/2 + 1)
+			if removed || empty {
+				b.Fatal("missing middle ID was removed")
+			}
+			compactPostingC218Sink++
+		}
+	})
+}

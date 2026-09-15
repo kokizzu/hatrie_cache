@@ -131,6 +131,15 @@ func (list u64PostingList) removeSorted(id uint64) (u64PostingList, bool, bool) 
 	if id == list.rest.first {
 		return list.removeAt(1)
 	}
+	if tail := list.rest.rest; len(tail) > 0 {
+		last := len(tail) - 1
+		if id > tail[last] {
+			return list, false, false
+		}
+		if id == tail[last] {
+			return list.removeAt(last + 2)
+		}
+	}
 	position := sort.Search(len(list.rest.rest), func(position int) bool {
 		return list.rest.rest[position] >= id
 	})
