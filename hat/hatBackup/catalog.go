@@ -2,6 +2,9 @@ package hatBackup
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,13 +15,16 @@ import (
 	"sync"
 )
 
-const backupManifestCatalogLogHeader = "hatrie-backup-catalog-v1\n"
+const backupManifestCatalogLogHeader = "hatrie-backup-catalog-v2\n"
+const backupManifestCatalogLogHeaderV1 = "hatrie-backup-catalog-v1\n"
 const backupManifestCatalogVersion = 1
+const backupManifestCatalogChecksumLength = sha256.Size * 2
 
 type backupManifestCatalogFormat uint8
 
 const (
 	backupManifestCatalogLog backupManifestCatalogFormat = iota
+	backupManifestCatalogLegacyLog
 	backupManifestCatalogLegacyJSON
 )
 
@@ -91,7 +97,7 @@ func (catalog *BackupManifestCatalog) Append(manifest BundleManifest) error {
 		}
 	}
 	manifest = cloneBackupManifest(manifest)
-	if catalog.format == backupManifestCatalogLegacyJSON {
+	if catalog.format != backupManifestCatalogLog {
 		candidate := append(cloneBackupManifests(catalog.manifests), manifest)
 		if err := catalog.writeLocked(candidate); err != nil {
 			return err
@@ -165,8 +171,12 @@ func readBackupManifestCatalog(path string) ([]BundleManifest, backupManifestCat
 		return nil, backupManifestCatalogLog, fmt.Errorf("hatriecache: read backup manifest catalog: %w", err)
 	}
 	if bytes.HasPrefix(data, []byte(backupManifestCatalogLogHeader)) {
-		manifests, err := parseBackupManifestCatalogLog(data)
+		manifests, err := parseBackupManifestCatalogLog(data, true)
 		return manifests, backupManifestCatalogLog, err
+	}
+	if bytes.HasPrefix(data, []byte(backupManifestCatalogLogHeaderV1)) {
+		manifests, err := parseBackupManifestCatalogLog(data, false)
+		return manifests, backupManifestCatalogLegacyLog, err
 	}
 	var envelope backupManifestCatalogEnvelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
@@ -181,8 +191,12 @@ func readBackupManifestCatalog(path string) ([]BundleManifest, backupManifestCat
 	return cloneBackupManifests(envelope.Manifests), backupManifestCatalogLegacyJSON, nil
 }
 
-func parseBackupManifestCatalogLog(data []byte) ([]BundleManifest, error) {
-	payload := data[len(backupManifestCatalogLogHeader):]
+func parseBackupManifestCatalogLog(data []byte, checksummed bool) ([]BundleManifest, error) {
+	headerLength := len(backupManifestCatalogLogHeader)
+	if !checksummed {
+		headerLength = len(backupManifestCatalogLogHeaderV1)
+	}
+	payload := data[headerLength:]
 	if len(payload) == 0 {
 		return nil, nil
 	}
@@ -194,6 +208,21 @@ func parseBackupManifestCatalogLog(data []byte) ([]BundleManifest, error) {
 	for index, line := range lines {
 		if len(bytes.TrimSpace(line)) == 0 {
 			return nil, fmt.Errorf("hatriecache: backup manifest catalog has an empty record at line %d", index+1)
+		}
+		if checksummed {
+			if len(line) < backupManifestCatalogChecksumLength+1 || line[backupManifestCatalogChecksumLength] != ' ' {
+				return nil, fmt.Errorf("hatriecache: backup manifest catalog record %d has an invalid checksum frame", index+1)
+			}
+			var expected [sha256.Size]byte
+			if _, err := hex.Decode(expected[:], line[:backupManifestCatalogChecksumLength]); err != nil {
+				return nil, fmt.Errorf("hatriecache: backup manifest catalog record %d has an invalid checksum: %w", index+1, err)
+			}
+			payload := line[backupManifestCatalogChecksumLength+1:]
+			actual := sha256.Sum256(payload)
+			if subtle.ConstantTimeCompare(expected[:], actual[:]) != 1 {
+				return nil, fmt.Errorf("hatriecache: backup manifest catalog record %d checksum mismatch", index+1)
+			}
+			line = payload
 		}
 		var manifest BundleManifest
 		if err := json.Unmarshal(line, &manifest); err != nil {
@@ -265,7 +294,6 @@ func (catalog *BackupManifestCatalog) appendLogRecordLocked(manifest BundleManif
 	if err != nil {
 		return fmt.Errorf("hatriecache: encode backup manifest catalog record: %w", err)
 	}
-	record = append(record, '\n')
 	info, statErr := os.Lstat(catalog.path)
 	newFile := errors.Is(statErr, os.ErrNotExist)
 	if statErr != nil && !newFile {
@@ -291,9 +319,24 @@ func (catalog *BackupManifestCatalog) appendLogRecordLocked(manifest BundleManif
 		_ = file.Close()
 		return err
 	}
+	var checksum [backupManifestCatalogChecksumLength]byte
+	digest := sha256.Sum256(record)
+	hex.Encode(checksum[:], digest[:])
+	if _, err := file.Write(checksum[:]); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("hatriecache: append backup manifest catalog checksum: %w", err)
+	}
+	if _, err := file.Write([]byte{' '}); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("hatriecache: append backup manifest catalog checksum separator: %w", err)
+	}
 	if _, err := file.Write(record); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("hatriecache: append backup manifest catalog record: %w", err)
+	}
+	if _, err := file.Write([]byte{'\n'}); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("hatriecache: append backup manifest catalog record terminator: %w", err)
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
@@ -335,6 +378,11 @@ func encodeBackupManifestCatalogLog(manifests []BundleManifest) ([]byte, error) 
 		if err != nil {
 			return nil, fmt.Errorf("hatriecache: encode backup manifest catalog record %d: %w", index+1, err)
 		}
+		var checksum [backupManifestCatalogChecksumLength]byte
+		digest := sha256.Sum256(record)
+		hex.Encode(checksum[:], digest[:])
+		data.Write(checksum[:])
+		data.WriteByte(' ')
 		data.Write(record)
 		data.WriteByte('\n')
 	}

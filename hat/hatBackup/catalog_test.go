@@ -188,6 +188,63 @@ func TestBackupManifestCatalogMigratesLegacyJSONOnAppend(t *testing.T) {
 	}
 }
 
+func TestBackupManifestCatalogMigratesV1RawLogOnAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	base := catalogTestManifest("base", "", false, 10, "base-object")
+	record, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := append([]byte(backupManifestCatalogLogHeaderV1), record...)
+	legacy = append(legacy, '\n')
+	if err := os.WriteFile(path, legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := NewBackupManifestCatalog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Append(catalogTestManifest("child", "base", true, 20, "child-object")); err != nil {
+		t.Fatalf("Append() v1 log error = %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(contents, []byte(backupManifestCatalogLogHeader)) {
+		t.Fatalf("v1 log was not migrated to v2: %q", contents)
+	}
+}
+
+func TestBackupManifestCatalogRejectsChecksumTampering(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	catalog, err := NewBackupManifestCatalog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Append(catalogTestManifest("base", "", false, 10, "base-object")); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := bytes.Replace(contents, []byte(`"journal_sequence":10`), []byte(`"journal_sequence":11`), 1)
+	if bytes.Equal(contents, tampered) {
+		t.Fatal("test fixture did not change the manifest payload")
+	}
+	if err := os.WriteFile(path, tampered, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewBackupManifestCatalog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Load(); err == nil {
+		t.Fatal("checksum-tampered catalog was accepted")
+	}
+}
+
 func TestBackupManifestCatalogRejectsTornLogRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.json")
 	catalog, err := NewBackupManifestCatalog(path)
