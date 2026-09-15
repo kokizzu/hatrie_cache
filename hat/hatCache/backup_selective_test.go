@@ -101,3 +101,60 @@ func TestBackupBundleRejectsCombinedSelectivePartitionLocal(t *testing.T) {
 		t.Fatalf("CreateBackupBundle() error = %v, want partition-local conflict", err)
 	}
 }
+
+func TestBackupBundleRestoresSelectedPartitionSubset(t *testing.T) {
+	for _, format := range []SnapshotFormat{SnapshotFormatJSON, SnapshotFormatBinary} {
+		t.Run(string(format), func(t *testing.T) {
+			source := CreateHatTrie()
+			defer source.Destroy()
+			source.UpsertString("region:sg/user:1", "Singapore")
+			source.UpsertString("region:sg/user:2", "Singapore")
+			source.UpsertString("region:us/user:1", "United States")
+
+			bundlePath := t.TempDir() + "/partitioned.tar.gz"
+			_, err := CreateBackupBundle(bundlePath, source, nil, BackupBundleOptions{
+				Mode:           BackupModeSnapshot,
+				SnapshotFormat: format,
+				Partition: BackupPartitionMetadata{
+					Mode:       "partitioned",
+					Local:      true,
+					Partitions: []string{"sg", "us"},
+					KeyPrefixes: []string{
+						"region:sg/",
+						"region:us/",
+					},
+				},
+				PartitionLocal: true,
+			})
+			if err != nil {
+				t.Fatalf("CreateBackupBundle(%s) error = %v", format, err)
+			}
+
+			selector := BackupPartitionMetadata{
+				Mode:        "partitioned",
+				Local:       true,
+				Partitions:  []string{"sg"},
+				KeyPrefixes: []string{"region:sg/"},
+			}
+			restoreDir := t.TempDir() + "/restored"
+			report, err := RestoreBackupBundle(bundlePath, restoreDir, BackupBundleRestoreOptions{Partition: &selector})
+			if err != nil {
+				t.Fatalf("RestoreBackupBundle(%s) error = %v", format, err)
+			}
+			if report.RecoveredKeys != 2 {
+				t.Fatalf("RecoveredKeys = %d, want 2", report.RecoveredKeys)
+			}
+			restored := newTestTrie(t)
+			defer restored.Destroy()
+			if err := restored.LoadSnapshot(report.Snapshot); err != nil {
+				t.Fatalf("LoadSnapshot() error = %v", err)
+			}
+			if !restored.Exists("region:sg/user:1") || !restored.Exists("region:sg/user:2") {
+				t.Fatal("selected Singapore keys were not restored")
+			}
+			if restored.Exists("region:us/user:1") {
+				t.Fatal("unselected United States key was restored")
+			}
+		})
+	}
+}

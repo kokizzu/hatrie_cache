@@ -59,12 +59,23 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if err := hatBackup.ValidatePartitionRestore(manifest, options.Partition); err != nil {
+	selectivePartition, err := hatBackup.ValidatePartitionRestoreSelection(manifest, options.Partition)
+	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
 	mode := backupBundleManifestMode(manifest)
 	if mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
 		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle restore mode %q", mode)
+	}
+	if selectivePartition && mode != BackupModeSnapshot {
+		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore requires a snapshot backup")
+	}
+	if selectivePartition && manifest.Journal != "" {
+		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore does not support journal replay")
+	}
+	verificationManifest := manifest
+	if selectivePartition {
+		verificationManifest.Partition = cloneBackupPartitionMetadata(options.Partition)
 	}
 	destination, err := prepareRestoreDestinationForRestore(bundlePath, dataDir, options.Overwrite, options.Resume)
 	if err != nil {
@@ -80,10 +91,15 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err := extract(bundlePath, destination.StagingPath(), manifest.Files); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	if selectivePartition {
+		if err := filterRestoredSnapshotByPartition(destination.StagingPath(), manifest, options.Partition); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+	}
 	var doctor BackupDoctorReport
 	switch mode {
 	case BackupModeSnapshot:
-		doctor, err = verifySnapshotBackupRoot(bundlePath, "bundle", manifest, destination.StagingPath())
+		doctor, err = verifySnapshotBackupRoot(bundlePath, "bundle", verificationManifest, destination.StagingPath())
 	case BackupModePebbleCheckpoint:
 		doctor, err = verifyPebbleBackupRoot(bundlePath, "bundle", manifest, destination.StagingPath())
 	}
@@ -117,7 +133,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		Store:               storePath,
 		StorageBackend:      manifest.StorageBackend,
 		Journal:             journalPath,
-		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
+		Partition:           cloneBackupPartitionMetadata(verificationManifest.Partition),
 		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
 		JournalSequence:     manifest.JournalSequence,
 		RecoveredKeys:       doctor.RecoveredKeys,
@@ -140,8 +156,12 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if err := hatBackup.ValidatePartitionRestore(manifest, options.Partition); err != nil {
+	selectivePartition, err := hatBackup.ValidatePartitionRestoreSelection(manifest, options.Partition)
+	if err != nil {
 		return BackupBundleRestoreReport{}, err
+	}
+	if selectivePartition {
+		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore requires a snapshot backup")
 	}
 	destination, err := prepareRestoreDestinationForRestore(repositoryPath, dataDir, options.Overwrite, options.Resume)
 	if err != nil {
@@ -301,6 +321,20 @@ func RehearseRestore(path string, options RestoreRehearsalOptions) (RestoreRehea
 	backup, err := VerifyBackupPath(path)
 	if err != nil {
 		return RestoreRehearsalReport{}, err
+	}
+	if options.Partition != nil {
+		switch backup.Kind {
+		case "bundle", "repository":
+			selected, err := hatBackup.ValidatePartitionRestoreSelection(hatBackup.BundleManifest{Partition: backup.Partition}, options.Partition)
+			if err != nil {
+				return RestoreRehearsalReport{}, err
+			}
+			if selected {
+				return RestoreRehearsalReport{}, errors.New("hatriecache: restore rehearsal does not support selective partition restore")
+			}
+		case "directory":
+			return RestoreRehearsalReport{}, errors.New("hatriecache: restore rehearsal partition selectors require an atomic backup bundle")
+		}
 	}
 
 	workDir := strings.TrimSpace(options.WorkDir)

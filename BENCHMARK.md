@@ -26034,3 +26034,45 @@ An initial 65,536-value probe was rejected because the existing TDigest
 builder can leave more centroids than its configured validation bound. That
 is recorded as a separate compaction-bound fix candidate; this codec does not
 silently normalize or discard centroids.
+
+<a id="ch-064-selective-partition-restore"></a>
+### CH-064 Selective Partition Restore
+
+This measures the ClickHouse-style opt-in partition restore selector. The full
+path extracts and verifies a two-partition snapshot. The selected path validates
+the partition-to-prefix pairs, loads the extracted snapshot, atomically rewrites
+it with only the requested prefix, and verifies the reduced result. Existing
+nil and exact-match selectors retain the original path. Subset selection is
+supported only for snapshots without journal replay; Pebble checkpoint and
+repository subset restores are rejected before destination mutation.
+
+The fixture contains 4,096 string keys split evenly between `region:sg/` and
+`region:us/`. Results are Linux/amd64 on an AMD Ryzen 9 5950X from five measured
+iterations per sub-benchmark using `make benchmark-selective-restore-c224`.
+The selected result is intentionally reported as a tradeoff: it produces a
+smaller restored snapshot, but the current correctness-first implementation
+does extra load/write/verify work.
+
+| Format | Path | Time | Relative CPU | Snapshot bytes | Size change | Heap | Heap change | Allocs | Alloc change |
+| --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- |
+| JSON | Full | 10.21 ms | baseline | 397,350 | baseline | 3,953,232 B/op | baseline | 78,273 | baseline |
+| JSON | Selected `sg` | 16.60 ms | 1.63x slower | 198,694 | 2.00x smaller | 6,722,060 B/op | 1.70x higher | 156,169 | 2.00x higher |
+| Binary | Full | 7.34 ms | baseline | 167,943 | baseline | 2,894,438 B/op | baseline | 29,132 | baseline |
+| Binary | Selected `sg` | 10.30 ms | 1.40x slower | 83,975 | 2.00x smaller | 3,742,153 B/op | 1.29x higher | 39,464 | 1.35x higher |
+
+Raw result:
+
+```text
+BenchmarkBackupBundleRestorePartitionSelection/json/full-32       5  10206595 ns/op  397350 snapshot_bytes  3953232 B/op   78273 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/selected-32    5  16601852 ns/op  198694 snapshot_bytes  6722060 B/op  156169 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/full-32      5   7336429 ns/op  167943 snapshot_bytes  2894438 B/op   29132 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/selected-32  5  10297303 ns/op   83975 snapshot_bytes  3742153 B/op   39464 allocs/op
+```
+
+Correctness and safety coverage runs through
+`make test-selective-restore-c224`,
+`make test-selective-restore-package-c224`,
+`make test-selective-restore-cli-c224`,
+`make race-selective-restore-c224`, and
+`make vet-selective-restore-c224`. The feature is opt-in and does not alter
+ordinary full restores.

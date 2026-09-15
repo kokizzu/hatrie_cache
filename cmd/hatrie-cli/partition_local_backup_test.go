@@ -84,3 +84,46 @@ func TestRunRestoreBundlePartitionSelectorRestoresOnlySelectedRegion(t *testing.
 		t.Fatalf("restored foreign value = %q, want missing", got)
 	}
 }
+
+func TestRunRestoreBundlePartitionSubsetRestoresOnlySelectedRegion(t *testing.T) {
+	trie := hatCache.CreateHatTrie()
+	defer trie.Destroy()
+	trie.UpsertString("region:sg/key", "local")
+	trie.UpsertString("region:us/key", "foreign")
+	bundlePath := filepath.Join(t.TempDir(), "regions.tar.gz")
+	if _, err := hatCache.CreateBackupBundle(bundlePath, trie, nil, hatCache.BackupBundleOptions{
+		Mode:           hatCache.BackupModeSnapshot,
+		SnapshotFormat: hatCache.SnapshotFormatBinary,
+		Partition: hatCache.BackupPartitionMetadata{
+			Mode:        "partitioned",
+			Local:       true,
+			Partitions:  []string{"sg", "us"},
+			KeyPrefixes: []string{"region:sg/", "region:us/"},
+		},
+		PartitionLocal: true,
+	}); err != nil {
+		t.Fatalf("CreateBackupBundle() error = %v", err)
+	}
+
+	dataDir := filepath.Join(t.TempDir(), "restored")
+	var stdout, stderr bytes.Buffer
+	if err := runRestoreBundle([]string{
+		"-bundle", bundlePath,
+		"-data-dir", dataDir,
+		"-partitions", "sg",
+		"-partition-prefixes", "region:sg/",
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("runRestoreBundle() error = %v; stderr=%s", err, stderr.String())
+	}
+	restored := hatCache.CreateHatTrie()
+	defer restored.Destroy()
+	if err := restored.LoadSnapshot(filepath.Join(dataDir, "snapshot.hc")); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if got := restored.GetString("region:sg/key"); got != "local" {
+		t.Fatalf("restored local value = %q, want local", got)
+	}
+	if got := restored.GetString("region:us/key"); got != "" {
+		t.Fatalf("restored foreign value = %q, want missing", got)
+	}
+}

@@ -129,36 +129,58 @@ func NormalizePartitionMetadata(input PartitionMetadata) (*PartitionMetadata, er
 // region-local backup with matching partition coverage. A nil selector keeps
 // the historical restore behavior and accepts any valid backup.
 func ValidatePartitionRestore(manifest BundleManifest, requested *PartitionMetadata) error {
+	_, err := ValidatePartitionRestoreSelection(manifest, requested)
+	return err
+}
+
+// ValidatePartitionRestoreSelection validates a restore selector and reports
+// whether the selector is a strict partition subset that needs filtering.
+func ValidatePartitionRestoreSelection(manifest BundleManifest, requested *PartitionMetadata) (bool, error) {
 	if requested == nil {
-		return nil
+		return false, nil
 	}
 	selector, err := NormalizePartitionMetadata(*requested)
 	if err != nil {
-		return fmt.Errorf("hatriecache: partition selector: %w", err)
+		return false, fmt.Errorf("hatriecache: partition selector: %w", err)
 	}
 	if selector == nil {
-		return errors.New("hatriecache: partition selector is empty")
+		return false, errors.New("hatriecache: partition selector is empty")
 	}
 	if manifest.Partition == nil || !manifest.Partition.Local {
-		return errors.New("hatriecache: partition selector requires a region-local backup")
+		return false, errors.New("hatriecache: partition selector requires a region-local backup")
 	}
 	backup, err := NormalizePartitionMetadata(*manifest.Partition)
 	if err != nil {
-		return fmt.Errorf("hatriecache: partition selector: invalid backup metadata: %w", err)
-	}
-	if !sameStringSet(selector.Partitions, backup.Partitions) {
-		return fmt.Errorf("hatriecache: partition selector does not match backup partitions")
-	}
-	if len(selector.KeyPrefixes) > 0 && !sameStringSet(selector.KeyPrefixes, backup.KeyPrefixes) {
-		return fmt.Errorf("hatriecache: partition selector does not match backup key prefixes")
+		return false, fmt.Errorf("hatriecache: partition selector: invalid backup metadata: %w", err)
 	}
 	if selector.TopologyEpoch != 0 && selector.TopologyEpoch != backup.TopologyEpoch {
-		return fmt.Errorf("hatriecache: partition selector topology epoch does not match backup")
+		return false, fmt.Errorf("hatriecache: partition selector topology epoch does not match backup")
 	}
 	if selector.TopologyFingerprint != "" && selector.TopologyFingerprint != backup.TopologyFingerprint {
-		return fmt.Errorf("hatriecache: partition selector topology fingerprint does not match backup")
+		return false, fmt.Errorf("hatriecache: partition selector topology fingerprint does not match backup")
 	}
-	return nil
+	if sameStringSet(selector.Partitions, backup.Partitions) {
+		if len(selector.KeyPrefixes) > 0 && !sameStringSet(selector.KeyPrefixes, backup.KeyPrefixes) {
+			return false, fmt.Errorf("hatriecache: partition selector does not match backup key prefixes")
+		}
+		return false, nil
+	}
+	if !isStringSubset(selector.Partitions, backup.Partitions) {
+		return false, fmt.Errorf("hatriecache: partition selector does not match backup partitions")
+	}
+	if len(selector.KeyPrefixes) == 0 {
+		return false, errors.New("hatriecache: partition selector subset requires key prefixes")
+	}
+	if len(backup.KeyPrefixes) == 0 {
+		return false, errors.New("hatriecache: partition subset backup is missing key prefixes")
+	}
+	if len(selector.Partitions) != len(selector.KeyPrefixes) || len(backup.Partitions) != len(backup.KeyPrefixes) {
+		return false, errors.New("hatriecache: partition subset requires one key prefix per partition")
+	}
+	if !isPartitionCoverageSubset(selector, backup) {
+		return false, errors.New("hatriecache: partition selector does not match backup partition key prefixes")
+	}
+	return true, nil
 }
 
 // ClonePartitionMetadata returns an independent copy of metadata.
@@ -202,6 +224,39 @@ func sameStringSet(left []string, right []string) bool {
 	}
 	for _, value := range right {
 		if _, ok := seen[value]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func isStringSubset(subset []string, superset []string) bool {
+	if len(subset) > len(superset) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(superset))
+	for _, value := range superset {
+		seen[value] = struct{}{}
+	}
+	for _, value := range subset {
+		if _, ok := seen[value]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func isPartitionCoverageSubset(selector *PartitionMetadata, backup *PartitionMetadata) bool {
+	type coverage struct {
+		partition string
+		prefix    string
+	}
+	available := make(map[coverage]struct{}, len(backup.Partitions))
+	for index, partition := range backup.Partitions {
+		available[coverage{partition: partition, prefix: backup.KeyPrefixes[index]}] = struct{}{}
+	}
+	for index, partition := range selector.Partitions {
+		if _, ok := available[coverage{partition: partition, prefix: selector.KeyPrefixes[index]}]; !ok {
 			return false
 		}
 	}

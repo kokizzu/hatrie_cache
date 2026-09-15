@@ -15392,3 +15392,31 @@ commit-tdigest-aggregate-state-c223:
 
 push-tdigest-aggregate-state-c223:
 	bash ./scripts/push-tdigest-aggregate-state-c223.sh
+
+# C224 selective partition restore
+
+.PHONY: test-selective-restore-c224 benchmark-selective-restore-c224 test-selective-restore-package-c224 race-selective-restore-c224 test-selective-restore-cli-c224 vet-selective-restore-c224 format-selective-restore-c224 check-selective-restore-c224
+
+test-selective-restore-c224:
+	bash ./scripts/run-selective-restore-c224.sh
+
+benchmark-selective-restore-c224:
+	bash ./scripts/run-selective-restore-c224.sh benchmark
+
+test-selective-restore-package-c224:
+	bash ./scripts/run-selective-restore-c224.sh package
+
+race-selective-restore-c224:
+	bash ./scripts/run-selective-restore-c224.sh race
+
+test-selective-restore-cli-c224:
+	bash ./scripts/run-selective-restore-c224.sh cli
+
+vet-selective-restore-c224:
+	bash ./scripts/run-selective-restore-c224.sh vet
+
+format-selective-restore-c224:
+	bash ./scripts/format-selective-restore-c224.sh
+
+check-selective-restore-c224:
+	bash ./scripts/check-selective-restore-c224.sh

@@ -1154,6 +1154,21 @@ checkpoint, they are skipped; if a follower asks for a journal range older than
 the checkpoint, `/api/journal` returns `409` and the follower must fall back to a
 snapshot or an explicit replication sync.
 
+For a region-local snapshot bundle that covers multiple partitions, restore an
+opt-in strict subset by supplying one partition and its matching key prefix:
+
+```
+make cli ARGS='restore-bundle -bundle backup/regions.tar.gz -data-dir data -partitions sg -partition-prefixes region:sg/'
+```
+
+Subset restore is snapshot-only and requires the partition/prefix pairs declared
+by the bundle. Journal-bearing bundles and Pebble checkpoint/repository subset
+restores are rejected before the destination is changed; use a full restore or
+create a snapshot bundle without journal replay. The default restore path and
+exact full-partition selectors are unchanged. `restore-rehearsal` currently
+rejects strict subset selectors so its source and restored checksums remain
+comparable.
+
 Restore LevelDB data by restoring the directory and starting with `DB_PATH`:
 
 ```
