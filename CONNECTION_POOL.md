@@ -70,3 +70,9 @@ reuse is about 43 ns/op with zero steady-state allocations; the direct stub
 control is about 3.6 ns/op. Real connection setup, TLS, and authentication are
 outside this microbenchmark and are the reason to use the pool. See the raw
 samples and limitation in [BENCHMARK.md](BENCHMARK.md#connection-pool-reuse).
+
+The C212 idle-receive fast path removes a redundant mutex acquisition from the
+nonblocking reuse check while retaining the close checks and all capacity
+accounting. On the same host it reduced the median acquire/release cost from
+49.28 ns/op to 41.09 ns/op (`1.20x` faster), with zero bytes and allocations in
+both versions. See [CONNECTION_POOL_IDLE_FASTPATH.md](CONNECTION_POOL_IDLE_FASTPATH.md).

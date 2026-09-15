@@ -14969,3 +14969,26 @@ commit-roaring-lookup-fastpath-c211:
 
 push-roaring-lookup-fastpath-c211:
 	bash ./scripts/push-roaring-lookup-fastpath-c211.sh
+test-connection-pool-c212:
+	@bash ./scripts/test-connection-pool-c212.sh
+
+benchmark-connection-pool-c212:
+	@bash ./scripts/benchmark-connection-pool-c212.sh
+
+format-connection-pool-c212:
+	@bash ./scripts/format-connection-pool-c212.sh
+
+verify-connection-pool-c212:
+	@bash ./scripts/verify-connection-pool-c212.sh
+
+inspect-connection-pool-diff-c212:
+	@bash ./scripts/inspect-connection-pool-diff-c212.sh
+
+stage-connection-pool-c212:
+	@bash ./scripts/stage-connection-pool-c212.sh
+
+commit-connection-pool-c212:
+	@bash ./scripts/commit-connection-pool-c212.sh
+
+push-connection-pool-c212:
+	@bash ./scripts/push-connection-pool-c212.sh

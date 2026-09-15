@@ -232,11 +232,8 @@ func (pool *ConnectionPool[T]) Close() error {
 
 func (pool *ConnectionPool[T]) tryIdle() (T, bool) {
 	var zero T
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	if pool.closedState {
-		return zero, false
-	}
+	// The channel receive synchronizes idle ownership; Acquire checks Close
+	// before and after this receive, so a mutex is unnecessary on this path.
 	select {
 	case connection := <-pool.idle:
 		return connection, true

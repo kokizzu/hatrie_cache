@@ -16996,6 +16996,23 @@ enforcing `MaxOpen`; the synthetic direct control is intentionally too cheap to
 represent that setup. No production network speedup is inferred from this
 microbenchmark.
 
+### C212 idle-receive fast path
+
+Command: `make benchmark-connection-pool-c212`.
+
+This compares the previous mutex-protected nonblocking idle receive with the
+channel-only receive. Both runs use the same warmed single-connection pool,
+five samples, and `-benchmem` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Idle acquire + release | 49.28 ns/op | 41.09 ns/op | **1.20x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+| Direct dial + close control | 3.761 ns/op | 3.584 ns/op | control noise | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+
+Raw idle samples were `46.19, 50.45, 49.28, 51.37, 48.46 ns/op` before and
+`42.76, 39.50, 41.55, 41.09, 40.55 ns/op` after. The optimization changes no
+public pool behavior and has no measured memory or allocation cost.
+
 Raw samples:
 
 ```text
