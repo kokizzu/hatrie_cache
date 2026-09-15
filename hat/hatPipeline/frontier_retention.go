@@ -1,6 +1,7 @@
 package hatPipeline
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"sync"
@@ -81,6 +82,7 @@ type FrontierRetentionRegistry struct {
 	leaseCount int
 	closed     bool
 	states     map[string]*frontierRetentionState
+	notify     chan struct{}
 }
 
 // NewFrontierRetentionRegistry creates an as-of retention registry bound to
@@ -169,11 +171,13 @@ func (registry *FrontierRetentionRegistry) Release(lease FrontierRetentionLease)
 	registry.leaseCount--
 	if len(state.leases) == 0 {
 		delete(registry.states, lease.FrontierID)
+		registry.signalLocked()
 		return nil
 	}
 	if lease.AsOf == state.minimum {
 		if state.blockingLeaseCount > 1 {
 			state.blockingLeaseCount--
+			registry.signalLocked()
 			return nil
 		}
 		state.minimum = 0
@@ -187,6 +191,7 @@ func (registry *FrontierRetentionRegistry) Release(lease FrontierRetentionLease)
 			}
 		}
 	}
+	registry.signalLocked()
 	return nil
 }
 
@@ -205,14 +210,19 @@ func (registry *FrontierRetentionRegistry) SafeCompactionBefore(frontierID strin
 		return 0, ErrFrontierRetentionClosed
 	}
 	state := registry.states[frontierID]
+	minimum := uint64(0)
+	hasState := state != nil
+	if hasState {
+		minimum = state.minimum
+	}
 	registry.mu.RUnlock()
 	snapshot, err := registry.frontierSnapshot(frontierID)
 	if err != nil {
 		return 0, err
 	}
 	safe := snapshot.Lower
-	if state != nil && state.minimum < safe {
-		safe = state.minimum
+	if hasState && minimum < safe {
+		safe = minimum
 	}
 	return safe, nil
 }
@@ -225,6 +235,52 @@ func (registry *FrontierRetentionRegistry) CanCompactBefore(frontierID string, b
 		return false, err
 	}
 	return boundary <= safe, nil
+}
+
+// WaitUntilSafe waits until history strictly before boundary may be removed
+// for frontierID. It wakes on frontier progress and retention-lease release;
+// it does not consume a Scheduler worker while waiting.
+func (registry *FrontierRetentionRegistry) WaitUntilSafe(ctx context.Context, frontierID string, boundary uint64) error {
+	if registry == nil {
+		return ErrFrontierRetentionRegistryNil
+	}
+	if frontierID == "" {
+		return ErrFrontierIDEmpty
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		safe, err := registry.SafeCompactionBefore(frontierID)
+		if err != nil {
+			return err
+		}
+		if boundary <= safe {
+			return nil
+		}
+		frontier, err := registry.frontierSnapshot(frontierID)
+		if err != nil {
+			return err
+		}
+		if frontier.Lower < boundary {
+			if err := registry.frontiers.WaitUntil(ctx, frontierID, boundary); err != nil {
+				return err
+			}
+			continue
+		}
+		notify, wait, err := registry.retentionWaitChannel(frontierID, boundary)
+		if err != nil {
+			return err
+		}
+		if !wait {
+			continue
+		}
+		select {
+		case <-notify:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Snapshot reports active retention for one registered frontier.
@@ -244,6 +300,7 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	leaseCount := 0
 	minimum := uint64(0)
 	blockingLeaseCount := 0
+	hasState := state != nil
 	if state != nil {
 		leaseCount = len(state.leases)
 		minimum = state.minimum
@@ -258,14 +315,14 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	if state != nil && minimum < safe {
 		safe = minimum
 	}
-	if state == nil {
+	if !hasState {
 		minimum = frontier.Lower
 	}
 	debt := uint64(0)
 	blockedByLease := false
 	if safe < frontier.Lower {
 		debt = frontier.Lower - safe
-		blockedByLease = state != nil && minimum < frontier.Lower
+		blockedByLease = hasState && minimum < frontier.Lower
 	}
 	if !blockedByLease {
 		blockingLeaseCount = 0
@@ -345,8 +402,32 @@ func (registry *FrontierRetentionRegistry) Close() error {
 	registry.closed = true
 	registry.states = nil
 	registry.leaseCount = 0
+	registry.signalLocked()
 	registry.mu.Unlock()
 	return nil
+}
+
+func (registry *FrontierRetentionRegistry) retentionWaitChannel(frontierID string, boundary uint64) (<-chan struct{}, bool, error) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.closed {
+		return nil, false, ErrFrontierRetentionClosed
+	}
+	state := registry.states[frontierID]
+	if state == nil || state.minimum >= boundary {
+		return nil, false, nil
+	}
+	if registry.notify == nil {
+		registry.notify = make(chan struct{})
+	}
+	return registry.notify, true, nil
+}
+
+func (registry *FrontierRetentionRegistry) signalLocked() {
+	if registry.notify != nil {
+		close(registry.notify)
+		registry.notify = nil
+	}
 }
 
 func (registry *FrontierRetentionRegistry) checkTimestamp(frontierID string, asOf uint64) error {

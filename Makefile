@@ -15578,3 +15578,43 @@ commit-mz002-c226:
 	bash ./scripts/commit-mz002-c226.sh
 push-mz002-c226:
 	bash ./scripts/push-mz002-c226.sh
+
+.PHONY: inspect-mz003-c227
+inspect-mz003-c227:
+	bash ./scripts/inspect-mz003-c227.sh
+
+.PHONY: test-mz003-c227
+test-mz003-c227:
+	bash ./scripts/run-mz003-c227.sh
+
+.PHONY: inspect-mz003-docs-c227
+inspect-mz003-docs-c227:
+	bash ./scripts/inspect-mz003-docs-c227.sh
+
+.PHONY: inspect-benchmark-tail-mz003-c227
+inspect-benchmark-tail-mz003-c227:
+	bash ./scripts/inspect-benchmark-tail-mz003-c227.sh
+
+.PHONY: race-mz003-c227
+race-mz003-c227:
+	bash ./scripts/race-mz003-c227.sh
+
+.PHONY: race-mz003-package-c227
+race-mz003-package-c227:
+	bash ./scripts/race-mz003-package-c227.sh
+
+.PHONY: vet-mz003-c227
+vet-mz003-c227:
+	bash ./scripts/vet-mz003-c227.sh
+
+.PHONY: benchmark-mz003-c227
+benchmark-mz003-c227:
+	bash ./scripts/benchmark-mz003-c227.sh
+
+.PHONY: test-mz003-package-c227
+test-mz003-package-c227:
+	bash ./scripts/test-mz003-package-c227.sh
+
+.PHONY: format-mz003-c227
+format-mz003-c227:
+	bash ./scripts/format-mz003-c227.sh

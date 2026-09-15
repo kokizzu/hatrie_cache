@@ -26166,3 +26166,38 @@ BenchmarkBackupBundleRestorePartitionSelection/binary/selected-32               
 BenchmarkBackupBundleRestorePartitionSelection/binary/selected-checkpoint-journal-32  5  12806383 ns/op   84021 snapshot_bytes  3813022 B/op   39612 allocs/op
 BenchmarkBackupBundleRestorePartitionSelection/binary/selected-replay-tail-32         5  13730180 ns/op   86646 snapshot_bytes  3882670 B/op   40922 allocs/op
 ```
+
+<a id="mz-003-frontier-aware-compaction-admission"></a>
+## MZ-003 Frontier-Aware Compaction Admission
+
+This compares the existing direct `CanCompactBefore` check with the new
+opt-in `FrontierRetentionRegistry.WaitUntilSafe` fast path on Linux `amd64`,
+an AMD Ryzen 9 5950X, and five samples using `-benchtime=200ms -benchmem`.
+Both paths use a registered frontier already advanced to lower `100` and a
+boundary of `100`, so this measures the non-blocking admission overhead rather
+than waiting time.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU | Memory |
+| --- | ---: | ---: | ---: | --- | --- |
+| Existing `CanCompactBefore` baseline | 38.43 | 0 | 0 | baseline | baseline |
+| `WaitUntilSafe` | 46.40 | 0 | 0 | 1.21x slower | unchanged |
+
+The new call costs about `8 ns` or `21%` on an already-safe maintenance check,
+with no allocations. This cost applies only when the new API is used; existing
+compaction callers and defaults are unchanged. The gain is correctness and
+coordination: lagging frontiers and active read leases block before work enters
+the worker queue, rather than relying on polling or caller-side checks. Raw
+samples:
+
+```text
+BenchmarkMZ003CompactionAdmissionBaseline-32  6247426  38.10 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionBaseline-32  6240976  38.18 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionBaseline-32  5453246  38.43 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionBaseline-32  5551965  43.40 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionBaseline-32  5627078  42.83 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionAfter-32     5210857  46.40 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionAfter-32     5224218  46.79 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionAfter-32     5216364  40.28 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionAfter-32     5141236  47.15 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ003CompactionAdmissionAfter-32     5139253  41.38 ns/op  0 B/op  0 allocs/op
+```
