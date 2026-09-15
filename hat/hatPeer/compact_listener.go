@@ -26,6 +26,9 @@ var (
 const (
 	// CompactPeerHandshakeVersion1 is the first listener handshake version.
 	CompactPeerHandshakeVersion1 uint8 = 1
+	// CompactPeerFeaturePayloadCompression permits compressed compact payloads
+	// after both peers advertise and negotiate the feature.
+	CompactPeerFeaturePayloadCompression uint32 = 1 << 31
 
 	DefaultCompactPeerHandshakeTimeout       = 5 * time.Second
 	DefaultCompactPeerListenerMaxConnections = 256
@@ -125,6 +128,9 @@ func NewCompactPeerListener(listener net.Listener, options CompactPeerListenerOp
 	}
 	if handshake.Version != CompactPeerHandshakeVersion1 {
 		return nil, ErrCompactPeerListenerOptionsInvalid
+	}
+	if options.Session.Protocol.CompressPayloadsAbove > 0 {
+		handshake.Features |= CompactPeerFeaturePayloadCompression
 	}
 	options.Handshake = handshake
 	parent := options.Session.Context
@@ -290,10 +296,11 @@ func (server *CompactPeerListener) serveConnection(conn net.Conn) {
 		<-server.slots
 		_ = conn.Close()
 	}()
-	if _, err := server.negotiate(conn); err != nil {
+	negotiated, err := server.negotiate(conn)
+	if err != nil {
 		return
 	}
-	sessionOptions := server.options.Session
+	sessionOptions := CompactPeerSessionOptionsForNegotiatedHandshake(server.options.Session, negotiated)
 	sessionOptions.Context = server.context
 	session, err := NewCompactPeerSession(conn, sessionOptions)
 	if err != nil {

@@ -14678,3 +14678,35 @@ commit-ch051-c203:
 
 push-ch051-c203:
 	bash ./scripts/push-ch051-c203.sh
+
+.PHONY: test-tr051-c203
+test-tr051-c203:
+	@bash ./scripts/test-tr051-c203.sh
+
+.PHONY: benchmark-tr051-c203
+benchmark-tr051-c203:
+	@bash ./scripts/benchmark-tr051-c203.sh
+
+.PHONY: format-tr051-c203
+format-tr051-c203:
+	@bash ./scripts/format-tr051-c203.sh
+
+.PHONY: verify-tr051-c203
+verify-tr051-c203:
+	@bash ./scripts/verify-tr051-c203.sh
+
+.PHONY: stage-tr051-c203
+stage-tr051-c203:
+	@bash ./scripts/stage-tr051-c203.sh
+
+.PHONY: inspect-staged-tr051-c203
+inspect-staged-tr051-c203:
+	@bash ./scripts/inspect-staged-tr051-c203.sh
+
+.PHONY: commit-tr051-c203
+commit-tr051-c203:
+	@bash ./scripts/commit-tr051-c203.sh
+
+.PHONY: push-tr051-c203
+push-tr051-c203:
+	@bash ./scripts/push-tr051-c203.sh

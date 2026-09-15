@@ -60,6 +60,17 @@ type CompactPeerSessionOptions struct {
 	EnableRequestCancellation bool
 }
 
+// CompactPeerSessionOptionsForNegotiatedHandshake returns session options
+// compatible with a completed peer handshake. Compression is disabled when
+// the peer did not negotiate CompactPeerFeaturePayloadCompression. Direct
+// sessions created without a handshake keep their existing behavior.
+func CompactPeerSessionOptionsForNegotiatedHandshake(options CompactPeerSessionOptions, handshake CompactPeerHandshake) CompactPeerSessionOptions {
+	if handshake.Features&CompactPeerFeaturePayloadCompression == 0 {
+		options.Protocol.CompressPayloadsAbove = 0
+	}
+	return options
+}
+
 // CompactPeerSession adapts CompactProtocol and CompactMultiplexer to a
 // bidirectional net.Conn. It supports concurrent out-of-order calls and
 // inbound requests on the same connection. It is deliberately an embedded,

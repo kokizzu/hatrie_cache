@@ -1,6 +1,7 @@
 package hatPeer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -213,5 +214,129 @@ func TestCompactPeerListenerValidatesBoundsAndVersion(t *testing.T) {
 		if _, err := NewCompactPeerListener(listener, options); !errors.Is(err, ErrCompactPeerListenerOptionsInvalid) {
 			t.Fatalf("NewCompactPeerListener(%#v) error = %v, want options error", options, err)
 		}
+	}
+}
+
+func TestCompactPeerSessionOptionsForNegotiatedHandshake(t *testing.T) {
+	configured := CompactPeerSessionOptions{
+		Protocol: CompactProtocolOptions{CompressPayloadsAbove: 128},
+	}
+
+	withoutCompression := CompactPeerSessionOptionsForNegotiatedHandshake(configured, CompactPeerHandshake{
+		Version: CompactPeerHandshakeVersion1,
+	})
+	if withoutCompression.Protocol.CompressPayloadsAbove != 0 {
+		t.Fatalf("unnegotiated compression threshold = %d, want disabled", withoutCompression.Protocol.CompressPayloadsAbove)
+	}
+	if configured.Protocol.CompressPayloadsAbove != 128 {
+		t.Fatalf("options were mutated: %#v", configured)
+	}
+
+	withCompression := CompactPeerSessionOptionsForNegotiatedHandshake(configured, CompactPeerHandshake{
+		Version:  CompactPeerHandshakeVersion1,
+		Features: CompactPeerFeaturePayloadCompression,
+	})
+	if withCompression.Protocol.CompressPayloadsAbove != 128 {
+		t.Fatalf("negotiated compression threshold = %d, want 128", withCompression.Protocol.CompressPayloadsAbove)
+	}
+}
+
+func TestCompactPeerListenerAdvertisesConfiguredCompression(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	defer listener.Close()
+	server, err := NewCompactPeerListener(listener, CompactPeerListenerOptions{
+		Authorize: func(context.Context, net.Conn, CompactPeerHandshake) error { return nil },
+		Session: CompactPeerSessionOptions{
+			Protocol: CompactProtocolOptions{CompressPayloadsAbove: 128},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewCompactPeerListener() error = %v", err)
+	}
+	if server.options.Handshake.Features&CompactPeerFeaturePayloadCompression == 0 {
+		t.Fatalf("listener handshake features = %#x, want compression feature", server.options.Handshake.Features)
+	}
+}
+
+func TestCompactPeerListenerAppliesNegotiatedCompression(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		features       uint32
+		wantCompressed bool
+	}{
+		{name: "peer does not advertise", features: 0},
+		{name: "peer advertises", features: CompactPeerFeaturePayloadCompression, wantCompressed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("net.Listen() error = %v", err)
+			}
+			defer listener.Close()
+			server, err := NewCompactPeerListener(listener, CompactPeerListenerOptions{
+				Authorize: func(context.Context, net.Conn, CompactPeerHandshake) error { return nil },
+				Session: CompactPeerSessionOptions{
+					Protocol: CompactProtocolOptions{CompressPayloadsAbove: 1},
+					Handler: func(context.Context, CompactFrame) (CompactFrame, error) {
+						return CompactFrame{Payload: bytes.Repeat([]byte("payload"), 256)}, nil
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("NewCompactPeerListener() error = %v", err)
+			}
+			serveDone := make(chan error, 1)
+			go func() { serveDone <- server.Serve(context.Background()) }()
+
+			conn, err := net.Dial("tcp", listener.Addr().String())
+			if err != nil {
+				t.Fatalf("net.Dial() error = %v", err)
+			}
+			defer conn.Close()
+			negotiated, err := PerformCompactPeerHandshake(context.Background(), conn, CompactPeerHandshakeOptions{Features: test.features, Timeout: time.Second})
+			if err != nil {
+				t.Fatalf("PerformCompactPeerHandshake() error = %v", err)
+			}
+			if test.wantCompressed != (negotiated.Features&CompactPeerFeaturePayloadCompression != 0) {
+				t.Fatalf("negotiated features = %#x, want compression=%t", negotiated.Features, test.wantCompressed)
+			}
+			protocol, err := NewCompactProtocol(CompactProtocolOptions{})
+			if err != nil {
+				t.Fatalf("NewCompactProtocol() error = %v", err)
+			}
+			if err := protocol.Write(conn, CompactFrame{
+				Kind:      CompactRequest,
+				RequestID: 1,
+				Command:   []byte("ECHO"),
+				Payload:   []byte("request"),
+			}); err != nil {
+				t.Fatalf("protocol.Write() error = %v", err)
+			}
+			response, err := protocol.Read(conn)
+			if err != nil {
+				t.Fatalf("protocol.Read() error = %v", err)
+			}
+			gotCompressed := response.Flags&CompactFrameFlagPayloadCompressed != 0
+			if gotCompressed != test.wantCompressed {
+				t.Fatalf("response flags = %#x, want compressed=%t", response.Flags, test.wantCompressed)
+			}
+			if !bytes.Equal(response.Payload, bytes.Repeat([]byte("payload"), 256)) {
+				t.Fatalf("response payload was not restored")
+			}
+			if err := server.Close(); err != nil {
+				t.Fatalf("server.Close() error = %v", err)
+			}
+			select {
+			case err := <-serveDone:
+				if !errors.Is(err, ErrCompactPeerListenerClosed) {
+					t.Fatalf("Serve() error = %v, want closed error", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Serve() did not stop after Close()")
+			}
+		})
 	}
 }

@@ -25066,8 +25066,9 @@ The opt-in compact peer adapter now compresses payloads at or above
 `CompactProtocolOptions.CompressPayloadsAbove`, and bounds decompression with
 `MaxDecompressedPayloadBytes`. The default threshold is `0`, so existing
 connections stay uncompressed. The reader accepts plain and flagged gzip
-frames; all peers using compression must support the compact frame flag because
-this change does not add a capability handshake yet.
+frames. Listener-managed sessions now negotiate
+`CompactPeerFeaturePayloadCompression` before enabling the compression policy;
+direct sessions remain unchanged.
 
 Three-run local benchmark on a 12.3 KiB highly repetitive payload, using gzip
 best-speed with a four-writer cache:
@@ -25095,6 +25096,38 @@ BenchmarkCompactProtocolPayloadWire/plain: 2138, 2029, 1995 ns/op; 12304 wire-B;
 BenchmarkCompactProtocolPayloadWire/gzip: 9418, 9490, 9036 ns/op; 147 wire-B; 656 B/op; 5 allocs/op
 BenchmarkCompactProtocolPayloadRead/plain: 2417, 2358, 2418 ns/op; 12299 wire-B; 13632 B/op; 3 allocs/op
 BenchmarkCompactProtocolPayloadRead/gzip: 18763, 18662, 19646 ns/op; 142 wire-B; 67960 B/op; 21 allocs/op
+```
+
+## TR-051 Compact Peer Capability Negotiation
+
+The listener now advertises a named high-order compression capability when its
+session compression policy is configured. It intersects client and server
+bits, disables compression for a peer that did not advertise the bit, and
+provides `CompactPeerSessionOptionsForNegotiatedHandshake` for explicit client
+session construction. Existing direct sessions and the fixed-size handshake
+format are unchanged.
+
+Five-sample local handshake benchmark on Linux/amd64 with an in-memory
+`net.Conn`:
+
+| Path | Median CPU | Memory/op | Allocs/op | Request/response bytes | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing feature mask | 306.7 ns/op | 240 B | 7 | 9 / 10 | 1.00x |
+| Compression feature bit | 296.2 ns/op | 240 B | 7 | 9 / 10 | 0.97x |
+
+The 3.4% lower median is within normal benchmark noise; there is no measured
+steady-state cost because the feature is checked once while constructing the
+session. The operational tradeoff is one existing fixed handshake exchange;
+the benefit is compatibility with peers that do not support compressed frame
+flags. Compression itself keeps the TR-044 CPU and memory tradeoff.
+
+Command: `make benchmark-tr051-c203`
+
+Raw samples:
+
+```text
+BenchmarkPerformCompactPeerHandshake: 296.3, 319.1, 300.0, 311.2, 306.7 ns/op; 240 B/op; 7 allocs/op
+BenchmarkPerformCompactPeerHandshakeWithCompressionFeature: 297.3, 297.3, 292.2, 296.2, 292.1 ns/op; 240 B/op; 7 allocs/op
 ```
 
 ## CH-051 Low-Cardinality String Columns

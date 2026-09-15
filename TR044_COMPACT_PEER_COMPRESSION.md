@@ -20,10 +20,34 @@ compressed payloads, and readers enforce `MaxDecompressedPayloadBytes` before
 returning the inflated payload. This bounds memory use against compressed
 payload expansion.
 
-The compact adapter accepts both plain and compressed frames, but it does not
-perform a capability handshake. Enable compression only when every peer on
-that connection understands the flag. Existing sessions remain plain because
-the default is off.
+Direct compact sessions continue to accept both plain and compressed frames,
+but they do not perform a capability handshake. For listener-managed sessions,
+the listener advertises `CompactPeerFeaturePayloadCompression` automatically
+when compression is configured and only enables compression after the peer
+advertises the same bit. A peer that does not negotiate the bit receives plain
+frames. Existing direct sessions remain unchanged and the default is still
+off.
+
+Client code that performs the handshake explicitly should apply the returned
+features before creating its session:
+
+```go
+sessionOptions := hatPeer.CompactPeerSessionOptions{
+    Protocol: hatPeer.CompactProtocolOptions{CompressPayloadsAbove: 1024},
+}
+negotiated, err := hatPeer.PerformCompactPeerHandshake(ctx, conn, hatPeer.CompactPeerHandshakeOptions{
+    Features: hatPeer.CompactPeerFeaturePayloadCompression,
+})
+if err != nil {
+    return err
+}
+sessionOptions = hatPeer.CompactPeerSessionOptionsForNegotiatedHandshake(sessionOptions, negotiated)
+session, err := hatPeer.NewCompactPeerSession(conn, sessionOptions)
+```
+
+The capability bit is high-order so it does not collide with older callers'
+low-order application feature bits. Unknown feature bits continue to be
+ignored through the existing intersection negotiation.
 
 Compression is useful when the link is bandwidth-bound and payloads repeat
 well. It is not a general latency optimization: the measured 12.3 KiB

@@ -7,6 +7,9 @@ handshake before `CompactPeerSession` is created:
 - version negotiation rejects unsupported protocol versions;
 - feature negotiation returns the intersection of client and server feature
   bits;
+- configured payload compression is advertised through
+  `CompactPeerFeaturePayloadCompression` and is enabled only after the peer
+  negotiates that bit;
 - a mandatory authorization callback decides whether the connection may start;
 - `MaxConnections` reserves an admission slot before a handler goroutine is
   created;
@@ -52,13 +55,25 @@ The client performs the same handshake before creating its session:
 
 ```go
 negotiated, err := hatPeer.PerformCompactPeerHandshake(ctx, conn, hatPeer.CompactPeerHandshakeOptions{
-    Features: 0x03,
+    Features: hatPeer.CompactPeerFeaturePayloadCompression,
 })
 if err != nil {
     return err
 }
-session, err := hatPeer.NewCompactPeerSession(conn, hatPeer.CompactPeerSessionOptions{})
+sessionOptions := hatPeer.CompactPeerSessionOptions{
+    Protocol: hatPeer.CompactProtocolOptions{CompressPayloadsAbove: 1024},
+}
+sessionOptions = hatPeer.CompactPeerSessionOptionsForNegotiatedHandshake(sessionOptions, negotiated)
+session, err := hatPeer.NewCompactPeerSession(conn, sessionOptions)
 ```
+
+The listener automatically adds the compression feature to its advertised
+server bits when `Session.Protocol.CompressPayloadsAbove` is positive. If the
+client does not advertise the bit, the listener keeps that session plain. A
+client using `PerformCompactPeerHandshake` must apply the returned handshake
+with `CompactPeerSessionOptionsForNegotiatedHandshake` before constructing its
+session. Direct sessions that skip the handshake retain their existing
+compression settings.
 
 Version zero selects version 1. The default handshake timeout is five seconds.
 The default listener limit is 256 concurrent accepted connections. Both values

@@ -189,13 +189,14 @@ before/after measurement when its motivation is performance.
 | TR-41 | Net.box-style request multiplexing | Reuse one connection for concurrent calls | Ordering and head-of-line blocking | [ ] |
 | TR-42 | Net.box streaming cursors with backpressure | Process large reads incrementally | Cursor ownership | [ ] |
 | TR-43 | IProto prepared request IDs and response schemas | Reduce repeated parsing | Schema negotiation | [ ] |
-| TR-44 | IProto compression negotiation per request class | Save bandwidth selectively | CPU and protocol fallback | [x] Compact peer payloads support threshold-based gzip with an explicit frame flag and bounded inflation; disabled by default because the measured CPU tradeoff is significant. Full capability handshake remains future work. See [BENCHMARK.md](BENCHMARK.md#tr-044-selective-compact-peer-payload-compression). |
+| TR-44 | IProto compression negotiation per request class | Save bandwidth selectively | CPU and protocol fallback | [x] Compact peer payloads support threshold-based gzip with an explicit frame flag and bounded inflation; disabled by default because the measured CPU tradeoff is significant. Listener-managed sessions now negotiate the compression capability; direct sessions remain opt-in. See [BENCHMARK.md](BENCHMARK.md#tr-044-selective-compact-peer-payload-compression). |
 | TR-45 | Connection circuit breaker and health scoring | Stop sending to failing peers | Recovery tuning | [ ] |
 | TR-46 | Schema and DDL discovery protocol | Keep clients compatible during changes | Version drift | [ ] |
 | TR-47 | Role and object-grant authorization model | Narrow access beyond bearer authentication | Policy administration | [x] Implemented by optional `hatAuth.Rule.Objects` and `Policy.AuthorizeObject`; see [TR047_OBJECT_GRANTS.md](TR047_OBJECT_GRANTS.md) and [BENCHMARK.md](BENCHMARK.md#tr-047-object-scoped-rbac-grants). |
 | TR-48 | Audit-event sampling and export sinks | Operate high-volume audit safely | Dropped-event visibility | [x] Implemented by `AuditLoggerOptions.SuccessSampleRate`, lossless failures, and `AuditSink`; see [TR048_AUDIT_SAMPLING.md](TR048_AUDIT_SAMPLING.md) and [BENCHMARK.md](BENCHMARK.md#tr-048-audit-event-sampling-and-export-sinks). |
 | TR-49 | Queue partition ownership and online migration | Scale queues without implicit sharding | Movement and backup semantics | [ ] |
 | TR-50 | Rate-aware WAL and replication backpressure | Preserve foreground latency under bursts | Lower write throughput | [ ] |
+| TR-51 | Compact peer capability negotiation for compression | Avoid sending flagged frames to incompatible peers | One fixed handshake round trip and feature-bit API | [x] Implemented by `CompactPeerFeaturePayloadCompression`; listener-managed sessions enable gzip only after negotiation, while direct sessions remain backward-compatible. See [TR051_COMPACT_PEER_CAPABILITY_NEGOTIATION.md](TR051_COMPACT_PEER_CAPABILITY_NEGOTIATION.md) and [BENCHMARK.md#tr-051-compact-peer-capability-negotiation](BENCHMARK.md#tr-051-compact-peer-capability-negotiation). |
 
 ## CH-052 Prepared Temporal Expressions
 

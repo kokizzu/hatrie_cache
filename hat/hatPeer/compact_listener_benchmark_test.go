@@ -10,15 +10,24 @@ import (
 )
 
 func BenchmarkPerformCompactPeerHandshake(b *testing.B) {
+	benchmarkPerformCompactPeerHandshake(b, 0x03)
+}
+
+func BenchmarkPerformCompactPeerHandshakeWithCompressionFeature(b *testing.B) {
+	benchmarkPerformCompactPeerHandshake(b, CompactPeerFeaturePayloadCompression)
+}
+
+func benchmarkPerformCompactPeerHandshake(b *testing.B, features uint32) {
 	var response [compactPeerHandshakeResponseBytes]byte
 	copy(response[:4], compactPeerHandshakeMagic)
 	response[4] = compactPeerHandshakeAccepted
 	response[5] = CompactPeerHandshakeVersion1
+	binary.BigEndian.PutUint32(response[6:], features)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
 		conn := compactPeerHandshakeBenchmarkConn{response: response}
-		if _, err := PerformCompactPeerHandshake(context.Background(), &conn, CompactPeerHandshakeOptions{Features: 0x03}); err != nil {
+		if _, err := PerformCompactPeerHandshake(context.Background(), &conn, CompactPeerHandshakeOptions{Features: features}); err != nil {
 			b.Fatal(err)
 		}
 	}
