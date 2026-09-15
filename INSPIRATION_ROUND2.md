@@ -51,7 +51,7 @@ operator control remain the preferred deployment model.
 - [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
 - [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
 - [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.
-- [ ] C222 Approximate top-K aggregation with mergeable bounded state.
+- [x] C222 Approximate top-K aggregation with mergeable bounded state; importable `hatCache.TopK.Merge`, HAG1 aggregate-state round trips, and `HatTrie.MergeTopK` provide bounded partition-state union without changing existing command defaults. SQL planner integration remains open.
 - [ ] C223 Mergeable approximate distinct and quantile aggregate states.
 - [x] C223a Mergeable HyperLogLog partial state; `HyperLogLog.Merge` combines same-precision partition states with per-register maxima, supports zero-value receiver adoption, and rejects invalid or mismatched states without mutation. Quantile-state merging and SQL `State`/`Merge` syntax remain open under C223.
 - [x] C223b Mergeable Count-Min Sketch partial state; exported `CountMinSketch` snapshots merge same-shape counter matrices with saturating addition, and `HatTrie.MergeCountMinSketch` imports an owned state without changing existing command defaults. SQL `State`/`Merge` syntax remains open under C223.

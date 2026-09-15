@@ -25948,3 +25948,42 @@ JSON marshal: 21111 21408 21831 21439 20423 ns/op; 43750 wire bytes; 49390 B/op;
 compact unmarshal: 25303 26399 28274 27750 28144 ns/op; 32804 wire bytes; 73744 B/op; 3 alloc/op
 JSON unmarshal: 133368 131571 136353 131760 130624 ns/op; 43750 wire bytes; 164042 B/op; 5 alloc/op
 ```
+
+<a id="ch-062-mergeable-approximate-top-k-state"></a>
+### CH-062 Mergeable Approximate Top-K State
+
+`hatCache.TopK.Merge` unions two bounded top-K summaries without replaying the
+raw values. The importable API supports deterministic ranking, source-state
+isolation, zero-value receiver adoption, capacity validation, HAG1 aggregate
+state round trips, and `HatTrie.MergeTopK` replacement or merge. Existing
+top-K commands and defaults are unchanged; SQL planner integration remains
+caller-owned.
+
+The benchmark uses capacity 100 and two partitions with 128, 4,096, or 65,536
+events each on Linux/amd64 with an AMD Ryzen 9 5950X. Merge reuses the prepared
+partition summaries; replay rebuilds a new top-K state from every raw event.
+Each row is the median of five samples from
+`make benchmark-topk-merge-c222`.
+
+| Workload | Merge state | Replay raw values | Relative CPU | Merge B/op | Replay B/op | Merge allocs/op | Replay allocs/op | Heap-byte change |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| 128 events/partition | 114,468 ns | 120,326 ns | 1.05x faster | 43,638 | 39,830 | 414 | 789 | 1.10x higher |
+| 4,096 events/partition | 116,451 ns | 4,494,747 ns | 38.60x faster | 44,978 | 417,369 | 414 | 24,599 | 9.28x lower |
+| 65,536 events/partition | 101,390 ns | 71,380,174 ns | 704.66x faster | 44,851 | 6,227,644 | 414 | 393,261 | 138.84x lower |
+
+Raw samples:
+
+```text
+128 merge: 114468 111537 131589 128214 104944 ns/op; 43638-43649 B/op; 414 allocs/op
+128 replay: 114404 120192 122997 120326 121483 ns/op; 39820-39830 B/op; 789 allocs/op
+4096 merge: 118177 114909 116451 118837 110743 ns/op; 44969-44986 B/op; 414 allocs/op
+4096 replay: 4600197 4494747 4161500 4320743 4840369 ns/op; 417270-417449 B/op; 24599 allocs/op
+65536 merge: 97327 101500 98066 101390 101410 ns/op; 44847-44854 B/op; 414 allocs/op
+65536 replay: 71380174 72332510 76148586 70278639 70044748 ns/op; 6224670-6227712 B/op; 393261-393263 allocs/op
+```
+
+The 128-event case is the explicit crossover: summary union has a small
+candidate-map cost and is not a universal replacement for tiny direct batches.
+For larger partitions, merge work is bounded by the two summaries rather than
+the event count. The state is approximate by design, so callers should use the
+existing exact replay path when exact top-K counts are required.

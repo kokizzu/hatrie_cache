@@ -15328,3 +15328,35 @@ commit-aggregate-envelope-c223:
 .PHONY: push-aggregate-envelope-c223
 push-aggregate-envelope-c223:
 	@bash ./scripts/push-aggregate-envelope-c223.sh
+
+.PHONY: test-topk-merge-c222 format-topk-merge-c222 test-topk-merge-package-c222 race-topk-merge-c222 vet-topk-merge-c222 benchmark-topk-merge-c222 check-topk-merge-c222 stage-topk-merge-c222 commit-topk-merge-c222 push-topk-merge-c222
+
+test-topk-merge-c222:
+	bash ./scripts/run-topk-merge-c222.sh test
+
+format-topk-merge-c222:
+	bash ./scripts/format-topk-merge-c222.sh
+
+test-topk-merge-package-c222:
+	bash ./scripts/run-topk-merge-c222.sh package
+
+race-topk-merge-c222:
+	bash ./scripts/run-topk-merge-c222.sh race
+
+vet-topk-merge-c222:
+	bash ./scripts/run-topk-merge-c222.sh vet
+
+benchmark-topk-merge-c222:
+	bash ./scripts/run-topk-merge-c222.sh benchmark
+
+check-topk-merge-c222:
+	bash ./scripts/check-topk-merge-c222.sh
+
+stage-topk-merge-c222:
+	bash ./scripts/stage-topk-merge-c222.sh
+
+commit-topk-merge-c222:
+	bash ./scripts/commit-topk-merge-c222.sh
+
+push-topk-merge-c222:
+	bash ./scripts/push-topk-merge-c222.sh

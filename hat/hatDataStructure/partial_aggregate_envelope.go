@@ -23,6 +23,8 @@ const (
 	AggregateStateKindHyperLogLog = "hyperloglog"
 	// AggregateStateKindCountMinSketch identifies a Count-Min Sketch payload.
 	AggregateStateKindCountMinSketch = "count_min_sketch"
+	// AggregateStateKindTopK identifies an approximate top-K payload.
+	AggregateStateKindTopK = "top_k"
 )
 
 var (
