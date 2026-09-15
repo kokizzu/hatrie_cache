@@ -4093,6 +4093,7 @@ lookup and preparation tradeoff is documented in
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)
 
 - [Compact request cancellation](T240_COMPACT_REQUEST_CANCELLATION.md)
+- Single-replica read routing fast path: [TR055_SINGLE_REPLICA_READ_FASTPATH.md](TR055_SINGLE_REPLICA_READ_FASTPATH.md)
 SQL mutation changefeed consumers can request pre- and post-state rows with `RETURNING`; see [TR033_SQL_RETURNING_BEFORE_ROWS.md](TR033_SQL_RETURNING_BEFORE_ROWS.md).
 ## Query Engine Notes
 

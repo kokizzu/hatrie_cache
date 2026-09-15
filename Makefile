@@ -14863,3 +14863,28 @@ commit-compaction-fastpath-c207:
 
 push-compaction-fastpath-c207:
 	bash ./scripts/push-compaction-fastpath-c207.sh
+
+.PHONY: test-parallel-read-fastpath-c208 benchmark-parallel-read-fastpath-c208 format-parallel-read-fastpath-c208 verify-parallel-read-fastpath-c208 inspect-parallel-read-fastpath-diff-c208 stage-parallel-read-fastpath-c208 commit-parallel-read-fastpath-c208 push-parallel-read-fastpath-c208
+test-parallel-read-fastpath-c208:
+	bash ./scripts/test-parallel-read-fastpath-c208.sh
+
+benchmark-parallel-read-fastpath-c208:
+	bash ./scripts/benchmark-parallel-read-fastpath-c208.sh
+
+format-parallel-read-fastpath-c208:
+	bash ./scripts/format-parallel-read-fastpath-c208.sh
+
+verify-parallel-read-fastpath-c208:
+	bash ./scripts/verify-parallel-read-fastpath-c208.sh
+
+inspect-parallel-read-fastpath-diff-c208:
+	bash ./scripts/inspect-parallel-read-fastpath-diff-c208.sh
+
+stage-parallel-read-fastpath-c208:
+	bash ./scripts/stage-parallel-read-fastpath-c208.sh
+
+commit-parallel-read-fastpath-c208:
+	bash ./scripts/commit-parallel-read-fastpath-c208.sh
+
+push-parallel-read-fastpath-c208:
+	bash ./scripts/push-parallel-read-fastpath-c208.sh

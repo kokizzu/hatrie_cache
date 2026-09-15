@@ -60,6 +60,9 @@ func ExecuteParallelReplicaRead(ctx context.Context, nodes []string, hedgeDelay 
 	if err := ctx.Err(); err != nil {
 		return ParallelReplicaReadResult{}, err
 	}
+	if len(nodes) == 1 {
+		return executeSingleParallelReplicaRead(ctx, strings.TrimSpace(nodes[0]), read)
+	}
 	normalized, err := normalizeParallelReplicaNodes(nodes)
 	if err != nil {
 		return ParallelReplicaReadResult{}, err
@@ -138,6 +141,21 @@ func ExecuteParallelReplicaRead(ctx context.Context, nodes []string, hedgeDelay 
 			}, nil
 		}
 	}
+}
+
+func executeSingleParallelReplicaRead(ctx context.Context, node string, read ParallelReplicaReadFunc) (ParallelReplicaReadResult, error) {
+	if node == "" {
+		return ParallelReplicaReadResult{}, ErrParallelReplicaReadInvalid
+	}
+	attempt := ParallelReplicaReadAttempt{Node: node, Started: true}
+	value, err := read(ctx, node)
+	attempt.Completed = true
+	if err != nil {
+		attempt.Error = err.Error()
+		return ParallelReplicaReadResult{Attempts: []ParallelReplicaReadAttempt{attempt}}, fmt.Errorf("%w: all 1 replicas failed", ErrParallelReplicaReadFailed)
+	}
+	attempt.Succeeded = true
+	return ParallelReplicaReadResult{Node: node, Value: value, Attempts: []ParallelReplicaReadAttempt{attempt}}, nil
 }
 
 func resetParallelReplicaTimer(timer *time.Timer, delay time.Duration) {

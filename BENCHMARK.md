@@ -25307,3 +25307,42 @@ The focused test verifies follow-up scheduling, failure requeue, and
 `make verify-compaction-fastpath-c207`. See
 [TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
 for the implementation notes.
+
+## TR-055 Single-Replica Read Routing Fast Path
+
+`ExecuteParallelReplicaRead` now calls a singleton read directly when only
+one replica is eligible. This skips the general path's normalized-node
+allocation, result channel, goroutine, timer, and attempt-clone work. The
+multi-replica path remains the control path. Results are from Linux/amd64 on
+an AMD Ryzen 9 5950X; each row has three samples from
+`make benchmark-parallel-read-fastpath-c208`.
+
+| Workload | Before median | After median | Relative result | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 node success | 886.1 ns | 47.57 ns | 18.62x faster | 448 | 48 | 8 | 1 |
+| 3 node success control | 1,900 ns | 1,903 ns | 1.00x, 0.2% slower | 880 | 880 | 10 | 10 |
+| 1 node failure | 1,323 ns | 189.2 ns | 6.99x faster | 545 | 144 | 10 | 3 |
+
+Raw before samples:
+
+```text
+single_success: 870.6 886.1 890.8 ns/op; 448 B/op; 8 allocs/op
+three_success_control: 1859 1989 1900 ns/op; 880 B/op; 10 allocs/op
+single_failure: 1301 1323 1423 ns/op; 545 B/op; 10 allocs/op
+```
+
+Raw after samples:
+
+```text
+single_success: 49.77 47.57 47.53 ns/op; 48 B/op; 1 alloc/op
+three_success_control: 1872 1916 1903 ns/op; 880 B/op; 10 allocs/op
+single_failure: 186.4 189.2 189.3 ns/op; 144 B/op; 3 allocs/op
+```
+
+Correctness coverage includes singleton success and failure contracts,
+whitespace trimming, attempt status, `errors.Is`, the complete replication
+package, the race detector, and `go vet`. Commands:
+`make test-parallel-read-fastpath-c208`,
+`make benchmark-parallel-read-fastpath-c208`, and
+`make verify-parallel-read-fastpath-c208`. Full details are in
+[TR055_SINGLE_REPLICA_READ_FASTPATH.md](TR055_SINGLE_REPLICA_READ_FASTPATH.md).
