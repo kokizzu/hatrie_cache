@@ -58,6 +58,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired prepared temporal expressions: [CH052_PREPARED_TEMPORAL_EXPRESSIONS.md](CH052_PREPARED_TEMPORAL_EXPRESSIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-052-prepared-temporal-expressions)
 - ClickHouse-inspired prepared literal SQL `IN` sets: [CH053_PREPARED_LITERAL_IN.md](CH053_PREPARED_LITERAL_IN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-053-prepared-literal-in-sets)
 - ClickHouse-inspired typed binary search for large literal `IN` sets: [CH054_TYPED_IN_SEARCH.md](CH054_TYPED_IN_SEARCH.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-054-typed-prepared-in-search)
+- ClickHouse-inspired bounded dense-integer bitmap `IN` sets: [CHU17_DENSE_INTEGER_IN.md](CHU17_DENSE_INTEGER_IN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u17-dense-integer-in-sets)
 - ClickHouse-inspired prepared literal SQL `BETWEEN` bounds: [CH055_PREPARED_BETWEEN.md](CH055_PREPARED_BETWEEN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-055-prepared-literal-between-bounds)
 - ClickHouse-inspired prepared literal SQL `LIKE` patterns: [CH056_PREPARED_LIKE.md](CH056_PREPARED_LIKE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-056-prepared-literal-like-patterns)
 - ClickHouse-inspired journal-backed SQL mutation idempotency for retried direct and `INSERT ... SELECT` writes: [CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-057-sql-mutation-idempotency)

@@ -26324,3 +26324,50 @@ BenchmarkCH037ArgExtremeStateMerge-32    	 2335737	       100.1 ns/op	        25
 BenchmarkCH037ArgExtremeStateMerge-32    	 2410304	       114.6 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
 BenchmarkCH037ArgExtremeStateMerge-32    	 2224726	       104.9 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
 ```
+
+<a id="ch-u17-dense-integer-in-sets"></a>
+## CH-U17 Dense Integer `IN` Sets
+
+This compares the existing typed sorted-search representation with the new
+bounded bitmap representation for a prepared 10,000-value integer `IN` set.
+Five `-benchtime=200ms` samples were collected on an AMD Ryzen 9 5950X Linux
+`amd64` host. Lookup probes include hits, misses, an integral `float64`, and a
+non-integral `float64`; both paths report zero lookup allocations.
+
+| Path | Median lookup | Program bytes | Lookup allocations | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing sorted search | 23.97 ns/op | 160,000 | 0 B/op, 0 allocs/op | 1.00x |
+| Dense integer bitmap | 6.527 ns/op | 81,256 | 0 B/op, 0 allocs/op | 3.67x faster, 1.97x smaller |
+
+The bitmap lookup is 3.67x faster and retains 1.97x fewer representation
+bytes. Preparation is intentionally measured separately: the sorted baseline
+is 129,333 ns/op, 164,024 B/op, and 5 allocations; bitmap preparation is
+196,606 ns/op, 83,352 B/op, and 5 allocations. The bitmap therefore makes
+preparation 1.52x slower while reducing transient bytes by 1.97x. This is a
+reuse optimization for compiled expressions, not a benefit for a query that is
+prepared only once.
+
+Raw output:
+
+```text
+BenchmarkCHU17DenseIntegerSortedSearch-32     10673982  23.46 ns/op    160000 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerSortedSearch-32      9809834  26.03 ns/op    160000 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerSortedSearch-32      8954518  23.87 ns/op    160000 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerSortedSearch-32      9965190  24.48 ns/op    160000 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerSortedSearch-32     10004438  23.97 ns/op    160000 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerBitmapSearch-32     35927008   6.527 ns/op    81256 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerBitmapSearch-32     36469131   6.527 ns/op    81256 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerBitmapSearch-32     35578784   6.508 ns/op    81256 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerBitmapSearch-32     37310335   8.065 ns/op    81256 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerBitmapSearch-32     37327737   8.255 ns/op    81256 program_bytes  0 B/op  0 allocs/op
+BenchmarkCHU17DenseIntegerSortedBuild-32          1606  129333 ns/op  164024 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerSortedBuild-32          1743  128316 ns/op  164024 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerSortedBuild-32          1602  128097 ns/op  164024 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerSortedBuild-32          1634  135069 ns/op  164024 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerSortedBuild-32          1788  136872 ns/op  164024 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerBitmapBuild-32          1080  194660 ns/op   83352 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerBitmapBuild-32          1126  193468 ns/op   83352 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerBitmapBuild-32          1270  198439 ns/op   83352 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerBitmapBuild-32          1122  196606 ns/op   83352 B/op  5 allocs/op
+BenchmarkCHU17DenseIntegerBitmapBuild-32          1125  196648 ns/op   83352 B/op  5 allocs/op
+```

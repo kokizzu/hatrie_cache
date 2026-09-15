@@ -15720,3 +15720,39 @@ benchmark-ch037-c237:
 .PHONY: format-ch037-c237
 format-ch037-c237:
 	bash ./scripts/format-ch037-c237.sh
+
+.PHONY: test-chu17-c240
+test-chu17-c240:
+	bash ./scripts/test-chu17-c240.sh
+
+.PHONY: benchmark-chu17-c240
+benchmark-chu17-c240:
+	bash ./scripts/benchmark-chu17-c240.sh
+
+.PHONY: test-chu17-package-c240
+test-chu17-package-c240:
+	bash ./scripts/test-chu17-package-c240.sh
+
+.PHONY: format-chu17-c240
+format-chu17-c240:
+	bash ./scripts/format-chu17-c240.sh
+
+.PHONY: race-chu17-c240
+race-chu17-c240:
+	bash ./scripts/race-chu17-c240.sh
+
+.PHONY: vet-chu17-c240
+vet-chu17-c240:
+	bash ./scripts/vet-chu17-c240.sh
+
+.PHONY: stage-chu17-c240
+stage-chu17-c240:
+	bash ./scripts/stage-chu17-c240.sh
+
+.PHONY: commit-chu17-c240
+commit-chu17-c240:
+	bash ./scripts/commit-chu17-c240.sh
+
+.PHONY: push-chu17-c240
+push-chu17-c240:
+	bash ./scripts/push-chu17-c240.sh
