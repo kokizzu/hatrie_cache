@@ -27,7 +27,14 @@ const (
 	AsyncCommandSubmissionUnknown AsyncCommandSubmissionStatus = iota
 	AsyncCommandSubmissionPending
 	AsyncCommandSubmissionCompleted
+	AsyncCommandSubmissionRejected
+	AsyncCommandSubmissionFailed
 )
+
+// AsyncCommandSubmissionCommitted is the durable success state. It aliases
+// AsyncCommandSubmissionCompleted so callers compiled against the original
+// two-state API keep the same numeric value and behavior.
+const AsyncCommandSubmissionCommitted = AsyncCommandSubmissionCompleted
 
 func (status AsyncCommandSubmissionStatus) String() string {
 	switch status {
@@ -35,6 +42,10 @@ func (status AsyncCommandSubmissionStatus) String() string {
 		return "pending"
 	case AsyncCommandSubmissionCompleted:
 		return "completed"
+	case AsyncCommandSubmissionRejected:
+		return "rejected"
+	case AsyncCommandSubmissionFailed:
+		return "failed"
 	default:
 		return "unknown"
 	}
@@ -49,11 +60,17 @@ type CommandJournalSubmission struct {
 
 	mu        sync.Mutex
 	completed bool
+	sequence  uint64
+	status    AsyncCommandSubmissionStatus
 	response  CacheCommandResponse
+	err       error
 }
 
 func newCommandJournalSubmission() *CommandJournalSubmission {
-	return &CommandJournalSubmission{done: make(chan struct{})}
+	return &CommandJournalSubmission{
+		done:   make(chan struct{}),
+		status: AsyncCommandSubmissionPending,
+	}
 }
 
 // Done returns a channel closed at the durable-and-applied completion point.
@@ -69,12 +86,36 @@ func (submission *CommandJournalSubmission) Status() AsyncCommandSubmissionStatu
 	if submission == nil {
 		return AsyncCommandSubmissionUnknown
 	}
-	select {
-	case <-submission.done:
-		return AsyncCommandSubmissionCompleted
-	default:
-		return AsyncCommandSubmissionPending
+	submission.mu.Lock()
+	status := submission.status
+	submission.mu.Unlock()
+	return status
+}
+
+// Sequence returns the durable journal sequence assigned to the submission.
+// It is zero while the submission is queued and remains zero if the command
+// is rejected before a durable record can be retained.
+func (submission *CommandJournalSubmission) Sequence() uint64 {
+	if submission == nil {
+		return 0
 	}
+	submission.mu.Lock()
+	sequence := submission.sequence
+	submission.mu.Unlock()
+	return sequence
+}
+
+// Error returns an infrastructure error that prevented durable completion.
+// A rejected command has a nil Error and exposes its command-level failure in
+// the response returned by Wait.
+func (submission *CommandJournalSubmission) Error() error {
+	if submission == nil {
+		return ErrNilCommandJournalSubmission
+	}
+	submission.mu.Lock()
+	err := submission.err
+	submission.mu.Unlock()
+	return err
 }
 
 // Wait waits for durable-and-applied completion. A nil context is treated as
@@ -99,12 +140,51 @@ func (submission *CommandJournalSubmission) Wait(ctx context.Context) (CacheComm
 }
 
 func (submission *CommandJournalSubmission) complete(response CacheCommandResponse) {
+	status := AsyncCommandSubmissionCommitted
+	if !response.OK {
+		status = AsyncCommandSubmissionRejected
+	}
+	submission.completeState(status, response, nil)
+}
+
+func (submission *CommandJournalSubmission) fail(err error) {
+	if err == nil {
+		err = errors.New("hatriecache: asynchronous command failed")
+	}
+	submission.completeState(AsyncCommandSubmissionFailed, commandError(err.Error()), err)
+}
+
+func (submission *CommandJournalSubmission) setSequence(sequence uint64) {
+	if submission == nil {
+		return
+	}
+	submission.mu.Lock()
+	if !submission.completed {
+		submission.sequence = sequence
+	}
+	submission.mu.Unlock()
+}
+
+func (submission *CommandJournalSubmission) clearSequence() {
+	if submission == nil {
+		return
+	}
+	submission.mu.Lock()
+	if !submission.completed {
+		submission.sequence = 0
+	}
+	submission.mu.Unlock()
+}
+
+func (submission *CommandJournalSubmission) completeState(status AsyncCommandSubmissionStatus, response CacheCommandResponse, err error) {
 	submission.mu.Lock()
 	if submission.completed {
 		submission.mu.Unlock()
 		return
 	}
 	submission.response = cloneCacheCommandResponse(response)
+	submission.status = status
+	submission.err = err
 	submission.completed = true
 	close(submission.done)
 	submission.mu.Unlock()
@@ -169,6 +249,21 @@ func (job *commandJournalJob) complete(response CacheCommandResponse) {
 	}
 	if job.submission != nil {
 		job.submission.complete(response)
+		return
+	}
+	job.result <- response
+}
+
+func (job *commandJournalJob) fail(err error) {
+	if err == nil {
+		err = errors.New("hatriecache: asynchronous command failed")
+	}
+	response := commandError(err.Error())
+	if job.onComplete != nil {
+		job.onComplete(response)
+	}
+	if job.submission != nil {
+		job.submission.fail(err)
 		return
 	}
 	job.result <- response

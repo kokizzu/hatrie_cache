@@ -123,11 +123,14 @@ func (resolver *SQLSystemTablesResolver) mutations() ([]SQLRow, error) {
 	}
 	rows := make([]SQLRow, 0, len(tail.Entries))
 	for _, entry := range tail.Entries {
+		status := commandJournalMutationStatusFromRecord(entry)
 		rows = append(rows, SQLRow{
-			"sequence": entry.Sequence,
-			"command":  entry.Request.Command,
-			"key":      entry.Request.Key,
-			"state":    "committed",
+			"sequence":    status.Sequence,
+			"mutation_id": status.Sequence,
+			"command":     status.Command,
+			"key":         status.Key,
+			"state":       string(status.State),
+			"progress":    int64(status.Progress),
 		})
 	}
 	return rows, nil

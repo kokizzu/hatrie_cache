@@ -26616,3 +26616,55 @@ Measured with:
 make benchmark-chu05-c245
 make memory-chu05-c245
 ```
+
+## CH-U07 Mutation Lifecycle
+
+CH-U07 adds durable sequence/status inspection to asynchronous journal
+submissions and exposes `mutation_id`/`progress` in `system.mutations`. The
+benchmark measures the live handle metadata separately from the restart-safe
+single-record lookup and compares that lookup with the existing direct journal
+`Tail` call. Five local samples were collected on the same AMD Ryzen 9 5950X
+Linux `amd64` host.
+
+| Benchmark | Median time | Allocations | Meaning |
+| --- | ---: | ---: | --- |
+| Submission metadata (`Sequence` + `Status` + `Error`) | 11.0 ns/op | 0 B/op, 0 allocs/op | Allocation-free live polling |
+| Existing `Tail(0, 1)` | 12.31 us/op | 4,920 B/op, 14 allocs/op | Baseline one-record journal read |
+| `MutationStatus(1)` | 12.01 us/op | 4,944 B/op, 14 allocs/op | Typed sequence validation plus state |
+| Async commit and wait | 1.06 ms/op | 12,435 B/op, 45 allocs/op | Durable group-commit path |
+
+The measured status wrapper adds about 0.2 us/op and 24 B/op over the direct
+tail baseline while preserving the same one-record disk-read cost. It is an
+operator-facing lifecycle API, not a claimed throughput optimization.
+
+Raw output from `make benchmark-chu07-c247`:
+
+```text
+BenchmarkCHU07SubmissionMetadata-32  9721278  11.71 ns/op  0 B/op  0 allocs/op
+BenchmarkCHU07SubmissionMetadata-32 10976769  10.99 ns/op  0 B/op  0 allocs/op
+BenchmarkCHU07SubmissionMetadata-32 10868704  10.93 ns/op  0 B/op  0 allocs/op
+BenchmarkCHU07SubmissionMetadata-32 10912824  10.95 ns/op  0 B/op  0 allocs/op
+BenchmarkCHU07SubmissionMetadata-32 10560964  11.63 ns/op  0 B/op  0 allocs/op
+BenchmarkCHU07MutationStatusLookup-32  8556 12391 ns/op 4944 B/op 14 allocs/op
+BenchmarkCHU07MutationStatusLookup-32  9328 12005 ns/op 4944 B/op 14 allocs/op
+BenchmarkCHU07MutationStatusLookup-32  9596 12715 ns/op 4944 B/op 14 allocs/op
+BenchmarkCHU07MutationStatusLookup-32  9732 11973 ns/op 4944 B/op 14 allocs/op
+BenchmarkCHU07MutationStatusLookup-32 10000 11702 ns/op 4944 B/op 14 allocs/op
+BenchmarkCHU07TailLookup-32  9662 12522 ns/op 4920 B/op 14 allocs/op
+BenchmarkCHU07TailLookup-32  8445 12314 ns/op 4920 B/op 14 allocs/op
+BenchmarkCHU07TailLookup-32 10182 12349 ns/op 4920 B/op 14 allocs/op
+BenchmarkCHU07TailLookup-32 10000 12010 ns/op 4920 B/op 14 allocs/op
+BenchmarkCHU07TailLookup-32 10000 11434 ns/op 4920 B/op 14 allocs/op
+BenchmarkCHU07AsyncCommitAndWait-32 115 1088880 ns/op 12458 B/op 45 allocs/op
+BenchmarkCHU07AsyncCommitAndWait-32 109 1447608 ns/op 12438 B/op 45 allocs/op
+BenchmarkCHU07AsyncCommitAndWait-32 111 1058972 ns/op 12431 B/op 45 allocs/op
+BenchmarkCHU07AsyncCommitAndWait-32 110 1018716 ns/op 12435 B/op 45 allocs/op
+BenchmarkCHU07AsyncCommitAndWait-32 115 1058206 ns/op 12394 B/op 45 allocs/op
+```
+
+Raw one-shot RSS from `make memory-chu07-c247`:
+
+```text
+BenchmarkCHU07MutationStatusLookup-32  1 113024 ns/op 5008 B/op 16 allocs/op
+Maximum resident set size: 51816 kbytes
+```

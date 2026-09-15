@@ -15981,3 +15981,103 @@ commit-chu01-c242:
 
 push-chu01-c242:
 	bash ./scripts/push-chu01-c242.sh
+
+.PHONY: test-chu07-c247
+
+test-chu07-c247:
+
+	@bash ./scripts/test-chu07-c247.sh
+
+
+
+.PHONY: format-chu07-c247
+
+format-chu07-c247:
+
+	@bash ./scripts/format-chu07-c247.sh
+
+
+
+.PHONY: test-chu07-package-c247
+
+test-chu07-package-c247:
+
+	@bash ./scripts/test-chu07-package-c247.sh
+
+
+
+.PHONY: race-chu07-c247
+
+race-chu07-c247:
+
+	@bash ./scripts/race-chu07-c247.sh
+
+
+
+.PHONY: vet-chu07-c247
+
+vet-chu07-c247:
+
+	@bash ./scripts/vet-chu07-c247.sh
+
+
+
+.PHONY: benchmark-chu07-c247
+
+benchmark-chu07-c247:
+
+	@bash ./scripts/benchmark-chu07-c247.sh
+
+
+
+.PHONY: memory-chu07-c247
+
+memory-chu07-c247:
+
+	@bash ./scripts/memory-chu07-c247.sh
+
+
+
+.PHONY: verify-chu07-docs-c247
+
+verify-chu07-docs-c247:
+
+	@bash ./scripts/verify-chu07-docs-c247.sh
+
+
+
+.PHONY: test-chu07-repo-c247
+
+test-chu07-repo-c247:
+
+	@bash ./scripts/test-chu07-repo-c247.sh
+
+
+
+.PHONY: review-chu07-c247
+
+review-chu07-c247:
+
+	@bash ./scripts/review-chu07-c247.sh
+
+.PHONY: stage-chu07-c247
+
+stage-chu07-c247:
+
+	@bash ./scripts/stage-chu07-c247.sh
+
+
+
+.PHONY: commit-chu07-c247
+
+commit-chu07-c247:
+
+	@bash ./scripts/commit-chu07-c247.sh
+
+
+
+.PHONY: push-chu07-c247
+
+push-chu07-c247:
+
+	@bash ./scripts/push-chu07-c247.sh

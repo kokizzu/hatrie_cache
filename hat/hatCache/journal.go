@@ -549,7 +549,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 		chunkBytes := journal.recordBatchChunkLimit()
 		batchState, err := journal.currentAppendStateLocked()
 		if err != nil {
-			completeCommandJournalJobs(pending, commandError(err.Error()))
+			failCommandJournalJobs(pending, err)
 			return
 		}
 		recordSizes := make([]uint32, len(pending))
@@ -558,7 +558,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			sequence, nextErr := journal.nextAppendSequenceLocked()
 			if nextErr != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
-				completeCommandJournalJobs(pending, commandError(err.Error()))
+				failCommandJournalJobs(pending, err)
 				return
 			}
 			entry := commandJournalEntry{
@@ -569,7 +569,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			if commandJournalRecordBatchShouldFlush(encoded, entry.Request, chunkBytes) {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
-					completeCommandJournalJobs(pending, commandError(err.Error()))
+					failCommandJournalJobs(pending, err)
 					return
 				}
 				encoded = encoded[:0]
@@ -578,7 +578,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
 			if err != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
-				completeCommandJournalJobs(pending, commandError(err.Error()))
+				failCommandJournalJobs(pending, err)
 				return
 			}
 			recordSizes[idx] = uint32(len(encoded) - start)
@@ -586,7 +586,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
-					completeCommandJournalJobs(pending, commandError(err.Error()))
+					failCommandJournalJobs(pending, err)
 					return
 				}
 				encoded = encoded[:0]
@@ -594,13 +594,18 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 		}
 		if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			completeCommandJournalJobs(pending, commandError(err.Error()))
+			failCommandJournalJobs(pending, err)
 			return
 		}
 		if err := journal.syncLocked(); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			completeCommandJournalJobs(pending, commandError(err.Error()))
+			failCommandJournalJobs(pending, err)
 			return
+		}
+		for idx, job := range pending {
+			if job.submission != nil {
+				job.submission.setSequence(batchState.nextSequence + uint64(idx))
+			}
 		}
 
 		rejected := -1
@@ -621,13 +626,14 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 				nextSequence: batchState.nextSequence + uint64(idx),
 			}
 			rollbackErr := journal.rollbackAppendLocked(rollbackState)
+			clearCommandJournalJobSequences(pending[idx:])
 			if rollbackErr != nil {
 				response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
 			}
 			job.complete(response)
 			rejected = idx
 			if rollbackErr != nil {
-				completeCommandJournalJobs(pending[idx+1:], commandError(rollbackErr.Error()))
+				failCommandJournalJobs(pending[idx+1:], rollbackErr)
 				return
 			}
 			break
@@ -678,7 +684,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 		chunkBytes := journal.recordBatchChunkLimit()
 		batchState, err := journal.currentAppendStateLocked()
 		if err != nil {
-			completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
 		recordSizes := make([]uint32, len(entries))
@@ -688,7 +694,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			sequence, nextErr := journal.nextAppendSequenceLocked()
 			if nextErr != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
-				completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+				failCommandJournalIdempotentGroupEntries(entries, err)
 				return
 			}
 			entry.sequence = sequence
@@ -701,7 +707,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			if commandJournalRecordBatchShouldFlush(encoded, journalEntry.Request, chunkBytes) {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
-					completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+					failCommandJournalIdempotentGroupEntries(entries, err)
 					return
 				}
 				encoded = encoded[:0]
@@ -710,7 +716,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			encoded, err = appendCommandJournalRecord(encoded, journalEntry, journal.format)
 			if err != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
-				completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+				failCommandJournalIdempotentGroupEntries(entries, err)
 				return
 			}
 			recordSizes[index] = uint32(len(encoded) - start)
@@ -718,7 +724,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
-					completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+					failCommandJournalIdempotentGroupEntries(entries, err)
 					return
 				}
 				encoded = encoded[:0]
@@ -726,14 +732,15 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 		}
 		if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
 		if err := journal.syncLocked(); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			completeCommandJournalIdempotentGroupEntries(entries, commandError(err.Error()))
+			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
+		setCommandJournalIdempotentGroupSequences(entries)
 
 		rejected := -1
 		rollbackOffset := batchState.offset
@@ -755,6 +762,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 				nextSequence: batchState.nextSequence + uint64(index),
 			}
 			rollbackErr := journal.rollbackAppendLocked(rollbackState)
+			clearCommandJournalIdempotentGroupSequences(entries[index:])
 			if rollbackErr != nil {
 				response = commandError(response.Message + "; failed to remove rejected journal entries: " + rollbackErr.Error())
 			}
@@ -797,6 +805,44 @@ func completeCommandJournalIdempotentGroupEntries(entries []commandJournalIdempo
 	}
 }
 
+func failCommandJournalIdempotentGroupEntries(entries []commandJournalIdempotentGroupEntry, err error) {
+	for index := range entries {
+		entry := &entries[index]
+		entry.job.fail(err)
+		for _, alias := range entry.aliases {
+			alias.fail(err)
+		}
+	}
+}
+
+func setCommandJournalIdempotentGroupSequences(entries []commandJournalIdempotentGroupEntry) {
+	for index := range entries {
+		entry := &entries[index]
+		if entry.job.submission != nil {
+			entry.job.submission.setSequence(entry.sequence)
+		}
+		for _, alias := range entry.aliases {
+			if alias.submission != nil {
+				alias.submission.setSequence(entry.sequence)
+			}
+		}
+	}
+}
+
+func clearCommandJournalIdempotentGroupSequences(entries []commandJournalIdempotentGroupEntry) {
+	for index := range entries {
+		entry := &entries[index]
+		if entry.job.submission != nil {
+			entry.job.submission.clearSequence()
+		}
+		for _, alias := range entry.aliases {
+			if alias.submission != nil {
+				alias.submission.clearSequence()
+			}
+		}
+	}
+}
+
 func (job *commandJournalJob) execute() CacheCommandResponse {
 	if job.prepared {
 		return executePreparedInternalReplicationCommand(job.trie, job.request, job.operation)
@@ -807,6 +853,20 @@ func (job *commandJournalJob) execute() CacheCommandResponse {
 func completeCommandJournalJobs(jobs []*commandJournalJob, response CacheCommandResponse) {
 	for _, job := range jobs {
 		job.complete(response)
+	}
+}
+
+func failCommandJournalJobs(jobs []*commandJournalJob, err error) {
+	for _, job := range jobs {
+		job.fail(err)
+	}
+}
+
+func clearCommandJournalJobSequences(jobs []*commandJournalJob) {
+	for _, job := range jobs {
+		if job != nil && job.submission != nil {
+			job.submission.clearSequence()
+		}
 	}
 }
 
