@@ -15015,3 +15015,11 @@ commit-read-replica-policy-c213:
 
 push-read-replica-policy-c213:
 	@bash ./scripts/push-read-replica-policy-c213.sh
+stage-rejected-async-batcher-c214:
+	@bash ./scripts/stage-rejected-async-batcher-c214.sh
+
+commit-rejected-async-batcher-c214:
+	@bash ./scripts/commit-rejected-async-batcher-c214.sh
+
+push-rejected-async-batcher-c214:
+	@bash ./scripts/push-rejected-async-batcher-c214.sh

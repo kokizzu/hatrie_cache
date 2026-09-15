@@ -17045,6 +17045,28 @@ four after:              63.18, 62.57, 64.19, 64.30, 64.70 ns/op
 The optimization has no measured memory or allocation cost and changes no
 public consistency or selection behavior.
 
+## Rejected C214 Async Batcher Shared-Read Lock
+
+The ClickHouse-style `AsyncBatcher` already holds an exclusive mutex while a
+producer checks the close state, accounts for pending work, and enqueues its
+request. A measured experiment changed producer and flush readers to
+`sync.RWMutex.RLock` while keeping `Close` as the writer barrier. It was
+rejected and reverted because the lock implementation was slower in every
+measured path and added no memory benefit.
+
+Linux/amd64, AMD Ryzen 9 5950X, five samples per case, `-benchmem`:
+
+| Workload | Original median | RLock experiment median | Result | Memory |
+| --- | ---: | ---: | ---: | ---: |
+| Single producer, batch size 64 | 169.7 ns/op | 182.5 ns/op | **1.08x slower** | 0 B/op, 0 allocs/op in both |
+| Single producer, batch size 1 | 281.2 ns/op | 290.5 ns/op | **1.03x slower** | 0 B/op, 0 allocs/op in both |
+| Parallel global batcher, no work | 211.2 ns/op | 392.8 ns/op | **1.86x slower** | 0 B/op, 0 allocs/op in both |
+
+Raw samples for the parallel global case were `211.2, 202.1, 233.7, 231.3,
+203.5 ns/op` originally and `429.3, 392.8, 390.0, 394.5, 319.5 ns/op` in the
+experiment. The original `sync.Mutex` implementation remains in place; the
+existing partitioned batcher remains the preferred concurrency scaling path.
+
 Raw samples:
 
 ```text
