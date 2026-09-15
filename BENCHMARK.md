@@ -26371,3 +26371,44 @@ BenchmarkCHU17DenseIntegerBitmapBuild-32          1270  198439 ns/op   83352 B/o
 BenchmarkCHU17DenseIntegerBitmapBuild-32          1122  196606 ns/op   83352 B/op  5 allocs/op
 BenchmarkCHU17DenseIntegerBitmapBuild-32          1125  196648 ns/op   83352 B/op  5 allocs/op
 ```
+
+<a id="ch-031-typed-json-subcolumns"></a>
+## CH-031 Typed JSON Subcolumns
+
+This compares the existing row-source JSON evaluator with an opt-in typed
+columnar JSON path for 4,096 deterministic documents. Five
+`-benchtime=200ms` samples were collected on an AMD Ryzen 9 5950X Linux
+`amd64` host. The typed path is served by a
+`ColumnarJSONSubcolumnSourceResolver`; ordinary sources do not materialize
+typed subcolumns.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing row-source control | 9,300,569 | 7,283,678 | 90,138 | 1.00x |
+| Typed JSON subcolumn query | 2,372,477 | 1,707,569 | 30,508 | 3.92x faster, 4.27x lower heap, 2.95x fewer allocations |
+| One-time typed subcolumn materialization | 2,872,596 | 2,589,693 | 40,955 | build cost; reusable afterward |
+
+The after-build ordinary control remained at 90,138 allocations/op. Typed
+subcolumns therefore provide a reusable read optimization without changing
+the default row-source path. Materialization is deliberately not included in
+the query lookup result; it is a separate cost that must be amortized.
+
+Raw output from `make benchmark-ch031-after-c242`:
+
+```text
+BenchmarkCH031JSONValueBaseline-32           	      25	   9189148 ns/op	 7283904 B/op	   90138 allocs/op
+BenchmarkCH031JSONValueBaseline-32           	      25	   9392281 ns/op	 7283898 B/op	   90138 allocs/op
+BenchmarkCH031JSONValueBaseline-32           	      24	   9300569 ns/op	 7283670 B/op	   90138 allocs/op
+BenchmarkCH031JSONValueBaseline-32           	      26	   9608644 ns/op	 7283668 B/op	   90138 allocs/op
+BenchmarkCH031JSONValueBaseline-32           	      26	   9087301 ns/op	 7283678 B/op	   90138 allocs/op
+BenchmarkCH031JSONValueTypedSubcolumn-32     	      86	   2413446 ns/op	 1707570 B/op	   30508 allocs/op
+BenchmarkCH031JSONValueTypedSubcolumn-32     	     100	   2381532 ns/op	 1707573 B/op	   30508 allocs/op
+BenchmarkCH031JSONValueTypedSubcolumn-32     	     105	   2372477 ns/op	 1707566 B/op	   30508 allocs/op
+BenchmarkCH031JSONValueTypedSubcolumn-32     	     100	   2339240 ns/op	 1707569 B/op	   30508 allocs/op
+BenchmarkCH031JSONValueTypedSubcolumn-32     	     100	   2286530 ns/op	 1707568 B/op	   30508 allocs/op
+BenchmarkCH031JSONSubcolumnMaterialize-32    	      94	   2889496 ns/op	 2589693 B/op	   40955 allocs/op
+BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2890709 ns/op	 2589696 B/op	   40955 allocs/op
+BenchmarkCH031JSONSubcolumnMaterialize-32    	      84	   2872596 ns/op	 2589692 B/op	   40955 allocs/op
+BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2854735 ns/op	 2589690 B/op	   40955 allocs/op
+BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2851632 ns/op	 2589693 B/op	   40955 allocs/op
+```

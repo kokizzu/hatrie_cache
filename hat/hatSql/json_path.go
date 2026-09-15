@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type sqlJSONPathSegment struct {
@@ -14,9 +15,11 @@ type sqlJSONPathSegment struct {
 }
 
 type sqlJSONPathProgram struct {
-	source   string
-	segments []sqlJSONPathSegment
-	err      error
+	source        string
+	segments      []sqlJSONPathSegment
+	err           error
+	canonicalOnce sync.Once
+	canonical     string
 }
 
 type sqlJSONMemberLookup interface {
@@ -30,6 +33,16 @@ type sqlJSONMaterializer interface {
 func compileSQLJSONPath(path string) *sqlJSONPathProgram {
 	segments, err := parseSQLJSONPath(path)
 	return &sqlJSONPathProgram{source: path, segments: segments, err: err}
+}
+
+func (program *sqlJSONPathProgram) canonicalPath() string {
+	if program == nil || program.err != nil {
+		return ""
+	}
+	program.canonicalOnce.Do(func() {
+		program.canonical = formatSQLJSONPath(program.segments)
+	})
+	return program.canonical
 }
 
 func prepareSQLJSONPathExpr(expr *sqlExpr) {
@@ -271,6 +284,15 @@ func sqlJSONObject(value interface{}) (map[string]interface{}, bool) {
 func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 	if len(expr.args) != 2 {
 		return sqlEvalError{err: fmt.Errorf("%s expects exactly two arguments", expr.name), token: expr.token}
+	}
+	if value, present, found := sqlColumnarJSONSubcolumnValue(expr, row); found {
+		if expr.name == "JSON_EXISTS" {
+			return present
+		}
+		if !present {
+			return nil
+		}
+		return value
 	}
 	input := evalSQLExpr(expr.args[0], group, row)
 	if columnarInput, ok := sqlColumnarJSONFieldInput(expr.args[0], row); ok {

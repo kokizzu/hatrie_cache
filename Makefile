@@ -15756,3 +15756,37 @@ commit-chu17-c240:
 .PHONY: push-chu17-c240
 push-chu17-c240:
 	bash ./scripts/push-chu17-c240.sh
+
+.PHONY: test-ch031-c242 benchmark-ch031-before-c242 benchmark-ch031-after-c242 format-ch031-c242 test-ch031-package-c242 race-ch031-c242 vet-ch031-c242 test-ch031-repo-c242 stage-ch031-c242 commit-ch031-c242 push-ch031-c242
+test-ch031-c242:
+	bash ./scripts/test-ch031-c242.sh
+
+benchmark-ch031-before-c242:
+	bash ./scripts/benchmark-ch031-before-c242.sh
+
+benchmark-ch031-after-c242:
+	bash ./scripts/benchmark-ch031-after-c242.sh
+
+format-ch031-c242:
+	bash ./scripts/format-ch031-c242.sh
+
+test-ch031-package-c242:
+	bash ./scripts/test-ch031-package-c242.sh
+
+race-ch031-c242:
+	bash ./scripts/race-ch031-c242.sh
+
+vet-ch031-c242:
+	bash ./scripts/vet-ch031-c242.sh
+
+test-ch031-repo-c242:
+	bash ./scripts/test-ch031-repo-c242.sh
+
+stage-ch031-c242:
+	bash ./scripts/stage-ch031-c242.sh
+
+commit-ch031-c242:
+	bash ./scripts/commit-ch031-c242.sh
+
+push-ch031-c242:
+	bash ./scripts/push-ch031-c242.sh

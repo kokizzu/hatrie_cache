@@ -8461,6 +8461,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if q.limitBy != nil {
 		return SQLQueryResult{}, false, nil
 	}
+	if result, handled, err := executeSQLColumnarJSONSubcolumnScan(q, resolver, control, metrics, outer); handled {
+		return result, true, err
+	}
 	if result, handled, err := executeSQLColumnarMapScan(q, resolver, control, metrics, outer); handled {
 		return result, true, err
 	}

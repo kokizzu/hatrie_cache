@@ -52,6 +52,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)
 - ClickHouse-inspired prepared literal SQL/JSON path programs: [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs)
 - ClickHouse-inspired map key/value subcolumn pruning: [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning)
+- ClickHouse-inspired typed scalar JSON subcolumns: [CH031_TYPED_JSON_SUBCOLUMNS.md](CH031_TYPED_JSON_SUBCOLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-031-typed-json-subcolumns)
 - ClickHouse-inspired bitmap-backed logical deletes: [CH012_DELETE_BITMAP.md](CH012_DELETE_BITMAP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-012-bitmap-backed-lightweight-logical-deletes)
 - ClickHouse-inspired mutation admission throttling: [CH013_MUTATION_ADMISSION.md](CH013_MUTATION_ADMISSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-013-mutation-admission-throttling)
 - ClickHouse-inspired prepared SQL regex programs: [CH051_PREPARED_REGEX_PROGRAMS.md](CH051_PREPARED_REGEX_PROGRAMS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-051-prepared-sql-regex-programs)

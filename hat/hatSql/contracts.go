@@ -211,6 +211,7 @@ type ColumnarBatch struct {
 	ListColumns            map[string]ColumnarListColumn
 	NestedColumns          map[string]ColumnarNestedColumn
 	MapColumns             map[string]ColumnarMapColumn
+	JSONSubcolumns         map[ColumnarJSONSubcolumnKey]ColumnarJSONSubcolumn
 	Rows                   int
 	decompressedBlockCache *columnarDecompressedBlockCache
 	fieldOffsets           *columnarFieldOffsets
@@ -1215,6 +1216,13 @@ type ColumnarMapSubcolumn struct {
 // the ordinary columnar or row execution path.
 type ColumnarMapSubcolumnSourceResolver interface {
 	ResolveSQLColumnarMapSubcolumns(name, key string, fields []string, paths []ColumnarMapSubcolumn) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
+}
+
+// ColumnarJSONSubcolumnSourceResolver optionally supplies compact typed scalar
+// JSON paths. Returning available=false retains the existing map, columnar, or
+// row execution path without changing SQL semantics.
+type ColumnarJSONSubcolumnSourceResolver interface {
+	ResolveSQLColumnarJSONSubcolumns(name, key string, fields []string, paths []ColumnarJSONSubcolumnRequest) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }
 
 // BorrowedColumnarSourceResolver optionally supplies an immutable columnar
