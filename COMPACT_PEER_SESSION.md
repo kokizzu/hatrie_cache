@@ -54,6 +54,8 @@ frame, which the caller receives wrapped by `ErrCompactPeerRemote`.
   inbound handlers.
 - `CompactProtocolOptions` is passed through unchanged, so frame, command, and
   payload limits are checked before decoder allocation.
+- Plain session writes reuse an append-capable frame buffer up to 64 KiB;
+  compressed writes retain the existing protocol writer path.
 - A canceled call removes its local pending entry. A late response from that
   call is ignored, which avoids tearing down a healthy connection during a
   normal cancellation race.
@@ -82,8 +84,8 @@ single request per round trip, and no filesystem or network latency.
 | --- | ---: | ---: | ---: |
 | Compact marshal baseline | 40.3-41.0 ns/op | 80 B/op | 1/op |
 | Compact read baseline | 100.7-101.7 ns/op | 144 B/op | 3/op |
-| Compact peer session call | 5.93-6.21 us/op | 512 B/op | 9/op |
-| Prepared compact peer session call | 5.50-6.15 us/op | 480 B/op | 8/op |
+| Compact peer session call | 5.75-6.11 us/op | 448 B/op | 7/op |
+| Prepared compact peer session call | 5.79-6.27 us/op | 448 B/op | 7/op |
 | JSON marshal baseline | 298.7-301.3 ns/op | 208 B/op | 2/op |
 | JSON unmarshal baseline | 1.394-1.409 us/op | 352 B/op | 7/op |
 

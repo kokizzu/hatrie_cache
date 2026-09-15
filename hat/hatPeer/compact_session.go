@@ -32,9 +32,9 @@ var (
 const (
 	// DefaultCompactPeerMaxInFlight bounds both outgoing pending calls and
 	// concurrently executing inbound handlers.
-	DefaultCompactPeerMaxInFlight          = DefaultCompactMultiplexerMaxPending
-	maxCompactPeerMaxInFlight              = 1 << 20
-	compactPeerTemplateRetainedBufferBytes = 64 << 10
+	DefaultCompactPeerMaxInFlight       = DefaultCompactMultiplexerMaxPending
+	maxCompactPeerMaxInFlight           = 1 << 20
+	compactPeerWriteBufferRetainedBytes = 64 << 10
 )
 
 var compactPeerCancellationCommand = []byte("_hat.peer.cancel.v1")
@@ -404,7 +404,18 @@ func (session *CompactPeerSession) write(frame CompactFrame) error {
 	if err := session.Err(); err != nil {
 		return err
 	}
-	return session.protocol.Write(session.conn, frame)
+	if session.protocol.compressPayloadsAbove > 0 {
+		return session.protocol.Write(session.conn, frame)
+	}
+	encoded, err := session.protocol.MarshalInto(frame, session.writeBuffer[:0])
+	if err != nil {
+		return err
+	}
+	if err := writeCompactPeerBytes(session.conn, encoded); err != nil {
+		return err
+	}
+	session.writeBuffer = retainCompactPeerWriteBuffer(encoded)
+	return nil
 }
 
 func (session *CompactPeerSession) writeTemplate(template CompactRequestTemplate, requestID uint64, payload []byte) error {
@@ -420,10 +431,13 @@ func (session *CompactPeerSession) writeTemplate(template CompactRequestTemplate
 	if err := writeCompactPeerBytes(session.conn, encoded); err != nil {
 		return err
 	}
-	if len(encoded) <= compactPeerTemplateRetainedBufferBytes {
-		session.writeBuffer = encoded[:0]
-	} else {
-		session.writeBuffer = nil
+	session.writeBuffer = retainCompactPeerWriteBuffer(encoded)
+	return nil
+}
+
+func retainCompactPeerWriteBuffer(encoded []byte) []byte {
+	if len(encoded) <= compactPeerWriteBufferRetainedBytes {
+		return encoded[:0]
 	}
 	return nil
 }

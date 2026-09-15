@@ -66,6 +66,40 @@ func BenchmarkCompactProtocolMarshal(b *testing.B) {
 	}
 }
 
+func BenchmarkCompactProtocolMarshalInto(b *testing.B) {
+	protocol, err := NewCompactProtocol(CompactProtocolOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	frame := benchmarkCompactProtocolFrame()
+	warmup, err := protocol.Marshal(frame)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(warmup)))
+	b.Run("marshal", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			encoded, err := protocol.Marshal(frame)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.SetBytes(int64(len(encoded)))
+		}
+	})
+	b.Run("marshal_into_reused", func(b *testing.B) {
+		buffer := make([]byte, 0, len(warmup))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buffer, err = protocol.MarshalInto(frame, buffer[:0])
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.SetBytes(int64(len(buffer)))
+		}
+	})
+}
+
 func BenchmarkJSONFrameMarshal(b *testing.B) {
 	frame := benchmarkCompactProtocolFrame()
 	jsonFrame := benchmarkJSONFrame{

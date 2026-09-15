@@ -14742,3 +14742,35 @@ commit-tr043a-c203:
 .PHONY: push-tr043a-c203
 push-tr043a-c203:
 	@bash ./scripts/push-tr043a-c203.sh
+
+.PHONY: test-tr043b-c203
+test-tr043b-c203:
+	@bash ./scripts/test-tr043b-c203.sh
+
+.PHONY: benchmark-tr043b-c203
+benchmark-tr043b-c203:
+	@bash ./scripts/benchmark-tr043b-c203.sh
+
+.PHONY: format-tr043b-c203
+format-tr043b-c203:
+	@bash ./scripts/format-tr043b-c203.sh
+
+.PHONY: verify-tr043b-c203
+verify-tr043b-c203:
+	@bash ./scripts/verify-tr043b-c203.sh
+
+.PHONY: stage-tr043b-c203
+stage-tr043b-c203:
+	@bash ./scripts/stage-tr043b-c203.sh
+
+.PHONY: inspect-staged-tr043b-c203
+inspect-staged-tr043b-c203:
+	@bash ./scripts/inspect-staged-tr043b-c203.sh
+
+.PHONY: commit-tr043b-c203
+commit-tr043b-c203:
+	@bash ./scripts/commit-tr043b-c203.sh
+
+.PHONY: push-tr043b-c203
+push-tr043b-c203:
+	@bash ./scripts/push-tr043b-c203.sh

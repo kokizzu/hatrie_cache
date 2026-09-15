@@ -25163,6 +25163,35 @@ BenchmarkCompactPeerSessionCall: 6156, 5932, 6208, 6053, 5930 ns/op; 512 B/op; 9
 BenchmarkCompactPeerSessionCallTemplate: 5971, 6146, 5912, 5841, 5495 ns/op; 480 B/op; 8 allocs/op
 ```
 
+## TR-043b Reusable Compact Peer Frame Buffers
+
+`CompactProtocol.MarshalInto` now appends into reusable capacity, and plain
+compact sessions use a bounded per-session writer buffer for both requests and
+responses. Compression-enabled sessions retain the existing writer path.
+
+Five-sample local benchmark on Linux/amd64:
+
+| Path | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Plain protocol encode | 55.99 ns/op; 80 B/op; 1 alloc | 21.43 ns/op; 0 B/op; 0 alloc | 2.61x faster; 80 B and 1 alloc removed |
+| Plain session `Call` | 6.053 us/op; 512 B/op; 9 allocs | 6.004 us/op; 448 B/op; 7 allocs | 1.01x median; 12.5% lower B/op; 2 allocs removed |
+
+The session CPU change is within normal `net.Pipe` scheduling noise. The
+important steady-state result is two fewer allocations per request/response
+round trip. Frames remain byte-for-byte compatible, and buffers above 64 KiB
+are not retained.
+
+Command: `make benchmark-tr043b-c203`
+
+Raw samples:
+
+```text
+BenchmarkCompactProtocolMarshalInto/marshal: 55.99, 55.22, 53.91, 56.10, 57.58 ns/op; 80 B/op; 1 alloc/op
+BenchmarkCompactProtocolMarshalInto/marshal_into_reused: 21.09, 21.43, 21.76, 21.47, 21.18 ns/op; 0 B/op; 0 alloc/op
+BenchmarkCompactPeerSessionCall before: 6156, 5932, 6208, 6053, 5930 ns/op; 512 B/op; 9 allocs/op
+BenchmarkCompactPeerSessionCall after: 6004, 5746, 6106, 6044, 5958 ns/op; 448 B/op; 7 allocs/op
+```
+
 ## CH-051 Low-Cardinality String Columns
 
 This opt-in ClickHouse-style dictionary column sorts its dictionary and stores

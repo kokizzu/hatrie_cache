@@ -47,6 +47,51 @@ func TestCompactProtocolRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCompactProtocolMarshalIntoMatchesMarshal(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		options CompactProtocolOptions
+		payload []byte
+	}{
+		{name: "plain", payload: []byte("payload")},
+		{name: "compressed", options: CompactProtocolOptions{CompressPayloadsAbove: 1}, payload: bytes.Repeat([]byte("payload"), 128)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			protocol, err := NewCompactProtocol(test.options)
+			if err != nil {
+				t.Fatalf("NewCompactProtocol() error = %v", err)
+			}
+			frame := CompactFrame{Kind: CompactRequest, RequestID: 17, Command: []byte("SET"), Payload: test.payload}
+			want, err := protocol.Marshal(frame)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			prefix := []byte("prefix")
+			dst := make([]byte, len(prefix), len(prefix)+len(want)+8)
+			copy(dst, prefix)
+			got, err := protocol.MarshalInto(frame, dst)
+			if err != nil {
+				t.Fatalf("MarshalInto() error = %v", err)
+			}
+			if !bytes.Equal(got[:len(prefix)], prefix) || !bytes.Equal(got[len(prefix):], want) {
+				t.Fatalf("MarshalInto() = %x, want prefix %x followed by %x", got, prefix, want)
+			}
+		})
+	}
+	protocol, err := NewCompactProtocol(CompactProtocolOptions{})
+	if err != nil {
+		t.Fatalf("NewCompactProtocol() error = %v", err)
+	}
+	dst := []byte("prefix")
+	got, err := protocol.MarshalInto(CompactFrame{Kind: CompactRequest, Command: []byte("SET")}, dst)
+	if !errors.Is(err, ErrCompactProtocolRequestIDInvalid) {
+		t.Fatalf("MarshalInto() error = %v, want request ID error", err)
+	}
+	if !bytes.Equal(got, dst) {
+		t.Fatalf("MarshalInto() changed destination on error: %x, want %x", got, dst)
+	}
+}
+
 func TestCompactProtocolRejectsMalformedAndOversizedFrames(t *testing.T) {
 	protocol, err := NewCompactProtocol(CompactProtocolOptions{MaxFrameBytes: 64, MaxCommandBytes: 8, MaxPayloadBytes: 16})
 	if err != nil {

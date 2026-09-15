@@ -56,6 +56,11 @@ const (
 	CompactError    CompactFrameKind = 3
 )
 
+// CompactFrameFlagPayloadCompressed marks a payload encoded with the compact
+// protocol's configured gzip payload codec. The decoded frame exposes the
+// original payload while retaining this flag for observability.
+const CompactFrameFlagPayloadCompressed byte = 1 << 0
+
 // CompactFrame is the compact command envelope exchanged by a peer adapter.
 // RequestID correlates responses with requests; it must be non-zero.
 type CompactFrame struct {
@@ -69,16 +74,26 @@ type CompactFrame struct {
 // CompactProtocolOptions bounds decoding before memory is allocated. Zero
 // values select the documented defaults.
 type CompactProtocolOptions struct {
-	MaxFrameBytes   int
+	MaxFrameBytes int
+	// MaxCommandBytes bounds the command name.
 	MaxCommandBytes int
+	// MaxPayloadBytes bounds the encoded payload in one frame.
 	MaxPayloadBytes int
+	// CompressPayloadsAbove enables gzip for payloads at or above the supplied
+	// size. Zero keeps compression disabled.
+	CompressPayloadsAbove int
+	// MaxDecompressedPayloadBytes bounds a compressed payload after inflation.
+	// Zero defaults to MaxPayloadBytes.
+	MaxDecompressedPayloadBytes int
 }
 
 // CompactProtocol encodes and decodes length-prefixed compact frames.
 type CompactProtocol struct {
-	maxFrameBytes   int
-	maxCommandBytes int
-	maxPayloadBytes int
+	maxFrameBytes               int
+	maxCommandBytes             int
+	maxPayloadBytes             int
+	compressPayloadsAbove       int
+	maxDecompressedPayloadBytes int
 }
 
 // NewCompactProtocol creates a bounded compact protocol codec.
@@ -95,30 +110,61 @@ func NewCompactProtocol(options CompactProtocolOptions) (CompactProtocol, error)
 	if maxPayloadBytes == 0 {
 		maxPayloadBytes = DefaultCompactProtocolMaxPayloadBytes
 	}
+	compressPayloadsAbove := options.CompressPayloadsAbove
+	maxDecompressedPayloadBytes := options.MaxDecompressedPayloadBytes
+	if maxDecompressedPayloadBytes == 0 {
+		maxDecompressedPayloadBytes = maxPayloadBytes
+	}
 	if maxFrameBytes < minCompactProtocolFrameBytes || maxFrameBytes > maxCompactProtocolFrameBytes ||
 		maxCommandBytes < 1 || maxCommandBytes > maxCompactProtocolCommandBytes ||
 		maxPayloadBytes < 0 || maxPayloadBytes > maxCompactProtocolPayloadBytes ||
-		maxCommandBytes > maxFrameBytes-8 || maxPayloadBytes > maxFrameBytes-8 {
+		maxCommandBytes > maxFrameBytes-8 || maxPayloadBytes > maxFrameBytes-8 ||
+		compressPayloadsAbove < 0 || maxDecompressedPayloadBytes < 0 ||
+		maxDecompressedPayloadBytes > maxCompactProtocolPayloadBytes {
 		return CompactProtocol{}, ErrCompactProtocolOptionsInvalid
 	}
 	return CompactProtocol{
-		maxFrameBytes:   maxFrameBytes,
-		maxCommandBytes: maxCommandBytes,
-		maxPayloadBytes: maxPayloadBytes,
+		maxFrameBytes:               maxFrameBytes,
+		maxCommandBytes:             maxCommandBytes,
+		maxPayloadBytes:             maxPayloadBytes,
+		compressPayloadsAbove:       compressPayloadsAbove,
+		maxDecompressedPayloadBytes: maxDecompressedPayloadBytes,
 	}, nil
 }
 
 // Marshal returns one length-prefixed compact frame.
 func (protocol CompactProtocol) Marshal(frame CompactFrame) ([]byte, error) {
+	return protocol.MarshalInto(frame, nil)
+}
+
+// MarshalInto appends one length-prefixed compact frame to dst. Reusing dst's
+// capacity avoids allocating a new frame buffer for every plain session write.
+func (protocol CompactProtocol) MarshalInto(frame CompactFrame, dst []byte) ([]byte, error) {
 	if err := protocol.validateFrame(frame); err != nil {
-		return nil, err
+		return dst, err
 	}
-	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(frame.Payload))) + len(frame.Payload)
+	payload, flags, err := protocol.preparePayload(frame.Payload, frame.Flags)
+	if err != nil {
+		return dst, err
+	}
+	if len(payload) > protocol.maxPayloadBytes {
+		return dst, ErrCompactProtocolPayloadTooLarge
+	}
+	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(payload))) + len(payload)
 	if bodyBytes > protocol.maxFrameBytes {
-		return nil, ErrCompactProtocolFrameTooLarge
+		return dst, ErrCompactProtocolFrameTooLarge
 	}
 	prefixBytes := compactUvarintSize(uint64(bodyBytes))
-	encoded := make([]byte, prefixBytes+bodyBytes)
+	start := len(dst)
+	totalBytes := prefixBytes + bodyBytes
+	if cap(dst)-start < totalBytes {
+		grown := make([]byte, start+totalBytes)
+		copy(grown, dst)
+		dst = grown
+	} else {
+		dst = dst[:start+totalBytes]
+	}
+	encoded := dst[start:]
 	binary.PutUvarint(encoded, uint64(bodyBytes))
 	offset := prefixBytes
 	encoded[offset] = compactProtocolMagic0
@@ -129,14 +175,14 @@ func (protocol CompactProtocol) Marshal(frame CompactFrame) ([]byte, error) {
 	offset++
 	encoded[offset] = byte(frame.Kind)
 	offset++
-	encoded[offset] = frame.Flags
+	encoded[offset] = flags
 	offset++
 	offset += binary.PutUvarint(encoded[offset:], frame.RequestID)
 	offset += binary.PutUvarint(encoded[offset:], uint64(len(frame.Command)))
 	offset += copy(encoded[offset:], frame.Command)
-	offset += binary.PutUvarint(encoded[offset:], uint64(len(frame.Payload)))
-	copy(encoded[offset:], frame.Payload)
-	return encoded, nil
+	offset += binary.PutUvarint(encoded[offset:], uint64(len(payload)))
+	copy(encoded[offset:], payload)
+	return dst, nil
 }
 
 // Write marshals and writes one complete frame, handling short writes.
@@ -257,12 +303,16 @@ func (protocol CompactProtocol) decodeBody(body []byte) (CompactFrame, error) {
 	if payloadEnd != len(body) || kind == CompactRequest && len(command) == 0 {
 		return CompactFrame{}, ErrCompactProtocolInvalidFrame
 	}
+	payload, err := protocol.decodePayload(flags, body[offset:payloadEnd])
+	if err != nil {
+		return CompactFrame{}, err
+	}
 	return CompactFrame{
 		Kind:      kind,
 		RequestID: requestID,
 		Flags:     flags,
 		Command:   command,
-		Payload:   body[offset:payloadEnd],
+		Payload:   payload,
 	}, nil
 }
 
