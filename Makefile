@@ -15076,3 +15076,30 @@ commit-index-c216:
 
 push-index-c216:
 	@bash ./scripts/push-index-c216.sh
+
+test-posting-c217:
+	@bash ./scripts/test-posting-c217.sh
+
+benchmark-posting-c217:
+	@bash ./scripts/benchmark-posting-c217.sh
+
+benchmark-hash-index-c217:
+	@bash ./scripts/benchmark-hash-index-c217.sh
+
+format-posting-c217:
+	@bash ./scripts/format-posting-c217.sh
+
+verify-posting-c217:
+	@bash ./scripts/verify-posting-c217.sh
+
+inspect-posting-c217:
+	@bash ./scripts/inspect-posting-c217.sh
+
+stage-posting-c217:
+	@bash ./scripts/stage-posting-c217.sh
+
+commit-posting-c217:
+	@bash ./scripts/commit-posting-c217.sh
+
+push-posting-c217:
+	@bash ./scripts/push-posting-c217.sh

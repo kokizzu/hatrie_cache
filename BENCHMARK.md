@@ -17109,6 +17109,40 @@ order. For the normal fresh-result path it removes intermediate append growth;
 for reusable scratch it only checks the known cardinality against capacity and
 does not allocate when capacity is sufficient.
 
+<a id="monotonic-posting-insertion"></a>
+## Monotonic Posting Insertion
+
+Command: `make benchmark-posting-c217` and `make benchmark-hash-index-c217`.
+
+C217 recognizes the common sorted-ID append case before invoking binary search
+on a non-unique `HashIndex` posting list. Arbitrary insertion, duplicate
+rejection, and the sorted posting invariant retain their previous behavior. The
+benchmarks use five samples per case on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One posting, 256 IDs | 3,862 ns/op | 2,331 ns/op | **1.66x faster** | 6,168 B/op, 11 allocs | 6,168 B/op, 11 allocs |
+| One posting, 4,096 IDs | 76,602 ns/op | 41,923 ns/op | **1.83x faster** | 161,048 B/op, 18 allocs | 161,048 B/op, 18 allocs |
+| One posting, 10,000 IDs | 194,876 ns/op | 101,671 ns/op | **1.92x faster** | 439,578 B/op, 21 allocs | 439,577 B/op, 21 allocs |
+| HashIndex build, 10,000 rows / 100 keys | 1,100,643 ns/op | 1,027,912 ns/op | **1.07x faster** | 1,081,095 B/op, 969 allocs | 1,081,096 B/op, 969 allocs |
+
+Raw samples:
+
+```text
+posting size 256 before:   3785, 3869, 3882, 3784, 3862 ns/op; 6168 B/op; 11 alloc/op
+posting size 256 after:     2295, 2369, 2350, 2325, 2331 ns/op; 6168 B/op; 11 alloc/op
+posting size 4096 before: 87523, 76729, 75310, 75855, 76602 ns/op; 161048 B/op; 18 alloc/op
+posting size 4096 after:  43935, 40527, 41923, 41400, 42643 ns/op; 161048 B/op; 18 alloc/op
+posting size 10000 before: 192738, 194876, 197333, 192614, 197449 ns/op; 439578 B/op; 21 alloc/op
+posting size 10000 after:  126047, 98387, 101671, 96546, 106296 ns/op; 439577 B/op; 21 alloc/op
+hash build before:         1095125, 1100643, 1116295, 1080522, 1106253 ns/op; 1081094, 1081096, 1081096, 1081095, 1081100 B/op; 969 alloc/op
+hash build after:           994652, 1027912, 1074349, 1132275, 1172651 ns/op; 1081095, 1081095, 1081100, 1081097, 1081096 B/op; 969 alloc/op
+```
+
+The one-byte B/op variation in the integrated benchmark is allocator noise;
+allocation counts are unchanged. No additional index memory is retained, and
+non-monotonic workloads continue through the existing `sort.Search` path.
+
 ## Rejected C214 Async Batcher Shared-Read Lock
 
 The ClickHouse-style `AsyncBatcher` already holds an exclusive mutex while a

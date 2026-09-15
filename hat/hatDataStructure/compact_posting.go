@@ -59,6 +59,10 @@ func (list u64PostingList) insertSorted(id uint64) u64PostingList {
 		list.rest.first = id
 		return list
 	}
+	if len(list.rest.rest) == 0 || id > list.rest.rest[len(list.rest.rest)-1] {
+		list.rest.rest = append(list.rest.rest, id)
+		return list
+	}
 	position := sort.Search(len(list.rest.rest), func(position int) bool {
 		return list.rest.rest[position] >= id
 	})

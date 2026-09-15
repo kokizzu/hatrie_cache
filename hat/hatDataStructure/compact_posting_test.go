@@ -67,6 +67,24 @@ func TestU64PostingListValuesPreallocatesExactResult(t *testing.T) {
 	}
 }
 
+func TestU64PostingListInsertSortedMonotonicIDs(t *testing.T) {
+	list := newU64PostingList(0)
+	for id := uint64(1); id < 256; id++ {
+		list = list.insertSorted(id)
+	}
+	list = list.insertSorted(128)
+
+	values := list.values(nil)
+	if len(values) != 256 {
+		t.Fatalf("values() length after duplicate = %d, want 256", len(values))
+	}
+	for index, value := range values {
+		if value != uint64(index) {
+			t.Fatalf("values()[%d] = %d, want %d", index, value, index)
+		}
+	}
+}
+
 func TestCompactPostingIndexesHandleSingletonZeroID(t *testing.T) {
 	functional, err := NewFunctionalIndex(func(value int) int { return value }, 1)
 	if err != nil {

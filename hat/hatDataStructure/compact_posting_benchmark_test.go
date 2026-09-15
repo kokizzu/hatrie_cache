@@ -92,3 +92,40 @@ func BenchmarkC216FunctionalLookupIDs(b *testing.B) {
 		}
 	})
 }
+
+var compactPostingC217Sink int
+
+func BenchmarkC217PostingBuild(b *testing.B) {
+	for _, size := range []int{256, 4096, 10000} {
+		b.Run(fmt.Sprintf("monotonic-size-%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				list := newU64PostingList(0)
+				for id := 1; id < size; id++ {
+					list = list.insertSorted(uint64(id))
+				}
+				compactPostingC217Sink = len(list.values(nil))
+			}
+		})
+	}
+}
+
+func BenchmarkC217HashIndexBuild(b *testing.B) {
+	const (
+		rowCount = 10000
+		distinct = 100
+	)
+	b.ReportAllocs()
+	for range b.N {
+		index, err := NewHashIndex(func(value int) int { return value % distinct }, HashIndexOptions{Capacity: rowCount})
+		if err != nil {
+			b.Fatal(err)
+		}
+		for value := 0; value < rowCount; value++ {
+			if err := index.Upsert(uint64(value+1), value); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
