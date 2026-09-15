@@ -15493,3 +15493,32 @@ commit-frontier-read-hold-c203:
 
 push-frontier-read-hold-c203:
 	bash ./scripts/push-frontier-read-hold-c203.sh
+
+.PHONY: inspect-backup-c203 test-backup-catalog-c203 benchmark-backup-catalog-c203 race-backup-catalog-c203 vet-backup-catalog-c203 format-backup-catalog-c203
+inspect-backup-c203:
+	bash ./scripts/inspect-backup-c203.sh
+
+test-backup-catalog-c203:
+	bash ./scripts/test-backup-catalog-c203.sh
+
+benchmark-backup-catalog-c203:
+	bash ./scripts/benchmark-backup-catalog-c203.sh
+
+race-backup-catalog-c203:
+	bash ./scripts/race-backup-catalog-c203.sh
+
+vet-backup-catalog-c203:
+	bash ./scripts/vet-backup-catalog-c203.sh
+
+format-backup-catalog-c203:
+	bash ./scripts/format-backup-catalog-c203.sh
+
+.PHONY: stage-backup-catalog-c203 commit-backup-catalog-c203 push-backup-catalog-c203
+stage-backup-catalog-c203:
+	bash ./scripts/stage-backup-catalog-c203.sh
+
+commit-backup-catalog-c203:
+	bash ./scripts/commit-backup-catalog-c203.sh
+
+push-backup-catalog-c203:
+	bash ./scripts/push-backup-catalog-c203.sh
