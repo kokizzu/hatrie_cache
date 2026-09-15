@@ -86,3 +86,34 @@ Existing aggregate syntax, commands, journal/storage formats, and defaults are
 unchanged. The feature is useful when a producer can send one partial state
 instead of every input value; it does not make ordinary aggregate execution
 automatically distributed.
+
+## Arg-extreme states
+
+`ARGMAX_STATE(argument, ordering)` and `ARGMIN_STATE(argument, ordering)` retain
+the argument associated with the largest or smallest ordering value. The
+matching `ARGMAX_MERGE(state)` and `ARGMIN_MERGE(state)` functions combine those
+partial winners:
+
+```sql
+FROM events
+SELECT region, ARGMAX_STATE(payload, score) AS latest_state
+GROUP BY region
+```
+
+```sql
+FROM VALUES ($1), ($2) AS partial(state)
+SELECT ARGMAX_MERGE(partial.state) AS payload
+```
+
+Rows with a NULL argument or ordering value are ignored. Equal ordering values
+keep the first winner, including when partial states are merged. String
+ordering follows the query collation, and the collation is stored in the state;
+merging non-empty states with different collations is rejected. Empty states
+are valid and merge to NULL.
+
+The `HAEX` version-1 binary state preserves supported scalar types, including
+integers, unsigned integers, floats, strings, bytes, booleans, timestamps,
+`DATE`, `DECIMAL`, `UUID`, `DURATION`, IPv4, and IPv6. It has bounded length
+decoding, strict magic/version/kind/flag checks, and rejects trailing bytes or
+wrong-kind states. State creation adds serialization work; the ordinary
+`ARGMAX`/`ARGMIN` path remains unchanged.

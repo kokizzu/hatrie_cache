@@ -3244,20 +3244,22 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 }
 
 type sqlStreamAggregate struct {
-	name        string
-	arg         *sqlExpr
-	order       *sqlExpr
-	filter      *sqlExpr
-	approximate *sqlApproximateStreamState
-	state       *sqlAggregateStateAccumulator
-	stateMerge  bool
-	collation   SQLCollation
-	count       int64
-	sum         float64
-	value       float64
-	selected    interface{}
-	extreme     interface{}
-	seen        bool
+	name                 string
+	arg                  *sqlExpr
+	order                *sqlExpr
+	filter               *sqlExpr
+	approximate          *sqlApproximateStreamState
+	state                *sqlAggregateStateAccumulator
+	stateMerge           bool
+	argExtremeState      *sqlArgExtremeStateAccumulator
+	argExtremeStateMerge bool
+	collation            SQLCollation
+	count                int64
+	sum                  float64
+	value                float64
+	selected             interface{}
+	extreme              interface{}
+	seen                 bool
 }
 
 // sqlGlobalStreamAggregates recognizes the constant-state aggregate subset.
@@ -3313,6 +3315,22 @@ func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
 			aggregate.state = &sqlAggregateStateAccumulator{kind: kind}
 			aggregate.stateMerge = merge
 			aggregate.arg = argument
+		case "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
+			kind, merge, ok := sqlArgExtremeStateSpec(expr.name)
+			if !ok {
+				return nil, false
+			}
+			argument, ordering, err := sqlArgExtremeStateArity(expr, merge)
+			if err != nil {
+				return nil, false
+			}
+			aggregate.argExtremeState = &sqlArgExtremeStateAccumulator{kind: kind}
+			aggregate.argExtremeStateMerge = merge
+			aggregate.arg, aggregate.order = argument, ordering
+			if !merge {
+				aggregate.argExtremeState.collation = expr.collation.normalized()
+				aggregate.argExtremeState.collationSet = true
+			}
 		default:
 			return nil, false
 		}
@@ -3357,6 +3375,30 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 			return err
 		}
 		return aggregate.state.addValue(value)
+	}
+	if aggregate.argExtremeState != nil {
+		if aggregate.argExtremeStateMerge {
+			if aggregate.arg == nil {
+				return fmt.Errorf("%s aggregate state is incomplete", aggregate.name)
+			}
+			value := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			return aggregate.argExtremeState.mergeValue(value)
+		}
+		if aggregate.arg == nil || aggregate.order == nil {
+			return fmt.Errorf("%s aggregate state is incomplete", aggregate.name)
+		}
+		selected := evalSQLExpr(*aggregate.arg, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(selected); err != nil {
+			return err
+		}
+		extreme := evalSQLExpr(*aggregate.order, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(extreme); err != nil {
+			return err
+		}
+		return aggregate.argExtremeState.add(selected, extreme)
 	}
 	if sqlArgExtremeAggregate(aggregate.name) {
 		if aggregate.arg == nil || aggregate.order == nil {
@@ -3417,6 +3459,9 @@ func (aggregate sqlStreamAggregate) result() interface{} {
 	}
 	if aggregate.state != nil {
 		return aggregate.state.result(!aggregate.stateMerge)
+	}
+	if aggregate.argExtremeState != nil {
+		return aggregate.argExtremeState.result(!aggregate.argExtremeStateMerge)
 	}
 	switch aggregate.name {
 	case "COUNT":
@@ -3480,6 +3525,26 @@ func sqlStreamAggregateSourceValue(expr sqlExpr, row SQLRow, alias string) (inte
 }
 
 func (aggregate *sqlStreamAggregate) addSourceRow(row SQLRow, alias string) error {
+	if aggregate.argExtremeState != nil {
+		if aggregate.arg == nil {
+			return fmt.Errorf("%s aggregate state is incomplete", aggregate.name)
+		}
+		value, ok := sqlStreamAggregateSourceValue(*aggregate.arg, row, alias)
+		if !ok {
+			return fmt.Errorf("%s aggregate state argument is not a direct source expression", aggregate.name)
+		}
+		if aggregate.argExtremeStateMerge {
+			return aggregate.argExtremeState.mergeValue(value)
+		}
+		if aggregate.order == nil {
+			return fmt.Errorf("%s aggregate state is incomplete", aggregate.name)
+		}
+		ordering, ok := sqlStreamAggregateSourceValue(*aggregate.order, row, alias)
+		if !ok {
+			return fmt.Errorf("%s aggregate state ordering expression is not a direct source expression", aggregate.name)
+		}
+		return aggregate.argExtremeState.add(value, ordering)
+	}
 	if !sqlArgExtremeAggregate(aggregate.name) || aggregate.arg == nil || aggregate.order == nil {
 		return fmt.Errorf("%s aggregate is not a direct source aggregate", aggregate.name)
 	}
@@ -7305,7 +7370,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
-				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
 				default:
 					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
 				}
@@ -16306,7 +16371,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -16615,6 +16680,12 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return values
 		case "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE":
 			value, err := evalSQLAggregateState(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return value
+		case "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
+			value, err := evalSQLArgExtremeState(expr, group)
 			if err != nil {
 				return sqlEvaluationFailure(err)
 			}
@@ -17170,7 +17241,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false

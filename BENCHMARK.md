@@ -26283,3 +26283,44 @@ BenchmarkCH036AggregateStateMerge-32    4218529  54.29 ns/op 17.00 state-bytes/o
 BenchmarkCH036AggregateStateMerge-32    4317684  54.57 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
 BenchmarkCH036AggregateStateMerge-32    4362993  57.34 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
 ```
+
+<a id="ch-037-argmin-argmax-aggregate-state"></a>
+## CH-037 ARGMIN/ARGMAX Aggregate State
+
+This benchmark uses 1,024 deterministic `(payload string, score int64)` rows
+on Linux `amd64` with an AMD Ryzen 9 5950X. The ordinary `ARGMAX` path is the
+control. `ARGMAX_STATE` performs the same scan and serializes one transferable
+winner; `ARGMAX_MERGE` decodes and merges that one state. Five samples were run
+with `-benchtime=200ms`.
+
+| Path | Median ns/op | B/op | Allocs/op | State bytes/op | Relative CPU / memory / allocations |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Ordinary `ARGMAX` control | 235,739 | 346,209 | 2,063 | N/A | 1.00x |
+| `ARGMAX_STATE` | 404,659 | 699,722 | 4,119 | 25 | 1.72x slower / 2.02x bytes / 2.00x allocations |
+| `ARGMAX_MERGE` of one state | 100.9 | 56 | 3 | 25 | merge-only cost |
+
+The state is a fixed-size winner for this fixture, not a claim that the whole
+1,024-row input is 25 bytes. State creation has a measurable CPU and allocation
+cost because it validates and serializes the selected and ordering values; it
+is useful when that one state replaces shipping or retaining the full partial
+input. Ordinary `ARGMAX` and `ARGMIN` execution remains unchanged.
+
+Raw output from `make benchmark-ch037-c237`:
+
+```text
+BenchmarkCH037ArgExtremeBaseline-32      	     950	    236170 ns/op	      1024 rows/op	  346209 B/op	    2063 allocs/op
+BenchmarkCH037ArgExtremeBaseline-32      	    1032	    235690 ns/op	      1024 rows/op	  346209 B/op	    2063 allocs/op
+BenchmarkCH037ArgExtremeBaseline-32      	     970	    233790 ns/op	      1024 rows/op	  346208 B/op	    2063 allocs/op
+BenchmarkCH037ArgExtremeBaseline-32      	    1003	    240922 ns/op	      1024 rows/op	  346210 B/op	    2063 allocs/op
+BenchmarkCH037ArgExtremeBaseline-32      	     921	    235739 ns/op	      1024 rows/op	  346209 B/op	    2063 allocs/op
+BenchmarkCH037ArgExtremeState-32         	     662	    376703 ns/op	      1024 rows/op	        25.00 state-bytes/op	  699723 B/op	    4119 allocs/op
+BenchmarkCH037ArgExtremeState-32         	     614	    405378 ns/op	      1024 rows/op	        25.00 state-bytes/op	  699722 B/op	    4119 allocs/op
+BenchmarkCH037ArgExtremeState-32         	     518	    404659 ns/op	      1024 rows/op	        25.00 state-bytes/op	  699734 B/op	    4119 allocs/op
+BenchmarkCH037ArgExtremeState-32         	     568	    400844 ns/op	      1024 rows/op	        25.00 state-bytes/op	  699721 B/op	    4119 allocs/op
+BenchmarkCH037ArgExtremeState-32         	     513	    425644 ns/op	      1024 rows/op	        25.00 state-bytes/op	  699722 B/op	    4119 allocs/op
+BenchmarkCH037ArgExtremeStateMerge-32    	 2446387	        99.11 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
+BenchmarkCH037ArgExtremeStateMerge-32    	 2334003	       100.9 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
+BenchmarkCH037ArgExtremeStateMerge-32    	 2335737	       100.1 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
+BenchmarkCH037ArgExtremeStateMerge-32    	 2410304	       114.6 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
+BenchmarkCH037ArgExtremeStateMerge-32    	 2224726	       104.9 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
+```

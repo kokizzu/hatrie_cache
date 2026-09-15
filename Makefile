@@ -15702,3 +15702,21 @@ commit-ch036-c236: stage-ch036-c236
 .PHONY: push-ch036-c236
 push-ch036-c236: commit-ch036-c236
 	bash ./scripts/push-ch036-c236.sh
+.PHONY: test-ch037-c237
+test-ch037-c237:
+	bash ./scripts/test-ch037-c237.sh test
+.PHONY: test-ch037-package-c237
+test-ch037-package-c237:
+	bash ./scripts/test-ch037-c237.sh package
+.PHONY: vet-ch037-c237
+vet-ch037-c237:
+	bash ./scripts/test-ch037-c237.sh vet
+.PHONY: race-ch037-c237
+race-ch037-c237:
+	bash ./scripts/test-ch037-c237.sh race
+.PHONY: benchmark-ch037-c237
+benchmark-ch037-c237:
+	bash ./scripts/test-ch037-c237.sh benchmark
+.PHONY: format-ch037-c237
+format-ch037-c237:
+	bash ./scripts/format-ch037-c237.sh

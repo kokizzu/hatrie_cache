@@ -70,7 +70,19 @@ func sqlArgExtremeDirectSourcePlan(query *sqlQuery, aggregates []sqlStreamAggreg
 		return false
 	}
 	for _, aggregate := range aggregates {
-		if !sqlArgExtremeAggregate(aggregate.name) || aggregate.arg == nil || aggregate.order == nil {
+		if aggregate.filter != nil {
+			return false
+		}
+		if sqlArgExtremeAggregate(aggregate.name) {
+			if aggregate.arg == nil || aggregate.order == nil {
+				return false
+			}
+			continue
+		}
+		if aggregate.argExtremeState == nil || aggregate.arg == nil {
+			return false
+		}
+		if !aggregate.argExtremeStateMerge && aggregate.order == nil {
 			return false
 		}
 	}
