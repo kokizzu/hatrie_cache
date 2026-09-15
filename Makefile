@@ -15552,3 +15552,29 @@ commit-ch007-ttl-c225:
 	bash ./scripts/commit-ch007-ttl-c225.sh
 push-ch007-ttl-c225:
 	bash ./scripts/push-ch007-ttl-c225.sh
+
+.PHONY: inspect-mz002-c226 test-mz002-c226 test-mz002-all-c226 benchmark-mz002-c226 benchmark-mz002-before-c226 race-mz002-c226 vet-mz002-c226 locate-mz002-c226 format-mz002-c226 stage-mz002-c226 commit-mz002-c226 push-mz002-c226
+inspect-mz002-c226:
+	bash ./scripts/inspect-mz002-c226.sh
+test-mz002-c226:
+	bash ./scripts/run-mz002-c226.sh test
+test-mz002-all-c226:
+	bash ./scripts/run-mz002-c226.sh all
+benchmark-mz002-c226:
+	bash ./scripts/run-mz002-c226.sh benchmark
+benchmark-mz002-before-c226:
+	bash ./scripts/run-mz002-c226.sh baseline
+race-mz002-c226:
+	bash ./scripts/run-mz002-c226.sh race
+vet-mz002-c226:
+	bash ./scripts/run-mz002-c226.sh vet
+locate-mz002-c226:
+	bash ./scripts/locate-mz002-c226.sh
+format-mz002-c226:
+	bash ./scripts/format-mz002-c226.sh
+stage-mz002-c226:
+	bash ./scripts/stage-mz002-c226.sh
+commit-mz002-c226:
+	bash ./scripts/commit-mz002-c226.sh
+push-mz002-c226:
+	bash ./scripts/push-mz002-c226.sh

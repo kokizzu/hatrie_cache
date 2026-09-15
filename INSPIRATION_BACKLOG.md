@@ -91,7 +91,7 @@ before/after measurement when its motivation is performance.
 | ID | Candidate gap | Intended value | Main cost or risk | State |
 | --- | --- | --- | --- | --- |
 | MZ-01 | Durable persisted collections with blob and consensus handles | Recover arrangements without full recompute | Storage protocol and GC complexity | [ ] |
-| MZ-02 | Public since and upper read holds | Pin historical reads safely | Leaked holds block compaction | [ ] |
+| MZ-02 | Public since and upper read holds | Pin historical reads safely | Leaked holds block compaction | [x] `TypedTable.AcquireChangeReadHold` pins multi-call changefeed snapshots and blocks unsafe compaction; see [MZ002_TYPED_TABLE_READ_HOLDS.md](MZ002_TYPED_TABLE_READ_HOLDS.md) and [BENCHMARK.md#mz-002-typedtable-change-read-holds](BENCHMARK.md#mz-002-typedtable-change-read-holds). |
 | MZ-03 | Frontier-aware logical compaction scheduler | Bound retained differential history | Scheduler and prioritization cost | [ ] |
 | MZ-04 | Compaction debt and blocked-frontier metrics | Explain storage growth | More telemetry state | [x] Implemented as allocation-free fields on `hatPipeline.FrontierRetentionSnapshot`; see [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md) and [BENCHMARK.md#mz-04-frontier-compaction-debt-metrics](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics). |
 | MZ-05 | Immutable sealed batch/run format for persisted updates | Stream compaction efficiently | New on-disk format | [ ] |

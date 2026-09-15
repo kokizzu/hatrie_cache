@@ -336,6 +336,7 @@ type TypedTable struct {
 	changes          []TypedTableChange
 	compactedThrough uint64
 	sequence         uint64
+	changeReadHolds  *typedTableChangeReadHoldSet
 }
 
 // NewTypedTable validates schema and creates an empty compact table.
@@ -594,6 +595,10 @@ func (table *TypedTable) ChangesAfter(sequence uint64, limit int) ([]TypedTableC
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
+	return table.changesAfterLocked(sequence, limit)
+}
+
+func (table *TypedTable) changesAfterLocked(sequence uint64, limit int) ([]TypedTableChange, uint64, error) {
 	if sequence < table.compactedThrough {
 		return nil, table.sequence, ErrTypedTableChangesCompacted
 	}
@@ -626,6 +631,9 @@ func (table *TypedTable) CompactChangesThrough(sequence uint64) error {
 	}
 	drop := int(sequence - table.compactedThrough)
 	if drop > 0 {
+		if table.changeReadHolds != nil && !table.changeReadHolds.CanCompactThrough(sequence) {
+			return fmt.Errorf("%w: sequence %d", ErrTypedTableChangeReadHoldActive, sequence)
+		}
 		retained := make([]TypedTableChange, len(table.changes)-drop)
 		copy(retained, table.changes[drop:])
 		table.changes = retained

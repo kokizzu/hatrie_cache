@@ -1,5 +1,23 @@
 # Benchmark
 
+## MZ-002 TypedTable Change Read Holds
+
+The paired clean-overlay comparison uses `make benchmark-mz002-before-c226`
+and `make benchmark-mz002-c226`. The baseline is the pre-integration table;
+the optimized run adds the optional public change-read hold and its
+compaction guard. Five samples were collected on an AMD Ryzen 9 5950X Linux
+amd64 host. The default no-hold path remains allocation-free.
+
+| Operation | Before | After | Relative result |
+| --- | ---: | ---: | ---: |
+| `CompactChangesThrough(0)` without a hold | 8.57 ns/op | 8.02 ns/op | 1.07x throughput, within noise |
+| Explicit acquire/release lifecycle | n/a | 100.5 ns/op | 48 B/op, 2 allocs/op |
+
+The hold is intentionally opt-in; its map and handle allocations are paid
+only by multi-call readers that need compaction protection. It is a retention
+correctness feature rather than a throughput optimization. See
+[MZ002_TYPED_TABLE_READ_HOLDS.md](MZ002_TYPED_TABLE_READ_HOLDS.md).
+
 ## TR-019 Tuple Field-Offset Cache
 
 Five-run local benchmark on a 128-row batch containing dictionary, packed,

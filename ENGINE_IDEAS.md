@@ -86,7 +86,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-002 | Snapshot frontier gating | Source reads do not expose a public readiness frontier that blocks until a consistent snapshot. | Medium |
 | MZ-003 | Hydration progress and resume | Historical state rebuild has no public byte/record progress or resumable checkpoint. | Medium |
 | MZ-004 | Logical compaction controls | No per-collection policy for compacting historical updates after a safe frontier. | High |
-| MZ-005 | Since/upper frontier introspection | No API exposes lower and upper time frontiers for each maintained object. | Medium |
+| MZ-005 | Since/upper frontier introspection | Partially adopted: `TypedTableChangeReadHold` exposes bounded `Since`/`Upper` frontiers for multi-call changefeed readers and protects compaction; frontiers for every maintained object remain deferred. | Medium |
 | MZ-006 | Antichain timestamps | No partially ordered timestamp frontier for concurrent partitions. | High |
 | MZ-007 | Stale-read rejection | Adopted: opt-in `SQLSourceFrontierResolver` validation rejects unavailable, unready, or stale non-local sources before reads, including joins, CTEs, and set-operation branches. | Medium |
 | MZ-008 | `AS OF` query execution | Adopted: opt-in `SQLQueryOptions.AsOfFrontier` binds normal, streamed, offset-page, and keyset-page reads to an immutable `SQLFrontierSnapshotProvider` view; historical reads bypass the live result cache and bind cursors to the frontier. | High |
