@@ -94,12 +94,19 @@ func (queue *DelayQueue[T]) Pop() (DelayQueueItem[T], bool) {
 // or before now.
 func (queue *DelayQueue[T]) PopReady(now time.Time) (T, bool) {
 	var zero T
-	item, ok := queue.Peek()
-	if !ok || item.ReadyAt.After(now) {
+	if queue == nil || len(queue.items) == 0 || queue.items[0].ReadyAt.After(now) {
 		return zero, false
 	}
-	item, _ = queue.Pop()
-	return item.Value, true
+	root := queue.items[0]
+	last := len(queue.items) - 1
+	lastItem := queue.items[last]
+	queue.items[last].Value = zero
+	queue.items = queue.items[:last]
+	if len(queue.items) > 0 {
+		queue.items[0] = lastItem
+		queue.siftDown(0)
+	}
+	return root.Value, true
 }
 
 // Clear removes all queued values and releases references held by them.

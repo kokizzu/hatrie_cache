@@ -17045,6 +17045,28 @@ four after:              63.18, 62.57, 64.19, 64.30, 64.70 ns/op
 The optimization has no measured memory or allocation cost and changes no
 public consistency or selection behavior.
 
+<a id="delay-queue-pop-ready-fast-path"></a>
+## Delay Queue Pop-Ready Fast Path
+
+Command: `make benchmark-delay-queue-c215`.
+
+C215 compares the previous `Peek` plus `Pop` implementation with one in-place
+ready-root check and removal. Both runs use deterministic deadlines and
+`-benchmem` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One ready item: `PopReady` | 22.54 ns/op | 10.64 ns/op | **2.12x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+| `VisibilityQueue` lease + ack | 104.9 ns/op | 91.20 ns/op | **1.15x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+| 256-item resident lease + ack | 530.45 ns/op | 518.3 ns/op | **1.02x faster** | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op |
+
+Raw isolated samples were `22.43, 22.60, 22.40, 22.54, 24.39 ns/op` before
+and `11.78, 11.39, 10.64, 10.34, 10.45 ns/op` after. The resident case used
+ten samples per side: before `519.8, 526.3, 552.2, 534.6, 538.3, 557.1,
+509.2, 536.6, 508.2, 508.4 ns/op`; after `576.0, 503.1, 506.0, 523.4,
+526.1, 543.5, 506.1, 513.2, 551.6, 512.8 ns/op`. All cases remained at zero
+bytes and zero allocations per operation.
+
 ## Rejected C214 Async Batcher Shared-Read Lock
 
 The ClickHouse-style `AsyncBatcher` already holds an exclusive mutex while a

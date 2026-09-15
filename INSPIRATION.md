@@ -761,6 +761,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T088 Priority queue operations.
 - [x] T089 Delay queue operations - public generic `hatDataStructure.DelayQueue` uses a stable 4-ary deadline heap with zero steady-state allocations and `PopReady`/`NextReadyAt` operations. See [DELAY_QUEUE.md](DELAY_QUEUE.md).
 - [x] T089a Tarantool-style visibility-timeout queue leases. Importable generic `hatDataStructure.VisibilityQueue` hides leased items, supports acknowledgement and delayed negative acknowledgement, requeues expired leases, retains retry IDs/attempt counts, and removes acknowledged deadlines from an indexed expiry heap without steady-state allocations. See [VISIBILITY_QUEUE.md](VISIBILITY_QUEUE.md) and [BENCHMARK.md](BENCHMARK.md#visibility-timeout-queue).
+- [x] T089b Fused ready-item removal for delay and visibility queues. `DelayQueue.PopReady` checks and removes the root in one operation, preserving heap ordering and reference clearing; the isolated path is 2.12x faster with zero allocations, and the real lease/ack path is 1.15x faster. See [DELAY_QUEUE_POP_READY_FASTPATH.md](DELAY_QUEUE_POP_READY_FASTPATH.md).
 - [x] T090 TTL queue expiration.
 - [x] T091 Scheduled refresh and maintenance tasks.
 - [x] T092 Fiber-style cooperative scheduler. `hat/hatPipeline.Scheduler` provides fixed workers, bounded cooperative task submission, cancellation, fail-fast errors, and close/drain lifecycle semantics. See [SCHEDULER.md](SCHEDULER.md).
