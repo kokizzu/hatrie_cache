@@ -23299,6 +23299,50 @@ existing immutable entry slice. It is a memory/streaming win against an
 allocating materialization, not a CPU win over a caller with an already-sized
 reusable destination.
 
+<a id="ordered-snapshot-cursor-seek-fast-paths"></a>
+## Ordered Snapshot-Cursor Seek Fast Paths
+
+Command: `make benchmark-ordered-seek-c220`.
+
+C220 avoids the general-purpose binary-search loop for one- and two-entry
+ordered snapshot cursors. Forward and reverse snapshot seeks keep their
+inclusive/exclusive semantics, while vectors with eight or more entries retain
+the existing `sort.Search` path. The benchmark used three fixed 200 ms samples
+per case on Linux/amd64 with an AMD Ryzen 9 5950X and `-benchmem`.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Forward, 1 entry, first | 4.660 ns/op | 3.895 ns/op | **1.20x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Forward, 1 entry, middle/equal | 4.644 ns/op | 3.601 ns/op | **1.29x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Forward, 1 entry, after | 4.835 ns/op | 4.193 ns/op | **1.15x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Forward, 2 entries, first | 6.875 ns/op | 5.716 ns/op | **1.20x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Forward, 2 entries, middle | 7.036 ns/op | 6.610 ns/op | **1.06x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Forward, 2 entries, after | 5.042 ns/op | 4.431 ns/op | **1.14x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Reverse, 1 entry, strict | 5.762 ns/op | 4.606 ns/op | **1.25x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Reverse, 1 entry, inclusive | 5.537 ns/op | 4.392 ns/op | **1.26x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Reverse, 2 entries, strict | 7.757 ns/op | 6.542 ns/op | **1.19x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Reverse, 2 entries, inclusive | 5.213 ns/op | 4.496 ns/op | **1.16x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+
+Raw samples:
+
+```text
+forward 1/first before: 4.569, 4.734, 4.660 ns/op; after: 3.895, 4.080, 3.462 ns/op
+forward 1/middle before: 4.402, 4.791, 4.644 ns/op; after: 3.555, 3.760, 3.601 ns/op
+forward 1/after before: 4.317, 4.948, 4.835 ns/op; after: 3.677, 4.193, 4.675 ns/op
+forward 2/first before: 6.875, 7.391, 6.800 ns/op; after: 5.674, 5.716, 6.834 ns/op
+forward 2/middle before: 7.036, 7.448, 6.900 ns/op; after: 6.763, 6.610, 6.271 ns/op
+forward 2/after before: 5.042, 5.194, 4.823 ns/op; after: 4.705, 4.431, 4.211 ns/op
+reverse 1/strict before: 5.754, 5.762, 5.824 ns/op; after: 4.412, 4.606, 4.731 ns/op
+reverse 1/inclusive before: 5.537, 5.994, 5.534 ns/op; after: 4.701, 4.174, 4.392 ns/op
+reverse 2/strict before: 7.749, 7.757, 7.818 ns/op; after: 6.812, 6.373, 6.542 ns/op
+reverse 2/inclusive before: 5.213, 4.971, 5.812 ns/op; after: 4.486, 4.496, 4.736 ns/op
+```
+
+The change adds no fields, allocations, or retained backing storage. Ordinary
+iterator seeks were benchmarked during the experiment and left unchanged
+because their iterator setup dominates the tiny search and did not produce a
+repeatable net win.
+
 ## CH-041 Bounded `GROUP_ARRAY`
 
 This benchmark compares the existing unbounded grouped collection with the

@@ -109,13 +109,38 @@ func (cursor *OrderedIndexSnapshotCursor[T, K]) seek(key K, strict bool) error {
 	if cursor.released {
 		return ErrOrderedIndexSnapshotCursorReleased
 	}
-	cursor.position = sort.Search(len(cursor.entries), func(position int) bool {
-		comparison := cursor.index.compare(cursor.entries[position].Key, key)
-		if strict {
-			return comparison > 0
+	entries := cursor.entries
+	position := len(entries)
+	// Snapshot cursors are already zero-copy; avoid sort.Search overhead for
+	// the tiny vectors common to selective probes.
+	switch len(entries) {
+	case 1:
+		comparison := cursor.index.compare(entries[0].Key, key)
+		if comparison > 0 || !strict && comparison == 0 {
+			position = 0
 		}
-		return comparison >= 0
-	})
+	case 2:
+		comparison := cursor.index.compare(entries[1].Key, key)
+		if comparison < 0 || strict && comparison == 0 {
+			position = 2
+			break
+		}
+		comparison = cursor.index.compare(entries[0].Key, key)
+		if comparison > 0 || !strict && comparison == 0 {
+			position = 0
+		} else {
+			position = 1
+		}
+	default:
+		position = sort.Search(len(entries), func(position int) bool {
+			comparison := cursor.index.compare(entries[position].Key, key)
+			if strict {
+				return comparison > 0
+			}
+			return comparison >= 0
+		})
+	}
+	cursor.position = position
 	return nil
 }
 

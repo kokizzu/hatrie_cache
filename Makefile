@@ -15151,3 +15151,30 @@ commit-rtree-c219:
 
 push-rtree-c219:
 	@bash ./scripts/push-rtree-c219.sh
+
+inspect-ordered-c220:
+	@bash ./scripts/inspect-ordered-c220.sh
+
+test-ordered-seek-c220:
+	@bash ./scripts/test-ordered-seek-c220.sh
+
+benchmark-ordered-seek-c220:
+	@bash ./scripts/benchmark-ordered-seek-c220.sh
+
+format-ordered-seek-c220:
+	@bash ./scripts/format-ordered-seek-c220.sh
+
+verify-ordered-seek-c220:
+	@bash ./scripts/verify-ordered-seek-c220.sh
+
+test-ordered-seek-c220-package:
+	@bash ./scripts/test-ordered-seek-c220-package.sh
+
+stage-ordered-seek-c220:
+	@bash ./scripts/stage-ordered-seek-c220.sh
+
+commit-ordered-seek-c220:
+	@bash ./scripts/commit-ordered-seek-c220.sh
+
+push-ordered-seek-c220:
+	@bash ./scripts/push-ordered-seek-c220.sh
