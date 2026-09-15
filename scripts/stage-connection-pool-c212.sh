@@ -3,6 +3,14 @@ set -euo pipefail
 
 base_makefile=$(mktemp)
 trap 'rm -f "$base_makefile"' EXIT
+
+if git show HEAD:Makefile | grep -q '^test-connection-pool-c212:$'; then
+	git add scripts/push-connection-pool-c212.sh scripts/stage-connection-pool-c212.sh
+	git diff --cached --check
+	git diff --cached --name-only
+	exit 0
+fi
+
 git show HEAD:Makefile > "$base_makefile"
 {
 printf '\n'
