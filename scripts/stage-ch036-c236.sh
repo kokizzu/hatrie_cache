@@ -31,8 +31,9 @@ staged_makefile="$(mktemp /tmp/hatrie-cache-ch036-makefile.XXXXXX)"
 trap 'rm -f "$staged_makefile"' EXIT
 git show HEAD:Makefile > "$staged_makefile"
 if rg -q '^test-ch036-c231:|^benchmark-ch036-c231:|^commit-ch036-c236:' "$staged_makefile"; then
-    printf 'CH-036 target already exists in HEAD\n' >&2
-    exit 1
+    git diff --cached --check
+    git diff --cached --name-status
+    exit 0
 fi
 printf '%s\n' \
     '' \
