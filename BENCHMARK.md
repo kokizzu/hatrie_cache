@@ -26668,3 +26668,19 @@ Raw one-shot RSS from `make memory-chu07-c247`:
 BenchmarkCHU07MutationStatusLookup-32  1 113024 ns/op 5008 B/op 16 allocs/op
 Maximum resident set size: 51816 kbytes
 ```
+## CH-U08 Automatic SQL Result-Cache Wiring
+
+Raw command: `make benchmark-chu08-c248`.
+
+Five-run ranges on AMD Ryzen 9 5950X, Linux amd64:
+
+| Workload | CPU | Bytes/op | Allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| One-row direct uncached | 5.75-6.03 us | 4,624 | 23 | baseline |
+| One-row automatic cache disabled | 5.75-6.30 us | 4,624 | 23 | no measurable default overhead |
+| One-row automatic cache hit | 6.41-7.39 us | 6,056 | 42 | 1.06-1.28x slower |
+| 20,000-row / 20-group direct uncached | 4.01-4.27 ms | 440,895-445,517 | 22,314-22,441 | baseline |
+| 20,000-row / 20-group automatic cache hit | 11.97-12.63 us | 13,360 | 83 | 317-357x faster, about 33x lower bytes, about 270x fewer allocs |
+
+The cache is default-off and should be enabled for repeated expensive reads;
+small result hits pay query parsing and deep-clone costs.

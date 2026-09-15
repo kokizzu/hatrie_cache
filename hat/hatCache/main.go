@@ -3742,6 +3742,7 @@ type HatTrie struct {
 	nativeCommandBatchCalls            uint64
 	journalScalarBatchCalls            uint64
 	nativeCommandBatchScratch          nativeCommandBatchScratch
+	sqlResultCache                     atomic.Pointer[SQLResultCache]
 	localPartitions                    atomic.Pointer[localPartitionSet]
 	expires                            map[string]uint32
 	expirations                        expirationHeap

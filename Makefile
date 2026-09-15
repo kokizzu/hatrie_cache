@@ -16081,3 +16081,39 @@ commit-chu07-c247:
 push-chu07-c247:
 
 	@bash ./scripts/push-chu07-c247.sh
+.PHONY: test-chu08-c248
+test-chu08-c248:
+	@bash ./scripts/test-chu08-c248.sh
+.PHONY: benchmark-chu08-c248
+benchmark-chu08-c248:
+	@bash ./scripts/benchmark-chu08-c248.sh
+.PHONY: format-chu08-c248
+format-chu08-c248:
+	@bash ./scripts/format-chu08-c248.sh
+.PHONY: test-chu08-package-c248
+test-chu08-package-c248:
+	@bash ./scripts/test-chu08-package-c248.sh
+.PHONY: test-chu08-repo-c248
+test-chu08-repo-c248:
+	@bash ./scripts/test-chu08-repo-c248.sh
+.PHONY: race-chu08-c248
+race-chu08-c248:
+	@bash ./scripts/race-chu08-c248.sh
+.PHONY: vet-chu08-c248
+vet-chu08-c248:
+	@bash ./scripts/vet-chu08-c248.sh
+.PHONY: verify-chu08-docs-c248
+verify-chu08-docs-c248:
+	@bash ./scripts/verify-chu08-docs-c248.sh
+.PHONY: review-chu08-c248
+review-chu08-c248:
+	@bash ./scripts/review-chu08-c248.sh
+.PHONY: stage-chu08-c248
+stage-chu08-c248:
+	@bash ./scripts/stage-chu08-c248.sh
+.PHONY: commit-chu08-c248
+commit-chu08-c248:
+	@bash ./scripts/commit-chu08-c248.sh
+.PHONY: push-chu08-c248
+push-chu08-c248:
+	@bash ./scripts/push-chu08-c248.sh

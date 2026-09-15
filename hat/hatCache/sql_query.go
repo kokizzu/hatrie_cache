@@ -229,7 +229,7 @@ func (cache *SQLResultCache) Execute(ctx context.Context, trie *HatTrie, source 
 	return core.Execute(ctx, key, func() uint64 {
 		return atomic.LoadUint64(&trie.mutationEpoch)
 	}, func(ctx context.Context) (hatSql.QueryResult, error) {
-		return ExecuteSQLQueryParameters(ctx, source, trie, parameters, SQLQueryOptions{})
+		return hatSql.ExecuteSQLQueryParameters(ctx, source, trie, parameters, SQLQueryOptions{})
 	})
 }
 
@@ -526,15 +526,31 @@ func PrepareSQLQueryWithSchemaVersion(source string, parameters []SQLParameterSp
 }
 
 func ExecuteSQLQuery(source string, resolver SQLSourceResolver) (SQLQueryResult, error) {
-	return hatSql.ExecuteSQLQuery(source, resolver)
+	return ExecuteSQLQueryContext(context.Background(), source, resolver, SQLQueryOptions{})
 }
 
 func ExecuteSQLQueryContext(ctx context.Context, source string, resolver SQLSourceResolver, options SQLQueryOptions) (SQLQueryResult, error) {
+	options = sqlQueryOptionsWithAutomaticResultCache(resolver, options)
 	return hatSql.ExecuteSQLQueryContext(ctx, source, resolver, options)
 }
 
 func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	options = sqlQueryOptionsWithAutomaticResultCache(resolver, options)
 	return hatSql.ExecuteSQLQueryParameters(ctx, source, resolver, parameters, options)
+}
+
+func sqlQueryOptionsWithAutomaticResultCache(resolver SQLSourceResolver, options SQLQueryOptions) SQLQueryOptions {
+	if options.ResultCache != nil {
+		return options
+	}
+	trie, ok := resolver.(*HatTrie)
+	if !ok || trie == nil {
+		return options
+	}
+	if cache := trie.automaticSQLResultCache(); cache != nil {
+		options.ResultCache = cache
+	}
+	return options
 }
 
 func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions, visit func([]string, SQLRow) error) error {

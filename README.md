@@ -54,6 +54,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired external-source `DISTINCT` spill: [CHU04_EXTERNAL_DISTINCT_SPILL.md](CHU04_EXTERNAL_DISTINCT_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u04-external-distinct-spill)
 - ClickHouse-inspired external-source bounded window streaming: [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u05-external-window-streaming)
 - ClickHouse-inspired mutation lifecycle IDs and status lookup: [CHU07_MUTATION_LIFECYCLE.md](CHU07_MUTATION_LIFECYCLE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u07-mutation-lifecycle)
+- ClickHouse-inspired automatic SQL result-cache wiring: [CHU08_AUTOMATIC_SQL_RESULT_CACHE.md](CHU08_AUTOMATIC_SQL_RESULT_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u08-automatic-sql-result-cache-wiring)
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)
 - ClickHouse-inspired prepared literal SQL/JSON path programs: [CH030_PREPARED_JSON_PATHS.md](CH030_PREPARED_JSON_PATHS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030a-prepared-sqljson-path-programs)
 - ClickHouse-inspired map key/value subcolumn pruning: [CH030_MAP_SUBCOLUMNS.md](CH030_MAP_SUBCOLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-030-map-keyvalue-subcolumn-pruning)

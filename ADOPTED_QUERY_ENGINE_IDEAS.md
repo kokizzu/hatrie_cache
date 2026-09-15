@@ -239,6 +239,13 @@ unchanged; `RETURNING`, `ON CONFLICT`, `MERGE`, and automatic triggers remain
 unsupported because their semantics are not represented by the public journal
 record. See [CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md).
 
+## CH-U08: Automatic SQL Result-Cache Wiring
+
+Direct `HatTrie` materialized SQL entry points can opt into a bounded per-trie
+result cache with `ConfigureSQLResultCache`. The default is off. The trie
+mutation epoch provides conservative invalidation, and explicit caller caches
+remain authoritative. See [CHU08_AUTOMATIC_SQL_RESULT_CACHE.md](CHU08_AUTOMATIC_SQL_RESULT_CACHE.md).
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge
