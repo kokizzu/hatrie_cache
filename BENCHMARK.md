@@ -25440,3 +25440,41 @@ The small fresh cases remove two or four allocations and reduce allocated
 bytes by 88.9%, 66.7%, and 65.8%. The 32-entry case remains map-backed with
 the same allocation shape. Full notes and raw command list:
 [TR057_UPSERT_BATCH_SMALL_VECTOR.md](TR057_UPSERT_BATCH_SMALL_VECTOR.md).
+
+## TR-058 Roaring Bitmap Lookup Fast Path
+
+Roaring bitmap lookups now use explicit lower-bound loops for sorted
+high-word containers and sparse array-container values instead of callback
+based `sort.Search`. Bitmap containers keep their existing fixed bitset path.
+Results are from Linux/amd64 on an AMD Ryzen 9 5950X; each row is the median
+of three samples from `make benchmark-roaring-lookup-fastpath-c211`.
+
+| Workload | Before median | After median | Relative result | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Sparse container hit | 27.78 ns | 25.41 ns | 1.09x faster | 0 | 0 | 0 | 0 |
+| Sparse container miss | 28.18 ns | 23.52 ns | 1.20x faster | 0 | 0 | 0 | 0 |
+| Array container hit | 12.94 ns | 11.51 ns | 1.12x faster | 0 | 0 | 0 | 0 |
+| Array container miss | 12.61 ns | 10.99 ns | 1.15x faster | 0 | 0 | 0 | 0 |
+
+Raw before samples:
+
+```text
+sparse_container_hit: 32.95 27.78 26.45 ns/op; 0 B/op; 0 allocs/op
+sparse_container_miss: 28.18 29.15 27.14 ns/op; 0 B/op; 0 allocs/op
+array_container_hit: 12.11 13.34 12.94 ns/op; 0 B/op; 0 allocs/op
+array_container_miss: 12.35 12.90 12.61 ns/op; 0 B/op; 0 allocs/op
+```
+
+Raw after samples:
+
+```text
+sparse_container_hit: 25.77 24.50 25.41 ns/op; 0 B/op; 0 allocs/op
+sparse_container_miss: 23.22 23.59 23.52 ns/op; 0 B/op; 0 allocs/op
+array_container_hit: 12.15 11.37 11.51 ns/op; 0 B/op; 0 allocs/op
+array_container_miss: 11.16 10.99 10.95 ns/op; 0 B/op; 0 allocs/op
+```
+
+The focused test checks lookup boundaries and missing values; the full
+package, race, and vet verification runs through
+`make verify-roaring-lookup-fastpath-c211`. Full notes:
+[TR058_ROARING_BITMAP_LOOKUP_FASTPATH.md](TR058_ROARING_BITMAP_LOOKUP_FASTPATH.md).

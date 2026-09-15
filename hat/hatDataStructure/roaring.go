@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/bits"
-	"sort"
 )
 
 const (
@@ -339,7 +338,16 @@ func (bitmap RoaringBitmap) VisitContainers(visit func(key uint16, cardinality u
 }
 
 func (bitmap RoaringBitmap) findContainer(key uint16) (int, bool) {
-	idx := sort.Search(len(bitmap.containers), func(idx int) bool { return bitmap.containers[idx].key >= key })
+	low, high := 0, len(bitmap.containers)
+	for low < high {
+		middle := int(uint(low+high) >> 1)
+		if bitmap.containers[middle].key < key {
+			low = middle + 1
+			continue
+		}
+		high = middle
+	}
+	idx := low
 	return idx, idx < len(bitmap.containers) && bitmap.containers[idx].key == key
 }
 
@@ -353,7 +361,7 @@ func (container *roaringBitmapContainer) add(value uint16) bool {
 		container.cardinality++
 		return true
 	}
-	idx := sort.Search(len(container.values), func(idx int) bool { return container.values[idx] >= value })
+	idx := roaringLowerBound(container.values, value)
 	if idx < len(container.values) && container.values[idx] == value {
 		return false
 	}
@@ -380,7 +388,7 @@ func (container *roaringBitmapContainer) remove(value uint16) bool {
 		}
 		return true
 	}
-	idx := sort.Search(len(container.values), func(idx int) bool { return container.values[idx] >= value })
+	idx := roaringLowerBound(container.values, value)
 	if idx >= len(container.values) || container.values[idx] != value {
 		return false
 	}
@@ -401,8 +409,21 @@ func (container roaringBitmapContainer) contains(value uint16) bool {
 		word, mask := roaringBitmapBit(value)
 		return bitmap[word]&mask != 0
 	}
-	idx := sort.Search(len(container.values), func(idx int) bool { return container.values[idx] >= value })
+	idx := roaringLowerBound(container.values, value)
 	return idx < len(container.values) && container.values[idx] == value
+}
+
+func roaringLowerBound(values []uint16, value uint16) int {
+	low, high := 0, len(values)
+	for low < high {
+		middle := int(uint(low+high) >> 1)
+		if values[middle] < value {
+			low = middle + 1
+			continue
+		}
+		high = middle
+	}
+	return low
 }
 
 func (container roaringBitmapContainer) appendValues(out []uint32) []uint32 {
