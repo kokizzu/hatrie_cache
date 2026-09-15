@@ -15127,3 +15127,27 @@ commit-posting-remove-c218:
 
 push-posting-remove-c218:
 	@bash ./scripts/push-posting-remove-c218.sh
+
+test-rtree-c219:
+	@bash ./scripts/test-rtree-c219.sh
+
+benchmark-rtree-c219:
+	@bash ./scripts/benchmark-rtree-c219.sh
+
+format-rtree-c219:
+	@bash ./scripts/format-rtree-c219.sh
+
+verify-rtree-c219:
+	@bash ./scripts/verify-rtree-c219.sh
+
+inspect-rtree-c219:
+	@bash ./scripts/inspect-rtree-c219.sh
+
+stage-rtree-c219:
+	@bash ./scripts/stage-rtree-c219.sh
+
+commit-rtree-c219:
+	@bash ./scripts/commit-rtree-c219.sh
+
+push-rtree-c219:
+	@bash ./scripts/push-rtree-c219.sh

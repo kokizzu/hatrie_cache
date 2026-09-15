@@ -17174,6 +17174,40 @@ The change adds no retained fields, allocations, or ordering changes. It is
 safe for arbitrary sorted postings; only the boundary cases bypass
 `sort.Search`.
 
+<a id="rtree-small-result-sort-fast-paths"></a>
+## R-tree Small-Result Sort Fast Paths
+
+Command: `make benchmark-rtree-c219`.
+
+C219 avoids a general-purpose sort for zero or one R-tree search result and
+uses a direct compare/swap for exactly two results. Larger result sets retain
+the existing ascending sort. The benchmark uses five samples per case on
+Linux/amd64 with an AMD Ryzen 9 5950X and 10,000 resident rectangles.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Empty search | 15.58 ns/op | 11.97 ns/op | **1.30x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| One result | 130.8 ns/op | 125.4 ns/op | **1.04x faster** | 8 B/op, 1 alloc | 8 B/op, 1 alloc |
+| Two results | 159.3 ns/op | 138.9 ns/op | **1.15x faster** | 24 B/op, 2 allocs | 24 B/op, 2 allocs |
+| Many results | 2,604 ns/op | 2,563 ns/op | **1.02x faster** | 2,040 B/op, 8 allocs | 2,040 B/op, 8 allocs |
+
+Raw samples:
+
+```text
+empty before: 15.29, 15.89, 14.43, 17.98, 15.58 ns/op; 0 B/op; 0 alloc/op
+empty after:  11.50, 13.14, 12.46, 11.97, 11.15 ns/op; 0 B/op; 0 alloc/op
+one before:  128.0, 125.2, 145.4, 131.6, 130.8 ns/op; 8 B/op; 1 alloc/op
+one after:   127.6, 125.4, 118.4, 118.0, 128.5 ns/op; 8 B/op; 1 alloc/op
+two before:  160.4, 156.9, 156.7, 159.3, 165.9 ns/op; 24 B/op; 2 alloc/op
+two after:   152.9, 137.5, 138.9, 137.7, 139.9 ns/op; 24 B/op; 2 alloc/op
+many before: 3023, 3079, 2604, 2433, 2475 ns/op; 2040 B/op; 8 alloc/op
+many after:  2523, 2583, 2582, 2544, 2563 ns/op; 2040 B/op; 8 alloc/op
+```
+
+Search ordering, destination-prefix preservation, validation, and all larger
+result behavior remain unchanged; the optimization only removes work that
+cannot affect an already ordered result of size zero or one.
+
 ## Rejected C214 Async Batcher Shared-Read Lock
 
 The ClickHouse-style `AsyncBatcher` already holds an exclusive mutex while a

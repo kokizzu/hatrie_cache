@@ -156,7 +156,15 @@ func (tree *RTree) SearchInto(dst []uint64, bounds RTreeBounds) ([]uint64, error
 	if tree.root != nil && tree.root.hasBound {
 		ids = tree.searchLocked(tree.root, bounds, ids)
 	}
-	slices.Sort(ids[start:])
+	switch len(ids) - start {
+	case 0, 1:
+	case 2:
+		if ids[start] > ids[start+1] {
+			ids[start], ids[start+1] = ids[start+1], ids[start]
+		}
+	default:
+		slices.Sort(ids[start:])
+	}
 	return ids, nil
 }
 
