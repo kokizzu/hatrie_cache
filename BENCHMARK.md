@@ -26510,3 +26510,52 @@ Raw RSS samples from `make memory-chu02-c242`:
 materialized baseline: Maximum resident set size: 26044 kbytes
 streaming external spill: Maximum resident set size: 25084 kbytes
 ```
+
+## CH-U04 External `DISTINCT` Spill
+
+CH-U04 extends the exact bounded external set operator to direct
+`EXTERNAL('name')` sources that implement `ExternalStreamSourceResolver`. The
+benchmark uses a generated 4,096-row source with `SELECT DISTINCT id`,
+`MaxSetBytes=16 KiB`, and a 64 MiB spill budget. Five local samples were
+collected on the same AMD Ryzen 9 5950X Linux `amd64` host.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing materialized external baseline | 5,450,086 | 5,798,738 | 60,975 | 1.00x |
+| Streaming external spill | 41,653,211 | 12,570,501 | 257,405 | 7.64x slower, 2.17x cumulative bytes, 4.22x allocations |
+
+The spill path is not a small-input speedup. It trades CPU, filesystem I/O,
+and cumulative allocations for bounded distinct-set state, making it useful
+when high cardinality would otherwise exceed the process memory budget. A
+one-shot RSS sample used the same compiled test binary and `-benchtime=1x`:
+
+| Path | Maximum RSS | Set budget |
+| --- | ---: | ---: |
+| Existing materialized external baseline | 26,996 KiB | unbounded by CH-U04 |
+| Streaming external spill | 24,908 KiB | 16 KiB |
+
+The sample RSS reduction is 7.7%; process/runtime overhead dominates at this
+fixture size, while the configured set budget remains the relevant scaling
+control for larger streamed sources.
+
+Raw output from `make benchmark-chu04-c243`:
+
+```text
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/materialized_baseline-32          214    5482929 ns/op  5798820 B/op   60975 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/materialized_baseline-32          216    5286522 ns/op  5798738 B/op   60975 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/materialized_baseline-32          228    5175413 ns/op  5798656 B/op   60975 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/materialized_baseline-32          229    5628986 ns/op  5798846 B/op   60975 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/materialized_baseline-32          207    5450086 ns/op  5798719 B/op   60975 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/streaming_external_spill-32        25   41653211 ns/op 12571324 B/op  257406 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/streaming_external_spill-32        27   41247734 ns/op 12570501 B/op  257407 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/streaming_external_spill-32        30   41468071 ns/op 12570205 B/op  257404 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/streaming_external_spill-32        27   42330981 ns/op 12570532 B/op  257405 allocs/op
+BenchmarkCHU04ExternalDistinctBaselineAndStreaming/streaming_external_spill-32        33   43370361 ns/op 12569468 B/op  257405 allocs/op
+```
+
+Raw RSS samples from `make memory-chu04-c243`:
+
+```text
+materialized baseline: Maximum resident set size: 26996 kbytes
+streaming external spill: Maximum resident set size: 24908 kbytes
+```

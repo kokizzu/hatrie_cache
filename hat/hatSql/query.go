@@ -1367,7 +1367,7 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlIndexedDistinctStreamable(query, resolver) {
 		return executeSQLIndexedDistinctStream(ctx, query, resolver, control, visit)
 	}
-	if sqlExternalDistinctStreamable(query, control) {
+	if sqlExternalDistinctStreamable(query, resolver, control) {
 		return executeSQLExternalDistinctStream(ctx, query, resolver, control, visit)
 	}
 	if sqlIndexedRunningAggregateWindowStreamable(query, resolver) {
@@ -3018,8 +3018,17 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 // which an external key merge can retain only bounded set runs. The final
 // ordinal merge restores SQL's first-occurrence result order without retaining
 // a result-row slice.
-func sqlExternalDistinctStreamable(query *sqlQuery, control *sqlExecutionControl) bool {
-	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || !query.distinct || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || sqlExprHasWindow(query.where) {
+func sqlExternalDistinctStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
+	if control == nil || control.options.MaxSetBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || query == nil || query.explain || !query.distinct || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || len(query.orderBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || sqlExprHasWindow(query.where) {
+		return false
+	}
+	switch query.from.kind {
+	case "CACHE", "VALUES":
+	case "EXTERNAL":
+		if _, ok := resolver.(ExternalStreamSourceResolver); !ok {
+			return false
+		}
+	default:
 		return false
 	}
 	for _, selectItem := range query.selects {

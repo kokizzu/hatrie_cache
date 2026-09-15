@@ -1,4 +1,43 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: test-chu04-c243
+test-chu04-c243:
+	@bash ./scripts/test-chu04-c243.sh
+
+.PHONY: benchmark-chu04-c243
+benchmark-chu04-c243:
+	@bash ./scripts/benchmark-chu04-c243.sh
+
+.PHONY: memory-chu04-c243
+memory-chu04-c243:
+	@bash ./scripts/memory-chu04-c243.sh
+
+.PHONY: format-chu04-c243
+format-chu04-c243:
+	@bash ./scripts/format-chu04-c243.sh
+
+.PHONY: test-chu04-package-c243
+test-chu04-package-c243:
+	@bash ./scripts/test-chu04-package-c243.sh
+
+.PHONY: race-chu04-c243
+race-chu04-c243:
+	@bash ./scripts/race-chu04-c243.sh
+
+.PHONY: vet-chu04-c243
+vet-chu04-c243:
+	@bash ./scripts/vet-chu04-c243.sh
+
+.PHONY: stage-chu04-c243
+stage-chu04-c243:
+	@bash ./scripts/stage-chu04-c243.sh
+
+.PHONY: commit-chu04-c243
+commit-chu04-c243:
+	@bash ./scripts/commit-chu04-c243.sh
+
+.PHONY: push-chu04-c243
+push-chu04-c243:
+	@bash ./scripts/push-chu04-c243.sh
 .PHONY: format-chu02-c242
 format-chu02-c242:
 	@bash ./scripts/format-chu02-c242.sh
