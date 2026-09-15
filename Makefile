@@ -14630,3 +14630,51 @@ commit-tr044-c203:
 .PHONY: push-tr044-c203
 push-tr044-c203:
 	bash ./scripts/push-tr044-c203.sh
+
+test-ch051-c203:
+	bash ./scripts/test-ch051-c203.sh
+
+format-ch051-c203:
+	bash ./scripts/format-ch051-c203.sh
+
+benchmark-ch051-c203:
+	BENCHMARK_PATTERN='$(BENCHMARK_PATTERN)' BENCHMARK_COUNT='$(BENCHMARK_COUNT)' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-build-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringBuild|PlainStringColumnBuild)' BENCHMARK_COUNT='3' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-build-stable-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringBuild|PlainStringColumnBuild)' BENCHMARK_COUNT='5' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-group-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringGroupByCodes|LowCardinalityStringGroupByDenseCounts|PlainStringGroupByValues)' BENCHMARK_COUNT='3' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-group-stable-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringGroupByCodes|LowCardinalityStringGroupByDenseCounts|PlainStringGroupByValues)' BENCHMARK_COUNT='5' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-wire-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringMarshal|PlainStringMarshal)' BENCHMARK_COUNT='3' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-wire-stable-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringMarshal|PlainStringMarshal)' BENCHMARK_COUNT='5' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-high-cardinality-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringHighCardinalityBuild|PlainStringHighCardinalityBuild)' BENCHMARK_COUNT='3' bash ./scripts/benchmark-ch051-c203.sh
+
+benchmark-ch051-high-cardinality-stable-c203:
+	BENCHMARK_PATTERN='Benchmark(LowCardinalityStringHighCardinalityBuild|PlainStringHighCardinalityBuild)' BENCHMARK_COUNT='5' bash ./scripts/benchmark-ch051-c203.sh
+
+verify-ch051-c203:
+	bash ./scripts/verify-ch051-c203.sh
+
+stage-ch051-c203:
+	bash ./scripts/stage-ch051-c203.sh
+
+inspect-staged-ch051-c203:
+	bash ./scripts/inspect-staged-ch051-c203.sh
+
+commit-ch051-c203:
+	bash ./scripts/commit-ch051-c203.sh
+
+push-ch051-c203:
+	bash ./scripts/push-ch051-c203.sh

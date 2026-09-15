@@ -25096,3 +25096,27 @@ BenchmarkCompactProtocolPayloadWire/gzip: 9418, 9490, 9036 ns/op; 147 wire-B; 65
 BenchmarkCompactProtocolPayloadRead/plain: 2417, 2358, 2418 ns/op; 12299 wire-B; 13632 B/op; 3 allocs/op
 BenchmarkCompactProtocolPayloadRead/gzip: 18763, 18662, 19646 ns/op; 142 wire-B; 67960 B/op; 21 allocs/op
 ```
+
+## CH-051 Low-Cardinality String Columns
+
+This opt-in ClickHouse-style dictionary column sorts its dictionary and stores
+packed 1/2/4-byte row codes. The dense code-count path is faster for GROUP BY,
+and the compact representation sharply lowers retained and wire bytes. Build
+and per-row code-map paths are slower, and high-cardinality input is a clear
+loss; the builder therefore defaults to a 4,096-value limit and callers must
+choose this representation deliberately.
+
+| Workload | Baseline | Encoded | Improvement | Memory/wire |
+| --- | ---: | ---: | ---: | ---: |
+| Build, 100k / 64 values | 0.985 ms/op | 1.859 ms/op | 1.89x slower | 2.80 MB -> 101.8 KB retained |
+| GROUP BY per-row map | 1.419 ms/op | 2.538 ms/op | 1.79x slower | 9,297 -> 2,344 B/op |
+| GROUP BY dense counts | 1.419 ms/op | 0.802 ms/op | 1.77x faster | 9,297 -> 512 B/op |
+| Binary encode | 0.985 ms/op | 0.870 ms/op | 1.13x faster | 1,300,000 -> 100,842 B, 12.9x lower |
+| High-cardinality build, 20k / 20k | 0.196 ms/op | 1.888 ms/op | 9.65x slower | 560 KB -> 600 KB retained; 6.8x more B/op |
+
+Commands: `make benchmark-ch051-build-stable-c203`,
+`make benchmark-ch051-group-stable-c203`, `make benchmark-ch051-wire-stable-c203`,
+and `make benchmark-ch051-high-cardinality-stable-c203`.
+
+Raw samples and API guidance are in
+[CH051_LOW_CARDINALITY.md](CH051_LOW_CARDINALITY.md).
