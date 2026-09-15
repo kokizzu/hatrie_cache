@@ -15199,3 +15199,24 @@ commit-ordered-upsert-c221:
 
 push-ordered-upsert-c221:
 	@bash ./scripts/push-ordered-upsert-c221.sh
+
+test-ordered-append-c222:
+	@bash ./scripts/test-ordered-append-c222.sh
+
+benchmark-ordered-append-c222:
+	@bash ./scripts/benchmark-ordered-append-c222.sh
+
+format-ordered-append-c222:
+	@bash ./scripts/format-ordered-append-c222.sh
+
+verify-ordered-append-c222:
+	@bash ./scripts/verify-ordered-append-c222.sh
+
+stage-ordered-append-c222:
+	@bash ./scripts/stage-ordered-append-c222.sh
+
+commit-ordered-append-c222:
+	@bash ./scripts/commit-ordered-append-c222.sh
+
+push-ordered-append-c222:
+	@bash ./scripts/push-ordered-append-c222.sh

@@ -23377,6 +23377,40 @@ The fast path adds no retained state or allocation. The correctness tests cover
 same-key replacement, comparator-equivalent keys, order, exact deletion, and
 the old-value/new-value split between a live snapshot and the current index.
 
+<a id="ordered-index-monotonic-append-fast-path"></a>
+## Ordered Index Monotonic Append Fast Path
+
+Command: `make benchmark-ordered-append-c222`.
+
+C222 appends a new ordered-index entry directly when its key is greater than
+the current tail, or when its comparator-equivalent key has a greater ID. This
+avoids binary search and the zero-length insertion copy during monotonic bulk
+loads. Non-monotonic insertion retains the existing search-and-copy path, and
+position-map synchronization remains unchanged. The benchmark used three fixed
+200 ms samples per size on Linux/amd64 with an AMD Ryzen 9 5950X and
+`-benchmem`.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Monotonic build, 64 entries | 4,311 ns/op | 3,559 ns/op | **1.21x faster** | 4,024 B/op, 6 allocs | 4,024 B/op, 6 allocs |
+| Monotonic build, 1,024 entries | 77,744 ns/op | 47,493 ns/op | **1.64x faster** | 61,664 B/op, 8 allocs | 61,664 B/op, 8 allocs |
+| Monotonic build, 10,000 entries | 944,913 ns/op | 473,337 ns/op | **2.00x faster** | 541,456 B/op, 36 allocs | 541,457 B/op, 36 allocs |
+
+Raw samples:
+
+```text
+64 entries before:     4401, 4279, 4311 ns/op; 4024 B/op; 6 alloc/op
+64 entries after:      3432, 3599, 3559 ns/op; 4024 B/op; 6 alloc/op
+1024 entries before:  77744, 79354, 77529 ns/op; 61664 B/op; 8 alloc/op
+1024 entries after:   49317, 46990, 47493 ns/op; 61664 B/op; 8 alloc/op
+10000 entries before: 944913, 948452, 916287 ns/op; 541456-541457 B/op; 36 alloc/op
+10000 entries after:  490215, 470197, 473337 ns/op; 541457-541458 B/op; 36 alloc/op
+```
+
+The fast path adds no retained state and does not change allocation counts. The
+focused tests cover monotonic tail order, position-map entries, comparator
+equivalence, and non-monotonic insertion fallback.
+
 ## CH-041 Bounded `GROUP_ARRAY`
 
 This benchmark compares the existing unbounded grouped collection with the

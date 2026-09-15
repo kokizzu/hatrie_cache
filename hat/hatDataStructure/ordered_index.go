@@ -101,10 +101,22 @@ func (index *OrderedIndex[T, K]) Upsert(id uint64, value T) error {
 			}
 			index.removeAtLocked(position)
 		}
-		position := index.searchInsertLocked(index.entries, key, id)
-		index.entries = append(index.entries, OrderedIndexEntry[T, K]{})
-		copy(index.entries[position+1:], index.entries[position:])
-		index.entries[position] = OrderedIndexEntry[T, K]{ID: id, Key: key, Value: value}
+		entry := OrderedIndexEntry[T, K]{ID: id, Key: key, Value: value}
+		position := len(index.entries)
+		if position == 0 {
+			index.entries = append(index.entries, entry)
+		} else {
+			last := index.entries[position-1]
+			comparison := index.compare(last.Key, key)
+			if comparison < 0 || comparison == 0 && last.ID < id {
+				index.entries = append(index.entries, entry)
+			} else {
+				position = index.searchInsertLocked(index.entries, key, id)
+				index.entries = append(index.entries, OrderedIndexEntry[T, K]{})
+				copy(index.entries[position+1:], index.entries[position:])
+				index.entries[position] = entry
+			}
+		}
 		index.syncPositionsFromLocked(position)
 	} else {
 		index.upsertCopyOnWriteLocked(id, key, value)
