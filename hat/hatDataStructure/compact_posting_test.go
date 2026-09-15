@@ -52,6 +52,21 @@ func TestU64PostingListRemovesZeroAndCollapsesToSingleton(t *testing.T) {
 	}
 }
 
+func TestU64PostingListValuesPreallocatesExactResult(t *testing.T) {
+	list := newU64PostingList(1)
+	for id := uint64(2); id <= 5; id++ {
+		list = list.insertSorted(id)
+	}
+
+	values := list.values(nil)
+	if len(values) != 5 {
+		t.Fatalf("values() length = %d, want 5", len(values))
+	}
+	if cap(values) != len(values) {
+		t.Fatalf("values() capacity = %d, want exact length %d", cap(values), len(values))
+	}
+}
+
 func TestCompactPostingIndexesHandleSingletonZeroID(t *testing.T) {
 	functional, err := NewFunctionalIndex(func(value int) int { return value }, 1)
 	if err != nil {

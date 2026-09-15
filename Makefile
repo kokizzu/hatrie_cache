@@ -15046,3 +15046,33 @@ commit-delay-queue-c215:
 
 push-delay-queue-c215:
 	@bash ./scripts/push-delay-queue-c215.sh
+
+inspect-index-c216:
+	@bash ./scripts/inspect-index-c216.sh
+
+test-index-c216:
+	@bash ./scripts/test-index-c216.sh
+
+benchmark-index-c216:
+	@bash ./scripts/benchmark-index-c216.sh
+
+benchmark-index-lookup-c216:
+	@bash ./scripts/benchmark-index-lookup-c216.sh
+
+benchmark-index-posting-c216:
+	@bash ./scripts/benchmark-index-posting-c216.sh
+
+format-index-c216:
+	@bash ./scripts/format-index-c216.sh
+
+verify-index-c216:
+	@bash ./scripts/verify-index-c216.sh
+
+stage-index-c216:
+	@bash ./scripts/stage-index-c216.sh
+
+commit-index-c216:
+	@bash ./scripts/commit-index-c216.sh
+
+push-index-c216:
+	@bash ./scripts/push-index-c216.sh

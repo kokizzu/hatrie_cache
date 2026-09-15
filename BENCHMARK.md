@@ -17067,6 +17067,48 @@ ten samples per side: before `519.8, 526.3, 552.2, 534.6, 538.3, 557.1,
 526.1, 543.5, 506.1, 513.2, 551.6, 512.8 ns/op`. All cases remained at zero
 bytes and zero allocations per operation.
 
+<a id="posting-list-exact-capacity"></a>
+## Posting-List Exact-Capacity Materialization
+
+Command: `make benchmark-index-c216`.
+
+C216 applies the known posting cardinality before `u64PostingList.values`
+materializes a fresh ID result. This is shared by hash and functional indexes.
+The destination-reset contract of `LookupIDsInto` is unchanged, so an existing
+caller-owned scratch buffer remains reusable and allocation-free. The benchmark
+uses five samples per case on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Posting values, 1 ID | 17.39 ns/op | 1.673 ns/op | **10.40x faster** | 8 B/op, 1 alloc | 0 B/op, 0 alloc |
+| Posting values, 2 IDs | 40.00 ns/op | 3.558 ns/op | **11.24x faster** | 24 B/op, 2 allocs | 0 B/op, 0 allocs |
+| Posting values, 10 IDs | 68.91 ns/op | 32.58 ns/op | **2.12x faster** | 104 B/op, 3 allocs | 80 B/op, 1 alloc |
+| Posting values, 100 IDs | 210.8 ns/op | 198.9 ns/op | **1.06x faster** | 920 B/op, 3 allocs | 896 B/op, 1 alloc |
+| Functional index fresh lookup, 100 IDs | 324.8 ns/op | 274.7 ns/op | **1.18x faster** | 920 B/op, 3 allocs | 896 B/op, 1 alloc |
+| Functional index reusable scratch, 100 IDs | 30.28 ns/op | 28.83 ns/op | **1.05x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+
+Raw samples:
+
+```text
+posting size 1 before:   17.62, 17.59, 17.34, 17.38, 17.39 ns/op; 8 B/op; 1 alloc/op
+posting size 1 after:     1.719, 1.673, 1.563, 1.538, 1.698 ns/op; 0 B/op; 0 alloc/op
+posting size 2 before:   39.84, 40.59, 39.53, 40.00, 40.17 ns/op; 24 B/op; 2 alloc/op
+posting size 2 after:     3.348, 3.558, 3.516, 3.675, 3.651 ns/op; 0 B/op; 0 alloc/op
+posting size 10 before:  69.80, 67.36, 68.91, 72.01, 72.49 ns/op; 104 B/op; 3 alloc/op
+posting size 10 after:   32.17, 31.81, 32.58, 38.00, 32.90 ns/op; 80 B/op; 1 alloc/op
+posting size 100 before: 241.7, 209.2, 203.8, 210.8, 236.0 ns/op; 920 B/op; 3 alloc/op
+posting size 100 after:  204.6, 198.9, 202.3, 198.7, 190.9 ns/op; 896 B/op; 1 alloc/op
+lookup fresh before:     307.5, 299.3, 334.1, 329.8, 324.8 ns/op; 920 B/op; 3 alloc/op
+lookup fresh after:      265.0, 274.7, 277.6, 309.9, 273.9 ns/op; 896 B/op; 1 alloc/op
+lookup reusable before:   28.87, 30.28, 30.55, 31.78, 28.58 ns/op; 0 B/op; 0 alloc/op
+lookup reusable after:    28.83, 28.21, 28.23, 29.04, 30.07 ns/op; 0 B/op; 0 alloc/op
+```
+
+The change does not alter index storage, locks, key extraction, or posting
+order. For the normal fresh-result path it removes intermediate append growth;
+for reusable scratch it only checks the known cardinality against capacity and
+does not allocate when capacity is sufficient.
+
 ## Rejected C214 Async Batcher Shared-Read Lock
 
 The ClickHouse-style `AsyncBatcher` already holds an exclusive mutex while a

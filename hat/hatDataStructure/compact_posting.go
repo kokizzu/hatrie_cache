@@ -71,7 +71,20 @@ func (list u64PostingList) insertSorted(id uint64) u64PostingList {
 	return list
 }
 
+func (list u64PostingList) length() int {
+	if list.rest == nil {
+		return 1
+	}
+	return len(list.rest.rest) + 2
+}
+
 func (list u64PostingList) values(dst []uint64) []uint64 {
+	count := list.length()
+	if len(dst) == 0 && cap(dst) < count {
+		// LookupInto callers reset dst before reaching this helper, so a fresh
+		// exact-capacity result needs no copy and avoids append growth steps.
+		dst = make([]uint64, 0, count)
+	}
 	dst = append(dst, list.first)
 	if list.rest == nil {
 		return dst

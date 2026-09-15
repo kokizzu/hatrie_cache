@@ -38,3 +38,57 @@ func BenchmarkSecondaryIndexPostingBuildC204(b *testing.B) {
 		})
 	}
 }
+
+var compactPostingC216Sink uint64
+
+func BenchmarkC216PostingValues(b *testing.B) {
+	for _, size := range []int{1, 2, 10, 100} {
+		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
+			list := newU64PostingList(0)
+			for id := 1; id < size; id++ {
+				list = list.insertSorted(uint64(id))
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				values := list.values(nil)
+				compactPostingC216Sink += uint64(len(values))
+			}
+		})
+	}
+}
+
+func BenchmarkC216FunctionalLookupIDs(b *testing.B) {
+	const (
+		rowCount  = 10000
+		distinct  = 100
+		targetKey = 42
+	)
+	index, err := NewFunctionalIndex(func(value int) int { return value % distinct }, rowCount)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for value := 0; value < rowCount; value++ {
+		if err := index.Upsert(uint64(value+1), value); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("fresh", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			values := index.LookupIDs(targetKey)
+			compactPostingC216Sink += uint64(len(values))
+		}
+	})
+	b.Run("reusable", func(b *testing.B) {
+		values := make([]uint64, 0, rowCount/distinct)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			values = index.LookupIDsInto(targetKey, values)
+			compactPostingC216Sink += uint64(len(values))
+		}
+	})
+}
