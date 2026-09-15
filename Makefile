@@ -15446,3 +15446,24 @@ commit-journal-tail-c226:
 
 push-journal-tail-c226:
 	bash ./scripts/push-journal-tail-c226.sh
+
+.PHONY: cleanup-test-tmp-preview cleanup-test-tmp-apply
+cleanup-test-tmp-preview:
+	bash ./scripts/cleanup-test-tmp.sh preview
+
+cleanup-test-tmp-apply:
+	bash ./scripts/cleanup-test-tmp.sh apply
+
+.PHONY: test-cleanup-test-tmp
+test-cleanup-test-tmp:
+	bash ./scripts/test-cleanup-test-tmp.sh
+
+.PHONY: stage-cleanup-test-tmp commit-cleanup-test-tmp push-cleanup-test-tmp
+stage-cleanup-test-tmp:
+	bash ./scripts/stage-cleanup-test-tmp.sh
+
+commit-cleanup-test-tmp:
+	bash ./scripts/commit-cleanup-test-tmp.sh
+
+push-cleanup-test-tmp:
+	bash ./scripts/push-cleanup-test-tmp.sh
