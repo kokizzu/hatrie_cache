@@ -15522,3 +15522,33 @@ commit-backup-catalog-c203:
 
 push-backup-catalog-c203:
 	bash ./scripts/push-backup-catalog-c203.sh
+
+.PHONY: inspect-ttl-c225 test-ch007-ttl-c225 test-ch007-ttl-all-c225 benchmark-ch007-ttl-c225 benchmark-ch007-ttl-before-c225 race-ch007-ttl-c225 vet-ch007-ttl-c225 inspect-ttl-mutation-c225 locate-ch007-c225 inspect-benchmark-ch007-c225 format-ch007-ttl-c225 stage-ch007-ttl-c225 commit-ch007-ttl-c225 push-ch007-ttl-c225
+inspect-ttl-c225:
+	bash ./scripts/inspect-ttl-c225.sh
+test-ch007-ttl-c225:
+	bash ./scripts/run-ch007-ttl-c225.sh test
+test-ch007-ttl-all-c225:
+	bash ./scripts/run-ch007-ttl-c225.sh all
+benchmark-ch007-ttl-c225:
+	bash ./scripts/run-ch007-ttl-c225.sh benchmark
+benchmark-ch007-ttl-before-c225:
+	bash ./scripts/run-ch007-ttl-c225.sh baseline
+race-ch007-ttl-c225:
+	bash ./scripts/run-ch007-ttl-c225.sh race
+vet-ch007-ttl-c225:
+	bash ./scripts/run-ch007-ttl-c225.sh vet
+inspect-ttl-mutation-c225:
+	bash ./scripts/inspect-ttl-mutation-c225.sh
+locate-ch007-c225:
+	bash ./scripts/locate-ch007-c225.sh
+inspect-benchmark-ch007-c225:
+	bash ./scripts/inspect-benchmark-ch007-c225.sh
+format-ch007-ttl-c225:
+	bash ./scripts/format-ch007-ttl-c225.sh
+stage-ch007-ttl-c225:
+	bash ./scripts/stage-ch007-ttl-c225.sh
+commit-ch007-ttl-c225:
+	bash ./scripts/commit-ch007-ttl-c225.sh
+push-ch007-ttl-c225:
+	bash ./scripts/push-ch007-ttl-c225.sh

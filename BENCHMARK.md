@@ -69,6 +69,26 @@ event timestamps, which is the measured cost; the implementation does not
 hide an approximate count or start a background scheduler. TTL-enabled stats
 and histograms also recompute instead of returning time-stale cached values.
 
+### CH-007 TTL Expiry Index
+
+This paired comparison uses `make benchmark-ch007-ttl-before-c225` and
+`make benchmark-ch007-ttl-c225`. The baseline is the pre-index implementation;
+the optimized run includes the live min-heap and row-position sidecar. Both
+use five samples, 4,096 rows, and the same AMD Ryzen 9 5950X Linux amd64 host.
+
+| Operation | Before | After | Relative result |
+| --- | ---: | ---: | ---: |
+| `PurgeExpired` no-op | 13,865 ns/op | 9.931 ns/op | 1,396x faster |
+| `PurgeExpired` one due row | 51,970 ns/op | 1,203 ns/op | 43.2x faster |
+| Processing-time `Upsert` | 634.3 ns/op | 639.5 ns/op | 0.99x throughput |
+| Processing-time delete/reinsert | 913.7 ns/op | 953.5 ns/op | 0.96x throughput |
+| Expiry index retained memory | 0 bytes | 98,304 bytes | 24 bytes/row |
+
+Purge call-time allocations remained zero for the no-op case and unchanged
+for the sparse case. The index is a deliberate memory-for-maintenance-speed
+tradeoff; TTL remains disabled by default and no background scheduler is
+started.
+
 ## CH-022: Incremental Part Backup
 
 Command: `make benchmark-ch022-incremental-part-backup-c203`. The benchmark

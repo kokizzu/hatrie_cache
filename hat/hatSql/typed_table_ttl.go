@@ -3,6 +3,7 @@ package hatSql
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,9 +33,11 @@ type TypedTableTTLOptions struct {
 }
 
 type typedTableTTLState struct {
-	options   TypedTableTTLOptions
-	field     int
-	deadlines []int64
+	options         TypedTableTTLOptions
+	field           int
+	deadlines       []int64
+	expiryHeap      []typedTableTTLExpiryEntry
+	expiryPositions []int
 }
 
 func newTypedTableTTLState(options TypedTableTTLOptions, columns []TypedTableColumn, byName map[string]int) (*typedTableTTLState, error) {
@@ -94,11 +97,11 @@ func (state *typedTableTTLState) deadline(now time.Time) int64 {
 }
 
 func typedTableTTLExpired(value int64, lifetime time.Duration, now time.Time) bool {
-	delta := int64(lifetime)
-	if value > math.MaxInt64-delta {
+	deadline, ok := typedTableTTLEventDeadline(value, int64(lifetime))
+	if !ok {
 		return false
 	}
-	return value+delta <= now.UnixNano()
+	return deadline <= now.UnixNano()
 }
 
 func (table *TypedTable) typedTableTTLNow() time.Time {
@@ -128,13 +131,21 @@ func (table *TypedTable) typedTableRowHiddenLocked(index int, now time.Time) boo
 }
 
 func (table *TypedTable) setTypedTableTTLDeadlineLocked(index int, now time.Time) {
-	if table == nil || table.ttl == nil || table.ttl.options.Mode != TypedTableTTLProcessingTime {
+	if table == nil || table.ttl == nil {
 		return
 	}
-	for len(table.ttl.deadlines) <= index {
-		table.ttl.deadlines = append(table.ttl.deadlines, 0)
+	if table.ttl.options.Mode == TypedTableTTLProcessingTime {
+		for len(table.ttl.deadlines) <= index {
+			table.ttl.deadlines = append(table.ttl.deadlines, 0)
+		}
+		table.ttl.deadlines[index] = table.ttl.deadline(now)
 	}
-	table.ttl.deadlines[index] = table.ttl.deadline(now)
+	deadline, ok := table.typedTableTTLDeadlineAtLocked(index)
+	if !ok {
+		table.ttl.expiryRemove(index)
+		return
+	}
+	table.ttl.expiryUpsert(index, deadline)
 }
 
 // PurgeExpired removes rows whose configured TTL has elapsed at now. The
@@ -150,11 +161,31 @@ func (table *TypedTable) PurgeExpired(now time.Time) ([]TypedTableChange, error)
 	if table.ttl == nil {
 		return nil, nil
 	}
-	changes := make([]TypedTableChange, 0)
+	expiredRows := make([]int, 0)
+	nowUnixNano := now.UnixNano()
+	for len(table.ttl.expiryHeap) > 0 && table.ttl.expiryHeap[0].deadline <= nowUnixNano {
+		entry, ok := table.ttl.expiryPop()
+		if !ok || entry.row < 0 || entry.row >= len(table.keys) || table.typedTableRowDeletedLocked(entry.row) {
+			continue
+		}
+		if deadline, ok := table.typedTableTTLDeadlineAtLocked(entry.row); !ok || deadline > nowUnixNano {
+			continue
+		}
+		expiredRows = append(expiredRows, entry.row)
+	}
+	if len(expiredRows) == 0 {
+		return nil, nil
+	}
+	sort.Ints(expiredRows)
+	expiredKeys := make([]string, len(expiredRows))
+	for index, row := range expiredRows {
+		expiredKeys[index] = table.keys[row]
+	}
+	changes := make([]TypedTableChange, 0, len(expiredKeys))
 	prepared := false
-	for index := 0; index < len(table.keys); {
-		if table.typedTableRowDeletedLocked(index) || !table.typedTableRowExpiredLocked(index, now) {
-			index++
+	for _, key := range expiredKeys {
+		index, exists := table.positions[key]
+		if !exists || table.typedTableRowDeletedLocked(index) || !table.typedTableRowExpiredLocked(index, now) {
 			continue
 		}
 		if !prepared {
@@ -164,9 +195,6 @@ func (table *TypedTable) PurgeExpired(now time.Time) ([]TypedTableChange, error)
 			prepared = true
 		}
 		changes = append(changes, table.deleteIndexLocked(index))
-		if table.patchParts != nil {
-			index++
-		}
 	}
 	if len(changes) == 0 {
 		return nil, nil

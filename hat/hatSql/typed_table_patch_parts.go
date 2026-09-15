@@ -120,8 +120,11 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	for column := range table.columns {
 		table.columns[column].truncate(write)
 	}
-	if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
-		table.ttl.deadlines = table.ttl.deadlines[:write]
+	if table.ttl != nil {
+		if table.ttl.options.Mode == TypedTableTTLProcessingTime {
+			table.ttl.deadlines = table.ttl.deadlines[:write]
+		}
+		table.rebuildTypedTableTTLExpiryIndexLocked(write)
 	}
 	if table.storageEvents != nil {
 		table.recordStorageEventLocked(TypedTableStorageEventPatchPartMerged, physicalRowsBefore, write, 0, deletedRows, time.Since(started))

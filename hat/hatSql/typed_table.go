@@ -483,7 +483,9 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		for column := range table.columns {
 			table.columns[column].set(index, values[column])
 		}
-		table.setTypedTableTTLDeadlineLocked(index, ttlNow)
+		if table.ttl != nil {
+			table.setTypedTableTTLDeadlineLocked(index, ttlNow)
+		}
 	} else if exists {
 		change.Operation = "INSERT"
 		if table.patchParts != nil {
@@ -493,7 +495,9 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		for column := range table.columns {
 			table.columns[column].set(index, values[column])
 		}
-		table.setTypedTableTTLDeadlineLocked(index, ttlNow)
+		if table.ttl != nil {
+			table.setTypedTableTTLDeadlineLocked(index, ttlNow)
+		}
 	} else {
 		change.Operation = "INSERT"
 		index = len(table.keys)
@@ -505,7 +509,9 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		for column := range table.columns {
 			table.columns[column].append(values[column])
 		}
-		table.setTypedTableTTLDeadlineLocked(index, ttlNow)
+		if table.ttl != nil {
+			table.setTypedTableTTLDeadlineLocked(index, ttlNow)
+		}
 	}
 	change = table.appendChangeLocked(change)
 	if newBasePart {
@@ -535,6 +541,9 @@ func (table *TypedTable) Delete(key string) (TypedTableChange, error) {
 
 func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 	change := TypedTableChange{Operation: "DELETE", Key: table.keys[index], Before: table.rowLocked(index)}
+	if table.ttl != nil {
+		table.ttl.expiryRemove(index)
+	}
 	if table.patchParts != nil {
 		pendingDeletesBefore := table.patchParts.deletedCount
 		table.patchParts.deleted.set(index)
@@ -558,6 +567,9 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 		if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 			table.ttl.deadlines[index] = table.ttl.deadlines[last]
 		}
+		if table.ttl != nil {
+			table.ttl.expiryMove(last, index)
+		}
 	}
 	delete(table.positions, change.Key)
 	table.keys = table.keys[:last]
@@ -566,6 +578,9 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 	}
 	if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 		table.ttl.deadlines = table.ttl.deadlines[:last]
+	}
+	if table.ttl != nil {
+		table.ttl.expiryTruncate(last)
 	}
 	return table.appendChangeLocked(change)
 }
