@@ -11,8 +11,12 @@ clean_makefile="$(mktemp)"
 trap 'rm -f -- "$head_makefile" "$clean_makefile"' EXIT
 
 git show HEAD:Makefile > "$head_makefile"
-cp "$head_makefile" "$clean_makefile"
-printf '\n.PHONY: cleanup-test-tmp-preview cleanup-test-tmp-apply\ncleanup-test-tmp-preview:\n\tbash ./scripts/cleanup-test-tmp.sh preview\n\ncleanup-test-tmp-apply:\n\tbash ./scripts/cleanup-test-tmp.sh apply\n\n.PHONY: test-cleanup-test-tmp\ntest-cleanup-test-tmp:\n\tbash ./scripts/test-cleanup-test-tmp.sh\n\n.PHONY: stage-cleanup-test-tmp commit-cleanup-test-tmp push-cleanup-test-tmp\nstage-cleanup-test-tmp:\n\tbash ./scripts/stage-cleanup-test-tmp.sh\n\ncommit-cleanup-test-tmp:\n\tbash ./scripts/commit-cleanup-test-tmp.sh\n\npush-cleanup-test-tmp:\n\tbash ./scripts/push-cleanup-test-tmp.sh\n' >> "$clean_makefile"
+if grep -Fq 'cleanup-test-tmp-preview:' "$head_makefile"; then
+  cp "$head_makefile" "$clean_makefile"
+else
+  cp "$head_makefile" "$clean_makefile"
+  printf '\n.PHONY: cleanup-test-tmp-preview cleanup-test-tmp-apply\ncleanup-test-tmp-preview:\n\tbash ./scripts/cleanup-test-tmp.sh preview\n\ncleanup-test-tmp-apply:\n\tbash ./scripts/cleanup-test-tmp.sh apply\n\n.PHONY: test-cleanup-test-tmp\ntest-cleanup-test-tmp:\n\tbash ./scripts/test-cleanup-test-tmp.sh\n\n.PHONY: stage-cleanup-test-tmp commit-cleanup-test-tmp push-cleanup-test-tmp\nstage-cleanup-test-tmp:\n\tbash ./scripts/stage-cleanup-test-tmp.sh\n\ncommit-cleanup-test-tmp:\n\tbash ./scripts/commit-cleanup-test-tmp.sh\n\npush-cleanup-test-tmp:\n\tbash ./scripts/push-cleanup-test-tmp.sh\n' >> "$clean_makefile"
+fi
 
 makefile_blob="$(git hash-object -w "$clean_makefile")"
 git update-index --add --cacheinfo "100644,$makefile_blob,Makefile"

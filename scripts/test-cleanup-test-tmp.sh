@@ -38,6 +38,9 @@ TMP_CLEANUP_ROOT="$root" TMP_CLEANUP_PLAN="$plan" bash "$script" apply > "$root/
 [[ -d "$unrelated_directory" ]]
 [[ ! -e "$plan" ]]
 
+TMP_CLEANUP_ROOT="$root" TMP_CLEANUP_PLAN="$plan" bash "$script" preview > "$root/preview-empty.txt"
+[[ ! -e "$plan" ]]
+
 mkdir "$old_candidate"
 touch -d '2 days ago' "$old_candidate"
 TMP_CLEANUP_ROOT="$root" TMP_CLEANUP_PLAN="$plan" bash "$script" preview > "$root/preview-recheck.txt"

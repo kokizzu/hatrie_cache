@@ -98,8 +98,13 @@ if [[ "$mode" == "preview" ]]; then
   done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -print0)
 
   printf 'Summary: %s candidate(s), %s recent skip(s), %s protected skip(s).\n' "$candidates" "$skipped_recent" "$skipped_protected"
-  printf 'Plan: %s\n' "$plan_path"
-  printf 'Review the plan before running cleanup-test-tmp-apply.\n'
+  if (( candidates == 0 )); then
+    rm -f -- "$plan_path"
+    printf 'Plan: none (empty plan removed)\n'
+  else
+    printf 'Plan: %s\n' "$plan_path"
+    printf 'Review the plan before running cleanup-test-tmp-apply.\n'
+  fi
   exit 0
 fi
 

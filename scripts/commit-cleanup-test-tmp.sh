@@ -9,6 +9,10 @@ expected_paths=(
   scripts/commit-cleanup-test-tmp.sh
   scripts/push-cleanup-test-tmp.sh
 )
+required_paths=(
+  scripts/cleanup-test-tmp.sh
+  scripts/test-cleanup-test-tmp.sh
+)
 
 if git diff --cached --quiet; then
   printf 'no staged cleanup feature changes\n' >&2
@@ -16,18 +20,27 @@ if git diff --cached --quiet; then
 fi
 git diff --cached --check
 
-for path in "${expected_paths[@]}"; do
+for path in "${required_paths[@]}"; do
   git diff --cached --name-only -- "$path" | grep -Fx "$path" > /dev/null || {
-    printf 'expected staged path is missing: %s\n' "$path" >&2
+    printf 'required staged path is missing: %s\n' "$path" >&2
     exit 1
   }
 done
 
-staged_count="$(git diff --cached --name-only | wc -l)"
-if [[ "$staged_count" != "${#expected_paths[@]}" ]]; then
-  printf 'refusing to commit unexpected staged paths\n' >&2
-  git diff --cached --name-only >&2
-  exit 1
-fi
+staged_paths="$(git diff --cached --name-only)"
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  allowed=0
+  for expected_path in "${expected_paths[@]}"; do
+    if [[ "$path" == "$expected_path" ]]; then
+      allowed=1
+      break
+    fi
+  done
+  if (( allowed == 0 )); then
+    printf 'refusing unexpected staged path: %s\n' "$path" >&2
+    exit 1
+  fi
+done <<< "$staged_paths"
 
 git commit -m 'Add safe stale test temporary cleanup'
