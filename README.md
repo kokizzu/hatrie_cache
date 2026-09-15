@@ -1162,12 +1162,15 @@ make cli ARGS='restore-bundle -bundle backup/regions.tar.gz -data-dir data -part
 ```
 
 Subset restore is snapshot-only and requires the partition/prefix pairs declared
-by the bundle. A checkpoint-only journal marker is validated and preserved;
-journals containing replay commands and Pebble checkpoint/repository subset
-restores are rejected before the destination is changed. Use a full restore for
-replay-bearing journals. The default restore path and exact full-partition
-selectors are unchanged. `restore-rehearsal` currently rejects strict subset
-selectors so its source and restored checksums remain comparable.
+by the bundle. Checkpoint-only journal markers are validated and preserved.
+Post-snapshot tails containing single-key `SET*`, `INC`, `DEL`, `EXPIRE`, or
+`EXPIREAT` mutations are filtered and compacted into the selected snapshot;
+batches, outbox/idempotency-bearing entries, unsupported complex commands, and
+Pebble checkpoint/repository subset restores are rejected before the
+destination is changed. Use a full restore for those unsupported cases. The
+default restore path and exact full-partition selectors are unchanged.
+`restore-rehearsal` currently rejects strict subset selectors so its source and
+restored checksums remain comparable.
 
 Restore LevelDB data by restoring the directory and starting with `DB_PATH`:
 

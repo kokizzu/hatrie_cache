@@ -26043,9 +26043,10 @@ path extracts and verifies a two-partition snapshot. The selected path validates
 the partition-to-prefix pairs, loads the extracted snapshot, atomically rewrites
 it with only the requested prefix, and verifies the reduced result. Existing
 nil and exact-match selectors retain the original path. Subset selection
-preserves a validated checkpoint-only journal marker; replay-bearing journals,
-Pebble checkpoints, and repository subset restores are rejected before
-destination mutation.
+preserves a validated checkpoint-only journal marker. The C226 follow-up below
+also filters a safe single-key replay tail; complex replay commands, Pebble
+checkpoints, and repository subset restores are rejected before destination
+mutation.
 
 The fixture contains 4,096 string keys split evenly between `region:sg/` and
 `region:us/`. Results are Linux/amd64 on an AMD Ryzen 9 5950X from five measured
@@ -26086,3 +26087,44 @@ Correctness and safety coverage runs through
 `make race-selective-restore-c224`, and
 `make vet-selective-restore-c224`. The feature is opt-in and does not alter
 ordinary full restores.
+
+<a id="c226-partition-scoped-journal-tail"></a>
+### C226 Partition-Scoped Journal Tail Restore
+
+This follow-up measures a snapshot with a 128-record post-snapshot journal tail
+split evenly between `region:sg/` and `region:us/`. The selected restore applies
+only the 64 selected-region mutations, writes the final sequence into the
+snapshot, and replaces the staged journal with one checkpoint. The
+checkpoint-only row is included to isolate journal scanning without a replay
+tail. Results are Linux/amd64 on an AMD Ryzen 9 5950X from five measured
+iterations per sub-benchmark using `make benchmark-selective-restore-c224`.
+
+| Format | Path | Time | Relative CPU | Snapshot bytes | Size change | Heap | Heap change | Allocs | Alloc change |
+| --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- |
+| JSON | Full | 10.46 ms | baseline | 397,350 | baseline | 3,946,049 B/op | baseline | 78,271 | baseline |
+| JSON | Selected `sg` | 18.28 ms | 1.75x slower | 198,694 | 2.00x smaller | 6,728,089 B/op | 1.70x higher | 156,175 | 2.00x higher |
+| JSON | Selected `sg` + checkpoint journal | 19.66 ms | 1.08x selected time | 198,821 | 2.00x smaller | 6,798,507 B/op | 1.01x selected heap | 156,366 | 1.00x selected allocs |
+| JSON | Selected `sg` + 128-record tail | 21.69 ms | 1.19x selected time | 205,031 | 1.94x smaller | 6,924,164 B/op | 1.03x selected heap | 153,483 | 0.98x selected allocs |
+| Binary | Full | 8.80 ms | baseline | 167,943 | baseline | 2,891,603 B/op | baseline | 29,128 | baseline |
+| Binary | Selected `sg` | 12.78 ms | 1.45x slower | 83,975 | 2.00x smaller | 3,742,156 B/op | 1.29x higher | 39,465 | 1.35x higher |
+| Binary | Selected `sg` + checkpoint journal | 12.81 ms | 1.00x selected time | 84,021 | 2.00x smaller | 3,813,022 B/op | 1.02x selected heap | 39,612 | 1.00x selected allocs |
+| Binary | Selected `sg` + 128-record tail | 13.73 ms | 1.07x selected time | 86,646 | 1.94x smaller | 3,882,670 B/op | 1.04x selected heap | 40,922 | 1.04x higher |
+
+The tail path retains the expected selected-region mutations and does not
+reintroduce unselected keys. Its extra snapshot bytes are the selected tail
+data, not journal records: the journal is compacted to a single final
+checkpoint before publication. Unsupported commands are rejected rather than
+silently dropped.
+
+Raw result:
+
+```text
+BenchmarkBackupBundleRestorePartitionSelection/json/full-32                         5  10462110 ns/op  397350 snapshot_bytes  3946049 B/op   78271 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/selected-32                      5  18275225 ns/op  198694 snapshot_bytes  6728089 B/op  156175 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/selected-checkpoint-journal-32   5  19663193 ns/op  198821 snapshot_bytes  6798507 B/op  156366 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/selected-replay-tail-32            5  21687495 ns/op  205031 snapshot_bytes  6924164 B/op  153483 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/full-32                        5   8802468 ns/op  167943 snapshot_bytes  2891603 B/op   29128 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/selected-32                    5  12775048 ns/op   83975 snapshot_bytes  3742156 B/op   39465 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/selected-checkpoint-journal-32  5  12806383 ns/op   84021 snapshot_bytes  3813022 B/op   39612 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/selected-replay-tail-32         5  13730180 ns/op   86646 snapshot_bytes  3882670 B/op   40922 allocs/op
+```

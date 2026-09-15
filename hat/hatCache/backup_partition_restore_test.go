@@ -1,11 +1,14 @@
 package hatCache
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"hatrie_cache/hat/hatBackup"
+	"hatrie_cache/internal/jsonwire"
 )
 
 func TestValidatePartitionRestoreSelectionRejectsMismatchedCoveragePair(t *testing.T) {
@@ -33,32 +36,13 @@ func TestValidatePartitionRestoreSelectionRejectsEmptyBackupMetadata(t *testing.
 	}
 }
 
-func TestValidatePartitionRestoreJournalRejectsReplayEntry(t *testing.T) {
-	root := t.TempDir()
-	source := CreateHatTrie()
-	defer source.Destroy()
-	journal, err := OpenCommandJournal(filepath.Join(root, backupBundleJournalPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response := journal.ExecuteCommand(source, CacheCommandRequest{
-		Command: "SETSTR",
-		Key:     "region:sg/user:1",
-		Value:   "Singapore",
-	}); !response.OK {
-		t.Fatalf("ExecuteCommand() = %#v, want ok", response)
-	}
-	if err := journal.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	err = validatePartitionRestoreJournal(root, BackupBundleManifest{
-		Journal:         backupBundleJournalPath,
-		JournalFormat:   string(DefaultCommandJournalFormat),
-		JournalSequence: 1,
-	})
-	if err == nil || !strings.Contains(err.Error(), "checkpoint-only") {
-		t.Fatalf("validatePartitionRestoreJournal() error = %v, want replay-entry rejection", err)
+func TestSelectivePartitionJournalRejectsComplexCommand(t *testing.T) {
+	_, err := selectivePartitionJournalRequestKey(commandJournalEntry{Request: CacheCommandRequest{
+		Command: "BATCH",
+		Batch:   []CacheCommandRequest{{Command: "SETSTR", Key: "region:sg/user:1", Value: "Singapore"}},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "cannot safely filter") {
+		t.Fatalf("selectivePartitionJournalRequestKey() error = %v, want complex-command rejection", err)
 	}
 }
 
@@ -123,6 +107,139 @@ func TestRestoreBackupBundleAllowsCheckpointJournalForPartitionSubset(t *testing
 	if !restored.Exists("region:sg/user:1") || restored.Exists("region:us/user:1") {
 		t.Fatal("selective restore did not preserve only the selected partition")
 	}
+}
+
+func TestRestoreBackupBundleFiltersReplayTailForPartitionSubset(t *testing.T) {
+	for _, journalFormat := range []CommandJournalFormat{CommandJournalFormatJSON, CommandJournalFormatBinary} {
+		t.Run(string(journalFormat), func(t *testing.T) {
+			source := CreateHatTrie()
+			defer source.Destroy()
+			journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), backupBundleJournalPath), journalFormat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, request := range []CacheCommandRequest{
+				{Command: "SETSTR", Key: "region:sg/base", Value: "before"},
+				{Command: "SETSTR", Key: "region:us/base", Value: "before"},
+			} {
+				if response := journal.ExecuteCommand(source, request); !response.OK {
+					t.Fatalf("pre-snapshot ExecuteCommand(%#v) = %#v, want ok", request, response)
+				}
+			}
+
+			baseBundlePath := filepath.Join(t.TempDir(), "partitioned-base.tar.gz")
+			_, err = CreateBackupBundle(baseBundlePath, source, journal, BackupBundleOptions{
+				Mode:           BackupModeSnapshot,
+				SnapshotFormat: SnapshotFormatBinary,
+				Partition: BackupPartitionMetadata{
+					Mode:        "partitioned",
+					Local:       true,
+					Partitions:  []string{"sg", "us"},
+					KeyPrefixes: []string{"region:sg/", "region:us/"},
+				},
+				PartitionLocal: true,
+			})
+			if err != nil {
+				t.Fatalf("CreateBackupBundle() error = %v", err)
+			}
+			for _, request := range []CacheCommandRequest{
+				{Command: "SETSTR", Key: "region:sg/base", Value: "after"},
+				{Command: "SETINT", Key: "region:sg/count", Value: "7"},
+				{Command: "INC", Key: "region:sg/count", Value: "1"},
+				{Command: "SETSTR", Key: "region:us/after", Value: "excluded"},
+				{Command: "DEL", Key: "region:us/base"},
+			} {
+				if response := journal.ExecuteCommand(source, request); !response.OK {
+					t.Fatalf("tail ExecuteCommand(%#v) = %#v, want ok", request, response)
+				}
+			}
+			journalPath := journal.path
+			if err := journal.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+			tailBundlePath := rebuildBackupBundleWithJournal(t, baseBundlePath, journalPath)
+
+			selector := &BackupPartitionMetadata{
+				Mode:        "partitioned",
+				Local:       true,
+				Partitions:  []string{"sg"},
+				KeyPrefixes: []string{"region:sg/"},
+			}
+			report, err := RestoreBackupBundle(tailBundlePath, filepath.Join(t.TempDir(), "restored"), BackupBundleRestoreOptions{Partition: selector})
+			if err != nil {
+				t.Fatalf("RestoreBackupBundle(partition subset with replay tail) error = %v", err)
+			}
+			if report.JournalSequence != 7 || report.RecoveredKeys != 2 {
+				t.Fatalf("restore report sequence/keys = %d/%d, want 7/2", report.JournalSequence, report.RecoveredKeys)
+			}
+			entries, err := readCommandJournalEntries(report.Journal)
+			if err != nil {
+				t.Fatalf("readCommandJournalEntries() error = %v", err)
+			}
+			if len(entries) != 1 || !entries[0].Checkpoint || entries[0].Sequence != 7 {
+				t.Fatalf("restored journal entries = %#v, want one checkpoint at sequence 7", entries)
+			}
+			restored := newTestTrie(t)
+			defer restored.Destroy()
+			if err := restored.LoadSnapshot(report.Snapshot); err != nil {
+				t.Fatalf("LoadSnapshot() error = %v", err)
+			}
+			if restored.GetString("region:sg/base") != "after" || restored.GetCounter("region:sg/count") != 8 {
+				t.Fatalf("selected replayed state = %q/%d, want after/8", restored.GetString("region:sg/base"), restored.GetCounter("region:sg/count"))
+			}
+			if restored.Exists("region:us/base") || restored.Exists("region:us/after") {
+				t.Fatal("unselected replay tail data was restored")
+			}
+		})
+	}
+}
+
+func rebuildBackupBundleWithJournal(t testing.TB, bundlePath string, journalPath string) string {
+	t.Helper()
+	manifest, err := readBackupBundleManifest(bundlePath)
+	if err != nil {
+		t.Fatalf("readBackupBundleManifest() error = %v", err)
+	}
+	root := t.TempDir()
+	if err := extractBackupBundleFiles(bundlePath, root, manifest.Files); err != nil {
+		t.Fatalf("extractBackupBundleFiles() error = %v", err)
+	}
+	data, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatalf("ReadFile(journal) error = %v", err)
+	}
+	stagedJournalPath := filepath.Join(root, backupBundleJournalPath)
+	if err := os.WriteFile(stagedJournalPath, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(journal) error = %v", err)
+	}
+	for index := range manifest.Files {
+		if manifest.Files[index].Path != backupBundleJournalPath {
+			continue
+		}
+		manifest.Files[index], err = backupBundleFileInfo(backupBundleJournalPath, stagedJournalPath)
+		if err != nil {
+			t.Fatalf("backupBundleFileInfo(journal) error = %v", err)
+		}
+	}
+	manifestData, err := jsonwire.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("jsonwire.Marshal(manifest) error = %v", err)
+	}
+	manifestData = append(manifestData, '\n')
+	output := filepath.Join(t.TempDir(), "partitioned-with-replay-tail.tar.gz")
+	payloads := make([]backupBundlePayloadFile, 0, len(manifest.Files))
+	for _, file := range manifest.Files {
+		payloads = append(payloads, backupBundlePayloadFile{
+			name: file.Path,
+			path: filepath.Join(root, filepath.FromSlash(file.Path)),
+		})
+	}
+	if err := writeFileAtomicStream(output, func(writer io.Writer) error {
+		return writeBackupBundlePayloadTarGzip(writer, payloads, manifestData, manifest.CreatedAt)
+	}); err != nil {
+		t.Fatalf("writeBackupBundlePayloadTarGzip() error = %v", err)
+	}
+	return output
 }
 
 func TestRestoreBackupBundleRejectsPartitionSubsetForPebbleCheckpoint(t *testing.T) {

@@ -71,6 +71,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore requires a snapshot backup")
 	}
 	verificationManifest := manifest
+	restoredJournalSequence := manifest.JournalSequence
 	if selectivePartition {
 		verificationManifest.Partition = cloneBackupPartitionMetadata(options.Partition)
 	}
@@ -89,12 +90,12 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		return BackupBundleRestoreReport{}, err
 	}
 	if selectivePartition {
-		if err := validatePartitionRestoreJournal(destination.StagingPath(), manifest); err != nil {
+		journalSequence, err := filterRestoredSnapshotByPartition(destination.StagingPath(), manifest, options.Partition)
+		if err != nil {
 			return BackupBundleRestoreReport{}, err
 		}
-		if err := filterRestoredSnapshotByPartition(destination.StagingPath(), manifest, options.Partition); err != nil {
-			return BackupBundleRestoreReport{}, err
-		}
+		restoredJournalSequence = journalSequence
+		verificationManifest.JournalSequence = journalSequence
 	}
 	var doctor BackupDoctorReport
 	switch mode {
@@ -135,7 +136,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		Journal:             journalPath,
 		Partition:           cloneBackupPartitionMetadata(verificationManifest.Partition),
 		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
-		JournalSequence:     manifest.JournalSequence,
+		JournalSequence:     restoredJournalSequence,
 		RecoveredKeys:       doctor.RecoveredKeys,
 	}, nil
 }

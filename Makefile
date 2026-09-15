@@ -15433,3 +15433,16 @@ commit-selective-journal-c225:
 
 push-selective-journal-c225:
 	bash ./scripts/push-selective-journal-c225.sh
+
+# C226 partition-scoped journal tail restore
+
+.PHONY: stage-journal-tail-c226 commit-journal-tail-c226 push-journal-tail-c226
+
+stage-journal-tail-c226:
+	bash ./scripts/stage-journal-tail-c226.sh
+
+commit-journal-tail-c226:
+	bash ./scripts/commit-journal-tail-c226.sh
+
+push-journal-tail-c226:
+	bash ./scripts/push-journal-tail-c226.sh

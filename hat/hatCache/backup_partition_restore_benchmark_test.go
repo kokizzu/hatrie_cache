@@ -61,9 +61,24 @@ func BenchmarkBackupBundleRestorePartitionSelection(b *testing.B) {
 				_ = journal.Close()
 				b.Fatal(err)
 			}
+			for index := 0; index < 128; index++ {
+				prefix := "region:us/"
+				if index%2 == 0 {
+					prefix = "region:sg/"
+				}
+				if response := journal.ExecuteCommand(source, CacheCommandRequest{
+					Command: "SETSTR",
+					Key:     fmt.Sprintf("%sreplay:%03d", prefix, index),
+					Value:   "tail",
+				}); !response.OK {
+					b.Fatalf("tail ExecuteCommand() = %#v, want ok", response)
+				}
+			}
+			journalPath := journal.path
 			if err := journal.Close(); err != nil {
 				b.Fatal(err)
 			}
+			replayTailBundlePath := rebuildBackupBundleWithJournal(b, checkpointJournalBundlePath, journalPath)
 
 			selectedOption := BackupBundleRestoreOptions{Partition: &BackupPartitionMetadata{
 				Mode:        "partitioned",
@@ -90,6 +105,12 @@ func BenchmarkBackupBundleRestorePartitionSelection(b *testing.B) {
 					bundle:        checkpointJournalBundlePath,
 					option:        selectedOption,
 					wantRecovered: 2049,
+				},
+				{
+					name:          "selected-replay-tail",
+					bundle:        replayTailBundlePath,
+					option:        selectedOption,
+					wantRecovered: 2113,
 				},
 			} {
 				b.Run(selection.name, func(b *testing.B) {
