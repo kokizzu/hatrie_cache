@@ -14913,3 +14913,34 @@ commit-read-quorum-fastpath-c209:
 
 push-read-quorum-fastpath-c209:
 	bash ./scripts/push-read-quorum-fastpath-c209.sh
+
+.PHONY: test-upsert-batch-small-vector-c210 benchmark-upsert-batch-small-vector-c210 benchmark-upsert-batch-baseline-c210 benchmark-upsert-batch-control-c210 format-upsert-batch-small-vector-c210 verify-upsert-batch-small-vector-c210 inspect-upsert-batch-small-vector-diff-c210 stage-upsert-batch-small-vector-c210 commit-upsert-batch-small-vector-c210 push-upsert-batch-small-vector-c210
+test-upsert-batch-small-vector-c210:
+	bash ./scripts/test-upsert-batch-small-vector-c210.sh
+
+benchmark-upsert-batch-small-vector-c210:
+	bash ./scripts/benchmark-upsert-batch-small-vector-c210.sh
+
+benchmark-upsert-batch-baseline-c210:
+	bash ./scripts/benchmark-upsert-batch-baseline-c210.sh
+
+benchmark-upsert-batch-control-c210:
+	bash ./scripts/benchmark-upsert-batch-control-c210.sh
+
+format-upsert-batch-small-vector-c210:
+	bash ./scripts/format-upsert-batch-small-vector-c210.sh
+
+verify-upsert-batch-small-vector-c210:
+	bash ./scripts/verify-upsert-batch-small-vector-c210.sh
+
+inspect-upsert-batch-small-vector-diff-c210:
+	bash ./scripts/inspect-upsert-batch-small-vector-diff-c210.sh
+
+stage-upsert-batch-small-vector-c210:
+	bash ./scripts/stage-upsert-batch-small-vector-c210.sh
+
+commit-upsert-batch-small-vector-c210:
+	bash ./scripts/commit-upsert-batch-small-vector-c210.sh
+
+push-upsert-batch-small-vector-c210:
+	bash ./scripts/push-upsert-batch-small-vector-c210.sh

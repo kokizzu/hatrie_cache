@@ -25382,3 +25382,61 @@ Focused tests verify success and unsatisfied failure decisions, attempt
 metadata, callback errors, and value propagation. The verification target
 runs the complete replication package, race detector, and vet checks. Full
 notes: [TR056_SINGLE_NODE_READ_QUORUM_FASTPATH.md](TR056_SINGLE_NODE_READ_QUORUM_FASTPATH.md).
+
+## TR-057 Small-Vector UpsertBatch Representation
+
+`UpsertBatch` now uses its insertion-ordered record slice for batches with at
+most 16 distinct keys and promotes to the existing map at the 17th key. A
+capacity above 16 remains map-backed. Results are from Linux/amd64 on an AMD
+Ryzen 9 5950X; each row below is the median of three samples from
+`make benchmark-upsert-batch-small-vector-c210`.
+
+### Steady State
+
+| Distinct keys | Before median | After median | Relative result | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | 27.86 ns | 8.648 ns | 3.22x faster | 0 | 0 | 0 | 0 |
+| 4 | 95.75 ns | 43.54 ns | 2.20x faster | 0 | 0 | 0 | 0 |
+| 8 | 204.7 ns | 136.8 ns | 1.50x faster | 0 | 0 | 0 | 0 |
+| 16 | 424.7 ns | 347.3 ns | 1.22x faster | 0 | 0 | 0 | 0 |
+| 32 | 822.8 ns | 824.8 ns | 1.00x, 0.2% slower | 0 | 0 | 0 | 0 |
+| 64 | 1,675 ns | 1,676 ns | 1.00x | 0 | 0 | 0 | 0 |
+| 1,000 | 27,831 ns | 28,077 ns | 0.99x, 0.9% slower | 0 | 0 | 0 | 0 |
+
+Raw before samples:
+
+```text
+batch_1: 31.35 27.86 26.59 ns/op; 0 B/op; 0 allocs/op
+batch_4: 95.75 102.4 86.64 ns/op; 0 B/op; 0 allocs/op
+batch_8: 180.8 206.1 204.7 ns/op; 0 B/op; 0 allocs/op
+batch_16: 426.6 424.7 399.6 ns/op; 0 B/op; 0 allocs/op
+batch_32: 822.8 771.8 861.5 ns/op; 0 B/op; 0 allocs/op
+batch_64: 1675 1778 1664 ns/op; 0 B/op; 0 allocs/op
+batch_1000: 27349 27831 30032 ns/op; 0 B/op; 0 allocs/op
+```
+
+Raw after samples:
+
+```text
+batch_1: 8.648 9.264 8.044 ns/op; 0 B/op; 0 allocs/op
+batch_4: 41.23 43.54 47.52 ns/op; 0 B/op; 0 allocs/op
+batch_8: 137.4 136.8 132.9 ns/op; 0 B/op; 0 allocs/op
+batch_16: 347.3 377.1 331.4 ns/op; 0 B/op; 0 allocs/op
+batch_32: 824.8 848.6 822.8 ns/op; 0 B/op; 0 allocs/op
+batch_64: 1717 1676 1620 ns/op; 0 B/op; 0 allocs/op
+batch_1000: 27262 28077 28833 ns/op; 0 B/op; 0 allocs/op
+```
+
+### Fresh Construction
+
+| Distinct keys | Before median | After median | Relative result | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | 130.5 ns | 27.53 ns | 4.74x faster | 288 | 32 | 3 | 1 |
+| 4 | 228.4 ns | 79.61 ns | 2.87x faster | 384 | 128 | 3 | 1 |
+| 16 | 761.5 ns | 464.2 ns | 1.64x faster | 1,496 | 512 | 5 | 1 |
+| 32 | 1,383 ns | 1,402 ns | 0.99x, 1.4% slower | 3,032 | 3,032 | 5 | 5 |
+
+The small fresh cases remove two or four allocations and reduce allocated
+bytes by 88.9%, 66.7%, and 65.8%. The 32-entry case remains map-backed with
+the same allocation shape. Full notes and raw command list:
+[TR057_UPSERT_BATCH_SMALL_VECTOR.md](TR057_UPSERT_BATCH_SMALL_VECTOR.md).

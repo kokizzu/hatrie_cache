@@ -23,12 +23,19 @@ type UpsertBatch[T any] struct {
 	records []UpsertRecord[T]
 }
 
+const upsertBatchLinearThreshold = 16
+
 // NewUpsertBatch creates an empty batch with capacity reserved for capacity
 // distinct keys. A non-positive capacity leaves the batch lazy and allocates
 // only when the first record is added.
 func NewUpsertBatch[T any](capacity int) *UpsertBatch[T] {
 	if capacity <= 0 {
 		return &UpsertBatch[T]{}
+	}
+	if capacity <= upsertBatchLinearThreshold {
+		return &UpsertBatch[T]{
+			records: make([]UpsertRecord[T], 0, capacity),
+		}
 	}
 	return &UpsertBatch[T]{
 		indexes: make(map[string]int, capacity),
@@ -44,15 +51,27 @@ func (batch *UpsertBatch[T]) Upsert(key string, value T) error {
 	if key == "" {
 		return ErrUpsertBatchKeyInvalid
 	}
-	if index, ok := batch.indexes[key]; ok {
+	if batch.indexes != nil {
+		if index, ok := batch.indexes[key]; ok {
+			batch.records[index].Value = value
+			batch.records[index].Deleted = false
+			return nil
+		}
+		batch.indexes[key] = len(batch.records)
+		batch.records = append(batch.records, UpsertRecord[T]{Key: key, Value: value})
+		return nil
+	}
+	if index, ok := batch.linearIndexOf(key); ok {
 		batch.records[index].Value = value
 		batch.records[index].Deleted = false
 		return nil
 	}
 	if batch.indexes == nil {
-		batch.indexes = make(map[string]int)
+		batch.promoteIfNeeded()
 	}
-	batch.indexes[key] = len(batch.records)
+	if batch.indexes != nil {
+		batch.indexes[key] = len(batch.records)
+	}
 	batch.records = append(batch.records, UpsertRecord[T]{Key: key, Value: value})
 	return nil
 }
@@ -65,16 +84,29 @@ func (batch *UpsertBatch[T]) Delete(key string) error {
 	if key == "" {
 		return ErrUpsertBatchKeyInvalid
 	}
-	if index, ok := batch.indexes[key]; ok {
+	if batch.indexes != nil {
+		if index, ok := batch.indexes[key]; ok {
+			var zero T
+			batch.records[index].Value = zero
+			batch.records[index].Deleted = true
+			return nil
+		}
+		batch.indexes[key] = len(batch.records)
+		batch.records = append(batch.records, UpsertRecord[T]{Key: key, Deleted: true})
+		return nil
+	}
+	if index, ok := batch.linearIndexOf(key); ok {
 		var zero T
 		batch.records[index].Value = zero
 		batch.records[index].Deleted = true
 		return nil
 	}
 	if batch.indexes == nil {
-		batch.indexes = make(map[string]int)
+		batch.promoteIfNeeded()
 	}
-	batch.indexes[key] = len(batch.records)
+	if batch.indexes != nil {
+		batch.indexes[key] = len(batch.records)
+	}
 	batch.records = append(batch.records, UpsertRecord[T]{Key: key, Deleted: true})
 	return nil
 }
@@ -84,7 +116,7 @@ func (batch *UpsertBatch[T]) Lookup(key string) (UpsertRecord[T], bool) {
 	if batch == nil || key == "" {
 		return UpsertRecord[T]{}, false
 	}
-	index, ok := batch.indexes[key]
+	index, ok := batch.indexOf(key)
 	if !ok {
 		return UpsertRecord[T]{}, false
 	}
@@ -125,4 +157,32 @@ func (batch *UpsertBatch[T]) Reset() {
 		delete(batch.indexes, key)
 	}
 	batch.records = batch.records[:0]
+}
+
+func (batch *UpsertBatch[T]) indexOf(key string) (int, bool) {
+	if batch.indexes != nil {
+		index, ok := batch.indexes[key]
+		return index, ok
+	}
+	return batch.linearIndexOf(key)
+}
+
+func (batch *UpsertBatch[T]) linearIndexOf(key string) (int, bool) {
+	for index, record := range batch.records {
+		if record.Key == key {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func (batch *UpsertBatch[T]) promoteIfNeeded() {
+	if batch.indexes != nil || len(batch.records) < upsertBatchLinearThreshold {
+		return
+	}
+	indexes := make(map[string]int, len(batch.records)*2)
+	for index, record := range batch.records {
+		indexes[record.Key] = index
+	}
+	batch.indexes = indexes
 }

@@ -4095,6 +4095,7 @@ lookup and preparation tradeoff is documented in
 - [Compact request cancellation](T240_COMPACT_REQUEST_CANCELLATION.md)
 - Single-replica read routing fast path: [TR055_SINGLE_REPLICA_READ_FASTPATH.md](TR055_SINGLE_REPLICA_READ_FASTPATH.md)
 - Single-node read quorum fast path: [TR056_SINGLE_NODE_READ_QUORUM_FASTPATH.md](TR056_SINGLE_NODE_READ_QUORUM_FASTPATH.md)
+- Small-vector `UpsertBatch` representation: [TR057_UPSERT_BATCH_SMALL_VECTOR.md](TR057_UPSERT_BATCH_SMALL_VECTOR.md)
 SQL mutation changefeed consumers can request pre- and post-state rows with `RETURNING`; see [TR033_SQL_RETURNING_BEFORE_ROWS.md](TR033_SQL_RETURNING_BEFORE_ROWS.md).
 ## Query Engine Notes
 
