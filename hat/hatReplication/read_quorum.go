@@ -60,6 +60,15 @@ type readQuorumGroup struct {
 // Callers should provide a typed comparator for hot paths; nil is convenient
 // for values where reflect.DeepEqual is an acceptable equality policy.
 func ExecuteReadQuorum(ctx context.Context, nodes []string, required int, read ReadQuorumReadFunc, equal ReadQuorumEqualFunc) (ReadQuorumResult, error) {
+	if len(nodes) == 1 && required == 1 && nodes[0] != "" && read != nil {
+		if ctx == nil {
+			return ReadQuorumResult{}, fmt.Errorf("%w: context is nil", ErrReadQuorumExecutorInvalid)
+		}
+		if err := ctx.Err(); err != nil {
+			return ReadQuorumResult{}, fmt.Errorf("%w: %v", ErrReadQuorumContextCanceled, err)
+		}
+		return executeSingleReadQuorum(ctx, nodes[0], read)
+	}
 	normalized, err := normalizeReadQuorumNodes(nodes, required, read)
 	if err != nil {
 		return ReadQuorumResult{}, err
@@ -138,6 +147,25 @@ func ExecuteReadQuorum(ctx context.Context, nodes []string, required int, read R
 	}
 	result.Decision.Satisfied = true
 	result.Value = groups[bestGroup].value
+	return result, nil
+}
+
+func executeSingleReadQuorum(ctx context.Context, node string, read ReadQuorumReadFunc) (ReadQuorumResult, error) {
+	result := ReadQuorumResult{
+		Decision: ReadQuorumDecision{Total: 1, Required: 1},
+		Attempts: []ReadQuorumAttempt{{
+			Node: node,
+		}},
+	}
+	value, err := read(ctx, node)
+	if err != nil {
+		result.Attempts[0].Error = err.Error()
+		return result, fmt.Errorf("%w: acknowledged=0 required=1", ErrReadQuorumUnsatisfied)
+	}
+	result.Attempts[0].Acknowledged = true
+	result.Decision.Acknowledged = 1
+	result.Decision.Satisfied = true
+	result.Value = value
 	return result, nil
 }
 

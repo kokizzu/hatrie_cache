@@ -25346,3 +25346,39 @@ package, the race detector, and `go vet`. Commands:
 `make benchmark-parallel-read-fastpath-c208`, and
 `make verify-parallel-read-fastpath-c208`. Full details are in
 [TR055_SINGLE_REPLICA_READ_FASTPATH.md](TR055_SINGLE_REPLICA_READ_FASTPATH.md).
+
+## TR-056 Single-Node Read Quorum Fast Path
+
+`ExecuteReadQuorum` now calls a singleton quorum directly when one replica is
+both the only candidate and the required quorum. This skips normalized-node
+and response allocations, a goroutine, a `WaitGroup`, and response-group
+construction. The multi-node quorum path remains the control path. Results
+are from Linux/amd64 on an AMD Ryzen 9 5950X; each row has three samples from
+`make benchmark-read-quorum-fastpath-c209`.
+
+| Workload | Before median | After median | Relative result | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 node success | 679.3 ns | 62.37 ns | 10.90x faster | 320 | 48 | 6 | 1 |
+| 3 node success control | 1,520 ns | 1,529 ns | 1.00x, 0.6% slower | 864 | 864 | 12 | 12 |
+| 1 node failure | 1,041 ns | 193.0 ns | 5.39x faster | 432 | 160 | 8 | 3 |
+
+Raw before samples:
+
+```text
+single_success: 699.5 677.7 679.3 ns/op; 320 B/op; 6 allocs/op
+three_success_control: 1516 1525 1520 ns/op; 864 B/op; 12 allocs/op
+single_failure: 1019 1041 1050 ns/op; 432 B/op; 8 allocs/op
+```
+
+Raw after samples:
+
+```text
+single_success: 64.13 61.06 62.37 ns/op; 48 B/op; 1 alloc/op
+three_success_control: 1539 1529 1516 ns/op; 864 B/op; 12 allocs/op
+single_failure: 193.0 190.2 197.7 ns/op; 160 B/op; 3 allocs/op
+```
+
+Focused tests verify success and unsatisfied failure decisions, attempt
+metadata, callback errors, and value propagation. The verification target
+runs the complete replication package, race detector, and vet checks. Full
+notes: [TR056_SINGLE_NODE_READ_QUORUM_FASTPATH.md](TR056_SINGLE_NODE_READ_QUORUM_FASTPATH.md).

@@ -14888,3 +14888,28 @@ commit-parallel-read-fastpath-c208:
 
 push-parallel-read-fastpath-c208:
 	bash ./scripts/push-parallel-read-fastpath-c208.sh
+
+.PHONY: test-read-quorum-fastpath-c209 benchmark-read-quorum-fastpath-c209 format-read-quorum-fastpath-c209 verify-read-quorum-fastpath-c209 inspect-read-quorum-fastpath-diff-c209 stage-read-quorum-fastpath-c209 commit-read-quorum-fastpath-c209 push-read-quorum-fastpath-c209
+test-read-quorum-fastpath-c209:
+	bash ./scripts/test-read-quorum-fastpath-c209.sh
+
+benchmark-read-quorum-fastpath-c209:
+	bash ./scripts/benchmark-read-quorum-fastpath-c209.sh
+
+format-read-quorum-fastpath-c209:
+	bash ./scripts/format-read-quorum-fastpath-c209.sh
+
+verify-read-quorum-fastpath-c209:
+	bash ./scripts/verify-read-quorum-fastpath-c209.sh
+
+inspect-read-quorum-fastpath-diff-c209:
+	bash ./scripts/inspect-read-quorum-fastpath-diff-c209.sh
+
+stage-read-quorum-fastpath-c209:
+	bash ./scripts/stage-read-quorum-fastpath-c209.sh
+
+commit-read-quorum-fastpath-c209:
+	bash ./scripts/commit-read-quorum-fastpath-c209.sh
+
+push-read-quorum-fastpath-c209:
+	bash ./scripts/push-read-quorum-fastpath-c209.sh
