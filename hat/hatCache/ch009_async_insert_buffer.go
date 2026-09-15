@@ -22,10 +22,11 @@ const (
 )
 
 var (
-	ErrAsyncInsertBufferWriteOnly = errors.New("hatriecache: async insert buffer accepts journaled writes only")
-	ErrAsyncInsertBufferFull      = errors.New("hatriecache: async insert buffer is full")
-	ErrAsyncInsertBufferClosed    = errors.New("hatriecache: async insert buffer is closed")
-	ErrNilAsyncInsertSubmission   = errors.New("hatriecache: async insert submission is nil")
+	ErrAsyncInsertBufferWriteOnly           = errors.New("hatriecache: async insert buffer accepts journaled writes only")
+	ErrAsyncInsertBufferFull                = errors.New("hatriecache: async insert buffer is full")
+	ErrAsyncInsertBufferClosed              = errors.New("hatriecache: async insert buffer is closed")
+	ErrAsyncInsertBufferIdempotencyDisabled = errors.New("hatriecache: async insert idempotency requires journal idempotency")
+	ErrNilAsyncInsertSubmission             = errors.New("hatriecache: async insert submission is nil")
 )
 
 const (
@@ -157,6 +158,12 @@ func (buffer *AsyncInsertBuffer) Submit(ctx context.Context, request CacheComman
 	if err := validateAsyncInsertRequest(request); err != nil {
 		return nil, err
 	}
+	if key := strings.TrimSpace(request.IdempotencyKey); key != "" {
+		if !buffer.journal.idempotency.enabled() {
+			return nil, ErrAsyncInsertBufferIdempotencyDisabled
+		}
+		request.IdempotencyKey = key
+	}
 	request = cloneAsyncCommandRequest(request)
 
 	buffer.mu.Lock()
@@ -187,8 +194,13 @@ func (buffer *AsyncInsertBuffer) Submit(ctx context.Context, request CacheComman
 
 func validateAsyncInsertRequest(request CacheCommandRequest) error {
 	command := strings.ToUpper(strings.TrimSpace(request.Command))
-	if command == "" || command == "BATCH" || request.IdempotencyKey != "" || !commandShouldJournal(request) {
+	if command == "" || command == "BATCH" || !commandShouldJournal(request) {
 		return ErrAsyncInsertBufferWriteOnly
+	}
+	if key := strings.TrimSpace(request.IdempotencyKey); key != "" {
+		if err := validateCommandIdempotencyKey(key); err != nil {
+			return err
+		}
 	}
 	return nil
 }

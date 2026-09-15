@@ -26412,3 +26412,48 @@ BenchmarkCH031JSONSubcolumnMaterialize-32    	      84	   2872596 ns/op	 2589692
 BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2854735 ns/op	 2589690 B/op	   40955 allocs/op
 BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2851632 ns/op	 2589693 B/op	   40955 allocs/op
 ```
+
+<a id="ch-u01-durable-asynchronous-insert-deduplication"></a>
+## CH-U01 Durable Asynchronous-Insert Deduplication
+
+This compares the existing unkeyed `AsyncInsertBuffer` path with the same
+path after adding the conditional idempotency-key check, then measures keyed
+duplicate retries separately. Each sample submits and flushes 64 `SET`
+commands. Five `-benchtime=200ms` samples were collected on an AMD Ryzen 9
+5950X Linux `amd64` host with journal sync overridden to a no-op.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing unkeyed baseline | 108,382 | 82,577 | 268 | 1.00x |
+| Unkeyed after CH-U01 | 104,179 | 82,577 | 268 | 1.04x faster, heap/allocation neutral |
+| Keyed duplicate retry | 122,221 | 105,412 | 404 | 1.17x slower, 1.28x heap, 1.51x allocations vs unkeyed |
+
+The default unkeyed path has no measured heap or allocation regression. The
+keyed path pays for bounded fingerprinting and ledger lookup to provide
+restart-safe duplicate suppression; the CH-U01 test verifies that the retry
+does not append another journal record or change the stored value.
+
+Raw output from `make benchmark-chu01-before-c242`:
+
+```text
+BenchmarkCHU01AsyncInsertUnkeyed-32    	    1845	    109684 ns/op	   0.58 MB/s	   82589 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32    	    1956	    109305 ns/op	   0.59 MB/s	   82573 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32    	    2319	    105553 ns/op	   0.61 MB/s	   82575 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32    	    2466	    106586 ns/op	   0.60 MB/s	   82583 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32    	    2161	    108382 ns/op	   0.59 MB/s	   82577 B/op	     268 allocs/op
+```
+
+Raw output from `make benchmark-chu01-after-c242`:
+
+```text
+BenchmarkCHU01AsyncInsertUnkeyed-32           	    2077	    104179 ns/op	   0.61 MB/s	   82577 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32           	    2036	    104826 ns/op	   0.61 MB/s	   82576 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32           	    2368	    105179 ns/op	   0.61 MB/s	   82580 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32           	    2103	    101010 ns/op	   0.63 MB/s	   82570 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertUnkeyed-32           	    2140	    102365 ns/op	   0.63 MB/s	   82579 B/op	     268 allocs/op
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1708	    122221 ns/op	   0.52 MB/s	  105411 B/op	     404 allocs/op
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    2060	    122984 ns/op	   0.52 MB/s	  105399 B/op	     404 allocs/op
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1850	    122574 ns/op	   0.52 MB/s	  105412 B/op	     404 allocs/op
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1947	    121187 ns/op	   0.53 MB/s	  105474 B/op	     404 allocs/op
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    	    1988	    118770 ns/op	   0.54 MB/s	  105414 B/op	     404 allocs/op
+```

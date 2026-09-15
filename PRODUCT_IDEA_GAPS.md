@@ -19,7 +19,7 @@ tradeoffs are documented and its commit is published.
 
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
-| CH-U01 | Durable asynchronous-insert deduplication | `hatPipeline.AsyncBatcher` batches values in memory, but the server has no durable insert-ID ledger that makes retried asynchronous inserts idempotent. | Crash/restart replay, bounded ledger memory, expiry, and duplicate-byte measurements. |
+| CH-U01 | Durable asynchronous-insert deduplication | Partially adopted by `hatCache.AsyncInsertBuffer`: keyed journaled writes use the durable command-journal fingerprint ledger and survive replay; the generic `hatPipeline.AsyncBatcher` and server-level async-insert queue lifecycle remain caller-owned. | Crash/restart replay, bounded ledger memory, eviction horizon, and duplicate-byte measurements. See [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md). |
 | CH-U02 | Unified external `ORDER BY` spill | External sorting is not one reusable path for every compatible SQL ordered query. | Stable ties, NULL/collation behavior, cancellation cleanup, disk quota, and RSS versus CPU. |
 | CH-U03 | Versioned partial aggregate wire states | `hatDataStructure.AggregateStateEnvelope` now provides bounded, checksummed HAG1 envelopes, and HLL/Count-Min state APIs use compact raw payloads with explicit kind/version metadata; a broader SQL aggregate-state registry remains open. | Exact merge, schema/version rejection, bounded state size, and wire-size benchmark. |
 | CH-U04 | External `DISTINCT` spill | High-cardinality distinct operations do not have a bounded disk-backed set path. | Exact type/NULL semantics, duplicate elimination, cleanup, and memory ceiling. |

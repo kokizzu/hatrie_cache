@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/hatrie-chu01-package.XXXXXX")"
+cleanup() {
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
+
+git -C "$repo_dir" archive --format=tar HEAD | tar -x -C "$tmp_dir"
+files=(
+  "hat/hatCache/ch009_async_insert_buffer.go"
+  "hat/hatCache/ch009_async_insert_buffer_test.go"
+  "hat/hatCache/chu01_durable_async_insert_benchmark_test.go"
+  "hat/hatCache/chu01_durable_async_insert_test.go"
+)
+for file in "${files[@]}"; do
+  cp "$repo_dir/$file" "$tmp_dir/$file"
+done
+
+cd "$tmp_dir"
+go test ./hat/hatCache

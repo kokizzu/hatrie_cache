@@ -221,8 +221,8 @@ func TestCH009AsyncInsertBufferRejectsReadsAndBoundsAdmission(t *testing.T) {
 	if _, err := buffer.Submit(context.Background(), CacheCommandRequest{Command: "BATCH", Batch: []CacheCommandRequest{{Command: "SETSTR", Key: "nested", Value: "value"}}}); !errors.Is(err, ErrAsyncInsertBufferWriteOnly) {
 		t.Fatalf("batch submission error = %v, want write-only error", err)
 	}
-	if _, err := buffer.Submit(context.Background(), CacheCommandRequest{Command: "SETSTR", Key: "idempotent", Value: "value", IdempotencyKey: "request-1"}); !errors.Is(err, ErrAsyncInsertBufferWriteOnly) {
-		t.Fatalf("idempotent submission error = %v, want write-only error", err)
+	if _, err := buffer.Submit(context.Background(), CacheCommandRequest{Command: "SETSTR", Key: "idempotent", Value: "value", IdempotencyKey: "request-1"}); !errors.Is(err, ErrAsyncInsertBufferIdempotencyDisabled) {
+		t.Fatalf("idempotent submission error = %v, want idempotency-disabled error", err)
 	}
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
