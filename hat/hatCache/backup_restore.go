@@ -70,9 +70,6 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if selectivePartition && mode != BackupModeSnapshot {
 		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore requires a snapshot backup")
 	}
-	if selectivePartition && manifest.Journal != "" {
-		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore does not support journal replay")
-	}
 	verificationManifest := manifest
 	if selectivePartition {
 		verificationManifest.Partition = cloneBackupPartitionMetadata(options.Partition)
@@ -92,6 +89,9 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		return BackupBundleRestoreReport{}, err
 	}
 	if selectivePartition {
+		if err := validatePartitionRestoreJournal(destination.StagingPath(), manifest); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
 		if err := filterRestoredSnapshotByPartition(destination.StagingPath(), manifest, options.Partition); err != nil {
 			return BackupBundleRestoreReport{}, err
 		}

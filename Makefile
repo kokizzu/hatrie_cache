@@ -15420,3 +15420,16 @@ format-selective-restore-c224:
 
 check-selective-restore-c224:
 	bash ./scripts/check-selective-restore-c224.sh
+
+# C225 checkpoint-only journal selective restore
+
+.PHONY: stage-selective-journal-c225 commit-selective-journal-c225 push-selective-journal-c225
+
+stage-selective-journal-c225:
+	bash ./scripts/stage-selective-journal-c225.sh
+
+commit-selective-journal-c225:
+	bash ./scripts/commit-selective-journal-c225.sh
+
+push-selective-journal-c225:
+	bash ./scripts/push-selective-journal-c225.sh

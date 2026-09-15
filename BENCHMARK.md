@@ -26042,9 +26042,10 @@ This measures the ClickHouse-style opt-in partition restore selector. The full
 path extracts and verifies a two-partition snapshot. The selected path validates
 the partition-to-prefix pairs, loads the extracted snapshot, atomically rewrites
 it with only the requested prefix, and verifies the reduced result. Existing
-nil and exact-match selectors retain the original path. Subset selection is
-supported only for snapshots without journal replay; Pebble checkpoint and
-repository subset restores are rejected before destination mutation.
+nil and exact-match selectors retain the original path. Subset selection
+preserves a validated checkpoint-only journal marker; replay-bearing journals,
+Pebble checkpoints, and repository subset restores are rejected before
+destination mutation.
 
 The fixture contains 4,096 string keys split evenly between `region:sg/` and
 `region:us/`. Results are Linux/amd64 on an AMD Ryzen 9 5950X from five measured
@@ -26055,18 +26056,27 @@ does extra load/write/verify work.
 
 | Format | Path | Time | Relative CPU | Snapshot bytes | Size change | Heap | Heap change | Allocs | Alloc change |
 | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- |
-| JSON | Full | 10.21 ms | baseline | 397,350 | baseline | 3,953,232 B/op | baseline | 78,273 | baseline |
-| JSON | Selected `sg` | 16.60 ms | 1.63x slower | 198,694 | 2.00x smaller | 6,722,060 B/op | 1.70x higher | 156,169 | 2.00x higher |
-| Binary | Full | 7.34 ms | baseline | 167,943 | baseline | 2,894,438 B/op | baseline | 29,132 | baseline |
-| Binary | Selected `sg` | 10.30 ms | 1.40x slower | 83,975 | 2.00x smaller | 3,742,153 B/op | 1.29x higher | 39,464 | 1.35x higher |
+| JSON | Full | 16.94 ms | baseline | 397,350 | baseline | 3,954,044 B/op | baseline | 78,277 | baseline |
+| JSON | Selected `sg` | 18.55 ms | 1.10x slower | 198,694 | 2.00x smaller | 6,731,046 B/op | 1.70x higher | 156,177 | 2.00x higher |
+| JSON | Selected `sg` + checkpoint journal | 19.23 ms | 1.04x selected time | 198,821 | 2.00x smaller | 6,796,324 B/op | 1.01x selected heap | 156,351 | 1.00x selected allocs |
+| Binary | Full | 10.04 ms | baseline | 167,943 | baseline | 2,891,624 B/op | baseline | 29,128 | baseline |
+| Binary | Selected `sg` | 11.75 ms | 1.17x slower | 83,975 | 2.00x smaller | 3,742,145 B/op | 1.29x higher | 39,464 | 1.35x higher |
+| Binary | Selected `sg` + checkpoint journal | 11.70 ms | 1.00x selected time | 84,021 | 2.00x smaller | 3,807,105 B/op | 1.02x selected heap | 39,594 | 1.00x selected allocs |
+
+Checkpoint-only journal validation added about 1% heap and negligible
+allocations; JSON was 1.04x slower than the same selected restore, while binary
+was neutral within run noise. The journal marker itself does not change the
+restored key count or snapshot size materially.
 
 Raw result:
 
 ```text
-BenchmarkBackupBundleRestorePartitionSelection/json/full-32       5  10206595 ns/op  397350 snapshot_bytes  3953232 B/op   78273 allocs/op
-BenchmarkBackupBundleRestorePartitionSelection/json/selected-32    5  16601852 ns/op  198694 snapshot_bytes  6722060 B/op  156169 allocs/op
-BenchmarkBackupBundleRestorePartitionSelection/binary/full-32      5   7336429 ns/op  167943 snapshot_bytes  2894438 B/op   29132 allocs/op
-BenchmarkBackupBundleRestorePartitionSelection/binary/selected-32  5  10297303 ns/op   83975 snapshot_bytes  3742153 B/op   39464 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/full-32                         5  16937925 ns/op  397350 snapshot_bytes  3954044 B/op   78277 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/selected-32                      5  18546744 ns/op  198694 snapshot_bytes  6731046 B/op  156177 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/json/selected-checkpoint-journal-32   5  19227029 ns/op  198821 snapshot_bytes  6796324 B/op  156351 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/full-32                        5  10041006 ns/op  167943 snapshot_bytes  2891624 B/op   29128 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/selected-32                    5  11749680 ns/op   83975 snapshot_bytes  3742145 B/op   39464 allocs/op
+BenchmarkBackupBundleRestorePartitionSelection/binary/selected-checkpoint-journal-32  5  11696783 ns/op   84021 snapshot_bytes  3807105 B/op   39594 allocs/op
 ```
 
 Correctness and safety coverage runs through

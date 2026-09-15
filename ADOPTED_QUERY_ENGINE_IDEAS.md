@@ -419,9 +419,10 @@ measurements in [BENCHMARK.md](BENCHMARK.md).
 partition selector when each selected partition is paired with its declared
 key prefix. The extracted snapshot is atomically rewritten to the selected
 prefixes and verified again, so the published restore contains only the
-requested partition data. Journal-bearing and Pebble checkpoint/repository
-subset restores are rejected before destination mutation until their replay
-and storage paths can be filtered safely.
+requested partition data. A checkpoint-only journal marker is validated and
+preserved; journals containing replay commands and Pebble
+checkpoint/repository subset restores are rejected before destination
+mutation until their replay and storage paths can be filtered safely.
 
 See [BENCHMARK.md#ch-064-selective-partition-restore](BENCHMARK.md#ch-064-selective-partition-restore)
 for the measured size reduction and restore-cost tradeoff.

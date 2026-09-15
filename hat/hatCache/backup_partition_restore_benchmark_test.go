@@ -34,20 +34,62 @@ func BenchmarkBackupBundleRestorePartitionSelection(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			journal, err := OpenCommandJournal(filepath.Join(b.TempDir(), "commands.journal"))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if response := journal.ExecuteCommand(source, CacheCommandRequest{
+				Command: "SETSTR",
+				Key:     "region:sg/journal-marker",
+				Value:   "value",
+			}); !response.OK {
+				b.Fatalf("ExecuteCommand() = %#v, want ok", response)
+			}
+			checkpointJournalBundlePath := filepath.Join(b.TempDir(), "partitioned-checkpoint-journal.tar.gz")
+			_, err = CreateBackupBundle(checkpointJournalBundlePath, source, journal, BackupBundleOptions{
+				Mode:           BackupModeSnapshot,
+				SnapshotFormat: format,
+				Partition: BackupPartitionMetadata{
+					Mode:        "partitioned",
+					Local:       true,
+					Partitions:  []string{"sg", "us"},
+					KeyPrefixes: []string{"region:sg/", "region:us/"},
+				},
+				PartitionLocal: true,
+			})
+			if err != nil {
+				_ = journal.Close()
+				b.Fatal(err)
+			}
+			if err := journal.Close(); err != nil {
+				b.Fatal(err)
+			}
+
+			selectedOption := BackupBundleRestoreOptions{Partition: &BackupPartitionMetadata{
+				Mode:        "partitioned",
+				Local:       true,
+				Partitions:  []string{"sg"},
+				KeyPrefixes: []string{"region:sg/"},
+			}}
 
 			for _, selection := range []struct {
-				name   string
-				option BackupBundleRestoreOptions
+				name          string
+				bundle        string
+				option        BackupBundleRestoreOptions
+				wantRecovered int
 			}{
-				{name: "full"},
+				{name: "full", bundle: bundlePath, wantRecovered: 4096},
 				{
-					name: "selected",
-					option: BackupBundleRestoreOptions{Partition: &BackupPartitionMetadata{
-						Mode:        "partitioned",
-						Local:       true,
-						Partitions:  []string{"sg"},
-						KeyPrefixes: []string{"region:sg/"},
-					}},
+					name:          "selected",
+					bundle:        bundlePath,
+					option:        selectedOption,
+					wantRecovered: 2048,
+				},
+				{
+					name:          "selected-checkpoint-journal",
+					bundle:        checkpointJournalBundlePath,
+					option:        selectedOption,
+					wantRecovered: 2049,
 				},
 			} {
 				b.Run(selection.name, func(b *testing.B) {
@@ -56,15 +98,12 @@ func BenchmarkBackupBundleRestorePartitionSelection(b *testing.B) {
 					b.ResetTimer()
 					for index := 0; index < b.N; index++ {
 						dataDir := filepath.Join(dataRoot, fmt.Sprintf("restore-%d", index))
-						report, err := RestoreBackupBundle(bundlePath, dataDir, selection.option)
+						report, err := RestoreBackupBundle(selection.bundle, dataDir, selection.option)
 						if err != nil {
 							b.Fatal(err)
 						}
-						if selection.name == "full" && report.RecoveredKeys != 4096 {
-							b.Fatalf("full restore recovered %d keys, want 4096", report.RecoveredKeys)
-						}
-						if selection.name == "selected" && report.RecoveredKeys != 2048 {
-							b.Fatalf("selected restore recovered %d keys, want 2048", report.RecoveredKeys)
+						if report.RecoveredKeys != selection.wantRecovered {
+							b.Fatalf("%s restore recovered %d keys, want %d", selection.name, report.RecoveredKeys, selection.wantRecovered)
 						}
 					}
 					b.StopTimer()

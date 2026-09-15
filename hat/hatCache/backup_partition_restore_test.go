@@ -33,7 +33,36 @@ func TestValidatePartitionRestoreSelectionRejectsEmptyBackupMetadata(t *testing.
 	}
 }
 
-func TestRestoreBackupBundleRejectsPartitionSubsetWithJournal(t *testing.T) {
+func TestValidatePartitionRestoreJournalRejectsReplayEntry(t *testing.T) {
+	root := t.TempDir()
+	source := CreateHatTrie()
+	defer source.Destroy()
+	journal, err := OpenCommandJournal(filepath.Join(root, backupBundleJournalPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := journal.ExecuteCommand(source, CacheCommandRequest{
+		Command: "SETSTR",
+		Key:     "region:sg/user:1",
+		Value:   "Singapore",
+	}); !response.OK {
+		t.Fatalf("ExecuteCommand() = %#v, want ok", response)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	err = validatePartitionRestoreJournal(root, BackupBundleManifest{
+		Journal:         backupBundleJournalPath,
+		JournalFormat:   string(DefaultCommandJournalFormat),
+		JournalSequence: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "checkpoint-only") {
+		t.Fatalf("validatePartitionRestoreJournal() error = %v, want replay-entry rejection", err)
+	}
+}
+
+func TestRestoreBackupBundleAllowsCheckpointJournalForPartitionSubset(t *testing.T) {
 	source := CreateHatTrie()
 	defer source.Destroy()
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
@@ -50,8 +79,8 @@ func TestRestoreBackupBundleRejectsPartitionSubsetWithJournal(t *testing.T) {
 		}
 	}
 
-	bundlePath := filepath.Join(t.TempDir(), "partitioned-with-journal.tar.gz")
-	_, err = CreateBackupBundle(bundlePath, source, journal, BackupBundleOptions{
+	bundlePath := filepath.Join(t.TempDir(), "partitioned-with-checkpoint-journal.tar.gz")
+	manifest, err := CreateBackupBundle(bundlePath, source, journal, BackupBundleOptions{
 		Mode:           BackupModeSnapshot,
 		SnapshotFormat: SnapshotFormatBinary,
 		Partition: BackupPartitionMetadata{
@@ -72,9 +101,27 @@ func TestRestoreBackupBundleRejectsPartitionSubsetWithJournal(t *testing.T) {
 		Partitions:  []string{"sg"},
 		KeyPrefixes: []string{"region:sg/"},
 	}
-	_, err = RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "restored"), BackupBundleRestoreOptions{Partition: selector})
-	if err == nil || !strings.Contains(err.Error(), "journal") {
-		t.Fatalf("RestoreBackupBundle(partition subset with journal) error = %v, want journal rejection", err)
+	report, err := RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "restored"), BackupBundleRestoreOptions{Partition: selector})
+	if err != nil {
+		t.Fatalf("RestoreBackupBundle(partition subset with checkpoint journal) error = %v", err)
+	}
+	if report.Journal == "" {
+		t.Fatal("RestoreBackupBundle() omitted the checkpoint journal path")
+	}
+	entries, err := readCommandJournalEntries(report.Journal)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 1 || !entries[0].Checkpoint || entries[0].Sequence != manifest.JournalSequence {
+		t.Fatalf("restored journal entries = %#v, want one checkpoint at sequence %d", entries, manifest.JournalSequence)
+	}
+	restored := newTestTrie(t)
+	defer restored.Destroy()
+	if err := restored.LoadSnapshot(report.Snapshot); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if !restored.Exists("region:sg/user:1") || restored.Exists("region:us/user:1") {
+		t.Fatal("selective restore did not preserve only the selected partition")
 	}
 }
 
