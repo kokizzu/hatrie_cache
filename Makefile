@@ -15178,3 +15178,24 @@ commit-ordered-seek-c220:
 
 push-ordered-seek-c220:
 	@bash ./scripts/push-ordered-seek-c220.sh
+
+test-ordered-upsert-c221:
+	@bash ./scripts/test-ordered-upsert-c221.sh
+
+benchmark-ordered-upsert-c221:
+	@bash ./scripts/benchmark-ordered-upsert-c221.sh
+
+format-ordered-upsert-c221:
+	@bash ./scripts/format-ordered-upsert-c221.sh
+
+verify-ordered-upsert-c221:
+	@bash ./scripts/verify-ordered-upsert-c221.sh
+
+stage-ordered-upsert-c221:
+	@bash ./scripts/stage-ordered-upsert-c221.sh
+
+commit-ordered-upsert-c221:
+	@bash ./scripts/commit-ordered-upsert-c221.sh
+
+push-ordered-upsert-c221:
+	@bash ./scripts/push-ordered-upsert-c221.sh

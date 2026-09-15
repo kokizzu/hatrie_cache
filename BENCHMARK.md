@@ -23343,6 +23343,40 @@ iterator seeks were benchmarked during the experiment and left unchanged
 because their iterator setup dominates the tiny search and did not produce a
 repeatable net win.
 
+<a id="ordered-index-same-key-upsert-fast-path"></a>
+## Ordered Index Same-Key Upsert Fast Path
+
+Command: `make benchmark-ordered-upsert-c221`.
+
+C221 updates an existing ordered-index entry in place when its new extracted
+key compares equal to the old key and no snapshot cursor or iterator is live.
+That avoids removing and reinserting the entry, shifting the sorted vector, and
+rewriting the position map. Active snapshots continue through the existing
+copy-on-write path, and key-moving updates retain the existing reorder logic.
+The benchmark used three fixed 200 ms samples per size on Linux/amd64 with an
+AMD Ryzen 9 5950X and `-benchmem`.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Same-key replacement, 64 entries | 851.2 ns/op | 26.69 ns/op | **31.9x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Same-key replacement, 1,024 entries | 15,566 ns/op | 30.67 ns/op | **508x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+| Same-key replacement, 10,000 entries | 337,863 ns/op | 36.58 ns/op | **9,236x faster** | 0 B/op, 0 allocs | 0 B/op, 0 allocs |
+
+Raw samples:
+
+```text
+64 entries before:    864.7, 851.2, 808.4 ns/op; 0 B/op; 0 alloc/op
+64 entries after:      26.69, 26.17, 27.22 ns/op; 0 B/op; 0 alloc/op
+1024 entries before:  15686, 15132, 15566 ns/op; 0 B/op; 0 alloc/op
+1024 entries after:    32.65, 30.67, 29.56 ns/op; 0 B/op; 0 alloc/op
+10000 entries before: 343446, 337863, 318141 ns/op; 0 B/op; 0 alloc/op
+10000 entries after:    37.74, 36.58, 34.44 ns/op; 0 B/op; 0 alloc/op
+```
+
+The fast path adds no retained state or allocation. The correctness tests cover
+same-key replacement, comparator-equivalent keys, order, exact deletion, and
+the old-value/new-value split between a live snapshot and the current index.
+
 ## CH-041 Bounded `GROUP_ARRAY`
 
 This benchmark compares the existing unbounded grouped collection with the

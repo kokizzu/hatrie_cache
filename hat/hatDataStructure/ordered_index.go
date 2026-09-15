@@ -93,6 +93,12 @@ func (index *OrderedIndex[T, K]) Upsert(id uint64, value T) error {
 	defer index.mu.Unlock()
 	if index.active.Load() == 0 {
 		if position, exists := index.positionOfLocked(id); exists {
+			if index.compare(index.entries[position].Key, key) == 0 {
+				// An unchanged sort key needs no vector or position-map surgery.
+				index.entries[position] = OrderedIndexEntry[T, K]{ID: id, Key: key, Value: value}
+				index.generation.Add(1)
+				return nil
+			}
 			index.removeAtLocked(position)
 		}
 		position := index.searchInsertLocked(index.entries, key, id)
