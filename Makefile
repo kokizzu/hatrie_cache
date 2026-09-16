@@ -16534,3 +16534,32 @@ commit-tt050-durable-stats-c292:
 .PHONY: push-tt050-durable-stats-c292
 push-tt050-durable-stats-c292:
 	@bash scripts/push-tt050-durable-stats-c292.sh
+
+# TT-048 priority visibility queue targets
+.PHONY: format-tt048-c296
+format-tt048-c296:
+	@bash scripts/format-tt048-c296.sh
+.PHONY: test-race-tt048-c296
+test-race-tt048-c296:
+	@bash scripts/test-race-tt048-c296.sh
+.PHONY: benchmark-tt048-c296
+benchmark-tt048-c296:
+	@bash scripts/benchmark-tt048-c296.sh
+.PHONY: vet-tt048-c296
+vet-tt048-c296:
+	@bash scripts/vet-tt048-c296.sh
+.PHONY: review-tt048-c300
+review-tt048-c300:
+	@bash scripts/review-tt048-c300.sh
+.PHONY: stage-tt048-c300
+stage-tt048-c300:
+	@bash scripts/stage-tt048-c300.sh
+.PHONY: inspect-staged-tt048-c300
+inspect-staged-tt048-c300:
+	@bash scripts/inspect-staged-tt048-c300.sh
+.PHONY: commit-tt048-c300
+commit-tt048-c300:
+	@bash scripts/commit-tt048-c300.sh
+.PHONY: push-tt048-c300
+push-tt048-c300:
+	@bash scripts/push-tt048-c300.sh

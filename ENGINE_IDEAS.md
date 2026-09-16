@@ -184,7 +184,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-045 | Tuple-level compression | Individual large values/tuples lack transparent compressed storage with size thresholds. | Medium |
 | TT-046 | Slab/memory accounting | Implemented read-only per-structure native/backing accounting and monitoring; bounded eviction/admission telemetry remains a separate follow-up. | Medium |
 | TT-047 | Expiration wheel | Partially adopted: the opt-in cleaner now sleeps until the indexed min-heap deadline and wakes for newly earlier deadlines, including local partitions; a hierarchical wheel remains deferred because exact heap deadlines preserve bounded live entries and simpler recovery semantics. | Medium |
-| TT-048 | Queue/priority space primitive | No durable priority queue data structure with claim, retry, and visibility timeout. | Medium |
+| TT-048 | Queue/priority space primitive | Partially adopted as an importable priority visibility queue with explicit durable checkpoints. | Medium |
 | TT-049 | Pessimistic row locks | No `SELECT FOR UPDATE`-style lock lease for callers that need serialized reads/mutations. | High |
 | TT-050 | SQL planner statistics | Partially adopted: explicit source-versioned `ANALYZE` statistics now feed what-if planning, while `TypedTable.Stats()` and numeric `TypedTable.Histogram()` reuse invalidation-aware exact snapshots; opt-in `SaveSQLPlannerStatistics`/`LoadSQLPlannerStatistics` HPS1 snapshots validate source SHA-256 digests, while a full cost model remains. | Medium |
 

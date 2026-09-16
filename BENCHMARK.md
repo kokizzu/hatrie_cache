@@ -17065,6 +17065,39 @@ visibility_lease_ack_resident256: 515.0, 496.0, 552.5 ns/op; 0 B/op; 0 allocs/op
 visibility_requeue_expired: 118.3, 115.7, 115.0 ns/op; 0 B/op; 0 allocs/op
 ```
 
+<a id="priority-visibility-queue"></a>
+## Priority Visibility Queue
+
+Command: `make benchmark-tt048-c296`.
+
+The benchmark uses five samples on the same AMD Ryzen 9 5950X host. The lease
+comparison is a one-item enqueue/lease/ack loop. Snapshot cases serialize 1,024
+string values; `B/op` is transient Go heap and `Snapshot bytes` is the actual
+encoded payload.
+
+| Workload | Median ns/op | B/op | allocs/op | Snapshot bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `VisibilityQueue` lease + ack | 100.1 | 0 | 0 | n/a |
+| `PriorityVisibilityQueue` lease + token ack | 128.2 | 0 | 0 | n/a |
+| Binary snapshot with string codec | 195,142 | 237,904 | 1,040 | 53,304 |
+| Standard JSON snapshot | 454,752 | 165,586 | 1,026 | 110,220 |
+
+The priority path is `1.28x` the CPU cost of the simpler visibility queue
+because it maintains priority and enqueue identity; both paths remain
+allocation-free in steady state. The binary snapshot is `2.33x` faster and
+`2.07x` smaller than standard-library JSON, with `1.44x` more transient heap
+from deterministic snapshot assembly. Checkpoint cost is explicit and does not
+enter normal lease/ack operations.
+
+Raw samples:
+
+```text
+priority_lease_ack: 135.1, 128.2, 124.6, 133.1, 127.3 ns/op; 0 B/op; 0 allocs/op
+visibility_lease_ack_baseline: 104.1, 106.3, 94.88, 100.1, 96.96 ns/op; 0 B/op; 0 allocs/op
+priority_binary_string_marshal: 193190, 194024, 197409, 197952, 195142 ns/op; 53304 snapshot-bytes; 237904 B/op; 1040 allocs/op
+priority_json_marshal: 439588, 463839, 452166, 454752, 455993 ns/op; 110220 snapshot-bytes; 165586 B/op; 1026 allocs/op
+```
+
 <a id="connection-pool-reuse"></a>
 ## Connection Pool Reuse
 

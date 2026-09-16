@@ -6,6 +6,10 @@ the visibility-timeout and acknowledgement model used by Tarantool-style queue
 workers without adding a background goroutine or changing the existing
 `DelayQueue` API.
 
+For lower-number-first priority ordering combined with delayed readiness and
+durable checkpoints, use
+[`PriorityVisibilityQueue`](PRIORITY_VISIBILITY_QUEUE.md).
+
 ## Semantics
 
 - The type is non-thread-safe, like the other queues in `hatDataStructure`.

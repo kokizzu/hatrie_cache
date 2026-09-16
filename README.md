@@ -3302,6 +3302,9 @@ reference, command inputs, response forms, and examples. See
 [`DS_SPLIT_PROPOSAL.md`](DS_SPLIT_PROPOSAL.md) for the evaluation of splitting
 the shared HAT-trie by value type. See [`INDEX_PROPOSAL.md`](INDEX_PROPOSAL.md)
 for the proposed typed SQL indexes for filtering, grouping, and ordered scans.
+See [`PRIORITY_VISIBILITY_QUEUE.md`](PRIORITY_VISIBILITY_QUEUE.md) for the
+importable priority queue with claim, retry, visibility timeout, and durable
+checkpoint support.
 
 Use the HTTP client CLI against a running monitoring server:
 

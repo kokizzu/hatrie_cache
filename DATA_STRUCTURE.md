@@ -415,6 +415,16 @@ canonical command in the state tables.
 | `RANGEFW` | `FWRANGE` |
 | `INFOFW` | `FWINFO` |
 
+## Importable Queue Structures
+
+The command API above contains the durable `PUSHPQ`/`POPPQ` priority-value
+commands. Go callers that need worker claims, retries, and visibility leases
+can import `hatDataStructure.VisibilityQueue[T]`. For lower-number-first
+priority ordering with delayed readiness and explicit durable checkpoints, use
+`hatDataStructure.PriorityVisibilityQueue[T]`; its complete API and tested
+storage format are documented in
+[PRIORITY_VISIBILITY_QUEUE.md](PRIORITY_VISIBILITY_QUEUE.md).
+
 ## Type replacement and internal commands
 
 The first typed command creates or replaces the value at a key. `SETSTR`
