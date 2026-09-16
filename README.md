@@ -128,6 +128,7 @@ security guidance before exposing it on a network.
 - Versioned compact frontier checkpoint/restore: [FRONTIER_SNAPSHOTS.md](FRONTIER_SNAPSHOTS.md)
 - Bounded as-of retention leases for safe compaction: [FRONTIER_RETENTION.md](FRONTIER_RETENTION.md)
 - Tarantool-style tuple format version negotiation: [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md)
+- Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
 - Opt-in per-space operation statistics: [SPACE_OPERATION_STATS.md](SPACE_OPERATION_STATS.md)

@@ -16643,3 +16643,37 @@ commit-mz020-c307:
 .PHONY: push-mz020-c307
 push-mz020-c307:
 	@bash scripts/push-mz020-c307.sh
+
+.PHONY: format-tt045-c309 test-tt045-c309 test-race-tt045-c309 vet-tt045-c309 benchmark-tt045-c309
+
+format-tt045-c309:
+	bash ./scripts/format-tt045-c309.sh
+
+test-tt045-c309:
+	bash ./scripts/test-tt045-c309.sh
+
+test-race-tt045-c309:
+	bash ./scripts/test-race-tt045-c309.sh
+
+vet-tt045-c309:
+	bash ./scripts/vet-tt045-c309.sh
+
+benchmark-tt045-c309:
+	bash ./scripts/benchmark-tt045-c309.sh
+
+.PHONY: review-tt045-c310 stage-tt045-c310 inspect-staged-tt045-c310 commit-tt045-c310 push-tt045-c310
+
+review-tt045-c310:
+	bash ./scripts/review-tt045-c310.sh
+
+stage-tt045-c310:
+	bash ./scripts/stage-tt045-c310.sh
+
+inspect-staged-tt045-c310:
+	bash ./scripts/inspect-staged-tt045-c310.sh
+
+commit-tt045-c310:
+	bash ./scripts/commit-tt045-c310.sh
+
+push-tt045-c310:
+	bash ./scripts/push-tt045-c310.sh

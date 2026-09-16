@@ -17128,6 +17128,48 @@ should use the cheaper fixed scheduler. The earlier lock-based implementation
 measured `73161 ns/op`; the final atomic/cached implementation is `7.6%`
 faster than that intermediate version.
 
+<a id="tt-045-tuple-level-compression"></a>
+## TT-045 Tuple-Level Compression
+
+Command: `make benchmark-tt045-c309`.
+
+This benchmark uses five samples per case on the same AMD Ryzen 9 5950X host
+with a 96 KiB value. The codec is adaptive: repeated input compresses to a
+small ZSTD frame, while high-entropy input uses a raw framed payload. The raw
+copy case is a CPU/heap control, not a wire-compatible frame format.
+
+| Workload | Median ns/op | Median B/op | Allocs/op | Input bytes | Frame bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Adaptive repeated input, ZSTD | 21,259 | 276 | 1 | 98,304 | 98 |
+| Adaptive random input, raw fallback | 14,006 | 73,728 | 1 | 98,304 | 98,324 |
+| ZSTD decompression | 43,610 | 98,375 | 1 | 98 | 98,304 |
+| Raw copy baseline | 12,854 | 98,304 | 1 | 98,304 | n/a |
+
+The repeated value is `1,003.1x` smaller on the wire, removing `99.90%` of
+the payload bytes. Compression costs `1.65x` the raw-copy CPU, and
+decompression costs `3.39x` the raw-copy control while returning a fresh
+98,304-byte value. Random fallback is only `1.09x` the raw-copy CPU and adds a
+20-byte frame header without paying the ZSTD attempt.
+
+The reusable scratch-buffer follow-up changed repeated-input compression from
+a `31,038 ns/op` median, about `98.6 KiB/op`, and two allocations to the final
+`21,259 ns/op` median, `276 B/op`, and one allocation. This is a direct
+allocation-path improvement; it does not change the frame contract.
+
+Raw samples:
+
+```text
+BenchmarkTT045TupleCompressionZSTD-32: 22287, 21259, 20700, 19955, 21637 ns/op; 278, 271, 276, 261, 278 B/op; 1 alloc/op
+BenchmarkTT045TupleDecompressionZSTD-32: 46278, 45436, 42843, 43610, 42804 ns/op; 98375, 98376, 98377, 98375, 98374 B/op; 1 alloc/op
+BenchmarkTT045TupleRawCopyBaseline-32: 14976, 14430, 12049, 12854, 12188 ns/op; 98304 B/op; 1 alloc/op
+BenchmarkTT045TupleCompressionRandomFallback-32: 13952, 14595, 13916, 14006, 14229 ns/op; 73728 B/op; 1 alloc/op
+BenchmarkTT045TupleCompressionWireSize/repeated-32: 22204, 22283, 24077, 22510, 22461 ns/op; 98 frame-bytes; 98304 input-bytes; 112 B/op; 1 alloc/op
+BenchmarkTT045TupleCompressionWireSize/random-32: 21839, 20773, 21143, 21042, 20885 ns/op; 98324 frame-bytes; 98304 input-bytes; 106496 B/op; 1 alloc/op
+```
+
+The complete API, bounds, validation behavior, and configuration guidance are
+in [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md).
+
 <a id="priority-visibility-queue"></a>
 ## Priority Visibility Queue
 
