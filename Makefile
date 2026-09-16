@@ -16563,3 +16563,43 @@ commit-tt048-c300:
 .PHONY: push-tt048-c300
 push-tt048-c300:
 	@bash scripts/push-tt048-c300.sh
+
+.PHONY: test-ch014-c302
+test-ch014-c302:
+	@bash scripts/test-ch014-c302.sh
+
+.PHONY: format-ch014-c302
+format-ch014-c302:
+	@bash scripts/format-ch014-c302.sh
+
+.PHONY: test-race-ch014-c302
+test-race-ch014-c302:
+	@bash scripts/test-race-ch014-c302.sh
+
+.PHONY: vet-ch014-c302
+vet-ch014-c302:
+	@bash scripts/vet-ch014-c302.sh
+
+.PHONY: benchmark-ch014-c302
+benchmark-ch014-c302:
+	@bash scripts/benchmark-ch014-c302.sh
+
+.PHONY: review-ch014-c303
+review-ch014-c303:
+	@bash scripts/review-ch014-c303.sh
+
+.PHONY: stage-ch014-c303
+stage-ch014-c303:
+	@bash scripts/stage-ch014-c303.sh
+
+.PHONY: inspect-staged-ch014-c303
+inspect-staged-ch014-c303:
+	@bash scripts/inspect-staged-ch014-c303.sh
+
+.PHONY: commit-ch014-c303
+commit-ch014-c303:
+	@bash scripts/commit-ch014-c303.sh
+
+.PHONY: push-ch014-c303
+push-ch014-c303:
+	@bash scripts/push-ch014-c303.sh

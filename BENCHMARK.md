@@ -17065,6 +17065,35 @@ visibility_lease_ack_resident256: 515.0, 496.0, 552.5 ns/op; 0 B/op; 0 allocs/op
 visibility_requeue_expired: 118.3, 115.7, 115.0 ns/op; 0 B/op; 0 allocs/op
 ```
 
+<a id="mutation-dependency-graph"></a>
+## Mutation Dependency Graph
+
+This control measures ready-work polling on a 4,096-node dependency chain with
+one runnable node. `ReadySet` uses the graph's reverse dependency ready set;
+`ReadyLinearScan` scans every registered node on each poll. Both reuse a
+one-element result buffer and report allocation cost.
+
+Raw output from `make benchmark-ch014-c302`:
+
+```text
+BenchmarkMutationDependencyGraphReadySet-32            27705078  46.60 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadySet-32            24631822  49.04 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadySet-32            24585740  43.83 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadySet-32            26309090  42.01 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadySet-32            28514796  47.92 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadyLinearScan-32        29522  41565 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadyLinearScan-32        26428  40260 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadyLinearScan-32        30244  41486 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadyLinearScan-32        27469  44242 ns/op       0 B/op  0 allocs/op
+BenchmarkMutationDependencyGraphReadyLinearScan-32        31185  40438 ns/op       0 B/op  0 allocs/op
+```
+
+The indexed median is `46.60 ns/op`; the full scan median is `41486 ns/op`, so
+the control is `890.3x` slower for this sparse-ready workload. Both paths are
+allocation-free with caller buffer reuse. The graph's extra retained metadata
+is the deliberate cost that makes completion updates targeted; this benchmark
+does not represent a graph with every node ready.
+
 <a id="priority-visibility-queue"></a>
 ## Priority Visibility Queue
 

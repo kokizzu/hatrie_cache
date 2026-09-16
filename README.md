@@ -117,6 +117,7 @@ security guidance before exposing it on a network.
 - Opt-in replica health and locality-aware read routing: [REPLICA_HEALTH.md](REPLICA_HEALTH.md)
 - Opt-in SQL-readable telemetry catalog: [SYSTEM_METRICS.md](SYSTEM_METRICS.md)
 - Concurrent consumer-group queue with visibility leases: [CONSUMER_GROUP.md](CONSUMER_GROUP.md)
+- Caller-driven mutation dependency graph with resumable checkpoints: [MUTATION_DEPENDENCY_GRAPH.md](MUTATION_DEPENDENCY_GRAPH.md), with ready-set measurements in [BENCHMARK.md](BENCHMARK.md#mutation-dependency-graph)
 - ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
 - ClickHouse-style explicit partition-affine asynchronous batching: [C202_PARTITIONED_ASYNC_BATCHER.md](C202_PARTITIONED_ASYNC_BATCHER.md)
 - Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
