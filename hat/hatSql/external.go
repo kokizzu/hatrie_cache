@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/csv"
@@ -36,6 +37,251 @@ type ExternalTables struct {
 // NewExternalTables creates an empty external-table registry.
 func NewExternalTables() *ExternalTables {
 	return &ExternalTables{tables: make(map[string]ExternalTable)}
+}
+
+const (
+	defaultExternalImportMaxRows        = 1_000_000
+	defaultExternalImportMaxBytes       = 1 << 30
+	defaultExternalImportMaxRecordBytes = 16 << 20
+	maxExternalImportBytes              = int64(1<<62 - 1)
+)
+
+// ExternalImportOptions bounds reader-based CSV and JSONEachRow ingestion. A
+// zero field selects a conservative default; negative values are rejected.
+// MaxRows counts data records, MaxBytes limits bytes consumed from the reader,
+// and MaxRecordBytes limits one JSONEachRow line.
+type ExternalImportOptions struct {
+	MaxRows        int
+	MaxBytes       int64
+	MaxRecordBytes int
+}
+
+func (options ExternalImportOptions) normalize() (ExternalImportOptions, error) {
+	if options.MaxRows < 0 {
+		return ExternalImportOptions{}, fmt.Errorf("external import MaxRows cannot be negative")
+	}
+	if options.MaxBytes < 0 {
+		return ExternalImportOptions{}, fmt.Errorf("external import MaxBytes cannot be negative")
+	}
+	if options.MaxBytes > maxExternalImportBytes {
+		return ExternalImportOptions{}, fmt.Errorf("external import MaxBytes is too large")
+	}
+	if options.MaxRecordBytes < 0 {
+		return ExternalImportOptions{}, fmt.Errorf("external import MaxRecordBytes cannot be negative")
+	}
+	if options.MaxRows == 0 {
+		options.MaxRows = defaultExternalImportMaxRows
+	}
+	if options.MaxBytes == 0 {
+		options.MaxBytes = defaultExternalImportMaxBytes
+	}
+	if options.MaxRecordBytes == 0 {
+		options.MaxRecordBytes = defaultExternalImportMaxRecordBytes
+	}
+	return options, nil
+}
+
+type externalImportCountingReader struct {
+	reader io.Reader
+	bytes  int64
+}
+
+func (reader *externalImportCountingReader) Read(buffer []byte) (int, error) {
+	count, err := reader.reader.Read(buffer)
+	reader.bytes += int64(count)
+	return count, err
+}
+
+func newExternalImportReader(reader io.Reader, options ExternalImportOptions) (*externalImportCountingReader, io.Reader, error) {
+	if reader == nil {
+		return nil, nil, fmt.Errorf("external import reader is required")
+	}
+	options, err := options.normalize()
+	if err != nil {
+		return nil, nil, err
+	}
+	counting := &externalImportCountingReader{reader: reader}
+	return counting, io.LimitReader(counting, options.MaxBytes+1), nil
+}
+
+func externalImportBytesWithinLimit(reader *externalImportCountingReader, options ExternalImportOptions) bool {
+	return reader != nil && reader.bytes <= options.MaxBytes
+}
+
+// StreamCSV reads a header-based RFC 4180 CSV document one record at a time.
+// The columns slice is stable. The record slice may be reused after visit
+// returns, so callbacks that retain it must copy it.
+func StreamCSV(reader io.Reader, options ExternalImportOptions, visit func(columns []string, record []string) error) error {
+	return streamCSV(reader, options, nil, visit)
+}
+
+func streamCSV(reader io.Reader, options ExternalImportOptions, headerVisit func(columns []string) error, visit func(columns []string, record []string) error) error {
+	if visit == nil {
+		return fmt.Errorf("CSV visit callback is required")
+	}
+	normalized, err := options.normalize()
+	if err != nil {
+		return err
+	}
+	counting, limited, err := newExternalImportReader(reader, normalized)
+	if err != nil {
+		return err
+	}
+	csvReader := csv.NewReader(limited)
+	csvReader.ReuseRecord = true
+	header, err := csvReader.Read()
+	if err == io.EOF {
+		return fmt.Errorf("CSV requires a header row")
+	}
+	if err != nil {
+		return fmt.Errorf("parse CSV header: %w", err)
+	}
+	header = append([]string(nil), header...)
+	columns, err := externalTableColumns(header)
+	if err != nil {
+		return err
+	}
+	if headerVisit != nil {
+		if err := headerVisit(columns); err != nil {
+			return err
+		}
+	}
+	rows := 0
+	for {
+		record, readErr := csvReader.Read()
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("parse CSV record %d: %w", rows+2, readErr)
+		}
+		if rows >= normalized.MaxRows {
+			return fmt.Errorf("CSV row limit exceeded: maximum %d rows", normalized.MaxRows)
+		}
+		if len(record) != len(columns) {
+			return fmt.Errorf("CSV row %d has %d fields, want %d", rows+2, len(record), len(columns))
+		}
+		if err := visit(columns, record); err != nil {
+			return err
+		}
+		rows++
+	}
+	if !externalImportBytesWithinLimit(counting, normalized) {
+		return fmt.Errorf("CSV byte limit exceeded: maximum %d bytes", normalized.MaxBytes)
+	}
+	return nil
+}
+
+// StreamJSONEachRow reads one JSON object per non-empty line and invokes visit
+// immediately after decoding each object. It rejects non-object values,
+// malformed records, and records beyond the configured limits.
+func StreamJSONEachRow(reader io.Reader, options ExternalImportOptions, visit func(Row) error) error {
+	if visit == nil {
+		return fmt.Errorf("JSONEachRow visit callback is required")
+	}
+	normalized, err := options.normalize()
+	if err != nil {
+		return err
+	}
+	counting, limited, err := newExternalImportReader(reader, normalized)
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(limited)
+	bufferSize := normalized.MaxRecordBytes
+	if bufferSize > 64*1024 {
+		bufferSize = 64 * 1024
+	}
+	if bufferSize < 1 {
+		bufferSize = 1
+	}
+	scanner.Buffer(make([]byte, bufferSize), normalized.MaxRecordBytes)
+	rows := 0
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		if rows >= normalized.MaxRows {
+			return fmt.Errorf("JSONEachRow row limit exceeded: maximum %d rows", normalized.MaxRows)
+		}
+		var row Row
+		if err := json.Unmarshal(line, &row); err != nil {
+			return fmt.Errorf("parse JSONEachRow record %d: %w", lineNumber, err)
+		}
+		if row == nil {
+			return fmt.Errorf("JSONEachRow record %d must be an object", lineNumber)
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+		rows++
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read JSONEachRow: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("JSONEachRow requires at least one object record")
+	}
+	if !externalImportBytesWithinLimit(counting, normalized) {
+		return fmt.Errorf("JSONEachRow byte limit exceeded: maximum %d bytes", normalized.MaxBytes)
+	}
+	return nil
+}
+
+// StreamNDJSON is an alias for StreamJSONEachRow.
+func StreamNDJSON(reader io.Reader, options ExternalImportOptions, visit func(Row) error) error {
+	return StreamJSONEachRow(reader, options, visit)
+}
+
+// ImportCSVReader streams a CSV reader into one immutable external-table
+// snapshot. The existing table is replaced only after the complete input is
+// valid and within limits.
+func (tables *ExternalTables) ImportCSVReader(name string, reader io.Reader, options ExternalImportOptions) error {
+	if tables == nil {
+		return fmt.Errorf("external tables are nil")
+	}
+	rows := make([]Row, 0)
+	var columns []string
+	err := streamCSV(reader, options, func(header []string) error {
+		columns = append([]string(nil), header...)
+		return nil
+	}, func(_ []string, record []string) error {
+		row := make(Row, len(columns))
+		for index, value := range record {
+			row[columns[index]] = value
+		}
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return tables.registerExternalTable(name, ExternalTable{Columns: columns, Rows: rows}, false)
+}
+
+// ImportJSONEachRowReader streams JSONEachRow into one immutable external-table
+// snapshot. The existing table is left unchanged on any parse or limit error.
+func (tables *ExternalTables) ImportJSONEachRowReader(name string, reader io.Reader, options ExternalImportOptions) error {
+	if tables == nil {
+		return fmt.Errorf("external tables are nil")
+	}
+	rows := make([]Row, 0)
+	err := StreamJSONEachRow(reader, options, func(row Row) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return tables.registerExternalTable(name, ExternalTable{Columns: externalTableRowColumns(rows), Rows: rows}, false)
+}
+
+// ImportNDJSONReader is an alias for ImportJSONEachRowReader.
+func (tables *ExternalTables) ImportNDJSONReader(name string, reader io.Reader, options ExternalImportOptions) error {
+	return tables.ImportJSONEachRowReader(name, reader, options)
 }
 
 // ImportCSV parses a header-based RFC 4180 CSV document and replaces name.
@@ -202,6 +448,10 @@ func (tables *ExternalTables) ImportParquet(name string, data []byte) error {
 
 // Register replaces a table snapshot after validating its name and columns.
 func (tables *ExternalTables) Register(name string, table ExternalTable) error {
+	return tables.registerExternalTable(name, table, true)
+}
+
+func (tables *ExternalTables) registerExternalTable(name string, table ExternalTable, cloneRows bool) error {
 	if tables == nil {
 		return fmt.Errorf("external tables are nil")
 	}
@@ -221,7 +471,9 @@ func (tables *ExternalTables) Register(name string, table ExternalTable) error {
 		}
 	}
 	table.Columns = columns
-	table.Rows = CloneRows(table.Rows)
+	if cloneRows {
+		table.Rows = CloneRows(table.Rows)
+	}
 	tables.mu.Lock()
 	tables.tables[name] = table
 	tables.mu.Unlock()

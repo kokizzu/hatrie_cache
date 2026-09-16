@@ -16348,3 +16348,43 @@ commit-chu18-c259:
 push-chu18-c259:
 	@bash ./scripts/push-chu18-c259.sh
 # End CHU18 delivery targets
+# CHU21 red/green target
+.PHONY: test-chu21-c267
+test-chu21-c267:
+	@bash ./scripts/test-chu21-c267.sh
+# End CHU21 red/green target
+# CHU21 format target
+.PHONY: format-chu21-c267
+format-chu21-c267:
+	@bash ./scripts/format-chu21-c267.sh
+# End CHU21 format target
+# CHU21 benchmark targets
+.PHONY: benchmark-before-chu21-c267 benchmark-chu21-c267
+benchmark-before-chu21-c267:
+	@bash ./scripts/benchmark-before-chu21-c267.sh
+benchmark-chu21-c267:
+	@bash ./scripts/benchmark-chu21-c267.sh
+# End CHU21 benchmark targets
+# CHU21 package verification targets
+.PHONY: test-chu21-package-clean-c267 race-chu21-clean-c267 vet-chu21-clean-c267 verify-chu21-docs-c267
+test-chu21-package-clean-c267:
+	@bash ./scripts/test-chu21-package-clean-c267.sh
+race-chu21-clean-c267:
+	@bash ./scripts/race-chu21-clean-c267.sh
+vet-chu21-clean-c267:
+	@bash ./scripts/vet-chu21-clean-c267.sh
+verify-chu21-docs-c267:
+	@bash ./scripts/verify-chu21-docs-c267.sh
+# End CHU21 package verification targets
+# CHU21 delivery targets
+.PHONY: review-chu21-c267 stage-chu21-c267 commit-chu21-c267 push-chu21-c267
+review-chu21-c267:
+	@bash ./scripts/review-chu21-c267.sh
+stage-chu21-c267:
+	@bash ./scripts/stage-chu21-c267.sh
+commit-chu21-c267:
+	@bash ./scripts/commit-chu21-c267.sh
+push-chu21-c267:
+	@bash ./scripts/push-chu21-c267.sh
+
+# End CHU21 delivery targets

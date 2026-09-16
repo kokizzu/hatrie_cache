@@ -26377,6 +26377,76 @@ Raw output from `make benchmark-before-chu18-c259` and
 29.55 ns/op
 ```
 
+<a id="ch-u21-streaming-text-ingestion"></a>
+## CH-U21 Streaming Text Ingestion
+
+Five 200-ms samples were collected with `GOMAXPROCS=1` on an AMD Ryzen 9
+5950X Linux `amd64` host. Each workload contains 20,000 records. The reader
+imports use bounded options and owned-snapshot registration; the legacy column
+is the clean pre-feature whole-buffer implementation.
+
+| Workload | Legacy whole-buffer | Reader import | Relative result |
+| --- | ---: | ---: | --- |
+| CSV | 14.96 ms; 17.65 MB; 160,036 allocs | 8.73 ms; 8.45 MB; 100,038 allocs | 1.71x faster; 2.09x lower bytes; 1.60x fewer allocs |
+| JSONEachRow | 32.85 ms; 19.53 MB; 319,994 allocs | 28.61 ms; 12.76 MB; 280,016 allocs | 1.15x faster; 1.53x lower bytes; 1.14x fewer allocs |
+
+Callback-only parsing avoids table registration and measured 1.71 ms, 0.32 MB,
+and 20,015 allocations for CSV, plus 20.70 ms, 12.00 MB, and 279,993
+allocations for JSONEachRow. JSON still allocates one decoded row map per
+object; the streaming benefit is removal of whole-input splitting and the
+second snapshot clone. Reader limits are opt-in to the new APIs, while legacy
+byte-slice behavior is unchanged.
+
+Raw samples from `make benchmark-before-chu21-c267`:
+
+```text
+# CSV legacy ns/op, B/op, allocs/op
+15557693 17651476 160036
+14961666 17651468 160036
+14798875 17651468 160036
+15499385 17651468 160036
+14694129 17651468 160036
+
+# JSONEachRow legacy ns/op, B/op, allocs/op
+33985301 19529458 319994
+32078177 19529458 319994
+32848048 19529458 319994
+37244720 19529458 319994
+32577705 19529458 319994
+```
+
+Raw samples from `make benchmark-chu21-c267`:
+
+```text
+# CSV reader import ns/op, B/op, allocs/op
+8727326 8445432 100038
+8638548 8445432 100038
+8659337 8445433 100038
+8794341 8445433 100038
+9377806 8445433 100038
+
+# JSONEachRow reader import ns/op, B/op, allocs/op
+29257415 12760512 280016
+28614873 12760512 280016
+28607533 12760512 280016
+28807407 12760512 280016
+28475564 12760512 280016
+
+# callback-only CSV ns/op, B/op, allocs/op
+1530143 324400 20015
+1540082 324400 20015
+1924237 324400 20015
+1912915 324400 20015
+1713516 324400 20015
+
+# callback-only JSONEachRow ns/op, B/op, allocs/op
+20733048 11999424 279993
+20702232 11999424 279993
+20973946 11999424 279993
+20240461 11999424 279993
+20335075 11999424 279993
+```
+
 <a id="ch-u17-dense-integer-in-sets"></a>
 ## CH-U17 Dense Integer `IN` Sets
 
