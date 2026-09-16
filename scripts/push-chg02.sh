@@ -1,3 +1,3 @@
 #!/bin/sh
 set -eu
-git push origin HEAD
+git push origin HEAD:master
