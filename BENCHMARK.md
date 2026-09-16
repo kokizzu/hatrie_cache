@@ -26920,3 +26920,25 @@ Raw `ns/op` samples, in command order, were:
 | Add Decimal256 | 21263, 24187, 24210, 22212, 22908 | 10271, 10105, 11828, 11881, 11988 |
 | Filter Decimal128 | 8403, 7033, 8075, 7121, 7639 | 5645, 5505, 4627, 5662, 5781 |
 | Filter Decimal256 | 12351, 10957, 11036, 10336, 11366 | 5375, 5526, 6353, 6322, 6411 |
+
+## CH-U12 Background Index Rebuild Queue
+
+The queue is an opt-in maintenance scheduler, so this is an overhead/control
+benchmark rather than a query-speed improvement. `make
+benchmark-before-chu12-c274` measures a direct callback control from the clean
+baseline; `make benchmark-chu12-c274` runs that control and the queue on a
+clean archive with the current implementation. Both use `GOMAXPROCS=1`,
+`-benchmem -benchtime=200ms -count=5`, and an AMD Ryzen 9 5950X Linux/amd64
+host.
+
+| Operation | Five raw samples (ns/op) | Median | B/op | Allocs/op | Relative cost |
+|---|---|---:|---:|---:|---:|
+| Direct callback baseline | 1.990, 1.696, 1.655, 1.671, 1.677 | 1.677 | 0 | 0 | 1.00x |
+| Queue enqueue, one worker | 432.1, 423.1, 405.0, 374.0, 373.7 | 405.0 | 280 | 3 | 241.5x slower |
+
+The queue cost covers locking, priority-heap admission, task status, a
+cancellation context, and bounded history. It is not on the default query
+path: `Workers=0` makes `Start` return disabled, and callers must explicitly
+enqueue work. The feature earns its cost only when those lifecycle guarantees
+replace ad-hoc maintenance scheduling; it should not replace a direct callback
+in a hot query loop. See [CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md](CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md).

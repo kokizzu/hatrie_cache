@@ -16388,3 +16388,48 @@ push-chu21-c267:
 	@bash ./scripts/push-chu21-c267.sh
 
 # End CHU21 delivery targets
+
+# CHU12 test and baseline targets
+.PHONY: test-chu12-c274 benchmark-before-chu12-c274
+test-chu12-c274:
+	@bash ./scripts/test-chu12-c274.sh
+benchmark-before-chu12-c274:
+	@bash ./scripts/benchmark-before-chu12-c274.sh
+# End CHU12 test and baseline targets
+
+.PHONY: format-chu12-c274
+format-chu12-c274:
+	@bash ./scripts/format-chu12-c274.sh
+
+.PHONY: benchmark-chu12-c274
+benchmark-chu12-c274:
+	@bash ./scripts/benchmark-chu12-c274.sh
+
+.PHONY: verify-chu12-c274
+verify-chu12-c274:
+	@bash ./scripts/verify-chu12-c274.sh
+
+.PHONY: verify-chu12-docs-c279
+verify-chu12-docs-c279:
+	@bash ./scripts/verify-chu12-docs-c279.sh
+
+.PHONY: review-chu12-c274
+review-chu12-c274:
+	@bash ./scripts/review-chu12-c274.sh
+
+.PHONY: inspect-staged-chu12-c274
+inspect-staged-chu12-c274:
+	@bash ./scripts/inspect-staged-chu12-c274.sh
+
+.PHONY: stage-chu12-c274
+stage-chu12-c274:
+	@bash ./scripts/stage-chu12-c274.sh
+
+.PHONY: commit-chu12-c274
+commit-chu12-c274:
+	@bash ./scripts/commit-chu12-c274.sh
+
+.PHONY: push-chu12-c274
+push-chu12-c274:
+	@bash ./scripts/push-chu12-c274.sh
+# End CHU12 delivery targets
