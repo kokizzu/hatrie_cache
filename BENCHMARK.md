@@ -17094,6 +17094,40 @@ allocation-free with caller buffer reuse. The graph's extra retained metadata
 is the deliberate cost that makes completion updates targeted; this benchmark
 does not represent a graph with every node ready.
 
+<a id="mz-020-resizable-scheduler"></a>
+## MZ-020 Resizable Scheduler
+
+This benchmark compares the existing fixed-worker `Scheduler` with the opt-in
+`ResizableScheduler` on the same 256 no-op task batch and four-worker target.
+It also measures repeated one-to-four/to-one resize pairs. The final samples
+were collected with `make benchmark-mz020-c305` after replacing the worker-loop
+lock with atomic counts and cached resize wake channels.
+
+```text
+BenchmarkFixedSchedulerNoopBatch-32         17794  66265 ns/op  2953 B/op  12 allocs/op
+BenchmarkFixedSchedulerNoopBatch-32         18406  66694 ns/op  2950 B/op  12 allocs/op
+BenchmarkFixedSchedulerNoopBatch-32         17878  67534 ns/op  2952 B/op  12 allocs/op
+BenchmarkFixedSchedulerNoopBatch-32         18216  65822 ns/op  2949 B/op  12 allocs/op
+BenchmarkFixedSchedulerNoopBatch-32         17886  68334 ns/op  2951 B/op  12 allocs/op
+BenchmarkResizableSchedulerNoopBatch-32    16512  72838 ns/op  2961 B/op  12 allocs/op
+BenchmarkResizableSchedulerNoopBatch-32    16966  70913 ns/op  2959 B/op  12 allocs/op
+BenchmarkResizableSchedulerNoopBatch-32    18457  64916 ns/op  2958 B/op  12 allocs/op
+BenchmarkResizableSchedulerNoopBatch-32    18400  67594 ns/op  2962 B/op  12 allocs/op
+BenchmarkResizableSchedulerNoopBatch-32    18127  64113 ns/op  2959 B/op  12 allocs/op
+BenchmarkResizableSchedulerResize-32     3592216    311.8 ns/op   242 B/op   4 allocs/op
+BenchmarkResizableSchedulerResize-32     3753277    332.4 ns/op   242 B/op   4 allocs/op
+BenchmarkResizableSchedulerResize-32     3874821    332.3 ns/op   242 B/op   4 allocs/op
+BenchmarkResizableSchedulerResize-32     4146786    285.0 ns/op   241 B/op   4 allocs/op
+BenchmarkResizableSchedulerResize-32     3939049    319.5 ns/op   242 B/op   4 allocs/op
+```
+
+The resizable median is `67594 ns/op` versus `66694 ns/op` fixed, `1.013x`
+the CPU cost with the same allocation count. Resize itself is `319.5 ns/op`
+per four-to-one pair. The feature remains opt-in because a stable workload
+should use the cheaper fixed scheduler. The earlier lock-based implementation
+measured `73161 ns/op`; the final atomic/cached implementation is `7.6%`
+faster than that intermediate version.
+
 <a id="priority-visibility-queue"></a>
 ## Priority Visibility Queue
 

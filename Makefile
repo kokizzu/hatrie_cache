@@ -16603,3 +16603,43 @@ commit-ch014-c303:
 .PHONY: push-ch014-c303
 push-ch014-c303:
 	@bash scripts/push-ch014-c303.sh
+
+.PHONY: format-mz020-c305
+format-mz020-c305:
+	@bash scripts/format-mz020-c305.sh
+
+.PHONY: test-mz020-c305
+test-mz020-c305:
+	@bash scripts/test-mz020-c305.sh
+
+.PHONY: test-race-mz020-c305
+test-race-mz020-c305:
+	@bash scripts/test-race-mz020-c305.sh
+
+.PHONY: vet-mz020-c305
+vet-mz020-c305:
+	@bash scripts/vet-mz020-c305.sh
+
+.PHONY: benchmark-mz020-c305
+benchmark-mz020-c305:
+	@bash scripts/benchmark-mz020-c305.sh
+
+.PHONY: review-mz020-c307
+review-mz020-c307:
+	@bash scripts/review-mz020-c307.sh
+
+.PHONY: stage-mz020-c307
+stage-mz020-c307:
+	@bash scripts/stage-mz020-c307.sh
+
+.PHONY: inspect-staged-mz020-c307
+inspect-staged-mz020-c307:
+	@bash scripts/inspect-staged-mz020-c307.sh
+
+.PHONY: commit-mz020-c307
+commit-mz020-c307:
+	@bash scripts/commit-mz020-c307.sh
+
+.PHONY: push-mz020-c307
+push-mz020-c307:
+	@bash scripts/push-mz020-c307.sh
