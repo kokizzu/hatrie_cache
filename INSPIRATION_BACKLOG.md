@@ -111,7 +111,7 @@ before/after measurement when its motivation is performance.
 | MZ-19 | Durable connector pause and resume state | Operate connectors without losing progress | State-machine complexity | [ ] |
 | MZ-20 | Two-phase sink progress checkpoints | Prevent partial sink publication | Sink protocol requirements | [ ] |
 | MZ-21 | Sink idempotency tokens derived from frontier and batch | Make retries safe | Token retention | [ ] |
-| MZ-22 | Adaptive sink batching and flush deadlines | Improve throughput without large latency spikes | Tuning complexity | [ ] |
+| MZ-22 | Adaptive sink batching and flush deadlines | Improve throughput without large latency spikes | Tuning complexity | [-] Evaluated and rejected: the same 100-record replay measured `1.032x` CPU and `1.074x` transient heap versus fixed batching despite four fewer allocations; see [BENCHMARK.md#mz-022-adaptive-sink-batching-evaluation](BENCHMARK.md#mz-022-adaptive-sink-batching-evaluation). |
 | MZ-23 | Sink delivery audit trail with source frontier | Diagnose missing or delayed output | Event volume | [ ] |
 | MZ-24 | Resumable TAIL cursor tokens | Reconnect subscriptions without full replay | Cursor retention and invalidation | [x] |
 | MZ-25 | TAIL progress and heartbeat records | Distinguish idle from stalled streams | Protocol surface | [x] Implemented by `hatSql.QuerySubscriptions.Heartbeat` plus opt-in `EmitProgress`; see [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md) and [BENCHMARK.md#mz-25-tail-progress-and-heartbeats](BENCHMARK.md#mz-25-tail-progress-and-heartbeats). |

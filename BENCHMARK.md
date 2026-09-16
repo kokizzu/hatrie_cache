@@ -17170,6 +17170,34 @@ BenchmarkTT045TupleCompressionWireSize/random-32: 21839, 20773, 21143, 21042, 20
 The complete API, bounds, validation behavior, and configuration guidance are
 in [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md).
 
+<a id="mz-022-adaptive-sink-batching-evaluation"></a>
+## MZ-022 Adaptive Sink Batching Evaluation (Rejected)
+
+This experiment was evaluated against the existing journal sink and then
+rolled back because it did not meet the repository's improvement bar. Both
+cases replayed the same 100 records, started with a 16-record batch, and used
+a 1 ns deadline for the final partial batch. Five samples were collected on an
+AMD Ryzen 9 5950X in an isolated worktree overlay so the concurrent ASOF
+refactor could not affect the result.
+
+| Workload | Median ns/op | Median B/op | Allocs/op | Sink writes |
+| --- | ---: | ---: | ---: | ---: |
+| Existing fixed batch size 16 | 127,161 | 114,171 | 544 | 7 |
+| Adaptive batch size 16 to 100 | 131,296 | 122,580 | 540 | 4 |
+
+Adaptive batching reduced sink writes by `1.75x` and allocations by four, but
+was `1.032x` slower and used `1.074x` more transient heap. The extra retained
+batch capacity and policy work were not justified by that workload, so the
+implementation and configuration surface were removed. The backlog records
+this as a rejected candidate rather than claiming a shipped improvement.
+
+Raw samples:
+
+```text
+fixed_batch16: 127161, 127889, 123558, 128245, 124488 ns/op; 114171, 114281, 114180, 114147, 114092 B/op; 544 allocs/op
+adaptive_batch16: 125626, 133218, 134054, 127307, 131296 ns/op; 122397, 122709, 122959, 122580, 122096 B/op; 540 allocs/op
+```
+
 <a id="priority-visibility-queue"></a>
 ## Priority Visibility Queue
 
