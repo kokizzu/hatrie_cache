@@ -138,7 +138,7 @@ before/after measurement when its motivation is performance.
 | MZ-46 | Schema migration barrier across dependent dataflows | Prevent mixed-schema results | Planned downtime or buffering | [ ] |
 | MZ-47 | Timeline recovery and frontier reconciliation | Repair partially persisted progress | Recovery duration | [ ] |
 | MZ-48 | Persisted catalog manifest migrations | Upgrade metadata atomically | Migration compatibility | [ ] |
-| MZ-49 | Connector schema-drift quarantine stream | Keep bad records from stopping a source | Quarantine storage and policy | [ ] |
+| MZ-49 | Connector schema-drift quarantine stream | Keep bad records from stopping a source | Quarantine storage and policy | [x] Bounded callback quarantine for decoded rows and `UseNumber` JSONEachRow input with deterministic drift diagnostics and explicit limits; see [MZ049_SCHEMA_DRIFT_QUARANTINE.md](MZ049_SCHEMA_DRIFT_QUARANTINE.md) and [BENCHMARK.md](BENCHMARK.md#mz-049-schema-drift-quarantine) |
 | MZ-50 | Query-plan snapshots annotated with timestamp and frontier requirements | Make temporal readiness explainable | Explain output size | [x] Implemented as opt-in `SQLPlanSnapshot` metadata on materialized SQL results; see [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md) and [BENCHMARK.md#mz-050-sql-plan-snapshots](BENCHMARK.md#mz-050-sql-plan-snapshots). |
 
 ## Tarantool (50 candidates)

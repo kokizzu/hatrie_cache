@@ -27483,3 +27483,57 @@ BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5451   442
 BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5458   44021 ns/op    368 B/op     2 allocs/op
 BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5251   48923 ns/op    368 B/op     2 allocs/op
 ```
+
+<a id="mz-049-schema-drift-quarantine"></a>
+## MZ-049 Schema-Drift Quarantine
+
+This measures the Materialize-inspired opt-in schema-drift quarantine boundary
+for a 256-row valid feed. The reader baseline is the existing
+`StreamJSONEachRow` path; the after path uses `QuarantineExternalJSONEachRow`,
+which preserves JSON integers with `UseNumber` and validates each row against
+a typed schema. The decoded-row control is a deliberately minimal lower bound
+and is shown separately. Values above `1.00x` are slower or larger.
+
+The five samples were run with `-benchmem -benchtime=200ms -count=5` on an AMD
+Ryzen 9 5950X Linux/amd64 host through `make benchmark-mz049`.
+
+| Workload | Five raw samples (ns/op) | Median | B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing decoded-row pass-through | 143.6, 141.8, 147.1, 148.9, 133.5 | 143.6 | 0 | 0 | Lower-bound control |
+| `QuarantineExternalRows` validation | 63542, 58264, 66090, 66871, 62271 | 63542 | 336 | 3 | 442.5x versus lower-bound control |
+| Existing `StreamJSONEachRow` reader | 663315, 678334, 686210, 686581, 674927 | 678334 | 337770 | 7587 | 1.00x practical control |
+| `QuarantineExternalJSONEachRow` reader | 934435, 931492, 930623, 898659, 883916 | 930623 | 543298 | 8957 | 1.37x CPU; +60.8% B/op; +18.1% allocs |
+
+The practical reader comparison shows the cost of preserving exact JSON number
+classes and validating drift. The feature has no default-path cost, emits no
+per-row allocations in the already-decoded validator, and rejects configured
+overflow rather than silently dropping rows. It is an operational continuity
+feature, not a hot-path optimization; use it when source progress matters more
+than the measured opt-in overhead. See
+[MZ049_SCHEMA_DRIFT_QUARANTINE.md](MZ049_SCHEMA_DRIFT_QUARANTINE.md) for
+limits, callback semantics, and security boundaries.
+
+Raw output:
+
+```text
+BenchmarkMZ049SchemaDriftBaseline-32                 1677351  143.6 ns/op       0 B/op     0 allocs/op
+BenchmarkMZ049SchemaDriftBaseline-32                 1705970  141.8 ns/op       0 B/op     0 allocs/op
+BenchmarkMZ049SchemaDriftBaseline-32                 1837191  147.1 ns/op       0 B/op     0 allocs/op
+BenchmarkMZ049SchemaDriftBaseline-32                 1664533  148.9 ns/op       0 B/op     0 allocs/op
+BenchmarkMZ049SchemaDriftBaseline-32                 1655636  133.5 ns/op       0 B/op     0 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamBaseline-32           332  663315 ns/op  337770 B/op  7587 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamBaseline-32           328  678334 ns/op  337788 B/op  7587 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamBaseline-32           322  686210 ns/op  337770 B/op  7587 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamBaseline-32           338  686581 ns/op  337770 B/op  7587 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamBaseline-32           345  674927 ns/op  337769 B/op  7587 allocs/op
+BenchmarkMZ049SchemaDriftQuarantine-32                 4186   63542 ns/op     336 B/op     3 allocs/op
+BenchmarkMZ049SchemaDriftQuarantine-32                 4495   58264 ns/op     336 B/op     3 allocs/op
+BenchmarkMZ049SchemaDriftQuarantine-32                 3477   66090 ns/op     336 B/op     3 allocs/op
+BenchmarkMZ049SchemaDriftQuarantine-32                 3754   66871 ns/op     336 B/op     3 allocs/op
+BenchmarkMZ049SchemaDriftQuarantine-32                 3424   62271 ns/op     336 B/op     3 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         252  934435 ns/op  543300 B/op  8957 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         273  931492 ns/op  543297 B/op  8957 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         262  930623 ns/op  543301 B/op  8957 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         268  898659 ns/op  543298 B/op  8957 allocs/op
+BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         258  883916 ns/op  543297 B/op  8957 allocs/op
+```

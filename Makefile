@@ -16799,3 +16799,42 @@ commit-ch048:
 
 push-ch048:
 	bash ./scripts/deliver-ch048.sh push
+
+test-mz049-red:
+	bash ./scripts/test-mz049-red.sh
+
+benchmark-mz049-before:
+	bash ./scripts/benchmark-mz049-before.sh
+
+benchmark-mz049:
+	bash ./scripts/benchmark-mz049.sh
+
+format-mz049:
+	bash ./scripts/format-mz049.sh
+
+test-mz049:
+	bash ./scripts/test-mz049.sh
+
+race-mz049:
+	bash ./scripts/verify-mz049.sh race
+
+vet-mz049:
+	bash ./scripts/verify-mz049.sh vet
+
+verify-mz049:
+	bash ./scripts/verify-mz049.sh full
+
+deliver-mz049:
+	bash ./scripts/deliver-mz049.sh stage
+
+status-mz049:
+	bash ./scripts/deliver-mz049.sh status
+
+review-mz049:
+	bash ./scripts/deliver-mz049.sh review
+
+commit-mz049:
+	bash ./scripts/deliver-mz049.sh commit
+
+push-mz049:
+	bash ./scripts/deliver-mz049.sh push
