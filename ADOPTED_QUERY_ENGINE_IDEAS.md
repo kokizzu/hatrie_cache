@@ -488,3 +488,8 @@ benefit at one and four groups while larger groups retain equivalent
 allocation behavior and end-to-end performance within measurement noise. See
 [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md) and
 [BENCHMARK.md#chg02-small-cardinality-group-by-index](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+## C204: Projection Idempotency Propagation
+
+| Source | Adopted idea | Implementation | Evidence |
+| --- | --- | --- | --- |
+| ClickHouse | Preserve async-insert identity through dependent materialized views | Journal idempotency keys are carried by `SQLJournalProjectionRunner`, `ProjectionRun`, and `MaterializedViewStatus` | [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md), [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata) |

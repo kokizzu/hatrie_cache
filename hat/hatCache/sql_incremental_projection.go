@@ -127,14 +127,22 @@ func (runner *SQLJournalProjectionRunner) RunOnce(ctx context.Context, journal S
 		return hatSql.ProjectionRun{}, err
 	}
 	changes := make([]hatSql.ProjectionChange, 0, len(tail.Entries))
+	var idempotencyKeys []string
 	for _, entry := range tail.Entries {
 		key := strings.TrimSpace(entry.Request.Key)
 		if key == "" {
 			return hatSql.ProjectionRun{}, fmt.Errorf("SQL journal projection record %d has an empty key", entry.Sequence)
 		}
 		changes = append(changes, hatSql.ProjectionChange{Sequence: entry.Sequence, Dependency: key})
+		idempotencyKey := strings.TrimSpace(entry.Request.IdempotencyKey)
+		if idempotencyKey != "" {
+			if idempotencyKeys == nil {
+				idempotencyKeys = make([]string, len(tail.Entries))
+			}
+			idempotencyKeys[len(changes)-1] = idempotencyKey
+		}
 	}
-	run, err := runner.runner.Apply(ctx, changes)
+	run, err := runner.runner.ApplyWithIdempotencyKeys(ctx, changes, idempotencyKeys)
 	if err != nil {
 		return hatSql.ProjectionRun{}, err
 	}

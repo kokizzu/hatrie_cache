@@ -4214,3 +4214,9 @@ group count grows. The behavior is transparent and preserves first-seen order,
 collation, limits, and aggregate results. It has no configuration or format
 change. See [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md) and the
 [CHG02 benchmark](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+## Projection Idempotency Metadata
+
+Async journal writes can carry their idempotency identity through incremental
+SQL projections and refreshed materialized-view status for operational
+correlation. See [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md)
+and the measured tradeoff in [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata).

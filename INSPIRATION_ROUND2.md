@@ -33,7 +33,7 @@ operator control remain the preferred deployment model.
 - [-] C201 Adaptive asynchronous-insert flush timeout based on arrival rate. Rejected after the end-to-end 64-concurrent-command benchmark measured `432-478 us/op`, `67,0xx B/op`, and `334 allocs/op` versus the existing static worker at `158-164 us/op`, `66,5xx B/op`, and `331 allocs/op`; the adaptive path was about 2.8-3.0x slower. See [BENCHMARK.md](BENCHMARK.md#c201-rejected-adaptive-asynchronous-batch-flush).
 - [x] C202 Per-shard asynchronous-insert buffer affinity to reduce cross-shard coordination. Implemented as explicit `hatPipeline.PartitionedAsyncBatcher`; see [C202_PARTITIONED_ASYNC_BATCHER.md](C202_PARTITIONED_ASYNC_BATCHER.md) and [BENCHMARK.md](BENCHMARK.md#c202-partition-affine-asynchronous-batching).
 - [x] C203 Explicit `wait_for_async_insert` durability modes with visible acknowledgment semantics. Implemented for opt-in HTTP async commands; omitted/`0` preserves `202` admission and `1` waits for durable-and-applied completion. See [CHU03_ASYNC_INSERT_ACK_MODES.md](CHU03_ASYNC_INSERT_ACK_MODES.md).
-- [ ] C204 Idempotency-token propagation across asynchronous inserts and dependent materialized views.
+- [x] C204 Idempotency-token propagation across asynchronous inserts and dependent materialized views. Implemented through incremental projections and refreshed materialized-view status; see [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata).
 - [ ] C205 Query-cache controls scoped to individual subqueries.
 - [ ] C206 Query-cache eligibility checks that reject nondeterministic expressions.
 - [ ] C207 Query-condition cache with data-generation invalidation for repeated filters.
@@ -190,3 +190,9 @@ operator control remain the preferred deployment model.
 - [ ] T248 Retry counters and dead-letter routing for failed tasks.
 - [ ] T249 Queue capacity, age, retry, and consumer-lag metrics.
 - [ ] T250 Gap-safe sequence allocation with durable current value.
+## C204 Status
+
+C204 is adopted. Idempotency keys now propagate from async journal entries
+through incremental projections into refreshed materialized-view status. See
+[C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md) and the
+paired measurements in [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata).

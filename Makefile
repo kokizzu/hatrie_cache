@@ -17119,3 +17119,29 @@ commit-chu03-async-ack:
 .PHONY: push-chu03-async-ack
 push-chu03-async-ack:
 	sh scripts/push-chu03-async-ack.sh
+test-chu04-c204:
+	sh scripts/test-chu04-c204.sh
+
+benchmark-chu04-c204:
+	sh scripts/benchmark-chu04-c204.sh
+
+format-chu04-c204:
+	sh scripts/format-chu04-c204.sh
+
+test-chu04-c204-package:
+	sh scripts/test-chu04-c204-package.sh
+
+race-chu04-c204:
+	sh scripts/race-chu04-c204.sh
+
+vet-chu04-c204:
+	sh scripts/vet-chu04-c204.sh
+
+stage-chu04-c204:
+	sh scripts/stage-chu04-c204.sh
+
+commit-chu04-c204:
+	sh scripts/commit-chu04-c204.sh
+
+push-chu04-c204:
+	sh scripts/push-chu04-c204.sh

@@ -39,6 +39,7 @@ type ProjectionRun struct {
 	ThroughSequence uint64
 	Changes         int
 	Dependencies    []string
+	IdempotencyKeys []string
 	Refreshed       []MaterializedViewStatus
 }
 
@@ -108,8 +109,22 @@ func (runner *IncrementalProjectionRunner) Checkpoint() uint64 {
 // callers must rebuild from a trusted snapshot rather than silently skipping a
 // missing mutation.
 func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []ProjectionChange) (ProjectionRun, error) {
+	return runner.apply(ctx, changes, nil)
+}
+
+// ApplyWithIdempotencyKeys processes a contiguous log batch and carries one
+// optional idempotency key per change. Pass nil when the source has no keys;
+// a non-empty key slice must have the same length as changes.
+func (runner *IncrementalProjectionRunner) ApplyWithIdempotencyKeys(ctx context.Context, changes []ProjectionChange, idempotencyKeys []string) (ProjectionRun, error) {
+	return runner.apply(ctx, changes, idempotencyKeys)
+}
+
+func (runner *IncrementalProjectionRunner) apply(ctx context.Context, changes []ProjectionChange, idempotencyKeys []string) (ProjectionRun, error) {
 	if runner == nil {
 		return ProjectionRun{}, fmt.Errorf("incremental projection runner is nil")
+	}
+	if len(idempotencyKeys) != 0 && len(idempotencyKeys) != len(changes) {
+		return ProjectionRun{}, fmt.Errorf("incremental projection idempotency keys must match change count")
 	}
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
@@ -130,7 +145,7 @@ func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []
 
 	dependencies := make(map[string]struct{}, len(changes))
 	expected := runner.checkpoint
-	for _, change := range changes {
+	for index, change := range changes {
 		if change.Sequence <= runner.checkpoint {
 			continue
 		}
@@ -147,6 +162,11 @@ func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []
 		}
 		expected = change.Sequence
 		run.Changes++
+		if len(idempotencyKeys) != 0 {
+			if key := strings.TrimSpace(idempotencyKeys[index]); key != "" {
+				run.IdempotencyKeys = append(run.IdempotencyKeys, key)
+			}
+		}
 		dependencies[dependency] = struct{}{}
 	}
 	if run.Changes == 0 {
@@ -159,7 +179,13 @@ func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []
 		run.Dependencies = append(run.Dependencies, dependency)
 	}
 	sort.Strings(run.Dependencies)
-	refreshed, err := runner.views.RefreshChanged(ctx, run.Dependencies, runner.resolver, runner.options)
+	var refreshed []MaterializedViewStatus
+	var err error
+	if len(run.IdempotencyKeys) == 0 {
+		refreshed, err = runner.views.RefreshChanged(ctx, run.Dependencies, runner.resolver, runner.options)
+	} else {
+		refreshed, err = runner.views.RefreshChangedWithMetadata(ctx, run.Dependencies, runner.resolver, runner.options, MaterializedViewRefreshMetadata{IdempotencyKeys: run.IdempotencyKeys})
+	}
 	if err != nil {
 		run = ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}
 		err = fmt.Errorf("refresh incremental projection %q: %w", runner.config.Name, err)

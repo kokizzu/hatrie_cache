@@ -25,10 +25,17 @@ type MaterializedViewDefinition struct {
 
 // MaterializedViewStatus describes one immutable materialized-view snapshot.
 type MaterializedViewStatus struct {
-	Name         string
-	Dependencies []string
-	Revision     uint64
-	RefreshedAt  time.Time
+	Name            string
+	Dependencies    []string
+	Revision        uint64
+	RefreshedAt     time.Time
+	IdempotencyKeys []string `json:"idempotency_keys,omitempty"`
+}
+
+// MaterializedViewRefreshMetadata carries optional source-write metadata to
+// dependent views. Empty metadata preserves the legacy refresh path.
+type MaterializedViewRefreshMetadata struct {
+	IdempotencyKeys []string
 }
 
 // MaterializedViewsOptions bounds the aggregate logical result retained by a
@@ -199,9 +206,18 @@ func (views *MaterializedViews) Get(name string) (MaterializedView, bool) {
 // dependencies intersect changed. It leaves all prior snapshots untouched if
 // any candidate query fails.
 func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []string, resolver SourceResolver, options QueryOptions) ([]MaterializedViewStatus, error) {
+	return views.RefreshChangedWithMetadata(ctx, changed, resolver, options, MaterializedViewRefreshMetadata{})
+}
+
+// RefreshChangedWithMetadata is RefreshChanged with optional metadata from
+// the source mutation batch. The metadata is retained on each refreshed
+// dependent-view status so consumers can correlate a published snapshot with
+// its asynchronous source writes.
+func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, changed []string, resolver SourceResolver, options QueryOptions, metadata MaterializedViewRefreshMetadata) ([]MaterializedViewStatus, error) {
 	if views == nil {
 		return nil, fmt.Errorf("materialized views are nil")
 	}
+	metadataKeys := normalizeMaterializedViewIdempotencyKeys(metadata.IdempotencyKeys)
 	changedSet := make(map[string]struct{}, len(changed))
 	for _, dependency := range changed {
 		if dependency = strings.TrimSpace(dependency); dependency != "" {
@@ -274,6 +290,7 @@ func (views *MaterializedViews) RefreshChanged(ctx context.Context, changed []st
 		current.collation = normalizedMaterializedViewCollation(options.Collation)
 		current.snapshot.Status.Revision++
 		current.snapshot.Status.RefreshedAt = refreshedAt
+		current.snapshot.Status.IdempotencyKeys = append([]string(nil), metadataKeys...)
 		current.storedRows = resultRows[candidate.definition.Name]
 		current.storedBytes = resultBytes[candidate.definition.Name]
 		views.views[candidate.definition.Name] = current
@@ -432,7 +449,24 @@ func cloneMaterializedView(view MaterializedView) MaterializedView {
 
 func cloneMaterializedViewStatus(status MaterializedViewStatus) MaterializedViewStatus {
 	status.Dependencies = append([]string(nil), status.Dependencies...)
+	status.IdempotencyKeys = append([]string(nil), status.IdempotencyKeys...)
 	return status
+}
+
+func normalizeMaterializedViewIdempotencyKeys(keys []string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key = strings.TrimSpace(key); key != "" {
+			normalized = append(normalized, key)
+		}
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func cloneQueryResult(result QueryResult) QueryResult {

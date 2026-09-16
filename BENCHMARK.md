@@ -27985,3 +27985,51 @@ groups=256: 1582202 1582982 1587468 1599039 1567277 ns/op; 1797018 1797122 17971
 
 The raw command is `make benchmark-chg02`; focused correctness and static
 checks are listed in [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md).
+## C204 Projection Idempotency Metadata
+
+This benchmark compares the existing projection path with the opt-in path
+that carries an idempotency key from the command journal into the projection
+run and refreshed materialized-view status. It measures correlation metadata,
+not deduplication throughput.
+
+Command:
+
+```text
+make benchmark-chu04-c204
+```
+
+The paired run used Go benchmarks with `-benchtime=100ms -count=3 -benchmem`.
+The machine and Go toolchain were unchanged between the before and after
+runs.
+
+Before implementation, legacy `Apply` measured:
+
+```text
+BenchmarkC204ProjectionApplyBaseline-16  5230 ns/op  4760 B/op  29 allocs/op
+BenchmarkC204ProjectionApplyBaseline-16  4989 ns/op  4760 B/op  29 allocs/op
+BenchmarkC204ProjectionApplyBaseline-16  5220 ns/op  4760 B/op  29 allocs/op
+```
+
+After implementation, the paired benchmark measured:
+
+```text
+BenchmarkC204ProjectionApplyBaseline-32       5304 ns/op  4792 B/op  29 allocs/op
+BenchmarkC204ProjectionApplyBaseline-32       5505 ns/op  4792 B/op  29 allocs/op
+BenchmarkC204ProjectionApplyBaseline-32       5426 ns/op  4792 B/op  29 allocs/op
+BenchmarkC204ProjectionApplyWithIdempotencyKeys-32  5721 ns/op  4872 B/op  34 allocs/op
+BenchmarkC204ProjectionApplyWithIdempotencyKeys-32  5709 ns/op  4872 B/op  34 allocs/op
+BenchmarkC204ProjectionApplyWithIdempotencyKeys-32  5709 ns/op  4872 B/op  34 allocs/op
+```
+
+Using the median sample in each post-change group, the default legacy path
+measured `5426 ns/op`, `4792 B/op`, and `29 allocs/op`, while the opt-in
+metadata path measured `5709 ns/op`, `4872 B/op`, and `34 allocs/op`: about
+`1.05x` the CPU time, `+80 B/op`, and `+5 allocs/op`. Compared with the
+pre-change legacy samples, the allocation count is unchanged and the `+32
+B/op` difference is small relative to the fixture's measurement noise. No
+bandwidth is added unless the caller serializes the optional non-empty
+metadata field.
+
+Conclusion: keep the legacy path as the default. Use C204 when tracing a
+source write through dependent materialized views is worth the explicit small
+CPU and allocation cost.
