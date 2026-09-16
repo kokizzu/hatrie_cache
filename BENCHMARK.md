@@ -87,6 +87,27 @@ event timestamps, which is the measured cost; the implementation does not
 hide an approximate count or start a background scheduler. TTL-enabled stats
 and histograms also recompute instead of returning time-stale cached values.
 
+### CH-007 Background TTL Scheduler
+
+This comparison measures the existing manual no-op purge against the new
+explicit one-table scheduler pass. The scheduler is a maintenance feature, not
+a query-path optimization. `make benchmark-before-ch007-scheduler-c282` and
+`make benchmark-ch007-scheduler-c282` use clean archive overlays, five
+`-benchmem -benchtime=200ms` samples, `GOMAXPROCS=1`, and an AMD Ryzen 9 5950X
+Linux/amd64 host.
+
+| Operation | Five raw samples (ns/op) | Median | B/op | Allocs/op | Relative cost |
+|---|---|---:|---:|---:|---:|
+| Existing direct no-op `PurgeExpired` | 11.91, 11.89, 10.96, 11.33, 11.61 | 11.61 | 0 | 0 | 1.00x |
+| Scheduler `RunOnce`, one registered table | 180.6, 181.7, 195.9, 201.2, 186.3 | 186.3 | 96 | 1 | 16.0x slower |
+| `MarshalTTLState`, 4,096 rows | 37,976, 42,418, 37,368, 38,828, 46,775 | 38,828 | 81,920 | 1 | Explicit snapshot cost |
+
+The scheduler adds status and table-selection work but is never started by
+construction; normal reads, writes, and manual purge calls retain their
+existing behavior. The deadline snapshot is a one-time durable-state
+supplement, not a replacement for row backup or journal/checkpoint recovery.
+See [CH007_TTL_SCHEDULER.md](CH007_TTL_SCHEDULER.md).
+
 ### CH-007 TTL Expiry Index
 
 This paired comparison uses `make benchmark-ch007-ttl-before-c225` and

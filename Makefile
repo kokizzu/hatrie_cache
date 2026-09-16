@@ -16433,3 +16433,15 @@ commit-chu12-c274:
 push-chu12-c274:
 	@bash ./scripts/push-chu12-c274.sh
 # End CHU12 delivery targets
+
+.PHONY: review-ch007-scheduler-c282 stage-ch007-scheduler-c282 inspect-staged-ch007-scheduler-c282 commit-ch007-scheduler-c282 push-ch007-scheduler-c282
+review-ch007-scheduler-c282:
+	@bash scripts/deliver-ch007-scheduler-c282.sh review
+stage-ch007-scheduler-c282:
+	@bash scripts/deliver-ch007-scheduler-c282.sh stage
+inspect-staged-ch007-scheduler-c282:
+	@bash scripts/deliver-ch007-scheduler-c282.sh inspect
+commit-ch007-scheduler-c282:
+	@bash scripts/deliver-ch007-scheduler-c282.sh commit
+push-ch007-scheduler-c282:
+	@bash scripts/deliver-ch007-scheduler-c282.sh push
