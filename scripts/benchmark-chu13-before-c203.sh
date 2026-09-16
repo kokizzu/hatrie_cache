@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(pwd)
+tmp_root=$(mktemp -d /tmp/hatrie-cache-chu13-before.XXXXXX)
+cleanup() {
+	git -C "$repo_root" worktree remove --force "$tmp_root" >/dev/null 2>&1 || true
+	rm -rf "$tmp_root"
+}
+trap cleanup EXIT
+
+git -C "$repo_root" worktree add --detach "$tmp_root" HEAD >/dev/null
+cp "$repo_root/hat/hatDataStructure/ch_u13_phrase_postings_index_baseline_benchmark_test.go" "$tmp_root/hat/hatDataStructure/ch_u13_phrase_postings_index_baseline_benchmark_test.go"
+
+cd "$tmp_root"
+go test ./hat/hatDataStructure -run '^$' -bench '^BenchmarkCHU13Base(MatchAll|Upsert)$' -benchmem -benchtime=100ms -count=5

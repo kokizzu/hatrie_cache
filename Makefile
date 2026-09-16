@@ -16882,3 +16882,51 @@ commit-mz040-c203:
 .PHONY: push-mz040-c203
 push-mz040-c203:
 	bash ./scripts/deliver-mz040-c203.sh push
+
+.PHONY: format-chu13-c203
+format-chu13-c203:
+	bash ./scripts/format-chu13-c203.sh
+
+.PHONY: test-chu13-red-c203
+test-chu13-red-c203:
+	bash ./scripts/test-chu13-red-c203.sh
+
+.PHONY: test-chu13-c203
+test-chu13-c203:
+	bash ./scripts/test-chu13-c203.sh
+
+.PHONY: race-chu13-c203
+race-chu13-c203:
+	bash ./scripts/race-chu13-c203.sh
+
+.PHONY: vet-chu13-c203
+vet-chu13-c203:
+	bash ./scripts/vet-chu13-c203.sh
+
+.PHONY: benchmark-chu13-before-c203
+benchmark-chu13-before-c203:
+	bash ./scripts/benchmark-chu13-before-c203.sh
+
+.PHONY: benchmark-chu13-c203
+benchmark-chu13-c203:
+	bash ./scripts/benchmark-chu13-c203.sh
+
+.PHONY: full-test-chu13-c203
+full-test-chu13-c203:
+	bash ./scripts/full-test-chu13-c203.sh
+
+.PHONY: deliver-chu13-c203
+deliver-chu13-c203:
+	bash ./scripts/deliver-chu13-c203.sh all
+
+.PHONY: stage-chu13-c203
+stage-chu13-c203:
+	bash ./scripts/deliver-chu13-c203.sh stage
+
+.PHONY: commit-chu13-c203
+commit-chu13-c203:
+	bash ./scripts/deliver-chu13-c203.sh commit
+
+.PHONY: push-chu13-c203
+push-chu13-c203:
+	bash ./scripts/deliver-chu13-c203.sh push

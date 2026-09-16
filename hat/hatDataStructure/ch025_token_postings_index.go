@@ -34,6 +34,7 @@ type TokenPostingsIndex struct {
 	termRefRows []uint64
 	freeTermIDs []uint32
 	rows        map[uint32][]uint32
+	phrase      *tokenPhrasePostingsState
 }
 
 // NewTokenPostingsIndex creates an empty token postings index.
@@ -49,7 +50,14 @@ func (index *TokenPostingsIndex) Upsert(row uint32, text string) {
 	if index == nil {
 		return
 	}
-	tokens := tokenPostingsTokens(text)
+	var orderedTokens []string
+	var tokens []string
+	if index.phrase != nil {
+		orderedTokens = tokenPostingsOrderedTokens(text)
+		tokens = tokenPostingsUniqueTokens(append([]string(nil), orderedTokens...))
+	} else {
+		tokens = tokenPostingsTokens(text)
+	}
 	if len(tokens) == 0 {
 		index.Delete(row)
 		return
@@ -60,11 +68,21 @@ func (index *TokenPostingsIndex) Upsert(row uint32, text string) {
 	index.ensureInitializedLocked()
 
 	termIDs := index.resolveTermIDsLocked(tokens)
+	var orderedTermIDs []uint32
+	var encodedPhrase []byte
+	if index.phrase != nil {
+		orderedTermIDs = index.lookupOrderedTermIDsLocked(orderedTokens)
+		encodedPhrase = encodeTokenPhrase(orderedTermIDs)
+	}
 	oldTermIDs, exists := index.rows[row]
-	if exists && sameUint32Slice(oldTermIDs, termIDs) {
+	if exists && sameUint32Slice(oldTermIDs, termIDs) &&
+		(index.phrase == nil || sameTokenPhraseSequence(index.phrase.sequences[row], encodedPhrase)) {
 		return
 	}
 	if exists {
+		if index.phrase != nil {
+			index.removePhraseSequenceLocked(row, index.phrase.sequences[row])
+		}
 		index.removeRowTermsLocked(row, oldTermIDs)
 	}
 	for _, termID := range termIDs {
@@ -72,6 +90,10 @@ func (index *TokenPostingsIndex) Upsert(row uint32, text string) {
 		index.termRefRows[termID]++
 	}
 	index.rows[row] = termIDs
+	if index.phrase != nil {
+		index.phrase.sequences[row] = encodedPhrase
+		index.addPhraseSequenceLocked(row, orderedTermIDs)
+	}
 }
 
 // Delete removes row and returns whether it was indexed.
@@ -87,6 +109,9 @@ func (index *TokenPostingsIndex) Delete(row uint32) bool {
 	termIDs, exists := index.rows[row]
 	if !exists {
 		return false
+	}
+	if index.phrase != nil {
+		index.removePhraseSequenceLocked(row, index.phrase.sequences[row])
 	}
 	index.removeRowTermsLocked(row, termIDs)
 	delete(index.rows, row)
@@ -273,6 +298,10 @@ func (index *TokenPostingsIndex) Clear() {
 	index.termRefRows = nil
 	index.freeTermIDs = nil
 	index.rows = nil
+	if index.phrase != nil {
+		index.phrase.sequences = make(map[uint32][]byte)
+		index.phrase.postings = make(map[uint64]RoaringBitmap)
+	}
 }
 
 func (index *TokenPostingsIndex) ensureInitializedLocked() {
@@ -281,6 +310,9 @@ func (index *TokenPostingsIndex) ensureInitializedLocked() {
 	}
 	if index.rows == nil {
 		index.rows = make(map[uint32][]uint32)
+	}
+	if index.phrase != nil {
+		index.phrase.ensureInitialized()
 	}
 }
 
@@ -322,6 +354,14 @@ func (index *TokenPostingsIndex) lookupTermIDsLocked(tokens []string) []uint32 {
 	return termIDs
 }
 
+func (index *TokenPostingsIndex) lookupOrderedTermIDsLocked(tokens []string) []uint32 {
+	termIDs := make([]uint32, len(tokens))
+	for tokenIndex, token := range tokens {
+		termIDs[tokenIndex] = index.termIDs[token]
+	}
+	return termIDs
+}
+
 func (index *TokenPostingsIndex) removeRowTermsLocked(row uint32, termIDs []uint32) {
 	for _, termID := range termIDs {
 		index.postings[termID].Remove(row)
@@ -338,6 +378,10 @@ func (index *TokenPostingsIndex) removeRowTermsLocked(row uint32, termIDs []uint
 }
 
 func tokenPostingsTokens(text string) []string {
+	return tokenPostingsUniqueTokens(tokenPostingsOrderedTokens(text))
+}
+
+func tokenPostingsOrderedTokens(text string) []string {
 	tokens := make([]string, 0, 8)
 	start := -1
 	for offset, runeValue := range text {
@@ -355,6 +399,10 @@ func tokenPostingsTokens(text string) []string {
 	if start >= 0 {
 		tokens = append(tokens, strings.ToLower(text[start:]))
 	}
+	return tokens
+}
+
+func tokenPostingsUniqueTokens(tokens []string) []string {
 	if len(tokens) < 2 {
 		return tokens
 	}

@@ -4165,6 +4165,8 @@ lookup and preparation tradeoff is documented in
 
 - Opt-in SQL phrase and ordered proximity search over JSON text indexes:
   [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md)
+- Opt-in exact phrase matching for the reusable token postings index:
+  [CHU13_PHRASE_POSTINGS.md](CHU13_PHRASE_POSTINGS.md)
 
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
 

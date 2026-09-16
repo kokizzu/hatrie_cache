@@ -27572,3 +27572,87 @@ legacy_apply:            30775792, 30029433, 26793534 ns/op; 26127760/26122280/2
 bounded_apply:            29439426, 26058625, 28968193 ns/op; 26168080/26162632/26156944 B/op; 171008/171003/170995 allocs/op
 fully_bounded_apply:      41189034, 41442861, 39674403 ns/op; 34991328/34990992/34991008 B/op; 177717/177714/177715 allocs/op
 ```
+## CH-U13 Phrase Postings (2026-09-17)
+
+Command wrappers:
+
+```text
+make benchmark-chu13-before-c203
+make benchmark-chu13-c203
+```
+
+Environment: Linux, amd64, AMD Ryzen 9 5950X 16-Core Processor. Go benchmark
+flags: `-benchmem -benchtime=100ms -count=5`. Fixture: 20,000 rows and
+168,000 normalized tokens. Relative values use `before / after`; values below
+are medians unless raw output is shown.
+
+| Operation | Before median | After median | x result | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default `MatchAll` | 240,874 ns/op | 262,988 ns/op | 0.92x | 65,728 B/op, 3 allocs | 65,728 B/op, 3 allocs |
+| Default update `Upsert` | 935.1 ns/op | 975.5 ns/op | 0.96x | 252 B/op, 11 allocs | 252 B/op, 11 allocs |
+| Phrase-enabled `MatchAll` | n/a | 267,741 ns/op | n/a | n/a | 65,728 B/op, 3 allocs |
+| Exact `MatchPhrase` | n/a | 460,549 ns/op | 0.57x vs after `MatchAll` | n/a | 49,280 B/op, 2 allocs |
+| Phrase-enabled update `Upsert` | n/a | 2,323 ns/op | 0.40x vs before default update | n/a | 780 B/op, 27 allocs |
+
+The default-path differences are within benchmark noise and have identical
+allocation counts/bytes; the feature is opt-in. Exact phrase matching has
+different semantics from `MatchAll`, so its CPU comparison is informational,
+not a claim of regression for the same operation.
+
+Retained payload report for the phrase-enabled fixture:
+
+| Payload | Bytes |
+| --- | ---: |
+| Default token roaring payload | 73,536 |
+| Phrase ordered sequence payload | 168,000 |
+| Phrase bigram roaring payload | 105,344 |
+| Additional tracked phrase payload | 273,344 |
+| Base plus tracked phrase payload | 346,880 |
+
+Counters exclude Go map, slice-header, allocator, and term-string overhead.
+
+Raw before output:
+
+```text
+BenchmarkCHU13BaseMatchAll-32 481 234587 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 492 238971 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 493 270611 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 453 240874 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 422 258536 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseUpsert-32 134457 978.2 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 126597 950.8 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 125139 935.1 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 117267 934.5 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 130815 892.3 ns/op 252 B/op 11 allocs/op
+```
+
+Raw after output:
+
+```text
+BenchmarkCHU13BaseMatchAll-32 442 262988 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 438 286252 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 438 270108 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 426 262298 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseMatchAll-32 446 245645 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13BaseUpsert-32 128493 975.5 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 129345 914.6 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 120613 875.5 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 136971 1002 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13BaseUpsert-32 111535 1049 ns/op 252 B/op 11 allocs/op
+BenchmarkCHU13PhraseMatchAll-32 388 269119 ns/op 65741 B/op 3 allocs/op
+BenchmarkCHU13PhraseMatchAll-32 420 263360 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13PhraseMatchAll-32 415 267741 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13PhraseMatchAll-32 414 268120 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13PhraseMatchAll-32 477 257783 ns/op 65728 B/op 3 allocs/op
+BenchmarkCHU13PhraseMatchPhrase-32 262 452604 ns/op 49280 B/op 2 allocs/op
+BenchmarkCHU13PhraseMatchPhrase-32 264 463104 ns/op 49280 B/op 2 allocs/op
+BenchmarkCHU13PhraseMatchPhrase-32 264 459712 ns/op 49280 B/op 2 allocs/op
+BenchmarkCHU13PhraseMatchPhrase-32 259 460549 ns/op 49280 B/op 2 allocs/op
+BenchmarkCHU13PhraseMatchPhrase-32 240 463790 ns/op 49280 B/op 2 allocs/op
+BenchmarkCHU13PhraseUpsert-32 51403 2376 ns/op 780 B/op 27 allocs/op
+BenchmarkCHU13PhraseUpsert-32 50852 2283 ns/op 780 B/op 27 allocs/op
+BenchmarkCHU13PhraseUpsert-32 49137 2230 ns/op 780 B/op 27 allocs/op
+BenchmarkCHU13PhraseUpsert-32 52795 2332 ns/op 780 B/op 27 allocs/op
+BenchmarkCHU13PhraseUpsert-32 51993 2323 ns/op 780 B/op 27 allocs/op
+BenchmarkCHU13PhraseMemory-32 ... 73536 base_roaring_payload_bytes 105344 phrase_roaring_payload_bytes 168000 phrase_sequence_bytes 273344 phrase_tracked_payload_bytes
+```
