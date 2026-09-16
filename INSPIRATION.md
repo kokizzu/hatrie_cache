@@ -948,3 +948,7 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
 - [x] T156 ClickHouse-style optional gzip compression for public command and
   batch request bodies. JSON remains the default; `Client.CommandCompressionThreshold`
   enables bandwidth reduction for larger JSON or protobuf requests.
+- [x] CHG02 ClickHouse-style small-cardinality grouped-state lookup. The first
+  four normalized `GROUP BY` keys use an inline linear index and promote to the
+  existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
+  and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).

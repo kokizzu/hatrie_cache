@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+git add Makefile README.md INSPIRATION.md ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md CHG02_SMALL_GROUP_INDEX.md hat/hatSql/chg02_small_group_benchmark_test.go hat/hatSql/columnar_vector_group_aggregate.go hat/hatSql/hash_group_aggregate.go hat/hatSql/small_group_index.go hat/hatSql/small_group_index_benchmark_test.go hat/hatSql/small_group_index_test.go scripts/benchmark-chg02-save.sh scripts/benchmark-chg02.sh scripts/format-chg02.sh scripts/race-chg02.sh scripts/test-chg02-package.sh scripts/test-chg02.sh scripts/verify-chg02.sh scripts/stage-chg02.sh scripts/commit-chg02.sh scripts/push-chg02.sh scripts/vet-chg02.sh

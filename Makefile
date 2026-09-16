@@ -17042,3 +17042,41 @@ benchmark-chg01-after:
 
 print-chg01-benchmark:
 	sh scripts/print-chg01-benchmark.sh
+format-chg02:
+	sh scripts/format-chg02.sh
+
+test-chg02:
+	sh scripts/test-chg02.sh
+
+benchmark-chg02:
+	sh scripts/benchmark-chg02.sh
+.PHONY: test-chg02-package
+test-chg02-package:
+	sh scripts/test-chg02-package.sh
+
+.PHONY: race-chg02
+race-chg02:
+	sh scripts/race-chg02.sh
+
+.PHONY: vet-chg02
+vet-chg02:
+	sh scripts/vet-chg02.sh
+
+.PHONY: benchmark-chg02-save
+benchmark-chg02-save:
+	sh scripts/benchmark-chg02-save.sh
+.PHONY: verify-chg02
+verify-chg02:
+	sh scripts/verify-chg02.sh
+
+.PHONY: stage-chg02
+stage-chg02:
+	sh scripts/stage-chg02.sh
+
+.PHONY: commit-chg02
+commit-chg02:
+	sh scripts/commit-chg02.sh
+
+.PHONY: push-chg02
+push-chg02:
+	sh scripts/push-chg02.sh

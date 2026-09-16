@@ -27883,3 +27883,64 @@ The normal unbounded path remains unchanged when the cap is disabled.
 
 The implementation and configuration scope are documented in
 [CHG01_EXTERNAL_GROUP_SPILL.md](CHG01_EXTERNAL_GROUP_SPILL.md).
+
+## CHG02: Small-Cardinality `GROUP BY` Index
+
+The benchmark uses the same 2,048-row `VALUES` query with 1, 4, 16, 64, or
+256 groups, a warmed prepared-query cache, `-benchtime=200ms`, and five
+samples. The paired control is the original direct `map[string]int` path in
+the same worktree; the optimized run uses the inline four-entry index and
+promotes to a map on the fifth distinct key. Ratios are `after / before`, so
+values below `1.00x` are faster.
+
+### End-to-end grouped query
+
+| Groups | Before median ns/op | After median ns/op | Time x | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1,122,130 | 1,117,048 | 0.995x | 1,396,978 | 1,396,814 | 14,382 | 14,381 |
+| 4 | 1,162,697 | 1,159,412 | 0.997x | 1,401,216 | 1,401,054 | 14,414 | 14,413 |
+| 16 | 1,210,740 | 1,218,995 | 1.007x | 1,419,489 | 1,419,565 | 14,526 | 14,527 |
+| 64 | 1,291,813 | 1,260,018 | 0.975x | 1,492,936 | 1,493,036 | 14,964 | 14,965 |
+| 256 | 1,567,718 | 1,582,982 | 1.010x | 1,797,039 | 1,797,122 | 16,701 | 16,702 |
+
+The end-to-end result is effectively neutral at larger cardinalities: the
+largest observed difference is about 1 percent slower at 256 groups, while
+the one-group and four-group cases save one allocation and about 0.01 percent
+of query heap in this workload. The direct index microbenchmark isolates the
+reason for the optimization more clearly.
+
+### Direct index lookup
+
+| Groups | Map median ns/op | Inline-index median ns/op | Time x | Map B/op | Inline B/op | Map allocs/op | Inline allocs/op |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 136.2 | 15.58 | 0.11x | 256 | 0 | 2 | 0 |
+| 4 | 300.2 | 146.4 | 0.49x | 256 | 0 | 2 | 0 |
+| 8 | 528.8 | 524.7 | 0.99x | 256 | 256 | 2 | 2 |
+| 16 | 1,894 | 1,930 | 1.02x | 1,640 | 1,640 | 7 | 7 |
+| 64 | 7,824 | 9,159 | 1.17x | 6,952 | 6,952 | 11 | 11 |
+
+The 64-group direct-index measurement includes the promoted map and exposes
+the small mode check on every lookup; it is a targeted microbenchmark rather
+than a claim that full SQL execution is 17 percent slower. The end-to-end
+control above keeps that cost within normal benchmark noise for this query.
+
+### Raw end-to-end samples
+
+```text
+# control: direct map path
+groups=1: 1120028 1142418 1122130 1124133 1097559 ns/op; 1396984 1396978 1396976 1397022 1396957 B/op; 14382 allocs/op
+groups=4: 1146233 1178305 1144262 1162697 1162925 ns/op; 1401192 1401216 1401217 1401190 1401246 B/op; 14414 allocs/op
+groups=16: 1190836 1202869 1225706 1254933 1210740 ns/op; 1419486 1419489 1419514 1419479 1419528 B/op; 14526 allocs/op
+groups=64: 1317057 1316011 1286647 1266514 1291813 ns/op; 1492911 1492937 1492997 1492860 1492936 B/op; 14964 allocs/op
+groups=256: 1568848 1552912 1556364 1578694 1567718 ns/op; 1796939 1797077 1797039 1796965 1797070 B/op; 16701 16701 16701 16700 16701 allocs/op
+
+# optimized: inline four-entry index with map promotion
+groups=1: 1099134 1125167 1117048 1103520 1125042 ns/op; 1396829 1396805 1396814 1396808 1396859 B/op; 14381 allocs/op
+groups=4: 1143195 1200291 1169833 1159412 1151317 ns/op; 1401072 1401054 1401145 1401017 1401024 B/op; 14413 14413 14414 14413 14413 allocs/op
+groups=16: 1191570 1165408 1222503 1218995 1227884 ns/op; 1419536 1419612 1419533 1419575 1419565 B/op; 14527 14527 14526 14527 14527 allocs/op
+groups=64: 1254966 1270966 1274165 1244901 1260018 ns/op; 1493064 1493036 1493001 1493080 1493000 B/op; 14965 allocs/op
+groups=256: 1582202 1582982 1587468 1599039 1567277 ns/op; 1797018 1797122 1797138 1797185 1797095 B/op; 16702 allocs/op
+```
+
+The raw command is `make benchmark-chg02`; focused correctness and static
+checks are listed in [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md).

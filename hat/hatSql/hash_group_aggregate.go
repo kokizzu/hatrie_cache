@@ -123,7 +123,7 @@ func executeSQLHashGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) 
 	}
 	started := time.Now()
 	states := make([]sqlHashGroupAggregateState, 0)
-	indexes := make(map[string]int)
+	indexes := newSQLHashGroupAggregateIndexes()
 	inputRows := 0
 	var one [1]sqlExecRow
 	err := stream(func(row sqlExecRow) error {
@@ -138,10 +138,10 @@ func executeSQLHashGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRow) 
 			return err
 		}
 		key := sqlCollationValueKey(q.groupBy[0].collation, value)
-		index, exists := indexes[key]
+		index, exists := indexes.find(key)
 		if !exists {
 			index = len(states)
-			indexes[key] = index
+			indexes.add(key, index)
 			state := sqlHashGroupAggregateState{value: value, aggregates: make([]sqlOrderedAggregate, len(projections))}
 			for projectionIndex, projection := range projections {
 				if projection.aggregate != nil {

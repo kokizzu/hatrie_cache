@@ -4203,3 +4203,12 @@ order and the result slice is avoided. Partitioned, explicitly framed, or
 window-ordered external queries retain existing materialization behavior.
 See [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md) and
 the [CH-U05 benchmark](BENCHMARK.md#ch-u05-external-window-streaming).
+
+## SQL Small-Cardinality Group Index
+
+Grouped aggregation automatically keeps up to four distinct normalized keys in
+an allocation-free inline index and promotes to the existing map when the
+group count grows. The behavior is transparent and preserves first-seen order,
+collation, limits, and aggregate results. It has no configuration or format
+change. See [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md) and the
+[CHG02 benchmark](BENCHMARK.md#chg02-small-cardinality-group-by-index).

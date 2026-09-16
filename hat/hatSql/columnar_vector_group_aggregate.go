@@ -219,7 +219,7 @@ func sqlColumnarTwoLevelAggregatesSupported(projections []sqlOrderedGroupProject
 
 func executeSQLColumnarSingleLevelGroupStates(q *sqlQuery, batch ColumnarBatch, projections []sqlOrderedGroupProjection, groupField string, match func(int) (bool, error), control *sqlExecutionControl) ([]sqlHashGroupAggregateState, int, error) {
 	states := make([]sqlHashGroupAggregateState, 0)
-	indexes := make(map[string]int)
+	indexes := newSQLHashGroupAggregateIndexes()
 	selectionCapacity := sqlColumnarVectorGroupBlockRows
 	if batch.Rows < selectionCapacity {
 		selectionCapacity = batch.Rows
@@ -249,10 +249,10 @@ func executeSQLColumnarSingleLevelGroupStates(q *sqlQuery, batch ColumnarBatch, 
 		for _, rowIndex := range selection {
 			groupValue, _ := batch.Value(groupField, rowIndex)
 			key := sqlCollationValueKey(q.groupBy[0].collation, groupValue)
-			stateIndex, exists := indexes[key]
+			stateIndex, exists := indexes.find(key)
 			if !exists {
 				stateIndex = len(states)
-				indexes[key] = stateIndex
+				indexes.add(key, stateIndex)
 				state := sqlHashGroupAggregateState{value: groupValue, aggregates: make([]sqlOrderedAggregate, len(projections))}
 				for projectionIndex, projection := range projections {
 					if projection.aggregate != nil {
@@ -288,7 +288,7 @@ func executeSQLColumnarSingleLevelGroupStates(q *sqlQuery, batch ColumnarBatch, 
 type sqlColumnarTwoLevelWorkerState struct {
 	states  []sqlHashGroupAggregateState
 	keys    []string
-	indexes map[string]int
+	indexes sqlHashGroupAggregateIndexes
 	matched int
 	err     error
 }
@@ -303,7 +303,7 @@ func executeSQLColumnarTwoLevelGroupStates(q *sqlQuery, batch ColumnarBatch, pro
 		go func(index, start, end int) {
 			defer wait.Done()
 			worker := &local[index]
-			worker.indexes = make(map[string]int)
+			worker.indexes = newSQLHashGroupAggregateIndexes()
 			for rowIndex := start; rowIndex < end; rowIndex++ {
 				if control != nil {
 					if err := control.check(); err != nil {
@@ -321,10 +321,10 @@ func executeSQLColumnarTwoLevelGroupStates(q *sqlQuery, batch ColumnarBatch, pro
 				}
 				groupValue, _ := batch.Value(groupField, rowIndex)
 				key := sqlCollationValueKey(q.groupBy[0].collation, groupValue)
-				stateIndex, exists := worker.indexes[key]
+				stateIndex, exists := worker.indexes.find(key)
 				if !exists {
 					stateIndex = len(worker.states)
-					worker.indexes[key] = stateIndex
+					worker.indexes.add(key, stateIndex)
 					state := sqlHashGroupAggregateState{value: groupValue, aggregates: make([]sqlOrderedAggregate, len(projections))}
 					for projectionIndex, projection := range projections {
 						if projection.aggregate != nil {

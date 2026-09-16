@@ -476,3 +476,14 @@ rejected before destination mutation.
 
 See [BENCHMARK.md#ch-064-selective-partition-restore](BENCHMARK.md#ch-064-selective-partition-restore)
 for the measured size reduction and restore-cost tradeoff.
+
+### CHG02: Small-cardinality `GROUP BY` index
+
+Implemented as an automatic low-cardinality lookup optimization for streamable
+and columnar grouped aggregation. The first four normalized keys use an
+inline linear index with no heap allocation; the fifth key promotes the state
+to the existing `map[string]int` path. The paired benchmark shows the main
+benefit at one and four groups while larger groups retain equivalent
+allocation behavior and end-to-end performance within measurement noise. See
+[CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md) and
+[BENCHMARK.md#chg02-small-cardinality-group-by-index](BENCHMARK.md#chg02-small-cardinality-group-by-index).
