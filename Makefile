@@ -16274,3 +16274,35 @@ commit-chu11-c251:
 push-chu11-c251:
 	@bash ./scripts/push-chu11-c251.sh
 # End CHU11 targets
+# CHU15 red/green targets
+.PHONY: test-chu15-c255
+test-chu15-c255:
+	@bash ./scripts/test-chu15-c255.sh
+# End CHU15 red/green targets
+# CHU15 benchmark targets
+.PHONY: benchmark-chu15-before-c255 benchmark-chu15-c255
+benchmark-chu15-before-c255:
+	@bash ./scripts/benchmark-chu15-before-c255.sh
+benchmark-chu15-c255:
+	@bash ./scripts/benchmark-chu15-c255.sh
+# End CHU15 benchmark targets
+# CHU15 verification targets
+.PHONY: test-chu15-package-clean-c255 race-chu15-clean-c255 vet-chu15-clean-c255 verify-chu15-docs-c255
+test-chu15-package-clean-c255:
+	@bash ./scripts/test-chu15-package-clean-c255.sh
+race-chu15-clean-c255:
+	@bash ./scripts/race-chu15-clean-c255.sh
+vet-chu15-clean-c255:
+	@bash ./scripts/vet-chu15-clean-c255.sh
+verify-chu15-docs-c255:
+	@bash ./scripts/verify-chu15-docs-c255.sh
+# End CHU15 verification targets
+# CHU15 delivery targets
+.PHONY: stage-chu15-c255 commit-chu15-c255 push-chu15-c255
+stage-chu15-c255:
+	@bash ./scripts/stage-chu15-c255.sh
+commit-chu15-c255:
+	@bash ./scripts/commit-chu15-c255.sh
+push-chu15-c255:
+	@bash ./scripts/push-chu15-c255.sh
+# End CHU15 delivery targets

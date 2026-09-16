@@ -321,21 +321,5 @@ func appendSQLDecimal256(destination []byte, value SQLDecimal256) []byte {
 }
 
 func compareSQLDecimalFixed(left, right []byte) int {
-	leftNegative := len(left) != 0 && left[len(left)-1]&0x80 != 0
-	rightNegative := len(right) != 0 && right[len(right)-1]&0x80 != 0
-	if leftNegative != rightNegative {
-		if leftNegative {
-			return -1
-		}
-		return 1
-	}
-	for index := len(left) - 1; index >= 0; index-- {
-		if left[index] < right[index] {
-			return -1
-		}
-		if left[index] > right[index] {
-			return 1
-		}
-	}
-	return 0
+	return compareSQLDecimalFixedWords(left, right)
 }

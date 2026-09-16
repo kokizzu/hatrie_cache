@@ -26763,3 +26763,38 @@ so the ordinary advisor path retains its pre-feature allocation profile. See
 [CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md](CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md)
 for the supported predicate shape, explicit creation example, persistence
 compatibility, and verification targets.
+## CH-U15 Fixed-Width Decimal Kernels
+
+The portable Decimal128/Decimal256 kernels compare fixed-width coefficients in
+64-bit words, add/subtract with `math/bits`, and pack batch predicate results
+into caller-owned `uint64` bitmaps. The existing RowBinary decimal statistics
+path uses the faster comparison. The clean baseline is the pre-CH-U15 `HEAD`;
+the after run includes bytewise controls in the same process. Five 200-ms
+samples process 1,024 values on an AMD Ryzen 9 5950X.
+
+| Operation | Clean baseline median | Word kernel median | Improvement | B/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Compare Decimal128 | 7,368 ns | 3,875 ns | 1.90x | 0 | 0 |
+| Compare Decimal256 | 10,925 ns | 4,635 ns | 2.36x | 0 | 0 |
+| Add Decimal128 | 10,006 ns | 7,884 ns | 1.27x | 0 | 0 |
+| Add Decimal256 | 22,908 ns | 11,828 ns | 1.94x | 0 | 0 |
+| Filter Decimal128 | 7,639 ns | 5,645 ns | 1.35x | 0 | 0 |
+| Filter Decimal256 | 11,036 ns | 6,322 ns | 1.75x | 0 | 0 |
+
+The same-run bytewise controls measured 1.65x/2.17x slower for 128/256-bit
+comparison, 1.44x/2.03x slower for addition, and 1.38x/1.89x slower for
+packed filtering. Decimal arithmetic is same-scale coefficient arithmetic;
+scale alignment, rounding, multiplication, and division remain explicit
+caller responsibilities. Reproduce the raw five-sample runs with
+`make benchmark-chu15-before-c255` and `make benchmark-chu15-c255`.
+
+Raw `ns/op` samples, in command order, were:
+
+| Operation | Clean baseline, five samples | Word kernel, five samples |
+| --- | --- | --- |
+| Compare Decimal128 | 7540, 7564, 7368, 6295, 6386 | 3952, 3893, 3875, 3480, 3571 |
+| Compare Decimal256 | 11253, 10925, 9660, 11757, 10742 | 4234, 4862, 4635, 5063, 4614 |
+| Add Decimal128 | 10910, 9608, 10006, 10118, 8948 | 8108, 8496, 7393, 7884, 7662 |
+| Add Decimal256 | 21263, 24187, 24210, 22212, 22908 | 10271, 10105, 11828, 11881, 11988 |
+| Filter Decimal128 | 8403, 7033, 8075, 7121, 7639 | 5645, 5505, 4627, 5662, 5781 |
+| Filter Decimal256 | 12351, 10957, 11036, 10336, 11366 | 5375, 5526, 6353, 6322, 6411 |
