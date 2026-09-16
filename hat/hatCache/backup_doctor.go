@@ -91,6 +91,9 @@ func verifySnapshotBackupRoot(displayPath string, kind string, manifest BackupBu
 	if err != nil {
 		return BackupDoctorReport{}, err
 	}
+	if manifest.Consistency != nil && metadata.JournalSequence != manifest.Consistency.PartSequence {
+		return BackupDoctorReport{}, fmt.Errorf("hatriecache: snapshot journal sequence %d does not match backup consistency part boundary %d", metadata.JournalSequence, manifest.Consistency.PartSequence)
+	}
 	report.Snapshot = &BackupDoctorSnapshot{Path: manifest.Snapshot, OK: true, Keys: trie.Size(), JournalSequence: metadata.JournalSequence}
 	report.RecoveredKeys = trie.Size()
 	partitionValidation, err := validateBackupPartitionMetadataAgainstTrie(trie, manifest.Partition)
@@ -107,6 +110,9 @@ func verifySnapshotBackupRoot(displayPath string, kind string, manifest BackupBu
 		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
 		if err != nil {
 			return BackupDoctorReport{}, err
+		}
+		if manifest.Consistency != nil && manifest.JournalSequence == manifest.Consistency.JournalSequence && (manifest.Consistency.Journal == nil || journalReport.LastSequence != manifest.Consistency.JournalSequence) {
+			return BackupDoctorReport{}, fmt.Errorf("hatriecache: journal last sequence %d does not match backup consistency boundary %d", journalReport.LastSequence, manifest.Consistency.JournalSequence)
 		}
 		report.Journal = &journalReport
 		partitionValidation, err := validateBackupPartitionMetadataAgainstJournalEntries(report.PartitionValidation, entries, manifest.Partition)
@@ -189,6 +195,9 @@ func readBackupBundleManifest(bundlePath string) (BackupBundleManifest, error) {
 		if manifest.Version != BackupBundleVersion {
 			return BackupBundleManifest{}, fmt.Errorf("hatriecache: unsupported backup bundle version %d", manifest.Version)
 		}
+		if err := hatBackup.ValidateBundleConsistency(manifest); err != nil {
+			return BackupBundleManifest{}, err
+		}
 		return manifest, nil
 	}
 }
@@ -247,6 +256,15 @@ func verifyPebbleBackupRoot(displayPath string, kind string, manifest BackupBund
 	if err != nil {
 		return BackupDoctorReport{}, err
 	}
+	if manifest.Consistency != nil {
+		sequence, present, err := store.AppliedJournalSequence()
+		if err != nil {
+			return BackupDoctorReport{}, err
+		}
+		if !present || sequence != manifest.Consistency.PartSequence {
+			return BackupDoctorReport{}, fmt.Errorf("hatriecache: Pebble applied journal sequence %d does not match backup consistency part boundary %d", sequence, manifest.Consistency.PartSequence)
+		}
+	}
 	report := BackupDoctorReport{
 		OK:              true,
 		Kind:            kind,
@@ -275,6 +293,9 @@ func verifyPebbleBackupRoot(displayPath string, kind string, manifest BackupBund
 		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
 		if err != nil {
 			return BackupDoctorReport{}, err
+		}
+		if manifest.Consistency != nil && manifest.JournalSequence == manifest.Consistency.JournalSequence && (manifest.Consistency.Journal == nil || journalReport.LastSequence != manifest.Consistency.JournalSequence) {
+			return BackupDoctorReport{}, fmt.Errorf("hatriecache: journal last sequence %d does not match backup consistency boundary %d", journalReport.LastSequence, manifest.Consistency.JournalSequence)
 		}
 		report.Journal = &journalReport
 		partitionValidation, err = validateBackupPartitionMetadataAgainstJournalEntries(report.PartitionValidation, entries, manifest.Partition)

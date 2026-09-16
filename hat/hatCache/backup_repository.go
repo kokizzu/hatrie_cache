@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hatrie_cache/hat/hatBackup"
 	"io"
 	"os"
 	"path/filepath"
@@ -189,6 +190,11 @@ func createIncrementalBackupRepositoryLocked(ctx context.Context, path string, t
 		manifest.Files = append(manifest.Files, backupBundleBytesInfo(backupBundleJournalPath, journalData))
 		payloads = append(payloads, backupBundlePayloadFile{name: backupBundleJournalPath, data: journalData})
 	}
+	consistency, err := hatBackup.BuildBundleConsistency(manifest)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	manifest.Consistency = consistency
 	if err := storeBackupRepositoryObjects(ctx, path, &manifest, payloads); err != nil {
 		return BackupBundleManifest{}, err
 	}
@@ -373,6 +379,9 @@ func readBackupRepositoryManifest(root string, backupID string) (BackupBundleMan
 	}
 	if computedID != backupID {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup repository manifest checksum mismatch")
+	}
+	if err := hatBackup.ValidateBundleConsistency(manifest); err != nil {
+		return BackupBundleManifest{}, err
 	}
 	return manifest, nil
 }

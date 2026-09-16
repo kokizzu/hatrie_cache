@@ -39,6 +39,47 @@ type BundleFile struct {
 	SHA256 string `json:"sha256"`
 }
 
+// BundleConsistency binds immutable backup parts to the exact journal
+// boundary captured by the backup.
+type BundleConsistency struct {
+	Version         int                    `json:"version"`
+	PartSequence    uint64                 `json:"part_sequence"`
+	JournalSequence uint64                 `json:"journal_sequence"`
+	Parts           []BundlePart           `json:"parts"`
+	Journal         *BundleJournalBoundary `json:"journal,omitempty"`
+	Digest          string                 `json:"digest"`
+}
+
+// BundlePartKind identifies the payload class represented by a bundle part.
+const (
+	BundlePartKindSnapshot = "snapshot"
+	BundlePartKindStorage  = "storage"
+	BundlePartKindMetadata = "metadata"
+	BundlePartKindPayload  = "payload"
+)
+
+// BundleConsistencyVersion is the version of the part/journal consistency
+// contract embedded in new backup manifests.
+const BundleConsistencyVersion = 1
+
+// BundlePart is an immutable snapshot or storage payload covered by a backup.
+type BundlePart struct {
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// BundleJournalBoundary describes the journal/WAL artifact and the exact
+// mutation sequence at which the immutable parts were captured.
+type BundleJournalBoundary struct {
+	Path     string `json:"path"`
+	Format   string `json:"format,omitempty"`
+	Sequence uint64 `json:"sequence"`
+	Size     int64  `json:"size"`
+	SHA256   string `json:"sha256"`
+}
+
 // EncryptionMetadata identifies the authenticated envelope used for a
 // backup. The key itself is intentionally never stored in the manifest.
 type EncryptionMetadata struct {
@@ -75,6 +116,7 @@ type BundleManifest struct {
 	KeyPrefixes        []string            `json:"key_prefixes,omitempty"`
 	Partition          *PartitionMetadata  `json:"partition,omitempty"`
 	Encryption         *EncryptionMetadata `json:"encryption,omitempty"`
+	Consistency        *BundleConsistency  `json:"consistency,omitempty"`
 	Files              []BundleFile        `json:"files"`
 	RestoreHint        string              `json:"restore_hint"`
 }

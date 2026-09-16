@@ -27728,4 +27728,104 @@ BenchmarkCHU13PhraseUpsert-32 49137 2230 ns/op 780 B/op 27 allocs/op
 BenchmarkCHU13PhraseUpsert-32 52795 2332 ns/op 780 B/op 27 allocs/op
 BenchmarkCHU13PhraseUpsert-32 51993 2323 ns/op 780 B/op 27 allocs/op
 BenchmarkCHU13PhraseMemory-32 ... 73536 base_roaring_payload_bytes 105344 phrase_roaring_payload_bytes 168000 phrase_sequence_bytes 273344 phrase_tracked_payload_bytes
+
+## CH-U50 Part/WAL-Consistent Backup Manifest
+
+This benchmark measures the ClickHouse-inspired consistency section added to
+snapshot, Pebble checkpoint, and incremental backup manifests. It binds the
+immutable part list and the journal boundary with file sizes, SHA-256 values,
+and a deterministic digest. It is an integrity and restore-correctness
+feature, not a query-path optimization.
+
+Run the same source fixture and flags for the baseline and feature paths:
+
+```sh
+make prepare-chu50-benchmark-baseline-c203
+make sync-chu50-benchmark-baseline-c203
+make benchmark-chu50-before-c203
+make benchmark-chu50-c203
+```
+
+The five samples below use `-benchtime=100ms -count=5` on Linux/amd64, AMD
+Ryzen 9 5950X, Go 1.26.6. The table reports medians; ratios are `after /
+before`, so values above 1.00x are overhead and values below 1.00x are faster.
+
+| Operation | Before median | After median | Time x | Heap B/op before -> after | Allocs/op before -> after | Bytes before -> after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Snapshot create | 3,669,805 ns | 4,255,124 ns | 1.16x | 1,412,421 -> 1,416,830 | 165 -> 177 | bundle 600 -> 718 |
+| Snapshot verify | 537,604 ns | 554,641 ns | 1.03x | 317,493 -> 321,079 | 280 -> 307 | n/a |
+| Pebble checkpoint create | 15,698,801 ns | 15,539,042 ns | 0.99x | 2,764,398 -> 2,781,858 | 1,583 -> 1,618 | bundle 2,596 -> 2,775 |
+| Manifest marshal | 853.1 ns | 1,208 ns | 1.42x | 1,105 -> 1,618 | 3 -> 3 | manifest 600 -> 1,036 |
+
+The small snapshot fixture adds 118 compressed bundle bytes (+19.7 percent)
+and 436 manifest bytes (+72.7 percent). Snapshot creation heap rises 0.31
+percent, verification heap rises 1.13 percent, and Pebble checkpoint heap rises
+0.63 percent. The direct structural validator keeps verification at 1.03x CPU
+and avoids rebuilding the full consistency object on every read. The
+manifest-only benchmark is 1.42x slower because the metadata fixture is tiny;
+the absolute cost is about 0.35 microseconds. Legacy manifests without a
+consistency section remain compatible and do not incur this validation path.
+
+### Raw Samples
+
+```text
+# before: Snapshot create
+3669805 ns/op 605 bundle-bytes 1412608 B/op 166 allocs/op
+3694466 ns/op 600 bundle-bytes 1412179 B/op 165 allocs/op
+3481407 ns/op 599 bundle-bytes 1413165 B/op 166 allocs/op
+3587642 ns/op 601 bundle-bytes 1412421 B/op 165 allocs/op
+3721695 ns/op 600 bundle-bytes 1411778 B/op 165 allocs/op
+
+# after: Snapshot create
+4255124 ns/op 718 bundle-bytes 1417356 B/op 179 allocs/op
+6738867 ns/op 715 bundle-bytes 1417499 B/op 179 allocs/op
+4111031 ns/op 718 bundle-bytes 1416459 B/op 177 allocs/op
+3615837 ns/op 718 bundle-bytes 1416830 B/op 177 allocs/op
+5229531 ns/op 718 bundle-bytes 1416333 B/op 177 allocs/op
+
+# before: Snapshot verify
+551561 ns/op 317711 B/op 280 allocs/op
+537604 ns/op 317391 B/op 280 allocs/op
+553703 ns/op 316973 B/op 280 allocs/op
+534132 ns/op 317966 B/op 280 allocs/op
+527713 ns/op 317493 B/op 280 allocs/op
+
+# after: Snapshot verify
+553450 ns/op 321508 B/op 309 allocs/op
+554641 ns/op 320809 B/op 307 allocs/op
+548523 ns/op 320845 B/op 307 allocs/op
+563949 ns/op 321444 B/op 307 allocs/op
+609515 ns/op 321079 B/op 307 allocs/op
+
+# before: Pebble checkpoint create
+16082650 ns/op 2599 bundle-bytes 2764398 B/op 1583 allocs/op
+16649812 ns/op 2603 bundle-bytes 2769878 B/op 1595 allocs/op
+14974103 ns/op 2596 bundle-bytes 2760452 B/op 1575 allocs/op
+15434515 ns/op 2596 bundle-bytes 2767672 B/op 1591 allocs/op
+15698801 ns/op 2595 bundle-bytes 2754411 B/op 1572 allocs/op
+
+# after: Pebble checkpoint create
+15231425 ns/op 2775 bundle-bytes 2782699 B/op 1618 allocs/op
+16580539 ns/op 2769 bundle-bytes 2781533 B/op 1618 allocs/op
+15539042 ns/op 2775 bundle-bytes 2777579 B/op 1603 allocs/op
+16026006 ns/op 2768 bundle-bytes 2781858 B/op 1616 allocs/op
+15457273 ns/op 2775 bundle-bytes 2786050 B/op 1621 allocs/op
+
+# before: Manifest marshal
+874.3 ns/op 686.24 MB/s 600 manifest-bytes 1105 B/op 3 allocs/op
+856.5 ns/op 700.53 MB/s 600 manifest-bytes 1105 B/op 3 allocs/op
+836.3 ns/op 717.49 MB/s 600 manifest-bytes 1105 B/op 3 allocs/op
+830.2 ns/op 722.70 MB/s 600 manifest-bytes 1105 B/op 3 allocs/op
+853.1 ns/op 702.14 MB/s 599 manifest-bytes 1105 B/op 3 allocs/op
+
+# after: Manifest marshal
+1174 ns/op 881.48 MB/s 1035 manifest-bytes 1617 B/op 3 allocs/op
+1227 ns/op 844.41 MB/s 1036 manifest-bytes 1618 B/op 3 allocs/op
+1208 ns/op 857.78 MB/s 1036 manifest-bytes 1618 B/op 3 allocs/op
+1250 ns/op 827.99 MB/s 1035 manifest-bytes 1617 B/op 3 allocs/op
+1184 ns/op 874.79 MB/s 1036 manifest-bytes 1618 B/op 3 allocs/op
+```
+
+The exact contract and restore rules are documented in
+[CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md).
 ```

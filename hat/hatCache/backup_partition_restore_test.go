@@ -231,6 +231,10 @@ func rebuildBackupBundleWithJournal(t testing.TB, bundlePath string, journalPath
 			t.Fatalf("backupBundleFileInfo(journal) error = %v", err)
 		}
 	}
+	manifest.Consistency, err = hatBackup.BuildBundleConsistencyAtPartSequence(manifest, manifest.Consistency.PartSequence)
+	if err != nil {
+		t.Fatalf("BuildBundleConsistency() error = %v", err)
+	}
 	manifestData, err := jsonwire.Marshal(manifest)
 	if err != nil {
 		t.Fatalf("jsonwire.Marshal(manifest) error = %v", err)

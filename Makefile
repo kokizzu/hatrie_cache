@@ -16954,3 +16954,44 @@ commit-chu49-c203:
 
 push-chu49-c203:
 	sh scripts/push-chu49-c203.sh
+test-chu50-red-c203:
+	sh scripts/test-chu50-red-c203.sh
+
+format-chu50-c203:
+	sh scripts/format-chu50-c203.sh
+
+test-chu50-c203:
+	sh scripts/test-chu50-c203.sh
+
+prepare-chu50-benchmark-baseline-c203:
+	sh scripts/prepare-chu50-benchmark-baseline-c203.sh
+
+sync-chu50-benchmark-baseline-c203:
+	sh scripts/sync-chu50-benchmark-baseline-c203.sh
+
+benchmark-chu50-before-c203:
+	sh scripts/benchmark-chu50-c203.sh before
+
+benchmark-chu50-c203:
+	sh scripts/benchmark-chu50-c203.sh after
+
+race-chu50-c203:
+	sh scripts/race-chu50-c203.sh
+
+vet-chu50-c203:
+	sh scripts/vet-chu50-c203.sh
+
+verify-chu50-docs-c203:
+	sh scripts/verify-chu50-docs-c203.sh
+
+check-chu50-c203:
+	sh scripts/check-chu50-c203.sh
+
+stage-chu50-c203:
+	sh scripts/stage-chu50-c203.sh
+
+commit-chu50-c203:
+	sh scripts/commit-chu50-c203.sh
+
+push-chu50-c203:
+	sh scripts/push-chu50-c203.sh

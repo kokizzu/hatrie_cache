@@ -294,5 +294,14 @@ func cloneBackupManifest(input BundleManifest) BundleManifest {
 		encryption := *input.Encryption
 		output.Encryption = &encryption
 	}
+	if input.Consistency != nil {
+		consistency := *input.Consistency
+		consistency.Parts = append([]BundlePart(nil), input.Consistency.Parts...)
+		if input.Consistency.Journal != nil {
+			journal := *input.Consistency.Journal
+			consistency.Journal = &journal
+		}
+		output.Consistency = &consistency
+	}
 	return output
 }

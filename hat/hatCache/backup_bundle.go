@@ -280,6 +280,11 @@ func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, t
 		manifest.Journal = backupBundleJournalPath
 		manifest.JournalFormat = string(journalFormat)
 	}
+	consistency, err := hatBackup.BuildBundleConsistency(manifest)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	manifest.Consistency = consistency
 
 	manifestData, err := jsonwire.Marshal(manifest)
 	if err != nil {

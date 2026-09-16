@@ -224,6 +224,7 @@ security guidance before exposing it on a network.
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
+- Part/WAL-consistent backup manifests with per-file checksums: [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u50-partwal-consistent-backup-manifest)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Opt-in asynchronous HTTP command admission and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
 - Opt-in durable SQL subscription history, progress, and resume cursors: [DURABLE_SUBSCRIPTIONS.md](DURABLE_SUBSCRIPTIONS.md)

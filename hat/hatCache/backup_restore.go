@@ -77,6 +77,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	restoredJournalSequence := manifest.JournalSequence
 	if selectivePartition {
 		verificationManifest.Partition = cloneBackupPartitionMetadata(options.Partition)
+		verificationManifest.Consistency = nil
 	}
 	destination, err := prepareRestoreDestinationForRestore(bundlePath, dataDir, options.Overwrite, options.Resume)
 	if err != nil {
@@ -112,6 +113,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 			return BackupBundleRestoreReport{}, err
 		}
 		verificationManifest.JournalSequence = restoredJournalSequence
+		verificationManifest.Consistency = nil
 	}
 	var doctor BackupDoctorReport
 	switch mode {
