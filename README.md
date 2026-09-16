@@ -168,6 +168,7 @@ security guidance before exposing it on a network.
 - Bounded ordered time-series gap filling: [SQL `WITH FILL`](WITH_FILL.md)
 - Optional `WITH FILL` interpolation policies: [C218 interpolation](C218_WITH_FILL_INTERPOLATION.md)
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
+- Feedback-weighted projection selection from bounded execution cost: [CHU10_FEEDBACK_PROJECTION_SELECTION.md](CHU10_FEEDBACK_PROJECTION_SELECTION.md)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Materialize-style guarded SQL columnar dictionary compression: [SQL_COLUMNAR_DICTIONARY.md](SQL_COLUMNAR_DICTIONARY.md)
 - Lookup-aware columnar dictionary admission: [C216_COLUMNAR_DICTIONARY_SHAPES.md](C216_COLUMNAR_DICTIONARY_SHAPES.md)

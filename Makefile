@@ -16169,3 +16169,55 @@ commit-chu09-c249:
 .PHONY: push-chu09-c249
 push-chu09-c249:
 	@bash ./scripts/push-chu09-c249.sh
+
+.PHONY: benchmark-chu10-before-c250
+benchmark-chu10-before-c250:
+	@bash ./scripts/benchmark-chu10-before-c250.sh
+
+.PHONY: test-chu10-c250
+test-chu10-c250:
+	@bash ./scripts/test-chu10-c250.sh
+
+.PHONY: format-chu10-c250
+format-chu10-c250:
+	@bash ./scripts/format-chu10-c250.sh
+
+.PHONY: benchmark-chu10-c250
+benchmark-chu10-c250:
+	@bash ./scripts/benchmark-chu10-c250.sh
+
+.PHONY: test-chu10-package-c250
+test-chu10-package-c250:
+	@bash ./scripts/test-chu10-package-c250.sh
+
+.PHONY: race-chu10-c250
+race-chu10-c250:
+	@bash ./scripts/race-chu10-c250.sh
+
+.PHONY: vet-chu10-c250
+vet-chu10-c250:
+	@bash ./scripts/vet-chu10-c250.sh
+
+.PHONY: test-chu10-repo-c250
+test-chu10-repo-c250:
+	@bash ./scripts/test-chu10-repo-c250.sh
+
+.PHONY: verify-chu10-docs-c250
+verify-chu10-docs-c250:
+	@bash ./scripts/verify-chu10-docs-c250.sh
+
+.PHONY: review-chu10-c250
+review-chu10-c250:
+	@bash ./scripts/review-chu10-c250.sh
+
+.PHONY: stage-chu10-c250
+stage-chu10-c250:
+	@bash ./scripts/stage-chu10-c250.sh
+
+.PHONY: commit-chu10-c250
+commit-chu10-c250:
+	@bash ./scripts/commit-chu10-c250.sh
+
+.PHONY: push-chu10-c250
+push-chu10-c250:
+	@bash ./scripts/push-chu10-c250.sh

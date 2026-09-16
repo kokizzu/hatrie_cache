@@ -26720,3 +26720,23 @@ The final binary payload is `1.31x` smaller than the earlier `gob` draft
 unmarshalling arbitrary JSON into `interface{}` would not preserve the typed
 SQL values required by the cache contract. Persistence therefore remains
 explicit and is intended for repeated expensive reads, not every query.
+
+## CH-U10 Feedback-Driven Projection Selection
+
+Raw commands: `make benchmark-chu10-before-c250` and
+`make benchmark-chu10-c250`. Both benchmark from a clean archive to avoid
+unrelated worktree edits. Five samples use
+`-benchmem -benchtime=200ms -count=5` on an AMD Ryzen 9 5950X, Linux/amd64.
+
+| Workload | Before | After | Relative result |
+|---|---:|---:|---|
+| Advisor disabled | 4.34-4.55 us/op; 5,192 B/op; 22 allocs | 4.38-4.57 us/op; 5,192 B/op; 22 allocs | No measurable regression |
+| Advisor enabled, one slow candidate | 6.99-7.56 us/op; 6,584 B/op; 37 allocs | 7.11-7.24 us/op; 6,584 B/op; 37 allocs | Within run variance; no new allocation |
+| Explicit cost ranking, 128 candidates, top 16 | Not available | 17.52-18.96 us/op; 11,656 B/op; 132 allocs | One-time reporting cost, excluded from execution |
+
+The implementation records only successful slow `CACHE` queries with a caller
+`QueryID`; it keeps total and average elapsed time with saturating counters.
+`Recommendations()` keeps the existing count order. `CostRecommendations`
+uses aggregate observed latency as the selection signal and remains an explicit
+operator call, so it cannot destabilize the planner or create projection state
+implicitly.
