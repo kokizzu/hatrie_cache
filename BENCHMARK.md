@@ -349,6 +349,38 @@ also reports Pebble's filter hits/misses and read amplification through the
 existing persistent-store inspection surface; LevelDB leaves those fields
 zero-valued.
 
+### CH-022 Durable Manifest Catalog
+
+Command: `make benchmark-before-ch022-c290` for the archived baseline and
+`make benchmark-ch022-c290` for the current implementation. These runs use a
+single small content-addressed file, five samples per case, an in-memory object
+store, and a filesystem-backed checksummed manifest catalog. The machine was
+an AMD Ryzen 9 5950X on Linux amd64. Median values are shown; the catalog
+case includes its durable local append and sync.
+
+| Case | Time/op | Memory/op | Allocs/op | Relative to default |
+|---|---:|---:|---:|---:|
+| Archived baseline, no catalog | 44,159 ns | 6,892 B | 69 | 1.00x |
+| Current default, no catalog | 42,184 ns | 6,702 B | 69 | 0.96x time, 0.97x memory |
+| Current opt-in catalog | 1,626,670 ns | 10,046 B | 84 | 38.56x time, 1.50x memory |
+
+Raw samples:
+
+```text
+baseline no catalog: 37023, 44159, 45267, 46041, 43314 ns/op; 6839, 6885, 6897, 6898, 6892 B/op; 69 allocs/op
+current no catalog: 42629, 39103, 41530, 42184, 45435 ns/op; 6705, 6707, 6702, 6694, 6699 B/op; 69 allocs/op
+current catalog: 1877043, 1408073, 1001578, 2064677, 1626670 ns/op; 10078, 10046, 9983, 10182, 9939 B/op; 84 allocs/op
+```
+
+The default path is unchanged within benchmark noise: 4.47% faster in this
+run with 190 fewer bytes per operation and the same allocation count. The
+catalog is intentionally opt-in because durable local synchronization costs
+about 38.6x CPU time and 1.50x measured allocation memory for this tiny
+workload; it buys restart-safe manifest history and deterministic chain
+planning, not faster payload transfer. Filesystem scheduling caused variation
+among catalog samples; all raw samples are retained and the median is the
+comparison statistic.
+
 ## CH-49: Encrypted Object-Store Backups
 
 The opt-in `hatBackup.ObjectStoreTarget` encryption path uses AES-256-GCM

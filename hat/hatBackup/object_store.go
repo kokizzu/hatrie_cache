@@ -61,10 +61,11 @@ type ObjectStoreObjectExists interface {
 // prefix. The manifest is written last, so a reader never treats an incomplete
 // upload as a complete backup.
 type ObjectStoreTarget struct {
-	store      ObjectStore
-	prefix     string
-	encryption *objectStoreEncryptionConfig
-	layout     ObjectStoreLayout
+	store           ObjectStore
+	prefix          string
+	encryption      *objectStoreEncryptionConfig
+	layout          ObjectStoreLayout
+	manifestCatalog *BackupManifestCatalog
 }
 
 // NewObjectStoreTarget validates an object-store target prefix.
@@ -91,7 +92,13 @@ func NewObjectStoreTargetWithOptions(store ObjectStore, prefix string, options O
 	if err != nil {
 		return nil, err
 	}
-	return &ObjectStoreTarget{store: store, prefix: normalized, encryption: encryption, layout: layout}, nil
+	return &ObjectStoreTarget{
+		store:           store,
+		prefix:          normalized,
+		encryption:      encryption,
+		layout:          layout,
+		manifestCatalog: options.ManifestCatalog,
+	}, nil
 }
 
 func normalizeObjectStoreLayout(value ObjectStoreLayout) (ObjectStoreLayout, error) {
@@ -270,6 +277,11 @@ func (target *ObjectStoreTarget) Backup(ctx context.Context, source string, mani
 	}
 	if err := checkObjectStoreContext(ctx); err != nil {
 		return BundleManifest{}, err
+	}
+	if target.manifestCatalog != nil && manifest.Mode == ModePebbleIncremental {
+		if err := target.manifestCatalog.Append(manifest); err != nil {
+			return BundleManifest{}, fmt.Errorf("hatriecache: append object backup manifest to catalog: %w", err)
+		}
 	}
 	return manifest, nil
 }

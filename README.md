@@ -93,7 +93,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired compact typed-table histograms: [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md)
 - ClickHouse-inspired opt-in typed-table row TTL: [CH007_ROW_TTL.md](CH007_ROW_TTL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-007-row-ttl)
 - ClickHouse-inspired bounded background TTL reaper and durable processing-time deadline state: [CH007_TTL_SCHEDULER.md](CH007_TTL_SCHEDULER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-007-background-ttl-scheduler)
-- ClickHouse-inspired content-addressed incremental part backup: [CH022_INCREMENTAL_PART_BACKUP.md](CH022_INCREMENTAL_PART_BACKUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-022-incremental-part-backup)
+- ClickHouse-inspired content-addressed incremental part backup and optional durable manifest catalog: [CH022_INCREMENTAL_PART_BACKUP.md](CH022_INCREMENTAL_PART_BACKUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-022-incremental-part-backup)
 - ClickHouse-inspired bounded external dictionary cache: [CH027_EXTERNAL_DICTIONARY_CACHE.md](CH027_EXTERNAL_DICTIONARY_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-027-external-dictionary-cache)
 - ClickHouse-inspired dictionary version and fallback semantics: [CH028_DICTIONARY_VERSION_FALLBACK.md](CH028_DICTIONARY_VERSION_FALLBACK.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-028-dictionary-version-and-fallback)
 - ClickHouse-inspired dictionary-backed joins: [CH029_DICTIONARY_BACKED_JOIN.md](CH029_DICTIONARY_BACKED_JOIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-029-dictionary-backed-join)

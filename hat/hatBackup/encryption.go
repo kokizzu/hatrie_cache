@@ -57,6 +57,10 @@ type ObjectStoreTargetOptions struct {
 	EncryptionKeys        []ObjectStoreEncryptionKey
 	ActiveEncryptionKeyID string
 	Layout                ObjectStoreLayout
+	// ManifestCatalog optionally records successfully published manifests for
+	// durable incremental-chain planning. A nil catalog preserves the legacy
+	// object-store-only behavior.
+	ManifestCatalog *BackupManifestCatalog
 }
 
 type objectStoreEncryptionConfig struct {

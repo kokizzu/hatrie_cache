@@ -31,6 +31,34 @@ target, err := hatBackup.NewObjectStoreTargetWithOptions(store, "backup",
     })
 ```
 
+## Durable Manifest Catalog
+
+For incremental-backup operators that need chain planning to survive process
+restarts, attach a `hatBackup.BackupManifestCatalog` to the target:
+
+```go
+catalog, err := hatBackup.NewBackupManifestCatalog("/var/lib/hatrie/backup-catalog.log")
+if err != nil {
+    return err
+}
+target, err := hatBackup.NewObjectStoreTargetWithOptions(store, "backup",
+    hatBackup.ObjectStoreTargetOptions{
+        ManifestCatalog: catalog,
+    })
+```
+
+After the object-store manifest is published, successful
+`ModePebbleIncremental` backups are appended to the catalog. A base manifest
+must be recorded before a child manifest, and chain planning can use a newly
+opened catalog after a restart. Snapshot and other non-incremental backups are
+still valid and are intentionally not catalog entries.
+
+The catalog uses checksummed records, atomic migration from legacy formats,
+and restrictive file permissions. Its append is durable and therefore adds
+one local catalog write and sync per incremental backup. If that append fails,
+the object-store manifest may already be published; treat the returned error as
+a recovery task and reconcile the catalog before retrying the same backup id.
+
 ## Reuse
 
 Stores may implement the optional `hatBackup.ObjectStoreObjectExists`
@@ -74,7 +102,7 @@ consumers.
 manifest chains and protect objects referenced by retained manifests. The
 object-store target still publishes the latest manifest at `manifest.json`;
 callers that retain multiple backup IDs should retain the returned manifests
-or publish them in their catalog for chain planning. `KeepObjectKeys` and
+or configure `ManifestCatalog` for durable chain planning. `KeepObjectKeys` and
 `DeleteObjectKeys` are the exact relative object addresses to use for physical
 cleanup; this matters when the same plaintext hash exists under multiple
 encryption key IDs. The older `KeepObjectHashes` and `DeleteObjectHashes`

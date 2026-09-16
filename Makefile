@@ -16445,3 +16445,13 @@ commit-ch007-scheduler-c282:
 	@bash scripts/deliver-ch007-scheduler-c282.sh commit
 push-ch007-scheduler-c282:
 	@bash scripts/deliver-ch007-scheduler-c282.sh push
+
+.PHONY: benchmark-before-ch022-c290 benchmark-ch022-c290 format-ch022-c290 verify-ch022-c290
+benchmark-before-ch022-c290:
+	@bash scripts/benchmark-before-ch022-c290.sh
+benchmark-ch022-c290:
+	@bash scripts/benchmark-ch022-c290.sh
+format-ch022-c290:
+	@bash scripts/format-ch022-c290.sh
+verify-ch022-c290:
+	@bash scripts/verify-ch022-c290.sh

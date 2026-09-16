@@ -48,7 +48,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-019 | Replicated-part checks | No per-part checksums and replica consistency repair workflow. | High |
 | CH-020 | Zero-copy part sharing | No remote part registration that avoids copying immutable storage between replicas. | High |
 | CH-021 | Object-storage tiering | No hot/local and cold/object-storage tier with transparent reads. | High |
-| CH-022 | Incremental part backup | Partially adopted as content-addressed object storage with manifest-level changed-object accounting; durable manifest catalogs remain caller-managed. | Medium |
+| CH-022 | Incremental part backup | Adopted as content-addressed object storage with manifest-level changed-object accounting and an optional durable `BackupManifestCatalog` for incremental chain planning; retention execution remains caller-managed. | Medium |
 | CH-023 | Selective partition restore | Partially adopted for opt-in snapshot restores: a validated partition/prefix subset can be restored atomically; checkpoint-only markers and a safe single-key replay tail are handled, while complex replay commands and persistent-store subset restores remain rejected. | Medium |
 | CH-024 | Detach/attach parts | No operator API to quarantine immutable parts and attach verified replacements. | Medium |
 | CH-025 | Merge-pool prioritization | Compaction lacks a user-visible priority scheduler balancing freshness and space. | Medium |
