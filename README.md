@@ -4187,6 +4187,7 @@ SQL mutation changefeed consumers can request pre- and post-state rows with `RET
 - [Materialize-style late-data reclock](MZ032_LATE_DATA_RECLOCK.md)
 - [Materialize-style timestamp oracle](MZ033_TIMESTAMP_ORACLE.md)
 - [Materialize-style generic negative-diff operators](MZ034_GENERIC_NEGATIVE_DIFF.md)
+- [Materialize-style recursive convergence diagnostics and iteration bounds](MZ040_RECURSIVE_CONVERGENCE_BOUNDS.md)
 ### External window streaming
 
 `ExecuteSQLQueryRows` can stream the bounded direct-window subset from an

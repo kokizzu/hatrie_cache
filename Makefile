@@ -16838,3 +16838,47 @@ commit-mz049:
 
 push-mz049:
 	bash ./scripts/deliver-mz049.sh push
+
+.PHONY: format-mz040-c203
+format-mz040-c203:
+	bash ./scripts/format-mz040-c203.sh
+
+.PHONY: test-mz040-red-c203
+test-mz040-red-c203:
+	bash ./scripts/test-mz040-red-c203.sh
+
+.PHONY: test-mz040-c203
+test-mz040-c203:
+	bash ./scripts/test-mz040-c203.sh
+
+.PHONY: race-mz040-c203
+race-mz040-c203:
+	bash ./scripts/race-mz040-c203.sh
+
+.PHONY: vet-mz040-c203
+vet-mz040-c203:
+	bash ./scripts/vet-mz040-c203.sh
+
+.PHONY: benchmark-mz040-before-c203
+benchmark-mz040-before-c203:
+	bash ./scripts/benchmark-mz040-before-c203.sh
+
+.PHONY: benchmark-mz040-c203
+benchmark-mz040-c203:
+	bash ./scripts/benchmark-mz040-c203.sh
+
+.PHONY: verify-mz040-c203
+verify-mz040-c203:
+	bash ./scripts/verify-mz040-c203.sh
+
+.PHONY: stage-mz040-c203
+stage-mz040-c203:
+	bash ./scripts/deliver-mz040-c203.sh stage
+
+.PHONY: commit-mz040-c203
+commit-mz040-c203:
+	bash ./scripts/deliver-mz040-c203.sh commit
+
+.PHONY: push-mz040-c203
+push-mz040-c203:
+	bash ./scripts/deliver-mz040-c203.sh push

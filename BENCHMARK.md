@@ -27537,3 +27537,38 @@ BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         262  930623 ns/op  5433
 BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         268  898659 ns/op  543298 B/op  8957 allocs/op
 BenchmarkMZ049SchemaDriftJSONStreamQuarantine-32         258  883916 ns/op  543297 B/op  8957 allocs/op
 ```
+## MZ-40 Recursive Convergence Bounds
+
+`ApplyWithOptions` is an opt-in Materialize-style safety boundary for mutable
+recursive reachability updates. It reports affected sources, traversal work,
+closure depth, and emitted differential rows, and rejects a mutation before
+publication when a configured bound would be exceeded. Existing `Apply` is
+unchanged. Source/update-count bounds use the existing incremental append
+commit; full traversal/depth bounds use the temporary-map planner.
+
+Machine: AMD Ryzen 9 5950X, Linux/amd64. Medians are three samples with
+`-benchtime=20ms`. The timed operation appends one edge to a 255-edge chain.
+
+| Path | ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Apply` control | 30,029,433 | 26,122,280 | 171,002 | 1.00x |
+| `ApplyWithOptions` source/update bounds | 28,968,193 | 26,162,632 | 171,003 | 1.04x faster |
+| `ApplyWithOptions` full bounds | 41,189,034 | 34,991,008 | 177,715 | 1.37x slower |
+
+Raw before/after output is preserved in
+[MZ040_RECURSIVE_CONVERGENCE_BOUNDS.md](MZ040_RECURSIVE_CONVERGENCE_BOUNDS.md).
+
+```text
+# make benchmark-mz040-before-c203
+full_recompute:             166305, 154948, 161915 ns/op; 114832 B/op; 1031 allocs/op
+incremental_append:           1563,   1573,   1528 ns/op;   1088/1063/1072 B/op; 14 allocs/op
+full_recompute_delete:      159851, 155911, 160517 ns/op; 114752 B/op; 1028 allocs/op
+full_recompute_update:      156521, 161691, 155437 ns/op; 114768 B/op; 1029 allocs/op
+mutable_delete:              13458,  14311,  13924 ns/op;    496 B/op; 7 allocs/op
+mutable_update:              18782,  19938,  21177 ns/op;   1368 B/op; 18 allocs/op
+
+# make benchmark-mz040-c203
+legacy_apply:            30775792, 30029433, 26793534 ns/op; 26127760/26122280/26116624 B/op; 171009/171002/170996 allocs/op
+bounded_apply:            29439426, 26058625, 28968193 ns/op; 26168080/26162632/26156944 B/op; 171008/171003/170995 allocs/op
+fully_bounded_apply:      41189034, 41442861, 39674403 ns/op; 34991328/34990992/34991008 B/op; 177717/177714/177715 allocs/op
+```
