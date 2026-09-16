@@ -338,14 +338,22 @@ func (segment ColumnarStringNGramBloomSegment) MayContainSubstring(value string)
 // Segment i covers RowsPerSegment consecutive rows. SparsePrimaryField names
 // an optional numeric field whose complete segment bounds are nondecreasing;
 // the executor may binary-search those bounds for direct range predicates.
-// Providers must leave it empty unless that ordering guarantee is true.
+// SparsePrimaryFields names an optional lexicographically ordered numeric
+// tuple. SparsePrimaryTupleMinimum and SparsePrimaryTupleMaximum contain the
+// first and last tuple for each segment in flat segment-major order, so tuple
+// segment i occupies [i*len(SparsePrimaryFields):(i+1)*len(SparsePrimaryFields)].
+// Providers must leave these fields empty unless the ordering guarantee is
+// true.
 type ColumnarNumericSegments struct {
-	RowsPerSegment          int
-	SparsePrimaryField      string
-	Columns                 map[string][]ColumnarNumericSegment
-	DictionaryCodeSets      map[string][]uint64
-	StringBloomFilters      map[string][]ColumnarStringBloomSegment
-	StringNGramBloomFilters map[string][]ColumnarStringNGramBloomSegment
+	RowsPerSegment            int
+	SparsePrimaryField        string
+	SparsePrimaryFields       []string
+	SparsePrimaryTupleMinimum []float64
+	SparsePrimaryTupleMaximum []float64
+	Columns                   map[string][]ColumnarNumericSegment
+	DictionaryCodeSets        map[string][]uint64
+	StringBloomFilters        map[string][]ColumnarStringBloomSegment
+	StringNGramBloomFilters   map[string][]ColumnarStringNGramBloomSegment
 }
 
 // FieldRows reports the physical row count retained for one field.

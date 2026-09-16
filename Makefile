@@ -16306,3 +16306,45 @@ commit-chu15-c255:
 push-chu15-c255:
 	@bash ./scripts/push-chu15-c255.sh
 # End CHU15 delivery targets
+# CHU18 red/green target
+.PHONY: test-chu18-c259
+test-chu18-c259:
+	@bash ./scripts/test-chu18-c259.sh
+# End CHU18 red/green target
+# CHU18 format target
+.PHONY: format-chu18-c259
+format-chu18-c259:
+	@bash ./scripts/format-chu18-c259.sh
+# End CHU18 format target
+# CHU18 baseline benchmark target
+.PHONY: benchmark-before-chu18-c259
+benchmark-before-chu18-c259:
+	@bash ./scripts/benchmark-before-chu18-c259.sh
+# End CHU18 baseline benchmark target
+# CHU18 benchmark target
+.PHONY: benchmark-chu18-c259
+benchmark-chu18-c259:
+	@bash ./scripts/benchmark-chu18-c259.sh
+# End CHU18 benchmark target
+# CHU18 package verification targets
+.PHONY: test-chu18-package-clean-c259 race-chu18-clean-c259 vet-chu18-clean-c259 verify-chu18-docs-c259
+test-chu18-package-clean-c259:
+	@bash ./scripts/test-chu18-package-clean-c259.sh
+race-chu18-clean-c259:
+	@bash ./scripts/race-chu18-clean-c259.sh
+vet-chu18-clean-c259:
+	@bash ./scripts/vet-chu18-clean-c259.sh
+verify-chu18-docs-c259:
+	@bash ./scripts/verify-chu18-docs-c259.sh
+# End CHU18 package verification targets
+# CHU18 delivery targets
+.PHONY: review-chu18-c259 stage-chu18-c259 commit-chu18-c259 push-chu18-c259
+review-chu18-c259:
+	@bash ./scripts/review-chu18-c259.sh
+stage-chu18-c259:
+	@bash ./scripts/stage-chu18-c259.sh
+commit-chu18-c259:
+	@bash ./scripts/commit-chu18-c259.sh
+push-chu18-c259:
+	@bash ./scripts/push-chu18-c259.sh
+# End CHU18 delivery targets

@@ -26325,6 +26325,58 @@ BenchmarkCH037ArgExtremeStateMerge-32    	 2410304	       114.6 ns/op	        25
 BenchmarkCH037ArgExtremeStateMerge-32    	 2224726	       104.9 ns/op	        25.00 state-bytes/op	      56 B/op	       3 allocs/op
 ```
 
+<a id="ch-u18-composite-primary-mark-pruning"></a>
+## CH-U18 Composite Primary-Mark Pruning
+
+Seven one-second samples were collected with `GOMAXPROCS=1` on an AMD Ryzen 9
+5950X Linux `amd64` host. The workload has 100 tenants, 8,192 ordered rows per
+tenant, 256 rows per segment, and the predicates `tenant = 42 AND id >= 7000`.
+The old path can use only the leading `tenant` mark; the composite path uses
+both tuple fields.
+
+| Path | Planner median | Query allocations | Segments retained | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing single-field marks | 28.51 ns/op | 0 B/op, 0 allocs/op | 32 / 3,200 | 1.00x CPU baseline |
+| Composite `(tenant, id)` marks | 77.48 ns/op | 0 B/op, 0 allocs/op | 5 / 3,200 | 2.72x planner CPU cost; 6.40x fewer segments |
+
+The tuple arrays add `3,200 * 2 fields * 2 endpoints * 8 bytes = 102,400`
+bytes in this fixture, plus the small field-name slice. Query planning adds no
+heap allocation. Composite marks are therefore beneficial when the extra
+leading-key selectivity avoids enough row scanning to repay the additional
+tuple comparisons; single-field behavior remains the compatibility fallback.
+
+Raw output from `make benchmark-before-chu18-c259` and
+`make benchmark-chu18-c259`:
+
+```text
+# clean baseline, existing single-field path
+27.04 ns/op
+29.39 ns/op
+29.09 ns/op
+33.18 ns/op
+27.56 ns/op
+26.40 ns/op
+28.51 ns/op
+
+# working tree implementation, composite path
+77.44 ns/op
+78.15 ns/op
+85.59 ns/op
+83.32 ns/op
+75.31 ns/op
+75.40 ns/op
+77.48 ns/op
+
+# working tree implementation, existing single-field path control
+31.00 ns/op
+30.02 ns/op
+28.75 ns/op
+26.52 ns/op
+28.01 ns/op
+26.62 ns/op
+29.55 ns/op
+```
+
 <a id="ch-u17-dense-integer-in-sets"></a>
 ## CH-U17 Dense Integer `IN` Sets
 

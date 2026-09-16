@@ -70,6 +70,7 @@ type TypedTableColumnarCacheOptions struct {
 	AdaptiveSegments          bool
 	SparsePrimaryIndex        bool
 	SparsePrimaryField        string
+	SparsePrimaryFields       []string
 	SparsePrimaryMarkCache    bool
 	SparsePrimaryMarkMaxBytes int
 }
@@ -403,6 +404,8 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 	return table, nil
 }
 
+const typedTableSparsePrimaryMaxFields = 8
+
 func normalizeTypedTableColumnarCacheOptions(options TypedTableColumnarCacheOptions) TypedTableColumnarCacheOptions {
 	if !options.Enabled {
 		return TypedTableColumnarCacheOptions{}
@@ -433,12 +436,54 @@ func normalizeTypedTableColumnarCacheOptions(options TypedTableColumnarCacheOpti
 		}
 	}
 	if options.SparsePrimaryIndex {
-		options.SparsePrimaryField = strings.TrimSpace(options.SparsePrimaryField)
-		if options.SparsePrimaryField == "" {
+		fields := options.SparsePrimaryFields
+		if len(fields) == 0 && strings.TrimSpace(options.SparsePrimaryField) != "" {
+			fields = []string{options.SparsePrimaryField}
+		}
+		if len(fields) > typedTableSparsePrimaryMaxFields {
+			fields = nil
+		} else if len(fields) == 1 {
+			field := strings.TrimSpace(fields[0])
+			if field == "" {
+				fields = nil
+			} else {
+				fields = []string{field}
+			}
+		} else if len(fields) > 0 {
+			seen := make(map[string]struct{}, len(fields))
+			normalized := make([]string, len(fields))
+			for index, field := range fields {
+				field = strings.TrimSpace(field)
+				if field == "" {
+					fields = nil
+					break
+				}
+				if _, duplicate := seen[field]; duplicate {
+					fields = nil
+					break
+				}
+				seen[field] = struct{}{}
+				normalized[index] = field
+			}
+			if fields != nil {
+				fields = normalized
+			}
+		}
+		if len(fields) == 0 {
 			options.SparsePrimaryIndex = false
+			options.SparsePrimaryField = ""
+			options.SparsePrimaryFields = nil
+		} else {
+			options.SparsePrimaryField = fields[0]
+			if len(fields) > 1 {
+				options.SparsePrimaryFields = fields
+			} else {
+				options.SparsePrimaryFields = nil
+			}
 		}
 	} else {
 		options.SparsePrimaryField = ""
+		options.SparsePrimaryFields = nil
 	}
 	if !options.SparsePrimaryMarkCache || !options.SparsePrimaryIndex {
 		options.SparsePrimaryMarkCache = false
@@ -1082,6 +1127,7 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 			segments.SparsePrimaryField = field
 		}
 	}
+	table.columnarCompositeSparsePrimarySegmentsLocked(batch, segments)
 	for field, dictionary := range batch.Dictionaries {
 		valueCount := dictionary.ValueCount()
 		if !dictionary.codesTrusted || valueCount == 0 || valueCount > 64 || dictionary.RowCount() != batch.Rows {
@@ -1099,6 +1145,69 @@ func (table *TypedTable) columnarNumericSegmentsLocked(batch ColumnarBatch) *Col
 		return nil
 	}
 	return segments
+}
+
+func (table *TypedTable) columnarCompositeSparsePrimarySegmentsLocked(batch ColumnarBatch, segments *ColumnarNumericSegments) {
+	fields := table.columnar.options.SparsePrimaryFields
+	fieldCount := len(fields)
+	if segments == nil || fieldCount < 2 || fieldCount > typedTableSparsePrimaryMaxFields {
+		return
+	}
+	for _, field := range fields {
+		column, found := table.byName[field]
+		if !found || (table.columns[column].kind != TypedTableInt64 && table.columns[column].kind != TypedTableFloat64) || !columnarBatchHasField(batch, field) {
+			return
+		}
+	}
+	segmentCount := len(segments.Columns[fields[0]])
+	if segmentCount == 0 {
+		return
+	}
+	minimum := make([]float64, segmentCount*fieldCount)
+	maximum := make([]float64, segmentCount*fieldCount)
+	var tuple [typedTableSparsePrimaryMaxFields]float64
+	var previous [typedTableSparsePrimaryMaxFields]float64
+	previousValid := false
+	for row := 0; row < batch.Rows; row++ {
+		for fieldIndex, field := range fields {
+			value, numeric := columnarBatchNumericValue(batch, field, row)
+			if !numeric || math.IsNaN(value) {
+				return
+			}
+			tuple[fieldIndex] = value
+		}
+		if previousValid && sqlColumnarCompareNumericTuple(tuple[:fieldCount], previous[:fieldCount]) < 0 {
+			return
+		}
+		segment := row / segments.RowsPerSegment
+		segmentOffset := segment * fieldCount
+		if row%segments.RowsPerSegment == 0 {
+			copy(minimum[segmentOffset:segmentOffset+fieldCount], tuple[:fieldCount])
+		}
+		if row%segments.RowsPerSegment == segments.RowsPerSegment-1 || row == batch.Rows-1 {
+			copy(maximum[segmentOffset:segmentOffset+fieldCount], tuple[:fieldCount])
+		}
+		copy(previous[:fieldCount], tuple[:fieldCount])
+		previousValid = true
+	}
+	if !previousValid {
+		return
+	}
+	segments.SparsePrimaryFields = append([]string(nil), fields...)
+	segments.SparsePrimaryTupleMinimum = minimum
+	segments.SparsePrimaryTupleMaximum = maximum
+}
+
+func sqlColumnarCompareNumericTuple(left, right []float64) int {
+	for index := range left {
+		if left[index] < right[index] {
+			return -1
+		}
+		if left[index] > right[index] {
+			return 1
+		}
+	}
+	return 0
 }
 
 func columnarDictionaryCodeSets(dictionary DictionaryColumn, valueCount, rows, rowsPerSegment int) ([]uint64, bool) {

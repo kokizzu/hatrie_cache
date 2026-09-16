@@ -10098,7 +10098,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		return nil
 	}
 	if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
-		segmentStart, segmentEnd, sparsePrimary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+		segmentStart, segmentEnd, sparsePrimary := sqlColumnarSparsePrimarySegmentRangeWithComposite(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
 		if !sparsePrimary {
 			segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
 		}
@@ -10412,7 +10412,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			return nil
 		}
 		if segments != nil && (len(predicates) > 0 || dictionaryFilter || dictionaryINFilter) && segments.RowsPerSegment > 0 {
-			segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRange(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
+			segmentStart, segmentEnd, primary := sqlColumnarSparsePrimarySegmentRangeWithComposite(segments, predicates, (batch.Rows+segments.RowsPerSegment-1)/segments.RowsPerSegment)
 			sparsePrimary = primary
 			if !sparsePrimary {
 				segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
@@ -10490,6 +10490,47 @@ func sqlColumnarNumericSegmentMayMatch(segments *ColumnarNumericSegments, segmen
 	return true
 }
 
+func sqlColumnarSparsePrimarySegmentRangeWithComposite(segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, segmentCount int) (int, int, bool) {
+	if segments == nil || segments.RowsPerSegment <= 0 || segmentCount <= 0 {
+		return 0, 0, false
+	}
+	if len(segments.SparsePrimaryFields) >= 2 {
+		if start, end, used := sqlColumnarSparsePrimaryCompositeSegmentRange(segments, predicates, segmentCount); used {
+			return start, end, true
+		}
+	}
+	if segments.SparsePrimaryField == "" {
+		return 0, 0, false
+	}
+	fieldSegments, available := segments.Columns[segments.SparsePrimaryField]
+	if !available || len(fieldSegments) != segmentCount {
+		return 0, 0, false
+	}
+
+	start, end := 0, segmentCount
+	used := false
+	for _, predicate := range predicates {
+		if predicate.field != segments.SparsePrimaryField || predicate.value != predicate.value {
+			continue
+		}
+		predicateStart, predicateEnd, bounded := sqlColumnarSparsePrimaryPredicateRange(fieldSegments, predicate)
+		if !bounded {
+			continue
+		}
+		if predicateStart > start {
+			start = predicateStart
+		}
+		if predicateEnd < end {
+			end = predicateEnd
+		}
+		used = true
+	}
+	if !used {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
 func sqlColumnarSparsePrimarySegmentRange(segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, segmentCount int) (int, int, bool) {
 	if segments == nil || segments.RowsPerSegment <= 0 || segmentCount <= 0 || segments.SparsePrimaryField == "" {
 		return 0, 0, false
@@ -10521,6 +10562,152 @@ func sqlColumnarSparsePrimarySegmentRange(segments *ColumnarNumericSegments, pre
 		return 0, 0, false
 	}
 	return start, end, true
+}
+
+func sqlColumnarSparsePrimaryCompositeSegmentRange(segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, segmentCount int) (int, int, bool) {
+	if segments == nil || segmentCount <= 0 {
+		return 0, 0, false
+	}
+	fields := segments.SparsePrimaryFields
+	fieldCount := len(fields)
+	if fieldCount < 2 || fieldCount > typedTableSparsePrimaryMaxFields || len(segments.SparsePrimaryTupleMinimum) != segmentCount*fieldCount || len(segments.SparsePrimaryTupleMaximum) != segmentCount*fieldCount {
+		return 0, 0, false
+	}
+	var lower [typedTableSparsePrimaryMaxFields]float64
+	var upper [typedTableSparsePrimaryMaxFields]float64
+	var lowerInclusive [typedTableSparsePrimaryMaxFields]bool
+	var upperInclusive [typedTableSparsePrimaryMaxFields]bool
+	lowerTupleInclusive := true
+	upperTupleInclusive := true
+	for fieldIndex := 0; fieldIndex < fieldCount; fieldIndex++ {
+		lower[fieldIndex] = math.Inf(-1)
+		upper[fieldIndex] = math.Inf(1)
+		lowerInclusive[fieldIndex] = true
+		upperInclusive[fieldIndex] = true
+	}
+
+	usedPrefix := false
+	for fieldIndex, field := range fields {
+		equalitySet := false
+		var equality float64
+		lowerSet := false
+		upperSet := false
+		for _, predicate := range predicates {
+			if predicate.field != field || math.IsNaN(predicate.value) {
+				continue
+			}
+			switch predicate.operator {
+			case "=":
+				if equalitySet && equality != predicate.value {
+					return 0, 0, true
+				}
+				equality = predicate.value
+				equalitySet = true
+			case ">":
+				sqlColumnarSetSparsePrimaryLower(&lower[fieldIndex], &lowerSet, &lowerInclusive[fieldIndex], predicate.value, false)
+			case ">=":
+				sqlColumnarSetSparsePrimaryLower(&lower[fieldIndex], &lowerSet, &lowerInclusive[fieldIndex], predicate.value, true)
+			case "<":
+				sqlColumnarSetSparsePrimaryUpper(&upper[fieldIndex], &upperSet, &upperInclusive[fieldIndex], predicate.value, false)
+			case "<=":
+				sqlColumnarSetSparsePrimaryUpper(&upper[fieldIndex], &upperSet, &upperInclusive[fieldIndex], predicate.value, true)
+			}
+		}
+		if equalitySet {
+			for _, predicate := range predicates {
+				if predicate.field == field && (predicate.operator == "!=" || predicate.operator == "<>") && predicate.value == equality {
+					return 0, 0, true
+				}
+			}
+			if lowerSet && (equality < lower[fieldIndex] || equality == lower[fieldIndex] && !lowerInclusive[fieldIndex]) || upperSet && (equality > upper[fieldIndex] || equality == upper[fieldIndex] && !upperInclusive[fieldIndex]) {
+				return 0, 0, true
+			}
+			lower[fieldIndex] = equality
+			upper[fieldIndex] = equality
+			lowerInclusive[fieldIndex] = true
+			upperInclusive[fieldIndex] = true
+			usedPrefix = true
+			continue
+		}
+		if lowerSet || upperSet {
+			if lowerSet && upperSet && (lower[fieldIndex] > upper[fieldIndex] || lower[fieldIndex] == upper[fieldIndex] && (!lowerInclusive[fieldIndex] || !upperInclusive[fieldIndex])) {
+				return 0, 0, true
+			}
+			for later := fieldIndex + 1; later < fieldCount; later++ {
+				if lowerSet {
+					if lowerInclusive[fieldIndex] {
+						lower[later] = math.Inf(-1)
+					} else {
+						lower[later] = math.Inf(1)
+					}
+				}
+				if upperSet {
+					if upperInclusive[fieldIndex] {
+						upper[later] = math.Inf(1)
+					} else {
+						upper[later] = math.Inf(-1)
+					}
+				}
+			}
+			if lowerSet {
+				lowerTupleInclusive = lowerInclusive[fieldIndex]
+			}
+			if upperSet {
+				upperTupleInclusive = upperInclusive[fieldIndex]
+			}
+			usedPrefix = true
+			break
+		}
+		if !usedPrefix {
+			return 0, 0, false
+		}
+		break
+	}
+	if !usedPrefix {
+		return 0, 0, false
+	}
+	start := sqlColumnarSparsePrimaryTupleSearch(segments.SparsePrimaryTupleMaximum, segmentCount, fieldCount, lower[:fieldCount], lowerTupleInclusive)
+	end := sqlColumnarSparsePrimaryTupleSearch(segments.SparsePrimaryTupleMinimum, segmentCount, fieldCount, upper[:fieldCount], !upperTupleInclusive)
+	return start, end, true
+}
+
+func sqlColumnarSetSparsePrimaryLower(bound *float64, set, inclusive *bool, value float64, valueInclusive bool) {
+	if !*set || value > *bound {
+		*bound = value
+		*set = true
+		*inclusive = valueInclusive
+		return
+	}
+	if value == *bound && !valueInclusive {
+		*inclusive = false
+	}
+}
+
+func sqlColumnarSetSparsePrimaryUpper(bound *float64, set, inclusive *bool, value float64, valueInclusive bool) {
+	if !*set || value < *bound {
+		*bound = value
+		*set = true
+		*inclusive = valueInclusive
+		return
+	}
+	if value == *bound && !valueInclusive {
+		*inclusive = false
+	}
+}
+
+func sqlColumnarSparsePrimaryTupleSearch(values []float64, segmentCount, fieldCount int, target []float64, equalMatches bool) int {
+	low, high := 0, segmentCount
+	for low < high {
+		middle := low + (high-low)/2
+		start := middle * fieldCount
+		comparison := sqlColumnarCompareNumericTuple(values[start:start+fieldCount], target)
+		if comparison > 0 || comparison == 0 && equalMatches {
+			high = middle
+		} else {
+			low = middle + 1
+		}
+	}
+	return low
 }
 
 func sqlColumnarSparsePrimarySkippedRows(rows, rowsPerSegment, startSegment, endSegment int) int {
