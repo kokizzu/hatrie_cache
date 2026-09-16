@@ -1317,6 +1317,13 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// SQLIndexDiagnosticsResolver optionally reports index bytes, candidate rows,
+// and skipped segments for EXPLAIN ANALYZE. It is never required for indexed
+// execution and must not change the candidate rows returned by the index.
+type SQLIndexDiagnosticsResolver interface {
+	ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error)
+}
+
 // MultikeyIndexedSourceResolver optionally resolves ARRAY_CONTAINS predicates
 // against an index that stores one posting per distinct array element. It
 // returns candidates only; the executor evaluates ARRAY_CONTAINS again before

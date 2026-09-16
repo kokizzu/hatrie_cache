@@ -213,3 +213,37 @@ func sqlJSONPathSkipRows(index *sqlJSONPathSkipIndex, value interface{}) ([]SQLR
 	}
 	return hatSql.CloneRows(rows), true
 }
+
+func sqlJSONPathSkipDiagnostics(index *sqlJSONPathSkipIndex, field string, value interface{}) (hatSql.SQLIndexDiagnostics, bool) {
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok || index == nil || index.rowsPerSegment <= 0 || index.wordsPerSegment <= 0 {
+		return hatSql.SQLIndexDiagnostics{}, false
+	}
+	totalRows := len(index.rows)
+	segments := (totalRows + index.rowsPerSegment - 1) / index.rowsPerSegment
+	candidateRows := 0
+	candidateSegments := 0
+	for segment, start := 0, 0; start < totalRows; segment, start = segment+1, start+index.rowsPerSegment {
+		offset := segment * index.wordsPerSegment
+		if !sqlJSONPathSkipMayContain(index.bits, offset, index.bitsPerSegment, valueKey) {
+			continue
+		}
+		candidateSegments++
+		end := start + index.rowsPerSegment
+		if end > totalRows {
+			end = totalRows
+		}
+		candidateRows += end - start
+	}
+	return hatSql.SQLIndexDiagnostics{
+		Kind:              "json_path_skip",
+		Field:             field,
+		IndexBytes:        len(index.bits) * 8,
+		TotalRows:         totalRows,
+		CandidateRows:     candidateRows,
+		SkippedRows:       totalRows - candidateRows,
+		Segments:          segments,
+		CandidateSegments: candidateSegments,
+		SkippedSegments:   segments - candidateSegments,
+	}, true
+}

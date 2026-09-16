@@ -1,5 +1,78 @@
 # Benchmark
 
+## CH-U49 Skip-Index EXPLAIN Diagnostics
+
+This paired clean-worktree benchmark compares the pre-CH-U49 implementation
+with the implementation that reports selected JSON-path skip-index diagnostics.
+Both runs use the same deterministic JSON skip-index fixture and the same
+ordinary query and `EXPLAIN ANALYZE` query. Nine samples were collected with
+`-benchtime=200ms` on an AMD Ryzen 9 5950X Linux amd64 host.
+
+| Operation | Before median | After median | Relative result |
+| --- | ---: | ---: | ---: |
+| Ordinary indexed query CPU | 7,376,003 ns/op | 7,210,486 ns/op | 1.02x faster, within noise |
+| Ordinary indexed query heap | 7,588,829 B/op | 7,588,829 B/op | 1.00x, no change |
+| Ordinary indexed query allocations | 34,821 allocs/op | 34,821 allocs/op | 1.00x, no change |
+| `EXPLAIN ANALYZE` CPU | 18,901,932 ns/op | 18,586,384 ns/op | 1.02x faster, within noise |
+| `EXPLAIN ANALYZE` heap | 10,805,782 B/op | 10,807,056 B/op | 1.0001x, +1,274 B/op |
+| `EXPLAIN ANALYZE` allocations | 141,183 allocs/op | 141,211 allocs/op | 1.0002x, +28 allocs/op |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+query: 7285004 7589004 34821
+query: 7431164 7588829 34821
+query: 6498492 7588823 34821
+query: 7485659 7588996 34821
+query: 7376003 7588831 34821
+query: 7363165 7588833 34821
+query: 7598988 7588828 34821
+query: 7442998 7588829 34821
+query: 7271794 7588829 34821
+explain: 19538974 10807879 141185
+explain: 18414666 10805764 141183
+explain: 18952250 10805858 141185
+explain: 18541495 10805372 141183
+explain: 18901932 10805794 141184
+explain: 20689325 10805845 141184
+explain: 19815391 10805772 141183
+explain: 18806691 10805764 141183
+explain: 17732626 10805782 141183
+```
+
+Raw feature samples:
+
+```text
+query: 7836555 7589476 34822
+query: 7758449 7588829 34821
+query: 8553692 7588833 34821
+query: 7303666 7589175 34821
+query: 7210486 7588826 34821
+query: 6509412 7588823 34821
+query: 6703535 7588825 34821
+query: 7085835 7588994 34821
+query: 6728556 7588824 34821
+explain: 16807101 10808332 141212
+explain: 17698096 10807085 141211
+explain: 18529828 10806841 141211
+explain: 18468511 10807056 141211
+explain: 18590692 10807091 141211
+explain: 20114608 10806766 141212
+explain: 19591809 10806866 141212
+explain: 19238898 10806064 141211
+explain: 18586384 10807444 141213
+```
+
+The ordinary query path has no diagnostic type assertion when metrics are not
+requested, which explains the unchanged allocation and heap medians. The
+EXPLAIN-only cost is the bounded typed payload and tabular row representation;
+it does not affect normal reads. Reproduce with:
+
+```text
+make benchmark-chu49-before-c203
+make benchmark-chu49-c203
+```
+
 ## MZ-002 TypedTable Change Read Holds
 
 The paired clean-overlay comparison uses `make benchmark-mz002-before-c226`

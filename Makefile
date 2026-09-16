@@ -16930,3 +16930,27 @@ commit-chu13-c203:
 .PHONY: push-chu13-c203
 push-chu13-c203:
 	bash ./scripts/deliver-chu13-c203.sh push
+.PHONY: format-chu49-c203
+format-chu49-c203:
+	sh scripts/format-chu49-c203.sh
+.PHONY: benchmark-chu49-c203
+benchmark-chu49-c203:
+	sh scripts/benchmark-chu49-c203.sh
+
+test-chu49-c203:
+	sh scripts/test-chu49-c203.sh
+
+race-chu49-c203:
+	sh scripts/race-chu49-c203.sh
+
+vet-chu49-c203:
+	sh scripts/vet-chu49-c203.sh
+
+stage-chu49-c203:
+	sh scripts/stage-chu49-c203.sh
+
+commit-chu49-c203:
+	sh scripts/commit-chu49-c203.sh
+
+push-chu49-c203:
+	sh scripts/push-chu49-c203.sh

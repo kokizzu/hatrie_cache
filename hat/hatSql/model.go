@@ -33,6 +33,7 @@ type ExplainStep struct {
 	Detail               string               `json:"detail"`
 	Alternatives         []ExplainAlternative `json:"alternatives,omitempty"`
 	Notices              []ExplainNotice      `json:"notices,omitempty"`
+	Index                *SQLIndexDiagnostics `json:"index,omitempty"`
 	Pruning              *ExplainPruning      `json:"pruning,omitempty"`
 	Stage                int                  `json:"stage,omitempty"`
 	Worker               int                  `json:"worker,omitempty"`

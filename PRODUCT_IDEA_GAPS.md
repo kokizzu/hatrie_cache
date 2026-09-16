@@ -67,7 +67,7 @@ tradeoffs are documented and its commit is published.
 | CH-U46 | `ASOF JOIN` execution | SQL does not provide an ordered nearest-prior temporal join operator. | Timestamp ordering, duplicate ties, NULLs, and index usage. |
 | CH-U47 | Dictionary lookup functions | There is no SQL dictionary object/function contract with refresh, miss, and version semantics. | Bounded lookup latency, refresh atomicity, and secret handling. |
 | CH-U48 | Ranked full-text search | Token prefilters do not provide exact scored full-text results with BM25-like ranking. | Unicode/tokenization, update cost, and bounded result memory. |
-| CH-U49 | Skip-index explain diagnostics | Explain output does not report per-index bytes/rows skipped and false-positive work for a query. | No query-result changes, bounded metrics, and low default overhead. |
+| CH-U49 | Skip-index explain diagnostics | Implemented for direct equality probes over selected `CACHE` JSON-path skip indexes; other index families and compound predicates remain open. | No query-result changes, bounded metrics, and low default overhead. |
 | CH-U50 | Part/WAL-consistent backup manifest | Backup and restore are tested, but there is no ClickHouse-style manifest joining immutable parts, checksums, and the exact mutation/WAL boundary. | Concurrent writes, restore rehearsal, crash recovery, and bandwidth. |
 
 ## Materialize

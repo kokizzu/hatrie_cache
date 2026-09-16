@@ -8230,9 +8230,12 @@ func sqlSaturatingMultiply(left, right int) int {
 }
 
 type sqlExecutionMetrics struct {
-	steps     []SQLExplainStep
-	adaptive  *AdaptivePlanner
-	indexHint SQLIndexHint
+	steps        []SQLExplainStep
+	adaptive     *AdaptivePlanner
+	indexHint    SQLIndexHint
+	indexStep    int
+	indexFilter  string
+	indexPending bool
 }
 
 func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outputRows int, started time.Time) {
@@ -8295,6 +8298,62 @@ func (metrics *sqlExecutionMetrics) recordIndexCandidates(detail string, alterna
 	step := &metrics.steps[len(metrics.steps)-1]
 	step.Alternatives = alternatives
 	step.Notices = notices
+}
+
+func (metrics *sqlExecutionMetrics) recordIndexDiagnostics(source sqlSource, condition sqlExpr, resolver SQLSourceResolver) {
+	if metrics == nil || len(metrics.steps) == 0 || source.kind != "CACHE" {
+		return
+	}
+	field, value, matched := sqlIndexDiagnosticEquality(source, condition)
+	if !matched {
+		return
+	}
+	diagnosticsResolver, ok := resolver.(SQLIndexDiagnosticsResolver)
+	if !ok {
+		return
+	}
+	diagnostics, available, err := diagnosticsResolver.ResolveSQLIndexDiagnostics(source.kind, source.key, field, value)
+	if err != nil || !available {
+		return
+	}
+	step := &metrics.steps[len(metrics.steps)-1]
+	copyDiagnostics := diagnostics
+	step.Index = &copyDiagnostics
+	step.Pruning = &ExplainPruning{
+		TotalRows:                 diagnostics.TotalRows,
+		SkippedRows:               diagnostics.SkippedRows,
+		ScannedRows:               diagnostics.CandidateRows,
+		MatchedRows:               0,
+		ResidualRows:              diagnostics.CandidateRows,
+		ResidualFalsePositiveRate: 100,
+	}
+	metrics.indexStep = len(metrics.steps) - 1
+	metrics.indexFilter = sqlExplainExpression(condition)
+	metrics.indexPending = true
+}
+
+func (metrics *sqlExecutionMetrics) recordIndexMatched(filter string, matchedRows int) {
+	if metrics == nil || !metrics.indexPending || metrics.indexFilter != filter || metrics.indexStep < 0 || metrics.indexStep >= len(metrics.steps) {
+		return
+	}
+	pruning := metrics.steps[metrics.indexStep].Pruning
+	if pruning == nil {
+		metrics.indexPending = false
+		return
+	}
+	if matchedRows < 0 {
+		matchedRows = 0
+	}
+	pruning.MatchedRows = matchedRows
+	pruning.ResidualRows = pruning.ScannedRows - matchedRows
+	if pruning.ResidualRows < 0 {
+		pruning.ResidualRows = 0
+	}
+	pruning.ResidualFalsePositiveRate = 0
+	if pruning.ScannedRows > 0 {
+		pruning.ResidualFalsePositiveRate = float64(pruning.ResidualRows) * 100 / float64(pruning.ScannedRows)
+	}
+	metrics.indexPending = false
 }
 
 func (metrics *sqlExecutionMetrics) recordEstimated(node, detail string, estimatedRows *int, inputRows, outputRows int, started time.Time) {
@@ -11392,6 +11451,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				return SQLQueryResult{}, err
 			}
 			metrics.recordEstimated("INDEX SCAN", sqlExplainSource(*q.from), estimatedRows, 0, len(base), started)
+			metrics.recordIndexDiagnostics(*q.from, q.where, resolver)
 		} else {
 			metrics.recordScanRows(*q.from, base, started)
 		}
@@ -11409,6 +11469,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			rows = filtered
 			if metrics != nil {
 				metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
+				metrics.recordIndexMatched(sqlExplainExpression(q.where), len(rows))
 			}
 		}
 		leftAliases := []string{q.from.alias}
@@ -11900,6 +11961,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		rows = filtered
 		if metrics != nil {
 			metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
+			metrics.recordIndexMatched(sqlExplainExpression(q.where), len(rows))
 		}
 	}
 	if indexOrdered && !sqlQueryHasWithFill(q) {
@@ -12835,6 +12897,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.EstimateErrorPercent != nil {
 			row["estimate_error_percent"] = *step.EstimateErrorPercent
 		}
+		if step.Index != nil {
+			row["index"] = *step.Index
+		}
 		if step.Pruning != nil {
 			row["total_rows"] = step.Pruning.TotalRows
 			row["skipped_rows"] = step.Pruning.SkippedRows
@@ -12845,7 +12910,18 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		result.Rows = append(result.Rows, row)
 	}
-	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns", "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate")
+	hasIndexDiagnostics := false
+	for _, step := range steps {
+		if step.Index != nil {
+			hasIndexDiagnostics = true
+			break
+		}
+	}
+	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
+	if hasIndexDiagnostics {
+		result.Columns = append(result.Columns, "index")
+	}
+	result.Columns = append(result.Columns, "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate")
 	result.Rows = append(result.Rows, SQLRow{
 		"node":         "ANALYZE",
 		"detail":       "execution summary",
@@ -14225,6 +14301,26 @@ func sqlCompositeIndexedRange(source sqlSource, condition sqlExpr) ([]string, []
 		values[index] = equalities[field]
 	}
 	return fields, values, rangeField, rangeOperator, rangeValue, true
+}
+
+func sqlIndexDiagnosticEquality(source sqlSource, condition sqlExpr) (string, interface{}, bool) {
+	if source.kind != "CACHE" || condition.kind != "binary" || condition.op != "=" || condition.left == nil || condition.right == nil {
+		return "", nil, false
+	}
+	left, right := *condition.left, *condition.right
+	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
+		return left.name, right.value, true
+	}
+	if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+		return right.name, left.value, true
+	}
+	if path, ok := sqlJSONPathIndexField(left, source.alias); ok && right.kind == "literal" {
+		return path, right.value, true
+	}
+	if path, ok := sqlJSONPathIndexField(right, source.alias); ok && left.kind == "literal" {
+		return path, left.value, true
+	}
+	return "", nil, false
 }
 
 func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver) ([]SQLRow, bool, error) {

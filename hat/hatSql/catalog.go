@@ -270,6 +270,25 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLIndexDiagnostics forwards optional application index diagnostics
+// while leaving information-schema sources owned by the catalog resolver.
+func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		switch strings.ToLower(key) {
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+			return SQLIndexDiagnostics{}, false, nil
+		}
+	}
+	if resolver.Source == nil {
+		return SQLIndexDiagnostics{}, false, nil
+	}
+	diagnostics, ok := resolver.Source.(SQLIndexDiagnosticsResolver)
+	if !ok {
+		return SQLIndexDiagnostics{}, false, nil
+	}
+	return diagnostics.ResolveSQLIndexDiagnostics(name, key, field, value)
+}
+
 // ResolveSQLOrderedSourcePartitions forwards ordered application partitions
 // while leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {
