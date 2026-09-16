@@ -26740,3 +26740,26 @@ The implementation records only successful slow `CACHE` queries with a caller
 uses aggregate observed latency as the selection signal and remains an explicit
 operator call, so it cannot destabilize the planner or create projection state
 implicitly.
+
+## CH-U11 Automatic Data-Skipping-Index Selection
+
+Raw commands: `make benchmark-chu11-before-c251` and
+`make benchmark-chu11-c251`. Both commands benchmark clean archives so
+unrelated worktree edits cannot affect package compilation. Five samples use
+`-benchmem -count=5` on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Workload | Clean HEAD | CH-U11 | Relative result |
+|---|---:|---:|---|
+| Existing advisor disabled | 4.60-4.87 us/op; 5,936 B/op; 23 allocs | 4.73-5.01 us/op; 5,936 B/op; 23 allocs | No measurable default-path regression |
+| Existing advisor, non-covering candidate | 12.98-14.57 us/op; 9,659 B/op; 98 allocs | 12.30-12.88 us/op; 9,659-9,660 B/op; 98 allocs | No allocation regression after lazy collection |
+| Existing advisor, covering candidate | 14.34-14.83 us/op; 10,430 B/op; 105 allocs | 13.33-14.42 us/op; 10,430 B/op; 105 allocs | Within run variance |
+| Skip selector, 128 candidates, top 16 | Not available | 14.47-16.13 us/op; 9,624 B/op; 4 allocs | Explicit reporting cost only |
+| JSON query, advisor disabled | Not available | 9.64-10.41 us/op; 8,664 B/op; 52 allocs | Reference |
+| JSON query, advisor enabled | Not available | 16.25-17.92 us/op; 12,445 B/op; 133 allocs | Opt-in observation overhead |
+
+The selector is advisory and does not accelerate a query until the caller
+creates a recommended skip index. The no-JSON collector is allocation-free,
+so the ordinary advisor path retains its pre-feature allocation profile. See
+[CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md](CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md)
+for the supported predicate shape, explicit creation example, persistence
+compatibility, and verification targets.

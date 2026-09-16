@@ -20,12 +20,13 @@ const (
 
 // SQLIndexAdvisorSnapshotVersion is the persisted advisor snapshot format
 // version written by Save.
-const SQLIndexAdvisorSnapshotVersion = 2
+const SQLIndexAdvisorSnapshotVersion = 3
 
 type sqlIndexAdvisorSnapshot struct {
-	Version  uint8                                `json:"version"`
-	Entries  []sqlIndexAdvisorSnapshotEntry       `json:"entries"`
-	Prefixes []sqlIndexAdvisorPrefixSnapshotEntry `json:"prefixes,omitempty"`
+	Version     uint8                                `json:"version"`
+	Entries     []sqlIndexAdvisorSnapshotEntry       `json:"entries"`
+	Prefixes    []sqlIndexAdvisorPrefixSnapshotEntry `json:"prefixes,omitempty"`
+	SkipIndexes []sqlIndexAdvisorSkipSnapshotEntry   `json:"skip_indexes,omitempty"`
 }
 
 type sqlIndexAdvisorSnapshotEntry struct {
@@ -38,6 +39,14 @@ type sqlIndexAdvisorPrefixSnapshotEntry struct {
 	Key         string   `json:"key"`
 	Fields      []string `json:"fields"`
 	SlowQueries uint64   `json:"slow_queries"`
+}
+
+type sqlIndexAdvisorSkipSnapshotEntry struct {
+	Key               string `json:"key"`
+	Field             string `json:"field"`
+	Path              string `json:"path"`
+	SlowQueries       uint64 `json:"slow_queries"`
+	TotalElapsedNanos uint64 `json:"total_elapsed_nanos"`
 }
 
 // Save writes the advisor's bounded workload observations as a versioned JSON
@@ -59,10 +68,12 @@ func (advisor *SQLIndexAdvisor) Save(writer io.Writer) error {
 		}
 	}
 	prefixes := advisor.prefixSnapshotEntries()
+	skipIndexes := advisor.skipIndexSnapshotEntries()
 	return json.NewEncoder(writer).Encode(sqlIndexAdvisorSnapshot{
-		Version:  SQLIndexAdvisorSnapshotVersion,
-		Entries:  entries,
-		Prefixes: prefixes,
+		Version:     SQLIndexAdvisorSnapshotVersion,
+		Entries:     entries,
+		Prefixes:    prefixes,
+		SkipIndexes: skipIndexes,
 	})
 }
 
@@ -96,7 +107,7 @@ func (advisor *SQLIndexAdvisor) Load(reader io.Reader) error {
 		}
 		return fmt.Errorf("decode trailing SQL index advisor snapshot data: %w", err)
 	}
-	if snapshot.Version != 1 && snapshot.Version != SQLIndexAdvisorSnapshotVersion {
+	if snapshot.Version != 1 && snapshot.Version != 2 && snapshot.Version != SQLIndexAdvisorSnapshotVersion {
 		return fmt.Errorf("unsupported SQL index advisor snapshot version %d", snapshot.Version)
 	}
 	if len(snapshot.Entries) > maxSQLIndexAdvisorSnapshotEntries {
@@ -105,7 +116,10 @@ func (advisor *SQLIndexAdvisor) Load(reader io.Reader) error {
 	if len(snapshot.Prefixes) > maxSQLIndexAdvisorSnapshotEntries {
 		return fmt.Errorf("SQL index advisor snapshot contains too many prefixes")
 	}
-	if advisor.capacity <= 0 && (len(snapshot.Entries) > 0 || len(snapshot.Prefixes) > 0) {
+	if len(snapshot.SkipIndexes) > maxSQLIndexAdvisorSnapshotEntries {
+		return fmt.Errorf("SQL index advisor snapshot contains too many skip indexes")
+	}
+	if advisor.capacity <= 0 && (len(snapshot.Entries) > 0 || len(snapshot.Prefixes) > 0 || len(snapshot.SkipIndexes) > 0) {
 		return fmt.Errorf("SQL index advisor snapshot contains entries but capacity is %d", advisor.capacity)
 	}
 	if advisor.capacity > 0 && len(snapshot.Entries) > advisor.capacity {
@@ -113,6 +127,9 @@ func (advisor *SQLIndexAdvisor) Load(reader io.Reader) error {
 	}
 	if advisor.capacity > 0 && len(snapshot.Prefixes) > advisor.capacity {
 		return fmt.Errorf("SQL index advisor snapshot contains %d prefixes, capacity is %d", len(snapshot.Prefixes), advisor.capacity)
+	}
+	if advisor.capacity > 0 && len(snapshot.SkipIndexes) > advisor.capacity {
+		return fmt.Errorf("SQL index advisor snapshot contains %d skip indexes, capacity is %d", len(snapshot.SkipIndexes), advisor.capacity)
 	}
 	counts := make(map[sqlIndexAdvisorKey]uint64, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
@@ -158,9 +175,37 @@ func (advisor *SQLIndexAdvisor) Load(reader io.Reader) error {
 		}
 		prefixCounts[key] = entry.SlowQueries
 	}
+	skipCounts := make(map[sqlIndexAdvisorSkipKey]sqlIndexAdvisorSkipStats, len(snapshot.SkipIndexes))
+	for _, entry := range snapshot.SkipIndexes {
+		if len(entry.Key) == 0 || len(entry.Key) > maxSQLIndexAdvisorSnapshotStringBytes {
+			return fmt.Errorf("SQL index advisor snapshot skip key length is invalid")
+		}
+		if len(entry.Field) == 0 || len(entry.Field) > maxSQLIndexAdvisorSnapshotStringBytes {
+			return fmt.Errorf("SQL index advisor snapshot skip field length is invalid")
+		}
+		if len(entry.Path) == 0 || len(entry.Path) > maxSQLIndexAdvisorSnapshotStringBytes {
+			return fmt.Errorf("SQL index advisor snapshot skip path length is invalid")
+		}
+		canonicalPath, err := NormalizeJSONPath(entry.Path)
+		if err != nil || canonicalPath != entry.Path {
+			return fmt.Errorf("SQL index advisor snapshot skip path is invalid")
+		}
+		if entry.SlowQueries == 0 {
+			return fmt.Errorf("SQL index advisor snapshot skip count must be positive")
+		}
+		key := sqlIndexAdvisorSkipKey{key: entry.Key, field: entry.Field, path: entry.Path}
+		if _, exists := skipCounts[key]; exists {
+			return fmt.Errorf("SQL index advisor snapshot contains duplicate skip index")
+		}
+		skipCounts[key] = sqlIndexAdvisorSkipStats{
+			slowQueries:       entry.SlowQueries,
+			totalElapsedNanos: entry.TotalElapsedNanos,
+		}
+	}
 	advisor.mu.Lock()
 	advisor.counts = counts
 	advisor.prefixCounts = prefixCounts
+	advisor.skipCounts = skipCounts
 	advisor.mu.Unlock()
 	return nil
 }
@@ -184,6 +229,34 @@ func (advisor *SQLIndexAdvisor) prefixSnapshotEntries() []sqlIndexAdvisorPrefixS
 			return entries[left].Key < entries[right].Key
 		}
 		return strings.Join(entries[left].Fields, "\x00") < strings.Join(entries[right].Fields, "\x00")
+	})
+	return entries
+}
+
+func (advisor *SQLIndexAdvisor) skipIndexSnapshotEntries() []sqlIndexAdvisorSkipSnapshotEntry {
+	if advisor == nil {
+		return nil
+	}
+	advisor.mu.RLock()
+	entries := make([]sqlIndexAdvisorSkipSnapshotEntry, 0, len(advisor.skipCounts))
+	for key, stats := range advisor.skipCounts {
+		entries = append(entries, sqlIndexAdvisorSkipSnapshotEntry{
+			Key:               key.key,
+			Field:             key.field,
+			Path:              key.path,
+			SlowQueries:       stats.slowQueries,
+			TotalElapsedNanos: stats.totalElapsedNanos,
+		})
+	}
+	advisor.mu.RUnlock()
+	sort.Slice(entries, func(left, right int) bool {
+		if entries[left].Key != entries[right].Key {
+			return entries[left].Key < entries[right].Key
+		}
+		if entries[left].Field != entries[right].Field {
+			return entries[left].Field < entries[right].Field
+		}
+		return entries[left].Path < entries[right].Path
 	})
 	return entries
 }

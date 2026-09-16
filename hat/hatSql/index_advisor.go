@@ -25,6 +25,19 @@ type SQLCoveringIndexRecommendation struct {
 	SlowQueries uint64
 }
 
+// SQLJSONPathSkipIndexRecommendation is an opt-in recommendation for the
+// equality predicates supported by a JSON path data-skipping index. It
+// retains only the source key, document field, canonical path, and bounded
+// workload counters; predicate values are never retained.
+type SQLJSONPathSkipIndexRecommendation struct {
+	Key            string
+	Field          string
+	Path           string
+	SlowQueries    uint64
+	TotalElapsed   time.Duration
+	AverageElapsed time.Duration
+}
+
 // SQLPrimaryOrderRecommendation is a deterministic primary-field ordering
 // suggestion derived from the advisor's observed slow scans. Fields are
 // ordered by descending frequency, then by name; it contains no query text or
@@ -51,6 +64,7 @@ type SQLIndexAdvisor struct {
 	counts         map[sqlIndexAdvisorKey]uint64
 	prefixCounts   map[sqlIndexAdvisorPrefixKey]uint64
 	coveringCounts map[sqlCoveringAdvisorKey]uint64
+	skipCounts     map[sqlIndexAdvisorSkipKey]sqlIndexAdvisorSkipStats
 }
 
 type sqlIndexAdvisorKey struct {
@@ -69,11 +83,23 @@ type sqlCoveringAdvisorKey struct {
 	columns string
 }
 
+type sqlIndexAdvisorSkipKey struct {
+	key   string
+	field string
+	path  string
+}
+
+type sqlIndexAdvisorSkipStats struct {
+	slowQueries       uint64
+	totalElapsedNanos uint64
+}
+
 func NewSQLIndexAdvisor(capacity int) *SQLIndexAdvisor {
 	return &SQLIndexAdvisor{
 		capacity:     capacity,
 		counts:       make(map[sqlIndexAdvisorKey]uint64),
 		prefixCounts: make(map[sqlIndexAdvisorPrefixKey]uint64),
+		skipCounts:   make(map[sqlIndexAdvisorSkipKey]sqlIndexAdvisorSkipStats),
 	}
 }
 
@@ -235,6 +261,59 @@ func (advisor *SQLIndexAdvisor) CoveringRecommendations() []SQLCoveringIndexReco
 	return recommendations
 }
 
+// SkipIndexRecommendations returns bounded JSON path equality candidates
+// ranked by observed total elapsed time. A positive limit returns only the
+// first limit entries; zero returns every retained candidate. The method is
+// advisory only: it never creates an index or changes query planning.
+func (advisor *SQLIndexAdvisor) SkipIndexRecommendations(limit int) []SQLJSONPathSkipIndexRecommendation {
+	if advisor == nil {
+		return nil
+	}
+	advisor.mu.RLock()
+	recommendations := make([]SQLJSONPathSkipIndexRecommendation, 0, len(advisor.skipCounts))
+	for key, stats := range advisor.skipCounts {
+		if stats.slowQueries == 0 {
+			continue
+		}
+		totalElapsed := sqlIndexAdvisorNanosDuration(stats.totalElapsedNanos)
+		averageElapsed := totalElapsed
+		if stats.slowQueries > 1 {
+			averageElapsed = sqlIndexAdvisorNanosDuration(stats.totalElapsedNanos / stats.slowQueries)
+		}
+		recommendations = append(recommendations, SQLJSONPathSkipIndexRecommendation{
+			Key:            key.key,
+			Field:          key.field,
+			Path:           key.path,
+			SlowQueries:    stats.slowQueries,
+			TotalElapsed:   totalElapsed,
+			AverageElapsed: averageElapsed,
+		})
+	}
+	advisor.mu.RUnlock()
+	sort.Slice(recommendations, func(left, right int) bool {
+		if recommendations[left].TotalElapsed != recommendations[right].TotalElapsed {
+			return recommendations[left].TotalElapsed > recommendations[right].TotalElapsed
+		}
+		if recommendations[left].AverageElapsed != recommendations[right].AverageElapsed {
+			return recommendations[left].AverageElapsed > recommendations[right].AverageElapsed
+		}
+		if recommendations[left].SlowQueries != recommendations[right].SlowQueries {
+			return recommendations[left].SlowQueries > recommendations[right].SlowQueries
+		}
+		if recommendations[left].Key != recommendations[right].Key {
+			return recommendations[left].Key < recommendations[right].Key
+		}
+		if recommendations[left].Field != recommendations[right].Field {
+			return recommendations[left].Field < recommendations[right].Field
+		}
+		return recommendations[left].Path < recommendations[right].Path
+	})
+	if limit > 0 && len(recommendations) > limit {
+		recommendations = recommendations[:limit]
+	}
+	return recommendations
+}
+
 func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlExecutionMetrics, elapsed time.Duration, threshold time.Duration, err error) {
 	if advisor == nil || advisor.capacity <= 0 || err != nil || threshold <= 0 || elapsed < threshold || query == nil || query.from == nil || query.from.kind != "CACHE" || len(query.joins) != 0 {
 		return
@@ -246,7 +325,9 @@ func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlEx
 			}
 		}
 	}
-	orderedFields := sqlIndexAdvisorPredicateFieldOrder(sqlCombinedWhere(query), query.from.alias)
+	combinedWhere := sqlCombinedWhere(query)
+	orderedFields := sqlIndexAdvisorPredicateFieldOrder(combinedWhere, query.from.alias)
+	skipCandidates := sqlIndexAdvisorJSONSkipCandidates(combinedWhere, query.from.alias)
 	prefixFields := ""
 	if len(orderedFields) > 0 {
 		prefixFields = strings.Join(orderedFields, "\x00")
@@ -254,7 +335,7 @@ func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlEx
 	sort.Strings(orderedFields)
 	fields := orderedFields
 	coveringField, coveringColumns, covering := sqlIndexAdvisorCoveringProjection(query)
-	if len(orderedFields) == 0 && !covering {
+	if len(orderedFields) == 0 && !covering && len(skipCandidates) == 0 {
 		return
 	}
 	advisor.mu.Lock()
@@ -287,6 +368,112 @@ func (advisor *SQLIndexAdvisor) observeSlowQuery(query *sqlQuery, metrics *sqlEx
 			advisor.coveringCounts[key]++
 		}
 	}
+	if len(skipCandidates) > 0 {
+		if advisor.skipCounts == nil {
+			advisor.skipCounts = make(map[sqlIndexAdvisorSkipKey]sqlIndexAdvisorSkipStats)
+		}
+		elapsedNanos := uint64(0)
+		if elapsed > 0 {
+			elapsedNanos = uint64(elapsed)
+		}
+		for _, candidate := range skipCandidates {
+			key := sqlIndexAdvisorSkipKey{key: query.from.key, field: candidate.field, path: candidate.path}
+			stats, exists := advisor.skipCounts[key]
+			if !exists && len(advisor.skipCounts) >= advisor.capacity {
+				continue
+			}
+			stats.slowQueries = sqlIndexAdvisorSaturatingAdd(stats.slowQueries, 1)
+			stats.totalElapsedNanos = sqlIndexAdvisorSaturatingAdd(stats.totalElapsedNanos, elapsedNanos)
+			advisor.skipCounts[key] = stats
+		}
+	}
+}
+
+type sqlIndexAdvisorSkipCandidate struct {
+	field string
+	path  string
+}
+
+func sqlIndexAdvisorJSONSkipCandidates(expr sqlExpr, alias string) []sqlIndexAdvisorSkipCandidate {
+	var candidates []sqlIndexAdvisorSkipCandidate
+	var seen map[sqlIndexAdvisorSkipKey]struct{}
+	sqlIndexAdvisorCollectJSONSkipCandidates(expr, alias, &candidates, &seen)
+	return candidates
+}
+
+func sqlIndexAdvisorCollectJSONSkipCandidates(expr sqlExpr, alias string, candidates *[]sqlIndexAdvisorSkipCandidate, seen *map[sqlIndexAdvisorSkipKey]struct{}) {
+	if expr.kind == "binary" && expr.op == "AND" && expr.left != nil && expr.right != nil {
+		sqlIndexAdvisorCollectJSONSkipCandidates(*expr.left, alias, candidates, seen)
+		sqlIndexAdvisorCollectJSONSkipCandidates(*expr.right, alias, candidates, seen)
+		return
+	}
+	if expr.kind != "binary" || expr.op != "=" && expr.op != "==" || expr.left == nil || expr.right == nil {
+		return
+	}
+	sqlIndexAdvisorAppendJSONSkipCandidate(*expr.left, *expr.right, alias, candidates, seen)
+	sqlIndexAdvisorAppendJSONSkipCandidate(*expr.right, *expr.left, alias, candidates, seen)
+}
+
+func sqlIndexAdvisorAppendJSONSkipCandidate(candidateExpr, other sqlExpr, alias string, candidates *[]sqlIndexAdvisorSkipCandidate, seen *map[sqlIndexAdvisorSkipKey]struct{}) {
+	if other.kind != "literal" {
+		return
+	}
+	field, path, ok := sqlIndexAdvisorJSONSkipPath(candidateExpr, alias)
+	if !ok {
+		return
+	}
+	key := sqlIndexAdvisorSkipKey{field: field, path: path}
+	if *seen == nil {
+		*seen = make(map[sqlIndexAdvisorSkipKey]struct{}, 2)
+		*candidates = make([]sqlIndexAdvisorSkipCandidate, 0, 2)
+	}
+	if _, exists := (*seen)[key]; exists {
+		return
+	}
+	(*seen)[key] = struct{}{}
+	*candidates = append(*candidates, sqlIndexAdvisorSkipCandidate{field: field, path: path})
+}
+
+func sqlIndexAdvisorJSONSkipPath(expr sqlExpr, alias string) (string, string, bool) {
+	if expr.kind != "func" || expr.name != "JSON_VALUE" || len(expr.args) != 2 {
+		return "", "", false
+	}
+	field := expr.args[0]
+	if field.kind != "field" || field.qualifier != "" && field.qualifier != alias {
+		return "", "", false
+	}
+	if expr.args[1].kind != "literal" {
+		return "", "", false
+	}
+	if expr.jsonPath != nil && expr.jsonPath.err == nil {
+		if path := expr.jsonPath.canonicalPath(); path != "" {
+			return field.name, path, true
+		}
+	}
+	rawPath, ok := expr.args[1].value.(string)
+	if !ok {
+		return "", "", false
+	}
+	path, err := NormalizeJSONPath(rawPath)
+	if err != nil {
+		return "", "", false
+	}
+	return field.name, path, true
+}
+
+func sqlIndexAdvisorSaturatingAdd(current, delta uint64) uint64 {
+	if ^uint64(0)-current < delta {
+		return ^uint64(0)
+	}
+	return current + delta
+}
+
+func sqlIndexAdvisorNanosDuration(nanos uint64) time.Duration {
+	const maxDurationNanos = uint64(1<<63 - 1)
+	if nanos > maxDurationNanos {
+		return time.Duration(maxDurationNanos)
+	}
+	return time.Duration(nanos)
 }
 
 func sqlIndexAdvisorCoveringProjection(query *sqlQuery) (string, []string, bool) {

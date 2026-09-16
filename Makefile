@@ -16221,3 +16221,56 @@ commit-chu10-c250:
 .PHONY: push-chu10-c250
 push-chu10-c250:
 	@bash ./scripts/push-chu10-c250.sh
+# CHU11 targets
+.PHONY: test-chu11-c251
+test-chu11-c251:
+	@bash ./scripts/test-chu11-c251.sh
+
+.PHONY: test-chu11-clean-c251
+test-chu11-clean-c251:
+	@bash ./scripts/test-chu11-clean-c251.sh
+
+.PHONY: benchmark-chu11-before-c251
+benchmark-chu11-before-c251:
+	@bash ./scripts/benchmark-chu11-before-c251.sh
+
+.PHONY: benchmark-chu11-c251
+benchmark-chu11-c251:
+	@bash ./scripts/benchmark-chu11-c251.sh
+
+.PHONY: format-chu11-c251
+format-chu11-c251:
+	@bash ./scripts/format-chu11-c251.sh
+
+.PHONY: test-chu11-package-clean-c251
+test-chu11-package-clean-c251:
+	@bash ./scripts/test-chu11-package-clean-c251.sh
+
+.PHONY: race-chu11-clean-c251
+race-chu11-clean-c251:
+	@bash ./scripts/race-chu11-clean-c251.sh
+
+.PHONY: vet-chu11-clean-c251
+vet-chu11-clean-c251:
+	@bash ./scripts/vet-chu11-clean-c251.sh
+
+.PHONY: verify-chu11-docs-c251
+verify-chu11-docs-c251:
+	@bash ./scripts/verify-chu11-docs-c251.sh
+
+.PHONY: review-chu11-c251
+review-chu11-c251:
+	@bash ./scripts/review-chu11-c251.sh
+
+.PHONY: stage-chu11-c251
+stage-chu11-c251:
+	@bash ./scripts/stage-chu11-c251.sh
+
+.PHONY: commit-chu11-c251
+commit-chu11-c251:
+	@bash ./scripts/commit-chu11-c251.sh
+
+.PHONY: push-chu11-c251
+push-chu11-c251:
+	@bash ./scripts/push-chu11-c251.sh
+# End CHU11 targets

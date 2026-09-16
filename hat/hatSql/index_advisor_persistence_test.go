@@ -63,7 +63,7 @@ func TestSQLIndexAdvisorLoadRejectsInvalidSnapshotsWithoutMutation(t *testing.T)
 		name    string
 		payload string
 	}{
-		{name: "version", payload: `{"version":3,"entries":[]}`},
+		{name: "version", payload: `{"version":4,"entries":[]}`},
 		{name: "duplicate", payload: `{"version":1,"entries":[{"key":"people","field":"id","slow_queries":1},{"key":"people","field":"id","slow_queries":2}]}`},
 		{name: "unknown field", payload: `{"version":1,"entries":[],"extra":true}`},
 		{name: "trailing data", payload: `{"version":1,"entries":[]} {"version":1,"entries":[]}`},
