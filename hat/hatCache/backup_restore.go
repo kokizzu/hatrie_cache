@@ -64,6 +64,9 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		return BackupBundleRestoreReport{}, err
 	}
 	mode := backupBundleManifestMode(manifest)
+	if err := validatePointInTimeRestore(manifest, options.MaxJournalSequence); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
 	if mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
 		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle restore mode %q", mode)
 	}
@@ -90,12 +93,25 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		return BackupBundleRestoreReport{}, err
 	}
 	if selectivePartition {
-		journalSequence, err := filterRestoredSnapshotByPartition(destination.StagingPath(), manifest, options.Partition)
+		journalSequence, err := filterRestoredSnapshotByPartitionAtSequence(destination.StagingPath(), manifest, options.Partition, options.MaxJournalSequence)
 		if err != nil {
 			return BackupBundleRestoreReport{}, err
 		}
 		restoredJournalSequence = journalSequence
 		verificationManifest.JournalSequence = journalSequence
+	} else if options.MaxJournalSequence > 0 && options.MaxJournalSequence < manifest.JournalSequence {
+		journalPath := filepath.Join(destination.StagingPath(), filepath.FromSlash(manifest.Snapshot))
+		loaded := CreateHatTrie()
+		metadata, loadErr := loaded.LoadSnapshotWithMetadata(journalPath)
+		loaded.Destroy()
+		if loadErr != nil {
+			return BackupBundleRestoreReport{}, loadErr
+		}
+		restoredJournalSequence, err = truncateRestoredJournalAtSequence(destination.StagingPath(), manifest, options.MaxJournalSequence, metadata.JournalSequence)
+		if err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+		verificationManifest.JournalSequence = restoredJournalSequence
 	}
 	var doctor BackupDoctorReport
 	switch mode {
@@ -152,6 +168,9 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	}
 	if err := verifyBackupRepositoryDescriptor(repositoryPath); err != nil {
 		return BackupBundleRestoreReport{}, err
+	}
+	if options.MaxJournalSequence > 0 {
+		return BackupBundleRestoreReport{}, errors.New("hatriecache: point-in-time restore requires a snapshot backup bundle")
 	}
 	manifest, err := readBackupRepositoryManifest(repositoryPath, backupID)
 	if err != nil {

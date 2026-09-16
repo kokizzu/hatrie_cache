@@ -1346,6 +1346,7 @@ func runRestoreBundle(args []string, stdout io.Writer, stderr io.Writer) error {
 	dataDir := flags.String("data-dir", "data", "restore target data directory")
 	overwrite := flags.Bool("overwrite", false, "allow restoring into a non-empty data directory")
 	resume := flags.Bool("resume", false, "retain and reuse a verified staging directory after an interrupted restore")
+	maxJournalSequence := flags.Uint64("max-journal-sequence", 0, "restore a snapshot bundle only through this journal sequence")
 	partitions := flags.String("partitions", "", "comma-separated partition ids required in a region-local backup")
 	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes required in a region-local backup")
 	if err := flags.Parse(args); err != nil {
@@ -1355,7 +1356,7 @@ func runRestoreBundle(args []string, stdout io.Writer, stderr io.Writer) error {
 		return errors.New("restore-bundle -bundle is required")
 	}
 	partition := backupPartitionMetadataFromFlags("", *partitions, "", 0, "", *partitionPrefixes)
-	report, err := hatriecache.RestoreBackupBundle(*bundlePath, *dataDir, hatriecache.BackupBundleRestoreOptions{Overwrite: *overwrite, Resume: *resume, Partition: partition})
+	report, err := hatriecache.RestoreBackupBundle(*bundlePath, *dataDir, hatriecache.BackupBundleRestoreOptions{Overwrite: *overwrite, Resume: *resume, Partition: partition, MaxJournalSequence: *maxJournalSequence})
 	if err != nil {
 		return err
 	}

@@ -16455,3 +16455,42 @@ format-ch022-c290:
 	@bash scripts/format-ch022-c290.sh
 verify-ch022-c290:
 	@bash scripts/verify-ch022-c290.sh
+.PHONY: test-tt011-point-in-time-restore-c291
+test-tt011-point-in-time-restore-c291:
+	@bash scripts/test-tt011-point-in-time-restore-c291.sh
+
+.PHONY: format-tt011-point-in-time-restore-c291
+format-tt011-point-in-time-restore-c291:
+	@bash scripts/format-tt011-point-in-time-restore-c291.sh
+
+.PHONY: verify-tt011-point-in-time-restore-c291
+verify-tt011-point-in-time-restore-c291:
+	@bash scripts/verify-tt011-point-in-time-restore-c291.sh
+
+.PHONY: benchmark-before-tt011-point-in-time-restore-c291
+benchmark-before-tt011-point-in-time-restore-c291:
+	@bash scripts/benchmark-before-tt011-point-in-time-restore-c291.sh
+
+.PHONY: benchmark-tt011-point-in-time-restore-c291
+benchmark-tt011-point-in-time-restore-c291:
+	@bash scripts/benchmark-tt011-point-in-time-restore-c291.sh
+
+.PHONY: review-tt011-point-in-time-restore-c291
+review-tt011-point-in-time-restore-c291:
+	@bash scripts/review-tt011-point-in-time-restore-c291.sh
+
+.PHONY: stage-tt011-point-in-time-restore-c291
+stage-tt011-point-in-time-restore-c291:
+	@bash scripts/stage-tt011-point-in-time-restore-c291.sh
+
+.PHONY: inspect-staged-tt011-point-in-time-restore-c291
+inspect-staged-tt011-point-in-time-restore-c291:
+	@bash scripts/inspect-staged-tt011-point-in-time-restore-c291.sh
+
+.PHONY: commit-tt011-point-in-time-restore-c291
+commit-tt011-point-in-time-restore-c291:
+	@bash scripts/commit-tt011-point-in-time-restore-c291.sh
+
+.PHONY: push-tt011-point-in-time-restore-c291
+push-tt011-point-in-time-restore-c291:
+	@bash scripts/push-tt011-point-in-time-restore-c291.sh

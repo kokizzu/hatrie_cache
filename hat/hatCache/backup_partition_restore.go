@@ -9,6 +9,10 @@ import (
 )
 
 func filterRestoredSnapshotByPartition(root string, manifest BackupBundleManifest, selector *BackupPartitionMetadata) (uint64, error) {
+	return filterRestoredSnapshotByPartitionAtSequence(root, manifest, selector, 0)
+}
+
+func filterRestoredSnapshotByPartitionAtSequence(root string, manifest BackupBundleManifest, selector *BackupPartitionMetadata, maxSequence uint64) (uint64, error) {
 	if selector == nil || len(selector.KeyPrefixes) == 0 {
 		return manifest.JournalSequence, nil
 	}
@@ -26,7 +30,7 @@ func filterRestoredSnapshotByPartition(root string, manifest BackupBundleManifes
 	if err != nil {
 		return 0, err
 	}
-	journalSequence, err := filterPartitionJournalTail(root, manifest, selector, loaded, metadata.JournalSequence)
+	journalSequence, err := filterPartitionJournalTailAtSequence(root, manifest, selector, loaded, metadata.JournalSequence, maxSequence)
 	if err != nil {
 		return 0, err
 	}
@@ -41,7 +45,14 @@ func filterRestoredSnapshotByPartition(root string, manifest BackupBundleManifes
 }
 
 func filterPartitionJournalTail(root string, manifest BackupBundleManifest, selector *BackupPartitionMetadata, trie *HatTrie, snapshotSequence uint64) (uint64, error) {
+	return filterPartitionJournalTailAtSequence(root, manifest, selector, trie, snapshotSequence, 0)
+}
+
+func filterPartitionJournalTailAtSequence(root string, manifest BackupBundleManifest, selector *BackupPartitionMetadata, trie *HatTrie, snapshotSequence, maxSequence uint64) (uint64, error) {
 	if manifest.Journal == "" {
+		if maxSequence > 0 && maxSequence != snapshotSequence {
+			return 0, fmt.Errorf("hatriecache: point-in-time sequence %d requires a journal tail after snapshot checkpoint %d", maxSequence, snapshotSequence)
+		}
 		return snapshotSequence, nil
 	}
 	if manifest.Journal != backupBundleJournalPath {
@@ -53,9 +64,19 @@ func filterPartitionJournalTail(root string, manifest BackupBundleManifest, sele
 	}
 	journalPath := filepath.Join(root, filepath.FromSlash(manifest.Journal))
 	finalSequence := snapshotSequence
+	if maxSequence > 0 && maxSequence < snapshotSequence {
+		return 0, fmt.Errorf("hatriecache: point-in-time sequence %d is before snapshot checkpoint %d", maxSequence, snapshotSequence)
+	}
+	reached := maxSequence == 0 || maxSequence == snapshotSequence
 	if _, err := scanCommandJournalEntries(journalPath, func(entry commandJournalEntry) error {
+		if maxSequence > 0 && entry.Sequence > maxSequence {
+			return nil
+		}
 		if entry.Sequence > finalSequence {
 			finalSequence = entry.Sequence
+		}
+		if maxSequence > 0 && entry.Sequence == maxSequence {
+			reached = true
 		}
 		if entry.Checkpoint {
 			if entry.Sequence > snapshotSequence {
@@ -79,6 +100,9 @@ func filterPartitionJournalTail(root string, manifest BackupBundleManifest, sele
 		return nil
 	}); err != nil {
 		return 0, err
+	}
+	if maxSequence > 0 && !reached {
+		return 0, fmt.Errorf("hatriecache: point-in-time sequence %d is not present in journal", maxSequence)
 	}
 	if err := writeCommandJournalCheckpointWithFormat(journalPath, finalSequence, format); err != nil {
 		return 0, fmt.Errorf("hatriecache: selective partition restore journal checkpoint: %w", err)

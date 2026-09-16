@@ -26995,3 +26995,63 @@ path: `Workers=0` makes `Start` return disabled, and callers must explicitly
 enqueue work. The feature earns its cost only when those lifecycle guarantees
 replace ad-hoc maintenance scheduling; it should not replace a direct callback
 in a hot query loop. See [CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md](CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md).
+
+<a id="tt-011-point-in-time-snapshot-restore"></a>
+## TT-011 Point-in-Time Snapshot Restore
+
+This benchmark measures the Tarantool-inspired opt-in restore boundary on a
+small snapshot bundle with a two-record command-journal tail. The default path
+restores the complete bundle; the point-in-time path restores through the first
+post-snapshot sequence and omits the later mutation. Both paths use the same
+JSON snapshot and binary-safe restore workflow. The correctness tests separately
+cover JSON and binary command journals, journal replay, the snapshot checkpoint
+boundary, invalid ranges, and the CLI flag.
+
+The clean baseline is the pre-feature `HEAD`, measured with
+`make benchmark-before-tt011-point-in-time-restore-c291`. The after run is
+`make benchmark-tt011-point-in-time-restore-c291`; both use a clean archive,
+`-benchmem -benchtime=10x -count=5`, and an AMD Ryzen 9 5950X on Linux/amd64.
+The table reports medians of five samples. `x` is after divided by baseline;
+values above `1.00x` are slower or larger.
+
+| Workload | Baseline median | After median | Relative result |
+| --- | ---: | ---: | --- |
+| Default complete restore CPU | 2.977 ms/op | 3.100 ms/op | `1.04x` CPU; within small-run host variance, no semantic-path change |
+| Default complete restore heap | 435,327 B/op | 435,424 B/op | `1.00x`; +97 B/op |
+| Default complete restore allocations | 1,908 allocs/op | 1,908 allocs/op | `1.00x`; unchanged |
+| Opt-in restore through sequence 2 CPU | Not available | 3.714 ms/op | `1.20x` versus the after default path |
+| Opt-in restore through sequence 2 heap | Not available | 422,147 B/op | `0.97x` versus the after default path; 3.0% lower |
+| Opt-in restore through sequence 2 allocations | Not available | 1,616 allocs/op | `0.85x` versus the after default path; 292 fewer |
+
+The default comparison is a guard against an accidental regression in ordinary
+restore, not a claimed optimization. Its 4% CPU difference is near the noise
+level for this short filesystem fixture, while heap and allocations are flat.
+The opt-in path spends extra CPU scanning and atomically rewriting the journal,
+but its shorter replay tail lowers transient heap and allocations. That cost is
+appropriate only when the recovery boundary is more valuable than restoring the
+latest state; it is disabled by default.
+
+Raw baseline output:
+
+```text
+BenchmarkTT011RestoreDefault-32  10  2976609 ns/op  436260 B/op  1908 allocs/op
+BenchmarkTT011RestoreDefault-32  10  2900556 ns/op  434495 B/op  1908 allocs/op
+BenchmarkTT011RestoreDefault-32  10  3048345 ns/op  437057 B/op  1909 allocs/op
+BenchmarkTT011RestoreDefault-32  10  2866642 ns/op  433743 B/op  1907 allocs/op
+BenchmarkTT011RestoreDefault-32  10  3231328 ns/op  435327 B/op  1908 allocs/op
+```
+
+Raw after output:
+
+```text
+BenchmarkTT011RestoreDefault-32        10  3597643 ns/op  435424 B/op  1909 allocs/op
+BenchmarkTT011RestoreDefault-32        10  3372108 ns/op  436169 B/op  1908 allocs/op
+BenchmarkTT011RestoreDefault-32        10  2956798 ns/op  435800 B/op  1911 allocs/op
+BenchmarkTT011RestoreDefault-32        10  3100479 ns/op  435359 B/op  1908 allocs/op
+BenchmarkTT011RestoreDefault-32        10  2842381 ns/op  435408 B/op  1908 allocs/op
+BenchmarkTT011RestorePointInTime-32    10  4561461 ns/op  422018 B/op  1616 allocs/op
+BenchmarkTT011RestorePointInTime-32    10  3878368 ns/op  422160 B/op  1616 allocs/op
+BenchmarkTT011RestorePointInTime-32    10  3684296 ns/op  422128 B/op  1616 allocs/op
+BenchmarkTT011RestorePointInTime-32    10  3713752 ns/op  422147 B/op  1618 allocs/op
+BenchmarkTT011RestorePointInTime-32    10  3689795 ns/op  425501 B/op  1617 allocs/op
+```

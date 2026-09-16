@@ -60,6 +60,11 @@ type RestoreOptions struct {
 	// Resume keeps a verified staging directory after a failed restore and
 	// reuses matching files on retry. The default is false.
 	Resume bool
+	// MaxJournalSequence optionally restores a snapshot bundle only through
+	// this committed journal sequence. Zero preserves the complete-backup
+	// behavior. The sequence must be within the snapshot checkpoint and the
+	// bundle's recorded journal range.
+	MaxJournalSequence uint64
 }
 
 // RestoreReport describes an applied offline restore.

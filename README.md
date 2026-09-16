@@ -94,6 +94,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired opt-in typed-table row TTL: [CH007_ROW_TTL.md](CH007_ROW_TTL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-007-row-ttl)
 - ClickHouse-inspired bounded background TTL reaper and durable processing-time deadline state: [CH007_TTL_SCHEDULER.md](CH007_TTL_SCHEDULER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-007-background-ttl-scheduler)
 - ClickHouse-inspired content-addressed incremental part backup and optional durable manifest catalog: [CH022_INCREMENTAL_PART_BACKUP.md](CH022_INCREMENTAL_PART_BACKUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-022-incremental-part-backup)
+- Tarantool-inspired opt-in point-in-time snapshot restore by journal sequence: [TT011_POINT_IN_TIME_RESTORE.md](TT011_POINT_IN_TIME_RESTORE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-011-point-in-time-snapshot-restore)
 - ClickHouse-inspired bounded external dictionary cache: [CH027_EXTERNAL_DICTIONARY_CACHE.md](CH027_EXTERNAL_DICTIONARY_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-027-external-dictionary-cache)
 - ClickHouse-inspired dictionary version and fallback semantics: [CH028_DICTIONARY_VERSION_FALLBACK.md](CH028_DICTIONARY_VERSION_FALLBACK.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-028-dictionary-version-and-fallback)
 - ClickHouse-inspired dictionary-backed joins: [CH029_DICTIONARY_BACKED_JOIN.md](CH029_DICTIONARY_BACKED_JOIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-029-dictionary-backed-join)
@@ -1029,9 +1030,13 @@ pair, while `DB_PATH` is a full key/value persistence store. You can enable
 both, but keep in mind the snapshot is loaded after the persistent store and
 therefore wins for overlapping keys.
 
-The Go API `RestorePointInTime` provides an explicit recovery point by replaying
-only through the requested journal sequence. A target of zero selects the
-current journal tail; a target before the snapshot checkpoint is rejected.
+The Go API option `BackupBundleRestoreOptions.MaxJournalSequence` provides an
+explicit recovery point by restoring and replaying only through the requested
+committed journal sequence. The default `0` preserves the complete journal
+tail. The option is snapshot-bundle-only; targets before the snapshot
+checkpoint or after the bundle sequence are rejected, and the snapshot
+checkpoint itself is a valid snapshot-only recovery point. See
+[TT011_POINT_IN_TIME_RESTORE.md](TT011_POINT_IN_TIME_RESTORE.md).
 
 Recommended durability profiles:
 
@@ -1184,6 +1189,18 @@ destination is changed. Use a full restore for those unsupported cases. The
 default restore path and exact full-partition selectors are unchanged.
 `restore-rehearsal` currently rejects strict subset selectors so its source and
 restored checksums remain comparable.
+
+For a full snapshot bundle, restore to an exact committed journal sequence by
+adding `-max-journal-sequence`. The sequence can be the snapshot checkpoint or
+an exact later journal record:
+
+```
+make cli ARGS='restore-bundle -bundle backup/run-001.tar.gz -data-dir data/recovered -max-journal-sequence 123'
+```
+
+This mode is disabled when the flag is omitted or set to `0`. It is not
+available for repository/Pebble checkpoint bundles, and it never changes the
+source bundle.
 
 Restore LevelDB data by restoring the directory and starting with `DB_PATH`:
 

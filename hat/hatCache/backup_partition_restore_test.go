@@ -208,6 +208,16 @@ func rebuildBackupBundleWithJournal(t testing.TB, bundlePath string, journalPath
 	if err != nil {
 		t.Fatalf("ReadFile(journal) error = %v", err)
 	}
+	journalSequence := uint64(0)
+	if _, err := scanCommandJournalEntries(journalPath, func(entry commandJournalEntry) error {
+		if entry.Sequence > journalSequence {
+			journalSequence = entry.Sequence
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("scanCommandJournalEntries() error = %v", err)
+	}
+	manifest.JournalSequence = journalSequence
 	stagedJournalPath := filepath.Join(root, backupBundleJournalPath)
 	if err := os.WriteFile(stagedJournalPath, data, 0o600); err != nil {
 		t.Fatalf("WriteFile(journal) error = %v", err)
