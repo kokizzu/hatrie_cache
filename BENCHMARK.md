@@ -27325,3 +27325,59 @@ BenchmarkTT011RestorePointInTime-32    10  3684296 ns/op  422128 B/op  1616 allo
 BenchmarkTT011RestorePointInTime-32    10  3713752 ns/op  422147 B/op  1618 allocs/op
 BenchmarkTT011RestorePointInTime-32    10  3689795 ns/op  425501 B/op  1617 allocs/op
 ```
+<a id="mz-07-frontier-aware-source-backpressure"></a>
+## MZ-07 Frontier-Aware Source Backpressure
+
+This measures the opt-in `hatPipeline.FrontierBackpressure` admission gate.
+The gate is a bounded source-progress control, not a query-speed optimization:
+it prevents a caller-wired producer from advancing too far beyond a consumer
+frontier and intentionally reduces source throughput when the consumer lags.
+
+Run with `make benchmark-mz007-frontier-backpressure`. The command uses
+`-benchmem -benchtime=200ms -count=5` on an AMD Ryzen 9 5950X Linux/amd64 host.
+The baseline is a no-lock, no-state-update function with the same frontier
+arithmetic, so it is a lower-bound control rather than an end-to-end source
+implementation. Values above `1.00x` are slower than that control.
+
+| Operation | Five raw samples (ns/op) | Median | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| No-lock arithmetic control | 1.683, 1.670, 1.672, 1.873, 1.875 | 1.683 | 0 | 0 | 1.00x |
+| Admitted `TryAdmit` | 6.336, 6.512, 6.133, 6.371, 6.427 | 6.371 | 0 | 0 | 3.79x |
+| Admitted `Wait` | 5.398, 5.346, 5.404, 5.373, 5.356 | 5.373 | 0 | 0 | 3.19x |
+| Rejected `TryAdmit` | 6.500, 6.297, 5.985, 6.360, 6.438 | 6.360 | 0 | 0 | 3.78x |
+
+The gate adds about 4 ns over the arithmetic-only control while keeping its
+ordinary paths at zero heap allocations. The benefit is a bounded admission
+point when the caller connects it to its own queue; the gate itself does not
+retain or discard already buffered records. The blocking and wake-up path is
+covered by focused and race tests because scheduler latency is not comparable
+to a nanosecond loop benchmark.
+
+Raw output:
+
+```text
+BenchmarkMZ007FrontierBackpressureBaseline-32            137699631  1.683 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBaseline-32            144690607  1.670 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBaseline-32            142313974  1.672 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBaseline-32            128708628  1.873 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBaseline-32            125565199  1.875 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureTryAdmit-32             38072394  6.336 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureTryAdmit-32             37680205  6.512 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureTryAdmit-32             35370721  6.133 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureTryAdmit-32             36742208  6.371 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureTryAdmit-32             36960741  6.427 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureWaitAdmitted-32         44872939  5.398 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureWaitAdmitted-32         44653695  5.346 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureWaitAdmitted-32         42670216  5.404 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureWaitAdmitted-32         42654973  5.373 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureWaitAdmitted-32         44371010  5.356 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBlockedTryAdmit-32     37230578  6.500 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBlockedTryAdmit-32     38481530  6.297 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBlockedTryAdmit-32     39741396  5.985 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBlockedTryAdmit-32     36766642  6.360 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ007FrontierBackpressureBlockedTryAdmit-32     38112418  6.438 ns/op  0 B/op  0 allocs/op
+```
+
+See [MZ007_FRONTIER_SOURCE_BACKPRESSURE.md](MZ007_FRONTIER_SOURCE_BACKPRESSURE.md)
+for API semantics, default-off behavior, and the caller-owned buffering
+boundary.

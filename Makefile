@@ -16703,3 +16703,33 @@ commit-ch031-automatic-json-subcolumns:
 .PHONY: push-ch031-automatic-json-subcolumns
 push-ch031-automatic-json-subcolumns:
 	bash ./scripts/deliver-ch031-automatic-json-subcolumns.sh push
+.PHONY: test-mz007-frontier-backpressure
+test-mz007-frontier-backpressure:
+	bash ./scripts/test-mz007-frontier-backpressure.sh
+.PHONY: race-mz007-frontier-backpressure
+race-mz007-frontier-backpressure:
+	bash ./scripts/race-mz007-frontier-backpressure.sh
+.PHONY: vet-mz007-frontier-backpressure
+vet-mz007-frontier-backpressure:
+	bash ./scripts/vet-mz007-frontier-backpressure.sh
+.PHONY: format-mz007-frontier-backpressure
+format-mz007-frontier-backpressure:
+	bash ./scripts/format-mz007-frontier-backpressure.sh
+.PHONY: benchmark-mz007-frontier-backpressure
+benchmark-mz007-frontier-backpressure:
+	bash ./scripts/benchmark-mz007-frontier-backpressure.sh
+.PHONY: verify-mz007-frontier-backpressure
+verify-mz007-frontier-backpressure:
+	bash ./scripts/verify-mz007-frontier-backpressure.sh
+.PHONY: review-mz007-frontier-backpressure
+review-mz007-frontier-backpressure:
+	bash ./scripts/review-mz007-frontier-backpressure.sh
+.PHONY: stage-mz007-frontier-backpressure
+stage-mz007-frontier-backpressure:
+	bash ./scripts/stage-mz007-frontier-backpressure.sh
+.PHONY: commit-mz007-frontier-backpressure
+commit-mz007-frontier-backpressure:
+	bash ./scripts/commit-mz007-frontier-backpressure.sh
+.PHONY: push-mz007-frontier-backpressure
+push-mz007-frontier-backpressure:
+	bash ./scripts/push-mz007-frontier-backpressure.sh
