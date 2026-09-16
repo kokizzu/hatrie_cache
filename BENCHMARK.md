@@ -26684,3 +26684,39 @@ Five-run ranges on AMD Ryzen 9 5950X, Linux amd64:
 
 The cache is default-off and should be enabled for repeated expensive reads;
 small result hits pay query parsing and deep-clone costs.
+
+## CH-U09 Persisted SQL Result Cache
+
+Raw command: `make benchmark-chu09-c249`.
+
+The workload contains 1,024 rows with integer, string, bytes, boolean, and
+timestamp values. Five samples use `-benchmem -benchtime=200ms -count=5` on AMD
+Ryzen 9 5950X, Linux/amd64. Persist includes `fsync` and atomic rename; restore
+includes checksum validation and owned value reconstruction.
+
+| Workload | CPU range | Bytes/op range | Allocs/op range | Storage/result |
+|---|---:|---:|---:|---|
+| In-memory hit | 0.370-0.388 ms | 394,576-394,586 | 4,098 | baseline |
+| Persist, compact binary | 2.238-3.299 ms | 1,505,734-1,506,037 | 13,353-13,354 | 88,098-byte snapshot |
+| Restore, compact binary | 1.611-1.772 ms | 1,541,070-1,541,129 | 35,648 | cold-start load |
+| JSON encoding reference | 0.759-0.849 ms | 254,774-264,889 | 2,050 | 102,885-byte JSON payload |
+
+Raw final output:
+
+```text
+BenchmarkSQLResultCacheMemoryHit1KRows-32  632  375591 ns/op  394586 B/op  4098 allocs/op
+BenchmarkSQLResultCacheMemoryHit1KRows-32  618  370422 ns/op  394576 B/op  4098 allocs/op
+BenchmarkSQLResultCacheMemoryHit1KRows-32  660  387441 ns/op  394577 B/op  4098 allocs/op
+BenchmarkSQLResultCacheMemoryHit1KRows-32  652  375375 ns/op  394576 B/op  4098 allocs/op
+BenchmarkSQLResultCacheMemoryHit1KRows-32  651  369536 ns/op  394578 B/op  4098 allocs/op
+BenchmarkSQLResultCachePersist1KRows-32   100 2447524 ns/op  88098 bytes/snapshot 1505890 B/op 13354 allocs/op
+BenchmarkSQLResultCacheRestore1KRows-32   132 1771604 ns/op 1541100 B/op 35648 allocs/op
+BenchmarkSQLResultCacheJSONEncoding1KRows-32 310 758629 ns/op 102885 bytes/json 254774 B/op 2050 allocs/op
+```
+
+The final binary payload is `1.31x` smaller than the earlier `gob` draft
+(`88,098` versus `115,546` bytes), with about `1.31x` lower persist CPU and
+`1.25x` lower restore CPU at the medians. JSON is a CPU/size reference only:
+unmarshalling arbitrary JSON into `interface{}` would not preserve the typed
+SQL values required by the cache contract. Persistence therefore remains
+explicit and is intended for repeated expensive reads, not every query.

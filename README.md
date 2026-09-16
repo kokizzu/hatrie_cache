@@ -3261,6 +3261,15 @@ with `ErrSQLTransactionReadOnly` before parsing, and make `Commit` a successful
 no-op. The default remains writable. See
 [TR036_READ_ONLY_TRANSACTIONS.md](TR036_READ_ONLY_TRANSACTIONS.md) for the
 measured guard path.
+Materialized SQL result caches can also be retained across process restarts,
+but persistence is explicit and default-off. Create `hatSql.NewSQLResultCache`
+or enable `ConfigureSQLResultCache`, call `RestoreSQLResultCache` during
+startup, and call `PersistSQLResultCache` at a controlled shutdown or
+checkpoint. The snapshot is a bounded, checksummed `0600` cache artifact, not a
+backup of the underlying data; source-version and query-key validation still
+decide whether a restored entry can be used. See
+[CHU09_PERSISTED_SQL_RESULT_CACHE.md](CHU09_PERSISTED_SQL_RESULT_CACHE.md) and
+the measured tradeoff in [`BENCHMARK.md`](BENCHMARK.md#ch-u09-persisted-sql-result-cache).
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons. The comparison includes single-command

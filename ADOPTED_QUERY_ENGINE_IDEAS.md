@@ -72,6 +72,7 @@ explicitly opt-in operational control.
 | Materialize | Compiled reusable plan fragments | Adopted as an additive opt-in | `CompileSQLQuery` returns an immutable `CompiledSQLQuery` handle that avoids parser and prepared-cache lookup work while cloning and rebinding per execution. Existing query entry points and prepared-cache statistics remain unchanged; the handle retains one plan and is intended for repeated hot queries. |
 | ClickHouse/Materialize | Freshness-keyed query result cache | Adopted | `ResultCache.Execute` takes an explicit epoch callback, invalidates stale entries, and clones cached rows/plans for caller isolation. |
 | ClickHouse | Effective settings fingerprint in result-cache keys | Adopted as an additive opt-in namespace | `SQLQueryOptions.ResultCacheSettingsFingerprint` separates entries when resolver or function behavior depends on external session or tenant settings. Empty preserves the default key path; values above `MaxSQLResultCacheSettingsFingerprintBytes` bypass retention. See [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md) and [BENCHMARK.md#ch-002-settings-aware-result-cache-keys](BENCHMARK.md#ch-002-settings-aware-result-cache-keys). |
+| ClickHouse/Materialize | Persisted freshness-keyed result cache | Adopted as explicit opt-in | `hatSql.ResultCache.Persist` and `Restore` retain only typed versioned entries in a checksummed, bounded, atomic `0600` binary snapshot. `hatCache.HatTrie` exposes the same lifecycle; missing files cold-start and corrupt files never replace live entries. [CHU09_PERSISTED_SQL_RESULT_CACHE.md](CHU09_PERSISTED_SQL_RESULT_CACHE.md), [BENCHMARK.md#ch-u09-persisted-sql-result-cache](BENCHMARK.md#ch-u09-persisted-sql-result-cache) |
 | Materialize | Explain dataflow graph | Adopted | `BuildExplainDataflowGraph` preserves EXPLAIN steps, derives nested subplans, and emits stable pipeline/subplan edges; JSON and DOT helpers are read-only and leave the existing linear `ExplainDOT` API unchanged. |
 | Materialize | Recursive differential maintenance | Adopted as an opt-in SQL data-structure API | `NewMutableIncrementalRecursiveReachability` supports exact signed edge `INSERT`/`UPDATE`/`DELETE` maintenance, recomputes only affected source nodes, and uses direct leaf deltas for isolated terminal edges. The append-only constructor remains the zero-retention default. [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md) |
 | ClickHouse / Materialize | Generic signed differential `AVG(int64)` | Adopted as an opt-in batch operator | `GroupAverageInt64DifferentialRows` maintains exact weighted count/sum state in one pass and emits signed `float64` average transitions with atomic overflow and callback validation. It does not alter SQL defaults or planner selection. [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md), [BENCHMARK.md](BENCHMARK.md#differential-group-average) |
@@ -245,6 +246,15 @@ Direct `HatTrie` materialized SQL entry points can opt into a bounded per-trie
 result cache with `ConfigureSQLResultCache`. The default is off. The trie
 mutation epoch provides conservative invalidation, and explicit caller caches
 remain authoritative. See [CHU08_AUTOMATIC_SQL_RESULT_CACHE.md](CHU08_AUTOMATIC_SQL_RESULT_CACHE.md).
+
+## CH-U09: Persisted SQL Result Cache
+
+The explicit result cache can persist versioned SQL entries for warm starts.
+`Persist` writes a bounded checksummed binary snapshot and `Restore` validates
+the full file before replacing typed entries. Source versions and exact query
+keys remain authoritative, so schema/settings changes miss normally. The
+feature is opt-in and has no background filesystem writer. See
+[CHU09_PERSISTED_SQL_RESULT_CACHE.md](CHU09_PERSISTED_SQL_RESULT_CACHE.md).
 
 ## Deliberately Deferred
 

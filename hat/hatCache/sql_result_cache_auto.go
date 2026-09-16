@@ -15,9 +15,18 @@ const (
 	DefaultSQLResultCacheCapacity = 128
 )
 
-var ErrSQLResultCacheCapacityInvalid = errors.New("hatriecache: SQL result cache capacity must be non-negative")
+var (
+	ErrSQLResultCacheCapacityInvalid = errors.New("hatriecache: SQL result cache capacity must be non-negative")
+	ErrSQLResultCacheDisabled        = errors.New("hatriecache: automatic SQL result cache is disabled")
+)
 
 type SQLResultCacheStats = hatSql.ResultCacheStats
+type SQLResultCachePersistenceOptions = hatSql.SQLResultCachePersistenceOptions
+
+var (
+	ErrSQLResultCachePersistenceCorrupt  = hatSql.ErrSQLResultCachePersistenceCorrupt
+	ErrSQLResultCachePersistenceTooLarge = hatSql.ErrSQLResultCachePersistenceTooLarge
+)
 
 // ConfigureSQLResultCache enables bounded automatic caching for materialized
 // SQL queries executed directly against this trie. Capacity zero disables the
@@ -48,6 +57,93 @@ func (ht *HatTrie) SQLResultCacheStats() SQLResultCacheStats {
 		return SQLResultCacheStats{}
 	}
 	return cache.cache.Stats()
+}
+
+// PersistSQLResultCache atomically saves the enabled automatic SQL result
+// cache. Automatic caching remains disabled unless ConfigureSQLResultCache
+// was called with a positive capacity.
+func (ht *HatTrie) PersistSQLResultCache(path string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	cache := ht.automaticSQLResultCache()
+	if cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.Persist(path)
+}
+
+// RestoreSQLResultCache loads a previously persisted automatic SQL result
+// cache. Missing files are treated as a cold start by the hatSql layer.
+func (ht *HatTrie) RestoreSQLResultCache(path string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	cache := ht.automaticSQLResultCache()
+	if cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.Restore(path)
+}
+
+// PersistSQLResultCacheWithOptions saves the automatic cache with an explicit
+// file-size quota.
+func (ht *HatTrie) PersistSQLResultCacheWithOptions(path string, options SQLResultCachePersistenceOptions) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	cache := ht.automaticSQLResultCache()
+	if cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.PersistWithOptions(path, options)
+}
+
+// RestoreSQLResultCacheWithOptions restores the automatic cache with an
+// explicit file-size quota.
+func (ht *HatTrie) RestoreSQLResultCacheWithOptions(path string, options SQLResultCachePersistenceOptions) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	cache := ht.automaticSQLResultCache()
+	if cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.RestoreWithOptions(path, options)
+}
+
+// Persist writes an explicitly constructed SQLResultCache to path.
+func (cache *SQLResultCache) Persist(path string) error {
+	if cache == nil || cache.cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.cache.Persist(path)
+}
+
+// Restore loads an explicitly constructed SQLResultCache from path.
+func (cache *SQLResultCache) Restore(path string) error {
+	if cache == nil || cache.cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.cache.Restore(path)
+}
+
+// PersistWithOptions writes an explicitly constructed SQLResultCache with an
+// explicit file-size quota.
+func (cache *SQLResultCache) PersistWithOptions(path string, options SQLResultCachePersistenceOptions) error {
+	if cache == nil || cache.cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.cache.PersistWithOptions(path, options)
+}
+
+// RestoreWithOptions loads an explicitly constructed SQLResultCache with an
+// explicit file-size quota.
+func (cache *SQLResultCache) RestoreWithOptions(path string, options SQLResultCachePersistenceOptions) error {
+	if cache == nil || cache.cache == nil {
+		return ErrSQLResultCacheDisabled
+	}
+	return cache.cache.RestoreWithOptions(path, options)
 }
 
 func (ht *HatTrie) automaticSQLResultCache() *hatSql.ResultCache {

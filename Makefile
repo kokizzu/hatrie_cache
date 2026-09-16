@@ -16117,3 +16117,55 @@ commit-chu08-c248:
 .PHONY: push-chu08-c248
 push-chu08-c248:
 	@bash ./scripts/push-chu08-c248.sh
+
+.PHONY: test-chu09-c249
+test-chu09-c249:
+	@bash ./scripts/test-chu09-c249.sh
+
+.PHONY: format-chu09-c249
+format-chu09-c249:
+	@bash ./scripts/format-chu09-c249.sh
+
+.PHONY: benchmark-chu09-c249
+benchmark-chu09-c249:
+	@bash ./scripts/benchmark-chu09-c249.sh
+
+.PHONY: test-chu09-hatcache-c249
+test-chu09-hatcache-c249:
+	@bash ./scripts/test-chu09-hatcache-c249.sh
+
+.PHONY: test-chu09-package-c249
+test-chu09-package-c249:
+	@bash ./scripts/test-chu09-package-c249.sh
+
+.PHONY: race-chu09-c249
+race-chu09-c249:
+	@bash ./scripts/race-chu09-c249.sh
+
+.PHONY: vet-chu09-c249
+vet-chu09-c249:
+	@bash ./scripts/vet-chu09-c249.sh
+
+.PHONY: test-chu09-repo-c249
+test-chu09-repo-c249:
+	@bash ./scripts/test-chu09-repo-c249.sh
+
+.PHONY: review-chu09-c249
+review-chu09-c249:
+	@bash ./scripts/review-chu09-c249.sh
+
+.PHONY: verify-chu09-docs-c249
+verify-chu09-docs-c249:
+	@bash ./scripts/verify-chu09-docs-c249.sh
+
+.PHONY: stage-chu09-c249
+stage-chu09-c249:
+	@bash ./scripts/stage-chu09-c249.sh
+
+.PHONY: commit-chu09-c249
+commit-chu09-c249:
+	@bash ./scripts/commit-chu09-c249.sh
+
+.PHONY: push-chu09-c249
+push-chu09-c249:
+	@bash ./scripts/push-chu09-c249.sh
