@@ -293,6 +293,10 @@ type SQLQueryOptions struct {
 	// referenced source reports the same non-empty version. Nil preserves the
 	// ordinary executor and is the default.
 	ResultCache *SQLResultCache
+	// SubqueryResultCache optionally reuses eligible uncorrelated derived,
+	// CTE, and UNION branch results. Nil keeps the existing behavior and is the
+	// default. Correlated and lateral subqueries are never cached.
+	SubqueryResultCache *SQLResultCache
 	// ResultCacheSettingsFingerprint namespaces result-cache entries by the
 	// caller's effective session or tenant settings. Set a stable compact
 	// fingerprint when resolver or function behavior depends on settings that
@@ -803,6 +807,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, err
 	}
 	control.options = options
+	control.parameters = parameters
 	if options.Quota != nil {
 		quotaReservation, err = options.Quota.begin(options.QuotaKey)
 		if err != nil {
@@ -1020,6 +1025,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	control.options = options
+	control.parameters = parameters
 	if options.Quota != nil {
 		quotaReservation, err = options.Quota.begin(options.QuotaKey)
 		if err != nil {
@@ -5814,6 +5820,8 @@ func sqlQueryOutputsTie(order []sqlOrder, left, right sqlQueryOutput) bool {
 }
 
 type sqlQuery struct {
+	cacheKey           string
+	cacheVolatile      bool
 	indexHint          SQLIndexHint
 	maxThreads         int
 	ctes               []sqlCTE
@@ -5948,6 +5956,22 @@ type sqlQueryParser struct {
 }
 
 func (p *sqlQueryParser) parseQuery(stopRight bool) (*sqlQuery, error) {
+	start := p.index
+	query, err := p.parseQueryInternal(stopRight)
+	if err == nil && query != nil {
+		end := p.index
+		if end > len(p.tokens) {
+			end = len(p.tokens)
+		}
+		if start < end {
+			query.cacheKey = sqlQueryTokenKey(p.tokens[start:end])
+			query.cacheVolatile = sqlQueryTokensContainVolatile(p.tokens[start:end])
+		}
+	}
+	return query, err
+}
+
+func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 	q := &sqlQuery{limit: -1}
 	if p.keyword("UNION") || p.keyword("INTERSECT") || p.keyword("EXCEPT") {
 		return nil, p.expected(p.current(), "SELECT, FROM, or WITH", []string{"SELECT", "FROM", "WITH"})
@@ -7997,6 +8021,7 @@ type sqlExecutionControl struct {
 	ctx        context.Context
 	maxRows    int
 	options    SQLQueryOptions
+	parameters []interface{}
 	joinWork   int
 	sources    map[string][]SQLRow
 	arena      sqlExecutionArena
@@ -11360,7 +11385,13 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if cte.recursive {
 			rows, err = executeSQLRecursiveCTE(cte, resolver, ctes, metrics, control, maxRows)
 		} else if cte.query != nil {
-			r, e := executeSQLQueryWithMetrics(cte.query, resolver, ctes, metrics, control)
+			var r SQLQueryResult
+			var e error
+			if control == nil || control.options.SubqueryResultCache == nil {
+				r, e = executeSQLQueryWithMetrics(cte.query, resolver, ctes, metrics, control)
+			} else {
+				r, e = executeSQLCachedSubquery(cte.query, resolver, ctes, metrics, control)
+			}
 			err = e
 			if err == nil {
 				rows, err = sqlCTEOutputRows(cte, r)
@@ -12521,7 +12552,13 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		return SQLQueryResult{}, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
 	}
 	for _, union := range q.unions {
-		right, err := executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics, control)
+		var right SQLQueryResult
+		var err error
+		if control == nil || control.options.SubqueryResultCache == nil {
+			right, err = executeSQLQueryWithMetrics(union.query, resolver, ctes, metrics, control)
+		} else {
+			right, err = executeSQLCachedSubquery(union.query, resolver, ctes, metrics, control)
+		}
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
@@ -13238,7 +13275,13 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 	case "CTE":
 		return ctes[source.key], nil
 	case "SUBQUERY":
-		result, err := executeSQLQueryWithMetrics(source.query, resolver, ctes, metrics, control)
+		var result SQLQueryResult
+		var err error
+		if source.lateral || control == nil || control.options.SubqueryResultCache == nil {
+			result, err = executeSQLQueryWithMetrics(source.query, resolver, ctes, metrics, control)
+		} else {
+			result, err = executeSQLCachedSubquery(source.query, resolver, ctes, metrics, control)
+		}
 		if err != nil {
 			return nil, err
 		}

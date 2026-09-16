@@ -28033,3 +28033,51 @@ metadata field.
 Conclusion: keep the legacy path as the default. Use C204 when tracing a
 source write through dependent materialized views is worth the explicit small
 CPU and allocation cost.
+
+## C205: Subquery Result Cache
+
+This benchmark compares the pre-C205 executor, the post-C205 executor with the
+new option left off, and the warmed opt-in subquery cache. The query executes a
+512-row derived `CACHE('events')` source. All samples use `GOMAXPROCS=1`, a
+warmed prepared-query cache, `-benchtime=1s`, `-count=5`, and `-benchmem`.
+Ratios are `after / reference`; values below `1.00x` are faster or smaller.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Time x vs before | Heap x vs before | Alloc x vs before |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before C205 | 474,245 | 893,840 | 4,135 | 1.00x | 1.00x | 1.00x |
+| After, subquery cache off | 466,653 | 893,904 | 4,135 | 0.98x | 1.00x | 1.00x |
+| After, subquery cache warm hit | 239,466 | 451,528 | 2,100 | 0.51x | 0.51x | 0.51x |
+
+The option-off path is effectively neutral in this noisy cross-process
+comparison: it has the same allocation count and 64 additional bytes per
+operation. The warmed opt-in path is 1.98x faster, uses 1.98x less heap, and
+uses 1.97x fewer allocations than before. It also avoids source reloads after
+the first versioned miss. The tradeoff is bounded retained cache memory and
+one source-version lookup per attempted reuse; callers choose the cache
+capacity and can leave it nil.
+
+### Raw output
+
+```text
+# before: make benchmark-chu05-c205-baseline
+BenchmarkSQLSubqueryResultCacheBaseline  2121  503223 ns/op  893840 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheBaseline  2125  544565 ns/op  893840 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheBaseline  2557  474245 ns/op  893840 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheBaseline  2565  468877 ns/op  893840 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheBaseline  2590  447997 ns/op  893840 B/op  4135 allocs/op
+
+# after: make benchmark-chu05-c205
+BenchmarkSQLSubqueryResultCacheDisabled  2046  502759 ns/op  893904 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheDisabled  2614  441027 ns/op  893904 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheDisabled  2655  466653 ns/op  893904 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheDisabled  2445  463900 ns/op  893904 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheDisabled  2635  501448 ns/op  893904 B/op  4135 allocs/op
+BenchmarkSQLSubqueryResultCacheEnabled   4611  234353 ns/op  451528 B/op  2100 allocs/op
+BenchmarkSQLSubqueryResultCacheEnabled   4887  239466 ns/op  451528 B/op  2100 allocs/op
+BenchmarkSQLSubqueryResultCacheEnabled   4959  276034 ns/op  451528 B/op  2100 allocs/op
+BenchmarkSQLSubqueryResultCacheEnabled   3865  272297 ns/op  451528 B/op  2100 allocs/op
+BenchmarkSQLSubqueryResultCacheEnabled   4783  234127 ns/op  451528 B/op  2100 allocs/op
+```
+
+The implementation and usage boundaries are documented in
+[C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md).

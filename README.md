@@ -4220,3 +4220,13 @@ Async journal writes can carry their idempotency identity through incremental
 SQL projections and refreshed materialized-view status for operational
 correlation. See [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md)
 and the measured tradeoff in [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata).
+
+## SQL Subquery Result Cache
+
+`SQLQueryOptions.SubqueryResultCache` is an opt-in bounded cache for eligible
+uncorrelated derived queries, non-recursive CTE bodies, and set-operation
+branches. It uses source versions and bound parameters for invalidation and
+clones returned rows. Correlated, lateral, recursive, volatile, custom-function,
+and unversioned queries retain normal execution. See
+[C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md) and the raw
+measurements in [BENCHMARK.md](BENCHMARK.md#c205-subquery-result-cache).

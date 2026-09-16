@@ -17145,3 +17145,35 @@ commit-chu04-c204:
 
 push-chu04-c204:
 	sh scripts/push-chu04-c204.sh
+format-chu05-c205:
+	sh scripts/format-chu05-c205.sh
+
+test-chu05-c205-package:
+	sh scripts/test-chu05-c205-package.sh
+
+race-chu05-c205:
+	sh scripts/race-chu05-c205.sh
+
+vet-chu05-c205:
+	sh scripts/vet-chu05-c205.sh
+
+benchmark-chu05-c205:
+	sh scripts/benchmark-chu05-c205.sh
+
+audit-chu05-c205:
+	sh scripts/audit-chu05-c205.sh
+
+stage-chu05-c205:
+	sh scripts/stage-chu05-c205.sh
+
+commit-chu05-c205:
+	sh scripts/commit-chu05-c205.sh
+
+push-chu05-c205:
+	sh scripts/push-chu05-c205.sh
+
+diagnose-chu05-test:
+	sh scripts/diagnose-chu05-test.sh
+
+test-chu05-c205:
+	sh scripts/test-chu05-c205.sh

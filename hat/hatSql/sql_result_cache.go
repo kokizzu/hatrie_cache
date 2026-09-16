@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"strconv"
 	"strings"
@@ -37,10 +38,63 @@ func sqlResultCacheLookup(query *sqlQuery, source string, parameters []interface
 	}, true
 }
 
+func sqlResultCacheLookupQuery(query *sqlQuery, parameters []interface{}, resolver SQLSourceResolver, options SQLQueryOptions) (string, func() (string, bool), bool) {
+	if options.ResultCache == nil || !sqlResultCacheQueryEligible(query) || sqlResultCacheQueryHasCTEReference(query) || query.cacheKey == "" {
+		return "", nil, false
+	}
+	key, ok := sqlResultCacheQueryKey(query, parameters, options)
+	if !ok {
+		return "", nil, false
+	}
+	sources := sqlResultCacheSources(query)
+	if len(sources) == 0 {
+		return "", nil, false
+	}
+	if _, ok := resolver.(SourceVersionResolver); !ok {
+		return "", nil, false
+	}
+	return key, func() (string, bool) {
+		return sqlResultCacheVersion(sources, resolver)
+	}, true
+}
+
+func executeSQLCachedSubquery(query *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) (SQLQueryResult, error) {
+	if control == nil || control.options.SubqueryResultCache == nil || query == nil || query.cacheKey == "" {
+		return executeSQLQueryWithMetrics(query, resolver, ctes, metrics, control)
+	}
+	options := control.options
+	options.ResultCache = options.SubqueryResultCache
+	key, version, ok := sqlResultCacheLookupQuery(query, control.parameters, resolver, options)
+	if !ok {
+		return executeSQLQueryWithMetrics(query, resolver, ctes, metrics, control)
+	}
+	result, err := options.ResultCache.ExecuteVersioned(control.ctx, key, version, func(execCtx context.Context) (QueryResult, error) {
+		return executeSQLQueryWithMetrics(query, resolver, ctes, metrics, control)
+	})
+	if err != nil {
+		return result, err
+	}
+	if err := control.check(); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
 func sqlResultCacheKey(source string, parameters []interface{}, options SQLQueryOptions) (string, bool) {
 	if !sqlResultCacheOptionsEligible(options) || sqlResultCacheSourceIsVolatile(source) {
 		return "", false
 	}
+	return sqlResultCacheKeyParts(source, parameters, options)
+}
+
+func sqlResultCacheQueryKey(query *sqlQuery, parameters []interface{}, options SQLQueryOptions) (string, bool) {
+	if query == nil || query.cacheVolatile || !sqlResultCacheOptionsEligible(options) {
+		return "", false
+	}
+	return sqlResultCacheKeyParts(query.cacheKey, parameters, options)
+}
+
+func sqlResultCacheKeyParts(source string, parameters []interface{}, options SQLQueryOptions) (string, bool) {
 	if len(options.ResultCacheSettingsFingerprint) > MaxSQLResultCacheSettingsFingerprintBytes {
 		return "", false
 	}
@@ -198,6 +252,132 @@ func sqlResultCacheQueryEligible(query *sqlQuery) bool {
 	}
 	visitQuery(query)
 	return eligible
+}
+
+func sqlQueryTokenKey(tokens []sqlToken) string {
+	var key strings.Builder
+	key.WriteString("hatsql-query-tokens-v1")
+	for _, token := range tokens {
+		appendSQLResultCachePart(&key, strconv.Itoa(int(token.kind)))
+		appendSQLResultCachePart(&key, token.text)
+	}
+	return key.String()
+}
+
+func sqlQueryTokensContainVolatile(tokens []sqlToken) bool {
+	for _, token := range tokens {
+		if token.kind != sqlTokenIdentifier {
+			continue
+		}
+		switch strings.ToUpper(token.text) {
+		case "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "NOW", "RAND", "RANDOM", "UUID", "GENERATE_UUID":
+			return true
+		}
+	}
+	return false
+}
+
+func sqlResultCacheQueryHasCTEReference(query *sqlQuery) bool {
+	found := false
+	var visitExpr func(sqlExpr)
+	var visitSource func(sqlSource)
+	var visitQuery func(*sqlQuery)
+	visitExpr = func(expr sqlExpr) {
+		if found {
+			return
+		}
+		if expr.query != nil {
+			visitQuery(expr.query)
+		}
+		if expr.left != nil {
+			visitExpr(*expr.left)
+		}
+		if expr.right != nil {
+			visitExpr(*expr.right)
+		}
+		if expr.filter != nil {
+			visitExpr(*expr.filter)
+		}
+		for _, argument := range expr.args {
+			visitExpr(argument)
+		}
+		for _, branch := range expr.cases {
+			visitExpr(branch.when)
+			visitExpr(branch.then)
+		}
+		if expr.window != nil {
+			for _, partition := range expr.window.partition {
+				visitExpr(partition)
+			}
+			for _, order := range expr.window.order {
+				visitExpr(order.expr)
+			}
+		}
+	}
+	visitSource = func(source sqlSource) {
+		if found {
+			return
+		}
+		if source.kind == "CTE" {
+			found = true
+			return
+		}
+		if source.kind == "SUBQUERY" {
+			visitQuery(source.query)
+		}
+	}
+	visitQuery = func(candidate *sqlQuery) {
+		if candidate == nil || found {
+			return
+		}
+		for _, cte := range candidate.ctes {
+			visitQuery(cte.query)
+		}
+		if candidate.from != nil {
+			visitSource(*candidate.from)
+		}
+		for _, join := range candidate.joins {
+			visitSource(join.source)
+			visitExpr(join.on)
+		}
+		for _, item := range candidate.selects {
+			visitExpr(item.expr)
+		}
+		visitExpr(candidate.where)
+		for _, expression := range candidate.groupBy {
+			visitExpr(expression)
+		}
+		for _, groupingSet := range candidate.groupingSets {
+			for _, expression := range groupingSet {
+				visitExpr(expression)
+			}
+		}
+		for _, expression := range candidate.groupingDimensions {
+			visitExpr(expression)
+		}
+		visitExpr(candidate.having)
+		for _, order := range candidate.orderBy {
+			visitExpr(order.expr)
+		}
+		if candidate.limitBy != nil {
+			for _, expression := range candidate.limitBy.expressions {
+				visitExpr(expression)
+			}
+		}
+		for _, window := range candidate.windows {
+			for _, partition := range window.partition {
+				visitExpr(partition)
+			}
+			for _, order := range window.order {
+				visitExpr(order.expr)
+			}
+		}
+		for _, union := range candidate.unions {
+			visitQuery(union.query)
+		}
+	}
+	visitQuery(query)
+	return found
 }
 
 func sqlResultCacheSources(query *sqlQuery) []sqlResultCacheSource {
