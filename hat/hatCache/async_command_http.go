@@ -1,8 +1,10 @@
 package hatCache
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -19,6 +21,7 @@ var (
 	ErrMonitoringAsyncCommandRequiresJournal     = errors.New("hatriecache: async HTTP commands require a journal")
 	ErrMonitoringAsyncCommandRequiresIdempotency = errors.New("hatriecache: async HTTP commands require journal idempotency")
 	ErrMonitoringAsyncCommandIncompatible        = errors.New("hatriecache: async HTTP commands are incompatible with leader enforcement or replication")
+	ErrMonitoringAsyncCommandWaitValue           = errors.New("hatriecache: wait_for_async_insert must be 0 or 1")
 )
 
 // AsyncCommandAcceptedResponse is returned by the opt-in HTTP async command
@@ -77,8 +80,36 @@ func monitoringAsyncCommandRequested(r *http.Request) bool {
 	return false
 }
 
+func monitoringAsyncCommandWaitRequested(r *http.Request) (bool, error) {
+	if r == nil {
+		return false, nil
+	}
+	if r.URL == nil || !strings.Contains(r.URL.RawQuery, "wait_for_async_insert") {
+		return false, nil
+	}
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return false, ErrMonitoringAsyncCommandWaitValue
+	}
+	value := strings.TrimSpace(values.Get("wait_for_async_insert"))
+	switch value {
+	case "", "0":
+		return false, nil
+	case "1":
+		return true, nil
+	default:
+		return false, ErrMonitoringAsyncCommandWaitValue
+	}
+}
+
 func (handler *MonitoringHandler) handleAsyncCommandSubmission(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) {
-	accepted, err := handler.admitAsyncCommand(request)
+	waitForAsyncInsert, err := monitoringAsyncCommandWaitRequested(r)
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "command.async", Command: normalizedCommand(request.Command), Key: strings.TrimSpace(request.Key), OK: false, Status: http.StatusBadRequest, Message: err.Error()})
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	accepted, submission, err := handler.admitAsyncCommand(request)
 	if err != nil {
 		status := monitoringAsyncCommandErrorStatus(err)
 		handler.auditHTTP(r, AuditEvent{Action: "command.async", Command: normalizedCommand(request.Command), Key: strings.TrimSpace(request.Key), OK: false, Status: status, Message: err.Error()})
@@ -88,6 +119,21 @@ func (handler *MonitoringHandler) handleAsyncCommandSubmission(w http.ResponseWr
 	status := http.StatusAccepted
 	if accepted.Status == "completed" {
 		status = http.StatusOK
+	}
+	if waitForAsyncInsert && accepted.Status == "pending" {
+		response, waitErr := submission.Wait(r.Context())
+		if waitErr != nil {
+			status = monitoringAsyncCommandWaitErrorStatus(waitErr)
+			handler.auditHTTP(r, AuditEvent{Action: "command.async", Command: normalizedCommand(request.Command), Key: strings.TrimSpace(request.Key), OK: false, Status: status, Message: waitErr.Error()})
+			writeJSONStatus(w, status, commandError(waitErr.Error()))
+			return
+		}
+		accepted.Status = "completed"
+		accepted.Response = responsePointer(response)
+		status = http.StatusOK
+		if !response.OK {
+			status = http.StatusConflict
+		}
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "command.async", Command: normalizedCommand(request.Command), Key: strings.TrimSpace(request.Key), OK: true, Status: status, Message: accepted.Status})
 	writeJSONStatus(w, status, accepted)
@@ -103,54 +149,61 @@ func monitoringAsyncCommandErrorStatus(err error) int {
 	return http.StatusConflict
 }
 
-func (handler *MonitoringHandler) admitAsyncCommand(request CacheCommandRequest) (AsyncCommandAcceptedResponse, error) {
+func monitoringAsyncCommandWaitErrorStatus(err error) int {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusRequestTimeout
+	}
+	return http.StatusServiceUnavailable
+}
+
+func (handler *MonitoringHandler) admitAsyncCommand(request CacheCommandRequest) (AsyncCommandAcceptedResponse, *CommandJournalSubmission, error) {
 	if handler == nil || handler.trie == nil {
-		return AsyncCommandAcceptedResponse{}, ErrNilHatTrie
+		return AsyncCommandAcceptedResponse{}, nil, ErrNilHatTrie
 	}
 	journal := handler.options.Journal
 	if journal == nil {
-		return AsyncCommandAcceptedResponse{}, ErrMonitoringAsyncCommandRequiresJournal
+		return AsyncCommandAcceptedResponse{}, nil, ErrMonitoringAsyncCommandRequiresJournal
 	}
 	if !commandShouldJournal(request) {
-		return AsyncCommandAcceptedResponse{}, ErrCommandJournalAsyncWriteOnly
+		return AsyncCommandAcceptedResponse{}, nil, ErrCommandJournalAsyncWriteOnly
 	}
 	if asyncCommandContainsInternal(request) {
-		return AsyncCommandAcceptedResponse{}, ErrMonitoringAsyncCommandIncompatible
+		return AsyncCommandAcceptedResponse{}, nil, ErrMonitoringAsyncCommandIncompatible
 	}
 	if handler.options.EnforceLeaderWrites || handler.options.Replicator != nil {
-		return AsyncCommandAcceptedResponse{}, ErrMonitoringAsyncCommandIncompatible
+		return AsyncCommandAcceptedResponse{}, nil, ErrMonitoringAsyncCommandIncompatible
 	}
 	key := strings.TrimSpace(request.IdempotencyKey)
 	if key == "" {
-		return AsyncCommandAcceptedResponse{}, errors.New("hatriecache: async HTTP commands require idempotency_key")
+		return AsyncCommandAcceptedResponse{}, nil, errors.New("hatriecache: async HTTP commands require idempotency_key")
 	}
 	if err := validateCommandIdempotencyKey(key); err != nil {
-		return AsyncCommandAcceptedResponse{}, err
+		return AsyncCommandAcceptedResponse{}, nil, err
 	}
 	request.IdempotencyKey = key
 	check, err := journal.idempotencyCheck(request)
 	if err != nil {
-		return AsyncCommandAcceptedResponse{}, err
+		return AsyncCommandAcceptedResponse{}, nil, err
 	}
 	if !check.enabled {
-		return AsyncCommandAcceptedResponse{}, ErrMonitoringAsyncCommandRequiresIdempotency
+		return AsyncCommandAcceptedResponse{}, nil, ErrMonitoringAsyncCommandRequiresIdempotency
 	}
 	if response, duplicate, err := journal.lookupAsyncCommandIdempotency(check); err != nil {
-		return AsyncCommandAcceptedResponse{}, err
+		return AsyncCommandAcceptedResponse{}, nil, err
 	} else if duplicate {
 		return AsyncCommandAcceptedResponse{
 			Accepted:       true,
 			Status:         "completed",
 			IdempotencyKey: key,
 			Response:       responsePointer(response),
-		}, nil
+		}, nil, nil
 	}
 
 	handler.asyncCommandsMu.Lock()
 	defer handler.asyncCommandsMu.Unlock()
 	if entry, ok := handler.asyncCommands[key]; ok {
 		if entry.check.fingerprint != check.fingerprint {
-			return AsyncCommandAcceptedResponse{}, errors.New("hatriecache: idempotency key was reused with a different command")
+			return AsyncCommandAcceptedResponse{}, nil, errors.New("hatriecache: idempotency key was reused with a different command")
 		}
 		if entry.completed {
 			return AsyncCommandAcceptedResponse{
@@ -158,12 +211,12 @@ func (handler *MonitoringHandler) admitAsyncCommand(request CacheCommandRequest)
 				Status:         "completed",
 				IdempotencyKey: key,
 				Response:       responsePointer(entry.response),
-			}, nil
+			}, nil, nil
 		}
-		return AsyncCommandAcceptedResponse{Accepted: true, Status: "pending", IdempotencyKey: key}, nil
+		return AsyncCommandAcceptedResponse{Accepted: true, Status: "pending", IdempotencyKey: key}, entry.submission, nil
 	}
 	if len(handler.asyncCommands) >= handler.options.AsyncCommandStatusCapacity && !handler.evictCompletedAsyncCommandLocked() {
-		return AsyncCommandAcceptedResponse{}, ErrMonitoringAsyncCommandStatusFull
+		return AsyncCommandAcceptedResponse{}, nil, ErrMonitoringAsyncCommandStatusFull
 	}
 	handler.asyncCommands[key] = monitoringAsyncCommandEntry{
 		check:     check,
@@ -180,12 +233,12 @@ func (handler *MonitoringHandler) admitAsyncCommand(request CacheCommandRequest)
 	})
 	if err != nil {
 		handler.removeAsyncCommandLocked(key)
-		return AsyncCommandAcceptedResponse{}, err
+		return AsyncCommandAcceptedResponse{}, nil, err
 	}
 	entry := handler.asyncCommands[key]
 	entry.submission = submission
 	handler.asyncCommands[key] = entry
-	return AsyncCommandAcceptedResponse{Accepted: true, Status: "pending", IdempotencyKey: key}, nil
+	return AsyncCommandAcceptedResponse{Accepted: true, Status: "pending", IdempotencyKey: key}, submission, nil
 }
 
 func asyncCommandContainsInternal(request CacheCommandRequest) bool {

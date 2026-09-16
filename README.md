@@ -227,7 +227,7 @@ security guidance before exposing it on a network.
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Part/WAL-consistent backup manifests with per-file checksums: [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u50-partwal-consistent-backup-manifest)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
-- Opt-in asynchronous HTTP command admission and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
+- Opt-in asynchronous HTTP command admission, wait modes, and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
 - Opt-in durable SQL subscription history, progress, and resume cursors: [DURABLE_SUBSCRIPTIONS.md](DURABLE_SUBSCRIPTIONS.md)
 - Opt-in schema-enforced complete source replacements: [SCHEMA_BOUND_WRITES.md](SCHEMA_BOUND_WRITES.md)
 - Opt-in structured source lag, retry, and health records: [SOURCE_HEALTH.md](SOURCE_HEALTH.md)
@@ -251,8 +251,10 @@ for backpressure, recovery, and measured tradeoffs.
 
 HTTP clients can opt into the same bounded journal admission model with
 `X-Hatrie-Async: true` or `Prefer: respond-async`, then poll a completion
-record by idempotency key. The HTTP path is disabled by default and keeps the
-existing synchronous endpoint unchanged. See
+record by idempotency key. Add `wait_for_async_insert=1` when the response must
+wait for durable-and-applied completion; the default and `=0` remain admission
+only. The HTTP path is disabled by default and keeps the existing synchronous
+endpoint unchanged. See
 [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md) for configuration, retries,
 security, and the replication compatibility guard.
 

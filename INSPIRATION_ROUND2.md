@@ -32,7 +32,7 @@ operator control remain the preferred deployment model.
 
 - [-] C201 Adaptive asynchronous-insert flush timeout based on arrival rate. Rejected after the end-to-end 64-concurrent-command benchmark measured `432-478 us/op`, `67,0xx B/op`, and `334 allocs/op` versus the existing static worker at `158-164 us/op`, `66,5xx B/op`, and `331 allocs/op`; the adaptive path was about 2.8-3.0x slower. See [BENCHMARK.md](BENCHMARK.md#c201-rejected-adaptive-asynchronous-batch-flush).
 - [x] C202 Per-shard asynchronous-insert buffer affinity to reduce cross-shard coordination. Implemented as explicit `hatPipeline.PartitionedAsyncBatcher`; see [C202_PARTITIONED_ASYNC_BATCHER.md](C202_PARTITIONED_ASYNC_BATCHER.md) and [BENCHMARK.md](BENCHMARK.md#c202-partition-affine-asynchronous-batching).
-- [ ] C203 Explicit `wait_for_async_insert` durability modes with visible acknowledgment semantics.
+- [x] C203 Explicit `wait_for_async_insert` durability modes with visible acknowledgment semantics. Implemented for opt-in HTTP async commands; omitted/`0` preserves `202` admission and `1` waits for durable-and-applied completion. See [CHU03_ASYNC_INSERT_ACK_MODES.md](CHU03_ASYNC_INSERT_ACK_MODES.md).
 - [ ] C204 Idempotency-token propagation across asynchronous inserts and dependent materialized views.
 - [ ] C205 Query-cache controls scoped to individual subqueries.
 - [ ] C206 Query-cache eligibility checks that reject nondeterministic expressions.

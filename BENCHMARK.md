@@ -23123,6 +23123,47 @@ setup partitioned: 9589 9045 8762 9119 8628 ns/op, 31912 B/op, 58 allocs/op
 Reproduce with `make benchmark-c202`, `make benchmark-c202-serial`, and
 `make benchmark-c202-setup`.
 
+## CHU03 Explicit Async Insert Acknowledgment Modes
+
+This benchmark compares the parent revision's existing asynchronous HTTP
+admission path with the current revision's admission path and the new explicit
+`wait_for_async_insert=1` path. The parent and current admission cases use the
+same bounded async journal setup. The waited case includes journal sync and
+in-memory application by design.
+
+| Path | Median time | Bytes/op | Allocs/op | Relative time |
+|---|---:|---:|---:|---:|
+| Parent admission path | 35.130 us | 10,435 | 58 | 1.00x |
+| Current admission path | 33.734 us | 10,437 | 58 | 0.96x time |
+| Current `wait_for_async_insert=1` | 0.710 ms | 11,751 | 63 | 20.2x vs parent admission |
+
+The admission path has the same allocation count and the observed time
+difference is within run-to-run noise. The waited path costs about `+0.675 ms`,
+`+1,316 B/op`, and `+5 allocs/op` versus parent admission because it waits for
+the completion boundary. It is therefore opt-in and should be selected only
+when the caller needs a durable acknowledgment.
+
+Raw samples (`-benchtime=100ms -count=3 -benchmem`, AMD Ryzen 9 5950X):
+
+```text
+Parent BenchmarkMonitoringAsyncCommandHTTPAdmission:
+35.130 us/op, 10,448 B/op, 58 allocs/op
+35.659 us/op, 10,435 B/op, 58 allocs/op
+34.195 us/op, 10,431 B/op, 58 allocs/op
+
+Current BenchmarkMonitoringAsyncCommandHTTPAdmission:
+34.653 us/op, 10,433 B/op, 58 allocs/op
+32.915 us/op, 10,443 B/op, 58 allocs/op
+33.734 us/op, 10,437 B/op, 58 allocs/op
+
+Current BenchmarkMonitoringAsyncCommandHTTPWait:
+0.710 ms/op, 11,731 B/op, 63 allocs/op
+0.719 ms/op, 11,751 B/op, 63 allocs/op
+0.683 ms/op, 11,772 B/op, 63 allocs/op
+```
+
+Reproduce the current measurements with `make benchmark-chu03-async-ack`.
+
 ## M202 Durable Changefeed Checkpoint
 
 Materialize-inspired source-bound checkpoint benchmark, five runs:

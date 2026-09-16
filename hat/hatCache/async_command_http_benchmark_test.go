@@ -76,6 +76,41 @@ func BenchmarkMonitoringAsyncCommandHTTPAdmission(b *testing.B) {
 	}
 }
 
+func BenchmarkMonitoringAsyncCommandHTTPWait(b *testing.B) {
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
+		GroupCommitMaxBatch: 64,
+		IdempotencyCapacity: 1 << 16,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer journal.Close()
+	monitoringHandler := NewMonitoringHandler(trie, MonitoringOptions{
+		Journal:                    journal,
+		AsyncCommands:              true,
+		AsyncCommandStatusCapacity: MaxMonitoringAsyncCommandStatusCapacity,
+	})
+	handler := monitoringHandler.Handler()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		key := "bench-wait-" + strconv.Itoa(index)
+		body := []byte(`{"command":"SET","key":"async-bench:` + strconv.Itoa(index) + `","value":"value","idempotency_key":"` + key + `"}`)
+		request := httptest.NewRequest(http.MethodPost, "/api/commands?wait_for_async_insert=1", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set("X-Hatrie-Async", "true")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			b.Fatalf("wait-for-async command status = %d, want 200", response.Code)
+		}
+	}
+}
+
 func waitForAsyncCommandBenchmark(handler *MonitoringHandler, key string, b *testing.B) {
 	b.Helper()
 	deadline := time.Now().Add(5 * time.Second)

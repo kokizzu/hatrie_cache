@@ -236,6 +236,123 @@ func TestMonitoringAsyncCommandSupportsPreferAndRejectsConflict(t *testing.T) {
 	}
 }
 
+func TestMonitoringAsyncCommandWaitForAsyncInsert(t *testing.T) {
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		GroupCommitMaxBatch: 4,
+		IdempotencyCapacity: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+
+	server := httptest.NewServer(NewMonitoringHandler(trie, MonitoringOptions{
+		Journal:       journal,
+		AsyncCommands: true,
+	}).Handler())
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/commands?wait_for_async_insert=1", bytes.NewReader([]byte(`{"command":"SET","key":"async:wait","value":"value","idempotency_key":"wait-1"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("X-Hatrie-Async", "true")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+
+	var accepted AsyncCommandAcceptedResponse
+	if err := json.NewDecoder(response.Body).Decode(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !accepted.Accepted || accepted.Status != "completed" || accepted.Response == nil || !accepted.Response.OK {
+		t.Fatalf("wait-for-async response = status %d, %#v, want 200 completed success", response.StatusCode, accepted)
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "async:wait"}); got.Value != "value" {
+		t.Fatalf("wait-for-async value = %#v, want value", got.Value)
+	}
+}
+
+func TestMonitoringAsyncCommandWaitForAsyncInsertValidation(t *testing.T) {
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		GroupCommitMaxBatch: 4,
+		IdempotencyCapacity: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+
+	server := httptest.NewServer(NewMonitoringHandler(trie, MonitoringOptions{
+		Journal:       journal,
+		AsyncCommands: true,
+	}).Handler())
+	defer server.Close()
+
+	newRequest := func(query string, key string) *http.Request {
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/commands"+query, bytes.NewReader([]byte(`{"command":"SET","key":"`+key+`","value":"value","idempotency_key":"`+key+`"}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set("X-Hatrie-Async", "true")
+		return request
+	}
+
+	zeroResponse, err := http.DefaultClient.Do(newRequest("?wait_for_async_insert=0", "wait-zero"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var zeroAccepted AsyncCommandAcceptedResponse
+	if err := json.NewDecoder(zeroResponse.Body).Decode(&zeroAccepted); err != nil {
+		zeroResponse.Body.Close()
+		t.Fatal(err)
+	}
+	zeroResponse.Body.Close()
+	if zeroResponse.StatusCode != http.StatusAccepted || zeroAccepted.Status != "pending" {
+		t.Fatalf("wait=0 response = status %d, %#v, want 202 pending", zeroResponse.StatusCode, zeroAccepted)
+	}
+	waitForAsyncCommandCompletion(t, server.URL, "wait-zero", "")
+
+	invalidResponse, err := http.DefaultClient.Do(newRequest("?wait_for_async_insert=maybe", "wait-invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidResponse.Body.Close()
+	if invalidResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid wait value status = %d, want 400", invalidResponse.StatusCode)
+	}
+	if got := trie.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "wait-invalid"}); got.Value != "" {
+		t.Fatalf("invalid wait value wrote %#v, want empty", got.Value)
+	}
+}
+
+func TestMonitoringAsyncCommandOpenAPIAdvertisesWaitMode(t *testing.T) {
+	document := monitoringOpenAPIDocument(true)
+	paths := document["paths"].(map[string]interface{})
+	commandPath := paths["/api/commands"].(map[string]interface{})
+	operation := commandPath["post"].(map[string]interface{})
+	parameters := operation["parameters"].([]map[string]interface{})
+	if len(parameters) != 1 || parameters[0]["name"] != "wait_for_async_insert" {
+		t.Fatalf("async command parameters = %#v, want wait_for_async_insert", parameters)
+	}
+	responses := operation["responses"].(map[string]interface{})
+	if _, ok := responses["202"]; !ok {
+		t.Fatal("async command OpenAPI is missing 202 response")
+	}
+}
+
 func TestMonitoringAsyncCommandRequiresAuthAndIdempotency(t *testing.T) {
 	trie := CreateHatTrie()
 	defer trie.Destroy()

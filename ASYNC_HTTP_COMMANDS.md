@@ -86,6 +86,35 @@ response with `ok:false` when the command itself was rejected after admission.
 The idempotency key must be treated as a secret-bearing identifier when keys
 contain sensitive business context because it is included in the status URL.
 
+## Wait For Completion
+
+Callers that need a response only after durable application can use the
+ClickHouse-style `wait_for_async_insert=1` query parameter together with the
+async header:
+
+```sh
+curl --fail-with-body \
+  -H 'Authorization: Bearer operator-secret' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'X-Hatrie-Async: true' \
+  --data '{"command":"SET","key":"session:42","value":"ready","idempotency_key":"session-42-write-1"}' \
+  'http://127.0.0.1:8080/api/commands?wait_for_async_insert=1'
+```
+
+The value must be `0` or `1`. Omitted and `0` preserve the normal `202`
+admission response. `1` waits for journal sync and in-memory application, then
+returns `200` with `status:"completed"` and the command response. A rejected
+command returns `409`; a request deadline returns `408`, while the admitted
+command continues and remains available through the status endpoint. A wait
+does not cancel durable work after admission.
+
+This mode has an intentional cost because it includes the group-commit wait.
+The measured admission path remained at 58 allocations per operation, while
+the waited path measured 0.710 ms/op, 11,751 B/op, and 63 allocations in the
+same run. See [CHU03_ASYNC_INSERT_ACK_MODES.md](CHU03_ASYNC_INSERT_ACK_MODES.md)
+and the raw samples in [BENCHMARK.md](BENCHMARK.md#chu03-explicit-async-insert-acknowledgment-modes).
+
 ## Retries And Errors
 
 Retry the same request with the same idempotency key after a transport failure.
@@ -97,7 +126,7 @@ canonical command returns `409 Conflict`.
 | ---: | --- |
 | `200` | The key already completed; the response is replayed. |
 | `202` | The command was admitted and is pending durable application. |
-| `400` | The status request has a missing or invalid idempotency key. |
+| `400` | The status request has a missing or invalid idempotency key, or `wait_for_async_insert` is not `0` or `1`. |
 | `401` | Monitoring authentication failed. |
 | `409` | Async mode is disabled, prerequisites are missing, the command is not a journalable public write, or the key conflicts. |
 | `429` | The journal queue or bounded status registry is full. Retry with backoff. |

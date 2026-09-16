@@ -17080,3 +17080,42 @@ commit-chg02:
 .PHONY: push-chg02
 push-chg02:
 	sh scripts/push-chg02.sh
+.PHONY: test-chu03-async-ack
+test-chu03-async-ack:
+	sh scripts/test-chu03-async-ack.sh
+
+.PHONY: format-chu03-async-ack
+format-chu03-async-ack:
+	sh scripts/format-chu03-async-ack.sh
+
+.PHONY: test-chu03-async-ack-package
+test-chu03-async-ack-package:
+	sh scripts/test-chu03-async-ack-package.sh
+
+.PHONY: race-chu03-async-ack
+race-chu03-async-ack:
+	sh scripts/race-chu03-async-ack.sh
+
+.PHONY: vet-chu03-async-ack
+vet-chu03-async-ack:
+	sh scripts/vet-chu03-async-ack.sh
+
+.PHONY: inspect-async-benchmark
+inspect-async-benchmark:
+	sh scripts/inspect-async-benchmark.sh
+
+.PHONY: benchmark-chu03-async-ack
+benchmark-chu03-async-ack:
+	sh scripts/benchmark-chu03-async-ack.sh
+
+.PHONY: stage-chu03-async-ack
+stage-chu03-async-ack:
+	sh scripts/stage-chu03-async-ack.sh
+
+.PHONY: commit-chu03-async-ack
+commit-chu03-async-ack:
+	sh scripts/commit-chu03-async-ack.sh
+
+.PHONY: push-chu03-async-ack
+push-chu03-async-ack:
+	sh scripts/push-chu03-async-ack.sh

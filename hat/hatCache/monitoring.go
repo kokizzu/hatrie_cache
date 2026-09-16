@@ -1532,6 +1532,21 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 			},
 		},
 	}
+	commandOperation := map[string]interface{}{
+		"operationId": "executeCommand",
+		"responses":   map[string]interface{}{"200": jsonResponse},
+	}
+	if asyncCommands {
+		commandOperation["parameters"] = []map[string]interface{}{{
+			"name":        "wait_for_async_insert",
+			"in":          "query",
+			"description": "When async command admission is requested, wait for durable-and-applied completion. 0 keeps the 202 admission response; 1 waits for the final response.",
+			"required":    false,
+			"schema":      map[string]interface{}{"type": "integer", "enum": []int{0, 1}, "default": 0},
+		}}
+		commandOperation["responses"].(map[string]interface{})["202"] = jsonResponse
+		commandOperation["responses"].(map[string]interface{})["400"] = jsonResponse
+	}
 	paths := map[string]interface{}{
 		"/api/health":            map[string]interface{}{"get": map[string]interface{}{"operationId": "getHealth", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/memory":            map[string]interface{}{"get": map[string]interface{}{"operationId": "getMemory", "responses": map[string]interface{}{"200": memoryResponse}}},
@@ -1540,7 +1555,7 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 		"/api/entries":           map[string]interface{}{"get": map[string]interface{}{"operationId": "listEntries", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/sql":               map[string]interface{}{"post": map[string]interface{}{"operationId": "querySQL", "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/SQLQueryRequest"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/sql/import":        map[string]interface{}{"post": map[string]interface{}{"operationId": "importSQLRowBinary", "parameters": []map[string]interface{}{{"name": "query", "in": "query", "required": true, "schema": map[string]interface{}{"type": "string"}}, {"name": "batch_size", "in": "query", "schema": map[string]interface{}{"type": "integer", "minimum": 1}}}, "requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{hatSql.SQLRowBinaryStreamContentType: map[string]interface{}{"schema": map[string]interface{}{"type": "string", "format": "binary"}}}}, "responses": map[string]interface{}{"200": jsonResponse}}},
-		"/api/commands":          map[string]interface{}{"post": map[string]interface{}{"operationId": "executeCommand", "responses": map[string]interface{}{"200": jsonResponse}}},
+		"/api/commands":          map[string]interface{}{"post": commandOperation},
 		"/api/grafana/search":    map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaSearch", "responses": map[string]interface{}{"200": jsonResponse}}},
 		"/api/grafana/query":     map[string]interface{}{"post": map[string]interface{}{"operationId": "grafanaQuery", "responses": map[string]interface{}{"200": jsonResponse}}},
 	}
