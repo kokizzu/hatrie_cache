@@ -54,6 +54,7 @@ type IncrementalProjectionRunner struct {
 	config   IncrementalProjectionRunnerOptions
 
 	checkpoint uint64
+	status     ProjectionRefreshStatus
 }
 
 // NewIncrementalProjectionRunner creates an optional ordered projection
@@ -70,6 +71,7 @@ func NewIncrementalProjectionRunner(views *MaterializedViews, resolver SourceRes
 		return nil, fmt.Errorf("incremental projection name is required")
 	}
 	runner := &IncrementalProjectionRunner{views: views, resolver: resolver, options: options, config: config}
+	runner.status = newProjectionRefreshStatus(config.Name, config.Enabled, runner.checkpoint)
 	if !config.Enabled || config.CheckpointStore == nil {
 		return runner, nil
 	}
@@ -79,6 +81,8 @@ func NewIncrementalProjectionRunner(views *MaterializedViews, resolver SourceRes
 	}
 	if found {
 		runner.checkpoint = checkpoint
+		runner.status.AppliedSequence = checkpoint
+		runner.status.ObservedSequence = checkpoint
 	}
 	return runner, nil
 }
@@ -110,10 +114,19 @@ func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 
+	runner.ensureProjectionRefreshStatusLocked()
 	run := ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}
 	if !runner.config.Enabled {
 		return run, nil
 	}
+
+	observed := runner.status.ObservedSequence
+	for _, change := range changes {
+		if change.Sequence > observed {
+			observed = change.Sequence
+		}
+	}
+	runner.observeProjectionSequenceLocked(observed)
 
 	dependencies := make(map[string]struct{}, len(changes))
 	expected := runner.checkpoint
@@ -122,11 +135,15 @@ func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []
 			continue
 		}
 		if expected == ^uint64(0) || change.Sequence != expected+1 {
-			return run, fmt.Errorf("incremental projection %q expected sequence %d, got %d", runner.config.Name, expected+1, change.Sequence)
+			err := fmt.Errorf("incremental projection %q expected sequence %d, got %d", runner.config.Name, expected+1, change.Sequence)
+			runner.markProjectionRefreshFailureLocked(observed, err)
+			return run, err
 		}
 		dependency := strings.TrimSpace(change.Dependency)
 		if dependency == "" {
-			return run, fmt.Errorf("incremental projection %q sequence %d has an empty dependency", runner.config.Name, change.Sequence)
+			err := fmt.Errorf("incremental projection %q sequence %d has an empty dependency", runner.config.Name, change.Sequence)
+			runner.markProjectionRefreshFailureLocked(observed, err)
+			return run, err
 		}
 		expected = change.Sequence
 		run.Changes++
@@ -144,14 +161,21 @@ func (runner *IncrementalProjectionRunner) Apply(ctx context.Context, changes []
 	sort.Strings(run.Dependencies)
 	refreshed, err := runner.views.RefreshChanged(ctx, run.Dependencies, runner.resolver, runner.options)
 	if err != nil {
-		return ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}, fmt.Errorf("refresh incremental projection %q: %w", runner.config.Name, err)
+		run = ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}
+		err = fmt.Errorf("refresh incremental projection %q: %w", runner.config.Name, err)
+		runner.markProjectionRefreshFailureLocked(observed, err)
+		return run, err
 	}
 	if runner.config.CheckpointStore != nil {
 		if err := runner.config.CheckpointStore.SaveProjectionCheckpoint(ctx, runner.config.Name, expected); err != nil {
-			return ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}, fmt.Errorf("save incremental projection checkpoint %q: %w", runner.config.Name, err)
+			run = ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}
+			err = fmt.Errorf("save incremental projection checkpoint %q: %w", runner.config.Name, err)
+			runner.markProjectionRefreshFailureLocked(observed, err)
+			return run, err
 		}
 	}
 	runner.checkpoint = expected
+	runner.markProjectionRefreshSuccessLocked(expected)
 	run.Refreshed = cloneProjectionStatuses(refreshed)
 	return run, nil
 }
@@ -167,6 +191,7 @@ func (runner *IncrementalProjectionRunner) Rebuild(ctx context.Context, dependen
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 
+	runner.ensureProjectionRefreshStatusLocked()
 	run := ProjectionRun{Enabled: runner.config.Enabled, FromSequence: runner.checkpoint, ThroughSequence: runner.checkpoint}
 	if !runner.config.Enabled {
 		return run, nil
@@ -178,16 +203,22 @@ func (runner *IncrementalProjectionRunner) Rebuild(ctx context.Context, dependen
 	if err != nil {
 		return run, err
 	}
+	runner.observeProjectionSequenceLocked(throughSequence)
 	refreshed, err := runner.views.RefreshChanged(ctx, normalized, runner.resolver, runner.options)
 	if err != nil {
-		return run, fmt.Errorf("rebuild incremental projection %q: %w", runner.config.Name, err)
+		err = fmt.Errorf("rebuild incremental projection %q: %w", runner.config.Name, err)
+		runner.markProjectionRefreshFailureLocked(throughSequence, err)
+		return run, err
 	}
 	if runner.config.CheckpointStore != nil {
 		if err := runner.config.CheckpointStore.SaveProjectionCheckpoint(ctx, runner.config.Name, throughSequence); err != nil {
-			return run, fmt.Errorf("save rebuilt incremental projection checkpoint %q: %w", runner.config.Name, err)
+			err = fmt.Errorf("save rebuilt incremental projection checkpoint %q: %w", runner.config.Name, err)
+			runner.markProjectionRefreshFailureLocked(throughSequence, err)
+			return run, err
 		}
 	}
 	runner.checkpoint = throughSequence
+	runner.markProjectionRefreshSuccessLocked(throughSequence)
 	run.ThroughSequence = throughSequence
 	run.Dependencies = normalized
 	run.Refreshed = cloneProjectionStatuses(refreshed)

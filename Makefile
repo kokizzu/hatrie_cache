@@ -16733,3 +16733,33 @@ commit-mz007-frontier-backpressure:
 .PHONY: push-mz007-frontier-backpressure
 push-mz007-frontier-backpressure:
 	bash ./scripts/push-mz007-frontier-backpressure.sh
+.PHONY: format-ch018-projection-refresh-status
+format-ch018-projection-refresh-status:
+	bash ./scripts/format-ch018-projection-refresh-status-permanent.sh
+.PHONY: test-ch018-projection-refresh-status
+test-ch018-projection-refresh-status:
+	bash ./scripts/test-ch018-projection-refresh-status.sh
+.PHONY: test-race-ch018-projection-refresh-status
+test-race-ch018-projection-refresh-status:
+	bash ./scripts/test-race-ch018-projection-refresh-status.sh
+.PHONY: vet-ch018-projection-refresh-status
+vet-ch018-projection-refresh-status:
+	bash ./scripts/vet-ch018-projection-refresh-status.sh
+.PHONY: verify-ch018-projection-refresh-status
+verify-ch018-projection-refresh-status:
+	bash ./scripts/verify-ch018-projection-refresh-status.sh
+.PHONY: benchmark-ch018-projection-refresh-status
+benchmark-ch018-projection-refresh-status:
+	bash ./scripts/benchmark-ch018-projection-refresh-status.sh
+.PHONY: review-ch018-projection-refresh-status
+review-ch018-projection-refresh-status:
+	bash ./scripts/review-ch018-projection-refresh-status.sh
+.PHONY: stage-ch018-projection-refresh-status
+stage-ch018-projection-refresh-status:
+	bash ./scripts/stage-ch018-projection-refresh-status.sh
+.PHONY: commit-ch018-projection-refresh-status
+commit-ch018-projection-refresh-status:
+	bash ./scripts/commit-ch018-projection-refresh-status.sh
+.PHONY: push-ch018-projection-refresh-status
+push-ch018-projection-refresh-status:
+	bash ./scripts/push-ch018-projection-refresh-status.sh

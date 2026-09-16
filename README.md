@@ -27,6 +27,7 @@ security guidance before exposing it on a network.
 - ClickHouse/Materialize-style mergeable aggregate states and SQL `STATE`/`MERGE`: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
 - Opt-in bounded retries for transient SQL source reads: [SQL_REMOTE_READ_RETRIES.md](SQL_REMOTE_READ_RETRIES.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
+- Projection refresh lag and failure status: [CH018_PROJECTION_REFRESH_STATUS.md](CH018_PROJECTION_REFRESH_STATUS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-018-projection-refresh-lag-and-failure-state)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
 - Opt-in journal replay progress and ETA: [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md)

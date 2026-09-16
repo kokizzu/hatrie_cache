@@ -27381,3 +27381,58 @@ BenchmarkMZ007FrontierBackpressureBlockedTryAdmit-32     38112418  6.438 ns/op  
 See [MZ007_FRONTIER_SOURCE_BACKPRESSURE.md](MZ007_FRONTIER_SOURCE_BACKPRESSURE.md)
 for API semantics, default-off behavior, and the caller-owned buffering
 boundary.
+
+<a id="ch-018-projection-refresh-lag-and-failure-state"></a>
+## CH-018 Projection Refresh Lag And Failure State
+
+This measures the ClickHouse-inspired status snapshot added to the existing
+opt-in `IncrementalProjectionRunner`. The baseline is the same coalesced
+32-change projection benchmark from the clean pre-feature `HEAD`; the after
+run adds status bookkeeping and the direct status/control benchmarks. Both
+use `-benchmem -benchtime=200ms -count=5` on an AMD Ryzen 9 5950X Linux/amd64
+host. Values above `1.00x` are slower or larger.
+
+| Workload | Baseline median | After median | Relative result |
+| --- | ---: | ---: | --- |
+| Coalesced 32-change Apply CPU | 4.638 ms/op | 4.717 ms/op | `1.02x` CPU; +1.7%, within short-run host variance |
+| Coalesced 32-change Apply heap | 5,322,974 B/op | 5,322,971 B/op | `1.00x`; 3 B/op lower |
+| Coalesced 32-change Apply allocations | 30,177 allocs/op | 30,177 allocs/op | `1.00x`; unchanged |
+| `Status()` snapshot CPU | Not available | 16.75 ns/op | `3.54x` versus `Checkpoint()` control |
+| `Status()` snapshot heap | Not available | 0 B/op | `1.00x` zero-allocation path |
+| `Status()` snapshot allocations | Not available | 0 allocs/op | `1.00x` zero-allocation path |
+
+The apply comparison is a guard against turning observability into a large
+refresh regression; it is not an optimization claim. Status reads copy a
+fixed-size value under the runner mutex and add no heap allocation. The
+feature earns its small bookkeeping cost only when operators need to
+distinguish healthy, lagging, and failed projection state.
+
+Raw baseline output:
+
+```text
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  51  4526884 ns/op  5323083 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  46  4392913 ns/op  5322974 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  50  4733417 ns/op  5322974 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  45  4637965 ns/op  5322977 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  54  5008864 ns/op  5322969 B/op  30177 allocs/op
+```
+
+Raw after output:
+
+```text
+BenchmarkCH018ProjectionRefreshStatus-32  15831603  16.34 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionRefreshStatus-32  14047062  16.24 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionRefreshStatus-32  14369449  18.18 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionRefreshStatus-32  12406771  16.75 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionRefreshStatus-32  15596102  19.13 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionCheckpointControl-32  52447964  4.632 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionCheckpointControl-32  54566913  4.730 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionCheckpointControl-32  46785558  5.188 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionCheckpointControl-32  48690795  4.739 ns/op  0 B/op  0 allocs/op
+BenchmarkCH018ProjectionCheckpointControl-32  51858757  4.523 ns/op  0 B/op  0 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  44  4600428 ns/op  5322972 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  63  4716844 ns/op  5322969 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  55  4786544 ns/op  5322971 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  55  4725851 ns/op  5322970 B/op  30177 allocs/op
+BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  45  4607330 ns/op  5322977 B/op  30177 allocs/op
+```
