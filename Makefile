@@ -16494,3 +16494,43 @@ commit-tt011-point-in-time-restore-c291:
 .PHONY: push-tt011-point-in-time-restore-c291
 push-tt011-point-in-time-restore-c291:
 	@bash scripts/push-tt011-point-in-time-restore-c291.sh
+
+.PHONY: test-tt050-durable-stats-c292
+test-tt050-durable-stats-c292:
+	@bash scripts/test-tt050-durable-stats-c292.sh
+
+.PHONY: format-tt050-durable-stats-c292
+format-tt050-durable-stats-c292:
+	@bash scripts/format-tt050-durable-stats-c292.sh
+
+.PHONY: benchmark-before-tt050-durable-stats-c292
+benchmark-before-tt050-durable-stats-c292:
+	@bash scripts/benchmark-before-tt050-durable-stats-c292.sh
+
+.PHONY: benchmark-tt050-durable-stats-c292
+benchmark-tt050-durable-stats-c292:
+	@bash scripts/benchmark-tt050-durable-stats-c292.sh
+
+.PHONY: verify-tt050-durable-stats-c292
+verify-tt050-durable-stats-c292:
+	@bash scripts/verify-tt050-durable-stats-c292.sh
+
+.PHONY: review-tt050-durable-stats-c292
+review-tt050-durable-stats-c292:
+	@bash scripts/review-tt050-durable-stats-c292.sh
+
+.PHONY: stage-tt050-durable-stats-c292
+stage-tt050-durable-stats-c292:
+	@bash scripts/stage-tt050-durable-stats-c292.sh
+
+.PHONY: inspect-staged-tt050-durable-stats-c292
+inspect-staged-tt050-durable-stats-c292:
+	@bash scripts/inspect-staged-tt050-durable-stats-c292.sh
+
+.PHONY: commit-tt050-durable-stats-c292
+commit-tt050-durable-stats-c292:
+	@bash scripts/commit-tt050-durable-stats-c292.sh
+
+.PHONY: push-tt050-durable-stats-c292
+push-tt050-durable-stats-c292:
+	@bash scripts/push-tt050-durable-stats-c292.sh

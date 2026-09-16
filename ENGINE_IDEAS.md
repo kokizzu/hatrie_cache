@@ -186,13 +186,13 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-047 | Expiration wheel | Partially adopted: the opt-in cleaner now sleeps until the indexed min-heap deadline and wakes for newly earlier deadlines, including local partitions; a hierarchical wheel remains deferred because exact heap deadlines preserve bounded live entries and simpler recovery semantics. | Medium |
 | TT-048 | Queue/priority space primitive | No durable priority queue data structure with claim, retry, and visibility timeout. | Medium |
 | TT-049 | Pessimistic row locks | No `SELECT FOR UPDATE`-style lock lease for callers that need serialized reads/mutations. | High |
-| TT-050 | SQL planner statistics | Partial: explicit source-versioned `ANALYZE` statistics now feed what-if planning, while `TypedTable.Stats()` and numeric `TypedTable.Histogram()` reuse invalidation-aware exact snapshots; durable on-disk statistics and a full cost model remain. | Medium |
+| TT-050 | SQL planner statistics | Partially adopted: explicit source-versioned `ANALYZE` statistics now feed what-if planning, while `TypedTable.Stats()` and numeric `TypedTable.Histogram()` reuse invalidation-aware exact snapshots; opt-in `SaveSQLPlannerStatistics`/`LoadSQLPlannerStatistics` HPS1 snapshots validate source SHA-256 digests, while a full cost model remains. | Medium |
 
 ## Selection order
 
 The first implementation candidates beyond the adopted rows should be additive
 and measurable: persistent backup manifests, background task metrics, bounded
-TTL expiration, and the remaining durable portion of source-versioned SQL
+TTL expiration, and the remaining cost-model portion of source-versioned SQL
 planner statistics. Consensus,
 distributed fan-out, durable dataflow state, and automatic repartitioning need
 separate designs because they affect backup, recovery, and correctness across

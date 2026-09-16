@@ -21568,7 +21568,66 @@ BenchmarkSQLPlannerStatisticsWhatIf/WithAnalyze-32  3395 ns/op 4032 B/op 22 allo
 The improvement is limited to explicitly analyzed, unchanged sources. The
 cache is in-memory derived metadata, is bounded to 128 source entries, and is
 cleared across mutation-safe restore paths. It does not change command wire
-format, backup bytes, or persistence layout.
+format or ordinary cache backup bytes. The separate opt-in HPS1 planner
+statistics snapshot is measured below.
+
+### Durable HPS1 planner-statistics snapshot
+
+The persistence API was measured against the same 10,000-row JSON fixture. The
+baseline archive contained the existing planner-statistics implementation and
+the after archive added the explicit `SaveSQLPlannerStatistics` and
+`LoadSQLPlannerStatistics` APIs. Five samples were collected with
+`-benchmem`:
+
+```text
+make benchmark-before-tt050-durable-stats-c292
+make benchmark-tt050-durable-stats-c292
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | File bytes | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `ANALYZE` before persistence API | 16,542,192 | 5,918,821 | 190,045 | - | 1.00x baseline |
+| `ANALYZE` after persistence API | 16,478,396 | 5,918,513 | 190,045 | - | 0.996x baseline; no material default-path change |
+| Explicit save | 1,800,830 | 383,721 | 28 | 117 | one-time snapshot cost |
+| Explicit load | 279,519 | 379,874 | 24 | 117 | 59.2x faster than baseline `ANALYZE`; 15.6x lower transient bytes; 7,919x fewer allocations |
+
+`B/op` is cumulative transient allocation reported by Go benchmarks, not
+retained memory. The 117-byte file is specific to this two-field fixture; file
+size grows with the number of analyzed sources, fields, and histogram buckets.
+The load benchmark includes validating the source SHA-256 digest, but avoids
+JSON decoding and statistics reconstruction. Existing command wire transfer
+and ordinary cache backup bandwidth are unchanged; the separate HPS1 artifact
+adds only its measured file size when operators choose to preserve it.
+
+Raw baseline samples:
+
+```text
+BenchmarkSQLPlannerStatisticsAnalyze-32  13 16618411 ns/op 5918817 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  14 16542192 ns/op 5918862 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  14 16245815 ns/op 5918513 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  13 16345106 ns/op 5919136 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32  15 16641969 ns/op 5918821 B/op 190045 allocs/op
+```
+
+Raw after samples:
+
+```text
+BenchmarkSQLPlannerStatisticsAnalyze-32      14 16478396 ns/op 5918560 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32      14 16628771 ns/op 5918513 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32      13 17038825 ns/op 5918391 B/op 190045 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32      13 16007161 ns/op 5918008 B/op 190044 allocs/op
+BenchmarkSQLPlannerStatisticsAnalyze-32      14 16117865 ns/op 5919594 B/op 190046 allocs/op
+BenchmarkTT050SaveSQLPlannerStatistics-32   108 1950167 ns/op 117.0 file-bytes 383721 B/op 28 allocs/op
+BenchmarkTT050SaveSQLPlannerStatistics-32   130 1786058 ns/op 117.0 file-bytes 383720 B/op 28 allocs/op
+BenchmarkTT050SaveSQLPlannerStatistics-32   128 1818776 ns/op 117.0 file-bytes 383722 B/op 28 allocs/op
+BenchmarkTT050SaveSQLPlannerStatistics-32   134 1795950 ns/op 117.0 file-bytes 383721 B/op 28 allocs/op
+BenchmarkTT050SaveSQLPlannerStatistics-32   123 1800830 ns/op 117.0 file-bytes 383721 B/op 28 allocs/op
+BenchmarkTT050LoadSQLPlannerStatistics-32  817 276035 ns/op 379874 B/op 24 allocs/op
+BenchmarkTT050LoadSQLPlannerStatistics-32  828 279519 ns/op 379874 B/op 24 allocs/op
+BenchmarkTT050LoadSQLPlannerStatistics-32  814 281646 ns/op 379874 B/op 24 allocs/op
+BenchmarkTT050LoadSQLPlannerStatistics-32  855 278834 ns/op 379874 B/op 24 allocs/op
+BenchmarkTT050LoadSQLPlannerStatistics-32  849 281341 ns/op 379874 B/op 24 allocs/op
+```
 
 ### TypedTable exact stats cache
 
