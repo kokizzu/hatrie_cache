@@ -231,6 +231,10 @@ type SQLQueryOptions struct {
 	DisableNativeDataflow bool
 	MaxSortBytes          int
 	MaxGroupBytes         int
+	// MaxGroupMergeBytes bounds the estimated decoded record frontier while
+	// merging external GROUP BY spill runs. Zero preserves the existing
+	// unbounded merge behavior and keeps this guard disabled by default.
+	MaxGroupMergeBytes int
 	// MaxGroupRowsPerKey rejects a GROUP BY value once it receives more than
 	// this many input rows. Zero preserves the existing unbounded behavior.
 	// It is an opt-in skew guard for workloads where one key must not dominate
@@ -8072,7 +8076,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
@@ -15541,6 +15545,32 @@ func sqlSpillGroupRecordBytes(record sqlSpillGroupRecord) int {
 	return len(record.Key) + sqlRowBytes(SQLRow{"group": record.Value}) + len(record.Aggregates)*64 + 32
 }
 
+func sqlSpillGroupMergeRecordBytes(record sqlSpillGroupRecord) int {
+	// The group key's stable formatted representation already includes the
+	// variable-size value payload. Keep the merge guard allocation-free; its
+	// estimate only needs to bound the retained reader frontier.
+	return len(record.Key) + len(record.Aggregates)*64 + 64
+}
+
+func sqlCheckSpillGroupMergeMemory(readers []*sqlSpillGroupReader, control *sqlExecutionControl) error {
+	if control == nil || control.options.MaxGroupMergeBytes <= 0 {
+		return nil
+	}
+	limit := int64(control.options.MaxGroupMergeBytes)
+	used := int64(0)
+	for _, reader := range readers {
+		if reader == nil || reader.done {
+			continue
+		}
+		recordBytes := int64(sqlSpillGroupMergeRecordBytes(reader.current))
+		if recordBytes > limit-used {
+			return fmt.Errorf("SQL group merge memory budget exceeded: estimated retained records exceed maximum %d bytes", limit)
+		}
+		used += recordBytes
+	}
+	return nil
+}
+
 func sqlSpillGroupAggregateFromOrdered(aggregate sqlOrderedAggregate) sqlSpillGroupAggregate {
 	return sqlSpillGroupAggregate{Name: aggregate.name, Count: aggregate.count, Sum: aggregate.sum, Seen: aggregate.seen, Min: aggregate.min, Max: aggregate.max}
 }
@@ -15686,7 +15716,7 @@ func closeSQLSpillGroupReaders(readers []*sqlSpillGroupReader) {
 	}
 }
 
-func sqlOpenSpillGroupReaders(runs []sqlSpillGroupRun) ([]*sqlSpillGroupReader, error) {
+func sqlOpenSpillGroupReaders(runs []sqlSpillGroupRun, control *sqlExecutionControl) ([]*sqlSpillGroupReader, error) {
 	readers := make([]*sqlSpillGroupReader, len(runs))
 	for index, run := range runs {
 		reader, err := openSQLSpillGroupReader(run)
@@ -15695,6 +15725,10 @@ func sqlOpenSpillGroupReaders(runs []sqlSpillGroupRun) ([]*sqlSpillGroupReader, 
 			return nil, err
 		}
 		readers[index] = reader
+	}
+	if err := sqlCheckSpillGroupMergeMemory(readers, control); err != nil {
+		closeSQLSpillGroupReaders(readers)
+		return nil, err
 	}
 	return readers, nil
 }
@@ -15715,6 +15749,9 @@ func sqlNextRawSpillGroup(readers []*sqlSpillGroupReader, order sqlOrder, contro
 	}
 	record := readers[best].current
 	if err := readers[best].next(); err != nil {
+		return sqlSpillGroupRecord{}, false, err
+	}
+	if err := sqlCheckSpillGroupMergeMemory(readers, control); err != nil {
 		return sqlSpillGroupRecord{}, false, err
 	}
 	return record, true, nil
@@ -15740,11 +15777,14 @@ func sqlNextSpillGroup(readers []*sqlSpillGroupReader, order sqlOrder, control *
 		if err := readers[best].next(); err != nil {
 			return sqlSpillGroupRecord{}, false, err
 		}
+		if err := sqlCheckSpillGroupMergeMemory(readers, control); err != nil {
+			return sqlSpillGroupRecord{}, false, err
+		}
 	}
 }
 
 func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, directory string, available *int64, control *sqlExecutionControl) (sqlSpillGroupRun, error) {
-	readers, err := sqlOpenSpillGroupReaders(runs)
+	readers, err := sqlOpenSpillGroupReaders(runs, control)
 	if err != nil {
 		return sqlSpillGroupRun{}, err
 	}
@@ -16623,7 +16663,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 		}
 		runs = next
 	}
-	readers, err := sqlOpenSpillGroupReaders(runs)
+	readers, err := sqlOpenSpillGroupReaders(runs, control)
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}

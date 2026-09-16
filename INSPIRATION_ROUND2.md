@@ -60,7 +60,7 @@ operator control remain the preferred deployment model.
 - [ ] C224 `argMax` and `argMin` aggregate states with deterministic tie handling.
 - [ ] C225 Incremental window-frame state for repeated ordered windows.
 - [ ] C226 Grace-hash join spilling with bounded disk runs.
-- [ ] C227 External aggregation spilling with merge-time memory limits.
+- [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).
 - [ ] C228 External sort spilling with stable run ordering.
 - [ ] C229 Join overflow policies that explicitly reject, spill, or truncate.
 - [ ] C230 Memory-overcommit wait queues before query cancellation.

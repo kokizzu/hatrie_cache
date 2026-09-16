@@ -28081,3 +28081,43 @@ BenchmarkSQLSubqueryResultCacheEnabled   4783  234127 ns/op  451528 B/op  2100 a
 
 The implementation and usage boundaries are documented in
 [C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md).
+
+## C227: External Group-Merge Memory Budget
+
+This benchmark compares the existing external `GROUP BY` merge path with the
+same path using the new opt-in `MaxGroupMergeBytes` guard. The workload creates
+2,048 groups, limits input runs to 16 KiB, uses `GOMAXPROCS=1`, runs five 250 ms
+samples per case, and reports `-benchmem`. The guard checks the retained
+decoded reader frontier and is disabled when the option is zero.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Time x vs disabled | Heap x vs disabled | Alloc x vs disabled |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `MaxGroupMergeBytes = 0` | 14,276,884 | 5,833,192 | 68,090 | 1.00x | 1.00x | 1.00x |
+| `MaxGroupMergeBytes = 1 MiB` | 14,606,824 | 5,833,178 | 68,090 | 1.02x | 1.00x | 1.00x |
+
+The safety guard adds no allocations and measured a 2.3% median runtime cost in
+this run. That cost is opt-in; the default path performs no merge-budget scan.
+The benefit is bounded retained merge-frontier accounting and deterministic
+failure with spill cleanup when the selected budget is exceeded. It is not a
+complete RSS cap and does not automatically repartition a query whose budget
+is too small.
+
+### Raw Output
+
+```text
+make benchmark-c227-group-merge
+BenchmarkC227ExternalGroupMergeBudgetDisabled  22  14089560 ns/op  5833210 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetDisabled  19  14609458 ns/op  5833174 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetDisabled  24  12173189 ns/op  5833192 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetDisabled  24  14276884 ns/op  5833195 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetDisabled  20  15106624 ns/op  5833100 B/op  68089 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetEnabled   22  14379208 ns/op  5833190 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetEnabled   18  14606824 ns/op  5833198 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetEnabled   21  15902592 ns/op  5832777 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetEnabled   24  15517688 ns/op  5833178 B/op  68090 allocs/op
+BenchmarkC227ExternalGroupMergeBudgetEnabled   18  14380902 ns/op  5832783 B/op  68090 allocs/op
+```
+
+The focused tests also verify successful deterministic output, rejection when
+the frontier exceeds the budget, cleanup of temporary files, and negative-value
+validation. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md).

@@ -133,6 +133,7 @@ func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
 		options.Workers == 0 &&
 		options.MaxSortBytes == 0 &&
 		options.MaxGroupBytes == 0 &&
+		options.MaxGroupMergeBytes == 0 &&
 		options.MaxGroupRowsPerKey == 0 &&
 		options.MaxGroupKeys == 0 &&
 		options.MaxSetBytes == 0 &&

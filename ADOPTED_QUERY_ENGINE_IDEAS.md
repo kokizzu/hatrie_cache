@@ -499,3 +499,9 @@ allocation behavior and end-to-end performance within measurement noise. See
 | Source | Adopted idea | Implementation | Evidence |
 | --- | --- | --- | --- |
 | ClickHouse / Materialize | Reuse stable internal query fragments without requiring a whole-query materialized result | Importable `SQLQueryOptions.SubqueryResultCache` reuses eligible uncorrelated derived queries, non-recursive CTE bodies, and UNION/INTERSECT/EXCEPT branches. Source versions, parameters, collation, schema version, plan mode, and settings fingerprint namespace entries; row results are cloned. The option is off by default and excludes correlated, lateral, recursive, volatile, custom-function, and unversioned paths. | [C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md), [BENCHMARK.md](BENCHMARK.md#c205-subquery-result-cache) |
+
+## C227: External Group-Merge Memory Budget
+
+| Source | Adopted idea | Implementation | Evidence |
+| --- | --- | --- | --- |
+| ClickHouse | Bound external aggregation memory during run merging | `SQLQueryOptions.MaxGroupMergeBytes` bounds the estimated decoded current record frontier across active external `GROUP BY` spill readers. Zero keeps the guard off; negative values are rejected; over-budget merges return a deterministic error and clean all temporary files. The estimator is allocation-free and does not claim to cap total process RSS. | [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md), [BENCHMARK.md](BENCHMARK.md#c227-external-group-merge-memory-budget) |

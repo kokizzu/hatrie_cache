@@ -4230,3 +4230,13 @@ clones returned rows. Correlated, lateral, recursive, volatile, custom-function,
 and unversioned queries retain normal execution. See
 [C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md) and the raw
 measurements in [BENCHMARK.md](BENCHMARK.md#c205-subquery-result-cache).
+
+## External Group-Merge Memory Budget
+
+External `GROUP BY` spilling can also bound the decoded merge-reader frontier
+with `SQLQueryOptions.MaxGroupMergeBytes`. It defaults to `0` so existing
+queries are unchanged; set it together with `MaxGroupBytes`, `SpillDirectory`,
+and `MaxSpillBytes` when a query must fail cleanly instead of retaining an
+unbounded merge frontier. Temporary spill files are cleaned on rejection. See
+[C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and the raw
+measurements in [BENCHMARK.md](BENCHMARK.md#c227-external-group-merge-memory-budget).

@@ -17177,3 +17177,38 @@ diagnose-chu05-test:
 
 test-chu05-c205:
 	sh scripts/test-chu05-c205.sh
+test-c227-group-merge:
+	sh scripts/test-c227-group-merge.sh
+
+benchmark-c227-group-merge:
+	sh scripts/benchmark-c227-group-merge.sh
+
+format-c227-group-merge:
+	sh scripts/format-c227-group-merge.sh
+
+test-c227-group-merge-package:
+	sh scripts/test-c227-group-merge-package.sh
+
+test-c227-all:
+	sh scripts/test-c227-all.sh
+
+race-c227-group-merge:
+	sh scripts/race-c227-group-merge.sh
+
+vet-c227-group-merge:
+	sh scripts/vet-c227-group-merge.sh
+
+verify-c227-group-merge:
+	sh scripts/verify-c227-group-merge.sh
+
+status-c227-group-merge:
+	sh scripts/status-c227-group-merge.sh
+
+stage-c227-group-merge:
+	sh scripts/stage-c227-group-merge.sh
+
+commit-c227-group-merge:
+	sh scripts/commit-c227-group-merge.sh
+
+push-c227-group-merge:
+	sh scripts/push-c227-group-merge.sh
