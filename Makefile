@@ -16763,3 +16763,39 @@ commit-ch018-projection-refresh-status:
 .PHONY: push-ch018-projection-refresh-status
 push-ch018-projection-refresh-status:
 	bash ./scripts/push-ch018-projection-refresh-status.sh
+
+test-ch048-red:
+	bash ./scripts/test-ch048-red.sh
+
+test-ch048:
+	bash ./scripts/test-ch048.sh
+
+format-ch048:
+	bash ./scripts/format-ch048.sh
+
+benchmark-ch048:
+	bash ./scripts/benchmark-ch048.sh
+
+race-ch048:
+	bash ./scripts/verify-ch048.sh race
+
+vet-ch048:
+	bash ./scripts/verify-ch048.sh vet
+
+verify-ch048:
+	bash ./scripts/verify-ch048.sh full
+
+deliver-ch048:
+	bash ./scripts/deliver-ch048.sh stage
+
+status-ch048:
+	bash ./scripts/deliver-ch048.sh status
+
+review-ch048:
+	bash ./scripts/deliver-ch048.sh review
+
+commit-ch048:
+	bash ./scripts/deliver-ch048.sh commit
+
+push-ch048:
+	bash ./scripts/deliver-ch048.sh push

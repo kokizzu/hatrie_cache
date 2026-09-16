@@ -27436,3 +27436,50 @@ BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  55  4
 BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  55  4725851 ns/op  5322970 B/op  30177 allocs/op
 BenchmarkIncrementalProjectionCoalescedRefresh/coalesced_journal_batch-32  45  4607330 ns/op  5322977 B/op  30177 allocs/op
 ```
+
+<a id="ch-048-external-schema-inference"></a>
+## CH-048 External Schema Inference
+
+This measures the ClickHouse-inspired bounded schema inference API for
+external JSON and already-decoded rows. The JSON baseline is the existing
+`ParseJSONRows` path over the same 256-row fixture. The after path uses
+`InferExternalJSONSchema`, which decodes with `UseNumber` and infers a sorted
+RowBinary-compatible schema. Values above `1.00x` are slower or larger than
+the existing JSON parse path. The row-inference workload has no pre-feature
+equivalent, so it is reported as an absolute cost.
+
+The five samples were run with `-benchmem -benchtime=200ms -count=5` on an AMD
+Ryzen 9 5950X Linux/amd64 host through `make benchmark-ch048`.
+
+| Workload | Five raw samples (ns/op) | Median | B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing JSON parse (`ParseJSONRows`) | 623743, 597121, 614217, 591880, 562222 | 597121 | 231361 | 6573 | 1.00x baseline |
+| JSON parse plus inference | 637106, 622519, 642078, 631854, 636052 | 636052 | 242041 | 6923 | 1.07x CPU; +4.6% B/op; +5.3% allocs |
+| Inference over decoded rows | 44991, 44572, 44283, 44021, 48923 | 44572 | 368 | 2 | No baseline; absolute cost |
+
+The convenience API therefore has a measured cost, but it is not on the
+existing import path: callers pay it only when they explicitly request
+inference. Defaults are bounded at 4,096 rows, 1,024 columns, and 64 MiB;
+mixed types fall back to JSON and numeric promotion is opt-in. See
+[CH048_EXTERNAL_SCHEMA_INFERENCE.md](CH048_EXTERNAL_SCHEMA_INFERENCE.md) for
+API semantics, safety limits, and the precision tradeoff of promotion.
+
+Raw output:
+
+```text
+BenchmarkCH048ExternalSchemaInference/existing-json-parse-32          370  623743 ns/op  231392 B/op  6573 allocs/op
+BenchmarkCH048ExternalSchemaInference/existing-json-parse-32          394  597121 ns/op  231361 B/op  6573 allocs/op
+BenchmarkCH048ExternalSchemaInference/existing-json-parse-32          392  614217 ns/op  231362 B/op  6573 allocs/op
+BenchmarkCH048ExternalSchemaInference/existing-json-parse-32          399  591880 ns/op  231362 B/op  6573 allocs/op
+BenchmarkCH048ExternalSchemaInference/existing-json-parse-32          396  562222 ns/op  231361 B/op  6573 allocs/op
+BenchmarkCH048ExternalSchemaInference/json-parse-and-infer-32         346  637106 ns/op  242042 B/op  6923 allocs/op
+BenchmarkCH048ExternalSchemaInference/json-parse-and-infer-32         387  622519 ns/op  242041 B/op  6923 allocs/op
+BenchmarkCH048ExternalSchemaInference/json-parse-and-infer-32         375  642078 ns/op  242041 B/op  6923 allocs/op
+BenchmarkCH048ExternalSchemaInference/json-parse-and-infer-32         374  631854 ns/op  242041 B/op  6923 allocs/op
+BenchmarkCH048ExternalSchemaInference/json-parse-and-infer-32         373  636052 ns/op  242041 B/op  6923 allocs/op
+BenchmarkCH048ExternalSchemaInference/rows-infer-32                   4752   44991 ns/op    368 B/op     2 allocs/op
+BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5436   44572 ns/op    368 B/op     2 allocs/op
+BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5451   44283 ns/op    368 B/op     2 allocs/op
+BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5458   44021 ns/op    368 B/op     2 allocs/op
+BenchmarkCH048ExternalSchemaInference/rows-infer-32                   5251   48923 ns/op    368 B/op     2 allocs/op
+```
