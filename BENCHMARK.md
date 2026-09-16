@@ -27829,3 +27829,57 @@ consistency section remain compatible and do not incur this validation path.
 The exact contract and restore rules are documented in
 [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md).
 ```
+
+## CH-G01: Bounded External `GROUP BY` Aggregation Spill
+
+This benchmark uses 2,048 unique groups with the same query in the pre-feature
+and post-feature worktrees. The bounded run uses `MaxGroupBytes=16 KiB` and a
+64 MiB spill budget. `supported` is a benchmark counter: it is `1.000` when
+every iteration returns all 2,048 groups and `0.000` when the query is rejected.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Supported | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Before, unbounded in-memory | 3,943,443 | 4,622,428 | 32,847 | 1.000 | Reference |
+| Before, bounded spill request | 2,548,013 | 2,316,579 | 20,562 | 0.000 | Cannot complete |
+| After, unbounded in-memory | 3,992,577 | 4,622,961 | 32,847 | 1.000 | 1.01x time vs before |
+| After, bounded external spill | 13,702,265 | 5,871,345 | 68,110 | 1.000 | Completes under cap |
+
+The bounded successful path is about 3.4x slower, with about 1.27x the
+allocated bytes and 2.07x the allocations of the unbounded path. This is an
+availability/resource-bound feature, not a claim of a raw speed improvement.
+The normal unbounded path remains unchanged when the cap is disabled.
+
+### Raw output
+
+```text
+# before: BenchmarkCHG01UnorderedGroupBaseline
+3924815 ns/op 4623112 B/op 32847 allocs/op
+4055319 ns/op 4621955 B/op 32846 allocs/op
+3856173 ns/op 4621881 B/op 32846 allocs/op
+3943443 ns/op 4622428 B/op 32847 allocs/op
+4066667 ns/op 4622565 B/op 32847 allocs/op
+
+# before: BenchmarkCHG01BoundedUnorderedGroup
+2628530 ns/op 0.000 supported 2316508 B/op 20563 allocs/op
+2548013 ns/op 0.000 supported 2316579 B/op 20562 allocs/op
+2391990 ns/op 0.000 supported 2316589 B/op 20562 allocs/op
+2660542 ns/op 0.000 supported 2316395 B/op 20562 allocs/op
+2468224 ns/op 0.000 supported 2316616 B/op 20563 allocs/op
+
+# after: BenchmarkCHG01UnorderedGroupBaseline
+4382024 ns/op 4622961 B/op 32847 allocs/op
+4193178 ns/op 4622831 B/op 32847 allocs/op
+3928991 ns/op 4623112 B/op 32847 allocs/op
+3992577 ns/op 4623462 B/op 32847 allocs/op
+3728609 ns/op 4622581 B/op 32847 allocs/op
+
+# after: BenchmarkCHG01BoundedUnorderedGroup
+14413282 ns/op 1.000 supported 5873678 B/op 68114 allocs/op
+13277265 ns/op 1.000 supported 5870863 B/op 68110 allocs/op
+13680681 ns/op 1.000 supported 5874875 B/op 68113 allocs/op
+13702265 ns/op 1.000 supported 5871345 B/op 68107 allocs/op
+13945430 ns/op 1.000 supported 5871305 B/op 68108 allocs/op
+```
+
+The implementation and configuration scope are documented in
+[CHG01_EXTERNAL_GROUP_SPILL.md](CHG01_EXTERNAL_GROUP_SPILL.md).

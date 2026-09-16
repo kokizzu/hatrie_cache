@@ -155,7 +155,7 @@ name.
 - [x] C071 Hash aggregation.
 - [x] C072 Compact hash aggregation for small grouped states.
 - [x] C073 Two-level aggregation for high-cardinality grouped states - adopted explicitly for columnar inputs with `Workers >= 2`, at least two merge-safe `COUNT`/`MIN`/`MAX` states, and a 16,384-row threshold; benchmark and fallback rationale are in [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md).
-- [x] C074 External aggregation with a memory budget and spill path.
+- [x] C074 External aggregation with a memory budget and spill path for the tested single-field direct aggregate subset, including unordered queries.
 - [x] C075 Ordered aggregation when input ordering makes it cheaper.
 - [x] C076 Approximate sketches for supported distinct and quantile queries.
 - [x] C077 Aggregate combinators for reusable state, merge, and finalize phases. `SQLAggregateState` and its concurrent registry separate worker-local `Add`, partial `Merge`, and final `Finalize` phases; see [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md).

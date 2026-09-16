@@ -16995,3 +16995,50 @@ commit-chu50-c203:
 
 push-chu50-c203:
 	sh scripts/push-chu50-c203.sh
+test-chg01:
+	sh scripts/test-chg01.sh
+
+test-chg01-package:
+	sh scripts/test-chg01-package.sh
+
+test-chg01-all:
+	sh scripts/test-chg01-all.sh
+
+format-chg01:
+	sh scripts/format-chg01.sh
+
+race-chg01:
+	sh scripts/race-chg01.sh
+
+vet-chg01:
+	sh scripts/vet-chg01.sh
+
+verify-chg01-docs:
+	sh scripts/verify-chg01-docs.sh
+
+check-chg01:
+	sh scripts/check-chg01.sh
+
+stage-chg01:
+	sh scripts/stage-chg01.sh
+
+commit-chg01:
+	sh scripts/commit-chg01.sh
+
+push-chg01:
+	sh scripts/push-chg01.sh
+
+benchmark-chg01:
+	sh scripts/benchmark-chg01.sh
+
+prepare-chg01-benchmark-baseline:
+	sh scripts/prepare-chg01-benchmark-baseline.sh
+
+benchmark-chg01-before:
+	sh scripts/benchmark-chg01-before.sh
+
+benchmark-chg01-after:
+	sh scripts/benchmark-chg01-after.sh
+
+print-chg01-benchmark:
+	sh scripts/print-chg01-benchmark.sh

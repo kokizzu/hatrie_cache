@@ -15480,8 +15480,10 @@ type sqlSpillGroupReader struct {
 }
 
 func sqlSpillGroupRecordBefore(left, right sqlSpillGroupRecord, order sqlOrder) bool {
-	if less, decided := sqlOrderLess(order, left.Value, right.Value); decided {
-		return less
+	if order.expr.kind != "" {
+		if less, decided := sqlOrderLess(order, left.Value, right.Value); decided {
+			return less
+		}
 	}
 	// Group identity must be the secondary ordering so every partial state for
 	// one key is adjacent across independently sorted runs. SQL does not define
@@ -16305,7 +16307,13 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 
 func sqlSpilledGroupAggregateProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, sqlOrder, bool) {
 	projections, ok := sqlOrderedGroupProjections(q)
-	if !ok || len(q.orderBy) != 1 || !sqlSameField(q.orderBy[0].expr, q.groupBy[0]) {
+	if !ok {
+		return nil, sqlOrder{}, false
+	}
+	if len(q.orderBy) == 0 {
+		return projections, sqlOrder{}, true
+	}
+	if len(q.orderBy) != 1 || !sqlSameField(q.orderBy[0].expr, q.groupBy[0]) {
 		return nil, sqlOrder{}, false
 	}
 	return projections, q.orderBy[0], true
