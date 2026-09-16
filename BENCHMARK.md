@@ -26813,6 +26813,51 @@ BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2854735 ns/op	 2589690
 BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2851632 ns/op	 2589693 B/op	   40955 allocs/op
 ```
 
+<a id="ch-031-automatic-typed-json-subcolumn-promotion"></a>
+## CH-031 Automatic Typed JSON Subcolumn Promotion
+
+This measures the bounded automatic promotion primitive against rematerializing
+the same 4,096 JSON documents on every call. Three `-count=3` samples were
+collected on an AMD Ryzen 9 5950X Linux `amd64` host. Cached cases reuse the
+same promoted column and source generation.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| `MaterializeJSONSubcolumn` every call | 2,944,516 | 2,589,695 | 40,955 | 1.00x |
+| Automatic cached `Observe` | 101.8 | 0 | 0 | 28,925x faster |
+| Automatic cached `Lookup` | 84.08 | 0 | 0 | 35,020x faster |
+| Automatic cached `ResolveBatch` | 446.9 | 752 | 4 | 6,589x faster |
+
+The cold promotion still pays the one-time materialization cost. The cache
+retains only the compact typed column and bounded metadata; for this fixture
+the estimated retained integer payload is 32 KiB. It does not retain raw JSON
+documents, automatically persist columns, or change wire format. The default
+threshold is three observations and the feature is opt-in, so existing source
+resolvers are unaffected.
+
+Raw output from `make benchmark-ch031-automatic-json-subcolumns`:
+
+```text
+BenchmarkCH031AutomaticJSONSubcolumn/materialize_each_time-32         	     406	   3005573 ns/op	   1.36 MB/s	 2589708 B/op	   40955 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/materialize_each_time-32         	     400	   3010361 ns/op	   1.36 MB/s	 2589696 B/op	   40955 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/materialize_each_time-32         	     412	   2916631 ns/op	   1.40 MB/s	 2589693 B/op	   40955 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/observe_cached-32                	11139596	       102.4 ns/op	40002.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/observe_cached-32                	11029531	       101.7 ns/op	40276.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/observe_cached-32                	12696609	        98.75 ns/op	41479.52 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/lookup_cached-32                 	11551617	        95.05 ns/op	43095.21 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/lookup_cached-32                 	11588656	        97.09 ns/op	42186.71 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/lookup_cached-32                 	11678368	        97.71 ns/op	41919.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/resolve_batch_cached-32          	 2560618	       442.2 ns/op	9262.21 MB/s	     753 B/op	       4 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/resolve_batch_cached-32          	 2769122	       448.5 ns/op	9132.85 MB/s	     752 B/op	       4 allocs/op
+BenchmarkCH031AutomaticJSONSubcolumn/resolve_batch_cached-32          	 2643052	       436.0 ns/op	9394.61 MB/s	     753 B/op	       4 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	17.055s
+```
+
+See [CH031_AUTOMATIC_TYPED_JSON_SUBCOLUMNS.md](CH031_AUTOMATIC_TYPED_JSON_SUBCOLUMNS.md)
+for the source-generation contract, fallback behavior, and configuration
+limits.
+
 <a id="ch-u01-durable-asynchronous-insert-deduplication"></a>
 ## CH-U01 Durable Asynchronous-Insert Deduplication
 

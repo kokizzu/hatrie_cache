@@ -16677,3 +16677,29 @@ commit-tt045-c310:
 
 push-tt045-c310:
 	bash ./scripts/push-tt045-c310.sh
+
+.PHONY: format-ch031-automatic-json-subcolumns
+format-ch031-automatic-json-subcolumns:
+	bash ./scripts/format-ch031-automatic-json-subcolumns.sh
+.PHONY: review-ch031-automatic-json-subcolumns
+review-ch031-automatic-json-subcolumns:
+	bash ./scripts/review-ch031-automatic-json-subcolumns.sh
+.PHONY: stage-ch031-automatic-json-subcolumns
+stage-ch031-automatic-json-subcolumns:
+	bash ./scripts/stage-ch031-automatic-json-subcolumns.sh
+.PHONY: test-ch031-automatic-json-subcolumns
+test-ch031-automatic-json-subcolumns:
+	bash ./scripts/run-ch031-automatic-json-subcolumns.sh test
+.PHONY: verify-ch031-automatic-json-subcolumns
+verify-ch031-automatic-json-subcolumns:
+	bash ./scripts/run-ch031-automatic-json-subcolumns.sh verify
+.PHONY: benchmark-ch031-automatic-json-subcolumns
+benchmark-ch031-automatic-json-subcolumns:
+	bash ./scripts/run-ch031-automatic-json-subcolumns.sh benchmark
+
+.PHONY: commit-ch031-automatic-json-subcolumns
+commit-ch031-automatic-json-subcolumns:
+	bash ./scripts/deliver-ch031-automatic-json-subcolumns.sh commit
+.PHONY: push-ch031-automatic-json-subcolumns
+push-ch031-automatic-json-subcolumns:
+	bash ./scripts/deliver-ch031-automatic-json-subcolumns.sh push
