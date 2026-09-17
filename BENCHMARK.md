@@ -29315,3 +29315,48 @@ BenchmarkCHU25QuerySpillQuota/quota-enabled           92  13192046 ns/op  246323
 BenchmarkCHU25QuerySpillQuota/quota-enabled          100  12218868 ns/op  2463240 B/op  39381 allocs/op
 BenchmarkCHU25QuerySpillQuota/quota-enabled           97  12055661 ns/op  2463232 B/op  39381 allocs/op
 ```
+<a id="mu-016-transactional-view-ddl"></a>
+## M-U16 Transactional View DDL
+
+Command: `make benchmark-mu016-baseline` on the pre-change detached worktree
+and `make benchmark-mu016-transactional-views` on M-U16, each with five runs,
+`GOMAXPROCS=1`, and `-benchtime=500ms`.
+
+Raw pre-change output:
+
+```text
+BenchmarkMU016ViewCreateBaseline  2088 ns/op  2888 B/op  12 allocs/op
+BenchmarkMU016ViewCreateBaseline  2160 ns/op  2888 B/op  12 allocs/op
+BenchmarkMU016ViewCreateBaseline  2175 ns/op  2888 B/op  12 allocs/op
+BenchmarkMU016ViewCreateBaseline  2272 ns/op  2888 B/op  12 allocs/op
+BenchmarkMU016ViewCreateBaseline  2174 ns/op  2888 B/op  12 allocs/op
+```
+
+Raw M-U16 output:
+
+```text
+BenchmarkMU016ViewCreateBaseline        2238 ns/op  2904 B/op   12 allocs/op
+BenchmarkMU016ViewCreateBaseline        2286 ns/op  2904 B/op   12 allocs/op
+BenchmarkMU016ViewCreateBaseline        2121 ns/op  2904 B/op   12 allocs/op
+BenchmarkMU016ViewCreateBaseline        2118 ns/op  2904 B/op   12 allocs/op
+BenchmarkMU016ViewCreateBaseline        1943 ns/op  2904 B/op   12 allocs/op
+BenchmarkMU016TransactionalViewBatch    4370 ns/op  5320 B/op   22 allocs/op
+BenchmarkMU016TransactionalViewBatch    5605 ns/op  5320 B/op   22 allocs/op
+BenchmarkMU016TransactionalViewBatch    5681 ns/op  5320 B/op   22 allocs/op
+BenchmarkMU016TransactionalViewBatch    5247 ns/op  5320 B/op   22 allocs/op
+BenchmarkMU016TransactionalViewBatch    5317 ns/op  5320 B/op   22 allocs/op
+BenchmarkMU016TransactionalViewReplace 10197 ns/op 10432 B/op   41 allocs/op
+BenchmarkMU016TransactionalViewReplace 10276 ns/op 10432 B/op   41 allocs/op
+BenchmarkMU016TransactionalViewReplace  8708 ns/op 10432 B/op   41 allocs/op
+BenchmarkMU016TransactionalViewReplace  8910 ns/op 10432 B/op   41 allocs/op
+BenchmarkMU016TransactionalViewReplace  8632 ns/op 10432 B/op   41 allocs/op
+```
+
+| Path | Pre-change median ns/op | M-U16 median ns/op | CPU x | M-U16 B/op | M-U16 allocs/op | Result |
+|---|---:|---:|---:|---:|---:|---|
+| One-view `CreateView` compatibility path | 2,174 | 2,121 | 1.02x faster | 2,904 | 12 | Same allocation count; +16 B/session |
+| Two-view atomic batch | n/a | 5,317 | n/a | 5,320 | 22 | New capability |
+| Two-view replacement batch | n/a | 8,910 | n/a | 10,432 | 41 | New capability |
+
+See [MU016_TRANSACTIONAL_VIEW_DDL.md](MU016_TRANSACTIONAL_VIEW_DDL.md) for
+the API contract and tradeoff explanation.

@@ -10,11 +10,12 @@ import (
 // SQLSession owns temporary SQL sources and named result snapshots for one
 // caller. It is safe for concurrent use and never mutates its base resolver.
 type SQLSession struct {
-	mu      sync.RWMutex
-	source  SourceResolver
-	tables  map[string][]Row
-	results map[string][]Row
-	views   map[string]sqlSessionView
+	mu             sync.RWMutex
+	source         SourceResolver
+	tables         map[string][]Row
+	results        map[string][]Row
+	views          map[string]sqlSessionView
+	catalogVersion uint64
 }
 
 type sqlSessionView struct {
@@ -33,13 +34,18 @@ func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
 	}
 	session.mu.Lock()
 	session.tables[key] = cloneSQLRows(rows)
+	session.catalogVersion++
 	session.mu.Unlock()
 	return nil
 }
 
 func (session *SQLSession) DropTemporaryTable(name string) {
 	session.mu.Lock()
-	delete(session.tables, strings.ToLower(name))
+	key := strings.ToLower(name)
+	if _, exists := session.tables[key]; exists {
+		delete(session.tables, key)
+		session.catalogVersion++
+	}
 	session.mu.Unlock()
 }
 
@@ -54,58 +60,37 @@ func (session *SQLSession) StoreNamedResult(name string, result SQLQueryResult) 
 	return nil
 }
 
-// CreateView stores a session-local query definition after rejecting direct
-// and indirect dependencies on itself.
+// CreateView stores or replaces one session-local query definition. The
+// mutation uses the same staged validation and publication boundary as a
+// batch, with a single-change allocation fast path.
 func (session *SQLSession) CreateView(name, source string) error {
+	if session == nil {
+		return fmt.Errorf("SQL session is nil")
+	}
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err
 	}
-	query, err := parseSQLQuery(source)
+	query := strings.TrimSpace(source)
+	if query == "" {
+		return fmt.Errorf("SQL view %q requires a query", name)
+	}
+	parsed, err := parseSQLQuery(query)
 	if err != nil {
 		return err
 	}
-	view := sqlSessionView{source: source, dependencies: sqlQueryCacheDependencies(query)}
+	change := sqlSessionViewChange{
+		name: key,
+		view: sqlSessionView{source: query, dependencies: sqlQueryCacheDependencies(parsed)},
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	previous, existed := session.views[key]
-	session.views[key] = view
-	if session.viewCycleLocked(key) {
-		if existed {
-			session.views[key] = previous
-		} else {
-			delete(session.views, key)
-		}
+	if sqlSessionViewGraphHasCycleWithReplacement(session.views, change.name, change.view) {
 		return fmt.Errorf("SQL view %q introduces a dependency cycle", name)
 	}
+	session.views[change.name] = change.view
+	session.catalogVersion++
 	return nil
-}
-
-func (session *SQLSession) viewCycleLocked(root string) bool {
-	visiting, visited := map[string]bool{}, map[string]bool{}
-	var visit func(string) bool
-	visit = func(name string) bool {
-		if visiting[name] {
-			return true
-		}
-		if visited[name] {
-			return false
-		}
-		view, exists := session.views[name]
-		if !exists {
-			return false
-		}
-		visiting[name] = true
-		for _, dependency := range view.dependencies {
-			if visit(dependency) {
-				return true
-			}
-		}
-		delete(visiting, name)
-		visited[name] = true
-		return false
-	}
-	return visit(root)
 }
 
 func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
@@ -404,6 +389,12 @@ func sqlQueryCacheDependencies(query *sqlQuery) []string {
 }
 
 func (session *SQLSession) Execute(ctx context.Context, source string, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE OR REPLACE VIEW"); matched {
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		return SQLQueryResult{}, session.CreateView(name, query)
+	}
 	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE VIEW"); matched {
 		if err != nil {
 			return SQLQueryResult{}, err

@@ -927,6 +927,11 @@ Source lifecycle and progress can be exposed through the same resolver with
 reuses existing frontier metrics and redacts raw error text. See
 [MU015_SOURCE_STATUS_CATALOG.md](MU015_SOURCE_STATUS_CATALOG.md).
 
+Session-local dependent view definitions can be staged and published under one
+catalog version with `SQLSession.ApplyViewChanges`; SQL callers can also use
+`CREATE OR REPLACE VIEW`. See [MU016_TRANSACTIONAL_VIEW_DDL.md](MU016_TRANSACTIONAL_VIEW_DDL.md)
+for the atomic validation rules and benchmark.
+
 Run the full local verification suite with `make verify` or the explicit alias
 `make verify-local`. It checks deploy configuration, Go tests/race/coverage, C
 tests, the Svelte MPA, operations smoke tests, and benchmark-document freshness.

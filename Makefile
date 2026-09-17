@@ -14058,6 +14058,48 @@ commit-mu015-source-status-catalog:
 push-mu015-source-status-catalog:
 	bash ./scripts/push-mu015-source-status-catalog.sh
 
+.PHONY: test-mu016-transactional-views
+test-mu016-transactional-views:
+	bash ./scripts/test-mu016-transactional-views.sh
+
+.PHONY: benchmark-mu016-baseline
+benchmark-mu016-baseline:
+	bash ./scripts/benchmark-mu016-baseline.sh
+
+.PHONY: benchmark-mu016-transactional-views
+benchmark-mu016-transactional-views:
+	bash ./scripts/benchmark-mu016-transactional-views.sh
+
+.PHONY: format-mu016-transactional-views
+format-mu016-transactional-views:
+	bash ./scripts/format-mu016-transactional-views.sh
+
+.PHONY: test-mu016-transactional-view-package
+test-mu016-transactional-view-package:
+	bash ./scripts/test-mu016-transactional-view-package.sh
+
+.PHONY: race-mu016-transactional-views
+race-mu016-transactional-views:
+	bash ./scripts/race-mu016-transactional-views.sh
+
+.PHONY: vet-mu016-transactional-views
+vet-mu016-transactional-views:
+	bash ./scripts/vet-mu016-transactional-views.sh
+
+.PHONY: stage-mu016-transactional-views
+stage-mu016-transactional-views:
+	bash ./scripts/stage-mu016-transactional-views.sh
+
+.PHONY: commit-mu016-transactional-views
+commit-mu016-transactional-views:
+	bash ./scripts/commit-mu016-transactional-views.sh
+
+.PHONY: push-mu016-transactional-views
+push-mu016-transactional-views:
+	bash ./scripts/push-mu016-transactional-views.sh
+
+
+
 .PHONY: benchmark-mu015-baseline
 benchmark-mu015-baseline:
 	bash ./scripts/benchmark-mu015-baseline.sh
