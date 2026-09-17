@@ -25612,6 +25612,42 @@ BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 52 22065751 ns/op 100432 r
 BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 55 21948736 ns/op 100432 rank-frequency-values 20000 ranked-docs 17989923 B/op 120590 allocs/op
 ```
 
+<a id="mu-012-arrangement-explain"></a>
+## M-U12 Arrangement Metadata In EXPLAIN
+
+This compares the regular `EXPLAIN` path without an arrangement metadata
+resolver with the same path using a resolver that returns two bounded
+arrangement entries. Both runs parse and plan the same single-source query;
+the metadata callback does not read source rows. Command: `make
+benchmark-mu012-arrangement-explain`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Without arrangement metadata | 5,159 | 5,904 | 22 | 1.00x |
+| With two arrangement entries | 5,965 | 6,456 | 35 | 1.16x CPU; +552 B/op; +13 allocs/op |
+
+The metadata path therefore adds 15.6% CPU, 9.3% cumulative allocation bytes,
+and 59.1% allocation count for this two-entry explain result. These are
+explain-only allocations, not query execution, storage, wire transfer, or
+retained RSS. Existing resolvers that do not implement the optional contract
+stay on the baseline path. Output remains bounded to 64 entries per operator
+and 256 bytes per key/kind.
+
+Raw output from `make benchmark-mu012-arrangement-explain`:
+
+```text
+BenchmarkMU012ExplainArrangementMetadata/without-32          221511  5042 ns/op  5904 B/op  22 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/without-32          242113  5159 ns/op  5904 B/op  22 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/without-32          221557  5374 ns/op  5904 B/op  22 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/without-32          220975  5138 ns/op  5904 B/op  22 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/without-32          234966  5267 ns/op  5904 B/op  22 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/with-32             213945  6051 ns/op  6456 B/op  35 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/with-32             195520  5985 ns/op  6456 B/op  35 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/with-32             229893  5965 ns/op  6456 B/op  35 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/with-32             221014  5429 ns/op  6456 B/op  35 allocs/op
+BenchmarkMU012ExplainArrangementMetadata/with-32             233232  5271 ns/op  6456 B/op  35 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

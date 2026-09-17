@@ -289,6 +289,20 @@ func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field stri
 	return diagnostics.ResolveSQLIndexDiagnostics(name, key, field, value)
 }
 
+// ResolveSQLArrangementMetadata forwards optional application arrangement
+// metadata while leaving information-schema sources owned by the catalog
+// resolver.
+func (resolver CatalogResolver) ResolveSQLArrangementMetadata(name, key string) ([]SQLArrangementMetadata, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, nil
+	}
+	arrangements, ok := resolver.Source.(SQLArrangementMetadataResolver)
+	if !ok {
+		return nil, nil
+	}
+	return arrangements.ResolveSQLArrangementMetadata(name, key)
+}
+
 // ResolveSQLOrderedSourcePartitions forwards ordered application partitions
 // while leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {

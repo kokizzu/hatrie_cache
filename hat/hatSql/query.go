@@ -12982,11 +12982,19 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 
 func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
 	if query.pipeline {
-		return explainSQLPipelineQuery(query)
+		return explainSQLPipelineQuery(query, resolver)
 	}
 	steps := sqlExplainSteps(query)
+	if !query.analyze {
+		steps = sqlExplainStepsWithResolver(query, resolver)
+	}
+	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	columns := []string{"node", "detail", "estimated_rows"}
+	if hasArrangementMetadata {
+		columns = append(columns, "arrangements")
+	}
 	result := SQLQueryResult{
-		Columns: []string{"node", "detail", "estimated_rows"},
+		Columns: columns,
 		Rows:    make([]SQLRow, 0, len(steps)+1),
 		Plan:    steps,
 	}
@@ -12995,11 +13003,15 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
 		}
+		if hasArrangementMetadata && len(step.Arrangements) > 0 {
+			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
 		result.Rows = append(result.Rows, row)
 	}
 	if !query.analyze {
 		return result, nil
 	}
+	result.Columns = []string{"node", "detail", "estimated_rows"}
 	started := time.Now()
 	metrics := &sqlExecutionMetrics{}
 	executed, err := executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
@@ -13044,6 +13056,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.Index != nil {
 			row["index"] = *step.Index
 		}
+		if len(step.Arrangements) > 0 {
+			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
 		if step.Pruning != nil {
 			row["total_rows"] = step.Pruning.TotalRows
 			row["skipped_rows"] = step.Pruning.SkippedRows
@@ -13055,6 +13070,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		result.Rows = append(result.Rows, row)
 	}
 	hasIndexDiagnostics := false
+	hasArrangementMetadata = sqlExplainHasArrangementMetadata(result.Plan)
 	for _, step := range steps {
 		if step.Index != nil {
 			hasIndexDiagnostics = true
@@ -13064,6 +13080,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
 	if hasIndexDiagnostics {
 		result.Columns = append(result.Columns, "index")
+	}
+	if hasArrangementMetadata {
+		result.Columns = append(result.Columns, "arrangements")
 	}
 	result.Columns = append(result.Columns, "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate")
 	result.Rows = append(result.Rows, SQLRow{
@@ -13077,24 +13096,28 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 }
 
 func sqlExplainSteps(query *sqlQuery) []SQLExplainStep {
+	return sqlExplainStepsWithResolver(query, nil)
+}
+
+func sqlExplainStepsWithResolver(query *sqlQuery, resolver SQLSourceResolver) []SQLExplainStep {
 	steps := make([]SQLExplainStep, 0, 8+len(query.ctes)+len(query.joins)+len(query.unions))
-	sqlAppendExplainSteps(&steps, query, "")
+	sqlAppendExplainSteps(&steps, query, "", resolver)
 	return steps
 }
 
-func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string) {
+func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver) {
 	for _, cte := range query.ctes {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "CTE", Detail: cte.name})
 		if cte.query != nil {
-			sqlAppendExplainSteps(steps, cte.query, prefix+"  ")
+			sqlAppendExplainSteps(steps, cte.query, prefix+"  ", resolver)
 		} else {
 			estimate := len(cte.values)
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
 		}
 	}
-	*steps = append(*steps, sqlExplainSourceStep(prefix+"SCAN", *query.from))
+	*steps = append(*steps, sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver))
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
-		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ")
+		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver)
 	}
 	leftAliases := []string{}
 	if query.from != nil && query.from.alias != "" {
@@ -13126,9 +13149,11 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 				detail += " or COMPOSITE INDEX JOIN"
 			}
 		}
-		*steps = append(*steps, SQLExplainStep{Node: prefix + node, Detail: detail})
+		joinStep := SQLExplainStep{Node: prefix + node, Detail: detail}
+		joinStep.Arrangements = resolveSQLArrangementMetadata(resolver, join.source)
+		*steps = append(*steps, joinStep)
 		if join.source.kind == "SUBQUERY" && join.source.query != nil {
-			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ")
+			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver)
 		}
 		if join.source.alias != "" {
 			leftAliases = append(leftAliases, join.source.alias)
@@ -13172,12 +13197,13 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			kind += " ALL"
 		}
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "SET", Detail: kind})
-		sqlAppendExplainSteps(steps, union.query, prefix+"  ")
+		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver)
 	}
 }
 
-func sqlExplainSourceStep(node string, source sqlSource) SQLExplainStep {
+func sqlExplainSourceStep(node string, source sqlSource, resolver SQLSourceResolver) SQLExplainStep {
 	step := SQLExplainStep{Node: node, Detail: sqlExplainSource(source)}
+	step.Arrangements = resolveSQLArrangementMetadata(resolver, source)
 	if source.kind == "VALUES" {
 		estimate := len(source.values)
 		step.EstimatedRows = &estimate

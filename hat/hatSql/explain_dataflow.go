@@ -121,6 +121,7 @@ func explainDataflowStepDepth(node string) int {
 
 func cloneExplainDataflowStep(step ExplainStep) ExplainStep {
 	clone := step
+	clone.Arrangements = cloneSQLArrangementMetadata(step.Arrangements)
 	if step.Lineage != nil {
 		clone.Lineage = make([]ColumnLineage, len(step.Lineage))
 		for index, lineage := range step.Lineage {

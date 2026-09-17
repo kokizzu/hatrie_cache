@@ -5,16 +5,21 @@ import (
 	"strings"
 )
 
-func explainSQLPipelineQuery(query *sqlQuery) (SQLQueryResult, error) {
+func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResult, error) {
 	if query == nil {
 		return SQLQueryResult{}, fmt.Errorf("SQL pipeline query is nil")
 	}
 	if query.analyze {
 		return SQLQueryResult{}, fmt.Errorf("EXPLAIN PIPELINE ANALYZE is not supported")
 	}
-	steps := sqlExplainPipelineSteps(query)
+	steps := sqlExplainPipelineStepsWithResolver(query, resolver)
+	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	columns := []string{"node", "detail", "stage", "worker", "workers", "estimated_rows"}
+	if hasArrangementMetadata {
+		columns = append(columns, "arrangements")
+	}
 	result := SQLQueryResult{
-		Columns: []string{"node", "detail", "stage", "worker", "workers", "estimated_rows"},
+		Columns: columns,
 		Rows:    make([]SQLRow, 0, len(steps)),
 		Plan:    steps,
 	}
@@ -29,13 +34,20 @@ func explainSQLPipelineQuery(query *sqlQuery) (SQLQueryResult, error) {
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
 		}
+		if hasArrangementMetadata && len(step.Arrangements) > 0 {
+			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
 		result.Rows = append(result.Rows, row)
 	}
 	return result, nil
 }
 
 func sqlExplainPipelineSteps(query *sqlQuery) []SQLExplainStep {
-	steps := sqlExplainSteps(query)
+	return sqlExplainPipelineStepsWithResolver(query, nil)
+}
+
+func sqlExplainPipelineStepsWithResolver(query *sqlQuery, resolver SQLSourceResolver) []SQLExplainStep {
+	steps := sqlExplainStepsWithResolver(query, resolver)
 	stage := 1
 	for index := range steps {
 		if index > 0 && sqlExplainPipelineBoundary(steps[index].Node) {

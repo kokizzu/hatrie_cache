@@ -485,6 +485,7 @@ func cloneMaterializedExplainSteps(steps []ExplainStep) []ExplainStep {
 	cloned := make([]ExplainStep, len(steps))
 	for index, step := range steps {
 		cloned[index] = step
+		cloned[index].Arrangements = cloneSQLArrangementMetadata(step.Arrangements)
 		cloned[index].EstimatedRows = cloneMaterializedInt(step.EstimatedRows)
 		cloned[index].ActualInputRows = cloneMaterializedInt(step.ActualInputRows)
 		cloned[index].ActualOutputRows = cloneMaterializedInt(step.ActualOutputRows)

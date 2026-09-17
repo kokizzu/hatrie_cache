@@ -13898,6 +13898,46 @@ commit-chu48-ranked-full-text:
 push-chu48-ranked-full-text:
 	bash ./scripts/push-chu48-ranked-full-text.sh
 
+.PHONY: test-mu012-arrangement-explain
+test-mu012-arrangement-explain:
+	bash ./scripts/test-mu012-arrangement-explain.sh
+
+.PHONY: format-mu012-arrangement-explain
+format-mu012-arrangement-explain:
+	bash ./scripts/format-mu012-arrangement-explain.sh
+
+.PHONY: test-mu012-arrangement-package
+test-mu012-arrangement-package:
+	bash ./scripts/test-mu012-arrangement-package.sh
+
+.PHONY: race-mu012-arrangement-explain
+race-mu012-arrangement-explain:
+	bash ./scripts/race-mu012-arrangement-explain.sh
+
+.PHONY: vet-mu012-arrangement-explain
+vet-mu012-arrangement-explain:
+	bash ./scripts/vet-mu012-arrangement-explain.sh
+
+.PHONY: benchmark-mu012-arrangement-explain
+benchmark-mu012-arrangement-explain:
+	bash ./scripts/benchmark-mu012-arrangement-explain.sh
+
+.PHONY: review-mu012-arrangement-explain
+review-mu012-arrangement-explain:
+	bash ./scripts/review-mu012-arrangement-explain.sh
+
+.PHONY: stage-mu012-arrangement-explain
+stage-mu012-arrangement-explain:
+	bash ./scripts/stage-mu012-arrangement-explain.sh
+
+.PHONY: commit-mu012-arrangement-explain
+commit-mu012-arrangement-explain:
+	bash ./scripts/commit-mu012-arrangement-explain.sh
+
+.PHONY: push-mu012-arrangement-explain
+push-mu012-arrangement-explain:
+	bash ./scripts/push-mu012-arrangement-explain.sh
+
 .PHONY: test-mz043-operator-frontier
 test-mz043-operator-frontier:
 	bash ./scripts/test-mz043-operator-frontier.sh

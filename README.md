@@ -88,6 +88,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired compact multi-dimensional frontier antichains: [MZ008_FRONTIER_ANTICHAIN.md](MZ008_FRONTIER_ANTICHAIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-08-compact-frontier-antichain)
 - Materialize-inspired exact-frontier subscription snapshot export: [MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md](MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-26-exact-frontier-subscription-snapshot-export)
 - Materialize-inspired SQL plan snapshots: [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-050-sql-plan-snapshots)
+- Optional bounded arrangement metadata in `EXPLAIN`: [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-012-arrangement-explain)
 - Materialize-inspired bounded SQL source-frontier waits: [MZ018_SOURCE_FRONTIER_WAIT.md](MZ018_SOURCE_FRONTIER_WAIT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-018-source-frontier-wait)
 - Materialize-inspired frontier-aware source backpressure: [MZ007_FRONTIER_SOURCE_BACKPRESSURE.md](MZ007_FRONTIER_SOURCE_BACKPRESSURE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-07-frontier-aware-source-backpressure)
 - ClickHouse-inspired skip-index usefulness telemetry: [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry)
@@ -4240,6 +4241,18 @@ lookup and preparation tradeoff is documented in
 - Small-vector `UpsertBatch` representation: [TR057_UPSERT_BATCH_SMALL_VECTOR.md](TR057_UPSERT_BATCH_SMALL_VECTOR.md)
 - Roaring bitmap lower-bound lookup fast path: [TR058_ROARING_BITMAP_LOOKUP_FASTPATH.md](TR058_ROARING_BITMAP_LOOKUP_FASTPATH.md)
 SQL mutation changefeed consumers can request pre- and post-state rows with `RETURNING`; see [TR033_SQL_RETURNING_BEFORE_ROWS.md](TR033_SQL_RETURNING_BEFORE_ROWS.md).
+
+## Arrangement Metadata In EXPLAIN
+
+Resolvers can optionally implement `hatSql.SQLArrangementMetadataResolver` to
+show reusable source arrangements in `EXPLAIN` and `EXPLAIN PIPELINE`. Each
+entry reports its key, kind, reuse status, cardinality, and estimated memory
+bytes. The callback is diagnostics-only, has no query/storage/wire-format
+effect, and resolver errors are ignored. Output is capped at 64 entries per
+operator and 256 bytes per key or kind; existing resolvers keep the old explain
+columns. See [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md) and
+the measured overhead in [BENCHMARK.md](BENCHMARK.md#mu-012-arrangement-explain).
+
 ## Query Engine Notes
 
 - [MZ-030 incremental differential join](MZ030_INCREMENTAL_JOIN.md)
