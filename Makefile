@@ -17484,3 +17484,33 @@ commit-mz032:
 
 push-mz032:
 	sh scripts/push-mz032.sh
+benchmark-mz033-baseline:
+	sh scripts/benchmark-mz033-baseline.sh
+
+test-mz033:
+	sh scripts/test-mz033.sh
+
+benchmark-mz033:
+	sh scripts/benchmark-mz033.sh
+
+verify-mz033:
+	sh scripts/verify-mz033.sh
+
+.PHONY: stage-mz033 review-mz033-staged commit-mz033 push-mz033
+stage-mz033:
+	sh scripts/stage-mz033.sh
+
+review-mz033-staged:
+	sh scripts/review-mz033-staged.sh
+
+commit-mz033:
+	sh scripts/commit-mz033.sh
+
+push-mz033:
+	sh scripts/push-mz033.sh
+
+check-mz033-benchmark-process:
+	sh scripts/check-mz033-benchmark-process.sh
+
+inspect-mz033:
+	sh scripts/inspect-mz033.sh

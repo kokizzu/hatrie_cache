@@ -112,6 +112,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired exact weighted incremental Top-K maintenance: [MZ037_INCREMENTAL_TOP_K.md](MZ037_INCREMENTAL_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-037-incremental-weighted-top-k)
 - Materialize-inspired incremental Top-K rank movement changes: [MZ031_RANKED_TOP_K.md](MZ031_RANKED_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-031-ranked-top-k-change-diffs)
 - Materialize-inspired opt-in arrangement cost and reuse scoring for indexes, projections, and ordered layouts: [MZ032_ARRANGEMENT_COST.md](MZ032_ARRANGEMENT_COST.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-032-arrangement-cost-model)
+- Materialize-inspired bounded observed-dataflow index recommendations: [MZ033_DATAFLOW_INDEX_ADVISOR.md](MZ033_DATAFLOW_INDEX_ADVISOR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-033-automatic-dataflow-index-advisor)
 - Materialize-inspired stateful incremental distinct maintenance: [MZ039_INCREMENTAL_DISTINCT.md](MZ039_INCREMENTAL_DISTINCT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-039-incremental-distinct)
 - Materialize-inspired exact weighted incremental percentile maintenance: [MZ040_INCREMENTAL_PERCENTILE.md](MZ040_INCREMENTAL_PERCENTILE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-040-incremental-percentile)
 - ClickHouse-inspired statistics-driven join ordering with deterministic fallback: [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md)

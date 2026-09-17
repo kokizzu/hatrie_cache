@@ -28429,3 +28429,47 @@ returns materialized scores. This is an explicit imported utility and does not
 change default SQL planning or storage behavior. See
 [MZ032_ARRANGEMENT_COST.md](MZ032_ARRANGEMENT_COST.md) for formulas, defaults,
 overflow handling, and the usage example.
+
+<a id="mz-033-automatic-dataflow-index-advisor"></a>
+## MZ-033 Automatic Dataflow Index Advisor
+
+Command: `make benchmark-mz033`
+
+Each benchmark iteration aggregates 10,000 observations over 512 candidate
+identities, scores the retained candidates, and ranks the recommendations. The
+advisor is reused and reset between workload windows. Results are Linux amd64
+on an AMD Ryzen 9 5950X with `GOMAXPROCS=1`, five samples, and a three-second
+benchmark window per sample. The manual path performs the same bounded
+admission, saturating aggregation, cost scoring, and payback tie-breaking as
+the public advisor.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | --- |
+| Hand-written equivalent | 1,124,846; 1,311,054; 1,252,235; 1,309,996; 1,288,146 | 1,288,146 | 82,152 | 4 | 1.00x baseline |
+| `SQLDataflowIndexAdvisor` batch API | 1,366,525; 1,330,046; 1,324,493; 1,325,291; 1,280,403 | 1,325,291 | 82,152 | 4 | 0.97x of baseline throughput; 1.03x ns/op, 2.9% slower |
+
+The advisor's small CPU cost buys a reusable public API, bounded candidate
+retention, minimum-sample filtering, deterministic ranking, and concurrent
+observation. There is no allocation or measured per-operation memory increase
+in this workload. It is opt-in and does not enter SQL planning unless an
+application explicitly consumes its recommendations.
+
+### Raw Output
+
+```text
+make benchmark-mz033
+BenchmarkMZ033ManualDataflowRecommendation 3169 1124846 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033ManualDataflowRecommendation 2923 1311054 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033ManualDataflowRecommendation 2902 1252235 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033ManualDataflowRecommendation 3000 1309996 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033ManualDataflowRecommendation 2866 1288146 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033SQLDataflowIndexRecommendation 2737 1366525 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033SQLDataflowIndexRecommendation 2792 1330046 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033SQLDataflowIndexRecommendation 2996 1324493 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033SQLDataflowIndexRecommendation 2824 1325291 ns/op 82152 B/op 4 allocs/op
+BenchmarkMZ033SQLDataflowIndexRecommendation 3141 1280403 ns/op 82152 B/op 4 allocs/op
+```
+
+See [MZ033_DATAFLOW_INDEX_ADVISOR.md](MZ033_DATAFLOW_INDEX_ADVISOR.md) for
+defaults, aggregation semantics, resource bounds, and the importable API
+example.
