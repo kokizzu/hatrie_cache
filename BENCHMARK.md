@@ -25743,6 +25743,51 @@ BenchmarkMU014CatalogDependencyClosure-32      61950  19934 ns/op   19064 B/op  
 BenchmarkMU014CatalogDependencyClosure-32      64108  19590 ns/op   19064 B/op  58 allocs/op
 ```
 
+<a id="mu-015-sql-source-status-catalog"></a>
+## M-U15 SQL Source Status Catalog
+
+This measures the existing three-source `information_schema.sources` query
+before and after adding the status catalog, then measures the new three-source
+status relation. Five standalone runs on an AMD Ryzen 9 5950X; command:
+`make benchmark-mu015-source-status-catalog`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change three-source catalog | 11,230 | 9,632 | 60 | 1.00x |
+| Post-change three-source catalog | 10,999 | 9,680 | 60 | 1.02x measured, within noise |
+| Three-source status catalog | 20,131 | 16,336 | 87 | 1.79x CPU, new metadata path |
+
+The unchanged source path shows no meaningful regression. The status path
+costs more because it normalizes a snapshot and projects eleven status fields;
+that cost is paid only by metadata queries and does not affect ordinary source
+reads. Raw error messages are not returned; only bounded identifier-shaped
+error codes are accepted.
+
+Raw output before the change:
+
+```text
+BenchmarkMU015CatalogSourcesBaseline-32  106537 11230 ns/op 9632 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  109779 11093 ns/op 9632 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  103876 10801 ns/op 9632 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  109263 11302 ns/op 9632 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  103479 11728 ns/op 9632 B/op 60 allocs/op
+```
+
+Raw output after the change:
+
+```text
+BenchmarkMU015CatalogSourcesBaseline-32  106252 10999 ns/op  9680 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  113722 11353 ns/op  9680 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  102436 10876 ns/op  9680 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  110038 10986 ns/op  9680 B/op 60 allocs/op
+BenchmarkMU015CatalogSourcesBaseline-32  111086 11085 ns/op  9680 B/op 60 allocs/op
+BenchmarkMU015CatalogSourceStatus-32     57493 19646 ns/op 16336 B/op 87 allocs/op
+BenchmarkMU015CatalogSourceStatus-32     60134 20055 ns/op 16336 B/op 87 allocs/op
+BenchmarkMU015CatalogSourceStatus-32     61240 20981 ns/op 16336 B/op 87 allocs/op
+BenchmarkMU015CatalogSourceStatus-32     59604 20131 ns/op 16336 B/op 87 allocs/op
+BenchmarkMU015CatalogSourceStatus-32     60884 20248 ns/op 16336 B/op 87 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

@@ -14022,6 +14022,46 @@ commit-mu014-object-dependency-catalog:
 push-mu014-object-dependency-catalog:
 	bash ./scripts/push-mu014-object-dependency-catalog.sh
 
+.PHONY: format-mu015-source-status-catalog
+format-mu015-source-status-catalog:
+	bash ./scripts/format-mu015-source-status-catalog.sh
+
+.PHONY: test-mu015-source-status-catalog
+test-mu015-source-status-catalog:
+	bash ./scripts/test-mu015-source-status-catalog.sh
+
+.PHONY: benchmark-mu015-source-status-catalog
+benchmark-mu015-source-status-catalog:
+	bash ./scripts/benchmark-mu015-source-status-catalog.sh
+
+.PHONY: test-mu015-source-status-package
+test-mu015-source-status-package:
+	bash ./scripts/test-mu015-source-status-package.sh
+
+.PHONY: race-mu015-source-status-catalog
+race-mu015-source-status-catalog:
+	bash ./scripts/race-mu015-source-status-catalog.sh
+
+.PHONY: vet-mu015-source-status-catalog
+vet-mu015-source-status-catalog:
+	bash ./scripts/vet-mu015-source-status-catalog.sh
+
+.PHONY: stage-mu015-source-status-catalog
+stage-mu015-source-status-catalog:
+	bash ./scripts/stage-mu015-source-status-catalog.sh
+
+.PHONY: commit-mu015-source-status-catalog
+commit-mu015-source-status-catalog:
+	bash ./scripts/commit-mu015-source-status-catalog.sh
+
+.PHONY: push-mu015-source-status-catalog
+push-mu015-source-status-catalog:
+	bash ./scripts/push-mu015-source-status-catalog.sh
+
+.PHONY: benchmark-mu015-baseline
+benchmark-mu015-baseline:
+	bash ./scripts/benchmark-mu015-baseline.sh
+
 .PHONY: test-mz043-operator-frontier
 test-mz043-operator-frontier:
 	bash ./scripts/test-mz043-operator-frontier.sh

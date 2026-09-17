@@ -922,6 +922,11 @@ snapshot. `information_schema.objects`, `information_schema.dependencies`,
 `SHOW OBJECTS`, and `SHOW DEPENDENCIES` expose deterministic source, view, index,
 and sink metadata; see [MU014_DEPENDENCY_CATALOG.md](MU014_DEPENDENCY_CATALOG.md).
 
+Source lifecycle and progress can be exposed through the same resolver with
+`information_schema.source_status` or `SHOW SOURCE STATUS`; the status contract
+reuses existing frontier metrics and redacts raw error text. See
+[MU015_SOURCE_STATUS_CATALOG.md](MU015_SOURCE_STATUS_CATALOG.md).
+
 Run the full local verification suite with `make verify` or the explicit alias
 `make verify-local`. It checks deploy configuration, Go tests/race/coverage, C
 tests, the Svelte MPA, operations smoke tests, and benchmark-document freshness.

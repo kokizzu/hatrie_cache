@@ -7,12 +7,13 @@ import (
 
 // Catalog declares virtual information_schema metadata for one SQL resolver.
 type Catalog struct {
-	Version      uint64
-	Namespaces   []string
-	Sources      []CatalogSource
-	Indexes      []CatalogIndex
-	Objects      []CatalogObject
-	Dependencies []CatalogDependency
+	Version        uint64
+	Namespaces     []string
+	Sources        []CatalogSource
+	Indexes        []CatalogIndex
+	Objects        []CatalogObject
+	Dependencies   []CatalogDependency
+	SourceStatuses []CatalogSourceStatus
 }
 
 type CatalogSource struct {
@@ -39,8 +40,9 @@ type CatalogIndex struct {
 // CatalogResolver exposes immutable information_schema virtual sources while
 // delegating ordinary source resolution to Source.
 type CatalogResolver struct {
-	Source  SourceResolver
-	Catalog Catalog
+	Source       SourceResolver
+	Catalog      Catalog
+	SourceStatus CatalogSourceStatusResolver
 }
 
 // CompileSQLShortcut lowers catalog shortcuts to ordinary information_schema
@@ -53,8 +55,11 @@ func CompileSQLShortcut(source string) (string, error) {
 	}
 	switch strings.ToUpper(parts[0]) {
 	case "SHOW":
+		if len(parts) == 3 && strings.EqualFold(parts[1], "SOURCE") && strings.EqualFold(parts[2], "STATUS") {
+			return "FROM CACHE('information_schema.source_status') SELECT catalog_version, namespace, source, kind, state, available, ready, frontier, observed, lag, error_code ORDER BY namespace, source", nil
+		}
 		if len(parts) != 2 {
-			return "", fmt.Errorf("SHOW expects one of NAMESPACES, SOURCES, INDEXES, OBJECTS, or DEPENDENCIES")
+			return "", fmt.Errorf("SHOW expects NAMESPACES, SOURCES, INDEXES, OBJECTS, DEPENDENCIES, or SOURCE STATUS")
 		}
 		switch strings.ToUpper(parts[1]) {
 		case "NAMESPACES":
@@ -67,8 +72,10 @@ func CompileSQLShortcut(source string) (string, error) {
 			return "FROM CACHE('information_schema.objects') SELECT catalog_version, namespace, name, kind, type, object_version, state ORDER BY namespace, name, kind", nil
 		case "DEPENDENCIES":
 			return "FROM CACHE('information_schema.dependencies') SELECT catalog_version, namespace, object, object_kind, depends_on_namespace, depends_on, depends_on_kind, ordinal_position ORDER BY namespace, object, object_kind", nil
+		case "SOURCE_STATUS", "STATUS":
+			return "FROM CACHE('information_schema.source_status') SELECT catalog_version, namespace, source, kind, state, available, ready, frontier, observed, lag, error_code ORDER BY namespace, source", nil
 		default:
-			return "", fmt.Errorf("SHOW expects one of NAMESPACES, SOURCES, INDEXES, OBJECTS, or DEPENDENCIES")
+			return "", fmt.Errorf("SHOW expects NAMESPACES, SOURCES, INDEXES, OBJECTS, DEPENDENCIES, or SOURCE STATUS")
 		}
 	case "DESCRIBE":
 		if len(parts) != 2 || !catalogIdentifier(parts[1]) {
@@ -126,6 +133,8 @@ func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error
 			return catalogObjectRows(resolver.Catalog)
 		case "information_schema.dependencies":
 			return catalogDependencyRows(resolver.Catalog)
+		case "information_schema.source_status":
+			return catalogSourceStatusRows(resolver)
 		}
 	}
 	if resolver.Source == nil {
@@ -139,7 +148,7 @@ func catalogOwnsVirtualSource(name, key string) bool {
 		return false
 	}
 	switch strings.ToLower(key) {
-	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
+	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
 		return true
 	default:
 		return false
@@ -252,6 +261,9 @@ func (resolver CatalogResolver) PreferSQLColumnarSource(name, key string, fields
 // pseudo-sources intentionally remain unavailable so the SQL planner falls
 // back to its established exact source resolution path for mixed queries.
 func (resolver CatalogResolver) SQLSourceCardinality(name, key string) (int, bool, bool, error) {
+	if catalogOwnsVirtualSource(name, key) {
+		return 0, false, false, nil
+	}
 	if resolver.Source == nil {
 		return 0, false, false, nil
 	}
@@ -267,7 +279,7 @@ func (resolver CatalogResolver) SQLSourceCardinality(name, key string) (int, boo
 func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]SQLSourcePartition, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
 			return nil, false, nil
 		}
 	}
@@ -286,7 +298,7 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
 			return SQLIndexDiagnostics{}, false, nil
 		}
 	}
@@ -319,7 +331,7 @@ func (resolver CatalogResolver) ResolveSQLArrangementMetadata(name, key string) 
 func (resolver CatalogResolver) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
 			return nil, false, nil
 		}
 	}
