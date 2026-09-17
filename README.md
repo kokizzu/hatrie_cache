@@ -224,6 +224,7 @@ security guidance before exposing it on a network.
 - Deterministic opt-in SQL transaction triggers: [SQL_TRANSACTION_TRIGGERS.md](SQL_TRANSACTION_TRIGGERS.md)
 - Arrangement ownership and reuse snapshots: call `Snapshot()` on typed aggregate or join arrangement registries to inspect active leases, checkpoints, source sequences, and staleness.
 - Structural EXPLAIN dataflow graphs: call `BuildExplainDataflowGraph`, `MarshalExplainDataflowJSON`, or `ExplainDataflowDOT` to inspect nested subplans and pipeline edges without changing query execution.
+- Runtime pipeline dependency graphs: use `hatPipeline.NewDataflowGraph` for bounded operator metadata, direct dependencies, deterministic topological order, and transitive invalidation impact. See [MZ042_DATAFLOW_GRAPH.md](MZ042_DATAFLOW_GRAPH.md).
 - Structured optimizer alternatives and notices: inspect `ExplainStep.Alternatives` and `ExplainStep.Notices` on `EXPLAIN ANALYZE` plans. See [SQL_EXPLAIN_OPTIMIZER.md](SQL_EXPLAIN_OPTIMIZER.md).
 - Literal-independent SQL fingerprints: call `SQLQueryFingerprint` to group structurally identical queries without retaining literal values; identifiers, operators, literal types, and parameter positions remain significant.
 - Schema-aware RowBinary-style SQL row transfer: use `EncodeSQLRowBinary` and `DecodeSQLRowBinary`; the existing JSON/protobuf wire defaults remain unchanged. See [SQL_ROW_BINARY.md](SQL_ROW_BINARY.md).

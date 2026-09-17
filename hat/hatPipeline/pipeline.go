@@ -20,6 +20,22 @@ type Stage[T any] struct {
 	Process func(context.Context, T) (T, error)
 }
 
+// PipelineStageDescription describes one stage without exposing its process
+// function.
+type PipelineStageDescription struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Workers int    `json:"workers"`
+	Queue   int    `json:"queue"`
+}
+
+// PipelineDescription is a deterministic view of the linear dataflow graph
+// represented by a Pipeline.
+type PipelineDescription struct {
+	Stages []PipelineStageDescription `json:"stages"`
+	Edges  []DataflowEdge             `json:"edges"`
+}
+
 // Pipeline is an immutable sequence of stages.
 type Pipeline[T any] struct {
 	stages []Stage[T]
@@ -47,6 +63,38 @@ func NewPipeline[T any](stages ...Stage[T]) (*Pipeline[T], error) {
 		}
 	}
 	return &Pipeline[T]{stages: copied}, nil
+}
+
+// Describe returns a detached description of the pipeline. Stage IDs are
+// stable within the pipeline and do not depend on user-provided names.
+func (p *Pipeline[T]) Describe() PipelineDescription {
+	if p == nil {
+		return PipelineDescription{}
+	}
+	edgeCapacity := len(p.stages) - 1
+	if edgeCapacity < 0 {
+		edgeCapacity = 0
+	}
+	description := PipelineDescription{
+		Stages: make([]PipelineStageDescription, 0, len(p.stages)),
+		Edges:  make([]DataflowEdge, 0, edgeCapacity),
+	}
+	for index, stage := range p.stages {
+		id := fmt.Sprintf("stage-%d", index+1)
+		description.Stages = append(description.Stages, PipelineStageDescription{
+			ID:      id,
+			Name:    stage.Name,
+			Workers: stage.Workers,
+			Queue:   stage.Queue,
+		})
+		if index > 0 {
+			description.Edges = append(description.Edges, DataflowEdge{
+				From: fmt.Sprintf("stage-%d", index),
+				To:   id,
+			})
+		}
+	}
+	return description
 }
 
 // Run starts the pipeline and returns its final output and an error channel.

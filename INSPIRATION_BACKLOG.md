@@ -131,7 +131,7 @@ before/after measurement when its motivation is performance.
 | MZ-39 | Operator fuel or yield budgets | Bound a single operator monopolization | More scheduler checks | [x] |
 | MZ-40 | Recursive convergence diagnostics and iteration bounds | Make recursive dataflows operable | Additional state and errors | [x] |
 | MZ-41 | Recursive negative differential propagation | Support deletions in recursive results | Non-monotone fixpoint complexity | [ ] |
-| MZ-42 | Dataflow dependency graph introspection | Explain rebuild and invalidation impact | Graph retention | [ ] |
+| MZ-42 | Dataflow dependency graph introspection | Explain rebuild and invalidation impact | Graph retention | [x] Implemented by the opt-in bounded `hatPipeline.DataflowGraph` and `Pipeline.Describe()`; see [MZ042_DATAFLOW_GRAPH.md](MZ042_DATAFLOW_GRAPH.md) and [BENCHMARK.md#mz-042-dataflow-dependency-graph](BENCHMARK.md#mz-042-dataflow-dependency-graph). |
 | MZ-43 | Per-operator frontier lag metrics | Locate the actual source of staleness | Metrics cardinality | [x] |
 | MZ-44 | Session snapshot consistency tokens | Tie multiple queries to one logical view | Token lifetime | [x] Implemented by the opt-in HMAC-backed `hatSql.SQLSnapshotTokenCodec`; it maps to the existing `AsOfFrontier` provider path and defaults off. See [MZ044_SNAPSHOT_TOKENS.md](MZ044_SNAPSHOT_TOKENS.md) and [BENCHMARK.md#mz-044-session-snapshot-tokens](BENCHMARK.md#mz-044-session-snapshot-tokens). |
 | MZ-45 | Transactional source-to-sink boundary | Commit a source batch and sink effect together | Distributed commit complexity | [ ] |

@@ -18010,3 +18010,27 @@ push-chu25-query-spill-quota:
 	sh ./scripts/push-chu25-query-spill-quota.sh
 
 delivery-chu25-query-spill-quota: format-chu25-query-spill-quota test-chu25-query-spill-quota benchmark-chu25-query-spill-quota race-chu25-query-spill-quota vet-chu25-query-spill-quota review-chu25-query-spill-quota stage-chu25-query-spill-quota commit-chu25-query-spill-quota push-chu25-query-spill-quota
+test-mz42-dataflow-graph:
+	sh ./scripts/test-mz42-dataflow-graph.sh
+format-mz42-dataflow-graph:
+	sh ./scripts/format-mz42-dataflow-graph.sh
+benchmark-mz42-dataflow-graph:
+	sh ./scripts/benchmark-mz42-dataflow-graph.sh
+race-mz42-dataflow-graph:
+	sh ./scripts/race-mz42-dataflow-graph.sh
+test-mz42-package:
+	sh ./scripts/test-mz42-package.sh
+
+vet-mz42-dataflow-graph:
+	sh ./scripts/vet-mz42-dataflow-graph.sh
+review-mz42-dataflow-graph:
+	sh ./scripts/review-mz42-dataflow-graph.sh
+
+stage-mz42-dataflow-graph:
+	sh ./scripts/stage-mz42-dataflow-graph.sh
+
+commit-mz42-dataflow-graph:
+	sh ./scripts/commit-mz42-dataflow-graph.sh
+
+push-mz42-dataflow-graph:
+	sh ./scripts/push-mz42-dataflow-graph.sh

@@ -17142,6 +17142,38 @@ call. Rendering the richer graph costs about 1.77x the CPU, 2.42x the heap,
 and 2.54x the allocations of the existing linear DOT renderer in this small
 fixture. The new APIs are explicit and read-only; `ExplainDOT` remains
 unchanged for callers that do not need graph structure.
+## MZ-042 Dataflow Dependency Graph
+
+Command: `make benchmark-mz42-dataflow-graph`.
+
+This is a new opt-in introspection capability, so there is no prior execution
+path to compare against. `Pipeline.Run` is unchanged; these numbers measure
+only explicit graph inspection. The graph benchmark uses 2,048 nodes and
+2,047 chain edges, with `GOMAXPROCS=1` and five repetitions on Linux/AMD Ryzen
+9 5950X.
+
+| Operation | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `DataflowGraph.Snapshot` | 523,249 | 163,840 | 3 |
+| `DataflowGraph.TopologicalOrder` | 399,021 | 174,752 | 11 |
+| `DataflowGraph.Impact` | 582,490 | 242,672 | 2,068 |
+| `DataflowGraph.Dependencies` + `Dependents` | 222.5 | 32 | 2 |
+| `Pipeline.Describe` (3 stages) | 419.1 | 248 | 7 |
+
+Raw samples:
+
+```text
+snapshot: 604417, 523249, 595831, 511336, 503187 ns/op; 163840 B/op; 3 allocs/op
+topological_order: 396177, 415672, 398862, 399021, 399880 ns/op; 174752 B/op; 11 allocs/op
+impact: 556079, 565217, 601663, 582490, 611972 ns/op; 242672 B/op; 2068 allocs/op
+queries: 222.5, 212.1, 217.8, 235.0, 223.1 ns/op; 32 B/op; 2 allocs/op
+pipeline_describe: 419.1, 412.7, 387.2, 449.9, 466.3 ns/op; 248 B/op; 7 allocs/op
+```
+
+The tradeoff is retained graph metadata only when callers opt in, plus
+inspection-time allocations proportional to the requested result. Default
+pipeline execution pays no graph cost.
+
 ## Delay Queue
 
 Command: `make benchmark-delay-queue`.
