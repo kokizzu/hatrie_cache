@@ -4253,6 +4253,17 @@ operator and 256 bytes per key or kind; existing resolvers keep the old explain
 columns. See [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md) and
 the measured overhead in [BENCHMARK.md](BENCHMARK.md#mu-012-arrangement-explain).
 
+## SQL Cardinality Estimates
+
+`hatSql` can expose bounded source, filter, equality-join, and aggregate row
+estimates in `EXPLAIN`. `EXPLAIN ANALYZE` compares those estimates with the
+observed operator counts and reports row and percentage error. Estimates are
+metadata-only: unsupported shapes remain unknown, regular `EXPLAIN` does not
+read source rows, and query results are unchanged. See
+[MU013_SQL_CARDINALITY_ESTIMATES.md](MU013_SQL_CARDINALITY_ESTIMATES.md) and
+the measured cost in
+[BENCHMARK.md](BENCHMARK.md#mu-013-sql-cardinality-estimates).
+
 ## Query Engine Notes
 
 - [MZ-030 incremental differential join](MZ030_INCREMENTAL_JOIN.md)

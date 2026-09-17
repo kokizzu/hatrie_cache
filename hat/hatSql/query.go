@@ -12985,6 +12985,10 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		return explainSQLPipelineQuery(query, resolver)
 	}
 	steps := sqlExplainSteps(query)
+	var estimatedSteps []SQLExplainStep
+	if query.analyze {
+		estimatedSteps = sqlExplainStepsWithResolver(query, resolver)
+	}
 	if !query.analyze {
 		steps = sqlExplainStepsWithResolver(query, resolver)
 	}
@@ -13025,6 +13029,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		ResultBytes:   sqlRowsBytes(executed.Rows),
 		PlanSteps:     len(metrics.steps),
 	}
+	sqlMergeExplainCardinalityEstimates(metrics.steps, estimatedSteps)
 	result.Plan = metrics.steps
 	result.Rows = result.Rows[:0]
 	for _, step := range result.Plan {
@@ -13115,7 +13120,22 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
 		}
 	}
-	*steps = append(*steps, sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver))
+	sourceEstimate := sqlCardinalityEstimateForSource(*query.from, resolver)
+	currentEstimate := sourceEstimate
+	prewhereEstimate := sqlUnknownCardinalityEstimate()
+	whereEstimate := sqlUnknownCardinalityEstimate()
+	whereBeforeJoins := query.where.kind != "" && sqlCanPushBaseWhere(query)
+	if query.prewhere.kind != "" {
+		prewhereEstimate = sqlCardinalityEstimateForFilter(currentEstimate, *query.from, query.prewhere, resolver, len(query.joins) == 0)
+		currentEstimate = prewhereEstimate
+	}
+	if whereBeforeJoins {
+		whereEstimate = sqlCardinalityEstimateForFilter(currentEstimate, *query.from, query.where, resolver, true)
+		currentEstimate = whereEstimate
+	}
+	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
+	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
+	*steps = append(*steps, scanStep)
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
 		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver)
 	}
@@ -13130,6 +13150,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 				detail += " AS " + join.source.alias
 			}
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "ARRAY JOIN", Detail: detail})
+			currentEstimate = sqlUnknownCardinalityEstimate()
 			if join.source.alias != "" {
 				leftAliases = append(leftAliases, join.source.alias)
 			}
@@ -13151,6 +13172,9 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		}
 		joinStep := SQLExplainStep{Node: prefix + node, Detail: detail}
 		joinStep.Arrangements = resolveSQLArrangementMetadata(resolver, join.source)
+		joinEstimate := sqlCardinalityEstimateForJoin(currentEstimate, join, leftAliases, resolver)
+		sqlSetExplainCardinalityEstimate(&joinStep, joinEstimate)
+		currentEstimate = joinEstimate
 		*steps = append(*steps, joinStep)
 		if join.source.kind == "SUBQUERY" && join.source.query != nil {
 			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver)
@@ -13160,13 +13184,24 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		}
 	}
 	if query.prewhere.kind != "" {
-		*steps = append(*steps, SQLExplainStep{Node: prefix + "PREWHERE", Detail: sqlExplainExpression(query.prewhere)})
+		prewhereStep := SQLExplainStep{Node: prefix + "PREWHERE", Detail: sqlExplainExpression(query.prewhere)}
+		sqlSetExplainCardinalityEstimate(&prewhereStep, prewhereEstimate)
+		*steps = append(*steps, prewhereStep)
 	}
 	if query.where.kind != "" {
-		*steps = append(*steps, SQLExplainStep{Node: prefix + "FILTER", Detail: sqlExplainExpression(query.where)})
+		if !whereBeforeJoins {
+			whereEstimate = sqlCardinalityEstimateForFilter(currentEstimate, *query.from, query.where, resolver, len(query.joins) == 0)
+			currentEstimate = whereEstimate
+		}
+		whereStep := SQLExplainStep{Node: prefix + "FILTER", Detail: sqlExplainExpression(query.where)}
+		sqlSetExplainCardinalityEstimate(&whereStep, whereEstimate)
+		*steps = append(*steps, whereStep)
 	}
 	if len(query.groupBy) > 0 || sqlQueryHasAggregate(query) {
-		*steps = append(*steps, SQLExplainStep{Node: prefix + "AGGREGATE", Detail: sqlExplainExpressions(query.groupBy)})
+		aggregateStep := SQLExplainStep{Node: prefix + "AGGREGATE", Detail: sqlExplainExpressions(query.groupBy)}
+		currentEstimate = sqlCardinalityEstimateForAggregate(currentEstimate, query, resolver)
+		sqlSetExplainCardinalityEstimate(&aggregateStep, currentEstimate)
+		*steps = append(*steps, aggregateStep)
 	}
 	if query.having.kind != "" {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "HAVING", Detail: sqlExplainExpression(query.having)})

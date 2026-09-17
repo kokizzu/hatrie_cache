@@ -25648,6 +25648,47 @@ BenchmarkMU012ExplainArrangementMetadata/with-32             221014  5429 ns/op 
 BenchmarkMU012ExplainArrangementMetadata/with-32             233232  5271 ns/op  6456 B/op  35 allocs/op
 ```
 
+<a id="mu-013-sql-cardinality-estimates"></a>
+## M-U13 SQL Cardinality Estimates
+
+This measures the regular `EXPLAIN` path before and after adding optional
+source, filter, equality-join, and grouped-aggregate cardinality estimates.
+The pre-change resolver already has the same metadata methods, but the old
+planner does not call them, so this isolates the planner feature. Five runs on
+an AMD Ryzen 9 5950X; command: `make benchmark-mu013-cardinality-estimates`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change explain | 11,912 | 15,340 | 88 | 1.00x |
+| Cardinality metadata explain | 11,865 | 15,404 | 94 | 1.00x CPU (within noise); +64 B; +6 allocs |
+
+The measured CPU median is effectively unchanged within normal benchmark
+noise; this is an explain-only diagnostic cost, not a query execution cost.
+The useful cost boundary is about 0.4% more bytes and six allocations per
+explain in this fixture. Query execution, storage, wire transfer, and resolvers
+without optional metadata are unchanged. Estimates are omitted rather than
+guessed when statistics are not available.
+
+Raw output before the change:
+
+```text
+BenchmarkMU013ExplainCardinality-32     115578  11905 ns/op  15339 B/op  88 allocs/op
+BenchmarkMU013ExplainCardinality-32      94972  12074 ns/op  15340 B/op  88 allocs/op
+BenchmarkMU013ExplainCardinality-32     104265  11912 ns/op  15339 B/op  88 allocs/op
+BenchmarkMU013ExplainCardinality-32      99904  12079 ns/op  15340 B/op  88 allocs/op
+BenchmarkMU013ExplainCardinality-32     100117  11353 ns/op  15340 B/op  88 allocs/op
+```
+
+Raw output after the change:
+
+```text
+BenchmarkMU013ExplainCardinality-32      95125  12074 ns/op  15404 B/op  94 allocs/op
+BenchmarkMU013ExplainCardinality-32      96871  12339 ns/op  15404 B/op  94 allocs/op
+BenchmarkMU013ExplainCardinality-32      95454  11865 ns/op  15404 B/op  94 allocs/op
+BenchmarkMU013ExplainCardinality-32     100437  11780 ns/op  15404 B/op  94 allocs/op
+BenchmarkMU013ExplainCardinality-32     103099  11778 ns/op  15404 B/op  94 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

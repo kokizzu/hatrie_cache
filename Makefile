@@ -13938,6 +13938,50 @@ commit-mu012-arrangement-explain:
 push-mu012-arrangement-explain:
 	bash ./scripts/push-mu012-arrangement-explain.sh
 
+.PHONY: format-mu013-cardinality-estimates
+format-mu013-cardinality-estimates:
+	bash ./scripts/format-mu013-cardinality-estimates.sh
+
+.PHONY: test-mu013-cardinality-estimates
+test-mu013-cardinality-estimates:
+	bash ./scripts/test-mu013-cardinality-estimates.sh
+
+.PHONY: benchmark-mu013-cardinality-estimates
+benchmark-mu013-cardinality-estimates:
+	bash ./scripts/benchmark-mu013-cardinality-estimates.sh
+
+.PHONY: test-mu013-cardinality-package
+test-mu013-cardinality-package:
+	bash ./scripts/test-mu013-cardinality-package.sh
+
+.PHONY: race-mu013-cardinality-estimates
+race-mu013-cardinality-estimates:
+	bash ./scripts/race-mu013-cardinality-estimates.sh
+
+.PHONY: vet-mu013-cardinality-estimates
+vet-mu013-cardinality-estimates:
+	bash ./scripts/vet-mu013-cardinality-estimates.sh
+
+.PHONY: test-mu013-all
+test-mu013-all:
+	bash ./scripts/test-mu013-all.sh
+
+.PHONY: review-mu013-cardinality-estimates
+review-mu013-cardinality-estimates:
+	bash ./scripts/review-mu013-cardinality-estimates.sh
+
+.PHONY: stage-mu013-cardinality-estimates
+stage-mu013-cardinality-estimates:
+	bash ./scripts/stage-mu013-cardinality-estimates.sh
+
+.PHONY: commit-mu013-cardinality-estimates
+commit-mu013-cardinality-estimates:
+	bash ./scripts/commit-mu013-cardinality-estimates.sh
+
+.PHONY: push-mu013-cardinality-estimates
+push-mu013-cardinality-estimates:
+	bash ./scripts/push-mu013-cardinality-estimates.sh
+
 .PHONY: test-mz043-operator-frontier
 test-mz043-operator-frontier:
 	bash ./scripts/test-mz043-operator-frontier.sh
