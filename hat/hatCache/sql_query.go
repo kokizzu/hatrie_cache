@@ -1497,11 +1497,11 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
-	valueKey, ok := sqlIndexValueKey(value)
-	if !ok {
-		return []SQLRow{}, true, nil
+	rows, available := sqlJSONFieldIndexLookupRows(index, value)
+	if !available {
+		return nil, false, nil
 	}
-	return hatSql.CloneRows(index.rows[valueKey]), true, nil
+	return hatSql.CloneRows(rows), true, nil
 }
 
 // ResolveSQLCoveringSource returns equality candidates containing only fields
@@ -1847,11 +1847,11 @@ func (ht *HatTrie) SQLJSONIndexValueEstimate(key, field string, value interface{
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return 0, false, true, err
 	}
-	valueKey, ok := sqlIndexValueKey(value)
-	if !ok {
-		return 0, true, true, nil
+	matchedRows, available := sqlJSONFieldIndexLookupRows(index, value)
+	if !available {
+		return 0, false, false, nil
 	}
-	return len(index.rows[valueKey]), true, true, nil
+	return len(matchedRows), true, true, nil
 }
 
 // SQLJSONRangeStats returns fresh equal-depth histogram buckets for one
@@ -3499,10 +3499,26 @@ func refreshSQLJSONFieldIndexSourceRows(index *sqlJSONFieldIndex, field string, 
 			nulls = append(nulls, row)
 			continue
 		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				stringOnly = false
+		if value == nil {
+			nulls = append(nulls, row)
+			continue
+		}
+		if stringValue, ok := value.(string); ok {
+			if stringOnly {
+				postings[stringValue] = append(postings[stringValue], row)
+			} else {
+				postings["s:"+stringValue] = append(postings["s:"+stringValue], row)
 			}
+			ordered = append(ordered, sqlJSONFieldIndexEntry{value: value, row: row})
+			continue
+		}
+		if stringOnly {
+			stringOnly = false
+			canonical := make(map[string][]SQLRow, len(postings)+1)
+			for stringValue, stringRows := range postings {
+				canonical["s:"+stringValue] = stringRows
+			}
+			postings = canonical
 		}
 		if valueKey, ok := sqlIndexValueKey(value); ok {
 			postings[valueKey] = append(postings[valueKey], row)
@@ -3753,6 +3769,24 @@ func sqlJSONColumnarBatch(key string, data []byte, fields []string) (hatSql.Colu
 
 func sqlJSONColumnarBatchString(key, data string, fields []string) (hatSql.ColumnarBatch, error) {
 	return sqlJSONColumnarBatch(key, unsafe.Slice(unsafe.StringData(data), len(data)), fields)
+}
+
+func sqlJSONFieldIndexLookupRows(index *sqlJSONFieldIndex, value interface{}) ([]SQLRow, bool) {
+	if index == nil {
+		return nil, false
+	}
+	if index.stringOnly {
+		stringValue, ok := value.(string)
+		if !ok {
+			return []SQLRow{}, true
+		}
+		return index.rows[stringValue], true
+	}
+	valueKey, ok := sqlIndexValueKey(value)
+	if !ok {
+		return []SQLRow{}, true
+	}
+	return index.rows[valueKey], true
 }
 
 func sqlIndexValueKey(value interface{}) (string, bool) {

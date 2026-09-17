@@ -17655,3 +17655,35 @@ push-ch14:
 	sh ./scripts/push-ch14.sh
 stage-ch048:
 	@sh ./scripts/stage-ch048.sh
+test-tt023:
+	@sh ./scripts/test-tt023.sh test
+
+test-tt023-package:
+	@sh ./scripts/test-tt023.sh package
+
+benchmark-tt023-legacy:
+	@sh ./scripts/test-tt023.sh benchmark-legacy
+
+benchmark-tt023:
+	@sh ./scripts/test-tt023.sh benchmark
+
+race-tt023:
+	@sh ./scripts/test-tt023.sh race
+
+vet-tt023:
+	@sh ./scripts/test-tt023.sh vet
+
+format-tt023:
+	@sh ./scripts/test-tt023.sh format
+
+stage-tt023:
+	@sh ./scripts/deliver-tt023.sh stage
+
+commit-tt023:
+	@sh ./scripts/deliver-tt023.sh commit
+
+push-tt023:
+	@sh ./scripts/deliver-tt023.sh push
+
+verify-tt023-scope:
+	@sh ./scripts/deliver-tt023.sh verify

@@ -28687,3 +28687,15 @@ validation, and operational behavior.
 31,013 ns/op, or 15.66x faster, with 0 B/op and 0 allocs/op in both versions.
 See [CH048_STRING_PREDICATE.md](CH048_STRING_PREDICATE.md) for raw runs and
 scope guards.
+
+## TT-023 string equality index fast path
+
+`make benchmark-tt023` measures repeated exact lookup in an ordinary SQL JSON
+field index with `-benchmem` and five runs. The pre-change five-run median was
+45.20 ns/op, 8 B/op, and 1 alloc/op. After the raw-string-key fast path, the
+same benchmark measured 10.49 ns/op, 0 B/op, and 0 allocs/op. The post-change
+legacy comparator measured 40.84 ns/op, so the optimized path is 3.90x faster
+under identical process conditions, or 4.31x faster against the pre-change
+median. This is an exact-index lookup microbenchmark, not a full SQL query
+latency claim. See [TT023_STRING_HASH_FASTPATH.md](TT023_STRING_HASH_FASTPATH.md)
+for scope, raw runs, and correctness coverage.

@@ -38,11 +38,11 @@ func (ht *HatTrie) BorrowSQLIndexedSource(name, key, field string, value interfa
 	if err := refreshSQLJSONFieldIndexSourceRows(index, field, source, snapshot.rows); err != nil {
 		return nil, false, err
 	}
-	valueKey, ok := sqlIndexValueKey(value)
-	if !ok {
-		return []SQLRow{}, true, nil
+	rows, available := sqlJSONFieldIndexLookupRows(index, value)
+	if !available {
+		return nil, false, nil
 	}
-	return index.rows[valueKey], true, nil
+	return rows, true, nil
 }
 
 // BorrowSQLPrefixSource exposes immutable candidates from an ordinary JSON
