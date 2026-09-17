@@ -29360,3 +29360,45 @@ BenchmarkMU016TransactionalViewReplace  8632 ns/op 10432 B/op   41 allocs/op
 
 See [MU016_TRANSACTIONAL_VIEW_DDL.md](MU016_TRANSACTIONAL_VIEW_DDL.md) for
 the API contract and tradeoff explanation.
+<a id="mu-017-frontier-safe-backfill-handoff"></a>
+## M-U17 Frontier-Safe Backfill Handoff
+
+Command: `make benchmark-mu017-baseline` on a detached pre-change worktree and
+`make benchmark-mu017-frontier-backfill` on M-U17. Both use
+`GOMAXPROCS=1`, five runs, and `-benchtime=500ms`.
+
+Raw pre-change output:
+
+```text
+BenchmarkMU017RebuildBaseline  6094 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline  5801 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline  5893 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline  5795 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline  5314 ns/op  4920 B/op  29 allocs/op
+```
+
+Raw M-U17 output:
+
+```text
+BenchmarkMU017RebuildBaseline       6446 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline       6186 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline       5817 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline       5843 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017RebuildBaseline       5748 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017BackfillAtFrontier    6084 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017BackfillAtFrontier    6006 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017BackfillAtFrontier    6091 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017BackfillAtFrontier    5724 ns/op  4920 B/op  29 allocs/op
+BenchmarkMU017BackfillAtFrontier    6574 ns/op  4920 B/op  29 allocs/op
+```
+
+| Path | Pre-change median ns/op | M-U17 median ns/op | CPU x | M-U17 B/op | M-U17 allocs/op | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Trusted `Rebuild` control | 5,801 | 5,843 | 0.99x | 4,920 | 29 | Same memory; current control path remains available |
+| Frontier-safe backfill | n/a | 6,084 | n/a | 4,920 | 29 | New exact handoff capability |
+
+The control-path comparison is included to expose measurement cost, while the
+new capability is judged primarily by frontier and checkpoint correctness. The
+roughly 1.05x CPU cost of the new boundary has no measured memory or allocation
+increase in this workload.
+See [MU017_FRONTIER_BACKFILL.md](MU017_FRONTIER_BACKFILL.md).

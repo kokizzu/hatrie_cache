@@ -14098,6 +14098,46 @@ commit-mu016-transactional-views:
 push-mu016-transactional-views:
 	bash ./scripts/push-mu016-transactional-views.sh
 
+.PHONY: test-mu017-frontier-backfill
+test-mu017-frontier-backfill:
+	bash ./scripts/test-mu017-frontier-backfill.sh
+
+.PHONY: benchmark-mu017-baseline
+benchmark-mu017-baseline:
+	bash ./scripts/benchmark-mu017-baseline.sh
+
+.PHONY: benchmark-mu017-frontier-backfill
+benchmark-mu017-frontier-backfill:
+	bash ./scripts/benchmark-mu017-frontier-backfill.sh
+
+.PHONY: format-mu017-frontier-backfill
+format-mu017-frontier-backfill:
+	bash ./scripts/format-mu017-frontier-backfill.sh
+
+.PHONY: test-mu017-frontier-backfill-package
+test-mu017-frontier-backfill-package:
+	bash ./scripts/test-mu017-frontier-backfill-package.sh
+
+.PHONY: race-mu017-frontier-backfill
+race-mu017-frontier-backfill:
+	bash ./scripts/race-mu017-frontier-backfill.sh
+
+.PHONY: vet-mu017-frontier-backfill
+vet-mu017-frontier-backfill:
+	bash ./scripts/vet-mu017-frontier-backfill.sh
+
+.PHONY: stage-mu017-frontier-backfill
+stage-mu017-frontier-backfill:
+	bash ./scripts/stage-mu017-frontier-backfill.sh
+
+.PHONY: commit-mu017-frontier-backfill
+commit-mu017-frontier-backfill:
+	bash ./scripts/commit-mu017-frontier-backfill.sh
+
+.PHONY: push-mu017-frontier-backfill
+push-mu017-frontier-backfill:
+	bash ./scripts/push-mu017-frontier-backfill.sh
+
 
 
 .PHONY: benchmark-mu015-baseline

@@ -932,6 +932,11 @@ catalog version with `SQLSession.ApplyViewChanges`; SQL callers can also use
 `CREATE OR REPLACE VIEW`. See [MU016_TRANSACTIONAL_VIEW_DDL.md](MU016_TRANSACTIONAL_VIEW_DDL.md)
 for the atomic validation rules and benchmark.
 
+Maintained SQL projections can establish a frontier-safe snapshot-to-live
+handoff with `IncrementalProjectionRunner.BackfillAtFrontier`; see
+[MU017_FRONTIER_BACKFILL.md](MU017_FRONTIER_BACKFILL.md) for the checkpoint and
+`frontier+1` continuation contract.
+
 Run the full local verification suite with `make verify` or the explicit alias
 `make verify-local`. It checks deploy configuration, Go tests/race/coverage, C
 tests, the Svelte MPA, operations smoke tests, and benchmark-document freshness.
