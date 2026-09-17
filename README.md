@@ -23,6 +23,7 @@ security guidance before exposing it on a network.
 - Opt-in deterministic probabilistic SQL query-log sampling: [CHU38_QUERY_LOG_SAMPLING.md](CHU38_QUERY_LOG_SAMPLING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u38-sampled-query-log-export)
 - Opt-in bounded typed-table part and merge lifecycle events: [TYPED_TABLE_STORAGE_EVENTS.md](TYPED_TABLE_STORAGE_EVENTS.md)
 - Opt-in LRU sparse-primary marks separate from typed-table data layouts: [TYPED_TABLE_SPARSE_MARK_CACHE.md](TYPED_TABLE_SPARSE_MARK_CACHE.md)
+- ClickHouse-style deterministic storage-tier movement planning with caller-owned execution: [STORAGE_TIER_MOVEMENT.md](STORAGE_TIER_MOVEMENT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-015-storage-tier-movement)
 - Opt-in ClickHouse-style SQL intermediate row limits: [C232_INTERMEDIATE_ROWS.md](C232_INTERMEDIATE_ROWS.md)
 - Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
 - ClickHouse/Materialize-style mergeable aggregate states and SQL `STATE`/`MERGE`: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)

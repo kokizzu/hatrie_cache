@@ -17759,3 +17759,41 @@ push-ch036-aggregate-or-null:
 
 verify-ch036-aggregate-or-null:
 	sh ./scripts/deliver-ch036-aggregate-or-null.sh verify
+.PHONY: test-ch015-storage-tier-movement benchmark-ch015-storage-tier-movement-before
+test-ch015-storage-tier-movement:
+	sh ./scripts/test-ch015-storage-tier-movement.sh
+
+benchmark-ch015-storage-tier-movement-before:
+	sh ./scripts/benchmark-ch015-storage-tier-movement-before.sh
+
+.PHONY: format-ch015-storage-tier-movement test-ch015-storage-tier-movement-package race-ch015-storage-tier-movement vet-ch015-storage-tier-movement benchmark-ch015-storage-tier-movement
+format-ch015-storage-tier-movement:
+	sh ./scripts/format-ch015-storage-tier-movement.sh
+
+test-ch015-storage-tier-movement-package:
+	sh ./scripts/test-ch015-storage-tier-movement-package.sh
+
+race-ch015-storage-tier-movement:
+	sh ./scripts/race-ch015-storage-tier-movement.sh
+
+vet-ch015-storage-tier-movement:
+	sh ./scripts/vet-ch015-storage-tier-movement.sh
+
+benchmark-ch015-storage-tier-movement:
+	sh ./scripts/benchmark-ch015-storage-tier-movement.sh
+
+.PHONY: review-ch015-storage-tier-movement stage-ch015-storage-tier-movement commit-ch015-storage-tier-movement push-ch015-storage-tier-movement verify-ch015-storage-tier-movement
+review-ch015-storage-tier-movement:
+	sh ./scripts/review-ch015-storage-tier-movement.sh
+
+stage-ch015-storage-tier-movement:
+	sh ./scripts/deliver-ch015-storage-tier-movement.sh stage
+
+commit-ch015-storage-tier-movement:
+	sh ./scripts/deliver-ch015-storage-tier-movement.sh commit
+
+push-ch015-storage-tier-movement:
+	sh ./scripts/deliver-ch015-storage-tier-movement.sh push
+
+verify-ch015-storage-tier-movement:
+	sh ./scripts/deliver-ch015-storage-tier-movement.sh verify

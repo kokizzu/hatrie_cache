@@ -28785,3 +28785,53 @@ BenchmarkCH044JSONSubcolumnScanMaterialized-32        391   3238736 ns/op    134
 PASS
 ok  hatrie_cache/hat/hatCache  31.871s
 ```
+
+<a id="ch-015-storage-tier-movement"></a>
+## CH-015 Storage Tier Movement
+
+This measures the existing age-to-tier selector against the new deterministic
+256-part movement planner on Linux `amd64`, an AMD Ryzen 9 5950X. Both cases
+process the same 256 parts; the planner additionally validates unique keys,
+selects source paths for moves, and materializes move records. Five samples ran
+with `-benchtime=250ms` and `-benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Select` control before | 3,480 | 0 | 0 | baseline |
+| Existing `Select` control after | 3,534 | 0 | 0 | 1.00x |
+| `PlanStorageTierMoves` after | 25,142 | 35,368 | 4 | 7.12x slower than after control |
+
+The planner is an explicit operational batch, not a replacement for the
+single-part selector, so its allocation and CPU cost is isolated from ordinary
+classification and writes. A safe optimization that skipped source selection
+for already-correct tiers reduced the planner median from 27,270 ns/op to
+25,142 ns/op, or 1.08x faster, with unchanged 35,368 B/op and 4 allocs/op.
+There is no automatic background mover; the callback owns durable cross-volume
+copy, checksum verification, atomic publication, source deletion, and metadata
+updates.
+
+Raw output from `make benchmark-ch015-storage-tier-movement-before`:
+
+```text
+BenchmarkCH015StorageTierSelectBaseline-32  82734  3480 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  81382  3400 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  84434  3394 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  73521  3494 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  87866  3541 ns/op  0 B/op  0 allocs/op
+```
+
+Raw output from `make benchmark-ch015-storage-tier-movement` after the
+optimization:
+
+```text
+BenchmarkCH015StorageTierSelectBaseline-32  85252  3419 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  84478  3428 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  88070  3534 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  72676  3626 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierSelectBaseline-32  79820  3559 ns/op  0 B/op  0 allocs/op
+BenchmarkCH015StorageTierMovePlan-32       11719  24032 ns/op  35368 B/op  4 allocs/op
+BenchmarkCH015StorageTierMovePlan-32       12156  24805 ns/op  35368 B/op  4 allocs/op
+BenchmarkCH015StorageTierMovePlan-32       10000  25142 ns/op  35368 B/op  4 allocs/op
+BenchmarkCH015StorageTierMovePlan-32       11738  25394 ns/op  35368 B/op  4 allocs/op
+BenchmarkCH015StorageTierMovePlan-32       10000  25450 ns/op  35368 B/op  4 allocs/op
+```
