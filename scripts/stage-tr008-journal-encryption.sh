@@ -5,6 +5,7 @@ git add \
 	BENCHMARK.md \
 	INSPIRATION_BACKLOG.md \
 	Makefile \
+	PRODUCT_IDEA_GAPS.md \
 	README.md \
 	TR008_WAL_ENCRYPTION.md \
 	hat/hatCache/journal.go \
