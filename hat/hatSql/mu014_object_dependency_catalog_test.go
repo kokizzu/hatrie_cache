@@ -156,3 +156,28 @@ func TestMU014CatalogDependencyRowsDeduplicateDerivedIndexEdge(t *testing.T) {
 		t.Fatalf("deduplicated dependencies = %#v, want one edge", result.Rows)
 	}
 }
+
+type mu014PartitionPruningSource struct {
+	called bool
+}
+
+func (source *mu014PartitionPruningSource) ResolveSQLSource(string, string) ([]Row, error) {
+	return nil, nil
+}
+
+func (source *mu014PartitionPruningSource) ResolveSQLSourcePartitionsForPredicate(string, string, SQLPartitionPredicate) ([]SQLSourcePartition, bool, error) {
+	source.called = true
+	return []SQLSourcePartition{{Name: "unexpected"}}, true, nil
+}
+
+func TestMU014CatalogResolverKeepsNewVirtualSourcesLocalToPredicatePruning(t *testing.T) {
+	source := &mu014PartitionPruningSource{}
+	resolver := CatalogResolver{Source: source}
+	partitions, available, err := resolver.ResolveSQLSourcePartitionsForPredicate("CACHE", "information_schema.dependencies", SQLPartitionPredicate{})
+	if err != nil {
+		t.Fatalf("predicate pruning error = %v", err)
+	}
+	if available || partitions != nil || source.called {
+		t.Fatalf("predicate pruning for virtual catalog source = %#v/%v, called=%v; want unavailable and local", partitions, available, source.called)
+	}
+}
