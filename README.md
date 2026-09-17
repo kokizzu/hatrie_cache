@@ -182,6 +182,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired fixed-width Decimal128/Decimal256 RowBinary values: [SQL_DECIMAL_TYPES.md](SQL_DECIMAL_TYPES.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
 - Compact small-entry ordered indexes: [TR052_ORDERED_INDEX_SMALL_VECTOR.md](TR052_ORDERED_INDEX_SMALL_VECTOR.md)
+- Generic composite-key ordered ranges: [TT020_ORDERED_INDEX_RANGES.md](TT020_ORDERED_INDEX_RANGES.md)
 - Compact secondary-index posting lists: [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md)
 - Single-task compaction scheduler fast path: [TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)

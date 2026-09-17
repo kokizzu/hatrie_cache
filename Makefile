@@ -1,4 +1,43 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: test-tt020
+test-tt020:
+	@sh ./scripts/test-tt020.sh test
+
+.PHONY: test-tt020-package
+test-tt020-package:
+	@sh ./scripts/test-tt020.sh package
+
+.PHONY: test-tt020-all
+test-tt020-all:
+	@sh ./scripts/test-tt020.sh all
+
+.PHONY: benchmark-tt020
+benchmark-tt020:
+	@sh ./scripts/test-tt020.sh benchmark
+
+.PHONY: race-tt020
+race-tt020:
+	@sh ./scripts/test-tt020.sh race
+
+.PHONY: vet-tt020
+vet-tt020:
+	@sh ./scripts/test-tt020.sh vet
+
+.PHONY: format-tt020
+format-tt020:
+	@sh ./scripts/test-tt020.sh format
+
+.PHONY: stage-tt020
+stage-tt020:
+	@sh ./scripts/stage-tt020.sh
+
+.PHONY: commit-tt020
+commit-tt020:
+	@sh ./scripts/commit-tt020.sh
+
+.PHONY: push-tt020
+push-tt020:
+	@sh ./scripts/push-tt020.sh
 .PHONY: test-chu04-c243
 test-chu04-c243:
 	@bash ./scripts/test-chu04-c243.sh

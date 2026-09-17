@@ -201,6 +201,40 @@ func (index *OrderedIndex[T, K]) SeekAfter(key K) (OrderedIndexIterator[T, K], b
 	return index.seek(key, true)
 }
 
+// Range returns an iterator over entries whose keys are between start and end
+// inclusive. The bounds are located with binary search, so iteration work is
+// proportional to the returned range rather than to the full index. Composite
+// keys can express a partial-key range by supplying the smallest and largest
+// suffix values for the desired prefix.
+func (index *OrderedIndex[T, K]) Range(start, end K) (OrderedIndexIterator[T, K], bool) {
+	if index == nil {
+		return OrderedIndexIterator[T, K]{}, false
+	}
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	if len(index.entries) == 0 || index.compare(start, end) > 0 {
+		return OrderedIndexIterator[T, K]{}, false
+	}
+	first := sort.Search(len(index.entries), func(position int) bool {
+		return index.compare(index.entries[position].Key, start) >= 0
+	})
+	if first >= len(index.entries) {
+		return OrderedIndexIterator[T, K]{}, false
+	}
+	limit := sort.Search(len(index.entries), func(position int) bool {
+		return index.compare(index.entries[position].Key, end) > 0
+	})
+	if first >= limit {
+		return OrderedIndexIterator[T, K]{}, false
+	}
+	index.active.Add(1)
+	return OrderedIndexIterator[T, K]{
+		index:      index,
+		entries:    index.entries[first:limit],
+		generation: index.generation.Load(),
+	}, true
+}
+
 // SnapshotInto copies entries in sorted order into dst, reusing its backing
 // array when possible. It is the allocation-bearing alternative for callers
 // that need a stable collection after mutations.

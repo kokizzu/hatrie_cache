@@ -633,8 +633,8 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T012 Partial equality indexes.
 - [x] T013 Covering indexes and borrowed postings.
 - [x] T014 Equality index iterators.
-- [x] T015 Ordered range iterators.
-- [x] T016 Partial-key search.
+- [x] T015 Ordered range iterators. `OrderedIndex.Range` returns an allocation-free iterator over inclusive bounds.
+- [x] T016 Partial-key search. Composite ordered keys can express a prefix range with smallest/largest suffix bounds; the iterator uses binary-searched bounds and a bounded immutable subslice.
 - [x] T017 Explicit NULL index semantics.
 - [x] T018 Collation-aware string ordering.
 - [x] T019 Unique constraints and duplicate-key errors.

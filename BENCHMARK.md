@@ -23748,6 +23748,49 @@ execution harness, so the comparison isolates scan-versus-postings work. The
 indexed result still includes SQL parsing, candidate materialization, and the
 final predicate recheck.
 
+## TT-020 Generic Multi-Part Ordered Ranges
+
+Command: `make benchmark-tt020`.
+
+This compares the pre-feature caller pattern (`Seek(40,000)` followed by a
+caller-side upper-bound check) with `OrderedIndex.Range(40,000, 60,000)` over
+the same 100,000-entry ordered index. Each run used five benchmark samples on
+Linux/amd64 with an AMD Ryzen 9 5950X and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Seek plus caller-side filter | 56,991 | 0 | 0 | Baseline |
+| Inclusive bounded `Range` iterator | 44,680 | 0 | 0 | **1.28x faster** |
+
+Raw output:
+
+```text
+Before / baseline:
+BenchmarkTT020OrderedIndexSeekFilter-32  19234  58722 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  21204  56680 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  21759  57165 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  20832  58529 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  20986  56295 ns/op  0 B/op  0 allocs/op
+
+After / same baseline path plus Range:
+BenchmarkTT020OrderedIndexSeekFilter-32  21217  60717 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  22200  57069 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  21156  56282 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  23152  56991 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexSeekFilter-32  20668  56512 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexRange-32       24499  49431 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexRange-32       21992  52480 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexRange-32       24290  44584 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexRange-32       27482  44680 ns/op  0 B/op  0 allocs/op
+BenchmarkTT020OrderedIndexRange-32       27069  43059 ns/op  0 B/op  0 allocs/op
+```
+
+The final same-run baseline median is 56,991 ns/op and the `Range` median is
+44,680 ns/op, a 1.28x improvement. Both paths remain at zero allocations.
+`Range` is opt-in; ordinary `First` and `Seek` callers retain their previous
+behavior and iterator layout. Composite callers are responsible for choosing
+correct suffix bounds for their prefix.
+
 ## TR-029 Reverse Ordered Index Iterators
 
 This benchmark compares descending traversal of 1,024 entries using a reused
