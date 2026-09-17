@@ -7,9 +7,12 @@ import (
 
 // Catalog declares virtual information_schema metadata for one SQL resolver.
 type Catalog struct {
-	Namespaces []string
-	Sources    []CatalogSource
-	Indexes    []CatalogIndex
+	Version      uint64
+	Namespaces   []string
+	Sources      []CatalogSource
+	Indexes      []CatalogIndex
+	Objects      []CatalogObject
+	Dependencies []CatalogDependency
 }
 
 type CatalogSource struct {
@@ -51,7 +54,7 @@ func CompileSQLShortcut(source string) (string, error) {
 	switch strings.ToUpper(parts[0]) {
 	case "SHOW":
 		if len(parts) != 2 {
-			return "", fmt.Errorf("SHOW expects one of NAMESPACES, SOURCES, or INDEXES")
+			return "", fmt.Errorf("SHOW expects one of NAMESPACES, SOURCES, INDEXES, OBJECTS, or DEPENDENCIES")
 		}
 		switch strings.ToUpper(parts[1]) {
 		case "NAMESPACES":
@@ -60,8 +63,12 @@ func CompileSQLShortcut(source string) (string, error) {
 			return "FROM CACHE('information_schema.sources') SELECT namespace, name, kind", nil
 		case "INDEXES":
 			return "FROM CACHE('information_schema.indexes') SELECT namespace, source, name, kind, column, ordinal_position", nil
+		case "OBJECTS":
+			return "FROM CACHE('information_schema.objects') SELECT catalog_version, namespace, name, kind, type, object_version, state ORDER BY namespace, name, kind", nil
+		case "DEPENDENCIES":
+			return "FROM CACHE('information_schema.dependencies') SELECT catalog_version, namespace, object, object_kind, depends_on_namespace, depends_on, depends_on_kind, ordinal_position ORDER BY namespace, object, object_kind", nil
 		default:
-			return "", fmt.Errorf("SHOW expects one of NAMESPACES, SOURCES, or INDEXES")
+			return "", fmt.Errorf("SHOW expects one of NAMESPACES, SOURCES, INDEXES, OBJECTS, or DEPENDENCIES")
 		}
 	case "DESCRIBE":
 		if len(parts) != 2 || !catalogIdentifier(parts[1]) {
@@ -115,6 +122,10 @@ func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error
 				}
 			}
 			return rows, nil
+		case "information_schema.objects":
+			return catalogObjectRows(resolver.Catalog)
+		case "information_schema.dependencies":
+			return catalogDependencyRows(resolver.Catalog)
 		}
 	}
 	if resolver.Source == nil {
@@ -128,7 +139,7 @@ func catalogOwnsVirtualSource(name, key string) bool {
 		return false
 	}
 	switch strings.ToLower(key) {
-	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
 		return true
 	default:
 		return false
@@ -256,7 +267,7 @@ func (resolver CatalogResolver) SQLSourceCardinality(name, key string) (int, boo
 func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]SQLSourcePartition, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
 			return nil, false, nil
 		}
 	}
@@ -275,7 +286,7 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
 			return SQLIndexDiagnostics{}, false, nil
 		}
 	}
@@ -308,7 +319,7 @@ func (resolver CatalogResolver) ResolveSQLArrangementMetadata(name, key string) 
 func (resolver CatalogResolver) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes":
+		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies":
 			return nil, false, nil
 		}
 	}

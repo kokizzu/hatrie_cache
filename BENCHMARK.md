@@ -25689,6 +25689,60 @@ BenchmarkMU013ExplainCardinality-32     100437  11780 ns/op  15404 B/op  94 allo
 BenchmarkMU013ExplainCardinality-32     103099  11778 ns/op  15404 B/op  94 allocs/op
 ```
 
+<a id="mu-014-object-dependency-catalog"></a>
+## M-U14 Object Dependency Catalog
+
+This measures the existing source catalog path before and after adding the
+versioned object/dependency relations, then measures the new object listing and
+bounded closure separately. The baseline fixture has one source row. The new
+object fixture has 80 objects (32 sources, 32 indexes, and 16 views); the
+closure fixture returns three reachable edges. Five runs on an AMD Ryzen 9
+5950X; commands: `make benchmark-mu014-baseline` and
+`make benchmark-mu014-object-dependency-catalog`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change one-row sources | 8,083 | 6,384 | 36 | 1.00x |
+| Post-change one-row sources | 7,930 | 6,432 | 36 | 1.02x measured, within noise |
+| Objects, 80 rows | 181,282 | 146,314 | 999 | n/a, different row count |
+| Dependency closure, 3 edges | 19,594 | 19,064 | 58 | n/a, new workload |
+
+The compatibility path showed no regression in this run. The new object query
+is a metadata-only snapshot whose cost is proportional to the number of
+objects and requested SQL projection; it does not alter ordinary source reads.
+Closure traversal is bounded and cycle-safe, returning an explicit error rather
+than a partial result when a configured limit would be exceeded.
+
+Raw baseline output:
+
+```text
+BenchmarkMU014CatalogSourcesBaseline-32    145618  8518 ns/op  6384 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32    151730  8083 ns/op  6384 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32    139248  8465 ns/op  6384 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32    155839  7977 ns/op  6384 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32    154140  7722 ns/op  6384 B/op  36 allocs/op
+```
+
+Raw post-change output:
+
+```text
+BenchmarkMU014CatalogSourcesBaseline-32       155104  7899 ns/op    6432 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32       160887  8140 ns/op    6432 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32       161385  7994 ns/op    6432 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32       167778  7930 ns/op    6432 B/op  36 allocs/op
+BenchmarkMU014CatalogSourcesBaseline-32       147772  7847 ns/op    6432 B/op  36 allocs/op
+BenchmarkMU014CatalogObjects-32                 6590 178564 ns/op  146314 B/op 999 allocs/op
+BenchmarkMU014CatalogObjects-32                 6339 183019 ns/op  146314 B/op 999 allocs/op
+BenchmarkMU014CatalogObjects-32                 5547 182439 ns/op  146314 B/op 999 allocs/op
+BenchmarkMU014CatalogObjects-32                 6211 181202 ns/op  146314 B/op 999 allocs/op
+BenchmarkMU014CatalogObjects-32                 5935 181282 ns/op  146314 B/op 999 allocs/op
+BenchmarkMU014CatalogDependencyClosure-32      60154  19594 ns/op   19064 B/op  58 allocs/op
+BenchmarkMU014CatalogDependencyClosure-32      61220  19593 ns/op   19064 B/op  58 allocs/op
+BenchmarkMU014CatalogDependencyClosure-32      62539  19772 ns/op   19064 B/op  58 allocs/op
+BenchmarkMU014CatalogDependencyClosure-32      61950  19934 ns/op   19064 B/op  58 allocs/op
+BenchmarkMU014CatalogDependencyClosure-32      64108  19590 ns/op   19064 B/op  58 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

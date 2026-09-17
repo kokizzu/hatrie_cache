@@ -917,6 +917,11 @@ The Catalog page at `/catalog.html` reads optional declared SQL metadata from
 and `SQLCatalogIndex` entries when constructing the monitoring handler; the
 `GET /api/sql/catalog` response is read-only and copied before it is served.
 
+SQL callers can also publish a versioned `hatSql.Catalog` object/dependency
+snapshot. `information_schema.objects`, `information_schema.dependencies`,
+`SHOW OBJECTS`, and `SHOW DEPENDENCIES` expose deterministic source, view, index,
+and sink metadata; see [MU014_DEPENDENCY_CATALOG.md](MU014_DEPENDENCY_CATALOG.md).
+
 Run the full local verification suite with `make verify` or the explicit alias
 `make verify-local`. It checks deploy configuration, Go tests/race/coverage, C
 tests, the Svelte MPA, operations smoke tests, and benchmark-document freshness.

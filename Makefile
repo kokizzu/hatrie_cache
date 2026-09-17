@@ -13982,6 +13982,46 @@ commit-mu013-cardinality-estimates:
 push-mu013-cardinality-estimates:
 	bash ./scripts/push-mu013-cardinality-estimates.sh
 
+.PHONY: benchmark-mu014-baseline
+benchmark-mu014-baseline:
+	bash ./scripts/benchmark-mu014-baseline.sh
+
+.PHONY: format-mu014-object-dependency-catalog
+format-mu014-object-dependency-catalog:
+	bash ./scripts/format-mu014-object-dependency-catalog.sh
+
+.PHONY: test-mu014-object-dependency-catalog
+test-mu014-object-dependency-catalog:
+	bash ./scripts/test-mu014-object-dependency-catalog.sh
+
+.PHONY: benchmark-mu014-object-dependency-catalog
+benchmark-mu014-object-dependency-catalog:
+	bash ./scripts/benchmark-mu014-object-dependency-catalog.sh
+
+.PHONY: test-mu014-object-dependency-package
+test-mu014-object-dependency-package:
+	bash ./scripts/test-mu014-object-dependency-package.sh
+
+.PHONY: race-mu014-object-dependency-catalog
+race-mu014-object-dependency-catalog:
+	bash ./scripts/race-mu014-object-dependency-catalog.sh
+
+.PHONY: vet-mu014-object-dependency-catalog
+vet-mu014-object-dependency-catalog:
+	bash ./scripts/vet-mu014-object-dependency-catalog.sh
+
+.PHONY: stage-mu014-object-dependency-catalog
+stage-mu014-object-dependency-catalog:
+	bash ./scripts/stage-mu014-object-dependency-catalog.sh
+
+.PHONY: commit-mu014-object-dependency-catalog
+commit-mu014-object-dependency-catalog:
+	bash ./scripts/commit-mu014-object-dependency-catalog.sh
+
+.PHONY: push-mu014-object-dependency-catalog
+push-mu014-object-dependency-catalog:
+	bash ./scripts/push-mu014-object-dependency-catalog.sh
+
 .PHONY: test-mz043-operator-frontier
 test-mz043-operator-frontier:
 	bash ./scripts/test-mz043-operator-frontier.sh
