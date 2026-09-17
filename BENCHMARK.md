@@ -28406,3 +28406,26 @@ BenchmarkMZ030LookupJoinFrontierCache   129  875510 ns/op    1.0 lookup_calls/op
 
 See [MZ030_LOOKUP_JOIN_CACHE.md](MZ030_LOOKUP_JOIN_CACHE.md) for API and
 frontier invalidation rules.
+
+<a id="mz-032-arrangement-cost-model"></a>
+## MZ-032 Arrangement Cost Model
+
+Command: `make benchmark-mz032`
+
+The benchmark evaluates 10,000 prebuilt arrangement candidates per operation,
+with 1,000 operations per sample and five samples per path on Linux amd64
+(`GOMAXPROCS=1`, AMD Ryzen 9 5950X 16-Core Processor). The manual baseline and
+`SQLArrangementCostModel.Evaluate` compute the same complete score, verified
+for every fixture candidate by
+`TestSQLArrangementCostModelMatchesBenchmarkFormula`.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | --- |
+| Independent manual scorer | 245,775; 246,117; 241,523; 237,556; 235,561 | 241,523 | 0 | 0 | baseline |
+| `SQLArrangementCostModel.Evaluate` | 222,526; 221,757; 221,003; 222,149; 223,347 | 222,149 | 0 | 0 | 1.09x CPU, 8.0% lower ns/op |
+
+The evaluator is O(1) and allocation-free; `Rank` adds O(n log n) sorting and
+returns materialized scores. This is an explicit imported utility and does not
+change default SQL planning or storage behavior. See
+[MZ032_ARRANGEMENT_COST.md](MZ032_ARRANGEMENT_COST.md) for formulas, defaults,
+overflow handling, and the usage example.

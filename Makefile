@@ -17458,3 +17458,29 @@ push-mz031:
 
 benchmark-mz031-baseline:
 	sh scripts/benchmark-mz031-baseline.sh
+benchmark-mz032-baseline:
+	sh scripts/benchmark-mz032-baseline.sh
+
+test-mz032:
+	sh scripts/test-mz032.sh
+
+format-mz032:
+	sh scripts/format-mz032.sh
+
+benchmark-mz032:
+	sh scripts/benchmark-mz032.sh
+
+verify-mz032:
+	sh scripts/verify-mz032.sh
+
+stage-mz032:
+	sh scripts/stage-mz032.sh
+
+review-mz032-staged:
+	sh scripts/review-mz032-staged.sh
+
+commit-mz032:
+	sh scripts/commit-mz032.sh
+
+push-mz032:
+	sh scripts/push-mz032.sh
