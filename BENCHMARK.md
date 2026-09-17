@@ -995,6 +995,45 @@ The median is 13.24 ns/op with zero heap allocation. The benchmark reads a
 64-task pending queue; `Stats()` also reports a running task while a callback
 is in flight and cumulative success/failure counters in the regression test.
 
+## CH-U38 Sampled Query-Log Export
+
+This measures the opt-in durable query-log sampler against the existing
+retain-all append path. The benchmark uses five `-count=5` samples,
+`GOMAXPROCS=1`, `-benchmem`, and an AMD Ryzen 9 5950X on Linux/amd64. The
+`/dev/null` fixture uses the same entry value and isolates the append logic;
+the temporary-file fixture shows the practical file-writing path.
+
+| Case | Median ns/op | B/op | Allocs/op | Accepted/op | Dropped/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `origin/master`, retain all, `/dev/null` | 1,807 | 368 | 4 | 1.0000 | 0.0000 | baseline |
+| CH-U38, retain all, `/dev/null` | 1,710 | 368 | 4 | 1.0000 | 0.0000 | 1.06x faster in this run; within benchmark variance |
+| CH-U38, retain all, temporary file | 2,735 | 368 | 4 | 1.0000 | 0.0000 | feature reference |
+| CH-U38, 25% sample, temporary file | 1,482 | 368 | 4 | 0.2508 | 0.7492 | 1.85x faster than feature retain-all |
+
+Raw `ns/op` samples, in command order:
+
+```text
+origin/master /dev/null: 1818, 1831, 1807, 1585, 1583
+CH-U38 /dev/null:        1710, 1851, 1514, 1554, 1830
+CH-U38 retain-all file:  2735, 2601, 2409, 2740, 2806
+CH-U38 sample-25 file:   1342, 1330, 1509, 1506, 1482
+```
+
+Reproduce the feature measurements with `make benchmark-chu38`. The baseline
+`/dev/null` run was executed from an untouched `origin/master` worktree with
+the same fixture. The 25% sampler retained 25.08% of candidates in the five
+benchmark runs, so similarly sized records would produce approximately 25% of
+the durable log bytes. Both paths remain at `368 B/op` and `4 allocs/op`: the
+sampler avoids writes and rotation for dropped entries, but still validates and
+JSON-encodes each candidate before deciding. With `QueryLog` unset, the
+manager's normal query path is unchanged and does not invoke this code.
+
+The default is deliberately retain-all. Sampling is useful when durable query
+history is more valuable as a bounded statistical signal than as a complete
+audit trail; it is not a replacement for backups, audit logging, or access
+control. The seed is deterministic and non-secret, and counters reset when the
+log is reopened.
+
 ## CH-031 Persistent SQL Query Log
 
 These five-sample runs used `make benchmark-ch031-baseline` and

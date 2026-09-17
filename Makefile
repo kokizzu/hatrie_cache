@@ -17355,3 +17355,26 @@ commit-mu01:
 
 push-mu01:
 	sh scripts/push-mu01.sh
+.PHONY: inspect-t-u44
+inspect-t-u44:
+	sh scripts/inspect-t-u44.sh
+.PHONY: test-chu38
+test-chu38:
+	sh scripts/test-chu38.sh
+.PHONY: format-chu38
+format-chu38:
+	sh scripts/format-chu38.sh
+.PHONY: test-chu38-package race-chu38 vet-chu38 benchmark-chu38
+test-chu38-package:
+	sh scripts/test-chu38-package.sh
+race-chu38:
+	sh scripts/test-race-chu38.sh
+vet-chu38:
+	sh scripts/vet-chu38.sh
+benchmark-chu38:
+	sh scripts/benchmark-chu38.sh
+.PHONY: verify-chu38-docs verify-chu38
+verify-chu38-docs:
+	sh scripts/verify-chu38-docs.sh
+verify-chu38:
+	sh scripts/verify-chu38.sh

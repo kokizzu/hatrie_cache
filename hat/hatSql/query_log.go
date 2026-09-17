@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ const (
 	DefaultSQLQueryLogRetainedFiles = 7
 	maxSQLQueryLogRecordBytes       = 1 << 20
 	maxSQLQueryLogRetainedFiles     = 1024
+	defaultSQLQueryLogSampleSeed    = uint64(0x9e3779b97f4a7c15)
 )
 
 var (
@@ -48,6 +50,24 @@ type SQLQueryLogOptions struct {
 	// MaxRetainedFiles controls numbered archives beside Path. Zero selects
 	// DefaultSQLQueryLogRetainedFiles when rotation is enabled.
 	MaxRetainedFiles int
+	// SampleRate is the fraction of valid entries retained by the log. Zero
+	// preserves the existing retain-all behavior; values between zero and one
+	// enable Bernoulli sampling, and one retains every entry.
+	SampleRate float64
+	// SampleSeed makes probabilistic sampling reproducible. Zero selects a
+	// stable nonzero seed.
+	SampleSeed uint64
+}
+
+// SQLQueryLogSamplingStats reports sampling counters since the log was opened.
+// Accepted is the number selected for writing; a later filesystem error can
+// still prevent an accepted entry from being persisted. Dropped entries are
+// valid entries rejected before rotation and file writes.
+type SQLQueryLogSamplingStats struct {
+	SampleRate float64 `json:"sample_rate"`
+	Observed   uint64  `json:"observed"`
+	Accepted   uint64  `json:"accepted"`
+	Dropped    uint64  `json:"dropped"`
 }
 
 // SQLQueryLogEntry is the privacy-safe durable form of SQLQueryStatus. Query
@@ -77,6 +97,12 @@ type SQLQueryLog struct {
 	rotationEnabled  bool
 	fileBytes        int64
 	segmentStartedAt time.Time
+	sampleRate       float64
+	sampleThreshold  uint64
+	sampleState      uint64
+	samplingObserved uint64
+	samplingAccepted uint64
+	samplingDropped  uint64
 }
 
 // OpenSQLQueryLog opens or creates a privacy-safe query log with restrictive
@@ -107,6 +133,17 @@ func OpenSQLQueryLogWithOptions(path string, options SQLQueryLogOptions) (*SQLQu
 	}
 	if options.MaxRetainedFiles < 0 {
 		return nil, errors.New("hatSql: SQL query log retained files must not be negative")
+	}
+	if math.IsNaN(options.SampleRate) || math.IsInf(options.SampleRate, 0) || options.SampleRate < 0 || options.SampleRate > 1 {
+		return nil, errors.New("hatSql: SQL query log sample rate must be between 0 and 1")
+	}
+	sampleRate := options.SampleRate
+	if sampleRate == 0 {
+		sampleRate = 1
+	}
+	sampleSeed := options.SampleSeed
+	if sampleSeed == 0 {
+		sampleSeed = defaultSQLQueryLogSampleSeed
 	}
 	maxRetainedFiles := options.MaxRetainedFiles
 	if options.MaxFileBytes > 0 || options.MaxFileAge > 0 {
@@ -149,6 +186,9 @@ func OpenSQLQueryLogWithOptions(path string, options SQLQueryLogOptions) (*SQLQu
 		rotationEnabled:  options.MaxFileBytes > 0 || options.MaxFileAge > 0,
 		fileBytes:        info.Size(),
 		segmentStartedAt: info.ModTime(),
+		sampleRate:       sampleRate,
+		sampleThreshold:  sqlQueryLogSampleThreshold(sampleRate),
+		sampleState:      sampleSeed,
 	}, nil
 }
 
@@ -326,6 +366,9 @@ func (log *SQLQueryLog) AppendEntry(entry SQLQueryLogEntry) error {
 	if log.file == nil {
 		return ErrSQLQueryLogClosed
 	}
+	if log.sampleRate < 1 && !log.recordSamplingLocked() {
+		return nil
+	}
 	if !log.rotationEnabled {
 		written, err := log.file.Write(encoded)
 		if err != nil {
@@ -362,6 +405,55 @@ func (log *SQLQueryLog) AppendEntry(entry SQLQueryLogEntry) error {
 		}
 	}
 	return nil
+}
+
+// SamplingStats returns a consistent snapshot of sampling activity since the
+// log was opened. It is safe to call concurrently with Append.
+func (log *SQLQueryLog) SamplingStats() SQLQueryLogSamplingStats {
+	if log == nil {
+		return SQLQueryLogSamplingStats{}
+	}
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	return SQLQueryLogSamplingStats{
+		SampleRate: log.sampleRate,
+		Observed:   log.samplingObserved,
+		Accepted:   log.samplingAccepted,
+		Dropped:    log.samplingDropped,
+	}
+}
+
+func (log *SQLQueryLog) recordSamplingLocked() bool {
+	log.samplingObserved++
+	if sqlQueryLogNextSample(&log.sampleState) < log.sampleThreshold {
+		log.samplingAccepted++
+		return true
+	}
+	log.samplingDropped++
+	return false
+}
+
+func sqlQueryLogSampleThreshold(rate float64) uint64 {
+	if rate >= 1 {
+		return ^uint64(0)
+	}
+	scaled := math.Ldexp(rate, 64)
+	if scaled <= 0 {
+		return 0
+	}
+	if scaled >= math.Ldexp(1, 64) {
+		return ^uint64(0)
+	}
+	return uint64(scaled)
+}
+
+func sqlQueryLogNextSample(state *uint64) uint64 {
+	value := *state
+	value ^= value >> 12
+	value ^= value << 25
+	value ^= value >> 27
+	*state = value
+	return value * 2685821657736338717
 }
 
 // Sync flushes the log's file contents to the filesystem.
