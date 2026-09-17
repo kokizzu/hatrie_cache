@@ -16,7 +16,7 @@ commit)
 	git commit -m 'perf(sql): remove string index lookup allocation [skip ci]'
 	;;
 push)
-	git push origin HEAD
+	git push origin HEAD:refs/heads/master
 	;;
 verify)
 	git diff --cached --check
