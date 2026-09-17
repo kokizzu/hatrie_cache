@@ -25637,6 +25637,48 @@ per update are equal in this fixture. Its ordered index also retains one node
 per active logical key. It is an explicit imported operator rather than a
 default SQL plan rule.
 
+<a id="mz-031-ranked-top-k-change-diffs"></a>
+## MZ-031 Ranked Top-K Change Diffs
+
+Command: `make benchmark-mz031`
+
+Workload: 10,000 active rows, `K=20`, and 1,000 deterministic row-replacement
+updates per sample. Both paths emit the same ranked change stream, verified by
+an identical checksum and `1.189` changes/op. The rebuild baseline copies and
+sorts the full relation before diffing the bounded result. The incremental path
+updates the existing treap and reports rank movement directly. CPU: AMD Ryzen
+9 5950X 16-Core Processor, Linux amd64, five samples, `GOMAXPROCS=1`.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Changes/op | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Full rebuild, sort, and rank diff | 1,031,589; 1,015,529; 1,023,168; 1,048,933; 1,029,198 | 1,029,198 | 96 | 3 | 1.189 | baseline |
+| Incremental treap rank diff | 5,380; 4,450; 4,933; 4,512; 4,795 | 4,795 | 1,769 | 9 | 1.189 | 214.64x CPU |
+
+The checksum for both paths is `34,723,907`, so the measured speedup is for
+the same change stream rather than a smaller output. Transient allocation is
+the tradeoff: the ranked path uses 18.43x more `B/op` and 3x more allocations
+in this fixture because it validates updates, maintains the ordered index, and
+clones returned row payloads. It adds no persistent rank index; the existing
+treap nodes remain the retained storage. The API is opt-in and does not change
+the default `Apply` behavior or SQL planning.
+
+Raw output from the five fixed-1,000-update runs:
+
+```text
+BenchmarkMZ031RankedTopKRebuildChangeBaseline 1000 1031589 ns/op 1.189 changes/op 34723907 checksum 96 B/op 3 allocs/op
+BenchmarkMZ031RankedTopKRebuildChangeBaseline 1000 1015529 ns/op 1.189 changes/op 34723907 checksum 96 B/op 3 allocs/op
+BenchmarkMZ031RankedTopKRebuildChangeBaseline 1000 1023168 ns/op 1.189 changes/op 34723907 checksum 96 B/op 3 allocs/op
+BenchmarkMZ031RankedTopKRebuildChangeBaseline 1000 1048933 ns/op 1.189 changes/op 34723907 checksum 96 B/op 3 allocs/op
+BenchmarkMZ031RankedTopKRebuildChangeBaseline 1000 1029198 ns/op 1.189 changes/op 34723907 checksum 96 B/op 3 allocs/op
+BenchmarkMZ031RankedTopKIncremental 1000 5380 ns/op 1.189 changes/op 34723907 checksum 1769 B/op 9 allocs/op
+BenchmarkMZ031RankedTopKIncremental 1000 4450 ns/op 1.189 changes/op 34723907 checksum 1769 B/op 9 allocs/op
+BenchmarkMZ031RankedTopKIncremental 1000 4933 ns/op 1.189 changes/op 34723907 checksum 1769 B/op 9 allocs/op
+BenchmarkMZ031RankedTopKIncremental 1000 4512 ns/op 1.189 changes/op 34723907 checksum 1769 B/op 9 allocs/op
+BenchmarkMZ031RankedTopKIncremental 1000 4795 ns/op 1.189 changes/op 34723907 checksum 1769 B/op 9 allocs/op
+```
+
+See [MZ031_RANKED_TOP_K.md](MZ031_RANKED_TOP_K.md) for the API contract.
+
 <a id="mz-039-incremental-distinct"></a>
 ## MZ-039 Incremental Distinct
 

@@ -17424,3 +17424,37 @@ commit-mz030:
 
 push-mz030:
 	sh scripts/push-mz030.sh
+
+
+
+
+
+test-mz031:
+	sh scripts/test-mz031.sh
+
+benchmark-mz031:
+	sh scripts/benchmark-mz031.sh
+
+
+benchmark-mz031-once:
+	sh scripts/benchmark-mz031-once.sh
+
+format-mz031:
+	sh scripts/format-mz031.sh
+
+verify-mz031:
+	sh scripts/verify-mz031.sh
+
+stage-mz031:
+	sh scripts/stage-mz031.sh
+
+commit-mz031:
+	sh scripts/commit-mz031.sh
+
+push-mz031:
+	sh scripts/push-mz031.sh
+
+
+
+benchmark-mz031-baseline:
+	sh scripts/benchmark-mz031-baseline.sh

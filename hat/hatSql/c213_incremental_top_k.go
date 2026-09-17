@@ -69,6 +69,22 @@ type incrementalTopKSelection struct {
 	count uint64
 }
 
+// IncrementalTopKRankChange describes one row whose bounded Top-K rank or
+// selected multiplicity changed. Ranks are one-based first occupied positions;
+// zero means that the row is outside the bounded result. Weighted rows occupy
+// one position per selected multiplicity, while Diff is the selected-count
+// change rather than the full relation-count change.
+type IncrementalTopKRankChange struct {
+	Key         string
+	Time        uint64
+	Row         Row
+	Diff        int64
+	BeforeRank  int
+	AfterRank   int
+	BeforeCount int64
+	AfterCount  int64
+}
+
 // NewIncrementalTopK creates an exact weighted Top-K maintainer.
 func NewIncrementalTopK(definition IncrementalTopKDefinition) (*IncrementalTopK, error) {
 	if definition.K < 0 {
@@ -95,15 +111,23 @@ func (topK *IncrementalTopK) Apply(updates []DifferentialRow) ([]DifferentialRow
 	if topK == nil {
 		return nil, ErrIncrementalTopKNil
 	}
+	before, after, err := topK.apply(updates)
+	if err != nil {
+		return nil, err
+	}
+	return topK.selectionChanges(before, after), nil
+}
+
+func (topK *IncrementalTopK) apply(updates []DifferentialRow) ([]incrementalTopKSelection, []incrementalTopKSelection, error) {
 	if len(updates) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	pending := make(map[string]incrementalTopKPendingEntry, len(updates))
 	prepared := make([]incrementalTopKPreparedUpdate, 0, len(updates))
 	for index, update := range updates {
 		if update.Key == "" {
-			return nil, fmt.Errorf("incremental top-k update %d: differential row key is required", index)
+			return nil, nil, fmt.Errorf("incremental top-k update %d: differential row key is required", index)
 		}
 		if update.Diff == 0 {
 			continue
@@ -127,7 +151,7 @@ func (topK *IncrementalTopK) Apply(updates []DifferentialRow) ([]DifferentialRow
 			if !entry.active {
 				order, err := topK.orderKey(update.Row)
 				if err != nil {
-					return nil, fmt.Errorf("incremental top-k update %d key %q order key: %w", index, update.Key, err)
+					return nil, nil, fmt.Errorf("incremental top-k update %d key %q order key: %w", index, update.Key, err)
 				}
 				entry = incrementalTopKPendingEntry{
 					active: true,
@@ -141,24 +165,24 @@ func (topK *IncrementalTopK) Apply(updates []DifferentialRow) ([]DifferentialRow
 			} else if update.Row != nil {
 				order, err := topK.orderKey(update.Row)
 				if err != nil {
-					return nil, fmt.Errorf("incremental top-k update %d key %q order key: %w", index, update.Key, err)
+					return nil, nil, fmt.Errorf("incremental top-k update %d key %q order key: %w", index, update.Key, err)
 				}
 				if Compare(order, entry.order) != 0 || !reflect.DeepEqual(update.Row, entry.row) {
-					return nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKRowConflict)
+					return nil, nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKRowConflict)
 				}
 			}
 			next, ok := incrementalTopKAddMultiplicity(entry.count, update.Diff)
 			if !ok {
-				return nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKOverflow)
+				return nil, nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKOverflow)
 			}
 			entry.count = next
 		} else {
 			if !entry.active {
-				return nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKNegativeMultiplicity)
+				return nil, nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKNegativeMultiplicity)
 			}
 			decrement := incrementalTopKMagnitude(update.Diff)
 			if decrement > entry.count {
-				return nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKNegativeMultiplicity)
+				return nil, nil, fmt.Errorf("incremental top-k update %d key %q: %w", index, update.Key, ErrIncrementalTopKNegativeMultiplicity)
 			}
 			entry.count -= decrement
 			if entry.count == 0 {
@@ -169,7 +193,7 @@ func (topK *IncrementalTopK) Apply(updates []DifferentialRow) ([]DifferentialRow
 		prepared = append(prepared, preparedUpdate)
 	}
 	if len(prepared) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	before := topK.selectedRows()
@@ -206,7 +230,22 @@ func (topK *IncrementalTopK) Apply(updates []DifferentialRow) ([]DifferentialRow
 	}
 
 	after := topK.selectedRows()
-	return topK.selectionChanges(before, after), nil
+	return before, after, nil
+}
+
+// ApplyWithRankChanges validates and applies signed row updates, returning
+// every row whose bounded Top-K rank or selected multiplicity changed. Unlike
+// Apply, this reports rank-only movement with Diff equal to zero. The update is
+// atomic: an error leaves the maintainer unchanged and returns no changes.
+func (topK *IncrementalTopK) ApplyWithRankChanges(updates []DifferentialRow) ([]IncrementalTopKRankChange, error) {
+	if topK == nil {
+		return nil, ErrIncrementalTopKNil
+	}
+	before, after, err := topK.apply(updates)
+	if err != nil {
+		return nil, err
+	}
+	return topK.rankChanges(before, after), nil
 }
 
 // Snapshot returns the current Top-K result in SQL order. A weighted row is
@@ -253,6 +292,78 @@ func (topK *IncrementalTopK) selectedRows() []incrementalTopKSelection {
 	result := make([]incrementalTopKSelection, 0, capacity)
 	incrementalTopKAppendSelected(topK.root, uint64(topK.k), &result)
 	return result
+}
+
+func incrementalTopKFindRank(selections []incrementalTopKSelection, key string) (int, uint64, *incrementalTopKNode, bool) {
+	rank := 1
+	for _, selection := range selections {
+		if selection.node.key == key {
+			return rank, selection.count, selection.node, true
+		}
+		rank += int(selection.count)
+	}
+	return 0, 0, nil, false
+}
+
+func (topK *IncrementalTopK) rankChanges(before, after []incrementalTopKSelection) []IncrementalTopKRankChange {
+	if len(before) == 0 && len(after) == 0 {
+		return nil
+	}
+	capacity := len(before)
+	if capacity < len(after) {
+		capacity = len(after)
+	}
+	var changes []IncrementalTopKRankChange
+	rank := 1
+	for _, previous := range before {
+		afterRank, afterCount, currentNode, hasCurrent := incrementalTopKFindRank(after, previous.node.key)
+		if rank != afterRank || previous.count != afterCount {
+			node := previous.node
+			if hasCurrent {
+				node = currentNode
+			}
+			changes = incrementalTopKAppendRankChange(changes, capacity, IncrementalTopKRankChange{
+				Key:         previous.node.key,
+				Time:        node.time,
+				Row:         cloneDifferentialRow(node.row),
+				Diff:        int64(afterCount) - int64(previous.count),
+				BeforeRank:  rank,
+				AfterRank:   afterRank,
+				BeforeCount: int64(previous.count),
+				AfterCount:  int64(afterCount),
+			})
+		}
+		rank += int(previous.count)
+	}
+	rank = 1
+	for _, current := range after {
+		if _, _, _, hadPrevious := incrementalTopKFindRank(before, current.node.key); hadPrevious {
+			rank += int(current.count)
+			continue
+		}
+		changes = incrementalTopKAppendRankChange(changes, capacity, IncrementalTopKRankChange{
+			Key:         current.node.key,
+			Time:        current.node.time,
+			Row:         cloneDifferentialRow(current.node.row),
+			Diff:        int64(current.count),
+			BeforeRank:  0,
+			AfterRank:   rank,
+			BeforeCount: 0,
+			AfterCount:  int64(current.count),
+		})
+		rank += int(current.count)
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	return changes
+}
+
+func incrementalTopKAppendRankChange(changes []IncrementalTopKRankChange, capacity int, change IncrementalTopKRankChange) []IncrementalTopKRankChange {
+	if changes == nil {
+		changes = make([]IncrementalTopKRankChange, 0, capacity)
+	}
+	return append(changes, change)
 }
 
 func (topK *IncrementalTopK) selectionChanges(before, after []incrementalTopKSelection) []DifferentialRow {

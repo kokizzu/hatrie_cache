@@ -120,7 +120,7 @@ before/after measurement when its motivation is performance.
 | MZ-28 | Temporal join arrangements keyed by valid-time intervals | Maintain time-aware dimensions incrementally | Interval update complexity | [ ] |
 | MZ-29 | Differential interval-join maintenance | Avoid rescanning overlapping ranges | Index memory | [x] Implemented as the imported `hatSql.IncrementalIntervalJoin` API; see [MZ029_INCREMENTAL_INTERVAL_JOIN.md](MZ029_INCREMENTAL_INTERVAL_JOIN.md). |
 | MZ-30 | Lookup-join cache invalidation by source frontier | Keep lookup results consistent | Cache coordination | [x] Implemented by the opt-in `hatSql.SQLLookupJoinCache`; stable point lookups reuse candidates and source-frontier changes invalidate them. See [MZ030_LOOKUP_JOIN_CACHE.md](MZ030_LOOKUP_JOIN_CACHE.md) and [BENCHMARK.md#mz-30-frontier-aware-lookup-join-cache](BENCHMARK.md#mz-30-frontier-aware-lookup-join-cache). |
-| MZ-31 | Incremental Top-K change stream with rank movement diffs | Avoid complete result replacement | Ranking state and churn | [ ] |
+| MZ-31 | Incremental Top-K change stream with rank movement diffs | Avoid complete result replacement | Ranking state and churn | [x] |
 | MZ-32 | Arrangement cost model and reuse scoring | Share indexes only when they pay back | Planner estimation errors | [ ] |
 | MZ-33 | Automatic index recommendation from observed dataflows | Reduce manual tuning | Background analysis cost | [ ] |
 | MZ-34 | Online index build scheduler with admission limits | Build indexes without starving queries | Build latency | [ ] |
