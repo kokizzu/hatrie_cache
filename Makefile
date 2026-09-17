@@ -17904,6 +17904,9 @@ stage-ch017-projection-advisor:
 commit-ch017-projection-advisor:
 	sh ./scripts/commit-ch017-projection-advisor.sh
 
+commit-ch017-delivery-fix:
+	sh ./scripts/commit-ch017-delivery-fix.sh
+
 push-ch017-projection-advisor:
 	sh ./scripts/push-ch017-projection-advisor.sh
 
