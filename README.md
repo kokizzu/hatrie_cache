@@ -240,6 +240,7 @@ security guidance before exposing it on a network.
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
+- Opt-in authenticated WAL encryption and key rotation: [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)
 - Part/WAL-consistent backup manifests with per-file checksums: [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u50-partwal-consistent-backup-manifest)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Opt-in asynchronous HTTP command admission, wait modes, and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
@@ -3979,6 +3980,17 @@ machine before enabling it for a workload.
 source backup and once from the restored copy after journal replay. Its report
 includes `source_state_checksum`, `restored_state_checksum`, and
 `state_checksums_match`; a missing or mismatched checksum fails the rehearsal.
+
+### Authenticated WAL Encryption
+
+Command-journal encryption is opt-in through
+`hatJournal.EncryptionOptions`. It uses AES-GCM frames with a cleartext key ID,
+random nonce, authenticated metadata, and a keyring for rotation. Encryption
+is disabled by default, and existing plaintext records remain readable while
+new records use the current key. See [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)
+for rotation steps, recovery behavior, and measured CPU, allocation, and wire
+size costs.
+
 ## SQL Mutation Conflict Handling
 
 `ExecuteSQLMutation` supports primary-key conflict handling without changing

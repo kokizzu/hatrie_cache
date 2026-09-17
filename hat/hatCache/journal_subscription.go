@@ -234,7 +234,7 @@ func (journal *CommandJournal) commandJournalSubscriptionKeyTail(afterSequence u
 	if journal.closed {
 		return CommandJournalTail{}, ErrCommandJournalClosed
 	}
-	tail, err := readCommandJournalKeyTailSet(journal.path, journal.segmented(), afterSequence, limit, spaceKey, keyPrefix)
+	tail, err := readCommandJournalKeyTailSetWithEncryption(journal.path, journal.segmented(), afterSequence, limit, spaceKey, keyPrefix, journal.encryption)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}

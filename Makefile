@@ -17840,3 +17840,46 @@ push-tr050-replication-byte-backpressure:
 .PHONY: verify-delivery-tr050-replication-byte-backpressure
 verify-delivery-tr050-replication-byte-backpressure:
 	sh ./scripts/verify-delivery-tr050-replication-byte-backpressure.sh
+
+.PHONY: inspect-next-candidates
+inspect-next-candidates:
+	sh ./scripts/inspect-next-candidates.sh
+
+test-tr008-journal-encryption:
+	sh ./scripts/test-tr008-journal-encryption.sh
+
+.PHONY: format-tr008-journal-encryption
+format-tr008-journal-encryption:
+	sh ./scripts/format-tr008-journal-encryption.sh
+
+.PHONY: benchmark-tr008-journal-encryption
+benchmark-tr008-journal-encryption:
+	sh ./scripts/benchmark-tr008-journal-encryption.sh
+
+.PHONY: test-tr008-package
+test-tr008-package:
+	sh ./scripts/test-tr008-package.sh
+
+.PHONY: race-tr008-journal-encryption
+race-tr008-journal-encryption:
+	sh ./scripts/race-tr008-journal-encryption.sh
+
+.PHONY: vet-tr008-journal-encryption
+vet-tr008-journal-encryption:
+	sh ./scripts/vet-tr008-journal-encryption.sh
+
+.PHONY: review-tr008-journal-encryption
+review-tr008-journal-encryption:
+	sh ./scripts/review-tr008-journal-encryption.sh
+
+.PHONY: status-tr008-journal-encryption
+status-tr008-journal-encryption:
+	sh ./scripts/status-tr008-journal-encryption.sh
+
+.PHONY: stage-tr008-journal-encryption
+stage-tr008-journal-encryption:
+	sh ./scripts/stage-tr008-journal-encryption.sh
+
+.PHONY: commit-tr008-journal-encryption
+commit-tr008-journal-encryption:
+	sh ./scripts/commit-tr008-journal-encryption.sh

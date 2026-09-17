@@ -107,12 +107,13 @@ func InspectCommandJournal(path string, options CommandJournalOptions) (hatJourn
 		return hatJournal.Inspection{}, err
 	}
 	inspection, err := hatJournal.Inspect(path, hatJournal.InspectOptions{
-		Segmented: normalized.SegmentMaxBytes > 0,
+		Segmented:  normalized.SegmentMaxBytes > 0,
+		Encryption: normalized.Encryption,
 	})
 	if err != nil {
 		return hatJournal.Inspection{}, err
 	}
-	if _, err := scanCommandJournalSet(path, normalized.SegmentMaxBytes > 0, nil); err != nil {
+	if _, err := scanCommandJournalSetWithEncryption(path, normalized.SegmentMaxBytes > 0, normalized.Encryption, nil); err != nil {
 		return hatJournal.Inspection{}, err
 	}
 	return inspection, nil
@@ -211,6 +212,8 @@ type CommandJournal struct {
 	closeOnce             sync.Once
 	path                  string
 	format                CommandJournalFormat
+	encryption            hatJournal.EncryptionOptions
+	encryptor             *hatJournal.RecordEncryptor
 	file                  *os.File
 	closed                bool
 	accepting             bool
@@ -273,6 +276,13 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	}
 	options = normalized
 	format := options.Format
+	var encryptor *hatJournal.RecordEncryptor
+	if options.Encryption.Enabled() {
+		encryptor, err = hatJournal.NewRecordEncryptor(options.Encryption)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -280,7 +290,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	var earliestOutboxSequence uint64
 	var compactedThrough uint64
 	idempotency := newCommandIdempotencyState(options.IdempotencyCapacity)
-	validBytes, err := scanCommandJournalSet(path, options.SegmentMaxBytes > 0, func(entry commandJournalEntry) error {
+	validBytes, err := scanCommandJournalSetWithEncryption(path, options.SegmentMaxBytes > 0, options.Encryption, func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
 		}
@@ -317,7 +327,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		}
 	}
 	if options.SegmentMaxBytes > 0 && validBytes == 0 && maxSequence > 0 {
-		if err := writeCommandJournalCheckpointWithFormat(path, maxSequence, format); err != nil {
+		if err := writeCommandJournalCheckpointWithFormatAndEncryption(path, maxSequence, format, encryptor); err != nil {
 			return nil, err
 		}
 		compactedThrough = maxSequence
@@ -329,6 +339,8 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	journal := &CommandJournal{
 		path:                  path,
 		format:                format,
+		encryption:            options.Encryption,
+		encryptor:             encryptor,
 		file:                  file,
 		accepting:             true,
 		groupCommitWindow:     options.GroupCommitWindow,
@@ -348,7 +360,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
 		journal.nextSequence = 1
 	}
-	journal.activeSegmentStart, err = commandJournalActiveSegmentStart(path, journal.lastSequenceLocked())
+	journal.activeSegmentStart, err = commandJournalActiveSegmentStartWithEncryption(path, journal.lastSequenceLocked(), journal.encryption)
 	if err != nil {
 		_ = file.Close()
 		return nil, err
@@ -575,7 +587,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 				encoded = encoded[:0]
 			}
 			start := len(encoded)
-			encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
+			encoded, err = appendCommandJournalRecordWithEncryption(encoded, entry, journal.format, journal.encryptor)
 			if err != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
 				failCommandJournalJobs(pending, err)
@@ -713,7 +725,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 				encoded = encoded[:0]
 			}
 			start := len(encoded)
-			encoded, err = appendCommandJournalRecord(encoded, journalEntry, journal.format)
+			encoded, err = appendCommandJournalRecordWithEncryption(encoded, journalEntry, journal.format, journal.encryptor)
 			if err != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
 				failCommandJournalIdempotentGroupEntries(entries, err)
@@ -939,7 +951,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 			encoded = encoded[:0]
 		}
 		start := len(encoded)
-		encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
+		encoded, err = appendCommandJournalRecordWithEncryption(encoded, entry, journal.format, journal.encryptor)
 		if err != nil {
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
@@ -1061,7 +1073,7 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 			encoded = encoded[:0]
 		}
 		start := len(encoded)
-		encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
+		encoded, err = appendCommandJournalRecordWithEncryption(encoded, entry, journal.format, journal.encryptor)
 		if err != nil {
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
@@ -1134,6 +1146,17 @@ func (journal *CommandJournal) writeCommandJournalRecordBatchChunkLocked(data []
 }
 
 func appendCommandJournalRecord(data []byte, entry commandJournalEntry, format CommandJournalFormat) ([]byte, error) {
+	return appendCommandJournalRecordWithEncryption(data, entry, format, nil)
+}
+
+func appendCommandJournalRecordWithEncryption(data []byte, entry commandJournalEntry, format CommandJournalFormat, encryptor *hatJournal.RecordEncryptor) ([]byte, error) {
+	if encryptor != nil {
+		record, err := marshalCommandJournalEntry(entry, format)
+		if err != nil {
+			return nil, err
+		}
+		return encryptor.AppendRecord(data, record)
+	}
 	switch format {
 	case CommandJournalFormatBinary:
 		return appendCommandJournalEntryBinary(data, entry)
@@ -1323,7 +1346,7 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	var compactedThrough uint64
 	var totalEntries uint64
 	if progress != nil {
-		if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+		if _, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
 			if entry.Sequence > maxSequence {
 				maxSequence = entry.Sequence
 			}
@@ -1356,7 +1379,7 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	if targetSequence < afterSequence {
 		return 0, fmt.Errorf("hatriecache: requested journal sequence %d precedes snapshot sequence %d", targetSequence, afterSequence)
 	}
-	if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
 			return nil
 		}
@@ -1396,7 +1419,7 @@ func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJou
 	if limit > MaxCommandJournalTailLimit {
 		return CommandJournalTail{}, fmt.Errorf("hatriecache: journal tail limit must be <= %d", MaxCommandJournalTailLimit)
 	}
-	tail, err := readCommandJournalTailSet(journal.path, journal.segmented(), afterSequence, limit)
+	tail, err := readCommandJournalTailSetWithEncryption(journal.path, journal.segmented(), afterSequence, limit, journal.encryption)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
@@ -1771,7 +1794,7 @@ func (journal *CommandJournal) writeWithOutboxWithoutSyncLockedAndIdempotency(re
 		return 0, 0, err
 	}
 
-	n, err := journal.file.Write(data)
+	n, err := journal.encryptor.WriteRecord(journal.file, data)
 	if err != nil {
 		return n, 0, err
 	}
@@ -1818,7 +1841,7 @@ func (journal *CommandJournal) visitOutboxJobsAfter(afterSequence uint64, visit 
 	if journal.closed {
 		return ErrCommandJournalClosed
 	}
-	_, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+	_, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
 		if entry.Sequence <= afterSequence || entry.Outbox == nil {
 			return nil
 		}
@@ -1845,7 +1868,7 @@ func resolveJournalReplicationJobs(journal *CommandJournal, jobs []replicationJo
 	if journal.closed {
 		return jobs
 	}
-	_, _ = scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+	_, _ = scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
 		indexes := wanted[entry.Sequence]
 		if len(indexes) == 0 || entry.Outbox == nil {
 			return nil
@@ -1915,7 +1938,7 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 		return err
 	}
 
-	if err := writeCommandJournalCompactedWithFormat(journal.path, throughSequence, journal.format); err != nil {
+	if err := writeCommandJournalCompactedWithFormatAndEncryption(journal.path, throughSequence, journal.format, journal.encryptor, journal.encryption); err != nil {
 		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
 			return errors.Join(err, reopenErr)
 		}
@@ -1937,7 +1960,7 @@ func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
 			return err
 		}
 	}
-	if err := writeCommandJournalCheckpointWithFormat(journal.path, sequence, journal.format); err != nil {
+	if err := writeCommandJournalCheckpointWithFormatAndEncryption(journal.path, sequence, journal.format, journal.encryptor); err != nil {
 		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
 			return errors.Join(err, reopenErr)
 		}
@@ -1956,21 +1979,46 @@ func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
 }
 
 func writeCommandJournalCheckpointWithFormat(path string, sequence uint64, format CommandJournalFormat) error {
+	return writeCommandJournalCheckpointWithFormatAndEncryption(path, sequence, format, nil)
+}
+
+func writeCommandJournalCheckpointWithFormatAndEncryption(path string, sequence uint64, format CommandJournalFormat, encryptor *hatJournal.RecordEncryptor) error {
 	return writeFileAtomicStream(path, func(writer io.Writer) error {
 		if sequence == 0 {
 			return nil
 		}
-		return writeCommandJournalEntry(writer, commandJournalEntry{
+		return writeCommandJournalEntryWithEncryption(writer, commandJournalEntry{
 			Version:    commandJournalVersion,
 			Sequence:   sequence,
 			Checkpoint: true,
-		}, format)
+		}, format, encryptor)
 	})
 }
 
 // InstallCommandJournalCheckpoint resets an offline journal file and removes
 // any retained segment sidecars before the journal is opened.
 func InstallCommandJournalCheckpoint(path string, format CommandJournalFormat, sequence uint64) error {
+	return installCommandJournalCheckpoint(path, format, sequence, nil)
+}
+
+// InstallCommandJournalCheckpointWithOptions resets an offline journal file
+// using the requested format and optional journal encryption.
+func InstallCommandJournalCheckpointWithOptions(path string, options CommandJournalOptions, sequence uint64) error {
+	normalized, err := hatJournal.ValidateOptions(options)
+	if err != nil {
+		return err
+	}
+	var encryptor *hatJournal.RecordEncryptor
+	if normalized.Encryption.Enabled() {
+		encryptor, err = hatJournal.NewRecordEncryptor(normalized.Encryption)
+		if err != nil {
+			return err
+		}
+	}
+	return installCommandJournalCheckpoint(path, normalized.Format, sequence, encryptor)
+}
+
+func installCommandJournalCheckpoint(path string, format CommandJournalFormat, sequence uint64, encryptor *hatJournal.RecordEncryptor) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return errors.New("hatriecache: command journal path is required")
@@ -1982,7 +2030,7 @@ func InstallCommandJournalCheckpoint(path string, format CommandJournalFormat, s
 	if err := os.RemoveAll(commandJournalSegmentDir(path)); err != nil {
 		return err
 	}
-	return writeCommandJournalCheckpointWithFormat(path, sequence, format)
+	return writeCommandJournalCheckpointWithFormatAndEncryption(path, sequence, format, encryptor)
 }
 
 func writeCommandJournalCompacted(path string, throughSequence uint64) error {
@@ -1990,32 +2038,40 @@ func writeCommandJournalCompacted(path string, throughSequence uint64) error {
 }
 
 func writeCommandJournalCompactedWithFormat(path string, throughSequence uint64, format CommandJournalFormat) error {
+	return writeCommandJournalCompactedWithFormatAndEncryption(path, throughSequence, format, nil, hatJournal.EncryptionOptions{})
+}
+
+func writeCommandJournalCompactedWithFormatAndEncryption(path string, throughSequence uint64, format CommandJournalFormat, encryptor *hatJournal.RecordEncryptor, encryption hatJournal.EncryptionOptions) error {
 	return writeFileAtomicStream(path, func(writer io.Writer) error {
 		if throughSequence > 0 {
-			if err := writeCommandJournalEntry(writer, commandJournalEntry{
+			if err := writeCommandJournalEntryWithEncryption(writer, commandJournalEntry{
 				Version:    commandJournalVersion,
 				Sequence:   throughSequence,
 				Checkpoint: true,
-			}, format); err != nil {
+			}, format, encryptor); err != nil {
 				return err
 			}
 		}
-		_, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+		_, err := scanCommandJournalEntriesWithEncryption(path, encryption, func(entry commandJournalEntry) error {
 			if entry.Checkpoint || entry.Sequence <= throughSequence {
 				return nil
 			}
-			return writeCommandJournalEntry(writer, entry, format)
+			return writeCommandJournalEntryWithEncryption(writer, entry, format, encryptor)
 		})
 		return err
 	})
 }
 
 func writeCommandJournalEntry(writer io.Writer, entry commandJournalEntry, format CommandJournalFormat) error {
+	return writeCommandJournalEntryWithEncryption(writer, entry, format, nil)
+}
+
+func writeCommandJournalEntryWithEncryption(writer io.Writer, entry commandJournalEntry, format CommandJournalFormat, encryptor *hatJournal.RecordEncryptor) error {
 	payload, err := marshalCommandJournalEntry(entry, format)
 	if err != nil {
 		return err
 	}
-	_, err = writer.Write(payload)
+	_, err = encryptor.WriteRecord(writer, payload)
 	return err
 }
 
@@ -2104,7 +2160,11 @@ func (journal *CommandJournal) markAppendedLocked(sequence uint64) {
 }
 
 func scanCommandJournalEntries(path string, visit func(commandJournalEntry) error) (int64, error) {
-	file, reader, compression, err := hatJournal.OpenReader(path)
+	return scanCommandJournalEntriesWithEncryption(path, hatJournal.EncryptionOptions{}, visit)
+}
+
+func scanCommandJournalEntriesWithEncryption(path string, encryption hatJournal.EncryptionOptions, visit func(commandJournalEntry) error) (int64, error) {
+	file, reader, compression, err := hatJournal.OpenReaderWithEncryption(path, encryption)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
@@ -2114,6 +2174,7 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 	defer file.Close()
 
 	var validBytes int64
+	validPhysicalBytes := int64(-1)
 	var previousSequence uint64
 	var hasPreviousSequence bool
 	var readBuffer commandJournalReadBuffer
@@ -2130,6 +2191,15 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 				}
 				return info.Size(), nil
 			}
+			if physical, ok := file.(interface{ PhysicalBytes() int64 }); ok {
+				physicalBytes := physical.PhysicalBytes()
+				if physicalBytes >= 0 && validPhysicalBytes < 0 {
+					validPhysicalBytes = physicalBytes
+				}
+				if validPhysicalBytes >= 0 {
+					return validPhysicalBytes, nil
+				}
+			}
 			return validBytes, nil
 		}
 		if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
@@ -2140,7 +2210,17 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 				return validBytes, err
 			}
 		}
-		validBytes += int64(bytesRead)
+		if physical, ok := file.(interface{ PhysicalBytes() int64 }); ok {
+			physicalBytes := physical.PhysicalBytes()
+			if physicalBytes >= 0 {
+				validPhysicalBytes = physicalBytes
+				validBytes = validPhysicalBytes
+			} else {
+				validBytes += int64(bytesRead)
+			}
+		} else {
+			validBytes += int64(bytesRead)
+		}
 		previousSequence = entry.Sequence
 		hasPreviousSequence = true
 	}

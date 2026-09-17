@@ -152,7 +152,7 @@ before/after measurement when its motivation is performance.
 | TR-05 | Parallel relay and applier queues with ordering fences | Increase replication throughput | Ordering and backpressure bugs | [ ] |
 | TR-06 | Conflict-resolution hooks for multi-master updates | Make application conflict policy explicit | Non-deterministic user code | [ ] |
 | TR-07 | Adaptive WAL group-commit and fsync policy | Improve write throughput safely | Durability window changes | [ ] |
-| TR-08 | WAL encryption and key-rotation metadata | Protect journals at rest | Key recovery and CPU cost | [ ] |
+| TR-08 | WAL encryption and key-rotation metadata | Protect journals at rest | Key recovery and CPU cost | [x] Implemented as opt-in authenticated AES-GCM journal frames with clear key IDs, mixed legacy compatibility, keyring rotation, and encrypted offline checkpoint installation. See [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md) and [BENCHMARK.md#tr-08-wal-encryption-and-key-rotation](BENCHMARK.md#tr-08-wal-encryption-and-key-rotation). |
 | TR-09 | Incremental snapshot chains | Reduce backup write volume | Chain recovery complexity | [ ] |
 | TR-10 | Snapshot manifests with atomic restore publication | Make restores verifiable and resumable | Manifest compatibility | [ ] |
 | TR-11 | Hot-backup consistent file-set coordination | Copy live storage without torn state | Snapshot coordination | [ ] |

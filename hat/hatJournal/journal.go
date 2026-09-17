@@ -99,6 +99,7 @@ type Options struct {
 	RetainedSegments    int
 	RetainedBytes       int64
 	IdempotencyCapacity int
+	Encryption          EncryptionOptions
 }
 
 // ValidateOptions verifies journal options and returns a copy with a
@@ -145,8 +146,13 @@ func ValidateOptions(options Options) (Options, error) {
 	if options.IdempotencyCapacity > MaxIdempotencyCapacity {
 		return Options{}, fmt.Errorf("hatJournal: idempotency capacity must be <= %d", MaxIdempotencyCapacity)
 	}
+	encryption, err := ValidateEncryptionOptions(options.Encryption)
+	if err != nil {
+		return Options{}, err
+	}
 	options.Format = format
 	options.SegmentCompression = segmentCompression
+	options.Encryption = encryption
 	return options, nil
 }
 
@@ -155,6 +161,7 @@ func ValidateOptions(options Options) (Options, error) {
 type InspectOptions struct {
 	Segmented      bool
 	MaxRecordBytes int64
+	Encryption     EncryptionOptions
 }
 
 // File describes one active or archived journal file.
@@ -272,23 +279,23 @@ func Inspect(path string, options InspectOptions) (Inspection, error) {
 	var previous uint64
 	var hasPrevious bool
 	for index, current := range segments {
-		file, err := inspectFile(current.path, limit)
+		file, err := inspectFile(current.path, limit, options.Encryption)
 		if err != nil {
 			return Inspection{}, err
 		}
 		if file.TruncatedTail || file.ValidBytes != file.Size {
 			return Inspection{}, fmt.Errorf("hatJournal: archived journal segment %q is truncated", filepath.Base(current.path))
 		}
-		if err := mergeFile(&inspection, &previous, &hasPrevious, file, index > 0, current); err != nil {
+		if err := mergeFile(&inspection, &previous, &hasPrevious, file, index > 0, current, options.Encryption); err != nil {
 			return Inspection{}, err
 		}
 		inspection.Segments = append(inspection.Segments, file)
 	}
-	active, err := inspectFile(path, limit)
+	active, err := inspectFile(path, limit, options.Encryption)
 	if err != nil {
 		return Inspection{}, err
 	}
-	if err := mergeFile(&inspection, &previous, &hasPrevious, active, len(segments) > 0, segment{}); err != nil {
+	if err := mergeFile(&inspection, &previous, &hasPrevious, active, len(segments) > 0, segment{}, options.Encryption); err != nil {
 		return Inspection{}, err
 	}
 	inspection.Active = active
@@ -340,7 +347,7 @@ func listSegments(path string) ([]segment, error) {
 	return segments, nil
 }
 
-func inspectFile(path string, limit int64) (File, error) {
+func inspectFile(path string, limit int64, encryption EncryptionOptions) (File, error) {
 	file := File{Path: path, Format: FormatUnknown}
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -353,12 +360,13 @@ func inspectFile(path string, limit int64) (File, error) {
 		return File{}, fmt.Errorf("hatJournal: journal file %q is not regular", path)
 	}
 	file.Size = info.Size()
-	handle, reader, compression, err := OpenReader(path)
+	handle, reader, compression, err := OpenReaderWithEncryption(path, encryption)
 	if err != nil {
 		return File{}, err
 	}
 	defer handle.Close()
 	file.Compression = compression
+	validPhysicalBytes := int64(-1)
 	for {
 		record, bytesRead, complete, err := readRecord(reader, limit)
 		if err != nil {
@@ -369,10 +377,23 @@ func inspectFile(path string, limit int64) (File, error) {
 				file.ValidBytes = file.Size
 				return file, nil
 			}
+			if validPhysicalBytes >= 0 {
+				file.ValidBytes = validPhysicalBytes
+			}
 			file.TruncatedTail = bytesRead > 0
 			return file, nil
 		}
-		file.ValidBytes += int64(bytesRead)
+		if physical, ok := handle.(interface{ PhysicalBytes() int64 }); ok {
+			physicalBytes := physical.PhysicalBytes()
+			if physicalBytes >= 0 {
+				validPhysicalBytes = physicalBytes
+				file.ValidBytes = validPhysicalBytes
+			} else {
+				file.ValidBytes += int64(bytesRead)
+			}
+		} else {
+			file.ValidBytes += int64(bytesRead)
+		}
 		file.UncompressedBytes += int64(bytesRead)
 		file.RecordCount++
 		if file.RecordCount == 1 {
@@ -388,7 +409,7 @@ func inspectFile(path string, limit int64) (File, error) {
 	}
 }
 
-func mergeFile(inspection *Inspection, previous *uint64, hasPrevious *bool, file File, handoff bool, bounds segment) error {
+func mergeFile(inspection *Inspection, previous *uint64, hasPrevious *bool, file File, handoff bool, bounds segment, encryption EncryptionOptions) error {
 	inspection.ValidBytes += file.ValidBytes
 	inspection.RecordCount += file.RecordCount
 	if file.CompactedThrough > inspection.CompactedThrough {
@@ -401,7 +422,7 @@ func mergeFile(inspection *Inspection, previous *uint64, hasPrevious *bool, file
 		return nil
 	}
 
-	handle, reader, _, err := OpenReader(file.Path)
+	handle, reader, _, err := OpenReaderWithEncryption(file.Path, encryption)
 	if err != nil {
 		return err
 	}
@@ -469,6 +490,9 @@ func readRecord(reader *bufio.Reader, limit int64) (record, int, bool, error) {
 	header, err := reader.Peek(len(binaryMagic))
 	if err == nil && bytes.Equal(header, binaryMagic) {
 		return readBinaryRecord(reader, limit)
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return record{}, 0, false, err
 	}
 	if len(header) > 0 && bytes.HasPrefix(binaryMagic, header) {
 		_, _ = reader.Discard(len(header))

@@ -28891,3 +28891,39 @@ BenchmarkTR050ReplicationByteBudgetBurst/enabled-32                      262447 
 PASS
 ok  hatrie_cache/hat/hatCache  5.098s
 ```
+
+## TR-08 WAL Encryption And Key Rotation
+
+The benchmark isolates record framing on an AMD Ryzen 9 5950X. It compares the
+legacy plaintext memory-copy control with AES-GCM encoding for a fixed
+256-byte record. It measures CPU and allocations, while the wire-size change
+is derived from the authenticated frame layout.
+
+| Encoding | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy copy | 5.534 | 0 | 0 | 1.00x |
+| AES-GCM frame | 450.0 | 704 | 5 | 81.32x slower |
+
+The encrypted frame is 299 bytes versus 256 bytes for the control: 43 extra
+bytes, or 16.8% for this record/key-ID size. The 704 B/op includes temporary
+frame/header/ciphertext allocations in the reusable `RecordEncryptor` API.
+This is an isolated codec cost, not a disk, fsync, cache-apply, or group-commit
+throughput result; real workloads should measure with their normal record size
+and batching.
+
+Raw output from `make benchmark-tr008-journal-encryption`:
+
+```text
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatJournal
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkTR008RecordEncoding/legacy-copy-32         42906699   5.536 ns/op  46243.94 MB/s  0 B/op  0 allocs/op
+BenchmarkTR008RecordEncoding/legacy-copy-32         43214977   5.534 ns/op  46262.71 MB/s  0 B/op  0 allocs/op
+BenchmarkTR008RecordEncoding/legacy-copy-32         40871523   5.520 ns/op  46372.65 MB/s  0 B/op  0 allocs/op
+BenchmarkTR008RecordEncoding/aes-gcm-frame-32         526464 450.0 ns/op    568.88 MB/s  704 B/op  5 allocs/op
+BenchmarkTR008RecordEncoding/aes-gcm-frame-32         538854 453.9 ns/op    564.04 MB/s  704 B/op  5 allocs/op
+BenchmarkTR008RecordEncoding/aes-gcm-frame-32         447381 447.9 ns/op    571.57 MB/s  704 B/op  5 allocs/op
+PASS
+ok  hatrie_cache/hat/hatJournal  1.856s
+```

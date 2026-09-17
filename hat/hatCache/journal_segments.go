@@ -47,8 +47,12 @@ func listCommandJournalSegments(path string) ([]commandJournalSegment, error) {
 }
 
 func scanCommandJournalSet(path string, segmented bool, visit func(commandJournalEntry) error) (int64, error) {
+	return scanCommandJournalSetWithEncryption(path, segmented, hatJournal.EncryptionOptions{}, visit)
+}
+
+func scanCommandJournalSetWithEncryption(path string, segmented bool, encryption hatJournal.EncryptionOptions, visit func(commandJournalEntry) error) (int64, error) {
 	if !segmented {
-		return scanCommandJournalEntries(path, visit)
+		return scanCommandJournalEntriesWithEncryption(path, encryption, visit)
 	}
 	segments, err := listCommandJournalSegments(path)
 	if err != nil {
@@ -67,7 +71,7 @@ func scanCommandJournalSet(path string, segmented bool, visit func(commandJourna
 		firstEntry := true
 		var firstMutation uint64
 		var lastMutation uint64
-		validBytes, err := scanCommandJournalEntries(filePath, func(entry commandJournalEntry) error {
+		validBytes, err := scanCommandJournalEntriesWithEncryption(filePath, encryption, func(entry commandJournalEntry) error {
 			if firstEntry && fileIndex > 0 && entry.Checkpoint {
 				firstEntry = false
 				if !hasPreviousSequence || entry.Sequence != previousSequence {
@@ -117,6 +121,10 @@ func scanCommandJournalSet(path string, segmented bool, visit func(commandJourna
 }
 
 func commandJournalActiveSegmentStart(path string, lastSequence uint64) (uint64, error) {
+	return commandJournalActiveSegmentStartWithEncryption(path, lastSequence, hatJournal.EncryptionOptions{})
+}
+
+func commandJournalActiveSegmentStartWithEncryption(path string, lastSequence uint64, encryption hatJournal.EncryptionOptions) (uint64, error) {
 	start := uint64(1)
 	if lastSequence > 0 && lastSequence < ^uint64(0) {
 		start = lastSequence + 1
@@ -124,7 +132,7 @@ func commandJournalActiveSegmentStart(path string, lastSequence uint64) (uint64,
 		start = lastSequence
 	}
 	first := true
-	if _, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalEntriesWithEncryption(path, encryption, func(entry commandJournalEntry) error {
 		if !first {
 			return nil
 		}
@@ -262,7 +270,7 @@ func (journal *CommandJournal) writeCheckpointWithoutSyncLocked(sequence uint64)
 	if err != nil {
 		return err
 	}
-	n, err := journal.file.Write(data)
+	n, err := journal.encryptor.WriteRecord(journal.file, data)
 	if err != nil {
 		return err
 	}
@@ -335,12 +343,16 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 }
 
 func readCommandJournalTailSet(path string, segmented bool, afterSequence uint64, limit int) (CommandJournalTail, error) {
+	return readCommandJournalTailSetWithEncryption(path, segmented, afterSequence, limit, hatJournal.EncryptionOptions{})
+}
+
+func readCommandJournalTailSetWithEncryption(path string, segmented bool, afterSequence uint64, limit int, encryption hatJournal.EncryptionOptions) (CommandJournalTail, error) {
 	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
 	if limit > 0 {
 		tail.Limit = limit
 		tail.Entries = make([]CommandJournalRecord, 0, limit)
 	}
-	if _, err := scanCommandJournalSet(path, segmented, func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalSetWithEncryption(path, segmented, encryption, func(entry commandJournalEntry) error {
 		if entry.Sequence > tail.LastSequence {
 			tail.LastSequence = entry.Sequence
 		}
@@ -363,16 +375,20 @@ func readCommandJournalTailSet(path string, segmented bool, afterSequence uint64
 }
 
 func readCommandJournalSpaceTailSet(path string, segmented bool, afterSequence uint64, limit int, spaceKey string) (CommandJournalTail, error) {
-	return readCommandJournalKeyTailSet(path, segmented, afterSequence, limit, spaceKey, "")
+	return readCommandJournalKeyTailSetWithEncryption(path, segmented, afterSequence, limit, spaceKey, "", hatJournal.EncryptionOptions{})
 }
 
 func readCommandJournalKeyTailSet(path string, segmented bool, afterSequence uint64, limit int, spaceKey, keyPrefix string) (CommandJournalTail, error) {
+	return readCommandJournalKeyTailSetWithEncryption(path, segmented, afterSequence, limit, spaceKey, keyPrefix, hatJournal.EncryptionOptions{})
+}
+
+func readCommandJournalKeyTailSetWithEncryption(path string, segmented bool, afterSequence uint64, limit int, spaceKey, keyPrefix string, encryption hatJournal.EncryptionOptions) (CommandJournalTail, error) {
 	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
 	if limit > 0 {
 		tail.Limit = limit
 		tail.Entries = make([]CommandJournalRecord, 0, limit)
 	}
-	if _, err := scanCommandJournalSet(path, segmented, func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalSetWithEncryption(path, segmented, encryption, func(entry commandJournalEntry) error {
 		if entry.Sequence > tail.LastSequence {
 			tail.LastSequence = entry.Sequence
 		}
