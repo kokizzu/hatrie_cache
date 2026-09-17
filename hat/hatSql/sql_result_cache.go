@@ -127,6 +127,7 @@ func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
 		options.MaxIntermediateRows == 0 &&
 		options.MaxJoinWork == 0 &&
 		options.MaxJoinBytes == 0 &&
+		options.JoinOverflowPolicy == SQLJoinOverflowAuto &&
 		!options.SpillBloom &&
 		!options.RuntimeJoinBloomFilter &&
 		options.MaxResultBytes == 0 &&

@@ -28121,3 +28121,43 @@ BenchmarkC227ExternalGroupMergeBudgetEnabled   18  14380902 ns/op  5832783 B/op 
 The focused tests also verify successful deterministic output, rejection when
 the frontier exceeds the budget, cleanup of temporary files, and negative-value
 validation. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md).
+
+## C229: Join Overflow Policy
+
+This benchmark compares the zero-value join policy with the opt-in materialized
+input guard and the opt-in bounded spill path. The workload is a direct
+two-source equality join with four left rows and four right rows, uses
+`GOMAXPROCS=1`, runs five samples per case, and reports `-benchmem`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Time x vs auto | Heap x vs auto | Alloc x vs auto |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `auto-default` | 13,318 | 17,848 | 114 | 1.00x | 1.00x | 1.00x |
+| `reject-budget` | 15,372 | 18,520 | 138 | 1.15x | 1.04x | 1.21x |
+| `spill-budget` | 5,227,515 | 847,793 | 5,192 | 392.52x | 47.50x | 45.54x |
+
+The result is a policy feature, not a default speed optimization. `auto` has
+the legacy cost; `reject` adds its explicit byte check; `spill` trades CPU and
+heap for bounded in-memory join state and temporary-disk protection. The
+spill numbers are intentionally included so operators do not mistake bounded
+memory for free performance. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md).
+
+### Raw Output
+
+```text
+make benchmark-chu08-join-overflow
+BenchmarkC229JoinOverflowPolicy/auto-default          79408     13296 ns/op    17848 B/op   114 allocs/op
+BenchmarkC229JoinOverflowPolicy/auto-default          91018     13318 ns/op    17848 B/op   114 allocs/op
+BenchmarkC229JoinOverflowPolicy/auto-default          92253     14094 ns/op    17848 B/op   114 allocs/op
+BenchmarkC229JoinOverflowPolicy/auto-default          90064     14521 ns/op    17848 B/op   114 allocs/op
+BenchmarkC229JoinOverflowPolicy/auto-default          92524     13266 ns/op    17848 B/op   114 allocs/op
+BenchmarkC229JoinOverflowPolicy/reject-budget         78216     15372 ns/op    18520 B/op   138 allocs/op
+BenchmarkC229JoinOverflowPolicy/reject-budget         76813     15266 ns/op    18520 B/op   138 allocs/op
+BenchmarkC229JoinOverflowPolicy/reject-budget         78420     15461 ns/op    18520 B/op   138 allocs/op
+BenchmarkC229JoinOverflowPolicy/reject-budget         69962     16997 ns/op    18520 B/op   138 allocs/op
+BenchmarkC229JoinOverflowPolicy/reject-budget         79290     15244 ns/op    18520 B/op   138 allocs/op
+BenchmarkC229JoinOverflowPolicy/spill-budget            244   4713595 ns/op   847785 B/op  5192 allocs/op
+BenchmarkC229JoinOverflowPolicy/spill-budget            255   5471844 ns/op   847793 B/op  5192 allocs/op
+BenchmarkC229JoinOverflowPolicy/spill-budget            219   4977011 ns/op   847790 B/op  5192 allocs/op
+BenchmarkC229JoinOverflowPolicy/spill-budget            223   5297262 ns/op   847795 B/op  5192 allocs/op
+BenchmarkC229JoinOverflowPolicy/spill-budget            250   5227515 ns/op   847797 B/op  5192 allocs/op
+```

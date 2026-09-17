@@ -17212,3 +17212,41 @@ commit-c227-group-merge:
 
 push-c227-group-merge:
 	sh scripts/push-c227-group-merge.sh
+test-chu08-join-overflow:
+	sh scripts/test-chu08-join-overflow.sh
+
+format-chu08-join-overflow:
+	sh scripts/format-chu08-join-overflow.sh
+
+benchmark-chu08-join-overflow:
+	sh scripts/benchmark-chu08-join-overflow.sh
+
+test-chu08-join-overflow-package:
+	sh scripts/test-chu08-join-overflow-package.sh
+
+race-chu08-join-overflow:
+	sh scripts/race-chu08-join-overflow.sh
+
+vet-chu08-join-overflow:
+	sh scripts/vet-chu08-join-overflow.sh
+
+verify-chu08-join-overflow:
+	sh scripts/verify-chu08-join-overflow.sh
+
+status-chu08-join-overflow:
+	sh scripts/status-chu08-join-overflow.sh
+
+review-chu08-join-overflow:
+	sh scripts/review-chu08-join-overflow.sh
+
+review-staged-chu08-join-overflow:
+	sh scripts/review-staged-chu08-join-overflow.sh
+
+stage-chu08-join-overflow:
+	sh scripts/stage-chu08-join-overflow.sh
+
+commit-chu08-join-overflow:
+	sh scripts/commit-chu08-join-overflow.sh
+
+push-chu08-join-overflow:
+	sh scripts/push-chu08-join-overflow.sh

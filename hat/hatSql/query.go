@@ -201,6 +201,12 @@ type SQLQueryOptions struct {
 	// for a direct two-source INNER equality join. Zero keeps the existing
 	// in-memory join behavior.
 	MaxJoinBytes int
+	// JoinOverflowPolicy selects the explicit disposition for a configured
+	// MaxJoinBytes join budget. Empty keeps the established automatic behavior;
+	// reject bounds materialized join input; spill requires the bounded direct
+	// equality spill path. Truncation is deliberately unsupported because a
+	// partial SQL join result is not semantically correct.
+	JoinOverflowPolicy SQLJoinOverflowPolicy
 	// SpillBloom enables compact per-partition Bloom filters for spill hash
 	// joins. It can skip partition pairs that cannot share a join key.
 	SpillBloom bool
@@ -4747,6 +4753,9 @@ func sqlSpillHashJoinStreamable(query *sqlQuery, resolver SQLSourceResolver, con
 	if query == nil || query.from == nil || control == nil || control.options.MaxJoinBytes <= 0 || strings.TrimSpace(control.options.SpillDirectory) == "" || control.options.MaxSpillBytes <= 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.from.kind != "CACHE" || query.joins[0].source.kind != "CACHE" || query.joins[0].kind != "INNER" || query.where.kind != "" || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || len(query.from.fieldTypes) != 0 || len(query.joins[0].source.fieldTypes) != 0 {
 		return false
 	}
+	if control.options.JoinOverflowPolicy == SQLJoinOverflowReject {
+		return false
+	}
 	if _, ok := resolver.(SQLStreamSourceResolver); !ok {
 		return false
 	}
@@ -4768,6 +4777,9 @@ func sqlSpillHashJoinStreamable(query *sqlQuery, resolver SQLSourceResolver, con
 // the established deterministic no-ORDER-BY result order.
 func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
 	if !sqlSpillHashJoinStreamable(query, resolver, control) {
+		if control != nil && control.options.JoinOverflowPolicy == SQLJoinOverflowSpill && query != nil && len(query.joins) > 0 {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL join overflow policy %q requires MaxJoinBytes, SpillDirectory, MaxSpillBytes, and a direct two-source INNER equality CACHE join", SQLJoinOverflowSpill)
+		}
 		return SQLQueryResult{}, false, nil
 	}
 	_, leftField, rightField, _ := sqlHashJoinFields(query.joins[0].on, []string{query.from.alias}, query.joins[0].source.alias)
@@ -8082,6 +8094,9 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
 		return nil, func() {}, fmt.Errorf("SQL operator yield quantum exceeds the maximum %d", MaxSQLOperatorYieldEvery)
 	}
+	if !options.JoinOverflowPolicy.valid() {
+		return nil, func() {}, fmt.Errorf("unsupported SQL join overflow policy %q", options.JoinOverflowPolicy)
+	}
 	if !options.Collation.valid() {
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
@@ -8460,6 +8475,11 @@ func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, 
 		}
 		if len(resolved) > maxRows {
 			return nil, true, fmt.Errorf("SQL source %q exceeds the %d row limit", source.alias, maxRows)
+		}
+		if control != nil {
+			if err := sqlJoinMaterializedInputBudgetError(control.options, resolved); err != nil {
+				return nil, true, err
+			}
 		}
 		rowsByAlias[source.alias] = wrapSQLSource(source, resolved)
 		metrics.recordScanRows(source, resolved, started)
@@ -11885,6 +11905,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				}
 				if len(right) > maxRows {
 					return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+				}
+			}
+			if control != nil {
+				if err := sqlJoinMaterializedInputBudgetError(control.options, right); err != nil {
+					return SQLQueryResult{}, err
 				}
 			}
 			wrapped := wrapSQLSource(join.source, right)

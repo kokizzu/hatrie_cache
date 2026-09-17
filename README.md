@@ -4240,3 +4240,17 @@ and `MaxSpillBytes` when a query must fail cleanly instead of retaining an
 unbounded merge frontier. Temporary spill files are cleaned on rejection. See
 [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and the raw
 measurements in [BENCHMARK.md](BENCHMARK.md#c227-external-group-merge-memory-budget).
+
+## Join Overflow Policy
+
+Join resource handling can be made explicit with
+`SQLQueryOptions.JoinOverflowPolicy`. The zero value
+`SQLJoinOverflowAuto` preserves existing behavior. `SQLJoinOverflowReject`
+rejects an oversized materialized join input when `MaxJoinBytes` is set;
+`SQLJoinOverflowSpill` requires `MaxJoinBytes`, `SpillDirectory`, and
+`MaxSpillBytes` and accepts only the bounded direct two-source equality join.
+Unsupported shapes fail rather than silently using an unbounded fallback.
+Truncation is intentionally unsupported because it would return an incomplete
+SQL result; use `LIMIT` or `ExecuteSQLQueryPage` instead. See
+[C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and the raw
+measurements in [BENCHMARK.md](BENCHMARK.md#c229-join-overflow-policy).

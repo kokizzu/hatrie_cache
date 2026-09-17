@@ -58,6 +58,11 @@ func executeSQLReorderedInnerHashJoinsFromStats(q *sqlQuery, resolver SQLSourceR
 		if len(resolved) > maxRows {
 			return nil, true, fmt.Errorf("SQL source %q exceeds the %d row limit", source.alias, maxRows)
 		}
+		if control != nil {
+			if err := sqlJoinMaterializedInputBudgetError(control.options, resolved); err != nil {
+				return nil, true, err
+			}
+		}
 		wrapped := wrapSQLSource(source, resolved)
 		metrics.recordScanRows(source, resolved, started)
 		order = append(order, fmt.Sprintf("%s (%d rows; estimate %d)", source.alias, len(resolved), cardinalities[sourceIndex]))
