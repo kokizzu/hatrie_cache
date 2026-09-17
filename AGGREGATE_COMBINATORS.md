@@ -87,6 +87,25 @@ unchanged. The feature is useful when a producer can send one partial state
 instead of every input value; it does not make ordinary aggregate execution
 automatically distributed.
 
+## OrNull aggregates
+
+The ClickHouse-style `OrNull` forms are available for the built-in scalar
+aggregates:
+
+```sql
+FROM events
+SELECT COUNT_OR_NULL(value), SUM_OR_NULL(value), AVG_OR_NULL(value),
+       MIN_OR_NULL(value), MAX_OR_NULL(value)
+```
+
+`COUNT_OR_NULL(*)` returns the filtered row count, but returns `NULL` when no
+row contributes. `COUNT_OR_NULL(value)` counts non-NULL values and returns
+`NULL` when that count is zero. The numeric forms ignore NULL and non-numeric
+values using the ordinary aggregate `sqlNumber` rule and return `NULL` when no
+numeric value contributes. `FILTER (WHERE ...)` is supported. These forms use
+the existing bounded global streaming aggregate path when the query qualifies;
+ordinary aggregate names and their empty-result behavior are unchanged.
+
 ## Arg-extreme states
 
 `ARGMAX_STATE(argument, ordering)` and `ARGMIN_STATE(argument, ordering)` retain

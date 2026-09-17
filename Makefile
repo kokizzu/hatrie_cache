@@ -17719,3 +17719,43 @@ push-ch044:
 
 verify-ch044:
 	@sh ./scripts/deliver-ch044.sh verify
+.PHONY: test-ch036-aggregate-or-null benchmark-ch036-aggregate-or-null-before
+test-ch036-aggregate-or-null:
+	sh ./scripts/test-ch036-aggregate-or-null.sh
+
+benchmark-ch036-aggregate-or-null-before:
+	sh ./scripts/benchmark-ch036-aggregate-or-null-before.sh
+
+.PHONY: format-ch036-aggregate-or-null
+format-ch036-aggregate-or-null:
+	sh ./scripts/format-ch036-aggregate-or-null.sh
+
+.PHONY: test-ch036-aggregate-or-null-package race-ch036-aggregate-or-null vet-ch036-aggregate-or-null benchmark-ch036-aggregate-or-null
+test-ch036-aggregate-or-null-package:
+	sh ./scripts/test-ch036-aggregate-or-null-package.sh
+
+race-ch036-aggregate-or-null:
+	sh ./scripts/race-ch036-aggregate-or-null.sh
+
+vet-ch036-aggregate-or-null:
+	sh ./scripts/vet-ch036-aggregate-or-null.sh
+
+benchmark-ch036-aggregate-or-null:
+	sh ./scripts/benchmark-ch036-aggregate-or-null.sh
+
+.PHONY: review-ch036-aggregate-or-null
+review-ch036-aggregate-or-null:
+	sh ./scripts/review-ch036-aggregate-or-null.sh
+
+.PHONY: stage-ch036-aggregate-or-null commit-ch036-aggregate-or-null push-ch036-aggregate-or-null verify-ch036-aggregate-or-null
+stage-ch036-aggregate-or-null:
+	sh ./scripts/deliver-ch036-aggregate-or-null.sh stage
+
+commit-ch036-aggregate-or-null:
+	sh ./scripts/deliver-ch036-aggregate-or-null.sh commit
+
+push-ch036-aggregate-or-null:
+	sh ./scripts/deliver-ch036-aggregate-or-null.sh push
+
+verify-ch036-aggregate-or-null:
+	sh ./scripts/deliver-ch036-aggregate-or-null.sh verify

@@ -26882,6 +26882,44 @@ BenchmarkCH036AggregateStateMerge-32    4317684  54.57 ns/op 17.00 state-bytes/o
 BenchmarkCH036AggregateStateMerge-32    4362993  57.34 ns/op 17.00 state-bytes/op 32 B/op 2 allocs/op
 ```
 
+<a id="ch-036b-sql-aggregate-ornull"></a>
+### CH-036b SQL Aggregate OrNull
+
+This compares the existing `SUM` with the new `SUM_OR_NULL` over the same
+deterministic 4,096-row integer `VALUES` query on Linux `amd64`, an AMD Ryzen 9
+5950X. Both names use the bounded global streaming aggregate path. Each row is
+executed for five `-benchtime=250ms` samples with `-benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| `SUM` before implementation | 1,892,111 | 2,457,329 | 12,322 | baseline |
+| `SUM` control rerun | 1,863,939 | 2,457,323 | 12,322 | 1.00x |
+| `SUM_OR_NULL` after implementation | 1,568,622 | 2,329,126 | 12,309 | 1.19x faster than control; 1.06x lower heap |
+
+The implementation adds no state field or allocation to the existing streaming
+state: it normalizes the function name to the existing aggregate operation and
+only changes the empty `COUNT` result to `NULL`. The observed run used 13 fewer
+allocations per operation and approximately 128 KB less heap than the control.
+The pre-change baseline was 1.21x slower than the post-change `SUM_OR_NULL`
+sample, so the control rerun is the more conservative comparison; CPU results
+are workload- and machine-dependent and should be rechecked on deployment
+hardware.
+
+Raw output from `make benchmark-ch036-aggregate-or-null` after implementation:
+
+```text
+BenchmarkCH036AggregateBaseline-32     148  1943773 ns/op  2457356 B/op  12322 allocs/op
+BenchmarkCH036AggregateBaseline-32     150  1759269 ns/op  2457320 B/op  12322 allocs/op
+BenchmarkCH036AggregateBaseline-32     165  1812215 ns/op  2457323 B/op  12322 allocs/op
+BenchmarkCH036AggregateBaseline-32     165  1863939 ns/op  2457319 B/op  12322 allocs/op
+BenchmarkCH036AggregateBaseline-32     163  1927664 ns/op  2457356 B/op  12322 allocs/op
+BenchmarkCH036AggregateOrNull-32       194  1555977 ns/op  2329132 B/op  12309 allocs/op
+BenchmarkCH036AggregateOrNull-32       195  1548631 ns/op  2329125 B/op  12309 allocs/op
+BenchmarkCH036AggregateOrNull-32       194  1568622 ns/op  2329126 B/op  12309 allocs/op
+BenchmarkCH036AggregateOrNull-32       200  1622424 ns/op  2329128 B/op  12309 allocs/op
+BenchmarkCH036AggregateOrNull-32       194  1583364 ns/op  2329125 B/op  12309 allocs/op
+```
+
 <a id="ch-037-argmin-argmax-aggregate-state"></a>
 ## CH-037 ARGMIN/ARGMAX Aggregate State
 

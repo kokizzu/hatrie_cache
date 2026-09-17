@@ -3343,7 +3343,11 @@ func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
 			return nil, false
 		}
 		aggregate := sqlStreamAggregate{name: expr.name, filter: expr.filter}
-		switch expr.name {
+		name := expr.name
+		if base, ok := sqlAggregateOrNullBase(name); ok {
+			name = base
+		}
+		switch name {
 		case "COUNT":
 			if len(expr.args) > 1 {
 				return nil, false
@@ -3482,7 +3486,11 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 		updateSQLArgExtreme(aggregate.name, &aggregate.selected, &aggregate.extreme, &aggregate.seen, argument, value, aggregate.collation)
 		return nil
 	}
-	if aggregate.name == "COUNT" && aggregate.arg == nil {
+	name := aggregate.name
+	if base, ok := sqlAggregateOrNullBase(name); ok {
+		name = base
+	}
+	if name == "COUNT" && aggregate.arg == nil {
 		aggregate.count++
 		return nil
 	}
@@ -3490,7 +3498,7 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 	if err := sqlExpressionError(value); err != nil {
 		return err
 	}
-	if aggregate.name == "COUNT" {
+	if name == "COUNT" {
 		if value != nil {
 			aggregate.count++
 		}
@@ -3505,7 +3513,7 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 		return nil
 	}
 	aggregate.count++
-	switch aggregate.name {
+	switch name {
 	case "SUM", "AVG":
 		aggregate.sum += number
 	case "MIN":
@@ -3530,8 +3538,16 @@ func (aggregate sqlStreamAggregate) result() interface{} {
 	if aggregate.argExtremeState != nil {
 		return aggregate.argExtremeState.result(!aggregate.argExtremeStateMerge)
 	}
-	switch aggregate.name {
+	name := aggregate.name
+	orNull := false
+	if base, ok := sqlAggregateOrNullBase(name); ok {
+		name, orNull = base, true
+	}
+	switch name {
 	case "COUNT":
+		if orNull && aggregate.count == 0 {
+			return nil
+		}
 		return aggregate.count
 	case "SUM":
 		if aggregate.seen {
@@ -7467,7 +7483,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
-				case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
+				case "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
 				default:
 					return sqlExpr{}, p.diagnostic(p.current(), "FILTER is only valid on aggregate functions")
 				}
@@ -16846,7 +16862,7 @@ func sqlExprHasAggregate(expr sqlExpr) bool {
 	}
 	if expr.kind == "func" {
 		switch expr.name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
 			return true
 		}
 		for _, arg := range expr.args {
@@ -17161,6 +17177,12 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			return value
 		case "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE":
 			value, err := evalSQLArgExtremeState(expr, group)
+			if err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			return value
+		case "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL":
+			value, err := evalSQLAggregateOrNull(expr, group)
 			if err != nil {
 				return sqlEvaluationFailure(err)
 			}
@@ -17716,7 +17738,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "ARGMIN_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false
