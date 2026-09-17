@@ -55,6 +55,7 @@ type SQLCompiledQueryCache struct {
 	maxBytes   int64
 	bytes      int64
 	entries    map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheEntry
+	canonical  map[sqlCompiledQueryCanonicalCacheKey]sqlCompiledQueryCacheEntry
 	order      *list.List
 	hits       uint64
 	misses     uint64
@@ -67,10 +68,16 @@ type sqlCompiledQueryCacheKey struct {
 	schemaVersion string
 }
 
+type sqlCompiledQueryCanonicalCacheKey struct {
+	key           string
+	schemaVersion string
+}
+
 type sqlCompiledQueryCacheEntry struct {
-	query  *CompiledSQLQuery
-	weight int64
-	order  *list.Element
+	query        *CompiledSQLQuery
+	weight       int64
+	order        *list.Element
+	canonicalKey sqlCompiledQueryCanonicalCacheKey
 }
 
 // CompiledQueryCache is the package-native short name for
@@ -89,6 +96,7 @@ func NewSQLCompiledQueryCache(options SQLCompiledQueryCacheOptions) (*SQLCompile
 		maxEntries: options.MaxEntries,
 		maxBytes:   options.MaxBytes,
 		entries:    make(map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheEntry),
+		canonical:  make(map[sqlCompiledQueryCanonicalCacheKey]sqlCompiledQueryCacheEntry),
 		order:      list.New(),
 	}, nil
 }
@@ -119,6 +127,20 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 	}
 	cache.mu.Unlock()
 
+	canonical, err := sqlPreparedQueryCacheKey(source, schemaVersion)
+	if err != nil {
+		return nil, err
+	}
+	canonicalKey := sqlCompiledQueryCanonicalCacheKey{key: canonical, schemaVersion: schemaVersion}
+	cache.mu.Lock()
+	if entry, ok := cache.canonical[canonicalKey]; ok {
+		cache.hits++
+		cache.order.MoveToBack(entry.order)
+		cache.mu.Unlock()
+		return entry.query, nil
+	}
+	cache.mu.Unlock()
+
 	query, err := CompileSQLQuery(source)
 	if err != nil {
 		return nil, err
@@ -128,6 +150,11 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	if entry, ok := cache.entries[key]; ok {
+		cache.hits++
+		cache.order.MoveToBack(entry.order)
+		return entry.query, nil
+	}
+	if entry, ok := cache.canonical[canonicalKey]; ok {
 		cache.hits++
 		cache.order.MoveToBack(entry.order)
 		return entry.query, nil
@@ -146,12 +173,14 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 		oldEntry := cache.entries[oldKey]
 		cache.order.Remove(oldest)
 		delete(cache.entries, oldKey)
+		delete(cache.canonical, oldEntry.canonicalKey)
 		cache.bytes -= oldEntry.weight
 		cache.evictions++
 	}
-	entry := sqlCompiledQueryCacheEntry{query: query, weight: weight}
+	entry := sqlCompiledQueryCacheEntry{query: query, weight: weight, canonicalKey: canonicalKey}
 	entry.order = cache.order.PushBack(key)
 	cache.entries[key] = entry
+	cache.canonical[canonicalKey] = entry
 	cache.bytes += weight
 	return query, nil
 }
@@ -206,6 +235,7 @@ func (cache *SQLCompiledQueryCache) invalidateSchemaVersion(scoped bool, schemaV
 		}
 		cache.order.Remove(entry.order)
 		delete(cache.entries, key)
+		delete(cache.canonical, entry.canonicalKey)
 		cache.bytes -= entry.weight
 		removed++
 	}

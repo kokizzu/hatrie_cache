@@ -23748,6 +23748,70 @@ execution harness, so the comparison isolates scan-versus-postings work. The
 indexed result still includes SQL parsing, candidate materialization, and the
 final predicate recheck.
 
+## MZ-045 Canonical Compiled-Plan Equivalence
+
+Command: `make benchmark-mz045`.
+
+This workload compiles 64 SQL strings that have identical token meaning but
+different whitespace. The old exact-source cache parsed each variant. The new
+cache parses one representative and reuses its immutable compiled plan through
+the token-normalized key. Each run used five benchmark samples on Linux/amd64
+with an AMD Ryzen 9 5950X and `-benchmem`; one benchmark iteration is the full
+64-query workload.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct compile of all 64 variants | 494,588 ns/op | 466,389 ns/op | 1.06x faster | 440,962 B/op, 1,759 allocs | 440,961 B/op, 1,759 allocs |
+| Exact-source cache of all 64 variants | 550,689 ns/op | 164,561 ns/op | **3.35x faster** | 446,114 B/op, 1,887 allocs | 175,898 B/op, 592 allocs |
+
+The before cache was slower than direct compilation because all 64 variants
+missed independently. After canonical reuse, the cache is 2.83x faster than
+the after direct-compile control, uses 2.53x less benchmark heap, and performs
+3.19x fewer allocations than the before cache. Exact-source cache hits retain
+their pre-existing no-parse path.
+
+A later five-sample repeat of the exact-source hit control measured a median
+27.70 ns/op with 0 B/op and 0 allocs/op, confirming that the canonical fallback
+does not enter the exact-source hot path.
+
+Raw output from the before run:
+
+```text
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2701  505574 ns/op  440969 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2509  489369 ns/op  440962 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2122  510597 ns/op  440961 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2378  494588 ns/op  440961 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2456  482261 ns/op  440962 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            1971  515583 ns/op  446117 B/op  1887 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            2026  552220 ns/op  446114 B/op  1887 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            2205  550689 ns/op  446114 B/op  1887 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            1921  546942 ns/op  446117 B/op  1887 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            2043  580664 ns/op  446099 B/op  1887 allocs/op
+```
+
+Raw output from the after run:
+
+```text
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2443  457021 ns/op  440967 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2539  451263 ns/op  440962 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2232  513205 ns/op  440962 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2455  501663 ns/op  440961 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCompileBaseline-32  2229  466389 ns/op  440961 B/op  1759 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            6079  165539 ns/op  175898 B/op  592 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            6852  160963 ns/op  175898 B/op  592 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            8714  161808 ns/op  175898 B/op  592 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            6360  164561 ns/op  175898 B/op  592 allocs/op
+BenchmarkMZ045EquivalentPlanCache-32            7380  170536 ns/op  175898 B/op  592 allocs/op
+BenchmarkMZ045ExactPlanCacheHit-32              46214101  27.30 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ExactPlanCacheHit-32              41531931  27.70 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ExactPlanCacheHit-32              42043654  28.17 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ExactPlanCacheHit-32              37129914  27.97 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ExactPlanCacheHit-32              41618862  27.43 ns/op  0 B/op  0 allocs/op
+```
+
+The implementation is opt-in through the existing compiled-plan cache option;
+queries with different literals or schema versions cannot alias.
+
 ## TT-020 Generic Multi-Part Ordered Ranges
 
 Command: `make benchmark-tt020`.

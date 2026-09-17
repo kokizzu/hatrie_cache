@@ -38,6 +38,42 @@ commit-tt020:
 .PHONY: push-tt020
 push-tt020:
 	@sh ./scripts/push-tt020.sh
+
+.PHONY: test-mz045
+test-mz045:
+	@sh ./scripts/test-mz045.sh test
+
+.PHONY: test-mz045-package
+test-mz045-package:
+	@sh ./scripts/test-mz045.sh package
+
+.PHONY: benchmark-mz045
+benchmark-mz045:
+	@sh ./scripts/test-mz045.sh benchmark
+
+.PHONY: race-mz045
+race-mz045:
+	@sh ./scripts/test-mz045.sh race
+
+.PHONY: vet-mz045
+vet-mz045:
+	@sh ./scripts/test-mz045.sh vet
+
+.PHONY: format-mz045
+format-mz045:
+	@sh ./scripts/test-mz045.sh format
+
+.PHONY: stage-mz045
+stage-mz045:
+	@sh ./scripts/stage-mz045.sh
+
+.PHONY: commit-mz045
+commit-mz045:
+	@sh ./scripts/commit-mz045.sh
+
+.PHONY: push-mz045
+push-mz045:
+	@sh ./scripts/push-mz045.sh
 .PHONY: test-chu04-c243
 test-chu04-c243:
 	@bash ./scripts/test-chu04-c243.sh

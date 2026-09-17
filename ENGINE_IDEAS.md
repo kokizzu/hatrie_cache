@@ -127,7 +127,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-042 | Dependency invalidation graph | Implemented as an automatic reverse source-to-view index for `MaterializedViews.RefreshChanged`; affected candidates are deduplicated and still sorted/published atomically. | Medium |
 | MZ-043 | Transactional DDL dependencies | DDL cannot atomically create/alter a source, view, index, and dependent sink plan. | High |
 | MZ-044 | Costed dataflow explanation | Explain output lacks arrangement cost, frontier, and memory estimates. | Medium |
-| MZ-045 | Workload plan equivalence | Query fingerprints are not linked to canonical plan and arrangement reuse decisions. | Low |
+| MZ-045 | Workload plan equivalence | Partially implemented through `SQLCompiledQueryCache`: equivalent whitespace and keyword-casing token streams share one bounded compiled plan while literal values and schema versions remain distinct; query-fingerprint-to-arrangement reuse is still open. | Low |
 | MZ-046 | Frontier-aware cancellation | A query cannot cancel after a specified freshness or result frontier is reached. | Low |
 | MZ-047 | Session compute routing | Client sessions cannot choose a named compute cluster for an operation. | Medium |
 | MZ-048 | Connector secret rotation | Source/sink credentials cannot rotate without stopping the maintained dataflow. | Medium |
