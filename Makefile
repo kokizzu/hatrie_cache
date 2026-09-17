@@ -18561,3 +18561,13 @@ commit-mu024-workload-priority:
 	bash ./scripts/commit-mu024-workload-priority.sh
 push-mu024-workload-priority:
 	bash ./scripts/push-mu024-workload-priority.sh
+verify-mu025-query-history:
+	bash ./scripts/verify-mu025-query-history.sh
+review-mu025-query-history:
+	bash ./scripts/review-mu025-query-history.sh
+stage-mu025-query-history:
+	bash ./scripts/stage-mu025-query-history.sh
+commit-mu025-query-history:
+	bash ./scripts/commit-mu025-query-history.sh
+push-mu025-query-history:
+	bash ./scripts/push-mu025-query-history.sh
