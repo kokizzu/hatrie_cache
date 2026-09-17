@@ -9,7 +9,9 @@ git add BENCHMARK.md Makefile MU014_DEPENDENCY_CATALOG.md PRODUCT_IDEA_GAPS.md R
   hat/hatSql/mu014_object_dependency_catalog_test.go \
   scripts/benchmark-mu014-baseline.sh \
   scripts/benchmark-mu014-object-dependency-catalog.sh \
+  scripts/commit-mu014-object-dependency-catalog.sh \
   scripts/format-mu014-object-dependency-catalog.sh \
+  scripts/push-mu014-object-dependency-catalog.sh \
   scripts/race-mu014-object-dependency-catalog.sh \
   scripts/stage-mu014-object-dependency-catalog.sh \
   scripts/test-mu014-object-dependency-catalog.sh \
