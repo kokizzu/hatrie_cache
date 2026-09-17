@@ -17880,8 +17880,41 @@ status-tr008-journal-encryption:
 test-ch017-projection-advisor:
 	sh ./scripts/test-ch017-projection-advisor.sh
 
+test-chu16-adaptive-dictionary:
+	sh ./scripts/test-chu16-adaptive-dictionary.sh
+
 benchmark-ch017-projection-advisor:
 	sh ./scripts/benchmark-ch017-projection-advisor.sh
+
+benchmark-chu16-adaptive-dictionary:
+	sh ./scripts/benchmark-chu16-adaptive-dictionary.sh
+
+format-chu16-adaptive-dictionary:
+	sh ./scripts/format-chu16-adaptive-dictionary.sh
+
+test-chu16-package:
+	sh ./scripts/test-chu16-package.sh
+
+race-chu16-adaptive-dictionary:
+	sh ./scripts/race-chu16-adaptive-dictionary.sh
+
+vet-chu16-adaptive-dictionary:
+	sh ./scripts/vet-chu16-adaptive-dictionary.sh
+
+review-chu16-adaptive-dictionary:
+	sh ./scripts/review-chu16-adaptive-dictionary.sh
+
+stage-chu16-adaptive-dictionary:
+	sh ./scripts/stage-chu16-adaptive-dictionary.sh
+
+commit-chu16-adaptive-dictionary:
+	sh ./scripts/commit-chu16-adaptive-dictionary.sh
+
+push-chu16-adaptive-dictionary:
+	sh ./scripts/push-chu16-adaptive-dictionary.sh
+
+delivery-chu16-adaptive-dictionary:
+	sh ./scripts/delivery-chu16-adaptive-dictionary.sh
 
 format-ch017-projection-advisor:
 	sh ./scripts/format-ch017-projection-advisor.sh

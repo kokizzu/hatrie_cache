@@ -38,8 +38,18 @@ type TypedTableColumn struct {
 	Name              string
 	Kind              TypedTableKind
 	DictionaryEncoded bool
-	Generated         TypedTableGeneratedFunc
+	// DictionaryAdaptive samples the first bounded batch of string rows and
+	// promotes the column only when the observed cardinality is low enough to
+	// justify dictionary storage. DictionaryEncoded takes precedence.
+	DictionaryAdaptive bool
+	Generated          TypedTableGeneratedFunc
 }
+
+const (
+	typedTableDictionaryProbeRows                = 256
+	typedTableDictionaryProbeDistinctDenominator = 8
+	typedTableDictionaryProbeMaxDistinct         = typedTableDictionaryProbeRows / typedTableDictionaryProbeDistinctDenominator
+)
 
 const (
 	typedTableColumnarCacheDefaultMaxBytes                  = 4 << 20
@@ -125,6 +135,7 @@ type typedTableColumnStorage struct {
 	kind                TypedTableKind
 	strings             []string
 	dictionary          bool
+	adaptiveDictionary  *typedTableDictionaryProbe
 	dictionaryValues    []string
 	dictionaryCodes     []uint32
 	dictionaryPositions map[string]uint32
@@ -134,6 +145,11 @@ type typedTableColumnStorage struct {
 	floats              []float64
 	bools               []bool
 	valid               []bool
+}
+
+type typedTableDictionaryProbe struct {
+	rows   int
+	values []string
 }
 
 type typedTableColumnarLayout struct {
@@ -167,6 +183,7 @@ func (storage *typedTableColumnStorage) append(value TypedTableValue) {
 			}
 		} else {
 			storage.strings = append(storage.strings, value.String)
+			storage.observeAdaptiveDictionary(value)
 		}
 	case TypedTableInt64:
 		storage.int64s = append(storage.int64s, value.Int64)
@@ -193,6 +210,7 @@ func (storage *typedTableColumnStorage) set(index int, value TypedTableValue) {
 			}
 		} else {
 			storage.strings[index] = value.String
+			storage.noteAdaptiveDictionaryValue(value)
 		}
 	case TypedTableInt64:
 		storage.int64s[index] = value.Int64
@@ -208,7 +226,9 @@ func (storage *typedTableColumnStorage) value(index int) TypedTableValue {
 	switch storage.kind {
 	case TypedTableString:
 		if storage.dictionary {
-			value.String = storage.dictionaryValues[storage.dictionaryCodes[index]]
+			if value.Valid {
+				value.String = storage.dictionaryValues[storage.dictionaryCodes[index]]
+			}
 		} else {
 			value.String = storage.strings[index]
 		}
@@ -314,6 +334,76 @@ func (storage *typedTableColumnStorage) releaseDictionaryValue(code uint32) {
 	storage.dictionaryFree = append(storage.dictionaryFree, code)
 }
 
+func (storage *typedTableColumnStorage) observeAdaptiveDictionary(value TypedTableValue) {
+	probe := storage.adaptiveDictionary
+	if probe == nil {
+		return
+	}
+	probe.rows++
+	probe.observe(value)
+	if len(probe.values) > typedTableDictionaryProbeMaxDistinct {
+		storage.adaptiveDictionary = nil
+		return
+	}
+	if probe.rows < typedTableDictionaryProbeRows {
+		return
+	}
+	if len(probe.values)*typedTableDictionaryProbeDistinctDenominator > probe.rows {
+		storage.adaptiveDictionary = nil
+		return
+	}
+	storage.promoteAdaptiveDictionary()
+}
+
+func (storage *typedTableColumnStorage) noteAdaptiveDictionaryValue(value TypedTableValue) {
+	if storage.adaptiveDictionary == nil || !value.Valid {
+		return
+	}
+	storage.adaptiveDictionary.observe(value)
+}
+
+func (probe *typedTableDictionaryProbe) observe(value TypedTableValue) {
+	if !value.Valid {
+		return
+	}
+	for _, existing := range probe.values {
+		if existing == value.String {
+			return
+		}
+	}
+	probe.values = append(probe.values, value.String)
+}
+
+func (storage *typedTableColumnStorage) promoteAdaptiveDictionary() {
+	values := storage.strings
+	positions := make(map[string]uint32, len(storage.adaptiveDictionary.values))
+	dictionaryValues := make([]string, 0, len(storage.adaptiveDictionary.values))
+	dictionaryCounts := make([]uint32, 0, len(storage.adaptiveDictionary.values))
+	codes := make([]uint32, len(values))
+	for index, value := range values {
+		if !storage.valid[index] {
+			continue
+		}
+		code, found := positions[value]
+		if !found {
+			code = uint32(len(dictionaryValues))
+			positions[value] = code
+			dictionaryValues = append(dictionaryValues, value)
+			dictionaryCounts = append(dictionaryCounts, 0)
+		}
+		codes[index] = code
+		dictionaryCounts[code]++
+	}
+	storage.dictionary = true
+	storage.strings = nil
+	storage.dictionaryValues = dictionaryValues
+	storage.dictionaryCodes = codes
+	storage.dictionaryPositions = positions
+	storage.dictionaryCounts = dictionaryCounts
+	storage.dictionaryFree = nil
+	storage.adaptiveDictionary = nil
+}
+
 // TypedTable is a schema-checked row store with per-column primitive slices.
 // It is opt-in and implements the established source-resolver contracts.
 type TypedTable struct {
@@ -390,6 +480,8 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		table.columns[index].dictionary = column.Kind == TypedTableString && column.DictionaryEncoded
 		if table.columns[index].dictionary {
 			table.columns[index].dictionaryPositions = make(map[string]uint32)
+		} else if column.Kind == TypedTableString && column.DictionaryAdaptive {
+			table.columns[index].adaptiveDictionary = &typedTableDictionaryProbe{}
 		}
 	}
 	table.storageEvents = newTypedTableStorageEventLog(schema.StorageEvents)

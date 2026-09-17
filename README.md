@@ -4312,3 +4312,7 @@ measurements in [BENCHMARK.md](BENCHMARK.md#c229-join-overflow-policy).
 ## Workload-Driven Projection Advice
 
 The optional `hatSql.SQLProjectionAdvisor` identifies repeated slow `CACHE` query shapes and reports the fields used by projection, filters, `GROUP BY`, and `ORDER BY`. It is bounded, privacy-safe, and advisory only: it never creates storage or changes query execution. See [CH017_PROJECTION_ADVISOR.md](CH017_PROJECTION_ADVISOR.md) and the measured cost in [BENCHMARK.md](BENCHMARK.md#ch-17-workload-driven-projection-advisor).
+
+## Adaptive Low-Cardinality Storage
+
+`hatSql.TypedTableColumn.DictionaryAdaptive` can probe the first bounded batch of a string column and select the existing dictionary representation only when observed cardinality is low. It is opt-in, keeps high-cardinality data in the plain representation, and leaves `DictionaryEncoded` precedence and all defaults unchanged. See [CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md) and the benchmark in [BENCHMARK.md](BENCHMARK.md#chu16-adaptive-low-cardinality-string-storage).

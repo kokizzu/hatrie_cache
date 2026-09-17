@@ -28941,6 +28941,34 @@ Representative enabled-advisor query: one `CACHE` source, `SUM`, `WHERE`, `GROUP
 
 The CPU medians overlap normal benchmark noise, while the advisor adds 496 bytes and 19 allocations per observed slow query. This is an opt-in diagnostic cost; the default `ProjectionAdvisor: nil` path is unchanged. The advisor avoids an unsafe automatic projection decision, so disk usage and refresh work remain caller-controlled.
 
+## CHU16 Adaptive Low-Cardinality String Storage
+
+Command: `make benchmark-chu16-adaptive-dictionary`
+
+This benchmark creates a typed table and upserts 512 rows per iteration on Linux amd64, AMD Ryzen 9 5950X; five samples; `-benchmem`. Adaptive admission is enabled only for the adaptive rows. `B/op` is cumulative benchmark allocation, not retained heap.
+
+| Layout | Median ns/op | B/op | allocs/op | CPU vs matching plain | B/op vs matching plain |
+|---|---:|---:|---:|---:|---:|
+| Plain repeated | 164,845 | 241,585 | 1,083 | 1.00x | 1.00x |
+| Adaptive repeated | 168,034 | 235,513 | 1,090 | 1.02x | 0.97x |
+| Plain unique | 166,011 | 241,585 | 1,083 | 1.00x | 1.00x |
+| Adaptive unique | 163,393 | 243,777 | 1,091 | 0.98x | 1.01x |
+| Static dictionary repeated | 170,459 | 227,152 | 1,086 | 1.03x | 0.94x |
+| Static dictionary unique | 219,635 | 304,169 | 1,118 | 1.32x | 1.26x |
+
+Raw `ns/op` samples:
+
+```text
+plain-repeated:       169049 161700 167332 164845 161204
+plain-unique:         167385 165035 166011 165529 166950
+dictionary-repeated:  168640 171035 172627 170459 168088
+dictionary-unique:    225222 219635 215296 218189 222349
+adaptive-repeated:    163588 170980 172922 167578 168034
+adaptive-unique:      162729 163393 167420 166593 161480
+```
+
+Adaptive mode avoids the static dictionary's 1.32x CPU and 1.26x cumulative-allocation penalty on unique values. Its one-time probe is approximately 1.02x the repeated plain CPU median and 1.01x the unique plain allocation median. A promoted column stores one dictionary value plus one 4-byte code per row; the benchmark keeps precomputed input strings alive, so these `B/op` figures do not represent the full retained-backing reduction possible with independently allocated repeated inputs. See [CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md).
+
 Raw benchmark samples before shape capture:
 
 ```text
