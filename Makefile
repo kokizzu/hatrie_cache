@@ -17981,3 +17981,32 @@ push-chu40-dependency-invalidation:
 	sh ./scripts/push-chu40-dependency-invalidation.sh
 
 delivery-chu40-dependency-invalidation: format-chu40-dependency-invalidation test-chu40-dependency-invalidation benchmark-chu40-dependency-invalidation race-chu40-dependency-invalidation vet-chu40-dependency-invalidation review-chu40-dependency-invalidation stage-chu40-dependency-invalidation commit-chu40-dependency-invalidation push-chu40-dependency-invalidation
+
+test-chu25-query-spill-quota:
+	sh ./scripts/test-chu25-query-spill-quota.sh
+
+benchmark-chu25-query-spill-quota:
+	sh ./scripts/benchmark-chu25-query-spill-quota.sh
+
+format-chu25-query-spill-quota:
+	sh ./scripts/format-chu25-query-spill-quota.sh
+
+race-chu25-query-spill-quota:
+	sh ./scripts/race-chu25-query-spill-quota.sh
+
+vet-chu25-query-spill-quota:
+	sh ./scripts/vet-chu25-query-spill-quota.sh
+
+review-chu25-query-spill-quota:
+	sh ./scripts/review-chu25-query-spill-quota.sh
+
+stage-chu25-query-spill-quota:
+	sh ./scripts/stage-chu25-query-spill-quota.sh
+
+commit-chu25-query-spill-quota:
+	sh ./scripts/commit-chu25-query-spill-quota.sh
+
+push-chu25-query-spill-quota:
+	sh ./scripts/push-chu25-query-spill-quota.sh
+
+delivery-chu25-query-spill-quota: format-chu25-query-spill-quota test-chu25-query-spill-quota benchmark-chu25-query-spill-quota race-chu25-query-spill-quota vet-chu25-query-spill-quota review-chu25-query-spill-quota stage-chu25-query-spill-quota commit-chu25-query-spill-quota push-chu25-query-spill-quota

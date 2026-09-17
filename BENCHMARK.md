@@ -29017,3 +29017,41 @@ selective mutation invalidation and immediate release of affected entries;
 workloads with many sources or expensive version lookups avoid that callback
 entirely. The opt-in index has no default-cache allocation or behavior cost.
 See [CHU40_DEPENDENCY_INVALIDATION.md](CHU40_DEPENDENCY_INVALIDATION.md).
+
+## CHU25 Query-Wide Spill Quota
+
+Command: `make benchmark-chu25-query-spill-quota`
+
+This benchmark compares the existing spill path with the opt-in query-wide
+live-byte ledger on Linux amd64, AMD Ryzen 9 5950X; `-cpu=1`; five samples;
+`-benchmem`. The workload sorts 128 rows through temporary files with a
+128-byte in-memory threshold. The ledger is shared across all spill writers,
+but this focused workload exercises the external sort path.
+
+| Mode | Median ns/op | Median B/op | Median allocs/op | CPU vs disabled | B/op vs disabled | Allocs vs disabled |
+|---|---:|---:|---:|---:|---:|---:|
+| Quota disabled | 13,752,939 | 2,449,695 | 39,367 | 1.00x | 1.00x | 1.00x |
+| Quota enabled | 12,983,863 | 2,463,238 | 39,381 | 0.94x | 1.01x | 1.00x |
+
+The opt-in quota measured 0.94x CPU, 1.01x cumulative allocation bytes, and
+1.00x allocations here; the CPU difference is within the run-to-run noise of
+this storage-heavy microbenchmark and is not a claimed speedup. It bounds live
+temporary data across spill operators and releases capacity when merge inputs
+are removed. The zero value keeps the existing independent `MaxSpillBytes`
+path. See [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md).
+
+### Raw Output
+
+```text
+make benchmark-chu25-query-spill-quota
+BenchmarkCHU25QuerySpillQuota/quota-disabled          82  13104629 ns/op  2449690 B/op  39367 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-disabled          74  13951483 ns/op  2449695 B/op  39367 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-disabled          93  12768790 ns/op  2449688 B/op  39367 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-disabled          92  13752939 ns/op  2449752 B/op  39367 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-disabled         100  14771256 ns/op  2449698 B/op  39367 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-enabled          100  13559285 ns/op  2463238 B/op  39381 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-enabled           79  12983863 ns/op  2463237 B/op  39381 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-enabled           92  13192046 ns/op  2463239 B/op  39381 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-enabled          100  12218868 ns/op  2463240 B/op  39381 allocs/op
+BenchmarkCHU25QuerySpillQuota/quota-enabled           97  12055661 ns/op  2463232 B/op  39381 allocs/op
+```

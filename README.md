@@ -163,6 +163,7 @@ security guidance before exposing it on a network.
 - Changefeed progress frontiers: [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md)
 - Durable changefeed checkpoints: [CHANGEFEED_CHECKPOINT.md](CHANGEFEED_CHECKPOINT.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
+- Query-wide live SQL spill quotas: [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
 - ClickHouse-style opt-in two-level columnar aggregation: [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md)
@@ -4326,3 +4327,14 @@ remains available. `SQLQueryOptions.ResultCacheExplicitInvalidation` can skip
 source-version reads when every mutation notification is guaranteed. See
 [CHU40_DEPENDENCY_INVALIDATION.md](CHU40_DEPENDENCY_INVALIDATION.md) and the
 raw measurements in [BENCHMARK.md](BENCHMARK.md#chu40-dependency-aware-result-invalidation).
+
+## Query-Wide Spill Quota
+
+`SQLQueryOptions.MaxQuerySpillBytes` is an opt-in live-byte quota shared by
+sort, DISTINCT/set, GROUP BY, and partitioned hash-join spill files created by
+one query. Keep `MaxSpillBytes` configured for the operator as before; set the
+new field when several spill stages must share one disk budget. Zero preserves
+the existing per-operator behavior. Failed and canceled queries clean their
+temporary files; process-crash orphan handling remains the responsibility of
+the spill-directory lifecycle. See [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
+and the raw measurements in [BENCHMARK.md](BENCHMARK.md#chu25-query-wide-spill-quota).

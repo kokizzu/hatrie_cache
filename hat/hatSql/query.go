@@ -259,6 +259,10 @@ type SQLQueryOptions struct {
 	// safe in-memory budget failure. Temporary files are removed before return.
 	SpillDirectory string
 	MaxSpillBytes  int
+	// MaxQuerySpillBytes bounds live encoded spill bytes across every spill
+	// operator in one query. Zero preserves the independent MaxSpillBytes
+	// budgets and keeps the shared quota path disabled.
+	MaxQuerySpillBytes int64
 	// SpillFaults is an optional per-query external-sort I/O hook. It exists
 	// for deterministic fault-injection and chaos tests; production callers
 	// normally leave it nil.
@@ -486,6 +490,14 @@ const maxSQLSpillMergeFanIn = 32
 const sqlSpillHashPartitions = 64
 
 var errSQLSpillDiskBudget = errors.New("SQL spill disk budget exceeded")
+var errSQLQuerySpillDiskBudget = fmt.Errorf("%w: query spill budget exceeded", errSQLSpillDiskBudget)
+
+func sqlSpillBudgetError(err error, action string) error {
+	if errors.Is(err, errSQLQuerySpillDiskBudget) {
+		return fmt.Errorf("SQL query spill disk budget exceeded while %s: %w", action, err)
+	}
+	return fmt.Errorf("SQL spill disk budget exceeded while %s: %w", action, err)
+}
 
 type sqlSpillHashInput struct {
 	Row     SQLRow
@@ -1639,7 +1651,7 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 	paths := map[string]struct{}{}
 	defer func() {
 		for path := range paths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	runs := []sqlSpillRun{}
@@ -1699,7 +1711,7 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 			}
 			paths[merged.path] = struct{}{}
 			for _, run := range runs[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("remove SQL set spill file: %w", err)
 				}
 				delete(paths, run.path)
@@ -1794,7 +1806,7 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 	}
 	closeSQLSpillSetReaders(readers)
 	for _, run := range runs {
-		if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove SQL set spill file: %w", err)
 		}
 		delete(paths, run.path)
@@ -1813,7 +1825,7 @@ func executeSQLExternalSetStream(ctx context.Context, query *sqlQuery, resolver 
 			}
 			paths[merged.path] = struct{}{}
 			for _, run := range ordinalRuns[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("remove SQL set ordinal spill file: %w", err)
 				}
 				delete(paths, run.path)
@@ -1859,7 +1871,7 @@ func executeSQLExternalSetChainStream(ctx context.Context, query *sqlQuery, reso
 	paths := map[string]struct{}{}
 	defer func() {
 		for path := range paths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	runs, columns, err := sqlBuildExternalSetChainRuns(ctx, query, resolver, control, &available, paths)
@@ -1898,7 +1910,9 @@ func sqlBuildExternalSetChainRuns(ctx context.Context, query *sqlQuery, resolver
 			return emit(record.Row)
 		})
 	}
-	cleanRight := func() error { return sqlReleaseSpillRuns(rightRuns, available, paths, "set stage input") }
+	cleanRight := func() error {
+		return sqlReleaseSpillRuns(rightRuns, available, control.spillQuota, paths, "set stage input")
+	}
 	runs, err := sqlSpillExternalSetStage(leftStream, rightStream, cleanRight, union.kind, sqlQueryCollation(query), control, available, paths)
 	if err != nil {
 		return nil, nil, err
@@ -2008,7 +2022,7 @@ func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func()
 				return nil, err
 			}
 			paths[merged.path] = struct{}{}
-			if err := sqlReleaseSpillRuns(runs[start:end], available, paths, "set spill file"); err != nil {
+			if err := sqlReleaseSpillRuns(runs[start:end], available, control.spillQuota, paths, "set spill file"); err != nil {
 				return nil, err
 			}
 			next = append(next, merged)
@@ -2091,7 +2105,7 @@ func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func()
 		return nil, err
 	}
 	closeSQLSpillSetReaders(readers)
-	if err := sqlReleaseSpillRuns(runs, available, paths, "set spill file"); err != nil {
+	if err := sqlReleaseSpillRuns(runs, available, control.spillQuota, paths, "set spill file"); err != nil {
 		return nil, err
 	}
 	for len(ordinalRuns) > maxSQLSpillMergeFanIn {
@@ -2106,7 +2120,7 @@ func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func()
 				return nil, err
 			}
 			paths[merged.path] = struct{}{}
-			if err := sqlReleaseSpillRuns(ordinalRuns[start:end], available, paths, "set ordinal spill file"); err != nil {
+			if err := sqlReleaseSpillRuns(ordinalRuns[start:end], available, control.spillQuota, paths, "set ordinal spill file"); err != nil {
 				return nil, err
 			}
 			next = append(next, merged)
@@ -2116,9 +2130,9 @@ func sqlSpillExternalSetStage(left, right sqlSpillRowStream, releaseRight func()
 	return ordinalRuns, nil
 }
 
-func sqlReleaseSpillRuns(runs []sqlSpillRun, available *int64, paths map[string]struct{}, label string) error {
+func sqlReleaseSpillRuns(runs []sqlSpillRun, available *int64, quota *sqlSpillQuota, paths map[string]struct{}, label string) error {
 	for _, run := range runs {
-		if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := sqlRemoveSpillFile(run.path, quota); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove SQL %s: %w", label, err)
 		}
 		delete(paths, run.path)
@@ -2959,7 +2973,7 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 	allPaths := map[string]struct{}{}
 	defer func() {
 		for path := range allPaths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	runs := []sqlSpillRun{}
@@ -3045,7 +3059,7 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 			}
 			allPaths[merged.path] = struct{}{}
 			for _, run := range runs[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("remove SQL sort spill file: %w", err)
 				}
 				delete(allPaths, run.path)
@@ -3110,7 +3124,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 	allPaths := map[string]struct{}{}
 	defer func() {
 		for path := range allPaths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	keyRuns := []sqlSpillRun{}
@@ -3189,7 +3203,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 			}
 			allPaths[merged.path] = struct{}{}
 			for _, run := range keyRuns[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("remove SQL DISTINCT spill file: %w", err)
 				}
 				delete(allPaths, run.path)
@@ -3265,7 +3279,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 		return err
 	}
 	for _, run := range keyRuns {
-		if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove SQL DISTINCT spill file: %w", err)
 		}
 		delete(allPaths, run.path)
@@ -3284,7 +3298,7 @@ func executeSQLExternalDistinctStream(ctx context.Context, query *sqlQuery, reso
 			}
 			allPaths[merged.path] = struct{}{}
 			for _, run := range ordinalRuns[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("remove SQL DISTINCT ordinal spill file: %w", err)
 				}
 				delete(allPaths, run.path)
@@ -4831,7 +4845,7 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 	paths := map[string]struct{}{}
 	defer func() {
 		for path := range paths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	leftParts, err := newSQLSpillHashPartitions(control.options.SpillDirectory, "hatrie-sql-hash-left-*", &available, paths, control)
@@ -5198,7 +5212,7 @@ func newSQLSpillHashPartitions(directory, pattern string, available *int64, path
 		encoder, err := newSQLSpillEncoder(file, available, control, "hash")
 		if err != nil {
 			_ = file.Close()
-			_ = os.Remove(file.Name())
+			_ = sqlRemoveSpillFile(file.Name(), sqlSpillQuotaFor(control))
 			closeSQLSpillHashPartitions(partitions[:index])
 			return nil, err
 		}
@@ -5209,7 +5223,7 @@ func newSQLSpillHashPartitions(directory, pattern string, available *int64, path
 			if err != nil {
 				_ = encoder.Close()
 				_ = file.Close()
-				_ = os.Remove(file.Name())
+				_ = sqlRemoveSpillFile(file.Name(), sqlSpillQuotaFor(control))
 				closeSQLSpillHashPartitions(partitions[:index])
 				return nil, fmt.Errorf("initialize SQL hash spill Bloom filter: %w", err)
 			}
@@ -5223,7 +5237,7 @@ func newSQLSpillHashPartitions(directory, pattern string, available *int64, path
 func writeSQLSpillHashInput(partition sqlSpillHashPartition, input sqlSpillHashInput) error {
 	if err := partition.encoder.Encode(input); err != nil {
 		if errors.Is(err, errSQLSpillDiskBudget) {
-			return fmt.Errorf("SQL spill disk budget exceeded while writing hash partitions")
+			return sqlSpillBudgetError(err, "writing hash partitions")
 		}
 		return fmt.Errorf("write SQL hash spill partition: %w", err)
 	}
@@ -8085,6 +8099,7 @@ type sqlExecutionControl struct {
 	joinWork   int
 	sources    map[string][]SQLRow
 	arena      sqlExecutionArena
+	spillQuota *sqlSpillQuota
 	yieldEvery uint64
 	yieldFuel  atomic.Uint64
 	yields     atomic.Uint64
@@ -8132,7 +8147,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
@@ -8146,6 +8161,9 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
 		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}
+		if options.MaxQuerySpillBytes > 0 {
+			control.spillQuota = newSQLSpillQuota(options.MaxQuerySpillBytes)
+		}
 		if options.OperatorYieldEvery > 0 {
 			control.yieldEvery = uint64(options.OperatorYieldEvery)
 			control.yieldFuel.Store(control.yieldEvery)
@@ -14642,6 +14660,8 @@ func sqlGroupedRowsBytes(groups [][]sqlExecRow) int {
 type sqlSpillBudgetWriter struct {
 	writer    io.Writer
 	available *int64
+	quota     *sqlSpillQuota
+	path      string
 	faults    *SQLSpillFaults
 	kind      string
 }
@@ -14662,11 +14682,33 @@ func (writer sqlSpillBudgetWriter) Write(data []byte) (int, error) {
 			break
 		}
 	}
+	if writer.quota != nil && !writer.quota.reserve(writer.path, reserved) {
+		atomic.AddInt64(writer.available, reserved)
+		return 0, errSQLQuerySpillDiskBudget
+	}
 	written, err := writer.writer.Write(data)
 	if refund := reserved - int64(written); refund != 0 {
 		atomic.AddInt64(writer.available, refund)
+		if writer.quota != nil {
+			writer.quota.refund(writer.path, refund)
+		}
 	}
 	return written, err
+}
+
+func sqlSpillQuotaFor(control *sqlExecutionControl) *sqlSpillQuota {
+	if control == nil {
+		return nil
+	}
+	return control.spillQuota
+}
+
+func sqlRemoveSpillFile(path string, quota *sqlSpillQuota) error {
+	err := os.Remove(path)
+	if quota != nil && (err == nil || errors.Is(err, os.ErrNotExist)) {
+		quota.release(path)
+	}
+	return err
 }
 
 func sqlSpillFaults(control *sqlExecutionControl) *SQLSpillFaults {
@@ -14692,7 +14734,7 @@ func (encoder *sqlSpillEncoder) Encode(value interface{}) error { return encoder
 func (encoder *sqlSpillEncoder) Close() error                   { return encoder.close() }
 
 func newSQLSpillEncoder(file *os.File, available *int64, control *sqlExecutionControl, kind string) (*sqlSpillEncoder, error) {
-	var writer io.Writer = sqlSpillBudgetWriter{writer: file, available: available, faults: sqlSpillFaults(control), kind: kind}
+	var writer io.Writer = sqlSpillBudgetWriter{writer: file, available: available, quota: sqlSpillQuotaFor(control), path: file.Name(), faults: sqlSpillFaults(control), kind: kind}
 	closers := []io.Closer{}
 	if cipher := sqlSpillCipher(control); cipher != nil {
 		encrypted, err := cipher.NewWriter(writer, []byte("hatrie/sql-spill/"+kind))
@@ -14786,7 +14828,7 @@ func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int
 	defer func() {
 		if remove {
 			_ = file.Close()
-			_ = os.Remove(run.path)
+			_ = sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control))
 		}
 	}()
 	encoder, err := newSQLSpillEncoder(file, available, control, "sort")
@@ -14799,7 +14841,7 @@ func sqlWriteSpillRun(directory string, records []sqlSpillOutput, available *int
 		}
 		if err := encoder.Encode(record); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while writing sort runs")
+				return sqlSpillRun{}, sqlSpillBudgetError(err, "writing sort runs")
 			}
 			return sqlSpillRun{}, fmt.Errorf("write SQL sort spill file: %w", err)
 		}
@@ -14888,7 +14930,7 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 	defer func() {
 		if remove {
 			_ = file.Close()
-			_ = os.Remove(run.path)
+			_ = sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control))
 		}
 	}()
 	encoder, err := newSQLSpillEncoder(file, available, control, "sort")
@@ -14911,7 +14953,7 @@ func sqlMergeSpillRunsToWriter(runs []sqlSpillRun, order []sqlOrder, directory s
 		}
 		if err := encoder.Encode(readers[best].current); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging sort runs: %w", errSQLSpillDiskBudget)
+				return sqlSpillRun{}, sqlSpillBudgetError(err, "merging sort runs")
 			}
 			return sqlSpillRun{}, fmt.Errorf("write SQL sort merge file: %w", err)
 		}
@@ -15081,7 +15123,7 @@ func sqlMergeSpillSortPassParallel(runs []sqlSpillRun, order []sqlOrder, directo
 	if firstErr != nil {
 		for _, result := range results {
 			if result.err == nil && result.run.path != "" {
-				_ = os.Remove(result.run.path)
+				_ = sqlRemoveSpillFile(result.run.path, sqlSpillQuotaFor(control))
 			}
 		}
 		atomic.StoreInt64(available, before)
@@ -15109,7 +15151,7 @@ func sqlExternalSortRowsWithTies(records []sqlSpillOutput, order []sqlOrder, dir
 	allPaths := map[string]struct{}{}
 	defer func() {
 		for path := range allPaths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	runs := []sqlSpillRun{}
@@ -15165,7 +15207,7 @@ func sqlExternalSortRowsWithTies(records []sqlSpillOutput, order []sqlOrder, dir
 					end = len(runs)
 				}
 				for _, run := range runs[start:end] {
-					if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 						return nil, 0, 0, fmt.Errorf("remove SQL sort spill file: %w", err)
 					}
 					delete(allPaths, run.path)
@@ -15187,7 +15229,7 @@ func sqlExternalSortRowsWithTies(records []sqlSpillOutput, order []sqlOrder, dir
 			}
 			allPaths[merged.path] = struct{}{}
 			for _, run := range runs[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return nil, 0, 0, fmt.Errorf("remove SQL sort spill file: %w", err)
 				}
 				delete(allPaths, run.path)
@@ -15276,7 +15318,7 @@ func sqlWriteSpillSetRun(directory string, records []sqlSpillSetRecord, availabl
 	defer func() {
 		if remove {
 			_ = file.Close()
-			_ = os.Remove(run.path)
+			_ = sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control))
 		}
 	}()
 	encoder, err := newSQLSpillEncoder(file, available, control, "set")
@@ -15289,7 +15331,7 @@ func sqlWriteSpillSetRun(directory string, records []sqlSpillSetRecord, availabl
 		}
 		if err := encoder.Encode(record); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while writing set runs")
+				return sqlSpillRun{}, sqlSpillBudgetError(err, "writing set runs")
 			}
 			return sqlSpillRun{}, fmt.Errorf("write SQL set spill file: %w", err)
 		}
@@ -15400,7 +15442,7 @@ func sqlMergeSpillSetRunsToRun(runs []sqlSpillRun, directory string, available *
 	defer func() {
 		if remove {
 			_ = file.Close()
-			_ = os.Remove(run.path)
+			_ = sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control))
 		}
 	}()
 	encoder, err := newSQLSpillEncoder(file, available, control, "set")
@@ -15417,7 +15459,7 @@ func sqlMergeSpillSetRunsToRun(runs []sqlSpillRun, directory string, available *
 		}
 		if err := encoder.Encode(record); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging set runs")
+				return sqlSpillRun{}, sqlSpillBudgetError(err, "merging set runs")
 			}
 			return sqlSpillRun{}, fmt.Errorf("write SQL set spill file: %w", err)
 		}
@@ -15450,7 +15492,7 @@ func sqlExternalSetRows(left, right []SQLRow, operation, directory string, maxRu
 	allPaths := map[string]struct{}{}
 	defer func() {
 		for path := range allPaths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	runs := []sqlSpillRun{}
@@ -15510,7 +15552,7 @@ func sqlExternalSetRows(left, right []SQLRow, operation, directory string, maxRu
 			}
 			allPaths[merged.path] = struct{}{}
 			for _, run := range runs[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return nil, 0, 0, fmt.Errorf("remove SQL set spill file: %w", err)
 				}
 				delete(allPaths, run.path)
@@ -15726,7 +15768,7 @@ func sqlWriteSpillGroupRun(directory string, records []sqlSpillGroupRecord, avai
 	defer func() {
 		if remove {
 			_ = file.Close()
-			_ = os.Remove(run.path)
+			_ = sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control))
 		}
 	}()
 	encoder, err := newSQLSpillEncoder(file, available, control, "group")
@@ -15739,7 +15781,7 @@ func sqlWriteSpillGroupRun(directory string, records []sqlSpillGroupRecord, avai
 		}
 		if err := encoder.Encode(record); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillGroupRun{}, fmt.Errorf("SQL spill disk budget exceeded while writing aggregate runs")
+				return sqlSpillGroupRun{}, sqlSpillBudgetError(err, "writing aggregate runs")
 			}
 			return sqlSpillGroupRun{}, fmt.Errorf("write SQL group spill file: %w", err)
 		}
@@ -15883,7 +15925,7 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 	defer func() {
 		if remove {
 			_ = file.Close()
-			_ = os.Remove(run.path)
+			_ = sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control))
 		}
 	}()
 	encoder, err := newSQLSpillEncoder(file, available, control, "group")
@@ -15900,7 +15942,7 @@ func sqlMergeSpillGroupRunsToRun(runs []sqlSpillGroupRun, order sqlOrder, direct
 		}
 		if err := encoder.Encode(record); err != nil {
 			if errors.Is(err, errSQLSpillDiskBudget) {
-				return sqlSpillGroupRun{}, fmt.Errorf("SQL spill disk budget exceeded while merging aggregate runs: %w", errSQLSpillDiskBudget)
+				return sqlSpillGroupRun{}, sqlSpillBudgetError(err, "merging aggregate runs")
 			}
 			return sqlSpillGroupRun{}, fmt.Errorf("write SQL group merge file: %w", err)
 		}
@@ -15971,7 +16013,7 @@ func sqlMergeSpillGroupPassParallel(runs []sqlSpillGroupRun, order sqlOrder, dir
 	if firstErr != nil {
 		for _, result := range results {
 			if result.err == nil && result.run.path != "" {
-				_ = os.Remove(result.run.path)
+				_ = sqlRemoveSpillFile(result.run.path, sqlSpillQuotaFor(control))
 			}
 		}
 		atomic.StoreInt64(available, before)
@@ -16632,7 +16674,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 	paths := map[string]struct{}{}
 	defer func() {
 		for path := range paths {
-			_ = os.Remove(path)
+			_ = sqlRemoveSpillFile(path, sqlSpillQuotaFor(control))
 		}
 	}()
 	buffer := []sqlSpillGroupRecord{}
@@ -16716,7 +16758,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 					end = len(runs)
 				}
 				for _, run := range runs[start:end] {
-					if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 						return SQLQueryResult{}, true, fmt.Errorf("remove SQL group spill file: %w", err)
 					}
 					delete(paths, run.path)
@@ -16738,7 +16780,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 			}
 			paths[merged.path] = struct{}{}
 			for _, run := range runs[start:end] {
-				if err := os.Remove(run.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if err := sqlRemoveSpillFile(run.path, sqlSpillQuotaFor(control)); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return SQLQueryResult{}, true, fmt.Errorf("remove SQL group spill file: %w", err)
 				}
 				delete(paths, run.path)
