@@ -28209,3 +28209,25 @@ An earlier atomic-counter experiment produced about a 5% submit regression and
 was removed before acceptance. The final counters are protected by the
 buffer's existing mutex. Status snapshots allocate a small response slice;
 the default path does not instantiate the registry or routes.
+## M-U01 Durable Connector Lifecycle State
+
+The five-run benchmark uses 64 connectors with history limit 8, half paused,
+and `GOMAXPROCS=1`. The binary checkpoint is compared with Go
+`encoding/json` for the same detached state. Medians are shown below; the raw
+five-run samples are retained in [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md).
+
+| Path | Median ns/op | B/op | Allocs/op | Wire bytes | Relative result |
+|---|---:|---:|---:|---:|---:|
+| Existing status-only `Snapshot` | 6,804 | 5,432 | 4 | n/a | unchanged control path |
+| New detached `SnapshotState` | 10,037 | 14,264 | 68 | n/a | explicit full-state copy |
+| Binary codec | 9,746 | 15,056 | 8 | 4,331 | 7.90x faster than JSON |
+| JSON codec | 76,959 | 26,146 | 162 | 18,049 | baseline |
+| Binary decode | 14,618 | 19,752 | 228 | 4,331 | 15.66x faster than JSON |
+| JSON decode | 228,933 | 28,392 | 273 | 18,049 | baseline |
+
+The new checkpoint APIs are opt-in and do not alter the existing status-only
+snapshot path. Binary encoding is 4.17x smaller on the wire, with 1.74x lower
+heap and 20.25x fewer allocations than JSON in this fixture. Binary decoding is
+1.44x lower heap and uses 1.20x fewer allocations. See
+[MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md) for the
+API, durability guidance, and raw samples.

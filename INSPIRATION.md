@@ -607,6 +607,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M103 Query timeout and cancellation.
 - [x] M104 Retry-safe idempotent writes.
 - [x] M105 Workload isolation and bounded queues.
+- [x] M106 Durable connector lifecycle checkpoints. `hatPipeline.ConnectorRegistry` exposes deterministic, CRC32C-protected binary snapshots of bounded status and event history, with exact connector-ID validation on restore; connector callbacks remain caller-owned during restart reconciliation. See [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md).
 
 ## Tarantool Ideas
 

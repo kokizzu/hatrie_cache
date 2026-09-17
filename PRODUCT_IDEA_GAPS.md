@@ -74,7 +74,7 @@ tradeoffs are documented and its commit is published.
 
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
-| M-U01 | Durable connector lifecycle state | `hatPipeline.ConnectorRegistry` now owns create/start/pause/resume/stop transitions and bounded status history, but lifecycle state is in-memory and is not restored across restart. | Crash/restart recovery, version compatibility, bounded persistence, and no query-path overhead. |
+| M-U01 | Durable connector lifecycle state | Adopted as an explicit `hatPipeline.ConnectorRegistry` checkpoint: bounded status/history is encoded as deterministic, CRC32C-protected `HCS1` bytes and restored with caller-supplied fresh connector implementations. Restore never invokes callbacks and remains caller-owned for restart reconciliation. | Crash/restart metadata recovery, version validation, bounded persistence, and no query-path overhead are covered. See [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md). |
 | M-U02 | Connector schema evolution | SQL sources do not coordinate upstream add/drop-column changes with dependent objects. | Mixed-version reads, atomic catalog update, and rollback. |
 | M-U03 | External source snapshot ingestion | There is no production connector for Kafka/Postgres/CDC snapshot ingestion; callers provide resolver data. | Authentication, offsets, backpressure, and recovery. |
 | M-U04 | Multi-source snapshot coordinator | Frontier barriers exist, but no coordinator captures independent source snapshots and their live tails as one initial view. | Blocking, source failure, and exact version retention. |

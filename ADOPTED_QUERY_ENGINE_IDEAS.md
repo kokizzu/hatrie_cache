@@ -508,3 +508,17 @@ allocation behavior and end-to-end performance within measurement noise. See
 | Source | Adopted idea | Implementation | Evidence |
 | --- | --- | --- | --- |
 | ClickHouse | Bound external aggregation memory during run merging | `SQLQueryOptions.MaxGroupMergeBytes` bounds the estimated decoded current record frontier across active external `GROUP BY` spill readers. Zero keeps the guard off; negative values are rejected; over-budget merges return a deterministic error and clean all temporary files. The estimator is allocation-free and does not claim to cap total process RSS. | [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md), [BENCHMARK.md](BENCHMARK.md#c227-external-group-merge-memory-budget) |
+
+## Materialize M-U01: Durable Connector Lifecycle State
+
+`hatPipeline.ConnectorRegistry` now exposes detached lifecycle checkpoints and
+the deterministic, bounded, CRC32C-protected `HCS1` binary format through
+`SnapshotState`, `MarshalSnapshot`, `UnmarshalConnectorRegistrySnapshot`, and
+`NewConnectorRegistryFromSnapshot`. Restore requires an exact map of fresh
+connector implementations, never invokes connector callbacks, and leaves
+restart reconciliation explicit to the caller. The existing status-only
+snapshot API and all defaults are unchanged. The 64-connector fixture encodes
+4,331 bytes versus 18,049 bytes for JSON; binary codec medians are 7.90x faster
+to encode and 15.66x faster to decode. See
+[MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md) and
+[BENCHMARK.md](BENCHMARK.md#m-u01-durable-connector-lifecycle-state).

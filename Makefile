@@ -17317,3 +17317,41 @@ commit-chu23:
 
 push-chu23:
 	sh scripts/push-chu23.sh
+test-mu01:
+	sh scripts/test-mu01.sh
+
+test-mu01-verbose:
+	sh scripts/test-mu01-verbose.sh
+
+format-mu01:
+	sh scripts/format-mu01.sh
+
+benchmark-mu01:
+	sh scripts/benchmark-mu01.sh
+
+test-mu01-package:
+	sh scripts/test-mu01-package.sh
+
+test-race-mu01:
+	sh scripts/test-race-mu01.sh
+
+vet-mu01:
+	sh scripts/vet-mu01.sh
+
+verify-mu01-docs:
+	sh scripts/verify-mu01-docs.sh
+
+test-mu01-all:
+	sh scripts/test-mu01-all.sh
+
+review-mu01:
+	sh scripts/review-mu01.sh
+
+stage-mu01:
+	sh scripts/stage-mu01.sh
+
+commit-mu01:
+	sh scripts/commit-mu01.sh
+
+push-mu01:
+	sh scripts/push-mu01.sh

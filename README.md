@@ -133,6 +133,7 @@ security guidance before exposing it on a network.
 - Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
 - Tarantool-style compact multiplexed peer frames: [COMPACT_PEER_PROTOCOL.md](COMPACT_PEER_PROTOCOL.md)
 - Materialize-style connector lifecycle registry: [CONNECTOR_LIFECYCLE.md](CONNECTOR_LIFECYCLE.md)
+- Materialize-style durable connector lifecycle checkpoints: [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u01-durable-connector-lifecycle-state)
 - Materialize-style named lower/upper frontier registry: [FRONTIER_REGISTRY.md](FRONTIER_REGISTRY.md)
 - Versioned compact frontier checkpoint/restore: [FRONTIER_SNAPSHOTS.md](FRONTIER_SNAPSHOTS.md)
 - Bounded as-of retention leases for safe compaction: [FRONTIER_RETENTION.md](FRONTIER_RETENTION.md)
