@@ -17250,3 +17250,34 @@ commit-chu08-join-overflow:
 
 push-chu08-join-overflow:
 	sh scripts/push-chu08-join-overflow.sh
+test-chu22:
+	sh scripts/test-chu22.sh
+
+benchmark-chu22:
+	sh scripts/benchmark-chu22.sh
+format-chu22:
+	sh scripts/format-chu22.sh
+
+test-chu22-package:
+	sh scripts/test-chu22-package.sh
+
+test-chu22-all:
+	sh scripts/test-chu22-all.sh
+
+race-chu22:
+	sh scripts/race-chu22.sh
+
+vet-chu22:
+	sh scripts/vet-chu22.sh
+
+review-chu22:
+	sh scripts/review-chu22.sh
+
+stage-chu22:
+	sh scripts/stage-chu22.sh
+
+commit-chu22:
+	sh scripts/commit-chu22.sh
+
+push-chu22:
+	sh scripts/push-chu22.sh

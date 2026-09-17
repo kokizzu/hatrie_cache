@@ -1204,6 +1204,24 @@ perfect apples-to-apples microbenchmarks.
 
 Local runs were measured on an AMD Ryzen 9 5950X.
 
+## CH-U22 Direct Columnar Append
+
+The five-sample single-core benchmark appends 4,096 four-column rows per
+iteration. The row-wise baseline converts each columnar cell and calls the
+existing `TypedTable.Upsert`; the candidate calls
+`TypedTable.AppendColumnar`. Exact raw samples and the contract are in
+[CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md).
+
+| Input | Row-wise baseline | `AppendColumnar` | CPU improvement | Heap improvement | Allocation improvement |
+|---|---:|---:|---:|---:|---:|
+| Plain columns | 3,056,602 ns/op, 5,046,935 B/op, 12,478 allocs/op | 2,064,679 ns/op, 2,731,360 B/op, 8,226 allocs/op | 1.48x | 1.85x | 1.52x |
+| Packed columns | 3,682,146 ns/op, 5,110,409 B/op, 20,413 allocs/op | 2,650,549 ns/op, 2,794,840 B/op, 16,161 allocs/op | 1.39x | 1.83x | 1.26x |
+
+This is an explicit append-only API, so the measured win does not alter the
+default `Upsert` or SQL mutation path. Duplicate/existing-key rejection,
+strict scalar validation, generated columns, NULLs, and atomic failure are
+covered by the focused test target.
+
 ## Run Commands
 
 Large HAT-trie comparable command rows, including the public `BATCH` pipeline

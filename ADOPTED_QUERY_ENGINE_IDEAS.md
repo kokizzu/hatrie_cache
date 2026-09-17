@@ -179,6 +179,8 @@ explicitly opt-in operational control.
 | Materialize | Dependency invalidation graph | Adopted automatically for materialized-view refresh planning | `MaterializedViews` keeps a compact reverse source-to-view index, so `RefreshChanged` avoids scanning unrelated views, deduplicates multi-source overlaps, and preserves deterministic ordering and atomic failure behavior. [MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md](MATERIALIZED_VIEW_DEPENDENCY_GRAPH.md), [BENCHMARK.md](BENCHMARK.md#mz-042-materialized-view-dependency-invalidation) |
 | ClickHouse | Persistent query log | Adopted as an opt-in operator history | `OpenSQLQueryLog` appends terminal `SQLQueryManager` status as strict NDJSON with `0600` permissions, sanitized fields, explicit `Sync`, restart-readable history, and non-fatal `QueryLogError` reporting. The default manager remains in-memory-only. [PERSISTENT_QUERY_LOG.md](PERSISTENT_QUERY_LOG.md), [BENCHMARK.md](BENCHMARK.md#ch-031-persistent-sql-query-log) |
 
+| ClickHouse | Direct columnar append ingestion | Partially adopted as `hatSql.TypedTable.AppendColumnar`; complete scalar batches are validated before mutation and appended column-wise with plain and packed layouts supported. SQL `INSERT` routing remains caller-owned. | [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md), [BENCHMARK.md#ch-u22-direct-columnar-append](BENCHMARK.md#ch-u22-direct-columnar-append) |
+
 ## Measured Results
 
 | Feature | Result |

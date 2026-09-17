@@ -70,6 +70,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired typed binary search for large literal `IN` sets: [CH054_TYPED_IN_SEARCH.md](CH054_TYPED_IN_SEARCH.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-054-typed-prepared-in-search)
 - ClickHouse-inspired bounded dense-integer bitmap `IN` sets: [CHU17_DENSE_INTEGER_IN.md](CHU17_DENSE_INTEGER_IN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u17-dense-integer-in-sets)
 - ClickHouse-inspired bounded streaming CSV and JSONEachRow ingestion: [CHU21_STREAMING_TEXT_INGESTION.md](CHU21_STREAMING_TEXT_INGESTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u21-streaming-text-ingestion)
+- ClickHouse-inspired direct columnar append ingestion for typed tables: [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#ch-u22-direct-columnar-append)
 - ClickHouse-inspired bounded external-format schema inference: [CH048_EXTERNAL_SCHEMA_INFERENCE.md](CH048_EXTERNAL_SCHEMA_INFERENCE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-048-external-schema-inference)
 - Materialize-inspired bounded schema-drift quarantine: [MZ049_SCHEMA_DRIFT_QUARANTINE.md](MZ049_SCHEMA_DRIFT_QUARANTINE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-049-schema-drift-quarantine)
 - ClickHouse-inspired prepared literal SQL `BETWEEN` bounds: [CH055_PREPARED_BETWEEN.md](CH055_PREPARED_BETWEEN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-055-prepared-literal-between-bounds)

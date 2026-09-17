@@ -294,6 +294,7 @@ name.
 - [x] C167 ClickHouse-style read-in-order early `LIMIT` completion. The materialized ordered-index path now propagates the existing stream stop signal when no explicit source-row budget requires a full scan, preserving `OFFSET`, `LIMIT 0`, and `MaxRows` semantics without storing a full ordered result; see [CH021_READ_IN_ORDER.md](CH021_READ_IN_ORDER.md).
 
 - [x] C168 Tarantool/ClickHouse-style plain columnar value dispatch. `ColumnarBatch.Value` now bypasses unused optional physical-layout maps for the common plain `Columns` representation while preserving specialized-layout precedence; see [TR019_COLUMNAR_VALUE_FASTPATH.md](TR019_COLUMNAR_VALUE_FASTPATH.md).
+- [x] C169 ClickHouse-style direct columnar append ingestion. `TypedTable.AppendColumnar` validates complete scalar batches before mutation, rejects duplicate/existing keys atomically, supports plain and packed columnar representations, and appends with exact capacity reservation; SQL `INSERT` routing remains caller-owned. See [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md).
 
 ## Materialize Ideas
 
