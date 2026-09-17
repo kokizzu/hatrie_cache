@@ -3119,6 +3119,7 @@ exports `hatrie_cache_leveldb_dirty_keys` and
 Prometheus also exports `hatrie_cache_replication_health_score`,
 `hatrie_cache_replication_dead_letters`,
 `hatrie_cache_replication_queue_capacity`,
+`hatrie_cache_replication_queue_max_bytes`,
 `hatrie_cache_replication_queue_estimated_queued_bytes`,
 `hatrie_cache_replication_queue_estimated_in_flight_bytes`,
 `hatrie_cache_replication_queue_wait_millis`,
@@ -3898,6 +3899,29 @@ For library users, the same guard is available through
 ### Per-Peer Replication Lag
 
 Async replication queue status includes `source_sequence`, `last_acknowledged_sequence_by_target`, `replication_lag_by_target`, and an immutable `vector_clock` map containing the local sequence plus every current topology replica's acknowledged sequence (zero when none has been acknowledged). This is observational metadata, not quorum or conflict-resolution state. The Prometheus endpoint exposes the same data as `hatrie_cache_replication_source_sequence`, `hatrie_cache_replication_target_last_acknowledged_sequence`, and `hatrie_cache_replication_target_lag`, labeled by node and target.
+
+### Byte-Bounded Async Replication
+
+`HTTPReplicatorOptions.AsyncQueueMaxBytes` optionally bounds the estimated resident
+bytes held by asynchronous replication jobs. The estimate includes queued and
+in-flight command payloads, keys, target metadata, and fixed job/task overhead.
+The default is `0`, which keeps the byte budget disabled and preserves the
+existing slot-only queue behavior. The limit is an admission guard for
+replication memory, not a process-wide RSS limit.
+
+```go
+replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+	AsyncQueueSize:     1024,
+	AsyncQueueMaxBytes: 64 << 20,
+})
+```
+
+When the budget is full, a non-journal-backed job is returned as skipped with
+reason `replication queue byte budget is full`, matching the existing bounded
+queue drop behavior. A journal-backed job remains in the durable outbox backlog
+and is retried after capacity is available. `GET /api/replication` and the
+Prometheus endpoint expose `max_bytes`, `estimated_queued_bytes`, and
+`estimated_in_flight_bytes` for operating the limit.
 
 ### Graceful Async Replication Shutdown
 

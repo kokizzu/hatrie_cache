@@ -1094,6 +1094,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 			writePrometheusType(&builder, "hatrie_cache_replication_queue_depth", "gauge")
 			fmt.Fprintf(&builder, "hatrie_cache_replication_queue_depth{node=\"%s\"} %d\n", node, result.Queue.Depth)
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_capacity", "Configured async replication queue capacity.", node, uint64(result.Queue.Capacity))
+			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_max_bytes", "Configured estimated resident-byte limit for async replication; zero disables the limit.", node, result.Queue.MaxBytes)
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_paused", "Whether async replication queue delivery is paused.", node, boolGauge(result.Queue.Paused))
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_estimated_queued_bytes", "Estimated bytes held by queued async replication payloads; excludes durable-only backlog.", node, result.Queue.EstimatedQueuedBytes)
 			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_estimated_in_flight_bytes", "Estimated bytes held by the current in-flight async replication payload.", node, result.Queue.EstimatedInFlightBytes)

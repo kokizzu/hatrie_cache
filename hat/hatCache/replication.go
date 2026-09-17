@@ -70,16 +70,19 @@ var (
 )
 
 type HTTPReplicatorOptions struct {
-	Context                  context.Context
-	Self                     string
-	Topology                 *TopologyStore
-	ReplicationSchema        ReplicationSchemaContract
-	ReplicationRegionPolicy  ReplicationRegionPolicy
-	ReplicationKeyPrefixes   []string
-	Election                 *ElectionStore
-	Client                   *http.Client
-	Timeout                  time.Duration
-	AsyncQueueSize           int
+	Context                 context.Context
+	Self                    string
+	Topology                *TopologyStore
+	ReplicationSchema       ReplicationSchemaContract
+	ReplicationRegionPolicy ReplicationRegionPolicy
+	ReplicationKeyPrefixes  []string
+	Election                *ElectionStore
+	Client                  *http.Client
+	Timeout                 time.Duration
+	AsyncQueueSize          int
+	// AsyncQueueMaxBytes bounds estimated resident bytes in queued and in-flight
+	// asynchronous replication jobs. Zero disables the byte budget.
+	AsyncQueueMaxBytes       int64
 	AsyncRetryInterval       time.Duration
 	AsyncMaxAttempts         uint
 	AsyncDeadLetterLimit     int
@@ -122,6 +125,7 @@ type HTTPReplicator struct {
 	breakerFailures          int
 	breakerCooldown          time.Duration
 	batchMaxBytes            int
+	maxQueueBytes            uint64
 	maxInFlight              int
 	transport                ReplicationTransport
 	grpcStreamWindow         int
@@ -460,6 +464,9 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	} else if replicator.batchMaxBytes < 0 {
 		replicator.batchMaxBytes = 0
 	}
+	if options.AsyncQueueMaxBytes > 0 {
+		replicator.maxQueueBytes = uint64(options.AsyncQueueMaxBytes)
+	}
 	if replicator.maxInFlight == 0 {
 		replicator.maxInFlight = DefaultReplicationMaxInFlightTargets
 	} else if replicator.maxInFlight < 0 {
@@ -535,6 +542,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.queueStats = ReplicationQueueStats{
 			Enabled:  true,
 			Capacity: queueSize,
+			MaxBytes: replicator.maxQueueBytes,
 		}
 		replicator.queueSeq = maxOutboxJobID
 		replicator.outboxRestoreBacklog = maxOutboxJobID != 0
@@ -1093,7 +1101,23 @@ func (replicator *HTTPReplicator) enqueueReplicationJob(job replicationJob) Repl
 		result.Reason = "replication queue is closed; job retained in durable journal backlog"
 		return result
 	}
-	if replicator.prepareAsyncJobForQueue(job) {
+	restore, admitted := replicator.prepareAsyncJobForQueue(job)
+	if !admitted {
+		if journalBacked {
+			replicator.markAsyncOutboxBacklog()
+			result.Reason = "replication queue byte budget is full; job retained in durable journal backlog"
+			return result
+		}
+		replicator.unreserveAsyncJob(job.id)
+		replicator.deleteAsyncJob(job.id)
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication queue byte budget is full"
+		result.Targets = nil
+		replicator.recordAsyncDroppedForTasks(tasks)
+		return result
+	}
+	if restore {
 		return result
 	}
 	select {
@@ -1241,17 +1265,50 @@ func (replicator *HTTPReplicator) reserveAsyncJob(job *replicationJob) {
 	job.enqueuedAt = now
 }
 
-func (replicator *HTTPReplicator) prepareAsyncJobForQueue(job replicationJob) bool {
+func (replicator *HTTPReplicator) prepareAsyncJobForQueue(job replicationJob) (restore, admitted bool) {
 	if replicator == nil || replicator.queue == nil {
-		return false
+		return false, true
+	}
+	if replicator.maxQueueBytes == 0 {
+		replicator.mu.Lock()
+		replicator.appendPendingAsyncJobLocked(job)
+		restore := replicator.outboxRestoreBacklog || job.id <= replicator.outboxRestoreCursor
+		replicator.mu.Unlock()
+		return restore, true
 	}
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
+	if replicator.pendingAsyncJobLocked(job.id) {
+		return replicator.outboxRestoreBacklog || job.id <= replicator.outboxRestoreCursor, true
+	}
+	if !replicator.asyncQueueBytesAvailableLocked(replicationJobEstimatedBytes(job)) {
+		return false, false
+	}
 	replicator.appendPendingAsyncJobLocked(job)
 	if replicator.outboxRestoreBacklog || job.id <= replicator.outboxRestoreCursor {
-		return true
+		return true, true
+	}
+	return false, true
+}
+
+func (replicator *HTTPReplicator) pendingAsyncJobLocked(id uint64) bool {
+	for _, meta := range replicator.pending {
+		if meta.id == id {
+			return true
+		}
 	}
 	return false
+}
+
+func (replicator *HTTPReplicator) asyncQueueBytesAvailableLocked(additional uint64) bool {
+	if replicator.maxQueueBytes == 0 {
+		return true
+	}
+	used := addReplicationByteEstimate(replicator.queueStats.EstimatedQueuedBytes, replicator.queueStats.EstimatedInFlightBytes)
+	if used > replicator.maxQueueBytes {
+		return false
+	}
+	return additional <= replicator.maxQueueBytes-used
 }
 
 func replicationJobTargetIDs(tasks []replicationTask) []string {

@@ -28835,3 +28835,59 @@ BenchmarkCH015StorageTierMovePlan-32       10000  25142 ns/op  35368 B/op  4 all
 BenchmarkCH015StorageTierMovePlan-32       11738  25394 ns/op  35368 B/op  4 allocs/op
 BenchmarkCH015StorageTierMovePlan-32       10000  25450 ns/op  35368 B/op  4 allocs/op
 ```
+
+<a id="tr-050-rate-aware-replication-byte-backpressure"></a>
+## TR-050 Rate-Aware Replication Byte Backpressure
+
+This measures the asynchronous replication admission path on Linux `amd64`,
+an AMD Ryzen 9 5950X. The legacy control uses the previous append, lock, and
+defer shape without byte-budget checks. The default-off path is the new
+behavior for existing users; the configured path enables the positive byte
+budget. Three samples ran with `-benchtime=200ms` and `-benchmem`.
+
+| Admission mode | Median ns/op | B/op | Allocs/op | Relative to legacy control |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy control | 85.13 | 16 | 1 | 1.00x |
+| New default-off path | 88.62 | 16 | 1 | 1.04x slower |
+| New configured path | 102.6 | 16 | 1 | 1.21x slower |
+
+The default-off overhead is about 3.5 ns/op in this isolated admission
+benchmark. Configured admission pays about 17.5 ns/op for resident-byte
+accounting and duplicate-pending protection.
+
+The burst benchmark submits the same 1,024 estimated 348-byte jobs while the
+queue is paused. It demonstrates the memory bound, but the accepted work is
+intentionally different once the configured budget fills.
+
+| Burst mode | Median ns/op | Admitted jobs | Estimated queued bytes | B/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Byte budget disabled | 816,724 | 1,024 | 356,352 | 17,021 | 1,024 |
+| Byte budget `2,784` | 852.9 | 8 | 2,784 | 128 | 8 |
+
+The configured burst retained 128x fewer estimated queued bytes, 128x fewer
+resident jobs, and 128x fewer allocations because admission stopped at the
+budget. This is a memory-safety/backpressure result, not a claim that dropping
+or deferring work makes an equal workload faster. Journal-backed jobs remain in
+the durable backlog instead of being dropped.
+
+Raw output from `make benchmark-tr050-replication-byte-backpressure`:
+
+```text
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32          2795990  91.88 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32          2929185  85.13 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32          2882674  84.77 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/disabled-32                2868682  84.93 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/disabled-32                2628849  89.73 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/disabled-32                2628495  88.62 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/enabled-32                 2432910  103.0 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/enabled-32                 2412895  97.28 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/enabled-32                 2257652  102.6 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetBurst/disabled-32                     284  816724 ns/op  1024 admitted_jobs/burst  356352 estimated_queued_bytes/burst  17021 B/op  1024 allocs/op
+BenchmarkTR050ReplicationByteBudgetBurst/disabled-32                     274  895653 ns/op  1024 admitted_jobs/burst  356352 estimated_queued_bytes/burst  17044 B/op  1024 allocs/op
+BenchmarkTR050ReplicationByteBudgetBurst/disabled-32                     270  804797 ns/op  1024 admitted_jobs/burst  356352 estimated_queued_bytes/burst  17054 B/op  1024 allocs/op
+BenchmarkTR050ReplicationByteBudgetBurst/enabled-32                      281463  852.9 ns/op  8.000 admitted_jobs/burst  2784 estimated_queued_bytes/burst  128 B/op  8 allocs/op
+BenchmarkTR050ReplicationByteBudgetBurst/enabled-32                      269359  861.5 ns/op  8.000 admitted_jobs/burst  2784 estimated_queued_bytes/burst  128 B/op  8 allocs/op
+BenchmarkTR050ReplicationByteBudgetBurst/enabled-32                      262447  844.1 ns/op  8.000 admitted_jobs/burst  2784 estimated_queued_bytes/burst  128 B/op  8 allocs/op
+PASS
+ok  hatrie_cache/hat/hatCache  5.098s
+```

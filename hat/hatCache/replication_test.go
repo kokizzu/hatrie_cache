@@ -171,7 +171,7 @@ func TestHTTPReplicatorRestoresLevelDBOutboxWithinConfiguredQueueCapacity(t *tes
 	if err := replicator.persistAsyncJob(concurrentJob); err != nil {
 		t.Fatalf("persistAsyncJob(concurrent) error = %v", err)
 	}
-	if deferred := replicator.prepareAsyncJobForQueue(concurrentJob); !deferred {
+	if deferred, admitted := replicator.prepareAsyncJobForQueue(concurrentJob); !deferred || !admitted {
 		t.Fatal("concurrent durable job was not deferred behind restored backlog")
 	}
 	releaseOnce.Do(func() { close(release) })

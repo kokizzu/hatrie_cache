@@ -17797,3 +17797,46 @@ push-ch015-storage-tier-movement:
 
 verify-ch015-storage-tier-movement:
 	sh ./scripts/deliver-ch015-storage-tier-movement.sh verify
+.PHONY: test-tr050-replication-byte-backpressure
+test-tr050-replication-byte-backpressure:
+	sh ./scripts/test-tr050-replication-byte-backpressure.sh
+
+.PHONY: format-tr050-replication-byte-backpressure
+format-tr050-replication-byte-backpressure:
+	sh ./scripts/format-tr050-replication-byte-backpressure.sh
+
+.PHONY: test-tr050-replication-package
+test-tr050-replication-package:
+	sh ./scripts/test-tr050-replication-package.sh
+
+.PHONY: benchmark-tr050-replication-byte-backpressure
+benchmark-tr050-replication-byte-backpressure:
+	sh ./scripts/benchmark-tr050-replication-byte-backpressure.sh
+
+.PHONY: race-tr050-replication-byte-backpressure
+race-tr050-replication-byte-backpressure:
+	sh ./scripts/race-tr050-replication-byte-backpressure.sh
+
+.PHONY: vet-tr050-replication-byte-backpressure
+vet-tr050-replication-byte-backpressure:
+	sh ./scripts/vet-tr050-replication-byte-backpressure.sh
+
+.PHONY: review-tr050-replication-byte-backpressure
+review-tr050-replication-byte-backpressure:
+	sh ./scripts/review-tr050-replication-byte-backpressure.sh
+
+.PHONY: stage-tr050-replication-byte-backpressure
+stage-tr050-replication-byte-backpressure:
+	sh ./scripts/stage-tr050-replication-byte-backpressure.sh
+
+.PHONY: commit-tr050-replication-byte-backpressure
+commit-tr050-replication-byte-backpressure:
+	sh ./scripts/commit-tr050-replication-byte-backpressure.sh
+
+.PHONY: push-tr050-replication-byte-backpressure
+push-tr050-replication-byte-backpressure:
+	sh ./scripts/push-tr050-replication-byte-backpressure.sh
+
+.PHONY: verify-delivery-tr050-replication-byte-backpressure
+verify-delivery-tr050-replication-byte-backpressure:
+	sh ./scripts/verify-delivery-tr050-replication-byte-backpressure.sh

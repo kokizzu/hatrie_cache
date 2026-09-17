@@ -61,6 +61,7 @@ type QueueStats struct {
 	LastAcknowledgedSequenceByTarget map[string]uint64 `json:"last_acknowledged_sequence_by_target,omitempty"`
 	ReplicationLagByTarget           map[string]uint64 `json:"replication_lag_by_target,omitempty"`
 	VectorClock                      map[string]uint64 `json:"vector_clock,omitempty"`
+	MaxBytes                         uint64            `json:"max_bytes,omitempty"`
 	EstimatedQueuedBytes             uint64            `json:"estimated_queued_bytes,omitempty"`
 	EstimatedInFlightBytes           uint64            `json:"estimated_in_flight_bytes,omitempty"`
 	Enqueued                         uint64            `json:"enqueued"`
