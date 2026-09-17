@@ -4407,3 +4407,13 @@ scoped grants, exact-version mutation fencing, and deterministic policy
 snapshots while leaving the legacy `hatAuth.Policy` path unchanged. See
 [MU021_ROLE_NAMESPACE_CATALOG.md](MU021_ROLE_NAMESPACE_CATALOG.md) and the
 [M-U21 benchmark](BENCHMARK.md#mu-021-role-and-namespace-catalog).
+
+Connector applications can opt into
+`hatSql.SQLConnectorTransactionRetryJournal` to record source transaction
+intent, fenced retry attempts, and committed/retryable/aborted outcomes in a
+bounded checkpoint. It is disabled unless constructed explicitly; terminal
+records may be evicted, while pending and retryable records are retained. The
+binary snapshot is CRC-protected and stores only bounded error categories, not
+raw error text. See
+[MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md](MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md)
+and the [M-U22 benchmark](BENCHMARK.md#mu-022-connector-transaction-retry-journal).

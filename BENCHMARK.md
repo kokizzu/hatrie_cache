@@ -29591,3 +29591,53 @@ over the paired legacy policy but adds hierarchical roles, namespace
 ownership, scoped grants, version fencing, and deterministic snapshots without
 heap allocation. See
 [MU021_ROLE_NAMESPACE_CATALOG.md](MU021_ROLE_NAMESPACE_CATALOG.md).
+
+<a id="mu-022-connector-transaction-retry-journal"></a>
+## M-U22 Connector Transaction Retry Journal
+
+Command: `make benchmark-mu022-retry-journal`. The target uses
+`GOMAXPROCS=1`, `-benchtime=500ms`, and `-count=5` on the AMD Ryzen 9 5950X
+Linux/amd64 host. The control is the existing bare
+`SQLSourceOffsetTracker.AdvanceTransaction` operation. The final path records
+intent with `Begin`, completes it with `Complete`, returns defensive record
+copies, and exercises bounded terminal retention with 2,048 deterministic
+transaction IDs and a capacity of 1,024. This is a capability-cost comparison,
+not an apples-to-apples speedup claim: the journal performs substantially more
+durable bookkeeping than a high-watermark update.
+
+Pre-implementation raw baseline:
+
+```text
+BenchmarkMU022BeforeSourceTransactionAdvance  132.3 ns/op  48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  137.5 ns/op  48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  145.2 ns/op  48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  138.8 ns/op  48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  141.5 ns/op  48 B/op  1 allocs/op
+```
+
+Final paired raw output:
+
+```text
+BenchmarkMU022BeforeSourceTransactionAdvance  136.8 ns/op   48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  139.0 ns/op   48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  134.5 ns/op   48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  142.5 ns/op   48 B/op  1 allocs/op
+BenchmarkMU022BeforeSourceTransactionAdvance  140.2 ns/op   48 B/op  1 allocs/op
+BenchmarkMU022AfterRetryJournalBeginComplete 2601  ns/op  376 B/op  8 allocs/op
+BenchmarkMU022AfterRetryJournalBeginComplete 2529  ns/op  376 B/op  8 allocs/op
+BenchmarkMU022AfterRetryJournalBeginComplete 2546  ns/op  376 B/op  8 allocs/op
+BenchmarkMU022AfterRetryJournalBeginComplete 2540  ns/op  376 B/op  8 allocs/op
+BenchmarkMU022AfterRetryJournalBeginComplete 2516  ns/op  376 B/op  8 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Existing bare source transaction advance | 139.0 | 48 | 1 | 1.00x |
+| Final journal `Begin` + `Complete` | 2,540 | 376 | 8 | 18.27x slower |
+
+The journal adds 2,401 ns/op, 328 B/op, and 7 allocations/op in this workload.
+That is the explicit cost of intent retention, attempt fencing, defensive
+copies, and terminal retention. It is an opt-in reliability feature and does
+not change the default source-offset path. See
+[MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md](MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md)
+for recovery ordering and the binary checkpoint contract.

@@ -18489,3 +18489,27 @@ push-mu021-role-catalog:
 	bash ./scripts/push-mu021-role-catalog.sh
 verify-mu021-role-catalog:
 	bash ./scripts/verify-mu021-role-catalog.sh
+benchmark-mu022-retry-journal-baseline:
+	bash ./scripts/benchmark-mu022-retry-journal-baseline.sh
+test-mu022-retry-journal:
+	bash ./scripts/test-mu022-retry-journal.sh
+format-mu022-retry-journal:
+	bash ./scripts/format-mu022-retry-journal.sh
+benchmark-mu022-retry-journal:
+	bash ./scripts/benchmark-mu022-retry-journal.sh
+test-mu022-package:
+	bash ./scripts/test-mu022-package.sh
+race-mu022-retry-journal:
+	bash ./scripts/race-mu022-retry-journal.sh
+vet-mu022-retry-journal:
+	bash ./scripts/vet-mu022-retry-journal.sh
+verify-mu022-retry-journal:
+	bash ./scripts/verify-mu022-retry-journal.sh
+review-mu022-retry-journal:
+	bash ./scripts/review-mu022-retry-journal.sh
+stage-mu022-retry-journal:
+	bash ./scripts/stage-mu022-retry-journal.sh
+commit-mu022-retry-journal:
+	bash ./scripts/commit-mu022-retry-journal.sh
+push-mu022-retry-journal:
+	bash ./scripts/push-mu022-retry-journal.sh
