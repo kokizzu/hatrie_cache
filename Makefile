@@ -17401,3 +17401,26 @@ commit-mz023:
 
 push-mz023:
 	sh scripts/push-mz023.sh
+benchmark-mz030-baseline:
+	sh scripts/benchmark-mz030-baseline.sh
+
+test-mz030:
+	sh scripts/test-mz030.sh
+
+format-mz030:
+	sh scripts/format-mz030.sh
+
+benchmark-mz030:
+	sh scripts/benchmark-mz030.sh
+
+verify-mz030:
+	sh scripts/verify-mz030.sh
+
+stage-mz030:
+	sh scripts/stage-mz030.sh
+
+commit-mz030:
+	sh scripts/commit-mz030.sh
+
+push-mz030:
+	sh scripts/push-mz030.sh

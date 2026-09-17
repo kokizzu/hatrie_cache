@@ -28326,3 +28326,41 @@ BenchmarkSQLSinkDeliveryAuditMarshalBinary          5084 20966.0 ns/op 30592 B/o
 
 See [MZ023_SINK_DELIVERY_AUDIT.md](MZ023_SINK_DELIVERY_AUDIT.md) for the API,
 validation rules, and retention behavior.
+
+## MZ-30 Frontier-Aware Lookup-Join Cache
+
+This benchmark compares a 512-row lookup join with two repeated external keys.
+The cached path captures one ready source frontier per join, reuses immutable
+point-lookup candidates, and reports the number of calls made to the external
+lookup resolver.
+
+### Summary
+
+| Variant | Median ns/op | Lookup calls/op | B/op | Allocs/op | Relative result |
+|---|---:|---:|---:|---:|---:|
+| Baseline | 1,070,681 | 513.0 | 1,076,048 | 7,724 | 1.00x |
+| Frontier cache | 993,442 | 1.0 | 1,080,144 | 7,724 | 1.078x faster; 513x fewer lookup calls |
+
+The local resolver is intentionally cheap, so query row merging dominates CPU
+and allocations. The cache retained 4,096 additional bytes in this fixture,
+bounded by its per-entry row and byte limits. The default nil cache path is
+unchanged; the major expected production gain is avoiding repeated remote
+dictionary or network lookups while the source frontier is stable.
+
+### Raw Results
+
+```text
+BenchmarkMZ030LookupJoinBaseline       124  893623 ns/op  513.0 lookup_calls/op  1076048 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinBaseline       134  985373 ns/op  513.0 lookup_calls/op  1076048 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinBaseline       122 1177129 ns/op  513.0 lookup_calls/op  1076048 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinBaseline       100 1091018 ns/op  513.0 lookup_calls/op  1076048 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinBaseline       100 1070681 ns/op  513.0 lookup_calls/op  1076048 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinFrontierCache   100 1044381 ns/op    1.0 lookup_calls/op  1080144 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinFrontierCache   100 1082048 ns/op    1.0 lookup_calls/op  1080144 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinFrontierCache   135  993442 ns/op    1.0 lookup_calls/op  1080144 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinFrontierCache   120  969668 ns/op    1.0 lookup_calls/op  1080144 B/op  7724 allocs/op
+BenchmarkMZ030LookupJoinFrontierCache   129  875510 ns/op    1.0 lookup_calls/op  1080144 B/op  7724 allocs/op
+```
+
+See [MZ030_LOOKUP_JOIN_CACHE.md](MZ030_LOOKUP_JOIN_CACHE.md) for API and
+frontier invalidation rules.

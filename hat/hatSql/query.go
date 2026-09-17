@@ -303,6 +303,10 @@ type SQLQueryOptions struct {
 	// referenced source reports the same non-empty version. Nil preserves the
 	// ordinary executor and is the default.
 	ResultCache *SQLResultCache
+	// LookupJoinCache optionally reuses external point-lookup candidates while
+	// the lookup source reports the same ready frontier. Nil preserves the
+	// ordinary lookup path and is the default.
+	LookupJoinCache *SQLLookupJoinCache
 	// SubqueryResultCache optionally reuses eligible uncorrelated derived,
 	// CTE, and UNION branch results. Nil keeps the existing behavior and is the
 	// default. Correlated and lateral subqueries are never cached.
@@ -11765,6 +11769,22 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				if join.source.kind == "EXTERNAL" {
 					if lookup, ok := resolver.(LookupSourceResolver); ok {
 						resolveIndexed = lookup.ResolveSQLLookupSource
+						if control != nil && control.options.LookupJoinCache != nil {
+							if frontier, ok := resolver.(SQLSourceFrontierResolver); ok {
+								uncached := resolveIndexed
+								frontierValue, ready, available, err := frontier.SQLSourceFrontier(join.source.kind, join.source.key)
+								if err == nil && ready && available {
+									resolveIndexed = func(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
+										if value == nil {
+											return uncached(name, key, field, value)
+										}
+										return control.options.LookupJoinCache.resolveAtFrontier(name, key, field, value, frontierValue, frontier, uncached)
+									}
+								} else {
+									control.options.LookupJoinCache.recordBypass()
+								}
+							}
+						}
 					}
 				} else if borrowed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
 					var err error
