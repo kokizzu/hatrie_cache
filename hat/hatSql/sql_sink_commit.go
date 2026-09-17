@@ -31,9 +31,10 @@ var (
 // acknowledges. Progress entries must all belong to Sink and use distinct
 // sink partitions.
 type SQLSinkCommit struct {
-	Sink          string            `json:"sink"`
-	TransactionID string            `json:"transaction_id"`
-	Progress      []SQLSinkProgress `json:"progress"`
+	Sink           string            `json:"sink"`
+	TransactionID  string            `json:"transaction_id"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	Progress       []SQLSinkProgress `json:"progress"`
 }
 
 // SQLSinkCommitCoordinatorOptions configures optional delivery auditing.

@@ -21,8 +21,9 @@ deterministic, independently owned checkpoint data.
 
 The tracker stores only one `uint64` per sink/partition pair. It does not
 provide exactly-once delivery, durable sink commits, retries, or payload
-deduplication; those concerns remain part of the later M047 contract and the
-sink implementation.
+deduplication by itself. Use the [M-U18 exactly-once sink ledger](MU018_EXACTLY_ONCE_SINK.md)
+when the sink needs an idempotency key, bounded commit history, and durable
+frontier recovery.
 
 ## Cost
 

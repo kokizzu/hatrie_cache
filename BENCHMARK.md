@@ -29402,3 +29402,64 @@ new capability is judged primarily by frontier and checkpoint correctness. The
 roughly 1.05x CPU cost of the new boundary has no measured memory or allocation
 increase in this workload.
 See [MU017_FRONTIER_BACKFILL.md](MU017_FRONTIER_BACKFILL.md).
+
+<a id="mu-018-exactly-once-sink-checkpoints"></a>
+## M-U18 Exactly-Once Sink Checkpoints
+
+Commands: `make benchmark-mu018-baseline`,
+`make benchmark-mu018-exactly-once-sink`, and
+`make benchmark-mu018-durable-sink`. All runs used `GOMAXPROCS=1` on an AMD
+Ryzen 9 5950X Linux/amd64 host. The baseline is the existing unbounded
+`SQLSinkCommitCoordinator`; M-U18 is the bounded in-memory ledger with explicit
+idempotency keys. Durable samples used a `1024`-commit history and include the
+checkpoint store path.
+
+Raw pre-change output (`-benchtime=500ms -count=5`):
+
+```text
+BenchmarkMU018BaselineExistingCommitCoordinator  1208 ns/op  442 B/op  7 allocs/op
+BenchmarkMU018BaselineExistingCommitCoordinator  1415 ns/op  512 B/op  7 allocs/op
+BenchmarkMU018BaselineExistingCommitCoordinator  1361 ns/op  513 B/op  7 allocs/op
+BenchmarkMU018BaselineExistingCommitCoordinator  1288 ns/op  513 B/op  7 allocs/op
+BenchmarkMU018BaselineExistingCommitCoordinator   992.7 ns/op  445 B/op  7 allocs/op
+```
+
+Raw M-U18 in-memory output:
+
+```text
+BenchmarkMU018AfterExactlyOnceLedger  918.5 ns/op  482 B/op  9 allocs/op
+BenchmarkMU018AfterExactlyOnceLedger  977.2 ns/op  481 B/op  9 allocs/op
+BenchmarkMU018AfterExactlyOnceLedger  918.6 ns/op  482 B/op  9 allocs/op
+BenchmarkMU018AfterExactlyOnceLedger  943.9 ns/op  482 B/op  9 allocs/op
+BenchmarkMU018AfterExactlyOnceLedger  1038 ns/op  482 B/op  9 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerDuplicate  193.4 ns/op  72 B/op  2 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerDuplicate  179.9 ns/op  72 B/op  2 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerDuplicate  203.6 ns/op  72 B/op  2 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerDuplicate  223.9 ns/op  72 B/op  2 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerDuplicate  221.4 ns/op  72 B/op  2 allocs/op
+```
+
+Raw durable output (`-benchtime=100ms -count=3`):
+
+```text
+BenchmarkMU018AfterExactlyOnceLedgerMemoryCheckpoint  58900 ns/op  82489 B/op  12 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerMemoryCheckpoint  56468 ns/op  82495 B/op  12 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerMemoryCheckpoint  55909 ns/op  82492 B/op  12 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerFileCheckpoint  3552568 ns/op  1108811 B/op  5210 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerFileCheckpoint  3768925 ns/op  1108798 B/op  5210 allocs/op
+BenchmarkMU018AfterExactlyOnceLedgerFileCheckpoint  15924075 ns/op  1108772 B/op  5210 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Existing coordinator, new commit | 1,288 | 513 | 7 | baseline |
+| M-U18 ledger, new commit | 943.9 | 482 | 9 | `1.36x` faster; `1.06x` lower bytes; +2 allocs |
+| M-U18 ledger, duplicate replay | 203.6 | 72 | 2 | no external callback |
+| M-U18 ledger + in-memory checkpoint store | 56,468 | 82,492 | 12 | `59.8x` slower than in-memory commit |
+| M-U18 ledger + file checkpoint store | 3,768,925 | 1,108,798 | 5,210 | `3,993x` slower than in-memory commit |
+
+The in-memory comparison includes the bounded-history difference: the old
+coordinator retains every commit, while M-U18 retains `1024` commits and keeps
+frontiers separately. The durable modes are opt-in and pay for checkpoint
+assembly, binary encoding, atomic replacement, and file/directory sync. See
+[MU018_EXACTLY_ONCE_SINK.md](MU018_EXACTLY_ONCE_SINK.md).

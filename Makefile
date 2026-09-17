@@ -14138,6 +14138,56 @@ commit-mu017-frontier-backfill:
 push-mu017-frontier-backfill:
 	bash ./scripts/push-mu017-frontier-backfill.sh
 
+.PHONY: test-mu018-exactly-once-sink
+test-mu018-exactly-once-sink:
+	bash ./scripts/test-mu018-exactly-once-sink.sh
+
+.PHONY: benchmark-mu018-baseline
+benchmark-mu018-baseline:
+	bash ./scripts/benchmark-mu018-baseline.sh
+
+.PHONY: format-mu018-exactly-once-sink
+format-mu018-exactly-once-sink:
+	bash ./scripts/format-mu018-exactly-once-sink.sh
+
+.PHONY: benchmark-mu018-exactly-once-sink
+benchmark-mu018-exactly-once-sink:
+	bash ./scripts/benchmark-mu018-exactly-once-sink.sh
+
+.PHONY: test-mu018-package
+test-mu018-package:
+	bash ./scripts/test-mu018-package.sh
+
+.PHONY: race-mu018-exactly-once-sink
+race-mu018-exactly-once-sink:
+	bash ./scripts/race-mu018-exactly-once-sink.sh
+
+.PHONY: vet-mu018-exactly-once-sink
+vet-mu018-exactly-once-sink:
+	bash ./scripts/vet-mu018-exactly-once-sink.sh
+
+.PHONY: benchmark-mu018-durable-sink
+benchmark-mu018-durable-sink:
+	bash ./scripts/benchmark-mu018-durable-sink.sh
+
+.PHONY: review-mu018-exactly-once-sink
+review-mu018-exactly-once-sink:
+	bash ./scripts/review-mu018-exactly-once-sink.sh
+
+.PHONY: stage-mu018-exactly-once-sink
+stage-mu018-exactly-once-sink:
+	bash ./scripts/stage-mu018-exactly-once-sink.sh
+
+.PHONY: commit-mu018-exactly-once-sink
+commit-mu018-exactly-once-sink:
+	bash ./scripts/commit-mu018-exactly-once-sink.sh
+
+.PHONY: push-mu018-exactly-once-sink
+push-mu018-exactly-once-sink:
+	bash ./scripts/push-mu018-exactly-once-sink.sh
+
+
+
 
 
 .PHONY: benchmark-mu015-baseline
