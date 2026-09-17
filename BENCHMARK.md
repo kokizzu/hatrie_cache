@@ -28699,3 +28699,51 @@ under identical process conditions, or 4.31x faster against the pre-change
 median. This is an exact-index lookup microbenchmark, not a full SQL query
 latency claim. See [TT023_STRING_HASH_FASTPATH.md](TT023_STRING_HASH_FASTPATH.md)
 for scope, raw runs, and correctness coverage.
+
+## CH-044 JSON dynamic subcolumns
+
+`make benchmark-ch044` executes the same `JSON_VALUE` filter/projection query
+over 4,096 deterministic JSON documents on an AMD Ryzen 9 5950X Linux `amd64`
+host. Each case ran five samples. The disabled `HatTrie` row is the
+pre-feature-equivalent ordinary columnar path with the new adapter returning
+`available=false`; the materialized case promotes both requested paths before
+timing.
+
+| Path | Median ns/op | B/op | Allocs/op | Retained typed bytes | Relative to disabled |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `HatTrie`, materializer disabled | 13,898,674 | 8,821,725 | 118,885 | 0 | 1.00x |
+| `HatTrie`, typed subcolumns enabled | 3,291,193 | 2,007,618 | 36,927 | 134,058 | 4.22x faster, 4.39x lower heap, 3.22x fewer allocations |
+
+The typed-column byte figure is the materializer's retained payload estimate;
+it excludes ordinary result rows and process-wide runtime state. A regression
+test also verifies that this adapter does not populate the full-row
+`sqlJSONIndexSnapshots` cache. The row-only control measured 8,951,998 ns/op,
+6,817,396 B/op, and 69,687 allocations/op, but it hides the existing ordinary
+columnar resolver and is not the `HatTrie` baseline.
+
+Raw output from `make benchmark-ch044`:
+
+```text
+BenchmarkCH044JSONSubcolumnScanRowBaseline-32         128   9061451 ns/op  6817385 B/op   69687 allocs/op
+BenchmarkCH044JSONSubcolumnScanRowBaseline-32         138   8951998 ns/op  6817386 B/op   69687 allocs/op
+BenchmarkCH044JSONSubcolumnScanRowBaseline-32         120   9583405 ns/op  6817396 B/op   69688 allocs/op
+BenchmarkCH044JSONSubcolumnScanRowBaseline-32         130   8812660 ns/op  6817396 B/op   69687 allocs/op
+BenchmarkCH044JSONSubcolumnScanRowBaseline-32         132   8942908 ns/op  6817397 B/op   69688 allocs/op
+BenchmarkCH044JSONSubcolumnScanDisabled-32             92  13932817 ns/op  8821725 B/op  118885 allocs/op
+BenchmarkCH044JSONSubcolumnScanDisabled-32             84  13401479 ns/op  8821711 B/op  118885 allocs/op
+BenchmarkCH044JSONSubcolumnScanDisabled-32             84  13310520 ns/op  8821727 B/op  118885 allocs/op
+BenchmarkCH044JSONSubcolumnScanDisabled-32             79  13898674 ns/op  8821723 B/op  118885 allocs/op
+BenchmarkCH044JSONSubcolumnScanDisabled-32             85  13927749 ns/op  8821731 B/op  118886 allocs/op
+BenchmarkCH044JSONSubcolumnScanExistingColumnar-32     75  14644324 ns/op 10230165 B/op  127063 allocs/op
+BenchmarkCH044JSONSubcolumnScanExistingColumnar-32     86  14588239 ns/op 10230176 B/op  127063 allocs/op
+BenchmarkCH044JSONSubcolumnScanExistingColumnar-32     84  14724807 ns/op 10230236 B/op  127063 allocs/op
+BenchmarkCH044JSONSubcolumnScanExistingColumnar-32     80  15903320 ns/op 10230177 B/op  127063 allocs/op
+BenchmarkCH044JSONSubcolumnScanExistingColumnar-32     72  14487345 ns/op 10230168 B/op  127063 allocs/op
+BenchmarkCH044JSONSubcolumnScanMaterialized-32        366   3389127 ns/op    134058 retained_bytes 2007620 B/op   36927 allocs/op
+BenchmarkCH044JSONSubcolumnScanMaterialized-32        367   3291193 ns/op    134058 retained_bytes 2007618 B/op   36927 allocs/op
+BenchmarkCH044JSONSubcolumnScanMaterialized-32        370   3293806 ns/op    134058 retained_bytes 2007618 B/op   36927 allocs/op
+BenchmarkCH044JSONSubcolumnScanMaterialized-32        387   3156011 ns/op    134058 retained_bytes 2007616 B/op   36927 allocs/op
+BenchmarkCH044JSONSubcolumnScanMaterialized-32        391   3238736 ns/op    134058 retained_bytes 2007617 B/op   36927 allocs/op
+PASS
+ok  hatrie_cache/hat/hatCache  31.871s
+```

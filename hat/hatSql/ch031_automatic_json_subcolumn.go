@@ -155,6 +155,72 @@ func (materializer *JSONSubcolumnAutoMaterializer) Observe(key JSONSubcolumnAuto
 	return column, ready, nil
 }
 
+// ObserveRequests records one access observation for each distinct requested
+// path and reports whether row data should now be loaded for promotion. It
+// deliberately does not inspect documents, allowing a source adapter to keep
+// cold fallback queries on their original decode path.
+func (materializer *JSONSubcolumnAutoMaterializer) ObserveRequests(source JSONSubcolumnAutoSource, paths []ColumnarJSONSubcolumnRequest) (bool, error) {
+	if materializer == nil || len(paths) == 0 {
+		return false, nil
+	}
+	type requestKey struct {
+		key     JSONSubcolumnAutoKey
+		logical jsonSubcolumnAutoLogicalKey
+	}
+	requests := make([]requestKey, 0, len(paths))
+	seen := make(map[ColumnarJSONSubcolumnKey]struct{}, len(paths))
+	for _, request := range paths {
+		key := JSONSubcolumnAutoKey{
+			SourceName: source.SourceName,
+			SourceKey:  source.SourceKey,
+			Field:      request.Field,
+			Path:       request.Path,
+			Generation: source.Generation,
+		}
+		key, logical, err := normalizeJSONSubcolumnAutoKey(key)
+		if err != nil {
+			return false, err
+		}
+		columnKey := ColumnarJSONSubcolumnKey{Field: key.Field, Path: key.Path}
+		if _, duplicate := seen[columnKey]; duplicate {
+			continue
+		}
+		seen[columnKey] = struct{}{}
+		requests = append(requests, requestKey{key: key, logical: logical})
+	}
+	if len(requests) == 0 {
+		return false, nil
+	}
+	ready := true
+	materializer.mu.Lock()
+	for _, request := range requests {
+		entry := materializer.entries[request.logical]
+		if entry != nil && entry.generation != request.key.Generation {
+			materializer.removeEntryLocked(request.logical, entry)
+			entry = nil
+		}
+		if entry == nil {
+			entry = materializer.newEntryLocked(request.logical, request.key.Generation)
+		}
+		if entry.column.Rows != 0 {
+			continue
+		}
+		if entry.rejected {
+			ready = false
+			continue
+		}
+		if entry.observations < materializer.minObservations {
+			entry.observations++
+			materializer.observations++
+		}
+		if entry.observations < materializer.minObservations {
+			ready = false
+		}
+	}
+	materializer.mu.Unlock()
+	return ready, nil
+}
+
 func (materializer *JSONSubcolumnAutoMaterializer) observeCanonicalLocked(key JSONSubcolumnAutoKey, logical jsonSubcolumnAutoLogicalKey, documents []interface{}) (ColumnarJSONSubcolumn, bool) {
 	entry := materializer.entries[logical]
 	if entry != nil && entry.generation != key.Generation {
@@ -292,6 +358,60 @@ func (materializer *JSONSubcolumnAutoMaterializer) ResolveBatch(source JSONSubco
 			}
 			batch.Columns[field] = values
 		}
+	}
+	return batch, true, nil
+}
+
+// ResolvePromotedBatch returns a batch for paths that are already promoted.
+// It does not need source rows, so callers serving path-only queries can avoid
+// retaining or decoding the complete JSON document set on every warm read.
+func (materializer *JSONSubcolumnAutoMaterializer) ResolvePromotedBatch(source JSONSubcolumnAutoSource, paths []ColumnarJSONSubcolumnRequest) (ColumnarBatch, bool, error) {
+	if materializer == nil || len(paths) == 0 {
+		return ColumnarBatch{}, false, nil
+	}
+	resolved := make([]jsonSubcolumnAutoResolvedColumn, 0, len(paths))
+	seen := make(map[ColumnarJSONSubcolumnKey]struct{}, len(paths))
+	rows := -1
+	for _, request := range paths {
+		key := JSONSubcolumnAutoKey{
+			SourceName: source.SourceName,
+			SourceKey:  source.SourceKey,
+			Field:      request.Field,
+			Path:       request.Path,
+			Generation: source.Generation,
+		}
+		key, _, err := normalizeJSONSubcolumnAutoKey(key)
+		if err != nil {
+			return ColumnarBatch{}, false, err
+		}
+		columnKey := ColumnarJSONSubcolumnKey{Field: key.Field, Path: key.Path}
+		if _, duplicate := seen[columnKey]; duplicate {
+			continue
+		}
+		seen[columnKey] = struct{}{}
+		column, found, err := materializer.Lookup(key)
+		if err != nil {
+			return ColumnarBatch{}, false, err
+		}
+		if !found {
+			return ColumnarBatch{}, false, nil
+		}
+		if rows < 0 {
+			rows = column.Rows
+		} else if rows != column.Rows {
+			return ColumnarBatch{}, false, fmt.Errorf("%w: promoted JSON subcolumns have different row counts", ErrColumnarJSONSubcolumnInvalid)
+		}
+		resolved = append(resolved, jsonSubcolumnAutoResolvedColumn{key: columnKey, column: column})
+	}
+	if rows < 0 || len(resolved) == 0 {
+		return ColumnarBatch{}, false, nil
+	}
+	batch := ColumnarBatch{
+		Rows:           rows,
+		JSONSubcolumns: make(map[ColumnarJSONSubcolumnKey]ColumnarJSONSubcolumn, len(resolved)),
+	}
+	for _, resolvedColumn := range resolved {
+		batch.JSONSubcolumns[resolvedColumn.key] = resolvedColumn.column
 	}
 	return batch, true, nil
 }

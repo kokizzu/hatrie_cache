@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	hatSql "hatrie_cache/hat/hatSql"
 	"io"
 	"math"
 	"os"
@@ -3688,6 +3689,7 @@ type HatTrie struct {
 	sqlColumnarLayouts                 sqlColumnarLayoutCache
 	sqlJSONIndexAdmissionBudget        SQLJSONIndexAdmissionBudget
 	sqlJSONIndexAdmissionConfigured    bool
+	sqlJSONSubcolumnAutoMaterializer   *hatSql.JSONSubcolumnAutoMaterializer
 	sqlJSONIndexSourceGenerations      map[string]uint64
 	sqlJSONIndexSnapshots              map[string]*sqlJSONSourceSnapshot
 	sqlJSONTypedInt64Indexes           map[string]map[string]*sqlJSONTypedInt64Index

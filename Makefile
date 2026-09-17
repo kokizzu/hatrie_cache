@@ -17687,3 +17687,35 @@ push-tt023:
 
 verify-tt023-scope:
 	@sh ./scripts/deliver-tt023.sh verify
+test-ch044:
+	@sh ./scripts/test-ch044.sh
+
+benchmark-ch044:
+	@sh ./scripts/benchmark-ch044.sh
+
+format-ch044:
+	@sh ./scripts/format-ch044.sh
+
+test-ch044-package:
+	@sh ./scripts/test-ch044-package.sh
+
+race-ch044:
+	@sh ./scripts/race-ch044.sh
+
+vet-ch044:
+	@sh ./scripts/vet-ch044.sh
+
+review-ch044:
+	@sh ./scripts/review-ch044.sh
+
+stage-ch044:
+	@sh ./scripts/deliver-ch044.sh stage
+
+commit-ch044:
+	@sh ./scripts/deliver-ch044.sh commit
+
+push-ch044:
+	@sh ./scripts/deliver-ch044.sh push
+
+verify-ch044:
+	@sh ./scripts/deliver-ch044.sh verify

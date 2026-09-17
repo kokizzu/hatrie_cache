@@ -71,7 +71,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-041 | `GROUPING SETS`/`ROLLUP`/`CUBE` | Partially adopted: existing multi-level expansion now supports `GROUPING(expr)` identifiers folded per branch; native one-pass grouping and multi-argument `GROUPING_ID` remain open. | High |
 | CH-042 | Sampling key execution | `SAMPLE` is not a storage-aware deterministic sampling stage. | Medium |
 | CH-043 | Gap filling/interpolation | Implemented bounded ordered time-bucket `WITH FILL` plus opt-in `PREVIOUS`, `NEXT`, and numeric `LINEAR` interpolation; unconfigured queries retain the original fill path. | Medium |
-| CH-044 | JSON dynamic subcolumns | No path-level physical extraction and pruning for semi-structured rows. | High |
+| CH-044 | JSON dynamic subcolumns | Implemented as an opt-in bounded `HatTrie` adapter over automatic typed scalar JSON subcolumns; cold paths fall back, writes invalidate by source generation, and warm path-only queries avoid retaining full decoded rows. | High |
 | CH-045 | Array/map subcolumn pruning | No read planner that loads only referenced nested subcolumns. | Medium |
 | CH-046 | Native wire protocol framing | No ClickHouse-style typed block protocol with explicit column framing and progress. | High |
 | CH-047 | Parallel format parsing | Large RowBinary payloads now index row boundaries once and decode independent ranges in parallel; small and single-core inputs remain serial. CSV/JSON block parsing remains open. | Medium |
