@@ -4400,3 +4400,10 @@ the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
 readers are constrained by the referenced secret, and rotation uses an exact
 version check; values are copied only through explicit resolution and are not
 included in metadata snapshots. See [MU020_SECRET_CONNECTION_RESOURCES.md](MU020_SECRET_CONNECTION_RESOURCES.md).
+
+Role and namespace ownership can be managed with the opt-in
+`hatAuth.RoleCatalog`. It supports inherited roles, hierarchical namespaces,
+scoped grants, exact-version mutation fencing, and deterministic policy
+snapshots while leaving the legacy `hatAuth.Policy` path unchanged. See
+[MU021_ROLE_NAMESPACE_CATALOG.md](MU021_ROLE_NAMESPACE_CATALOG.md) and the
+[M-U21 benchmark](BENCHMARK.md#mu-021-role-and-namespace-catalog).

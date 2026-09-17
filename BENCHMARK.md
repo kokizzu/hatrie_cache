@@ -29542,3 +29542,52 @@ rotation, redaction, and snapshot metadata without secret bytes. Keep
 resolution outside per-row SQL loops. Secret values remain caller-managed and
 are not included in durable metadata snapshots. See
 [MU020_SECRET_CONNECTION_RESOURCES.md](MU020_SECRET_CONNECTION_RESOURCES.md).
+
+<a id="mu-021-role-and-namespace-catalog"></a>
+## M-U21 Role And Namespace Catalog
+
+Commands: `make benchmark-mu021-role-catalog-baseline` records the
+pre-implementation control, and `make benchmark-mu021-role-catalog` runs the
+paired control and final catalog paths. Both targets use `GOMAXPROCS=1`,
+`-benchtime=500ms`, and `-count=5` on an AMD Ryzen 9 5950X Linux/amd64 host.
+The workload authorizes the same command, namespace, and source dimensions;
+the catalog uses a direct role with its measured fast path. Both paths report
+zero heap allocations.
+
+Pre-implementation raw baseline:
+
+```text
+BenchmarkMU021BeforePolicyAuthorize  78.96 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize  81.10 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize  83.29 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize  83.49 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize  76.76 ns/op  0 B/op  0 allocs/op
+```
+
+Final secure paired raw output:
+
+```text
+BenchmarkMU021BeforePolicyAuthorize      81.24 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize      85.24 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize      81.45 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize      78.87 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize      81.43 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize 180.8 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize 170.8 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize 176.6 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize 175.0 ns/op  0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize 177.8 ns/op  0 B/op  0 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Existing flat `Policy` control | 81.43 | 0 | 0 | 1.00x |
+| Final secure `RoleCatalog` direct role | 176.6 | 0 | 0 | 2.17x slower |
+
+An attempted trim-before-validation optimization was reverted after a
+regression test showed that `alice\n` could be treated as `alice`; strict
+validation remains in the final path. The final capability costs about 95 ns
+over the paired legacy policy but adds hierarchical roles, namespace
+ownership, scoped grants, version fencing, and deterministic snapshots without
+heap allocation. See
+[MU021_ROLE_NAMESPACE_CATALOG.md](MU021_ROLE_NAMESPACE_CATALOG.md).

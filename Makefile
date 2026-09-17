@@ -18459,3 +18459,33 @@ commit-mu020-secret-resources:
 
 push-mu020-secret-resources:
 	bash ./scripts/push-mu020-secret-resources.sh
+benchmark-mu021-role-catalog-baseline:
+	bash ./scripts/benchmark-mu021-role-catalog-baseline.sh
+test-mu021-role-catalog:
+	bash ./scripts/test-mu021-role-catalog.sh
+format-mu021-role-catalog:
+	bash ./scripts/format-mu021-role-catalog.sh
+benchmark-mu021-role-catalog:
+	bash ./scripts/benchmark-mu021-role-catalog.sh
+test-mu021-package:
+	bash ./scripts/test-mu021-package.sh
+
+race-mu021-role-catalog:
+	bash ./scripts/race-mu021-role-catalog.sh
+
+vet-mu021-role-catalog:
+	bash ./scripts/vet-mu021-role-catalog.sh
+
+review-mu021-role-catalog:
+	bash ./scripts/review-mu021-role-catalog.sh
+
+stage-mu021-role-catalog:
+	bash ./scripts/stage-mu021-role-catalog.sh
+
+commit-mu021-role-catalog:
+	bash ./scripts/commit-mu021-role-catalog.sh
+
+push-mu021-role-catalog:
+	bash ./scripts/push-mu021-role-catalog.sh
+verify-mu021-role-catalog:
+	bash ./scripts/verify-mu021-role-catalog.sh
