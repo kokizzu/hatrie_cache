@@ -28270,3 +28270,59 @@ heap and 20.25x fewer allocations than JSON in this fixture. Binary decoding is
 1.44x lower heap and uses 1.20x fewer allocations. See
 [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md) for the
 API, durability guidance, and raw samples.
+
+## MZ-23 Sink Delivery Audit
+
+The audit is opt-in and stores terminal sink outcomes plus acknowledged source
+frontiers in a bounded ring. The default coordinator remains payload-free and
+does not allocate an audit ring.
+
+### Summary
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative result |
+|---|---:|---:|---:|---:|
+| Clean baseline, new commit | 919.0 | 427 | 5 | 1.00x |
+| Feature, audit disabled | 965.5 | 438 | 5 | 1.05x; within run variance |
+| Feature, audit enabled | 1,179.0 | 485 | 7 | 1.28x vs clean baseline |
+| Binary checkpoint, 64 events | 20,966.0 | 30,592 | 195 | export path only |
+
+The benchmark used `GOMAXPROCS=1`, `-benchtime=100ms`, `-benchmem`, and five
+runs. Audited commits add two allocations and about 58 B/op over the clean
+baseline in this one-partition fixture. The retained memory is bounded by the
+configured ring capacity; the default path has no retained history.
+
+### Raw Output
+
+```text
+make benchmark-mz023-baseline
+BenchmarkSQLSinkCommitCoordinatorNewCommit        165262  978.6 ns/op  406 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        241542  908.1 ns/op  457 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        317246  844.9 ns/op  413 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        291824  924.5 ns/op  427 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        253552  919.0 ns/op  453 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorDuplicateCommit  670155  180.0 ns/op   72 B/op  2 allocs/op
+BenchmarkSQLSinkCommitCoordinatorDuplicateCommit  735525  149.0 ns/op   72 B/op  2 allocs/op
+BenchmarkSQLSinkCommitCoordinatorDuplicateCommit  890631  148.1 ns/op   72 B/op  2 allocs/op
+BenchmarkSQLSinkCommitCoordinatorDuplicateCommit  724442  152.5 ns/op   72 B/op  2 allocs/op
+BenchmarkSQLSinkCommitCoordinatorDuplicateCommit  738808  156.5 ns/op   72 B/op  2 allocs/op
+
+make benchmark-mz023
+BenchmarkSQLSinkCommitCoordinatorNewCommit        171082  965.5 ns/op  401 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        261314 1106.0 ns/op  447 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        243304  998.5 ns/op  457 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        274592  887.2 ns/op  438 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorNewCommit        206160  736.0 ns/op  376 B/op  5 allocs/op
+BenchmarkSQLSinkCommitCoordinatorAuditedCommit    117660 1369.0 ns/op  512 B/op  7 allocs/op
+BenchmarkSQLSinkCommitCoordinatorAuditedCommit    157819 1179.0 ns/op  485 B/op  7 allocs/op
+BenchmarkSQLSinkCommitCoordinatorAuditedCommit    136508 1224.0 ns/op  510 B/op  7 allocs/op
+BenchmarkSQLSinkCommitCoordinatorAuditedCommit    159718 1178.0 ns/op  483 B/op  7 allocs/op
+BenchmarkSQLSinkCommitCoordinatorAuditedCommit    177195 1150.0 ns/op  468 B/op  7 allocs/op
+BenchmarkSQLSinkDeliveryAuditMarshalBinary          6082 21548.0 ns/op 30592 B/op 195 allocs/op
+BenchmarkSQLSinkDeliveryAuditMarshalBinary          5791 20857.0 ns/op 30592 B/op 195 allocs/op
+BenchmarkSQLSinkDeliveryAuditMarshalBinary          5911 20897.0 ns/op 30592 B/op 195 allocs/op
+BenchmarkSQLSinkDeliveryAuditMarshalBinary          5547 22334.0 ns/op 30592 B/op 195 allocs/op
+BenchmarkSQLSinkDeliveryAuditMarshalBinary          5084 20966.0 ns/op 30592 B/op 195 allocs/op
+```
+
+See [MZ023_SINK_DELIVERY_AUDIT.md](MZ023_SINK_DELIVERY_AUDIT.md) for the API,
+validation rules, and retention behavior.

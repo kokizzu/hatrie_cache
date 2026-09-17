@@ -17378,3 +17378,26 @@ verify-chu38-docs:
 	sh scripts/verify-chu38-docs.sh
 verify-chu38:
 	sh scripts/verify-chu38.sh
+test-mz023:
+	sh scripts/test-mz023.sh
+
+format-mz023:
+	sh scripts/format-mz023.sh
+
+benchmark-mz023-baseline:
+	sh scripts/benchmark-mz023-baseline.sh
+
+benchmark-mz023:
+	sh scripts/benchmark-mz023.sh
+
+verify-mz023:
+	sh scripts/verify-mz023.sh
+
+stage-mz023:
+	sh scripts/stage-mz023.sh
+
+commit-mz023:
+	sh scripts/commit-mz023.sh
+
+push-mz023:
+	sh scripts/push-mz023.sh

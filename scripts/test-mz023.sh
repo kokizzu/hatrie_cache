@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+go test ./hat/hatSql -run '^TestSQLSinkDeliveryAuditTracksCoordinatorOutcomesAndRestores$' -count=1

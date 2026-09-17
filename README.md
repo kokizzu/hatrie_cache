@@ -196,6 +196,7 @@ security guidance before exposing it on a network.
 - Kafka-style SQL source offset tracking: [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
 - Atomic SQL source transaction grouping: [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md)
 - SQL sink progress and acknowledged frontiers: [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md)
+- Materialize-style bounded sink delivery audit history: [MZ023_SINK_DELIVERY_AUDIT.md](MZ023_SINK_DELIVERY_AUDIT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-23-sink-delivery-audit)
 - Opt-in deterministic parallel mapping for independent CPU-bound work: [PARALLEL_MAP.md](PARALLEL_MAP.md)
 - Opt-in incremental foreign-key enforcement: [FOREIGN_KEY_INDEX.md](FOREIGN_KEY_INDEX.md)
 - Independent topology leader election: [LEADER_ELECTION.md](LEADER_ELECTION.md)

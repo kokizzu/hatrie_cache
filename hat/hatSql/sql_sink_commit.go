@@ -36,6 +36,11 @@ type SQLSinkCommit struct {
 	Progress      []SQLSinkProgress `json:"progress"`
 }
 
+// SQLSinkCommitCoordinatorOptions configures optional delivery auditing.
+type SQLSinkCommitCoordinatorOptions struct {
+	Audit *SQLSinkDeliveryAudit
+}
+
 type sqlSinkCommitKey struct {
 	sink          string
 	transactionID string
@@ -55,11 +60,21 @@ type sqlSinkCommitState struct {
 type SQLSinkCommitCoordinator struct {
 	mu      sync.Mutex
 	commits map[sqlSinkCommitKey]*sqlSinkCommitState
+	audit   *SQLSinkDeliveryAudit
 }
 
 // NewSQLSinkCommitCoordinator creates an empty sink commit coordinator.
 func NewSQLSinkCommitCoordinator() *SQLSinkCommitCoordinator {
-	return &SQLSinkCommitCoordinator{commits: make(map[sqlSinkCommitKey]*sqlSinkCommitState)}
+	return NewSQLSinkCommitCoordinatorWithOptions(SQLSinkCommitCoordinatorOptions{})
+}
+
+// NewSQLSinkCommitCoordinatorWithOptions creates a coordinator with optional
+// bounded delivery outcome auditing.
+func NewSQLSinkCommitCoordinatorWithOptions(options SQLSinkCommitCoordinatorOptions) *SQLSinkCommitCoordinator {
+	return &SQLSinkCommitCoordinator{
+		commits: make(map[sqlSinkCommitKey]*sqlSinkCommitState),
+		audit:   options.Audit,
+	}
 }
 
 // Commit invokes apply once for a new transaction. Concurrent calls for the
@@ -83,10 +98,12 @@ func (coordinator *SQLSinkCommitCoordinator) Commit(commit SQLSinkCommit, apply 
 	if existing, found := coordinator.commits[key]; found {
 		if !equalSQLSinkProgress(existing.progress, normalized.Progress) {
 			coordinator.mu.Unlock()
+			coordinator.recordDeliveryAudit(normalized, SQLSinkDeliveryConflict, ErrSQLSinkCommitConflict)
 			return false, ErrSQLSinkCommitConflict
 		}
 		if existing.committed {
 			coordinator.mu.Unlock()
+			coordinator.recordDeliveryAudit(normalized, SQLSinkDeliveryDuplicate, nil)
 			return false, nil
 		}
 		done := existing.done
@@ -115,9 +132,11 @@ func (coordinator *SQLSinkCommitCoordinator) Commit(commit SQLSinkCommit, apply 
 	if panicked {
 		coordinator.mu.Lock()
 		state.err = fmt.Errorf("%w: %v", ErrSQLSinkCommitApplyPanic, panicValue)
+		panicErr := state.err
 		delete(coordinator.commits, key)
 		close(state.done)
 		coordinator.mu.Unlock()
+		coordinator.recordDeliveryAudit(normalized, SQLSinkDeliveryFailed, panicErr)
 		panic(panicValue)
 	}
 	coordinator.mu.Lock()
@@ -125,13 +144,31 @@ func (coordinator *SQLSinkCommitCoordinator) Commit(commit SQLSinkCommit, apply 
 		state.committed = true
 		close(state.done)
 		coordinator.mu.Unlock()
+		coordinator.recordDeliveryAudit(normalized, SQLSinkDeliveryCommitted, nil)
 		return true, nil
 	}
 	state.err = err
 	delete(coordinator.commits, key)
 	close(state.done)
 	coordinator.mu.Unlock()
+	coordinator.recordDeliveryAudit(normalized, SQLSinkDeliveryFailed, err)
 	return false, err
+}
+
+func (coordinator *SQLSinkCommitCoordinator) recordDeliveryAudit(commit SQLSinkCommit, outcome SQLSinkDeliveryOutcome, deliveryErr error) {
+	if coordinator == nil || coordinator.audit == nil {
+		return
+	}
+	event := SQLSinkDeliveryEvent{
+		Sink:          commit.Sink,
+		TransactionID: commit.TransactionID,
+		Outcome:       outcome,
+		Progress:      commit.Progress,
+	}
+	if deliveryErr != nil {
+		event.Error = deliveryErr.Error()
+	}
+	_ = coordinator.audit.Record(event)
 }
 
 // Committed reports whether transactionID has already committed for sink.
