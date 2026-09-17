@@ -29463,3 +29463,38 @@ coordinator retains every commit, while M-U18 retains `1024` commits and keeps
 frontiers separately. The durable modes are opt-in and pay for checkpoint
 assembly, binary encoding, atomic replacement, and file/directory sync. See
 [MU018_EXACTLY_ONCE_SINK.md](MU018_EXACTLY_ONCE_SINK.md).
+
+<a id="mu-019-source-transaction-envelopes"></a>
+## M-U19 Source Transaction Envelopes
+
+Command: `make benchmark-mu019-source-transaction-envelope`. The target uses
+`GOMAXPROCS=1`, `-benchtime=500ms`, and `-count=5` on an AMD Ryzen 9 5950X
+Linux/amd64 host. Both paths use two source partitions and recreate the
+coordinator every 256 accepted transactions. The existing path is the paired
+pre-envelope control; the new path carries two relation names and records the
+same commit marker.
+
+Raw output from the pinned run (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkMU019BeforeSourceIngestion  598.5 ns/op  649 B/op  8 allocs/op
+BenchmarkMU019BeforeSourceIngestion  665.7 ns/op  649 B/op  8 allocs/op
+BenchmarkMU019BeforeSourceIngestion  649.4 ns/op  649 B/op  8 allocs/op
+BenchmarkMU019BeforeSourceIngestion  689.4 ns/op  649 B/op  8 allocs/op
+BenchmarkMU019BeforeSourceIngestion  628.3 ns/op  649 B/op  8 allocs/op
+BenchmarkMU019AfterSourceTransactionEnvelope  717.9 ns/op  713 B/op  10 allocs/op
+BenchmarkMU019AfterSourceTransactionEnvelope  726.2 ns/op  713 B/op  10 allocs/op
+BenchmarkMU019AfterSourceTransactionEnvelope  720.7 ns/op  713 B/op  10 allocs/op
+BenchmarkMU019AfterSourceTransactionEnvelope  687.7 ns/op  713 B/op  10 allocs/op
+BenchmarkMU019AfterSourceTransactionEnvelope  710.2 ns/op  713 B/op  10 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing relation-free ingestion | 649.4 | 649 | 8 | 1.00x control |
+| Two-relation transaction envelope | 717.9 | 713 | 10 | 1.11x slower, 1.10x bytes, +2 allocs |
+
+The overhead is bounded relation metadata validation and retention; the
+relation-free API keeps its original allocation count. The new capability is
+measured as a correctness/operability improvement rather than a raw CPU
+optimization. See [MU019_SOURCE_TRANSACTION_ENVELOPE.md](MU019_SOURCE_TRANSACTION_ENVELOPE.md).

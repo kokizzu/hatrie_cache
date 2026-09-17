@@ -106,7 +106,7 @@ before/after measurement when its motivation is performance.
 | MZ-14 | Avro schema-registry source integration | Evolve event schemas safely | Registry availability | [ ] |
 | MZ-15 | Protobuf schema-registry source integration | Compact typed CDC transfer | Field compatibility rules | [ ] |
 | MZ-16 | Exactly-once source offset checkpoints coupled to updates | Make restart replay bounded | Durable transaction protocol | [ ] |
-| MZ-17 | Source transaction grouping and commit markers | Preserve upstream transaction boundaries | Delayed visibility | [ ] |
+| MZ-17 | Source transaction grouping and commit markers | Preserve upstream transaction boundaries | Delayed visibility | [x] [MU019_SOURCE_TRANSACTION_ENVELOPE.md](MU019_SOURCE_TRANSACTION_ENVELOPE.md) |
 | MZ-18 | Source freshness constraints with query rejection or wait | Make staleness explicit | Availability tradeoff | [x] [MZ018_SOURCE_FRONTIER_WAIT.md](MZ018_SOURCE_FRONTIER_WAIT.md) |
 | MZ-19 | Durable connector pause and resume state | Operate connectors without losing progress | State-machine complexity | [ ] |
 | MZ-20 | Two-phase sink progress checkpoints | Prevent partial sink publication | Sink protocol requirements | [ ] |

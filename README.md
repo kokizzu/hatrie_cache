@@ -928,6 +928,13 @@ Source lifecycle and progress can be exposed through the same resolver with
 reuses existing frontier metrics and redacts raw error text. See
 [MU015_SOURCE_STATUS_CATALOG.md](MU015_SOURCE_STATUS_CATALOG.md).
 
+Source adapters that update multiple relations can use
+`hatSql.SQLSourceTransactionEnvelope` with
+`NewSQLSourceTransactionEnvelopeCoordinator`. It canonicalizes relation and
+partition metadata, suppresses duplicate commits, and preserves relation
+membership in recovery snapshots. The callback must stage and commit all
+relation changes atomically; see [MU019_SOURCE_TRANSACTION_ENVELOPE.md](MU019_SOURCE_TRANSACTION_ENVELOPE.md).
+
 Session-local dependent view definitions can be staged and published under one
 catalog version with `SQLSession.ApplyViewChanges`; SQL callers can also use
 `CREATE OR REPLACE VIEW`. See [MU016_TRANSACTIONAL_VIEW_DDL.md](MU016_TRANSACTIONAL_VIEW_DDL.md)

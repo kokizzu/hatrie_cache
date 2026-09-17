@@ -40,6 +40,7 @@ type sqlSourceIngestionKey struct {
 
 type sqlSourceIngestionState struct {
 	offsets   []SQLSourceOffset
+	relations []string
 	done      chan struct{}
 	committed bool
 	err       error
@@ -74,11 +75,46 @@ func (coordinator *SQLSourceIngestionCoordinator) Ingest(ingestion SQLSourceInge
 	if err != nil {
 		return false, err
 	}
+	envelope := SQLSourceTransactionEnvelope{
+		Source:      normalized.Source,
+		Transaction: normalized.Transaction,
+	}
+	return coordinator.ingestNormalized(key, envelope, apply)
+}
+
+// IngestEnvelope invokes apply once for a source transaction that spans one
+// or more relations. Concurrent calls for the same source transaction wait for
+// the first callback; a successful duplicate returns false. The callback
+// should apply every relation change as one atomic unit. A commit marker is
+// recorded only after the callback returns nil.
+func (coordinator *SQLSourceIngestionCoordinator) IngestEnvelope(envelope SQLSourceTransactionEnvelope, apply func() error) (bool, error) {
+	if coordinator == nil {
+		return false, ErrSQLSourceIngestionNil
+	}
+	if apply == nil {
+		return false, ErrSQLSourceIngestionApplyRequired
+	}
+	key, normalized, err := normalizeSQLSourceTransactionEnvelope(envelope, true)
+	if err != nil {
+		return false, err
+	}
+	return coordinator.ingestNormalized(key, normalized, apply)
+}
+
+func (coordinator *SQLSourceIngestionCoordinator) ingestNormalized(key sqlSourceIngestionKey, envelope SQLSourceTransactionEnvelope, apply func() error) (bool, error) {
 
 	coordinator.mu.Lock()
 	coordinator.ensureMapLocked()
 	if existing, found := coordinator.ingestions[key]; found {
-		if !equalSQLSourceOffsets(existing.offsets, normalized.Transaction.Offsets) {
+		existingEnvelope := SQLSourceTransactionEnvelope{
+			Source: key.source,
+			Transaction: SQLSourceTransaction{
+				ID:      key.transactionID,
+				Offsets: existing.offsets,
+			},
+			Relations: existing.relations,
+		}
+		if !equalSQLSourceTransactionMetadata(existingEnvelope, envelope) {
 			coordinator.mu.Unlock()
 			return false, ErrSQLSourceIngestionConflict
 		}
@@ -92,12 +128,14 @@ func (coordinator *SQLSourceIngestionCoordinator) Ingest(ingestion SQLSourceInge
 		return false, existing.err
 	}
 	state := &sqlSourceIngestionState{
-		offsets: normalized.Transaction.Offsets,
-		done:    make(chan struct{}),
+		offsets:   envelope.Transaction.Offsets,
+		relations: envelope.Relations,
+		done:      make(chan struct{}),
 	}
 	coordinator.ingestions[key] = state
 	coordinator.mu.Unlock()
 
+	var err error
 	panicked := true
 	var panicValue any
 	func() {
@@ -178,6 +216,38 @@ func (coordinator *SQLSourceIngestionCoordinator) Snapshot() []SQLSourceIngestio
 	return snapshot
 }
 
+// SnapshotEnvelopes returns committed source transaction envelopes in
+// deterministic order. Use this form when relation membership must survive a
+// restart; Snapshot remains the legacy relation-free representation.
+func (coordinator *SQLSourceIngestionCoordinator) SnapshotEnvelopes() []SQLSourceTransactionEnvelope {
+	if coordinator == nil {
+		return nil
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	snapshot := make([]SQLSourceTransactionEnvelope, 0, len(coordinator.ingestions))
+	for key, state := range coordinator.ingestions {
+		if !state.committed {
+			continue
+		}
+		snapshot = append(snapshot, SQLSourceTransactionEnvelope{
+			Source: key.source,
+			Transaction: SQLSourceTransaction{
+				ID:      key.transactionID,
+				Offsets: cloneSQLSourceOffsets(state.offsets),
+			},
+			Relations: append([]string(nil), state.relations...),
+		})
+	}
+	sort.Slice(snapshot, func(left, right int) bool {
+		if snapshot[left].Source != snapshot[right].Source {
+			return snapshot[left].Source < snapshot[right].Source
+		}
+		return snapshot[left].Transaction.ID < snapshot[right].Transaction.ID
+	})
+	return snapshot
+}
+
 // Restore atomically replaces committed transaction metadata. Invalid or
 // duplicate snapshots leave the current state unchanged.
 func (coordinator *SQLSourceIngestionCoordinator) Restore(snapshot []SQLSourceIngestion) error {
@@ -195,6 +265,41 @@ func (coordinator *SQLSourceIngestionCoordinator) Restore(snapshot []SQLSourceIn
 		}
 		replacement[key] = &sqlSourceIngestionState{
 			offsets:   normalized.Transaction.Offsets,
+			done:      closedSQLSourceIngestionChannel(),
+			committed: true,
+		}
+	}
+
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	for _, state := range coordinator.ingestions {
+		if !state.committed {
+			return ErrSQLSourceIngestionInFlight
+		}
+	}
+	coordinator.ingestions = replacement
+	return nil
+}
+
+// RestoreEnvelopes atomically replaces committed transaction envelopes. It
+// rejects malformed or duplicate envelopes without changing current state,
+// and refuses to discard a callback that is still in flight.
+func (coordinator *SQLSourceIngestionCoordinator) RestoreEnvelopes(snapshot []SQLSourceTransactionEnvelope) error {
+	if coordinator == nil {
+		return ErrSQLSourceIngestionNil
+	}
+	replacement := make(map[sqlSourceIngestionKey]*sqlSourceIngestionState, len(snapshot))
+	for _, envelope := range snapshot {
+		key, normalized, err := normalizeSQLSourceTransactionEnvelope(envelope, true)
+		if err != nil {
+			return err
+		}
+		if _, found := replacement[key]; found {
+			return fmt.Errorf("%w: transaction %q for source %q", ErrSQLSourceTransactionEnvelopeInvalid, key.transactionID, key.source)
+		}
+		replacement[key] = &sqlSourceIngestionState{
+			offsets:   normalized.Transaction.Offsets,
+			relations: normalized.Relations,
 			done:      closedSQLSourceIngestionChannel(),
 			committed: true,
 		}

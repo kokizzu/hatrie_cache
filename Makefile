@@ -13878,6 +13878,50 @@ vet-chu48-ranked-full-text:
 cleanup-hatrie-tmp-preview:
 	bash ./scripts/cleanup-hatrie-tmp.sh preview
 
+.PHONY: benchmark-mu019-source-transaction-envelope
+benchmark-mu019-source-transaction-envelope:
+	bash ./scripts/benchmark-mu019-source-transaction-envelope.sh
+
+.PHONY: test-mu019-source-transaction-envelope
+test-mu019-source-transaction-envelope:
+	bash ./scripts/test-mu019-source-transaction-envelope.sh
+
+.PHONY: test-mu019-legacy-source-contract
+test-mu019-legacy-source-contract:
+	bash ./scripts/test-mu019-legacy-source-contract.sh
+
+.PHONY: format-mu019-source-transaction-envelope
+format-mu019-source-transaction-envelope:
+	bash ./scripts/format-mu019-source-transaction-envelope.sh
+
+.PHONY: test-mu019-package
+test-mu019-package:
+	bash ./scripts/test-mu019-package.sh
+
+.PHONY: race-mu019-source-transaction-envelope
+race-mu019-source-transaction-envelope:
+	bash ./scripts/race-mu019-source-transaction-envelope.sh
+
+.PHONY: vet-mu019-source-transaction-envelope
+vet-mu019-source-transaction-envelope:
+	bash ./scripts/vet-mu019-source-transaction-envelope.sh
+
+.PHONY: review-mu019-source-transaction-envelope
+review-mu019-source-transaction-envelope:
+	bash ./scripts/review-mu019-source-transaction-envelope.sh
+
+.PHONY: stage-mu019-source-transaction-envelope
+stage-mu019-source-transaction-envelope:
+	bash ./scripts/stage-mu019-source-transaction-envelope.sh
+
+.PHONY: commit-mu019-source-transaction-envelope
+commit-mu019-source-transaction-envelope:
+	bash ./scripts/commit-mu019-source-transaction-envelope.sh
+
+.PHONY: push-mu019-source-transaction-envelope
+push-mu019-source-transaction-envelope:
+	bash ./scripts/push-mu019-source-transaction-envelope.sh
+
 .PHONY: cleanup-hatrie-tmp-apply
 cleanup-hatrie-tmp-apply:
 	bash ./scripts/cleanup-hatrie-tmp.sh apply
