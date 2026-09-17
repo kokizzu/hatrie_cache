@@ -18,6 +18,7 @@ type Request struct {
 	TTLSeconds     *int64         `json:"ttl_seconds,omitempty"`
 	UnixSeconds    *int64         `json:"unix_seconds,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	InsertQuorum   int            `json:"insert_quorum,omitempty"` // Single public mutation only; zero uses server defaults.
 	BinaryValue    []byte         `json:"-"`
 }
 

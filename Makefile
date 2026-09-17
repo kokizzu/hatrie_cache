@@ -17509,8 +17509,38 @@ commit-mz033:
 push-mz033:
 	sh scripts/push-mz033.sh
 
+test-ch11:
+	sh scripts/test-ch11.sh
+
+format-ch11:
+	sh scripts/format-ch11.sh
+
 check-mz033-benchmark-process:
 	sh scripts/check-mz033-benchmark-process.sh
 
 inspect-mz033:
 	sh scripts/inspect-mz033.sh
+.PHONY: benchmark-ch11
+benchmark-ch11:
+	sh ./scripts/benchmark-ch11.sh
+.PHONY: verify-ch11
+verify-ch11:
+	sh ./scripts/verify-ch11.sh
+.PHONY: review-ch11
+review-ch11:
+	sh ./scripts/review-ch11.sh
+.PHONY: stage-ch11
+stage-ch11:
+	sh ./scripts/stage-ch11.sh
+
+.PHONY: review-ch11-staged
+review-ch11-staged:
+	sh ./scripts/review-ch11-staged.sh
+
+.PHONY: commit-ch11
+commit-ch11:
+	sh ./scripts/commit-ch11.sh
+
+.PHONY: push-ch11
+push-ch11:
+	sh ./scripts/push-ch11.sh

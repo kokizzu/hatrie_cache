@@ -28473,3 +28473,67 @@ BenchmarkMZ033SQLDataflowIndexRecommendation 3141 1280403 ns/op 82152 B/op 4 all
 See [MZ033_DATAFLOW_INDEX_ADVISOR.md](MZ033_DATAFLOW_INDEX_ADVISOR.md) for
 defaults, aggregation semantics, resource bounds, and the importable API
 example.
+
+<a id="ch-011-client-insert-quorum"></a>
+## CH-011 Client Insert Quorum
+
+Command: `make benchmark-ch11`
+
+The benchmark compares the clean parent revision with the feature revision on
+the existing `hat/hatCache` command path. It uses five samples,
+`-benchtime=100ms`, `-benchmem`, and an AMD Ryzen 9 5950X. The disabled path is
+the normal single-node command path; the loopback paths use one synchronous
+replica and a quorum of two. The request-level path gets that quorum from
+`InsertQuorum` while the server-wide setting remains zero.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Parent, default/off | 367.2; 359.6; 425.9; 391.7; 367.1 | 367.2 | 0 | 0 | 1.00x baseline |
+| Feature, default/off | 383.8; 415.7; 354.3; 371.6; 344.8 | 371.6 | 0 | 0 | 1.01x ns/op; allocation-free |
+| Parent, server `WriteQuorum=2` | 133,413; 130,595; 121,393; 136,317; 123,096 | 130,595 | 14,565 | 161 | 1.00x quorum baseline |
+| Feature, server `WriteQuorum=2` | 135,031; 140,522; 143,758; 138,822; 132,115 | 138,822 | 14,686 | 161 | 1.06x ns/op; same allocations |
+| Feature, request `InsertQuorum=2` | 124,851; 127,110; 130,146; 123,750; 125,082 | 125,082 | 14,481 | 161 | 0.96x measured quorum median; same cost class |
+
+The default path has no new heap allocation and its 1.2% median difference is
+within the short-run variance of this sub-microsecond benchmark. A request
+quorum has the same synchronous HTTP replication cost as the existing server
+quorum: the request field selects the policy, while network round trips and
+replica response allocations dominate the operation. The request setting is
+therefore accepted for explicit durability control, not as a speedup.
+
+### Raw Output
+
+```text
+make benchmark-ch11
+--- baseline dc469fa4f40e0b5c731a0766c9033d0325fe2ce7 ---
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  293700  367.2 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  336399  359.6 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  362019  425.9 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  345079  391.7 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  338080  367.1 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  898  133413 ns/op  14491 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  837  130595 ns/op  14740 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  1020  121393 ns/op  14446 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  854  136317 ns/op  14701 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  949  123096 ns/op  14565 B/op  161 allocs/op
+--- current legacy/default path ---
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  350040  383.8 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  301694  415.7 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  316804  354.3 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  289777  371.6 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumDisabled-32  333969  344.8 ns/op  0 B/op  0 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  776  135031 ns/op  14232 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  914  140522 ns/op  14933 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  894  143758 ns/op  14728 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  879  138822 ns/op  14857 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandWriteQuorumLoopback-32  850  132115 ns/op  14686 B/op  161 allocs/op
+--- current request-level quorum path ---
+BenchmarkExecuteCacheCommandInsertQuorum-32  835  124851 ns/op  14215 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandInsertQuorum-32  960  127110 ns/op  14418 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandInsertQuorum-32  939  130146 ns/op  14636 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandInsertQuorum-32  920  123750 ns/op  14481 B/op  161 allocs/op
+BenchmarkExecuteCacheCommandInsertQuorum-32  988  125082 ns/op  14499 B/op  161 allocs/op
+```
+
+See [CH011_INSERT_QUORUM.md](CH011_INSERT_QUORUM.md) for the request contract,
+validation, and operational behavior.

@@ -2042,7 +2042,15 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		return response, true
 	}
 	if normalizedCommand(request.Command) == "BATCH" {
+		if request.InsertQuorum != 0 {
+			return commandError("insert quorum is valid only for a single public write command"), true
+		}
 		return executePublicCommandBatch(ctx, trie, request, options)
+	}
+	if request.InsertQuorum != 0 {
+		if err := validateCommandInsertQuorum(ctx, request, options); err != nil {
+			return commandError(err.Error()), true
+		}
 	}
 	replicationToken, response, handled, rejected := checkReplicationSafetyWithMetadata(
 		request,
@@ -2062,8 +2070,12 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
 		return response, true
 	}
-	if options.WriteQuorum > 0 && commandWriteQuorumEligible(request) {
-		if err := validateCommandWriteQuorum(ctx, options); err != nil {
+	requiredWriteQuorum := options.WriteQuorum
+	if request.InsertQuorum > requiredWriteQuorum {
+		requiredWriteQuorum = request.InsertQuorum
+	}
+	if requiredWriteQuorum > 0 && commandWriteQuorumEligible(request) {
+		if err := validateCommandWriteQuorum(ctx, options, requiredWriteQuorum); err != nil {
 			return commandError(err.Error()), true
 		}
 	}
@@ -2095,8 +2107,8 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		options.DirtyTracker.markCommand(request)
 	}
 	if options.Replicator != nil {
-		if options.WriteQuorum > 0 && replicationPayloadKindFor(request, response) != replicationPayloadNone {
-			if _, err := options.Replicator.ReplicateCommandWithQuorum(ctx, trie, request, response, options.WriteQuorum); err != nil {
+		if requiredWriteQuorum > 0 && replicationPayloadKindFor(request, response) != replicationPayloadNone {
+			if _, err := options.Replicator.ReplicateCommandWithQuorum(ctx, trie, request, response, requiredWriteQuorum); err != nil {
 				response.OK = false
 				response.Message = err.Error()
 				return response, true
@@ -2120,15 +2132,32 @@ func commandWriteQuorumEligible(request CacheCommandRequest) bool {
 	return commandShouldJournal(request)
 }
 
-func validateCommandWriteQuorum(ctx context.Context, options commandExecutionOptions) error {
-	if options.WriteQuorum < 1 {
-		return fmt.Errorf("%w: required=%d", hatReplication.ErrWriteQuorumInvalid, options.WriteQuorum)
+func validateCommandInsertQuorum(ctx context.Context, request CacheCommandRequest, options commandExecutionOptions) error {
+	if request.InsertQuorum < 1 {
+		return fmt.Errorf("%w: insert required=%d", hatReplication.ErrWriteQuorumInvalid, request.InsertQuorum)
+	}
+	if !commandWriteQuorumEligible(request) {
+		return fmt.Errorf("%w: insert quorum requires a single public write command", hatReplication.ErrWriteQuorumInvalid)
+	}
+	required := options.WriteQuorum
+	if request.InsertQuorum > required {
+		required = request.InsertQuorum
+	}
+	return validateCommandWriteQuorum(ctx, options, required)
+}
+
+func validateCommandWriteQuorum(ctx context.Context, options commandExecutionOptions, required int) error {
+	if required < 1 {
+		return fmt.Errorf("%w: required=%d", hatReplication.ErrWriteQuorumInvalid, required)
 	}
 	if options.Replicator == nil {
 		return fmt.Errorf("%w: replication is not configured", hatReplication.ErrWriteQuorumInvalid)
 	}
 	if options.Replicator.queue != nil {
 		return hatReplication.ErrWriteQuorumAsynchronous
+	}
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", hatReplication.ErrWriteQuorumInvalid)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -2163,12 +2192,17 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if err != nil {
 		return commandError(err.Error()), false
 	}
+	for index, payload := range payloads {
+		if payload.InsertQuorum != 0 {
+			return commandError(fmt.Sprintf("batch value %d: insert quorum is valid only for a single public write command", index)), true
+		}
+	}
 	if trie.localPartitionSet() != nil {
 		return executePartitionedPublicCommandBatch(ctx, trie, request, payloads, options)
 	}
 	batchQuorum := request.Atomic && options.WriteQuorum > 0 && atomicBatchWriteQuorumEligible(payloads)
 	if batchQuorum {
-		if err := validateCommandWriteQuorum(ctx, options); err != nil {
+		if err := validateCommandWriteQuorum(ctx, options, options.WriteQuorum); err != nil {
 			return commandError(err.Error()), true
 		}
 	}

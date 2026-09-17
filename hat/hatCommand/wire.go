@@ -399,6 +399,7 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) Request
 		ExpectedValue:  request.GetExpectedValue(),
 		Subkey:         request.GetSubkey(),
 		IdempotencyKey: request.GetIdempotencyKey(),
+		InsertQuorum:   int(request.GetInsertQuorum()),
 		BinaryValue:    append([]byte(nil), request.GetBinaryValue()...),
 	}
 	if request.TtlSeconds != nil {
@@ -491,6 +492,9 @@ func writeJSONStatus(w http.ResponseWriter, status int, value any) {
 }
 
 func cacheCommandRequestToProto(request Request) (*hatriecachev1.CommandRequest, error) {
+	if int(int32(request.InsertQuorum)) != request.InsertQuorum {
+		return nil, fmt.Errorf("%w: insert quorum is outside the protobuf range", ErrUnsupportedCommandWireProtobufValue)
+	}
 	batch, err := cacheCommandBatchToProto(request.Batch)
 	if err != nil {
 		return nil, err
@@ -503,6 +507,7 @@ func cacheCommandRequestToProto(request Request) (*hatriecachev1.CommandRequest,
 		ExpectedValue:  request.ExpectedValue,
 		Subkey:         request.Subkey,
 		IdempotencyKey: request.IdempotencyKey,
+		InsertQuorum:   int32(request.InsertQuorum),
 		BinaryValue:    append([]byte(nil), request.BinaryValue...),
 		TtlSeconds:     request.TTLSeconds,
 		UnixSeconds:    request.UnixSeconds,

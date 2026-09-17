@@ -1517,6 +1517,9 @@ func publicCommandBatchRequests(request CacheCommandRequest) ([]CacheCommandRequ
 }
 
 func validatePublicCommandBatchPayload(request CacheCommandRequest, index int) error {
+	if request.InsertQuorum != 0 {
+		return fmt.Errorf("batch value %d: insert quorum is valid only for a single public write command", index)
+	}
 	command := normalizedCommand(request.Command)
 	if command == "" {
 		return fmt.Errorf("batch value %d: command is required", index)

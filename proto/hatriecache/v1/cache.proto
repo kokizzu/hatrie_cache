@@ -88,6 +88,7 @@ message CommandRequest {
 	uint64 request_id = 13;
 	bool atomic = 14;
 	string expected_value = 15;
+	int32 insert_quorum = 16;
 }
 
 message CommandResponse {
