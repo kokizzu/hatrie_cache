@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-git push
+git push origin HEAD:master
