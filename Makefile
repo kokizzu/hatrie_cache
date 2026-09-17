@@ -17876,6 +17876,40 @@ review-tr008-journal-encryption:
 status-tr008-journal-encryption:
 	sh ./scripts/status-tr008-journal-encryption.sh
 
+.PHONY: inspect-ch017-source
+test-ch017-projection-advisor:
+	sh ./scripts/test-ch017-projection-advisor.sh
+
+benchmark-ch017-projection-advisor:
+	sh ./scripts/benchmark-ch017-projection-advisor.sh
+
+format-ch017-projection-advisor:
+	sh ./scripts/format-ch017-projection-advisor.sh
+
+test-ch017-package:
+	sh ./scripts/test-ch017-package.sh
+
+race-ch017-projection-advisor:
+	sh ./scripts/race-ch017-projection-advisor.sh
+
+vet-ch017-projection-advisor:
+	sh ./scripts/vet-ch017-projection-advisor.sh
+
+review-ch017-projection-advisor:
+	sh ./scripts/review-ch017-projection-advisor.sh
+
+stage-ch017-projection-advisor:
+	sh ./scripts/stage-ch017-projection-advisor.sh
+
+commit-ch017-projection-advisor:
+	sh ./scripts/commit-ch017-projection-advisor.sh
+
+push-ch017-projection-advisor:
+	sh ./scripts/push-ch017-projection-advisor.sh
+
+delivery-ch017-projection-advisor:
+	sh ./scripts/delivery-ch017-projection-advisor.sh
+
 .PHONY: stage-tr008-journal-encryption
 stage-tr008-journal-encryption:
 	sh ./scripts/stage-tr008-journal-encryption.sh

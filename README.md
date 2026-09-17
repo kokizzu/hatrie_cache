@@ -4309,3 +4309,6 @@ measurements in [BENCHMARK.md](BENCHMARK.md#c229-join-overflow-policy).
 - Tarantool-inspired zero-allocation string equality index lookup:
   [TT023_STRING_HASH_FASTPATH.md](TT023_STRING_HASH_FASTPATH.md), with
   measurements in [BENCHMARK.md](BENCHMARK.md#tt-023-string-equality-index-fast-path).
+## Workload-Driven Projection Advice
+
+The optional `hatSql.SQLProjectionAdvisor` identifies repeated slow `CACHE` query shapes and reports the fields used by projection, filters, `GROUP BY`, and `ORDER BY`. It is bounded, privacy-safe, and advisory only: it never creates storage or changes query execution. See [CH017_PROJECTION_ADVISOR.md](CH017_PROJECTION_ADVISOR.md) and the measured cost in [BENCHMARK.md](BENCHMARK.md#ch-17-workload-driven-projection-advisor).

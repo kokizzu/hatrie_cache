@@ -28927,3 +28927,36 @@ BenchmarkTR008RecordEncoding/aes-gcm-frame-32         447381 447.9 ns/op    571.
 PASS
 ok  hatrie_cache/hat/hatJournal  1.856s
 ```
+## CH-17 Workload-Driven Projection Advisor
+
+Command: `make benchmark-ch017-projection-advisor`
+
+Representative enabled-advisor query: one `CACHE` source, `SUM`, `WHERE`, `GROUP BY`, and `ORDER BY`; Linux amd64 on AMD Ryzen 9 5950X 16-Core Processor; five benchmark samples; `-benchtime=200ms`.
+
+| State | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Before shape capture | 10,385 | 8,792 | 52 |
+| After shape capture | 10,439 | 9,288 | 71 |
+| Change | +0.5% | +5.6% | +36.5% |
+
+The CPU medians overlap normal benchmark noise, while the advisor adds 496 bytes and 19 allocations per observed slow query. This is an opt-in diagnostic cost; the default `ProjectionAdvisor: nil` path is unchanged. The advisor avoids an unsafe automatic projection decision, so disk usage and refresh work remain caller-controlled.
+
+Raw benchmark samples before shape capture:
+
+```text
+9976 ns/op 8792 B/op 52 allocs/op
+10208 ns/op 8792 B/op 52 allocs/op
+10385 ns/op 8792 B/op 52 allocs/op
+11051 ns/op 8792 B/op 52 allocs/op
+10700 ns/op 8792 B/op 52 allocs/op
+```
+
+Raw benchmark samples after shape capture:
+
+```text
+10263 ns/op 9288 B/op 71 allocs/op
+10110 ns/op 9288 B/op 71 allocs/op
+10888 ns/op 9288 B/op 71 allocs/op
+10439 ns/op 9288 B/op 71 allocs/op
+10970 ns/op 9288 B/op 71 allocs/op
+```

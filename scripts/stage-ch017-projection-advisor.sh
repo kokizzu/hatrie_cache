@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+git add hat/hatSql/projection_advisor.go hat/hatSql/ch017_projection_advisor_test.go hat/hatSql/ch017_projection_advisor_benchmark_test.go CH017_PROJECTION_ADVISOR.md BENCHMARK.md INSPIRATION_BACKLOG.md README.md Makefile scripts/benchmark-ch017-projection-advisor.sh scripts/format-ch017-projection-advisor.sh scripts/test-ch017-projection-advisor.sh scripts/test-ch017-package.sh scripts/race-ch017-projection-advisor.sh scripts/vet-ch017-projection-advisor.sh scripts/review-ch017-projection-advisor.sh scripts/stage-ch017-projection-advisor.sh scripts/commit-ch017-projection-advisor.sh scripts/push-ch017-projection-advisor.sh scripts/delivery-ch017-projection-advisor.sh
