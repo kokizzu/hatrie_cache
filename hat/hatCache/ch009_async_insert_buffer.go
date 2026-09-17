@@ -78,6 +78,7 @@ type AsyncInsertBuffer struct {
 	current      *asyncInsertBatch
 	ready        []*asyncInsertBatch
 	queued       int
+	inFlight     int
 	closed       bool
 	closeErr     error
 	closeOnce    sync.Once
@@ -85,6 +86,10 @@ type AsyncInsertBuffer struct {
 	flushRequest chan chan error
 	close        chan struct{}
 	done         chan struct{}
+	submitted      uint64
+	flushedBatches uint64
+	flushedItems   uint64
+	failedBatches  uint64
 }
 
 // NewAsyncInsertBuffer creates an opt-in bounded writer. It requires a
@@ -184,6 +189,7 @@ func (buffer *AsyncInsertBuffer) Submit(ctx context.Context, request CacheComman
 	index := len(batch.requests)
 	batch.requests = append(batch.requests, request)
 	buffer.queued++
+	buffer.submitted++
 	if len(batch.requests) >= buffer.options.BatchSize {
 		buffer.ready = append(buffer.ready, batch)
 		buffer.current = nil
@@ -231,6 +237,7 @@ func (buffer *AsyncInsertBuffer) takeReady() *asyncInsertBatch {
 	buffer.ready[len(buffer.ready)-1] = nil
 	buffer.ready = buffer.ready[:len(buffer.ready)-1]
 	buffer.queued -= len(batch.requests)
+	buffer.inFlight += len(batch.requests)
 	return batch
 }
 
@@ -267,7 +274,7 @@ func (buffer *AsyncInsertBuffer) flushBatch(batch *asyncInsertBatch) error {
 				break
 			}
 			if !errors.Is(err, ErrCommandJournalAsyncQueueFull) {
-				batch.complete(CacheCommandResponse{}, err)
+				buffer.finishBatch(batch, CacheCommandResponse{}, err)
 				return err
 			}
 			time.Sleep(time.Millisecond)
@@ -278,12 +285,12 @@ func (buffer *AsyncInsertBuffer) flushBatch(batch *asyncInsertBatch) error {
 	for index, submission := range submissions {
 		response, err := submission.Wait(context.Background())
 		if err != nil {
-			batch.complete(CacheCommandResponse{}, err)
+			buffer.finishBatch(batch, CacheCommandResponse{}, err)
 			return err
 		}
 		responses[index] = response
 	}
-	batch.complete(CacheCommandResponse{
+	buffer.finishBatch(batch, CacheCommandResponse{
 		OK:        true,
 		Message:   "batch completed",
 		Responses: responses,

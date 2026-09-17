@@ -180,6 +180,7 @@ explicitly opt-in operational control.
 | ClickHouse | Persistent query log | Adopted as an opt-in operator history | `OpenSQLQueryLog` appends terminal `SQLQueryManager` status as strict NDJSON with `0600` permissions, sanitized fields, explicit `Sync`, restart-readable history, and non-fatal `QueryLogError` reporting. The default manager remains in-memory-only. [PERSISTENT_QUERY_LOG.md](PERSISTENT_QUERY_LOG.md), [BENCHMARK.md](BENCHMARK.md#ch-031-persistent-sql-query-log) |
 
 | ClickHouse | Direct columnar append ingestion | Partially adopted as `hatSql.TypedTable.AppendColumnar`; complete scalar batches are validated before mutation and appended column-wise with plain and packed layouts supported. SQL `INSERT` routing remains caller-owned. | [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md), [BENCHMARK.md#ch-u22-direct-columnar-append](BENCHMARK.md#ch-u22-direct-columnar-append) |
+| ClickHouse | Async-insert queue status and explicit flush | Adopted as the bounded importable `AsyncInsertQueueRegistry` with payload-free status snapshots and authenticated targeted/all-queue flush endpoints. It is disabled unless explicitly configured. | [CHU23_ASYNC_INSERT_QUEUE.md](CHU23_ASYNC_INSERT_QUEUE.md), [BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush](BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush) |
 
 ## Measured Results
 

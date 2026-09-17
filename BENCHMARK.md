@@ -28179,3 +28179,33 @@ BenchmarkC229JoinOverflowPolicy/spill-budget            219   4977011 ns/op   84
 BenchmarkC229JoinOverflowPolicy/spill-budget            223   5297262 ns/op   847795 B/op  5192 allocs/op
 BenchmarkC229JoinOverflowPolicy/spill-budget            250   5227515 ns/op   847797 B/op  5192 allocs/op
 ```
+## CH-U23 Async Insert Queue Status and Flush
+
+Command: `make benchmark-chu23-baseline` for the clean baseline and
+`make benchmark-chu23` for the feature worktree. Both use
+`GOMAXPROCS=1`, `-cpu=1`, `-benchmem`, and `-count=5` on the same host.
+
+### Raw Submit Results
+
+| Variant | Run 1 ns/op | Run 2 ns/op | Run 3 ns/op | Run 4 ns/op | Run 5 ns/op | Median ns/op | Median B/op | Allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Clean baseline | 13,681 | 13,317 | 14,162 | 13,199 | 13,382 | 13,382 | 1,414 | 6 |
+| CH-U23 feature | 14,260 | 13,218 | 13,412 | 13,556 | 13,761 | 13,556 | 1,413 | 6 |
+
+The feature is approximately `1.01x` the baseline time (`1.3%` higher), with
+the same allocation count and effectively unchanged bytes/op. The difference
+is within observed run variance, so this feature is accepted for its operator
+control surface rather than as a submit-throughput optimization.
+
+### Raw Status Snapshot Results
+
+`BenchmarkCHU23AsyncInsertQueueStats` with one registered queue:
+
+| Run 1 ns/op | Run 2 ns/op | Run 3 ns/op | Run 4 ns/op | Run 5 ns/op | Median ns/op | B/op | Allocs/op |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 176.4 | 173.3 | 173.5 | 174.3 | 205.3 | 174.3 | 160 | 3 |
+
+An earlier atomic-counter experiment produced about a 5% submit regression and
+was removed before acceptance. The final counters are protected by the
+buffer's existing mutex. Status snapshots allocate a small response slice;
+the default path does not instantiate the registry or routes.

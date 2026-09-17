@@ -128,6 +128,9 @@ type MonitoringOptions struct {
 	// It is disabled by default and requires a journal with idempotency enabled.
 	AsyncCommands              bool
 	AsyncCommandStatusCapacity int
+	// AsyncInsertQueues enables authenticated monitoring of named async-insert
+	// buffers when a registry is supplied. A nil value keeps these routes off.
+	AsyncInsertQueues *AsyncInsertQueueRegistry
 	// SlowCommandThreshold enables bounded slow-command capture when positive.
 	// It is disabled by default; values are never stored in captured records.
 	SlowCommandThreshold            time.Duration
@@ -659,6 +662,10 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/commands/slow", handler.handleSlowCommands)
 	if handler.options.AsyncCommands {
 		server.HandleFunc("/api/commands/status", handler.handleAsyncCommandStatus)
+	}
+	if handler.options.AsyncInsertQueues != nil {
+		server.HandleFunc("/api/async-inserts", handler.handleAsyncInsertQueues)
+		server.HandleFunc("/api/async-inserts/flush", handler.handleAsyncInsertQueueFlush)
 	}
 	server.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	server.HandleFunc("/api/backup", handler.handleBackup)
@@ -1500,10 +1507,14 @@ func (handler *MonitoringHandler) handleOpenAPI(w http.ResponseWriter, r *http.R
 		writeMethodNotAllowed(w)
 		return
 	}
-	writeJSON(w, monitoringOpenAPIDocument(handler.options.AsyncCommands))
+	writeJSON(w, monitoringOpenAPIDocumentWithAsyncInsertQueues(handler.options.AsyncCommands, handler.options.AsyncInsertQueues != nil))
 }
 
 func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
+	return monitoringOpenAPIDocumentWithAsyncInsertQueues(asyncCommands, false)
+}
+
+func monitoringOpenAPIDocumentWithAsyncInsertQueues(asyncCommands, asyncInsertQueues bool) map[string]interface{} {
 	jsonResponse := map[string]interface{}{
 		"description": "JSON response",
 		"content":     map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
@@ -1561,6 +1572,10 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 	}
 	if asyncCommands {
 		paths["/api/commands/status"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncCommandStatus", "responses": map[string]interface{}{"200": jsonResponse}}}
+	}
+	if asyncInsertQueues {
+		paths["/api/async-inserts"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncInsertQueues", "responses": map[string]interface{}{"200": jsonResponse}}}
+		paths["/api/async-inserts/flush"] = map[string]interface{}{"post": map[string]interface{}{"operationId": "flushAsyncInsertQueues", "responses": map[string]interface{}{"200": jsonResponse}}}
 	}
 	return map[string]interface{}{
 		"openapi": "3.1.0",

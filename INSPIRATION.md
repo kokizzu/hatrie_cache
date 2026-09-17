@@ -295,6 +295,7 @@ name.
 
 - [x] C168 Tarantool/ClickHouse-style plain columnar value dispatch. `ColumnarBatch.Value` now bypasses unused optional physical-layout maps for the common plain `Columns` representation while preserving specialized-layout precedence; see [TR019_COLUMNAR_VALUE_FASTPATH.md](TR019_COLUMNAR_VALUE_FASTPATH.md).
 - [x] C169 ClickHouse-style direct columnar append ingestion. `TypedTable.AppendColumnar` validates complete scalar batches before mutation, rejects duplicate/existing keys atomically, supports plain and packed columnar representations, and appends with exact capacity reservation; SQL `INSERT` routing remains caller-owned. See [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md).
+- [x] C170 ClickHouse-style async-insert queue status and explicit flush. The importable bounded `AsyncInsertQueueRegistry` exposes payload-free queue snapshots and authenticated targeted/all-queue flush routes; registration, buffer lifecycle, and worker ownership remain caller-controlled and disabled by default. See [CHU23_ASYNC_INSERT_QUEUE.md](CHU23_ASYNC_INSERT_QUEUE.md).
 
 ## Materialize Ideas
 

@@ -17281,3 +17281,39 @@ commit-chu22:
 
 push-chu22:
 	sh scripts/push-chu22.sh
+test-chu23:
+	sh scripts/test-chu23.sh
+
+benchmark-chu23:
+	sh scripts/benchmark-chu23.sh
+
+format-chu23:
+	sh scripts/format-chu23.sh
+benchmark-chu23-baseline:
+	sh scripts/benchmark-chu23-baseline.sh
+test-chu23-package:
+	sh scripts/test-chu23-package.sh
+
+test-race-chu23:
+	sh scripts/test-race-chu23.sh
+
+vet-chu23:
+	sh scripts/vet-chu23.sh
+
+test-chu23-all:
+	sh scripts/test-chu23-all.sh
+
+verify-chu23-docs:
+	sh scripts/verify-chu23-docs.sh
+
+review-chu23:
+	sh scripts/review-chu23.sh
+
+stage-chu23:
+	sh scripts/stage-chu23.sh
+
+commit-chu23:
+	sh scripts/commit-chu23.sh
+
+push-chu23:
+	sh scripts/push-chu23.sh
