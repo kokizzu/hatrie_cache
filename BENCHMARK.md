@@ -28474,6 +28474,42 @@ See [MZ033_DATAFLOW_INDEX_ADVISOR.md](MZ033_DATAFLOW_INDEX_ADVISOR.md) for
 defaults, aggregation semantics, resource bounds, and the importable API
 example.
 
+<a id="ch-014-resumable-mutation-dependency-graph"></a>
+## CH-014 Resumable Mutation Dependency Graph
+
+Command: `make benchmark-ch14`
+
+This is a new opt-in coordination API, so it has no legacy implementation to
+claim as a speed baseline. The benchmark uses 512 independent pending tasks
+and claims 64 at a time, then measures JSON snapshot encoding for 256 tasks.
+It uses five samples, `-benchtime=100ms`, `-benchmem`, and an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| `ClaimReady(64)` over 512 tasks | 54,717; 56,722; 59,371; 58,042; 56,975 | 56,975 | 14,848 | 2 | new bounded scheduler path |
+| `Save` with 256 tasks | 74,799; 79,775; 83,029; 78,088; 76,070 | 78,088 | 40,717 | 5 | new persistence path |
+
+The scheduler has no cost unless an application constructs and uses it. The
+claim path returns detached records and performs a bounded scan/sort, while
+snapshot encoding includes the retained task metadata. Limits and atomic load
+validation are documented in [CH014_MUTATION_DEPENDENCY_GRAPH.md](CH014_MUTATION_DEPENDENCY_GRAPH.md).
+
+### Raw Output
+
+```text
+make benchmark-ch14
+BenchmarkSQLMutationDependencyGraphClaimReady-32  2062  54717 ns/op  14848 B/op  2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32  2212  56722 ns/op  14848 B/op  2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32  2312  59371 ns/op  14848 B/op  2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32  1788  58042 ns/op  14848 B/op  2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32  1876  56975 ns/op  14848 B/op  2 allocs/op
+BenchmarkSQLMutationDependencyGraphSave-32       1681  74799 ns/op  40717 B/op  5 allocs/op
+BenchmarkSQLMutationDependencyGraphSave-32       1413  79775 ns/op  40573 B/op  5 allocs/op
+BenchmarkSQLMutationDependencyGraphSave-32       1652  83029 ns/op  40738 B/op  5 allocs/op
+BenchmarkSQLMutationDependencyGraphSave-32       1566  78088 ns/op  40784 B/op  5 allocs/op
+BenchmarkSQLMutationDependencyGraphSave-32       1542  76070 ns/op  40682 B/op  5 allocs/op
+```
+
 <a id="ch-011-client-insert-quorum"></a>
 ## CH-011 Client Insert Quorum
 

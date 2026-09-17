@@ -213,6 +213,7 @@ security guidance before exposing it on a network.
 - Distributed join movement accounting for adapters: [DISTRIBUTED_JOIN_ACCOUNTING.md](DISTRIBUTED_JOIN_ACCOUNTING.md)
 - Opt-in bounded synchronous write quorums: [QUORUM_WRITES.md](QUORUM_WRITES.md)
 - Per-command client insert quorum: [CH011_INSERT_QUORUM.md](CH011_INSERT_QUORUM.md)
+- Resumable SQL mutation dependency scheduling: [CH014_MUTATION_DEPENDENCY_GRAPH.md](CH014_MUTATION_DEPENDENCY_GRAPH.md)
 - Eventual and session read-consistency policies: [READ_CONSISTENCY.md](READ_CONSISTENCY.md)
 - Independent topology epochs and local lease fencing: [EPOCH_LEASES.md](EPOCH_LEASES.md)
 - Deterministic opt-in SQL transaction triggers: [SQL_TRANSACTION_TRIGGERS.md](SQL_TRANSACTION_TRIGGERS.md)

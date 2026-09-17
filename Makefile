@@ -17544,3 +17544,34 @@ commit-ch11:
 .PHONY: push-ch11
 push-ch11:
 	sh ./scripts/push-ch11.sh
+.PHONY: test-ch14
+test-ch14:
+	sh ./scripts/test-ch14.sh
+.PHONY: benchmark-ch14
+benchmark-ch14:
+	sh ./scripts/benchmark-ch14.sh
+.PHONY: format-ch14
+format-ch14:
+	sh ./scripts/format-ch14.sh
+.PHONY: verify-ch14
+verify-ch14:
+	sh ./scripts/verify-ch14.sh
+.PHONY: review-ch14
+review-ch14:
+	sh ./scripts/review-ch14.sh
+
+.PHONY: stage-ch14
+stage-ch14:
+	sh ./scripts/stage-ch14.sh
+
+.PHONY: review-ch14-staged
+review-ch14-staged:
+	sh ./scripts/review-ch14-staged.sh
+
+.PHONY: commit-ch14
+commit-ch14:
+	sh ./scripts/commit-ch14.sh
+
+.PHONY: push-ch14
+push-ch14:
+	sh ./scripts/push-ch14.sh
