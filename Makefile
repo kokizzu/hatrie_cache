@@ -18513,3 +18513,27 @@ commit-mu022-retry-journal:
 	bash ./scripts/commit-mu022-retry-journal.sh
 push-mu022-retry-journal:
 	bash ./scripts/push-mu022-retry-journal.sh
+test-mu023-cluster-admission:
+	bash ./scripts/test-mu023-cluster-admission.sh
+benchmark-mu023-cluster-admission-baseline:
+	bash ./scripts/benchmark-mu023-cluster-admission-baseline.sh
+format-mu023-cluster-admission:
+	bash ./scripts/format-mu023-cluster-admission.sh
+benchmark-mu023-cluster-admission:
+	bash ./scripts/benchmark-mu023-cluster-admission.sh
+race-mu023-cluster-admission:
+	bash ./scripts/race-mu023-cluster-admission.sh
+vet-mu023-cluster-admission:
+	bash ./scripts/vet-mu023-cluster-admission.sh
+test-mu023-package:
+	bash ./scripts/test-mu023-package.sh
+verify-mu023-cluster-admission:
+	bash ./scripts/verify-mu023-cluster-admission.sh
+review-mu023-cluster-admission:
+	bash ./scripts/review-mu023-cluster-admission.sh
+stage-mu023-cluster-admission:
+	bash ./scripts/stage-mu023-cluster-admission.sh
+commit-mu023-cluster-admission:
+	bash ./scripts/commit-mu023-cluster-admission.sh
+push-mu023-cluster-admission:
+	bash ./scripts/push-mu023-cluster-admission.sh

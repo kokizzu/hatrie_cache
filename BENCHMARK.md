@@ -29641,3 +29641,50 @@ copies, and terminal retention. It is an opt-in reliability feature and does
 not change the default source-offset path. See
 [MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md](MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md)
 for recovery ordering and the binary checkpoint contract.
+
+<a id="mu-023-cluster-query-admission"></a>
+## M-U23 Cluster Query Admission
+
+Commands: `make benchmark-mu023-cluster-admission-baseline` records the
+standalone direct-callback control, and `make benchmark-mu023-cluster-admission`
+runs the paired control and the full `SQLClusterAdmission.Execute` wrapper. Both
+use `GOMAXPROCS=1`, `-benchtime=500ms`, and `-count=5` on the AMD Ryzen 9 5950X
+Linux/amd64 host. The admitted path uses the default serving pool, one CPU unit,
+and a no-op callback; resource contention is not included in this microbenchmark.
+
+Pre-implementation raw baseline:
+
+```text
+BenchmarkMU023BeforeDirectExecution  1.557 ns/op  0 B/op  0 allocs/op
+BenchmarkMU023BeforeDirectExecution  1.544 ns/op  0 B/op  0 allocs/op
+BenchmarkMU023BeforeDirectExecution  1.493 ns/op  0 B/op  0 allocs/op
+BenchmarkMU023BeforeDirectExecution  1.556 ns/op  0 B/op  0 allocs/op
+BenchmarkMU023BeforeDirectExecution  1.407 ns/op  0 B/op  0 allocs/op
+```
+
+Final paired raw output:
+
+```text
+BenchmarkMU023BeforeDirectExecution        1.184 ns/op  0 B/op   0 allocs/op
+BenchmarkMU023BeforeDirectExecution        1.183 ns/op  0 B/op   0 allocs/op
+BenchmarkMU023BeforeDirectExecution        1.202 ns/op  0 B/op   0 allocs/op
+BenchmarkMU023BeforeDirectExecution        1.165 ns/op  0 B/op   0 allocs/op
+BenchmarkMU023BeforeDirectExecution        1.165 ns/op  0 B/op   0 allocs/op
+BenchmarkMU023AfterClusterAdmissionExecute 146.3 ns/op  80 B/op   1 allocs/op
+BenchmarkMU023AfterClusterAdmissionExecute 154.8 ns/op  80 B/op   1 allocs/op
+BenchmarkMU023AfterClusterAdmissionExecute 138.3 ns/op  80 B/op   1 allocs/op
+BenchmarkMU023AfterClusterAdmissionExecute 144.0 ns/op  80 B/op   1 allocs/op
+BenchmarkMU023AfterClusterAdmissionExecute 139.3 ns/op  80 B/op   1 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Existing direct callback control | 1.183 | 0 | 0 | 1.00x |
+| `SQLClusterAdmission.Execute` | 144.0 | 80 | 1 | 121.72x slower |
+
+The wrapper adds about 143 ns and one 80-byte lease allocation to a direct
+callback. This is a control-plane cost, not a query execution regression: the
+feature is opt-in and is intended to protect work whose runtime is much larger
+than the admission operation. See
+[MU023_CLUSTER_QUERY_ADMISSION.md](MU023_CLUSTER_QUERY_ADMISSION.md) for
+resource semantics and cancellation behavior.

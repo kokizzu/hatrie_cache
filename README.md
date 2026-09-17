@@ -17,6 +17,7 @@ security guidance before exposing it on a network.
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
+- Opt-in per-cluster SQL serving/maintenance admission with CPU and memory budgets: [MU023_CLUSTER_QUERY_ADMISSION.md](MU023_CLUSTER_QUERY_ADMISSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-023-cluster-query-admission)
 - Opt-in named SQL settings profiles with bounded inheritance: [SQL_NAMED_SETTINGS.md](SQL_NAMED_SETTINGS.md)
 - Static soft/hard namespace admission previews: [SQL_NAMESPACE_ADMISSION.md](SQL_NAMESPACE_ADMISSION.md)
 - Privacy-safe SQL query-log retention and rotation: [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md)
