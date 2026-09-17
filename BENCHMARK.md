@@ -25560,6 +25560,58 @@ BenchmarkCH025TokenPostings/build_20k-32 63 17001024 ns/op 14367363 B/op 100443 
 BenchmarkCH025TokenPostings/build_20k-32 66 16282285 ns/op 14367361 B/op 100443 allocs/op
 ```
 
+<a id="chu48-ranked-full-text"></a>
+## CHU48 Ranked Full-Text
+
+This compares a linear scan, the existing exact token postings query, and the
+new opt-in BM25-like ranked query over the same 100,000 deterministic
+documents. The query is the sparse two-token OR query `needle rare`; ranked
+results are bounded by a top-K heap. Command: `make
+benchmark-chu48-ranked-full-text`.
+
+| Operation | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Linear any-token scan | 1,475,217 | 0 | 0 | Baseline |
+| Plain exact `MatchAny` | 65,635 | 24,192 | 24 | 22.47x faster than scan |
+| Ranked `Limit: 10` | 224,278 | 15,864 | 46 | 6.58x faster than scan; 3.42x slower than exact |
+| Ranked `Limit: 100` | 248,820 | 24,152 | 139 | 5.93x faster than scan |
+
+For the 20,000-row build, plain postings measured 16,987,417 ns/op,
+14,367,382 B/op, and 100,443 allocs/op. Ranked postings measured 21,817,560
+ns/op, 17,989,926 B/op, and 120,590 allocs/op: 1.28x build time, 1.25x
+allocated bytes, and 1.20x allocation count. Ranking therefore remains
+explicitly opt-in.
+
+Raw output from `make benchmark-chu48-ranked-full-text`:
+
+```text
+BenchmarkCHU48RankedTokenPostings/linear_any_scan-32 717 1564273 ns/op 3068.52 MB/s 0 B/op 0 allocs/op
+BenchmarkCHU48RankedTokenPostings/linear_any_scan-32 745 1470106 ns/op 3265.07 MB/s 0 B/op 0 allocs/op
+BenchmarkCHU48RankedTokenPostings/linear_any_scan-32 744 1411847 ns/op 3399.80 MB/s 0 B/op 0 allocs/op
+BenchmarkCHU48RankedTokenPostings/linear_any_scan-32 793 1475217 ns/op 3253.76 MB/s 0 B/op 0 allocs/op
+BenchmarkCHU48RankedTokenPostings/linear_any_scan-32 764 1525044 ns/op 3147.45 MB/s 0 B/op 0 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_any_exact_index-32 19351 57935 ns/op 24192 B/op 24 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_any_exact_index-32 20714 65704 ns/op 24192 B/op 24 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_any_exact_index-32 17128 68585 ns/op 24192 B/op 24 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_any_exact_index-32 17110 65201 ns/op 24192 B/op 24 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_any_exact_index-32 15807 65635 ns/op 24192 B/op 24 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_10-32 5376 235023 ns/op 15864 B/op 46 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_10-32 5263 224278 ns/op 15864 B/op 46 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_10-32 5164 223871 ns/op 15864 B/op 46 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_10-32 4340 233461 ns/op 15864 B/op 46 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_10-32 5262 221141 ns/op 15864 B/op 46 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_100-32 4941 237586 ns/op 24152 B/op 139 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_100-32 4306 248820 ns/op 24152 B/op 139 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_100-32 5011 265154 ns/op 24152 B/op 139 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_100-32 3998 280468 ns/op 24152 B/op 139 allocs/op
+BenchmarkCHU48RankedTokenPostings/match_ranked_limit_100-32 4722 243200 ns/op 24152 B/op 139 allocs/op
+BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 61 21817560 ns/op 100432 rank-frequency-values 20000 ranked-docs 17989932 B/op 120590 allocs/op
+BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 63 20764554 ns/op 100432 rank-frequency-values 20000 ranked-docs 17989928 B/op 120590 allocs/op
+BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 60 21045090 ns/op 100432 rank-frequency-values 20000 ranked-docs 17989926 B/op 120590 allocs/op
+BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 52 22065751 ns/op 100432 rank-frequency-values 20000 ranked-docs 17989924 B/op 120590 allocs/op
+BenchmarkCHU48RankedTokenPostings/build_20k_ranked-32 55 21948736 ns/op 100432 rank-frequency-values 20000 ranked-docs 17989923 B/op 120590 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

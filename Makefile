@@ -13850,6 +13850,54 @@ commit-ch025-token-postings:
 push-ch025-token-postings:
 	bash ./scripts/push-ch025-token-postings.sh
 
+.PHONY: test-chu48-ranked-full-text
+test-chu48-ranked-full-text:
+	bash ./scripts/test-chu48-ranked-full-text.sh
+
+.PHONY: format-chu48-ranked-full-text
+format-chu48-ranked-full-text:
+	bash ./scripts/format-chu48-ranked-full-text.sh
+
+.PHONY: benchmark-chu48-ranked-full-text
+benchmark-chu48-ranked-full-text:
+	bash ./scripts/benchmark-chu48-ranked-full-text.sh
+
+.PHONY: race-chu48-ranked-full-text
+race-chu48-ranked-full-text:
+	bash ./scripts/race-chu48-ranked-full-text.sh
+
+.PHONY: test-chu48-ranked-package
+test-chu48-ranked-package:
+	bash ./scripts/test-chu48-ranked-package.sh
+
+.PHONY: vet-chu48-ranked-full-text
+vet-chu48-ranked-full-text:
+	bash ./scripts/vet-chu48-ranked-full-text.sh
+
+.PHONY: cleanup-hatrie-tmp-preview
+cleanup-hatrie-tmp-preview:
+	bash ./scripts/cleanup-hatrie-tmp.sh preview
+
+.PHONY: cleanup-hatrie-tmp-apply
+cleanup-hatrie-tmp-apply:
+	bash ./scripts/cleanup-hatrie-tmp.sh apply
+
+.PHONY: review-chu48-ranked-full-text
+review-chu48-ranked-full-text:
+	bash ./scripts/review-chu48-ranked-full-text.sh
+
+.PHONY: stage-chu48-ranked-full-text
+stage-chu48-ranked-full-text:
+	bash ./scripts/stage-chu48-ranked-full-text.sh
+
+.PHONY: commit-chu48-ranked-full-text
+commit-chu48-ranked-full-text:
+	bash ./scripts/commit-chu48-ranked-full-text.sh
+
+.PHONY: push-chu48-ranked-full-text
+push-chu48-ranked-full-text:
+	bash ./scripts/push-chu48-ranked-full-text.sh
+
 .PHONY: test-mz043-operator-frontier
 test-mz043-operator-frontier:
 	bash ./scripts/test-mz043-operator-frontier.sh

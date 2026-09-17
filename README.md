@@ -235,6 +235,7 @@ security guidance before exposing it on a network.
 - External Parquet tables: `ExternalTables` supports `ExportParquet`, `ImportParquet`, and `WriteParquet` alongside CSV, JSON, NDJSON, and Arrow formats.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - Exact token postings for reusable row-level text filtering: [CH025_TOKEN_POSTINGS_INDEX.md](CH025_TOKEN_POSTINGS_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-025-token-postings-index)
+- Opt-in BM25-like ranked full-text results over token postings: [CHU48_RANKED_FULL_TEXT.md](CHU48_RANKED_FULL_TEXT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#chu48-ranked-full-text)
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
@@ -4225,6 +4226,9 @@ lookup and preparation tradeoff is documented in
   [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md)
 - Opt-in exact phrase matching for the reusable token postings index:
   [CHU13_PHRASE_POSTINGS.md](CHU13_PHRASE_POSTINGS.md)
+
+- Opt-in BM25-like ranked full-text search over token postings:
+  [CHU48_RANKED_FULL_TEXT.md](CHU48_RANKED_FULL_TEXT.md)
 
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
 

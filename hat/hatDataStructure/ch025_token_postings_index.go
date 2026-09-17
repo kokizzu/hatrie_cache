@@ -35,14 +35,12 @@ type TokenPostingsIndex struct {
 	freeTermIDs []uint32
 	rows        map[uint32][]uint32
 	phrase      *tokenPhrasePostingsState
+	ranking     *tokenPostingsRankingState
 }
 
 // NewTokenPostingsIndex creates an empty token postings index.
 func NewTokenPostingsIndex() *TokenPostingsIndex {
-	return &TokenPostingsIndex{
-		termIDs: make(map[string]uint32),
-		rows:    make(map[uint32][]uint32),
-	}
+	return NewTokenPostingsIndexWithOptions(TokenPostingsIndexOptions{})
 }
 
 // Upsert replaces the normalized token set associated with row.
@@ -52,7 +50,17 @@ func (index *TokenPostingsIndex) Upsert(row uint32, text string) {
 	}
 	var orderedTokens []string
 	var tokens []string
-	if index.phrase != nil {
+	var frequencies []uint32
+	var documentLength uint32
+	if index.ranking != nil {
+		orderedTokens = tokenPostingsOrderedTokens(text)
+		documentLength = tokenPostingsDocumentLength(len(orderedTokens))
+		if index.phrase != nil {
+			tokens, frequencies = tokenPostingsUniqueTokenFrequencies(append([]string(nil), orderedTokens...))
+		} else {
+			tokens, frequencies = tokenPostingsUniqueTokenFrequencies(orderedTokens)
+		}
+	} else if index.phrase != nil {
 		orderedTokens = tokenPostingsOrderedTokens(text)
 		tokens = tokenPostingsUniqueTokens(append([]string(nil), orderedTokens...))
 	} else {
@@ -76,23 +84,30 @@ func (index *TokenPostingsIndex) Upsert(row uint32, text string) {
 	}
 	oldTermIDs, exists := index.rows[row]
 	if exists && sameUint32Slice(oldTermIDs, termIDs) &&
-		(index.phrase == nil || sameTokenPhraseSequence(index.phrase.sequences[row], encodedPhrase)) {
+		(index.phrase == nil || sameTokenPhraseSequence(index.phrase.sequences[row], encodedPhrase)) &&
+		(index.ranking == nil || sameTokenPostingsRankDocument(index.ranking.documents[row], frequencies, documentLength)) {
 		return
 	}
 	if exists {
 		if index.phrase != nil {
 			index.removePhraseSequenceLocked(row, index.phrase.sequences[row])
 		}
-		index.removeRowTermsLocked(row, oldTermIDs)
+		if index.ranking != nil {
+			index.removeRankDocumentLocked(row)
+		}
 	}
-	for _, termID := range termIDs {
-		index.postings[termID].Add(row)
-		index.termRefRows[termID]++
-	}
+	index.replaceRowTermsLocked(row, oldTermIDs, termIDs)
 	index.rows[row] = termIDs
 	if index.phrase != nil {
 		index.phrase.sequences[row] = encodedPhrase
 		index.addPhraseSequenceLocked(row, orderedTermIDs)
+	}
+	if index.ranking != nil {
+		index.ranking.documents[row] = tokenPostingsRankDocument{
+			length:      documentLength,
+			frequencies: frequencies,
+		}
+		index.ranking.totalLength += uint64(documentLength)
 	}
 }
 
@@ -112,6 +127,9 @@ func (index *TokenPostingsIndex) Delete(row uint32) bool {
 	}
 	if index.phrase != nil {
 		index.removePhraseSequenceLocked(row, index.phrase.sequences[row])
+	}
+	if index.ranking != nil {
+		index.removeRankDocumentLocked(row)
 	}
 	index.removeRowTermsLocked(row, termIDs)
 	delete(index.rows, row)
@@ -298,6 +316,10 @@ func (index *TokenPostingsIndex) Clear() {
 	index.termRefRows = nil
 	index.freeTermIDs = nil
 	index.rows = nil
+	if index.ranking != nil {
+		index.ranking.documents = make(map[uint32]tokenPostingsRankDocument)
+		index.ranking.totalLength = 0
+	}
 	if index.phrase != nil {
 		index.phrase.sequences = make(map[uint32][]byte)
 		index.phrase.postings = make(map[uint64]RoaringBitmap)
@@ -310,6 +332,9 @@ func (index *TokenPostingsIndex) ensureInitializedLocked() {
 	}
 	if index.rows == nil {
 		index.rows = make(map[uint32][]uint32)
+	}
+	if index.ranking != nil && index.ranking.documents == nil {
+		index.ranking.documents = make(map[uint32]tokenPostingsRankDocument)
 	}
 	if index.phrase != nil {
 		index.phrase.ensureInitialized()
@@ -375,6 +400,45 @@ func (index *TokenPostingsIndex) removeRowTermsLocked(row uint32, termIDs []uint
 		index.postings[termID] = NewRoaringBitmap()
 		index.freeTermIDs = append(index.freeTermIDs, termID)
 	}
+}
+
+func (index *TokenPostingsIndex) replaceRowTermsLocked(row uint32, oldTermIDs, newTermIDs []uint32) {
+	for _, termID := range oldTermIDs {
+		if containsUint32(newTermIDs, termID) {
+			continue
+		}
+		index.postings[termID].Remove(row)
+	}
+	for _, termID := range oldTermIDs {
+		if containsUint32(newTermIDs, termID) {
+			continue
+		}
+		index.termRefRows[termID]--
+		if index.termRefRows[termID] != 0 {
+			continue
+		}
+		term := index.terms[termID]
+		delete(index.termIDs, term)
+		index.terms[termID] = ""
+		index.postings[termID] = NewRoaringBitmap()
+		index.freeTermIDs = append(index.freeTermIDs, termID)
+	}
+	for _, termID := range newTermIDs {
+		if containsUint32(oldTermIDs, termID) {
+			continue
+		}
+		index.postings[termID].Add(row)
+		index.termRefRows[termID]++
+	}
+}
+
+func containsUint32(values []uint32, needle uint32) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func tokenPostingsTokens(text string) []string {
