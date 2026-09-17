@@ -19,16 +19,18 @@ import (
 )
 
 const (
-	defaultSQLResultCachePersistenceMaxBytes int64 = 64 << 20
-	SQLResultCachePersistenceMaxBytes        int64 = defaultSQLResultCachePersistenceMaxBytes
-	resultCachePersistenceVersion                  = 1
-	resultCachePersistenceHeaderSize               = 4 + 1 + 8 + sha256.Size
-	maxResultCachePersistenceEntries               = 1 << 20
-	maxResultCachePersistenceRows                  = 1 << 20
-	maxResultCachePersistenceFields                = 1 << 16
-	maxResultCachePersistenceStringBytes           = 1 << 20
-	maxResultCachePersistenceScalarBytes           = 16 << 20
-	maxResultCachePersistenceValueDepth            = 64
+	defaultSQLResultCachePersistenceMaxBytes  int64 = 64 << 20
+	SQLResultCachePersistenceMaxBytes         int64 = defaultSQLResultCachePersistenceMaxBytes
+	resultCachePersistenceVersion                   = 1
+	resultCachePersistenceDependenciesVersion       = 2
+	resultCachePersistenceHeaderSize                = 4 + 1 + 8 + sha256.Size
+	maxResultCachePersistenceEntries                = 1 << 20
+	maxResultCachePersistenceDependencies           = 1 << 16
+	maxResultCachePersistenceRows                   = 1 << 20
+	maxResultCachePersistenceFields                 = 1 << 16
+	maxResultCachePersistenceStringBytes            = 1 << 20
+	maxResultCachePersistenceScalarBytes            = 16 << 20
+	maxResultCachePersistenceValueDepth             = 64
 )
 
 var resultCachePersistenceMagic = [4]byte{'H', 'S', 'C', '1'}
@@ -84,7 +86,11 @@ func (cache *ResultCache) PersistWithOptions(path string, options SQLResultCache
 	if err != nil {
 		return fmt.Errorf("hatSql: encode SQL result cache persistence: %w", err)
 	}
-	payload, err := encodeResultCachePersistenceSnapshot(entries)
+	version := byte(resultCachePersistenceVersion)
+	if resultCachePersistenceHasDependencies(entries) {
+		version = resultCachePersistenceDependenciesVersion
+	}
+	payload, err := encodeResultCachePersistenceSnapshotVersion(entries, version)
 	if err != nil {
 		return fmt.Errorf("hatSql: encode SQL result cache persistence: %w", err)
 	}
@@ -93,7 +99,7 @@ func (cache *ResultCache) PersistWithOptions(path string, options SQLResultCache
 		return fmt.Errorf("%w: snapshot is %d bytes, limit is %d", ErrSQLResultCachePersistenceTooLarge, fileSize, maxBytes)
 	}
 
-	return writeResultCachePersistenceFile(path, payload)
+	return writeResultCachePersistenceFileVersion(path, payload, version)
 }
 
 // Restore loads versioned SQL entries from path. A missing file is treated as
@@ -169,13 +175,20 @@ func (cache *ResultCache) RestoreWithOptions(path string, options SQLResultCache
 			delete(cache.entries, oldest)
 		}
 	}
+	cache.rebuildDependencyIndexLocked()
 	return nil
 }
 
 type resultCachePersistenceEntry struct {
-	Key     string
-	Version string
-	Result  resultCachePersistenceResult
+	Key          string
+	Version      string
+	Dependencies []resultCachePersistenceDependency
+	Result       resultCachePersistenceResult
+}
+
+type resultCachePersistenceDependency struct {
+	Kind string
+	Key  string
 }
 
 type resultCachePersistenceLoadedEntry struct {
@@ -234,6 +247,13 @@ const (
 )
 
 func encodeResultCachePersistenceSnapshot(entries []resultCachePersistenceEntry) ([]byte, error) {
+	return encodeResultCachePersistenceSnapshotVersion(entries, resultCachePersistenceVersion)
+}
+
+func encodeResultCachePersistenceSnapshotVersion(entries []resultCachePersistenceEntry, version byte) ([]byte, error) {
+	if version != resultCachePersistenceVersion && version != resultCachePersistenceDependenciesVersion {
+		return nil, fmt.Errorf("unsupported persistence version %d", version)
+	}
 	payload := make([]byte, 0, 128)
 	payload = appendResultCachePersistenceUvarint(payload, uint64(len(entries)))
 	for index, entry := range entries {
@@ -245,6 +265,21 @@ func encodeResultCachePersistenceSnapshot(entries []resultCachePersistenceEntry)
 		}
 		payload = appendResultCachePersistenceString(payload, entry.Key)
 		payload = appendResultCachePersistenceString(payload, entry.Version)
+		if version >= resultCachePersistenceDependenciesVersion {
+			if len(entry.Dependencies) > maxResultCachePersistenceDependencies {
+				return nil, fmt.Errorf("entry %d has too many dependencies", index)
+			}
+			payload = appendResultCachePersistenceUvarint(payload, uint64(len(entry.Dependencies)))
+			for dependencyIndex, dependency := range entry.Dependencies {
+				if dependency.Kind == "" || dependency.Key == "" || len(dependency.Kind) > maxResultCachePersistenceStringBytes || len(dependency.Key) > maxResultCachePersistenceStringBytes {
+					return nil, fmt.Errorf("entry %d dependency %d is invalid", index, dependencyIndex)
+				}
+				payload = appendResultCachePersistenceString(payload, dependency.Kind)
+				payload = appendResultCachePersistenceString(payload, dependency.Key)
+			}
+		} else if len(entry.Dependencies) != 0 {
+			return nil, fmt.Errorf("entry %d dependencies require persistence version %d", index, resultCachePersistenceDependenciesVersion)
+		}
 		var err error
 		payload, err = appendResultCachePersistenceResult(payload, entry.Result)
 		if err != nil {
@@ -422,7 +457,7 @@ func (cache *ResultCache) snapshotPersistentEntries() ([]resultCachePersistenceE
 			continue
 		}
 		seen[key] = struct{}{}
-		live = append(live, resultCachePersistenceLiveEntry{key: key, version: entry.version, result: cloneResultCacheResult(entry.result)})
+		live = append(live, resultCachePersistenceLiveEntry{key: key, version: entry.version, dependencies: resultCachePersistenceDependencies(entry.dependencies), result: cloneResultCacheResult(entry.result)})
 	}
 	remaining := make([]string, 0)
 	for key, entry := range cache.entries {
@@ -436,7 +471,7 @@ func (cache *ResultCache) snapshotPersistentEntries() ([]resultCachePersistenceE
 	sort.Strings(remaining)
 	for _, key := range remaining {
 		entry := cache.entries[key]
-		live = append(live, resultCachePersistenceLiveEntry{key: key, version: entry.version, result: cloneResultCacheResult(entry.result)})
+		live = append(live, resultCachePersistenceLiveEntry{key: key, version: entry.version, dependencies: resultCachePersistenceDependencies(entry.dependencies), result: cloneResultCacheResult(entry.result)})
 	}
 	cache.mu.Unlock()
 
@@ -449,15 +484,36 @@ func (cache *ResultCache) snapshotPersistentEntries() ([]resultCachePersistenceE
 		if err != nil {
 			return nil, err
 		}
-		ordered[index] = resultCachePersistenceEntry{Key: item.key, Version: item.version, Result: result}
+		ordered[index] = resultCachePersistenceEntry{Key: item.key, Version: item.version, Dependencies: item.dependencies, Result: result}
 	}
 	return ordered, nil
 }
 
 type resultCachePersistenceLiveEntry struct {
-	key     string
-	version string
-	result  QueryResult
+	key          string
+	version      string
+	dependencies []resultCachePersistenceDependency
+	result       QueryResult
+}
+
+func resultCachePersistenceHasDependencies(entries []resultCachePersistenceEntry) bool {
+	for _, entry := range entries {
+		if len(entry.Dependencies) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func resultCachePersistenceDependencies(dependencies []resultCacheDependencyKey) []resultCachePersistenceDependency {
+	if len(dependencies) == 0 {
+		return nil
+	}
+	result := make([]resultCachePersistenceDependency, len(dependencies))
+	for index, dependency := range dependencies {
+		result[index] = resultCachePersistenceDependency{Kind: dependency.kind, Key: dependency.key}
+	}
+	return result
 }
 
 func encodeResultCachePersistenceResult(result QueryResult) (resultCachePersistenceResult, error) {
@@ -879,6 +935,13 @@ func readResultCachePersistenceUint(encoded []byte, offset *int) (uint64, error)
 }
 
 func writeResultCachePersistenceFile(path string, payload []byte) error {
+	return writeResultCachePersistenceFileVersion(path, payload, resultCachePersistenceVersion)
+}
+
+func writeResultCachePersistenceFileVersion(path string, payload []byte, version byte) error {
+	if version != resultCachePersistenceVersion && version != resultCachePersistenceDependenciesVersion {
+		return fmt.Errorf("unsupported persistence version %d", version)
+	}
 	directory := filepath.Dir(path)
 	base := filepath.Base(path)
 	temporary, err := os.CreateTemp(directory, "."+base+".tmp-*")
@@ -897,7 +960,7 @@ func writeResultCachePersistenceFile(path string, payload []byte) error {
 	}
 	var header [resultCachePersistenceHeaderSize]byte
 	copy(header[:4], resultCachePersistenceMagic[:])
-	header[4] = resultCachePersistenceVersion
+	header[4] = version
 	binary.BigEndian.PutUint64(header[5:13], uint64(len(payload)))
 	digest := sha256.Sum256(payload)
 	copy(header[13:], digest[:])
@@ -965,7 +1028,8 @@ func decodeResultCachePersistence(data []byte) ([]resultCachePersistenceLoadedEn
 	if !bytes.Equal(data[:4], resultCachePersistenceMagic[:]) {
 		return nil, corrupt("invalid magic")
 	}
-	if data[4] != resultCachePersistenceVersion {
+	version := data[4]
+	if version != resultCachePersistenceVersion && version != resultCachePersistenceDependenciesVersion {
 		return nil, corrupt("unsupported version %d", data[4])
 	}
 	payloadLength := binary.BigEndian.Uint64(data[5:13])
@@ -977,7 +1041,7 @@ func decodeResultCachePersistence(data []byte) ([]resultCachePersistenceLoadedEn
 	if subtle.ConstantTimeCompare(data[13:13+sha256.Size], digest[:]) != 1 {
 		return nil, corrupt("checksum mismatch")
 	}
-	loaded, err := decodeResultCachePersistencePayload(payload)
+	loaded, err := decodeResultCachePersistencePayloadVersion(payload, version)
 	if err != nil {
 		return nil, corrupt("decode payload: %v", err)
 	}
@@ -990,6 +1054,10 @@ type resultCachePersistenceReader struct {
 }
 
 func decodeResultCachePersistencePayload(payload []byte) ([]resultCachePersistenceLoadedEntry, error) {
+	return decodeResultCachePersistencePayloadVersion(payload, resultCachePersistenceVersion)
+}
+
+func decodeResultCachePersistencePayloadVersion(payload []byte, formatVersion byte) ([]resultCachePersistenceLoadedEntry, error) {
 	reader := resultCachePersistenceReader{data: payload}
 	entryCount, err := reader.count(maxResultCachePersistenceEntries, "entry")
 	if err != nil {
@@ -1016,6 +1084,34 @@ func decodeResultCachePersistencePayload(payload []byte) ([]resultCachePersisten
 			return nil, fmt.Errorf("duplicate key %q", key)
 		}
 		seen[key] = struct{}{}
+		var dependencies []resultCacheDependencyKey
+		if formatVersion >= resultCachePersistenceDependenciesVersion {
+			dependencyCount, err := reader.count(maxResultCachePersistenceDependencies, "dependency")
+			if err != nil {
+				return nil, fmt.Errorf("entry %d dependencies: %w", index, err)
+			}
+			dependencies = make([]resultCacheDependencyKey, 0, dependencyCount)
+			seenDependencies := make(map[resultCacheDependencyKey]struct{}, dependencyCount)
+			for dependencyIndex := 0; dependencyIndex < dependencyCount; dependencyIndex++ {
+				kind, err := reader.string(maxResultCachePersistenceStringBytes, "dependency kind")
+				if err != nil {
+					return nil, fmt.Errorf("entry %d dependency %d: %w", index, dependencyIndex, err)
+				}
+				dependencyKey, err := reader.string(maxResultCachePersistenceStringBytes, "dependency key")
+				if err != nil {
+					return nil, fmt.Errorf("entry %d dependency %d: %w", index, dependencyIndex, err)
+				}
+				dependency := resultCacheDependencyKey{kind: kind, key: dependencyKey}
+				if kind == "" || dependencyKey == "" {
+					return nil, fmt.Errorf("entry %d dependency %d is empty", index, dependencyIndex)
+				}
+				if _, exists := seenDependencies[dependency]; exists {
+					return nil, fmt.Errorf("entry %d has duplicate dependency", index)
+				}
+				seenDependencies[dependency] = struct{}{}
+				dependencies = append(dependencies, dependency)
+			}
+		}
 		persisted, err := reader.result()
 		if err != nil {
 			return nil, fmt.Errorf("entry %d result: %w", index, err)
@@ -1026,7 +1122,7 @@ func decodeResultCachePersistencePayload(payload []byte) ([]resultCachePersisten
 		}
 		loaded = append(loaded, resultCachePersistenceLoadedEntry{
 			key:   key,
-			entry: resultCacheEntry{version: version, typed: true, result: result},
+			entry: resultCacheEntry{version: version, typed: true, dependencies: dependencies, result: result},
 		})
 	}
 	if reader.offset != len(reader.data) {

@@ -12,15 +12,31 @@ import (
 // ResultCache caches query results while the caller-supplied epoch remains
 // unchanged. It is portable because the owner supplies both execution and
 // invalidation; cache-server adapters can use their mutation epoch directly.
+// ResultCacheDependency identifies a mutable source used to produce a cached
+// result. Dependency-aware caches can invalidate all results that reference a
+// source without scanning unrelated entries.
+type ResultCacheDependency struct {
+	Kind string
+	Key  string
+}
+
+type resultCacheDependencyKey struct {
+	kind string
+	key  string
+}
+
 type ResultCache struct {
-	mu        sync.Mutex
-	capacity  int
-	entries   map[string]resultCacheEntry
-	order     []string
-	hits      uint64
-	misses    uint64
-	bypasses  uint64
-	evictions uint64
+	mu                   sync.Mutex
+	capacity             int
+	entries              map[string]resultCacheEntry
+	order                []string
+	dependencyTracking   bool
+	dependencyIndex      map[resultCacheDependencyKey]map[string]struct{}
+	dependencyGeneration uint64
+	hits                 uint64
+	misses               uint64
+	bypasses             uint64
+	evictions            uint64
 }
 
 // ResultCacheStats reports cache reuse and retention outcomes. Misses count
@@ -43,16 +59,36 @@ type SQLResultCacheStats = ResultCacheStats
 type SQLResultCache = ResultCache
 
 type resultCacheEntry struct {
-	epoch   uint64
-	version string
-	typed   bool
-	result  QueryResult
+	epoch        uint64
+	version      string
+	typed        bool
+	result       QueryResult
+	dependencies []resultCacheDependencyKey
 }
 
 // NewResultCache creates a bounded cache. A non-positive capacity disables
 // retention while preserving Execute behavior.
 func NewResultCache(capacity int) *ResultCache {
-	return &ResultCache{capacity: capacity, entries: make(map[string]resultCacheEntry)}
+	return newResultCache(capacity, false)
+}
+
+// NewResultCacheWithDependencies creates a cache with an opt-in source
+// dependency index. Use InvalidateDependency or InvalidateDependencies after
+// a source mutation. The default constructor does not retain this index.
+func NewResultCacheWithDependencies(capacity int) *ResultCache {
+	return newResultCache(capacity, true)
+}
+
+func newResultCache(capacity int, dependencyTracking bool) *ResultCache {
+	cache := &ResultCache{
+		capacity:           capacity,
+		entries:            make(map[string]resultCacheEntry),
+		dependencyTracking: dependencyTracking,
+	}
+	if dependencyTracking {
+		cache.dependencyIndex = make(map[resultCacheDependencyKey]map[string]struct{})
+	}
+	return cache
 }
 
 // NewSQLResultCache creates a bounded cache for typed SQL results. Unlike
@@ -60,6 +96,14 @@ func NewResultCache(capacity int) *ResultCache {
 // types instead of applying the portable JSON normalization contract.
 func NewSQLResultCache(capacity int) *SQLResultCache {
 	return NewResultCache(capacity)
+}
+
+// NewSQLResultCacheWithDependencies creates a typed SQL result cache with an
+// opt-in source dependency index. It is safe to use with the normal versioned
+// SQL path, or with ResultCacheExplicitInvalidation for lower lookup cost when
+// every source mutation calls InvalidateDependency.
+func NewSQLResultCacheWithDependencies(capacity int) *SQLResultCache {
+	return NewResultCacheWithDependencies(capacity)
 }
 
 // Stats returns a stable snapshot of cache entries and cumulative counters.
@@ -127,17 +171,8 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 		return result, nil
 	}
 	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if _, exists := cache.entries[key]; !exists {
-		cache.order = append(cache.order, key)
-	}
-	cache.entries[key] = resultCacheEntry{epoch: before, result: stored}
-	for len(cache.order) > cache.capacity {
-		oldest := cache.order[0]
-		cache.order = cache.order[1:]
-		delete(cache.entries, oldest)
-		atomic.AddUint64(&cache.evictions, 1)
-	}
+	cache.storeEntryLocked(key, resultCacheEntry{epoch: before, result: stored})
+	cache.mu.Unlock()
 	return result, nil
 }
 
@@ -147,6 +182,18 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 // result bypasses retention so a resolver without a freshness guarantee keeps
 // its ordinary behavior.
 func (cache *ResultCache) ExecuteVersioned(ctx context.Context, key string, version func() (string, bool), execute func(context.Context) (QueryResult, error)) (QueryResult, error) {
+	return cache.executeVersioned(ctx, key, version, nil, execute)
+}
+
+// ExecuteVersionedWithDependencies is ExecuteVersioned with an optional
+// source dependency set retained for selective invalidation. Version checking
+// remains enabled, so this method is safe for callers that have not yet wired
+// mutation notifications.
+func (cache *ResultCache) ExecuteVersionedWithDependencies(ctx context.Context, key string, version func() (string, bool), dependencies []ResultCacheDependency, execute func(context.Context) (QueryResult, error)) (QueryResult, error) {
+	return cache.executeVersioned(ctx, key, version, dependencies, execute)
+}
+
+func (cache *ResultCache) executeVersioned(ctx context.Context, key string, version func() (string, bool), dependencies []ResultCacheDependency, execute func(context.Context) (QueryResult, error)) (QueryResult, error) {
 	if execute == nil {
 		return QueryResult{}, errors.New("hatSql: result cache executor is nil")
 	}
@@ -167,7 +214,11 @@ func (cache *ResultCache) ExecuteVersioned(ctx context.Context, key string, vers
 	cache.mu.Lock()
 	entry, ok := cache.entries[key]
 	cache.mu.Unlock()
-	if ok && entry.typed && entry.version == before {
+	dependenciesMatch := true
+	if cache.dependencyTracking && resultCacheDependenciesValid(dependencies) {
+		dependenciesMatch = resultCacheDependenciesEqualPublic(entry.dependencies, dependencies)
+	}
+	if ok && entry.typed && entry.version == before && dependenciesMatch {
 		atomic.AddUint64(&cache.hits, 1)
 		return cloneResultCacheResult(entry.result), nil
 	}
@@ -182,19 +233,232 @@ func (cache *ResultCache) ExecuteVersioned(ctx context.Context, key string, vers
 		return result, nil
 	}
 	stored := cloneResultCacheResult(result)
+	entry = resultCacheEntry{version: before, typed: true, result: stored}
+	if cache.dependencyTracking && resultCacheDependenciesValid(dependencies) {
+		entry.dependencies, _ = normalizeResultCacheDependencies(dependencies)
+	}
+	cache.mu.Lock()
+	cache.storeEntryLocked(key, entry)
+	cache.mu.Unlock()
+	return result, nil
+}
+
+// ExecuteWithDependencies reuses a typed result until the caller invalidates
+// one of its dependencies. It is available only on a cache created with
+// NewResultCacheWithDependencies, and is intended for mutation-driven paths
+// that can guarantee invalidation ordering. Invalid or empty dependencies are
+// executed without retention.
+func (cache *ResultCache) ExecuteWithDependencies(ctx context.Context, key string, dependencies []ResultCacheDependency, execute func(context.Context) (QueryResult, error)) (QueryResult, error) {
+	if execute == nil {
+		return QueryResult{}, errors.New("hatSql: result cache executor is nil")
+	}
+	if cache == nil || cache.capacity <= 0 || !cache.dependencyTracking || !resultCacheDependenciesValid(dependencies) {
+		if cache != nil {
+			cache.RecordBypass()
+		}
+		return execute(ctx)
+	}
+	cache.mu.Lock()
+	generation := cache.dependencyGeneration
+	entry, ok := cache.entries[key]
+	cache.mu.Unlock()
+	if ok && entry.typed && resultCacheDependenciesEqualPublic(entry.dependencies, dependencies) {
+		atomic.AddUint64(&cache.hits, 1)
+		return cloneResultCacheResult(entry.result), nil
+	}
+	atomic.AddUint64(&cache.misses, 1)
+	result, err := execute(ctx)
+	if err != nil {
+		return result, err
+	}
+	dependencyKeys, _ := normalizeResultCacheDependencies(dependencies)
+	stored := resultCacheEntry{
+		typed:        true,
+		result:       cloneResultCacheResult(result),
+		dependencies: dependencyKeys,
+	}
+	cache.mu.Lock()
+	if generation != cache.dependencyGeneration {
+		cache.mu.Unlock()
+		cache.RecordBypass()
+		return result, nil
+	}
+	cache.storeEntryLocked(key, stored)
+	cache.mu.Unlock()
+	return result, nil
+}
+
+// InvalidateDependency removes every retained result that depends on the
+// given source and returns the number of removed entries. It is a no-op for a
+// cache created without dependency tracking.
+func (cache *ResultCache) InvalidateDependency(kind string, key string) int {
+	return cache.InvalidateDependencies([]ResultCacheDependency{{Kind: kind, Key: key}})
+}
+
+// InvalidateDependencies removes the union of entries that depend on any
+// supplied source. Duplicate dependencies and entries are counted once.
+func (cache *ResultCache) InvalidateDependencies(dependencies []ResultCacheDependency) int {
+	if cache == nil || !cache.dependencyTracking {
+		return 0
+	}
+	dependencyKeys, validDependencies := normalizeResultCacheDependencies(dependencies)
+	if !validDependencies {
+		return 0
+	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	if _, exists := cache.entries[key]; !exists {
+	cache.dependencyGeneration++
+	keys := make(map[string]struct{})
+	for _, dependency := range dependencyKeys {
+		for key := range cache.dependencyIndex[dependency] {
+			keys[key] = struct{}{}
+		}
+	}
+	removed := 0
+	for key := range keys {
+		entry, ok := cache.entries[key]
+		if !ok {
+			continue
+		}
+		cache.removeDependencyIndexLocked(key, entry)
+		delete(cache.entries, key)
+		removed++
+	}
+	if removed != 0 {
+		order := cache.order[:0]
+		for _, key := range cache.order {
+			if _, ok := cache.entries[key]; ok {
+				order = append(order, key)
+			}
+		}
+		cache.order = order
+	}
+	return removed
+}
+
+func normalizeResultCacheDependencies(dependencies []ResultCacheDependency) ([]resultCacheDependencyKey, bool) {
+	if len(dependencies) == 0 {
+		return nil, false
+	}
+	keys := make([]resultCacheDependencyKey, 0, len(dependencies))
+	seen := make(map[resultCacheDependencyKey]struct{}, len(dependencies))
+	for _, dependency := range dependencies {
+		if dependency.Kind == "" || dependency.Key == "" {
+			return nil, false
+		}
+		key := resultCacheDependencyKey{kind: dependency.Kind, key: dependency.Key}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys, len(keys) != 0
+}
+
+func resultCacheDependenciesValid(dependencies []ResultCacheDependency) bool {
+	if len(dependencies) == 0 {
+		return false
+	}
+	for _, dependency := range dependencies {
+		if dependency.Kind == "" || dependency.Key == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func resultCacheDependenciesEqualPublic(left []resultCacheDependencyKey, right []ResultCacheDependency) bool {
+	if len(left) == 0 || !resultCacheDependenciesValid(right) {
+		return false
+	}
+	uniqueCount := 0
+	for index, candidate := range right {
+		duplicate := false
+		for _, previous := range right[:index] {
+			if previous == candidate {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			uniqueCount++
+		}
+	}
+	if len(left) != uniqueCount {
+		return false
+	}
+	for _, candidate := range left {
+		found := false
+		for _, dependency := range right {
+			if dependency.Kind == candidate.kind && dependency.Key == candidate.key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (cache *ResultCache) storeEntryLocked(key string, entry resultCacheEntry) {
+	if previous, exists := cache.entries[key]; exists {
+		cache.removeDependencyIndexLocked(key, previous)
+	} else {
 		cache.order = append(cache.order, key)
 	}
-	cache.entries[key] = resultCacheEntry{version: before, typed: true, result: stored}
+	cache.entries[key] = entry
+	cache.addDependencyIndexLocked(key, entry)
 	for len(cache.order) > cache.capacity {
 		oldest := cache.order[0]
 		cache.order = cache.order[1:]
+		previous, exists := cache.entries[oldest]
+		if !exists {
+			continue
+		}
+		cache.removeDependencyIndexLocked(oldest, previous)
 		delete(cache.entries, oldest)
 		atomic.AddUint64(&cache.evictions, 1)
 	}
-	return result, nil
+}
+
+func (cache *ResultCache) addDependencyIndexLocked(key string, entry resultCacheEntry) {
+	if !cache.dependencyTracking {
+		return
+	}
+	for _, dependency := range entry.dependencies {
+		keys := cache.dependencyIndex[dependency]
+		if keys == nil {
+			keys = make(map[string]struct{})
+			cache.dependencyIndex[dependency] = keys
+		}
+		keys[key] = struct{}{}
+	}
+}
+
+func (cache *ResultCache) removeDependencyIndexLocked(key string, entry resultCacheEntry) {
+	if !cache.dependencyTracking {
+		return
+	}
+	for _, dependency := range entry.dependencies {
+		keys := cache.dependencyIndex[dependency]
+		delete(keys, key)
+		if len(keys) == 0 {
+			delete(cache.dependencyIndex, dependency)
+		}
+	}
+}
+
+func (cache *ResultCache) rebuildDependencyIndexLocked() {
+	if !cache.dependencyTracking {
+		return
+	}
+	cache.dependencyIndex = make(map[resultCacheDependencyKey]map[string]struct{})
+	for key, entry := range cache.entries {
+		cache.addDependencyIndexLocked(key, entry)
+	}
 }
 
 // snapshotResultCacheResult retains the existing JSON-shaped cache contract at

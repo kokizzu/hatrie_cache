@@ -13,49 +13,60 @@ import (
 // Callers should pass a digest or similarly compact stable value.
 const MaxSQLResultCacheSettingsFingerprintBytes = 256
 
-type sqlResultCacheSource struct {
-	kind string
-	key  string
-}
+type sqlResultCacheSource = ResultCacheDependency
 
-func sqlResultCacheLookup(query *sqlQuery, source string, parameters []interface{}, resolver SQLSourceResolver, options SQLQueryOptions) (string, func() (string, bool), bool) {
+func sqlResultCacheLookup(query *sqlQuery, source string, parameters []interface{}, resolver SQLSourceResolver, options SQLQueryOptions) (string, func() (string, bool), []ResultCacheDependency, bool) {
 	if options.ResultCache == nil || !sqlResultCacheQueryEligible(query) {
-		return "", nil, false
+		return "", nil, nil, false
 	}
 	key, ok := sqlResultCacheKey(source, parameters, options)
 	if !ok {
-		return "", nil, false
+		return "", nil, nil, false
 	}
 	sources := sqlResultCacheSources(query)
 	if len(sources) == 0 {
-		return "", nil, false
+		return "", nil, nil, false
+	}
+	dependencies := []ResultCacheDependency(nil)
+	if options.ResultCache.dependencyTracking {
+		dependencies = sources
 	}
 	if _, ok := resolver.(SourceVersionResolver); !ok {
-		return "", nil, false
+		if !(options.ResultCacheExplicitInvalidation && options.ResultCache.dependencyTracking) {
+			return "", nil, nil, false
+		}
+		return key, nil, dependencies, true
 	}
 	return key, func() (string, bool) {
 		return sqlResultCacheVersion(sources, resolver)
-	}, true
+	}, dependencies, true
 }
 
-func sqlResultCacheLookupQuery(query *sqlQuery, parameters []interface{}, resolver SQLSourceResolver, options SQLQueryOptions) (string, func() (string, bool), bool) {
+func sqlResultCacheLookupQuery(query *sqlQuery, parameters []interface{}, resolver SQLSourceResolver, options SQLQueryOptions) (string, func() (string, bool), []ResultCacheDependency, bool) {
 	if options.ResultCache == nil || !sqlResultCacheQueryEligible(query) || sqlResultCacheQueryHasCTEReference(query) || query.cacheKey == "" {
-		return "", nil, false
+		return "", nil, nil, false
 	}
 	key, ok := sqlResultCacheQueryKey(query, parameters, options)
 	if !ok {
-		return "", nil, false
+		return "", nil, nil, false
 	}
 	sources := sqlResultCacheSources(query)
 	if len(sources) == 0 {
-		return "", nil, false
+		return "", nil, nil, false
+	}
+	dependencies := []ResultCacheDependency(nil)
+	if options.ResultCache.dependencyTracking {
+		dependencies = sources
 	}
 	if _, ok := resolver.(SourceVersionResolver); !ok {
-		return "", nil, false
+		if !(options.ResultCacheExplicitInvalidation && options.ResultCache.dependencyTracking) {
+			return "", nil, nil, false
+		}
+		return key, nil, dependencies, true
 	}
 	return key, func() (string, bool) {
 		return sqlResultCacheVersion(sources, resolver)
-	}, true
+	}, dependencies, true
 }
 
 func executeSQLCachedSubquery(query *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) (SQLQueryResult, error) {
@@ -64,13 +75,20 @@ func executeSQLCachedSubquery(query *sqlQuery, resolver SQLSourceResolver, ctes 
 	}
 	options := control.options
 	options.ResultCache = options.SubqueryResultCache
-	key, version, ok := sqlResultCacheLookupQuery(query, control.parameters, resolver, options)
+	key, version, dependencies, ok := sqlResultCacheLookupQuery(query, control.parameters, resolver, options)
 	if !ok {
 		return executeSQLQueryWithMetrics(query, resolver, ctes, metrics, control)
 	}
-	result, err := options.ResultCache.ExecuteVersioned(control.ctx, key, version, func(execCtx context.Context) (QueryResult, error) {
+	execute := func(execCtx context.Context) (QueryResult, error) {
 		return executeSQLQueryWithMetrics(query, resolver, ctes, metrics, control)
-	})
+	}
+	var result QueryResult
+	var err error
+	if control.options.ResultCacheExplicitInvalidation && options.ResultCache.dependencyTracking {
+		result, err = options.ResultCache.ExecuteWithDependencies(control.ctx, key, dependencies, execute)
+	} else {
+		result, err = options.ResultCache.ExecuteVersionedWithDependencies(control.ctx, key, version, dependencies, execute)
+	}
 	if err != nil {
 		return result, err
 	}
@@ -394,7 +412,7 @@ func sqlResultCacheSources(query *sqlQuery) []sqlResultCacheSource {
 			return
 		}
 		seen[identity] = struct{}{}
-		sources = append(sources, sqlResultCacheSource{kind: source.kind, key: source.key})
+		sources = append(sources, sqlResultCacheSource{Kind: source.kind, Key: source.key})
 	}
 	var visitSource func(sqlSource)
 	var visitQuery func(*sqlQuery)
@@ -497,12 +515,12 @@ func sqlResultCacheVersion(sources []sqlResultCacheSource, resolver SQLSourceRes
 	}
 	var result strings.Builder
 	for _, source := range sources {
-		version, available, err := versions.SQLSourceVersion(source.kind, source.key)
+		version, available, err := versions.SQLSourceVersion(source.Kind, source.Key)
 		if err != nil || !available || version == "" {
 			return "", false
 		}
-		appendSQLResultCachePart(&result, source.kind)
-		appendSQLResultCachePart(&result, source.key)
+		appendSQLResultCachePart(&result, source.Kind)
+		appendSQLResultCachePart(&result, source.Key)
 		appendSQLResultCachePart(&result, version)
 	}
 	return result.String(), true

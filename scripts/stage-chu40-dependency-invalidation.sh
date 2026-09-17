@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+git add -- Makefile README.md BENCHMARK.md PRODUCT_IDEA_GAPS.md CHU40_DEPENDENCY_INVALIDATION.md hat/hatSql/result_cache.go hat/hatSql/sql_result_cache.go hat/hatSql/query.go hat/hatSql/result_cache_persistence.go hat/hatSql/chu40_dependency_invalidation_test.go hat/hatSql/chu40_dependency_invalidation_benchmark_test.go scripts/test-chu40-dependency-invalidation.sh scripts/benchmark-chu40-dependency-invalidation.sh scripts/format-chu40-dependency-invalidation.sh scripts/race-chu40-dependency-invalidation.sh scripts/vet-chu40-dependency-invalidation.sh scripts/review-chu40-dependency-invalidation.sh scripts/stage-chu40-dependency-invalidation.sh scripts/commit-chu40-dependency-invalidation.sh scripts/push-chu40-dependency-invalidation.sh

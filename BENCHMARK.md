@@ -28988,3 +28988,32 @@ Raw benchmark samples after shape capture:
 10439 ns/op 9288 B/op 71 allocs/op
 10970 ns/op 9288 B/op 71 allocs/op
 ```
+
+## CHU40 Dependency-Aware Result Invalidation
+
+Command: `make benchmark-chu40-dependency-invalidation`
+
+This microbenchmark runs a one-row typed cache hit on Linux amd64, AMD Ryzen
+9 5950X; five samples; `-benchmem`. It isolates cache lookup and result cloning.
+The dependency index is opt-in; the default constructor remains unchanged.
+
+| Mode | Median ns/op | B/op | allocs/op | CPU vs default | B/op vs default |
+|---|---:|---:|---:|---:|---:|
+| Default versioned | 256.2 | 344 | 3 | 1.00x | 1.00x |
+| Dependency versioned | 270.0 | 344 | 3 | 1.05x | 1.00x |
+| Explicit invalidation | 262.1 | 344 | 3 | 1.02x | 1.00x |
+
+Raw samples:
+
+```text
+default-versioned:      256.2 252.2 260.6 251.3 263.5 ns/op 344 B/op 3 allocs/op
+dependency-versioned:   261.4 270.0 277.4 275.6 261.4 ns/op 344 B/op 3 allocs/op
+explicit-invalidation:  264.8 262.8 253.1 260.5 262.1 ns/op 344 B/op 3 allocs/op
+```
+
+For a single cheap version callback, explicit invalidation is effectively CPU
+neutral because result cloning dominates. The feature's measured benefit is
+selective mutation invalidation and immediate release of affected entries;
+workloads with many sources or expensive version lookups avoid that callback
+entirely. The opt-in index has no default-cache allocation or behavior cost.
+See [CHU40_DEPENDENCY_INVALIDATION.md](CHU40_DEPENDENCY_INVALIDATION.md).

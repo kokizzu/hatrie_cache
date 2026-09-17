@@ -4316,3 +4316,13 @@ The optional `hatSql.SQLProjectionAdvisor` identifies repeated slow `CACHE` quer
 ## Adaptive Low-Cardinality Storage
 
 `hatSql.TypedTableColumn.DictionaryAdaptive` can probe the first bounded batch of a string column and select the existing dictionary representation only when observed cardinality is low. It is opt-in, keeps high-cardinality data in the plain representation, and leaves `DictionaryEncoded` precedence and all defaults unchanged. See [CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md) and the benchmark in [BENCHMARK.md](BENCHMARK.md#chu16-adaptive-low-cardinality-string-storage).
+
+## Dependency-Aware Result Invalidation
+
+`NewSQLResultCacheWithDependencies` adds an opt-in source-to-result index for
+selective invalidation. Use `InvalidateDependency("CACHE", "events")` after a
+mutation to remove only affected SQL results; the ordinary version-checked path
+remains available. `SQLQueryOptions.ResultCacheExplicitInvalidation` can skip
+source-version reads when every mutation notification is guaranteed. See
+[CHU40_DEPENDENCY_INVALIDATION.md](CHU40_DEPENDENCY_INVALIDATION.md) and the
+raw measurements in [BENCHMARK.md](BENCHMARK.md#chu40-dependency-aware-result-invalidation).

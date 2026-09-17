@@ -17953,3 +17953,31 @@ stage-tr008-journal-encryption:
 .PHONY: commit-tr008-journal-encryption
 commit-tr008-journal-encryption:
 	sh ./scripts/commit-tr008-journal-encryption.sh
+test-chu40-dependency-invalidation:
+	sh ./scripts/test-chu40-dependency-invalidation.sh
+
+benchmark-chu40-dependency-invalidation:
+	sh ./scripts/benchmark-chu40-dependency-invalidation.sh
+
+format-chu40-dependency-invalidation:
+	sh ./scripts/format-chu40-dependency-invalidation.sh
+
+race-chu40-dependency-invalidation:
+	sh ./scripts/race-chu40-dependency-invalidation.sh
+
+vet-chu40-dependency-invalidation:
+	sh ./scripts/vet-chu40-dependency-invalidation.sh
+
+review-chu40-dependency-invalidation:
+	sh ./scripts/review-chu40-dependency-invalidation.sh
+
+stage-chu40-dependency-invalidation:
+	sh ./scripts/stage-chu40-dependency-invalidation.sh
+
+commit-chu40-dependency-invalidation:
+	sh ./scripts/commit-chu40-dependency-invalidation.sh
+
+push-chu40-dependency-invalidation:
+	sh ./scripts/push-chu40-dependency-invalidation.sh
+
+delivery-chu40-dependency-invalidation: format-chu40-dependency-invalidation test-chu40-dependency-invalidation benchmark-chu40-dependency-invalidation race-chu40-dependency-invalidation vet-chu40-dependency-invalidation review-chu40-dependency-invalidation stage-chu40-dependency-invalidation commit-chu40-dependency-invalidation push-chu40-dependency-invalidation

@@ -303,6 +303,11 @@ type SQLQueryOptions struct {
 	// referenced source reports the same non-empty version. Nil preserves the
 	// ordinary executor and is the default.
 	ResultCache *SQLResultCache
+	// ResultCacheExplicitInvalidation uses the dependency index instead of
+	// source-version reads for ResultCache lookups. It requires a cache created
+	// with NewSQLResultCacheWithDependencies, and every mutation must invalidate
+	// its affected source before a subsequent read.
+	ResultCacheExplicitInvalidation bool
 	// LookupJoinCache optionally reuses external point-lookup candidates while
 	// the lookup source reports the same ready frontier. Nil preserves the
 	// ordinary lookup path and is the default.
@@ -854,10 +859,15 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, err
 	}
 	if options.AsOfFrontier == nil {
-		if key, version, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
-			result, err = options.ResultCache.ExecuteVersioned(ctx, key, version, func(execCtx context.Context) (QueryResult, error) {
+		if key, version, dependencies, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
+			execute := func(execCtx context.Context) (QueryResult, error) {
 				return executeSQLQueryUncached(execCtx, source, query, resolver, options, control, observation, &operatorSteps)
-			})
+			}
+			if options.ResultCacheExplicitInvalidation && options.ResultCache.dependencyTracking {
+				result, err = options.ResultCache.ExecuteWithDependencies(ctx, key, dependencies, execute)
+			} else {
+				result, err = options.ResultCache.ExecuteVersionedWithDependencies(ctx, key, version, dependencies, execute)
+			}
 			if err != nil {
 				return result, err
 			}
