@@ -29688,3 +29688,50 @@ feature is opt-in and is intended to protect work whose runtime is much larger
 than the admission operation. See
 [MU023_CLUSTER_QUERY_ADMISSION.md](MU023_CLUSTER_QUERY_ADMISSION.md) for
 resource semantics and cancellation behavior.
+
+<a id="mu-024-workload-classes-and-priorities"></a>
+## M-U24 Workload Classes And Priorities
+
+Commands: `make benchmark-mu024-workload-priority-baseline` records the
+previous first-fitting FIFO selector, and `make benchmark-mu024-workload-priority`
+records the current legacy fastpath and positive-priority selector. Both use a
+32-waiter, one-CPU pool, `GOMAXPROCS=1`, `-benchtime=500ms`, and `-count=5` on the
+AMD Ryzen 9 5950X Linux/amd64 host. This is a selector-only benchmark; it does
+not execute a query or include goroutine scheduling.
+
+Previous FIFO control raw output:
+
+```text
+BenchmarkMU024BeforeFIFOSelection  1.065 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024BeforeFIFOSelection  0.9684 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024BeforeFIFOSelection  1.084 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024BeforeFIFOSelection  1.009 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024BeforeFIFOSelection  0.9619 ns/op  0 B/op  0 allocs/op
+```
+
+Current implementation raw output:
+
+```text
+BenchmarkMU024AfterLegacyFIFOSelection  3.166 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterLegacyFIFOSelection  3.089 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterLegacyFIFOSelection  3.138 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterLegacyFIFOSelection  3.184 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterLegacyFIFOSelection  3.185 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterPrioritySelection    94.65 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterPrioritySelection    95.37 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterPrioritySelection    99.94 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterPrioritySelection    98.31 ns/op  0 B/op  0 allocs/op
+BenchmarkMU024AfterPrioritySelection    97.44 ns/op  0 B/op  0 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---|
+| Previous FIFO first-fit control | 1.009 | 0 | 0 | 1.00x |
+| Current legacy FIFO fastpath | 3.166 | 0 | 0 | 3.14x slower |
+| Current positive-priority selector | 97.44 | 0 | 0 | 96.57x slower |
+
+The positive-priority cost is bounded queue selection, not query execution. It
+is paid only while a positive-priority waiter is queued; default requests keep
+the first-fitting FIFO fastpath, and selection performs zero allocations. The
+feature is retained for cross-workload ordering and bounded starvation rather
+than raw selector throughput.

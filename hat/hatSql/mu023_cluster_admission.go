@@ -22,7 +22,13 @@ const (
 	// class when no queue capacity is configured.
 	DefaultSQLClusterAdmissionQueueCapacity = 64
 	// MaxSQLClusterAdmissionQueueCapacity bounds retained waiter requests.
-	MaxSQLClusterAdmissionQueueCapacity    = 100000
+	MaxSQLClusterAdmissionQueueCapacity = 100000
+	// DefaultSQLClusterAdmissionPriority is used by legacy requests and by
+	// requests that do not specify a priority.
+	DefaultSQLClusterAdmissionPriority = 0
+	// MaxSQLClusterAdmissionPriority bounds priority metadata and also bounds
+	// the aging work needed to prevent starvation.
+	MaxSQLClusterAdmissionPriority         = 100
 	maxSQLClusterAdmissionClusterNameBytes = 128
 )
 
@@ -55,6 +61,24 @@ const (
 	SQLClusterWorkMaintenance SQLClusterWorkClass = "maintenance"
 )
 
+// SQLClusterWorkloadClass identifies the producer of work for shared priority
+// scheduling. It is metadata only and does not select the serving or
+// maintenance resource pool.
+type SQLClusterWorkloadClass string
+
+const (
+	// SQLClusterWorkloadDefault preserves the behavior of legacy requests.
+	SQLClusterWorkloadDefault SQLClusterWorkloadClass = "default"
+	// SQLClusterWorkloadSource identifies source ingestion work.
+	SQLClusterWorkloadSource SQLClusterWorkloadClass = "source"
+	// SQLClusterWorkloadCompute identifies maintained compute work.
+	SQLClusterWorkloadCompute SQLClusterWorkloadClass = "compute"
+	// SQLClusterWorkloadSink identifies external sink delivery work.
+	SQLClusterWorkloadSink SQLClusterWorkloadClass = "sink"
+	// SQLClusterWorkloadAdHoc identifies interactive or ad-hoc queries.
+	SQLClusterWorkloadAdHoc SQLClusterWorkloadClass = "ad_hoc"
+)
+
 // SQLClusterAdmissionPool configures one class-specific resource pool. CPUUnits
 // and MemoryBytes are request/capacity units chosen by the caller; a zero
 // MemoryBytes means memory accounting is disabled for that pool. Zero CPUUnits,
@@ -82,12 +106,16 @@ type SQLClusterAdmissionOptions struct {
 	MaxClusters int                                  `json:"max_clusters,omitempty"`
 }
 
-// SQLClusterAdmissionRequest describes one resource reservation.
+// SQLClusterAdmissionRequest describes one resource reservation and its shared
+// workload scheduling metadata. Priority zero and the default workload class
+// preserve legacy FIFO behavior when no queue is contended.
 type SQLClusterAdmissionRequest struct {
-	Cluster     string              `json:"cluster"`
-	Class       SQLClusterWorkClass `json:"class"`
-	CPUUnits    int64               `json:"cpu_units"`
-	MemoryBytes int64               `json:"memory_bytes"`
+	Cluster       string                  `json:"cluster"`
+	Class         SQLClusterWorkClass     `json:"class"`
+	WorkloadClass SQLClusterWorkloadClass `json:"workload_class,omitempty"`
+	Priority      int                     `json:"priority,omitempty"`
+	CPUUnits      int64                   `json:"cpu_units"`
+	MemoryBytes   int64                   `json:"memory_bytes"`
 }
 
 // SQLClusterAdmissionPoolStats reports current usage and queue depth for one
@@ -144,13 +172,14 @@ type sqlClusterAdmissionClusterState struct {
 }
 
 type sqlClusterAdmissionPoolState struct {
-	mu         sync.Mutex
-	limits     SQLClusterAdmissionPool
-	cpuUsed    int64
-	memoryUsed int64
-	running    int
-	waiters    []*sqlClusterAdmissionWaiter
-	closed     bool
+	mu                 sync.Mutex
+	limits             SQLClusterAdmissionPool
+	cpuUsed            int64
+	memoryUsed         int64
+	running            int
+	waiters            []*sqlClusterAdmissionWaiter
+	prioritizedWaiters int
+	closed             bool
 }
 
 type sqlClusterAdmissionWaiter struct {
@@ -158,6 +187,7 @@ type sqlClusterAdmissionWaiter struct {
 	request   SQLClusterAdmissionRequest
 	lease     *SQLClusterAdmissionLease
 	err       error
+	age       int
 	granted   bool
 	cancelled bool
 }
@@ -378,6 +408,9 @@ func (pool *sqlClusterAdmissionPoolState) acquire(ctx context.Context, request S
 		request: request,
 	}
 	pool.waiters = append(pool.waiters, waiter)
+	if request.Priority > DefaultSQLClusterAdmissionPriority {
+		pool.prioritizedWaiters++
+	}
 	pool.mu.Unlock()
 
 	select {
@@ -459,24 +492,59 @@ func (pool *sqlClusterAdmissionPoolState) release(request SQLClusterAdmissionReq
 
 func (pool *sqlClusterAdmissionPoolState) dispatchLocked() {
 	for {
-		selected := -1
-		for index, waiter := range pool.waiters {
-			if !waiter.cancelled && pool.canStartLocked(waiter.request) {
-				selected = index
-				break
-			}
-		}
+		selected := pool.selectWaiterLocked()
 		if selected < 0 {
 			return
+		}
+		for index, waiter := range pool.waiters {
+			if index != selected && !waiter.cancelled && waiter.age < MaxSQLClusterAdmissionPriority+1 {
+				waiter.age++
+			}
 		}
 		waiter := pool.waiters[selected]
 		copy(pool.waiters[selected:], pool.waiters[selected+1:])
 		pool.waiters[len(pool.waiters)-1] = nil
 		pool.waiters = pool.waiters[:len(pool.waiters)-1]
+		if waiter.request.Priority > DefaultSQLClusterAdmissionPriority {
+			pool.prioritizedWaiters--
+		}
 		waiter.granted = true
 		waiter.lease = pool.reserveLocked(waiter.request)
 		close(waiter.ready)
 	}
+}
+
+func (pool *sqlClusterAdmissionPoolState) selectWaiterLocked() int {
+	if pool.prioritizedWaiters == 0 {
+		for index, waiter := range pool.waiters {
+			if !waiter.cancelled && pool.canStartLocked(waiter.request) {
+				return index
+			}
+		}
+		return -1
+	}
+	selected := -1
+	for index, waiter := range pool.waiters {
+		if waiter.cancelled || !pool.canStartLocked(waiter.request) {
+			continue
+		}
+		if selected < 0 || sqlClusterAdmissionWaiterHigherPriority(waiter, pool.waiters[selected]) {
+			selected = index
+		}
+	}
+	return selected
+}
+
+func sqlClusterAdmissionWaiterHigherPriority(candidate, selected *sqlClusterAdmissionWaiter) bool {
+	candidatePriority := candidate.request.Priority + candidate.age
+	if candidatePriority > MaxSQLClusterAdmissionPriority {
+		candidatePriority = MaxSQLClusterAdmissionPriority
+	}
+	selectedPriority := selected.request.Priority + selected.age
+	if selectedPriority > MaxSQLClusterAdmissionPriority {
+		selectedPriority = MaxSQLClusterAdmissionPriority
+	}
+	return candidatePriority > selectedPriority
 }
 
 func (pool *sqlClusterAdmissionPoolState) close() {
@@ -503,6 +571,9 @@ func (pool *sqlClusterAdmissionPoolState) removeWaiterLocked(target *sqlClusterA
 		copy(pool.waiters[index:], pool.waiters[index+1:])
 		pool.waiters[len(pool.waiters)-1] = nil
 		pool.waiters = pool.waiters[:len(pool.waiters)-1]
+		if target.request.Priority > DefaultSQLClusterAdmissionPriority {
+			pool.prioritizedWaiters--
+		}
 		return
 	}
 }
@@ -559,6 +630,18 @@ func normalizeSQLClusterAdmissionRequest(request SQLClusterAdmissionRequest) (SQ
 	if class != SQLClusterWorkServing && class != SQLClusterWorkMaintenance {
 		return SQLClusterAdmissionRequest{}, ErrSQLClusterAdmissionInvalid
 	}
+	workloadClass := request.WorkloadClass
+	if workloadClass == "" {
+		workloadClass = SQLClusterWorkloadDefault
+	}
+	switch workloadClass {
+	case SQLClusterWorkloadDefault, SQLClusterWorkloadSource, SQLClusterWorkloadCompute, SQLClusterWorkloadSink, SQLClusterWorkloadAdHoc:
+	default:
+		return SQLClusterAdmissionRequest{}, ErrSQLClusterAdmissionInvalid
+	}
+	if request.Priority < DefaultSQLClusterAdmissionPriority || request.Priority > MaxSQLClusterAdmissionPriority {
+		return SQLClusterAdmissionRequest{}, ErrSQLClusterAdmissionInvalid
+	}
 	if request.CPUUnits < 0 || request.MemoryBytes < 0 {
 		return SQLClusterAdmissionRequest{}, ErrSQLClusterAdmissionInvalid
 	}
@@ -567,6 +650,7 @@ func normalizeSQLClusterAdmissionRequest(request SQLClusterAdmissionRequest) (SQ
 	}
 	request.Cluster = cluster
 	request.Class = class
+	request.WorkloadClass = workloadClass
 	return request, nil
 }
 

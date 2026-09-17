@@ -18537,3 +18537,27 @@ commit-mu023-cluster-admission:
 	bash ./scripts/commit-mu023-cluster-admission.sh
 push-mu023-cluster-admission:
 	bash ./scripts/push-mu023-cluster-admission.sh
+test-mu024-workload-priority:
+	bash ./scripts/test-mu024-workload-priority.sh
+format-mu024-workload-priority:
+	bash ./scripts/format-mu024-workload-priority.sh
+benchmark-mu024-workload-priority-baseline:
+	bash ./scripts/benchmark-mu024-workload-priority-baseline.sh
+benchmark-mu024-workload-priority:
+	bash ./scripts/benchmark-mu024-workload-priority.sh
+race-mu024-workload-priority:
+	bash ./scripts/race-mu024-workload-priority.sh
+vet-mu024-workload-priority:
+	bash ./scripts/vet-mu024-workload-priority.sh
+test-mu024-package:
+	bash ./scripts/test-mu024-package.sh
+verify-mu024-workload-priority:
+	bash ./scripts/verify-mu024-workload-priority.sh
+review-mu024-workload-priority:
+	bash ./scripts/review-mu024-workload-priority.sh
+stage-mu024-workload-priority:
+	bash ./scripts/stage-mu024-workload-priority.sh
+commit-mu024-workload-priority:
+	bash ./scripts/commit-mu024-workload-priority.sh
+push-mu024-workload-priority:
+	bash ./scripts/push-mu024-workload-priority.sh
