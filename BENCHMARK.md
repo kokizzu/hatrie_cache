@@ -29735,3 +29735,78 @@ is paid only while a positive-priority waiter is queued; default requests keep
 the first-fitting FIFO fastpath, and selection performs zero allocations. The
 feature is retained for cross-workload ordering and bounded starvation rather
 than raw selector throughput.
+
+<a id="mu-026-unified-dataflow-metrics"></a>
+## M-U26 Unified Dataflow Metrics
+
+Commands: `make benchmark-mu026-unified-metrics-baseline` measures a synthetic
+split-map control with separate source, compute, and sink registries;
+`make benchmark-mu026-unified-metrics` runs that control together with the
+unified catalog's `Upsert`, registered-metric `UpdateMetric`, and `Rows` paths.
+Both use four objects, eight metrics per object, `GOMAXPROCS=1`,
+`-benchtime=500ms`, and `-count=5` on the AMD Ryzen 9 5950X Linux/amd64 host.
+The split-map control emits the same six logical columns and sorts metric names,
+but it has a fixed workload shape and no defensive snapshot boundary; it is a
+structural comparison, not an old production implementation.
+
+Raw split-map control output:
+
+```text
+BenchmarkMU026BeforeSeparateMapUpdate  20.55 ns/op  0 B/op  0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate  20.83 ns/op  0 B/op  0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate  21.41 ns/op  0 B/op  0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate  21.01 ns/op  0 B/op  0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate  22.49 ns/op  0 B/op  0 allocs/op
+BenchmarkMU026BeforeSeparateMapRows    12366 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows    11974 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows    11793 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows    12164 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows    12642 ns/op  13824 B/op  229 allocs/op
+```
+
+Final paired raw output:
+
+```text
+BenchmarkMU026BeforeSeparateMapUpdate          20.90 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate          20.62 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate          21.50 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate          22.57 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026BeforeSeparateMapUpdate          21.65 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026BeforeSeparateMapRows            12573 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows            11858 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows            11048 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows            11381 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026BeforeSeparateMapRows            11918 ns/op  13824 B/op  229 allocs/op
+BenchmarkMU026AfterUnifiedCatalogUpsert        176.6 ns/op  64 B/op     1 allocs/op
+BenchmarkMU026AfterUnifiedCatalogUpsert        184.3 ns/op  64 B/op     1 allocs/op
+BenchmarkMU026AfterUnifiedCatalogUpsert        183.8 ns/op  64 B/op     1 allocs/op
+BenchmarkMU026AfterUnifiedCatalogUpsert        184.9 ns/op  64 B/op     1 allocs/op
+BenchmarkMU026AfterUnifiedCatalogUpsert        181.3 ns/op  64 B/op     1 allocs/op
+BenchmarkMU026AfterUnifiedCatalogMetricUpdate  74.17 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026AfterUnifiedCatalogMetricUpdate  68.18 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026AfterUnifiedCatalogMetricUpdate  74.09 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026AfterUnifiedCatalogMetricUpdate  67.78 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026AfterUnifiedCatalogMetricUpdate  69.95 ns/op  0 B/op      0 allocs/op
+BenchmarkMU026AfterUnifiedCatalogRows          13812 ns/op  17280 B/op  282 allocs/op
+BenchmarkMU026AfterUnifiedCatalogRows          13499 ns/op  17280 B/op  282 allocs/op
+BenchmarkMU026AfterUnifiedCatalogRows          13195 ns/op  17280 B/op  282 allocs/op
+BenchmarkMU026AfterUnifiedCatalogRows          13106 ns/op  17280 B/op  282 allocs/op
+BenchmarkMU026AfterUnifiedCatalogRows          12790 ns/op  17280 B/op  282 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative to split control |
+|---|---:|---:|---:|---:|
+| Split-map metric update | 21.50 | 0 | 0 | 1.00x |
+| Unified `Upsert` | 183.8 | 64 | 1 | 8.55x slower |
+| Unified `UpdateMetric` | 69.95 | 0 | 0 | 3.25x slower |
+| Split-map row snapshot | 11,858 | 13,824 | 229 | 1.00x |
+| Unified `Rows` snapshot | 13,195 | 17,280 | 282 | 1.11x slower |
+
+The capability's direct cost is bounded validation, synchronization, sorting,
+and defensive copies. `UpdateMetric` removes the recurring `Upsert` allocation
+and is 2.63x faster than rebuilding a one-metric object, but an uncontended
+catalog lock remains about 3.25x slower than an unprotected map write. Full row
+snapshots retain 1.25x more bytes and 1.23x more allocations for this workload.
+This is an opt-in control-plane catalog; it is not a claim that ordinary SQL
+execution became faster. Use `UpdateMetric` for producers and `Snapshot()` when
+typed Go data is sufficient.

@@ -18571,3 +18571,41 @@ commit-mu025-query-history:
 	bash ./scripts/commit-mu025-query-history.sh
 push-mu025-query-history:
 	bash ./scripts/push-mu025-query-history.sh
+test-mu026-unified-metrics:
+	bash ./scripts/test-mu026-unified-metrics.sh
+
+format-mu026-unified-metrics:
+	bash ./scripts/format-mu026-unified-metrics.sh
+
+test-mu026-package:
+	bash ./scripts/test-mu026-package.sh
+
+race-mu026-unified-metrics:
+	bash ./scripts/race-mu026-unified-metrics.sh
+
+vet-mu026-unified-metrics:
+	bash ./scripts/vet-mu026-unified-metrics.sh
+
+benchmark-mu026-unified-metrics-baseline:
+	bash ./scripts/benchmark-mu026-unified-metrics.sh baseline
+
+benchmark-mu026-unified-metrics:
+	bash ./scripts/benchmark-mu026-unified-metrics.sh current
+
+verify-mu026-unified-metrics:
+	bash ./scripts/verify-mu026-unified-metrics.sh
+
+review-mu026-unified-metrics:
+	bash ./scripts/review-mu026-unified-metrics.sh
+
+stage-mu026-unified-metrics:
+	bash ./scripts/stage-mu026-unified-metrics.sh
+
+commit-mu026-unified-metrics:
+	bash ./scripts/commit-mu026-unified-metrics.sh
+
+push-mu026-unified-metrics:
+	bash ./scripts/push-mu026-unified-metrics.sh
+
+verify-all:
+	bash ./scripts/verify-all-local.sh
