@@ -13922,6 +13922,32 @@ commit-mu019-source-transaction-envelope:
 push-mu019-source-transaction-envelope:
 	bash ./scripts/push-mu019-source-transaction-envelope.sh
 
+.PHONY: inspect-product-gap-sequence
+.PHONY: benchmark-mu020-secret-resources
+benchmark-mu020-secret-resources:
+	bash ./scripts/benchmark-mu020-secret-resources.sh
+
+.PHONY: test-mu020-secret-resources
+test-mu020-secret-resources:
+	bash ./scripts/test-mu020-secret-resources.sh
+
+
+.PHONY: format-mu020-secret-resources
+format-mu020-secret-resources:
+	bash ./scripts/format-mu020-secret-resources.sh
+
+.PHONY: test-mu020-package
+test-mu020-package:
+	bash ./scripts/test-mu020-package.sh
+
+.PHONY: race-mu020-secret-resources
+race-mu020-secret-resources:
+	bash ./scripts/race-mu020-secret-resources.sh
+
+.PHONY: vet-mu020-secret-resources
+vet-mu020-secret-resources:
+	bash ./scripts/vet-mu020-secret-resources.sh
+
 .PHONY: cleanup-hatrie-tmp-apply
 cleanup-hatrie-tmp-apply:
 	bash ./scripts/cleanup-hatrie-tmp.sh apply
@@ -18422,3 +18448,14 @@ commit-mz42-dataflow-graph:
 
 push-mz42-dataflow-graph:
 	sh ./scripts/push-mz42-dataflow-graph.sh
+review-mu020-secret-resources:
+	bash ./scripts/review-mu020-secret-resources.sh
+
+stage-mu020-secret-resources:
+	bash ./scripts/stage-mu020-secret-resources.sh
+
+commit-mu020-secret-resources:
+	bash ./scripts/commit-mu020-secret-resources.sh
+
+push-mu020-secret-resources:
+	bash ./scripts/push-mu020-secret-resources.sh

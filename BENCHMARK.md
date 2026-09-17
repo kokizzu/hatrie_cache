@@ -29498,3 +29498,47 @@ The overhead is bounded relation metadata validation and retention; the
 relation-free API keeps its original allocation count. The new capability is
 measured as a correctness/operability improvement rather than a raw CPU
 optimization. See [MU019_SOURCE_TRANSACTION_ENVELOPE.md](MU019_SOURCE_TRANSACTION_ENVELOPE.md).
+
+<a id="mu-020-secret-and-connection-resources"></a>
+## M-U20 Secret And Connection Resources
+
+Command: `make benchmark-mu020-secret-resources`. The target uses
+`GOMAXPROCS=1`, `-benchtime=500ms`, and `-count=5` on the same Linux/amd64
+host. The baseline is a raw map lookup. The implemented paths include bounded
+authorization, redacted metadata, version checks, and explicit value-copy
+resolution.
+
+Raw output from the paired run (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkMU020BeforeConnectionLookup   9.969 ns/op  0 B/op  0 allocs/op
+BenchmarkMU020BeforeConnectionLookup  10.09 ns/op   0 B/op  0 allocs/op
+BenchmarkMU020BeforeConnectionLookup  10.80 ns/op   0 B/op  0 allocs/op
+BenchmarkMU020BeforeConnectionLookup  10.41 ns/op   0 B/op  0 allocs/op
+BenchmarkMU020BeforeConnectionLookup   9.847 ns/op  0 B/op  0 allocs/op
+BenchmarkMU020AfterConnectionLookup    90.77 ns/op  16 B/op  1 allocs/op
+BenchmarkMU020AfterConnectionLookup    91.11 ns/op  16 B/op  1 allocs/op
+BenchmarkMU020AfterConnectionLookup    87.03 ns/op  16 B/op  1 allocs/op
+BenchmarkMU020AfterConnectionLookup    92.87 ns/op  16 B/op  1 allocs/op
+BenchmarkMU020AfterConnectionLookup    87.31 ns/op  16 B/op  1 allocs/op
+BenchmarkMU020AfterConnectionResolve  123.5 ns/op  32 B/op  2 allocs/op
+BenchmarkMU020AfterConnectionResolve  121.0 ns/op  32 B/op  2 allocs/op
+BenchmarkMU020AfterConnectionResolve  114.6 ns/op  32 B/op  2 allocs/op
+BenchmarkMU020AfterConnectionResolve  121.9 ns/op  32 B/op  2 allocs/op
+BenchmarkMU020AfterConnectionResolve  116.1 ns/op  32 B/op  2 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Raw map lookup | 10.09 | 0 | 0 | 1.00x control |
+| Registry metadata lookup | 90.77 | 16 | 1 | 9.00x slower |
+| Registry credential resolution | 121.0 | 32 | 2 | 12.0x slower |
+
+This is an opt-in security and operability boundary, not a hot-loop lookup
+optimization. Metadata access adds about 81 ns and one allocation versus the
+raw map; explicit resolution adds about 111 ns and one more allocation for
+copy isolation. In exchange, callers get bounded authorization, exact-version
+rotation, redaction, and snapshot metadata without secret bytes. Keep
+resolution outside per-row SQL loops. Secret values remain caller-managed and
+are not included in durable metadata snapshots. See
+[MU020_SECRET_CONNECTION_RESOURCES.md](MU020_SECRET_CONNECTION_RESOURCES.md).

@@ -4395,3 +4395,8 @@ the existing per-operator behavior. Failed and canceled queries clean their
 temporary files; process-crash orphan handling remains the responsibility of
 the spill-directory lifecycle. See [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
 and the raw measurements in [BENCHMARK.md](BENCHMARK.md#chu25-query-wide-spill-quota).
+Named SQL-style connections and their credentials can be kept separate with
+the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
+readers are constrained by the referenced secret, and rotation uses an exact
+version check; values are copied only through explicit resolution and are not
+included in metadata snapshots. See [MU020_SECRET_CONNECTION_RESOURCES.md](MU020_SECRET_CONNECTION_RESOURCES.md).
