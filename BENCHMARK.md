@@ -28680,3 +28680,10 @@ BenchmarkExecuteCacheCommandInsertQuorum-32  988  125082 ns/op  14499 B/op  161 
 
 See [CH011_INSERT_QUORUM.md](CH011_INSERT_QUORUM.md) for the request contract,
 validation, and operational behavior.
+## CH-048 string predicate kernel
+
+`make benchmark-ch048` scans a 4,096-row plain string column with a binary
+`name >= 'm'` predicate. The five-run median improved from 485,616 ns/op to
+31,013 ns/op, or 15.66x faster, with 0 B/op and 0 allocs/op in both versions.
+See [CH048_STRING_PREDICATE.md](CH048_STRING_PREDICATE.md) for raw runs and
+scope guards.

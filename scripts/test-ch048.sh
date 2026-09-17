@@ -1,16 +1,27 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-repo_root=$(pwd)
-worktree=$(mktemp -d /tmp/hatrie-cache-ch048.XXXXXX)
-
-cleanup() {
-	git -C "$repo_root" worktree remove --force "$worktree" >/dev/null 2>&1 || rm -rf "$worktree"
-}
-trap cleanup EXIT
-
-git -C "$repo_root" worktree add --detach "$worktree" HEAD >/dev/null
-cp "$repo_root/hat/hatSql/external_schema.go" "$worktree/hat/hatSql/external_schema.go"
-cp "$repo_root/hat/hatSql/ch048_external_schema_inference_test.go" "$worktree/hat/hatSql/ch048_external_schema_inference_test.go"
-cd "$worktree"
-go test ./hat/hatSql -run '^TestCH048ExternalSchemaInference'
+case "${1:-test}" in
+test)
+	go test ./hat/hatSql -run 'TestCH048'
+	;;
+package)
+	go test ./hat/hatSql
+	;;
+benchmark)
+	go test ./hat/hatSql -run '^$' -bench '^BenchmarkCH048StringComparison$' -benchmem -count=5
+	;;
+race)
+	go test -race ./hat/hatSql -run 'TestCH048'
+	;;
+vet)
+	go vet ./hat/hatSql
+	;;
+format)
+	gofmt -w hat/hatSql/columnar_string_predicate.go hat/hatSql/ch048_string_predicate_test.go
+	;;
+*)
+	printf '%s\n' "usage: $0 {test|package|benchmark|race|vet|format}" >&2
+	exit 2
+	;;
+esac

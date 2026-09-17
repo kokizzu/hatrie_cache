@@ -16843,19 +16843,22 @@ test-ch048-red:
 	bash ./scripts/test-ch048-red.sh
 
 test-ch048:
-	bash ./scripts/test-ch048.sh
+	@sh ./scripts/test-ch048.sh test
+
+test-ch048-package:
+	@sh ./scripts/test-ch048.sh package
 
 format-ch048:
-	bash ./scripts/format-ch048.sh
+	@sh ./scripts/test-ch048.sh format
 
 benchmark-ch048:
-	bash ./scripts/benchmark-ch048.sh
+	@sh ./scripts/test-ch048.sh benchmark
 
 race-ch048:
-	bash ./scripts/verify-ch048.sh race
+	@sh ./scripts/test-ch048.sh race
 
 vet-ch048:
-	bash ./scripts/verify-ch048.sh vet
+	@sh ./scripts/test-ch048.sh vet
 
 verify-ch048:
 	bash ./scripts/verify-ch048.sh full
@@ -16870,10 +16873,10 @@ review-ch048:
 	bash ./scripts/deliver-ch048.sh review
 
 commit-ch048:
-	bash ./scripts/deliver-ch048.sh commit
+	@sh ./scripts/commit-ch048.sh
 
 push-ch048:
-	bash ./scripts/deliver-ch048.sh push
+	@sh ./scripts/push-ch048.sh
 
 test-mz049-red:
 	bash ./scripts/test-mz049-red.sh
@@ -17650,3 +17653,5 @@ commit-ch14:
 .PHONY: push-ch14
 push-ch14:
 	sh ./scripts/push-ch14.sh
+stage-ch048:
+	@sh ./scripts/stage-ch048.sh

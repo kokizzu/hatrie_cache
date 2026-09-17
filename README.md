@@ -4267,3 +4267,4 @@ Truncation is intentionally unsupported because it would return an incomplete
 SQL result; use `LIMIT` or `ExecuteSQLQueryPage` instead. See
 [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and the raw
 measurements in [BENCHMARK.md](BENCHMARK.md#c229-join-overflow-policy).
+[CH-048 string predicate kernel](CH048_STRING_PREDICATE.md)

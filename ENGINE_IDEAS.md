@@ -75,7 +75,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-045 | Array/map subcolumn pruning | No read planner that loads only referenced nested subcolumns. | Medium |
 | CH-046 | Native wire protocol framing | No ClickHouse-style typed block protocol with explicit column framing and progress. | High |
 | CH-047 | Parallel format parsing | Large RowBinary payloads now index row boundaries once and decode independent ranges in parallel; small and single-core inputs remain serial. CSV/JSON block parsing remains open. | Medium |
-| CH-048 | SIMD/generic predicate coverage | Existing `hatPredicate` masks cover typed int64 batches, and SQL direct numeric and packed-boolean predicates now use byte-oriented kernels; string and broader predicate shapes remain open. | Medium |
+| CH-048 | SIMD/generic predicate coverage | Partially adopted: plain binary string comparisons now use a direct zero-allocation columnar kernel for all six ordering/equality operators, while packed/dictionary, non-binary collation, and broader predicate shapes remain on existing paths. | Medium |
 | CH-049 | Refreshable external dictionaries | Adopted as an opt-in `hatSql` registry with immutable atomic snapshots, manual/background refresh, bounded staleness, and `DICT_GET`/`DICT_GET_OR_DEFAULT`/`DICT_HAS`. | Done |
 | CH-050 | Named settings collections and inheritable validated profiles | Adopted as an imported `hatSql` registry with bounded immutable snapshots, revision compare-and-swap updates, optional parent inheritance with cycle/depth/effective-size checks, caller-supplied setting validation, isolated full-profile reads, and allocation-free single-value lookup. | Done |
 

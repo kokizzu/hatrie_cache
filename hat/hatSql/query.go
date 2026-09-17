@@ -1233,6 +1233,20 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 			return operator == "=" && found && candidate == code || (operator == "!=" || operator == "<>") && (!found || candidate != code), nil
 		}
 	}
+	if field, operator, value, comparable := sqlColumnarStringComparison(query.where, query.from.alias); comparable {
+		if values, plain := sqlColumnarPlainStringValues(batch, field); plain {
+			return func(rowIndex int) (bool, error) {
+				if rowIndex < 0 || rowIndex >= len(values) || values[rowIndex] == nil {
+					return false, nil
+				}
+				candidate, ok := values[rowIndex].(string)
+				if !ok {
+					return false, nil
+				}
+				return sqlColumnarStringComparisonMatches(candidate, operator, value), nil
+			}
+		}
+	}
 	if field, pattern, like := sqlColumnarLikePredicate(query.where, query.from.alias); like {
 		program, collation := query.where.likeProgram, query.where.collation
 		return func(rowIndex int) (bool, error) {
