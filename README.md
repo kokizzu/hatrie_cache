@@ -4450,3 +4450,10 @@ and observed frontiers. It returns deterministic adopt/replay/quarantine
 decisions without mutating live state. See
 [MZ047_TIMELINE_RECOVERY.md](MZ047_TIMELINE_RECOVERY.md) for semantics,
 limits, and measured cost.
+## Persisted Catalog Manifests
+
+`hatSchema.SpaceCatalogManifestStore` persists named-space metadata with
+checksums, atomic replacement, and bounded version migrations. Use
+`LoadAndMigrate` during startup and `Publish` only after the catalog has been
+validated. See [MZ048_CATALOG_MANIFEST_MIGRATIONS.md](MZ048_CATALOG_MANIFEST_MIGRATIONS.md)
+for migration, recovery, and measured CPU/memory cost.

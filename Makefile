@@ -19317,3 +19317,39 @@ commit-mz047:
 .PHONY: push-mz047
 push-mz047:
 	bash ./scripts/push-mz047.sh
+.PHONY: test-mz048-space-catalog-manifest
+test-mz048-space-catalog-manifest:
+	bash ./scripts/test-mz048-space-catalog-manifest.sh
+.PHONY: format-mz048-space-catalog-manifest
+format-mz048-space-catalog-manifest:
+	bash ./scripts/format-mz048-space-catalog-manifest.sh
+.PHONY: benchmark-mz048-space-catalog-manifest
+benchmark-mz048-space-catalog-manifest:
+	bash ./scripts/benchmark-mz048-space-catalog-manifest.sh
+
+.PHONY: test-mz048-package
+test-mz048-package:
+	bash ./scripts/test-mz048-package.sh
+
+.PHONY: race-mz048-space-catalog-manifest
+race-mz048-space-catalog-manifest:
+	bash ./scripts/race-mz048-space-catalog-manifest.sh
+
+.PHONY: vet-mz048-space-catalog-manifest
+vet-mz048-space-catalog-manifest:
+	bash ./scripts/vet-mz048-space-catalog-manifest.sh
+.PHONY: review-mz048
+review-mz048:
+	bash ./scripts/review-mz048.sh
+
+.PHONY: stage-mz048
+stage-mz048:
+	bash ./scripts/stage-mz048.sh
+
+.PHONY: commit-mz048
+commit-mz048:
+	bash ./scripts/commit-mz048.sh
+
+.PHONY: push-mz048
+push-mz048:
+	bash ./scripts/push-mz048.sh

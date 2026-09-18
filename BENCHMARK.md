@@ -30603,3 +30603,19 @@ manual: 51835 16584 4
 manual: 53632 16584 4
 manual: 52707 16584 4
 ```
+<a id="mz-048-persisted-catalog-manifest-migrations"></a>
+## MZ048 Persisted Catalog Manifest Migrations
+
+This benchmark compares raw JSON metadata with the MZ048 checksummed,
+normalized manifest path for 64 named spaces on an AMD Ryzen 9 5950X.
+
+| Operation | Raw JSON median | MZ048 median | Relative CPU | Raw memory | MZ048 memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Encode | 13,992 ns/op | 18,401 ns/op | 1.32x slower | 4,923 B/op | 10,324 B/op |
+| Decode | 86,731 ns/op | 188,596 ns/op | 2.17x slower | 19,176 B/op | 35,478 B/op |
+
+Allocations were 2 versus 3 for encode and 209 versus 241 for decode. The
+overhead is isolated to opt-in metadata persistence/recovery and buys schema
+validation, checksum verification, deterministic ordering, migration, and
+atomic publication. Raw samples and safety details are in
+[MZ048_CATALOG_MANIFEST_MIGRATIONS.md](MZ048_CATALOG_MANIFEST_MIGRATIONS.md).
