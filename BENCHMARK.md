@@ -31381,3 +31381,9 @@ open circuit rejects locally instead of repeating a remote call.
 The open path also uses 154x fewer bytes and 12x fewer allocations than the
 repeated remote-error path. Results are five-sample medians on Linux amd64,
 AMD Ryzen 9 5950X; rerun with `make benchmark-tr045-peer`.
+
+## Rejected T-042: Recovery Parallel Replay
+
+An opt-in four-worker replay experiment was rolled back after it made a
+matched 8,320-mutation workload 1.82x slower and used 6.35x more bytes per
+operation than serial replay. See [T042_RECOVERY_PARALLEL_REPLAY_EVALUATION.md](T042_RECOVERY_PARALLEL_REPLAY_EVALUATION.md).

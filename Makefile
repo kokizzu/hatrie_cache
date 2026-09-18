@@ -7866,6 +7866,7 @@ commit-t042-rejection:
 .PHONY: push-t042-rejection
 push-t042-rejection:
 	bash ./scripts/push-t042-rejection.sh
+
 .PHONY: benchmark-m032-frontier
 benchmark-m032-frontier:
 	bash ./scripts/benchmark-m032-frontier.sh
@@ -20326,3 +20327,15 @@ commit-tr045-peer:
 .PHONY: push-tr045-peer
 push-tr045-peer:
 	bash ./scripts/push-tr045-peer.sh
+
+verify-t042-rejection:
+	bash ./scripts/verify-t042-rejection.sh
+
+stage-t042-evaluation:
+	bash ./scripts/stage-t042-evaluation.sh
+
+commit-t042-evaluation:
+	bash ./scripts/commit-t042-evaluation.sh
+
+push-t042-evaluation:
+	bash ./scripts/push-t042-evaluation.sh
