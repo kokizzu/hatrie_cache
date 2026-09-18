@@ -575,3 +575,14 @@ deadlines have a bounded CRC-protected `MarshalColumnTTLState` /
 and live-clock mutation of historical MVCC snapshots remain intentionally out
 of scope. See [CH008_COLUMN_TTL.md](CH008_COLUMN_TTL.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-008-column-ttl).
+
+## CH-009: TTL Rollup
+
+CH-009 is partially adopted through importable `hatSql.TypedTableTTLRollup`.
+It reuses the exact typed-table aggregate engine to summarize only row-TTL
+`DELETE` before-images after detail expiry. `RegisterWithRollup` connects the
+summary to the existing shared TTL scheduler as an explicit opt-in; ordinary
+registration, background startup, live-table reads, and column-TTL behavior
+remain unchanged. Rollup persistence and automatic restart replay remain
+caller-owned. See [CH009_TTL_ROLLUP.md](CH009_TTL_ROLLUP.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-009-ttl-rollup).

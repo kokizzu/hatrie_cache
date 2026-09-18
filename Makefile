@@ -18899,3 +18899,31 @@ commit-ch008-column-ttl:
 .PHONY: push-ch008-column-ttl
 push-ch008-column-ttl:
 	bash ./scripts/push-ch008-column-ttl.sh
+
+.PHONY: test-ch009-ttl-rollup
+test-ch009-ttl-rollup:
+	bash ./scripts/test-ch009-ttl-rollup.sh
+
+.PHONY: format-ch009-ttl-rollup
+format-ch009-ttl-rollup:
+	bash ./scripts/format-ch009-ttl-rollup.sh
+
+.PHONY: benchmark-ch009-ttl-rollup
+benchmark-ch009-ttl-rollup:
+	bash ./scripts/benchmark-ch009-ttl-rollup.sh
+
+.PHONY: review-ch009
+review-ch009:
+	bash ./scripts/review-ch009.sh
+
+.PHONY: stage-ch009-ttl-rollup
+stage-ch009-ttl-rollup:
+	bash ./scripts/stage-ch009-ttl-rollup.sh
+
+.PHONY: commit-ch009-ttl-rollup
+commit-ch009-ttl-rollup:
+	bash ./scripts/commit-ch009-ttl-rollup.sh
+
+.PHONY: push-ch009-ttl-rollup
+push-ch009-ttl-rollup:
+	bash ./scripts/push-ch009-ttl-rollup.sh

@@ -169,7 +169,8 @@ func TestCH008PurgeExpiredColumnsEmitsUpdateAndReleasesValue(t *testing.T) {
 func TestCH008ColumnTTLDeadlinesFollowPatchCompaction(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	table, err := NewTypedTable(TypedTableSchema{
-		Name: "column-ttl-compaction",
+		Name:       "column-ttl-compaction",
+		PatchParts: TypedTablePatchOptions{Enabled: true},
 		Columns: []TypedTableColumn{
 			{Name: "payload", Kind: TypedTableString, TTL: TypedTableTTLOptions{
 				Mode: TypedTableTTLProcessingTime, Lifetime: time.Hour, Clock: func() time.Time { return now },
@@ -228,7 +229,7 @@ func TestCH008ColumnTTLStateRoundTrip(t *testing.T) {
 	if _, err := restored.Upsert("row", []TypedTableValue{TypedString("payload")}); err != nil {
 		t.Fatal(err)
 	}
-	if restored.Rows()[0]["payload"] != nil {
+	if restored.Rows()[0]["payload"] == nil {
 		t.Fatal("restored table unexpectedly expired before state restore")
 	}
 	if err := restored.RestoreColumnTTLState(encoded); err != nil {

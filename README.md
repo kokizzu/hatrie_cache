@@ -15,6 +15,7 @@ security guidance before exposing it on a network.
 - Opt-in CRC-protected typed-table delete bitmap snapshots for restart recovery: [CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots)
 - Opt-in durable dependency-aware mutation queues with CRC-checked binary WAL replay and compaction: [CH006_DURABLE_MUTATION_QUEUE.md](CH006_DURABLE_MUTATION_QUEUE.md), with measured fsync tradeoffs in [BENCHMARK.md](BENCHMARK.md#ch-006-durable-mutation-dependency-queue)
 - Opt-in per-column TTL masking, physical purge, scheduler maintenance, and deadline backup/restore: [CH008_COLUMN_TTL.md](CH008_COLUMN_TTL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-008-column-ttl)
+- Opt-in TTL rollups that aggregate expired row images into coarse summaries: [CH009_TTL_ROLLUP.md](CH009_TTL_ROLLUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-ttl-rollup)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)

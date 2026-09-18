@@ -30247,3 +30247,44 @@ sample range and should be rechecked on deployment hardware.
 
 Reproduce with `make benchmark-ch008-column-ttl`; run correctness coverage with
 `make test-ch008-column-ttl`.
+
+## CH-009: TTL Rollup
+
+Command:
+
+```text
+make benchmark-ch009-ttl-rollup
+```
+
+This compares the same 4,096-row processing-time expiry batch with and without
+an explicit 16-group `COUNT` plus `SUM` rollup. The timed path includes purge;
+setup and row insertion are outside the timer. Five fixed `-benchtime=100x`
+samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+Raw output:
+
+```text
+BenchmarkCH009TTLPurgeOnly-32       100  3897706 ns/op  3509823 B/op 8416 allocs/op
+BenchmarkCH009TTLPurgeOnly-32       100  3574834 ns/op  3509762 B/op 8416 allocs/op
+BenchmarkCH009TTLPurgeOnly-32       100  3810205 ns/op  3509768 B/op 8416 allocs/op
+BenchmarkCH009TTLPurgeOnly-32       100  3696065 ns/op  3509768 B/op 8416 allocs/op
+BenchmarkCH009TTLPurgeOnly-32       100  3406639 ns/op  3509769 B/op 8416 allocs/op
+BenchmarkCH009TTLPurgeWithRollup-32 100  4021295 ns/op  3515712 B/op 8454 allocs/op
+BenchmarkCH009TTLPurgeWithRollup-32 100  4092581 ns/op  3515709 B/op 8454 allocs/op
+BenchmarkCH009TTLPurgeWithRollup-32 100  4329396 ns/op  3515710 B/op 8454 allocs/op
+BenchmarkCH009TTLPurgeWithRollup-32 100  4168748 ns/op  3515714 B/op 8454 allocs/op
+BenchmarkCH009TTLPurgeWithRollup-32 100  4488843 ns/op  3515712 B/op 8454 allocs/op
+```
+
+Median comparison:
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Purge only | 3,696,065 | 3,509,768 | 8,416 | 1.00x |
+| Purge plus TTL rollup | 4,168,748 | 3,515,712 | 8,454 | 1.13x time, 1.00x heap, +38 allocations |
+
+The feature is a capability addition, not a general performance improvement.
+The measured tradeoff is a 12.8% median maintenance-time increase for retaining
+the grouped expired-row summary; measured heap rises by about 0.17%. Ordinary
+TTL registration remains unchanged, so this cost is paid only when a rollup is
+explicitly registered.

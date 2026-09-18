@@ -34,12 +34,14 @@ type TypedTableTTLSchedulerOptions struct {
 }
 
 // TypedTableTTLRun records one table maintenance pass. Expired is the number
-// of rows converted into DELETE changes during the pass.
+// of rows converted into DELETE changes; RolledUp is the number added to an
+// explicitly registered expired-row rollup.
 type TypedTableTTLRun struct {
 	Name           string
 	StartedAt      time.Time
 	FinishedAt     time.Time
 	Expired        int
+	RolledUp       int
 	ExpiredColumns int
 	Error          string
 }
@@ -51,6 +53,7 @@ type TypedTableTTLScheduler struct {
 	mu      sync.RWMutex
 	options TypedTableTTLSchedulerOptions
 	tables  map[string]*TypedTable
+	rollups map[string]*TypedTableTTLRollup
 	status  map[string]TypedTableTTLRun
 
 	wake    chan struct{}
@@ -77,6 +80,7 @@ func NewTypedTableTTLScheduler(options TypedTableTTLSchedulerOptions) (*TypedTab
 	return &TypedTableTTLScheduler{
 		options: options,
 		tables:  make(map[string]*TypedTable),
+		rollups: make(map[string]*TypedTableTTLRollup),
 		status:  make(map[string]TypedTableTTLRun),
 		wake:    make(chan struct{}, 1),
 	}, nil
@@ -106,6 +110,31 @@ func (scheduler *TypedTableTTLScheduler) Register(name string, table *TypedTable
 	return nil
 }
 
+// RegisterWithRollup registers a table and an explicit expired-row rollup as
+// one unit. Rollups are opt-in; Register never creates or runs one.
+func (scheduler *TypedTableTTLScheduler) RegisterWithRollup(name string, table *TypedTable, rollup *TypedTableTTLRollup) error {
+	if scheduler == nil {
+		return ErrTypedTableTTLSchedulerNil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || table == nil || rollup == nil || rollup.table != table {
+		return ErrTypedTableTTLSchedulerInvalid
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if scheduler.closed {
+		return ErrTypedTableTTLSchedulerClosed
+	}
+	if _, exists := scheduler.tables[name]; exists {
+		return ErrTypedTableTTLSchedulerExists
+	}
+	scheduler.tables[name] = table
+	scheduler.rollups[name] = rollup
+	scheduler.status[name] = TypedTableTTLRun{Name: name}
+	scheduler.signalWakeLocked()
+	return nil
+}
+
 // Unregister removes a table and its last-run status.
 func (scheduler *TypedTableTTLScheduler) Unregister(name string) error {
 	if scheduler == nil {
@@ -118,6 +147,7 @@ func (scheduler *TypedTableTTLScheduler) Unregister(name string) error {
 		return ErrTypedTableTTLSchedulerNotFound
 	}
 	delete(scheduler.tables, name)
+	delete(scheduler.rollups, name)
 	delete(scheduler.status, name)
 	scheduler.signalWakeLocked()
 	return nil
@@ -151,7 +181,8 @@ func (scheduler *TypedTableTTLScheduler) Start(ctx context.Context) error {
 
 // RunOnce purges all currently registered tables, up to the configured table
 // bound, using one coherent scheduler-clock timestamp. Expired rows are
-// deleted, while expired column values are masked and physically cleared.
+// deleted, optional rollups receive their before images, and expired column
+// values are masked and physically cleared.
 func (scheduler *TypedTableTTLScheduler) RunOnce(ctx context.Context) ([]TypedTableTTLRun, error) {
 	if scheduler == nil {
 		return nil, ErrTypedTableTTLSchedulerNil
@@ -173,8 +204,10 @@ func (scheduler *TypedTableTTLScheduler) RunOnce(ctx context.Context) ([]TypedTa
 		names = names[:scheduler.options.MaxTablesPerCycle]
 	}
 	tables := make([]*TypedTable, len(names))
+	rollups := make([]*TypedTableTTLRollup, len(names))
 	for index, name := range names {
 		tables[index] = scheduler.tables[name]
+		rollups[index] = scheduler.rollups[name]
 	}
 	now := scheduler.options.Now()
 	scheduler.mu.RUnlock()
@@ -189,6 +222,12 @@ func (scheduler *TypedTableTTLScheduler) RunOnce(ctx context.Context) ([]TypedTa
 		run.Expired = len(changes)
 		if err != nil {
 			run.Error = err.Error()
+		}
+		if err == nil && rollups[index] != nil {
+			run.RolledUp, err = rollups[index].applyExpired(changes)
+			if err != nil {
+				run.Error = err.Error()
+			}
 		}
 		if err == nil {
 			columnChanges, columnErr := tables[index].PurgeExpiredColumns(now)
