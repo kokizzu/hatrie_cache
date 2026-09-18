@@ -4478,3 +4478,6 @@ opt-in and does not implement automatic sharding or data movement. Use a view
 per queue batch and `OwnerUnchecked` only after the partition range is already
 validated. See [`TR049_QUEUE_PARTITION_OWNERSHIP.md`](TR049_QUEUE_PARTITION_OWNERSHIP.md)
 and the [TR-49 benchmark](BENCHMARK.md#tr-49-queue-partition-ownership-and-online-migration).
+### Schema and DDL discovery
+
+Use the opt-in [TR-46 schema and DDL discovery protocol](TR046_SCHEMA_DDL_DISCOVERY.md) when a client or peer must exchange a bounded schema fingerprint and supported DDL capabilities before sending schema-dependent data. It uses canonical HSD1 binary frames; the legacy JSON and replication paths remain unchanged.

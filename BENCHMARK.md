@@ -30864,3 +30864,31 @@ changes are O(partition-count) control-plane publications; callers should
 refresh routing views at batch boundaries. See
 [TR049_QUEUE_PARTITION_OWNERSHIP.md](TR049_QUEUE_PARTITION_OWNERSHIP.md) for
 the handoff protocol and limitations.
+<a id="tr-46-schema-and-ddl-discovery-protocol"></a>
+
+## TR-46: Schema and DDL discovery protocol
+
+The benchmark compares the new bounded HSD1 binary discovery frame with the
+standard-library JSON representation of the same `SchemaDiscovery` value. It
+uses `make benchmark-tr046-schema-discovery`, five samples per case,
+`-benchtime=250ms`, and the same AMD Ryzen 9 5950X Linux/amd64 host used by
+the other local measurements.
+
+| Operation | JSON ns/op | HSD1 binary ns/op | Speed improvement | JSON bytes/op | HSD1 bytes/op | Bandwidth reduction | JSON allocs/op | HSD1 allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Marshal | 419.8 median | 165.8 median | 2.53x | 240 | 144 | 40.0% | 2 | 1 |
+| Unmarshal | 2,151 median | 463.1 median | 4.64x | 488 | 256 | 47.5% | 13 | 9 |
+
+Raw samples:
+
+```text
+JSON marshal:    409.2, 419.8, 427.3, 453.9, 401.1 ns/op; 240 B/op; 2 allocs/op
+HSD1 marshal:    161.0, 175.1, 165.8, 166.1, 164.3 ns/op; 144 B/op; 1 alloc/op
+JSON unmarshal:  2119, 2242, 2120, 2151, 2246 ns/op; 488 B/op; 13 allocs/op
+HSD1 unmarshal:  470.2, 443.7, 456.1, 463.1, 463.5 ns/op; 256 B/op; 9 allocs/op
+```
+
+The result is a control-plane improvement, not a claim that all application
+JSON should be replaced. HSD1 adds a versioned binary contract and only
+carries metadata; a schema mismatch still requires a separate full-schema
+transfer. Existing paths are unaffected unless callers opt in.

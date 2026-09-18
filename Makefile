@@ -19581,3 +19581,39 @@ commit-tr049-queue-partition-ownership:
 
 push-tr049-queue-partition-ownership:
 	sh ./scripts/push-tr049-queue-partition-ownership.sh
+
+test-tr046-schema-discovery:
+	bash ./scripts/test-tr046-schema-discovery.sh
+
+benchmark-tr046-baseline:
+	bash ./scripts/benchmark-tr046-baseline.sh
+
+benchmark-tr046-schema-discovery:
+	bash ./scripts/benchmark-tr046-schema-discovery.sh
+
+format-tr046-schema-discovery:
+	bash ./scripts/format-tr046-schema-discovery.sh
+
+test-tr046-package:
+	bash ./scripts/test-tr046-package.sh
+
+race-tr046-schema-discovery:
+	bash ./scripts/race-tr046-schema-discovery.sh
+
+vet-tr046-schema-discovery:
+	bash ./scripts/vet-tr046-schema-discovery.sh
+
+verify-tr046-schema-discovery-docs:
+	bash ./scripts/verify-tr046-schema-discovery-docs.sh
+
+review-tr046-schema-discovery:
+	bash ./scripts/review-tr046-schema-discovery.sh
+
+stage-tr046-schema-discovery:
+	bash ./scripts/stage-tr046-schema-discovery.sh
+
+commit-tr046-schema-discovery:
+	bash ./scripts/commit-tr046-schema-discovery.sh
+
+push-tr046-schema-discovery:
+	bash ./scripts/push-tr046-schema-discovery.sh
