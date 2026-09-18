@@ -19044,6 +19044,49 @@ vet-tt049-row-locks:
 review-tt049:
 	bash ./scripts/review-tt049.sh
 
+.PHONY: test-tr037-deadlock-detection
+test-tr037-deadlock-detection:
+	bash ./scripts/test-tr037-deadlock-detection.sh
+
+.PHONY: format-tr037-deadlock-detection
+format-tr037-deadlock-detection:
+	bash ./scripts/format-tr037-deadlock-detection.sh
+
+.PHONY: benchmark-tr037-deadlock-detection
+benchmark-tr037-deadlock-detection:
+	bash ./scripts/benchmark-tr037-deadlock-detection.sh
+
+.PHONY: race-tr037-deadlock-detection
+race-tr037-deadlock-detection:
+	bash ./scripts/race-tr037-deadlock-detection.sh
+
+.PHONY: vet-tr037-deadlock-detection
+vet-tr037-deadlock-detection:
+	bash ./scripts/vet-tr037-deadlock-detection.sh
+
+.PHONY: test-tr037-package
+test-tr037-package:
+	bash ./scripts/test-tr037-package.sh
+
+.PHONY: review-tr037
+review-tr037:
+	bash ./scripts/review-tr037.sh
+
+.PHONY: stage-tr037-deadlock-detection
+stage-tr037-deadlock-detection:
+	bash ./scripts/stage-tr037-deadlock-detection.sh
+
+.PHONY: commit-tr037-deadlock-detection
+commit-tr037-deadlock-detection:
+	bash ./scripts/commit-tr037-deadlock-detection.sh
+
+.PHONY: push-tr037-deadlock-detection
+push-tr037-deadlock-detection:
+	bash ./scripts/push-tr037-deadlock-detection.sh
+
+
+
+
 
 .PHONY: stage-tt049-row-locks
 stage-tt049-row-locks:

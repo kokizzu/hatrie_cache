@@ -30410,3 +30410,26 @@ The row-lock path intentionally costs more because it hashes a caller key,
 looks up bounded state, returns a lease object, and supports waiters and
 capacity accounting. It is opt-in and process-local; ordinary SQL execution
 does not pay this cost.
+
+<a id="tr-037-deadlock-detection"></a>
+## TR-037 Deadlock Detection
+
+Command:
+
+```text
+make benchmark-tr037-deadlock-detection
+```
+
+This compares the unchanged default row-lock path with the opt-in owner-aware
+wait-for graph and a contended non-blocking check. Five 100 ms samples were
+collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Default row-lock acquire/release | 345.6 | 224 | 3 | Baseline; graph disabled |
+| Owner-aware detection acquire/release | 504.5 | 448 | 5 | 1.46x time, +224 B/op, +2 allocs/op |
+| Contended `TryAcquireOwned` check | 24.12 | 0 | 0 | Allocation-free refusal |
+
+The graph is deliberately opt-in. The measured overhead buys deterministic
+cycle rejection and bounded wait-edge metadata; ordinary callers retain the
+default token-channel path.
