@@ -30529,3 +30529,46 @@ BenchmarkMZ046BarrierAcknowledge-32  1958326  56.45 ns/op  7 B/op  0 allocs/op
 BenchmarkMZ046BarrierAcknowledge-32  2073382  59.31 ns/op  7 B/op  0 allocs/op
 BenchmarkMZ046BarrierAcknowledge-32  2102506  53.30 ns/op  7 B/op  0 allocs/op
 ```
+<a id="mz-009-timestamp-domain-lease"></a>
+## MZ-009 Timestamp-Domain Lease
+
+Command:
+
+```text
+make benchmark-mz009-timestamp-domain-lease
+```
+
+This compares a raw counter, a mutex-protected counter, and the fenced lease
+`Next` operation with an injected fixed clock. Five samples ran on an AMD Ryzen
+9 5950X.
+
+| Path | Five ns/op samples | Median ns/op | B/op | Allocs/op | Relative to mutex |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw counter | 0.2723, 0.2773, 0.2765, 0.2535, 0.2902 | 0.2765 | 0 | 0 | 0.07x |
+| Mutex counter | 3.972, 3.906, 3.810, 3.753, 3.974 | 3.906 | 0 | 0 | 1.00x |
+| Fenced lease `Next` | 27.80, 28.40, 28.10, 27.47, 27.74 | 27.80 | 0 | 0 | 7.12x |
+
+The lease operation adds 23.9 ns/op over a plain mutex counter but provides
+expiry, ownership fencing, and a preserved monotonic watermark. It is opt-in
+and does not add work to existing timestamp or query paths. See
+[MZ009_TIMESTAMP_DOMAIN_LEASE.md](MZ009_TIMESTAMP_DOMAIN_LEASE.md).
+
+Raw output:
+
+```text
+BenchmarkMZ009DirectCounter-32          420717342  0.2723 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ009DirectCounter-32          426067474  0.2773 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ009DirectCounter-32          484359975  0.2765 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ009DirectCounter-32          462676234  0.2535 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ009DirectCounter-32          496149568  0.2902 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ009DirectMutexCounter-32      26780985  3.972 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009DirectMutexCounter-32      29436583  3.906 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009DirectMutexCounter-32      31516993  3.810 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009DirectMutexCounter-32      32111578  3.753 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009DirectMutexCounter-32      30256514  3.974 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009LeaseNext-32                3618723 27.80 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009LeaseNext-32                4551235 28.40 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009LeaseNext-32                4057990 28.10 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009LeaseNext-32                4270225 27.47 ns/op   0 B/op  0 allocs/op
+BenchmarkMZ009LeaseNext-32                4414605 27.74 ns/op   0 B/op  0 allocs/op
+```

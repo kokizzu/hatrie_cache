@@ -19164,6 +19164,37 @@ commit-mz046:
 push-mz046:
 	bash ./scripts/push-mz046.sh
 
+test-mz009-timestamp-domain-lease:
+	bash ./scripts/test-mz009-timestamp-domain-lease.sh
+
+format-mz009-timestamp-domain-lease:
+	bash ./scripts/format-mz009-timestamp-domain-lease.sh
+
+benchmark-mz009-timestamp-domain-lease:
+	bash ./scripts/benchmark-mz009-timestamp-domain-lease.sh
+
+test-mz009-package:
+	bash ./scripts/test-mz009-package.sh
+
+race-mz009-timestamp-domain-lease:
+	bash ./scripts/race-mz009-timestamp-domain-lease.sh
+
+vet-mz009-timestamp-domain-lease:
+	bash ./scripts/vet-mz009-timestamp-domain-lease.sh
+
+review-mz009:
+	bash ./scripts/review-mz009.sh
+
+stage-mz009:
+	bash ./scripts/stage-mz009.sh
+
+commit-mz009:
+	bash ./scripts/commit-mz009.sh
+
+push-mz009:
+	bash ./scripts/push-mz009.sh
+
+
 
 
 
