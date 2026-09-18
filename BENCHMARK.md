@@ -26099,6 +26099,30 @@ incremental path still uses about 6.5x the rebuild's transient bytes because
 it owns ordered state and clones the updated and returned rows. It retains one
 treap node and row payload per active key, so it is intended for repeated
 updates and percentile reads, not a one-shot sort.
+## MZ-028: Temporal interval arrangement
+
+Workload: one-key valid-time rows with half-open intervals. The first two rows
+compare the existing point-version `TemporalTable` with the new arrangement at
+256 entries; they are intentionally not treated as the same feature because
+the arrangement supports overlapping intervals and range matches. The last
+two rows compare a 4,096-interval linear scan with indexed `At`. Five 500 ms
+samples were run with `-benchmem` on Linux/amd64, AMD Ryzen 9 5950X.
+
+Command: `make benchmark-mz028-temporal-arrangement`.
+
+| Workload | Raw ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing `TemporalTable` out-of-order point update, 256 versions | 464.1, 464.2, 442.3, 434.3, 434.3 | 442.3 | 411 | 2 |
+| Interval arrangement upsert, 256 intervals | 605.5, 636.9, 586.5, 601.1, 620.8 | 605.5 | 538 | 3 |
+| Linear interval scan at 4,096 intervals | 6454, 6178, 6225, 5894, 6247 | 6225 | 336 | 2 |
+| Interval arrangement `At` at 4,096 intervals | 367.5, 362.7, 346.8, 342.2, 362.0 | 362.0 | 400 | 3 |
+
+Indexed interval lookup is 17.2x faster than the linear scan, with 19% more
+temporary bytes and one additional allocation per detached result. Upsert is
+1.37x slower than the existing narrow point-version update and retains more
+index metadata; the new API is therefore opt-in and does not replace
+`TemporalTable`.
+
 <a id="mz-030-incremental-join"></a>
 ## MZ-030 Incremental Differential Join
 

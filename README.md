@@ -4336,6 +4336,7 @@ the measured cost in
 ## Query Engine Notes
 
 - [Materialize-style incremental interval join](MZ029_INCREMENTAL_INTERVAL_JOIN.md)
+- [Materialize-style temporal interval arrangement](MZ028_TEMPORAL_INTERVAL_ARRANGEMENT.md)
 - [Materialize-style spillable arrangements](MZ029_SPILLABLE_ARRANGEMENT.md)
 - [Materialize-style skew-aware join exchange](MZ031_SKEW_AWARE_JOIN_EXCHANGE.md)
 - [Materialize-style late-data reclock](MZ032_LATE_DATA_RECLOCK.md)

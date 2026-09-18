@@ -410,14 +410,25 @@ shows a 2.89x CPU improvement versus the pre-change materialized path, with
 | ClickHouse | Background prioritized skip-index rebuild queue | Adopted as an importable opt-in maintenance primitive | `hatSql.SQLIndexRebuildQueue` bounds pending work, prioritizes rebuild callbacks, preserves FIFO ties, propagates cancellation, reports monotone progress, and retains bounded terminal history. It has no default workers and no automatic schema mutation; enqueue cost is a measured 405.0 ns/op, 280 B/op, and 3 allocs/op versus a 1.677 ns/op direct callback control. See [CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md](CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md) and [BENCHMARK.md](BENCHMARK.md#ch-u12-background-index-rebuild-queue). |
 | ClickHouse | Per-index skip-index EXPLAIN diagnostics | Adopted as a diagnostic-only optional resolver contract | `EXPLAIN ANALYZE` reports the selected JSON-path skip index kind/path, bitmap payload bytes, candidate/skipped rows and segments, and exact residual predicate work. Ordinary query results and EXPLAIN plans without diagnostics retain their existing behavior; the nine-sample paired benchmark shows identical ordinary-query median memory/allocations and only `+1,274 B/op` and `+28 allocs/op` on the measured EXPLAIN path. See [CHU49_SKIP_INDEX_EXPLAIN.md](CHU49_SKIP_INDEX_EXPLAIN.md) and [BENCHMARK.md](BENCHMARK.md#ch-u49-skip-index-explain-diagnostics). |
 
+### Materialize MZ-028: Temporal Interval Arrangement
+
+Implemented as the importable `hatSql.SQLTemporalIntervalArrangement`. It
+keeps bounded half-open valid-time intervals in per-key augmented treaps,
+supports atomic replacement and deletion, returns detached point/range
+matches, and preserves deterministic snapshots. The 4,096-interval point
+lookup benchmark is 17.2x faster than a linear scan for 19% more temporary
+bytes and one additional allocation; the existing `TemporalTable` path is
+unchanged. See [MZ028_TEMPORAL_INTERVAL_ARRANGEMENT.md](MZ028_TEMPORAL_INTERVAL_ARRANGEMENT.md)
+and [BENCHMARK.md](BENCHMARK.md#mz-028-temporal-interval-arrangement).
+
 ### MZ-030: Incremental Differential Join
 
 Implemented in `hatSql` as the imported `IncrementalJoin` API. It maintains
 exact signed inner-join deltas for keyed updates and retractions, validates
 batches atomically, supports same-key replacement, and exposes deterministic
 snapshots. See [MZ030_INCREMENTAL_JOIN.md](MZ030_INCREMENTAL_JOIN.md) for the
-API, scope, and measured tradeoffs. SQL planner integration, outer joins, and
-temporal interval joins remain open.
+API, scope, and measured tradeoffs. SQL planner integration and outer joins
+remain open.
 ### Materialize MZ-29: Incremental Interval-Join Maintenance
 
 Implemented as the imported `hatSql.IncrementalIntervalJoin` API. It maintains

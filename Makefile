@@ -20035,3 +20035,40 @@ commit-mz021-sink-idempotency:
 .PHONY: push-mz021-sink-idempotency
 push-mz021-sink-idempotency:
 	@bash ./scripts/push-mz021-sink-idempotency.sh
+.PHONY: test-mz028-temporal-arrangement
+test-mz028-temporal-arrangement:
+	@bash ./scripts/test-mz028-temporal-arrangement.sh
+.PHONY: benchmark-mz028-temporal-arrangement
+benchmark-mz028-temporal-arrangement:
+	@bash ./scripts/benchmark-mz028-temporal-arrangement.sh
+
+.PHONY: test-mz028-temporal-arrangement-package
+test-mz028-temporal-arrangement-package:
+	@bash ./scripts/test-mz028-temporal-arrangement-package.sh
+
+.PHONY: race-mz028-temporal-arrangement
+race-mz028-temporal-arrangement:
+	@bash ./scripts/race-mz028-temporal-arrangement.sh
+
+.PHONY: vet-mz028-temporal-arrangement
+vet-mz028-temporal-arrangement:
+	@bash ./scripts/vet-mz028-temporal-arrangement.sh
+
+.PHONY: verify-mz028-temporal-arrangement-docs
+verify-mz028-temporal-arrangement-docs:
+	@bash ./scripts/verify-mz028-temporal-arrangement-docs.sh
+
+.PHONY: stage-mz028-temporal-arrangement
+stage-mz028-temporal-arrangement:
+	@bash ./scripts/stage-mz028-temporal-arrangement.sh
+
+.PHONY: commit-mz028-temporal-arrangement
+commit-mz028-temporal-arrangement:
+	@bash ./scripts/commit-mz028-temporal-arrangement.sh
+
+.PHONY: push-mz028-temporal-arrangement
+push-mz028-temporal-arrangement:
+	@bash ./scripts/push-mz028-temporal-arrangement.sh
+.PHONY: format-mz028-temporal-arrangement
+format-mz028-temporal-arrangement:
+	@bash ./scripts/format-mz028-temporal-arrangement.sh
