@@ -13952,6 +13952,23 @@ vet-mu020-secret-resources:
 cleanup-hatrie-tmp-apply:
 	bash ./scripts/cleanup-hatrie-tmp.sh apply
 
+.PHONY: test-cleanup-hatrie-tmp
+test-cleanup-hatrie-tmp:
+	bash ./scripts/test-cleanup-hatrie-tmp.sh
+
+.PHONY: review-cleanup-hatrie-tmp stage-cleanup-hatrie-tmp commit-cleanup-hatrie-tmp push-cleanup-hatrie-tmp
+review-cleanup-hatrie-tmp:
+	bash ./scripts/review-cleanup-hatrie-tmp.sh
+
+stage-cleanup-hatrie-tmp:
+	bash ./scripts/stage-cleanup-hatrie-tmp.sh
+
+commit-cleanup-hatrie-tmp:
+	bash ./scripts/commit-cleanup-hatrie-tmp.sh
+
+push-cleanup-hatrie-tmp:
+	bash ./scripts/push-cleanup-hatrie-tmp.sh
+
 
 .PHONY: review-chu48-ranked-full-text
 review-chu48-ranked-full-text:

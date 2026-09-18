@@ -3,13 +3,16 @@ set -euo pipefail
 
 mode="${1:-}"
 plan="${HATRIE_TMP_CLEANUP_PLAN:-/tmp/hatrie-cache-tmp-cleanup.plan}"
+root="${HATRIE_TMP_CLEANUP_ROOT:-/tmp}"
+root="${root%/}"
+active_worktree="${HATRIE_TMP_CLEANUP_ACTIVE_WORKTREE:-/tmp/hatrie-cache-next-goal}"
 
 case "$mode" in
 preview)
 	: > "$plan"
 	while IFS= read -r path; do
 		case "$path" in
-			/tmp/hatrie-cache-next-goal|/tmp/hatrie-cache-next-goal/)
+			"$active_worktree"|"$active_worktree"/)
 				continue
 				;;
 		esac
@@ -17,7 +20,7 @@ preview)
 			continue
 		fi
 		printf '%s\n' "$path" >> "$plan"
-	done < <(find /tmp -mindepth 1 -maxdepth 1 -type d -mmin +60 \( -name 'hatrie-cache-*' -o -name 'hatrie_cache-*' \) -print | sort)
+	done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -mmin +60 \( -name 'hatrie-*' -o -name 'hatrie_*' \) -print | sort)
 	printf '%s\n' 'Cleanup plan (directories older than 60 minutes, no .git marker):'
 	if [ -s "$plan" ]; then
 		while IFS= read -r path; do
@@ -41,7 +44,7 @@ apply)
 	fi
 	while IFS= read -r path; do
 		case "$path" in
-			/tmp/hatrie-cache-*|/tmp/hatrie_cache-*)
+			"$root"/hatrie-*|"$root"/hatrie_*)
 				;;
 			*)
 				printf 'Refusing unexpected cleanup path: %s\n' "$path" >&2
@@ -49,7 +52,7 @@ apply)
 				;;
 		esac
 		case "$path" in
-			/tmp/hatrie-cache-next-goal|/tmp/hatrie-cache-next-goal/)
+			"$active_worktree"|"$active_worktree"/)
 				printf 'Refusing active worktree cleanup: %s\n' "$path" >&2
 				exit 1
 				;;

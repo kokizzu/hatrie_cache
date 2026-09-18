@@ -265,6 +265,7 @@ security guidance before exposing it on a network.
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)
 - Reproducible Jupyter SQL analysis: [NOTEBOOK.md](NOTEBOOK.md)
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
+- Safe stale test-directory cleanup: run `make cleanup-hatrie-tmp-preview`, review the plan, then `make cleanup-hatrie-tmp-apply`; active and `.git`-marked worktrees are preserved.
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Opt-in authenticated WAL encryption and key rotation: [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)
