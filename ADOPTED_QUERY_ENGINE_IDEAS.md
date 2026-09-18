@@ -674,3 +674,6 @@ idle-key reclamation, and idempotent release. The manager is process-local;
 SQL `FOR UPDATE` parsing, transaction lifetime, durable recovery, and
 distributed fencing remain caller-owned. See [TT049_ROW_LOCK_LEASES.md](TT049_ROW_LOCK_LEASES.md)
 and [BENCHMARK.md](BENCHMARK.md#tt-049-sql-row-lock-leases).
+## Tarantool-Inspired Transport Reliability
+
+- **TR-045 connection circuit breaker and health scoring:** `hatPeer.CompactPeerCircuitBreaker` is an opt-in wrapper with bounded failure admission, one half-open probe, caller-cancellation exclusion, and a local health score. See [TR045_COMPACT_PEER_CIRCUIT_BREAKER.md](TR045_COMPACT_PEER_CIRCUIT_BREAKER.md).

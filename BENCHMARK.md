@@ -31365,3 +31365,19 @@ The local accounting overhead is intentional and small relative to a remote
 subquery. The planner does not send or retain rows; callers must use the plan
 to materialize once, fan out, publish atomically, and invalidate on epoch
 change. See [CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md](CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md).
+## TR-045: Compact Peer Circuit Breaker
+
+The opt-in breaker adds one allocation and 8 bytes to a successful compact
+peer call in the paired microbenchmark. Its value is failure containment: an
+open circuit rejects locally instead of repeating a remote call.
+
+| Path | Median ns/op | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Direct successful session call | 6,774 | 448 | 7 | 1.00x |
+| Breaker successful call | 6,810 | 456 | 8 | 1.01x vs direct |
+| Direct repeated remote error | 7,420 | 617 | 12 | 1.10x vs success |
+| Open breaker fail-fast | 75.39 | 4 | 1 | 0.010x remote error, 98x faster |
+
+The open path also uses 154x fewer bytes and 12x fewer allocations than the
+repeated remote-error path. Results are five-sample medians on Linux amd64,
+AMD Ryzen 9 5950X; rerun with `make benchmark-tr045-peer`.

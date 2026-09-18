@@ -4531,3 +4531,9 @@ with `GEO_WITHIN_BOX` or `GEO_WITHIN_RADIUS`. The SQL executor rechecks every
 candidate, so the index is a work reduction and does not change predicate
 semantics. The benchmarked 50k-row radius query is 3,254x faster than a full
 scan; index construction costs are documented before enabling it.
+## Peer Circuit Breaker
+
+The opt-in `hatPeer.CompactPeerCircuitBreaker` stops sending requests to a
+failing compact peer after a bounded failure threshold, allows one cooldown
+probe, and exposes a local health score. Existing `CompactPeerSession` calls
+remain unchanged unless wrapped. See [TR045_COMPACT_PEER_CIRCUIT_BREAKER.md](TR045_COMPACT_PEER_CIRCUIT_BREAKER.md).

@@ -20287,3 +20287,42 @@ commit-tr028-keyset-token:
 .PHONY: push-tr028-keyset-token
 push-tr028-keyset-token:
 	bash ./scripts/push-tr028-keyset-token.sh
+.PHONY: test-tr045-peer
+test-tr045-peer:
+	bash ./scripts/test-tr045-peer.sh
+
+.PHONY: format-tr045-peer
+format-tr045-peer:
+	bash ./scripts/format-tr045-peer.sh
+
+.PHONY: benchmark-tr045-peer
+benchmark-tr045-peer:
+	bash ./scripts/benchmark-tr045-peer.sh
+
+.PHONY: test-tr045-package
+test-tr045-package:
+	bash ./scripts/test-tr045-package.sh
+
+.PHONY: race-tr045-peer
+race-tr045-peer:
+	bash ./scripts/race-tr045-peer.sh
+
+.PHONY: vet-tr045-peer
+vet-tr045-peer:
+	bash ./scripts/vet-tr045-peer.sh
+
+.PHONY: verify-tr045-docs
+verify-tr045-docs:
+	bash ./scripts/verify-tr045-docs.sh
+
+.PHONY: stage-tr045-peer
+stage-tr045-peer:
+	bash ./scripts/stage-tr045-peer.sh
+
+.PHONY: commit-tr045-peer
+commit-tr045-peer:
+	bash ./scripts/commit-tr045-peer.sh
+
+.PHONY: push-tr045-peer
+push-tr045-peer:
+	bash ./scripts/push-tr045-peer.sh
