@@ -30619,3 +30619,43 @@ overhead is isolated to opt-in metadata persistence/recovery and buys schema
 validation, checksum verification, deterministic ordering, migration, and
 atomic publication. Raw samples and safety details are in
 [MZ048_CATALOG_MANIFEST_MIGRATIONS.md](MZ048_CATALOG_MANIFEST_MIGRATIONS.md).
+
+<a id="mz-010-cross-source-snapshot-cutover"></a>
+## MZ010 Cross-Source Snapshot Cutover
+
+MZ010 benchmarks the opt-in cross-source cutover coordinator with 16 sources
+on an AMD Ryzen 9 5950X. The compact progress API avoids detached slice copies
+for frequent source acknowledgements; the status API intentionally returns
+detached deterministic slices for callers that need a complete snapshot.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Manual source coverage loop | 15.61 | 0 | 0 | 1.00x |
+| `AcknowledgeProgress` compact path | 75.44 | 0 | 0 | 4.83x slower |
+| `Acknowledge` detached status | 503.1 | 1,088 | 2 | 32.23x slower |
+
+The compact path is the recommended connector path: the extra CPU is bounded
+coordination and validation, with no per-ack heap allocation. The detached
+status cost is intentionally higher because it copies source and
+acknowledgement slices. These are control-plane measurements, not query
+throughput measurements. Run with `make benchmark-mz010-snapshot-cutover`.
+
+Raw final samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+coordinator-status: 521.6 1088 2
+coordinator-status: 520.7 1088 2
+coordinator-status: 483.9 1088 2
+coordinator-status: 495.0 1088 2
+coordinator-status: 503.1 1088 2
+coordinator-progress: 71.86 0 0
+coordinator-progress: 75.37 0 0
+coordinator-progress: 75.65 0 0
+coordinator-progress: 78.07 0 0
+coordinator-progress: 75.44 0 0
+manual: 16.36 0 0
+manual: 15.48 0 0
+manual: 15.60 0 0
+manual: 15.78 0 0
+manual: 15.61 0 0
+```

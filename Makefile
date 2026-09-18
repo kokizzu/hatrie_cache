@@ -13952,6 +13952,7 @@ vet-mu020-secret-resources:
 cleanup-hatrie-tmp-apply:
 	bash ./scripts/cleanup-hatrie-tmp.sh apply
 
+
 .PHONY: review-chu48-ranked-full-text
 review-chu48-ranked-full-text:
 	bash ./scripts/review-chu48-ranked-full-text.sh
@@ -19353,3 +19354,37 @@ commit-mz048:
 .PHONY: push-mz048
 push-mz048:
 	bash ./scripts/push-mz048.sh
+.PHONY: test-mz010-snapshot-cutover
+test-mz010-snapshot-cutover:
+	bash ./scripts/test-mz010-snapshot-cutover.sh
+.PHONY: format-mz010-snapshot-cutover
+format-mz010-snapshot-cutover:
+	bash ./scripts/format-mz010-snapshot-cutover.sh
+.PHONY: benchmark-mz010-snapshot-cutover
+benchmark-mz010-snapshot-cutover:
+	bash ./scripts/benchmark-mz010-snapshot-cutover.sh
+
+.PHONY: test-mz010-package
+test-mz010-package:
+	bash ./scripts/test-mz010-package.sh
+
+.PHONY: race-mz010-snapshot-cutover
+race-mz010-snapshot-cutover:
+	bash ./scripts/race-mz010-snapshot-cutover.sh
+
+.PHONY: vet-mz010-snapshot-cutover
+vet-mz010-snapshot-cutover:
+	bash ./scripts/vet-mz010-snapshot-cutover.sh
+
+.PHONY: review-mz010-snapshot-cutover stage-mz010-snapshot-cutover commit-mz010-snapshot-cutover push-mz010-snapshot-cutover
+review-mz010-snapshot-cutover:
+	bash ./scripts/review-mz010-snapshot-cutover.sh
+
+stage-mz010-snapshot-cutover:
+	bash ./scripts/stage-mz010-snapshot-cutover.sh
+
+commit-mz010-snapshot-cutover:
+	bash ./scripts/commit-mz010-snapshot-cutover.sh
+
+push-mz010-snapshot-cutover:
+	bash ./scripts/push-mz010-snapshot-cutover.sh
