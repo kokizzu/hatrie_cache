@@ -29874,3 +29874,65 @@ The implementation is at-least-once because durable checkpoint persistence and
 the downstream transaction remain connector-owned. See
 [MU027_LOGICAL_PUBLICATION.md](MU027_LOGICAL_PUBLICATION.md) for the recovery
 contract.
+
+<a id="mu-028-sql-monotonicity-inference"></a>
+## M-U28 SQL Monotonicity Inference
+
+Commands `make benchmark-mu028-monotonicity-baseline` and
+`make benchmark-mu028-monotonicity` run five one-second samples on the AMD
+Ryzen 9 5950X Linux/amd64 host. The baseline parses the same SQL expression
+tree and validates its end; the analyzer adds only the conservative proof
+walk. This measures the cost of a new opt-in analysis call, not a change to
+ordinary query execution.
+
+Final raw baseline output:
+
+```text
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_plus_constant  1153 ns/op  1400 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_plus_constant  1227 ns/op  1400 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_plus_constant  1259 ns/op  1400 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_plus_constant  1125 ns/op  1400 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_plus_constant  1230 ns/op  1400 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_threshold      1174 ns/op  1080 B/op  5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_threshold      1188 ns/op  1080 B/op  5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_threshold      1172 ns/op  1080 B/op  5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_threshold      1171 ns/op  1080 B/op  5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/price_threshold      1117 ns/op  1080 B/op  5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/unsupported_function 1178 ns/op  1088 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/unsupported_function 1194 ns/op  1088 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/unsupported_function 1119 ns/op  1088 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/unsupported_function 1183 ns/op  1088 B/op  6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/baseline_parse/unsupported_function 1318 ns/op  1088 B/op  6 allocs/op
+```
+
+Final raw analyzer output:
+
+```text
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_plus_constant 1149 ns/op 1400 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_plus_constant 1107 ns/op 1400 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_plus_constant 1347 ns/op 1400 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_plus_constant 1389 ns/op 1400 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_plus_constant 1324 ns/op 1400 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_threshold     1244 ns/op 1080 B/op 5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_threshold     1220 ns/op 1080 B/op 5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_threshold     1263 ns/op 1080 B/op 5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_threshold     1251 ns/op 1080 B/op 5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/price_threshold     1277 ns/op 1080 B/op 5 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/unsupported_function 1424 ns/op 1088 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/unsupported_function 1349 ns/op 1088 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/unsupported_function 1359 ns/op 1088 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/unsupported_function 1348 ns/op 1088 B/op 6 allocs/op
+BenchmarkMU028SQLExpressionMonotonicity/analyze/unsupported_function 1408 ns/op 1088 B/op 6 allocs/op
+```
+
+| Expression | Parser median | Analyzer median | Analyzer CPU overhead | Parser memory | Analyzer memory |
+|---|---:|---:|---:|---:|---:|
+| `price + 10` | 1,227 ns/op | 1,324 ns/op | 7.9% | 1,400 B/op, 6 allocs | 1,400 B/op, 6 allocs |
+| `price >= 10` | 1,172 ns/op | 1,251 ns/op | 6.7% | 1,080 B/op, 5 allocs | 1,080 B/op, 5 allocs |
+| `abs(price)` | 1,183 ns/op | 1,359 ns/op | 14.9% | 1,088 B/op, 6 allocs | 1,088 B/op, 6 allocs |
+
+The analyzer has no measured allocation or memory increase for these cases.
+Because it is not connected to query planning, existing workloads have no
+execution regression; callers should cache reports for repeated prepared
+expressions. See [MU028_MONOTONICITY.md](MU028_MONOTONICITY.md) for proof
+rules and correctness limits.

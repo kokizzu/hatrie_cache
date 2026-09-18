@@ -18640,6 +18640,42 @@ commit-mu027-logical-publication:
 push-mu027-logical-publication:
 	bash ./scripts/push-mu027-logical-publication.sh
 
+test-mu028-monotonicity:
+	bash ./scripts/test-mu028-monotonicity.sh
+
+format-mu028-monotonicity:
+	bash ./scripts/format-mu028-monotonicity.sh
+
+test-mu028-package:
+	bash ./scripts/test-mu028-package.sh
+
+race-mu028-monotonicity:
+	bash ./scripts/race-mu028-monotonicity.sh
+
+vet-mu028-monotonicity:
+	bash ./scripts/vet-mu028-monotonicity.sh
+
+verify-mu028-monotonicity:
+	bash ./scripts/verify-mu028-monotonicity.sh
+
+review-mu028-monotonicity:
+	bash ./scripts/review-mu028-monotonicity.sh
+
+stage-mu028-monotonicity:
+	bash ./scripts/stage-mu028-monotonicity.sh
+
+commit-mu028-monotonicity:
+	bash ./scripts/commit-mu028-monotonicity.sh
+
+push-mu028-monotonicity:
+	bash ./scripts/push-mu028-monotonicity.sh
+
+benchmark-mu028-monotonicity-baseline:
+	bash ./scripts/benchmark-mu028-monotonicity.sh baseline
+
+benchmark-mu028-monotonicity:
+	bash ./scripts/benchmark-mu028-monotonicity.sh current
+
 benchmark-mu027-logical-publication-baseline:
 	bash ./scripts/benchmark-mu027-logical-publication.sh baseline
 

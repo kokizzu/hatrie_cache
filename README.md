@@ -45,7 +45,7 @@ security guidance before exposing it on a network.
 - Shared compiled JSON subcolumn paths for repeated lookups: [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md)
 - Canonical CDC envelopes for downstream consumers: [CDC_ENVELOPE.md](CDC_ENVELOPE.md)
 - Key-replacing CDC upsert state for materialized consumers: [CDC_UPSERT.md](CDC_UPSERT.md)
-- Typed-table monotonicity analysis for selecting the existing fast path: [MONOTONICITY_ANALYSIS.md](MONOTONICITY_ANALYSIS.md)
+- Conservative public SQL expression monotonicity analysis: [MU028_MONOTONICITY.md](MU028_MONOTONICITY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-028-sql-monotonicity-inference)
 - Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
 - Opt-in Materialize-style worker-local exchange batching: [MZ037_WORKER_LOCAL_EXCHANGE.md](MZ037_WORKER_LOCAL_EXCHANGE.md)
 - Opt-in Materialize-style operator yield budgets: [MZ039_OPERATOR_YIELD.md](MZ039_OPERATOR_YIELD.md)
