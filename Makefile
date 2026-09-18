@@ -19836,6 +19836,36 @@ commit-mz014-avro-schema-registry:
 push-mz014-avro-schema-registry:
 	bash ./scripts/test-mz014-avro-schema-registry.sh push
 
+format-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh format
+
+test-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh test
+
+benchmark-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh benchmark
+
+race-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh race
+
+vet-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh vet
+
+test-mz015-protobuf-schema-registry-package:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh package
+
+verify-mz015-protobuf-schema-registry-docs:
+	bash ./scripts/verify-mz015-protobuf-schema-registry-docs.sh
+
+stage-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh stage
+
+commit-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh commit
+
+push-mz015-protobuf-schema-registry:
+	bash ./scripts/test-mz015-protobuf-schema-registry.sh push
+
 stage-ch046-kafka-table-source:
 	bash ./scripts/test-ch046-kafka-table-source.sh stage
 

@@ -31062,3 +31062,29 @@ baseline; 163,314 ns/op, 0 B/op, and 0 allocations for the cached path. The
 hot cache is 2.94x faster and removes per-record schema allocations. Network
 latency and actual Avro datum decoding are intentionally outside this shared
 boundary benchmark.
+## MZ-015 Protobuf Schema Registry
+
+Benchmark command:
+
+```text
+make benchmark-mz015-protobuf-schema-registry
+```
+
+Workload: 10,000 Confluent-framed records using one descriptor-set schema ID
+and one message-index path. The baseline fetches and reparses the descriptor
+set for every record. The cached path warms the descriptor set and dynamic
+message type once, then resolves the cached path. Five samples were collected
+with `-benchmem` on the same Linux/amd64 host.
+
+Raw samples:
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Fetch and parse every record | 76,044,782; 77,284,423; 77,755,539; 81,701,587; 77,877,340 | 59,305,372; 59,302,006; 59,304,950; 59,302,397; 59,303,443 | 660,731; 660,641; 660,731; 660,643; 660,683 |
+| Cached descriptor and message path | 856,860; 818,857; 897,119; 827,796; 809,748 | 4; 3; 4; 3; 3 | 0; 0; 0; 0; 0 |
+
+Medians are 77,755,539 ns/op, 59,303,443 B/op, and 660,683 allocations for
+the baseline; 827,796 ns/op, 3 B/op, and 0 allocations for the cached path.
+The cache path is 93.9x faster and removes all measured hot-path allocations.
+Actual protobuf datum decoding and registry network latency are excluded from
+this boundary benchmark.
