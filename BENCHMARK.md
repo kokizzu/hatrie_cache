@@ -31137,3 +31137,25 @@ Command: `make benchmark-mz019-kafka-source-lifecycle`.
 Median is `84.92 ns/op` with zero allocations. The normal running path is
 unchanged; durable lifecycle changes pay the existing full-checkpoint snapshot
 cost.
+
+## MZ-020: Two-phase sink progress checkpoints
+
+Workload: one unique sink transaction per iteration. The baseline uses the
+existing in-memory one-phase exactly-once ledger. The two-phase path calls
+`Prepare` and `Commit` on the new coordinator with no-op participant callbacks
+and no checkpoint I/O, isolating coordinator overhead. Both paths retain up to
+1,024 transaction records. Five 500 ms samples were run with `-benchmem` on
+Linux/amd64, AMD Ryzen 9 5950X.
+
+Command: `make benchmark-mz020-two-phase-sink`.
+
+| Path | Raw ns/op samples | B/op | allocs/op |
+| --- | --- | --- | --- |
+| Existing one-phase baseline | 1585, 1448, 1543, 1479, 1529 | 482 | 9 |
+| Two-phase coordinator | 2754, 2801, 2638, 2831, 2811 | 729 | 15 |
+
+Median is 1,529 ns/op for the baseline and 2,801 ns/op for two-phase: 1.83x
+CPU time, 1.51x cumulative bytes, and 6 additional allocations per sink
+transaction. This is an opt-in safety cost; checkpoint-store I/O and external
+sink work are intentionally excluded and will be workload-specific. The
+existing one-phase path is unchanged.

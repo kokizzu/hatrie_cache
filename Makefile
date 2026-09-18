@@ -19964,3 +19964,38 @@ commit-ch046-kafka-table-source:
 
 push-ch046-kafka-table-source:
 	bash ./scripts/test-ch046-kafka-table-source.sh push
+.PHONY: test-mz020-two-phase-sink
+test-mz020-two-phase-sink:
+	@bash ./scripts/test-mz020-two-phase-sink.sh
+.PHONY: format-mz020-two-phase-sink
+format-mz020-two-phase-sink:
+	@bash ./scripts/format-mz020-two-phase-sink.sh
+.PHONY: benchmark-mz020-two-phase-sink
+benchmark-mz020-two-phase-sink:
+	@bash ./scripts/benchmark-mz020-two-phase-sink.sh
+.PHONY: verify-mz020-two-phase-sink-docs
+verify-mz020-two-phase-sink-docs:
+	@bash ./scripts/verify-mz020-two-phase-sink-docs.sh
+.PHONY: race-mz020-two-phase-sink
+race-mz020-two-phase-sink:
+	@bash ./scripts/race-mz020-two-phase-sink.sh
+
+.PHONY: vet-mz020-two-phase-sink
+vet-mz020-two-phase-sink:
+	@bash ./scripts/vet-mz020-two-phase-sink.sh
+
+.PHONY: test-mz020-two-phase-sink-package
+test-mz020-two-phase-sink-package:
+	@bash ./scripts/test-mz020-two-phase-sink-package.sh
+
+.PHONY: stage-mz020-two-phase-sink
+stage-mz020-two-phase-sink:
+	@bash ./scripts/stage-mz020-two-phase-sink.sh
+
+.PHONY: commit-mz020-two-phase-sink
+commit-mz020-two-phase-sink:
+	@bash ./scripts/commit-mz020-two-phase-sink.sh
+
+.PHONY: push-mz020-two-phase-sink
+push-mz020-two-phase-sink:
+	@bash ./scripts/push-mz020-two-phase-sink.sh
