@@ -20482,3 +20482,112 @@ commit-tr024-covering-index:
 	bash ./scripts/commit-tr024-covering-index.sh
 push-tr024-covering-index:
 	bash ./scripts/push-tr024-covering-index.sh
+ .PHONY: audit-inspiration-gaps
+ audit-inspiration-gaps:
+	bash ./scripts/audit-inspiration-gaps.sh
+
+ .PHONY: audit-inspiration-rows
+ audit-inspiration-rows:
+	bash ./scripts/audit-inspiration-gaps.sh rows
+
+ .PHONY: audit-materialize-ideas
+ audit-materialize-ideas:
+	bash ./scripts/audit-inspiration-gaps.sh materialize
+
+ .PHONY: audit-tarantool-ideas
+ audit-tarantool-ideas:
+	bash ./scripts/audit-inspiration-gaps.sh tarantool
+
+ .PHONY: audit-explain-path
+ audit-explain-path:
+	bash ./scripts/audit-inspiration-gaps.sh explain
+
+ .PHONY: audit-explain-doc
+ audit-explain-doc:
+	bash ./scripts/audit-inspiration-gaps.sh explain-doc
+
+ .PHONY: audit-explain-core
+ audit-explain-core:
+	bash ./scripts/audit-inspiration-gaps.sh explain-core
+
+ .PHONY: audit-explain-type
+ audit-explain-type:
+	bash ./scripts/audit-inspiration-gaps.sh explain-type
+
+ .PHONY: audit-explain-implementation
+ audit-explain-implementation:
+	bash ./scripts/audit-inspiration-gaps.sh explain-implementation
+
+ .PHONY: audit-arrangement-cost
+ audit-arrangement-cost:
+	bash ./scripts/audit-inspiration-gaps.sh arrangement-cost
+
+ .PHONY: audit-explain-parser
+ audit-explain-parser:
+	bash ./scripts/audit-inspiration-gaps.sh explain-parser
+
+ .PHONY: audit-explain-symbols
+ audit-explain-symbols:
+	bash ./scripts/audit-inspiration-gaps.sh explain-symbols
+
+ .PHONY: audit-explain-parser-core
+ audit-explain-parser-core:
+	bash ./scripts/audit-inspiration-gaps.sh explain-parser-core
+
+ .PHONY: audit-explain-branch
+ audit-explain-branch:
+	bash ./scripts/audit-inspiration-gaps.sh explain-branch
+
+ .PHONY: audit-explain-function
+ audit-explain-function:
+	bash ./scripts/audit-inspiration-gaps.sh explain-function
+
+ .PHONY: audit-explain-merge
+ audit-explain-merge:
+	bash ./scripts/audit-inspiration-gaps.sh explain-merge
+
+ .PHONY: audit-query-struct
+ audit-query-struct:
+	bash ./scripts/audit-inspiration-gaps.sh query-struct
+
+ .PHONY: audit-benchmark-tail
+ audit-benchmark-tail:
+	bash ./scripts/audit-inspiration-gaps.sh benchmark-tail
+
+ .PHONY: audit-adopted-mz044
+ audit-adopted-mz044:
+	bash ./scripts/audit-inspiration-gaps.sh adopted-mz044
+
+ .PHONY: audit-adopted-head
+ audit-adopted-head:
+	bash ./scripts/audit-inspiration-gaps.sh adopted-head
+
+ .PHONY: format-mz044-costed-explain test-mz044-costed-explain benchmark-mz044-costed-explain baseline-mz044-costed-explain race-mz044-costed-explain vet-mz044-costed-explain test-mz044-package race-mz044-package status-mz044-costed-explain stage-mz044-costed-explain commit-mz044-costed-explain push-mz044-costed-explain check-mz044-costed-explain docs-mz044-costed-explain
+ format-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh format
+ test-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh test
+ benchmark-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh benchmark
+ baseline-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh baseline
+ race-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh race
+ vet-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh vet
+ test-mz044-package:
+	bash ./scripts/run-mz044-costed-explain.sh package
+ race-mz044-package:
+	bash ./scripts/run-mz044-costed-explain.sh race-package
+ status-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh status
+ stage-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh stage
+ commit-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh commit
+ push-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh push
+ check-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh check
+ docs-mz044-costed-explain:
+	bash ./scripts/run-mz044-costed-explain.sh docs

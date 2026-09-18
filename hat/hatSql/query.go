@@ -5554,12 +5554,17 @@ func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 	parser := sqlQueryParser{tokens: tokens, allowParameters: true}
 	explain := false
 	pipeline := false
+	cost := false
 	analyze := false
 	if parser.keyword("EXPLAIN") {
 		explain = true
 		parser.next()
 		if parser.keyword("PIPELINE") {
 			pipeline = true
+			parser.next()
+		}
+		if parser.keyword("COST") {
+			cost = true
 			parser.next()
 		}
 		if parser.keyword("ANALYZE") {
@@ -5585,6 +5590,7 @@ func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 		return nil, parser.expected(parser.current(), "end of input", nil)
 	}
 	query.explain = explain
+	query.explainCost = cost
 	query.pipeline = pipeline
 	query.analyze = analyze
 	return query, nil
@@ -5943,6 +5949,7 @@ type sqlQuery struct {
 	distinct           bool
 	unions             []sqlUnion
 	explain            bool
+	explainCost        bool
 	pipeline           bool
 	analyze            bool
 }
@@ -8085,7 +8092,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "PIPELINE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "COST", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
@@ -13028,9 +13035,16 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	if !query.analyze {
 		steps = sqlExplainStepsWithResolver(query, resolver)
+		if query.explainCost {
+			steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
+		}
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
+	if hasExplainCost {
+		columns = append(columns, "estimated_cost", "estimated_memory_bytes")
+	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
 	}
@@ -13043,6 +13057,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		row := SQLRow{"node": step.Node, "detail": step.Detail}
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
+		}
+		if step.EstimatedCost != nil {
+			row["estimated_cost"] = *step.EstimatedCost
+		}
+		if step.EstimatedMemoryBytes != nil {
+			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
@@ -13068,6 +13088,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	sqlMergeExplainCardinalityEstimates(metrics.steps, estimatedSteps)
 	result.Plan = metrics.steps
+	if query.explainCost {
+		result.Plan = CostSQLExplainSteps(result.Plan, SQLExplainCostOptions{})
+	}
 	result.Rows = result.Rows[:0]
 	for _, step := range result.Plan {
 		rowCapacity := 3
@@ -13088,6 +13111,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
+		}
+		if step.EstimatedCost != nil {
+			row["estimated_cost"] = *step.EstimatedCost
+		}
+		if step.EstimatedMemoryBytes != nil {
+			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes
 		}
 		if step.EstimateErrorRows != nil {
 			row["estimate_error_rows"] = *step.EstimateErrorRows
@@ -13113,6 +13142,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	hasIndexDiagnostics := false
 	hasArrangementMetadata = sqlExplainHasArrangementMetadata(result.Plan)
+	hasExplainCost = sqlExplainHasCost(result.Plan)
 	for _, step := range steps {
 		if step.Index != nil {
 			hasIndexDiagnostics = true
@@ -13120,6 +13150,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 	}
 	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
+	if hasExplainCost {
+		result.Columns = append([]string{"node", "detail", "estimated_rows", "estimated_cost", "estimated_memory_bytes"}, result.Columns[3:]...)
+	}
 	if hasIndexDiagnostics {
 		result.Columns = append(result.Columns, "index")
 	}

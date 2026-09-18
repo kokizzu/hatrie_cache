@@ -130,6 +130,8 @@ func cloneExplainDataflowStep(step ExplainStep) ExplainStep {
 		}
 	}
 	clone.EstimatedRows = cloneExplainDataflowInt(step.EstimatedRows)
+	clone.EstimatedCost = cloneExplainDataflowInt(step.EstimatedCost)
+	clone.EstimatedMemoryBytes = cloneExplainDataflowInt(step.EstimatedMemoryBytes)
 	clone.ActualInputRows = cloneExplainDataflowInt(step.ActualInputRows)
 	clone.ActualOutputRows = cloneExplainDataflowInt(step.ActualOutputRows)
 	clone.ActualInputBytes = cloneExplainDataflowInt(step.ActualInputBytes)

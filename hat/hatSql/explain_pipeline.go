@@ -13,8 +13,15 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 		return SQLQueryResult{}, fmt.Errorf("EXPLAIN PIPELINE ANALYZE is not supported")
 	}
 	steps := sqlExplainPipelineStepsWithResolver(query, resolver)
+	if query.explainCost {
+		steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
+	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "stage", "worker", "workers", "estimated_rows"}
+	if hasExplainCost {
+		columns = append(columns, "estimated_cost", "estimated_memory_bytes")
+	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
 	}
@@ -33,6 +40,12 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 		}
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
+		}
+		if step.EstimatedCost != nil {
+			row["estimated_cost"] = *step.EstimatedCost
+		}
+		if step.EstimatedMemoryBytes != nil {
+			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)

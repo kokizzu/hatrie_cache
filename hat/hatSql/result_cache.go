@@ -536,6 +536,8 @@ func cloneResultCachePlanStep(step ExplainStep) ExplainStep {
 		clone.Lineage[index] = ColumnLineage{Output: lineage.Output, SourceFields: append([]string(nil), lineage.SourceFields...)}
 	}
 	clone.EstimatedRows = cloneResultCacheInt(step.EstimatedRows)
+	clone.EstimatedCost = cloneResultCacheInt(step.EstimatedCost)
+	clone.EstimatedMemoryBytes = cloneResultCacheInt(step.EstimatedMemoryBytes)
 	clone.ActualInputRows = cloneResultCacheInt(step.ActualInputRows)
 	clone.ActualOutputRows = cloneResultCacheInt(step.ActualOutputRows)
 	clone.ActualInputBytes = cloneResultCacheInt(step.ActualInputBytes)

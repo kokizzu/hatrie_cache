@@ -31474,3 +31474,22 @@ The benchmark was run with:
 make benchmark-tr024-covering-index-baseline
 make benchmark-tr024-covering-index
 ```
+
+<a id="mz-044-costed-sql-explain"></a>
+## MZ-044: Costed SQL EXPLAIN
+
+The workload is a four-row `VALUES` plan with one filter and projection. The
+new mode adds deterministic heuristic CPU and memory fields only when an
+operator has an estimated row count. Regular `EXPLAIN` is the paired control.
+
+### Median comparison
+
+| Path | ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Regular `EXPLAIN` | 10,090 | 10,505 | 58 | 1.00x |
+| `EXPLAIN COST` | 11,226 | 11,483 | 66 | 1.11x |
+
+`EXPLAIN COST` therefore adds 978 B/op and 8 allocations in this small
+diagnostic plan. The ordinary path retains the baseline allocation profile and
+does not run the cost pass. Raw samples and the estimation rules are in
+[MZ044_COSTED_EXPLAIN.md](MZ044_COSTED_EXPLAIN.md).
