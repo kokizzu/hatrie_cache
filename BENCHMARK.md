@@ -30844,3 +30844,23 @@ Validation remains allocation-free and adds only the opt-in version check.
 Marshal and unmarshal are explicit boundary operations; the legacy tuple cache
 path is not changed. See [TR020_VERSIONED_TUPLE.md](TR020_VERSIONED_TUPLE.md) for
 the wire format, limits, and compatibility guidance.
+## TR-49: Queue partition ownership and online migration
+
+Final benchmark, Linux/amd64 on an AMD Ryzen 9 5950X. Each result is the
+median of five samples; `x` is the measured value divided by the static-slice
+baseline. The manager and safe snapshot paths are measured with zero
+allocations; `OwnerUnchecked` is intended for a validated batch loop.
+
+| Operation | Baseline | TR-49 | Relative | Memory |
+| --- | ---: | ---: | ---: | ---: |
+| Static owner lookup | 0.56 ns/op | n/a | n/a | 0 B/op, 0 allocs/op |
+| Manager `Owner` lookup | 0.56 ns/op | 3.74 ns/op | 6.67x | 0 B/op, 0 allocs/op |
+| Reused safe snapshot `Owner` | 0.56 ns/op | 2.38 ns/op | 4.25x | 0 B/op, 0 allocs/op |
+| Reused `OwnerUnchecked` view | 0.56 ns/op | 0.62 ns/op | 1.10x | 0 B/op, 0 allocs/op |
+| 64-partition migration | n/a | 3.38 us/op | n/a | 15,888 B/op, 7 allocs/op |
+
+The feature is opt-in and does not change `PartitionedAsyncBatcher`. Ownership
+changes are O(partition-count) control-plane publications; callers should
+refresh routing views at batch boundaries. See
+[TR049_QUEUE_PARTITION_OWNERSHIP.md](TR049_QUEUE_PARTITION_OWNERSHIP.md) for
+the handoff protocol and limitations.

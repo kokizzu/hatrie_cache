@@ -19545,3 +19545,39 @@ commit-tr020-versioned-tuple:
 
 push-tr020-versioned-tuple:
 	sh ./scripts/push-tr020-versioned-tuple.sh
+
+test-tr049-queue-partition-ownership:
+	sh ./scripts/test-tr049-queue-partition-ownership.sh
+
+benchmark-tr049-baseline:
+	sh ./scripts/benchmark-tr049-baseline.sh
+
+format-tr049-queue-partition-ownership:
+	sh ./scripts/format-tr049-queue-partition-ownership.sh
+
+benchmark-tr049-queue-partition-ownership:
+	sh ./scripts/benchmark-tr049-queue-partition-ownership.sh
+
+test-tr049-package:
+	sh ./scripts/test-tr049-package.sh
+
+race-tr049-queue-partition-ownership:
+	sh ./scripts/race-tr049-queue-partition-ownership.sh
+
+vet-tr049-queue-partition-ownership:
+	sh ./scripts/vet-tr049-queue-partition-ownership.sh
+
+verify-tr049-queue-partition-ownership-docs:
+	sh ./scripts/verify-tr049-queue-partition-ownership-docs.sh
+
+review-tr049-queue-partition-ownership:
+	sh ./scripts/review-tr049-queue-partition-ownership.sh
+
+stage-tr049-queue-partition-ownership:
+	sh ./scripts/stage-tr049-queue-partition-ownership.sh
+
+commit-tr049-queue-partition-ownership:
+	sh ./scripts/commit-tr049-queue-partition-ownership.sh
+
+push-tr049-queue-partition-ownership:
+	sh ./scripts/push-tr049-queue-partition-ownership.sh

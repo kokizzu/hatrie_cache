@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+git add BENCHMARK.md INSPIRATION_BACKLOG.md README.md TR049_QUEUE_PARTITION_OWNERSHIP.md hat/hatPipeline/tr049_queue_partition_ownership.go hat/hatPipeline/tr049_queue_partition_ownership_test.go hat/hatPipeline/tr049_queue_partition_ownership_benchmark_test.go scripts/benchmark-tr049-baseline.sh scripts/benchmark-tr049-queue-partition-ownership.sh scripts/commit-tr049-queue-partition-ownership.sh scripts/format-tr049-queue-partition-ownership.sh scripts/push-tr049-queue-partition-ownership.sh scripts/race-tr049-queue-partition-ownership.sh scripts/review-tr049-queue-partition-ownership.sh scripts/stage-tr049-queue-partition-ownership.sh scripts/test-tr049-package.sh scripts/test-tr049-queue-partition-ownership.sh scripts/verify-tr049-queue-partition-ownership-docs.sh scripts/vet-tr049-queue-partition-ownership.sh Makefile
+git diff --cached --check

@@ -4470,3 +4470,11 @@ format version, validates it before field-shape checks, and provides bounded
 `HTV1` encode/decode. Existing `TupleFieldOffsetCache` callers remain
 unchanged. See [`TR020_VERSIONED_TUPLE.md`](TR020_VERSIONED_TUPLE.md) and the
 [TR-20 benchmark](BENCHMARK.md#tr-20-versioned-tuple-boundaries).
+### Queue partition ownership
+
+`hatPipeline.QueuePartitionOwnership` provides explicit partition ownership,
+fenced online migration, generation checks, and immutable routing views. It is
+opt-in and does not implement automatic sharding or data movement. Use a view
+per queue batch and `OwnerUnchecked` only after the partition range is already
+validated. See [`TR049_QUEUE_PARTITION_OWNERSHIP.md`](TR049_QUEUE_PARTITION_OWNERSHIP.md)
+and the [TR-49 benchmark](BENCHMARK.md#tr-49-queue-partition-ownership-and-online-migration).
