@@ -19806,6 +19806,36 @@ verify-ch046-kafka-table-source-docs:
 audit-next-ideas:
 	bash ./scripts/audit-next-ideas.sh
 
+format-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh format
+
+test-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh test
+
+benchmark-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh benchmark
+
+race-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh race
+
+vet-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh vet
+
+test-mz013-debezium-kafka-package:
+	bash ./scripts/test-mz013-debezium-kafka.sh package
+
+verify-mz013-debezium-kafka-docs:
+	bash ./scripts/verify-mz013-debezium-kafka-docs.sh
+
+stage-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh stage
+
+commit-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh commit
+
+push-mz013-debezium-kafka:
+	bash ./scripts/test-mz013-debezium-kafka.sh push
+
 format-mz014-avro-schema-registry:
 	bash ./scripts/test-mz014-avro-schema-registry.sh format
 

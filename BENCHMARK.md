@@ -31088,3 +31088,21 @@ the baseline; 827,796 ns/op, 3 B/op, and 0 allocations for the cached path.
 The cache path is 93.9x faster and removes all measured hot-path allocations.
 Actual protobuf datum decoding and registry network latency are excluded from
 this boundary benchmark.
+## MZ-013: Debezium Kafka envelope normalization
+
+Workload: one Debezium update event with both `before` and `after` rows. The
+baseline directly decodes both rows; the decoder additionally validates the
+operation and row shape, canonicalizes structured Kafka keys, supports the
+schema/payload envelope, and handles tombstones.
+
+Command: `make benchmark-mz013-debezium-kafka`.
+
+| Path | Raw ns/op samples | B/op | allocs/op |
+| --- | --- | --- | --- |
+| Direct parse baseline | 2952, 2853, 2821, 2779, 2919 | 1112 | 26 |
+| Debezium decoder | 2964, 3123, 2938, 2875, 3028 | 1144 | 26 |
+
+Median: baseline 2,853 ns/op, decoder 2,964 ns/op. The decoder is 1.04x the
+baseline CPU time, 1.03x the bytes, and has the same allocation count. The
+small overhead buys validation, structured-key canonicalization, schema/payload
+support, and tombstone handling.
