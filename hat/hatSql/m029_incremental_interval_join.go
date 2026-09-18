@@ -79,12 +79,16 @@ type IncrementalIntervalJoin struct {
 }
 
 type incrementalIntervalJoinEntry struct {
-	key     string
-	joinKey string
-	start   int64
-	end     int64
-	row     Row
-	count   int64
+	key          string
+	joinKey      string
+	start        int64
+	end          int64
+	row          Row
+	count        int64
+	treePriority uint64
+	treeMaxEnd   int64
+	treeLeft     *incrementalIntervalJoinEntry
+	treeRight    *incrementalIntervalJoinEntry
 }
 
 type incrementalIntervalJoinPendingEntry struct {
@@ -103,8 +107,8 @@ type incrementalIntervalJoinMatch struct {
 }
 
 type incrementalIntervalJoinBucket struct {
-	entries      []*incrementalIntervalJoinEntry
-	prefixMaxEnd []int64
+	root *incrementalIntervalJoinEntry
+	size int
 }
 
 // NewIncrementalIntervalJoin creates an empty exact interval join.
@@ -250,7 +254,7 @@ func (join *IncrementalIntervalJoin) Snapshot() ([]DifferentialRow, error) {
 		if leftBucket == nil || rightBucket == nil {
 			continue
 		}
-		leftEntries := incrementalIntervalJoinActiveEntries(leftBucket.entries)
+		leftEntries := leftBucket.activeEntries()
 		for _, leftEntry := range leftEntries {
 			for _, rightEntry := range rightBucket.overlap(leftEntry.start, leftEntry.end) {
 				joinedDiff, err := multiplyIncrementalIntervalJoinDelta(leftEntry.count, rightEntry.count)
@@ -487,80 +491,204 @@ func (join *IncrementalIntervalJoin) incrementalIntervalJoinRemoveFromBucket(buc
 	if bucket == nil {
 		return
 	}
-	bucket.remove(entry.key)
-	if len(bucket.entries) == 0 {
+	bucket.remove(entry.start, entry.key)
+	if bucket.size == 0 {
 		delete(buckets, entry.joinKey)
 	}
 }
 
 func (bucket *incrementalIntervalJoinBucket) add(entry *incrementalIntervalJoinEntry) {
-	index := sort.Search(len(bucket.entries), func(index int) bool {
-		current := bucket.entries[index]
-		return current.start > entry.start || (current.start == entry.start && current.key >= entry.key)
-	})
-	bucket.entries = append(bucket.entries, nil)
-	copy(bucket.entries[index+1:], bucket.entries[index:])
-	bucket.entries[index] = entry
-	bucket.rebuildPrefixMaxEnd()
+	entry.treePriority = incrementalIntervalJoinPriority(entry.start, entry.key)
+	entry.treeMaxEnd = entry.end
+	entry.treeLeft = nil
+	entry.treeRight = nil
+	bucket.root = incrementalIntervalJoinTreeInsert(bucket.root, entry)
+	bucket.size++
 }
 
-func (bucket *incrementalIntervalJoinBucket) remove(key string) {
-	for index, entry := range bucket.entries {
-		if entry.key != key {
+func (bucket *incrementalIntervalJoinBucket) remove(start int64, key string) {
+	entry := incrementalIntervalJoinTreeFind(bucket.root, start, key)
+	var removed bool
+	bucket.root, removed = incrementalIntervalJoinTreeDelete(bucket.root, start, key)
+	if removed {
+		if entry != nil {
+			entry.treeLeft = nil
+			entry.treeRight = nil
+		}
+		bucket.size--
+	}
+}
+
+func incrementalIntervalJoinTreeFind(root *incrementalIntervalJoinEntry, start int64, key string) *incrementalIntervalJoinEntry {
+	for root != nil {
+		if start == root.start && key == root.key {
+			return root
+		}
+		if start < root.start || (start == root.start && key < root.key) {
+			root = root.treeLeft
 			continue
 		}
-		copy(bucket.entries[index:], bucket.entries[index+1:])
-		bucket.entries[len(bucket.entries)-1] = nil
-		bucket.entries = bucket.entries[:len(bucket.entries)-1]
-		bucket.rebuildPrefixMaxEnd()
-		return
+		root = root.treeRight
 	}
-}
-
-func (bucket *incrementalIntervalJoinBucket) rebuildPrefixMaxEnd() {
-	if len(bucket.entries) == 0 {
-		bucket.prefixMaxEnd = nil
-		return
-	}
-	bucket.prefixMaxEnd = make([]int64, len(bucket.entries))
-	maxEnd := bucket.entries[0].end
-	for index, entry := range bucket.entries {
-		if entry.end > maxEnd {
-			maxEnd = entry.end
-		}
-		bucket.prefixMaxEnd[index] = maxEnd
-	}
+	return nil
 }
 
 func (bucket *incrementalIntervalJoinBucket) overlap(start, end int64) []*incrementalIntervalJoinEntry {
-	if bucket == nil || len(bucket.entries) == 0 {
+	if bucket == nil || bucket.root == nil {
 		return nil
 	}
-	limit := sort.Search(len(bucket.entries), func(index int) bool {
-		return bucket.entries[index].start >= end
-	})
-	first := sort.Search(limit, func(index int) bool {
-		return bucket.prefixMaxEnd[index] > start
-	})
-	result := make([]*incrementalIntervalJoinEntry, 0, limit-first)
-	for index := first; index < limit; index++ {
-		entry := bucket.entries[index]
-		if entry.end > start {
-			result = append(result, entry)
-		}
-	}
+	result := make([]*incrementalIntervalJoinEntry, 0)
+	incrementalIntervalJoinTreeOverlap(bucket.root, start, end, &result)
 	return result
 }
 
-func incrementalIntervalJoinActiveEntries(entries []*incrementalIntervalJoinEntry) []*incrementalIntervalJoinEntry {
-	active := make([]*incrementalIntervalJoinEntry, 0, len(entries))
-	for _, entry := range entries {
+func (bucket *incrementalIntervalJoinBucket) activeEntries() []*incrementalIntervalJoinEntry {
+	if bucket == nil || bucket.root == nil {
+		return nil
+	}
+	active := make([]*incrementalIntervalJoinEntry, 0, bucket.size)
+	incrementalIntervalJoinTreeWalk(bucket.root, func(entry *incrementalIntervalJoinEntry) {
 		if entry.count > 0 {
 			active = append(active, entry)
 		}
-	}
+	})
 	sort.Slice(active, func(i, j int) bool { return active[i].key < active[j].key })
 	return active
+}
+
+func incrementalIntervalJoinPriority(start int64, key string) uint64 {
+	hash := uint64(start) + 0x9e3779b97f4a7c15
+	for index := 0; index < len(key); index++ {
+		hash ^= uint64(key[index])
+		hash *= 0x100000001b3
+	}
+	hash ^= hash >> 30
+	hash *= 0xbf58476d1ce4e5b9
+	hash ^= hash >> 27
+	hash *= 0x94d049bb133111eb
+	return hash ^ (hash >> 31)
+}
+
+func incrementalIntervalJoinEntryLess(left, right *incrementalIntervalJoinEntry) bool {
+	if left.start != right.start {
+		return left.start < right.start
+	}
+	return left.key < right.key
+}
+
+func incrementalIntervalJoinTreeInsert(root, node *incrementalIntervalJoinEntry) *incrementalIntervalJoinEntry {
+	if root == nil {
+		return node
+	}
+	if incrementalIntervalJoinEntryLess(node, root) {
+		root.treeLeft = incrementalIntervalJoinTreeInsert(root.treeLeft, node)
+		if root.treeLeft.treePriority < root.treePriority {
+			root = incrementalIntervalJoinTreeRotateRight(root)
+		}
+	} else {
+		root.treeRight = incrementalIntervalJoinTreeInsert(root.treeRight, node)
+		if root.treeRight.treePriority < root.treePriority {
+			root = incrementalIntervalJoinTreeRotateLeft(root)
+		}
+	}
+	incrementalIntervalJoinTreeUpdate(root)
+	return root
+}
+
+func incrementalIntervalJoinTreeDelete(root *incrementalIntervalJoinEntry, start int64, key string) (*incrementalIntervalJoinEntry, bool) {
+	if root == nil {
+		return nil, false
+	}
+	if start != root.start || key != root.key {
+		if start < root.start || (start == root.start && key < root.key) {
+			var removed bool
+			root.treeLeft, removed = incrementalIntervalJoinTreeDelete(root.treeLeft, start, key)
+			if removed {
+				incrementalIntervalJoinTreeUpdate(root)
+			}
+			return root, removed
+		}
+		var removed bool
+		root.treeRight, removed = incrementalIntervalJoinTreeDelete(root.treeRight, start, key)
+		if removed {
+			incrementalIntervalJoinTreeUpdate(root)
+		}
+		return root, removed
+	}
+	return incrementalIntervalJoinTreeMerge(root.treeLeft, root.treeRight), true
+}
+
+func incrementalIntervalJoinTreeMerge(left, right *incrementalIntervalJoinEntry) *incrementalIntervalJoinEntry {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	if left.treePriority < right.treePriority {
+		left.treeRight = incrementalIntervalJoinTreeMerge(left.treeRight, right)
+		incrementalIntervalJoinTreeUpdate(left)
+		return left
+	}
+	right.treeLeft = incrementalIntervalJoinTreeMerge(left, right.treeLeft)
+	incrementalIntervalJoinTreeUpdate(right)
+	return right
+}
+
+func incrementalIntervalJoinTreeRotateRight(root *incrementalIntervalJoinEntry) *incrementalIntervalJoinEntry {
+	newRoot := root.treeLeft
+	root.treeLeft = newRoot.treeRight
+	newRoot.treeRight = root
+	incrementalIntervalJoinTreeUpdate(root)
+	incrementalIntervalJoinTreeUpdate(newRoot)
+	return newRoot
+}
+
+func incrementalIntervalJoinTreeRotateLeft(root *incrementalIntervalJoinEntry) *incrementalIntervalJoinEntry {
+	newRoot := root.treeRight
+	root.treeRight = newRoot.treeLeft
+	newRoot.treeLeft = root
+	incrementalIntervalJoinTreeUpdate(root)
+	incrementalIntervalJoinTreeUpdate(newRoot)
+	return newRoot
+}
+
+func incrementalIntervalJoinTreeUpdate(node *incrementalIntervalJoinEntry) {
+	if node == nil {
+		return
+	}
+	node.treeMaxEnd = node.end
+	if node.treeLeft != nil && node.treeLeft.treeMaxEnd > node.treeMaxEnd {
+		node.treeMaxEnd = node.treeLeft.treeMaxEnd
+	}
+	if node.treeRight != nil && node.treeRight.treeMaxEnd > node.treeMaxEnd {
+		node.treeMaxEnd = node.treeRight.treeMaxEnd
+	}
+}
+
+func incrementalIntervalJoinTreeOverlap(node *incrementalIntervalJoinEntry, start, end int64, result *[]*incrementalIntervalJoinEntry) {
+	if node == nil || node.treeMaxEnd <= start {
+		return
+	}
+	if node.treeLeft != nil {
+		incrementalIntervalJoinTreeOverlap(node.treeLeft, start, end, result)
+	}
+	if node.start >= end {
+		return
+	}
+	if node.end > start {
+		*result = append(*result, node)
+	}
+	incrementalIntervalJoinTreeOverlap(node.treeRight, start, end, result)
+}
+
+func incrementalIntervalJoinTreeWalk(node *incrementalIntervalJoinEntry, visit func(*incrementalIntervalJoinEntry)) {
+	if node == nil {
+		return
+	}
+	incrementalIntervalJoinTreeWalk(node.treeLeft, visit)
+	visit(node)
+	incrementalIntervalJoinTreeWalk(node.treeRight, visit)
 }
 
 func validateIncrementalIntervalJoinSourceKey(key string) error {

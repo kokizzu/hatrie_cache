@@ -4492,3 +4492,11 @@ versioned right row at or before its timestamp. It preserves input order,
 handles equal timestamps deterministically, omits unmatched rows, and clones
 both sides of each match. See [CH043_ASOF_TEMPORAL_JOIN.md](CH043_ASOF_TEMPORAL_JOIN.md)
 and the [CH-43 benchmark](BENCHMARK.md#ch-43-asof-temporal-join).
+
+### Interval join maintenance
+
+`hatSql.IncrementalIntervalJoin` maintains overlap buckets with a deterministic
+interval treap. Inserts and removals avoid rebuilding a sorted slice and retain
+subtree maximum-end pruning for overlap lookups. See
+[CH044_INTERVAL_JOIN_MAINTENANCE.md](CH044_INTERVAL_JOIN_MAINTENANCE.md) and the
+[CH-44 benchmark](BENCHMARK.md#ch-44-interval-join-maintenance).

@@ -19688,3 +19688,32 @@ commit-ch043-asof-join:
 
 push-ch043-asof-join:
 	bash ./scripts/push-ch043-asof-join.sh
+test-ch044-interval-join:
+	sh ./scripts/test-ch044-interval-join.sh
+
+benchmark-ch044-interval-join:
+	sh ./scripts/benchmark-ch044-interval-join.sh
+
+race-ch044-interval-join:
+	sh ./scripts/race-ch044-interval-join.sh
+
+vet-ch044-interval-join:
+	sh ./scripts/vet-ch044-interval-join.sh
+
+verify-ch044-interval-join-docs:
+	sh ./scripts/verify-ch044-interval-join-docs.sh
+
+review-ch044-interval-join:
+	sh ./scripts/review-ch044-interval-join.sh
+
+stage-ch044-interval-join:
+	sh ./scripts/stage-ch044-interval-join.sh
+
+commit-ch044-interval-join:
+	sh ./scripts/commit-ch044-interval-join.sh
+
+push-ch044-interval-join:
+	sh ./scripts/push-ch044-interval-join.sh
+
+format-ch044-interval-join:
+	sh ./scripts/format-ch044-interval-join.sh

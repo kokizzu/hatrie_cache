@@ -30945,3 +30945,29 @@ The result is a modest CPU improvement with no meaningful memory or allocation
 change. The API is explicit and does not alter SQL parsing or planner behavior;
 see [CH043_ASOF_TEMPORAL_JOIN.md](CH043_ASOF_TEMPORAL_JOIN.md) for semantics
 and limitations.
+
+<a id="ch-44-interval-join-maintenance"></a>
+
+## CH-44: Interval join maintenance
+
+This benchmark compares the former sorted-slice interval bucket with the
+embedded-metadata interval treap. Both paths create 2,048 intervals in one
+join-key bucket and apply them in one batch. Values are five samples with
+`-benchtime=250ms` and `-benchmem` on an AMD Ryzen 9 5950X Linux/amd64 host.
+
+| Operation | Sorted slice baseline | Interval treap | Improvement |
+| --- | ---: | ---: | ---: |
+| 2,048 interval additions | 9,262,177 ns/op | 2,076,175 ns/op | 4.46x faster |
+| Cumulative allocation | 19,162,273 B/op | 1,452,249 B/op | 13.19x lower |
+| Allocation count | 10,303 allocs/op | 8,240 allocs/op | 1.25x fewer |
+
+Raw results (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Sorted slice baseline: 9836210/19162268/10303; 9262177/19162452/10303; 9057933/19162261/10302; 8964122/19162273/10303; 9339915/19162282/10303
+Interval treap:        2045618/1452250/8240; 2036485/1452249/8240; 2111373/1452249/8240; 2098859/1452247/8240; 2076175/1452248/8240
+```
+
+The `B/op` column is cumulative allocation reported by the Go benchmark, not
+retained heap. The implementation tradeoff and scope are described in
+[CH044_INTERVAL_JOIN_MAINTENANCE.md](CH044_INTERVAL_JOIN_MAINTENANCE.md).
