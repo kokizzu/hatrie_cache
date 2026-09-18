@@ -31743,3 +31743,25 @@ and 2.39x faster for below-threshold accounting. The tradeoff is delayed space
 reclamation and potentially higher interim read amplification until the debt
 threshold is reached. Full API and operational guidance are in
 [TR013_COMPACTION_DEBT_SCHEDULER.md](TR013_COMPACTION_DEBT_SCHEDULER.md).
+
+<a id="tr-01-leader-lease-and-fencing"></a>
+## TR-01 Leader Lease and Fencing
+
+Commands: `make test-tr01-leader-lease`, `make race-tr01-leader-lease`,
+`make vet-tr01-leader-lease`, and `make benchmark-tr01-leader-lease`.
+
+This is a partial, opt-in lease primitive rather than a Raft implementation.
+The control validates fixed holder/token/expiry fields inline; the after path
+uses the synchronized `hatTopology.LeaderLeaseStore`. Five `-benchmem` samples
+ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Inline holder/token/expiry control | 2.455; 2.302; 2.178; 2.170; 2.150 | 2.178 | 0 | 0 | 1.00x |
+| `LeaderLeaseStore.Validate` | 23.87; 22.94; 23.37; 22.83; 23.76 | 23.37 | 0 | 0 | 10.73x |
+
+The lease path adds a real relative control cost but remains allocation-free.
+Use it at ownership or commit boundaries, not blindly on every hot mutation.
+It has no default runtime cost because it is not wired into the existing
+election or replication paths. Full API limitations and the consensus boundary
+are documented in [TR01_LEADER_LEASE.md](TR01_LEADER_LEASE.md).

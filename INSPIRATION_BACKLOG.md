@@ -145,7 +145,7 @@ before/after measurement when its motivation is performance.
 
 | ID | Candidate gap | Intended value | Main cost or risk | State |
 | --- | --- | --- | --- | --- |
-| TR-01 | Raft-backed failover with leader leases | Prevent split-brain promotions | Consensus latency and operational complexity | [ ] |
+| TR-01 | Raft-backed failover with leader leases | Prevent split-brain promotions | Consensus latency and operational complexity | [x] Partial adoption: `hatTopology.LeaderLeaseStore` provides opt-in expiry and monotonic fencing tokens, but the transport, quorum, durable state, and full Raft integration remain open. See [TR01_LEADER_LEASE.md](TR01_LEADER_LEASE.md) and [BENCHMARK.md#tr-01-leader-lease-and-fencing](BENCHMARK.md#tr-01-leader-lease-and-fencing). |
 | TR-02 | Synchronous replication commit barriers | Acknowledge only after durable replicas | Write latency and quorum failures | [ ] |
 | TR-03 | Replica-promotion catch-up barrier | Avoid promoting a stale node | Longer failover | [x] Implemented as an importable bounded `ReplicaPromotionBarrier` with monotone source/replica progress, exact capture fences, single-use generation advancement, stale-token rejection, and atomic snapshots. See [TR003_REPLICA_PROMOTION_BARRIER.md](TR003_REPLICA_PROMOTION_BARRIER.md) and [BENCHMARK.md](BENCHMARK.md#tr-003-replica-promotion-catch-up-barrier). |
 | TR-04 | Replication filtering by space and key range | Reduce relay bandwidth | Divergent replica contents | [x] Implemented as opt-in literal `HTTPReplicatorOptions.ReplicationKeyPrefixes`; see [TR004_REPLICATION_KEY_FILTER.md](TR004_REPLICATION_KEY_FILTER.md) and [BENCHMARK.md#tr-04-replication-key-prefix-filter](BENCHMARK.md#tr-04-replication-key-prefix-filter). |

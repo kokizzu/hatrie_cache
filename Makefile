@@ -18503,6 +18503,50 @@ push-tr013-compaction-debt:
 status-tr013-compaction-debt:
 	bash ./scripts/run-tr013-compaction-debt.sh status
 
+.PHONY: test-tr01-leader-lease
+test-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh test
+
+.PHONY: format-tr01-leader-lease
+format-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh format
+
+.PHONY: race-tr01-leader-lease
+race-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh race
+
+.PHONY: benchmark-tr01-leader-lease
+benchmark-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh benchmark
+
+.PHONY: vet-tr01-leader-lease
+vet-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh vet
+
+.PHONY: package-tr01-leader-lease
+package-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh package
+
+.PHONY: review-tr01-leader-lease
+review-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh review
+
+.PHONY: stage-tr01-leader-lease
+stage-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh stage
+
+.PHONY: commit-tr01-leader-lease
+commit-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh commit
+
+.PHONY: push-tr01-leader-lease
+push-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh push
+
+.PHONY: status-tr01-leader-lease
+status-tr01-leader-lease:
+	bash ./scripts/run-tr01-leader-lease.sh status
+
 .PHONY: test-chu27-priority
 test-chu27-priority:
 	bash ./scripts/run-chu27-priority.sh test
