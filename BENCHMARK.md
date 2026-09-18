@@ -15234,6 +15234,21 @@ improves that to `40.5 us/op`, `27,172 B/op`, and `403 allocs/op`. The public
 resolver still clones, so its callers retain mutation safety. Broad ranges can
 have a smaller benefit because the executor still builds row envelopes.
 
+The focused planner benchmark also compares the same `10,000`-row fixture
+through the public scan resolver and the typed composite resolver. Five raw
+samples from `make benchmark-sql-typed-composite` on Linux/amd64 with an AMD
+Ryzen 9 5950X were:
+
+| Path | Raw ns/op samples | B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | --- |
+| Public scan | 58,629; 55,709; 56,526; 61,345; 56,013 | 13,328 | 89 | Baseline |
+| Typed composite equality-prefix range | 13,010; 13,111; 13,664; 13,568; 13,743 | 13,128 | 62 | `4.31-4.70x` faster; `1.5%` fewer bytes; `30.3%` fewer allocations |
+
+This is a planner-path comparison, not a general claim for arbitrary composite
+types or predicate shapes. The typed index remains opt-in and currently covers
+`int64` fields with equality predicates on the leading fields and one range
+predicate on the final field; unsupported cases use the normal correct scan.
+
 ```sh
 make test-sql-typed-composite
 make benchmark-sql-typed-composite
