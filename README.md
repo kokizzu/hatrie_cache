@@ -4355,6 +4355,7 @@ the measured cost in
 - [Materialize-style temporal interval arrangement](MZ028_TEMPORAL_INTERVAL_ARRANGEMENT.md)
 - [Materialize-style immutable sealed upsert runs](MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md)
 - [Materialize-style spillable arrangements](MZ029_SPILLABLE_ARRANGEMENT.md)
+- [Materialize-style durable persisted spillable arrangements](MZ001_DURABLE_PERSISTED_ARRANGEMENT.md)
 - [Materialize-style skew-aware join exchange](MZ031_SKEW_AWARE_JOIN_EXCHANGE.md)
 - [Materialize-style late-data reclock](MZ032_LATE_DATA_RECLOCK.md)
 - [Materialize-style timestamp oracle](MZ033_TIMESTAMP_ORACLE.md)

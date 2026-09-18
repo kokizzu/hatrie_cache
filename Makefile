@@ -18375,6 +18375,54 @@ verify-delivery-tr050-replication-byte-backpressure:
 inspect-next-candidates:
 	sh ./scripts/inspect-next-candidates.sh
 
+.PHONY: format-mz01-durable-arrangement
+format-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh format
+
+.PHONY: test-mz01-durable-arrangement
+test-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh test
+
+.PHONY: benchmark-mz01-durable-arrangement-baseline
+benchmark-mz01-durable-arrangement-baseline:
+	bash ./scripts/run-mz01-durable-arrangement.sh benchmark-baseline
+
+.PHONY: benchmark-mz01-durable-arrangement
+benchmark-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh benchmark
+
+.PHONY: race-mz01-durable-arrangement
+race-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh race
+
+.PHONY: vet-mz01-durable-arrangement
+vet-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh vet
+
+.PHONY: package-mz01-durable-arrangement
+package-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh package
+
+.PHONY: review-mz01-durable-arrangement
+review-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh review
+
+.PHONY: stage-mz01-durable-arrangement
+stage-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh stage
+
+.PHONY: commit-mz01-durable-arrangement
+commit-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh commit
+
+.PHONY: push-mz01-durable-arrangement
+push-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh push
+
+.PHONY: status-mz01-durable-arrangement
+status-mz01-durable-arrangement:
+	bash ./scripts/run-mz01-durable-arrangement.sh status
+
 .PHONY: test-chu27-priority
 test-chu27-priority:
 	bash ./scripts/run-chu27-priority.sh test

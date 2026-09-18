@@ -1,12 +1,14 @@
 package hatDataStructure
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -34,6 +36,7 @@ var (
 	ErrSpillableArrangementDiskLimit     = errors.New("hatDataStructure: spillable arrangement disk limit exceeded")
 	ErrSpillableArrangementClosed        = errors.New("hatDataStructure: spillable arrangement is closed")
 	ErrSpillableArrangementCorrupt       = errors.New("hatDataStructure: spillable arrangement record is corrupt")
+	ErrSpillableArrangementPathInvalid   = errors.New("hatDataStructure: spillable arrangement path is invalid")
 )
 
 // SpillableArrangementOptions configures an opt-in local spill tier. A zero
@@ -67,8 +70,8 @@ type SpillableArrangementStats struct {
 
 // SpillableArrangement keeps keyed byte values in memory until the configured
 // payload budget is exceeded, then moves least-recently-written cold values to
-// a local binary segment. It is an exact opt-in storage tier, not a durability
-// or replication protocol.
+// a local binary segment. The segment can be reopened explicitly after a
+// process restart; replication and consensus remain caller responsibilities.
 type SpillableArrangement struct {
 	mu             sync.RWMutex
 	directory      string
@@ -111,24 +114,15 @@ type spillableArrangementQueueItem struct {
 // NewSpillableArrangement creates an empty arrangement and its private binary
 // spill segment. Existing files are never opened or reused.
 func NewSpillableArrangement(options SpillableArrangementOptions) (*SpillableArrangement, error) {
-	if options.MemoryLimitBytes < 0 || options.MaxDiskBytes < 0 || options.MaxKeyBytes < 0 || options.MaxValueBytes < 0 {
-		return nil, ErrSpillableArrangementLimitInvalid
+	options, err := normalizeSpillableArrangementOptions(options)
+	if err != nil {
+		return nil, err
 	}
 	memoryLimit := options.MemoryLimitBytes
-	if memoryLimit == 0 {
-		memoryLimit = DefaultSpillableArrangementMemoryLimit
-	}
 	maxKeyBytes := options.MaxKeyBytes
-	if maxKeyBytes == 0 {
-		maxKeyBytes = DefaultSpillableArrangementMaxKeyBytes
-	}
 	maxValueBytes := options.MaxValueBytes
-	if maxValueBytes == 0 {
-		maxValueBytes = DefaultSpillableArrangementMaxValueBytes
-	}
 	directory := options.Directory
 	ownedDirectory := false
-	var err error
 	if directory == "" {
 		directory, err = os.MkdirTemp("", "hatrie-spill-")
 		if err != nil {
@@ -156,6 +150,153 @@ func NewSpillableArrangement(options SpillableArrangementOptions) (*SpillableArr
 		maxValueBytes:  maxValueBytes,
 		entries:        make(map[string]*spillableArrangementEntry),
 	}, nil
+}
+
+// OpenSpillableArrangement reopens a previously flushed spill segment. The
+// segment is scanned once for record integrity, while only the latest key and
+// its file offset are retained in memory. Values remain cold until Get or
+// Snapshot reads them.
+func OpenSpillableArrangement(path string, options SpillableArrangementOptions) (*SpillableArrangement, error) {
+	options, err := normalizeSpillableArrangementOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, ErrSpillableArrangementPathInvalid
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	path = filepath.Clean(path)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, ErrSpillableArrangementPathInvalid
+	}
+	if options.MaxDiskBytes > 0 && info.Size() > options.MaxDiskBytes {
+		return nil, ErrSpillableArrangementDiskLimit
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	arrangement := &SpillableArrangement{
+		directory:     filepath.Dir(path),
+		spillPath:     path,
+		file:          file,
+		memoryLimit:   options.MemoryLimitBytes,
+		maxDiskBytes:  options.MaxDiskBytes,
+		maxKeyBytes:   options.MaxKeyBytes,
+		maxValueBytes: options.MaxValueBytes,
+		entries:       make(map[string]*spillableArrangementEntry),
+	}
+	if err := arrangement.recoverSegment(info.Size()); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return arrangement, nil
+}
+
+func normalizeSpillableArrangementOptions(options SpillableArrangementOptions) (SpillableArrangementOptions, error) {
+	if options.MemoryLimitBytes < 0 || options.MaxDiskBytes < 0 || options.MaxKeyBytes < 0 || options.MaxValueBytes < 0 {
+		return SpillableArrangementOptions{}, ErrSpillableArrangementLimitInvalid
+	}
+	if options.MemoryLimitBytes == 0 {
+		options.MemoryLimitBytes = DefaultSpillableArrangementMemoryLimit
+	}
+	if options.MaxKeyBytes == 0 {
+		options.MaxKeyBytes = DefaultSpillableArrangementMaxKeyBytes
+	}
+	if options.MaxValueBytes == 0 {
+		options.MaxValueBytes = DefaultSpillableArrangementMaxValueBytes
+	}
+	return options, nil
+}
+
+func (arrangement *SpillableArrangement) recoverSegment(size int64) error {
+	if size < 0 {
+		return ErrSpillableArrangementCorrupt
+	}
+	header := make([]byte, spillableArrangementHeaderSize)
+	var valueChunk [8 << 10]byte
+	keyBuffer := make([]byte, 0, 256)
+	if _, err := arrangement.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	reader := bufio.NewReaderSize(arrangement.file, 16<<10)
+	var offset int64
+	for offset < size {
+		if size-offset < spillableArrangementHeaderSize {
+			return ErrSpillableArrangementCorrupt
+		}
+		if _, err := io.ReadFull(reader, header); err != nil {
+			return ErrSpillableArrangementCorrupt
+		}
+		if !equalSpillableArrangementMagic(header[:4]) || binary.LittleEndian.Uint32(header[20:24]) != 0 {
+			return ErrSpillableArrangementCorrupt
+		}
+		keyLength := uint64(binary.LittleEndian.Uint32(header[4:8]))
+		valueLength := binary.LittleEndian.Uint64(header[8:16])
+		if keyLength == 0 || keyLength > uint64(arrangement.maxKeyBytes) || keyLength > uint64(math.MaxInt) || valueLength > uint64(arrangement.maxValueBytes) {
+			return ErrSpillableArrangementCorrupt
+		}
+		recordSize := int64(spillableArrangementHeaderSize) + int64(keyLength)
+		if recordSize < 0 || valueLength > uint64(math.MaxInt64-recordSize) {
+			return ErrSpillableArrangementCorrupt
+		}
+		recordSize += int64(valueLength)
+		if recordSize > size-offset {
+			return ErrSpillableArrangementCorrupt
+		}
+		keyLengthInt := int(keyLength)
+		if cap(keyBuffer) < keyLengthInt {
+			keyBuffer = make([]byte, keyLengthInt)
+		} else {
+			keyBuffer = keyBuffer[:keyLengthInt]
+		}
+		if _, err := io.ReadFull(reader, keyBuffer); err != nil {
+			return ErrSpillableArrangementCorrupt
+		}
+		checksum := crc32.NewIEEE()
+		_, _ = checksum.Write(keyBuffer)
+		remaining := valueLength
+		for remaining > 0 {
+			chunkLength := uint64(len(valueChunk))
+			if remaining < chunkLength {
+				chunkLength = remaining
+			}
+			if _, err := io.ReadFull(reader, valueChunk[:int(chunkLength)]); err != nil {
+				return ErrSpillableArrangementCorrupt
+			}
+			_, _ = checksum.Write(valueChunk[:int(chunkLength)])
+			remaining -= chunkLength
+		}
+		if checksum.Sum32() != binary.LittleEndian.Uint32(header[16:20]) {
+			return ErrSpillableArrangementCorrupt
+		}
+		key := string(keyBuffer)
+		if _, exists := arrangement.entries[key]; exists {
+			arrangement.coldEntries--
+		}
+		arrangement.generation++
+		arrangement.entries[key] = &spillableArrangementEntry{
+			key:      key,
+			ref:      spillableArrangementRef{offset: offset, total: recordSize},
+			gen:      arrangement.generation,
+			valueHot: false,
+		}
+		arrangement.coldEntries++
+		arrangement.spillRecords++
+		offset += recordSize
+	}
+	if _, err := arrangement.file.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
+	arrangement.diskBytes = size
+	return nil
 }
 
 // Set inserts or replaces key with a cloned value. If the configured disk
@@ -417,8 +558,8 @@ func (arrangement *SpillableArrangement) Stats() SpillableArrangementStats {
 	}
 }
 
-// SpillPath returns the local segment path. It is useful for operational
-// accounting and backup tooling; the path is not a reopen/restore API.
+// SpillPath returns the local segment path. Call Flush before treating the
+// path as durable, then pass it to OpenSpillableArrangement after restart.
 func (arrangement *SpillableArrangement) SpillPath() string {
 	if arrangement == nil {
 		return ""

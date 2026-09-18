@@ -26293,6 +26293,42 @@ BenchmarkMZ029IncrementalIntervalJoinIncremental-32
 The index retains both source sides and interval metadata, so this is a
 small-update optimization rather than a reduction in total retained data.
 Complete snapshots still scale with the full joined result.
+<a id="mz-001-durable-persisted-spillable-arrangement"></a>
+## Materialize MZ-001 Durable Persisted Spillable Arrangement
+
+This compares rebuilding a fresh `SpillableArrangement` from 256 decoded rows
+with reopening its flushed checksummed segment. The reopen path scans records
+sequentially, validates CRCs, and retains only keys and file offsets; values
+remain cold until read. Five `-benchmem` samples ran on Linux/amd64 with an AMD
+Ryzen 9 5950X.
+
+| Recovery path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild from snapshot rows | 338,574 | 68,757 | 561 | 1.00x |
+| Open durable segment | 78,797 | 75,288 | 538 | 4.30x faster; 1.09x bytes; 0.96x allocations |
+
+The opt-in path is 4.3x faster and uses 4.1% fewer allocations, at the cost of
+9.5% more transient allocated bytes in this small fixture. It reports zero hot
+value bytes after reopen, so the additional bytes are recovery metadata and
+scratch space rather than retained payload. See
+[MZ001_DURABLE_PERSISTED_ARRANGEMENT.md](MZ001_DURABLE_PERSISTED_ARRANGEMENT.md)
+for scope, safety limits, and raw samples.
+
+Raw output:
+
+```text
+BenchmarkMZ01RebuildFromSnapshot-32    5932  173958 ns/op  68734 B/op  561 allocs/op
+BenchmarkMZ01RebuildFromSnapshot-32    7425  198999 ns/op  68730 B/op  561 allocs/op
+BenchmarkMZ01RebuildFromSnapshot-32    3014  339197 ns/op  68816 B/op  561 allocs/op
+BenchmarkMZ01RebuildFromSnapshot-32    3078  338574 ns/op  68757 B/op  561 allocs/op
+BenchmarkMZ01RebuildFromSnapshot-32    3672  334754 ns/op  68786 B/op  561 allocs/op
+BenchmarkMZ01OpenDurableSegment-32    14986   78070 ns/op  75288 B/op  538 allocs/op
+BenchmarkMZ01OpenDurableSegment-32    15360   79329 ns/op  75288 B/op  538 allocs/op
+BenchmarkMZ01OpenDurableSegment-32    14368   79870 ns/op  75288 B/op  538 allocs/op
+BenchmarkMZ01OpenDurableSegment-32    15111   78797 ns/op  75288 B/op  538 allocs/op
+BenchmarkMZ01OpenDurableSegment-32    15225   78443 ns/op  75256 B/op  538 allocs/op
+```
+
 <a id="mz-029-spillable-arrangement"></a>
 ## Materialize MZ-029 Spillable Arrangements
 
