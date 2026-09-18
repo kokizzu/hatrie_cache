@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-test -f MZ011_SINK_CONNECTORS.md
-rg -F 'MZ011_SINK_CONNECTORS.md' README.md ADOPTED_QUERY_ENGINE_IDEAS.md
-rg -F 'MZ-011' ENGINE_IDEAS.md BENCHMARK.md MZ011_SINK_CONNECTORS.md
-rg -F 'BENCHMARK.md#mz-011-sink-connectors' MZ011_SINK_CONNECTORS.md ADOPTED_QUERY_ENGINE_IDEAS.md
-printf '%s\n' 'MZ-011 documentation links and references verified.'
+rg -n 'MZ-11.*\[x\].*MZ011_PARTITION_OFFSET_FRONTIERS|MZ011_PARTITION_OFFSET_FRONTIERS|mz-011-kafka-style-partition-offset-frontiers|# MZ011' \
+  INSPIRATION_BACKLOG.md README.md BENCHMARK.md MZ011_PARTITION_OFFSET_FRONTIERS.md

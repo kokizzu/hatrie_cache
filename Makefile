@@ -13878,6 +13878,46 @@ vet-chu48-ranked-full-text:
 cleanup-hatrie-tmp-preview:
 	bash ./scripts/cleanup-hatrie-tmp.sh preview
 
+.PHONY: benchmark-mz011-partition-frontier
+benchmark-mz011-partition-frontier:
+	bash ./scripts/benchmark-mz011-partition-frontier.sh
+
+.PHONY: test-mz011-partition-frontier format-mz011-partition-frontier
+test-mz011-partition-frontier:
+	bash ./scripts/test-mz011-partition-frontier.sh
+
+format-mz011-partition-frontier:
+	bash ./scripts/format-mz011-partition-frontier.sh
+
+.PHONY: test-mz011-package race-mz011-partition-frontier vet-mz011-partition-frontier verify-mz011-partition-frontier-docs
+test-mz011-package:
+	bash ./scripts/test-mz011-package.sh
+
+race-mz011-partition-frontier:
+	bash ./scripts/race-mz011-partition-frontier.sh
+
+vet-mz011-partition-frontier:
+	bash ./scripts/vet-mz011-partition-frontier.sh
+
+verify-mz011-partition-frontier-docs:
+	bash ./scripts/verify-mz011-docs.sh
+
+.PHONY: review-mz011-partition-frontier stage-mz011-partition-frontier commit-mz011-partition-frontier push-mz011-partition-frontier
+review-mz011-partition-frontier:
+	bash ./scripts/review-mz011-partition-frontier.sh
+
+stage-mz011-partition-frontier:
+	bash ./scripts/stage-mz011-partition-frontier.sh
+
+commit-mz011-partition-frontier:
+	bash ./scripts/commit-mz011-partition-frontier.sh
+
+push-mz011-partition-frontier:
+	bash ./scripts/push-mz011-partition-frontier.sh
+
+
+
+
 .PHONY: benchmark-mu019-source-transaction-envelope
 benchmark-mu019-source-transaction-envelope:
 	bash ./scripts/benchmark-mu019-source-transaction-envelope.sh

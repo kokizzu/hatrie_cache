@@ -30658,4 +30658,61 @@ manual: 15.48 0 0
 manual: 15.60 0 0
 manual: 15.78 0 0
 manual: 15.61 0 0
+
+<a id="mz-011-kafka-style-partition-offset-frontiers"></a>
+## MZ011 Kafka-Style Partition Offset Frontiers
+
+MZ011 benchmarks a bounded partition offset and event-time watermark frontier
+with 64 contiguous partitions on an AMD Ryzen 9 5950X. The manual control is a
+map of partition state. The dense implementation uses direct indexing for the
+common `0..N-1` layout and retains a map only for sparse partition IDs.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Manual map advance/readiness | 16.13 | 0 | 0 | 1.00x |
+| Dense frontier advance/readiness | 3.702 | 0 | 0 | 4.36x faster |
+| Manual map common frontier | 530.3 | 0 | 0 | 1.00x |
+| Dense frontier common frontier | 30.75 | 0 | 0 | 17.24x faster |
+| Manual map construction | 1,700 | 3,240 | 3 | 1.00x |
+| Dense frontier construction | 881.7 | 2,408 | 5 | 1.93x faster, 1.35x lower bytes |
+
+The two extra construction allocations are a one-time cost for owned sorted
+storage. `Advance`, `Ready`, and `Common` allocate zero bytes. Sparse IDs use
+the bounded map fallback and are not represented by the contiguous fast-path
+numbers. Run with `make benchmark-mz011-partition-frontier`.
+
+Raw final samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+manual-advance: 15.84 0 0
+manual-advance: 16.81 0 0
+manual-advance: 16.63 0 0
+manual-advance: 15.69 0 0
+manual-advance: 16.13 0 0
+manual-common: 541.0 0 0
+manual-common: 500.8 0 0
+manual-common: 545.7 0 0
+manual-common: 530.3 0 0
+manual-common: 505.5 0 0
+dense-advance: 3.519 0 0
+dense-advance: 3.702 0 0
+dense-advance: 3.481 0 0
+dense-advance: 4.002 0 0
+dense-advance: 3.965 0 0
+dense-common: 31.67 0 0
+dense-common: 30.05 0 0
+dense-common: 31.31 0 0
+dense-common: 30.75 0 0
+dense-common: 29.85 0 0
+manual-build: 1774 3240 3
+manual-build: 1689 3240 3
+manual-build: 1732 3240 3
+manual-build: 1700 3240 3
+manual-build: 1594 3240 3
+dense-build: 865.8 2408 5
+dense-build: 884.4 2408 5
+dense-build: 896.0 2408 5
+dense-build: 859.6 2408 5
+dense-build: 881.7 2408 5
+```
 ```

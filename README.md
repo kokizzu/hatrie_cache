@@ -66,6 +66,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Opt-in cross-source snapshot cutover coordination: [MZ010_SNAPSHOT_CUTOVER.md](MZ010_SNAPSHOT_CUTOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-010-cross-source-snapshot-cutover)
+- Kafka-style partition offset and watermark frontiers: [MZ011_PARTITION_OFFSET_FRONTIERS.md](MZ011_PARTITION_OFFSET_FRONTIERS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-011-kafka-style-partition-offset-frontiers)
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - ClickHouse-inspired durable asynchronous-insert deduplication: [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u01-durable-asynchronous-insert-deduplication)
 - ClickHouse-inspired external-source `ORDER BY` spill: [CHU02_EXTERNAL_ORDER_SPILL.md](CHU02_EXTERNAL_ORDER_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u02-external-order-by-spill)
