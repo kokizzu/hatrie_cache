@@ -18318,6 +18318,63 @@ verify-delivery-tr050-replication-byte-backpressure:
 inspect-next-candidates:
 	sh ./scripts/inspect-next-candidates.sh
 
+.PHONY: test-chu27-priority
+test-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh test
+
+.PHONY: format-chu27-priority
+format-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh format
+
+.PHONY: benchmark-chu27-priority-baseline
+benchmark-chu27-priority-baseline:
+	bash ./scripts/run-chu27-priority.sh baseline
+
+.PHONY: benchmark-chu27-priority
+benchmark-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh benchmark
+
+.PHONY: race-chu27-priority
+race-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh race
+
+.PHONY: vet-chu27-priority
+vet-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh vet
+
+.PHONY: test-chu27-package
+test-chu27-package:
+	bash ./scripts/run-chu27-priority.sh package
+
+.PHONY: race-chu27-package
+race-chu27-package:
+	bash ./scripts/run-chu27-priority.sh race-package
+
+.PHONY: status-chu27-priority
+status-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh status
+
+.PHONY: stage-chu27-priority
+stage-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh stage
+
+.PHONY: commit-chu27-priority
+commit-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh commit
+
+.PHONY: push-chu27-priority
+push-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh push
+
+.PHONY: docs-chu27-priority
+docs-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh docs
+
+.PHONY: check-chu27-priority
+check-chu27-priority:
+	bash ./scripts/run-chu27-priority.sh check
+
+
 test-tr008-journal-encryption:
 	sh ./scripts/test-tr008-journal-encryption.sh
 

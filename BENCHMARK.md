@@ -17619,6 +17619,19 @@ safe for arbitrary sorted postings; only the boundary cases bypass
 `sort.Search`.
 
 <a id="rtree-small-result-sort-fast-paths"></a>
+## CH-U27: Priority Merge Scheduler
+
+The explicit priority path is opt-in. This no-op control-plane benchmark uses
+one worker and 64 queued tasks:
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+|---|---:|---:|---:|---:|
+| Default `Schedule` | 33,495 | 17,704 | 96 | 1.00x |
+| `ScheduleWithPriority` | 45,077 | 20,376 | 98 | 1.35x |
+
+The existing default scheduler benchmark retained `3,400 B/op` and `12
+allocs/op` after the change. See [CHU27_PRIORITY_MERGE_SCHEDULER.md](CHU27_PRIORITY_MERGE_SCHEDULER.md).
+
 ## R-tree Small-Result Sort Fast Paths
 
 Command: `make benchmark-rtree-c219`.

@@ -47,6 +47,11 @@ type compactionPendingTask struct {
 	run func(context.Context) error
 }
 
+type compactionPriorityTask struct {
+	priority int
+	run      func(context.Context) error
+}
+
 // CompactionScheduler coalesces compaction requests by task name and bounds
 // maintenance concurrency. It is independent of any particular storage
 // engine; callers typically schedule a closure around an engine's Compact
@@ -55,15 +60,16 @@ type CompactionScheduler struct {
 	runMu sync.Mutex
 	mu    sync.Mutex
 
-	maxConcurrent int
-	pending       map[string]compactionPendingTask
-	running       map[string]struct{}
-	now           func() time.Time
-	oldestPending time.Time
-	oldestRunning time.Time
-	scheduled     uint64
-	completed     uint64
-	failed        uint64
+	maxConcurrent   int
+	pending         map[string]compactionPendingTask
+	priorityPending map[string]compactionPriorityTask
+	running         map[string]struct{}
+	now             func() time.Time
+	oldestPending   time.Time
+	oldestRunning   time.Time
+	scheduled       uint64
+	completed       uint64
+	failed          uint64
 }
 
 // NewCompactionScheduler validates and creates a compaction scheduler. A zero
@@ -83,9 +89,9 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 	}, nil
 }
 
-// Schedule requests one compaction for name. Duplicate requests are
-// coalesced while the task is queued or running. The bool is false when an
-// equivalent request is already pending or executing.
+// Schedule requests one default-priority compaction for name. Duplicate
+// requests are coalesced while the task is queued or running. The bool is
+// false when an equivalent request is already pending or executing.
 func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Context) error) (bool, error) {
 	if scheduler == nil {
 		return false, ErrCompactionSchedulerNil
@@ -96,6 +102,22 @@ func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Con
 	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	if scheduler.priorityPending != nil {
+		if _, exists := scheduler.priorityPending[name]; exists {
+			return false, nil
+		}
+		if _, exists := scheduler.running[name]; exists {
+			return false, nil
+		}
+		if scheduler.oldestPending.IsZero() {
+			scheduler.oldestPending = scheduler.now()
+		}
+		scheduler.priorityPending[name] = compactionPriorityTask{run: run}
+		return true, nil
+	}
+	if scheduler.pending == nil {
+		scheduler.pending = make(map[string]compactionPendingTask)
+	}
 	if _, exists := scheduler.pending[name]; exists {
 		return false, nil
 	}
@@ -109,6 +131,47 @@ func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Con
 	return true, nil
 }
 
+// ScheduleWithPriority requests one compaction with an explicit priority.
+// Higher priorities run first; equal priorities retain deterministic name
+// ordering. A higher-priority duplicate updates a task that is still queued,
+// while the currently running task remains unchanged.
+func (scheduler *CompactionScheduler) ScheduleWithPriority(name string, priority int, run func(context.Context) error) (bool, error) {
+	if priority == 0 {
+		return scheduler.Schedule(name, run)
+	}
+	if scheduler == nil {
+		return false, ErrCompactionSchedulerNil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || run == nil {
+		return false, ErrCompactionTaskInvalid
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if scheduler.priorityPending == nil {
+		scheduler.priorityPending = make(map[string]compactionPriorityTask, len(scheduler.pending)+1)
+		for pendingName, pending := range scheduler.pending {
+			scheduler.priorityPending[pendingName] = compactionPriorityTask{run: pending.run}
+		}
+		scheduler.pending = nil
+	}
+	if _, exists := scheduler.running[name]; exists {
+		return false, nil
+	}
+	if pending, exists := scheduler.priorityPending[name]; exists {
+		if priority > pending.priority {
+			pending.priority = priority
+			scheduler.priorityPending[name] = pending
+		}
+		return false, nil
+	}
+	if scheduler.oldestPending.IsZero() {
+		scheduler.oldestPending = scheduler.now()
+	}
+	scheduler.priorityPending[name] = compactionPriorityTask{priority: priority, run: run}
+	return true, nil
+}
+
 // Pending reports the number of queued tasks that have not started.
 func (scheduler *CompactionScheduler) Pending() int {
 	if scheduler == nil {
@@ -116,6 +179,15 @@ func (scheduler *CompactionScheduler) Pending() int {
 	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	if scheduler.priorityPending != nil {
+		pending := 0
+		for name := range scheduler.priorityPending {
+			if _, running := scheduler.running[name]; !running {
+				pending++
+			}
+		}
+		return pending
+	}
 	return len(scheduler.pending)
 }
 
@@ -133,7 +205,7 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 	scheduler.runMu.Lock()
 	defer scheduler.runMu.Unlock()
 
-	tasks := scheduler.takePending()
+	tasks, prioritized := scheduler.takePending()
 	result := CompactionRun{Scheduled: len(tasks)}
 	if len(tasks) == 0 {
 		return result, nil
@@ -141,9 +213,22 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 	if len(tasks) == 1 {
 		return scheduler.finishSingle(tasks[0], tasks[0].run(ctx))
 	}
-	sort.Slice(tasks, func(left, right int) bool {
-		return tasks[left].name < tasks[right].name
-	})
+	if prioritized {
+		scheduler.mu.Lock()
+		sort.Slice(tasks, func(left, right int) bool {
+			leftPriority := scheduler.priorityPending[tasks[left].name].priority
+			rightPriority := scheduler.priorityPending[tasks[right].name].priority
+			if leftPriority != rightPriority {
+				return leftPriority > rightPriority
+			}
+			return tasks[left].name < tasks[right].name
+		})
+		scheduler.mu.Unlock()
+	} else {
+		sort.Slice(tasks, func(left, right int) bool {
+			return tasks[left].name < tasks[right].name
+		})
+	}
 
 	workers := scheduler.maxConcurrent
 	if workers > len(tasks) {
@@ -174,20 +259,32 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 	for index, task := range tasks {
 		err := errs[index]
 		delete(scheduler.running, task.name)
+		_, priorityTask := scheduler.priorityPending[task.name]
 		if err == nil {
+			if priorityTask {
+				delete(scheduler.priorityPending, task.name)
+			}
 			result.Completed++
 			scheduler.completed++
 			continue
 		}
 		result.Failed++
 		scheduler.failed++
-		if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
+		if priorityTask {
+			// The priority entry remains in the queue; only its running marker
+			// was removed above.
+		} else if scheduler.priorityPending != nil {
+			scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run}
+		} else if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 			if scheduler.oldestPending.IsZero() {
 				scheduler.oldestPending = scheduler.now()
 			}
 			scheduler.pending[task.name] = compactionPendingTask{run: task.run}
 		}
 		failures = append(failures, fmt.Errorf("compaction task %q: %w", task.name, err))
+	}
+	if len(scheduler.priorityPending) == 0 {
+		scheduler.priorityPending = nil
 	}
 	if len(failures) > 0 {
 		return result, errors.Join(failures...)
@@ -201,27 +298,56 @@ func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err erro
 	defer scheduler.mu.Unlock()
 	scheduler.oldestRunning = time.Time{}
 	delete(scheduler.running, task.name)
+	_, priorityTask := scheduler.priorityPending[task.name]
 	if err == nil {
+		if priorityTask {
+			delete(scheduler.priorityPending, task.name)
+		}
 		result.Completed = 1
 		scheduler.completed++
 		return result, nil
 	}
 	result.Failed = 1
 	scheduler.failed++
-	if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
+	if priorityTask {
+		// The priority entry remains queued after the running marker is removed.
+	} else if scheduler.priorityPending != nil {
+		scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run}
+	} else if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 		if scheduler.oldestPending.IsZero() {
 			scheduler.oldestPending = scheduler.now()
 		}
 		scheduler.pending[task.name] = compactionPendingTask{run: task.run}
 	}
+	if len(scheduler.priorityPending) == 0 {
+		scheduler.priorityPending = nil
+	}
 	return result, errors.Join(fmt.Errorf("compaction task %q: %w", task.name, err))
 }
 
-func (scheduler *CompactionScheduler) takePending() []compactionTask {
+func (scheduler *CompactionScheduler) takePending() ([]compactionTask, bool) {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	if scheduler.priorityPending != nil {
+		if len(scheduler.priorityPending) == 0 {
+			return nil, true
+		}
+		startedAt := scheduler.now()
+		tasks := make([]compactionTask, 0, len(scheduler.priorityPending))
+		for name, pending := range scheduler.priorityPending {
+			if _, alreadyRunning := scheduler.running[name]; alreadyRunning {
+				continue
+			}
+			tasks = append(tasks, compactionTask{name: name, run: pending.run})
+			scheduler.running[name] = struct{}{}
+		}
+		scheduler.oldestPending = time.Time{}
+		scheduler.oldestRunning = startedAt
+		scheduler.scheduled += uint64(len(tasks))
+		return tasks, true
+	}
 	if len(scheduler.pending) == 0 {
-		return nil
+		return nil, false
 	}
 	startedAt := scheduler.now()
 	tasks := make([]compactionTask, 0, len(scheduler.pending))
@@ -233,5 +359,5 @@ func (scheduler *CompactionScheduler) takePending() []compactionTask {
 	scheduler.oldestPending = time.Time{}
 	scheduler.oldestRunning = startedAt
 	scheduler.scheduled += uint64(len(tasks))
-	return tasks
+	return tasks, false
 }
