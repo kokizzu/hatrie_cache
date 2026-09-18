@@ -382,6 +382,9 @@ type SQLQueryOptions struct {
 	// for related queries. Empty preserves the existing query path.
 	SnapshotToken      string
 	SnapshotTokenCodec *SQLSnapshotTokenCodec
+	// KeysetCursorTokenCodec optionally authenticates keyset continuation
+	// cursors and applies their expiry. Nil preserves the legacy cursor format.
+	KeysetCursorTokenCodec *SQLKeysetTokenCodec
 	// PlanSnapshot enables an immutable explain snapshot on the returned
 	// materialized result, including any source-frontier requirements.
 	PlanSnapshot *SQLPlanSnapshotOptions

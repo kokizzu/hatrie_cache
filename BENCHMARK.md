@@ -16908,6 +16908,31 @@ the current source snapshot, while the statistics path is an estimate and
 annotates the report accordingly. Neither path creates an index or changes
 normal SQL execution. See [SQL_WHATIF.md](SQL_WHATIF.md).
 
+## TR-028 Authenticated SQL Keyset Cursor Tokens
+
+Command: `make benchmark-tr028-keyset-token`.
+
+This benchmark compares the legacy JSON/base64 cursor codec with the opt-in
+HMAC-SHA256 and expiry wrapper for the same SQL keyset cursor. Five samples
+were collected on Linux amd64, AMD Ryzen 9 5950X.
+
+Raw output medians:
+
+| Path | Time (ns/op) | Heap (B/op) | Allocations (allocs/op) | Signed / legacy |
+| --- | ---: | ---: | ---: | --- |
+| Legacy encode | 708 | 497 | 4 | 1.00x baseline |
+| Signed encode | 1,211 | 1,296 | 9 | 1.71x CPU, 2.61x heap, 2.25x allocs |
+| Legacy decode | 2,123 | 504 | 11 | 1.00x baseline |
+| Signed wrapper decode | 1,098 | 880 | 8 | 0.52x CPU, 1.75x heap, 0.73x allocs |
+
+The representative cursor was 147 bytes in the legacy format and 262 bytes
+when signed: 1.78x the wire size, or 115 additional bytes. Signed decoding is
+the wrapper only; SQL still performs the existing cursor JSON decode afterward,
+so the enabled path adds the wrapper cost to the legacy decode. The feature is
+opt-in through `SQLQueryOptions.KeysetCursorTokenCodec`; nil preserves the
+legacy default with no new steady-state cost. See
+[TR028_AUTHENTICATED_KEYSET_TOKENS.md](TR028_AUTHENTICATED_KEYSET_TOKENS.md).
+
 ## SQL Keyset Pagination
 
 Command: `make benchmark-sql-keyset-hattrie`.

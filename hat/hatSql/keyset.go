@@ -76,6 +76,13 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 	if fingerprintErr != nil {
 		return result, fingerprintErr
 	}
+	if cursor != "" && options.KeysetCursorTokenCodec != nil {
+		decoded, cursorErr := options.KeysetCursorTokenCodec.Decode(cursor)
+		if cursorErr != nil {
+			return result, cursorErr
+		}
+		cursor = decoded.Cursor
+	}
 	var metrics *sqlExecutionMetrics
 	if observation.observer != nil || observation.recorder != nil || options.IndexHint.Mode != "" {
 		metrics = &sqlExecutionMetrics{indexHint: options.IndexHint}
@@ -89,6 +96,12 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 			partitionedResult.QueryID = observation.id
 			if partitionedErr != nil {
 				return partitionedResult, sqlRuntimeDiagnostic(partitionedErr)
+			}
+			if partitionedResult.NextCursor != "" && options.KeysetCursorTokenCodec != nil {
+				partitionedResult.NextCursor, err = options.KeysetCursorTokenCodec.Encode(partitionedResult.NextCursor)
+				if err != nil {
+					return partitionedResult, err
+				}
 			}
 			return partitionedResult, nil
 		}
@@ -134,6 +147,12 @@ func ExecuteSQLQueryKeysetPage(ctx context.Context, source string, resolver SQLS
 		result.NextCursor, err = encodeSQLKeysetCursor(next)
 		if err != nil {
 			return result, err
+		}
+		if options.KeysetCursorTokenCodec != nil {
+			result.NextCursor, err = options.KeysetCursorTokenCodec.Encode(result.NextCursor)
+			if err != nil {
+				return result, err
+			}
 		}
 	}
 	return result, nil

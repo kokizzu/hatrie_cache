@@ -20243,3 +20243,47 @@ commit-mz038-resizable-pipeline:
 .PHONY: push-mz038-resizable-pipeline
 push-mz038-resizable-pipeline:
 	@bash ./scripts/push-mz038-resizable-pipeline.sh
+
+.PHONY: test-tr028-keyset-token
+test-tr028-keyset-token:
+	bash ./scripts/test-tr028-keyset-token.sh
+
+.PHONY: format-tr028-keyset-token
+format-tr028-keyset-token:
+	bash ./scripts/format-tr028-keyset-token.sh
+
+.PHONY: benchmark-tr028-keyset-token
+benchmark-tr028-keyset-token:
+	bash ./scripts/benchmark-tr028-keyset-token.sh
+
+.PHONY: test-tr028-keyset-package
+test-tr028-keyset-package:
+	bash ./scripts/test-tr028-keyset-package.sh
+
+.PHONY: race-tr028-keyset-token
+race-tr028-keyset-token:
+	bash ./scripts/race-tr028-keyset-token.sh
+
+.PHONY: vet-tr028-keyset-token
+vet-tr028-keyset-token:
+	bash ./scripts/vet-tr028-keyset-token.sh
+
+.PHONY: verify-tr028-docs
+verify-tr028-docs:
+	bash ./scripts/verify-tr028-docs.sh
+
+.PHONY: status-tr028-keyset-token
+status-tr028-keyset-token:
+	bash ./scripts/status-tr028-keyset-token.sh
+
+.PHONY: stage-tr028-keyset-token
+stage-tr028-keyset-token:
+	bash ./scripts/stage-tr028-keyset-token.sh
+
+.PHONY: commit-tr028-keyset-token
+commit-tr028-keyset-token:
+	bash ./scripts/commit-tr028-keyset-token.sh
+
+.PHONY: push-tr028-keyset-token
+push-tr028-keyset-token:
+	bash ./scripts/push-tr028-keyset-token.sh
