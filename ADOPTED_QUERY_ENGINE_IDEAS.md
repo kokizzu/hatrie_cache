@@ -448,6 +448,16 @@ and build are slower than a hot mutable map, so this remains an opt-in format
 for persisted, transferred, and compaction input. See
 [MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md](MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md) and
 [BENCHMARK.md#mz-005-immutable-sealed-upsert-runs](BENCHMARK.md#mz-005-immutable-sealed-upsert-runs).
+### ClickHouse CH-045: GLOBAL IN / GLOBAL JOIN Broadcast Planning
+
+Implemented as the importable, caller-owned `hatSql.GlobalJoinBroadcastPlanner`.
+It bounds broadcast decisions by rows and bytes, keys reuse by query
+fingerprint plus source epoch, caps metadata with FIFO eviction, and reports
+remote subquery and fanout accounting. Large results fall back to explicit
+per-worker execution; network transport, payload publication, and SQL planner
+wiring remain caller-owned. See
+[CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md](CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md)
+and [BENCHMARK.md#ch-045-global-in-global-join-broadcast-planning](BENCHMARK.md#ch-045-global-in-global-join-broadcast-planning).
 ### Materialize MZ-029: Spillable Arrangements
 
 Implemented as the imported `hatDataStructure.SpillableArrangement` opt-in

@@ -4332,6 +4332,7 @@ the measured cost in
 
 ## Query Engine Notes
 
+- [ClickHouse-style GLOBAL IN / GLOBAL JOIN broadcast planning](CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md)
 - [MZ-030 incremental differential join](MZ030_INCREMENTAL_JOIN.md)
 ## Query Engine Notes
 

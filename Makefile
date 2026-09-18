@@ -20111,3 +20111,47 @@ commit-mz005-sealed-run:
 .PHONY: push-mz005-sealed-run
 push-mz005-sealed-run:
 	@bash ./scripts/push-mz005-sealed-run.sh
+
+.PHONY: test-ch045-global-broadcast
+test-ch045-global-broadcast:
+	@bash ./scripts/test-ch045-global-broadcast.sh
+
+.PHONY: format-ch045-global-broadcast
+format-ch045-global-broadcast:
+	@bash ./scripts/format-ch045-global-broadcast.sh
+
+.PHONY: format-ch045-global-broadcast-benchmark
+format-ch045-global-broadcast-benchmark:
+	@bash ./scripts/format-ch045-global-broadcast-benchmark.sh
+
+.PHONY: benchmark-ch045-global-broadcast
+benchmark-ch045-global-broadcast:
+	@bash ./scripts/benchmark-ch045-global-broadcast.sh
+
+.PHONY: verify-ch045-global-broadcast-docs
+verify-ch045-global-broadcast-docs:
+	@bash ./scripts/verify-ch045-global-broadcast-docs.sh
+
+.PHONY: test-ch045-global-broadcast-package
+test-ch045-global-broadcast-package:
+	@bash ./scripts/test-ch045-global-broadcast-package.sh
+
+.PHONY: race-ch045-global-broadcast
+race-ch045-global-broadcast:
+	@bash ./scripts/race-ch045-global-broadcast.sh
+
+.PHONY: vet-ch045-global-broadcast
+vet-ch045-global-broadcast:
+	@bash ./scripts/vet-ch045-global-broadcast.sh
+
+.PHONY: stage-ch045-global-broadcast
+stage-ch045-global-broadcast:
+	@bash ./scripts/stage-ch045-global-broadcast.sh
+
+.PHONY: commit-ch045-global-broadcast
+commit-ch045-global-broadcast:
+	@bash ./scripts/commit-ch045-global-broadcast.sh
+
+.PHONY: push-ch045-global-broadcast
+push-ch045-global-broadcast:
+	@bash ./scripts/push-ch045-global-broadcast.sh

@@ -31243,3 +31243,30 @@ This is an opt-in persistence/transfer format, not a hot-map replacement.
 The sealed path pays build and point-lookup CPU to reduce serialized size and
 validated decode cost. See [MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md](MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md)
 for the API, bounds, format, and stride sweep.
+
+## CH-045: GLOBAL IN / GLOBAL JOIN Broadcast Planning
+
+Workload: eight workers and a 1 MiB eligible global subquery result. The naive
+control only counts one remote subquery per worker. The candidate is the
+metadata-only `hatSql.GlobalJoinBroadcastPlanner`, measured for a warm cache
+hit and a cold eligible plan. Five 500 ms samples were run with `-benchmem` on
+Linux/amd64, AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Remote work/accounting | B/op | allocs/op | Improvement |
+| --- | ---: | --- | ---: | ---: | --- |
+| Naive per-worker accounting | 2.681 | 8 remote-fetches/op | 0 | 0 | 1.00x local CPU baseline |
+| Cached broadcast plan hit | 39.10 | 0 remote-fetches/op; 8 MiB fanout accounting | 0 | 0 | 14.6x local CPU cost, 8x fewer remote fetches |
+| Cold broadcast plan | 117.0 | 1 remote-fetch/op | 0 | 0 | 43.6x local CPU cost, 8x fewer remote fetches |
+
+Raw result samples:
+
+```text
+BenchmarkCH045NaivePerWorkerSubqueryAccounting: 2.906, 3.016, 2.681, 2.656, 2.671 ns/op; 8 remote-fetches/op; 0 B/op; 0 allocs/op
+BenchmarkCH045GlobalJoinBroadcastPlanHit: 39.10, 44.92, 39.67, 38.89, 39.01 ns/op; 1 cache-hit/op; 8388608 fanout-bytes/op; 0 B/op; 0 allocs/op
+BenchmarkCH045GlobalJoinBroadcastPlanCold: 114.8, 119.5, 116.4, 117.0, 118.9 ns/op; 1 remote-fetch/op; 0 B/op; 0 allocs/op
+```
+
+The local accounting overhead is intentional and small relative to a remote
+subquery. The planner does not send or retain rows; callers must use the plan
+to materialize once, fan out, publish atomically, and invalidate on epoch
+change. See [CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md](CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md).
