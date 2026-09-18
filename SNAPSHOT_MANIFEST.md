@@ -41,6 +41,22 @@ file returns an error wrapping `ErrSnapshotManifestMismatch` when the byte
 identity differs. Snapshot parsing still performs its normal structural and
 semantic validation during the subsequent load.
 
+## Atomic restore and recovery coverage
+
+Snapshot manifests are usable with the existing staged restore publication
+and resume flow. The restore tests cover semantic verification, atomic
+destination replacement, preservation of the previous destination on failure,
+symlink rejection, stale-file repair, and safe checkpoint retention. The
+focused manifest test also passes under the race detector.
+
+The 10k-key atomic-restore benchmark measures integrity and pass-count
+behavior, not a raw latency win. On an AMD Ryzen 9 5950X, the snapshot path
+used one payload pass but measured `69.0 ms` versus `58.8 ms` for the legacy
+double-pass path; the checkpoint path measured `213.6 ms` versus `78.1 ms`.
+The single-pass paths used fewer allocations, but their current checkpoint
+implementation is slower, so atomic publication should be selected for
+correctness, resumability, and failure isolation rather than throughput.
+
 ## Compatibility and cost
 
 The existing `WriteSnapshotWithFormat` and `SaveSnapshotWithFormat` APIs are
