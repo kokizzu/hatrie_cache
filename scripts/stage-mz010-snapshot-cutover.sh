@@ -11,7 +11,9 @@ git add -- \
   hat/hatPipeline/mz010_snapshot_cutover_benchmark_test.go \
   hat/hatPipeline/mz010_snapshot_cutover_test.go \
   scripts/benchmark-mz010-snapshot-cutover.sh \
+  scripts/commit-mz010-snapshot-cutover.sh \
   scripts/format-mz010-snapshot-cutover.sh \
+  scripts/push-mz010-snapshot-cutover.sh \
   scripts/race-mz010-snapshot-cutover.sh \
   scripts/review-mz010-snapshot-cutover.sh \
   scripts/stage-mz010-snapshot-cutover.sh \
