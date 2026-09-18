@@ -30572,3 +30572,34 @@ BenchmarkMZ009LeaseNext-32                4057990 28.10 ns/op   0 B/op  0 allocs
 BenchmarkMZ009LeaseNext-32                4270225 27.47 ns/op   0 B/op  0 allocs/op
 BenchmarkMZ009LeaseNext-32                4414605 27.74 ns/op   0 B/op  0 allocs/op
 ```
+<a id="mz-047-timeline-recovery"></a>
+## MZ047 Timeline Recovery
+
+MZ047 compares 128 persisted and observed timeline checkpoints and returns
+sorted adopt/replay/quarantine decisions. This is a recovery control-plane
+operation and is not installed on the normal request path.
+
+| Implementation | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Manual linear reconciliation | 53,506 | 16,584 | 4 | 1.00x |
+| MZ047 typed-slice reconciliation | 30,699 | 27,184 | 5 | 1.74x faster |
+
+The benchmark was run with `make benchmark-mz047-timeline-recovery` on an AMD
+Ryzen 9 5950X. The planner's extra 10,600 bytes and one allocation are bounded
+to the recovery call and buy input validation, deterministic ordering,
+detached results, and quarantine semantics. A map-based first implementation
+was rejected because it retained about 51,536 B/op and 8 allocations.
+Raw final samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+MZ047: 30076 27184 5
+MZ047: 30699 27184 5
+MZ047: 30414 27184 5
+MZ047: 31898 27184 5
+MZ047: 31489 27184 5
+manual: 53715 16584 4
+manual: 53506 16584 4
+manual: 51835 16584 4
+manual: 53632 16584 4
+manual: 52707 16584 4
+```

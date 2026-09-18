@@ -19280,3 +19280,40 @@ commit-mz024-arrangement-selection:
 .PHONY: push-mz024-arrangement-selection
 push-mz024-arrangement-selection:
 	bash ./scripts/push-mz024-arrangement-selection.sh
+.PHONY: test-mz047-timeline-recovery
+test-mz047-timeline-recovery:
+	bash ./scripts/test-mz047-timeline-recovery.sh
+.PHONY: format-mz047-timeline-recovery
+format-mz047-timeline-recovery:
+	bash ./scripts/format-mz047-timeline-recovery.sh
+
+.PHONY: benchmark-mz047-timeline-recovery
+benchmark-mz047-timeline-recovery:
+	bash ./scripts/benchmark-mz047-timeline-recovery.sh
+
+.PHONY: test-mz047-package
+test-mz047-package:
+	bash ./scripts/test-mz047-package.sh
+
+.PHONY: race-mz047-timeline-recovery
+race-mz047-timeline-recovery:
+	bash ./scripts/race-mz047-timeline-recovery.sh
+
+.PHONY: vet-mz047-timeline-recovery
+vet-mz047-timeline-recovery:
+	bash ./scripts/vet-mz047-timeline-recovery.sh
+.PHONY: review-mz047
+review-mz047:
+	bash ./scripts/review-mz047.sh
+
+.PHONY: stage-mz047
+stage-mz047:
+	bash ./scripts/stage-mz047.sh
+
+.PHONY: commit-mz047
+commit-mz047:
+	bash ./scripts/commit-mz047.sh
+
+.PHONY: push-mz047
+push-mz047:
+	bash ./scripts/push-mz047.sh

@@ -4442,3 +4442,11 @@ binary snapshot is CRC-protected and stores only bounded error categories, not
 raw error text. See
 [MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md](MU022_CONNECTOR_TRANSACTION_RETRY_JOURNAL.md)
 and the [M-U22 benchmark](BENCHMARK.md#mu-022-connector-transaction-retry-journal).
+## Timeline Recovery
+
+For crash recovery or a partially persisted multi-source cutover, use the
+bounded `hatPipeline.ReconcileTimelineRecovery` planner to compare persisted
+and observed frontiers. It returns deterministic adopt/replay/quarantine
+decisions without mutating live state. See
+[MZ047_TIMELINE_RECOVERY.md](MZ047_TIMELINE_RECOVERY.md) for semantics,
+limits, and measured cost.
