@@ -5,6 +5,8 @@ git add -- \
   Makefile \
   README.md \
   scripts/cleanup-hatrie-tmp.sh \
+  scripts/commit-cleanup-hatrie-tmp.sh \
+  scripts/push-cleanup-hatrie-tmp.sh \
   scripts/review-cleanup-hatrie-tmp.sh \
   scripts/stage-cleanup-hatrie-tmp.sh \
   scripts/test-cleanup-hatrie-tmp.sh
