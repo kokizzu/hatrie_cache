@@ -20369,3 +20369,36 @@ commit-m032-distributed-frontier:
 
 push-m032-distributed-frontier:
 	bash ./scripts/push-m032-distributed-frontier.sh
+
+benchmark-tr021-secondary-index-baseline:
+	bash ./scripts/benchmark-tr021-secondary-index-baseline.sh
+
+test-tr021-online-secondary-index:
+	bash ./scripts/test-tr021-online-secondary-index.sh
+
+benchmark-tr021-online-secondary-index:
+	bash ./scripts/benchmark-tr021-online-secondary-index.sh
+
+format-tr021-online-secondary-index:
+	bash ./scripts/format-tr021-online-secondary-index.sh
+
+race-tr021-online-secondary-index:
+	bash ./scripts/race-tr021-online-secondary-index.sh
+
+test-tr021-sql-package:
+	bash ./scripts/test-tr021-sql-package.sh
+
+vet-tr021-online-secondary-index:
+	bash ./scripts/vet-tr021-online-secondary-index.sh
+
+verify-tr021-online-secondary-index:
+	bash ./scripts/verify-tr021-online-secondary-index.sh
+
+stage-tr021-online-secondary-index:
+	bash ./scripts/stage-tr021-online-secondary-index.sh
+
+commit-tr021-online-secondary-index:
+	bash ./scripts/commit-tr021-online-secondary-index.sh
+
+push-tr021-online-secondary-index:
+	bash ./scripts/push-tr021-online-secondary-index.sh

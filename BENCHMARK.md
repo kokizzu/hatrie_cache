@@ -31410,3 +31410,23 @@ AMD Ryzen 9 5950X; rerun with `make benchmark-tr045-peer`.
 An opt-in four-worker replay experiment was rolled back after it made a
 matched 8,320-mutation workload 1.82x slower and used 6.35x more bytes per
 operation than serial replay. See [T042_RECOVERY_PARALLEL_REPLAY_EVALUATION.md](T042_RECOVERY_PARALLEL_REPLAY_EVALUATION.md).
+<a id="tr-021-materializedsource-online-secondary-index-build"></a>
+## TR-021 MaterializedSource Online Secondary-Index Build
+
+Command: `make benchmark-tr021-online-secondary-index`.
+
+This compares the public `MaterializedSource.Rows()` scan and external posting
+map rebuild with the opt-in `BuildSecondaryIndex` path over 10,000 rows and 64
+distinct `region` values. Five `-benchmem` samples ran on Linux/amd64 with an
+AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Public scan control, paired final run | 5,079,753; 5,085,857; 4,999,184; 5,042,269; 5,195,941 | 5,079,753 | 4,653,758 | 30,613 | baseline |
+| `BuildSecondaryIndex`, paired final run | 1,728,480; 1,720,430; 1,694,304; 1,680,027; 1,770,619 | 1,720,430 | 1,291,623 | 10,611 | 2.95x faster; 3.60x less bytes; 2.89x fewer allocations |
+
+The first pre-change baseline median was 5,828,411 ns/op, 4,653,742 B/op, and
+30,612 allocs/op. The new path avoids cloning every row while building and
+publishes the finished posting map only after a generation check. The index is
+opt-in and its long-lived map/posting memory is outside the per-operation
+allocation comparison. See [TR021_ONLINE_SECONDARY_INDEX.md](TR021_ONLINE_SECONDARY_INDEX.md).

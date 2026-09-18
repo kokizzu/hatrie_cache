@@ -1,10 +1,17 @@
 package hatSchema
 
 import (
+	"errors"
 	"fmt"
 	"hatrie_cache/hat/hatSql"
 	"strings"
 	"sync"
+)
+
+var (
+	ErrMaterializedSourceNil            = errors.New("hatSchema: materialized source is nil")
+	ErrMaterializedSourceColumnRequired = errors.New("hatSchema: materialized source index column is required")
+	ErrMaterializedSourceColumnUnknown  = errors.New("hatSchema: materialized source index column is unknown")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
@@ -38,6 +45,9 @@ func (adapter SQLResolverAdapter) ResolveSQLSource(name, key string) ([]hatSql.R
 func (adapter SQLResolverAdapter) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]hatSql.Row, bool, error) {
 	if strings.EqualFold(name, "CACHE") {
 		if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+			if !source.HasIndex(field) {
+				return nil, false, nil
+			}
 			return sqlRows(source.Lookup(field, value)), true, nil
 		}
 	}
@@ -55,16 +65,36 @@ func sqlRows(rows []Row) []hatSql.Row {
 	return converted
 }
 
+// SecondaryIndexBuildReport describes one online secondary-index build.
+type SecondaryIndexBuildReport struct {
+	Field    string
+	Rows     int
+	Attempts int
+}
+
 type MaterializedSource struct {
-	mu      sync.RWMutex
-	columns []DerivedColumn
-	nextID  map[string]int64
-	rows    []Row
-	indexes map[string]map[string][]int
+	mu            sync.RWMutex
+	columns       []DerivedColumn
+	nextID        map[string]int64
+	rows          []Row
+	indexes       map[string]map[string][]int
+	indexedFields map[string]struct{}
+	generation    uint64
 }
 
 func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
-	return &MaterializedSource{columns: append([]DerivedColumn(nil), columns...), nextID: map[string]int64{}, indexes: map[string]map[string][]int{}}
+	indexedFields := make(map[string]struct{})
+	for _, column := range columns {
+		if column.Indexed {
+			indexedFields[column.Name] = struct{}{}
+		}
+	}
+	return &MaterializedSource{
+		columns:       append([]DerivedColumn(nil), columns...),
+		nextID:        map[string]int64{},
+		indexes:       map[string]map[string][]int{},
+		indexedFields: indexedFields,
+	}
 }
 
 func (source *MaterializedSource) Insert(row Row) (Row, error) {
@@ -102,17 +132,79 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 	}
 	position := len(source.rows)
 	source.rows = append(source.rows, cloneRow(materialized))
-	for _, column := range source.columns {
-		if !column.Indexed {
+	for field := range source.indexedFields {
+		if source.indexes[field] == nil {
+			source.indexes[field] = map[string][]int{}
+		}
+		key := materializedIndexKey(materialized[field])
+		source.indexes[field][key] = append(source.indexes[field][key], position)
+	}
+	source.generation++
+	return cloneRow(materialized), nil
+}
+
+// HasIndex reports whether field has a maintained equality index.
+func (source *MaterializedSource) HasIndex(field string) bool {
+	if source == nil {
+		return false
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return false
+	}
+	source.mu.RLock()
+	_, indexed := source.indexedFields[field]
+	source.mu.RUnlock()
+	return indexed
+}
+
+// BuildSecondaryIndex builds and atomically installs an equality index while
+// allowing inserts and reads to continue. The builder snapshots row headers,
+// performs the expensive map construction outside the lock, and retries when
+// a concurrent insert changes the source generation before publication.
+func (source *MaterializedSource) BuildSecondaryIndex(field string) (SecondaryIndexBuildReport, error) {
+	if source == nil {
+		return SecondaryIndexBuildReport{}, ErrMaterializedSourceNil
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return SecondaryIndexBuildReport{}, ErrMaterializedSourceColumnRequired
+	}
+	report := SecondaryIndexBuildReport{Field: field}
+	for {
+		source.mu.RLock()
+		if !source.hasColumnLocked(field) {
+			source.mu.RUnlock()
+			return SecondaryIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceColumnUnknown, field)
+		}
+		generation := source.generation
+		rows := append([]Row(nil), source.rows...)
+		source.mu.RUnlock()
+
+		index := make(map[string][]int, len(rows))
+		for position, row := range rows {
+			key := materializedIndexKey(row[field])
+			index[key] = append(index[key], position)
+		}
+		report.Attempts++
+
+		source.mu.Lock()
+		if source.generation != generation {
+			source.mu.Unlock()
 			continue
 		}
-		if source.indexes[column.Name] == nil {
-			source.indexes[column.Name] = map[string][]int{}
+		if source.indexes == nil {
+			source.indexes = make(map[string]map[string][]int)
 		}
-		key := fmt.Sprintf("%T:%v", materialized[column.Name], materialized[column.Name])
-		source.indexes[column.Name][key] = append(source.indexes[column.Name][key], position)
+		if source.indexedFields == nil {
+			source.indexedFields = make(map[string]struct{})
+		}
+		source.indexes[field] = index
+		source.indexedFields[field] = struct{}{}
+		source.mu.Unlock()
+		report.Rows = len(rows)
+		return report, nil
 	}
-	return cloneRow(materialized), nil
 }
 
 func (source *MaterializedSource) Lookup(field string, value interface{}) []Row {
@@ -121,12 +213,25 @@ func (source *MaterializedSource) Lookup(field string, value interface{}) []Row 
 	}
 	source.mu.RLock()
 	defer source.mu.RUnlock()
-	positions := source.indexes[field][fmt.Sprintf("%T:%v", value, value)]
+	positions := source.indexes[field][materializedIndexKey(value)]
 	rows := make([]Row, 0, len(positions))
 	for _, position := range positions {
 		rows = append(rows, cloneRow(source.rows[position]))
 	}
 	return rows
+}
+
+func (source *MaterializedSource) hasColumnLocked(field string) bool {
+	for _, column := range source.columns {
+		if column.Name == field {
+			return true
+		}
+	}
+	return false
+}
+
+func materializedIndexKey(value interface{}) string {
+	return fmt.Sprintf("%T:%v", value, value)
 }
 
 func (source *MaterializedSource) Rows() []Row {
