@@ -112,6 +112,9 @@ func (source *KafkaTableSource) ConsumeOnceWithCheckpoint(ctx context.Context, c
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if source.isPaused() {
+		return KafkaTableIngestResult{}, ErrKafkaTableSourcePaused
+	}
 	batch, err := consumer.Poll(ctx)
 	if err != nil {
 		return KafkaTableIngestResult{}, err
@@ -131,6 +134,9 @@ func (source *KafkaTableSource) ConsumeOnceWithCheckpoint(ctx context.Context, c
 }
 
 func (source *KafkaTableSource) applyKafkaTableBatchLocked(normalizedMessages []KafkaTableMessage, offsets []SQLSourceOffset, transactionID string) (KafkaTableIngestResult, error) {
+	if source.lifecycle.State == KafkaTableSourceLifecyclePaused {
+		return KafkaTableIngestResult{}, ErrKafkaTableSourcePaused
+	}
 	envelope := SQLSourceTransactionEnvelope{
 		Source: source.source,
 		Transaction: SQLSourceTransaction{
@@ -173,6 +179,7 @@ func (source *KafkaTableSource) snapshotLocked() KafkaTableSourceSnapshot {
 		Table:      source.table,
 		Topic:      source.topic,
 		SourceKind: source.sourceKind,
+		Lifecycle:  source.lifecycle,
 		Rows:       rows,
 		Offsets:    source.offsets.Snapshot(),
 		Ingestions: source.ingestions.SnapshotEnvelopes(),
@@ -198,8 +205,13 @@ func (source *KafkaTableSource) restoreSnapshotLocked(snapshot KafkaTableSourceS
 	if err := replacementIngestions.RestoreEnvelopes(snapshot.Ingestions); err != nil {
 		return fmt.Errorf("%w: ingestions: %v", ErrKafkaTableSourceCheckpointInvalid, err)
 	}
+	lifecycle, err := normalizeKafkaTableSourceLifecycle(snapshot.Lifecycle)
+	if err != nil {
+		return fmt.Errorf("%w: lifecycle: %v", ErrKafkaTableSourceCheckpointInvalid, err)
+	}
 	source.rows = replacementRows
 	source.offsets = replacementOffsets
 	source.ingestions = replacementIngestions
+	source.lifecycle = lifecycle
 	return nil
 }

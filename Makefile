@@ -19806,6 +19806,36 @@ verify-ch046-kafka-table-source-docs:
 audit-next-ideas:
 	bash ./scripts/audit-next-ideas.sh
 
+format-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh format
+
+test-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh test
+
+benchmark-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh benchmark
+
+race-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh race
+
+vet-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh vet
+
+test-mz019-kafka-source-lifecycle-package:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh package
+
+verify-mz019-kafka-source-lifecycle-docs:
+	bash ./scripts/verify-mz019-kafka-source-lifecycle-docs.sh
+
+stage-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh stage
+
+commit-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh commit
+
+push-mz019-kafka-source-lifecycle:
+	bash ./scripts/test-mz019-kafka-source-lifecycle.sh push
+
 format-mz016-kafka-source-checkpoint:
 	bash ./scripts/test-mz016-kafka-source-checkpoint.sh format
 

@@ -144,6 +144,7 @@ type KafkaTableSourceSnapshot struct {
 	Table      string                         `json:"table"`
 	Topic      string                         `json:"topic"`
 	SourceKind string                         `json:"source_kind"`
+	Lifecycle  KafkaTableSourceLifecycle      `json:"lifecycle"`
 	Rows       map[string]Row                 `json:"rows"`
 	Offsets    []SQLSourceOffset              `json:"offsets"`
 	Ingestions []SQLSourceTransactionEnvelope `json:"ingestions"`
@@ -162,6 +163,7 @@ type KafkaTableSource struct {
 	rows             map[string]Row
 	offsets          *SQLSourceOffsetTracker
 	ingestions       *SQLSourceIngestionCoordinator
+	lifecycle        KafkaTableSourceLifecycle
 	stats            KafkaTableSourceStats
 }
 
@@ -208,6 +210,7 @@ func NewKafkaTableSource(options KafkaTableSourceOptions) (*KafkaTableSource, er
 		maxBatchMessages: maxBatchMessages,
 		offsets:          NewSQLSourceOffsetTracker(),
 		ingestions:       NewSQLSourceIngestionCoordinator(),
+		lifecycle:        KafkaTableSourceLifecycle{State: KafkaTableSourceLifecycleRunning},
 	}, nil
 }
 
@@ -245,6 +248,9 @@ func (source *KafkaTableSource) ApplyBatch(batch KafkaTableBatch) (KafkaTableIng
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
+	if source.lifecycle.State == KafkaTableSourceLifecyclePaused {
+		return KafkaTableIngestResult{}, ErrKafkaTableSourcePaused
+	}
 	return source.applyKafkaTableBatchLocked(normalizedMessages, offsets, transactionID)
 }
 
@@ -259,6 +265,9 @@ func (source *KafkaTableSource) ConsumeOnce(ctx context.Context, consumer KafkaT
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if source.isPaused() {
+		return KafkaTableIngestResult{}, ErrKafkaTableSourcePaused
 	}
 	batch, err := consumer.Poll(ctx)
 	if err != nil {
@@ -317,6 +326,7 @@ func (source *KafkaTableSource) Snapshot() KafkaTableSourceSnapshot {
 		Table:      source.table,
 		Topic:      source.topic,
 		SourceKind: source.sourceKind,
+		Lifecycle:  source.lifecycle,
 		Rows:       rows,
 		Offsets:    source.offsets.Snapshot(),
 		Ingestions: source.ingestions.SnapshotEnvelopes(),
@@ -347,10 +357,15 @@ func (source *KafkaTableSource) Restore(snapshot KafkaTableSourceSnapshot) error
 	if err := replacementIngestions.RestoreEnvelopes(snapshot.Ingestions); err != nil {
 		return fmt.Errorf("%w: ingestions: %w", ErrKafkaTableSourceSnapshotInvalid, err)
 	}
+	lifecycle, err := normalizeKafkaTableSourceLifecycle(snapshot.Lifecycle)
+	if err != nil {
+		return fmt.Errorf("%w: lifecycle: %v", ErrKafkaTableSourceSnapshotInvalid, err)
+	}
 	source.mu.Lock()
 	source.rows = replacementRows
 	source.offsets = replacementOffsets
 	source.ingestions = replacementIngestions
+	source.lifecycle = lifecycle
 	source.stats = KafkaTableSourceStats{}
 	source.mu.Unlock()
 	return nil

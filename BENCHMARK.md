@@ -31122,3 +31122,18 @@ Command: `make benchmark-mz016-kafka-source-checkpoint`.
 Median: normal 4,796 ns/op, checkpoint 5,992 ns/op. The checkpoint path is
 1.25x CPU time, 1.33x bytes, and 13 allocations higher. This is opt-in and
 scales with the retained source snapshot; the normal path is unchanged.
+## MZ-019: Durable Kafka source lifecycle state
+
+Workload: one in-memory `Pause` plus `Resume` pair on a Kafka table source.
+Durable variants use the MZ-16 full checkpoint path; this isolates the
+operator-state transition cost.
+
+Command: `make benchmark-mz019-kafka-source-lifecycle`.
+
+| Operation | Raw ns/op samples | B/op | allocs/op |
+| --- | --- | --- | --- |
+| Pause + Resume | 84.92, 79.11, 84.86, 85.90, 89.49 | 0 | 0 |
+
+Median is `84.92 ns/op` with zero allocations. The normal running path is
+unchanged; durable lifecycle changes pay the existing full-checkpoint snapshot
+cost.
