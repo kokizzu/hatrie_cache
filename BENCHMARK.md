@@ -30038,3 +30038,55 @@ memory. The 48 B lookup cost is intentional: returned definitions and their
 argument slices are independent copies. See
 [MU032_UDF_CAPABILITIES.md](MU032_UDF_CAPABILITIES.md) for the trust model and
 planner integration limits.
+
+<a id="ch-004-final-read-semantics"></a>
+## CH-004 FINAL Read Semantics
+
+`make benchmark-ch004-final-baseline`, `make benchmark-ch004-final`, and
+`make benchmark-ch004-final-rows` run five samples on the AMD Ryzen 9 5950X
+Linux/amd64 host. The fixture has 4,096 input rows and 1,024 logical keys.
+The comparison benchmark measures the existing query without `FINAL`,
+replacing `FINAL`, and collapsing `FINAL`. The row benchmark measures
+`ExecuteSQLQueryRows` with replacing reconciliation.
+
+Final raw comparison output:
+
+```text
+BenchmarkCH004Final/legacy-32         877 1462525 ns/op 1413055 B/op 8205 allocs/op
+BenchmarkCH004Final/legacy-32         823 1336346 ns/op 1413048 B/op 8205 allocs/op
+BenchmarkCH004Final/legacy-32         885 1367008 ns/op 1413054 B/op 8205 allocs/op
+BenchmarkCH004Final/legacy-32         984 1360240 ns/op 1413048 B/op 8205 allocs/op
+BenchmarkCH004Final/legacy-32         898 1323955 ns/op 1413047 B/op 8205 allocs/op
+BenchmarkCH004Final/replacing-32      525 2212729 ns/op 2578947 B/op 12328 allocs/op
+BenchmarkCH004Final/replacing-32      544 2192269 ns/op 2578946 B/op 12328 allocs/op
+BenchmarkCH004Final/replacing-32      522 2221515 ns/op 2578955 B/op 12328 allocs/op
+BenchmarkCH004Final/replacing-32      532 2201275 ns/op 2578948 B/op 12328 allocs/op
+BenchmarkCH004Final/replacing-32      528 2189623 ns/op 2578946 B/op 12328 allocs/op
+BenchmarkCH004Final/collapsing-32     261 4706292 ns/op 5829334 B/op 27705 allocs/op
+BenchmarkCH004Final/collapsing-32     247 4738575 ns/op 5829332 B/op 27705 allocs/op
+BenchmarkCH004Final/collapsing-32     253 4612127 ns/op 5829328 B/op 27705 allocs/op
+BenchmarkCH004Final/collapsing-32     262 4613397 ns/op 5829327 B/op 27705 allocs/op
+BenchmarkCH004Final/collapsing-32     261 4759565 ns/op 5829334 B/op 27705 allocs/op
+```
+
+Final raw row-stream output:
+
+```text
+BenchmarkCH004FinalRows-32 392 2889301 ns/op 2762507 B/op 18482 allocs/op
+BenchmarkCH004FinalRows-32 410 2892373 ns/op 2762487 B/op 18482 allocs/op
+BenchmarkCH004FinalRows-32 427 2857584 ns/op 2762412 B/op 18482 allocs/op
+BenchmarkCH004FinalRows-32 430 2810714 ns/op 2762435 B/op 18482 allocs/op
+BenchmarkCH004FinalRows-32 402 2959523 ns/op 2762439 B/op 18482 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | CPU vs legacy | Heap vs legacy | Allocs vs legacy |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy query | 1,360,240 | 1,413,048 | 8,205 | 1.00x | 1.00x | 1.00x |
+| Replacing FINAL | 2,201,275 | 2,578,948 | 12,328 | 1.62x | 1.83x | 1.50x |
+| Collapsing FINAL | 4,706,292 | 5,829,332 | 27,705 | 3.46x | 4.13x | 3.38x |
+| Replacing FINAL row callback | 2,889,301 | 2,762,439 | 18,482 | 2.12x* | 1.95x* | 2.25x* |
+
+`FINAL` is therefore kept off by default. The legacy path's allocations and
+heap are unchanged by the feature; the measured costs are paid only when
+reconciliation is explicitly requested. The row-callback comparison is not
+strictly apples-to-apples because its control is materialized.

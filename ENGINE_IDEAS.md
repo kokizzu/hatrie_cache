@@ -30,7 +30,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-001 | Explicit `PREWHERE` stage | Implemented for stream-capable single-source reads; specialized physical plans still use a combined predicate. | Low |
 | CH-002 | Sparse primary-key mark pruning | Ordered JSON indexes now prune literal ranges with binary-search bounds; physical part/mark granularity is still deferred. | Medium |
 | CH-003 | Partition-key pruning | Partially adopted: SQL now forwards validated literal equality, `IN`, and range predicates to opt-in partition resolvers; concrete physical partition metadata remains backend-specific. | Medium |
-| CH-004 | `FINAL` read semantics | No query-time reconciliation of replacing or collapsing versions. | High |
+| CH-004 | `FINAL` read semantics | Partially adopted: explicit SQL `FINAL` reconciles caller-defined replacing or collapsing source rows; automatic schema-bound metadata and persistent merge integration remain open. | High |
 | CH-005 | Lightweight delete bitmap | Opt-in typed-table patch parts use a compact in-memory bitmap; persistent immutable stored-part delete bitmaps remain open. | High |
 | CH-006 | Mutation dependency queue | No durable dependency-aware queue for ALTER/DELETE mutations. | High |
 | CH-007 | Row TTL | Adopted as an opt-in `TypedTable` processing-time or event-time policy with an indexed explicit purge, a shared bounded background scheduler, and CRC-protected processing-time deadline snapshots. Column-level TTL, automatic schema integration, and retry policy remain caller-owned. | Medium |

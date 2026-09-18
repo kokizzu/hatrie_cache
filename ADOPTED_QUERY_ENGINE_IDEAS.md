@@ -527,3 +527,16 @@ snapshot API and all defaults are unchanged. The 64-connector fixture encodes
 to encode and 15.66x faster to decode. See
 [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md) and
 [BENCHMARK.md](BENCHMARK.md#m-u01-durable-connector-lifecycle-state).
+
+## CH-004: `FINAL` Read Semantics
+
+ClickHouse-style query-time `FINAL` is adopted as an explicit opt-in SQL
+capability. `SQLFinalReplacing` keeps the highest caller-defined version per
+key, while `SQLFinalCollapsing` cancels caller-defined opposite signs and
+preserves unmatched rows. The resolver contract is required and the executor
+fails closed when a marked source has no configuration. Existing query paths
+remain unchanged without `FINAL`; marked queries bypass shortcuts that could
+return unreconciled rows and reconcile before downstream operators consume the
+source. See [CH004_FINAL_READ.md](CH004_FINAL_READ.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics). Persistent
+schema-bound metadata and background merge integration remain open.

@@ -374,6 +374,10 @@ type SQLQueryOptions struct {
 	// frontier. Nil preserves the live/default execution path; a non-nil
 	// pointer also permits an explicit frontier of zero.
 	AsOfFrontier *uint64
+	// FinalSourceOptions enables explicit ClickHouse-style FINAL
+	// reconciliation for sources marked FINAL in the query. Nil preserves the
+	// existing unreconciled source path and is the default.
+	FinalSourceOptions *SQLFinalSourceOptionsResolver
 	// SnapshotToken optionally authenticates and selects an immutable frontier
 	// for related queries. Empty preserves the existing query path.
 	SnapshotToken      string
@@ -870,7 +874,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		result.QueryID = observation.id
 		return result, err
 	}
-	if options.AsOfFrontier == nil {
+	if options.AsOfFrontier == nil && !sqlQueryHasFinalSource(query) {
 		if key, version, dependencies, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
 			execute := func(execCtx context.Context) (QueryResult, error) {
 				return executeSQLQueryUncached(execCtx, source, query, resolver, options, control, observation, &operatorSteps)
@@ -903,6 +907,11 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 	result.QueryID = observation.id
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
+	}
+	if sqlQueryHasFinalSource(query) {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		result.QueryID = observation.id
+		return result, err
 	}
 	if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
 		if (control.options.MaxRows > 0 || control.options.MaxIntermediateRows > 0) && len(projection.Rows) > control.maxRows {
@@ -1325,6 +1334,18 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
+	}
+	if sqlQueryHasFinalSource(query) {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if err := visit(result.Columns, row); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if query.qualify.kind != "" {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
@@ -5947,6 +5968,7 @@ type sqlCTE struct {
 type sqlSource struct {
 	kind, key, alias string
 	lateral          bool
+	final            bool
 	values           [][]interface{}
 	columns          []string
 	fieldTypes       map[string]sqlSourceFieldType
@@ -6753,14 +6775,22 @@ func (p *sqlQueryParser) parseArrayJoin() (sqlJoin, error) {
 }
 
 func (p *sqlQueryParser) parseAlias(source *sqlSource) error {
+	if p.keyword("FINAL") {
+		source.final = true
+		p.next()
+	}
 	if p.keyword("AS") {
 		p.next()
 		if p.current().kind == sqlTokenIdentifier {
 			source.alias = p.current().text
 			p.next()
 		}
-	} else if p.current().kind == sqlTokenIdentifier && !sqlClauseKeyword(p.current().text) && !strings.EqualFold(p.current().text, "JION") {
+	} else if p.current().kind == sqlTokenIdentifier && !sqlClauseKeyword(p.current().text) && !p.keyword("FINAL") && !strings.EqualFold(p.current().text, "JION") {
 		source.alias = p.current().text
+		p.next()
+	}
+	if p.keyword("FINAL") {
+		source.final = true
 		p.next()
 	}
 	if p.current().kind == sqlTokenLeftParen {
@@ -8660,6 +8690,9 @@ func executeSQLApproximateAggregateResultStream(q *sqlQuery, resolver SQLSourceR
 // columns. It only accepts a single-source field projection with a simple
 // field/literal predicate, so every other query keeps the general executor.
 func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
+	if sqlQueryHasFinalSource(q) {
+		return SQLQueryResult{}, false, nil
+	}
 	if sqlQueryHasWithFill(q) {
 		return SQLQueryResult{}, false, nil
 	}
@@ -11452,6 +11485,7 @@ func sqlColumnarNumericMatches(number float64, operator string, value float64) b
 }
 
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
+	finalSource := sqlQueryHasFinalSource(q)
 	if q != nil && q.prewhere.kind != "" && !sqlPrewhereStreamable(q, resolver) {
 		q = sqlQueryWithCombinedPrewhere(q)
 	}
@@ -11490,12 +11524,12 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		}
 		ctes[cte.name] = rows
 	}
-	if outer == nil {
+	if outer == nil && !finalSource {
 		if result, handled, streamErr := executeSQLApproximateAggregateResultStream(q, resolver, control); handled {
 			return result, streamErr
 		}
 	}
-	if !sqlQueryHasWithFill(q) && q.limitBy == nil {
+	if !finalSource && !sqlQueryHasWithFill(q) && q.limitBy == nil {
 		if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
 			return result, runtimeErr
 		}
@@ -11506,7 +11540,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, streamErr
 		}
 	}
-	if !sqlQueryHasWithFill(q) {
+	if !finalSource && !sqlQueryHasWithFill(q) {
 		if result, handled, streamErr := executeSQLHashGroupAggregateStream(q, resolver, control, metrics, nil); handled {
 			return result, streamErr
 		}
@@ -11516,7 +11550,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	var rows []sqlExecRow
 	reordered := false
 	var err error
-	if !sqlQueryHasSubqueryExpression(q) {
+	if !finalSource && !sqlQueryHasSubqueryExpression(q) {
 		rows, reordered, err = executeSQLReorderedInnerHashJoins(q, resolver, ctes, metrics, control, maxRows)
 	}
 	if err != nil {
@@ -11535,12 +11569,12 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
 			}
 		}
-		if !indexed && q.sample == nil && !sqlQueryHasWithFill(q) {
+		if !finalSource && !indexed && q.sample == nil && !sqlQueryHasWithFill(q) {
 			if result, handled, err := executeSQLColumnarScan(q, resolver, control, metrics, outer); handled {
 				return result, err
 			}
 		}
-		if !indexed && q.limitBy == nil {
+		if !finalSource && !indexed && q.limitBy == nil {
 			if result, handled, err := executeSQLPrewhereScan(q, resolver, ctes, metrics, control, outer); handled {
 				return result, err
 			}
@@ -13439,9 +13473,9 @@ func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[str
 func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, predicates []SQLPartitionPredicate) ([]SQLRow, error) {
 	switch source.kind {
 	case "VALUES":
-		return valuesSQLRows(source.values, source.columns), nil
+		return finalizeSQLSourceRows(source, control, valuesSQLRows(source.values, source.columns))
 	case "CTE":
-		return ctes[source.key], nil
+		return finalizeSQLSourceRows(source, control, ctes[source.key])
 	case "SUBQUERY":
 		var result SQLQueryResult
 		var err error
@@ -13453,15 +13487,19 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 		if err != nil {
 			return nil, err
 		}
-		return result.Rows, nil
+		return finalizeSQLSourceRows(source, control, result.Rows)
 	case "CACHE", "KEYS":
 		if resolver == nil {
-			return nil, nil
+			return finalizeSQLSourceRows(source, control, nil)
 		}
 		cacheKey := source.kind + "\x00" + source.key
 		if control != nil {
 			if rows, ok := control.sources[cacheKey]; ok {
-				return validateSQLSourceFieldTypes(source, cloneSQLRows(rows))
+				validated, err := validateSQLSourceFieldTypes(source, cloneSQLRows(rows))
+				if err != nil {
+					return nil, err
+				}
+				return finalizeSQLSourceRows(source, control, validated)
 			}
 		}
 		var rows []SQLRow
@@ -13501,7 +13539,7 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 		cacheKey := source.kind + "\x00" + source.key
 		if control != nil {
 			if rows, ok := control.sources[cacheKey]; ok {
-				return cloneSQLRows(rows), nil
+				return finalizeSQLSourceRows(source, control, cloneSQLRows(rows))
 			}
 		}
 		external, ok := resolver.(ExternalSourceResolver)
@@ -13515,7 +13553,7 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 		if control != nil {
 			control.sources[cacheKey] = cloneSQLRows(rows)
 		}
-		return rows, nil
+		return finalizeSQLSourceRows(source, control, rows)
 	case "TABLE":
 		if resolver == nil {
 			return nil, fmt.Errorf("TABLE(%q) requires a table function resolver", source.key)
@@ -13532,7 +13570,7 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 		if err != nil {
 			return nil, err
 		}
-		return rows, nil
+		return finalizeSQLSourceRows(source, control, rows)
 	}
 	return nil, nil
 }
@@ -13549,7 +13587,11 @@ func finishSQLSourceRows(source sqlSource, control *sqlExecutionControl, rows []
 			control.sources[cacheKey] = cloneSQLRows(rows)
 		}
 	}
-	return validateSQLSourceFieldTypes(source, rows)
+	validated, err := validateSQLSourceFieldTypes(source, rows)
+	if err != nil {
+		return nil, err
+	}
+	return finalizeSQLSourceRows(source, control, validated)
 }
 
 func resolveSQLSourcePartitions(resolver PartitionedSourceResolver, name, key string) ([]SQLRow, bool, error) {
@@ -13879,6 +13921,9 @@ func sqlCoveringIndexedEquality(source sqlSource, condition sqlExpr) (string, in
 }
 
 func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, coveringFields []string) ([]SQLRow, bool, error) {
+	if source.final {
+		return nil, false, nil
+	}
 	if (source.kind != "CACHE" && source.kind != "EXTERNAL") || len(source.fieldTypes) != 0 {
 		return nil, false, nil
 	}
@@ -14257,6 +14302,9 @@ func resolveSQLJoinPushedSource(source sqlSource, condition sqlExpr, resolver SQ
 // the ordered field may additionally select a source-side range scan; the
 // complete predicate is still evaluated by the normal executor.
 func resolveSQLOrderedSource(q *sqlQuery, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+	if q != nil && q.from != nil && q.from.final {
+		return nil, false, nil
+	}
 	if q == nil || q.from == nil || q.sample != nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || q.distinct || sqlQueryHasWindow(q) || len(q.joins) != 0 || len(q.unions) != 0 || len(q.orderBy) != 1 {
 		return nil, false, nil
 	}

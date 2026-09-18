@@ -18753,3 +18753,54 @@ benchmark-mu027-logical-publication-baseline:
 
 benchmark-mu027-logical-publication:
 	bash ./scripts/benchmark-mu027-logical-publication.sh current
+.PHONY: test-ch004-final
+test-ch004-final:
+	bash ./scripts/test-ch004-final.sh
+
+.PHONY: benchmark-ch004-final-baseline
+benchmark-ch004-final-baseline:
+	bash ./scripts/benchmark-ch004-final-baseline.sh
+
+.PHONY: benchmark-ch004-final
+benchmark-ch004-final:
+	bash ./scripts/benchmark-ch004-final.sh
+
+.PHONY: benchmark-ch004-final-rows
+benchmark-ch004-final-rows:
+	bash ./scripts/benchmark-ch004-final-rows.sh
+
+.PHONY: format-ch004-final
+format-ch004-final:
+	bash ./scripts/format-ch004-final.sh
+
+.PHONY: test-ch004-package-final
+test-ch004-package-final:
+	bash ./scripts/test-ch004-package.sh
+
+.PHONY: test-ch004-all
+test-ch004-all:
+	bash ./scripts/test-ch004-all.sh
+
+.PHONY: race-ch004-final
+race-ch004-final:
+	bash ./scripts/race-ch004-final.sh
+
+.PHONY: vet-ch004-final
+vet-ch004-final:
+	bash ./scripts/vet-ch004-final.sh
+
+.PHONY: review-ch004-final
+review-ch004-final:
+	bash ./scripts/review-ch004-final.sh
+
+.PHONY: stage-ch004-final
+stage-ch004-final:
+	bash ./scripts/stage-ch004-final.sh
+
+.PHONY: commit-ch004-final
+commit-ch004-final:
+	bash ./scripts/commit-ch004-final.sh
+
+.PHONY: push-ch004-final
+push-ch004-final:
+	bash ./scripts/push-ch004-final.sh
