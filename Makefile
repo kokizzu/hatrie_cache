@@ -19803,6 +19803,39 @@ test-ch046-kafka-table-source-package:
 verify-ch046-kafka-table-source-docs:
 	bash ./scripts/verify-ch046-kafka-table-source-docs.sh
 
+audit-next-ideas:
+	bash ./scripts/audit-next-ideas.sh
+
+format-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh format
+
+test-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh test
+
+benchmark-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh benchmark
+
+race-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh race
+
+vet-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh vet
+
+test-mz014-avro-schema-registry-package:
+	bash ./scripts/test-mz014-avro-schema-registry.sh package
+
+verify-mz014-avro-schema-registry-docs:
+	bash ./scripts/verify-mz014-avro-schema-registry-docs.sh
+
+stage-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh stage
+
+commit-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh commit
+
+push-mz014-avro-schema-registry:
+	bash ./scripts/test-mz014-avro-schema-registry.sh push
+
 stage-ch046-kafka-table-source:
 	bash ./scripts/test-ch046-kafka-table-source.sh stage
 

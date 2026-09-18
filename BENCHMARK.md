@@ -31037,3 +31037,28 @@ Medians are 4.43 ms, 3.81 MB, and 20,253 allocations for the baseline;
 4.52 ms, 4.15 MB, and 20,283 allocations for the batched source. Relative to
 the baseline, the source is 1.02x CPU, 1.09x memory, and 1.00x allocations.
 This is a small durability/correctness cost, not a throughput improvement.
+## MZ-014 Avro Schema Registry
+
+Benchmark command:
+
+```text
+make benchmark-mz014-avro-schema-registry
+```
+
+Workload: 10,000 Confluent-framed records using one schema ID. The baseline
+fetches and allocates the schema for every record. The cached path warms the
+same schema once and then uses the read-only `Borrow` hit path. Five samples
+were collected with `-benchmem` on the same Linux/amd64 host.
+
+Raw samples:
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Fetch every record | 493,523; 426,504; 488,497; 480,615; 477,393 | 800,128; 800,137; 800,137; 800,141; 800,144 | 10,003; 10,004; 10,004; 10,004; 10,004 |
+| Bounded hot cache | 165,327; 165,164; 162,108; 163,314; 163,003 | 0; 0; 0; 0; 0 | 0; 0; 0; 0; 0 |
+
+Medians are 480,615 ns/op, 800,137 B/op, and 10,004 allocations for the
+baseline; 163,314 ns/op, 0 B/op, and 0 allocations for the cached path. The
+hot cache is 2.94x faster and removes per-record schema allocations. Network
+latency and actual Avro datum decoding are intentionally outside this shared
+boundary benchmark.
