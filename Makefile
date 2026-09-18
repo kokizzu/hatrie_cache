@@ -19072,6 +19072,52 @@ test-tr037-package:
 review-tr037:
 	bash ./scripts/review-tr037.sh
 
+.PHONY: test-tr022-index-rebuild-verification
+test-tr022-index-rebuild-verification:
+	bash ./scripts/test-tr022-index-rebuild-verification.sh
+
+.PHONY: format-tr022-index-rebuild-verification
+format-tr022-index-rebuild-verification:
+	bash ./scripts/format-tr022-index-rebuild-verification.sh
+
+.PHONY: benchmark-tr022-index-rebuild-verification
+benchmark-tr022-index-rebuild-verification:
+	bash ./scripts/benchmark-tr022-index-rebuild-verification.sh
+
+.PHONY: test-tr022-package
+test-tr022-package:
+	bash ./scripts/test-tr022-package.sh
+
+.PHONY: race-tr022-index-rebuild-verification
+race-tr022-index-rebuild-verification:
+	bash ./scripts/race-tr022-index-rebuild-verification.sh
+
+.PHONY: vet-tr022-index-rebuild-verification
+vet-tr022-index-rebuild-verification:
+	bash ./scripts/vet-tr022-index-rebuild-verification.sh
+
+.PHONY: review-tr022
+review-tr022:
+	bash ./scripts/review-tr022.sh
+
+.PHONY: stage-tr022-index-rebuild-verification
+stage-tr022-index-rebuild-verification:
+	bash ./scripts/stage-tr022-index-rebuild-verification.sh
+
+.PHONY: commit-tr022-index-rebuild-verification
+commit-tr022-index-rebuild-verification:
+	bash ./scripts/commit-tr022-index-rebuild-verification.sh
+
+.PHONY: push-tr022-index-rebuild-verification
+push-tr022-index-rebuild-verification:
+	bash ./scripts/push-tr022-index-rebuild-verification.sh
+
+
+
+
+
+
+
 .PHONY: stage-tr037-deadlock-detection
 stage-tr037-deadlock-detection:
 	bash ./scripts/stage-tr037-deadlock-detection.sh

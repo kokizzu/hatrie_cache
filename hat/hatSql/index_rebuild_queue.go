@@ -53,25 +53,32 @@ type SQLIndexRebuildProgressFunc func(completed, total int)
 
 type SQLIndexRebuildFunc func(context.Context, SQLIndexRebuildProgressFunc) error
 
+// SQLIndexRebuildVerifyFunc validates the materialized index after Run has
+// completed. A non-nil error prevents the task from becoming succeeded.
+type SQLIndexRebuildVerifyFunc func(context.Context) error
+
 type SQLIndexRebuildRequest struct {
 	ID       string
 	Name     string
 	Priority int
 	Run      SQLIndexRebuildFunc
+	Verify   SQLIndexRebuildVerifyFunc
 }
 
 type SQLIndexRebuildStatus struct {
-	ID              string
-	Name            string
-	Priority        int
-	State           SQLIndexRebuildState
-	SubmittedAt     time.Time
-	StartedAt       time.Time
-	FinishedAt      time.Time
-	Completed       int
-	Total           int
-	CancelRequested bool
-	Error           string
+	ID                    string
+	Name                  string
+	Priority              int
+	State                 SQLIndexRebuildState
+	SubmittedAt           time.Time
+	StartedAt             time.Time
+	FinishedAt            time.Time
+	Completed             int
+	Total                 int
+	CancelRequested       bool
+	VerificationRequested bool
+	Verified              bool
+	Error                 string
 }
 
 type sqlIndexRebuildTask struct {
@@ -239,11 +246,12 @@ func (queue *SQLIndexRebuildQueue) Enqueue(request SQLIndexRebuildRequest) (SQLI
 		request:  request,
 		sequence: queue.nextSequence,
 		status: SQLIndexRebuildStatus{
-			ID:          request.ID,
-			Name:        request.Name,
-			Priority:    request.Priority,
-			State:       SQLIndexRebuildQueued,
-			SubmittedAt: time.Now(),
+			ID:                    request.ID,
+			Name:                  request.Name,
+			Priority:              request.Priority,
+			State:                 SQLIndexRebuildQueued,
+			SubmittedAt:           time.Now(),
+			VerificationRequested: request.Verify != nil,
 		},
 	}
 	wasIdle := queue.isIdleLocked()
@@ -393,6 +401,7 @@ func (queue *SQLIndexRebuildQueue) worker() {
 			return
 		}
 		var runErr error
+		verified := false
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
@@ -402,8 +411,12 @@ func (queue *SQLIndexRebuildQueue) worker() {
 			runErr = task.request.Run(task.ctx, func(completed, total int) {
 				queue.updateProgress(task, completed, total)
 			})
+			if runErr == nil && task.request.Verify != nil && task.ctx.Err() == nil {
+				runErr = task.request.Verify(task.ctx)
+				verified = runErr == nil
+			}
 		}()
-		queue.finishTask(task, runErr)
+		queue.finishTask(task, runErr, verified)
 	}
 }
 
@@ -458,7 +471,7 @@ func (queue *SQLIndexRebuildQueue) updateProgress(task *sqlIndexRebuildTask, com
 	task.status.Completed = completed
 }
 
-func (queue *SQLIndexRebuildQueue) finishTask(task *sqlIndexRebuildTask, runErr error) {
+func (queue *SQLIndexRebuildQueue) finishTask(task *sqlIndexRebuildTask, runErr error, verified bool) {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 	if _, ok := queue.tasks[task.request.ID]; !ok || task.status.State != SQLIndexRebuildRunning {
@@ -475,6 +488,7 @@ func (queue *SQLIndexRebuildQueue) finishTask(task *sqlIndexRebuildTask, runErr 
 	} else if runErr != nil {
 		state = SQLIndexRebuildFailed
 	}
+	task.status.Verified = state == SQLIndexRebuildSucceeded && verified
 	queue.finishLocked(task, state, errText)
 	queue.updateIdleLocked(false)
 }

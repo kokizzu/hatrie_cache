@@ -167,7 +167,7 @@ before/after measurement when its motivation is performance.
 | TR-19a | Plain columnar value dispatch fast path | Avoid probing unused physical layouts | Mixed-layout branch | [x] Implemented by the C168 plain-only `ColumnarBatch.Value` path; see [TR019_COLUMNAR_VALUE_FASTPATH.md](TR019_COLUMNAR_VALUE_FASTPATH.md). |
 | TR-20 | Tuple schema-version validation on every boundary | Reject incompatible records early | Version metadata | [ ] |
 | TR-21 | Online secondary-index build | Add indexes without blocking writes | Build/replay resource usage | [ ] |
-| TR-22 | Online secondary-index rebuild and verification | Repair indexes safely | Double storage and I/O | [ ] |
+| TR-22 | Online secondary-index rebuild and verification | Repair indexes safely | Double storage and I/O | [x] Implemented as an optional post-build `SQLIndexRebuildRequest.Verify` callback with observable verification status; see [TR022_INDEX_REBUILD_VERIFICATION.md](TR022_INDEX_REBUILD_VERIFICATION.md). |
 | TR-23 | Functional indexes over deterministic expressions | Accelerate computed predicates | Expression compatibility | [ ] |
 | TR-24 | Covering indexes with projected payload fields | Avoid primary tuple fetches | Larger indexes and staleness | [ ] |
 | TR-25 | Multi-column prefix range planner | Use composite indexes efficiently | Planner complexity | [ ] |

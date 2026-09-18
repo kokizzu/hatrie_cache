@@ -30433,3 +30433,24 @@ collected on Linux/amd64 with an AMD Ryzen 9 5950X.
 The graph is deliberately opt-in. The measured overhead buys deterministic
 cycle rejection and bounded wait-edge metadata; ordinary callers retain the
 default token-channel path.
+
+<a id="tr-022-index-rebuild-verification"></a>
+## TR-022 Index Rebuild Verification
+
+Command:
+
+```text
+make benchmark-tr022-index-rebuild-verification
+```
+
+This compares the existing bounded rebuild queue with and without a no-op
+post-build verifier. Five 100 ms samples were collected on Linux/amd64 with an
+AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild without verification | 3,209 | 819 | 8 | Baseline |
+| Rebuild with no-op verification | 3,005 | 844 | 8 | 0.94x CPU, +25 B/op, allocations unchanged; CPU within noise |
+
+The verifier is optional and runs only after a successful rebuild. Verification
+errors are published as failed tasks instead of false successes.
