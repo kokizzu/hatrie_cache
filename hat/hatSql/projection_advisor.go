@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,29 @@ type SQLProjectionRecommendation struct {
 	SlowQueries    uint64
 	TotalElapsed   time.Duration
 	AverageElapsed time.Duration
+}
+
+// SQLProjectionCostModel describes the workload and maintenance assumptions
+// used by CostBasedRecommendations. All durations are nonnegative. The model
+// is caller-supplied because the advisor deliberately does not retain rows or
+// source-write rates.
+type SQLProjectionCostModel struct {
+	ExpectedQueries   uint64
+	ExpectedRefreshes uint64
+	QueryHitLatency   time.Duration
+	InitialBuildCost  time.Duration
+	RefreshCost       time.Duration
+}
+
+// SQLProjectionCostRecommendation compares observed query savings with the
+// caller's projected build and refresh costs. WorthBuilding is true only when
+// the estimated net benefit is positive.
+type SQLProjectionCostRecommendation struct {
+	SQLProjectionRecommendation
+	EstimatedQuerySavings    time.Duration
+	EstimatedMaintenanceCost time.Duration
+	EstimatedNetBenefit      time.Duration
+	WorthBuilding            bool
 }
 
 // SQLProjectionAdvisor records bounded candidates for application-managed
@@ -73,6 +97,59 @@ func (advisor *SQLProjectionAdvisor) CostRecommendations(limit int) []SQLProject
 	return advisor.recommendations(true, limit)
 }
 
+// CostBasedRecommendations returns deterministic recommendations ordered by
+// estimated net benefit. Query savings use each candidate's observed average
+// latency minus the projected projection-hit latency, multiplied by the
+// expected query count. Maintenance includes one initial build and the
+// expected refreshes. This method never changes planning or creates a view.
+func (advisor *SQLProjectionAdvisor) CostBasedRecommendations(limit int, model SQLProjectionCostModel) ([]SQLProjectionCostRecommendation, error) {
+	if model.ExpectedQueries == 0 {
+		return nil, fmt.Errorf("projection cost model expected queries must be positive")
+	}
+	if model.QueryHitLatency < 0 || model.InitialBuildCost < 0 || model.RefreshCost < 0 {
+		return nil, fmt.Errorf("projection cost model durations must not be negative")
+	}
+	maintenance := sqlProjectionAdvisorDurationSum(
+		model.InitialBuildCost,
+		sqlProjectionAdvisorDurationProduct(model.RefreshCost, model.ExpectedRefreshes),
+	)
+	recommendations := make([]SQLProjectionCostRecommendation, 0)
+	if advisor != nil {
+		advisor.mu.RLock()
+		recommendations = make([]SQLProjectionCostRecommendation, 0, len(advisor.counts))
+		for key, stats := range advisor.counts {
+			recommendation := sqlProjectionAdvisorRecommendation(key, stats)
+			savingsPerQuery := recommendation.AverageElapsed - model.QueryHitLatency
+			if savingsPerQuery < 0 {
+				savingsPerQuery = 0
+			}
+			savings := sqlProjectionAdvisorDurationProduct(savingsPerQuery, model.ExpectedQueries)
+			netBenefit := sqlProjectionAdvisorDurationDifference(savings, maintenance)
+			recommendations = append(recommendations, SQLProjectionCostRecommendation{
+				SQLProjectionRecommendation: recommendation,
+				EstimatedQuerySavings:       savings,
+				EstimatedMaintenanceCost:    maintenance,
+				EstimatedNetBenefit:         netBenefit,
+				WorthBuilding:               netBenefit > 0,
+			})
+		}
+		advisor.mu.RUnlock()
+	}
+	sort.Slice(recommendations, func(left, right int) bool {
+		if recommendations[left].EstimatedNetBenefit != recommendations[right].EstimatedNetBenefit {
+			return recommendations[left].EstimatedNetBenefit > recommendations[right].EstimatedNetBenefit
+		}
+		if recommendations[left].QueryID != recommendations[right].QueryID {
+			return recommendations[left].QueryID < recommendations[right].QueryID
+		}
+		return sqlProjectionAdvisorEncodeDependencies(recommendations[left].Dependencies) < sqlProjectionAdvisorEncodeDependencies(recommendations[right].Dependencies)
+	})
+	if limit > 0 && len(recommendations) > limit {
+		recommendations = recommendations[:limit]
+	}
+	return recommendations, nil
+}
+
 func (advisor *SQLProjectionAdvisor) recommendations(byCost bool, limit int) []SQLProjectionRecommendation {
 	if advisor == nil {
 		return nil
@@ -80,24 +157,7 @@ func (advisor *SQLProjectionAdvisor) recommendations(byCost bool, limit int) []S
 	advisor.mu.RLock()
 	recommendations := make([]SQLProjectionRecommendation, 0, len(advisor.counts))
 	for key, stats := range advisor.counts {
-		dependencies := sqlProjectionAdvisorDecodeDependencies(key.dependencies)
-		shape := sqlProjectionAdvisorDecodeShape(key.shape)
-		totalElapsed := sqlProjectionAdvisorDuration(stats.totalElapsedNanos)
-		averageElapsed := time.Duration(0)
-		if stats.slowQueries > 0 {
-			averageElapsed = sqlProjectionAdvisorDuration(stats.totalElapsedNanos / stats.slowQueries)
-		}
-		recommendations = append(recommendations, SQLProjectionRecommendation{
-			QueryID:        key.queryID,
-			Dependencies:   dependencies,
-			Fields:         shape.fields,
-			FilterFields:   shape.filterFields,
-			GroupByFields:  shape.groupByFields,
-			OrderByFields:  shape.orderByFields,
-			SlowQueries:    stats.slowQueries,
-			TotalElapsed:   totalElapsed,
-			AverageElapsed: averageElapsed,
-		})
+		recommendations = append(recommendations, sqlProjectionAdvisorRecommendation(key, stats))
 	}
 	advisor.mu.RUnlock()
 	sort.Slice(recommendations, func(left, right int) bool {
@@ -134,6 +194,27 @@ func (advisor *SQLProjectionAdvisor) recommendations(byCost bool, limit int) []S
 		recommendations = recommendations[:limit]
 	}
 	return recommendations
+}
+
+func sqlProjectionAdvisorRecommendation(key sqlProjectionAdvisorKey, stats sqlProjectionAdvisorStats) SQLProjectionRecommendation {
+	dependencies := sqlProjectionAdvisorDecodeDependencies(key.dependencies)
+	shape := sqlProjectionAdvisorDecodeShape(key.shape)
+	totalElapsed := sqlProjectionAdvisorDuration(stats.totalElapsedNanos)
+	averageElapsed := time.Duration(0)
+	if stats.slowQueries > 0 {
+		averageElapsed = sqlProjectionAdvisorDuration(stats.totalElapsedNanos / stats.slowQueries)
+	}
+	return SQLProjectionRecommendation{
+		QueryID:        key.queryID,
+		Dependencies:   dependencies,
+		Fields:         shape.fields,
+		FilterFields:   shape.filterFields,
+		GroupByFields:  shape.groupByFields,
+		OrderByFields:  shape.orderByFields,
+		SlowQueries:    stats.slowQueries,
+		TotalElapsed:   totalElapsed,
+		AverageElapsed: averageElapsed,
+	}
 }
 
 func (advisor *SQLProjectionAdvisor) observeSlowQuery(query *sqlQuery, queryID string, metrics *sqlExecutionMetrics, elapsed time.Duration, threshold time.Duration, err error) {
@@ -284,6 +365,46 @@ func sqlProjectionAdvisorSaturatingAdd(current, delta uint64) uint64 {
 		return ^uint64(0)
 	}
 	return current + delta
+}
+
+func sqlProjectionAdvisorDurationProduct(value time.Duration, multiplier uint64) time.Duration {
+	if value <= 0 || multiplier == 0 {
+		return 0
+	}
+	max := uint64(1<<63 - 1)
+	valueNanos := uint64(value)
+	if valueNanos > max/multiplier {
+		return time.Duration(max)
+	}
+	return time.Duration(valueNanos * multiplier)
+}
+
+func sqlProjectionAdvisorDurationSum(values ...time.Duration) time.Duration {
+	max := uint64(1<<63 - 1)
+	var total uint64
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		valueNanos := uint64(value)
+		if total > max-valueNanos {
+			return time.Duration(max)
+		}
+		total += valueNanos
+	}
+	return time.Duration(total)
+}
+
+func sqlProjectionAdvisorDurationDifference(savings, maintenance time.Duration) time.Duration {
+	if savings >= maintenance {
+		return savings - maintenance
+	}
+	difference := uint64(maintenance) - uint64(savings)
+	max := uint64(1<<63 - 1)
+	if difference > max {
+		return -time.Duration(max)
+	}
+	return -time.Duration(difference)
 }
 
 func sqlProjectionAdvisorDependencies(query *sqlQuery) ([]string, bool) {

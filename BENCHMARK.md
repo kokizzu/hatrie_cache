@@ -30340,3 +30340,28 @@ The benchmark measures repeated exact-query reads, not projection creation or
 refresh. The feature trades snapshot storage and explicit refresh maintenance
 for much lower work on matching reads; source-version mismatch never serves a
 stale snapshot.
+
+## CH-012 Projection Advisor Cost
+
+Command:
+
+```text
+make benchmark-ch012-projection-advisor-cost
+```
+
+This compares the existing observed-latency ranking with the opt-in
+cost-based projection advisor over 128 bounded candidates and a 32-result
+limit. The cost-based model adds caller-supplied query savings and projection
+maintenance estimates. Five 1,000-iteration samples were collected on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing observed-cost ranking | 41,318 | 24,040 | 132 | 1.00x |
+| Cost-based ranking | 41,816 | 29,576 | 132 | 1.01x time, 1.23x heap, same allocations |
+
+The extra heap is the returned cost fields, not an intermediate temporary
+recommendation slice. The advisor remains disabled by default and the richer
+analysis is only paid when `CostBasedRecommendations` is called. See
+[CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md) for the
+model and correctness coverage.

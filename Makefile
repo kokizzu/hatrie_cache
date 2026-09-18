@@ -18983,3 +18983,31 @@ commit-ch011-projection-ddl:
 .PHONY: push-ch011-projection-ddl
 push-ch011-projection-ddl:
 	bash ./scripts/push-ch011-projection-ddl.sh
+
+.PHONY: test-ch012-projection-advisor-cost
+test-ch012-projection-advisor-cost:
+	bash ./scripts/test-ch012-projection-advisor-cost.sh
+
+.PHONY: format-ch012-projection-advisor-cost
+format-ch012-projection-advisor-cost:
+	bash ./scripts/format-ch012-projection-advisor-cost.sh
+
+.PHONY: benchmark-ch012-projection-advisor-cost
+benchmark-ch012-projection-advisor-cost:
+	bash ./scripts/benchmark-ch012-projection-advisor-cost.sh
+
+.PHONY: review-ch012
+review-ch012:
+	bash ./scripts/review-ch012.sh
+
+.PHONY: stage-ch012-projection-advisor-cost
+stage-ch012-projection-advisor-cost:
+	bash ./scripts/stage-ch012-projection-advisor-cost.sh
+
+.PHONY: commit-ch012-projection-advisor-cost
+commit-ch012-projection-advisor-cost:
+	bash ./scripts/commit-ch012-projection-advisor-cost.sh
+
+.PHONY: push-ch012-projection-advisor-cost
+push-ch012-projection-advisor-cost:
+	bash ./scripts/push-ch012-projection-advisor-cost.sh

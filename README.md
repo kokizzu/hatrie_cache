@@ -18,6 +18,7 @@ security guidance before exposing it on a network.
 - Opt-in TTL rollups that aggregate expired row images into coarse summaries: [CH009_TTL_ROLLUP.md](CH009_TTL_ROLLUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-ttl-rollup)
 - Opt-in materialized/default typed-table columns with dependency validation and a lazy default fast path: [CH010_MATERIALIZED_DEFAULT_COLUMNS.md](CH010_MATERIALIZED_DEFAULT_COLUMNS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-010-materialized-and-default-columns)
 - Session-local `CREATE/DROP/REFRESH PROJECTION` with source-version-guarded exact hits: [CH011_PROJECTION_DDL.md](CH011_PROJECTION_DDL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-011-projection-ddl)
+- Opt-in cost-based projection recommendations comparing observed query savings with caller-supplied build and refresh costs: [CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-cost)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
