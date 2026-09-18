@@ -551,3 +551,14 @@ read, and compaction paths are unchanged. Full immutable stored-part manifests
 and automatic cross-process part hydration remain open. See
 [CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots).
+## CH-006: Durable Mutation Dependency Queue
+
+CH-006 is partially adopted through the importable
+`hatSql.SQLMutationDependencyQueue`. It wraps the existing dependency graph
+with a bounded binary write-ahead log, CRC validation, monotone record
+sequences, crash-tail truncation, replay, and caller-triggered atomic
+compaction. Add, claim, complete, fail, retry, and requeue transitions are
+synced before returning. The default in-memory graph and SQL execution path are
+unchanged; automatic `ALTER`/`DELETE` planner integration and cross-process
+leases remain open. See [CH006_DURABLE_MUTATION_QUEUE.md](CH006_DURABLE_MUTATION_QUEUE.md)
+and [BENCHMARK.md](BENCHMARK.md#ch-006-durable-mutation-dependency-queue).

@@ -18831,3 +18831,35 @@ commit-ch005-patch:
 .PHONY: push-ch005-patch
 push-ch005-patch:
 	bash ./scripts/push-ch005-patch.sh
+
+.PHONY: benchmark-ch006-durable-queue-baseline
+benchmark-ch006-durable-queue-baseline:
+	bash ./scripts/benchmark-ch006-durable-queue-baseline.sh
+
+.PHONY: test-ch006-durable-queue
+test-ch006-durable-queue:
+	bash ./scripts/test-ch006-durable-queue.sh
+
+.PHONY: format-ch006-durable-queue
+format-ch006-durable-queue:
+	bash ./scripts/format-ch006-durable-queue.sh
+
+.PHONY: benchmark-ch006-durable-queue
+benchmark-ch006-durable-queue:
+	bash ./scripts/benchmark-ch006-durable-queue.sh
+
+.PHONY: review-ch006-durable-queue
+review-ch006-durable-queue:
+	bash ./scripts/review-ch006-durable-queue.sh
+
+.PHONY: stage-ch006-durable-queue
+stage-ch006-durable-queue:
+	bash ./scripts/stage-ch006-durable-queue.sh
+
+.PHONY: commit-ch006-durable-queue
+commit-ch006-durable-queue:
+	bash ./scripts/commit-ch006-durable-queue.sh
+
+.PHONY: push-ch006-durable-queue
+push-ch006-durable-queue:
+	bash ./scripts/push-ch006-durable-queue.sh

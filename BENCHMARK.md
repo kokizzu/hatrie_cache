@@ -30142,3 +30142,50 @@ BenchmarkCH005PatchState/Restore-32 43483 28255 ns/op 520 B/op 2 allocs/op
 No default delete or compaction setting changed. The final implementation
 keeps the large restore win while leaving the existing in-memory bitmap path
 untouched.
+<a id="ch-006-durable-mutation-dependency-queue"></a>
+
+## CH-006: Durable Mutation Dependency Queue
+
+Command:
+
+```text
+make benchmark-ch006-durable-queue
+```
+
+The command runs `go test ./hat/hatSql -run '^$' -bench
+'^BenchmarkSQLMutationDependency(Graph|Queue)' -benchmem -benchtime=100x
+-count=5`.
+
+Representative raw samples from the final optimized implementation:
+
+```text
+BenchmarkSQLMutationDependencyQueueClaimReady-32       100  1459795 ns/op  21079 B/op    13 allocs/op
+BenchmarkSQLMutationDependencyQueueClaimReady-32       100  1502467 ns/op  21079 B/op    13 allocs/op
+BenchmarkSQLMutationDependencyQueueClaimReady-32       100  1515392 ns/op  21079 B/op    13 allocs/op
+BenchmarkSQLMutationDependencyQueueClaimReady-32       100  1489091 ns/op  21079 B/op    13 allocs/op
+BenchmarkSQLMutationDependencyQueueClaimReady-32       100  1572590 ns/op  21079 B/op    13 allocs/op
+BenchmarkSQLMutationDependencyQueueOpenReplay-32       100  1096370 ns/op  90926 B/op  1303 allocs/op
+BenchmarkSQLMutationDependencyQueueOpenReplay-32       100  1030307 ns/op  90925 B/op  1303 allocs/op
+BenchmarkSQLMutationDependencyQueueOpenReplay-32       100  1052055 ns/op  90925 B/op  1303 allocs/op
+BenchmarkSQLMutationDependencyQueueOpenReplay-32       100  1073066 ns/op  90925 B/op  1303 allocs/op
+BenchmarkSQLMutationDependencyQueueOpenReplay-32       100  1074347 ns/op  90925 B/op  1303 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32       100    53119 ns/op  14848 B/op     2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32       100    55990 ns/op  14848 B/op     2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32       100    50514 ns/op  14848 B/op     2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32       100    51821 ns/op  14848 B/op     2 allocs/op
+BenchmarkSQLMutationDependencyGraphClaimReady-32       100    55174 ns/op  14848 B/op     2 allocs/op
+```
+
+Median comparison:
+
+| Path | Median ns/op | B/op | allocs/op | Relative to graph |
+| --- | ---: | ---: | ---: | ---: |
+| In-memory graph claim/requeue | 53,119 | 14,848 | 2 | 1.00x |
+| Durable queue claim/requeue | 1,502,467 | 21,079 | 13 | 28.29x slower, 1.42x heap, 6.50x allocations |
+| Durable queue open/replay, 256 tasks | 1,073,066 | 90,925 | 1,303 | restart-only path |
+
+The queue is opt-in and syncs every transition. The default in-memory graph is
+unchanged; the tradeoff buys restart durability and bounded replay through
+compaction. The initial queue version measured 1,567,118 ns/op, 121,944 B/op,
+and 17 allocations/op, so the final success path is 1.04x faster with 5.79x
+lower heap and 1.31x fewer allocations.

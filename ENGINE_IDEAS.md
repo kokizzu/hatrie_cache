@@ -32,7 +32,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-003 | Partition-key pruning | Partially adopted: SQL now forwards validated literal equality, `IN`, and range predicates to opt-in partition resolvers; concrete physical partition metadata remains backend-specific. | Medium |
 | CH-004 | `FINAL` read semantics | Partially adopted: explicit SQL `FINAL` reconciles caller-defined replacing or collapsing source rows; automatic schema-bound metadata and persistent merge integration remain open. | High |
 | CH-005 | Lightweight delete bitmap | Partially adopted: opt-in typed-table patch parts now persist their compact bitmap through bounded CRC-protected state snapshots; immutable stored-part manifests and cross-process part integration remain open. | High |
-| CH-006 | Mutation dependency queue | No durable dependency-aware queue for ALTER/DELETE mutations. | High |
+| CH-006 | Mutation dependency queue | Partially adopted: importable `SQLMutationDependencyQueue` now persists dependency-aware task transitions in a CRC-checked binary WAL with crash-tail recovery and explicit compaction; automatic SQL `ALTER`/`DELETE` wiring and cross-process leases remain open. | High |
 | CH-007 | Row TTL | Adopted as an opt-in `TypedTable` processing-time or event-time policy with an indexed explicit purge, a shared bounded background scheduler, and CRC-protected processing-time deadline snapshots. Column-level TTL, automatic schema integration, and retry policy remain caller-owned. | Medium |
 | CH-008 | Column TTL | No independent removal or masking of expired wide columns. | Medium |
 | CH-009 | TTL rollup | No background aggregation of expired detail rows into coarser summaries. | High |
