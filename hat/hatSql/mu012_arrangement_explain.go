@@ -14,6 +14,7 @@ const (
 type SQLArrangementMetadata struct {
 	Key            string   `json:"key"`
 	Kind           string   `json:"kind"`
+	Locality       string   `json:"locality,omitempty"`
 	Reused         bool     `json:"reused"`
 	Fields         []string `json:"fields,omitempty"`
 	Cardinality    int      `json:"cardinality,omitempty"`
@@ -49,6 +50,7 @@ func resolveSQLArrangementMetadata(resolver SQLSourceResolver, source sqlSource)
 	for _, arrangement := range arrangements {
 		arrangement.Key = cloneSQLExplainArrangementText(arrangement.Key)
 		arrangement.Kind = cloneSQLExplainArrangementText(arrangement.Kind)
+		arrangement.Locality = cloneSQLExplainArrangementText(arrangement.Locality)
 		arrangement.Fields = cloneSQLExplainArrangementFields(arrangement.Fields)
 		cloned = append(cloned, arrangement)
 	}
@@ -64,6 +66,7 @@ func cloneSQLArrangementMetadata(arrangements []SQLArrangementMetadata) []SQLArr
 	for index := range cloned {
 		cloned[index].Key = cloneSQLExplainArrangementText(cloned[index].Key)
 		cloned[index].Kind = cloneSQLExplainArrangementText(cloned[index].Kind)
+		cloned[index].Locality = cloneSQLExplainArrangementText(cloned[index].Locality)
 		cloned[index].Fields = cloneSQLExplainArrangementFields(cloned[index].Fields)
 	}
 	return cloned

@@ -30454,3 +30454,40 @@ AMD Ryzen 9 5950X.
 
 The verifier is optional and runs only after a successful rebuild. Verification
 errors are published as failed tasks instead of false successes.
+<a id="mz-035-arrangement-locality-hints"></a>
+## MZ-035 Arrangement Locality Hints
+
+Command:
+
+```text
+make benchmark-mz035-arrangement-locality
+```
+
+This compares the bounded arrangement selector with two `user_id` candidates
+and one filter field, with and without an opt-in `us-east` locality hint. Each
+case ran five 100 ms samples on the local AMD Ryzen 9 5950X.
+
+| Selector path | Five ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Without locality | 536.3, 494.0, 464.9, 463.9, 417.7 | 464.9 | 56 | 3 | 1.00x |
+| With locality hint | 498.0, 507.5, 505.3, 592.9, 524.5 | 507.5 | 80 | 4 | 1.09x |
+
+The locality hint adds 42.6 ns/op at the median, one allocation, and 24
+bytes/op in this workload. The no-hint path remains unchanged. Locality is an
+advisory planning signal only; it does not move data, create shards, or alter
+ordinary reads and writes. See [MZ035_ARRANGEMENT_LOCALITY.md](MZ035_ARRANGEMENT_LOCALITY.md).
+
+Raw output:
+
+```text
+BenchmarkMZ035ArrangementRecommendationWithoutLocality-32  206202  536.3 ns/op  56 B/op  3 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithoutLocality-32  229507  494.0 ns/op  56 B/op  3 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithoutLocality-32  289593  464.9 ns/op  56 B/op  3 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithoutLocality-32  306868  463.9 ns/op  56 B/op  3 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithoutLocality-32  359558  417.7 ns/op  56 B/op  3 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithLocality-32     207223  498.0 ns/op  80 B/op  4 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithLocality-32     232417  507.5 ns/op  80 B/op  4 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithLocality-32     302514  505.3 ns/op  80 B/op  4 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithLocality-32     187356  592.9 ns/op  80 B/op  4 allocs/op
+BenchmarkMZ035ArrangementRecommendationWithLocality-32     244080  524.5 ns/op  80 B/op  4 allocs/op
+```

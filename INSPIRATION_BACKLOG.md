@@ -124,7 +124,7 @@ before/after measurement when its motivation is performance.
 | MZ-32 | Arrangement cost model and reuse scoring | Share indexes only when they pay back | Planner estimation errors | [x] Implemented by the opt-in `hatSql.SQLArrangementCostModel`; see [MZ032_ARRANGEMENT_COST.md](MZ032_ARRANGEMENT_COST.md) and [BENCHMARK.md#mz-032-arrangement-cost-model](BENCHMARK.md#mz-032-arrangement-cost-model). |
 | MZ-33 | Automatic index recommendation from observed dataflows | Reduce manual tuning | Background analysis cost | [x] Implemented by the opt-in `hatSql.SQLDataflowIndexAdvisor`; see [MZ033_DATAFLOW_INDEX_ADVISOR.md](MZ033_DATAFLOW_INDEX_ADVISOR.md) and [BENCHMARK.md#mz-33-automatic-dataflow-index-advisor](BENCHMARK.md#mz-33-automatic-dataflow-index-advisor). |
 | MZ-34 | Online index build scheduler with admission limits | Build indexes without starving queries | Build latency | [ ] |
-| MZ-35 | Arrangement shard locality hints | Keep hot keys near their consumers | Skew and rebalancing | [ ] |
+| MZ-35 | Arrangement shard locality hints | Keep hot keys near their consumers | Skew and rebalancing | [x] Implemented as bounded advisory locality hints for arrangement selection; see [MZ035_ARRANGEMENT_LOCALITY.md](MZ035_ARRANGEMENT_LOCALITY.md). |
 | MZ-36 | Dataflow operator placement constraints by failure domain | Improve locality and resilience | Placement solver complexity | [ ] |
 | MZ-37 | Worker-local exchange batching | Reduce per-record coordination | Batch latency | [x] |
 | MZ-38 | Dynamic dataflow worker scaling | Match compute to changing load | State movement and rebalance | [ ] |

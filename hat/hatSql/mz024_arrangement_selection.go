@@ -14,6 +14,7 @@ type SQLArrangementWorkload struct {
 	GroupByFields []string
 	OrderByFields []string
 	JoinFields    []string
+	LocalityHints []string
 	orderedFields []string
 }
 
@@ -34,6 +35,7 @@ type sqlArrangementMatch struct {
 	group       int
 	order       int
 	join        int
+	locality    bool
 	reused      bool
 	memoryBytes int
 	cardinality int
@@ -147,6 +149,10 @@ func sqlScoreArrangement(index int, candidate SQLArrangementMetadata, workload S
 	if candidate.Reused {
 		match.score++
 	}
+	if sqlArrangementLocalityMatches(candidate.Locality, workload.LocalityHints) {
+		match.score += 3
+		match.locality = true
+	}
 	return match
 }
 
@@ -226,6 +232,29 @@ func sqlNormalizeArrangementWorkload(workload SQLArrangementWorkload) SQLArrange
 	return workload
 }
 
+func sqlArrangementLocalityMatches(candidate string, hints []string) bool {
+	if len(hints) > maxSQLArrangementSelectorFields {
+		hints = hints[:maxSQLArrangementSelectorFields]
+	}
+	candidate = strings.TrimSpace(candidate)
+	if len(candidate) > maxSQLArrangementSelectorFieldBytes {
+		candidate = candidate[:maxSQLArrangementSelectorFieldBytes]
+	}
+	if candidate == "" {
+		return false
+	}
+	for _, hint := range hints {
+		hint = strings.TrimSpace(hint)
+		if len(hint) > maxSQLArrangementSelectorFieldBytes {
+			hint = hint[:maxSQLArrangementSelectorFieldBytes]
+		}
+		if hint != "" && strings.EqualFold(hint, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 func sqlNormalizeArrangementFields(fields []string) []string {
 	if len(fields) > maxSQLArrangementSelectorFields {
 		fields = fields[:maxSQLArrangementSelectorFields]
@@ -265,7 +294,7 @@ func sqlArrangementFieldsFromKey(key string) []string {
 }
 
 func sqlArrangementRecommendationReason(match sqlArrangementMatch) string {
-	categories := make([]string, 0, 4)
+	categories := make([]string, 0, 5)
 	if match.filter > 0 {
 		categories = append(categories, "WHERE")
 	}
@@ -277,6 +306,9 @@ func sqlArrangementRecommendationReason(match sqlArrangementMatch) string {
 	}
 	if match.join > 0 {
 		categories = append(categories, "JOIN")
+	}
+	if match.locality {
+		categories = append(categories, "LOCALITY")
 	}
 	if len(categories) == 0 {
 		return "matched query fields"

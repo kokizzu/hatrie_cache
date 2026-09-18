@@ -19100,6 +19100,42 @@ vet-tr022-index-rebuild-verification:
 review-tr022:
 	bash ./scripts/review-tr022.sh
 
+.PHONY: inspect-mz035-context
+.PHONY: test-mz035-arrangement-locality
+test-mz035-arrangement-locality:
+	bash ./scripts/test-mz035-arrangement-locality.sh
+
+.PHONY: format-mz035-arrangement-locality
+format-mz035-arrangement-locality:
+	bash ./scripts/format-mz035-arrangement-locality.sh
+
+.PHONY: benchmark-mz035-arrangement-locality
+benchmark-mz035-arrangement-locality:
+	bash ./scripts/benchmark-mz035-arrangement-locality.sh
+
+test-mz035-package:
+	bash ./scripts/test-mz035-package.sh
+
+race-mz035-arrangement-locality:
+	bash ./scripts/race-mz035-arrangement-locality.sh
+
+vet-mz035-arrangement-locality:
+	bash ./scripts/vet-mz035-arrangement-locality.sh
+
+review-mz035:
+	bash ./scripts/review-mz035.sh
+
+stage-mz035:
+	bash ./scripts/stage-mz035.sh
+
+commit-mz035:
+	bash ./scripts/commit-mz035.sh
+
+push-mz035:
+	bash ./scripts/push-mz035.sh
+
+
+
 .PHONY: stage-tr022-index-rebuild-verification
 stage-tr022-index-rebuild-verification:
 	bash ./scripts/stage-tr022-index-rebuild-verification.sh
