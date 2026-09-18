@@ -20729,3 +20729,35 @@ commit-tr007:
 
 push-tr007:
 	bash ./scripts/run-tr007-adaptive-group-commit.sh push
+format-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh format
+
+test-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh test
+
+baseline-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh baseline
+
+benchmark-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh benchmark
+
+race-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh race
+
+vet-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh vet
+
+test-m033-package:
+	bash ./scripts/run-m033-timestamp-oracle.sh package
+
+status-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh status
+
+stage-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh stage
+
+commit-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh commit
+
+push-m033:
+	bash ./scripts/run-m033-timestamp-oracle.sh push

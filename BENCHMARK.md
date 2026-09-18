@@ -31572,3 +31572,23 @@ The measured speedup costs 492,105 additional allocated bytes per operation
 and 9 allocations. This is an explicit batch API; ordinary streaming and CSV
 imports remain unchanged. Raw samples and the framing rationale are in
 [CH047_PARALLEL_FORMAT_PARSING.md](CH047_PARALLEL_FORMAT_PARSING.md).
+
+<a id="m033-batched-logical-timestamp-oracle"></a>
+## M033: Batched Logical Timestamp Oracle
+
+Commands: `make baseline-m033` and `make benchmark-m033`.
+
+The control performs 1,024 individual atomic increments per benchmark
+iteration. The opt-in oracle performs one `Reserve(1024)` operation, returning
+the same number of contiguous timestamps. Five `-benchmem` samples ran on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Individual atomic increments | 1,769; 1,798; 1,777; 1,806; 1,849 | 1,798 | 0 | 0 | baseline |
+| `Reserve(1024)` | 2.268; 2.190; 2.221; 2.406; 2.162 | 2.221 | 0 | 0 | 810x faster for 1,024 timestamps |
+
+This is an allocation-only measurement, not an end-to-end source-ingestion
+claim. The oracle is process-local and opt-in; distributed timestamp ordering
+still requires a caller-owned leader, quorum, or consensus layer. Full details
+are in [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md).

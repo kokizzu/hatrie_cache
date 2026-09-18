@@ -689,3 +689,15 @@ replay behavior. The zero value remains the fixed-window implementation. In a
 16-concurrent-writer benchmark it was 1.12x faster with unchanged sync count,
 bytes, and allocations. See [TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md)
 and [BENCHMARK.md](BENCHMARK.md#tr-007-adaptive-wal-group-commit).
+
+## M033: Batched Logical Timestamp Oracle
+
+M033 is partially adopted through the opt-in
+`hatSql.SQLLogicalTimestampOracle`. It provides monotone process-local
+timestamps, external frontier observation, overflow-safe allocation, and a
+contiguous `Reserve(count)` path that assigns one source batch with one atomic
+update. Distributed uniqueness, uncertainty bounds, persistence, and consensus
+remain caller-owned. A 1,024-timestamp reservation was about 810x faster than
+1,024 individual atomic increments with zero allocations in the recorded
+fixture. See [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md)
+and [BENCHMARK.md](BENCHMARK.md#m033-batched-logical-timestamp-oracle).

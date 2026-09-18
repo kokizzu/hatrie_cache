@@ -189,7 +189,10 @@ records a separate implementation boundary.
 - [ ] C154 Rolling schema changes across replicas.
 - [ ] M032 Strong consistency across all independent source partitions.
 - [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).
-- [ ] M033 Timestamp oracle for globally ordered writes.
+- [x] M033 Timestamp oracle for globally ordered writes. The opt-in
+  `hatSql.SQLLogicalTimestampOracle` provides monotone process-local timestamps
+  and one-atomic-update batch reservation; cross-process consensus remains
+  caller-owned. See [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md).
 - [ ] M037 Generic negative-diff support for every SQL operator.
 - [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
