@@ -19782,3 +19782,32 @@ race-tr027-spatial-index:
 
 vet-tr027-spatial-index:
 	bash ./scripts/test-tr027-spatial-index.sh vet
+format-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh format
+
+test-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh test
+
+benchmark-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh benchmark
+
+race-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh race
+
+vet-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh vet
+
+test-ch046-kafka-table-source-package:
+	bash ./scripts/test-ch046-kafka-table-source.sh package
+
+verify-ch046-kafka-table-source-docs:
+	bash ./scripts/verify-ch046-kafka-table-source-docs.sh
+
+stage-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh stage
+
+commit-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh commit
+
+push-ch046-kafka-table-source:
+	bash ./scripts/test-ch046-kafka-table-source.sh push

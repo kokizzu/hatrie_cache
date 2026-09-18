@@ -228,6 +228,7 @@ security guidance before exposing it on a network.
 - Opt-in frontier-driven append-only recursive dataflow maintenance: [RECURSIVE_DATAFLOW.md](RECURSIVE_DATAFLOW.md)
 - Source-metadata selection for append-only aggregate maintenance: [SOURCE_APPEND_ONLY_METADATA.md](SOURCE_APPEND_ONLY_METADATA.md)
 - Kafka-style SQL source offset tracking: [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
+- Kafka table source batches with durable partition checkpoints, replay markers, snapshot/restore, and post-apply consumer commits: [CH046_KAFKA_TABLE_SOURCE.md](CH046_KAFKA_TABLE_SOURCE.md)
 - Atomic SQL source transaction grouping: [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md)
 - SQL sink progress and acknowledged frontiers: [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md)
 - Exactly-once sink idempotency keys and durable checkpoints: [MU018_EXACTLY_ONCE_SINK.md](MU018_EXACTLY_ONCE_SINK.md)

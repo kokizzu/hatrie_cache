@@ -31012,3 +31012,28 @@ the full raw output and build-cost tradeoff are in
 | Full scan | 32,574,123 | 31,618,254 | 200,040 | 1.00x |
 | R-tree candidates | 10,010 | 6,737 | 35 | 3,254x faster |
 | R-tree build, 50k rows | 146,309,264 | 39,435,496 | 158,874 | one-time cost |
+# CH-046 Kafka Table Source
+
+Benchmark command:
+
+```text
+make benchmark-ch046-kafka-table-source
+```
+
+Workload: 10,000 records in one partition, one primary-key row copy per
+record, five samples per benchmark, `-benchmem`. The baseline advances the
+existing source offset tracker once per record. The batched path validates one
+source transaction, decodes records atomically, and advances one checkpoint per
+partition.
+
+Raw samples from the verification run:
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Per-message baseline | 4,953,001; 4,464,252; 4,239,726; 4,200,095; 4,428,991 | 3,812,297; 3,814,584; 3,814,303; 3,811,260; 3,812,358 | 20,251; 20,285; 20,281; 20,237; 20,253 |
+| Batched durable source | 4,563,028; 4,520,905; 4,292,332; 4,553,640; 4,388,280 | 4,146,556; 4,148,930; 4,147,872; 4,147,877; 4,146,098 | 20,268; 20,294; 20,283; 20,283; 20,264 |
+
+Medians are 4.43 ms, 3.81 MB, and 20,253 allocations for the baseline;
+4.52 ms, 4.15 MB, and 20,283 allocations for the batched source. Relative to
+the baseline, the source is 1.02x CPU, 1.09x memory, and 1.00x allocations.
+This is a small durability/correctness cost, not a throughput improvement.
