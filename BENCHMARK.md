@@ -31159,3 +31159,27 @@ CPU time, 1.51x cumulative bytes, and 6 additional allocations per sink
 transaction. This is an opt-in safety cost; checkpoint-store I/O and external
 sink work are intentionally excluded and will be workload-specific. The
 existing one-phase path is unchanged.
+
+## MZ-021: Sink idempotency tokens
+
+Workload: derive one token from a warehouse sink, one partition frontier, and
+a small batch. The supplied-key baseline assigns an already available key to
+a sink commit. The first derived implementation built a sorted canonical
+buffer with general-purpose allocations. The optimized implementation uses a
+stack buffer and insertion sort for small inputs, and streams larger inputs
+directly into SHA-256. Five 500 ms samples were run with `-benchmem` on
+Linux/amd64, AMD Ryzen 9 5950X.
+
+Command: `make benchmark-mz021-sink-idempotency`.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Supplied key baseline | 0.4997, 0.4617, 0.4631, 0.4470, 0.4550 | 0.462 | 0 | 0 |
+| First derived implementation | 703.5, 720.6, 724.5, 702.3, 676.4 | 703.5 | 464 | 14 |
+| Optimized derived implementation | 268.0, 250.2, 250.3, 260.8, 274.3 | 260.8 | 64 | 1 |
+
+The optimized token path is 2.70x faster than the first implementation, with
+7.25x lower temporary bytes and 14x fewer allocations. Compared with the
+supplied-key lower bound, derivation costs about 565x CPU time; callers that
+already persist a stable source token should continue passing it directly.
+This benchmark excludes external sink I/O and ledger/checkpoint work.

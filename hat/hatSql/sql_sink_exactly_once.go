@@ -189,7 +189,7 @@ func (ledger *SQLSinkExactlyOnceLedger) CommitContext(ctx context.Context, commi
 	ledger.mu.Lock()
 	ledger.ensureLocked()
 	if existing, found := ledger.commits[key]; found {
-		if !equalSQLSinkExactlyOnceCommit(existing.commit, normalized) {
+		if !equalSQLSinkExactlyOnceDelivery(existing.commit, normalized) {
 			ledger.mu.Unlock()
 			return false, fmt.Errorf("idempotency key %q: %w", key.idempotencyKey, ErrSQLSinkExactlyOnceConflict)
 		}
@@ -816,6 +816,10 @@ func normalizeSQLSinkExactlyOnceName(name string) (string, error) {
 
 func equalSQLSinkExactlyOnceCommit(left, right SQLSinkCommit) bool {
 	return left.Sink == right.Sink && left.TransactionID == right.TransactionID && left.IdempotencyKey == right.IdempotencyKey && equalSQLSinkProgress(left.Progress, right.Progress)
+}
+
+func equalSQLSinkExactlyOnceDelivery(left, right SQLSinkCommit) bool {
+	return left.Sink == right.Sink && left.IdempotencyKey == right.IdempotencyKey && equalSQLSinkProgress(left.Progress, right.Progress)
 }
 
 func cloneSQLSinkCommit(commit SQLSinkCommit) SQLSinkCommit {

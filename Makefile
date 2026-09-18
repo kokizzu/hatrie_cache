@@ -19999,3 +19999,39 @@ commit-mz020-two-phase-sink:
 .PHONY: push-mz020-two-phase-sink
 push-mz020-two-phase-sink:
 	@bash ./scripts/push-mz020-two-phase-sink.sh
+.PHONY: test-mz021-sink-idempotency
+test-mz021-sink-idempotency:
+	@bash ./scripts/test-mz021-sink-idempotency.sh
+.PHONY: format-mz021-sink-idempotency
+format-mz021-sink-idempotency:
+	@bash ./scripts/format-mz021-sink-idempotency.sh
+
+.PHONY: benchmark-mz021-sink-idempotency
+benchmark-mz021-sink-idempotency:
+	@bash ./scripts/benchmark-mz021-sink-idempotency.sh
+.PHONY: verify-mz021-sink-idempotency-docs
+verify-mz021-sink-idempotency-docs:
+	@bash ./scripts/verify-mz021-sink-idempotency-docs.sh
+.PHONY: test-mz021-sink-idempotency-package
+test-mz021-sink-idempotency-package:
+	@bash ./scripts/test-mz021-sink-idempotency-package.sh
+
+.PHONY: race-mz021-sink-idempotency
+race-mz021-sink-idempotency:
+	@bash ./scripts/race-mz021-sink-idempotency.sh
+
+.PHONY: vet-mz021-sink-idempotency
+vet-mz021-sink-idempotency:
+	@bash ./scripts/vet-mz021-sink-idempotency.sh
+
+.PHONY: stage-mz021-sink-idempotency
+stage-mz021-sink-idempotency:
+	@bash ./scripts/stage-mz021-sink-idempotency.sh
+
+.PHONY: commit-mz021-sink-idempotency
+commit-mz021-sink-idempotency:
+	@bash ./scripts/commit-mz021-sink-idempotency.sh
+
+.PHONY: push-mz021-sink-idempotency
+push-mz021-sink-idempotency:
+	@bash ./scripts/push-mz021-sink-idempotency.sh
