@@ -13,7 +13,9 @@ git diff --check -- \
   hat/hatSql/mu031_retractable_aggregate_benchmark_test.go \
   scripts/benchmark-mu031-retractable-aggregate-baseline.sh \
   scripts/benchmark-mu031-retractable-aggregate.sh \
+  scripts/commit-mu031-retractable-aggregate.sh \
   scripts/format-mu031-retractable-aggregate.sh \
+  scripts/push-mu031-retractable-aggregate.sh \
   scripts/race-mu031-retractable-aggregate.sh \
   scripts/review-mu031-retractable-aggregate.sh \
   scripts/test-mu031-package.sh \
@@ -32,7 +34,9 @@ git status --short -- \
   hat/hatSql/mu031_retractable_aggregate_benchmark_test.go \
   scripts/benchmark-mu031-retractable-aggregate-baseline.sh \
   scripts/benchmark-mu031-retractable-aggregate.sh \
+  scripts/commit-mu031-retractable-aggregate.sh \
   scripts/format-mu031-retractable-aggregate.sh \
+  scripts/push-mu031-retractable-aggregate.sh \
   scripts/race-mu031-retractable-aggregate.sh \
   scripts/review-mu031-retractable-aggregate.sh \
   scripts/test-mu031-package.sh \
