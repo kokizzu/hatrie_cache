@@ -30189,3 +30189,61 @@ unchanged; the tradeoff buys restart durability and bounded replay through
 compaction. The initial queue version measured 1,567,118 ns/op, 121,944 B/op,
 and 17 allocations/op, so the final success path is 1.04x faster with 5.79x
 lower heap and 1.31x fewer allocations.
+
+## CH-008: Column TTL
+
+This benchmark uses 4,096 typed-table rows and measures `Rows()` over five
+fixed `-benchtime=100x` samples on Linux/amd64 with an AMD Ryzen 9 5950X. The
+pre-change control was the existing row-TTL path before column TTL was added.
+The post-change run includes a real TTL-free table, the unchanged row-TTL path,
+and an expired processing-time column-TTL path. The column path masks one
+string column while retaining the row.
+
+Raw pre-change output:
+
+```text
+BenchmarkCH008RowTTLRows 100 1615787 ns/op 2124576 B/op 24285 allocs/op
+BenchmarkCH008RowTTLRows 100 1543126 ns/op 2124354 B/op 24285 allocs/op
+BenchmarkCH008RowTTLRows 100 1557369 ns/op 2124353 B/op 24285 allocs/op
+BenchmarkCH008RowTTLRows 100 1649817 ns/op 2124351 B/op 24285 allocs/op
+BenchmarkCH008RowTTLRows 100 1489074 ns/op 2124350 B/op 24285 allocs/op
+```
+
+Raw post-change output:
+
+```text
+BenchmarkCH008NoTTLRows 100 1634273 ns/op 2128050 B/op 24320 allocs/op
+BenchmarkCH008NoTTLRows 100 1660084 ns/op 2127882 B/op 24320 allocs/op
+BenchmarkCH008NoTTLRows 100 1669438 ns/op 2127885 B/op 24320 allocs/op
+BenchmarkCH008NoTTLRows 100 1726013 ns/op 2127883 B/op 24320 allocs/op
+BenchmarkCH008NoTTLRows 100 1712588 ns/op 2127881 B/op 24320 allocs/op
+BenchmarkCH008RowTTLRows 100 1674466 ns/op 2127882 B/op 24320 allocs/op
+BenchmarkCH008RowTTLRows 100 1665844 ns/op 2127885 B/op 24320 allocs/op
+BenchmarkCH008RowTTLRows 100 1741466 ns/op 2127883 B/op 24320 allocs/op
+BenchmarkCH008RowTTLRows 100 1594457 ns/op 2127879 B/op 24320 allocs/op
+BenchmarkCH008RowTTLRows 100 1645248 ns/op 2127882 B/op 24320 allocs/op
+BenchmarkCH008ColumnTTLRows 100 1694453 ns/op 2062344 B/op 20224 allocs/op
+BenchmarkCH008ColumnTTLRows 100 1656752 ns/op 2062344 B/op 20224 allocs/op
+BenchmarkCH008ColumnTTLRows 100 1589552 ns/op 2062403 B/op 20224 allocs/op
+BenchmarkCH008ColumnTTLRows 100 1652143 ns/op 2062344 B/op 20224 allocs/op
+BenchmarkCH008ColumnTTLRows 100 1552259 ns/op 2062346 B/op 20224 allocs/op
+```
+
+Median comparison:
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change row TTL | 1,557,369 | 2,124,353 | 24,285 | baseline |
+| Post-change TTL-free | 1,669,438 | 2,127,883 | 24,320 | control only; no column-TTL state retained |
+| Post-change row TTL | 1,665,844 | 2,127,882 | 24,320 | 1.07x time versus pre-change; within overlapping sample range |
+| Post-change expired column TTL | 1,652,143 | 2,062,344 | 20,224 | 1.01x faster than post-change TTL-free; 2.9% lower heap and 16.8% fewer allocations in this workload |
+
+The feature is not claimed as a general CPU optimization. Its value is
+correctness and reclaimability: expired wide strings become `NULL` immediately
+on reads, and scheduler/manual purge releases their backing storage while
+emitting an exact update. The default-disabled path retains the existing
+fast-path shape; the modest control difference is within the noisy overlapping
+sample range and should be rechecked on deployment hardware.
+
+Reproduce with `make benchmark-ch008-column-ttl`; run correctness coverage with
+`make test-ch008-column-ttl`.

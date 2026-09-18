@@ -36,7 +36,7 @@ func (table *TypedTable) Stats() TypedTableStats {
 		return TypedTableStats{}
 	}
 	table.mu.RLock()
-	if table.ttl == nil && table.statsCacheValid {
+	if table.ttl == nil && table.columnTTLs == nil && table.statsCacheValid {
 		stats := cloneTypedTableStats(table.statsCache)
 		table.mu.RUnlock()
 		return stats
@@ -45,11 +45,11 @@ func (table *TypedTable) Stats() TypedTableStats {
 
 	table.mu.Lock()
 	defer table.mu.Unlock()
-	if table.ttl == nil && table.statsCacheValid {
+	if table.ttl == nil && table.columnTTLs == nil && table.statsCacheValid {
 		return cloneTypedTableStats(table.statsCache)
 	}
 	stats := table.computeStatsLocked()
-	if table.ttl == nil {
+	if table.ttl == nil && table.columnTTLs == nil {
 		table.statsCache = stats
 		table.statsCacheValid = true
 	}
@@ -76,7 +76,7 @@ func (table *TypedTable) computeStatsLocked() TypedTableStats {
 		stats.RowCount++
 		for index, storage := range table.columns {
 			columnStats := &stats.Columns[index]
-			if !storage.valid[row] {
+			if !storage.valid[row] || (table.columnTTLs != nil && table.typedTableColumnExpiredLocked(index, row)) {
 				columnStats.NullCount++
 				continue
 			}

@@ -36,11 +36,12 @@ type TypedTableTTLSchedulerOptions struct {
 // TypedTableTTLRun records one table maintenance pass. Expired is the number
 // of rows converted into DELETE changes during the pass.
 type TypedTableTTLRun struct {
-	Name       string
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Expired    int
-	Error      string
+	Name           string
+	StartedAt      time.Time
+	FinishedAt     time.Time
+	Expired        int
+	ExpiredColumns int
+	Error          string
 }
 
 // TypedTableTTLScheduler is an explicit, one-goroutine reaper for registered
@@ -149,7 +150,8 @@ func (scheduler *TypedTableTTLScheduler) Start(ctx context.Context) error {
 }
 
 // RunOnce purges all currently registered tables, up to the configured table
-// bound, using one coherent scheduler-clock timestamp.
+// bound, using one coherent scheduler-clock timestamp. Expired rows are
+// deleted, while expired column values are masked and physically cleared.
 func (scheduler *TypedTableTTLScheduler) RunOnce(ctx context.Context) ([]TypedTableTTLRun, error) {
 	if scheduler == nil {
 		return nil, ErrTypedTableTTLSchedulerNil
@@ -184,11 +186,19 @@ func (scheduler *TypedTableTTLScheduler) RunOnce(ctx context.Context) ([]TypedTa
 		}
 		run := TypedTableTTLRun{Name: name, StartedAt: now}
 		changes, err := tables[index].PurgeExpired(now)
-		run.FinishedAt = scheduler.options.Now()
 		run.Expired = len(changes)
 		if err != nil {
 			run.Error = err.Error()
 		}
+		if err == nil {
+			columnChanges, columnErr := tables[index].PurgeExpiredColumns(now)
+			run.ExpiredColumns = len(columnChanges)
+			if columnErr != nil {
+				err = columnErr
+				run.Error = columnErr.Error()
+			}
+		}
+		run.FinishedAt = scheduler.options.Now()
 		scheduler.recordRun(run, tables[index])
 		runs = append(runs, run)
 		scheduler.notify(run)

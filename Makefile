@@ -18863,3 +18863,39 @@ commit-ch006-durable-queue:
 .PHONY: push-ch006-durable-queue
 push-ch006-durable-queue:
 	bash ./scripts/push-ch006-durable-queue.sh
+
+.PHONY: benchmark-ch008-column-ttl
+benchmark-ch008-column-ttl:
+	bash ./scripts/benchmark-ch008-column-ttl.sh
+
+.PHONY: test-ch008-column-ttl
+test-ch008-column-ttl:
+	bash ./scripts/test-ch008-column-ttl.sh
+
+.PHONY: format-ch008-column-ttl
+format-ch008-column-ttl:
+	bash ./scripts/format-ch008-column-ttl.sh
+
+.PHONY: format-ch008-column-ttl-snapshot
+format-ch008-column-ttl-snapshot:
+	bash ./scripts/format-ch008-column-ttl-snapshot.sh
+
+.PHONY: format-ch008-scheduler
+format-ch008-scheduler:
+	bash ./scripts/format-ch008-scheduler.sh
+
+.PHONY: review-ch008
+review-ch008:
+	bash ./scripts/review-ch008.sh
+
+.PHONY: stage-ch008-column-ttl
+stage-ch008-column-ttl:
+	bash ./scripts/stage-ch008-column-ttl.sh
+
+.PHONY: commit-ch008-column-ttl
+commit-ch008-column-ttl:
+	bash ./scripts/commit-ch008-column-ttl.sh
+
+.PHONY: push-ch008-column-ttl
+push-ch008-column-ttl:
+	bash ./scripts/push-ch008-column-ttl.sh

@@ -110,6 +110,7 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 			if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 				table.ttl.deadlines[write] = table.ttl.deadlines[read]
 			}
+			table.moveTypedTableColumnTTLDeadlineLocked(write, read)
 		}
 		state.deleted.clear(write)
 		write++
@@ -120,6 +121,7 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	for column := range table.columns {
 		table.columns[column].truncate(write)
 	}
+	table.truncateTypedTableColumnTTLDeadlinesLocked(write)
 	if table.ttl != nil {
 		if table.ttl.options.Mode == TypedTableTTLProcessingTime {
 			table.ttl.deadlines = table.ttl.deadlines[:write]

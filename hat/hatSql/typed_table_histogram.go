@@ -67,7 +67,7 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 	}
 	cacheKey := typedTableHistogramCacheKey{field: field, bins: bins}
 	table.mu.RLock()
-	if table.ttl == nil {
+	if table.ttl == nil && table.columnTTLs == nil {
 		if cached, found := table.histogramCache[cacheKey]; found {
 			histogram := cloneTypedTableHistogram(cached)
 			table.mu.RUnlock()
@@ -78,7 +78,7 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 
 	table.mu.Lock()
 	defer table.mu.Unlock()
-	if table.ttl == nil {
+	if table.ttl == nil && table.columnTTLs == nil {
 		if cached, found := table.histogramCache[cacheKey]; found {
 			return cloneTypedTableHistogram(cached), nil
 		}
@@ -108,6 +108,10 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		}
 		histogram.RowCount++
 		if !storage.valid[row] {
+			histogram.NullCount++
+			continue
+		}
+		if table.columnTTLs != nil && table.typedTableColumnExpiredLocked(columnIndex, row) {
 			histogram.NullCount++
 			continue
 		}
@@ -153,7 +157,7 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		}
 	}
 	if !histogram.HasMinMax {
-		if table.ttl == nil {
+		if table.ttl == nil && table.columnTTLs == nil {
 			table.cacheTypedTableHistogramLocked(cacheKey, histogram)
 		}
 		return cloneTypedTableHistogram(histogram), nil
@@ -167,16 +171,16 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		}
 		for row := range table.keys {
 			if table.ttl != nil {
-				if table.typedTableRowHiddenLocked(row, now) || !storage.valid[row] {
+				if table.typedTableRowHiddenLocked(row, now) || !storage.valid[row] || (table.columnTTLs != nil && table.typedTableColumnExpiredLocked(columnIndex, row)) {
 					continue
 				}
-			} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] {
+			} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] || (table.columnTTLs != nil && table.typedTableColumnExpiredLocked(columnIndex, row)) {
 				continue
 			}
 			index := typedTableIntHistogramIndex(storage.int64s[row], minInt, maxInt, bins)
 			histogram.Bins[index].Count++
 		}
-		if table.ttl == nil {
+		if table.ttl == nil && table.columnTTLs == nil {
 			table.cacheTypedTableHistogramLocked(cacheKey, histogram)
 		}
 		return cloneTypedTableHistogram(histogram), nil
@@ -191,10 +195,10 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 	}
 	for row := range table.keys {
 		if table.ttl != nil {
-			if table.typedTableRowHiddenLocked(row, now) || !storage.valid[row] {
+			if table.typedTableRowHiddenLocked(row, now) || !storage.valid[row] || (table.columnTTLs != nil && table.typedTableColumnExpiredLocked(columnIndex, row)) {
 				continue
 			}
-		} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] {
+		} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] || (table.columnTTLs != nil && table.typedTableColumnExpiredLocked(columnIndex, row)) {
 			continue
 		}
 		value := storage.floats[row]
@@ -204,7 +208,7 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		index := typedTableFloatHistogramIndex(value, minFloat, maxFloat, bins)
 		histogram.Bins[index].Count++
 	}
-	if table.ttl == nil {
+	if table.ttl == nil && table.columnTTLs == nil {
 		table.cacheTypedTableHistogramLocked(cacheKey, histogram)
 	}
 	return cloneTypedTableHistogram(histogram), nil

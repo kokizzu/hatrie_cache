@@ -34,7 +34,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-005 | Lightweight delete bitmap | Partially adopted: opt-in typed-table patch parts now persist their compact bitmap through bounded CRC-protected state snapshots; immutable stored-part manifests and cross-process part integration remain open. | High |
 | CH-006 | Mutation dependency queue | Partially adopted: importable `SQLMutationDependencyQueue` now persists dependency-aware task transitions in a CRC-checked binary WAL with crash-tail recovery and explicit compaction; automatic SQL `ALTER`/`DELETE` wiring and cross-process leases remain open. | High |
 | CH-007 | Row TTL | Adopted as an opt-in `TypedTable` processing-time or event-time policy with an indexed explicit purge, a shared bounded background scheduler, and CRC-protected processing-time deadline snapshots. Column-level TTL, automatic schema integration, and retry policy remain caller-owned. | Medium |
-| CH-008 | Column TTL | No independent removal or masking of expired wide columns. | Medium |
+| CH-008 | Column TTL | Partially adopted: `TypedTableColumn.TTL` independently masks expired cells in row/columnar reads, `Stats`, and `Histogram`; explicit and scheduler-driven purge physically clears values and emits updates, with bounded CRC-protected processing-time deadline snapshots. | Medium |
 | CH-009 | TTL rollup | No background aggregation of expired detail rows into coarser summaries. | High |
 | CH-010 | Materialized/default columns | No stored expression column maintained during writes with schema validation. | Medium |
 | CH-011 | General projection DDL | Only narrow cached ordering projections exist; no user-defined maintained projection. | High |

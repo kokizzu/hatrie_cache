@@ -562,3 +562,16 @@ synced before returning. The default in-memory graph and SQL execution path are
 unchanged; automatic `ALTER`/`DELETE` planner integration and cross-process
 leases remain open. See [CH006_DURABLE_MUTATION_QUEUE.md](CH006_DURABLE_MUTATION_QUEUE.md)
 and [BENCHMARK.md](BENCHMARK.md#ch-006-durable-mutation-dependency-queue).
+
+## CH-008: Column TTL
+
+CH-008 is partially adopted through importable per-column TTL metadata on
+`TypedTableColumn`. Processing-time and event-time policies mask expired values
+as SQL `NULL` in live row/columnar reads, statistics, and histograms while
+retaining the row. `PurgeExpiredColumns` and the opt-in TTL scheduler physically
+clear expired values and emit exact `UPDATE` changes. Processing-time column
+deadlines have a bounded CRC-protected `MarshalColumnTTLState` /
+`RestoreColumnTTLState` pair for backup and restore. Automatic schema inference
+and live-clock mutation of historical MVCC snapshots remain intentionally out
+of scope. See [CH008_COLUMN_TTL.md](CH008_COLUMN_TTL.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-008-column-ttl).
