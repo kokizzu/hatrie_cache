@@ -20832,3 +20832,39 @@ push-tu36-backup-rotation:
 	bash ./scripts/run-tu36-backup-rotation.sh push
 status-tu36-backup-rotation:
 	bash ./scripts/run-tu36-backup-rotation.sh status
+.PHONY: format-tr023-functional-index test-tr023-functional-index benchmark-tr023-functional-index race-tr023-functional-index vet-tr023-functional-index package-tr023-functional-index full-test-tr023-functional-index review-tr023-functional-index stage-tr023-functional-index commit-tr023-functional-index push-tr023-functional-index status-tr023-functional-index
+format-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh format
+
+test-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh test
+
+benchmark-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh benchmark
+
+race-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh race
+
+vet-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh vet
+
+package-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh package
+
+full-test-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh full-test
+
+review-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh review
+
+stage-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh stage
+
+commit-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh commit
+
+push-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh push
+
+status-tr023-functional-index:
+	bash ./scripts/run-tr023-functional-index.sh status

@@ -9,13 +9,22 @@ import (
 )
 
 var (
-	ErrMaterializedSourceNil                    = errors.New("hatSchema: materialized source is nil")
-	ErrMaterializedSourceColumnRequired         = errors.New("hatSchema: materialized source index column is required")
-	ErrMaterializedSourceColumnUnknown          = errors.New("hatSchema: materialized source index column is unknown")
-	ErrMaterializedSourceCoveringFieldsRequired = errors.New("hatSchema: materialized source covering fields are required")
+	ErrMaterializedSourceNil                                 = errors.New("hatSchema: materialized source is nil")
+	ErrMaterializedSourceColumnRequired                      = errors.New("hatSchema: materialized source index column is required")
+	ErrMaterializedSourceColumnUnknown                       = errors.New("hatSchema: materialized source index column is unknown")
+	ErrMaterializedSourceCoveringFieldsRequired              = errors.New("hatSchema: materialized source covering fields are required")
+	ErrMaterializedSourceFunctionalIndexNameRequired         = errors.New("hatSchema: materialized source functional index name is required")
+	ErrMaterializedSourceFunctionalIndexDependenciesRequired = errors.New("hatSchema: materialized source functional index dependencies are required")
+	ErrMaterializedSourceFunctionalIndexEvaluatorRequired    = errors.New("hatSchema: materialized source functional index evaluator is required")
+	ErrMaterializedSourceFunctionalIndexNameConflict         = errors.New("hatSchema: materialized source functional index name conflicts with an existing index")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
+
+// FunctionalIndexEvaluator derives the lookup value for one materialized row.
+// Evaluators should be deterministic and read-only; the source passes a row
+// copy so an accidental mutation cannot alter stored data.
+type FunctionalIndexEvaluator func(Row) (interface{}, error)
 
 type DerivedColumn struct {
 	Name      string
@@ -99,6 +108,14 @@ type CoveringIndexBuildReport struct {
 	Attempts int
 }
 
+// FunctionalIndexBuildReport describes one online functional-index build.
+type FunctionalIndexBuildReport struct {
+	Name         string
+	Dependencies []string
+	Rows         int
+	Attempts     int
+}
+
 type materializedCoveringIndex struct {
 	fields    []string
 	fieldSet  map[string]struct{}
@@ -106,15 +123,22 @@ type materializedCoveringIndex struct {
 	rows      map[string][]Row
 }
 
+type materializedFunctionalIndex struct {
+	dependencies []string
+	evaluator    FunctionalIndexEvaluator
+	positions    map[string][]int
+}
+
 type MaterializedSource struct {
-	mu              sync.RWMutex
-	columns         []DerivedColumn
-	nextID          map[string]int64
-	rows            []Row
-	indexes         map[string]map[string][]int
-	indexedFields   map[string]struct{}
-	coveringIndexes map[string]*materializedCoveringIndex
-	generation      uint64
+	mu                sync.RWMutex
+	columns           []DerivedColumn
+	nextID            map[string]int64
+	rows              []Row
+	indexes           map[string]map[string][]int
+	indexedFields     map[string]struct{}
+	coveringIndexes   map[string]*materializedCoveringIndex
+	functionalIndexes map[string]*materializedFunctionalIndex
+	generation        uint64
 }
 
 func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
@@ -125,11 +149,12 @@ func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
 		}
 	}
 	return &MaterializedSource{
-		columns:         append([]DerivedColumn(nil), columns...),
-		nextID:          map[string]int64{},
-		indexes:         map[string]map[string][]int{},
-		indexedFields:   indexedFields,
-		coveringIndexes: map[string]*materializedCoveringIndex{},
+		columns:           append([]DerivedColumn(nil), columns...),
+		nextID:            map[string]int64{},
+		indexes:           map[string]map[string][]int{},
+		indexedFields:     indexedFields,
+		coveringIndexes:   map[string]*materializedCoveringIndex{},
+		functionalIndexes: map[string]*materializedFunctionalIndex{},
 	}
 }
 
@@ -166,6 +191,20 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		}
 		materialized[column.Name] = value
 	}
+	var functionalKeys map[string]string
+	if len(source.functionalIndexes) > 0 {
+		functionalKeys = make(map[string]string, len(source.functionalIndexes))
+		for name, index := range source.functionalIndexes {
+			if index == nil || index.evaluator == nil {
+				continue
+			}
+			value, err := index.evaluator(cloneRow(materialized))
+			if err != nil {
+				return nil, fmt.Errorf("hatSchema: evaluate functional index %q: %w", name, err)
+			}
+			functionalKeys[name] = materializedIndexKey(value)
+		}
+	}
 	position := len(source.rows)
 	source.rows = append(source.rows, cloneRow(materialized))
 	for field := range source.indexedFields {
@@ -182,6 +221,13 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		key := materializedIndexKey(materialized[field])
 		index.positions[key] = append(index.positions[key], position)
 		index.rows[key] = append(index.rows[key], projectMaterializedRow(materialized, index.fields))
+	}
+	for name, index := range source.functionalIndexes {
+		if index == nil {
+			continue
+		}
+		key := functionalKeys[name]
+		index.positions[key] = append(index.positions[key], position)
 	}
 	source.generation++
 	return cloneRow(materialized), nil
@@ -200,6 +246,9 @@ func (source *MaterializedSource) HasIndex(field string) bool {
 	_, indexed := source.indexedFields[field]
 	if !indexed {
 		_, indexed = source.coveringIndexes[field]
+	}
+	if !indexed {
+		_, indexed = source.functionalIndexes[field]
 	}
 	source.mu.RUnlock()
 	return indexed
@@ -334,6 +383,80 @@ func (source *MaterializedSource) BuildSecondaryIndex(field string) (SecondaryIn
 	}
 }
 
+// BuildFunctionalIndex builds and atomically installs an equality index over a
+// deterministic expression. The evaluator runs outside the source lock while
+// the source is scanned; a concurrent insert causes a generation-checked retry.
+// The index is maintained for subsequent inserts after publication.
+func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies []string, evaluator FunctionalIndexEvaluator) (FunctionalIndexBuildReport, error) {
+	if source == nil {
+		return FunctionalIndexBuildReport{}, ErrMaterializedSourceNil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return FunctionalIndexBuildReport{}, ErrMaterializedSourceFunctionalIndexNameRequired
+	}
+	if evaluator == nil {
+		return FunctionalIndexBuildReport{}, ErrMaterializedSourceFunctionalIndexEvaluatorRequired
+	}
+	normalizedDependencies, err := normalizeFunctionalIndexDependencies(dependencies)
+	if err != nil {
+		return FunctionalIndexBuildReport{}, err
+	}
+	report := FunctionalIndexBuildReport{Name: name, Dependencies: append([]string(nil), normalizedDependencies...)}
+	for {
+		source.mu.RLock()
+		if source.hasColumnLocked(name) {
+			source.mu.RUnlock()
+			return FunctionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceFunctionalIndexNameConflict, name)
+		}
+		if _, exists := source.indexedFields[name]; exists {
+			source.mu.RUnlock()
+			return FunctionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceFunctionalIndexNameConflict, name)
+		}
+		if _, exists := source.coveringIndexes[name]; exists {
+			source.mu.RUnlock()
+			return FunctionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceFunctionalIndexNameConflict, name)
+		}
+		for _, dependency := range normalizedDependencies {
+			if !source.hasColumnLocked(dependency) {
+				source.mu.RUnlock()
+				return FunctionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceColumnUnknown, dependency)
+			}
+		}
+		generation := source.generation
+		rows := append([]Row(nil), source.rows...)
+		source.mu.RUnlock()
+
+		positions := make(map[string][]int, len(rows))
+		for position, row := range rows {
+			value, evaluateErr := evaluator(cloneRow(row))
+			if evaluateErr != nil {
+				return FunctionalIndexBuildReport{}, fmt.Errorf("hatSchema: evaluate functional index %q at row %d: %w", name, position, evaluateErr)
+			}
+			key := materializedIndexKey(value)
+			positions[key] = append(positions[key], position)
+		}
+		report.Attempts++
+
+		source.mu.Lock()
+		if source.generation != generation {
+			source.mu.Unlock()
+			continue
+		}
+		if source.functionalIndexes == nil {
+			source.functionalIndexes = make(map[string]*materializedFunctionalIndex)
+		}
+		source.functionalIndexes[name] = &materializedFunctionalIndex{
+			dependencies: append([]string(nil), normalizedDependencies...),
+			evaluator:    evaluator,
+			positions:    positions,
+		}
+		source.mu.Unlock()
+		report.Rows = len(rows)
+		return report, nil
+	}
+}
+
 func (source *MaterializedSource) Lookup(field string, value interface{}) []Row {
 	if source == nil {
 		return nil
@@ -344,6 +467,11 @@ func (source *MaterializedSource) Lookup(field string, value interface{}) []Row 
 	positions := source.indexes[field][key]
 	if positions == nil {
 		if index := source.coveringIndexes[field]; index != nil {
+			positions = index.positions[key]
+		}
+	}
+	if positions == nil {
+		if index := source.functionalIndexes[field]; index != nil {
 			positions = index.positions[key]
 		}
 	}
@@ -421,6 +549,29 @@ func normalizeCoveringFields(indexField string, fields []string) ([]string, erro
 		if err := add(field); err != nil {
 			return nil, err
 		}
+	}
+	return normalized, nil
+}
+
+func normalizeFunctionalIndexDependencies(dependencies []string) ([]string, error) {
+	if len(dependencies) == 0 {
+		return nil, ErrMaterializedSourceFunctionalIndexDependenciesRequired
+	}
+	normalized := make([]string, 0, len(dependencies))
+	seen := make(map[string]struct{}, len(dependencies))
+	for _, dependency := range dependencies {
+		dependency = strings.TrimSpace(dependency)
+		if dependency == "" {
+			return nil, ErrMaterializedSourceFunctionalIndexDependenciesRequired
+		}
+		if _, exists := seen[dependency]; exists {
+			continue
+		}
+		seen[dependency] = struct{}{}
+		normalized = append(normalized, dependency)
+	}
+	if len(normalized) == 0 {
+		return nil, ErrMaterializedSourceFunctionalIndexDependenciesRequired
 	}
 	return normalized, nil
 }

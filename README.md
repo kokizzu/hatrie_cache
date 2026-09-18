@@ -157,6 +157,7 @@ security guidance before exposing it on a network.
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)
 - Typed functional secondary index: [FUNCTIONAL_INDEX.md](FUNCTIONAL_INDEX.md)
+- Materialized SQL functional indexes with online publication: [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md)
 - Exact compact-slot bitset index: [BITSET_INDEX.md](BITSET_INDEX.md)
 - Opt-in replica health and locality-aware read routing: [REPLICA_HEALTH.md](REPLICA_HEALTH.md)
 - Opt-in SQL-readable telemetry catalog: [SYSTEM_METRICS.md](SYSTEM_METRICS.md)

@@ -31505,6 +31505,28 @@ The first pre-change baseline median was 5,828,411 ns/op, 4,653,742 B/op, and
 publishes the finished posting map only after a generation check. The index is
 opt-in and its long-lived map/posting memory is outside the per-operation
 allocation comparison. See [TR021_ONLINE_SECONDARY_INDEX.md](TR021_ONLINE_SECONDARY_INDEX.md).
+<a id="tr-023-functional-indexes"></a>
+## TR-023 Functional Indexes
+
+Command: `make benchmark-tr023-functional-index`.
+
+This compares a 10,000-row SQL `LOWER` equality scan with the opt-in
+`MaterializedSource.BuildFunctionalIndex` path. The indexed query returns 100
+rows. The build comparison uses the same lower-case expression and measures
+the cost of constructing the retained posting map. Five `-benchmem` samples
+ran on Linux/amd64 with an AMD Ryzen 9 5950X; values below are medians.
+
+| Workload | Before | After | Improvement / tradeoff |
+| --- | ---: | ---: | ---: |
+| SQL `LOWER` equality lookup | 9.891 ms/op, 9,986,044 B/op, 70,234 allocs/op | 100.409 us/op, 112,900 B/op, 734 allocs/op | **98.5x faster**, 88.5x fewer bytes, 95.7x fewer allocs |
+| Equivalent lower-case scan | 523.431 us/op, 80,000 B/op, 10,000 allocs/op | indexed SQL path above | **5.2x faster** query path |
+| Functional-index build | 1.187 ms/op, 1,071,074 B/op, 10,833 allocs/op | 5.705 ms/op, 4,836,898 B/op, 50,845 allocs/op | 4.81x slower CPU and 4.51x more build-time bytes |
+
+The index is explicitly opt-in because build cost and retained posting memory
+are real tradeoffs. It is intended for repeated selective predicates; the
+legacy scan remains the default for sources that do not build an index. Full
+details and raw samples: [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md).
+
 <a id="tr-024-covering-materialized-indexes"></a>
 ## TR-024: Covering Materialized Indexes
 

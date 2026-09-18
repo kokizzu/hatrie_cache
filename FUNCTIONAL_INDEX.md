@@ -2,8 +2,10 @@
 
 `hatDataStructure.FunctionalIndex[T, K]` is a typed secondary index for values
 whose lookup key is derived by a caller-provided function. It is the reusable
-primitive for Tarantool-style functional indexes; it is not automatically wired
-into the SQL planner yet.
+primitive for Tarantool-style functional indexes. For materialized SQL sources,
+the opt-in `hatSchema.MaterializedSource.BuildFunctionalIndex` integration is
+documented in [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md); arbitrary
+typed indexes remain caller-managed rather than being inferred by the planner.
 
 ## Example
 
