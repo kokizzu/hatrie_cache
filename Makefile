@@ -19806,6 +19806,36 @@ verify-ch046-kafka-table-source-docs:
 audit-next-ideas:
 	bash ./scripts/audit-next-ideas.sh
 
+format-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh format
+
+test-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh test
+
+benchmark-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh benchmark
+
+race-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh race
+
+vet-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh vet
+
+test-mz016-kafka-source-checkpoint-package:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh package
+
+verify-mz016-kafka-source-checkpoint-docs:
+	bash ./scripts/verify-mz016-kafka-source-checkpoint-docs.sh
+
+stage-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh stage
+
+commit-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh commit
+
+push-mz016-kafka-source-checkpoint:
+	bash ./scripts/test-mz016-kafka-source-checkpoint.sh push
+
 format-mz013-debezium-kafka:
 	bash ./scripts/test-mz013-debezium-kafka.sh format
 

@@ -243,39 +243,9 @@ func (source *KafkaTableSource) ApplyBatch(batch KafkaTableBatch) (KafkaTableIng
 	if err != nil {
 		return KafkaTableIngestResult{}, err
 	}
-	envelope := SQLSourceTransactionEnvelope{
-		Source: source.source,
-		Transaction: SQLSourceTransaction{
-			ID:      transactionID,
-			Offsets: offsets,
-		},
-		Relations: []string{source.table},
-	}
-
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	wasCommitted := source.ingestions.Committed(source.source, transactionID)
-	result := KafkaTableIngestResult{
-		TransactionID: transactionID,
-		Offsets:       source.effectiveOffsetsLocked(offsets),
-	}
-	committed, err := source.ingestions.IngestEnvelope(envelope, func() error {
-		applied, skipped, err := source.applyMessagesLocked(normalizedMessages, offsets)
-		result.AppliedMessages = applied
-		result.SkippedMessages = skipped
-		return err
-	})
-	if err != nil {
-		return KafkaTableIngestResult{}, err
-	}
-	result.Committed = committed || wasCommitted
-	result.Duplicate = !committed && wasCommitted
-	if committed {
-		source.stats.AppliedBatches++
-	} else if result.Duplicate {
-		source.stats.DuplicateBatches++
-	}
-	return result, nil
+	return source.applyKafkaTableBatchLocked(normalizedMessages, offsets, transactionID)
 }
 
 // ConsumeOnce polls, applies, and then commits one source batch. A consumer

@@ -31106,3 +31106,19 @@ Median: baseline 2,853 ns/op, decoder 2,964 ns/op. The decoder is 1.04x the
 baseline CPU time, 1.03x the bytes, and has the same allocation count. The
 small overhead buys validation, structured-key canonicalization, schema/payload
 support, and tombstone handling.
+## MZ-016: Durable Kafka source checkpoints
+
+Workload: one Kafka row applied to a fresh source. The checkpoint path clones
+and commits rows, offsets, and replay markers through a no-op store; the normal
+path only applies the batch.
+
+Command: `make benchmark-mz016-kafka-source-checkpoint`.
+
+| Path | Raw ns/op samples | B/op | allocs/op |
+| --- | --- | --- | --- |
+| Normal `ApplyBatch` | 5002, 4796, 5125, 4738, 4688 | 2800 | 36 |
+| `ApplyBatchWithCheckpoint` | 5832, 5846, 5992, 6147, 6727 | 3728 | 49 |
+
+Median: normal 4,796 ns/op, checkpoint 5,992 ns/op. The checkpoint path is
+1.25x CPU time, 1.33x bytes, and 13 allocations higher. This is opt-in and
+scales with the retained source snapshot; the normal path is unchanged.
