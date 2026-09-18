@@ -21085,3 +21085,19 @@ format-tr31:
 .PHONY: benchmark-tr31
 benchmark-tr31:
 	sh ./scripts/benchmark-tr31.sh
+
+.PHONY: test-tr034-savepoint race-tr034-savepoint vet-tr034-savepoint format-tr034-savepoint benchmark-tr034-savepoint
+test-tr034-savepoint:
+	bash scripts/test-tr034-savepoint.sh
+
+race-tr034-savepoint:
+	bash scripts/race-tr034-savepoint.sh
+
+vet-tr034-savepoint:
+	bash scripts/vet-tr034-savepoint.sh
+
+format-tr034-savepoint:
+	bash scripts/format-tr034-savepoint.sh
+
+benchmark-tr034-savepoint:
+	bash scripts/benchmark-tr034-savepoint.sh

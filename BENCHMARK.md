@@ -31801,3 +31801,22 @@ Use it at ownership or commit boundaries, not blindly on every hot mutation.
 It has no default runtime cost because it is not wired into the existing
 election or replication paths. Full API limitations and the consensus boundary
 are documented in [TR01_LEADER_LEASE.md](TR01_LEADER_LEASE.md).
+
+<a id="tr-034-sql-savepoints"></a>
+## TR-34 SQL Savepoints
+
+`BenchmarkTR034SQLTransactionSavepoint` compares the existing transaction
+path with one staged mutation against the same path with one runtime
+savepoint. Five `-benchmem` samples used `-benchtime=10x` on Linux/amd64 with
+an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Transaction without savepoint | 2,199,602; 2,321,207; 2,225,356; 2,842,391; 2,314,229 | 2,314,229 | 240,644 | 1,020 | 1.00x |
+| Transaction with one savepoint | 4,923,037; 4,668,252; 4,810,685; 5,684,574; 4,695,120 | 4,810,685 | 477,636 | 2,032 | 2.08x |
+
+The savepoint adds roughly 2.50 ms, 237 KiB, and 1,012 allocations in this
+fixture because it creates a second gzip-binary snapshot. This is a deliberate
+correctness-first implementation tradeoff; the API should not be used as a
+per-row batching mechanism. The full semantics and future undo-log direction
+are documented in [TR034_SQL_SAVEPOINTS.md](TR034_SQL_SAVEPOINTS.md).
