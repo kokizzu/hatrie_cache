@@ -8674,6 +8674,7 @@ verify-sql-set-operation-all:
 .PHONY: inspect-goal-state
 inspect-goal-state:
 	bash ./scripts/inspect-goal-state.sh
+
 .PHONY: test-m052c-native-dataflow
 test-m052c-native-dataflow:
 	bash ./scripts/test-m052c-native-dataflow.sh
@@ -20688,5 +20689,43 @@ commit-mz010-sql-subscription:
 	@bash scripts/run-mz010-sql-subscription.sh commit
 
 push-mz010-sql-subscription:
-
 	@bash scripts/run-mz010-sql-subscription.sh push
+
+.PHONY: format-tr007
+format-tr007:
+	@bash scripts/run-tr007-adaptive-group-commit.sh format
+
+.PHONY: test-tr007
+test-tr007:
+	@bash scripts/run-tr007-adaptive-group-commit.sh test
+
+.PHONY: baseline-tr007
+baseline-tr007:
+	@bash scripts/run-tr007-adaptive-group-commit.sh baseline
+
+.PHONY: benchmark-tr007
+benchmark-tr007:
+	@bash scripts/run-tr007-adaptive-group-commit.sh benchmark
+
+.PHONY: race-tr007
+race-tr007:
+	@bash scripts/run-tr007-adaptive-group-commit.sh race
+
+.PHONY: vet-tr007
+vet-tr007:
+	@bash scripts/run-tr007-adaptive-group-commit.sh vet
+
+.PHONY: test-tr007-package
+test-tr007-package:
+	@bash scripts/run-tr007-adaptive-group-commit.sh package
+status-tr007:
+	bash ./scripts/run-tr007-adaptive-group-commit.sh status
+
+stage-tr007:
+	bash ./scripts/run-tr007-adaptive-group-commit.sh stage
+
+commit-tr007:
+	bash ./scripts/run-tr007-adaptive-group-commit.sh commit
+
+push-tr007:
+	bash ./scripts/run-tr007-adaptive-group-commit.sh push

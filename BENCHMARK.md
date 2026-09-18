@@ -31457,6 +31457,29 @@ The open path also uses 154x fewer bytes and 12x fewer allocations than the
 repeated remote-error path. Results are five-sample medians on Linux amd64,
 AMD Ryzen 9 5950X; rerun with `make benchmark-tr045-peer`.
 
+<a id="tr-007-adaptive-wal-group-commit"></a>
+## TR-007: Adaptive WAL Group Commit
+
+Command: `make baseline-tr007` and `make benchmark-tr007`.
+
+This compares the existing fixed group-commit collection window with the new
+opt-in adaptive window. The workload uses 16 concurrent `SETSTR` callers, a
+2 ms configured window, `GroupCommitMaxBatch=64`, and a no-op sync hook. Each
+path was measured with five `-benchmem` samples on Linux/amd64.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Syncs/round | Relative result |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Pre-change fixed window | 2,190,102; 2,190,955; 2,186,356; 2,194,431; 2,193,167 | 2,190,955 | 16,117 | 89 | 1.000 | baseline |
+| Final fixed control | 2,188,096; 2,188,399; 2,188,571; 2,187,286; 2,184,768 | 2,188,096 | 16,073 | 89 | 1.00x |
+| Adaptive window | 1,996,152; 1,955,632; 1,939,148; 1,952,730; 1,972,774 | 1,955,632 | 16,051 | 89 | 1.12x faster than final control |
+
+Both paths completed the 16-command round with one sync. The adaptive path
+therefore reduced measured latency without increasing per-operation heap or
+allocations in this fixture. It remains opt-in because sparse traffic can
+shorten batching and increase sync frequency; see
+[TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md) for
+the policy and raw memory samples.
+
 ## Rejected T-042: Recovery Parallel Replay
 
 An opt-in four-worker replay experiment was rolled back after it made a

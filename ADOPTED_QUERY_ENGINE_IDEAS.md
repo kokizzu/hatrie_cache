@@ -679,3 +679,13 @@ and [BENCHMARK.md](BENCHMARK.md#tt-049-sql-row-lock-leases).
 ## Tarantool-Inspired Transport Reliability
 
 - **TR-045 connection circuit breaker and health scoring:** `hatPeer.CompactPeerCircuitBreaker` is an opt-in wrapper with bounded failure admission, one half-open probe, caller-cancellation exclusion, and a local health score. See [TR045_COMPACT_PEER_CIRCUIT_BREAKER.md](TR045_COMPACT_PEER_CIRCUIT_BREAKER.md).
+
+## TR-007: Adaptive WAL Group Commit
+
+TR-007 is adopted as the opt-in `hatJournal.Options.AdaptiveGroupCommit`
+policy. It shortens the existing collection window when queued writers show
+pressure while preserving ordered append, sync-before-apply/ack, rollback, and
+replay behavior. The zero value remains the fixed-window implementation. In a
+16-concurrent-writer benchmark it was 1.12x faster with unchanged sync count,
+bytes, and allocations. See [TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md)
+and [BENCHMARK.md](BENCHMARK.md#tr-007-adaptive-wal-group-commit).

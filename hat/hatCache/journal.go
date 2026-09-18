@@ -221,6 +221,7 @@ type CommandJournal struct {
 	sequenceExhausted     bool
 	groupCommitWindow     time.Duration
 	groupCommitMaxBatch   int
+	adaptiveGroupCommit   bool
 	segmentMaxBytes       int64
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
@@ -345,6 +346,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		accepting:             true,
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
+		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
@@ -409,6 +411,16 @@ func (journal *CommandJournal) Close() error {
 
 func (journal *CommandJournal) groupCommitEnabled() bool {
 	return journal.groupCommitMaxBatch > 1
+}
+
+func adaptiveGroupCommitWindow(window time.Duration, maxBatch, queued int) time.Duration {
+	if window <= 0 || maxBatch <= 1 || queued <= 0 {
+		return window
+	}
+	if queued >= maxBatch/2 {
+		return 0
+	}
+	return window / 4
 }
 
 func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheCommandRequest) CacheCommandResponse {
@@ -494,7 +506,11 @@ func (journal *CommandJournal) runGroupCommit() {
 		}
 		batch := make([]*commandJournalJob, 1, journal.groupCommitMaxBatch)
 		batch[0] = first
-		if journal.groupCommitWindow == 0 {
+		window := journal.groupCommitWindow
+		if journal.adaptiveGroupCommit {
+			window = adaptiveGroupCommitWindow(window, journal.groupCommitMaxBatch, len(journal.groupCommitJobs))
+		}
+		if window == 0 {
 			runtime.Gosched()
 			channelClosed := false
 		drain:
@@ -516,7 +532,7 @@ func (journal *CommandJournal) runGroupCommit() {
 			}
 			continue
 		}
-		timer := time.NewTimer(journal.groupCommitWindow)
+		timer := time.NewTimer(window)
 		channelClosed := false
 	collect:
 		for len(batch) < journal.groupCommitMaxBatch {

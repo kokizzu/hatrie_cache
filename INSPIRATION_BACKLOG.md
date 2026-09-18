@@ -151,7 +151,7 @@ before/after measurement when its motivation is performance.
 | TR-04 | Replication filtering by space and key range | Reduce relay bandwidth | Divergent replica contents | [x] Implemented as opt-in literal `HTTPReplicatorOptions.ReplicationKeyPrefixes`; see [TR004_REPLICATION_KEY_FILTER.md](TR004_REPLICATION_KEY_FILTER.md) and [BENCHMARK.md#tr-04-replication-key-prefix-filter](BENCHMARK.md#tr-04-replication-key-prefix-filter). |
 | TR-05 | Parallel relay and applier queues with ordering fences | Increase replication throughput | Ordering and backpressure bugs | [ ] |
 | TR-06 | Conflict-resolution hooks for multi-master updates | Make application conflict policy explicit | Non-deterministic user code | [ ] |
-| TR-07 | Adaptive WAL group-commit and fsync policy | Improve write throughput safely | Durability window changes | [ ] |
+| TR-07 | Adaptive WAL group-commit and fsync policy | Improve write throughput safely | Durability window changes | [x] |
 | TR-08 | WAL encryption and key-rotation metadata | Protect journals at rest | Key recovery and CPU cost | [x] Implemented as opt-in authenticated AES-GCM journal frames with clear key IDs, mixed legacy compatibility, keyring rotation, and encrypted offline checkpoint installation. See [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md) and [BENCHMARK.md#tr-08-wal-encryption-and-key-rotation](BENCHMARK.md#tr-08-wal-encryption-and-key-rotation). |
 | TR-09 | Incremental snapshot chains | Reduce backup write volume | Chain recovery complexity | [ ] |
 | TR-10 | Snapshot manifests with atomic restore publication | Make restores verifiable and resumable | Manifest compatibility | [ ] |

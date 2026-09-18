@@ -2568,6 +2568,11 @@ make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_SEGMENT_MAX_BY
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_SEGMENT_MAX_BYTES=0
 ```
 
+The opt-in `AdaptiveGroupCommit` field shortens the collection window when the
+durable journal queue is under pressure. It preserves sync-before-apply and is
+disabled by default; see [TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md)
+for the Go configuration example and measured tradeoff.
+
 Rotation occurs before a durable batch, never inside one, so rollback and
 group-commit acknowledgement semantics remain unchanged. A segment can exceed
 the byte target by one batch. With defaults, closed-history capacity is roughly

@@ -95,6 +95,9 @@ type Options struct {
 	SegmentCompression  SegmentCompression
 	GroupCommitWindow   time.Duration
 	GroupCommitMaxBatch int
+	// AdaptiveGroupCommit shortens the collection window when queued writers
+	// indicate pressure. It is disabled by default for compatibility.
+	AdaptiveGroupCommit bool
 	SegmentMaxBytes     int64
 	RetainedSegments    int
 	RetainedBytes       int64
