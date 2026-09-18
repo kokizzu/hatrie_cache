@@ -18609,3 +18609,39 @@ push-mu026-unified-metrics:
 
 verify-all:
 	bash ./scripts/verify-all-local.sh
+
+test-mu027-logical-publication:
+	bash ./scripts/test-mu027-logical-publication.sh
+
+format-mu027-logical-publication:
+	bash ./scripts/format-mu027-logical-publication.sh
+
+test-mu027-package:
+	bash ./scripts/test-mu027-package.sh
+
+race-mu027-logical-publication:
+	bash ./scripts/race-mu027-logical-publication.sh
+
+vet-mu027-logical-publication:
+	bash ./scripts/vet-mu027-logical-publication.sh
+
+verify-mu027-logical-publication:
+	bash ./scripts/verify-mu027-logical-publication.sh
+
+review-mu027-logical-publication:
+	bash ./scripts/review-mu027-logical-publication.sh
+
+stage-mu027-logical-publication:
+	bash ./scripts/stage-mu027-logical-publication.sh
+
+commit-mu027-logical-publication:
+	bash ./scripts/commit-mu027-logical-publication.sh
+
+push-mu027-logical-publication:
+	bash ./scripts/push-mu027-logical-publication.sh
+
+benchmark-mu027-logical-publication-baseline:
+	bash ./scripts/benchmark-mu027-logical-publication.sh baseline
+
+benchmark-mu027-logical-publication:
+	bash ./scripts/benchmark-mu027-logical-publication.sh current

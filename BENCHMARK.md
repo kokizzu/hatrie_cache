@@ -29810,3 +29810,67 @@ snapshots retain 1.25x more bytes and 1.23x more allocations for this workload.
 This is an opt-in control-plane catalog; it is not a claim that ordinary SQL
 execution became faster. Use `UpdateMetric` for producers and `Snapshot()` when
 typed Go data is sufficient.
+
+<a id="mu-027-logical-sql-publications"></a>
+## M-U27 Logical SQL Publications
+
+Commands: `make benchmark-mu027-logical-publication-baseline` measures a
+synthetic direct buffered-channel control, and
+`make benchmark-mu027-logical-publication` measures validated publication
+append, append with one live subscriber, and replay-plus-ack of 64 retained
+batches. Both use `GOMAXPROCS=1`, `-benchtime=500ms`, and `-count=5` on the AMD
+Ryzen 9 5950X Linux/amd64 host. The direct channel is a lower-bound control,
+not a previous production implementation: the publication additionally checks
+schema and sequence, copies rows, retains bounded history, tracks checkpoints,
+and applies subscriber backpressure policy.
+
+Raw direct-channel control output:
+
+```text
+BenchmarkMU027BeforeDirectBatchSend  29.70 ns/op  0 B/op  0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend  29.51 ns/op  0 B/op  0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend  28.80 ns/op  0 B/op  0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend  28.65 ns/op  0 B/op  0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend  29.47 ns/op  0 B/op  0 allocs/op
+```
+
+Final paired raw output:
+
+```text
+BenchmarkMU027BeforeDirectBatchSend                 30.59 ns/op  0 B/op      0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend                 28.98 ns/op  0 B/op      0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend                 29.38 ns/op  0 B/op      0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend                 29.21 ns/op  0 B/op      0 allocs/op
+BenchmarkMU027BeforeDirectBatchSend                 29.25 ns/op  0 B/op      0 allocs/op
+BenchmarkMU027AfterPublicationAppend                834.1 ns/op  391 B/op    4 allocs/op
+BenchmarkMU027AfterPublicationAppend                849.1 ns/op  391 B/op    4 allocs/op
+BenchmarkMU027AfterPublicationAppend                877.7 ns/op  391 B/op    4 allocs/op
+BenchmarkMU027AfterPublicationAppend                930.3 ns/op  391 B/op    4 allocs/op
+BenchmarkMU027AfterPublicationAppend                901.9 ns/op  391 B/op    4 allocs/op
+BenchmarkMU027AfterPublicationAppendWithSubscriber 1282 ns/op    775 B/op    8 allocs/op
+BenchmarkMU027AfterPublicationAppendWithSubscriber 1338 ns/op    775 B/op    8 allocs/op
+BenchmarkMU027AfterPublicationAppendWithSubscriber 1300 ns/op    775 B/op    8 allocs/op
+BenchmarkMU027AfterPublicationAppendWithSubscriber 1312 ns/op    775 B/op    8 allocs/op
+BenchmarkMU027AfterPublicationAppendWithSubscriber 1220 ns/op    775 B/op    8 allocs/op
+BenchmarkMU027AfterPublicationReplayAndAck         22342 ns/op  29760 B/op  261 allocs/op
+BenchmarkMU027AfterPublicationReplayAndAck         22861 ns/op  29760 B/op  261 allocs/op
+BenchmarkMU027AfterPublicationReplayAndAck         22925 ns/op  29760 B/op  261 allocs/op
+BenchmarkMU027AfterPublicationReplayAndAck         22914 ns/op  29760 B/op  261 allocs/op
+BenchmarkMU027AfterPublicationReplayAndAck         23458 ns/op  29760 B/op  261 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+|---|---:|---:|---:|---:|
+| Direct buffered batch send | 29.25 | 0 | 0 | 1.00x |
+| `SQLPublication.Append` | 877.7 | 391 | 4 | 30.01x slower |
+| `Append` with one subscriber | 1,300 | 775 | 8 | 44.44x slower |
+| Replay and ack of 64 batches | 22,914 | 29,760 | 261 | not comparable |
+
+The publication intentionally spends CPU and memory on correctness boundaries
+that a raw channel does not provide. Its value is versioned replay,
+resynchronization after a crash, bounded history, fixed-schema validation, and
+explicit slow-consumer behavior; it is not a raw message-channel replacement.
+The implementation is at-least-once because durable checkpoint persistence and
+the downstream transaction remain connector-owned. See
+[MU027_LOGICAL_PUBLICATION.md](MU027_LOGICAL_PUBLICATION.md) for the recovery
+contract.
