@@ -14075,19 +14075,14 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	var adaptiveKey string
 	var adaptiveEstimate *int
 	if metrics != nil && metrics.adaptive != nil {
-		// An exact value estimator is already used while choosing among AND
-		// conjuncts. A single equality has no competing index, so avoid a second
-		// per-query lookup on the historical direct-probe path.
-		if _, hasValueEstimator := resolver.(IndexValueEstimator); !hasValueEstimator {
-			adaptiveKey = sqlAdaptiveIndexKey(source, condition)
-			var estimateErr error
-			adaptiveEstimate, estimateErr = sqlIndexedEqualityEstimate(source, condition, resolver)
-			if estimateErr != nil {
-				return nil, false, estimateErr
-			}
-			if adaptiveEstimate != nil && !metrics.adaptive.ShouldUseIndex(adaptiveKey) {
-				return nil, false, nil
-			}
+		adaptiveKey = sqlAdaptiveIndexKey(source, condition)
+		var estimateErr error
+		adaptiveEstimate, estimateErr = sqlIndexedEqualityEstimate(source, condition, resolver)
+		if estimateErr != nil {
+			return nil, false, estimateErr
+		}
+		if adaptiveEstimate != nil && !metrics.adaptive.ShouldUseIndex(adaptiveKey) {
+			return nil, false, nil
 		}
 	}
 	var rows []SQLRow

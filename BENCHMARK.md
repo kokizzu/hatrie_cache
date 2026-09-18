@@ -15254,6 +15254,27 @@ make test-sql-typed-composite
 make benchmark-sql-typed-composite
 ```
 
+<a id="tr-31-automatic-index-choice"></a>
+## TR-31 Automatic Index Choice
+
+`hatSql` ranks eligible equality-index conjuncts by exact or statistical
+posting estimates and records selected and rejected alternatives in
+`EXPLAIN ANALYZE`. The benchmark uses 20,000 rows, a 50%-selective `kind`
+predicate, and a single-row `id` predicate. Five samples from
+`make benchmark-tr31` on Linux/amd64 with an AMD Ryzen 9 5950X were:
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Historical left-to-right probe | 2,906,745 | 2,589,384 | 66 | Baseline |
+| Estimated-selectivity choice | 586,590 | 10,739 | 63 | `4.95x` faster; `241x` lower bytes; `4.5%` fewer allocations |
+
+`SQLAdaptivePlanner` is opt-in and disabled by default. Its focused stress
+fixture intentionally reports a one-row estimate for a 20,000-row posting;
+the corrected feedback path switches to a source scan, which is slower for a
+resolver that materializes rows inefficiently. The raw before/after result and
+the reason this correctness fix is retained are in
+[TR031_AUTOMATIC_INDEX_SELECTION.md](TR031_AUTOMATIC_INDEX_SELECTION.md).
+
 ## Materialized Single-Source SQL Envelopes
 
 The SQL executor already has a direct single-source row representation used by

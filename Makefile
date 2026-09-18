@@ -21076,3 +21076,12 @@ push-tr030-index-stats:
 
 status-tr030-index-stats:
 	bash ./scripts/run-tr030-index-stats.sh status
+.PHONY: test-tr31-focused
+test-tr31-focused:
+	sh ./scripts/test-tr31-focused.sh
+.PHONY: format-tr31
+format-tr31:
+	sh ./scripts/format-tr31.sh
+.PHONY: benchmark-tr31
+benchmark-tr31:
+	sh ./scripts/benchmark-tr31.sh
