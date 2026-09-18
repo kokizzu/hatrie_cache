@@ -39,13 +39,16 @@ type CacheGRPCOptions struct {
 	WriteProtected                   bool
 	// MaintenanceReadOnly rejects public cache writes while preserving reads,
 	// snapshots, and backup operations. It is disabled by default.
-	MaintenanceReadOnly        bool
-	RateLimiter                *RateLimiter
-	Metrics                    *APIMetrics
-	StartAt                    time.Time
-	Snapshot                   func() error
-	Journal                    *CommandJournal
-	DirtyTracker               *LevelDBDirtyTracker
+	MaintenanceReadOnly bool
+	RateLimiter         *RateLimiter
+	Metrics             *APIMetrics
+	StartAt             time.Time
+	Snapshot            func() error
+	Journal             *CommandJournal
+	DirtyTracker        *LevelDBDirtyTracker
+	// ReplicationApplyThrottle optionally gates each ordered replication batch
+	// before it mutates the local trie. Nil preserves the legacy path.
+	ReplicationApplyThrottle   ReplicationApplyThrottle
 	Topology                   *TopologyStore
 	Election                   *ElectionStore
 	Replicator                 *HTTPReplicator
@@ -526,6 +529,10 @@ func (server *CacheGRPCServer) applyReplicationStreamBatch(ctx context.Context, 
 		Method:  "/hatriecache.v1.CacheService/ReplicationStream",
 		Details: map[string]interface{}{"source": batch.GetSource(), "sequence": batch.GetSequence(), "entries": len(keys)},
 	}); err != nil {
+		ack.Message = err.Error()
+		return ack
+	}
+	if err := waitForReplicationApply(ctx, server.options.ReplicationApplyThrottle, len(keys)); err != nil {
 		ack.Message = err.Error()
 		return ack
 	}

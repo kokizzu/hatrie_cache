@@ -690,6 +690,15 @@ replay behavior. The zero value remains the fixed-window implementation. In a
 bytes, and allocations. See [TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md)
 and [BENCHMARK.md](BENCHMARK.md#tr-007-adaptive-wal-group-commit).
 
+## T-U37: Replica Applier Throttling
+
+Added an opt-in bounded `hatReplication.ApplierThrottle` and wired it to
+ordered HTTP journal pulls and gRPC replication streams. The default nil path
+keeps existing replay behavior; configured callers trade replica catch-up
+throughput for bounded foreground impact. See
+[TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md) and
+[BENCHMARK.md](BENCHMARK.md#tu37-replica-applier-throttling).
+
 ## M033: Batched Logical Timestamp Oracle
 
 M033 is partially adopted through the opt-in

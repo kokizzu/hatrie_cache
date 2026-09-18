@@ -20761,3 +20761,45 @@ commit-m033:
 
 push-m033:
 	bash ./scripts/run-m033-timestamp-oracle.sh push
+
+format-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh format
+
+test-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh test
+
+test-tu37-applier-throttle-cache:
+	bash ./scripts/run-tu37-applier-throttle.sh cache-test
+
+baseline-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh baseline
+
+benchmark-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh benchmark
+
+race-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh race
+
+race-tu37-applier-throttle-cache:
+	bash ./scripts/run-tu37-applier-throttle.sh cache-race
+
+vet-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh vet
+
+vet-tu37-applier-throttle-cache:
+	bash ./scripts/run-tu37-applier-throttle.sh cache-vet
+
+test-tu37-applier-throttle-package:
+	bash ./scripts/run-tu37-applier-throttle.sh package
+
+test-tu37-applier-throttle-cache-package:
+	bash ./scripts/run-tu37-applier-throttle.sh cache-package
+
+stage-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh stage
+
+commit-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh commit
+
+push-tu37-applier-throttle:
+	bash ./scripts/run-tu37-applier-throttle.sh push

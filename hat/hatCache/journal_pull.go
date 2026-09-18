@@ -28,6 +28,9 @@ type CommandJournalPullOptions struct {
 	DirtyTracker  *LevelDBDirtyTracker
 	AuthToken     string
 	WireFormat    CommandJournalWireFormat
+	// ReplicationApplyThrottle optionally gates each ordered journal batch
+	// before it mutates the local trie. Nil preserves the legacy path.
+	ReplicationApplyThrottle ReplicationApplyThrottle
 }
 
 type CommandJournalPullError struct {
@@ -75,7 +78,7 @@ func PullCommandJournal(ctx context.Context, trie *HatTrie, journal *CommandJour
 	if err != nil {
 		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, err)
 	}
-	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client, options.DirtyTracker, options.AuthToken, wireFormat)
+	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client, options.DirtyTracker, options.AuthToken, wireFormat, options.ReplicationApplyThrottle)
 }
 
 func commandJournalPullError(status int, err error) error {
@@ -95,7 +98,7 @@ func commandJournalPullHTTPClient(client *http.Client, timeout time.Duration) (*
 	return &http.Client{Timeout: timeout}, nil
 }
 
-func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client, dirtyTracker *LevelDBDirtyTracker, authToken string, wireFormat CommandJournalWireFormat) (CommandJournalPullResult, error) {
+func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client, dirtyTracker *LevelDBDirtyTracker, authToken string, wireFormat CommandJournalWireFormat, applyThrottle ReplicationApplyThrottle) (CommandJournalPullResult, error) {
 	result := CommandJournalPullResult{
 		Source:         source,
 		AfterSequence:  afterSequence,
@@ -112,6 +115,13 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 				err = fmt.Errorf("%w: %v", ErrCommandJournalCompacted, err)
 			}
 			return result, commandJournalPullError(status, err)
+		}
+		entryCount := len(tail.Entries)
+		if len(tail.compactEntries) != 0 {
+			entryCount = len(tail.compactEntries)
+		}
+		if err := waitForReplicationApply(ctx, applyThrottle, entryCount); err != nil {
+			return result, err
 		}
 		batchResult, err := applyCommandJournalTail(trie, journal, source, result.AppliedThrough, tail, dirtyTracker)
 		if err != nil {

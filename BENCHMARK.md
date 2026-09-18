@@ -31574,6 +31574,26 @@ imports remain unchanged. Raw samples and the framing rationale are in
 [CH047_PARALLEL_FORMAT_PARSING.md](CH047_PARALLEL_FORMAT_PARSING.md).
 
 <a id="m033-batched-logical-timestamp-oracle"></a>
+<a id="tu37-replica-applier-throttling"></a>
+## T-U37 Replica Applier Throttling
+
+Commands: `make baseline-tu37-applier-throttle` and
+`make benchmark-tu37-applier-throttle`.
+
+The feature is default-off. `hatReplication.ApplierThrottle` reserves capacity
+before each ordered HTTP journal-pull or gRPC replication batch, so replay can
+be bounded without dropping or reordering mutations. The matched unthrottled
+control stayed allocation-free and within noise of the baseline; the opt-in
+reservation path also stayed at zero allocations.
+
+| Path | Before median ns/op | After median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Unthrottled admission | `0.2532` | `0.2393` | `0` | `0` | `1.06x` after, within noise |
+| Opt-in reservation | n/a | `31.64` | `0` | `0` | explicit pacing cost |
+
+Raw samples and the latency/throughput tradeoff are documented in
+[TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md).
+
 ## M033: Batched Logical Timestamp Oracle
 
 Commands: `make baseline-m033` and `make benchmark-m033`.
