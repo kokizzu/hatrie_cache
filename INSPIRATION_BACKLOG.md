@@ -147,7 +147,7 @@ before/after measurement when its motivation is performance.
 | --- | --- | --- | --- | --- |
 | TR-01 | Raft-backed failover with leader leases | Prevent split-brain promotions | Consensus latency and operational complexity | [ ] |
 | TR-02 | Synchronous replication commit barriers | Acknowledge only after durable replicas | Write latency and quorum failures | [ ] |
-| TR-03 | Replica-promotion catch-up barrier | Avoid promoting a stale node | Longer failover | [ ] |
+| TR-03 | Replica-promotion catch-up barrier | Avoid promoting a stale node | Longer failover | [x] Implemented as an importable bounded `ReplicaPromotionBarrier` with monotone source/replica progress, exact capture fences, single-use generation advancement, stale-token rejection, and atomic snapshots. See [TR003_REPLICA_PROMOTION_BARRIER.md](TR003_REPLICA_PROMOTION_BARRIER.md) and [BENCHMARK.md](BENCHMARK.md#tr-003-replica-promotion-catch-up-barrier). |
 | TR-04 | Replication filtering by space and key range | Reduce relay bandwidth | Divergent replica contents | [x] Implemented as opt-in literal `HTTPReplicatorOptions.ReplicationKeyPrefixes`; see [TR004_REPLICATION_KEY_FILTER.md](TR004_REPLICATION_KEY_FILTER.md) and [BENCHMARK.md#tr-04-replication-key-prefix-filter](BENCHMARK.md#tr-04-replication-key-prefix-filter). |
 | TR-05 | Parallel relay and applier queues with ordering fences | Increase replication throughput | Ordering and backpressure bugs | [ ] |
 | TR-06 | Conflict-resolution hooks for multi-master updates | Make application conflict policy explicit | Non-deterministic user code | [ ] |

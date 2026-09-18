@@ -177,6 +177,7 @@ security guidance before exposing it on a network.
 - Opt-in index cardinality and hot-key statistics: [INDEX_STATS.md](INDEX_STATS.md)
 - Opt-in method-aware peer retries: [RETRY_POLICY.md](RETRY_POLICY.md)
 - Opt-in bounded replica read hedging: [REPLICA_HEDGING.md](REPLICA_HEDGING.md)
+- Replica-promotion catch-up barriers: [TR003_REPLICA_PROMOTION_BARRIER.md](TR003_REPLICA_PROMOTION_BARRIER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tr-003-replica-promotion-catch-up-barrier)
 - Bounded authenticated versioned configuration watch: [CONFIG_WATCH.md](CONFIG_WATCH.md)
 - Opt-in adaptive per-peer circuit cooldowns: [ADAPTIVE_PEER_BREAKER.md](ADAPTIVE_PEER_BREAKER.md)
 - Authenticated bounded compact-peer listener: [COMPACT_PEER_LISTENER.md](COMPACT_PEER_LISTENER.md)

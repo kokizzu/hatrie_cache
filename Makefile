@@ -19478,3 +19478,35 @@ commit-mz012-consumer-group-fence:
 	@bash ./scripts/commit-mz012-consumer-group-fence.sh
 push-mz012-consumer-group-fence:
 	@bash ./scripts/push-mz012-consumer-group-fence.sh
+.PHONY: test-tr003-replica-promotion-barrier
+test-tr003-replica-promotion-barrier:
+	@bash ./scripts/test-tr003-replica-promotion-barrier.sh
+.PHONY: benchmark-tr003-baseline
+benchmark-tr003-baseline:
+	@bash ./scripts/benchmark-tr003-baseline.sh
+.PHONY: format-tr003-replica-promotion-barrier
+format-tr003-replica-promotion-barrier:
+	@bash ./scripts/format-tr003-replica-promotion-barrier.sh
+.PHONY: benchmark-tr003-replica-promotion-barrier
+benchmark-tr003-replica-promotion-barrier:
+	@bash ./scripts/benchmark-tr003-replica-promotion-barrier.sh
+.PHONY: verify-tr003-replica-promotion-barrier-docs
+verify-tr003-replica-promotion-barrier-docs:
+	@bash ./scripts/verify-tr003-docs.sh
+.PHONY: test-tr003-package race-tr003-replica-promotion-barrier vet-tr003-replica-promotion-barrier
+test-tr003-package:
+	@bash ./scripts/test-tr003-package.sh
+race-tr003-replica-promotion-barrier:
+	@bash ./scripts/race-tr003-replica-promotion-barrier.sh
+vet-tr003-replica-promotion-barrier:
+	@bash ./scripts/vet-tr003-replica-promotion-barrier.sh
+
+.PHONY: review-tr003-replica-promotion-barrier stage-tr003-replica-promotion-barrier commit-tr003-replica-promotion-barrier push-tr003-replica-promotion-barrier
+review-tr003-replica-promotion-barrier:
+	@bash ./scripts/review-tr003-replica-promotion-barrier.sh
+stage-tr003-replica-promotion-barrier:
+	@bash ./scripts/stage-tr003-replica-promotion-barrier.sh
+commit-tr003-replica-promotion-barrier:
+	@bash ./scripts/commit-tr003-replica-promotion-barrier.sh
+push-tr003-replica-promotion-barrier:
+	@bash ./scripts/push-tr003-replica-promotion-barrier.sh

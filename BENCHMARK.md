@@ -30772,3 +30772,58 @@ fenced-sparse-rebalance: 522.5 608 8
 fenced-sparse-rebalance: 502.1 608 8
 fenced-sparse-rebalance: 473.2 608 8
 ```
+<a id="tr-003-replica-promotion-catch-up-barrier"></a>
+## TR003 Replica-Promotion Catch-Up Barrier
+
+TR003 benchmarks the local control-plane barrier that prevents promotion until
+a replica reaches the captured source journal sequence. The manual control is
+a raw map comparison without immutable state publication or single-use
+generation invalidation.
+
+| Operation | Median ns/op | B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Manual map capture | 7.660 | 0 | 0 | 1.00x |
+| Barrier capture | 14.13 | 0 | 0 | 1.84x higher CPU, same memory |
+| Manual map promotion | 7.832 | 0 | 0 | 1.00x |
+| Barrier promotion | 36.65 | 0 | 0 | 4.68x higher CPU, same memory |
+| Barrier replica observation | 243.7 | 272 | 3 | Bounded control-plane update |
+| Barrier snapshot | 120.8 | 48 | 2 | Detached inspection |
+
+The barrier's extra absolute cost is paid during failover control operations;
+record application remains outside this API. Run with
+`make benchmark-tr003-replica-promotion-barrier`.
+
+Raw final samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+manual-capture: 7.421 0 0
+manual-capture: 8.177 0 0
+manual-capture: 7.768 0 0
+manual-capture: 7.660 0 0
+manual-capture: 7.515 0 0
+manual-promote: 7.647 0 0
+manual-promote: 7.662 0 0
+manual-promote: 7.832 0 0
+manual-promote: 8.348 0 0
+manual-promote: 7.930 0 0
+barrier-capture: 13.68 0 0
+barrier-capture: 14.54 0 0
+barrier-capture: 14.65 0 0
+barrier-capture: 14.13 0 0
+barrier-capture: 13.82 0 0
+barrier-promote: 36.72 0 0
+barrier-promote: 36.88 0 0
+barrier-promote: 35.19 0 0
+barrier-promote: 36.65 0 0
+barrier-promote: 35.90 0 0
+barrier-observe-replica: 244.3 272 3
+barrier-observe-replica: 236.8 272 3
+barrier-observe-replica: 243.7 272 3
+barrier-observe-replica: 240.3 272 3
+barrier-observe-replica: 257.5 272 3
+barrier-snapshot: 120.8 48 2
+barrier-snapshot: 121.6 48 2
+barrier-snapshot: 116.0 48 2
+barrier-snapshot: 119.3 48 2
+barrier-snapshot: 122.8 48 2
+```
