@@ -31717,3 +31717,29 @@ This is an allocation-only measurement, not an end-to-end source-ingestion
 claim. The oracle is process-local and opt-in; distributed timestamp ordering
 still requires a caller-owned leader, quorum, or consensus layer. Full details
 are in [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md).
+
+<a id="tr-013-compaction-debt-scheduler"></a>
+## TR-013 Compaction Debt Scheduler
+
+Commands: `make test-tr013-compaction-debt`,
+`make race-tr013-compaction-debt`, `make vet-tr013-compaction-debt`, and
+`make benchmark-tr013-compaction-debt`.
+
+The scheduler is opt-in and default-off. The benchmark uses a no-op compaction
+callback to isolate control-plane cost; it does not claim to measure LevelDB or
+Pebble disk throughput. Five `-benchmem` samples ran on Linux/amd64 with an
+AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Compactions/op | Relative result |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Immediate callback control | 1.799; 1.816; 1.763; 1.806; 1.780 | 1.799 | 0 | 0 | 1.00000 | baseline |
+| Debt scheduler | 9.782; 10.45; 10.07; 9.510; 10.10 | 10.07 | 0 | 0 | 0.01562 | 64x fewer callbacks; 5.60x control CPU |
+| Below-threshold debt accounting | 2.427; 2.459; 2.217; 2.137; 2.136 | 2.217 | 0 | 0 | 0 | no compaction |
+
+The scheduler batches 64 equal debt increments into one callback in this
+fixture. The measured overhead is substantially lower after replacing the
+initial mutex bookkeeping with atomics: about 1.84x faster for scheduled checks
+and 2.39x faster for below-threshold accounting. The tradeoff is delayed space
+reclamation and potentially higher interim read amplification until the debt
+threshold is reached. Full API and operational guidance are in
+[TR013_COMPACTION_DEBT_SCHEDULER.md](TR013_COMPACTION_DEBT_SCHEDULER.md).

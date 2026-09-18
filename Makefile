@@ -18459,6 +18459,50 @@ push-mz41-recursive-differential:
 status-mz41-recursive-differential:
 	bash ./scripts/run-mz41-recursive-differential.sh status
 
+.PHONY: test-tr013-compaction-debt
+test-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh test
+
+.PHONY: format-tr013-compaction-debt
+format-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh format
+
+.PHONY: race-tr013-compaction-debt
+race-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh race
+
+.PHONY: benchmark-tr013-compaction-debt
+benchmark-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh benchmark
+
+.PHONY: vet-tr013-compaction-debt
+vet-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh vet
+
+.PHONY: package-tr013-compaction-debt
+package-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh package
+
+.PHONY: review-tr013-compaction-debt
+review-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh review
+
+.PHONY: stage-tr013-compaction-debt
+stage-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh stage
+
+.PHONY: commit-tr013-compaction-debt
+commit-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh commit
+
+.PHONY: push-tr013-compaction-debt
+push-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh push
+
+.PHONY: status-tr013-compaction-debt
+status-tr013-compaction-debt:
+	bash ./scripts/run-tr013-compaction-debt.sh status
+
 .PHONY: test-chu27-priority
 test-chu27-priority:
 	bash ./scripts/run-chu27-priority.sh test
