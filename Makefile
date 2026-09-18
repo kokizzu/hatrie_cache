@@ -20199,3 +20199,47 @@ commit-mz036-dataflow-placement:
 .PHONY: push-mz036-dataflow-placement
 push-mz036-dataflow-placement:
 	@bash ./scripts/push-mz036-dataflow-placement.sh
+
+.PHONY: test-mz038-resizable-pipeline
+test-mz038-resizable-pipeline:
+	@bash ./scripts/test-mz038-resizable-pipeline.sh
+
+.PHONY: format-mz038-resizable-pipeline
+format-mz038-resizable-pipeline:
+	@bash ./scripts/format-mz038-resizable-pipeline.sh
+
+.PHONY: format-mz038-resizable-pipeline-benchmark
+format-mz038-resizable-pipeline-benchmark:
+	@bash ./scripts/format-mz038-resizable-pipeline-benchmark.sh
+
+.PHONY: benchmark-mz038-resizable-pipeline
+benchmark-mz038-resizable-pipeline:
+	@bash ./scripts/benchmark-mz038-resizable-pipeline.sh
+
+.PHONY: verify-mz038-resizable-pipeline-docs
+verify-mz038-resizable-pipeline-docs:
+	@bash ./scripts/verify-mz038-resizable-pipeline-docs.sh
+
+.PHONY: test-mz038-resizable-pipeline-package
+test-mz038-resizable-pipeline-package:
+	@bash ./scripts/test-mz038-resizable-pipeline-package.sh
+
+.PHONY: race-mz038-resizable-pipeline
+race-mz038-resizable-pipeline:
+	@bash ./scripts/race-mz038-resizable-pipeline.sh
+
+.PHONY: vet-mz038-resizable-pipeline
+vet-mz038-resizable-pipeline:
+	@bash ./scripts/vet-mz038-resizable-pipeline.sh
+
+.PHONY: stage-mz038-resizable-pipeline
+stage-mz038-resizable-pipeline:
+	@bash ./scripts/stage-mz038-resizable-pipeline.sh
+
+.PHONY: commit-mz038-resizable-pipeline
+commit-mz038-resizable-pipeline:
+	@bash ./scripts/commit-mz038-resizable-pipeline.sh
+
+.PHONY: push-mz038-resizable-pipeline
+push-mz038-resizable-pipeline:
+	@bash ./scripts/push-mz038-resizable-pipeline.sh

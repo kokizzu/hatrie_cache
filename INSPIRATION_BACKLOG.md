@@ -127,7 +127,7 @@ before/after measurement when its motivation is performance.
 | MZ-35 | Arrangement shard locality hints | Keep hot keys near their consumers | Skew and rebalancing | [x] Implemented as bounded advisory locality hints for arrangement selection; see [MZ035_ARRANGEMENT_LOCALITY.md](MZ035_ARRANGEMENT_LOCALITY.md). |
 | MZ-36 | Dataflow operator placement constraints by failure domain | Improve locality and resilience | Placement solver complexity | [x] Implemented as the opt-in deterministic `hatPipeline.PlanDataflowOperatorPlacement` planner; see [MZ036_DATAFLOW_OPERATOR_PLACEMENT.md](MZ036_DATAFLOW_OPERATOR_PLACEMENT.md). |
 | MZ-37 | Worker-local exchange batching | Reduce per-record coordination | Batch latency | [x] |
-| MZ-38 | Dynamic dataflow worker scaling | Match compute to changing load | State movement and rebalance | [ ] |
+| MZ-38 | Dynamic dataflow worker scaling | Match compute to changing load | State movement and rebalance | [x] Implemented as the opt-in `hatPipeline.ResizablePipeline`; see [MZ038_DYNAMIC_DATAFLOW_WORKER_SCALING.md](MZ038_DYNAMIC_DATAFLOW_WORKER_SCALING.md). |
 | MZ-39 | Operator fuel or yield budgets | Bound a single operator monopolization | More scheduler checks | [x] |
 | MZ-40 | Recursive convergence diagnostics and iteration bounds | Make recursive dataflows operable | Additional state and errors | [x] |
 | MZ-41 | Recursive negative differential propagation | Support deletions in recursive results | Non-monotone fixpoint complexity | [ ] |

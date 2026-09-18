@@ -30547,6 +30547,44 @@ BenchmarkMZ036PlacementSolver-32         10000  58828 ns/op   12512 B/op   15 al
 BenchmarkMZ036PlacementSolver-32         10465  57012 ns/op   12512 B/op   15 allocs/op
 ```
 
+<a id="mz-038-dynamic-dataflow-worker-scaling"></a>
+## MZ-038 Dynamic Dataflow Worker Scaling
+
+The resizable pipeline is opt-in. The existing fixed `Pipeline` remains the
+baseline for steady-state workloads; the new path adds runtime stage resizing
+and retains bounded backpressure.
+
+| Operation | Median ns/op | B/op | allocs/op | CPU vs fixed | Bytes vs fixed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| existing fixed `Pipeline` | 182,655 | 4,647 | 24 | 1.00x | 1.00x |
+| resizable, fixed workers | 235,839 | 4,472 | 29 | 1.29x | 0.96x |
+| resizable, scale 1 -> 4 | 231,842 | 4,708 | 33 | 1.27x | 1.01x |
+
+The workload processes 256 values through two stages. It was run five times
+with `-benchtime=500ms` on Linux amd64, AMD Ryzen 9 5950X. The scale-up case
+starts with one worker per stage and resizes both to four before draining the
+input. This is a control-plane capability, not an automatic state rebalancer.
+
+Raw output:
+
+```text
+BenchmarkMZ038FixedPipeline-32                    2949  182655 ns/op  4737 B/op  24 allocs/op
+BenchmarkMZ038FixedPipeline-32                    2917  177767 ns/op  4647 B/op  24 allocs/op
+BenchmarkMZ038FixedPipeline-32                    2968  179164 ns/op  4650 B/op  24 allocs/op
+BenchmarkMZ038FixedPipeline-32                    3157  186177 ns/op  4646 B/op  24 allocs/op
+BenchmarkMZ038FixedPipeline-32                    3891  185525 ns/op  4639 B/op  24 allocs/op
+BenchmarkMZ038ResizablePipelineFixedWorkers-32    2400  235839 ns/op  4472 B/op  29 allocs/op
+BenchmarkMZ038ResizablePipelineFixedWorkers-32    2623  227204 ns/op  4472 B/op  29 allocs/op
+BenchmarkMZ038ResizablePipelineFixedWorkers-32    2167  256657 ns/op  4475 B/op  29 allocs/op
+BenchmarkMZ038ResizablePipelineFixedWorkers-32    2288  252631 ns/op  4478 B/op  29 allocs/op
+BenchmarkMZ038ResizablePipelineFixedWorkers-32    2403  229982 ns/op  4461 B/op  29 allocs/op
+BenchmarkMZ038ResizablePipelineScaleUp-32         2604  231459 ns/op  4705 B/op  33 allocs/op
+BenchmarkMZ038ResizablePipelineScaleUp-32         2323  246816 ns/op  4710 B/op  33 allocs/op
+BenchmarkMZ038ResizablePipelineScaleUp-32         3008  230737 ns/op  4704 B/op  33 allocs/op
+BenchmarkMZ038ResizablePipelineScaleUp-32         3638  231842 ns/op  4712 B/op  33 allocs/op
+BenchmarkMZ038ResizablePipelineScaleUp-32         2614  238044 ns/op  4708 B/op  33 allocs/op
+```
+
 <a id="mz-046-schema-migration-barrier"></a>
 ## MZ-046 Schema Migration Barrier
 
