@@ -586,3 +586,15 @@ registration, background startup, live-table reads, and column-TTL behavior
 remain unchanged. Rollup persistence and automatic restart replay remain
 caller-owned. See [CH009_TTL_ROLLUP.md](CH009_TTL_ROLLUP.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-009-ttl-rollup).
+
+## CH-010: Materialized and Default Columns
+
+CH-010 is partially adopted through `TypedTableColumn.GeneratedMode` and
+`GeneratedDependencies`. The zero-value materialized mode preserves the
+existing callback behavior; the opt-in default mode preserves valid caller
+values and computes only null values. Dependency names are validated once at
+schema construction, generated callbacks run in cached topological order, and
+the explicit-default path avoids a row clone. SQL expression parsing, DDL
+integration, and persistence of generated expressions remain caller-owned. See
+[CH010_MATERIALIZED_DEFAULT_COLUMNS.md](CH010_MATERIALIZED_DEFAULT_COLUMNS.md)
+and [BENCHMARK.md](BENCHMARK.md#ch-010-materialized-and-default-columns).

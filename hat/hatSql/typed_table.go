@@ -33,6 +33,16 @@ const (
 // remain reproducible.
 type TypedTableGeneratedFunc func([]TypedTableValue) (TypedTableValue, error)
 
+// TypedTableGeneratedMode controls when a generated callback is evaluated.
+// The zero value is materialized for compatibility with the original
+// Generated field behavior.
+type TypedTableGeneratedMode uint8
+
+const (
+	TypedTableGeneratedMaterialized TypedTableGeneratedMode = iota
+	TypedTableGeneratedDefault
+)
+
 // TypedTableColumn declares one schema-checked table column.
 type TypedTableColumn struct {
 	Name string
@@ -45,6 +55,13 @@ type TypedTableColumn struct {
 	// justify dictionary storage. DictionaryEncoded takes precedence.
 	DictionaryAdaptive bool
 	Generated          TypedTableGeneratedFunc
+	// GeneratedMode is meaningful only when Generated is set. Materialized
+	// callbacks always replace the supplied value; default callbacks run only
+	// when the supplied value is null.
+	GeneratedMode TypedTableGeneratedMode
+	// GeneratedDependencies names columns that must be available before this
+	// callback runs. Dependencies may be ordinary or generated columns.
+	GeneratedDependencies []string
 }
 
 const (
@@ -416,6 +433,7 @@ type TypedTable struct {
 	keys            []string
 	positions       map[string]int
 	generated       bool
+	generatedOrder  []int
 	columnar        typedTableColumnarCache
 	patchParts      *typedTablePatchState
 	storageEvents   *typedTableStorageEventLog
@@ -475,6 +493,16 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		if column.Kind < TypedTableString || column.Kind > TypedTableBool {
 			return nil, fmt.Errorf("typed table column %q has invalid kind", column.Name)
 		}
+		if column.Generated == nil {
+			if column.GeneratedMode != TypedTableGeneratedMaterialized {
+				return nil, fmt.Errorf("typed table column %q has generated mode without a generated callback", column.Name)
+			}
+			if len(column.GeneratedDependencies) != 0 {
+				return nil, fmt.Errorf("typed table column %q has generated dependencies without a generated callback", column.Name)
+			}
+		} else if column.GeneratedMode != TypedTableGeneratedMaterialized && column.GeneratedMode != TypedTableGeneratedDefault {
+			return nil, fmt.Errorf("typed table column %q has invalid generated mode", column.Name)
+		}
 		table.byName[column.Name] = index
 		table.columns[index].kind = column.Kind
 		if column.Generated != nil {
@@ -486,6 +514,13 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		} else if column.Kind == TypedTableString && column.DictionaryAdaptive {
 			table.columns[index].adaptiveDictionary = &typedTableDictionaryProbe{}
 		}
+	}
+	if table.generated {
+		generatedOrder, err := typedTableGeneratedOrder(table.schema.Columns, table.byName)
+		if err != nil {
+			return nil, err
+		}
+		table.generatedOrder = generatedOrder
 	}
 	for index := range table.schema.Columns {
 		columnTTL, err := newTypedTableColumnTTLState(index, table.schema.Columns[index].TTL, table.schema.Columns, table.byName)
@@ -1456,12 +1491,62 @@ func typedTableColumnarBatchBytes(batch ColumnarBatch, segments *ColumnarNumeric
 	return bytes
 }
 
+func typedTableGeneratedOrder(columns []TypedTableColumn, byName map[string]int) ([]int, error) {
+	state := make([]uint8, len(columns))
+	order := make([]int, 0, len(columns))
+	var visit func(int) error
+	visit = func(index int) error {
+		switch state[index] {
+		case 1:
+			return fmt.Errorf("typed table generated column dependency cycle includes %q", columns[index].Name)
+		case 2:
+			return nil
+		}
+		state[index] = 1
+		column := &columns[index]
+		seen := make(map[string]struct{}, len(column.GeneratedDependencies))
+		for dependencyIndex, dependencyName := range column.GeneratedDependencies {
+			dependencyName = strings.TrimSpace(dependencyName)
+			if dependencyName == "" {
+				return fmt.Errorf("typed table generated column %q has an empty dependency at index %d", column.Name, dependencyIndex)
+			}
+			if _, duplicate := seen[dependencyName]; duplicate {
+				return fmt.Errorf("typed table generated column %q has duplicate dependency %q", column.Name, dependencyName)
+			}
+			seen[dependencyName] = struct{}{}
+			column.GeneratedDependencies[dependencyIndex] = dependencyName
+			dependency, exists := byName[dependencyName]
+			if !exists {
+				return fmt.Errorf("typed table generated column %q depends on unknown column %q", column.Name, dependencyName)
+			}
+			if columns[dependency].Generated != nil {
+				if err := visit(dependency); err != nil {
+					return err
+				}
+			}
+		}
+		state[index] = 2
+		order = append(order, index)
+		return nil
+	}
+	for index := range columns {
+		if columns[index].Generated == nil {
+			continue
+		}
+		if err := visit(index); err != nil {
+			return nil, err
+		}
+	}
+	return order, nil
+}
+
 func (table *TypedTable) validateValues(values []TypedTableValue) error {
 	if len(values) != len(table.columns) {
 		return fmt.Errorf("typed table row has %d values, want %d", len(values), len(table.columns))
 	}
 	for index, value := range values {
-		if table.schema.Columns[index].Generated != nil {
+		column := table.schema.Columns[index]
+		if column.Generated != nil && (column.GeneratedMode == TypedTableGeneratedMaterialized || !value.Valid) {
 			continue
 		}
 		if !value.Valid {
@@ -1481,10 +1566,19 @@ func (table *TypedTable) applyGeneratedValues(values []TypedTableValue) ([]Typed
 	if len(values) != len(table.schema.Columns) {
 		return nil, fmt.Errorf("typed table row has %d values, want %d", len(values), len(table.schema.Columns))
 	}
-	computed := cloneTypedTableValues(values)
-	for index, column := range table.schema.Columns {
+	computed := values
+	cloned := false
+	for _, index := range table.generatedOrder {
+		column := table.schema.Columns[index]
 		if column.Generated == nil {
 			continue
+		}
+		if column.GeneratedMode == TypedTableGeneratedDefault && computed[index].Valid {
+			continue
+		}
+		if !cloned {
+			computed = cloneTypedTableValues(values)
+			cloned = true
 		}
 		value, err := column.Generated(cloneTypedTableValues(computed))
 		if err != nil {

@@ -18927,3 +18927,31 @@ commit-ch009-ttl-rollup:
 .PHONY: push-ch009-ttl-rollup
 push-ch009-ttl-rollup:
 	bash ./scripts/push-ch009-ttl-rollup.sh
+
+.PHONY: format-ch010-materialized-default
+format-ch010-materialized-default:
+	bash ./scripts/format-ch010-materialized-default.sh
+
+.PHONY: benchmark-ch010-materialized-default
+benchmark-ch010-materialized-default:
+	bash ./scripts/benchmark-ch010-materialized-default.sh
+
+.PHONY: test-ch010-materialized-default
+test-ch010-materialized-default:
+	bash ./scripts/test-ch010-materialized-default.sh
+
+.PHONY: review-ch010
+review-ch010:
+	bash ./scripts/review-ch010.sh
+
+.PHONY: stage-ch010-materialized-default
+stage-ch010-materialized-default:
+	bash ./scripts/stage-ch010-materialized-default.sh
+
+.PHONY: commit-ch010-materialized-default
+commit-ch010-materialized-default:
+	bash ./scripts/commit-ch010-materialized-default.sh
+
+.PHONY: push-ch010-materialized-default
+push-ch010-materialized-default:
+	bash ./scripts/push-ch010-materialized-default.sh

@@ -30288,3 +30288,32 @@ The measured tradeoff is a 12.8% median maintenance-time increase for retaining
 the grouped expired-row summary; measured heap rises by about 0.17%. Ordinary
 TTL registration remains unchanged, so this cost is paid only when a rollup is
 explicitly registered.
+
+## CH-010: Materialized and Default Columns
+
+Command:
+
+```text
+make benchmark-ch010-materialized-default
+```
+
+The benchmark performs 100,000 repeated upserts per sample, uses five samples,
+and reports the median on an AMD Ryzen 9 5950X, Linux amd64.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Plain two-column upsert | 790.2 | 817 | 4 | 1.00x |
+| Materialized generated column | 934.0 | 1,009 | 6 | 1.18x time, 1.24x heap, 1.50x allocations |
+| Default column computed from null | 1,044 | 1,009 | 6 | 1.32x time, 1.24x heap, 1.50x allocations |
+| Default column with explicit value | 874.0 | 817 | 4 | 1.11x time, 1.00x heap, 1.00x allocations |
+
+The explicit-default path is the optimization target: lazy cloning removes one
+allocation and 96 B/op compared with the pre-optimization run (914.7 ns/op,
+913 B/op, 5 allocations). The feature is primarily a correctness and schema
+capability addition; computed defaults still have callback cost, while
+explicit defaults return to the plain path's measured heap and allocation
+count.
+
+Focused correctness uses `make test-ch010-materialized-default` and covers
+materialized compatibility, default computation/preservation, dependency
+ordering, and invalid dependency/type rejection.

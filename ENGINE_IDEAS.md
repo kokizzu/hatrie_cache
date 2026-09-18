@@ -36,7 +36,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-007 | Row TTL | Adopted as an opt-in `TypedTable` processing-time or event-time policy with an indexed explicit purge, a shared bounded background scheduler, and CRC-protected processing-time deadline snapshots. Column-level TTL, automatic schema integration, and retry policy remain caller-owned. | Medium |
 | CH-008 | Column TTL | Partially adopted: `TypedTableColumn.TTL` independently masks expired cells in row/columnar reads, `Stats`, and `Histogram`; explicit and scheduler-driven purge physically clears values and emits updates, with bounded CRC-protected processing-time deadline snapshots. | Medium |
 | CH-009 | TTL rollup | Partially adopted: importable `TypedTableTTLRollup` aggregates expired row images, and `TypedTableTTLScheduler.RegisterWithRollup` wires it into an explicit opt-in maintenance pass; persistence and automatic historical replay remain caller-owned. | High |
-| CH-010 | Materialized/default columns | No stored expression column maintained during writes with schema validation. | Medium |
+| CH-010 | Materialized/default columns | Partially adopted: `TypedTableColumn.GeneratedMode` adds explicit materialized/default write semantics, cached dependency ordering, and schema validation; SQL expression parsing, DDL wiring, and persistence remain caller-owned. | Medium |
 | CH-011 | General projection DDL | Only narrow cached ordering projections exist; no user-defined maintained projection. | High |
 | CH-012 | Projection advisor | No cost-based recommendation comparing projection maintenance with query savings. | Medium |
 | CH-013 | Query condition cache | No cache of reusable predicate outcomes for stable part/key conditions. | Medium |
