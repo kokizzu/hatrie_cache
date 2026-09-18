@@ -19011,3 +19011,43 @@ commit-ch012-projection-advisor-cost:
 .PHONY: push-ch012-projection-advisor-cost
 push-ch012-projection-advisor-cost:
 	bash ./scripts/push-ch012-projection-advisor-cost.sh
+
+.PHONY: test-mz024-arrangement-selection
+test-mz024-arrangement-selection:
+	bash ./scripts/test-mz024-arrangement-selection.sh
+
+.PHONY: format-mz024-arrangement-selection
+format-mz024-arrangement-selection:
+	bash ./scripts/format-mz024-arrangement-selection.sh
+
+.PHONY: benchmark-mz024-arrangement-selection
+benchmark-mz024-arrangement-selection:
+	bash ./scripts/benchmark-mz024-arrangement-selection.sh
+
+.PHONY: test-mz024-package
+test-mz024-package:
+	bash ./scripts/test-mz024-package.sh
+
+.PHONY: race-mz024-arrangement-selection
+race-mz024-arrangement-selection:
+	bash ./scripts/race-mz024-arrangement-selection.sh
+
+.PHONY: vet-mz024-arrangement-selection
+vet-mz024-arrangement-selection:
+	bash ./scripts/vet-mz024-arrangement-selection.sh
+
+.PHONY: review-mz024
+review-mz024:
+	bash ./scripts/review-mz024.sh
+
+.PHONY: stage-mz024-arrangement-selection
+stage-mz024-arrangement-selection:
+	bash ./scripts/stage-mz024-arrangement-selection.sh
+
+.PHONY: commit-mz024-arrangement-selection
+commit-mz024-arrangement-selection:
+	bash ./scripts/commit-mz024-arrangement-selection.sh
+
+.PHONY: push-mz024-arrangement-selection
+push-mz024-arrangement-selection:
+	bash ./scripts/push-mz024-arrangement-selection.sh

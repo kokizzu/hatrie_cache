@@ -30365,3 +30365,26 @@ recommendation slice. The advisor remains disabled by default and the richer
 analysis is only paid when `CostBasedRecommendations` is called. See
 [CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md) for the
 model and correctness coverage.
+
+<a id="mz-024-automatic-arrangement-key-selection"></a>
+## MZ-024 Automatic Arrangement Key Selection
+
+Command:
+
+```text
+make benchmark-mz024-arrangement-selection
+```
+
+This measures the bounded selector over 32 existing arrangement candidates and
+a workload with filter, grouping, and ordering fields. It is an `EXPLAIN`
+diagnostic cost, not an ordinary query-execution path. Five 100 ms samples were
+collected on Linux/amd64 with an AMD Ryzen 9 5950X after the correctness tests.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Arrangement recommendation | 4,529 | 168 | 6 | New diagnostic path; ordinary reads/writes unchanged |
+
+The recommendation is only computed when arrangement metadata is available to
+`EXPLAIN`; no metadata keeps the existing behavior. The selector does not claim
+to make a query faster by itself: a caller must expose or acquire the selected
+arrangement before execution can benefit.

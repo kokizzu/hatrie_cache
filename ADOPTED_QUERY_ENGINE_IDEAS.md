@@ -620,3 +620,13 @@ arithmetic prevents duration overflow, while automatic forecasting, planner
 wiring, and persistent workload history remain caller-owned. See
 [CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-cost).
+
+## MZ-024: Automatic Arrangement Key Selection
+
+MZ-024 is partially adopted through `RecommendSQLArrangement` and the
+diagnostic integration in `EXPLAIN`. Existing arrangement metadata can include
+explicit fields; the bounded selector scores matches across filter, grouping,
+ordering, and join workloads and marks one deterministic recommendation. It
+never creates or changes state, and automatic planner rewrites remain
+caller-owned. See [MZ024_ARRANGEMENT_KEY_SELECTION.md](MZ024_ARRANGEMENT_KEY_SELECTION.md)
+and [BENCHMARK.md](BENCHMARK.md#mz-024-automatic-arrangement-key-selection).

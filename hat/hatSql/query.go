@@ -13168,6 +13168,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		currentEstimate = whereEstimate
 	}
 	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
+	sqlMarkArrangementRecommendation(scanStep.Arrangements, sqlArrangementWorkloadForQuery(query))
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
 	*steps = append(*steps, scanStep)
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
@@ -13206,6 +13207,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		}
 		joinStep := SQLExplainStep{Node: prefix + node, Detail: detail}
 		joinStep.Arrangements = resolveSQLArrangementMetadata(resolver, join.source)
+		sqlMarkArrangementRecommendation(joinStep.Arrangements, sqlArrangementWorkloadForQuery(query))
 		joinEstimate := sqlCardinalityEstimateForJoin(currentEstimate, join, leftAliases, resolver)
 		sqlSetExplainCardinalityEstimate(&joinStep, joinEstimate)
 		currentEstimate = joinEstimate

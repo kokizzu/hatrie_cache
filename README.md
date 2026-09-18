@@ -129,6 +129,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired exact weighted incremental Top-K maintenance: [MZ037_INCREMENTAL_TOP_K.md](MZ037_INCREMENTAL_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-037-incremental-weighted-top-k)
 - Materialize-inspired incremental Top-K rank movement changes: [MZ031_RANKED_TOP_K.md](MZ031_RANKED_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-031-ranked-top-k-change-diffs)
 - Materialize-inspired opt-in arrangement cost and reuse scoring for indexes, projections, and ordered layouts: [MZ032_ARRANGEMENT_COST.md](MZ032_ARRANGEMENT_COST.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-032-arrangement-cost-model)
+- Materialize-inspired bounded automatic arrangement-key selection for `EXPLAIN`: [MZ024_ARRANGEMENT_KEY_SELECTION.md](MZ024_ARRANGEMENT_KEY_SELECTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-024-automatic-arrangement-key-selection)
 - Materialize-inspired bounded observed-dataflow index recommendations: [MZ033_DATAFLOW_INDEX_ADVISOR.md](MZ033_DATAFLOW_INDEX_ADVISOR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-033-automatic-dataflow-index-advisor)
 - Materialize-inspired stateful incremental distinct maintenance: [MZ039_INCREMENTAL_DISTINCT.md](MZ039_INCREMENTAL_DISTINCT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-039-incremental-distinct)
 - Materialize-inspired exact weighted incremental percentile maintenance: [MZ040_INCREMENTAL_PERCENTILE.md](MZ040_INCREMENTAL_PERCENTILE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-040-incremental-percentile)
@@ -4294,6 +4295,10 @@ effect, and resolver errors are ignored. Output is capped at 64 entries per
 operator and 256 bytes per key or kind; existing resolvers keep the old explain
 columns. See [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md) and
 the measured overhead in [BENCHMARK.md](BENCHMARK.md#mu-012-arrangement-explain).
+When metadata includes explicit fields, `EXPLAIN` also marks the best existing
+arrangement for the query's `WHERE`, `GROUP BY`, `ORDER BY`, and join shape with
+`recommended`, `match_score`, and a short reason. This is advisory only; see
+[MZ024_ARRANGEMENT_KEY_SELECTION.md](MZ024_ARRANGEMENT_KEY_SELECTION.md).
 
 ## SQL Cardinality Estimates
 
