@@ -30716,3 +30716,59 @@ dense-build: 859.6 2408 5
 dense-build: 881.7 2408 5
 ```
 ```
+<a id="mz-012-kafka-style-consumer-group-fencing"></a>
+## MZ012 Kafka-Style Consumer-Group Fencing
+
+MZ012 benchmarks a local generation and ownership fence for a Kafka-style
+consumer group. The manual control is a map with group, generation, member, and
+partition checks. Dense assignments use an immutable direct owner slice; sparse
+assignments use the bounded map fallback.
+
+| Operation | Median ns/op | B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Manual map validate | 7.686 | 0 | 0 | 1.00x |
+| Fenced validate | 7.997 | 0 | 0 | 1.04x higher CPU, same memory |
+| Manual map rebalance | 1,767 | 3,496 | 3 | 1.00x |
+| Dense fenced rebalance | 1,066 | 3,008 | 3 | 1.66x faster, 1.16x lower bytes |
+| Dense fenced snapshot | 462.7 | 1,792 | 1 | Detached inspection path |
+| Sparse fenced rebalance, 4 partitions | 522.5 | 608 | 8 | Map fallback |
+
+Validation is zero-allocation and concurrent with atomic generation swaps. The
+small validation cost is the stale-generation and ownership safety check; dense
+rebalance setup is faster and smaller than the manual map control. Run with
+`make benchmark-mz012-consumer-group-fence`.
+
+Raw final samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+manual-validate: 7.674 0 0
+manual-validate: 7.532 0 0
+manual-validate: 7.686 0 0
+manual-validate: 7.894 0 0
+manual-validate: 7.787 0 0
+manual-rebalance: 1770 3496 3
+manual-rebalance: 1755 3496 3
+manual-rebalance: 1717 3496 3
+manual-rebalance: 1767 3496 3
+manual-rebalance: 1927 3496 3
+fenced-validate: 7.943 0 0
+fenced-validate: 7.516 0 0
+fenced-validate: 8.118 0 0
+fenced-validate: 8.073 0 0
+fenced-validate: 7.997 0 0
+fenced-rebalance: 969.9 3008 3
+fenced-rebalance: 1071 3008 3
+fenced-rebalance: 1066 3008 3
+fenced-rebalance: 1061 3008 3
+fenced-rebalance: 1137 3008 3
+fenced-snapshot: 490.1 1792 1
+fenced-snapshot: 430.6 1792 1
+fenced-snapshot: 462.7 1792 1
+fenced-snapshot: 504.7 1792 1
+fenced-snapshot: 463.9 1792 1
+fenced-sparse-rebalance: 599.3 608 8
+fenced-sparse-rebalance: 573.7 608 8
+fenced-sparse-rebalance: 522.5 608 8
+fenced-sparse-rebalance: 502.1 608 8
+fenced-sparse-rebalance: 473.2 608 8
+```

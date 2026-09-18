@@ -19445,3 +19445,36 @@ commit-mz010-snapshot-cutover:
 
 push-mz010-snapshot-cutover:
 	bash ./scripts/push-mz010-snapshot-cutover.sh
+.PHONY: test-mz012-consumer-group-fence
+test-mz012-consumer-group-fence:
+	@bash ./scripts/test-mz012-consumer-group-fence.sh
+.PHONY: benchmark-mz012-baseline
+benchmark-mz012-baseline:
+	@bash ./scripts/benchmark-mz012-baseline.sh
+.PHONY: format-mz012-consumer-group-fence
+format-mz012-consumer-group-fence:
+	@bash ./scripts/format-mz012-consumer-group-fence.sh
+.PHONY: benchmark-mz012-consumer-group-fence
+benchmark-mz012-consumer-group-fence:
+	@bash ./scripts/benchmark-mz012-consumer-group-fence.sh
+.PHONY: race-mz012-consumer-group-fence test-mz012-package vet-mz012-consumer-group-fence
+race-mz012-consumer-group-fence:
+	@bash ./scripts/race-mz012-consumer-group-fence.sh
+test-mz012-package:
+	@bash ./scripts/test-mz012-package.sh
+vet-mz012-consumer-group-fence:
+	@bash ./scripts/vet-mz012-consumer-group-fence.sh
+.PHONY: verify-mz012-consumer-group-fence-docs
+verify-mz012-consumer-group-fence-docs:
+	@bash ./scripts/verify-mz012-docs.sh
+.PHONY: test-mz012-all review-mz012-consumer-group-fence stage-mz012-consumer-group-fence commit-mz012-consumer-group-fence push-mz012-consumer-group-fence
+test-mz012-all:
+	@bash ./scripts/test-mz012-all.sh
+review-mz012-consumer-group-fence:
+	@bash ./scripts/review-mz012-consumer-group-fence.sh
+stage-mz012-consumer-group-fence:
+	@bash ./scripts/stage-mz012-consumer-group-fence.sh
+commit-mz012-consumer-group-fence:
+	@bash ./scripts/commit-mz012-consumer-group-fence.sh
+push-mz012-consumer-group-fence:
+	@bash ./scripts/push-mz012-consumer-group-fence.sh
