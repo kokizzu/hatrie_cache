@@ -29936,3 +29936,57 @@ Because it is not connected to query planning, existing workloads have no
 execution regression; callers should cache reports for repeated prepared
 expressions. See [MU028_MONOTONICITY.md](MU028_MONOTONICITY.md) for proof
 rules and correctness limits.
+
+<a id="mu-031-retractable-aggregate-capabilities"></a>
+## M-U31 Retractable Aggregate Capabilities
+
+Commands `make benchmark-mu031-retractable-aggregate-baseline` and
+`make benchmark-mu031-retractable-aggregate` run five one-second samples on
+the AMD Ryzen 9 5950X Linux/amd64 host. Both paths construct a state from the
+same factory. The baseline calls `NewState`; the capability path additionally
+checks the requested optional interface. This is a constructor/discovery
+measurement, not a claim that `Add`, `Retract`, `Merge`, or `Finalize` became
+faster.
+
+Final raw baseline output:
+
+```text
+BenchmarkMU031AggregateStateCreation/base_retractable 121.8 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_retractable 113.6 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_retractable 115.3 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_retractable 111.8 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_retractable 111.6 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_serializable 106.2 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_serializable 106.4 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_serializable 111.9 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_serializable 107.8 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/base_serializable 109.2 ns/op 24 B/op 2 allocs/op
+```
+
+Final raw capability output:
+
+```text
+BenchmarkMU031AggregateStateCreation/capability_retractable 128.6 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_retractable 127.5 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_retractable 144.5 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_retractable 133.9 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_retractable 128.8 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_serializable 116.5 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_serializable 120.2 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_serializable 117.5 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_serializable 123.1 ns/op 24 B/op 2 allocs/op
+BenchmarkMU031AggregateStateCreation/capability_serializable 119.5 ns/op 24 B/op 2 allocs/op
+```
+
+| Capability | Baseline median | Capability median | CPU delta | Baseline memory | Capability memory |
+|---|---:|---:|---:|---:|---:|
+| Retraction discovery | 113.6 ns/op | 128.8 ns/op | 1.13x, 13.4% higher | 24 B/op, 2 allocs | 24 B/op, 2 allocs |
+| Binary serialization discovery | 107.8 ns/op | 119.5 ns/op | 1.11x, 10.9% higher | 24 B/op, 2 allocs | 24 B/op, 2 allocs |
+
+The opt-in capability constructors therefore add a small constructor-only CPU
+cost and no measured allocation or memory increase in this fixture. They make
+unsupported incremental or checkpoint paths fail explicitly instead of
+silently selecting an incorrect fallback. Existing callers using `NewState`
+are unchanged. See
+[MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md) for the
+public contract and its rollback/panic limitations.

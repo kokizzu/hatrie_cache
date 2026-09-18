@@ -10,9 +10,11 @@ import (
 )
 
 var (
-	ErrSQLAggregateCombinatorInvalid = errors.New("hatSql: invalid aggregate combinator")
-	ErrSQLAggregateCombinatorExists  = errors.New("hatSql: aggregate combinator already registered")
-	ErrSQLAggregateCombinatorMissing = errors.New("hatSql: aggregate combinator is not registered")
+	ErrSQLAggregateCombinatorInvalid         = errors.New("hatSql: invalid aggregate combinator")
+	ErrSQLAggregateCombinatorExists          = errors.New("hatSql: aggregate combinator already registered")
+	ErrSQLAggregateCombinatorMissing         = errors.New("hatSql: aggregate combinator is not registered")
+	ErrSQLAggregateCombinatorNotRetractable  = errors.New("hatSql: aggregate combinator does not support retraction")
+	ErrSQLAggregateCombinatorNotSerializable = errors.New("hatSql: aggregate combinator does not support binary serialization")
 )
 
 // SQLAggregateState is the reusable state, merge, and finalize contract for a
@@ -22,6 +24,24 @@ type SQLAggregateState interface {
 	Add(value interface{}) error
 	Merge(other SQLAggregateState) error
 	Finalize() (interface{}, error)
+}
+
+// SQLRetractableAggregateState extends SQLAggregateState with removal support.
+// Implementations must make Retract(value) the inverse of Add(value) for the
+// values they accept. The base SQLAggregateState stays unchanged so existing
+// aggregate implementations remain source-compatible.
+type SQLRetractableAggregateState interface {
+	SQLAggregateState
+	Retract(value interface{}) error
+}
+
+// SQLSerializableAggregateState extends SQLAggregateState with a binary
+// snapshot contract. The byte representation is owned by the implementation
+// and must be stable enough for the caller's persistence or transfer scope.
+type SQLSerializableAggregateState interface {
+	SQLAggregateState
+	MarshalBinary() ([]byte, error)
+	UnmarshalBinary(data []byte) error
 }
 
 // SQLAggregateFactory constructs an independent aggregate state.
@@ -54,6 +74,35 @@ func (combinator SQLAggregateCombinator) NewState() (SQLAggregateState, error) {
 		return nil, fmt.Errorf("%w: factory returned nil state", ErrSQLAggregateCombinatorInvalid)
 	}
 	return state, nil
+}
+
+// NewRetractableState creates a state only when the factory advertises
+// retraction support. A missing capability is reported explicitly instead of
+// silently falling back to a slower or incorrect recomputation path.
+func (combinator SQLAggregateCombinator) NewRetractableState() (SQLRetractableAggregateState, error) {
+	state, err := combinator.NewState()
+	if err != nil {
+		return nil, err
+	}
+	retractable, ok := state.(SQLRetractableAggregateState)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorNotRetractable, combinator.Name)
+	}
+	return retractable, nil
+}
+
+// NewSerializableState creates a state only when the factory advertises
+// binary snapshot support.
+func (combinator SQLAggregateCombinator) NewSerializableState() (SQLSerializableAggregateState, error) {
+	state, err := combinator.NewState()
+	if err != nil {
+		return nil, err
+	}
+	serializable, ok := state.(SQLSerializableAggregateState)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorNotSerializable, combinator.Name)
+	}
+	return serializable, nil
 }
 
 // SQLAggregateCombinatorRegistry stores named aggregate state factories. The
@@ -104,6 +153,40 @@ func (registry *SQLAggregateCombinatorRegistry) NewState(name string) (SQLAggreg
 		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorMissing, name)
 	}
 	return combinator.NewState()
+}
+
+// NewRetractableState resolves a name and creates a fresh retractable state.
+// It returns ErrSQLAggregateCombinatorNotRetractable when the registered
+// factory only implements the base aggregate contract.
+func (registry *SQLAggregateCombinatorRegistry) NewRetractableState(name string) (SQLRetractableAggregateState, error) {
+	if registry == nil {
+		return nil, ErrSQLAggregateCombinatorMissing
+	}
+	name = normalizeSQLAggregateCombinatorName(name)
+	registry.mu.RLock()
+	combinator, ok := registry.combinators[name]
+	registry.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorMissing, name)
+	}
+	return combinator.NewRetractableState()
+}
+
+// NewSerializableState resolves a name and creates a fresh serializable
+// state. It returns ErrSQLAggregateCombinatorNotSerializable when the
+// registered factory only implements the base aggregate contract.
+func (registry *SQLAggregateCombinatorRegistry) NewSerializableState(name string) (SQLSerializableAggregateState, error) {
+	if registry == nil {
+		return nil, ErrSQLAggregateCombinatorMissing
+	}
+	name = normalizeSQLAggregateCombinatorName(name)
+	registry.mu.RLock()
+	combinator, ok := registry.combinators[name]
+	registry.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorMissing, name)
+	}
+	return combinator.NewSerializableState()
 }
 
 // Names returns registered combinator names in deterministic order.

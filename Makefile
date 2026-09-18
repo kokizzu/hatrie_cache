@@ -18670,6 +18670,42 @@ commit-mu028-monotonicity:
 push-mu028-monotonicity:
 	bash ./scripts/push-mu028-monotonicity.sh
 
+test-mu031-retractable-aggregate:
+	bash ./scripts/test-mu031-retractable-aggregate.sh
+
+format-mu031-retractable-aggregate:
+	bash ./scripts/format-mu031-retractable-aggregate.sh
+
+benchmark-mu031-retractable-aggregate-baseline:
+	bash ./scripts/benchmark-mu031-retractable-aggregate-baseline.sh
+
+benchmark-mu031-retractable-aggregate:
+	bash ./scripts/benchmark-mu031-retractable-aggregate.sh
+
+test-mu031-package:
+	bash ./scripts/test-mu031-package.sh
+
+race-mu031-retractable-aggregate:
+	bash ./scripts/race-mu031-retractable-aggregate.sh
+
+vet-mu031-retractable-aggregate:
+	bash ./scripts/vet-mu031-retractable-aggregate.sh
+
+verify-mu031-retractable-aggregate:
+	bash ./scripts/verify-mu031-retractable-aggregate.sh
+
+review-mu031-retractable-aggregate:
+	bash ./scripts/review-mu031-retractable-aggregate.sh
+
+stage-mu031-retractable-aggregate:
+	bash ./scripts/stage-mu031-retractable-aggregate.sh
+
+commit-mu031-retractable-aggregate:
+	bash ./scripts/commit-mu031-retractable-aggregate.sh
+
+push-mu031-retractable-aggregate:
+	bash ./scripts/push-mu031-retractable-aggregate.sh
+
 benchmark-mu028-monotonicity-baseline:
 	bash ./scripts/benchmark-mu028-monotonicity.sh baseline
 
