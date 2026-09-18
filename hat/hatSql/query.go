@@ -13965,6 +13965,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if rows, indexed, err := resolveSQLMultikeyIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
+	if rows, indexed, err := resolveSQLGeoIndexedSource(source, condition, resolver, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}

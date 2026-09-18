@@ -19750,5 +19750,35 @@ push-ch047-remote-table-function:
 
 
 
+
 format-ch044-interval-join:
 	sh ./scripts/format-ch044-interval-join.sh
+format-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh format
+
+verify-tr027-spatial-index-docs:
+	bash ./scripts/test-tr027-spatial-index.sh verify-docs
+
+review-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh review
+
+stage-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh stage
+
+commit-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh commit
+
+push-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh push
+
+test-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh test
+
+benchmark-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh benchmark
+
+race-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh race
+
+vet-tr027-spatial-index:
+	bash ./scripts/test-tr027-spatial-index.sh vet

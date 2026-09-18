@@ -1317,6 +1317,14 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// GeoIndexedSourceResolver optionally resolves GEO_WITHIN_* predicates through
+// a spatial candidate index. The SQL executor evaluates the original
+// predicate again, so implementations may return false positives but must not
+// omit matching or otherwise unindexable rows.
+type GeoIndexedSourceResolver interface {
+	ResolveSQLGeoSource(name, key string, predicate SQLGeoPredicate) ([]Row, bool, error)
+}
+
 // SQLIndexDiagnosticsResolver optionally reports index bytes, candidate rows,
 // and skipped segments for EXPLAIN ANALYZE. It is never required for indexed
 // execution and must not change the candidate rows returned by the index.

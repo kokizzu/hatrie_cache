@@ -4509,3 +4509,10 @@ avoid downloading and decoding an entire remote object; response and row
 limits, safe URL validation, and redirect blocking are enabled by default. See
 [CH047_REMOTE_TABLE_FUNCTIONS.md](CH047_REMOTE_TABLE_FUNCTIONS.md) and the
 [CH-47 benchmark](BENCHMARK.md#ch-47-s3-and-url-table-functions).
+## Spatial R-tree SQL Index
+
+Bounded point queries can use the opt-in [`RTreeSpatialSource`](TR027_RTREE_SPATIAL_INDEX.md)
+with `GEO_WITHIN_BOX` or `GEO_WITHIN_RADIUS`. The SQL executor rechecks every
+candidate, so the index is a work reduction and does not change predicate
+semantics. The benchmarked 50k-row radius query is 3,254x faster than a full
+scan; index construction costs are documented before enabling it.

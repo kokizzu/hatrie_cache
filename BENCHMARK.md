@@ -30997,3 +30997,18 @@ The range path is useful when a caller already knows a record-aligned byte
 window. It is not a promise that arbitrary compressed or split records can be
 decoded independently; the complete-record requirement and resolver limits are
 documented in [CH047_REMOTE_TABLE_FUNCTIONS.md](CH047_REMOTE_TABLE_FUNCTIONS.md).
+<a id="tr-027-spatial-r-tree-sql-index"></a>
+## TR-027 Spatial R-tree SQL Index
+
+Command: `make benchmark-tr027-spatial-index`.
+
+Five samples on Linux/amd64 with an AMD Ryzen 9 5950X and 50,000 points. The
+query is a selective 100 km `GEO_WITHIN_RADIUS` predicate. Values are medians;
+the full raw output and build-cost tradeoff are in
+[TR027_RTREE_SPATIAL_INDEX.md](TR027_RTREE_SPATIAL_INDEX.md).
+
+| Path | ns/op | B/op | allocs/op | Relative query time |
+| --- | ---: | ---: | ---: | ---: |
+| Full scan | 32,574,123 | 31,618,254 | 200,040 | 1.00x |
+| R-tree candidates | 10,010 | 6,737 | 35 | 3,254x faster |
+| R-tree build, 50k rows | 146,309,264 | 39,435,496 | 158,874 | one-time cost |
