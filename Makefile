@@ -18423,6 +18423,42 @@ push-mz01-durable-arrangement:
 status-mz01-durable-arrangement:
 	bash ./scripts/run-mz01-durable-arrangement.sh status
 
+.PHONY: test-mz41-recursive-differential
+test-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh test
+
+.PHONY: race-mz41-recursive-differential
+race-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh race
+
+.PHONY: benchmark-mz41-recursive-differential
+benchmark-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh benchmark
+
+.PHONY: vet-mz41-recursive-differential
+vet-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh vet
+
+.PHONY: review-mz41-recursive-differential
+review-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh review
+
+.PHONY: stage-mz41-recursive-differential
+stage-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh stage
+
+.PHONY: commit-mz41-recursive-differential
+commit-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh commit
+
+.PHONY: push-mz41-recursive-differential
+push-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh push
+
+.PHONY: status-mz41-recursive-differential
+status-mz41-recursive-differential:
+	bash ./scripts/run-mz41-recursive-differential.sh status
+
 .PHONY: test-chu27-priority
 test-chu27-priority:
 	bash ./scripts/run-chu27-priority.sh test
