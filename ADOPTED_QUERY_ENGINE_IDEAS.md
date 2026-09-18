@@ -540,3 +540,14 @@ return unreconciled rows and reconcile before downstream operators consume the
 source. See [CH004_FINAL_READ.md](CH004_FINAL_READ.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics). Persistent
 schema-bound metadata and background merge integration remain open.
+
+## CH-005: Delete Bitmap State Snapshots
+
+ClickHouse-style lightweight delete state is partially adopted for typed-table
+patch parts. `TypedTable.MarshalPatchState` and `RestorePatchState` persist and
+restore the packed physical-row bitmap with a bounded versioned CRC format,
+exact key-order validation, and atomic failure behavior. The default delete,
+read, and compaction paths are unchanged. Full immutable stored-part manifests
+and automatic cross-process part hydration remain open. See
+[CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots).

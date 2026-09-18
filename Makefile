@@ -18804,3 +18804,30 @@ commit-ch004-final:
 .PHONY: push-ch004-final
 push-ch004-final:
 	bash ./scripts/push-ch004-final.sh
+
+.PHONY: test-ch005-patch-snapshot
+test-ch005-patch-snapshot:
+	bash ./scripts/test-ch005-patch-snapshot.sh
+
+.PHONY: format-ch005-patch
+format-ch005-patch:
+	bash ./scripts/format-ch005-patch.sh
+
+.PHONY: benchmark-ch005-patch-snapshot
+benchmark-ch005-patch-snapshot:
+	bash ./scripts/benchmark-ch005-patch-snapshot.sh
+.PHONY: review-ch005-snapshot
+review-ch005-snapshot:
+	bash ./scripts/review-ch005-snapshot.sh
+
+.PHONY: stage-ch005-patch
+stage-ch005-patch:
+	bash ./scripts/stage-ch005-patch.sh
+
+.PHONY: commit-ch005-patch
+commit-ch005-patch:
+	bash ./scripts/commit-ch005-patch.sh
+
+.PHONY: push-ch005-patch
+push-ch005-patch:
+	bash ./scripts/push-ch005-patch.sh

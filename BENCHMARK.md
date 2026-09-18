@@ -30090,3 +30090,55 @@ BenchmarkCH004FinalRows-32 402 2959523 ns/op 2762439 B/op 18482 allocs/op
 heap are unchanged by the feature; the measured costs are paid only when
 reconciliation is explicitly requested. The row-callback comparison is not
 strictly apples-to-apples because its control is materialized.
+
+<a id="ch-005-delete-bitmap-state-snapshots"></a>
+## CH-005 Delete Bitmap State Snapshots
+
+`make benchmark-ch005-patch-snapshot` runs five samples on the AMD Ryzen 9
+5950X Linux/amd64 host. The fixture contains 4,096 physical rows and 1,024
+logical deletes. The first output is the initial implementation; the second
+output is the final implementation after restore stopped allocating one Go
+string per physical key.
+
+Initial raw output:
+
+```text
+BenchmarkCH005PatchState/Marshal-32 43798 27390 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 41589 29419 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 42534 27602 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 41030 28728 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 41863 30175 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Restore-32 4094 291814 ns/op 299938 B/op 4106 allocs/op
+BenchmarkCH005PatchState/Restore-32 4353 295597 ns/op 299939 B/op 4106 allocs/op
+BenchmarkCH005PatchState/Restore-32 3631 304660 ns/op 299939 B/op 4106 allocs/op
+BenchmarkCH005PatchState/Restore-32 4058 297043 ns/op 299938 B/op 4106 allocs/op
+BenchmarkCH005PatchState/Restore-32 4166 292943 ns/op 299940 B/op 4106 allocs/op
+```
+
+Final raw output:
+
+```text
+BenchmarkCH005PatchState/Marshal-32 42295 28293 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 42790 28079 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 44487 27957 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 45727 28289 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 40606 28758 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Restore-32 47190 25176 ns/op 520 B/op 2 allocs/op
+BenchmarkCH005PatchState/Restore-32 45992 25452 ns/op 520 B/op 2 allocs/op
+BenchmarkCH005PatchState/Restore-32 47324 27073 ns/op 520 B/op 2 allocs/op
+BenchmarkCH005PatchState/Restore-32 46430 24966 ns/op 520 B/op 2 allocs/op
+BenchmarkCH005PatchState/Restore-32 43483 28255 ns/op 520 B/op 2 allocs/op
+```
+
+| Path | Before median | Final median | Improvement |
+| --- | ---: | ---: | ---: |
+| Marshal CPU | 28,728 ns/op | 28,289 ns/op | 1.02x faster, within noise |
+| Marshal heap | 32,768 B/op | 32,768 B/op | unchanged |
+| Marshal allocations | 1 | 1 | unchanged |
+| Restore CPU | 295,597 ns/op | 25,452 ns/op | 11.61x faster |
+| Restore heap | 299,939 B/op | 520 B/op | 576.81x lower |
+| Restore allocations | 4,106 | 2 | 2,053x fewer |
+
+No default delete or compaction setting changed. The final implementation
+keeps the large restore win while leaving the existing in-memory bitmap path
+untouched.

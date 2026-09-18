@@ -12,6 +12,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Opt-in ClickHouse-style `FINAL` read reconciliation for replacing and collapsing source rows: [CH004_FINAL_READ.md](CH004_FINAL_READ.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics)
+- Opt-in CRC-protected typed-table delete bitmap snapshots for restart recovery: [CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
