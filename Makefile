@@ -20072,3 +20072,42 @@ push-mz028-temporal-arrangement:
 .PHONY: format-mz028-temporal-arrangement
 format-mz028-temporal-arrangement:
 	@bash ./scripts/format-mz028-temporal-arrangement.sh
+.PHONY: test-mz005-sealed-run
+test-mz005-sealed-run:
+	@bash ./scripts/test-mz005-sealed-run.sh
+
+.PHONY: format-mz005-sealed-run
+format-mz005-sealed-run:
+	@bash ./scripts/format-mz005-sealed-run.sh
+
+.PHONY: benchmark-mz005-sealed-run
+benchmark-mz005-sealed-run:
+	@bash ./scripts/benchmark-mz005-sealed-run.sh
+
+.PHONY: verify-mz005-sealed-run-docs
+verify-mz005-sealed-run-docs:
+	@bash ./scripts/verify-mz005-sealed-run-docs.sh
+
+.PHONY: test-mz005-sealed-run-package
+test-mz005-sealed-run-package:
+	@bash ./scripts/test-mz005-sealed-run-package.sh
+
+.PHONY: race-mz005-sealed-run
+race-mz005-sealed-run:
+	@bash ./scripts/race-mz005-sealed-run.sh
+
+.PHONY: vet-mz005-sealed-run
+vet-mz005-sealed-run:
+	@bash ./scripts/vet-mz005-sealed-run.sh
+
+.PHONY: stage-mz005-sealed-run
+stage-mz005-sealed-run:
+	@bash ./scripts/stage-mz005-sealed-run.sh
+
+.PHONY: commit-mz005-sealed-run
+commit-mz005-sealed-run:
+	@bash ./scripts/commit-mz005-sealed-run.sh
+
+.PHONY: push-mz005-sealed-run
+push-mz005-sealed-run:
+	@bash ./scripts/push-mz005-sealed-run.sh

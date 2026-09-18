@@ -31207,3 +31207,39 @@ The optimized token path is 2.70x faster than the first implementation, with
 supplied-key lower bound, derivation costs about 565x CPU time; callers that
 already persist a stable source token should continue passing it directly.
 This benchmark excludes external sink I/O and ledger/checkpoint work.
+
+## MZ-005: Immutable Sealed Upsert Runs
+
+Workload: 4,096 sorted keyed updates with common key prefixes and short binary
+values. The mutable baseline is a `map[string][]byte` copy-on-read/build path;
+the serialization baseline is Go `encoding/json`. The sealed candidate
+consolidates, sorts, front-codes, CRC-protects, and sparse-indexes the run.
+Five 500 ms samples were run with `-benchmem` on Linux/amd64, AMD Ryzen 9
+5950X. The final default restart stride is 16.
+
+| Operation | Baseline median | Sealed median | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Point lookup | 51.57 ns/op; 16 B; 1 alloc | 355.4 ns/op; 16 B; 1 alloc | Baseline is 6.89x faster; same transient read allocation |
+| Build | 211,471 ns/op; 393,538 B; 17 allocs | 1,568,152 ns/op; 886,521 B; 24 allocs | Baseline is 7.42x faster; sealed build has 2.25x cumulative bytes |
+| Marshal | 614,412 ns/op; 299,009 wire bytes | 16,126 ns/op; 90,022 wire bytes | Sealed is 38.1x faster and 3.32x smaller |
+| Unmarshal/validate | 3,529,767 ns/op; 876,114 B; 8,213 allocs | 213,065 ns/op; 107,840 B; 259 allocs | Sealed is 16.6x faster, 8.13x lower bytes, 31.7x fewer allocs |
+
+Raw result samples:
+
+```text
+BenchmarkMZ005MutableMapLookup: 50.50, 49.50, 51.57, 52.21, 51.87 ns/op; 16 B/op; 1 allocs/op
+BenchmarkMZ005SealedRunLookup: 392.0, 382.4, 355.4, 343.3, 347.5 ns/op; 16 B/op; 1 allocs/op
+BenchmarkMZ005SealedRunLookupStride8: 238.9, 239.0, 244.3, 262.1, 228.6 ns/op; 16 B/op; 1 allocs/op
+BenchmarkMZ005SealedRunLookupStride16: 349.0, 364.3, 370.3, 366.8, 377.6 ns/op; 16 B/op; 1 allocs/op
+BenchmarkMZ005MutableMapBuild: 224273, 202591, 211471, 219950, 203618 ns/op; 393538 B/op; 17 allocs/op
+BenchmarkMZ005SealedRunBuild: 1574549, 1547555, 1568152, 1605979, 1523259 ns/op; 886521 B/op; 24 allocs/op
+BenchmarkMZ005JSONMarshal: 618895, 594580, 641110, 614412, 602809 ns/op; 299009 wire-bytes/op; about 306 KB/op
+BenchmarkMZ005SealedRunMarshal: 15340, 15877, 16126, 16527, 16456 ns/op; 90022 wire-bytes/op; 90112 B/op; 1 alloc/op
+BenchmarkMZ005JSONUnmarshal: 3300581, 3471815, 3564970, 3529767, 3555550 ns/op; 299009 wire-bytes/op; 876114 B/op; 8213 allocs/op
+BenchmarkMZ005SealedRunUnmarshal: 207477, 197815, 213065, 218959, 214680 ns/op; 90022 wire-bytes/op; 107840 B/op; 259 allocs/op
+```
+
+This is an opt-in persistence/transfer format, not a hot-map replacement.
+The sealed path pays build and point-lookup CPU to reduce serialized size and
+validated decode cost. See [MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md](MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md)
+for the API, bounds, format, and stride sweep.

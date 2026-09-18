@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+test -s MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md
+rg -n 'MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md|mz-005-immutable-sealed-upsert-runs|SealedUpsertRun' README.md INSPIRATION_BACKLOG.md ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md

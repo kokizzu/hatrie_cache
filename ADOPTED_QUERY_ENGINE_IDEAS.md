@@ -438,6 +438,16 @@ overflow checks, row cloning, and deterministic snapshots. The separate
 `ENGINE_IDEAS.md` MZ-029 entry is spillable arrangements and remains open.
 See [MZ029_INCREMENTAL_INTERVAL_JOIN.md](MZ029_INCREMENTAL_INTERVAL_JOIN.md)
 for the API and measured tradeoffs.
+### Materialize MZ-005: Immutable Sealed Upsert Runs
+
+Implemented as the importable `hatDataStructure.SealedUpsertRun`. It
+consolidates keyed updates, sorts and front-codes final records, keeps sparse
+restart points for bounded lookup, and validates CRC-protected binary round
+trips under configurable record, key, value, and wire-size limits. Point lookup
+and build are slower than a hot mutable map, so this remains an opt-in format
+for persisted, transferred, and compaction input. See
+[MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md](MZ005_IMMUTABLE_SEALED_UPSERT_RUN.md) and
+[BENCHMARK.md#mz-005-immutable-sealed-upsert-runs](BENCHMARK.md#mz-005-immutable-sealed-upsert-runs).
 ### Materialize MZ-029: Spillable Arrangements
 
 Implemented as the imported `hatDataStructure.SpillableArrangement` opt-in
