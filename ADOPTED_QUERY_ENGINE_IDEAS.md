@@ -3,6 +3,7 @@
 ## Recently Adopted
 
 | Source | Idea | Status | Evidence |
+| Materialize | Dataflow operator placement constraints by failure domain | Adopted | Deterministic, bounded opt-in planner in `hatPipeline.PlanDataflowOperatorPlacement`; see [MZ036_DATAFLOW_OPERATOR_PLACEMENT.md](MZ036_DATAFLOW_OPERATOR_PLACEMENT.md) and [BENCHMARK.md](BENCHMARK.md#mz-036-dataflow-operator-placement). |
 | --- | --- | --- | --- |
 | ClickHouse | Mutation wait/status lifecycle | Adopted for asynchronous journal writes | `CommandJournalSubmission` exposes the durable journal sequence, committed/rejected/failed state, and infrastructure error; `CommandJournal.MutationStatus` rereads committed state after restart, while `system.mutations` adds privacy-safe `mutation_id` and `progress`. [CHU07_MUTATION_LIFECYCLE.md](CHU07_MUTATION_LIFECYCLE.md) |
 | ClickHouse | Mutation dependency graph with resumable progress | Adopted as an importable caller-driven maintenance coordinator | `hatPipeline.MutationDependencyGraph` maintains reverse dependents and a deterministic ready set, blocks dependents after failures, supports explicit retry, and restores running work as pending. It does not execute or persist user work automatically. See [MUTATION_DEPENDENCY_GRAPH.md](MUTATION_DEPENDENCY_GRAPH.md) and [BENCHMARK.md#mutation-dependency-graph](BENCHMARK.md#mutation-dependency-graph). |

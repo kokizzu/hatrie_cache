@@ -133,6 +133,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired incremental Top-K rank movement changes: [MZ031_RANKED_TOP_K.md](MZ031_RANKED_TOP_K.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-031-ranked-top-k-change-diffs)
 - Materialize-inspired opt-in arrangement cost and reuse scoring for indexes, projections, and ordered layouts: [MZ032_ARRANGEMENT_COST.md](MZ032_ARRANGEMENT_COST.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-032-arrangement-cost-model)
 - Materialize-inspired bounded arrangement locality hints for placement-aware `EXPLAIN` recommendations: [MZ035_ARRANGEMENT_LOCALITY.md](MZ035_ARRANGEMENT_LOCALITY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-035-arrangement-locality-hints)
+- Materialize-inspired deterministic dataflow operator placement across failure domains: [MZ036_DATAFLOW_OPERATOR_PLACEMENT.md](MZ036_DATAFLOW_OPERATOR_PLACEMENT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-036-dataflow-operator-placement)
 - Materialize-inspired bounded schema-migration barriers for dependent dataflows: [MZ046_SCHEMA_MIGRATION_BARRIER.md](MZ046_SCHEMA_MIGRATION_BARRIER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-046-schema-migration-barrier)
 - Materialize-inspired fenced timestamp-domain leases for independent source clocks: [MZ009_TIMESTAMP_DOMAIN_LEASE.md](MZ009_TIMESTAMP_DOMAIN_LEASE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-009-timestamp-domain-lease)
 - Materialize-inspired bounded automatic arrangement-key selection for `EXPLAIN`: [MZ024_ARRANGEMENT_KEY_SELECTION.md](MZ024_ARRANGEMENT_KEY_SELECTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-024-automatic-arrangement-key-selection)
@@ -4334,6 +4335,7 @@ the measured cost in
 
 - [ClickHouse-style GLOBAL IN / GLOBAL JOIN broadcast planning](CH045_GLOBAL_JOIN_BROADCAST_PLANNING.md)
 - [MZ-030 incremental differential join](MZ030_INCREMENTAL_JOIN.md)
+- [MZ-036 dataflow operator placement across failure domains](MZ036_DATAFLOW_OPERATOR_PLACEMENT.md)
 ## Query Engine Notes
 
 - [Materialize-style incremental interval join](MZ029_INCREMENTAL_INTERVAL_JOIN.md)

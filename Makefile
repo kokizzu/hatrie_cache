@@ -20155,3 +20155,47 @@ commit-ch045-global-broadcast:
 .PHONY: push-ch045-global-broadcast
 push-ch045-global-broadcast:
 	@bash ./scripts/push-ch045-global-broadcast.sh
+
+.PHONY: test-mz036-dataflow-placement
+test-mz036-dataflow-placement:
+	@bash ./scripts/test-mz036-dataflow-placement.sh
+
+.PHONY: format-mz036-dataflow-placement
+format-mz036-dataflow-placement:
+	@bash ./scripts/format-mz036-dataflow-placement.sh
+
+.PHONY: format-mz036-dataflow-placement-benchmark
+format-mz036-dataflow-placement-benchmark:
+	@bash ./scripts/format-mz036-dataflow-placement-benchmark.sh
+
+.PHONY: benchmark-mz036-dataflow-placement
+benchmark-mz036-dataflow-placement:
+	@bash ./scripts/benchmark-mz036-dataflow-placement.sh
+
+.PHONY: verify-mz036-dataflow-placement-docs
+verify-mz036-dataflow-placement-docs:
+	@bash ./scripts/verify-mz036-dataflow-placement-docs.sh
+
+.PHONY: test-mz036-dataflow-placement-package
+test-mz036-dataflow-placement-package:
+	@bash ./scripts/test-mz036-dataflow-placement-package.sh
+
+.PHONY: race-mz036-dataflow-placement
+race-mz036-dataflow-placement:
+	@bash ./scripts/race-mz036-dataflow-placement.sh
+
+.PHONY: vet-mz036-dataflow-placement
+vet-mz036-dataflow-placement:
+	@bash ./scripts/vet-mz036-dataflow-placement.sh
+
+.PHONY: stage-mz036-dataflow-placement
+stage-mz036-dataflow-placement:
+	@bash ./scripts/stage-mz036-dataflow-placement.sh
+
+.PHONY: commit-mz036-dataflow-placement
+commit-mz036-dataflow-placement:
+	@bash ./scripts/commit-mz036-dataflow-placement.sh
+
+.PHONY: push-mz036-dataflow-placement
+push-mz036-dataflow-placement:
+	@bash ./scripts/push-mz036-dataflow-placement.sh

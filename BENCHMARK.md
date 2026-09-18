@@ -30515,6 +30515,38 @@ BenchmarkMZ035ArrangementRecommendationWithLocality-32     302514  505.3 ns/op  
 BenchmarkMZ035ArrangementRecommendationWithLocality-32     187356  592.9 ns/op  80 B/op  4 allocs/op
 BenchmarkMZ035ArrangementRecommendationWithLocality-32     244080  524.5 ns/op  80 B/op  4 allocs/op
 ```
+<a id="mz-036-dataflow-operator-placement"></a>
+## MZ-036 Dataflow Operator Placement
+
+The constrained planner is a control-plane operation. It spreads replicas
+across distinct failure domains when requested, respects worker capacity, and
+rejects unsatisfied plans. The baseline is an unchecked round-robin loop, so
+it does not provide equivalent correctness guarantees.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| unchecked round-robin baseline | 532.6 | 0 | 0 | 1.0x |
+| constrained placement solver | 57,193 | 12,512 | 15 | 107.4x |
+
+The workload contains 32 operators, three replicas per operator, and 16
+workers. The solver creates one detached plan and is intended to run when a
+dataflow is created or deliberately rescheduled, never per record.
+
+Raw output:
+
+```text
+BenchmarkMZ036NaiveRoundRobin-32       1000000    533.1 ns/op       0 B/op    0 allocs/op
+BenchmarkMZ036NaiveRoundRobin-32       1000000    519.3 ns/op       0 B/op    0 allocs/op
+BenchmarkMZ036NaiveRoundRobin-32       1000000    533.9 ns/op       0 B/op    0 allocs/op
+BenchmarkMZ036NaiveRoundRobin-32       1000000    533.1 ns/op       0 B/op    0 allocs/op
+BenchmarkMZ036NaiveRoundRobin-32       1000000    532.6 ns/op       0 B/op    0 allocs/op
+BenchmarkMZ036PlacementSolver-32         10604  58341 ns/op   12512 B/op   15 allocs/op
+BenchmarkMZ036PlacementSolver-32         10000  57193 ns/op   12512 B/op   15 allocs/op
+BenchmarkMZ036PlacementSolver-32          9714  57183 ns/op   12512 B/op   15 allocs/op
+BenchmarkMZ036PlacementSolver-32         10000  58828 ns/op   12512 B/op   15 allocs/op
+BenchmarkMZ036PlacementSolver-32         10465  57012 ns/op   12512 B/op   15 allocs/op
+```
+
 <a id="mz-046-schema-migration-barrier"></a>
 ## MZ-046 Schema Migration Barrier
 
