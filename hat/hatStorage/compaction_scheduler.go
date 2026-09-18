@@ -273,7 +273,13 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 		if priorityTask {
 			// The priority entry remains in the queue; only its running marker
 			// was removed above.
+			if scheduler.oldestPending.IsZero() {
+				scheduler.oldestPending = scheduler.now()
+			}
 		} else if scheduler.priorityPending != nil {
+			if scheduler.oldestPending.IsZero() {
+				scheduler.oldestPending = scheduler.now()
+			}
 			scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run}
 		} else if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 			if scheduler.oldestPending.IsZero() {
@@ -311,7 +317,13 @@ func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err erro
 	scheduler.failed++
 	if priorityTask {
 		// The priority entry remains queued after the running marker is removed.
+		if scheduler.oldestPending.IsZero() {
+			scheduler.oldestPending = scheduler.now()
+		}
 	} else if scheduler.priorityPending != nil {
+		if scheduler.oldestPending.IsZero() {
+			scheduler.oldestPending = scheduler.now()
+		}
 		scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run}
 	} else if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 		if scheduler.oldestPending.IsZero() {
