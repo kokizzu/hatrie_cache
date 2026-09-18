@@ -14,6 +14,14 @@ type SQLFunctionDefinition = hatSql.FunctionDefinition
 type SQLFunctionCall = hatSql.FunctionCall
 type SQLFunctionError = hatSql.FunctionError
 type SQLFunctionResolver = hatSql.FunctionResolver
+type SQLFunctionMonotonicity = hatSql.FunctionMonotonicity
+
+const (
+	SQLFunctionMonotonicityUnknown       = hatSql.FunctionMonotonicityUnknown
+	SQLFunctionMonotonicityConstant      = hatSql.FunctionMonotonicityConstant
+	SQLFunctionMonotonicityNonDecreasing = hatSql.FunctionMonotonicityNonDecreasing
+	SQLFunctionMonotonicityNonIncreasing = hatSql.FunctionMonotonicityNonIncreasing
+)
 
 func FormatSQLFunctionDiagnostic(definition SQLFunctionDefinition, err error) string {
 	return hatSql.FormatFunctionDiagnostic(definition, err)
@@ -178,6 +186,23 @@ func (registry *SQLFunctionRegistry) EvaluateSQLFunction(name string, calls []SQ
 	return registry.core.EvaluateSQLFunction(name, calls)
 }
 
+// Definition returns a defensive copy of one registered function definition.
+func (registry *SQLFunctionRegistry) Definition(name string) (SQLFunctionDefinition, bool) {
+	if registry == nil || registry.core == nil {
+		return SQLFunctionDefinition{}, false
+	}
+	return registry.core.Definition(name)
+}
+
+// Definitions returns defensive copies of all registered definitions in name
+// order.
+func (registry *SQLFunctionRegistry) Definitions() []SQLFunctionDefinition {
+	if registry == nil || registry.core == nil {
+		return nil
+	}
+	return registry.core.Definitions()
+}
+
 func (registry *SQLFunctionRegistry) Close() {
 	if registry == nil {
 		return
@@ -270,6 +295,9 @@ func (parser *sqlParser) parseSQLFunctionArguments() ([]string, []string, error)
 func normalizeSQLFunctionDefinition(definition *SQLFunctionDefinition) error {
 	if definition == nil {
 		return fmt.Errorf("SQL function definition is required")
+	}
+	if err := hatSql.NormalizeFunctionCapabilities(definition); err != nil {
+		return err
 	}
 	if definition.Name == "" {
 		return fmt.Errorf("SQL function name is required")

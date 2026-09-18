@@ -34,6 +34,10 @@ func (registry *Registry) Register(definition FunctionDefinition, persist func([
 	if err != nil {
 		return err
 	}
+	if err := NormalizeFunctionCapabilities(&normalized); err != nil {
+		closeRuntime(runtime)
+		return err
+	}
 	key := strings.ToUpper(normalized.Name)
 	registry.mu.Lock()
 	definitions := cloneDefinitions(registry.definitions)
@@ -63,6 +67,11 @@ func (registry *Registry) Replace(definitions []FunctionDefinition) error {
 	for index, definition := range definitions {
 		normalized, runtime, err := registry.compiler(definition)
 		if err != nil {
+			closeRuntimes(functions)
+			return fmt.Errorf("load SQL function definition %d: %w", index, err)
+		}
+		if err := NormalizeFunctionCapabilities(&normalized); err != nil {
+			closeRuntime(runtime)
 			closeRuntimes(functions)
 			return fmt.Errorf("load SQL function definition %d: %w", index, err)
 		}
@@ -96,6 +105,39 @@ func (registry *Registry) EvaluateSQLFunction(name string, calls []FunctionCall)
 	return function.Evaluate(calls)
 }
 
+// Definition returns an immutable-by-convention copy of one registered
+// function definition. The returned argument slices are also copied.
+func (registry *Registry) Definition(name string) (FunctionDefinition, bool) {
+	if registry == nil {
+		return FunctionDefinition{}, false
+	}
+	registry.mu.RLock()
+	definition, ok := registry.definitions[strings.ToUpper(strings.TrimSpace(name))]
+	if ok {
+		definition = cloneFunctionDefinition(definition)
+	}
+	registry.mu.RUnlock()
+	return definition, ok
+}
+
+// Definitions returns all registered definitions in deterministic name order.
+// The returned definitions and their argument slices are independent copies.
+func (registry *Registry) Definitions() []FunctionDefinition {
+	if registry == nil {
+		return nil
+	}
+	registry.mu.RLock()
+	definitions := make([]FunctionDefinition, 0, len(registry.definitions))
+	for _, definition := range registry.definitions {
+		definitions = append(definitions, cloneFunctionDefinition(definition))
+	}
+	registry.mu.RUnlock()
+	sort.Slice(definitions, func(left, right int) bool {
+		return definitions[left].Name < definitions[right].Name
+	})
+	return definitions
+}
+
 // Close releases every installed runtime.
 func (registry *Registry) Close() {
 	if registry == nil {
@@ -111,7 +153,7 @@ func (registry *Registry) Close() {
 func cloneDefinitions(source map[string]FunctionDefinition) map[string]FunctionDefinition {
 	out := make(map[string]FunctionDefinition, len(source)+1)
 	for key, value := range source {
-		out[key] = value
+		out[key] = cloneFunctionDefinition(value)
 	}
 	return out
 }
@@ -119,10 +161,16 @@ func cloneDefinitions(source map[string]FunctionDefinition) map[string]FunctionD
 func sortedDefinitions(definitions map[string]FunctionDefinition) []FunctionDefinition {
 	out := make([]FunctionDefinition, 0, len(definitions))
 	for _, definition := range definitions {
-		out = append(out, definition)
+		out = append(out, cloneFunctionDefinition(definition))
 	}
 	sort.Slice(out, func(left, right int) bool { return out[left].Name < out[right].Name })
 	return out
+}
+
+func cloneFunctionDefinition(definition FunctionDefinition) FunctionDefinition {
+	definition.Arguments = append([]string(nil), definition.Arguments...)
+	definition.ArgumentTypes = append([]string(nil), definition.ArgumentTypes...)
+	return definition
 }
 
 func closeRuntime(runtime FunctionRuntime) {

@@ -18673,6 +18673,42 @@ push-mu028-monotonicity:
 test-mu031-retractable-aggregate:
 	bash ./scripts/test-mu031-retractable-aggregate.sh
 
+test-mu032-function-capabilities:
+	bash ./scripts/test-mu032-function-capabilities.sh
+
+format-mu032-function-capabilities:
+	bash ./scripts/format-mu032-function-capabilities.sh
+
+benchmark-mu032-function-capabilities-baseline:
+	bash ./scripts/benchmark-mu032-function-capabilities-baseline.sh
+
+benchmark-mu032-function-capabilities:
+	bash ./scripts/benchmark-mu032-function-capabilities.sh
+
+test-mu032-package:
+	bash ./scripts/test-mu032-package.sh
+
+race-mu032-function-capabilities:
+	bash ./scripts/race-mu032-function-capabilities.sh
+
+vet-mu032-function-capabilities:
+	bash ./scripts/vet-mu032-function-capabilities.sh
+
+verify-mu032-function-capabilities:
+	bash ./scripts/verify-mu032-function-capabilities.sh
+
+review-mu032-function-capabilities:
+	bash ./scripts/review-mu032-function-capabilities.sh
+
+stage-mu032-function-capabilities:
+	bash ./scripts/stage-mu032-function-capabilities.sh
+
+commit-mu032-function-capabilities:
+	bash ./scripts/commit-mu032-function-capabilities.sh
+
+push-mu032-function-capabilities:
+	bash ./scripts/push-mu032-function-capabilities.sh
+
 format-mu031-retractable-aggregate:
 	bash ./scripts/format-mu031-retractable-aggregate.sh
 

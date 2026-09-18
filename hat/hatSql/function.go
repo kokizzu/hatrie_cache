@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+// FunctionMonotonicity describes how a function's result changes as its
+// declared inputs increase. Unknown is the conservative zero value.
+type FunctionMonotonicity string
+
+const (
+	FunctionMonotonicityUnknown       FunctionMonotonicity = ""
+	FunctionMonotonicityConstant      FunctionMonotonicity = "constant"
+	FunctionMonotonicityNonDecreasing FunctionMonotonicity = "non_decreasing"
+	FunctionMonotonicityNonIncreasing FunctionMonotonicity = "non_increasing"
+)
+
 // FunctionDefinition describes a named scalar function available to read-only
 // SQL queries. Source is interpreted by the runtime selected by Language.
 type FunctionDefinition struct {
@@ -14,6 +25,45 @@ type FunctionDefinition struct {
 	ArgumentTypes []string `json:"argument_types"`
 	Language      string   `json:"language"`
 	Source        string   `json:"source"`
+	// Deterministic is an explicit caller declaration that equal inputs always
+	// produce equal outputs. The false zero value means unknown.
+	Deterministic bool `json:"deterministic,omitempty"`
+	// Monotonicity is an optional proof hint for planner-owned incremental
+	// maintenance. It is never inferred from the function language.
+	Monotonicity FunctionMonotonicity `json:"monotonicity,omitempty"`
+	// Retractable declares that the caller has an inverse/update contract for
+	// the function's use in a differential plan.
+	Retractable bool `json:"retractable,omitempty"`
+}
+
+// NormalizeFunctionCapabilities validates and normalizes optional function
+// capability metadata. Unknown metadata is the safe default; stronger claims
+// require an explicit deterministic declaration.
+func NormalizeFunctionCapabilities(definition *FunctionDefinition) error {
+	if definition == nil {
+		return fmt.Errorf("SQL function definition is required")
+	}
+	monotonicity := strings.ToLower(strings.TrimSpace(string(definition.Monotonicity)))
+	monotonicity = strings.ReplaceAll(monotonicity, "-", "_")
+	switch monotonicity {
+	case "", "unknown":
+		definition.Monotonicity = FunctionMonotonicityUnknown
+	case string(FunctionMonotonicityConstant):
+		definition.Monotonicity = FunctionMonotonicityConstant
+	case string(FunctionMonotonicityNonDecreasing):
+		definition.Monotonicity = FunctionMonotonicityNonDecreasing
+	case string(FunctionMonotonicityNonIncreasing):
+		definition.Monotonicity = FunctionMonotonicityNonIncreasing
+	default:
+		return fmt.Errorf("SQL function %q has unsupported monotonicity %q", definition.Name, definition.Monotonicity)
+	}
+	if definition.Monotonicity != FunctionMonotonicityUnknown && !definition.Deterministic {
+		return fmt.Errorf("SQL function %q must be deterministic before declaring monotonicity", definition.Name)
+	}
+	if definition.Retractable && !definition.Deterministic {
+		return fmt.Errorf("SQL function %q must be deterministic before declaring retraction", definition.Name)
+	}
+	return nil
 }
 
 // FunctionCall contains one function invocation's positional values.

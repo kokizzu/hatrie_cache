@@ -29990,3 +29990,51 @@ silently selecting an incorrect fallback. Existing callers using `NewState`
 are unchanged. See
 [MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md) for the
 public contract and its rollback/panic limitations.
+
+<a id="mu-032-udf-capability-classification"></a>
+## M-U32 UDF Capability Classification
+
+Commands `make benchmark-mu032-function-capabilities-baseline` and
+`make benchmark-mu032-function-capabilities` run five one-second samples on
+the AMD Ryzen 9 5950X Linux/amd64 host. The execution comparison runs the same
+256-row bounded `GO` UDF with zero capability metadata versus explicit
+deterministic, non-decreasing, and retractable metadata. The lookup benchmark
+measures one defensive copy returned by `Definition`.
+
+Final raw baseline output:
+
+```text
+BenchmarkMU032FunctionMetadata/before_execution 15748 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/before_execution 16275 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/before_execution 16264 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/before_execution 16191 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/before_execution 15730 ns/op 4888 B/op 3 allocs/op
+```
+
+Final raw classified output:
+
+```text
+BenchmarkMU032FunctionMetadata/after_execution 15698 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/after_execution 15806 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/after_execution 15775 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/after_execution 15848 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/after_execution 16448 ns/op 4888 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/definition_lookup 179.1 ns/op 48 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/definition_lookup 179.7 ns/op 48 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/definition_lookup 176.9 ns/op 48 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/definition_lookup 182.7 ns/op 48 B/op 3 allocs/op
+BenchmarkMU032FunctionMetadata/definition_lookup 174.5 ns/op 48 B/op 3 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+|---|---:|---:|---:|---:|
+| Existing unclassified UDF execution | 16,191 | 4,888 | 3 | baseline |
+| Classified UDF execution | 15,806 | 4,888 | 3 | 0.98x, no measurable regression |
+| Defensive `Definition` lookup | 179.1 | 48 | 3 | lookup-only |
+
+The 2.4% execution difference is within normal benchmark variance and is not
+reported as a speedup. Metadata adds no measured hot-path allocations or
+memory. The 48 B lookup cost is intentional: returned definitions and their
+argument slices are independent copies. See
+[MU032_UDF_CAPABILITIES.md](MU032_UDF_CAPABILITIES.md) for the trust model and
+planner integration limits.
