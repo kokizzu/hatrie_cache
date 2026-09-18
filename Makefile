@@ -20803,3 +20803,32 @@ commit-tu37-applier-throttle:
 
 push-tu37-applier-throttle:
 	bash ./scripts/run-tu37-applier-throttle.sh push
+.PHONY: format-tu36-backup-rotation test-tu36-backup-rotation baseline-tu36-backup-rotation benchmark-tu36-backup-rotation
+.PHONY: race-tu36-backup-rotation vet-tu36-backup-rotation package-tu36-backup-rotation root-tu36-backup-rotation review-tu36-backup-rotation
+.PHONY: stage-tu36-backup-rotation commit-tu36-backup-rotation push-tu36-backup-rotation status-tu36-backup-rotation
+format-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh format
+test-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh test
+baseline-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh baseline
+benchmark-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh benchmark
+race-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh race
+vet-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh vet
+package-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh package
+root-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh root
+review-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh review
+stage-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh stage
+commit-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh commit
+push-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh push
+status-tu36-backup-rotation:
+	bash ./scripts/run-tu36-backup-rotation.sh status

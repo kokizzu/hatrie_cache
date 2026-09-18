@@ -78,6 +78,9 @@ func CreateIncrementalBackupRepositoryWithContext(ctx context.Context, path stri
 	if retention < 1 {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup repository retention must be positive")
 	}
+	if options.RepositoryRetainBytes < 0 {
+		return BackupBundleManifest{}, errors.New("hatriecache: backup repository byte retention must be non-negative")
+	}
 	partition, err := normalizeBackupPartitionMetadata(options.Partition)
 	if err != nil {
 		return BackupBundleManifest{}, err
@@ -97,12 +100,12 @@ func CreateIncrementalBackupRepositoryWithContext(ctx context.Context, path stri
 		if err := checkBackupContext(ctx); err != nil {
 			return BackupBundleManifest{}, err
 		}
-		return createIncrementalBackupRepositoryLocked(ctx, path, trie, store, options.DirtyTracker, journal.lastSequenceLocked(), journal.format, true, partition, createdAt, retention)
+		return createIncrementalBackupRepositoryLocked(ctx, path, trie, store, options.DirtyTracker, journal.lastSequenceLocked(), journal.format, true, partition, createdAt, retention, options.RepositoryRetainBytes)
 	}
-	return createIncrementalBackupRepositoryLocked(ctx, path, trie, store, options.DirtyTracker, 0, "", false, partition, createdAt, retention)
+	return createIncrementalBackupRepositoryLocked(ctx, path, trie, store, options.DirtyTracker, 0, "", false, partition, createdAt, retention, options.RepositoryRetainBytes)
 }
 
-func createIncrementalBackupRepositoryLocked(ctx context.Context, path string, trie *HatTrie, store *PebbleStore, tracker *LevelDBDirtyTracker, journalSequence uint64, journalFormat CommandJournalFormat, includeJournal bool, partition *BackupPartitionMetadata, createdAt time.Time, retention int) (BackupBundleManifest, error) {
+func createIncrementalBackupRepositoryLocked(ctx context.Context, path string, trie *HatTrie, store *PebbleStore, tracker *LevelDBDirtyTracker, journalSequence uint64, journalFormat CommandJournalFormat, includeJournal bool, partition *BackupPartitionMetadata, createdAt time.Time, retention int, retentionBytes int64) (BackupBundleManifest, error) {
 	mutexValue, _ := backupRepositoryLocks.LoadOrStore(path, &sync.Mutex{})
 	mutex := mutexValue.(*sync.Mutex)
 	mutex.Lock()
@@ -220,7 +223,7 @@ func createIncrementalBackupRepositoryLocked(ctx context.Context, path string, t
 	if err := writeFileAtomic(filepath.Join(path, backupRepositoryLatestPath), []byte(manifest.BackupID+"\n")); err != nil {
 		return BackupBundleManifest{}, err
 	}
-	if err := pruneBackupRepository(path, manifest.BackupID, retention); err != nil {
+	if err := pruneBackupRepositoryWithBytes(path, manifest.BackupID, retention, retentionBytes); err != nil {
 		return BackupBundleManifest{}, err
 	}
 	tracker.Clear(dirty)
@@ -477,7 +480,12 @@ func copyBackupRepositoryObject(sourcePath string, targetPath string, declaratio
 }
 
 func pruneBackupRepository(root string, latest string, retention int) error {
+	return pruneBackupRepositoryWithBytes(root, latest, retention, 0)
+}
+
+func pruneBackupRepositoryWithBytes(root string, latest string, retention int, retentionBytes int64) error {
 	keep := make(map[string]BackupBundleManifest, retention)
+	ordered := make([]string, 0, retention)
 	current := latest
 	for len(keep) < retention && current != "" {
 		manifest, err := readBackupRepositoryManifest(root, current)
@@ -488,7 +496,13 @@ func pruneBackupRepository(root string, latest string, retention int) error {
 			break
 		}
 		keep[current] = manifest
+		ordered = append(ordered, current)
 		current = manifest.ParentBackupID
+	}
+	for retentionBytes > 0 && len(ordered) > 1 && backupRepositoryRetainedBytes(keep) > retentionBytes {
+		oldest := ordered[len(ordered)-1]
+		delete(keep, oldest)
+		ordered = ordered[:len(ordered)-1]
 	}
 	manifestDir := filepath.Join(root, backupRepositoryManifestsPath)
 	entries, err := os.ReadDir(manifestDir)
@@ -541,4 +555,23 @@ func pruneBackupRepository(root string, latest string, retention int) error {
 		}
 	}
 	return syncDirectory(root)
+}
+
+func backupRepositoryRetainedBytes(manifests map[string]BackupBundleManifest) int64 {
+	reachable := make(map[string]struct{})
+	var total int64
+	for _, manifest := range manifests {
+		for _, file := range manifest.Files {
+			if _, seen := reachable[file.SHA256]; seen {
+				continue
+			}
+			reachable[file.SHA256] = struct{}{}
+			if file.Size > 0 && total <= int64(^uint64(0)>>1)-file.Size {
+				total += file.Size
+			} else if file.Size > 0 {
+				return int64(^uint64(0) >> 1)
+			}
+		}
+	}
+	return total
 }

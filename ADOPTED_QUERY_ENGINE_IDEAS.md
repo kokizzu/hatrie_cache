@@ -690,6 +690,17 @@ replay behavior. The zero value remains the fixed-window implementation. In a
 bytes, and allocations. See [TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md)
 and [BENCHMARK.md](BENCHMARK.md#tr-007-adaptive-wal-group-commit).
 
+## T-U36: Snapshot Rotation Policy
+
+T-U36 adds an opt-in `BackupRotationPolicy` and
+`CreateIncrementalBackupRepositoryIfDue`. It combines maximum elapsed time,
+journal sequence deltas, and a minimum interval for change-driven rotations.
+Incremental repositories can also retain by count and approximate unique
+object bytes. The first backup is immediate; a not-due call is read-only, and
+existing mutation and backup defaults remain unchanged. See
+[TU36_SNAPSHOT_ROTATION.md](TU36_SNAPSHOT_ROTATION.md) and
+[BENCHMARK.md](BENCHMARK.md#tu36-snapshot-rotation-policy).
+
 ## T-U37: Replica Applier Throttling
 
 Added an opt-in bounded `hatReplication.ApplierThrottle` and wired it to

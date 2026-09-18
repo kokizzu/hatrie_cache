@@ -31573,7 +31573,29 @@ and 9 allocations. This is an explicit batch API; ordinary streaming and CSV
 imports remain unchanged. Raw samples and the framing rationale are in
 [CH047_PARALLEL_FORMAT_PARSING.md](CH047_PARALLEL_FORMAT_PARSING.md).
 
-<a id="m033-batched-logical-timestamp-oracle"></a>
+<a id="tu36-snapshot-rotation-policy"></a>
+## T-U36 Snapshot Rotation Policy
+
+Commands: `make baseline-tu36-backup-rotation` and
+`make benchmark-tu36-backup-rotation`.
+
+The baseline is an equivalent inline cadence check. The after path validates
+and evaluates `BackupRotationPolicy`, including interval and journal-delta
+gating. Both paths are allocation-free; this is a control-plane benchmark,
+not a cache mutation benchmark.
+
+Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Equivalent inline cadence check | `9.368; 9.348; 8.907; 9.583; 9.078` | `9.348` | `0` | `0` | baseline |
+| `BackupRotationPolicy.Decide` | `16.23; 18.02; 16.67; 16.36; 17.85` | `16.67` | `0` | `0` | `1.78x` control cost; +`7.322` ns |
+
+The absolute overhead is paid only when a scheduler asks whether a backup is
+due. Cache writes, journal appends, and existing backup serialization are not
+on this path. Full semantics and the retention tradeoff are documented in
+[TU36_SNAPSHOT_ROTATION.md](TU36_SNAPSHOT_ROTATION.md).
+
 <a id="tu37-replica-applier-throttling"></a>
 ## T-U37 Replica Applier Throttling
 
@@ -31594,6 +31616,7 @@ reservation path also stayed at zero allocations.
 Raw samples and the latency/throughput tradeoff are documented in
 [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md).
 
+<a id="m033-batched-logical-timestamp-oracle"></a>
 ## M033: Batched Logical Timestamp Oracle
 
 Commands: `make baseline-m033` and `make benchmark-m033`.

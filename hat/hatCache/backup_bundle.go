@@ -46,6 +46,9 @@ type BackupBundleOptions struct {
 	PersistentStore  PersistentStore
 	DirtyTracker     *LevelDBDirtyTracker
 	RepositoryRetain int
+	// RepositoryRetainBytes is an optional approximate physical-object budget
+	// for incremental backup retention. Zero keeps the existing count-only policy.
+	RepositoryRetainBytes int64
 }
 
 type BackupPartitionMetadata = hatBackup.PartitionMetadata
