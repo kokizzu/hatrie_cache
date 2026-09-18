@@ -30388,3 +30388,25 @@ The recommendation is only computed when arrangement metadata is available to
 `EXPLAIN`; no metadata keeps the existing behavior. The selector does not claim
 to make a query faster by itself: a caller must expose or acquire the selected
 arrangement before execution can benefit.
+
+<a id="tt-049-sql-row-lock-leases"></a>
+## TT-049 SQL Row Lock Leases
+
+Command:
+
+```text
+make benchmark-tt049-row-locks
+```
+
+This compares the importable keyed lease path with one uncontended mutex. Five
+100 ms samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Sharded row-lock acquire/release | 237.9 | 176 | 3 | Keyed ownership with cancellation and reclamation |
+| One uncontended `sync.Mutex` | 4.49 | 0 | 0 | Lower-level lock baseline; not feature-equivalent |
+
+The row-lock path intentionally costs more because it hashes a caller key,
+looks up bounded state, returns a lease object, and supports waiters and
+capacity accounting. It is opt-in and process-local; ordinary SQL execution
+does not pay this cost.

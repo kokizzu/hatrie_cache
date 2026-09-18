@@ -19016,6 +19016,47 @@ push-ch012-projection-advisor-cost:
 test-mz024-arrangement-selection:
 	bash ./scripts/test-mz024-arrangement-selection.sh
 
+.PHONY: test-tt049-row-locks
+test-tt049-row-locks:
+	bash ./scripts/test-tt049-row-locks.sh
+
+.PHONY: format-tt049-row-locks
+format-tt049-row-locks:
+	bash ./scripts/format-tt049-row-locks.sh
+
+.PHONY: benchmark-tt049-row-locks
+benchmark-tt049-row-locks:
+	bash ./scripts/benchmark-tt049-row-locks.sh
+
+.PHONY: test-tt049-package
+test-tt049-package:
+	bash ./scripts/test-tt049-package.sh
+
+.PHONY: race-tt049-row-locks
+race-tt049-row-locks:
+	bash ./scripts/race-tt049-row-locks.sh
+
+.PHONY: vet-tt049-row-locks
+vet-tt049-row-locks:
+	bash ./scripts/vet-tt049-row-locks.sh
+
+.PHONY: review-tt049
+review-tt049:
+	bash ./scripts/review-tt049.sh
+
+
+.PHONY: stage-tt049-row-locks
+stage-tt049-row-locks:
+	bash ./scripts/stage-tt049-row-locks.sh
+
+.PHONY: commit-tt049-row-locks
+commit-tt049-row-locks:
+	bash ./scripts/commit-tt049-row-locks.sh
+
+.PHONY: push-tt049-row-locks
+push-tt049-row-locks:
+	bash ./scripts/push-tt049-row-locks.sh
+
 .PHONY: format-mz024-arrangement-selection
 format-mz024-arrangement-selection:
 	bash ./scripts/format-mz024-arrangement-selection.sh

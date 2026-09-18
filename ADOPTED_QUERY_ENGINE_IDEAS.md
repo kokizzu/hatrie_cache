@@ -630,3 +630,13 @@ ordering, and join workloads and marks one deterministic recommendation. It
 never creates or changes state, and automatic planner rewrites remain
 caller-owned. See [MZ024_ARRANGEMENT_KEY_SELECTION.md](MZ024_ARRANGEMENT_KEY_SELECTION.md)
 and [BENCHMARK.md](BENCHMARK.md#mz-024-automatic-arrangement-key-selection).
+
+## TT-049: SQL Row Lock Leases
+
+TT-049 is partially adopted as the importable bounded
+`SQLRowLockManager`. It provides per-key exclusive leases, context-aware
+waiting, nonblocking `TryAcquire`, explicit capacity errors, sharded lookup,
+idle-key reclamation, and idempotent release. The manager is process-local;
+SQL `FOR UPDATE` parsing, transaction lifetime, durable recovery, and
+distributed fencing remain caller-owned. See [TT049_ROW_LOCK_LEASES.md](TT049_ROW_LOCK_LEASES.md)
+and [BENCHMARK.md](BENCHMARK.md#tt-049-sql-row-lock-leases).
