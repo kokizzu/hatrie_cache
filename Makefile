@@ -19715,5 +19715,40 @@ commit-ch044-interval-join:
 push-ch044-interval-join:
 	sh ./scripts/push-ch044-interval-join.sh
 
+test-ch047-remote-table-function:
+	sh ./scripts/test-ch047-remote-table-function.sh
+
+format-ch047-remote-table-function:
+	sh ./scripts/format-ch047-remote-table-function.sh
+
+benchmark-ch047-remote-table-function:
+	sh ./scripts/benchmark-ch047-remote-table-function.sh
+
+race-ch047-remote-table-function:
+	sh ./scripts/race-ch047-remote-table-function.sh
+
+vet-ch047-remote-table-function:
+	sh ./scripts/vet-ch047-remote-table-function.sh
+
+verify-ch047-remote-table-function-docs:
+	sh ./scripts/verify-ch047-remote-table-function-docs.sh
+
+review-ch047-remote-table-function:
+	sh ./scripts/review-ch047-remote-table-function.sh
+
+stage-ch047-remote-table-function:
+	sh ./scripts/stage-ch047-remote-table-function.sh
+
+commit-ch047-remote-table-function:
+	sh ./scripts/commit-ch047-remote-table-function.sh
+
+push-ch047-remote-table-function:
+	sh ./scripts/push-ch047-remote-table-function.sh
+
+
+
+
+
+
 format-ch044-interval-join:
 	sh ./scripts/format-ch044-interval-join.sh

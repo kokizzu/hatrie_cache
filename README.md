@@ -4500,3 +4500,12 @@ interval treap. Inserts and removals avoid rebuilding a sorted slice and retain
 subtree maximum-end pruning for overlap lookups. See
 [CH044_INTERVAL_JOIN_MAINTENANCE.md](CH044_INTERVAL_JOIN_MAINTENANCE.md) and the
 [CH-44 benchmark](BENCHMARK.md#ch-44-interval-join-maintenance).
+
+### URL and S3 table functions
+
+Use the opt-in `hatSql.RemoteTableFunctionResolver` for bounded `url()` and
+`s3()` table functions over CSV, JSON, and NDJSON objects. Optional byte ranges
+avoid downloading and decoding an entire remote object; response and row
+limits, safe URL validation, and redirect blocking are enabled by default. See
+[CH047_REMOTE_TABLE_FUNCTIONS.md](CH047_REMOTE_TABLE_FUNCTIONS.md) and the
+[CH-47 benchmark](BENCHMARK.md#ch-47-s3-and-url-table-functions).

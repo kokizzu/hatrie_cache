@@ -30971,3 +30971,29 @@ Interval treap:        2045618/1452250/8240; 2036485/1452249/8240; 2111373/14522
 The `B/op` column is cumulative allocation reported by the Go benchmark, not
 retained heap. The implementation tradeoff and scope are described in
 [CH044_INTERVAL_JOIN_MAINTENANCE.md](CH044_INTERVAL_JOIN_MAINTENANCE.md).
+
+<a id="ch-47-s3-and-url-table-functions"></a>
+
+## CH-47: S3 and URL table functions
+
+This benchmark uses a deterministic in-process HTTP transport with a 2,048-row
+CSV object. It compares a complete 31,667-byte response with a bounded range
+containing the first 256 rows and 3,739 bytes. The benchmark excludes network
+latency; `wire-B` is the response body size exposed to the decoder.
+
+| Path | Median ns/op | Wire bytes | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Full object | 981,341 | 31,667 | 986,640 | 12,343 | 1.00x |
+| Bounded range | 139,174 | 3,739 | 125,721 | 1,587 | 7.05x faster, 8.47x lower wire, 7.85x lower B/op, 7.78x fewer allocs |
+
+Raw samples (`ns/op`, `wire-B`, `B/op`, `allocs/op`):
+
+```text
+Full object:    1005617/31667/986640/12343; 970891/31667/986640/12343; 1039916/31667/986642/12343; 981341/31667/986639/12343; 974247/31667/986638/12343
+Bounded range:  168450/3739/125721/1587; 147580/3739/125721/1587; 139174/3739/125721/1587; 138811/3739/125721/1587; 138275/3739/125721/1587
+```
+
+The range path is useful when a caller already knows a record-aligned byte
+window. It is not a promise that arbitrary compressed or split records can be
+decoded independently; the complete-record requirement and resolver limits are
+documented in [CH047_REMOTE_TABLE_FUNCTIONS.md](CH047_REMOTE_TABLE_FUNCTIONS.md).
