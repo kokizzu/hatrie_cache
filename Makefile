@@ -20402,3 +20402,26 @@ commit-tr021-online-secondary-index:
 
 push-tr021-online-secondary-index:
 	bash ./scripts/push-tr021-online-secondary-index.sh
+.PHONY: test-tr024-covering-index benchmark-tr024-covering-index-baseline format-tr024-covering-index benchmark-tr024-covering-index race-tr024-covering-index test-tr024-sql-package vet-tr024-covering-index verify-tr024-covering-index stage-tr024-covering-index commit-tr024-covering-index push-tr024-covering-index
+test-tr024-covering-index:
+	bash ./scripts/test-tr024-covering-index.sh
+benchmark-tr024-covering-index-baseline:
+	bash ./scripts/benchmark-tr024-covering-index-baseline.sh
+format-tr024-covering-index:
+	bash ./scripts/format-tr024-covering-index.sh
+benchmark-tr024-covering-index:
+	bash ./scripts/benchmark-tr024-covering-index.sh
+race-tr024-covering-index:
+	bash ./scripts/race-tr024-covering-index.sh
+test-tr024-sql-package:
+	bash ./scripts/test-tr024-sql-package.sh
+vet-tr024-covering-index:
+	bash ./scripts/vet-tr024-covering-index.sh
+verify-tr024-covering-index:
+	bash ./scripts/verify-tr024-covering-index.sh
+stage-tr024-covering-index:
+	bash ./scripts/stage-tr024-covering-index.sh
+commit-tr024-covering-index:
+	bash ./scripts/commit-tr024-covering-index.sh
+push-tr024-covering-index:
+	bash ./scripts/push-tr024-covering-index.sh

@@ -1,5 +1,12 @@
 # ClickHouse, Materialize, And Tarantool Audit
 
+## Scoped Hatrie Implementations
+
+- [x] TR-24a covering materialized indexes. The existing SQL covering-index
+  contract is now backed by an online, opt-in `MaterializedSource` index with
+  projected-row storage, insert maintenance, and regular-index/full-scan
+  fallback. See [TR024_COVERING_INDEX.md](TR024_COVERING_INDEX.md).
+
 This catalog keeps 50 canonical ideas from each source product and
 copies their current repository status from `INSPIRATION.md`. It is an
 implementation ledger, not a claim that every idea is desirable here.

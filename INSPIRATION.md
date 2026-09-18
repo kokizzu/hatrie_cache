@@ -853,6 +853,13 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T154 Automatic slow-command capture.
 - [x] T155 Per-command allocation budgets.
 
+### TR-24a: Covering materialized indexes
+
+- [x] Opt-in `MaterializedSource` covering equality indexes now retain only
+  requested projected fields, serve the existing SQL covering-index contract,
+  maintain inserts, and fall back when coverage is incomplete. See
+  [TR024_COVERING_INDEX.md](TR024_COVERING_INDEX.md).
+
 ## Adoption Workflow
 
 For each future unchecked item:

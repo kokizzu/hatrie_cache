@@ -31430,3 +31430,34 @@ The first pre-change baseline median was 5,828,411 ns/op, 4,653,742 B/op, and
 publishes the finished posting map only after a generation check. The index is
 opt-in and its long-lived map/posting memory is outside the per-operation
 allocation comparison. See [TR021_ONLINE_SECONDARY_INDEX.md](TR021_ONLINE_SECONDARY_INDEX.md).
+<a id="tr-024-covering-materialized-indexes"></a>
+## TR-024: Covering Materialized Indexes
+
+The workload has 20,000 rows, 16 extra payload fields, 64 region values, and
+selects `region,name` for one equality predicate. The pre-change baseline was
+measured before the red implementation test; the final control and covering
+path were measured in the same five-sample run.
+
+### Raw samples
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Pre-change indexed full-row baseline | 578,114; 550,647; 560,047; 567,519; 567,114 | 566,710; 566,692; 566,689; 566,691; 566,689 | 1,908; 1,908; 1,908; 1,908; 1,908 |
+| Final indexed full-row control | 574,684; 628,489; 632,074; 615,512; 658,798 | 566,769; 566,737; 566,737; 566,736; 566,736 | 1,909; 1,909; 1,909; 1,909; 1,909 |
+| Covering index | 207,778; 221,133; 198,994; 207,092; 205,295 | 283,744; 283,746; 283,746; 283,745; 283,745 | 1,283; 1,283; 1,283; 1,283; 1,283 |
+
+### Median comparison
+
+| Path | ns/op | B/op | allocs/op | Covering improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Final indexed full-row control | 628,489 | 566,737 | 1,909 | 1.00x |
+| Covering index | 207,092 | 283,745 | 1,283 | 3.03x CPU, 2.00x lower bytes, 1.49x fewer allocations |
+
+The query-path allocation reduction does not include retained covering-index
+memory. Each indexed row stores a projected map, so the feature remains opt-in.
+The benchmark was run with:
+
+```text
+make benchmark-tr024-covering-index-baseline
+make benchmark-tr024-covering-index
+```
