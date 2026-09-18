@@ -19654,3 +19654,37 @@ commit-ch020-parallel-replica-read:
 
 push-ch020-parallel-replica-read:
 	bash ./scripts/push-ch020-parallel-replica-read.sh
+
+test-ch043-asof-join:
+	bash ./scripts/test-ch043-asof-join.sh
+benchmark-ch043-baseline:
+	bash ./scripts/benchmark-ch043-baseline.sh
+
+benchmark-ch043-asof-join:
+	bash ./scripts/benchmark-ch043-asof-join.sh
+format-ch043-asof-join:
+	bash ./scripts/format-ch043-asof-join.sh
+
+test-ch043-package:
+	bash ./scripts/test-ch043-package.sh
+
+race-ch043-asof-join:
+	bash ./scripts/race-ch043-asof-join.sh
+
+vet-ch043-asof-join:
+	bash ./scripts/vet-ch043-asof-join.sh
+
+verify-ch043-asof-join-docs:
+	bash ./scripts/verify-ch043-asof-join-docs.sh
+
+review-ch043-asof-join:
+	bash ./scripts/review-ch043-asof-join.sh
+
+stage-ch043-asof-join:
+	bash ./scripts/stage-ch043-asof-join.sh
+
+commit-ch043-asof-join:
+	bash ./scripts/commit-ch043-asof-join.sh
+
+push-ch043-asof-join:
+	bash ./scripts/push-ch043-asof-join.sh

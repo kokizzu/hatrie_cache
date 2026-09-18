@@ -62,7 +62,7 @@ before/after measurement when its motivation is performance.
 | CH-40 | TDigest and GK quantile state variants | Better tail quantile accuracy choices | State size and merge cost | [x] Implemented by opt-in `APPROX_TDIGEST_PERCENTILE` and exported `hatDataStructure.TDigest`; see [SQL_TDIGEST_PERCENTILE.md](SQL_TDIGEST_PERCENTILE.md) and [BENCHMARK.md](BENCHMARK.md#ch-040-t-digest-percentile). |
 | CH-41 | Bounded groupArray aggregate state | Retain representative grouped values safely | Truncation semantics | [x] |
 | CH-42 | Window frame exclusion and group-frame semantics | Cover more analytical SQL | Complex incremental maintenance | [x] Implemented for aggregate and arg-extreme windows; see [SQL_WINDOW_FRAME_EXCLUSION.md](SQL_WINDOW_FRAME_EXCLUSION.md) and [BENCHMARK.md](BENCHMARK.md#ch-042-window-frame-exclusion). |
-| CH-43 | ASOF temporal join | Match each row to the latest earlier dimension value | Ordering and timestamp edge cases | [ ] |
+| CH-43 | ASOF temporal join | Match each row to the latest earlier dimension value | Ordering and timestamp edge cases | [x] Implemented as an explicit `hatSql.TemporalTable.AsOfJoin` API with per-key cursor reuse, binary-search fallback, tie handling, and cloned rows. See [CH043_ASOF_TEMPORAL_JOIN.md](CH043_ASOF_TEMPORAL_JOIN.md) and [BENCHMARK.md](BENCHMARK.md#ch-43-asof-temporal-join). |
 | CH-44 | Interval join maintenance | Join rows whose validity intervals overlap | Retained interval indexes | [ ] |
 | CH-45 | Distributed GLOBAL IN and GLOBAL JOIN broadcast planning | Avoid repeated remote subqueries | Network amplification | [ ] |
 | CH-46 | Kafka table source with durable offset checkpoints | Ingest streams without an external adapter | Exactly-once and connector lifecycle | [ ] |

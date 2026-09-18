@@ -30919,3 +30919,29 @@ Parallel no-op:     23,185/6,699/54; 23,506/6,684/54; 23,442/6,678/54; 22,728/6,
 The measured result is why CH-20 remains opt-in: it wins when replica calls
 spend most of their time waiting on independent I/O, and loses for tiny local
 callbacks. Existing replication and query behavior is unchanged.
+
+<a id="ch-43-asof-temporal-join"></a>
+
+## CH-43: ASOF temporal join
+
+This paired benchmark compares the explicit `TemporalTable.AsOfJoin` batch API
+with the same result-building loop using direct binary search. It uses five
+samples with `-benchtime=250ms` on an AMD Ryzen 9 5950X Linux/amd64 host. The
+fixture contains 16,384 left rows, 4,096 right versions, one key, and cyclic
+timestamps, so it measures both cursor use and out-of-order fallback.
+
+| Operation | Baseline | ASOF join | Improvement | Memory | Allocs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 16,384-row batch | 12,446,920 ns/op | 11,778,269 ns/op | 1.06x faster | 12,320,840 vs 12,320,842 B/op | 65,539 vs 65,539 |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Baseline: 10,667,439/12,321,245/65,540; 10,674,387/12,320,841/65,539; 14,614,094/12,320,838/65,539; 12,890,386/12,321,100/65,539; 12,446,920/12,320,840/65,539
+ASOF:     11,677,704/12,320,838/65,539; 11,502,739/12,320,841/65,539; 14,606,610/12,320,852/65,540; 11,778,269/12,320,842/65,539; 12,585,062/12,321,051/65,539
+```
+
+The result is a modest CPU improvement with no meaningful memory or allocation
+change. The API is explicit and does not alter SQL parsing or planner behavior;
+see [CH043_ASOF_TEMPORAL_JOIN.md](CH043_ASOF_TEMPORAL_JOIN.md) for semantics
+and limitations.

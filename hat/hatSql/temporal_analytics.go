@@ -31,11 +31,15 @@ func (table *TemporalTable) Upsert(key string, at time.Time, row Row) {
 }
 func (table *TemporalTable) AsOf(key string, at time.Time) (Row, bool) {
 	versions := table.versions[key]
-	index := sort.Search(len(versions), func(index int) bool { return versions[index].At.After(at) })
-	if index == 0 {
+	index := temporalAsOfIndex(versions, at)
+	if index < 0 {
 		return nil, false
 	}
-	return CloneRows([]Row{versions[index-1].Row})[0], true
+	return CloneRows([]Row{versions[index].Row})[0], true
+}
+
+func temporalAsOfIndex(versions []TemporalVersion, at time.Time) int {
+	return sort.Search(len(versions), func(index int) bool { return versions[index].At.After(at) }) - 1
 }
 func (table *TemporalTable) RetainAfter(at time.Time, verified bool) int {
 	if !verified {

@@ -4484,3 +4484,11 @@ Use the opt-in [TR-46 schema and DDL discovery protocol](TR046_SCHEMA_DDL_DISCOV
 ### Parallel replica reads
 
 Use the opt-in [CH-20 parallel replica read coordinator](CH020_PARALLEL_REPLICA_READ.md) for large reads already divided into non-overlapping partitions. It bounds fan-out and cancels failed work; it is intentionally not enabled for small local callbacks because the coordination overhead is measurable.
+
+### ASOF temporal joins
+
+Use `hatSql.TemporalTable.AsOfJoin` when each left row must select the latest
+versioned right row at or before its timestamp. It preserves input order,
+handles equal timestamps deterministically, omits unmatched rows, and clones
+both sides of each match. See [CH043_ASOF_TEMPORAL_JOIN.md](CH043_ASOF_TEMPORAL_JOIN.md)
+and the [CH-43 benchmark](BENCHMARK.md#ch-43-asof-temporal-join).
