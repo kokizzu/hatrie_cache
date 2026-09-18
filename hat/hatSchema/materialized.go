@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"hatrie_cache/hat/hatSql"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -65,6 +66,33 @@ func (adapter SQLResolverAdapter) ResolveSQLIndexedSource(name, key, field strin
 		return indexed.ResolveSQLIndexedSource(name, key, field, value)
 	}
 	return nil, false, nil
+}
+
+// SQLJSONIndexStats exposes current materialized-source index distribution
+// statistics to the SQL planner. The source remains the authority for rows;
+// a non-CACHE source is delegated to the optional base resolver.
+func (adapter SQLResolverAdapter) SQLJSONIndexStats(key string, fields ...string) (hatSql.JSONIndexStats, bool, error) {
+	if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+		stats, available, err := source.IndexStats(fields...)
+		stats.Key = key
+		return stats, available, err
+	}
+	if provider, ok := adapter.Base.(hatSql.JSONIndexStatsResolver); ok {
+		return provider.SQLJSONIndexStats(key, fields...)
+	}
+	return hatSql.JSONIndexStats{}, false, nil
+}
+
+// SQLJSONIndexValueEstimate exposes one exact posting-list size to the SQL
+// planner without materializing rows or the full index distribution.
+func (adapter SQLResolverAdapter) SQLJSONIndexValueEstimate(key, field string, value interface{}) (int, bool, bool, error) {
+	if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+		return source.IndexValueEstimate(field, value)
+	}
+	if provider, ok := adapter.Base.(hatSql.IndexValueEstimator); ok {
+		return provider.SQLJSONIndexValueEstimate(key, field, value)
+	}
+	return 0, false, false, nil
 }
 
 // ResolveSQLCoveringSource resolves a CACHE equality predicate from a
@@ -138,6 +166,7 @@ type MaterializedSource struct {
 	indexedFields     map[string]struct{}
 	coveringIndexes   map[string]*materializedCoveringIndex
 	functionalIndexes map[string]*materializedFunctionalIndex
+	indexStatsCache   map[string]hatSql.JSONIndexStats
 	generation        uint64
 }
 
@@ -230,6 +259,7 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		index.positions[key] = append(index.positions[key], position)
 	}
 	source.generation++
+	source.indexStatsCache = nil
 	return cloneRow(materialized), nil
 }
 
@@ -252,6 +282,130 @@ func (source *MaterializedSource) HasIndex(field string) bool {
 	}
 	source.mu.RUnlock()
 	return indexed
+}
+
+// IndexStats returns current cardinality and posting-distribution statistics
+// for one maintained equality index. The bounded result is cached until the
+// next row or index mutation.
+func (source *MaterializedSource) IndexStats(fields ...string) (hatSql.JSONIndexStats, bool, error) {
+	if source == nil || len(fields) != 1 {
+		return hatSql.JSONIndexStats{}, false, nil
+	}
+	field := strings.TrimSpace(fields[0])
+	if field == "" {
+		return hatSql.JSONIndexStats{}, false, nil
+	}
+	source.mu.RLock()
+	if cached, ok := source.indexStatsCache[field]; ok {
+		source.mu.RUnlock()
+		return cloneMaterializedIndexStats(cached), true, nil
+	}
+	generation := source.generation
+	stats, available := source.indexStatsLocked(field)
+	source.mu.RUnlock()
+	if !available {
+		return hatSql.JSONIndexStats{}, false, nil
+	}
+
+	source.mu.Lock()
+	if source.generation == generation {
+		if source.indexStatsCache == nil {
+			source.indexStatsCache = make(map[string]hatSql.JSONIndexStats)
+		}
+		source.indexStatsCache[field] = cloneMaterializedIndexStats(stats)
+	}
+	source.mu.Unlock()
+	return stats, true, nil
+}
+
+// IndexValueEstimate returns the exact current posting-list size for one
+// maintained equality index without cloning matching rows.
+func (source *MaterializedSource) IndexValueEstimate(field string, value interface{}) (int, bool, bool, error) {
+	if source == nil {
+		return 0, false, false, nil
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return 0, false, false, nil
+	}
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	var postings map[string][]int
+	if _, indexed := source.indexedFields[field]; indexed {
+		postings = source.indexes[field]
+	} else if index := source.coveringIndexes[field]; index != nil {
+		postings = index.positions
+	} else if index := source.functionalIndexes[field]; index != nil {
+		postings = index.positions
+	} else {
+		return 0, false, false, nil
+	}
+	return len(postings[materializedIndexKey(value)]), true, true, nil
+}
+
+func (source *MaterializedSource) indexStatsLocked(field string) (hatSql.JSONIndexStats, bool) {
+	var postings map[string][]int
+	includeNull := false
+	if _, indexed := source.indexedFields[field]; indexed {
+		postings = source.indexes[field]
+		includeNull = true
+	} else if index := source.coveringIndexes[field]; index != nil {
+		postings = index.positions
+		includeNull = true
+	} else if index := source.functionalIndexes[field]; index != nil {
+		postings = index.positions
+	} else {
+		return hatSql.JSONIndexStats{}, false
+	}
+
+	stats := hatSql.JSONIndexStats{Fields: []string{field}, Rows: len(source.rows)}
+	nullRows := 0
+	if includeNull {
+		for _, row := range source.rows {
+			if row[field] == nil {
+				nullRows++
+			}
+		}
+		stats.NullRows = nullRows
+	}
+	nullKey := materializedIndexKey(nil)
+	frequencies := make(map[int]int)
+	for key, positions := range postings {
+		if includeNull && key == nullKey {
+			continue
+		}
+		count := len(positions)
+		if count == 0 {
+			continue
+		}
+		stats.DistinctKeys++
+		if stats.MinRowsPerKey == 0 || count < stats.MinRowsPerKey {
+			stats.MinRowsPerKey = count
+		}
+		if count > stats.MaxRowsPerKey {
+			stats.MaxRowsPerKey = count
+		}
+		frequencies[count]++
+	}
+	if stats.DistinctKeys > 0 {
+		stats.AverageRowsPerKey = float64(len(source.rows)-nullRows) / float64(stats.DistinctKeys)
+		counts := make([]int, 0, len(frequencies))
+		for count := range frequencies {
+			counts = append(counts, count)
+		}
+		sort.Ints(counts)
+		stats.FrequencyHistogram = make([]hatSql.JSONIndexFrequencyBucket, 0, len(counts))
+		for _, count := range counts {
+			stats.FrequencyHistogram = append(stats.FrequencyHistogram, hatSql.JSONIndexFrequencyBucket{RowsPerKey: count, DistinctKeys: frequencies[count]})
+		}
+	}
+	return stats, true
+}
+
+func cloneMaterializedIndexStats(stats hatSql.JSONIndexStats) hatSql.JSONIndexStats {
+	stats.Fields = append([]string(nil), stats.Fields...)
+	stats.FrequencyHistogram = append([]hatSql.JSONIndexFrequencyBucket(nil), stats.FrequencyHistogram...)
+	return stats
 }
 
 // BuildCoveringIndex builds and atomically installs an equality index that
@@ -311,6 +465,7 @@ func (source *MaterializedSource) BuildCoveringIndex(field string, fields []stri
 			source.coveringIndexes = make(map[string]*materializedCoveringIndex)
 		}
 		source.coveringIndexes[field] = index
+		source.indexStatsCache = nil
 		source.mu.Unlock()
 		report.Rows = len(rows)
 		return report, nil
@@ -377,6 +532,7 @@ func (source *MaterializedSource) BuildSecondaryIndex(field string) (SecondaryIn
 		}
 		source.indexes[field] = index
 		source.indexedFields[field] = struct{}{}
+		source.indexStatsCache = nil
 		source.mu.Unlock()
 		report.Rows = len(rows)
 		return report, nil
@@ -451,6 +607,7 @@ func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies
 			evaluator:    evaluator,
 			positions:    positions,
 		}
+		source.indexStatsCache = nil
 		source.mu.Unlock()
 		report.Rows = len(rows)
 		return report, nil

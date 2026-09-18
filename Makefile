@@ -20868,3 +20868,39 @@ push-tr023-functional-index:
 
 status-tr023-functional-index:
 	bash ./scripts/run-tr023-functional-index.sh status
+
+.PHONY: format-tr030-index-stats test-tr030-index-stats benchmark-tr030-index-stats race-tr030-index-stats vet-tr030-index-stats package-tr030-index-stats review-tr030-index-stats stage-tr030-index-stats commit-tr030-index-stats push-tr030-index-stats status-tr030-index-stats
+format-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh format
+
+test-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh test
+
+benchmark-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh benchmark
+
+race-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh race
+
+vet-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh vet
+
+package-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh package
+
+review-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh review
+
+stage-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh stage
+
+commit-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh commit
+
+push-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh push
+
+
+
+status-tr030-index-stats:
+	bash ./scripts/run-tr030-index-stats.sh status

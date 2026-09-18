@@ -31527,6 +31527,30 @@ are real tradeoffs. It is intended for repeated selective predicates; the
 legacy scan remains the default for sources that do not build an index. Full
 details and raw samples: [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md).
 
+<a id="tr-030-materialized-index-statistics"></a>
+## TR-030 Materialized Index Statistics
+
+Command: `make benchmark-tr030-index-stats`.
+
+This compares a 10,000-row two-index equality query using the historical
+left-to-right resolver with the `SQLResolverAdapter` path that exposes cached
+posting distributions. The common `kind` predicate appears before the unique
+`id` predicate, so the statistics-aware planner avoids scanning the broad
+posting list. Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9
+5950X; values below are medians.
+
+| Workload | Before | After | Improvement |
+| --- | ---: | ---: | --- |
+| Two competing equality indexes | 6.064 ms/op, 5,802,820 B/op, 20,032 allocs/op | 15.317 us/op, 11,202 B/op, 69 allocs/op | **395.6x faster**, 518.0x fewer bytes, 290.3x fewer allocations |
+| One equality index control | 8.166 us/op, 6,029 B/op, 33 allocs/op | 8.230 us/op, 6,085 B/op, 35 allocs/op | 0.8% slower, 0.9% more bytes, 6.1% more allocations |
+
+The single-index control uses a direct resolver before and the adapter after;
+the planner skips statistics and exact-estimate calls when there is no
+competing equality index. The small residual difference is adapter dispatch
+and remains within the expected benchmark noise. Statistics are cached until
+row or index mutation, and the full predicate is rechecked after every index
+probe. Raw samples and API details are in [TR030_INDEX_STATS.md](TR030_INDEX_STATS.md).
+
 <a id="tr-024-covering-materialized-indexes"></a>
 ## TR-024: Covering Materialized Indexes
 
