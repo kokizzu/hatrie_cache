@@ -31493,3 +31493,20 @@ operator has an estimated row count. Regular `EXPLAIN` is the paired control.
 diagnostic plan. The ordinary path retains the baseline allocation profile and
 does not run the cost pass. Raw samples and the estimation rules are in
 [MZ044_COSTED_EXPLAIN.md](MZ044_COSTED_EXPLAIN.md).
+
+<a id="ch-047-parallel-ndjson-format-parsing"></a>
+## CH-047: Parallel NDJSON Format Parsing
+
+The workload contains 20,000 newline-delimited JSON objects. The serial
+control and the parallel path perform the same split and JSON decoding; the
+parallel path uses four workers and returns rows in input order.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Serial control | 23,454,336 | 12,647,249 | 279,995 | 1.00x |
+| `ParseNDJSONParallel(..., 4)` | 10,028,278 | 13,139,247 | 280,004 | 2.34x faster |
+
+The measured speedup costs 492,105 additional allocated bytes per operation
+and 9 allocations. This is an explicit batch API; ordinary streaming and CSV
+imports remain unchanged. Raw samples and the framing rationale are in
+[CH047_PARALLEL_FORMAT_PARSING.md](CH047_PARALLEL_FORMAT_PARSING.md).

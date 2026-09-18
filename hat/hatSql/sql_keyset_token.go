@@ -134,6 +134,12 @@ func (codec *SQLKeysetTokenCodec) Decode(token string) (SQLKeysetToken, error) {
 	if err != nil || len(raw) < sqlKeysetTokenHeaderBytes+sqlKeysetTokenMACBytes {
 		return SQLKeysetToken{}, ErrSQLKeysetTokenInvalid
 	}
+	// Raw base64 permits alternate spellings when unused trailing bits are
+	// non-zero. Reject those aliases before HMAC verification so a tampered
+	// token can never decode to the same authenticated bytes.
+	if base64.RawURLEncoding.EncodeToString(raw) != token {
+		return SQLKeysetToken{}, ErrSQLKeysetTokenAuthentication
+	}
 	if string(raw[:4]) != sqlKeysetTokenMagic || raw[4] != 1 {
 		return SQLKeysetToken{}, ErrSQLKeysetTokenInvalid
 	}

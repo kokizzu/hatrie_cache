@@ -12272,6 +12272,62 @@ deliver-ch003: check-ch003 commit-ch003 push-ch003
 audit-inspiration-backlog:
 	bash ./scripts/audit-inspiration-backlog.sh
 
+.PHONY: select-next-inspiration
+select-next-inspiration:
+	bash ./scripts/select-next-inspiration.sh
+
+.PHONY: format-ch047-parallel
+format-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh format
+
+.PHONY: test-ch047-parallel
+test-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh test
+
+.PHONY: baseline-ch047-parallel
+baseline-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh baseline
+
+.PHONY: benchmark-ch047-parallel
+benchmark-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh benchmark
+
+.PHONY: race-ch047-parallel
+race-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh race
+
+.PHONY: vet-ch047-parallel
+vet-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh vet
+
+.PHONY: test-ch047-package
+test-ch047-package:
+	bash ./scripts/run-ch047-parallel.sh package
+
+.PHONY: check-ch047-parallel
+check-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh check
+
+.PHONY: status-ch047-parallel
+status-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh status
+
+.PHONY: stage-ch047-parallel
+stage-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh stage
+
+.PHONY: commit-ch047-parallel
+commit-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh commit
+
+.PHONY: push-ch047-parallel
+push-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh push
+
+.PHONY: docs-ch047-parallel
+docs-ch047-parallel:
+	bash ./scripts/run-ch047-parallel.sh docs
+
 .PHONY: test-ch005-red
 test-ch005-red:
 	bash ./scripts/test-ch005.sh red
