@@ -30827,3 +30827,20 @@ barrier-snapshot: 116.0 48 2
 barrier-snapshot: 119.3 48 2
 barrier-snapshot: 122.8 48 2
 ```
+## TR-20: Versioned tuple boundaries
+
+Final validation benchmark, Linux/amd64 on an AMD Ryzen 9 5950X. Each row is
+the median of five samples; `x` is versioned divided by the unversioned
+baseline. The baseline validates the same typed tuple with `TupleFormat.Validate`
+without a recorded schema version.
+
+| Operation | Baseline | TR-20 | Relative | Memory |
+| --- | ---: | ---: | ---: | ---: |
+| Typed tuple validation | 46.17 ns/op | 47.61 ns/op | 1.03x | 0 B/op, 0 allocs/op |
+| HTV1 marshal | n/a | 115.1 ns/op | n/a | 80 B/op, 1 alloc/op |
+| HTV1 unmarshal | n/a | 132.3 ns/op | n/a | 72 B/op, 4 allocs/op |
+
+Validation remains allocation-free and adds only the opt-in version check.
+Marshal and unmarshal are explicit boundary operations; the legacy tuple cache
+path is not changed. See [TR020_VERSIONED_TUPLE.md](TR020_VERSIONED_TUPLE.md) for
+the wire format, limits, and compatibility guidance.

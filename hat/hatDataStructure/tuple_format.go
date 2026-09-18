@@ -216,6 +216,10 @@ func (format TupleFormat) Validate(tuple TupleFieldOffsetCache) error {
 	if err := format.validateDefinition(); err != nil {
 		return err
 	}
+	return format.validateTuple(tuple)
+}
+
+func (format TupleFormat) validateTuple(tuple TupleFieldOffsetCache) error {
 	if tuple.FieldCount() != len(format.fields) {
 		return fmt.Errorf("hatDataStructure: tuple has %d fields, format requires %d", tuple.FieldCount(), len(format.fields))
 	}

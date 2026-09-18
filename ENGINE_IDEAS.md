@@ -163,7 +163,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-023 | HASH equality index | Implemented as a zero-allocation raw-string fast path for homogeneous ordinary SQL JSON field equality indexes; mixed-type values retain the existing typed key encoding. | Low |
 | TT-024 | Full-text phrase/position index | `CONTAINS_PREFIX` now uses an opt-in sorted token-key sidecar; token positions and phrase search remain absent. | High |
 | TT-025 | Online uniqueness validation | Unique index creation has no staged validation before atomic publication. | Medium |
-| TT-026 | Versioned tuple format | Stored rows have no schema version and migration decoder boundary. | High |
+| TT-026 | Versioned tuple format | Implemented as opt-in `hatDataStructure.VersionedTuple` schema validation and bounded HTV1 envelope; existing unversioned tuple caches remain compatible. | High |
 | TT-027 | Generated columns | No write-maintained expression columns with dependency validation. | Medium |
 | TT-028 | Upsert conflict handlers | Public mutation commands lack declarative merge-on-conflict callbacks or policies. | Medium |
 | TT-029 | General before/after replace triggers | Trigger scope is not a complete pre/post mutation lifecycle for every command. | Medium |

@@ -4462,3 +4462,11 @@ checksums, atomic replacement, and bounded version migrations. Use
 `LoadAndMigrate` during startup and `Publish` only after the catalog has been
 validated. See [MZ048_CATALOG_MANIFEST_MIGRATIONS.md](MZ048_CATALOG_MANIFEST_MIGRATIONS.md)
 for migration, recovery, and measured CPU/memory cost.
+### Versioned tuple boundaries
+
+For storage, replication, or wire paths that need an explicit schema fence,
+use the opt-in `hatDataStructure.VersionedTuple` API. It records the tuple
+format version, validates it before field-shape checks, and provides bounded
+`HTV1` encode/decode. Existing `TupleFieldOffsetCache` callers remain
+unchanged. See [`TR020_VERSIONED_TUPLE.md`](TR020_VERSIONED_TUPLE.md) and the
+[TR-20 benchmark](BENCHMARK.md#tr-20-versioned-tuple-boundaries).

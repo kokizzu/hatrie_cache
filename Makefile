@@ -19510,3 +19510,38 @@ commit-tr003-replica-promotion-barrier:
 	@bash ./scripts/commit-tr003-replica-promotion-barrier.sh
 push-tr003-replica-promotion-barrier:
 	@bash ./scripts/push-tr003-replica-promotion-barrier.sh
+test-tr020-versioned-tuple:
+	sh ./scripts/test-tr020-versioned-tuple.sh
+
+benchmark-tr020-baseline:
+	sh ./scripts/benchmark-tr020-baseline.sh
+
+format-tr020-versioned-tuple:
+	sh ./scripts/format-tr020-versioned-tuple.sh
+
+benchmark-tr020-versioned-tuple:
+	sh ./scripts/benchmark-tr020-versioned-tuple.sh
+
+test-tr020-package:
+	sh ./scripts/test-tr020-package.sh
+
+race-tr020-versioned-tuple:
+	sh ./scripts/race-tr020-versioned-tuple.sh
+
+vet-tr020-versioned-tuple:
+	sh ./scripts/vet-tr020-versioned-tuple.sh
+
+verify-tr020-versioned-tuple-docs:
+	sh ./scripts/verify-tr020-versioned-tuple-docs.sh
+
+review-tr020-versioned-tuple:
+	sh ./scripts/review-tr020-versioned-tuple.sh
+
+stage-tr020-versioned-tuple:
+	sh ./scripts/stage-tr020-versioned-tuple.sh
+
+commit-tr020-versioned-tuple:
+	sh ./scripts/commit-tr020-versioned-tuple.sh
+
+push-tr020-versioned-tuple:
+	sh ./scripts/push-tr020-versioned-tuple.sh
