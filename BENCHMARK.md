@@ -20014,6 +20014,29 @@ dispatch.
 The stronger path has no measured allocation or retained-memory cost. Its
 small absolute overhead is opt-in and buys an explicit exact-frontier contract;
 ordinary SQL execution does not call it.
+
+<a id="m032e-distributed-frontier-coordinator"></a>
+## M032e Distributed Frontier Coordinator
+
+Command: `make benchmark-m032-distributed-frontier`.
+
+This benchmark compares a manual readiness loop over eight independent source
+barriers with the opt-in `SQLDistributedFrontierCoordinator.ReadyAt` wrapper.
+The construction benchmark separately measures the defensive barrier-slice
+copy. Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | --- |
+| Manual loop, 8 barriers | 54.22; 53.08; 55.48; 57.11; 55.60 | 55.48 | 0 | 0 | baseline |
+| Coordinator `ReadyAt`, 8 barriers | 56.56; 56.62; 55.82; 54.40; 58.48 | 56.56 | 0 | 0 | 1.02x cost, 1.9% slower |
+| Coordinator construction, 8 barriers | 66.16; 68.48; 66.25; 64.45; 60.50 | 66.16 | 64 | 1 | setup-only |
+
+The coordinator adds a small O(group-count) method-check cost and no measured
+steady-state allocation. Construction retains one copied pointer slice, about
+64 bytes for eight barriers on this 64-bit run. This is a consistency/control
+capability, not a throughput optimization, and remains default-off. See
+[M032_DISTRIBUTED_FRONTIER.md](M032_DISTRIBUTED_FRONTIER.md).
+
 ## Reusable SQL Dataflow Fragment Execution
 
 M052b adds reusable execution wiring for lowered SQL dataflow fragments. The

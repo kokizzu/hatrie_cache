@@ -20339,3 +20339,33 @@ commit-t042-evaluation:
 
 push-t042-evaluation:
 	bash ./scripts/push-t042-evaluation.sh
+
+test-m032-distributed-frontier:
+	bash ./scripts/test-m032-distributed-frontier.sh
+
+test-m032-sql-package:
+	bash ./scripts/test-m032-sql-package.sh
+
+benchmark-m032-distributed-frontier:
+	bash ./scripts/benchmark-m032-distributed-frontier.sh
+
+format-m032-distributed-frontier:
+	bash ./scripts/format-m032-distributed-frontier.sh
+
+race-m032-distributed-frontier:
+	bash ./scripts/race-m032-distributed-frontier.sh
+
+vet-m032-distributed-frontier:
+	bash ./scripts/vet-m032-distributed-frontier.sh
+
+verify-m032-distributed-frontier:
+	bash ./scripts/verify-m032-distributed-frontier.sh
+
+stage-m032-distributed-frontier:
+	bash ./scripts/stage-m032-distributed-frontier.sh
+
+commit-m032-distributed-frontier:
+	bash ./scripts/commit-m032-distributed-frontier.sh
+
+push-m032-distributed-frontier:
+	bash ./scripts/push-m032-distributed-frontier.sh
