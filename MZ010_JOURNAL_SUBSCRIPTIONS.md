@@ -2,6 +2,10 @@
 
 Status: partially adopted.
 
+SQL result subscriptions now have opt-in importable entrypoints that derive
+static `CACHE(...)` dependencies and reuse the bounded query snapshot or
+differential queues. See [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md).
+
 This is the first Materialize-inspired subscription primitive in `hatrie_cache`.
 It exposes a bounded, opt-in stream of durable `CommandJournalRecord` values.
 It is intentionally lower-level than Materialize `TAIL`: it does not evaluate a
@@ -83,8 +87,9 @@ smaller buffers fail faster and bound memory more tightly.
 
 The following are not part of this API:
 
-- SQL `TAIL` or `SUBSCRIBE` statements.
-- Differential `INSERT`/`DELETE`/`UPDATE` rows for a query result.
+- SQL `TAIL` or `SUBSCRIBE` statements. Importable SQL subscription entrypoints
+  are documented separately.
+- A signed wire envelope for differential `INSERT`/`DELETE`/`UPDATE` rows.
 - Exactly-once sink acknowledgments coupled to a query frontier.
 - Cross-process subscription transport over HTTP/2 or gRPC.
 

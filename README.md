@@ -11,6 +11,7 @@ security guidance before exposing it on a network.
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)
+- Opt-in Materialize-style SQL result subscriptions with automatic `CACHE(...)` dependency discovery: [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md), with registration cost measurements in [BENCHMARK.md#mz-010-sql-result-subscription-entrypoints](BENCHMARK.md#mz-010-sql-result-subscription-entrypoints)
 - Opt-in ClickHouse-style `FINAL` read reconciliation for replacing and collapsing source rows: [CH004_FINAL_READ.md](CH004_FINAL_READ.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics)
 - Opt-in CRC-protected typed-table delete bitmap snapshots for restart recovery: [CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots)
 - Opt-in durable dependency-aware mutation queues with CRC-checked binary WAL replay and compaction: [CH006_DURABLE_MUTATION_QUEUE.md](CH006_DURABLE_MUTATION_QUEUE.md), with measured fsync tradeoffs in [BENCHMARK.md](BENCHMARK.md#ch-006-durable-mutation-dependency-queue)

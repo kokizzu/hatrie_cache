@@ -22163,6 +22163,45 @@ The exact command used was:
 make benchmark-mz010-journal-subscription
 ```
 
+<a id="mz-010-sql-result-subscription-entrypoints"></a>
+## MZ-010 SQL Result Subscription Entrypoints
+
+This benchmark measures the opt-in SQL-result subscription entrypoints added
+for Materialize-style `TAIL`/`SUBSCRIBE` workflows. Both cases create and
+close the same one-row subscription on an AMD Ryzen 9 5950X,
+`linux/amd64`, with five samples. The explicit case is the existing manual
+dependency control; the automatic case derives static `CACHE(...)`
+dependencies from the SQL definition. Refresh delivery is shared by both
+paths and is not included in this registration benchmark.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `MZ010ManualSubscription` pre-feature baseline | 6297, 6459, 6508, 6342, 6124 | 5672, 5672, 5672, 5672, 5672 | 28, 28, 28, 28, 28 |
+| `MZ010ManualSubscription` final control | 6257, 6444, 6342, 6312, 6705 | 5672, 5672, 5672, 5672, 5672 | 28, 28, 28, 28, 28 |
+| `MZ010AutoSubscription` final | 9060, 9932, 10148, 9399, 8855 | 8104, 8104, 8104, 8104, 8104 | 32, 32, 32, 32, 32 |
+
+### Median And Tradeoff
+
+| Comparison | Median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Pre-feature manual baseline | 6342 | 5672 | 28 | Baseline |
+| Final manual control | 6342 | 5672 | 28 | No measurable regression in the control path |
+| Automatic dependency discovery | 9399 | 8104 | 32 | `1.48x` registration CPU, `1.43x` registration bytes, and 4 more allocations |
+
+The automatic path is intentionally opt-in. It reduces duplicate dependency
+lists and supports static and bound-parameter `CACHE(...)` sources, but it is
+not a performance optimization for short-lived subscription creation. The
+steady-state notification and bounded delivery path is the same as the
+explicit API.
+
+The exact command used was:
+
+```sh
+make benchmark-mz010-sql-subscription
+```
+
 ## TT-040 Space Changefeed
 
 This benchmark compares an unfiltered journal subscription with the opt-in

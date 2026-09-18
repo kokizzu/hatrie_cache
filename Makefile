@@ -20647,3 +20647,46 @@ push-tr024-covering-index:
 	bash ./scripts/run-mz044-costed-explain.sh check
  docs-mz044-costed-explain:
 	bash ./scripts/run-mz044-costed-explain.sh docs
+test-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh test
+
+format-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh format
+
+status-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh status
+
+benchmark-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh benchmark
+
+baseline-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh baseline
+
+race-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh race
+
+vet-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh vet
+
+test-mz010-sql-subscription-package:
+
+	@bash scripts/run-mz010-sql-subscription.sh package
+
+stage-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh stage
+
+commit-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh commit
+
+push-mz010-sql-subscription:
+
+	@bash scripts/run-mz010-sql-subscription.sh push
