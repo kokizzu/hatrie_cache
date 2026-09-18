@@ -202,6 +202,42 @@ func (views *MaterializedViews) Get(name string) (MaterializedView, bool) {
 	return cloneMaterializedView(view.snapshot), true
 }
 
+// Drop removes one named materialized view and its retained storage accounting.
+// The operation is idempotent only for nil registries; callers receive an error
+// when the requested view does not exist.
+func (views *MaterializedViews) Drop(name string) error {
+	if views == nil {
+		return fmt.Errorf("materialized views are nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("materialized view name is required")
+	}
+	views.mu.Lock()
+	defer views.mu.Unlock()
+	view, exists := views.views[name]
+	if !exists {
+		return fmt.Errorf("materialized view %q does not exist", name)
+	}
+	delete(views.views, name)
+	views.rows -= view.storedRows
+	views.bytes -= view.storedBytes
+	for dependency, dependents := range views.dependents {
+		filtered := dependents[:0]
+		for _, dependent := range dependents {
+			if dependent != name {
+				filtered = append(filtered, dependent)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(views.dependents, dependency)
+		} else {
+			views.dependents[dependency] = filtered
+		}
+	}
+	return nil
+}
+
 // RefreshChanged atomically publishes refreshed snapshots for views whose
 // dependencies intersect changed. It leaves all prior snapshots untouched if
 // any candidate query fails.

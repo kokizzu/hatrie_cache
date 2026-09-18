@@ -37,7 +37,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-008 | Column TTL | Partially adopted: `TypedTableColumn.TTL` independently masks expired cells in row/columnar reads, `Stats`, and `Histogram`; explicit and scheduler-driven purge physically clears values and emits updates, with bounded CRC-protected processing-time deadline snapshots. | Medium |
 | CH-009 | TTL rollup | Partially adopted: importable `TypedTableTTLRollup` aggregates expired row images, and `TypedTableTTLScheduler.RegisterWithRollup` wires it into an explicit opt-in maintenance pass; persistence and automatic historical replay remain caller-owned. | High |
 | CH-010 | Materialized/default columns | Partially adopted: `TypedTableColumn.GeneratedMode` adds explicit materialized/default write semantics, cached dependency ordering, and schema validation; SQL expression parsing, DDL wiring, and persistence remain caller-owned. | Medium |
-| CH-011 | General projection DDL | Only narrow cached ordering projections exist; no user-defined maintained projection. | High |
+| CH-011 | General projection DDL | Partially adopted: `SQLSession` supports session-local `CREATE`, `DROP`, and explicit `REFRESH PROJECTION` backed by source-version-guarded materialized snapshots; durable table-bound metadata, automatic source notifications, and cross-node coordination remain open. | High |
 | CH-012 | Projection advisor | No cost-based recommendation comparing projection maintenance with query savings. | Medium |
 | CH-013 | Query condition cache | No cache of reusable predicate outcomes for stable part/key conditions. | Medium |
 | CH-014 | Uncompressed hot-data cache | No cache that stores decoded hot ranges while preserving compressed storage. | Medium |

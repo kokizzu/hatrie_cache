@@ -598,3 +598,14 @@ the explicit-default path avoids a row clone. SQL expression parsing, DDL
 integration, and persistence of generated expressions remain caller-owned. See
 [CH010_MATERIALIZED_DEFAULT_COLUMNS.md](CH010_MATERIALIZED_DEFAULT_COLUMNS.md)
 and [BENCHMARK.md](BENCHMARK.md#ch-010-materialized-and-default-columns).
+
+## CH-011: Projection DDL
+
+CH-011 is partially adopted through session-local `CREATE PROJECTION`, `DROP
+PROJECTION`, and `REFRESH PROJECTION`. The implementation reuses
+`MaterializedViews`, requires source versions before creation, selects only
+exact fresh query matches, and falls back to the source path on version
+mismatch. Durable table-bound projection metadata, automatic source-write
+notifications, and cross-node coordination remain caller-owned. See
+[CH011_PROJECTION_DDL.md](CH011_PROJECTION_DDL.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-011-projection-ddl).

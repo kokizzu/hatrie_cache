@@ -18955,3 +18955,31 @@ commit-ch010-materialized-default:
 .PHONY: push-ch010-materialized-default
 push-ch010-materialized-default:
 	bash ./scripts/push-ch010-materialized-default.sh
+
+.PHONY: test-ch011-projection-ddl
+test-ch011-projection-ddl:
+	bash ./scripts/test-ch011-projection-ddl.sh
+
+.PHONY: format-ch011-projection-ddl
+format-ch011-projection-ddl:
+	bash ./scripts/format-ch011-projection-ddl.sh
+
+.PHONY: benchmark-ch011-projection-ddl
+benchmark-ch011-projection-ddl:
+	bash ./scripts/benchmark-ch011-projection-ddl.sh
+
+.PHONY: review-ch011
+review-ch011:
+	bash ./scripts/review-ch011.sh
+
+.PHONY: stage-ch011-projection-ddl
+stage-ch011-projection-ddl:
+	bash ./scripts/stage-ch011-projection-ddl.sh
+
+.PHONY: commit-ch011-projection-ddl
+commit-ch011-projection-ddl:
+	bash ./scripts/commit-ch011-projection-ddl.sh
+
+.PHONY: push-ch011-projection-ddl
+push-ch011-projection-ddl:
+	bash ./scripts/push-ch011-projection-ddl.sh

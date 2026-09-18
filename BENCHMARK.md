@@ -30317,3 +30317,26 @@ count.
 Focused correctness uses `make test-ch010-materialized-default` and covers
 materialized compatibility, default computation/preservation, dependency
 ordering, and invalid dependency/type rejection.
+
+## CH-011: Projection DDL
+
+Command:
+
+```text
+make benchmark-ch011-projection-ddl
+```
+
+This compares the same top-32 query over 4,096 rows with no projection and
+with a prebuilt exact projection. Creation is outside the timer; five
+`-benchtime=100x` samples were collected on Linux/amd64 with an AMD Ryzen 9
+5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full scan and sort | 9,004,302 | 5,219,497 | 28,718 | 1.00x |
+| Exact projection hit | 16,014 | 15,456 | 80 | 562x lower time, 338x lower heap, 359x fewer allocations |
+
+The benchmark measures repeated exact-query reads, not projection creation or
+refresh. The feature trades snapshot storage and explicit refresh maintenance
+for much lower work on matching reads; source-version mismatch never serves a
+stale snapshot.

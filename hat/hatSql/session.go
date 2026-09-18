@@ -15,6 +15,7 @@ type SQLSession struct {
 	tables         map[string][]Row
 	results        map[string][]Row
 	views          map[string]sqlSessionView
+	projections    *MaterializedViews
 	catalogVersion uint64
 }
 
@@ -24,7 +25,13 @@ type sqlSessionView struct {
 }
 
 func NewSQLSession(source SourceResolver) *SQLSession {
-	return &SQLSession{source: source, tables: map[string][]Row{}, results: map[string][]Row{}, views: map[string]sqlSessionView{}}
+	return &SQLSession{
+		source:      source,
+		tables:      map[string][]Row{},
+		results:     map[string][]Row{},
+		views:       map[string]sqlSessionView{},
+		projections: NewMaterializedViews(),
+	}
 }
 
 func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
@@ -91,6 +98,129 @@ func (session *SQLSession) CreateView(name, source string) error {
 	session.views[change.name] = change.view
 	session.catalogVersion++
 	return nil
+}
+
+// CreateProjection creates one source-version-guarded materialized projection
+// for the session. Projection hits are selected automatically for exact query
+// matches; an unversioned source is rejected so stale rows cannot be served.
+func (session *SQLSession) CreateProjection(ctx context.Context, name, source string, options QueryOptions) error {
+	if session == nil {
+		return fmt.Errorf("SQL session is nil")
+	}
+	key, err := sessionObjectName(name)
+	if err != nil {
+		return err
+	}
+	query := strings.TrimSpace(source)
+	if query == "" {
+		return fmt.Errorf("SQL projection %q requires a query", name)
+	}
+	parsed, err := parseSQLQuery(query)
+	if err != nil {
+		return err
+	}
+	dependencies := sqlQueryCacheDependencies(parsed)
+	if len(dependencies) == 0 {
+		return fmt.Errorf("SQL projection %q requires at least one versioned CACHE source", name)
+	}
+	for _, dependency := range dependencies {
+		version, available, err := session.SQLSourceVersion("CACHE", dependency)
+		if err != nil {
+			return fmt.Errorf("SQL projection %q source %q version: %w", name, dependency, err)
+		}
+		if !available || version == "" {
+			return fmt.Errorf("SQL projection %q source %q does not provide a version", name, dependency)
+		}
+	}
+	projectionOptions := options
+	projectionOptions.ProjectionCatalog = nil
+	projections := session.projectionCatalog()
+	_, err = projections.Create(ctx, MaterializedViewDefinition{
+		Name:         key,
+		Query:        query,
+		Dependencies: dependencies,
+	}, session, projectionOptions)
+	return err
+}
+
+// DropProjection removes one session-local materialized projection.
+func (session *SQLSession) DropProjection(name string) error {
+	if session == nil {
+		return fmt.Errorf("SQL session is nil")
+	}
+	key, err := sessionObjectName(name)
+	if err != nil {
+		return err
+	}
+	return session.projectionCatalog().Drop(key)
+}
+
+// RefreshProjection rebuilds one projection after its source versions advance.
+// RefreshChanged is used so other projections sharing the same dependencies
+// are refreshed atomically in the same maintenance pass.
+func (session *SQLSession) RefreshProjection(ctx context.Context, name string, options QueryOptions) error {
+	if session == nil {
+		return fmt.Errorf("SQL session is nil")
+	}
+	key, err := sessionObjectName(name)
+	if err != nil {
+		return err
+	}
+	projections := session.projectionCatalog()
+	view, exists := projections.Get(key)
+	if !exists {
+		return fmt.Errorf("SQL projection %q does not exist", name)
+	}
+	refreshOptions := options
+	refreshOptions.ProjectionCatalog = nil
+	statuses, err := projections.RefreshChanged(ctx, view.Status.Dependencies, session, refreshOptions)
+	if err != nil {
+		return err
+	}
+	for _, status := range statuses {
+		if status.Name == key {
+			return nil
+		}
+	}
+	return fmt.Errorf("SQL projection %q was not refreshed", name)
+}
+
+// SQLSourceVersion forwards source versions and assigns a session catalog
+// version to temporary tables, so projection freshness is never inferred from
+// an unversioned row slice.
+func (session *SQLSession) SQLSourceVersion(name, key string) (string, bool, error) {
+	if session == nil {
+		return "", false, nil
+	}
+	if strings.EqualFold(name, "CACHE") {
+		session.mu.RLock()
+		key = strings.ToLower(strings.TrimSpace(key))
+		_, tableExists := session.tables[key]
+		_, resultExists := session.results[key]
+		version := session.catalogVersion
+		session.mu.RUnlock()
+		if tableExists || resultExists {
+			return fmt.Sprintf("session-%d-%s", version, key), true, nil
+		}
+	}
+	if session.source == nil {
+		return "", false, nil
+	}
+	versions, ok := session.source.(SourceVersionResolver)
+	if !ok {
+		return "", false, nil
+	}
+	return versions.SQLSourceVersion(name, key)
+}
+
+func (session *SQLSession) projectionCatalog() *MaterializedViews {
+	session.mu.Lock()
+	if session.projections == nil {
+		session.projections = NewMaterializedViews()
+	}
+	projections := session.projections
+	session.mu.Unlock()
+	return projections
 }
 
 func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
@@ -389,6 +519,24 @@ func sqlQueryCacheDependencies(query *sqlQuery) []string {
 }
 
 func (session *SQLSession) Execute(ctx context.Context, source string, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE PROJECTION"); matched {
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		return SQLQueryResult{}, session.CreateProjection(ctx, name, query, options)
+	}
+	if name, matched, err := sqlSessionDropStatement(source, "DROP PROJECTION"); matched {
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		return SQLQueryResult{}, session.DropProjection(name)
+	}
+	if name, matched, err := sqlSessionDropStatement(source, "REFRESH PROJECTION"); matched {
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		return SQLQueryResult{}, session.RefreshProjection(ctx, name, options)
+	}
 	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE OR REPLACE VIEW"); matched {
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -411,7 +559,11 @@ func (session *SQLSession) Execute(ctx context.Context, source string, parameter
 		}
 		return SQLQueryResult{}, session.CreateTemporaryTable(name, result.Rows)
 	}
-	return ExecuteSQLQueryParameters(ctx, source, session, parameters, options)
+	queryOptions := options
+	if queryOptions.ProjectionCatalog == nil {
+		queryOptions.ProjectionCatalog = session.projectionCatalog()
+	}
+	return ExecuteSQLQueryParameters(ctx, source, session, parameters, queryOptions)
 }
 
 func sqlSessionCreateStatement(source, prefix string) (string, string, bool, error) {
@@ -435,6 +587,24 @@ func sqlSessionCreateStatement(source, prefix string) (string, string, bool, err
 		return "", "", true, fmt.Errorf("%s requires a query after AS", prefix)
 	}
 	return name, query, true, nil
+}
+
+func sqlSessionDropStatement(source, prefix string) (string, bool, error) {
+	trimmed := strings.TrimSpace(source)
+	upper := strings.ToUpper(trimmed)
+	prefixUpper := prefix + " "
+	if !strings.HasPrefix(upper, prefixUpper) {
+		return "", false, nil
+	}
+	name := strings.TrimSpace(trimmed[len(prefix):])
+	if name == "" {
+		return "", true, fmt.Errorf("%s requires a name", prefix)
+	}
+	key, err := sessionObjectName(name)
+	if err != nil {
+		return "", true, err
+	}
+	return key, true, nil
 }
 
 func sessionObjectName(name string) (string, error) {
