@@ -15,6 +15,7 @@ git add -- \
   scripts/race-m032-distributed-frontier.sh \
   scripts/test-m032-distributed-frontier.sh \
   scripts/verify-m032-distributed-frontier.sh \
+  scripts/vet-m032-distributed-frontier.sh \
   scripts/stage-m032-distributed-frontier.sh \
   scripts/commit-m032-distributed-frontier.sh \
   scripts/push-m032-distributed-frontier.sh \
