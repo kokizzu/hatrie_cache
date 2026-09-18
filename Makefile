@@ -19134,6 +19134,38 @@ commit-mz035:
 push-mz035:
 	bash ./scripts/push-mz035.sh
 
+test-mz046-schema-migration-barrier:
+	bash ./scripts/test-mz046-schema-migration-barrier.sh
+
+format-mz046-schema-migration-barrier:
+	bash ./scripts/format-mz046-schema-migration-barrier.sh
+
+benchmark-mz046-schema-migration-barrier:
+	bash ./scripts/benchmark-mz046-schema-migration-barrier.sh
+
+test-mz046-package:
+	bash ./scripts/test-mz046-package.sh
+
+race-mz046-schema-migration-barrier:
+	bash ./scripts/race-mz046-schema-migration-barrier.sh
+
+vet-mz046-schema-migration-barrier:
+	bash ./scripts/vet-mz046-schema-migration-barrier.sh
+
+review-mz046:
+	bash ./scripts/review-mz046.sh
+
+stage-mz046:
+	bash ./scripts/stage-mz046.sh
+
+commit-mz046:
+	bash ./scripts/commit-mz046.sh
+
+push-mz046:
+	bash ./scripts/push-mz046.sh
+
+
+
 
 
 .PHONY: stage-tr022-index-rebuild-verification

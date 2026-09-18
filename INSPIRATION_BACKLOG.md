@@ -135,7 +135,7 @@ before/after measurement when its motivation is performance.
 | MZ-43 | Per-operator frontier lag metrics | Locate the actual source of staleness | Metrics cardinality | [x] |
 | MZ-44 | Session snapshot consistency tokens | Tie multiple queries to one logical view | Token lifetime | [x] Implemented by the opt-in HMAC-backed `hatSql.SQLSnapshotTokenCodec`; it maps to the existing `AsOfFrontier` provider path and defaults off. See [MZ044_SNAPSHOT_TOKENS.md](MZ044_SNAPSHOT_TOKENS.md) and [BENCHMARK.md#mz-044-session-snapshot-tokens](BENCHMARK.md#mz-044-session-snapshot-tokens). |
 | MZ-45 | Transactional source-to-sink boundary | Commit a source batch and sink effect together | Distributed commit complexity | [ ] |
-| MZ-46 | Schema migration barrier across dependent dataflows | Prevent mixed-schema results | Planned downtime or buffering | [ ] |
+| MZ-46 | Schema migration barrier across dependent dataflows | Prevent mixed-schema results | Planned downtime or buffering | [x] Implemented as a bounded opt-in prepare/acknowledge/commit protocol; see [MZ046_SCHEMA_MIGRATION_BARRIER.md](MZ046_SCHEMA_MIGRATION_BARRIER.md). |
 | MZ-47 | Timeline recovery and frontier reconciliation | Repair partially persisted progress | Recovery duration | [ ] |
 | MZ-48 | Persisted catalog manifest migrations | Upgrade metadata atomically | Migration compatibility | [ ] |
 | MZ-49 | Connector schema-drift quarantine stream | Keep bad records from stopping a source | Quarantine storage and policy | [x] Bounded callback quarantine for decoded rows and `UseNumber` JSONEachRow input with deterministic drift diagnostics and explicit limits; see [MZ049_SCHEMA_DRIFT_QUARANTINE.md](MZ049_SCHEMA_DRIFT_QUARANTINE.md) and [BENCHMARK.md](BENCHMARK.md#mz-049-schema-drift-quarantine) |

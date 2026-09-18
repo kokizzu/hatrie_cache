@@ -30491,3 +30491,41 @@ BenchmarkMZ035ArrangementRecommendationWithLocality-32     302514  505.3 ns/op  
 BenchmarkMZ035ArrangementRecommendationWithLocality-32     187356  592.9 ns/op  80 B/op  4 allocs/op
 BenchmarkMZ035ArrangementRecommendationWithLocality-32     244080  524.5 ns/op  80 B/op  4 allocs/op
 ```
+<a id="mz-046-schema-migration-barrier"></a>
+## MZ-046 Schema Migration Barrier
+
+Command:
+
+```text
+make benchmark-mz046-schema-migration-barrier
+```
+
+This measures four dependency acknowledgements on an AMD Ryzen 9 5950X. The
+direct dependency set is a lower-bound comparison; it has no synchronization
+or detached status-copy requirements.
+
+| Path | Five ns/op samples | Median ns/op | B/op | Allocs/op | Relative to direct set |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Direct dependency set | 21.73, 21.28, 18.97, 19.08, 21.19 | 21.19 | 0 | 0 | 1.00x |
+| Barrier `Acknowledge` | 59.85, 56.23, 56.45, 59.31, 53.30 | 56.45 | 7 | 0 | 2.66x |
+
+The normal acknowledgement path is bounded and allocation-free. The barrier
+is opt-in, so existing dataflow and query paths have no additional cost. An
+initial status-returning acknowledgement measured 257.5 ns/op, 240 B/op, and
+3 allocations; the final split API reduced that to 56.45 ns/op, 7 B/op, and
+zero allocations. See [MZ046_SCHEMA_MIGRATION_BARRIER.md](MZ046_SCHEMA_MIGRATION_BARRIER.md).
+
+Raw final output:
+
+```text
+BenchmarkMZ046DirectDependencySet-32  5836746  21.73 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ046DirectDependencySet-32  5790594  21.28 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ046DirectDependencySet-32  5349908  18.97 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ046DirectDependencySet-32  5293610  19.08 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ046DirectDependencySet-32  5617885  21.19 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ046BarrierAcknowledge-32  2138364  59.85 ns/op  7 B/op  0 allocs/op
+BenchmarkMZ046BarrierAcknowledge-32  2102138  56.23 ns/op  7 B/op  0 allocs/op
+BenchmarkMZ046BarrierAcknowledge-32  1958326  56.45 ns/op  7 B/op  0 allocs/op
+BenchmarkMZ046BarrierAcknowledge-32  2073382  59.31 ns/op  7 B/op  0 allocs/op
+BenchmarkMZ046BarrierAcknowledge-32  2102506  53.30 ns/op  7 B/op  0 allocs/op
+```
