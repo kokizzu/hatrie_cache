@@ -19617,3 +19617,40 @@ commit-tr046-schema-discovery:
 
 push-tr046-schema-discovery:
 	bash ./scripts/push-tr046-schema-discovery.sh
+
+
+test-ch020-parallel-replica-read:
+	bash ./scripts/test-ch020-parallel-replica-read.sh
+
+benchmark-ch020-baseline:
+	bash ./scripts/benchmark-ch020-baseline.sh
+
+benchmark-ch020-parallel-replica-read:
+	bash ./scripts/benchmark-ch020-parallel-replica-read.sh
+
+format-ch020-parallel-replica-read:
+	bash ./scripts/format-ch020-parallel-replica-read.sh
+
+test-ch020-package:
+	bash ./scripts/test-ch020-package.sh
+
+race-ch020-parallel-replica-read:
+	bash ./scripts/race-ch020-parallel-replica-read.sh
+
+vet-ch020-parallel-replica-read:
+	bash ./scripts/vet-ch020-parallel-replica-read.sh
+
+verify-ch020-parallel-replica-read-docs:
+	bash ./scripts/verify-ch020-parallel-replica-read-docs.sh
+
+review-ch020-parallel-replica-read:
+	bash ./scripts/review-ch020-parallel-replica-read.sh
+
+stage-ch020-parallel-replica-read:
+	bash ./scripts/stage-ch020-parallel-replica-read.sh
+
+commit-ch020-parallel-replica-read:
+	bash ./scripts/commit-ch020-parallel-replica-read.sh
+
+push-ch020-parallel-replica-read:
+	bash ./scripts/push-ch020-parallel-replica-read.sh

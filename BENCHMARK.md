@@ -30892,3 +30892,30 @@ The result is a control-plane improvement, not a claim that all application
 JSON should be replaced. HSD1 adds a versioned binary contract and only
 carries metadata; a schema mismatch still requires a separate full-schema
 transfer. Existing paths are unaffected unless callers opt in.
+<a id="ch-20-parallel-replica-read-coordinator"></a>
+
+## CH-20: Parallel replica read coordinator
+
+This paired benchmark compares a sequential loop with the opt-in bounded
+coordinator for 32 assigned partitions and eight workers. The latency-bound
+case sleeps for 100 microseconds in each callback to represent network/storage
+wait; the no-op case measures coordination overhead. Five samples use
+`-benchtime=200ms` on an AMD Ryzen 9 5950X Linux/amd64 host.
+
+| Workload | Sequential median | Parallel median | Relative result | Sequential memory | Parallel memory | Sequential allocs | Parallel allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 32 latency-bound reads | 33,858,389 ns/op | 4,277,142 ns/op | 7.92x faster | 2,320 B/op | 7,717 B/op | 33 | 62 |
+| 32 no-op reads | 1,140 ns/op | 23,185 ns/op | 20.3x slower | 2,304 B/op | 6,684 B/op | 33 | 54 |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Sequential latency: 33,919,902/2,322/33; 33,672,312/2,320/33; 33,858,389/2,317/33; 33,893,477/2,317/33; 33,846,078/2,320/33
+Parallel latency:   4,276,392/7,988/63; 4,274,920/7,715/63; 4,295,278/7,728/62; 4,277,142/7,717/62; 4,298,846/7,611/62
+Sequential no-op:   1,134/2,304/33; 1,140/2,304/33; 1,140/2,304/33; 1,164/2,304/33; 1,139/2,304/33
+Parallel no-op:     23,185/6,699/54; 23,506/6,684/54; 23,442/6,678/54; 22,728/6,678/54; 22,751/6,678/54
+```
+
+The measured result is why CH-20 remains opt-in: it wins when replica calls
+spend most of their time waiting on independent I/O, and loses for tiny local
+callbacks. Existing replication and query behavior is unchanged.

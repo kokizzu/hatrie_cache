@@ -4481,3 +4481,6 @@ and the [TR-49 benchmark](BENCHMARK.md#tr-49-queue-partition-ownership-and-onlin
 ### Schema and DDL discovery
 
 Use the opt-in [TR-46 schema and DDL discovery protocol](TR046_SCHEMA_DDL_DISCOVERY.md) when a client or peer must exchange a bounded schema fingerprint and supported DDL capabilities before sending schema-dependent data. It uses canonical HSD1 binary frames; the legacy JSON and replication paths remain unchanged.
+### Parallel replica reads
+
+Use the opt-in [CH-20 parallel replica read coordinator](CH020_PARALLEL_REPLICA_READ.md) for large reads already divided into non-overlapping partitions. It bounds fan-out and cancels failed work; it is intentionally not enabled for small local callbacks because the coordination overhead is measurable.
