@@ -54,6 +54,7 @@ security guidance before exposing it on a network.
 - Replication queue and wire-byte metrics: [REPLICATION_METRICS.md](REPLICATION_METRICS.md)
 - Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
 - Opt-in journal-wide synchronous write quorum bound to exact journal sequences and fence tokens: [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md), with measured validation and execution costs in [BENCHMARK.md](BENCHMARK.md#t-u10-journal-wide-synchronous-write-quorum)
+- Opt-in durable generation-fenced cluster membership journal with atomic recovery: [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md), with bounded snapshot and persistence measurements in [BENCHMARK.md](BENCHMARK.md#t-u13-durable-cluster-membership)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - Shared compiled JSON subcolumn paths for repeated lookups: [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md)

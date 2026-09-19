@@ -32963,6 +32963,27 @@ feature is default-off; asynchronous replication and ordinary count-only
 quorum paths are unchanged. Raw commands and the operational boundary are in
 [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md).
 
+<a id="t-u13-durable-cluster-membership"></a>
+## T-U13 Durable Cluster Membership
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is the
+existing one-node `ClusterTopology.Clone`; the candidate returns a detached
+generation/fence/history snapshot and also measures the explicit CRC-protected
+binary persistence envelope.
+
+| Path | Five raw ns/op samples | Median ns/op | B/op | Allocs/op | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing `ClusterTopology.Clone`, one node | 69.73; 71.15; 70.84; 70.53; 69.67 | 70.53 | 144 | 1 | reference |
+| `MembershipJournal.Snapshot`, one node | 139.2; 136.9; 138.0; 139.8; 138.8 | 138.8 | 352 | 2 | 1.97x CPU, +208 B, +1 alloc |
+| `MembershipJournal.MarshalBinary`, one node | 1,008; 1,008; 1,026; 1,017; 1,099 | 1,017 | 1,122 | 5 | explicit persistence/CRC cost |
+
+The snapshot cost is expected because the journal returns independent node and
+record slices plus generation/fence metadata. The path-backed `Apply` route is
+control-plane durability work rather than a foreground data/query path. The
+feature is opt-in and leaves ordinary topology persistence unchanged. Raw
+commands and recovery semantics are documented in
+[TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md).
+
 ## T-U12 Automatic Failover Coordinator
 
 AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is a

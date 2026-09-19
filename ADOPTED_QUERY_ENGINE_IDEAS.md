@@ -707,6 +707,17 @@ fence persistence, and failed-replica repair remain caller-owned. See
 [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u10-journal-wide-synchronous-write-quorum).
 
+## T-U13: Durable Cluster Membership
+
+T-U13 is adopted as the opt-in `hatTopology.MembershipJournal`. It persists
+generation/fence-checked join and leave records through a CRC-protected `HMM1`
+snapshot, retries unchanged operation IDs idempotently, bounds retained history,
+and reports gaps instead of replaying incomplete membership changes. Consensus
+authorization, cross-node quorum, backup placement, and transport integration
+remain caller-owned; the existing topology and replication defaults are
+unchanged. See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md)
+and [BENCHMARK.md](BENCHMARK.md#t-u13-durable-cluster-membership).
+
 ## T-U36: Snapshot Rotation Policy
 
 T-U36 adds an opt-in `BackupRotationPolicy` and

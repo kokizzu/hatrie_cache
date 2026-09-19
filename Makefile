@@ -21872,6 +21872,14 @@ benchmark-tu10-write-quorum:
 benchmark-generic-write-quorum:
 	bash scripts/benchmark-tu10-write-quorum.sh generic
 
+.PHONY: baseline-tu13-membership
+baseline-tu13-membership:
+	bash scripts/benchmark-tu13-membership.sh baseline
+
+.PHONY: benchmark-tu13-membership
+benchmark-tu13-membership:
+	bash scripts/benchmark-tu13-membership.sh candidate
+
 tmp-hatrie-audit:
 	bash scripts/audit-hatrie-tmp.sh
 tmp-hatrie-audit-contents:
