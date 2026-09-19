@@ -189,3 +189,5 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+- T-U44 memory fragmentation diagnostics are implemented in
+  `hat/hatMemoryStats`; the report is read-only and sampling is opt-in.

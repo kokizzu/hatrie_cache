@@ -22208,3 +22208,21 @@ benchmark-chu18-primary-pruning:
 
 verify-chu18-primary-pruning:
 	bash scripts/verify-chu18-primary-pruning.sh
+
+test-tu44-memory-stats:
+	bash scripts/test-tu44-memory-stats.sh
+
+format-tu44-memory-stats:
+	bash scripts/format-tu44-memory-stats.sh
+
+race-tu44-memory-stats:
+	bash scripts/race-tu44-memory-stats.sh
+
+vet-tu44-memory-stats:
+	bash scripts/vet-tu44-memory-stats.sh
+
+benchmark-tu44-memory-stats:
+	bash scripts/benchmark-tu44-memory-stats.sh
+
+verify-tu44-memory-stats:
+	bash scripts/verify-tu44-memory-stats.sh

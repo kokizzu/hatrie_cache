@@ -4775,3 +4775,8 @@ memory estimates without changing default EXPLAIN output.
 - Adaptive exact integer `IN` sets: [CHU17_ADAPTIVE_IN_SET.md](CHU17_ADAPTIVE_IN_SET.md)
 
 - Composite primary-mark pruning: [CHU18_COMPOSITE_PRIMARY_MARKS.md](CHU18_COMPOSITE_PRIMARY_MARKS.md)
+
+## Memory diagnostics
+
+Read-only runtime memory diagnostics are documented in
+[TU44_MEMORY_FRAGMENTATION.md](TU44_MEMORY_FRAGMENTATION.md).
