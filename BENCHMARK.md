@@ -31893,3 +31893,21 @@ The opt-in logical admission check adds about 3.3% median CPU in this small
 write path with no allocation increase. It does not account for Go map
 capacity, indexes, query working memory, or allocator fragmentation; see
 [CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md).
+
+## CH-U26 Operator Memory Profiles
+
+Five `-benchmem` samples measured the existing query-profiler `Record` path
+against the opt-in warmed single-operator `RecordMemory` path on Linux/amd64
+with an AMD Ryzen 9 5950X:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Ordinary `Record` | 26.81; 27.44; 27.36; 27.54; 28.25 | 27.44 | 0 | 0 | 1.00x |
+| Opt-in `RecordMemory` | 44.79; 43.68; 43.43; 42.78; 42.67 | 43.43 | 0 | 0 | 1.58x |
+
+Memory accounting is allocation-free after warm-up, but the explicit path costs
+about `1.58x` CPU in this isolated benchmark for its additional map lookup and
+operator aggregation. Ordinary `Record` callers do not initialize the memory
+profile map or pay this cost. Measurements, API bounds, and the fact that
+runtime memory samples remain caller-supplied are documented in
+[CHU26_OPERATOR_MEMORY_PROFILES.md](CHU26_OPERATOR_MEMORY_PROFILES.md).

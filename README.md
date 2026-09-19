@@ -4460,6 +4460,10 @@ the existing per-operator behavior. Failed and canceled queries clean their
 temporary files; process-crash orphan handling remains the responsibility of
 the spill-directory lifecycle. See [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
 and the raw measurements in [BENCHMARK.md](BENCHMARK.md#chu25-query-wide-spill-quota).
+Opt-in query profiling can also retain bounded per-operator allocation, peak,
+and retained-byte aggregates with `SQLQueryProfiler.RecordMemory`; see
+[CHU26_OPERATOR_MEMORY_PROFILES.md](CHU26_OPERATOR_MEMORY_PROFILES.md) and the
+[CH-U26 benchmark](BENCHMARK.md#ch-u26-operator-memory-profiles).
 Named SQL-style connections and their credentials can be kept separate with
 the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
 readers are constrained by the referenced secret, and rotation uses an exact

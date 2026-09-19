@@ -21221,3 +21221,25 @@ vet-chu24:
 .PHONY: commit-chu24
 commit-chu24:
 	bash ./scripts/commit-chu24.sh
+
+.PHONY: format-chu26 test-chu26 test-chu26-package benchmark-chu26 race-chu26 vet-chu26 commit-chu26
+format-chu26:
+	bash ./scripts/format-chu26.sh
+
+test-chu26:
+	bash ./scripts/test-chu26.sh
+
+test-chu26-package:
+	bash ./scripts/test-chu26-package.sh
+
+benchmark-chu26:
+	bash ./scripts/benchmark-chu26.sh
+
+race-chu26:
+	bash ./scripts/race-chu26.sh
+
+vet-chu26:
+	bash ./scripts/vet-chu26.sh
+
+commit-chu26:
+	bash ./scripts/commit-chu26.sh
