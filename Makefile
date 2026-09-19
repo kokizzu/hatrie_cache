@@ -22100,3 +22100,21 @@ benchmark-tu03:
 
 verify-tu03:
 	bash scripts/verify-tu03.sh
+
+test-mu24:
+	bash scripts/test-mu24.sh
+
+format-mu24:
+	bash scripts/format-mu24.sh
+
+test-race-mu24:
+	bash scripts/test-race-mu24.sh
+
+benchmark-mu24:
+	bash scripts/benchmark-mu24.sh
+
+vet-mu24:
+	bash scripts/vet-mu24.sh
+
+verify-mu24:
+	bash scripts/verify-mu24.sh

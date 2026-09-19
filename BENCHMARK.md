@@ -32627,3 +32627,14 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## M-U24 Workload Admission
+
+Five-run median on the local Ryzen 9 5950X:
+
+| Operation | Median | Memory | Allocations | Note |
+|---|---:|---:|---:|---|
+| Direct atomic counter baseline | 1.85 ns/op | 0 B/op | 0 | no admission |
+| Uncontended Admission Acquire+Release | 45.23 ns/op | 4 B/op | 1 | bounded opt-in admission |
+| Two-class Snapshot | 258.0 ns/op | 216 B/op | 4 | diagnostics |
+
+The direct counter is not behaviorally equivalent: admission adds class lookup, bounded capacity, queueing, cancellation, and release ownership. Relative to the first implementation, the final uncontended path is about 5.8x faster, uses 52x fewer bytes, and reduces allocations from 3 to 1.
