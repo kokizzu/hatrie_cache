@@ -107,6 +107,25 @@ func (index *StringMultikeyIndex) Lookup(key string, dst []uint64) []uint64 {
 	return posting.values(dst[:0])
 }
 
+func (index *StringMultikeyIndex) lookupBytes(key []byte, dst []uint64) []uint64 {
+	if index == nil {
+		if dst != nil {
+			return dst[:0]
+		}
+		return nil
+	}
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	posting, ok := index.byKey[string(key)]
+	if !ok {
+		if dst != nil {
+			return dst[:0]
+		}
+		return nil
+	}
+	return posting.values(dst[:0])
+}
+
 // Contains reports whether id is indexed under key.
 func (index *StringMultikeyIndex) Contains(key string, id uint64) bool {
 	if index == nil {
@@ -115,6 +134,29 @@ func (index *StringMultikeyIndex) Contains(key string, id uint64) bool {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 	posting, ok := index.byKey[key]
+	if !ok {
+		return false
+	}
+	if posting.first == id {
+		return true
+	}
+	if posting.rest == nil {
+		return false
+	}
+	if posting.rest.first == id {
+		return true
+	}
+	position := sort.Search(len(posting.rest.rest), func(position int) bool { return posting.rest.rest[position] >= id })
+	return position < len(posting.rest.rest) && posting.rest.rest[position] == id
+}
+
+func (index *StringMultikeyIndex) containsBytes(key []byte, id uint64) bool {
+	if index == nil {
+		return false
+	}
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	posting, ok := index.byKey[string(key)]
 	if !ok {
 		return false
 	}

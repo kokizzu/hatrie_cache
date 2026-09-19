@@ -18043,6 +18043,21 @@ Command: `make benchmark-t155` (`-count=3`, `-benchmem`). These are test-time re
 
 The focused test enforces these ceilings after warm-up and logs the measured allocation rate. `INCRCMS` intentionally keeps a one-allocation budget because the benchmark consistently observed `7 B/op`; it is not misreported as zero-allocation.
 
+## T-U23 Typed Tuple Multikey Index
+
+The typed tuple multikey index is benchmarked by `make verify-tu23`. It uses
+100,000 items with two values per item and five samples on Linux amd64, AMD
+Ryzen 9 5950X. Typed string lookup is 146.3 ns/op, 16 B/op, and one
+allocation versus 88.95 ns/op and zero allocations for the existing string
+index. Fixed-width typed lookup is allocation-free at 418.7 ns/op while
+returning 3,125 IDs instead of 1,000. The typed build is 4.078 ms/op,
+2.437 MB/op, and 31,347 allocations versus 3.360 ms/op, 2.197 MB/op, and
+21,347 allocations for the string index. Map-of-sets lookup is 9,459 ns/op
+and linear scan is 121,904 ns/op on the same fixture.
+
+See [TU23_TYPED_MULTIKEY_INDEX.md](TU23_TYPED_MULTIKEY_INDEX.md) for the API,
+scope, raw comparison table, and tradeoffs.
+
 ## SQL Multikey Array Membership
 
 Command: `make benchmark-sql-multikey` (`-benchmem -count=5`). The fixture has
