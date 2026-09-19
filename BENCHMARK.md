@@ -32091,3 +32091,25 @@ when saving or warming the cache.
 
 Details, limits, and restore safety are in
 [CHU41_SCHEMA_VERSIONED_PLAN_CACHE.md](CHU41_SCHEMA_VERSIONED_PLAN_CACHE.md).
+
+## CH-U44 SQL Aggregate Combinators
+
+The benchmark uses a deterministic 128-row `VALUES` source and executes the
+query through the same parser and executor path. Values below are five raw
+`-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X. The clean
+baseline was captured before the feature; the two after rows were captured by
+`make benchmark-chu44` after the implementation was optimized to share the
+existing aggregate normalization pass.
+
+| Operation | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | CPU vs clean baseline |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before: existing `SUM_STATE(...) FILTER` | 86,366; 87,541; 89,298; 89,633; 94,293 | 89,298 | 115,768 | 608 | 1.00x |
+| After: existing `SUM_STATE(...) FILTER` control | 86,327; 93,376; 86,419; 88,605; 91,161 | 88,605 | 115,768 | 608 | 0.99x |
+| After: `SUM_STATE_IF(...)` | 87,924; 87,663; 89,543; 92,229; 92,607 | 89,543 | 115,768 | 608 | 1.00x (0.27% slower) |
+
+The new spelling has the same measured heap and allocation profile as the
+existing filtered spelling. Its median CPU cost is within benchmark noise of
+the clean baseline; the small 0.27% difference is not treated as a meaningful
+regression. The implementation adds no retained state memory and leaves the
+serialized state bytes unchanged. Details and examples are in
+[CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md).

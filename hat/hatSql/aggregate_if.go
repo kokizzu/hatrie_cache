@@ -26,7 +26,7 @@ func sqlAggregateIfBase(name string) (string, bool) {
 func normalizeSQLAggregateIf(expr sqlExpr) (sqlExpr, bool, error) {
 	base, combinator := sqlAggregateIfBase(expr.name)
 	if !combinator {
-		return expr, false, nil
+		return normalizeSQLAggregateStateIf(expr)
 	}
 	expected := 2
 	if base == "COUNT" {
