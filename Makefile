@@ -22172,3 +22172,21 @@ benchmark-tu46-index-stats:
 
 verify-tu46-index-stats:
 	bash scripts/verify-tu46-index-stats.sh
+
+test-chu17-membership:
+	bash scripts/test-chu17-membership.sh
+
+format-chu17-membership:
+	bash scripts/format-chu17-membership.sh
+
+test-race-chu17-membership:
+	bash scripts/test-race-chu17-membership.sh
+
+vet-chu17-membership:
+	bash scripts/vet-chu17-membership.sh
+
+benchmark-chu17-membership:
+	bash scripts/benchmark-chu17-membership.sh
+
+verify-chu17-membership:
+	bash scripts/verify-chu17-membership.sh

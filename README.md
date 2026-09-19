@@ -4771,3 +4771,5 @@ memory estimates without changing default EXPLAIN output.
 - Authenticated ordered-pagination cursor tokens: [TU42_CURSOR_TOKENS.md](TU42_CURSOR_TOKENS.md)
 
 - Opt-in index cardinality and hot-key diagnostics: [TU46_INDEX_STATS.md](TU46_INDEX_STATS.md)
+
+- Adaptive exact integer `IN` sets: [CHU17_ADAPTIVE_IN_SET.md](CHU17_ADAPTIVE_IN_SET.md)
