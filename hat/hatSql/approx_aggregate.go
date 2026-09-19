@@ -28,15 +28,17 @@ type sqlApproxTopKEntry struct {
 }
 
 type sqlApproximateStreamState struct {
-	expr      sqlExpr
-	hll       *hatDataStructure.HyperLogLog
-	quantile  *hatDataStructure.QuantileSketch
-	quantileP float64
-	tdigest   *hatDataStructure.TDigest
-	tdigestP  float64
-	auto      *sqlAutoDistinctState
-	hllState  bool
-	hllMerge  bool
+	expr         sqlExpr
+	hll          *hatDataStructure.HyperLogLog
+	quantile     *hatDataStructure.QuantileSketch
+	quantileP    float64
+	tdigest      *hatDataStructure.TDigest
+	tdigestP     float64
+	tdigestState bool
+	tdigestMerge bool
+	auto         *sqlAutoDistinctState
+	hllState     bool
+	hllMerge     bool
 }
 
 func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, bool) {
@@ -131,6 +133,24 @@ func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, boo
 		}
 		state.tdigest, state.tdigestP = &digest, quantile
 		return state, true
+	case "APPROX_TDIGEST_PERCENTILE_STATE":
+		compression, err := sqlApproximateTDigestStateCompression(expr)
+		if err != nil {
+			return nil, false
+		}
+		digest, err := hatDataStructure.NewTDigest(compression)
+		if err != nil {
+			return nil, false
+		}
+		state.tdigest, state.tdigestState = &digest, true
+		return state, true
+	case "APPROX_TDIGEST_PERCENTILE_MERGE":
+		quantile, err := sqlApproximateTDigestMergeQuantile(expr)
+		if err != nil {
+			return nil, false
+		}
+		state.tdigestP, state.tdigestMerge = quantile, true
+		return state, true
 	default:
 		return nil, false
 	}
@@ -188,6 +208,24 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 		state.hll.AddJSONString(encoded)
 		return nil
 	}
+	if state.tdigestMerge {
+		serialized, ok := value.([]byte)
+		if !ok {
+			return sqlApproximateAggregateError(state.expr, fmt.Sprintf("%s expects serialized HAG1 state, got %s", state.expr.name, sqlLiteralTypeName(value)))
+		}
+		other, err := hatDataStructure.NewTDigestFromAggregateState(serialized)
+		if err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		if state.tdigest == nil {
+			state.tdigest = &other
+			return nil
+		}
+		if err := state.tdigest.Merge(other); err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		return nil
+	}
 	if state.tdigest != nil {
 		if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
 			state.tdigest.Add(number)
@@ -216,6 +254,16 @@ func (state *sqlApproximateStreamState) result() interface{} {
 			return uint64(0)
 		}
 		return state.hll.Count()
+	}
+	if state.tdigestState {
+		wire, err := state.tdigest.MarshalAggregateState()
+		if err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		return wire
+	}
+	if state.tdigestMerge && state.tdigest == nil {
+		return nil
 	}
 	if state.hll != nil {
 		return state.hll.Count()
@@ -248,6 +296,8 @@ func evalSQLApproximateAggregate(expr sqlExpr, group []sqlExecRow) interface{} {
 		return evalSQLApproxPercentile(expr, group)
 	case "APPROX_TDIGEST_PERCENTILE":
 		return evalSQLApproxTDigestPercentile(expr, group)
+	case "APPROX_TDIGEST_PERCENTILE_STATE", "APPROX_TDIGEST_PERCENTILE_MERGE":
+		return evalSQLApproximateTDigestState(expr, group)
 	case "APPROX_TOP_K":
 		return evalSQLApproxTopK(expr, group)
 	default:

@@ -1440,6 +1440,23 @@ make test-race-sql-query-trace-spans
 make benchmark-sql-query-trace-spans
 ```
 
+## CH-U43 mergeable SQL t-digest percentile states
+
+This benchmark measures the new mergeable SQL t-digest state path against the
+existing materialized percentile function. The workload uses 10,000 numeric
+rows and five samples; values are medians, and lower is better.
+
+| Path | ns/op | B/op | allocs/op | wire bytes/op | CPU vs materialized | Memory vs materialized |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing `APPROX_TDIGEST_PERCENTILE` | 5,131,224 | 50,630 | 166 | - | 1.00x | 1.00x |
+| `APPROX_TDIGEST_PERCENTILE_STATE` | 5,144,576 | 76,008 | 176 | 11,012 | 1.00x | 1.50x |
+| `APPROX_TDIGEST_PERCENTILE_MERGE` (two 5,000-row states) | 191,182 | 128,704 | 46 | - | separate merge workload | separate merge workload |
+
+State production is CPU-neutral within benchmark noise and adds the expected
+serialization allocation. The existing percentile behavior and default remain
+unchanged; the extra memory is opt-in and produces the reusable HAG1 state.
+Reproduce with `make benchmark-chu43`.
+
 ## CH-042 mergeable approximate distinct states
 
 This benchmark measures the mergeable SQL state path added for

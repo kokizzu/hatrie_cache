@@ -21165,3 +21165,31 @@ vet-chu42:
 .PHONY: commit-chu42
 commit-chu42:
 	sh scripts/commit-chu42.sh
+
+.PHONY: test-chu43
+test-chu43:
+	sh scripts/test-chu43.sh
+
+.PHONY: format-chu43
+format-chu43:
+	sh scripts/format-chu43.sh
+
+.PHONY: benchmark-chu43
+benchmark-chu43:
+	sh scripts/benchmark-chu43.sh
+
+.PHONY: test-chu43-package
+test-chu43-package:
+	sh scripts/test-chu43-package.sh
+
+.PHONY: race-chu43
+race-chu43:
+	sh scripts/race-chu43.sh
+
+.PHONY: vet-chu43
+vet-chu43:
+	sh scripts/vet-chu43.sh
+
+.PHONY: commit-chu43
+commit-chu43:
+	sh scripts/commit-chu43.sh
