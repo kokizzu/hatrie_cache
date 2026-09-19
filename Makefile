@@ -21276,3 +21276,22 @@ cleanup-hatrie-tmp-audit-preview:
 
 cleanup-hatrie-tmp-audit-apply:
 	bash ./scripts/cleanup-hatrie-tmp.sh apply
+
+.PHONY: test-chu31 benchmark-chu31 format-chu31 test-chu31-package race-chu31 vet-chu31
+test-chu31:
+	bash ./scripts/test-chu31.sh
+
+benchmark-chu31:
+	bash ./scripts/benchmark-chu31.sh
+
+format-chu31:
+	bash ./scripts/format-chu31.sh
+
+test-chu31-package:
+	bash ./scripts/test-chu31-package.sh
+
+race-chu31:
+	bash ./scripts/race-chu31.sh
+
+vet-chu31:
+	bash ./scripts/vet-chu31.sh

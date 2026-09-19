@@ -4468,6 +4468,15 @@ Opt-in query profiling can also retain bounded per-operator allocation, peak,
 and retained-byte aggregates with `SQLQueryProfiler.RecordMemory`; see
 [CHU26_OPERATOR_MEMORY_PROFILES.md](CHU26_OPERATOR_MEMORY_PROFILES.md) and the
 [CH-U26 benchmark](BENCHMARK.md#ch-u26-operator-memory-profiles).
+
+### Resumable multipart remote uploads
+
+The opt-in `hatStorage.UploadRemotePartMultipart` coordinator provides
+checksummed, resumable multipart upload state with per-part persistence and
+explicit abort. Store-specific network/authentication and orphan-upload policy
+remain behind the `RemoteMultipartUploadStore` interface. See
+[CHU31_MULTIPART_REMOTE_UPLOAD.md](CHU31_MULTIPART_REMOTE_UPLOAD.md) and the
+[CH-U31 benchmark](BENCHMARK.md#ch-u31-multipart-remote-upload).
 Named SQL-style connections and their credentials can be kept separate with
 the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
 readers are constrained by the referenced secret, and rotation uses an exact

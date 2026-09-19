@@ -31930,3 +31930,23 @@ operator aggregation. Ordinary `Record` callers do not initialize the memory
 profile map or pay this cost. Measurements, API bounds, and the fact that
 runtime memory samples remain caller-supplied are documented in
 [CHU26_OPERATOR_MEMORY_PROFILES.md](CHU26_OPERATOR_MEMORY_PROFILES.md).
+
+## CH-U31 Multipart Remote Upload
+
+Five `-benchmem` samples measured checksum work and the opt-in multipart
+coordinator on Linux/amd64 with an AMD Ryzen 9 5950X. The payload was 4 MiB
+and the remote store was a no-op adapter, so this isolates local checksum and
+control-plane cost rather than network bandwidth or service latency.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| One whole-payload SHA-256 | 1,959,165; 1,983,738; 1,973,534; 1,940,585; 1,963,822 | 1,963,822 | 9 | 0 | 1.00x |
+| Fair two-checksum baseline | 3,938,290; 3,941,050; 4,005,544; 4,037,843; 3,842,402 | 3,941,050 | 18 | 0 | 2.01x |
+| Multipart coordinator, one part | 4,096,522; 4,033,336; 4,007,616; 3,925,734; 3,956,409 | 4,007,616 | 866 | 12 | 2.04x vs one checksum; 1.02x vs fair baseline |
+| Multipart coordinator, four parts | 3,913,537; 4,051,921; 4,022,129; 3,960,868; 3,954,873 | 3,960,868 | 2,131 | 21 | 2.02x vs one checksum; 1.01x vs fair baseline |
+
+The extra CPU versus a single checksum is intentional: the upload validates the
+whole object and each part. The coordinator does not copy the payload; memory
+grows with persisted part metadata. Full resume, abort, validation, and store
+boundary semantics are documented in
+[CHU31_MULTIPART_REMOTE_UPLOAD.md](CHU31_MULTIPART_REMOTE_UPLOAD.md).
