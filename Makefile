@@ -21964,3 +21964,18 @@ format-mu41:
 
 verify-mu41:
 	bash scripts/verify-mu41.sh
+
+test-mu44:
+	@bash scripts/test-mu44.sh
+
+benchmark-mu44-baseline:
+	@bash scripts/benchmark-mu44-baseline.sh
+
+benchmark-mu44:
+	@bash scripts/benchmark-mu44.sh
+
+format-mu44:
+	@bash scripts/format-mu44.sh
+
+verify-mu44:
+	@bash scripts/verify-mu44.sh

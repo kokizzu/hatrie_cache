@@ -299,6 +299,7 @@ security guidance before exposing it on a network.
 - Installing, running, backing up, restoring, and clustering: [Operations Manual](#operations-manual)
 - Safe stale test-directory cleanup: run `make cleanup-hatrie-tmp-preview`, review the plan, then `make cleanup-hatrie-tmp-apply`; active and `.git`-marked worktrees are preserved.
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
+- Opt-in cross-dataflow visibility fencing for maintained SQL views: [M-U44_TRANSACTION_VISIBILITY.md](M-U44_TRANSACTION_VISIBILITY.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Opt-in authenticated WAL encryption and key rotation: [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)
 - Part/WAL-consistent backup manifests with per-file checksums: [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u50-partwal-consistent-backup-manifest)
@@ -3744,6 +3745,16 @@ HTTP topology/election endpoints for generated clients.
 
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.
+
+## M-U44 Cross-Dataflow Visibility
+
+`hatSql.NewSQLDataflowVisibilityCoordinator` is an opt-in publication barrier
+for independent maintained views. Register the view names, prepare the views in
+the caller's own update transaction, then call `Publish` with the complete
+batch. Readers call `Acquire` and `Check` to reject mixed or stale logical
+versions. It retains only bounded name/version metadata; it does not execute
+SQL or retain historical rows. See [M-U44_TRANSACTION_VISIBILITY.md](M-U44_TRANSACTION_VISIBILITY.md)
+for the contract, benchmark tradeoff, and verification commands.
 
 ## TODO:
 

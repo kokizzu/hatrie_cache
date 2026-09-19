@@ -32449,3 +32449,31 @@ Five samples on an AMD Ryzen 9 5950X using `go test -benchmem`:
 | Snapshot of 1,024 events | 249,419 ns/op | 106,600 B/op, 5 allocs/op | Explicit persistence cost |
 
 The ledger is opt-in and bounded; payload bytes are not retained. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md).
+
+## M-U44 Cross-Dataflow Transaction Visibility
+
+Commands:
+
+```sh
+make benchmark-mu44-baseline
+make benchmark-mu44
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline
+updates four preallocated numeric slots. The coordinator validates four names,
+uses one lock, and returns a defensive token or checkpoint.
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU vs one-lock baseline |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Baseline one lock, four slots | 3.852; 3.872; 3.906; 3.843; 3.986 | 3.872 | 0 | 0 | 1.00x |
+| Baseline four independent locks | 15.23; 14.83; 15.06; 14.64; 15.00 | 15.00 | 0 | 0 | 3.88x |
+| `Publish` four dataflows | 191.1; 197.0; 191.2; 193.1; 183.1 | 191.2 | 64 | 1 | 49.38x |
+| `Acquire` four dataflows | 139.0; 132.3; 133.8; 133.5; 133.6 | 133.6 | 64 | 1 | 34.50x |
+| `Check` four dataflows | 123.0; 126.5; 129.6; 128.2; 129.6 | 128.2 | 64 | 1 | 33.11x |
+| `Snapshot` four dataflows | 291.0; 284.0; 296.6; 289.2; 282.3 | 289.2 | 192 | 4 | 74.69x |
+
+This feature is a correctness and recovery boundary, not a performance fast
+path. The overhead is opt-in; ordinary SQL and maintained-view paths do not
+construct a coordinator or pay per-row bookkeeping. See
+[M-U44_TRANSACTION_VISIBILITY.md](M-U44_TRANSACTION_VISIBILITY.md) for the
+API contract and limitations.
