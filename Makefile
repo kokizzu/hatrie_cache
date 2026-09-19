@@ -21510,3 +21510,35 @@ commit-chu41:
 
 push-chu41:
 	bash ./scripts/push-chu41.sh
+
+.PHONY: test-chu44 benchmark-chu44
+test-chu44:
+	bash ./scripts/test-chu44.sh
+benchmark-chu44:
+	bash ./scripts/benchmark-chu44.sh
+
+.PHONY: format-chu44
+format-chu44:
+	bash ./scripts/format-chu44.sh
+
+.PHONY: test-chu44-package
+test-chu44-package:
+	bash ./scripts/test-chu44-package.sh
+
+.PHONY: race-chu44
+race-chu44:
+	bash ./scripts/race-chu44.sh
+
+.PHONY: vet-chu44
+vet-chu44:
+	bash ./scripts/vet-chu44.sh
+
+.PHONY: verify-chu44
+verify-chu44:
+	bash ./scripts/verify-chu44.sh
+
+.PHONY: commit-chu44 push-chu44
+commit-chu44:
+	bash ./scripts/commit-chu44.sh
+push-chu44:
+	bash ./scripts/push-chu44.sh

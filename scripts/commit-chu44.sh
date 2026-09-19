@@ -11,6 +11,9 @@ git archive "$head" | tar -x -C "$stage"
 
 awk '
 {
+	if (index($0, "return normalizeSQLAggregateStateIf(expr)") != 0) {
+		done = 1
+	}
 	if (!done && index($0, "return expr, false, nil") != 0) {
 		print "\t\treturn normalizeSQLAggregateStateIf(expr)"
 		done = 1
@@ -25,10 +28,52 @@ END {
 }' "$stage/hat/hatSql/aggregate_if.go" > "$stage/hat/hatSql/aggregate_if.go.tmp"
 mv "$stage/hat/hatSql/aggregate_if.go.tmp" "$stage/hat/hatSql/aggregate_if.go"
 
-sed -i 's/"ARGMAX_MERGE":/"ARGMAX_MERGE", "COUNT_STATE_IF", "SUM_STATE_IF", "AVG_STATE_IF", "MIN_STATE_IF", "MAX_STATE_IF", "COUNT_MERGE_IF", "SUM_MERGE_IF", "AVG_MERGE_IF", "MIN_MERGE_IF", "MAX_MERGE_IF", "ARGMAX_STATE_IF", "ARGMIN_STATE_IF", "ARGMAX_MERGE_IF", "ARGMIN_MERGE_IF":/' "$stage/hat/hatSql/query.go"
+if ! rg -q 'COUNT_STATE_IF' "$stage/hat/hatSql/query.go"; then
+	sed -i 's/"ARGMAX_MERGE",/"ARGMAX_MERGE", "COUNT_STATE_IF", "SUM_STATE_IF", "AVG_STATE_IF", "MIN_STATE_IF", "MAX_STATE_IF", "COUNT_MERGE_IF", "SUM_MERGE_IF", "AVG_MERGE_IF", "MIN_MERGE_IF", "MAX_MERGE_IF", "ARGMAX_STATE_IF", "ARGMIN_STATE_IF", "ARGMAX_MERGE_IF", "ARGMIN_MERGE_IF",/' "$stage/hat/hatSql/query.go"
+fi
+
+if ! rg -q '^format-chu44:' "$stage/Makefile"; then
+	printf '%s\n' \
+		'' \
+		'.PHONY: test-chu44 benchmark-chu44' \
+		'test-chu44:' \
+		$'\tbash ./scripts/test-chu44.sh' \
+		'benchmark-chu44:' \
+		$'\tbash ./scripts/benchmark-chu44.sh' \
+		'' \
+		'.PHONY: format-chu44' \
+		'format-chu44:' \
+		$'\tbash ./scripts/format-chu44.sh' \
+		'' \
+		'.PHONY: test-chu44-package' \
+		'test-chu44-package:' \
+		$'\tbash ./scripts/test-chu44-package.sh' \
+		'' \
+		'.PHONY: race-chu44' \
+		'race-chu44:' \
+		$'\tbash ./scripts/race-chu44.sh' \
+		'' \
+		'.PHONY: vet-chu44' \
+		'vet-chu44:' \
+		$'\tbash ./scripts/vet-chu44.sh' \
+		'' \
+		'.PHONY: verify-chu44' \
+		'verify-chu44:' \
+		$'\tbash ./scripts/verify-chu44.sh' \
+		'' \
+		'.PHONY: commit-chu44 push-chu44' \
+		'commit-chu44:' \
+		$'\tbash ./scripts/commit-chu44.sh' \
+		'push-chu44:' \
+		$'\tbash ./scripts/push-chu44.sh' \
+		>> "$stage/Makefile"
+fi
 
 awk '
 {
+	if (index($0, "CHU44_SQL_AGGREGATE_COMBINATORS.md") != 0) {
+		done = 1
+	}
 	print
 	if (!done && index($0, "AGGREGATE_COMBINATORS.md)") != 0) {
 		print "- Filtered SQL aggregate state/merge combinators such as `SUM_STATE_IF` and `SUM_MERGE_IF`: [CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#ch-u44-sql-aggregate-combinators)"
@@ -58,6 +103,7 @@ END {
 }' "$stage/PRODUCT_IDEA_GAPS.md" > "$stage/PRODUCT_IDEA_GAPS.md.tmp"
 mv "$stage/PRODUCT_IDEA_GAPS.md.tmp" "$stage/PRODUCT_IDEA_GAPS.md"
 
+if ! rg -q '^## CH-U44 SQL Aggregate Combinators$' "$stage/BENCHMARK.md"; then
 printf '%s\n' \
   '' \
   '## CH-U44 SQL Aggregate Combinators' \
@@ -82,6 +128,7 @@ printf '%s\n' \
   'serialized state bytes unchanged. Details and examples are in' \
   '[CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md).' \
   >> "$stage/BENCHMARK.md"
+fi
 
 feature_paths=(
 	CHU44_SQL_AGGREGATE_COMBINATORS.md
@@ -117,7 +164,7 @@ if [ "$(git rev-parse HEAD)" != "$head" ]; then
 fi
 
 tree=$(GIT_INDEX_FILE="$index" git write-tree)
-commit=$(printf '%s\n' 'feat(hatSql): add filtered aggregate state combinators' | git commit-tree "$tree" -p "$head")
+commit=$(printf '%s\n' 'fix(hatSql): wire CH-U44 parser and Makefile targets' | git commit-tree "$tree" -p "$head")
 
 if ref=$(git symbolic-ref -q HEAD); then
 	git update-ref "$ref" "$commit" "$head"
