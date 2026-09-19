@@ -196,6 +196,7 @@ security guidance before exposing it on a network.
 - Clock-independent bounded replica RPO status: [REPLICA_RPO_STATUS.md](REPLICA_RPO_STATUS.md)
 - Online snapshot manifest with exact journal coordinate: [SNAPSHOT_MANIFEST.md](SNAPSHOT_MANIFEST.md)
 - Per-space conflict policy registry: [CONFLICT_POLICY.md](CONFLICT_POLICY.md)
+- Opt-in bounded redacted conflict introspection stream: [TU38_CONFLICT_INTROSPECTION.md](TU38_CONFLICT_INTROSPECTION.md), with measured snapshot CPU, memory, and wire-size tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u38-conflict-introspection-stream)
 - Named versioned space catalog: [SPACE_CATALOG.md](SPACE_CATALOG.md)
 - Authenticated cursor-after pagination: [CURSOR_PAGINATION.md](CURSOR_PAGINATION.md)
 - Changefeed progress frontiers: [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md)

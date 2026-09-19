@@ -32814,3 +32814,56 @@ BenchmarkPersistentDeleteBitmapPackedDecode-32       262429 4809 ns/op 13616 B/o
 The packed decoder uses one additional allocation but 7.82x less heap; the
 format is explicit and bounded rather than an automatic change to existing
 typed-table persistence.
+
+## T-U38 Conflict Introspection Stream
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The direct baseline
+is the existing conflict resolver. JSON and CIF1 snapshots encode the same
+256 redacted events.
+
+| Operation | Existing/direct or JSON baseline | CIF1 conflict log | Improvement or cost |
+| --- | ---: | ---: | ---: |
+| Direct resolution versus explicit record | 6.57 ns/op, 0 B/op, 0 allocs/op | 85.79 ns/op, 0 B/op, 0 allocs/op | 13.1x opt-in recording cost |
+| Snapshot encode | 121,176 ns/op, 68,905 wire bytes (JSON) | 19,057 ns/op, 27,925 wire bytes | 6.36x faster, 2.47x smaller |
+| Snapshot decode | 869,389 ns/op, 88,539 B/op, 1,041 allocs/op (JSON) | 41,307 ns/op, 47,109 B/op, 769 allocs/op | 21.0x faster, 26% fewer allocs |
+| Snapshot encode allocations | 2 allocs/op (JSON) | 2 allocs/op | unchanged |
+| Snapshot decode allocations | 1,041 allocs/op (JSON) | 769 allocs/op | 26% lower |
+
+The feature is opt-in and caller-driven. Existing conflict resolution keeps its
+zero-allocation behavior; the recording cost is paid only when a caller wants
+the diagnostic event. The binary snapshot is CRC32C-protected and bounded.
+
+Raw samples:
+
+```text
+BenchmarkResolveConflictVersion-32  187955611  6.763 ns/op  0 B/op  0 allocs/op
+BenchmarkResolveConflictVersion-32  187844469  6.595 ns/op  0 B/op  0 allocs/op
+BenchmarkResolveConflictVersion-32  186584611  6.717 ns/op  0 B/op  0 allocs/op
+BenchmarkResolveConflictVersion-32  186076284  6.285 ns/op  0 B/op  0 allocs/op
+BenchmarkResolveConflictVersion-32  179353695  6.572 ns/op  0 B/op  0 allocs/op
+BenchmarkTU38ConflictIntrospectionRecord-32  12799508  89.36 ns/op  0 B/op  0 allocs/op
+BenchmarkTU38ConflictIntrospectionRecord-32  13168314  85.79 ns/op  0 B/op  0 allocs/op
+BenchmarkTU38ConflictIntrospectionRecord-32  14695778  83.92 ns/op  0 B/op  0 allocs/op
+BenchmarkTU38ConflictIntrospectionRecord-32  12719167  85.62 ns/op  0 B/op  0 allocs/op
+BenchmarkTU38ConflictIntrospectionRecord-32  12852675  91.63 ns/op  0 B/op  0 allocs/op
+BenchmarkTU38BaselineJSONSnapshotEncode-32  9915  116506 ns/op  68905 wire-bytes/op  74280 B/op  2 allocs/op
+BenchmarkTU38BaselineJSONSnapshotEncode-32  9650  115278 ns/op  68905 wire-bytes/op  74209 B/op  2 allocs/op
+BenchmarkTU38BaselineJSONSnapshotEncode-32  10000  121176 ns/op  68905 wire-bytes/op  74276 B/op  2 allocs/op
+BenchmarkTU38BaselineJSONSnapshotEncode-32  9501  121403 ns/op  68905 wire-bytes/op  74409 B/op  2 allocs/op
+BenchmarkTU38BaselineJSONSnapshotEncode-32  8174  129240 ns/op  68905 wire-bytes/op  74238 B/op  2 allocs/op
+BenchmarkTU38BaselineJSONSnapshotDecode-32  1369  930321 ns/op  88535 B/op  1041 allocs/op
+BenchmarkTU38BaselineJSONSnapshotDecode-32  1353  857505 ns/op  88539 B/op  1041 allocs/op
+BenchmarkTU38BaselineJSONSnapshotDecode-32  1378  878086 ns/op  88533 B/op  1041 allocs/op
+BenchmarkTU38BaselineJSONSnapshotDecode-32  1335  869389 ns/op  88543 B/op  1041 allocs/op
+BenchmarkTU38BaselineJSONSnapshotDecode-32  1351  838921 ns/op  88539 B/op  1041 allocs/op
+BenchmarkTU38ConflictIntrospectionMarshal-32  63456  19131 ns/op  27925 wire-bytes/op  69632 B/op  2 allocs/op
+BenchmarkTU38ConflictIntrospectionMarshal-32  62680  19057 ns/op  27925 wire-bytes/op  69632 B/op  2 allocs/op
+BenchmarkTU38ConflictIntrospectionMarshal-32  63799  18968 ns/op  27925 wire-bytes/op  69632 B/op  2 allocs/op
+BenchmarkTU38ConflictIntrospectionMarshal-32  64144  18983 ns/op  27925 wire-bytes/op  69632 B/op  2 allocs/op
+BenchmarkTU38ConflictIntrospectionMarshal-32  63070  19874 ns/op  27925 wire-bytes/op  69632 B/op  2 allocs/op
+BenchmarkTU38ConflictIntrospectionUnmarshal-32  28780  41598 ns/op  47109 B/op  769 allocs/op
+BenchmarkTU38ConflictIntrospectionUnmarshal-32  28550  41184 ns/op  47109 B/op  769 allocs/op
+BenchmarkTU38ConflictIntrospectionUnmarshal-32  27801  41829 ns/op  47109 B/op  769 allocs/op
+BenchmarkTU38ConflictIntrospectionUnmarshal-32  29251  41307 ns/op  47109 B/op  769 allocs/op
+BenchmarkTU38ConflictIntrospectionUnmarshal-32  32668  36053 ns/op  47108 B/op  769 allocs/op
+```
