@@ -199,6 +199,7 @@ security guidance before exposing it on a network.
 - Changefeed progress frontiers: [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md)
 - Durable changefeed checkpoints: [CHANGEFEED_CHECKPOINT.md](CHANGEFEED_CHECKPOINT.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
+- Opt-in durable SQL mutation retries with `mutation_id`: [CHU34_SQL_MUTATION_IDEMPOTENCY.md](CHU34_SQL_MUTATION_IDEMPOTENCY.md), with raw retry measurements in [BENCHMARK.md](BENCHMARK.md#ch-u34-idempotent-sql-mutation-retries)
 - Query-wide live SQL spill quotas: [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
@@ -4496,6 +4497,16 @@ to a manifest fingerprint, deterministic voter quorum, and fencing token before
 calling the injected publication store. Discovery, retries, and rollback remain
 caller-owned. See [CHU33_REMOTE_PART_PUBLICATION.md](CHU33_REMOTE_PART_PUBLICATION.md)
 and the [CH-U33 benchmark](BENCHMARK.md#ch-u33-quorum-remote-part-publication).
+
+### Idempotent SQL mutation retries
+
+`POST /api/sql` is read-only by default. Add a stable `mutation_id` to opt into
+one journal-backed SQL mutation retry token; the same request can be retried
+after a transport timeout without applying the write twice, including after
+journal replay. Same-token changes fail closed, while zero idempotency capacity
+keeps the feature disabled. See
+[CHU34_SQL_MUTATION_IDEMPOTENCY.md](CHU34_SQL_MUTATION_IDEMPOTENCY.md) and the
+[CH-U34 benchmark](BENCHMARK.md#ch-u34-idempotent-sql-mutation-retries).
 Named SQL-style connections and their credentials can be kept separate with
 the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
 readers are constrained by the referenced secret, and rotation uses an exact

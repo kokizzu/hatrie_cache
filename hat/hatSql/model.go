@@ -2,10 +2,13 @@
 // hatrie_cache SQL endpoint.
 package hatSql
 
-// QueryRequest is accepted by the read-only monitoring SQL endpoint.
+// QueryRequest is accepted by the monitoring SQL endpoint. A non-empty
+// MutationID opts into one journal-backed mutation; requests without it remain
+// read-only.
 type QueryRequest struct {
 	Query      string        `json:"query"`
 	Parameters []interface{} `json:"parameters,omitempty"`
+	MutationID string        `json:"mutation_id,omitempty"`
 	PageSize   int           `json:"page_size,omitempty"`
 	Cursor     string        `json:"cursor,omitempty"`
 	Keyset     bool          `json:"keyset,omitempty"`

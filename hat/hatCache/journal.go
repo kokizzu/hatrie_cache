@@ -1405,7 +1405,17 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 		if progress != nil {
 			progress.markCurrent(entry.Sequence)
 		}
-		if err := executeCommandForReplay(trie, entry.Request); err != nil {
+		if journal.idempotency.enabled() && strings.TrimSpace(entry.Request.IdempotencyKey) != "" {
+			response := trie.ExecuteCommand(entry.Request)
+			if !response.OK {
+				return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
+			}
+			check, err := newCommandIdempotencyCheck(entry.Request)
+			if err != nil {
+				return fmt.Errorf("hatriecache: replay command journal entry %d idempotency check failed: %s", entry.Sequence, err)
+			}
+			journal.idempotency.remember(check, response, entry.Sequence)
+		} else if err := executeCommandForReplay(trie, entry.Request); err != nil {
 			return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, err)
 		}
 		if progress != nil {

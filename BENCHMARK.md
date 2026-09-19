@@ -31989,3 +31989,24 @@ with unchanged correctness coverage. The fixed control-plane cost is the
 tradeoff for fencing and quorum safety; the feature is opt-in.
 
 Details are in [CHU33_REMOTE_PART_PUBLICATION.md](CHU33_REMOTE_PART_PUBLICATION.md).
+
+## CH-U34 Idempotent SQL Mutation Retries
+
+Five `-benchmem` samples measured the warmed duplicate HTTP retry path on
+Linux/amd64 with an AMD Ryzen 9 5950X. The initial durable write is outside the
+timer. The before column is the old `/api/sql` behavior, which rejected the
+mutation as read-only; it is a semantic baseline rather than an apples-to-apples
+throughput control.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Approx. seconds per 10k |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before: rejected mutation request | 17,459; 19,222; 17,440; 17,573; 17,031 | 17,459 | 15,327 | 98 | 0.175 |
+| After: accepted durable duplicate retry | 31,076; 35,846; 38,099; 37,755; 37,035 | 37,035 | 26,880 | 134 | 0.370 |
+
+Compared with the rejected request, the valid retry path costs 2.12x CPU,
+1.75x transient heap, and 1.37x allocations. That cost buys the durable
+fingerprint, journal admission, conflict detection, and restart-safe response;
+the feature is opt-in and the default read-only SQL path is unchanged.
+
+Details, configuration, supported statements, and verification commands are in
+[CHU34_SQL_MUTATION_IDEMPOTENCY.md](CHU34_SQL_MUTATION_IDEMPOTENCY.md).

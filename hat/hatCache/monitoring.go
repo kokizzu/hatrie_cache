@@ -1398,6 +1398,10 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	if handler.rejectSQLRBACHTTP(w, r, request) {
 		return
 	}
+	if strings.TrimSpace(request.MutationID) != "" {
+		handler.handleSQLMutation(w, r, request)
+		return
+	}
 	sources, _ := SQLQuerySourceNames(request.Query, request.Parameters)
 	if request.Stream {
 		if request.PageSize != 0 || request.Cursor != "" || request.Keyset {
@@ -1495,6 +1499,39 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, result)
 }
 
+func (handler *MonitoringHandler) handleSQLMutation(w http.ResponseWriter, r *http.Request, request SQLQueryRequest) {
+	if request.Stream || request.PageSize != 0 || request.Cursor != "" || request.Keyset {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL mutations cannot be combined with streaming or cursor pagination"))
+		return
+	}
+	if handler.options.MaintenanceReadOnly {
+		writeJSONStatus(w, http.StatusServiceUnavailable, commandError("SQL mutations are disabled during maintenance read-only mode"))
+		return
+	}
+	if handler.options.Journal == nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL mutation idempotency requires a configured journal"))
+		return
+	}
+	mutationID := strings.TrimSpace(request.MutationID)
+	sources, _ := SQLQuerySourceNames(request.Query, request.Parameters)
+	result, err := ExecuteSQLMutationIdempotent(
+		r.Context(),
+		handler.options.Journal,
+		handler.trie,
+		request.Query,
+		request.Parameters,
+		handler.options.SQLQueryOptions,
+		mutationID,
+	)
+	if err != nil {
+		handler.auditSQLQuery(r, request, sources, 0, false, http.StatusBadRequest, err.Error())
+		writeJSONStatus(w, http.StatusBadRequest, commandError("SQL mutation failed: "+err.Error()))
+		return
+	}
+	handler.auditSQLQuery(r, request, sources, result.Affected, true, http.StatusOK, "")
+	writeJSON(w, result)
+}
+
 func (handler *MonitoringHandler) handleSQLCatalog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
@@ -1588,7 +1625,7 @@ func monitoringOpenAPIDocumentWithAsyncInsertQueues(asyncCommands, asyncInsertQu
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{"bearerAuth": map[string]interface{}{"type": "http", "scheme": "bearer"}},
 			"schemas": map[string]interface{}{
-				"SQLQueryRequest":        map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
+				"SQLQueryRequest":        map[string]interface{}{"type": "object", "required": []string{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "parameters": map[string]interface{}{"type": "array"}, "mutation_id": map[string]interface{}{"type": "string", "maxLength": MaxCommandJournalIdempotencyKeyBytes, "description": "Optional durable retry token for one journal-backed SQL mutation."}, "page_size": map[string]interface{}{"type": "integer"}, "cursor": map[string]interface{}{"type": "string"}, "keyset": map[string]interface{}{"type": "boolean"}, "stream": map[string]interface{}{"type": "boolean"}}},
 				"MemoryReport":           monitoringMemoryReportOpenAPISchema(),
 				"MemoryAccountingReport": monitoringMemoryAccountingOpenAPISchema(),
 				"SchedulerReport":        monitoringSchedulerReportOpenAPISchema(),
@@ -1937,7 +1974,15 @@ func (handler *MonitoringHandler) rejectCommandRBACHTTP(w http.ResponseWriter, r
 }
 
 func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *http.Request, request SQLQueryRequest) bool {
-	sources, err := SQLQuerySourceNames(request.Query, request.Parameters)
+	var (
+		sources []string
+		err     error
+	)
+	if strings.TrimSpace(request.MutationID) != "" {
+		sources, err = sqlMutationSourceNames(request.Query, request.Parameters)
+	} else {
+		sources, err = SQLQuerySourceNames(request.Query, request.Parameters)
+	}
 	if err != nil {
 		handler.auditSQLQuery(r, request, nil, 0, false, http.StatusBadRequest, err.Error())
 		writeJSONStatus(w, http.StatusBadRequest, commandError(FormatSQLDiagnostic(request.Query, err)))

@@ -24,6 +24,21 @@ type SQLMutationResult struct {
 	BeforeRows []SQLRow             `json:"before_rows,omitempty"`
 }
 
+func sqlMutationSourceNames(source string, parameters []interface{}) ([]string, error) {
+	mutationSource, _, err := parseSQLMutationReturning(source)
+	if err != nil {
+		return nil, err
+	}
+	insert, insertSelect, err := parseSQLInsertSelect(mutationSource)
+	if err != nil {
+		return nil, err
+	}
+	if !insertSelect {
+		return nil, nil
+	}
+	return SQLQuerySourceNames(insert.query, parameters)
+}
+
 // ExecuteSQLMutation executes direct command-SQL mutations and INSERT ...
 // SELECT against trie. INSERT ... SELECT accepts a relational query after the
 // target column list; its selected columns are mapped positionally to key,

@@ -21342,3 +21342,38 @@ vet-chu33:
 .PHONY: verify-chu33
 verify-chu33:
 	bash ./scripts/verify-chu33.sh
+
+.PHONY: test-chu34
+test-chu34:
+	bash ./scripts/test-chu34.sh
+
+.PHONY: benchmark-chu34
+benchmark-chu34:
+	bash ./scripts/benchmark-chu34.sh
+
+.PHONY: format-chu34
+format-chu34:
+	bash ./scripts/format-chu34.sh
+
+.PHONY: test-chu34-package
+test-chu34-package:
+	bash ./scripts/test-chu34-package.sh
+
+.PHONY: race-chu34
+race-chu34:
+	bash ./scripts/race-chu34.sh
+
+.PHONY: vet-chu34
+vet-chu34:
+	bash ./scripts/vet-chu34.sh
+
+.PHONY: verify-chu34
+verify-chu34:
+	bash ./scripts/verify-chu34.sh
+
+.PHONY: commit-chu34 push-chu34
+commit-chu34:
+	bash ./scripts/commit-chu34.sh
+
+push-chu34:
+	bash ./scripts/push-chu34.sh
