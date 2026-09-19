@@ -32369,3 +32369,32 @@ save pays for fsync and atomic replacement, while restore opens a fresh
 registry and validates the complete payload. See
 [MU09_DURABLE_FRONTIER_SNAPSHOTS.md](MU09_DURABLE_FRONTIER_SNAPSHOTS.md) for
 the recovery contract and operational guidance.
+
+## M-U10 Adaptive Logical Compaction
+
+Commands:
+
+```sh
+make benchmark-mu10-baseline
+make benchmark-mu10
+make benchmark-mu10-cancellable
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The nil-policy path keeps the
+existing direct join behavior. The fast adaptive path reuses direct `Compact`
+for non-cancellable maintenance contexts; the cancellable path collects keys
+before mutation so cancellation cannot leave partial state.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Before direct load | 3,081,673 | 2,979,086 | 13,457 | baseline |
+| Final nil-policy load | 3,011,868 | 2,979,123 | 13,457 | within run variance |
+| Final enabled-policy load | 3,131,926 | 2,979,152 | 13,458 | 1.04x vs nil-policy |
+| Recommendation only | 77.87 | 0 | 0 | zero-allocation hint |
+| Before direct compaction | 302,759 | 197,110 | 20 | baseline |
+| Fast adaptive compaction | 327,521 | 197,139 | 21 | 1.08x CPU |
+| Cancellable adaptive compaction | 375,300 | 268,489 | 52 | 1.24x CPU |
+
+This is an opt-in scheduling feature, not an unconditional hot-path
+optimization. See [MU10_ADAPTIVE_LOGICAL_COMPACTION.md](MU10_ADAPTIVE_LOGICAL_COMPACTION.md)
+for raw samples and threshold defaults.

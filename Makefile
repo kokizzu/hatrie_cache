@@ -21891,3 +21891,16 @@ tmp-hatrie-empty-plan:
 	bash scripts/cleanup-hatrie-empty-tmp.sh preview
 tmp-hatrie-empty-clean:
 	bash scripts/cleanup-hatrie-empty-tmp.sh apply
+
+test-mu10:
+	sh scripts/test-mu10.sh
+format-mu10:
+	gofmt -w hat/hatSql/differential_temporal_join.go hat/hatSql/differential_temporal_join_adaptive_compaction.go hat/hatSql/m_u10_adaptive_compaction_test.go hat/hatSql/m_u10_adaptive_compaction_benchmark_test.go
+benchmark-mu10-baseline:
+	bash scripts/benchmark-mu10-baseline.sh
+benchmark-mu10:
+	bash scripts/benchmark-mu10.sh
+benchmark-mu10-cancellable:
+	bash scripts/benchmark-mu10-cancellable.sh
+verify-mu10:
+	bash scripts/verify-mu10.sh

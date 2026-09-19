@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"time"
 )
 
 var (
@@ -29,10 +30,11 @@ type DifferentialTemporalJoinKeyFunc func(SQLRow) string
 // equi-join. Rows match when their callback keys are equal and their timestamps
 // differ by at most MaxTimeDistance, inclusive.
 type DifferentialTemporalJoinDefinition struct {
-	MinTimeDistance uint64
-	MaxTimeDistance uint64
-	LeftKey         DifferentialTemporalJoinKeyFunc
-	RightKey        DifferentialTemporalJoinKeyFunc
+	MinTimeDistance  uint64
+	MaxTimeDistance  uint64
+	LeftKey          DifferentialTemporalJoinKeyFunc
+	RightKey         DifferentialTemporalJoinKeyFunc
+	CompactionPolicy *DifferentialTemporalJoinCompactionPolicy
 }
 
 type differentialTemporalJoinEntry struct {
@@ -65,19 +67,22 @@ type DifferentialTemporalJoinCompactionStats struct {
 // changes they apply. The join is safe for concurrent ApplyLeft/ApplyRight
 // calls; each batch is serialized and invalid batches leave state unchanged.
 type DifferentialTemporalJoin struct {
-	mu              sync.Mutex
-	minTimeDistance uint64
-	maxTimeDistance uint64
-	leftKey         DifferentialTemporalJoinKeyFunc
-	rightKey        DifferentialTemporalJoinKeyFunc
-	left            map[string]differentialTemporalJoinEntry
-	right           map[string]differentialTemporalJoinEntry
-	leftGroups      map[string][]string
-	rightGroups     map[string][]string
-	leftGroupKnown  map[differentialTemporalJoinGroupKey]struct{}
-	rightGroupKnown map[differentialTemporalJoinGroupKey]struct{}
-	leftFrontier    uint64
-	rightFrontier   uint64
+	mu                     sync.Mutex
+	minTimeDistance        uint64
+	maxTimeDistance        uint64
+	leftKey                DifferentialTemporalJoinKeyFunc
+	rightKey               DifferentialTemporalJoinKeyFunc
+	left                   map[string]differentialTemporalJoinEntry
+	right                  map[string]differentialTemporalJoinEntry
+	leftGroups             map[string][]string
+	rightGroups            map[string][]string
+	leftGroupKnown         map[differentialTemporalJoinGroupKey]struct{}
+	rightGroupKnown        map[differentialTemporalJoinGroupKey]struct{}
+	leftFrontier           uint64
+	rightFrontier          uint64
+	compactionPolicy       *DifferentialTemporalJoinCompactionPolicy
+	updatesSinceCompaction uint64
+	lastCompactionAt       time.Time
 }
 
 // NewDifferentialTemporalJoin creates an empty temporal join.
@@ -91,17 +96,22 @@ func NewDifferentialTemporalJoin(definition DifferentialTemporalJoinDefinition) 
 	if definition.MinTimeDistance > definition.MaxTimeDistance {
 		return nil, ErrDifferentialTemporalJoinInvalidInterval
 	}
+	compactionPolicy, err := normalizeDifferentialTemporalJoinCompactionPolicy(definition.CompactionPolicy)
+	if err != nil {
+		return nil, err
+	}
 	return &DifferentialTemporalJoin{
-		minTimeDistance: definition.MinTimeDistance,
-		maxTimeDistance: definition.MaxTimeDistance,
-		leftKey:         definition.LeftKey,
-		rightKey:        definition.RightKey,
-		left:            make(map[string]differentialTemporalJoinEntry),
-		right:           make(map[string]differentialTemporalJoinEntry),
-		leftGroups:      make(map[string][]string),
-		rightGroups:     make(map[string][]string),
-		leftGroupKnown:  make(map[differentialTemporalJoinGroupKey]struct{}),
-		rightGroupKnown: make(map[differentialTemporalJoinGroupKey]struct{}),
+		minTimeDistance:  definition.MinTimeDistance,
+		maxTimeDistance:  definition.MaxTimeDistance,
+		leftKey:          definition.LeftKey,
+		rightKey:         definition.RightKey,
+		left:             make(map[string]differentialTemporalJoinEntry),
+		right:            make(map[string]differentialTemporalJoinEntry),
+		leftGroups:       make(map[string][]string),
+		rightGroups:      make(map[string][]string),
+		leftGroupKnown:   make(map[differentialTemporalJoinGroupKey]struct{}),
+		rightGroupKnown:  make(map[differentialTemporalJoinGroupKey]struct{}),
+		compactionPolicy: compactionPolicy,
 	}, nil
 }
 
@@ -116,7 +126,9 @@ func (join *DifferentialTemporalJoin) ApplyLeft(changes []DifferentialRow) ([]Di
 	if err := join.validateChanges(changes, true); err != nil {
 		return nil, err
 	}
-	return join.applyChanges(changes, true), nil
+	emitted := join.applyChanges(changes, true)
+	join.recordDifferentialTemporalJoinUpdates(changes)
+	return emitted, nil
 }
 
 // ApplyRight applies weighted changes to the right input and returns matching
@@ -130,7 +142,9 @@ func (join *DifferentialTemporalJoin) ApplyRight(changes []DifferentialRow) ([]D
 	if err := join.validateChanges(changes, false); err != nil {
 		return nil, err
 	}
-	return join.applyChanges(changes, false), nil
+	emitted := join.applyChanges(changes, false)
+	join.recordDifferentialTemporalJoinUpdates(changes)
+	return emitted, nil
 }
 
 // Compact evicts rows that cannot match any future counterpart and are sealed
@@ -169,6 +183,7 @@ func (join *DifferentialTemporalJoin) Compact(leftFrontier, rightFrontier uint64
 	join.rightFrontier = rightFrontier
 	stats.RetainedLeft = len(join.left)
 	stats.RetainedRight = len(join.right)
+	join.markDifferentialTemporalJoinCompacted(time.Now().UTC())
 	return stats, nil
 }
 

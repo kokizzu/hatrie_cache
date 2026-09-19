@@ -4719,3 +4719,18 @@ the recovery contract, security notes, and measured control-plane cost.
 
 Run `make test-mu09`, `make verify-mu09`, `make benchmark-mu09-baseline`, and
 `make benchmark-mu09` for the focused checks and measurements.
+
+## Adaptive Logical Compaction
+
+`hatSql.DifferentialTemporalJoin` can opt into bounded compaction
+recommendations based on update count, estimated retained bytes, and time
+since the last successful frontier compaction. The default is off: no worker
+starts and ordinary joins keep the existing path. `CompactIfNeeded` retains
+the exact frontier safety rules and uses an all-or-nothing collect path when a
+cancellable context is supplied. See
+[MU10_ADAPTIVE_LOGICAL_COMPACTION.md](MU10_ADAPTIVE_LOGICAL_COMPACTION.md) for
+the API, defaults, cancellation behavior, and measurements.
+
+Run `make test-mu10`, `make verify-mu10`, `make benchmark-mu10-baseline`,
+`make benchmark-mu10`, and `make benchmark-mu10-cancellable` for the focused
+checks and measurements.
