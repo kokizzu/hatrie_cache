@@ -1,85 +1,70 @@
-# Connector Health Remediation
+# M-U48 Source Connector Health Remediation
 
-MU-048 adds an opt-in retry and quarantine policy to `hat/hatPipeline` connector startup.
-The existing `ConnectorRegistry.Start` lifecycle remains unchanged. Callers that need
-bounded remediation can use `StartWithHealthPolicy`.
+M-U48 adds an opt-in health control plane for `hatPipeline.ConnectorRegistry`.
+It provides bounded synchronous retries, context-aware exponential backoff,
+observable health status, and explicit quarantine/release. Existing lifecycle
+methods do not retry or start background goroutines.
 
-## Use
+## API
 
 ```go
-policy := hatPipeline.ConnectorHealthPolicy{
-	MaxAttempts:     4,
-	QuarantineAfter: 3,
-	InitialBackoff: 25 * time.Millisecond,
-	MaxBackoff:     500 * time.Millisecond,
+policy := hatPipeline.DefaultConnectorHealthPolicy()
+status, err := registry.StartWithHealthPolicy(ctx, "orders", policy)
+if err != nil {
+	// status.LastError retains the connector error; err may be context.Canceled.
+	return err
 }
 
-result, err := registry.StartWithHealthPolicy(ctx, "orders", policy)
-switch {
-case err == nil && result.Recovered:
-	// The connector failed transiently and then recovered.
-case errors.Is(err, hatPipeline.ErrConnectorHealthQuarantined):
-	// Keep the connector failed and alert or require operator intervention.
-case err != nil:
-	// The context, registry, or connector returned a non-retryable error.
+status, err = registry.QuarantineConnector(ctx, "orders", "upstream revoked access")
+if err != nil {
+	return err
+}
+_ = status
+
+if err := registry.ReleaseConnectorQuarantine("orders"); err != nil {
+	return err
 }
 ```
 
-The policy call is caller-driven. It does not create a background goroutine or
-change the default `Start` path, so deployments can choose their own scheduler,
-alerting, and operator override behavior.
+`StartWithHealthPolicy` starts `Created` or `Failed` connectors, resumes
+paused connectors, and returns an already-running connector as healthy. A
+failure can be retried when `Retryable` accepts it. `QuarantineOnFailure`
+records the final failure as `ConnectorQuarantined`; otherwise it records
+`ConnectorHealthFailed`. Quarantine blocks later remediation until an
+explicit release. Quarantine pauses a running connector before recording the
+quarantine, while release does not start the connector automatically.
 
-## Defaults And Bounds
+`HealthStatus` and `HealthSnapshot` expose `Unknown`, `Healthy`, `Retrying`,
+`ConnectorHealthFailed`, and `ConnectorQuarantined` states. Error/reason text
+is capped at 4 KiB; attempts are capped at 128 and backoff at one hour.
 
-Zero-valued policy fields use these defaults:
+## Defaults and safety
 
-| Field | Default |
-| --- | ---: |
-| `MaxAttempts` | `3` |
-| `QuarantineAfter` | `MaxAttempts` |
-| `InitialBackoff` | `100ms` |
-| `MaxBackoff` | `2s` |
-
-The implementation accepts at most `1024` attempts and a maximum backoff of one
-hour. Negative values, a quarantine threshold greater than the attempt limit, or
-an initial backoff greater than the maximum are rejected before startup.
-
-`MaxAttempts` includes the first startup attempt. A connector is quarantined
-after `QuarantineAfter` retryable callback failures. Quarantine returns an error
-wrapping `ErrConnectorHealthQuarantined` and leaves the connector in the existing
-`Failed` state; it does not delete offsets or unregister the connector.
-
-## Retry Rules
-
-Connector callback failures are retried with bounded exponential backoff. Context
-cancellation and registry/lifecycle errors are returned immediately. A canceled
-context also interrupts an in-progress backoff timer. The result reports total
-attempts, callback failures, recovery, and quarantine so callers can emit their
-own metrics without inspecting internal state.
+`DefaultConnectorHealthPolicy` uses three total attempts, 100 ms initial
+backoff, a 5 s maximum backoff, and quarantine after failure. The policy is
+still inert until the caller invokes `StartWithHealthPolicy`. Numeric zero
+values select those numeric defaults; `QuarantineOnFailure` must be explicitly
+set when constructing a custom policy. Context cancellation stops the timer
+without another attempt and preserves the last connector error in health
+status.
 
 ## Benchmark
 
-The benchmark uses a fresh registry and connector for every iteration. It was run
-with Go benchmarks, `-benchmem`, and `-count=5` on an AMD Ryzen 9 5950X.
+Machine: AMD Ryzen 9 5950X, linux/amd64. Five `-benchmem` samples. The
+baseline creates and registers the same connector before calling direct
+`Start`; this measures control-plane overhead, not connector I/O.
 
-| Path | Samples (ns/op) | Median | B/op | allocs/op |
-| --- | --- | ---: | ---: | ---: |
-| Clean baseline | 466.0, 436.5, 415.9, 425.1, 435.5 | 435.5 | 544 | 5 |
-| Existing `Start` | 430.8, 426.8, 437.4, 425.4, 407.0 | 426.8 | 544 | 5 |
-| `StartWithHealthPolicy` | 416.6, 411.7, 388.1, 415.4, 425.2 | 415.4 | 544 | 5 |
+| Operation | Median ns/op | B/op | allocs/op | Relative to direct Start |
+| --- | ---: | ---: | ---: | --- |
+| Direct lifecycle `Start` | 1,072 | 3,240 | 7 | baseline |
+| Health policy, immediate success | 1,497 | 4,264 | 8 | 1.40x time, 1.32x bytes, +1 alloc |
+| Health policy, one retry | 2,386 | 4,528 | 12 | 2.23x time, 1.40x bytes, +5 allocs |
 
-The samples overlap normal benchmark noise; this feature is not presented as a
-throughput optimization. The existing start path keeps the same measured memory
-profile, and the policy path adds no measured allocations in the successful
-single-attempt case. Failed attempts intentionally pay for the configured timer
-and backoff, which is the tradeoff for avoiding retry storms.
+Raw median inputs were direct `Start`: 986.6, 1,072, 1,075, 1,082, 1,048
+ns/op; policy success: 1,428, 1,487, 1,499, 1,497, 1,608 ns/op; and one
+retry: 2,360, 2,453, 2,439, 2,386, 2,275 ns/op.
 
-## Verification
-
-```text
-make test-mu048
-make verify-mu048
-make benchmark-mu048
-```
-
-The verification target runs package tests, a focused race test, and `go vet`.
+This is an explicit resilience tradeoff paid only by callers that request
+health remediation. It is not a claim that a retry is faster than a direct
+start; the benefit is bounded recovery and operator quarantine without
+changing ordinary connector behavior.

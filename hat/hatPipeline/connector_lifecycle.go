@@ -88,13 +88,14 @@ type ConnectorEvent struct {
 }
 
 type managedConnector struct {
-	mu        sync.Mutex
-	id        string
-	connector Connector
-	status    ConnectorStatus
-	events    []ConnectorEvent
-	eventNext int
-	removed   bool
+	mu             sync.Mutex
+	remediationMu  sync.Mutex
+	id             string
+	connector      Connector
+	status         ConnectorStatus
+	events         []ConnectorEvent
+	eventNext      int
+	removed        bool
 }
 
 // ConnectorRegistry owns connector registration, lifecycle transitions, and
@@ -102,7 +103,9 @@ type managedConnector struct {
 // operations unless a caller explicitly uses it.
 type ConnectorRegistry struct {
 	mu           sync.RWMutex
+	healthMu     sync.RWMutex
 	connectors   map[string]*managedConnector
+	health       map[string]ConnectorHealthStatus
 	historyLimit int
 	closed       bool
 }
@@ -118,6 +121,7 @@ func NewConnectorRegistry(options ConnectorRegistryOptions) (*ConnectorRegistry,
 	}
 	return &ConnectorRegistry{
 		connectors:   make(map[string]*managedConnector),
+		health:       make(map[string]ConnectorHealthStatus),
 		historyLimit: historyLimit,
 	}, nil
 }
@@ -176,6 +180,9 @@ func (r *ConnectorRegistry) Unregister(id string) error {
 	}
 	entry.removed = true
 	delete(r.connectors, id)
+	r.healthMu.Lock()
+	delete(r.health, id)
+	r.healthMu.Unlock()
 	return nil
 }
 

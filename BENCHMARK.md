@@ -32571,6 +32571,21 @@ Machine: AMD Ryzen 9 5950X, linux/amd64. Five samples per benchmark.
 
 See [MU045_JOIN_ARRANGEMENT_SELECTION.md](MU045_JOIN_ARRANGEMENT_SELECTION.md) for the selection contract, ranking rules, and raw benchmark samples.
 
+## M-U48 Source Connector Health Remediation
+
+Machine: AMD Ryzen 9 5950X, linux/amd64. Five `-benchmem` samples.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative to direct Start |
+| --- | ---: | ---: | ---: | --- |
+| Direct lifecycle `Start` | 1,072 | 3,240 | 7 | baseline |
+| Health policy, immediate success | 1,497 | 4,264 | 8 | 1.40x time, 1.32x bytes, +1 alloc |
+| Health policy, one retry | 2,386 | 4,528 | 12 | 2.23x time, 1.40x bytes, +5 allocs |
+
+The health policy is opt-in control-plane work. It adds bounded retry and
+quarantine behavior without changing ordinary lifecycle calls. See
+[MU048_CONNECTOR_HEALTH_REMEDIATION.md](MU048_CONNECTOR_HEALTH_REMEDIATION.md)
+for raw samples and safety limits.
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:

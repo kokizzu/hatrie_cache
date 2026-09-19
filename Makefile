@@ -22051,6 +22051,26 @@ verify-mu45:
 	@bash scripts/verify-mu45.sh
 
 
+test-mu48:
+	 scripts/test-mu48.sh
+
+
+benchmark-mu48-baseline:
+	 scripts/benchmark-mu48-baseline.sh
+
+
+benchmark-mu48:
+	 scripts/benchmark-mu48.sh
+
+
+format-mu48:
+	 scripts/format-mu48.sh
+
+
+verify-mu48:
+	 scripts/verify-mu48.sh
+
+
 test-mu47:
 	@bash scripts/test-mu47.sh
 
