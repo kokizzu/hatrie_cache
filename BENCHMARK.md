@@ -33137,3 +33137,50 @@ BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 166275471  7.07 ns/op  0 B
 ```
 
 Reproduce with `make benchmark-tu34` and `make verify-tu34`.
+
+## T-U29 Durable Stream Transaction Recovery
+
+The benchmark measures the opt-in `hatPeer.StreamTransactionRecovery` control
+plane. A persisted transaction performs begin, one call, commit, and forget;
+the lookup cases use one retained operation.
+
+| Workload | Samples | Median | Memory | Comparison |
+| --- | --- | ---: | ---: | ---: |
+| Defensive `Lookup` | 52.08, 52.79, 53.45, 52.02, 52.45 ns/op | 52.45 ns/op | 80 B/op, 1 alloc/op | 17.8x direct-map control |
+| Buffered `LookupInto` | 14.41, 15.52, 15.71, 15.05, 13.72 ns/op | 15.05 ns/op | 0 B/op, 0 allocs/op | 5.1x direct-map control |
+| Direct-map control | 2.95, 2.90, 3.02, 2.97, 2.99 ns/op | 2.95 ns/op | 0 B/op, 0 allocs/op | control |
+| Persisted sync-on-commit transaction | 1.929, 1.692, 1.636, 1.641, 1.656 ms/op | 1.656 ms/op | 3,224 B/op, 44 allocs/op | durable path |
+
+The first all-mutation-sync implementation measured 6.726 ms/op, 6,740 B/op,
+and 95 allocations for the same persisted transaction. Sync-on-commit is about
+4.06x faster, 2.09x lower in measured bytes, and 2.16x fewer allocations. It
+keeps pending calls in memory by default; call `Sync()` or select
+`sync-every-mutation` when pending-state durability is required. Existing peer
+stream endpoints remain unchanged unless the caller opts into the ledger.
+
+Raw output:
+
+```text
+BenchmarkStreamTransactionRecoveryLookup/recovery-32       4566739  52.08 ns/op  80 B/op  1 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-32       4441190  52.79 ns/op  80 B/op  1 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-32       4583943  53.45 ns/op  80 B/op  1 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-32       4523854  52.02 ns/op  80 B/op  1 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-32       4660728  52.45 ns/op  80 B/op  1 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/direct-map-control-32 81176994  2.95 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/direct-map-control-32 71191012  2.90 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/direct-map-control-32 79597184  3.02 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/direct-map-control-32 81867769  2.97 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/direct-map-control-32 83956065  2.99 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-into-32    17324696  14.41 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-into-32    17125706  15.52 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-into-32    15075782  15.71 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-into-32    16193826  15.05 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryLookup/recovery-into-32    15117414  13.72 ns/op  0 B/op  0 allocs/op
+BenchmarkStreamTransactionRecoveryPersistedMutation-32         121  1.929 ms/op  3,225 B/op  44 allocs/op
+BenchmarkStreamTransactionRecoveryPersistedMutation-32         147  1.692 ms/op  3,224 B/op  44 allocs/op
+BenchmarkStreamTransactionRecoveryPersistedMutation-32         145  1.636 ms/op  3,217 B/op  44 allocs/op
+BenchmarkStreamTransactionRecoveryPersistedMutation-32         138  1.641 ms/op  3,224 B/op  44 allocs/op
+BenchmarkStreamTransactionRecoveryPersistedMutation-32         138  1.656 ms/op  3,224 B/op  44 allocs/op
+```
+
+Reproduce with `make benchmark-tu29` and `make verify-tu29`.

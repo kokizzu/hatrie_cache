@@ -22317,6 +22317,12 @@ benchmark-tu27:
 verify-tu27:
 	bash scripts/verify-tu27.sh
 
+benchmark-tu29:
+	bash scripts/benchmark-tu29.sh
+
+verify-tu29:
+	bash scripts/verify-tu29.sh
+
 benchmark-tu34:
 	bash scripts/benchmark-tu34.sh
 

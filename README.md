@@ -4335,6 +4335,7 @@ lookup and preparation tradeoff is documented in
 - Reusable compact peer frame buffers: [TR043B_COMPACT_PEER_WRITE_BUFFER.md](TR043B_COMPACT_PEER_WRITE_BUFFER.md)
 - Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
+- Opt-in durable stream transaction recovery with bounded CRC-protected snapshots: [TU29_DURABLE_STREAM_TRANSACTION_RECOVERY.md](TU29_DURABLE_STREAM_TRANSACTION_RECOVERY.md), with measured sync-mode tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u29-durable-stream-transaction-recovery)
 
 - Opt-in HTTP SQL RowBinary streaming for lower CPU, allocations, and wire
   size: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
