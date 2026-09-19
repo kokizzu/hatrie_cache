@@ -33103,3 +33103,37 @@ it does not claim a wire-size reduction; sparse-prefix consumers can reduce
 their response payload when their transport serializes only matching events.
 Run `make benchmark-tu27` and `make verify-tu27` to reproduce the feature
 benchmark and checks.
+
+## T-U34 Per-Space WAL Sync Policy Registry
+
+The registry resolves a normalized named-space override with a bounded default
+policy. This is a control-plane benchmark; it does not measure fsync or claim
+that a journal write became faster.
+
+| Workload | Samples (ns/op) | Median | Memory | Relative CPU |
+| --- | --- | ---: | ---: | ---: |
+| Registry `Resolve("orders")` | 12.89, 13.04, 12.93, 12.76, 12.12 | 12.89 | 0 B/op, 0 allocs/op | 1.80x slower than direct-map control |
+| Direct map lookup control | 7.35, 7.20, 7.09, 7.15, 7.07 | 7.15 | 0 B/op, 0 allocs/op | control |
+
+The registry overhead buys bounded admission, trimmed names, policy validation,
+default fallback, replacement, and concurrent snapshot support. The feature is
+opt-in and leaves the existing journal default unchanged. The clean remote
+`hatCache` baseline could not compile because of unrelated missing SQL symbols,
+so no end-to-end before/after throughput ratio is reported here.
+
+Raw output:
+
+```text
+BenchmarkSpaceSyncPolicyResolve/registry-32         87594738  12.89 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/registry-32         94854348  13.04 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/registry-32         92442630  12.93 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/registry-32         99242912  12.76 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/registry-32         95105528  12.12 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 154543262  7.35 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 168774327  7.20 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 167660011  7.09 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 169858632  7.15 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 166275471  7.07 ns/op  0 B/op  0 allocs/op
+```
+
+Reproduce with `make benchmark-tu34` and `make verify-tu34`.
