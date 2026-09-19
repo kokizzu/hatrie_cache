@@ -31950,3 +31950,22 @@ whole object and each part. The coordinator does not copy the payload; memory
 grows with persisted part metadata. Full resume, abort, validation, and store
 boundary semantics are documented in
 [CHU31_MULTIPART_REMOTE_UPLOAD.md](CHU31_MULTIPART_REMOTE_UPLOAD.md).
+
+## CH-U32 Remote-Part Garbage Collection
+
+Five `-benchmem` samples measured 10,000 listed objects, 2,000 reachable
+references, and 8,000 old unreachable candidates on Linux/amd64 with an AMD
+Ryzen 9 5950X. The no-op delete adapter isolates local planning and control
+cost from remote bandwidth and latency.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Naive O(n x m) reachability scan, no retained plan | 62,690,218; 60,933,069; 61,822,760; 60,714,458; 63,467,288 | 61,822,760 | 298 | 12 | 1.00x |
+| Naive O(n x m) plan, retains candidates | 54,470,632; 55,929,603; 57,292,393; 55,508,608; 56,729,108 | 55,929,603 | 483,601 | 12 | 1.00x |
+| CH-U32 hash reachability plus in-place sorted plan | 1,655,524; 1,742,548; 1,649,398; 1,703,955; 1,740,435 | 1,703,955 | 674,608 | 13 | 0.03x; 32.82x faster than fair naive plan |
+| CH-U32 explicit delete executor | 718,378; 736,666; 720,331; 768,033; 728,822 | 728,822 | 3 | 0 | allocation-free |
+
+The optimized planner uses 1.40x the fair naive plan's memory for canonical
+candidate metadata and deterministic sorting, while reducing CPU by about
+32.8x. Full plan/apply semantics and safety limits are in
+[CHU32_REMOTE_PART_GC.md](CHU32_REMOTE_PART_GC.md).

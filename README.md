@@ -4477,6 +4477,16 @@ explicit abort. Store-specific network/authentication and orphan-upload policy
 remain behind the `RemoteMultipartUploadStore` interface. See
 [CHU31_MULTIPART_REMOTE_UPLOAD.md](CHU31_MULTIPART_REMOTE_UPLOAD.md) and the
 [CH-U31 benchmark](BENCHMARK.md#ch-u31-multipart-remote-upload).
+
+### Remote-part garbage collection
+
+The opt-in `hatStorage.PlanRemotePartGarbageCollection` creates a bounded,
+manifest-aware dry-run plan with age retention, deterministic ordering, and
+reclaimable-byte accounting. `ExecuteRemotePartGarbageCollection` deletes only
+an explicitly reviewed plan and reports partial progress; listing, manifest
+reads, authorization, and object-store credentials remain caller-owned. See
+[CHU32_REMOTE_PART_GC.md](CHU32_REMOTE_PART_GC.md) and the
+[CH-U32 benchmark](BENCHMARK.md#ch-u32-remote-part-garbage-collection).
 Named SQL-style connections and their credentials can be kept separate with
 the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
 readers are constrained by the referenced secret, and rotation uses an exact

@@ -21295,3 +21295,22 @@ race-chu31:
 
 vet-chu31:
 	bash ./scripts/vet-chu31.sh
+
+.PHONY: test-chu32 benchmark-chu32 format-chu32 test-chu32-package race-chu32 vet-chu32
+test-chu32:
+	bash ./scripts/test-chu32.sh
+
+benchmark-chu32:
+	bash ./scripts/benchmark-chu32.sh
+
+format-chu32:
+	bash ./scripts/format-chu32.sh
+
+test-chu32-package:
+	bash ./scripts/test-chu32-package.sh
+
+race-chu32:
+	bash ./scripts/race-chu32.sh
+
+vet-chu32:
+	bash ./scripts/vet-chu32.sh
