@@ -32413,3 +32413,15 @@ Five-run medians on the AMD Ryzen 9 5950X:
 The advisor is opt-in and runs at plan construction, not in row processing.
 The existing snapshot allocation counts remain 160 B/2 allocs for aggregate
 snapshots and 128 B/1 alloc for join snapshots.
+
+## M-U12 arrangement metadata in EXPLAIN
+
+Five-run medians for a four-step plan on the AMD Ryzen 9 5950X:
+
+| Case | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing explain JSON | 1,147 same-run comparison | 288 | 2 |
+| Build enriched arrangement plan | 577.8 | 1,032 | 4 |
+| Marshal enriched arrangement JSON | 2,348 | 1,594 | 6 |
+
+The enriched format is opt-in and not used in row processing.

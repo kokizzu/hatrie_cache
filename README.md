@@ -4740,3 +4740,9 @@ checks and measurements.
 Typed-table planners can reuse exact aggregate and join arrangements, classify
 stale checkpoints, and estimate incremental memory with
 [M-U11](MU11_ARRANGEMENT_REUSE_ADVISOR.md).
+
+## Arrangement metadata in EXPLAIN
+
+Use the opt-in [M-U12 enriched explain format](MU12_EXPLAIN_ARRANGEMENTS.md)
+to expose arrangement keys, reuse decisions, staleness, cardinality, and
+memory estimates without changing default EXPLAIN output.

@@ -21919,3 +21919,18 @@ format-mu11:
 
 verify-mu11:
 	bash scripts/verify-mu11.sh
+
+test-mu12:
+	bash scripts/test-mu12.sh
+
+benchmark-mu12-baseline:
+	bash scripts/benchmark-mu12-baseline.sh
+
+benchmark-mu12:
+	bash scripts/benchmark-mu12.sh
+
+format-mu12:
+	bash scripts/format-mu12.sh
+
+verify-mu12:
+	bash scripts/verify-mu12.sh
