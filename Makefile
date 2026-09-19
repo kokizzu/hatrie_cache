@@ -21859,3 +21859,17 @@ benchmark-mu08:
 
 verify-mu08:
 	sh scripts/verify-mu08.sh
+
+tmp-hatrie-audit:
+	bash scripts/audit-hatrie-tmp.sh
+tmp-hatrie-audit-contents:
+	bash scripts/audit-go-temp-contents.sh
+tmp-go-test-plan:
+	bash scripts/cleanup-go-test-tmp.sh preview
+tmp-go-test-clean:
+	bash scripts/cleanup-go-test-tmp.sh apply
+verify-tmp-cleanup:
+	bash scripts/test-tmp-cleanup.sh
+
+
+
