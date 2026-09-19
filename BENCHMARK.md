@@ -31829,3 +31829,11 @@ samples. Median results: deterministic key construction `3,351 ns/op`,
 `6.5x` fewer allocations, with `1.22x` higher bytes in this microbenchmark.
 See [C206_QUERY_CACHE_ELIGIBILITY.md](C206_QUERY_CACHE_ELIGIBILITY.md) for
 the correctness scope and limitations.
+## C207 Query condition cache
+
+Median of five samples for a 20,000-row selective columnar filter:
+no cache `425,625 ns/op`, `13,291 B/op`, `74 allocs/op`; warm condition-cache
+hit `18,532 ns/op`, `13,150 B/op`, `72 allocs/op`; cold cache path
+`486,974 ns/op`, `15,378 B/op`, `88 allocs/op`. The warm hit is `23.0x`
+faster, while the cold path is `1.14x` slower than the no-cache path. See
+[C207_QUERY_CONDITION_CACHE.md](C207_QUERY_CONDITION_CACHE.md).

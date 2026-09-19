@@ -21125,3 +21125,15 @@ format-c206:
 .PHONY: commit-c206
 commit-c206:
 	sh scripts/commit-c206.sh
+
+.PHONY: race-c207
+race-c207:
+	sh scripts/race-c207.sh
+
+.PHONY: vet-c207
+vet-c207:
+	sh scripts/vet-c207.sh
+
+.PHONY: commit-c207
+commit-c207:
+	sh scripts/commit-c207.sh
