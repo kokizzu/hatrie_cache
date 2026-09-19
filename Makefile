@@ -21711,3 +21711,19 @@ commit-m050-baseline-fix:
 	bash ./scripts/commit-m050-baseline-fix.sh
 push-m050-baseline-fix:
 	bash ./scripts/push-m050-baseline-fix.sh
+
+.PHONY: format-m052
+format-m052:
+	@bash scripts/format-m052.sh
+
+.PHONY: test-m052
+test-m052:
+	@bash scripts/test-m052.sh
+
+.PHONY: benchmark-m052
+benchmark-m052:
+	@bash scripts/benchmark-m052.sh
+
+.PHONY: verify-m052
+verify-m052:
+	@bash scripts/verify-m052.sh

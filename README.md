@@ -4638,3 +4638,5 @@ The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes,
 - Dependency-aware SQL catalog migration planning and rollback orchestration: [M049_CATALOG_MIGRATION.md](M049_CATALOG_MIGRATION.md)
 
 - Durable logical backup manifests joining storage, source offsets, frontiers, and subscriptions: [M050_DURABLE_FRONTIER_BACKUP.md](M050_DURABLE_FRONTIER_BACKUP.md)
+
+- Materialize-style connector schema evolution with deterministic compatibility plans, mixed-version row projection, atomic catalog generations, and rollback: [MU02_CONNECTOR_SCHEMA_EVOLUTION.md](MU02_CONNECTOR_SCHEMA_EVOLUTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u02-connector-schema-evolution).

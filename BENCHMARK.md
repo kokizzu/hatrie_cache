@@ -32180,3 +32180,16 @@ Five runs on Linux/amd64, AMD Ryzen 9 5950X:
 The control loop is a lower-bound measurement, not a previous backup
 implementation. M-U50 is intentionally bounded control-plane work and should
 not be put on a query or row-update hot path.
+
+## M-U02 Connector Schema Evolution
+
+`make benchmark-m052-baseline` measured the clean `origin/master` resolver control path, and `make benchmark-m052` measured the feature tree. Both used five runs on an AMD Ryzen 9 5950X with `-benchmem`.
+
+| Path | Clean origin median | Feature median | Feature B/op | Feature allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Resolver control, 64 sources | 102917 ns/op | 86719 ns/op | 106816 | 1542 | 1.19x observed lower latency; memory and allocations unchanged |
+| Evolution plan, 64 sources | n/a | 454355 ns/op | 258120 | 1999 | New control-plane validation path |
+| Project 128 rows | n/a | 262619 ns/op | 129024 | 1185 | New mixed-version projection path |
+| Registry replace, 64 sources | n/a | 546499 ns/op | 324456 | 2594 | New atomic catalog publication path |
+
+The resolver control path does not call the new APIs, so its lower median is benchmark variance rather than a claimed feature speedup. No hot-path allocation or memory regression was measured. Raw five-run samples and compatibility tradeoffs are in [MU02_CONNECTOR_SCHEMA_EVOLUTION.md](MU02_CONNECTOR_SCHEMA_EVOLUTION.md).
