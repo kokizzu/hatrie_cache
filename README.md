@@ -4604,3 +4604,12 @@ The opt-in `hatPeer.CompactPeerCircuitBreaker` stops sending requests to a
 failing compact peer after a bounded failure threshold, allows one cooldown
 probe, and exposes a local health score. Existing `CompactPeerSession` calls
 remain unchanged unless wrapped. See [TR045_COMPACT_PEER_CIRCUIT_BREAKER.md](TR045_COMPACT_PEER_CIRCUIT_BREAKER.md).
+
+### Bounded optimize control
+
+The importable opt-in `hatStorage.CompactionController` adds bounded target
+coalescing, job status/history, retry state, context cancellation, priority,
+and estimated-I/O pacing over the existing compaction scheduler. It starts no
+worker and changes no default path; callers own authentication, target
+validation, backend merge callbacks, and any HTTP/SQL command wiring. See
+[CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md).

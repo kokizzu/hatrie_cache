@@ -32010,3 +32010,18 @@ the feature is opt-in and the default read-only SQL path is unchanged.
 
 Details, configuration, supported statements, and verification commands are in
 [CHU34_SQL_MUTATION_IDEMPOTENCY.md](CHU34_SQL_MUTATION_IDEMPOTENCY.md).
+
+## CH-U35 Bounded Optimize Control
+
+Five `-benchmem` samples used the same 64-task, no-op callback workload as the
+existing scheduler benchmark. This is a control-plane comparison, not a real
+compaction throughput claim.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing `CompactionScheduler` | 34,521; 29,589; 30,360; 37,445; 36,661 | 34,521 | 17,513 | 35 | 1.00x |
+| Opt-in `CompactionController` | 162,499; 172,362; 153,163; 148,213; 150,976 | 153,163 | 39,453 | 193 | 4.44x |
+
+The controller is retained as an opt-in status/control capability, not as a
+replacement for the lower-overhead scheduler. Full semantics and safety
+boundaries are in [CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md).

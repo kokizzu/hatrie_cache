@@ -21377,3 +21377,35 @@ commit-chu34:
 
 push-chu34:
 	bash ./scripts/push-chu34.sh
+
+.PHONY: test-chu35 test-chu35-package benchmark-chu35-baseline benchmark-chu35 format-chu35 race-chu35 vet-chu35 verify-chu35
+test-chu35:
+	bash ./scripts/test-chu35.sh
+
+test-chu35-package:
+	bash ./scripts/test-chu35-package.sh
+
+benchmark-chu35-baseline:
+	bash ./scripts/benchmark-chu35-baseline.sh
+
+benchmark-chu35:
+	bash ./scripts/benchmark-chu35.sh
+
+format-chu35:
+	bash ./scripts/format-chu35.sh
+
+race-chu35:
+	bash ./scripts/race-chu35.sh
+
+vet-chu35:
+	bash ./scripts/vet-chu35.sh
+
+verify-chu35:
+	bash ./scripts/verify-chu35.sh
+
+.PHONY: commit-chu35 push-chu35
+commit-chu35:
+	bash ./scripts/commit-chu35.sh
+
+push-chu35:
+	bash ./scripts/push-chu35.sh
