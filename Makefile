@@ -22118,3 +22118,21 @@ vet-mu24:
 
 verify-mu24:
 	bash scripts/verify-mu24.sh
+
+test-chu25:
+	bash scripts/test-chu25.sh
+
+format-chu25:
+	bash scripts/format-chu25.sh
+
+test-race-chu25:
+	bash scripts/test-race-chu25.sh
+
+vet-chu25:
+	bash scripts/vet-chu25.sh
+
+benchmark-chu25:
+	bash scripts/benchmark-chu25.sh
+
+verify-chu25:
+	bash scripts/verify-chu25.sh
