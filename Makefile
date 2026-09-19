@@ -21314,3 +21314,31 @@ race-chu32:
 
 vet-chu32:
 	bash ./scripts/vet-chu32.sh
+
+.PHONY: format-chu33
+format-chu33:
+	bash ./scripts/format-chu33.sh
+
+.PHONY: test-chu33
+test-chu33:
+	bash ./scripts/test-chu33.sh
+
+.PHONY: benchmark-chu33
+benchmark-chu33:
+	bash ./scripts/benchmark-chu33.sh
+
+.PHONY: test-chu33-package
+test-chu33-package:
+	bash ./scripts/test-chu33-package.sh
+
+.PHONY: race-chu33
+race-chu33:
+	bash ./scripts/race-chu33.sh
+
+.PHONY: vet-chu33
+vet-chu33:
+	bash ./scripts/vet-chu33.sh
+
+.PHONY: verify-chu33
+verify-chu33:
+	bash ./scripts/verify-chu33.sh

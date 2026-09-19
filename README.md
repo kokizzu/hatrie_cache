@@ -4487,6 +4487,15 @@ an explicitly reviewed plan and reports partial progress; listing, manifest
 reads, authorization, and object-store credentials remain caller-owned. See
 [CHU32_REMOTE_PART_GC.md](CHU32_REMOTE_PART_GC.md) and the
 [CH-U32 benchmark](BENCHMARK.md#ch-u32-remote-part-garbage-collection).
+
+### Quorum remote-part publication
+
+The opt-in `hatStorage.NewRemotePartPublicationProposal` and
+`hatStorage.PublishRemotePartAfterQuorum` APIs bind one remote-part reference
+to a manifest fingerprint, deterministic voter quorum, and fencing token before
+calling the injected publication store. Discovery, retries, and rollback remain
+caller-owned. See [CHU33_REMOTE_PART_PUBLICATION.md](CHU33_REMOTE_PART_PUBLICATION.md)
+and the [CH-U33 benchmark](BENCHMARK.md#ch-u33-quorum-remote-part-publication).
 Named SQL-style connections and their credentials can be kept separate with
 the opt-in `hatAuth.ResourceRegistry`. Connection metadata is redacted,
 readers are constrained by the referenced secret, and rotation uses an exact

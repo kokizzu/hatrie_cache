@@ -31969,3 +31969,23 @@ The optimized planner uses 1.40x the fair naive plan's memory for canonical
 candidate metadata and deterministic sorting, while reducing CPU by about
 32.8x. Full plan/apply semantics and safety limits are in
 [CHU32_REMOTE_PART_GC.md](CHU32_REMOTE_PART_GC.md).
+
+## CH-U33 Quorum Remote-Part Publication
+
+Five `-benchmem` samples measured the opt-in publication control path with
+three voters and a two-vote requirement on Linux/amd64 with an AMD Ryzen 9
+5950X. The direct control is an inlined no-op store; neither path includes
+network or durable object-store latency.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Direct no-op publication | 0.2637; 0.2468; 0.2433; 0.2414; 0.2380 | 0.2433 | 0 | 0 | 1.00x control |
+| Quorum publication, 3 voters / 2 required | 2151; 2198; 2169; 2124; 2161 | 2161 | 930 | 24 | 8,884x vs inlined control |
+
+Removing duplicate proposal validation improved the quorum path from 3,739
+ns/op, 1,715 B/op, and 45 allocations to 2,161 ns/op, 930 B/op, and 24
+allocations: 1.73x faster, 1.85x less memory, and 1.88x fewer allocations
+with unchanged correctness coverage. The fixed control-plane cost is the
+tradeoff for fencing and quorum safety; the feature is opt-in.
+
+Details are in [CHU33_REMOTE_PART_PUBLICATION.md](CHU33_REMOTE_PART_PUBLICATION.md).
