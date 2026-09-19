@@ -35,6 +35,8 @@ type sqlApproximateStreamState struct {
 	tdigest   *hatDataStructure.TDigest
 	tdigestP  float64
 	auto      *sqlAutoDistinctState
+	hllState  bool
+	hllMerge  bool
 }
 
 func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, bool) {
@@ -68,6 +70,23 @@ func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, boo
 			return nil, false
 		}
 		state.hll = &sketch
+		return state, true
+	case "APPROX_COUNT_DISTINCT_STATE":
+		precision, err := sqlApproximateDistinctStatePrecision(expr)
+		if err != nil {
+			return nil, false
+		}
+		sketch, err := hatDataStructure.NewHyperLogLog(precision)
+		if err != nil {
+			return nil, false
+		}
+		state.hll, state.hllState = &sketch, true
+		return state, true
+	case "APPROX_COUNT_DISTINCT_MERGE":
+		if len(expr.args) != 1 || expr.args[0].kind == "star" {
+			return nil, false
+		}
+		state.hllMerge = true
 		return state, true
 	case "APPROX_PERCENTILE":
 		if len(expr.args) < 2 || len(expr.args) > 3 {
@@ -137,6 +156,24 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 	if value == nil {
 		return nil
 	}
+	if state.hllMerge {
+		serialized, ok := value.([]byte)
+		if !ok {
+			return sqlApproximateAggregateError(state.expr, fmt.Sprintf("%s expects serialized HAG1 state, got %s", state.expr.name, sqlLiteralTypeName(value)))
+		}
+		other, err := hatDataStructure.NewHyperLogLogFromAggregateState(serialized)
+		if err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		if state.hll == nil {
+			state.hll = &other
+			return nil
+		}
+		if err := state.hll.Merge(other); err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		return nil
+	}
 	if state.auto != nil {
 		if err := state.auto.addValue(value); err != nil {
 			return sqlApproximateAggregateError(state.expr, err.Error())
@@ -167,6 +204,19 @@ func (state *sqlApproximateStreamState) result() interface{} {
 	if state.auto != nil {
 		return state.auto.count()
 	}
+	if state.hllState {
+		wire, err := state.hll.MarshalAggregateState()
+		if err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		return wire
+	}
+	if state.hllMerge {
+		if state.hll == nil {
+			return uint64(0)
+		}
+		return state.hll.Count()
+	}
 	if state.hll != nil {
 		return state.hll.Count()
 	}
@@ -192,6 +242,8 @@ func evalSQLApproximateAggregate(expr sqlExpr, group []sqlExecRow) interface{} {
 		return evalSQLAutoCountDistinct(expr, group)
 	case "APPROX_COUNT_DISTINCT":
 		return evalSQLApproxCountDistinct(expr, group)
+	case "APPROX_COUNT_DISTINCT_STATE", "APPROX_COUNT_DISTINCT_MERGE":
+		return evalSQLApproximateDistinctState(expr, group)
 	case "APPROX_PERCENTILE":
 		return evalSQLApproxPercentile(expr, group)
 	case "APPROX_TDIGEST_PERCENTILE":

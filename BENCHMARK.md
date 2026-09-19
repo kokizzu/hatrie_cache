@@ -1440,6 +1440,30 @@ make test-race-sql-query-trace-spans
 make benchmark-sql-query-trace-spans
 ```
 
+## CH-042 mergeable approximate distinct states
+
+This benchmark measures the mergeable SQL state path added for
+`APPROX_COUNT_DISTINCT_STATE` and `APPROX_COUNT_DISTINCT_MERGE` against the
+existing `APPROX_COUNT_DISTINCT` path. The workload uses 20,000 rows and five
+samples; values below are medians, and lower is better.
+
+| Path | ns/op | B/op | allocs/op | wire bytes/op | CPU vs baseline | Memory vs baseline |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing `APPROX_COUNT_DISTINCT` | 1,417,441 | 166,592 | 19,998 | - | 1.00x | 1.00x |
+| `APPROX_COUNT_DISTINCT_STATE`, streaming | 1,409,937 | 167,857 | 20,001 | 1,051 | 0.99x | 1.01x |
+| `APPROX_COUNT_DISTINCT_MERGE` | 44,498 | 23,120 | 57 | - | separate merge workload | separate merge workload |
+| Rejected materialized state attempt | 4,312,596 | 4,734,137 | 40,004 | 1,051 | 2.71x | 28.42x |
+
+The first state implementation materialized the input state path and was
+rejected after measurement. The accepted streaming path is about 2.75x faster,
+28.2x lower in benchmark memory, and uses about half as many allocations as
+that attempt, while remaining effectively the same cost as the existing
+approximate aggregate. The state output is the checksummed `HAG1` HyperLogLog
+format and is 1,051 bytes for this precision and workload.
+
+Reproduce with `make benchmark-chu42`; correctness and race checks are listed
+in [CH042_APPROX_DISTINCT_STATE.md](CH042_APPROX_DISTINCT_STATE.md).
+
 ## SQL Approximate Aggregates
 
 The SQL aggregate benchmark executes one grouped query over 10,000 in-memory

@@ -211,6 +211,7 @@ security guidance before exposing it on a network.
 - Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - ClickHouse-style compressed SQL bitmap aggregates and set operations: [SQL bitmap aggregates](SQL_BITMAP_AGGREGATES.md)
 - Automatic exact-to-approximate distinct counting: [SQL automatic distinct counting](SQL_AUTO_COUNT_DISTINCT.md)
+- Mergeable approximate distinct SQL states: [CH042_APPROX_DISTINCT_STATE.md](CH042_APPROX_DISTINCT_STATE.md)
 - Tail-aware t-digest percentile aggregates: [SQL t-digest percentile](SQL_TDIGEST_PERCENTILE.md)
 - SQL window frame exclusion: [SQL window frame exclusion](SQL_WINDOW_FRAME_EXCLUSION.md)
 - ClickHouse-inspired bounded remote-part cache: [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md)

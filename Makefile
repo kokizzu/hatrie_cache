@@ -21137,3 +21137,31 @@ vet-c207:
 .PHONY: commit-c207
 commit-c207:
 	sh scripts/commit-c207.sh
+
+.PHONY: test-chu42
+test-chu42:
+	sh scripts/test-chu42.sh
+
+.PHONY: test-chu42-package
+test-chu42-package:
+	sh scripts/test-chu42-package.sh
+
+.PHONY: benchmark-chu42
+benchmark-chu42:
+	sh scripts/benchmark-chu42.sh
+
+.PHONY: format-chu42
+format-chu42:
+	sh scripts/format-chu42.sh
+
+.PHONY: race-chu42
+race-chu42:
+	sh scripts/race-chu42.sh
+
+.PHONY: vet-chu42
+vet-chu42:
+	sh scripts/vet-chu42.sh
+
+.PHONY: commit-chu42
+commit-chu42:
+	sh scripts/commit-chu42.sh
