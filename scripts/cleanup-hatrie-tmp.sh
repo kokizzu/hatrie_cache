@@ -1,72 +1,117 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-mode=${1:-plan}
-plan=/tmp/hatrie-cache-tmp-cleanup.current.plan
+tmp_root=${TMPDIR:-/tmp}
+min_age_hours=${HATRIE_TMP_MIN_AGE_HOURS:-24}
+repo_root=$(pwd -P)
+plan_file=${HATRIE_TMP_CLEANUP_PLAN:-"$repo_root/.hatrie-tmp-cleanup.plan"}
 
-is_protected() {
-	base=${1##*/}
-	case "$base" in
-		hatrie-cache-next-goal|*next-goal*|*stage*|*session*|hatrie-cache-tmp-cleanup.current.plan)
-			return 0
-			;;
-	esac
-	return 1
+is_hatrie_directory() {
+  local path=$1
+  local name=${path##*/}
+  [[ "$name" == hatrie-cache-* || "$name" == hatrie_cache_* ]]
 }
 
-case "$mode" in
-	plan)
-		: > "$plan"
-		for candidate in /tmp/hatrie*; do
-			if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
-				continue
-			fi
-			if is_protected "$candidate"; then
-				continue
-			fi
-			printf '%s\n' "$candidate" >> "$plan"
-		done
-		printf 'review plan: %s\n' "$plan"
-		if [ -s "$plan" ]; then
-			while IFS= read -r candidate; do
-				printf 'REMOVE %s\n' "$candidate"
-			done < "$plan"
-		else
-			printf 'REMOVE none\n'
-		fi
-		printf 'PRESERVE /tmp/hatrie-cache-next-goal and paths containing next-goal, stage, or session\n'
-		;;
-	apply)
-		if [ ! -f "$plan" ]; then
-			printf 'cleanup plan is missing: %s\n' "$plan" >&2
-			exit 1
-		fi
-		while IFS= read -r candidate; do
-			[ -n "$candidate" ] || continue
-			case "$candidate" in
-				/tmp/hatrie*|/tmp/hatri*)
-					;;
-				*)
-					printf 'unexpected cleanup path: %s\n' "$candidate" >&2
-					exit 1
-					;;
-			esac
-			if is_protected "$candidate"; then
-				printf 'PRESERVE %s\n' "$candidate"
-				continue
-			fi
-			if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
-				printf 'GONE %s\n' "$candidate"
-				continue
-			fi
-			printf 'REMOVE %s\n' "$candidate"
-			rm -rf -- "$candidate"
-		done < "$plan"
-		rm -f -- "$plan"
-		printf 'cleanup complete: %s\n' "$plan"
-		;;
-	*)
-		printf 'usage: %s {plan|apply}\n' "$0" >&2
-		exit 2
-		;;
+is_active_path() {
+  local candidate=$1
+  local proc_dir cwd
+  for proc_dir in /proc/[0-9]*; do
+    [[ -d "$proc_dir" ]] || continue
+    cwd=$(readlink "$proc_dir/cwd" 2>/dev/null || true)
+    [[ -n "$cwd" ]] || continue
+    case "$cwd" in
+      "$candidate"|"$candidate"/*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+write_plan() {
+  local now=$1
+  local path mtime age_hours
+  local candidates=0
+
+  : > "$plan_file"
+  while IFS= read -r -d '' path; do
+    is_hatrie_directory "$path" || continue
+    [[ "$path" != "$repo_root" && "$path" != "$repo_root"/* ]] || continue
+    is_active_path "$path" && continue
+
+    mtime=$(stat -c '%Y' -- "$path")
+    age_hours=$(( (now - mtime) / 3600 ))
+    (( age_hours >= min_age_hours )) || continue
+    printf '%s\n' "$path" >> "$plan_file"
+    candidates=$((candidates + 1))
+  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -print0)
+
+  printf 'Hatrie test temporary cleanup plan (age >= %s hours):\n' "$min_age_hours"
+  if (( candidates == 0 )); then
+    printf 'Summary: 0 candidate(s); plan removed.\n'
+    rm -f -- "$plan_file"
+    return 0
+  fi
+
+  while IFS= read -r path; do
+    mtime=$(stat -c '%Y' -- "$path")
+    age_hours=$(( (now - mtime) / 3600 ))
+    printf '%s hours %s\n' "$age_hours" "$path"
+  done < "$plan_file"
+  printf 'Summary: %s candidate(s).\n' "$candidates"
+  printf 'Plan: %s\n' "$plan_file"
+}
+
+apply_plan() {
+  local path
+  local removed=0
+  local skipped=0
+
+  [[ -f "$plan_file" ]] || {
+    printf 'No cleanup plan found at %s; run preview first.\n' "$plan_file" >&2
+    return 1
+  }
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    [[ "$path" == "$tmp_root"/* ]] || {
+      printf 'Refusing plan path outside %s: %s\n' "$tmp_root" "$path" >&2
+      return 1
+    }
+    [[ "$path" != "$tmp_root"/*/* ]] || {
+      printf 'Refusing non-top-level plan path: %s\n' "$path" >&2
+      return 1
+    }
+    is_hatrie_directory "$path" || {
+      printf 'Refusing non-Hatrie plan path: %s\n' "$path" >&2
+      return 1
+    }
+    [[ -d "$path" ]] || {
+      skipped=$((skipped + 1))
+      continue
+    }
+    is_active_path "$path" && {
+      printf 'Refusing active path: %s\n' "$path" >&2
+      return 1
+    }
+    rm -rf -- "$path"
+    printf 'Removed %s\n' "$path"
+    removed=$((removed + 1))
+  done < "$plan_file"
+
+  rm -f -- "$plan_file"
+  printf 'Summary: %s removed, %s already absent.\n' "$removed" "$skipped"
+}
+
+case "${1:-}" in
+  preview|plan)
+    write_plan "$(date +%s)"
+    ;;
+  apply)
+    apply_plan
+    ;;
+  *)
+    printf 'usage: %s preview|apply\n' "$0" >&2
+    exit 2
+    ;;
 esac

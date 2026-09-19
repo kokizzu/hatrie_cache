@@ -21769,3 +21769,9 @@ tmp-hatrie-plan:
 
 tmp-hatrie-clean:
 	sh scripts/cleanup-hatrie-tmp.sh apply
+
+tmp-hatrie-plan:
+	sh scripts/cleanup-hatrie-tmp.sh plan
+
+tmp-hatrie-clean:
+	sh scripts/cleanup-hatrie-tmp.sh apply
