@@ -32437,3 +32437,15 @@ Five samples on an AMD Ryzen 9 5950X using `go test -benchmem`:
 | 64-arrangement `Snapshot` | 11,195 ns/op | 14,720 B/op, 66 allocs/op | Explicit scrape cost |
 
 The registry is opt-in and bounded; after registration, recording adds no heap allocations. See [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md).
+
+## M-U41 Webhook Event Idempotency
+
+Five samples on an AMD Ryzen 9 5950X using `go test -benchmem`:
+
+| Operation | Median | Memory | Comparison |
+|---|---:|---:|---:|
+| SHA-256 payload fingerprint | 101.4 ns/op | 0 B/op, 0 allocs/op | Baseline |
+| Duplicate `Accept` | 147.1 ns/op | 0 B/op, 0 allocs/op | 1.45x CPU, 0 allocations |
+| Snapshot of 1,024 events | 249,419 ns/op | 106,600 B/op, 5 allocs/op | Explicit persistence cost |
+
+The ledger is opt-in and bounded; payload bytes are not retained. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md).

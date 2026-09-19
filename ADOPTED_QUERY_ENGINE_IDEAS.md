@@ -727,3 +727,7 @@ and [BENCHMARK.md](BENCHMARK.md#m033-batched-logical-timestamp-oracle).
 ## Materialize M-U37: Per-Arrangement Compaction Diagnostics
 
 Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement registration, allocation-free post-registration recording, deterministic detached snapshots, and fixed-depth history retain logical/physical bytes and caller-defined compaction debt without adding default-path overhead. The storage engine still owns the meaning of debt and the wiring point. See [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md) and [BENCHMARK.md](BENCHMARK.md#m-u37-per-arrangement-compaction-diagnostics).
+
+## Materialize M-U41: Webhook Event Idempotency
+
+Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
