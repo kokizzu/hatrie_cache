@@ -32290,3 +32290,31 @@ and atomicity behavior while moving frame evaluation from repeated scans to a
 single value pass plus prefix sums. See
 [MU06_DIFFERENTIAL_WINDOW_FRAMES.md](MU06_DIFFERENTIAL_WINDOW_FRAMES.md) for
 the full contract and tradeoffs.
+
+## M-U07 Declarative Differential Dataflow Policy
+
+Commands:
+
+```sh
+make benchmark-mu07-baseline
+make benchmark-mu07
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. Both fixtures
+classify 1,024 updates and clone accepted rows. The existing controls use the
+same frontier and zero allowed lateness as the new manual policy path.
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing late-data filter | 142704; 131631; 138041; 133885; 142643 | 138041 | 212,993 | 1,025 | 1.00x |
+| Existing watermark wrapper | 133676; 138689; 135587; 134394; 133594 | 134394 | 212,993 | 1,025 | 1.03x control |
+| M-U07 manual policy | 134965; 134348; 127844; 140173; 138480 | 134965 | 212,993 | 1,025 | 1.02x vs filter |
+| M-U07 batch-max policy | 13813; 13418; 15712; 15728; 13865 | 13865 | 41,653 | 5 | 9.96x vs filter* |
+
+`*` Batch-max is measured after its first successful batch advances the
+frontier, so most repeated rows are classified as too late and dropped. It is
+not a direct semantic replacement for the manual control. The manual path is
+within benchmark noise of the existing filter with no measured memory or
+allocation increase. See
+[MU07_DECLARATIVE_DATAFLOW_POLICY.md](MU07_DECLARATIVE_DATAFLOW_POLICY.md) for
+the policy contract and limits.

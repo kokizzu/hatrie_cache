@@ -21821,3 +21821,22 @@ benchmark-mu06:
 
 verify-mu06:
 	sh scripts/verify-mu06.sh
+
+test-mu07:
+	sh scripts/test-mu07.sh
+
+
+format-mu07:
+	gofmt -w hat/hatSql/differential_dataflow.go hat/hatSql/m_u07_dataflow_policy_test.go hat/hatSql/m_u07_dataflow_policy_benchmark_test.go
+
+
+benchmark-mu07-baseline:
+	sh scripts/benchmark-mu07-baseline.sh
+
+
+benchmark-mu07:
+	sh scripts/benchmark-mu07.sh
+
+
+verify-mu07:
+	sh scripts/verify-mu07.sh

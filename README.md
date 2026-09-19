@@ -4681,3 +4681,15 @@ the contract, example, limits, verification commands, and raw benchmarks.
 
 Run `make test-mu06`, `make verify-mu06`, `make benchmark-mu06-baseline`, and
 `make benchmark-mu06` for the focused checks and measurements.
+
+## Declarative Differential Dataflow Policy
+
+`hatSql.DifferentialDataflow` couples allowed lateness, correction behavior,
+manual or batch-max frontier advancement, atomic maintained-sink delivery, and
+operator counters. It is opt-in and leaves the existing watermark and
+late-data helpers unchanged. See
+[MU07_DECLARATIVE_DATAFLOW_POLICY.md](MU07_DECLARATIVE_DATAFLOW_POLICY.md)
+for the sink contract, example, defaults, and measurements.
+
+Run `make test-mu07`, `make verify-mu07`, `make benchmark-mu07-baseline`, and
+`make benchmark-mu07` for the focused checks and measurements.
