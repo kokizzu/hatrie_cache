@@ -4,8 +4,7 @@ set -euo pipefail
 for script in \
   scripts/audit-hatrie-tmp.sh \
   scripts/audit-go-temp-contents.sh \
-  scripts/cleanup-go-test-tmp.sh \
-  scripts/commit-tmp-cleanup.sh; do
+  scripts/cleanup-go-test-tmp.sh; do
   bash -n "$script"
 done
 
