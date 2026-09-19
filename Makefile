@@ -21781,3 +21781,18 @@ tmp-hatrie-plan:
 
 tmp-hatrie-clean:
 	sh scripts/cleanup-hatrie-tmp.sh apply
+
+benchmark-m055-baseline:
+	sh scripts/benchmark-m055-baseline.sh
+
+test-m055:
+	sh scripts/test-m055.sh
+
+format-m055:
+	sh scripts/format-m055.sh
+
+benchmark-m055:
+	sh scripts/benchmark-m055.sh
+
+verify-m055:
+	sh scripts/verify-m055.sh

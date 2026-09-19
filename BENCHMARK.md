@@ -32229,3 +32229,30 @@ The steady-state coordinated resolve is 1.12x the direct controls CPU time
 with identical measured memory and allocation counts. Capture and recovery are
 control-plane costs: capture includes authentication dispatch, bounded
 collection, validation, deep copies, and one checkpoint commit.
+
+## M-U05 Arrangement-Only Recovery
+
+Command:
+
+```sh
+make benchmark-m055
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has
+10,000 rows, 32 groups, sum/min/max, and distinct-name state. The replay case
+is the same fixture with a fresh aggregate applying all 10,000 changes.
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Capture checkpoint | 4,250,240; 4,317,354; 4,360,163; 4,980,365; 6,413,087 | 4,360,163 | 2,906,705 | 517 | 0.72x replay |
+| Restore checkpoint | 4,233,413; 4,260,752; 4,536,766; 3,172,422; 3,038,150 | 4,233,413 | 2,646,024 | 496 | 0.70x replay |
+| Rebuild by replaying 10,000 changes | 5,811,308; 6,419,611; 5,542,795; 6,015,176; 6,469,398 | 6,015,176 | 3,137,138 | 1,035 | 1.00x |
+| JSON decode | 40,785,321; 38,551,257; 37,841,658; 40,715,309; 41,871,900 | 40,715,309 | 4,778,789 | 5,143 | 6.77x replay |
+| JSON marshal plus decode | 44,199,984; 43,917,376; 48,178,815; 45,850,842; 48,649,757 | 45,850,842 | 12,661,842 | 5,162 | 7.62x replay |
+
+Raw checkpoint restore is the useful recovery path here: it is about 1.42x
+faster than replay with fewer allocations and lower measured bytes. JSON is
+portable but materially slower and larger, so it belongs in checkpoint
+storage/transfer control paths rather than row-update or query hot paths. See
+[MU05_ARRANGEMENT_ONLY_RECOVERY.md](MU05_ARRANGEMENT_ONLY_RECOVERY.md) for the
+validation contract and operational guidance.

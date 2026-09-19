@@ -4654,3 +4654,17 @@ security guidance, and measurements.
 
 Run the focused checks and benchmarks with make test-m054,
 make benchmark-m054-baseline, and make benchmark-m054.
+
+## Arrangement-Only Recovery
+
+`hatSql` can checkpoint maintained typed-table aggregate and join arrangements,
+then restore their indexes without rereading the source changefeed. Restore is
+accepted only when table identities, definitions, and source sequences match
+exactly; otherwise hydrate from retained changes or rebuild from a source
+snapshot. Checkpoint input is bounded and validated, but durable ordering and
+authentication remain the caller's responsibility. See
+[MU05_ARRANGEMENT_ONLY_RECOVERY.md](MU05_ARRANGEMENT_ONLY_RECOVERY.md) for the
+API, security contract, and measurements.
+
+Run `make test-m055`, `make benchmark-m055`, and `make verify-m055` for the
+focused checks.
