@@ -22270,3 +22270,16 @@ vet-chu03-aggregate-registry:
 
 verify-chu03-aggregate-registry:
 	bash scripts/verify-chu03-aggregate-registry.sh
+.PHONY: test-chu06-persistent-delete-bitmap format-chu06-persistent-delete-bitmap benchmark-chu06-persistent-delete-bitmap race-chu06-persistent-delete-bitmap vet-chu06-persistent-delete-bitmap verify-chu06-persistent-delete-bitmap
+test-chu06-persistent-delete-bitmap:
+	bash scripts/test-chu06-persistent-delete-bitmap.sh
+format-chu06-persistent-delete-bitmap:
+	bash scripts/format-chu06-persistent-delete-bitmap.sh
+benchmark-chu06-persistent-delete-bitmap:
+	bash scripts/benchmark-chu06-persistent-delete-bitmap.sh
+race-chu06-persistent-delete-bitmap:
+	bash scripts/race-chu06-persistent-delete-bitmap.sh
+vet-chu06-persistent-delete-bitmap:
+	bash scripts/vet-chu06-persistent-delete-bitmap.sh
+verify-chu06-persistent-delete-bitmap:
+	bash scripts/verify-chu06-persistent-delete-bitmap.sh

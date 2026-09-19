@@ -4786,3 +4786,16 @@ Read-only runtime memory diagnostics are documented in
 
 The opt-in durable insert-ID ledger is documented in
 [CHU01_ASYNC_INSERT_DEDUP.md](CHU01_ASYNC_INSERT_DEDUP.md).
+
+## Persistent delete bitmap
+
+`hatDataStructure.PersistentDeleteBitmap` provides a bounded, CRC32C-protected
+one-bit-per-row snapshot for stored-part adapters. It is importable and
+explicit; it does not change existing typed-table defaults or automatically
+alter backup manifests. See
+[CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md) for
+the API, limits, security notes, and measured CPU/heap/size tradeoff.
+
+Run `make test-chu06-persistent-delete-bitmap`,
+`make verify-chu06-persistent-delete-bitmap`, and
+`make benchmark-chu06-persistent-delete-bitmap` for focused verification.

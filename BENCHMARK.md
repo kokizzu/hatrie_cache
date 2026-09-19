@@ -32770,3 +32770,47 @@ BenchmarkAggregateStateRegistry/json-decode-32  854.6 ns/op  256 B/op  6 allocs/
 
 See [CHU03_AGGREGATE_STATE_WIRE.md](CHU03_AGGREGATE_STATE_WIRE.md) for the
 contract, limits, and usage.
+## CH-U06 Persistent Lightweight Delete Bitmap
+
+Five samples, AMD Ryzen 9 5950X Linux/amd64, 100,000 physical rows, every
+third row deleted. The baseline uses one byte per row and the same CRC32C
+checksum work as `HTDB1`.
+
+| Operation | Byte-per-row baseline | Packed `HTDB1` | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode CPU | 132,642 ns/op | 5,623 ns/op | 23.59x faster |
+| Encode heap | 106,496 B/op | 13,568 B/op | 7.85x lower |
+| Encode allocations | 1 | 1 | unchanged |
+| Decode CPU | 59,893 ns/op | 4,809 ns/op | 12.45x faster |
+| Decode heap | 106,497 B/op | 13,616 B/op | 7.82x lower |
+| Decode allocations | 1 | 2 | 1 extra allocation |
+| Snapshot size | 100,012 bytes | 12,522 bytes | 7.99x smaller |
+
+Raw output:
+
+```text
+BenchmarkPersistentDeleteBitmapBaselineBoolEncode-32  8215 132642 ns/op 106496 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolEncode-32  8941 134586 ns/op 106496 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolEncode-32  8718 132466 ns/op 106496 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolEncode-32  8662 135588 ns/op 106496 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolEncode-32  8445 131709 ns/op 106496 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolDecode-32  19898 59862 ns/op 106497 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolDecode-32  20222 58779 ns/op 106497 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolDecode-32  20613 60412 ns/op 106497 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolDecode-32  20335 60099 ns/op 106497 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapBaselineBoolDecode-32  19766 59893 ns/op 106497 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapPackedEncode-32       204564 5576 ns/op 13568 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapPackedEncode-32       206362 5696 ns/op 13568 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapPackedEncode-32       217046 5623 ns/op 13568 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapPackedEncode-32       212052 5582 ns/op 13568 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapPackedEncode-32       209160 5739 ns/op 13568 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapPackedDecode-32       242082 4939 ns/op 13616 B/op 2 allocs/op
+BenchmarkPersistentDeleteBitmapPackedDecode-32       224238 4822 ns/op 13616 B/op 2 allocs/op
+BenchmarkPersistentDeleteBitmapPackedDecode-32       252957 4533 ns/op 13616 B/op 2 allocs/op
+BenchmarkPersistentDeleteBitmapPackedDecode-32       258060 4563 ns/op 13616 B/op 2 allocs/op
+BenchmarkPersistentDeleteBitmapPackedDecode-32       262429 4809 ns/op 13616 B/op 2 allocs/op
+```
+
+The packed decoder uses one additional allocation but 7.82x less heap; the
+format is explicit and bounded rather than an automatic change to existing
+typed-table persistence.
