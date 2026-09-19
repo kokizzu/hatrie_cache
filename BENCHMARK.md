@@ -32941,3 +32941,41 @@ BenchmarkTU09BootstrapSnapshot-32              85478413 13.09 ns/op  0 B/op  0 a
 BenchmarkTU09BootstrapSnapshot-32              78464624 13.02 ns/op  0 B/op  0 allocs/op
 BenchmarkTU09BootstrapSnapshot-32              81439574 13.10 ns/op  0 B/op  0 allocs/op
 ```
+
+## T-U12 Automatic Failover Coordinator
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is a
+simple source-health/candidate-sequence eligibility check; policy evaluation
+validates a two-candidate trusted observation and selects a deterministic
+proposal.
+
+| Operation | Median | Allocations | Improvement or cost |
+| --- | ---: | ---: | ---: |
+| Simple eligibility baseline | 0.482 ns/op | 0 B/op, 0 allocs/op | Lower-bound control |
+| Full policy evaluation | 84.53 ns/op | 0 B/op, 0 allocs/op | 175x control cost |
+| Coordinator `Snapshot` | 10.79 ns/op | 0 B/op, 0 allocs/op | 0 allocation status path |
+
+The feature is default-off and runs only during a failover decision. Candidate
+validation is allocation-free; the inline proposal state keeps status snapshots
+allocation-free. Consensus, fencing of the old source, and topology publication
+remain outside the microbenchmark and caller-owned.
+
+Raw output:
+
+```text
+BenchmarkTU12BaselineFailoverEligibility-32  1000000000  0.4759 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12BaselineFailoverEligibility-32  1000000000  0.4846 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12BaselineFailoverEligibility-32  1000000000  0.5064 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12BaselineFailoverEligibility-32  1000000000  0.4822 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12BaselineFailoverEligibility-32  1000000000  0.4770 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverEvaluate-32    14356704  80.73 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverEvaluate-32    14342269  77.19 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverEvaluate-32    13637347  84.53 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverEvaluate-32    14131574  86.10 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverEvaluate-32    15904826  89.07 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverSnapshot-32   120156950  10.86 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverSnapshot-32   106940389  12.12 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverSnapshot-32    99331843  10.76 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverSnapshot-32   114581944  10.49 ns/op  0 B/op  0 allocs/op
+BenchmarkTU12AutomaticFailoverSnapshot-32    97160594  10.79 ns/op  0 B/op  0 allocs/op
+```
