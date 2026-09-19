@@ -21481,3 +21481,32 @@ commit-chu37:
 .PHONY: push-chu37
 push-chu37:
 	bash ./scripts/push-chu37.sh
+
+.PHONY: format-chu41 test-chu41 benchmark-chu41 test-chu41-package race-chu41 vet-chu41 verify-chu41 commit-chu41 push-chu41
+
+format-chu41:
+	bash ./scripts/format-chu41.sh
+
+test-chu41:
+	bash ./scripts/test-chu41.sh
+
+benchmark-chu41:
+	bash ./scripts/benchmark-chu41.sh
+
+test-chu41-package:
+	bash ./scripts/test-chu41-package.sh
+
+race-chu41:
+	bash ./scripts/race-chu41.sh
+
+vet-chu41:
+	bash ./scripts/vet-chu41.sh
+
+verify-chu41:
+	bash ./scripts/verify-chu41.sh
+
+commit-chu41:
+	bash ./scripts/commit-chu41.sh
+
+push-chu41:
+	bash ./scripts/push-chu41.sh

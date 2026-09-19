@@ -32069,3 +32069,25 @@ default write or journal-retention path pays its cost.
 
 Details and the redaction contract are in
 [CHU37_SYSTEM_MUTATIONS_CATALOG.md](CHU37_SYSTEM_MUTATIONS_CATALOG.md).
+## CH-U41 Schema-Versioned Plan Cache
+
+Five `-benchmem` samples were run through `make benchmark-chu41` on
+Linux/amd64 with an AMD Ryzen 9 5950X. The before values came from a clean
+`HEAD` archive; save and load are explicit maintenance operations over 256
+prepared plans.
+
+| Operation | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before: versioned cache hit | 31,400; 30,940; 33,040; 29,860; 31,740 | 31,400 | 0 | 0 | 1.00x |
+| After: versioned cache hit | 27,780; 27,730; 28,850; 27,160; 26,620 | 27,730 | 0 | 0 | 0.88x |
+| After: no-persistence hit control | 31,070; 32,730; 32,610; 30,120; 30,170 | 31,070 | 0 | 0 | 0.99x |
+| After: save 256 plans | 1,013,948; 938,070; 910,781; 1,014,210; 1,055,556 | 1,013,948 | 63,692 | 18 | 32,291x* |
+| After: load 256 plans | 1,734,169; 1,784,637; 1,811,622; 1,833,964; 1,891,596 | 1,811,622 | 1,466,869 | 7,980 | 57,696x* |
+
+`*` Save/load CPU ratios compare different operations and are included only
+to show scale; they are not query-throughput claims. The regular cache-hit path
+stays zero-allocation. Persistence is opt-in and pays its CPU/heap cost only
+when saving or warming the cache.
+
+Details, limits, and restore safety are in
+[CHU41_SCHEMA_VERSIONED_PLAN_CACHE.md](CHU41_SCHEMA_VERSIONED_PLAN_CACHE.md).
