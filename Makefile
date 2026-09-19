@@ -21873,3 +21873,14 @@ verify-tmp-cleanup:
 
 
 
+
+test-mu09:
+	sh scripts/test-mu09.sh
+format-mu09:
+	gofmt -w hat/hatPipeline/durable_frontier_snapshot.go hat/hatPipeline/m_u09_durable_frontier_snapshot_test.go hat/hatPipeline/m_u09_durable_frontier_snapshot_benchmark_test.go
+benchmark-mu09-baseline:
+	bash scripts/benchmark-mu09-baseline.sh
+benchmark-mu09:
+	bash scripts/benchmark-mu09.sh
+verify-mu09:
+	bash scripts/verify-mu09.sh

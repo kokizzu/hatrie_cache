@@ -4705,3 +4705,17 @@ for the safety rule, example, and measurements.
 
 Run `make test-mu08`, `make verify-mu08`, `make benchmark-mu08-baseline`, and
 `make benchmark-mu08` for the focused checks and measurements.
+
+## Durable Frontier Snapshots
+
+`hatPipeline.FrontierRegistry` can persist its deterministic binary snapshot to
+an atomic, private local file and restore it into an empty registry. The store
+uses a bounded payload, `0600` temporary files, file and directory syncs, and
+distinguishes a missing checkpoint from a corrupt checkpoint. Custom WAL,
+object-store, or database implementations can use the
+`FrontierSnapshotStore` interface. See
+[MU09_DURABLE_FRONTIER_SNAPSHOTS.md](MU09_DURABLE_FRONTIER_SNAPSHOTS.md) for
+the recovery contract, security notes, and measured control-plane cost.
+
+Run `make test-mu09`, `make verify-mu09`, `make benchmark-mu09-baseline`, and
+`make benchmark-mu09` for the focused checks and measurements.

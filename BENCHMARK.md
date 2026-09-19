@@ -32343,3 +32343,29 @@ memory profile. Compaction is explicit control-plane work and reclaims 99.6%
 of the fixture's retained row state without per-key tombstones. See
 [MU08_TEMPORAL_JOIN_COMPACTION.md](MU08_TEMPORAL_JOIN_COMPACTION.md) for the
 frontier safety rule and post-compaction retraction behavior.
+
+## M-U09 Durable Frontier Snapshots
+
+Commands:
+
+```sh
+make benchmark-mu09-baseline
+make benchmark-mu09
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 128
+named frontiers. The durable path includes its file and parent-directory sync;
+the existing controls measure only in-memory binary encoding and decoding.
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing binary marshal control | 21,704; 23,774; 23,714; 22,562; 22,818 | 22,818 | 17,208 | 5 | 1.00x |
+| Durable file save | 1,895,569; 1,712,404; 1,695,605; 5,419,584; 1,609,443 | 1,712,404 | 18,512 | 22 | 75.05x slower |
+| Existing binary decode control | 13,301; 13,048; 13,319; 12,930; 13,755 | 13,301 | 18,088 | 132 | 1.00x |
+| Durable file restore | 39,501; 40,028; 40,181; 39,104; 39,174 | 39,501 | 45,752 | 279 | 2.97x slower |
+
+Durability is the feature, so this is intentionally not a hot-path speed win:
+save pays for fsync and atomic replacement, while restore opens a fresh
+registry and validates the complete payload. See
+[MU09_DURABLE_FRONTIER_SNAPSHOTS.md](MU09_DURABLE_FRONTIER_SNAPSHOTS.md) for
+the recovery contract and operational guidance.
