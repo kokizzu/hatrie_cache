@@ -32160,3 +32160,23 @@ implementation. The runner intentionally pays this bounded control-plane cost
 to validate dependencies, produce deterministic ordering, track applied steps,
 and retain rollback state. It should not be placed on a query or row-update
 hot path.
+
+## M-U50 Durable Frontier-Based Backup
+
+Commands:
+
+~~~sh
+make benchmark-m050-baseline
+make benchmark-m050
+~~~
+
+Five runs on Linux/amd64, AMD Ryzen 9 5950X:
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op | Encoded size |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Clean-tree control loop | 0.5477, 0.5508, 0.5261, 0.5600, 0.5360 | 0.5477 | 0 | 0 | n/a |
+| Marshal plus restore-plan validation | 2058, 1930, 1935, 1982, 2008 | 1982 | 1488 | 27 | 117 bytes |
+
+The control loop is a lower-bound measurement, not a previous backup
+implementation. M-U50 is intentionally bounded control-plane work and should
+not be put on a query or row-update hot path.

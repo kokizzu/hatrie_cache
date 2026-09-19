@@ -21661,3 +21661,29 @@ commit-m049:
 	bash ./scripts/commit-m049.sh
 push-m049:
 	bash ./scripts/push-m049.sh
+
+.PHONY: format-m050 test-m050 benchmark-m050-baseline benchmark-m050
+format-m050:
+	bash ./scripts/format-m050.sh
+test-m050:
+	bash ./scripts/test-m050.sh
+benchmark-m050-baseline:
+	bash ./scripts/benchmark-m050-baseline.sh
+benchmark-m050:
+	bash ./scripts/benchmark-m050.sh
+
+.PHONY: test-m050-package race-m050 vet-m050 verify-m050
+test-m050-package:
+	bash ./scripts/test-m050-package.sh
+race-m050:
+	bash ./scripts/race-m050.sh
+vet-m050:
+	bash ./scripts/vet-m050.sh
+verify-m050:
+	bash ./scripts/verify-m050.sh
+
+.PHONY: commit-m050 push-m050
+commit-m050:
+	bash ./scripts/commit-m050.sh
+push-m050:
+	bash ./scripts/push-m050.sh

@@ -123,7 +123,7 @@ tradeoffs are documented and its commit is published.
 | M-U47 | Progress-only subscription frames | Subscription streams do not have a compact standard frame for frontier advancement independent of row updates across every API. | Ordering, cancellation, and wire compatibility. |
 | M-U48 | Source connector health remediation | Implemented: opt-in bounded retry, exponential backoff, context cancellation, and quarantine through `StartWithHealthPolicy`. | Avoid retry storms, preserve offsets, and operator override without changing the default lifecycle path. |
 | M-U49 | Catalog migration runner | Implemented in [M049_CATALOG_MIGRATION.md](M049_CATALOG_MIGRATION.md): dependency-aware validation/dry-run ordering, serial apply, and reverse rollback callbacks. | The caller still owns SQL locks, durable history, retries, engine-specific compatibility, and mixed-version rollout policy. |
-| M-U50 | Durable frontier-based backup | Backup does not capture all source offsets, arrangement frontiers, and subscription checkpoints as one recoverable logical snapshot. | Restore ordering, missing history, and rehearsal verification. |
+| M-U50 | Durable frontier-based backup | Implemented in [M050_DURABLE_FRONTIER_BACKUP.md](M050_DURABLE_FRONTIER_BACKUP.md): bounded deterministic binary manifest plus restore-order and journal-gap validation for storage, sources, frontiers, and subscriptions. | The caller still owns source barriers, file/checksum verification, journal replay, rehearsal, and durable publication. |
 
 ## Tarantool
 
