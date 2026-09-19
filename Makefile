@@ -22136,3 +22136,21 @@ benchmark-chu25:
 
 verify-chu25:
 	bash scripts/verify-chu25.sh
+
+test-tu42-token:
+	bash scripts/test-tu42-token.sh
+
+format-tu42-token:
+	bash scripts/format-tu42-token.sh
+
+test-race-tu42-token:
+	bash scripts/test-race-tu42-token.sh
+
+vet-tu42-token:
+	bash scripts/vet-tu42-token.sh
+
+benchmark-tu42-token:
+	bash scripts/benchmark-tu42-token.sh
+
+verify-tu42-token:
+	bash scripts/verify-tu42-token.sh
