@@ -4613,3 +4613,4 @@ and estimated-I/O pacing over the existing compaction scheduler. It starts no
 worker and changes no default path; callers own authentication, target
 validation, backend merge callbacks, and any HTTP/SQL command wiring. See
 [CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md).
+- Opt-in bounded ClickHouse-style `system.parts` metadata with deterministic ordering, checksums, key ranges, and retention fields: [CHU36_SYSTEM_PARTS_CATALOG.md](CHU36_SYSTEM_PARTS_CATALOG.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u36-stable-sql-system-parts-catalog)

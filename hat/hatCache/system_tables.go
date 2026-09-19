@@ -1,8 +1,11 @@
 package hatCache
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"hatrie_cache/hat/hatSql"
 )
@@ -10,12 +13,57 @@ import (
 const (
 	DefaultSQLSystemMutationLimit = 1000
 	MaxSQLSystemMutationLimit     = 10000
+	DefaultSQLSystemPartLimit     = 1024
+	MaxSQLSystemPartLimit         = 10000
+	MaxSQLSystemPartFieldBytes    = 4096
 
 	SQLSystemPartsTable        = "system.parts"
 	SQLSystemMutationsTable    = "system.mutations"
 	SQLSystemQueriesTable      = "system.queries"
 	SQLSystemQueryHistoryTable = "system.query_history"
 )
+
+var (
+	ErrSQLSystemPartInvalid        = errors.New("hatriecache: invalid SQL system part")
+	ErrSQLSystemPartsLimitExceeded = errors.New("hatriecache: SQL system parts limit exceeded")
+)
+
+// SQLSystemPart is the stable, privacy-conscious metadata contract for one
+// physical part. It contains layout, checksum, and retention information but
+// never requires a filesystem path or row values.
+type SQLSystemPart struct {
+	Name           string
+	Partition      int64
+	Rows           int64
+	BytesOnDisk    int64
+	Active         bool
+	State          string
+	Level          int64
+	DataVersion    int64
+	MinKey         string
+	MaxKey         string
+	Checksum       string
+	CreatedAt      time.Time
+	RetentionUntil time.Time
+}
+
+// SQLSystemPartProvider supplies a bounded point-in-time catalog snapshot.
+// The provider owns synchronization and must return metadata only; resolver
+// output is copied into fresh SQL rows.
+type SQLSystemPartProvider interface {
+	SnapshotSQLSystemParts() ([]SQLSystemPart, error)
+}
+
+// SQLSystemPartProviderFunc adapts a function to SQLSystemPartProvider.
+type SQLSystemPartProviderFunc func() ([]SQLSystemPart, error)
+
+// SnapshotSQLSystemParts implements SQLSystemPartProvider.
+func (provider SQLSystemPartProviderFunc) SnapshotSQLSystemParts() ([]SQLSystemPart, error) {
+	if provider == nil {
+		return nil, nil
+	}
+	return provider()
+}
 
 // SQLSystemTablesResolverOptions supplies optional operator data sources for
 // SQLSystemTablesResolver. Missing sources produce empty system tables.
@@ -29,6 +77,11 @@ type SQLSystemTablesResolverOptions struct {
 	Journal *CommandJournal
 	// MutationLimit bounds the number of journal rows returned per read.
 	MutationLimit int
+	// PartProvider supplies complete immutable-part metadata. When omitted,
+	// system.parts retains the legacy trie partition count view.
+	PartProvider SQLSystemPartProvider
+	// PartLimit bounds provider rows returned by one system.parts read.
+	PartLimit int
 }
 
 // SQLSystemTablesResolver adds read-only operational tables to an existing SQL
@@ -40,6 +93,8 @@ type SQLSystemTablesResolver struct {
 	queryManager  *hatSql.SQLQueryManager
 	journal       *CommandJournal
 	mutationLimit int
+	partProvider  SQLSystemPartProvider
+	partLimit     int
 }
 
 // NewSQLSystemTablesResolver wraps source with read-only system tables.
@@ -55,12 +110,21 @@ func NewSQLSystemTablesResolver(source SQLSourceResolver, options SQLSystemTable
 	if limit > MaxSQLSystemMutationLimit {
 		limit = MaxSQLSystemMutationLimit
 	}
+	partLimit := options.PartLimit
+	if partLimit <= 0 {
+		partLimit = DefaultSQLSystemPartLimit
+	}
+	if partLimit > MaxSQLSystemPartLimit {
+		partLimit = MaxSQLSystemPartLimit
+	}
 	return &SQLSystemTablesResolver{
 		source:        source,
 		trie:          trie,
 		queryManager:  options.QueryManager,
 		journal:       options.Journal,
 		mutationLimit: limit,
+		partProvider:  options.PartProvider,
+		partLimit:     partLimit,
 	}
 }
 
@@ -73,7 +137,10 @@ func (resolver *SQLSystemTablesResolver) ResolveSQLSource(name, key string) ([]S
 	if strings.EqualFold(strings.TrimSpace(name), "CACHE") {
 		switch strings.ToLower(strings.TrimSpace(key)) {
 		case SQLSystemPartsTable:
-			return resolver.parts(), nil
+			if resolver.partProvider == nil {
+				return resolver.legacyParts(), nil
+			}
+			return resolver.providerParts()
 		case SQLSystemMutationsTable:
 			return resolver.mutations()
 		case SQLSystemQueriesTable:
@@ -88,7 +155,7 @@ func (resolver *SQLSystemTablesResolver) ResolveSQLSource(name, key string) ([]S
 	return resolver.source.ResolveSQLSource(name, key)
 }
 
-func (resolver *SQLSystemTablesResolver) parts() []SQLRow {
+func (resolver *SQLSystemTablesResolver) legacyParts() []SQLRow {
 	if resolver.trie == nil {
 		return nil
 	}
@@ -111,6 +178,85 @@ func (resolver *SQLSystemTablesResolver) parts() []SQLRow {
 		}
 	}
 	return rows
+}
+
+func (resolver *SQLSystemTablesResolver) providerParts() ([]SQLRow, error) {
+	parts, err := resolver.partProvider.SnapshotSQLSystemParts()
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) > resolver.partLimit {
+		return nil, fmt.Errorf("%w: got %d rows, limit %d", ErrSQLSystemPartsLimitExceeded, len(parts), resolver.partLimit)
+	}
+	parts = append([]SQLSystemPart(nil), parts...)
+	for index := range parts {
+		if err := validateSQLSystemPart(parts[index]); err != nil {
+			return nil, err
+		}
+	}
+	sort.SliceStable(parts, func(left, right int) bool {
+		if parts[left].Partition != parts[right].Partition {
+			return parts[left].Partition < parts[right].Partition
+		}
+		if parts[left].Name != parts[right].Name {
+			return parts[left].Name < parts[right].Name
+		}
+		if parts[left].DataVersion != parts[right].DataVersion {
+			return parts[left].DataVersion < parts[right].DataVersion
+		}
+		return parts[left].Level < parts[right].Level
+	})
+	rows := make([]SQLRow, len(parts))
+	for index, part := range parts {
+		rows[index] = sqlSystemPartRow(part)
+	}
+	return rows, nil
+}
+
+func validateSQLSystemPart(part SQLSystemPart) error {
+	if strings.TrimSpace(part.Name) == "" || len(part.Name) > MaxSQLSystemPartFieldBytes {
+		return fmt.Errorf("%w: name is required and must be at most %d bytes", ErrSQLSystemPartInvalid, MaxSQLSystemPartFieldBytes)
+	}
+	if part.Partition < 0 || part.Rows < 0 || part.BytesOnDisk < 0 || part.Level < 0 || part.DataVersion < 0 {
+		return fmt.Errorf("%w: numeric metadata must be non-negative", ErrSQLSystemPartInvalid)
+	}
+	if len(part.State) > MaxSQLSystemPartFieldBytes || len(part.MinKey) > MaxSQLSystemPartFieldBytes || len(part.MaxKey) > MaxSQLSystemPartFieldBytes || len(part.Checksum) > MaxSQLSystemPartFieldBytes {
+		return fmt.Errorf("%w: metadata field exceeds %d bytes", ErrSQLSystemPartInvalid, MaxSQLSystemPartFieldBytes)
+	}
+	return nil
+}
+
+func sqlSystemPartRow(part SQLSystemPart) SQLRow {
+	state := strings.TrimSpace(part.State)
+	if state == "" {
+		if part.Active {
+			state = "active"
+		} else {
+			state = "inactive"
+		}
+	}
+	row := SQLRow{
+		"name":            strings.TrimSpace(part.Name),
+		"partition":       part.Partition,
+		"rows":            part.Rows,
+		"bytes_on_disk":   part.BytesOnDisk,
+		"active":          part.Active,
+		"state":           state,
+		"level":           part.Level,
+		"data_version":    part.DataVersion,
+		"min_key":         part.MinKey,
+		"max_key":         part.MaxKey,
+		"checksum":        part.Checksum,
+		"created_at":      nil,
+		"retention_until": nil,
+	}
+	if !part.CreatedAt.IsZero() {
+		row["created_at"] = part.CreatedAt.UTC()
+	}
+	if !part.RetentionUntil.IsZero() {
+		row["retention_until"] = part.RetentionUntil.UTC()
+	}
+	return row
 }
 
 func (resolver *SQLSystemTablesResolver) mutations() ([]SQLRow, error) {

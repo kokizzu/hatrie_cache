@@ -32025,3 +32025,25 @@ compaction throughput claim.
 The controller is retained as an opt-in status/control capability, not as a
 replacement for the lower-overhead scheduler. Full semantics and safety
 boundaries are in [CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md).
+
+## CH-U36 Stable SQL System Parts Catalog
+
+The benchmark uses 64 local partitions and 4,096 seeded keys for the legacy
+path, and 64 rich provider rows for the opt-in path. Five `-benchmem` samples
+were run through `make benchmark-chu36` on Linux/amd64 with an AMD Ryzen 9
+5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before: legacy view | 29,191; 28,117; 29,546; 30,096; 30,801 | 29,546 | 24,635 | 258 | 1.00x |
+| After: legacy fast path | 25,932; 25,161; 25,498; 25,610; 25,810 | 25,610 | 24,635 | 258 | 0.87x |
+| After: rich provider | 47,946; 48,053; 47,965; 46,713; 48,268 | 47,965 | 59,128 | 517 | 1.62x |
+
+The default path is about 1.15x faster with unchanged allocations in this
+run. The opt-in provider path costs about 1.87x the legacy CPU, 2.40x the
+transient heap, and 2.00x the allocations because it copies, sorts, validates,
+and materializes 64 metadata rows. It adds no cost to ordinary writes or to
+resolvers without `PartProvider`.
+
+Details and the complete column contract are in
+[CHU36_SYSTEM_PARTS_CATALOG.md](CHU36_SYSTEM_PARTS_CATALOG.md).
