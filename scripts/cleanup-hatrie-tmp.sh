@@ -1,73 +1,117 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode="${1:-}"
-plan="${HATRIE_TMP_CLEANUP_PLAN:-/tmp/hatrie-cache-tmp-cleanup.plan}"
-root="${HATRIE_TMP_CLEANUP_ROOT:-/tmp}"
-root="${root%/}"
-active_worktree="${HATRIE_TMP_CLEANUP_ACTIVE_WORKTREE:-/tmp/hatrie-cache-next-goal}"
+tmp_root=${TMPDIR:-/tmp}
+min_age_hours=${HATRIE_TMP_MIN_AGE_HOURS:-24}
+repo_root=$(pwd -P)
+plan_file=${HATRIE_TMP_CLEANUP_PLAN:-"$repo_root/.hatrie-tmp-cleanup.plan"}
 
-case "$mode" in
-preview)
-	: > "$plan"
-	while IFS= read -r path; do
-		case "$path" in
-			"$active_worktree"|"$active_worktree"/)
-				continue
-				;;
-		esac
-		if [ -e "$path/.git" ]; then
-			continue
-		fi
-		printf '%s\n' "$path" >> "$plan"
-	done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -mmin +60 \( -name 'hatrie-*' -o -name 'hatrie_*' \) -print | sort)
-	printf '%s\n' 'Cleanup plan (directories older than 60 minutes, no .git marker):'
-	if [ -s "$plan" ]; then
-		while IFS= read -r path; do
-			printf '%s ' "$path"
-			du -sh -- "$path" | cut -f1
-		done < "$plan"
-	else
-		printf '%s\n' '(none)'
-	fi
-	printf 'Plan file: %s\n' "$plan"
-	;;
-apply)
-	if [ ! -e "$plan" ]; then
-		printf 'No reviewed cleanup plan found at %s\n' "$plan" >&2
-		exit 1
-	fi
-	if [ ! -s "$plan" ]; then
-		rm -f -- "$plan"
-		printf '%s\n' 'Cleanup plan is empty; nothing to remove.'
-		exit 0
-	fi
-	while IFS= read -r path; do
-		case "$path" in
-			"$root"/hatrie-*|"$root"/hatrie_*)
-				;;
-			*)
-				printf 'Refusing unexpected cleanup path: %s\n' "$path" >&2
-				exit 1
-				;;
-		esac
-		case "$path" in
-			"$active_worktree"|"$active_worktree"/)
-				printf 'Refusing active worktree cleanup: %s\n' "$path" >&2
-				exit 1
-				;;
-		esac
-		if [ -d "$path" ] && [ ! -e "$path/.git" ]; then
-			rm -rf -- "$path"
-			printf 'Removed %s\n' "$path"
-		else
-			printf 'Skipped changed or missing path %s\n' "$path"
-		fi
-	done < "$plan"
-	rm -f -- "$plan"
-	;;
-*)
-	printf 'usage: %s preview|apply\n' "$0" >&2
-	exit 2
-	;;
+is_hatrie_directory() {
+  local path=$1
+  local name=${path##*/}
+  [[ "$name" == hatrie-cache-* || "$name" == hatrie_cache_* ]]
+}
+
+is_active_path() {
+  local candidate=$1
+  local proc_dir cwd
+  for proc_dir in /proc/[0-9]*; do
+    [[ -d "$proc_dir" ]] || continue
+    cwd=$(readlink "$proc_dir/cwd" 2>/dev/null || true)
+    [[ -n "$cwd" ]] || continue
+    case "$cwd" in
+      "$candidate"|"$candidate"/*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+write_plan() {
+  local now=$1
+  local path mtime mtime_seconds age_hours
+  local candidates=0
+
+  : > "$plan_file"
+  while IFS= read -r -d '' path; do
+    is_hatrie_directory "$path" || continue
+    [[ "$path" != "$repo_root" && "$path" != "$repo_root"/* ]] || continue
+    is_active_path "$path" && continue
+
+    mtime=$(stat -c '%Y' -- "$path")
+    age_hours=$(( (now - mtime) / 3600 ))
+    (( age_hours >= min_age_hours )) || continue
+    printf '%s\n' "$path" >> "$plan_file"
+    candidates=$((candidates + 1))
+  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -print0)
+
+  printf 'Hatrie test temporary cleanup plan (age >= %s hours):\n' "$min_age_hours"
+  if (( candidates == 0 )); then
+    printf 'Summary: 0 candidate(s); plan removed.\n'
+    rm -f -- "$plan_file"
+    return 0
+  fi
+
+  while IFS= read -r path; do
+    mtime=$(stat -c '%Y' -- "$path")
+    age_hours=$(( (now - mtime) / 3600 ))
+    printf '%s hours %s\n' "$age_hours" "$path"
+  done < "$plan_file"
+  printf 'Summary: %s candidate(s).\n' "$candidates"
+  printf 'Plan: %s\n' "$plan_file"
+}
+
+apply_plan() {
+  local path
+  local removed=0
+  local skipped=0
+
+  [[ -f "$plan_file" ]] || {
+    printf 'No cleanup plan found at %s; run preview first.\n' "$plan_file" >&2
+    return 1
+  }
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    [[ "$path" == "$tmp_root"/* ]] || {
+      printf 'Refusing plan path outside %s: %s\n' "$tmp_root" "$path" >&2
+      return 1
+    }
+    [[ "$path" != "$tmp_root"/*/* ]] || {
+      printf 'Refusing non-top-level plan path: %s\n' "$path" >&2
+      return 1
+    }
+    is_hatrie_directory "$path" || {
+      printf 'Refusing non-Hatrie plan path: %s\n' "$path" >&2
+      return 1
+    }
+    [[ -d "$path" ]] || {
+      skipped=$((skipped + 1))
+      continue
+    }
+    is_active_path "$path" && {
+      printf 'Refusing active path: %s\n' "$path" >&2
+      return 1
+    }
+    rm -rf -- "$path"
+    printf 'Removed %s\n' "$path"
+    removed=$((removed + 1))
+  done < "$plan_file"
+
+  rm -f -- "$plan_file"
+  printf 'Summary: %s removed, %s already absent.\n' "$removed" "$skipped"
+}
+
+case "${1:-}" in
+  preview)
+    write_plan "$(date +%s)"
+    ;;
+  apply)
+    apply_plan
+    ;;
+  *)
+    printf 'usage: %s preview|apply\n' "$0" >&2
+    exit 2
+    ;;
 esac

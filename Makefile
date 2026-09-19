@@ -21265,3 +21265,14 @@ vet-chu28:
 
 commit-chu28:
 	bash ./scripts/commit-chu28.sh
+
+.PHONY: inspect-test-tmp
+inspect-test-tmp:
+	bash ./scripts/inspect-test-tmp.sh
+
+.PHONY: cleanup-hatrie-tmp-audit-preview cleanup-hatrie-tmp-audit-apply
+cleanup-hatrie-tmp-audit-preview:
+	bash ./scripts/cleanup-hatrie-tmp.sh preview
+
+cleanup-hatrie-tmp-audit-apply:
+	bash ./scripts/cleanup-hatrie-tmp.sh apply
