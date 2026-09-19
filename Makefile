@@ -22088,3 +22088,15 @@ measure-mu47-payload:
 
 verify-mu47:
 	@bash scripts/verify-mu47.sh
+
+test-tu03:
+	bash scripts/test-tu03.sh
+
+format-tu03:
+	bash scripts/format-tu03.sh
+
+benchmark-tu03:
+	bash scripts/benchmark-tu03.sh
+
+verify-tu03:
+	bash scripts/verify-tu03.sh

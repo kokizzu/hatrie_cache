@@ -32586,6 +32586,26 @@ quarantine behavior without changing ordinary lifecycle calls. See
 [MU048_CONNECTOR_HEALTH_REMEDIATION.md](MU048_CONNECTOR_HEALTH_REMEDIATION.md)
 for raw samples and safety limits.
 
+## T-U03 Stored Procedure Registry
+
+Machine: AMD Ryzen 9 5950X, linux/amd64. Five `-benchmem` samples from
+`make benchmark-tu03`; medians are shown.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative to direct callback |
+| --- | ---: | ---: | ---: | --- |
+| Direct callback | 25.2 | 16 | 1 | baseline |
+| Registry call, no authorizer | 114.8 | 32 | 2 | 4.56x time, 2.00x bytes, +1 alloc |
+| Registry call, authorizer | 162.5 | 48 | 3 | 6.46x time, 3.00x bytes, +2 allocs |
+
+The registry is an opt-in governance boundary, so the additional lookup,
+input-copy, authorization, and panic-isolation work is expected. Returning
+the callback-owned result slice avoids one retained copy: the no-authorizer
+path improved from 144.7 to 114.8 ns/op, from 48 to 32 B/op, and from 3 to 2
+allocations; the authorized path improved from 187.3 to 162.5 ns/op, from 64
+to 48 B/op, and from 4 to 3 allocations. See
+[TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md) for
+the API and safety contract.
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:

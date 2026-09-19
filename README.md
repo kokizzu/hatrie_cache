@@ -201,6 +201,7 @@ security guidance before exposing it on a network.
 - Changefeed progress frontiers: [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md)
 - Durable changefeed checkpoints: [CHANGEFEED_CHECKPOINT.md](CHANGEFEED_CHECKPOINT.md)
 - Current 50-per-product implementation queue: [PRODUCT_IDEA_GAPS.md](PRODUCT_IDEA_GAPS.md)
+- Opt-in versioned stored procedure registry with authorization and panic isolation: [TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md)
 - Prepared SQL plans can be warmed across restarts with the opt-in, schema-validated cache described in [CHU41_SCHEMA_VERSIONED_PLAN_CACHE.md](CHU41_SCHEMA_VERSIONED_PLAN_CACHE.md).
 - Opt-in durable SQL mutation retries with `mutation_id`: [CHU34_SQL_MUTATION_IDEMPOTENCY.md](CHU34_SQL_MUTATION_IDEMPOTENCY.md), with raw retry measurements in [BENCHMARK.md](BENCHMARK.md#ch-u34-idempotent-sql-mutation-retries)
 - Query-wide live SQL spill quotas: [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
