@@ -31894,6 +31894,25 @@ write path with no allocation increase. It does not account for Go map
 capacity, indexes, query working memory, or allocator fragmentation; see
 [CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md).
 
+## CH-U28 Disk-I/O Merge Throttling
+
+Five `-benchmem` samples measured the scheduler before and after adding the
+opt-in estimated-byte gate on Linux/amd64 with an AMD Ryzen 9 5950X:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Pre-feature `Schedule`, cold | 679.6; 686.3; 702.8; 714.1; 704.2 | 702.8 | 680 | 7 | 1.00x |
+| Legacy `Schedule`, cold after feature | 729.7; 735.6; 735.8; 728.7; 727.8 | 729.7 | 696 | 7 | 1.04x |
+| Opt-in `ScheduleWithIO`, cold | 1115; 1148; 1220; 1111; 1185 | 1148 | 1032 | 11 | 1.57x vs legacy cold |
+| Legacy `Schedule`, warm | 322.0; 294.3; 303.7; 303.5; 304.4 | 303.7 | 40 | 2 | 1.00x |
+| Opt-in `ScheduleWithIO`, warm | 407.2; 414.3; 396.5; 411.2; 429.7 | 411.2 | 40 | 2 | 1.35x vs legacy warm |
+
+The default remains off. Legacy queue entries retain their original layout;
+the warm opt-in path has the same allocation and byte counts as the warm legacy
+path, with CPU spent on intentional rate reservation. Full semantics and the
+calibration limitation are documented in
+[CHU28_DISK_IO_THROTTLING.md](CHU28_DISK_IO_THROTTLING.md).
+
 ## CH-U26 Operator Memory Profiles
 
 Five `-benchmem` samples measured the existing query-profiler `Record` path

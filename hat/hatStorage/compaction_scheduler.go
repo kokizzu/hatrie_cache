@@ -27,7 +27,8 @@ const DefaultCompactionSchedulerMaxConcurrent = 1
 // CompactionSchedulerOptions configures caller-driven persistent-shard
 // compaction. The scheduler has no timer and does not run in the background.
 type CompactionSchedulerOptions struct {
-	MaxConcurrent int
+	MaxConcurrent       int
+	MaxIOBytesPerSecond uint64
 }
 
 // CompactionRun summarizes one drain of the currently queued compaction jobs.
@@ -70,6 +71,7 @@ type CompactionScheduler struct {
 	scheduled       uint64
 	completed       uint64
 	failed          uint64
+	ioState         *compactionSchedulerIOState
 }
 
 // NewCompactionScheduler validates and creates a compaction scheduler. A zero
@@ -86,6 +88,7 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 		pending:       make(map[string]compactionPendingTask),
 		running:       make(map[string]struct{}),
 		now:           time.Now,
+		ioState:       newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
 	}, nil
 }
 
@@ -93,6 +96,17 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 // requests are coalesced while the task is queued or running. The bool is
 // false when an equivalent request is already pending or executing.
 func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Context) error) (bool, error) {
+	return scheduler.schedule(name, 0, run)
+}
+
+// ScheduleWithIO requests a default-priority compaction with an estimated
+// amount of disk work. When MaxIOBytesPerSecond is configured, the estimate is
+// used to pace task starts. A zero estimate keeps the task unthrottled.
+func (scheduler *CompactionScheduler) ScheduleWithIO(name string, estimatedBytes uint64, run func(context.Context) error) (bool, error) {
+	return scheduler.schedule(name, estimatedBytes, run)
+}
+
+func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run func(context.Context) error) (bool, error) {
 	if scheduler == nil {
 		return false, ErrCompactionSchedulerNil
 	}
@@ -113,6 +127,7 @@ func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Con
 			scheduler.oldestPending = scheduler.now()
 		}
 		scheduler.priorityPending[name] = compactionPriorityTask{run: run}
+		scheduler.setIOEstimateLocked(name, ioBytes)
 		return true, nil
 	}
 	if scheduler.pending == nil {
@@ -128,6 +143,7 @@ func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Con
 		scheduler.oldestPending = scheduler.now()
 	}
 	scheduler.pending[name] = compactionPendingTask{run: run}
+	scheduler.setIOEstimateLocked(name, ioBytes)
 	return true, nil
 }
 
@@ -136,8 +152,19 @@ func (scheduler *CompactionScheduler) Schedule(name string, run func(context.Con
 // ordering. A higher-priority duplicate updates a task that is still queued,
 // while the currently running task remains unchanged.
 func (scheduler *CompactionScheduler) ScheduleWithPriority(name string, priority int, run func(context.Context) error) (bool, error) {
+	return scheduler.scheduleWithPriority(name, priority, 0, run)
+}
+
+// ScheduleWithPriorityAndIO requests a prioritized compaction with an
+// estimated disk-work cost. A duplicate keeps the larger queued estimate so
+// coalescing cannot accidentally under-throttle the eventual task.
+func (scheduler *CompactionScheduler) ScheduleWithPriorityAndIO(name string, priority int, estimatedBytes uint64, run func(context.Context) error) (bool, error) {
+	return scheduler.scheduleWithPriority(name, priority, estimatedBytes, run)
+}
+
+func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority int, ioBytes uint64, run func(context.Context) error) (bool, error) {
 	if priority == 0 {
-		return scheduler.Schedule(name, run)
+		return scheduler.schedule(name, ioBytes, run)
 	}
 	if scheduler == nil {
 		return false, ErrCompactionSchedulerNil
@@ -161,14 +188,16 @@ func (scheduler *CompactionScheduler) ScheduleWithPriority(name string, priority
 	if pending, exists := scheduler.priorityPending[name]; exists {
 		if priority > pending.priority {
 			pending.priority = priority
-			scheduler.priorityPending[name] = pending
 		}
+		scheduler.priorityPending[name] = pending
+		scheduler.setIOEstimateLocked(name, ioBytes)
 		return false, nil
 	}
 	if scheduler.oldestPending.IsZero() {
 		scheduler.oldestPending = scheduler.now()
 	}
 	scheduler.priorityPending[name] = compactionPriorityTask{priority: priority, run: run}
+	scheduler.setIOEstimateLocked(name, ioBytes)
 	return true, nil
 }
 
@@ -211,7 +240,7 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 		return result, nil
 	}
 	if len(tasks) == 1 {
-		return scheduler.finishSingle(tasks[0], tasks[0].run(ctx))
+		return scheduler.finishSingle(tasks[0], scheduler.executeTask(ctx, tasks[0]))
 	}
 	if prioritized {
 		scheduler.mu.Lock()
@@ -246,7 +275,7 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 				if index >= len(tasks) {
 					return
 				}
-				errs[index] = tasks[index].run(ctx)
+				errs[index] = scheduler.executeTask(ctx, tasks[index])
 			}
 		}()
 	}
@@ -264,6 +293,7 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 			if priorityTask {
 				delete(scheduler.priorityPending, task.name)
 			}
+			scheduler.clearIOEstimateLocked(task.name)
 			result.Completed++
 			scheduler.completed++
 			continue
@@ -309,6 +339,7 @@ func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err erro
 		if priorityTask {
 			delete(scheduler.priorityPending, task.name)
 		}
+		scheduler.clearIOEstimateLocked(task.name)
 		result.Completed = 1
 		scheduler.completed++
 		return result, nil
@@ -372,4 +403,43 @@ func (scheduler *CompactionScheduler) takePending() ([]compactionTask, bool) {
 	scheduler.oldestRunning = startedAt
 	scheduler.scheduled += uint64(len(tasks))
 	return tasks, false
+}
+
+func (scheduler *CompactionScheduler) executeTask(ctx context.Context, task compactionTask) error {
+	if scheduler.ioState == nil {
+		return task.run(ctx)
+	}
+	if ioBytes := scheduler.ioEstimate(task.name); ioBytes > 0 {
+		if err := scheduler.ioState.throttle.wait(ctx, ioBytes); err != nil {
+			return err
+		}
+	}
+	return task.run(ctx)
+}
+
+func (scheduler *CompactionScheduler) setIOEstimateLocked(name string, bytes uint64) {
+	if scheduler.ioState == nil || bytes == 0 {
+		return
+	}
+	if scheduler.ioState.estimates == nil {
+		scheduler.ioState.estimates = make(map[string]uint64)
+	}
+	if previous := scheduler.ioState.estimates[name]; bytes > previous {
+		scheduler.ioState.estimates[name] = bytes
+	}
+}
+
+func (scheduler *CompactionScheduler) ioEstimate(name string) uint64 {
+	if scheduler == nil || scheduler.ioState == nil {
+		return 0
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	return scheduler.ioState.estimates[name]
+}
+
+func (scheduler *CompactionScheduler) clearIOEstimateLocked(name string) {
+	if scheduler.ioState != nil && scheduler.ioState.estimates != nil {
+		delete(scheduler.ioState.estimates, name)
+	}
 }
