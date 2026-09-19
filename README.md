@@ -303,6 +303,7 @@ security guidance before exposing it on a network.
 - Bounded differential checkpoint export/import: [M-U46_DIFFERENTIAL_EXPORT.md](M-U46_DIFFERENTIAL_EXPORT.md)
 - Durable connector pause/resume checkpoints with generation fencing: [MU042_CONNECTOR_CHECKPOINTS.md](MU042_CONNECTOR_CHECKPOINTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u42-connector-pauseresume-checkpoints)
 - Frontier-aware sink backpressure with high/low-watermark admission: [MU043_SINK_BACKPRESSURE.md](MU043_SINK_BACKPRESSURE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u43-sink-backpressure)
+- Incremental join arrangement selection across explicit exact predicates: [MU045_JOIN_ARRANGEMENT_SELECTION.md](MU045_JOIN_ARRANGEMENT_SELECTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u45-incremental-join-arrangement-selection)
 - Compact progress-only subscription frames: [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Opt-in authenticated WAL encryption and key rotation: [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)

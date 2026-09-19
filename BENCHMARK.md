@@ -32559,6 +32559,18 @@ unchanged unless the registry is constructed. See
 [MU043_SINK_BACKPRESSURE.md](MU043_SINK_BACKPRESSURE.md) for raw benchmark
 commands and operational semantics.
 
+## M-U45 Incremental Join Arrangement Selection
+
+Machine: AMD Ryzen 9 5950X, linux/amd64. Five samples per benchmark.
+
+| Operation | Median ns/op | B/op | allocs/op | Compared with exact advisor |
+| --- | ---: | ---: | ---: | --- |
+| Existing exact advisor, one predicate | 190.4 | 184 | 2 | baseline |
+| Selector, one alternative | 261.6 | 328 | 3 | 1.37x time, 1.78x bytes, +1 alloc |
+| Selector, three alternatives | 869.7 | 1,024 | 9 | 4.57x time, 5.56x bytes, +7 allocs |
+
+See [MU045_JOIN_ARRANGEMENT_SELECTION.md](MU045_JOIN_ARRANGEMENT_SELECTION.md) for the selection contract, ranking rules, and raw benchmark samples.
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:
