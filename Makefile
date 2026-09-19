@@ -21615,3 +21615,19 @@ commit-t044:
 push-t044:
 	bash ./scripts/push-t044.sh
 # END T044 heap fragmentation diagnostics
+
+# BEGIN safe test temporary cleanup
+.PHONY: cleanup-test-tmp-preview cleanup-test-tmp cleanup-hatrie-tmp-audit-preview cleanup-hatrie-tmp commit-cleanup-tooling push-cleanup-tooling
+cleanup-test-tmp-preview:
+	bash ./scripts/cleanup-test-tmp.sh preview
+cleanup-test-tmp:
+	bash ./scripts/cleanup-test-tmp.sh apply
+cleanup-hatrie-tmp-audit-preview:
+	bash ./scripts/cleanup-test-tmp.sh preview
+cleanup-hatrie-tmp:
+	bash ./scripts/cleanup-test-tmp.sh apply
+commit-cleanup-tooling:
+	bash ./scripts/commit-cleanup-tooling.sh
+push-cleanup-tooling:
+	bash ./scripts/push-cleanup-tooling.sh
+# END safe test temporary cleanup
