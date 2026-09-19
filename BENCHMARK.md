@@ -31878,3 +31878,18 @@ hit `18,532 ns/op`, `13,150 B/op`, `72 allocs/op`; cold cache path
 `486,974 ns/op`, `15,378 B/op`, `88 allocs/op`. The warm hit is `23.0x`
 faster, while the cold path is `1.14x` slower than the no-cache path. See
 [C207_QUERY_CONDITION_CACHE.md](C207_QUERY_CONDITION_CACHE.md).
+
+## CH-U24 Typed-Table Memory Budget
+
+Five `-benchmem` samples measured repeated existing-row `Upsert` on Linux/amd64
+with an AMD Ryzen 9 5950X:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Budget disabled | 267.9; 265.6; 264.0; 273.0; 267.5 | 267.5 | 192 | 4 | 1.00x |
+| Budget enabled | 283.2; 266.6; 273.7; 280.9; 276.4 | 276.4 | 192 | 4 | 1.03x |
+
+The opt-in logical admission check adds about 3.3% median CPU in this small
+write path with no allocation increase. It does not account for Go map
+capacity, indexes, query working memory, or allocator fragmentation; see
+[CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md).

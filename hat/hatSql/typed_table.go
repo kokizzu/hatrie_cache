@@ -16,6 +16,13 @@ import (
 // is older than the retained changefeed boundary.
 var ErrTypedTableChangesCompacted = errors.New("typed table changes compacted")
 
+// ErrTypedTableMemoryBudgetExceeded reports that a mutation would exceed the
+// configured typed-table logical memory budget.
+var ErrTypedTableMemoryBudgetExceeded = errors.New("typed table memory budget exceeded")
+
+// ErrTypedTableMemoryBudgetInvalid reports an invalid typed-table budget.
+var ErrTypedTableMemoryBudgetInvalid = errors.New("typed table memory budget is invalid")
+
 // TypedTableKind identifies the fixed physical representation of one column.
 type TypedTableKind uint8
 
@@ -111,10 +118,30 @@ type TypedTableSchema struct {
 	SourceName    string
 	Columns       []TypedTableColumn
 	TTL           TypedTableTTLOptions
+	MemoryBudget  TypedTableMemoryBudgetOptions
 	ColumnarCache TypedTableColumnarCacheOptions
 	PatchParts    TypedTablePatchOptions
 	StorageEvents TypedTableStorageEventLogOptions
 	MVCC          TypedTableMVCCOptions
+}
+
+// TypedTableMemoryBudgetOptions configures an optional logical resident-data
+// budget. The estimate includes key bytes, scalar payload bytes, validity
+// bytes, and a fixed row allowance; it deliberately excludes Go map capacity,
+// index structures, query working memory, and allocator fragmentation. It is
+// therefore an admission guard, not an exact process-heap limit.
+// MaxBytes zero disables admission checks and preserves the legacy path.
+type TypedTableMemoryBudgetOptions struct {
+	MaxBytes int64
+}
+
+// TypedTableMemoryUsage reports the bounded logical bytes tracked by a table.
+// Deleted rows remain charged until patch-part compaction physically removes
+// them, matching the retained storage behavior.
+type TypedTableMemoryUsage struct {
+	MaxBytes       int64 `json:"max_bytes"`
+	UsedBytes      int64 `json:"used_bytes"`
+	AvailableBytes int64 `json:"available_bytes"`
 }
 
 // TypedTableValue stores one scalar table value. A value with Valid false is
@@ -426,24 +453,27 @@ func (storage *typedTableColumnStorage) promoteAdaptiveDictionary() {
 // TypedTable is a schema-checked row store with per-column primitive slices.
 // It is opt-in and implements the established source-resolver contracts.
 type TypedTable struct {
-	mu              sync.RWMutex
-	schema          TypedTableSchema
-	columns         []typedTableColumnStorage
-	byName          map[string]int
-	keys            []string
-	positions       map[string]int
-	generated       bool
-	generatedOrder  []int
-	columnar        typedTableColumnarCache
-	patchParts      *typedTablePatchState
-	storageEvents   *typedTableStorageEventLog
-	mvcc            *typedTableMVCCState
-	ttl             *typedTableTTLState
-	columnTTLs      []*typedTableColumnTTLState
-	appendOnly      bool
-	statsCache      TypedTableStats
-	statsCacheValid bool
-	histogramCache  map[typedTableHistogramCacheKey]TypedTableHistogram
+	mu                   sync.RWMutex
+	schema               TypedTableSchema
+	columns              []typedTableColumnStorage
+	byName               map[string]int
+	keys                 []string
+	positions            map[string]int
+	generated            bool
+	generatedOrder       []int
+	columnar             typedTableColumnarCache
+	patchParts           *typedTablePatchState
+	storageEvents        *typedTableStorageEventLog
+	mvcc                 *typedTableMVCCState
+	ttl                  *typedTableTTLState
+	columnTTLs           []*typedTableColumnTTLState
+	appendOnly           bool
+	statsCache           TypedTableStats
+	statsCacheValid      bool
+	histogramCache       map[typedTableHistogramCacheKey]TypedTableHistogram
+	memoryBudgetMaxBytes int64
+	memoryBytes          int64
+	memoryRowBytes       []int64
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -461,6 +491,9 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 	if schema.SourceName == "" {
 		schema.SourceName = "CACHE"
 	}
+	if schema.MemoryBudget.MaxBytes < 0 {
+		return nil, fmt.Errorf("%w: max bytes must be non-negative", ErrTypedTableMemoryBudgetInvalid)
+	}
 	if len(schema.Columns) == 0 {
 		return nil, fmt.Errorf("typed table columns are required")
 	}
@@ -474,8 +507,12 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		columnar: typedTableColumnarCache{
 			options: schema.ColumnarCache,
 		},
-		patchParts: newTypedTablePatchState(schema.PatchParts),
-		appendOnly: true,
+		patchParts:           newTypedTablePatchState(schema.PatchParts),
+		appendOnly:           true,
+		memoryBudgetMaxBytes: schema.MemoryBudget.MaxBytes,
+	}
+	if table.memoryBudgetMaxBytes > 0 {
+		table.memoryRowBytes = make([]int64, 0)
 	}
 	if schema.MVCC.Enabled {
 		table.mvcc = newTypedTableMVCCState()
@@ -657,13 +694,24 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	if err := table.validateValues(values); err != nil {
 		return TypedTableChange{}, err
 	}
+	index, exists := table.positions[key]
+	var rowBytes int64
+	if table.memoryBudgetMaxBytes > 0 {
+		rowBytes = typedTableEstimatedRowBytes(key, values)
+		var previousBytes int64
+		if exists {
+			previousBytes = table.memoryRowBytes[index]
+		}
+		if err := table.checkTypedTableMemoryBudgetLocked(previousBytes, rowBytes); err != nil {
+			return TypedTableChange{}, err
+		}
+	}
 	table.clearColumnarLayoutsLocked()
 	table.invalidateTypedTableDerivedCachesLocked()
 	var ttlNow time.Time
 	if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 		ttlNow = table.typedTableTTLNow()
 	}
-	index, exists := table.positions[key]
 	newBasePart := !exists && len(table.keys) == 0
 	change := TypedTableChange{Key: key, After: cloneTypedTableValues(values)}
 	if exists && !table.typedTableRowDeletedLocked(index) {
@@ -673,6 +721,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		for column := range table.columns {
 			table.columns[column].set(index, values[column])
 		}
+		table.replaceTypedTableMemoryRowLocked(index, rowBytes)
 		if table.ttl != nil {
 			table.setTypedTableTTLDeadlineLocked(index, ttlNow)
 		}
@@ -685,6 +734,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		for column := range table.columns {
 			table.columns[column].set(index, values[column])
 		}
+		table.replaceTypedTableMemoryRowLocked(index, rowBytes)
 		if table.ttl != nil {
 			table.setTypedTableTTLDeadlineLocked(index, ttlNow)
 		}
@@ -699,6 +749,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		for column := range table.columns {
 			table.columns[column].append(values[column])
 		}
+		table.appendTypedTableMemoryRowLocked(rowBytes)
 		if table.ttl != nil {
 			table.setTypedTableTTLDeadlineLocked(index, ttlNow)
 		}
@@ -755,6 +806,9 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 		for column := range table.columns {
 			table.columns[column].copy(index, last)
 		}
+		if table.memoryBudgetMaxBytes > 0 {
+			table.memoryRowBytes[index] = table.memoryRowBytes[last]
+		}
 		if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 			table.ttl.deadlines[index] = table.ttl.deadlines[last]
 		}
@@ -767,6 +821,10 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 	table.keys = table.keys[:last]
 	for column := range table.columns {
 		table.columns[column].truncate(last)
+	}
+	if table.memoryBudgetMaxBytes > 0 {
+		table.memoryBytes -= table.memoryRowBytes[last]
+		table.memoryRowBytes = table.memoryRowBytes[:last]
 	}
 	if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 		table.ttl.deadlines = table.ttl.deadlines[:last]
@@ -944,6 +1002,65 @@ func (table *TypedTable) PreferSQLColumnarSource(name string, key string, fields
 
 // SQLSourceVersion identifies the current cached-table snapshot for safe
 // condition-cache reuse. Disabled layout caches retain prior resolver behavior.
+const typedTableMemoryRowOverhead int64 = 32
+const typedTableMemoryMaxInt64 = int64(^uint64(0) >> 1)
+
+func typedTableEstimatedRowBytes(key string, values []TypedTableValue) int64 {
+	total := typedTableMemoryRowOverhead + int64(len(key))
+	for _, value := range values {
+		total = typedTableAddMemoryBytes(total, 1)
+		if !value.Valid {
+			continue
+		}
+		scalarBytes := int64(0)
+		switch value.Kind {
+		case TypedTableString:
+			scalarBytes = int64(len(value.String))
+		case TypedTableInt64, TypedTableFloat64:
+			scalarBytes = 8
+		case TypedTableBool:
+			scalarBytes = 1
+		}
+		total = typedTableAddMemoryBytes(total, scalarBytes)
+	}
+	return total
+}
+
+func typedTableAddMemoryBytes(total, additional int64) int64 {
+	if additional < 0 || total > typedTableMemoryMaxInt64-additional {
+		return typedTableMemoryMaxInt64
+	}
+	return total + additional
+}
+
+func (table *TypedTable) checkTypedTableMemoryBudgetLocked(previousBytes, nextBytes int64) error {
+	if table.memoryBudgetMaxBytes <= 0 || nextBytes <= previousBytes {
+		return nil
+	}
+	increase := nextBytes - previousBytes
+	if table.memoryBytes > table.memoryBudgetMaxBytes || increase > table.memoryBudgetMaxBytes-table.memoryBytes {
+		return fmt.Errorf("%w: maximum %d bytes, current %d bytes, requested %d bytes", ErrTypedTableMemoryBudgetExceeded, table.memoryBudgetMaxBytes, table.memoryBytes, nextBytes)
+	}
+	return nil
+}
+
+func (table *TypedTable) replaceTypedTableMemoryRowLocked(index int, rowBytes int64) {
+	if table.memoryBudgetMaxBytes <= 0 {
+		return
+	}
+	previous := table.memoryRowBytes[index]
+	table.memoryRowBytes[index] = rowBytes
+	table.memoryBytes += rowBytes - previous
+}
+
+func (table *TypedTable) appendTypedTableMemoryRowLocked(rowBytes int64) {
+	if table.memoryBudgetMaxBytes <= 0 {
+		return
+	}
+	table.memoryRowBytes = append(table.memoryRowBytes, rowBytes)
+	table.memoryBytes += rowBytes
+}
+
 func (table *TypedTable) SQLSourceVersion(name string, key string) (string, bool, error) {
 	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
 		return "", false, nil
@@ -1026,6 +1143,24 @@ func (table *TypedTable) Schema() TypedTableSchema {
 	schema := table.schema
 	schema.Columns = append([]TypedTableColumn(nil), schema.Columns...)
 	return schema
+}
+
+// MemoryUsage returns the current logical budget usage. It is intentionally a
+// conservative admission metric rather than a process heap measurement.
+func (table *TypedTable) MemoryUsage() TypedTableMemoryUsage {
+	if table == nil {
+		return TypedTableMemoryUsage{}
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	usage := TypedTableMemoryUsage{
+		MaxBytes:  table.memoryBudgetMaxBytes,
+		UsedBytes: table.memoryBytes,
+	}
+	if usage.MaxBytes > usage.UsedBytes {
+		usage.AvailableBytes = usage.MaxBytes - usage.UsedBytes
+	}
+	return usage
 }
 
 func (table *TypedTable) columnarBatchLocked(fields []string) ColumnarBatch {

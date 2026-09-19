@@ -21193,3 +21193,31 @@ vet-chu43:
 .PHONY: commit-chu43
 commit-chu43:
 	sh scripts/commit-chu43.sh
+
+.PHONY: test-chu24
+test-chu24:
+	bash ./scripts/test-chu24.sh
+
+.PHONY: format-chu24
+format-chu24:
+	bash ./scripts/format-chu24.sh
+
+.PHONY: benchmark-chu24
+benchmark-chu24:
+	bash ./scripts/benchmark-chu24.sh
+
+.PHONY: test-chu24-package
+test-chu24-package:
+	bash ./scripts/test-chu24-package.sh
+
+.PHONY: race-chu24
+race-chu24:
+	bash ./scripts/race-chu24.sh
+
+.PHONY: vet-chu24
+vet-chu24:
+	bash ./scripts/vet-chu24.sh
+
+.PHONY: commit-chu24
+commit-chu24:
+	bash ./scripts/commit-chu24.sh

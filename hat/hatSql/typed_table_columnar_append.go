@@ -89,6 +89,18 @@ func (table *TypedTable) AppendColumnar(keys []string, batch ColumnarBatch) ([]T
 			return nil, fmt.Errorf("typed table key %q already exists", key)
 		}
 	}
+	var memoryRowBytes []int64
+	if table.memoryBudgetMaxBytes > 0 {
+		memoryRowBytes = make([]int64, len(changes))
+		var additionalBytes int64
+		for index, change := range changes {
+			memoryRowBytes[index] = typedTableEstimatedRowBytes(change.Key, change.After)
+			additionalBytes = typedTableAddMemoryBytes(additionalBytes, memoryRowBytes[index])
+		}
+		if err := table.checkTypedTableMemoryBudgetLocked(0, additionalBytes); err != nil {
+			return nil, err
+		}
+	}
 	table.clearColumnarLayoutsLocked()
 	table.invalidateTypedTableDerivedCachesLocked()
 	newBasePart := len(table.keys) == 0
@@ -114,6 +126,9 @@ func (table *TypedTable) AppendColumnar(keys []string, batch ColumnarBatch) ([]T
 		table.keys = append(table.keys, change.Key)
 		for column := range table.columns {
 			table.columns[column].append(change.After[column])
+		}
+		if table.memoryBudgetMaxBytes > 0 {
+			table.appendTypedTableMemoryRowLocked(memoryRowBytes[row])
 		}
 		if table.ttl != nil {
 			table.setTypedTableTTLDeadlineLocked(index, ttlNow)

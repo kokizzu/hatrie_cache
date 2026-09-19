@@ -98,6 +98,9 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	write := 0
 	for read, key := range table.keys {
 		if state.deleted.contains(read) {
+			if table.memoryBudgetMaxBytes > 0 {
+				table.memoryBytes -= table.memoryRowBytes[read]
+			}
 			delete(table.positions, key)
 			continue
 		}
@@ -106,6 +109,9 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 			table.positions[key] = write
 			for column := range table.columns {
 				table.columns[column].copy(write, read)
+			}
+			if table.memoryBudgetMaxBytes > 0 {
+				table.memoryRowBytes[write] = table.memoryRowBytes[read]
 			}
 			if table.ttl != nil && table.ttl.options.Mode == TypedTableTTLProcessingTime {
 				table.ttl.deadlines[write] = table.ttl.deadlines[read]
@@ -120,6 +126,9 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	state.deletedCount = 0
 	for column := range table.columns {
 		table.columns[column].truncate(write)
+	}
+	if table.memoryBudgetMaxBytes > 0 {
+		table.memoryRowBytes = table.memoryRowBytes[:write]
 	}
 	table.truncateTypedTableColumnTTLDeadlinesLocked(write)
 	if table.ttl != nil {
