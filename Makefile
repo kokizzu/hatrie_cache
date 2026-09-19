@@ -21884,3 +21884,10 @@ benchmark-mu09:
 	bash scripts/benchmark-mu09.sh
 verify-mu09:
 	bash scripts/verify-mu09.sh
+
+tmp-hatrie-audit-top-contents:
+	bash scripts/audit-hatrie-top-contents.sh
+tmp-hatrie-empty-plan:
+	bash scripts/cleanup-hatrie-empty-tmp.sh preview
+tmp-hatrie-empty-clean:
+	bash scripts/cleanup-hatrie-empty-tmp.sh apply
