@@ -31820,3 +31820,12 @@ fixture because it creates a second gzip-binary snapshot. This is a deliberate
 correctness-first implementation tradeoff; the API should not be used as a
 per-row batching mechanism. The full semantics and future undo-log direction
 are documented in [TR034_SQL_SAVEPOINTS.md](TR034_SQL_SAVEPOINTS.md).
+## C206 Query-cache eligibility
+
+The existing result-cache admission guard was verified with five benchmark
+samples. Median results: deterministic key construction `3,351 ns/op`,
+`2,221 B/op`, `26 allocs/op`; volatile key rejection `1,710 ns/op`,
+`2,704 B/op`, `4 allocs/op`. Volatile admission is `1.96x` faster and uses
+`6.5x` fewer allocations, with `1.22x` higher bytes in this microbenchmark.
+See [C206_QUERY_CACHE_ELIGIBILITY.md](C206_QUERY_CACHE_ELIGIBILITY.md) for
+the correctness scope and limitations.

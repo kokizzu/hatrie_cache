@@ -21101,3 +21101,27 @@ format-tr034-savepoint:
 
 benchmark-tr034-savepoint:
 	bash scripts/benchmark-tr034-savepoint.sh
+
+.PHONY: test-c206
+test-c206:
+	sh scripts/test-c206.sh
+
+.PHONY: benchmark-c206
+benchmark-c206:
+	sh scripts/benchmark-c206.sh
+
+.PHONY: race-c206
+race-c206:
+	sh scripts/race-c206.sh
+
+.PHONY: vet-c206
+vet-c206:
+	sh scripts/vet-c206.sh
+
+.PHONY: format-c206
+format-c206:
+	sh scripts/format-c206.sh
+
+.PHONY: commit-c206
+commit-c206:
+	sh scripts/commit-c206.sh

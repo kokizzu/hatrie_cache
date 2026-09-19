@@ -35,7 +35,7 @@ operator control remain the preferred deployment model.
 - [x] C203 Explicit `wait_for_async_insert` durability modes with visible acknowledgment semantics. Implemented for opt-in HTTP async commands; omitted/`0` preserves `202` admission and `1` waits for durable-and-applied completion. See [CHU03_ASYNC_INSERT_ACK_MODES.md](CHU03_ASYNC_INSERT_ACK_MODES.md).
 - [x] C204 Idempotency-token propagation across asynchronous inserts and dependent materialized views. Implemented through incremental projections and refreshed materialized-view status; see [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata).
 - [x] C205 Query-cache controls scoped to individual subqueries; see [C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md) and [BENCHMARK.md](BENCHMARK.md#c205-subquery-result-cache).
-- [ ] C206 Query-cache eligibility checks that reject nondeterministic expressions.
+- [x] C206 Query-cache eligibility checks that reject nondeterministic expressions; verified in [C206_QUERY_CACHE_ELIGIBILITY.md](C206_QUERY_CACHE_ELIGIBILITY.md).
 - [ ] C207 Query-condition cache with data-generation invalidation for repeated filters.
 - [x] C208 Query-cache hit, miss, bypass, and eviction metrics via `ResultCache`; see [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md).
 - [x] C209 Automatic basic column statistics for row count, null count, min, and max via `TypedTable.Stats()`; see [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md).
