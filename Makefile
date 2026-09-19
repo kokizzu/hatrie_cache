@@ -21796,3 +21796,9 @@ benchmark-m055:
 
 verify-m055:
 	sh scripts/verify-m055.sh
+
+test:
+	sh scripts/test-all.sh
+
+test-all:
+	sh scripts/test-all.sh
