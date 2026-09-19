@@ -32904,3 +32904,40 @@ BenchmarkTU06ReplicaWriteGateBlocked-32      289486372  3.511 ns/op  0 B/op  0 a
 BenchmarkTU06ReplicaWriteGateBlocked-32      293989261  3.939 ns/op  0 B/op  0 allocs/op
 BenchmarkTU06ReplicaWriteGateBlocked-32      343512962  3.668 ns/op  0 B/op  0 allocs/op
 ```
+
+## T-U09 Snapshot-plus-WAL Bootstrap Coordinator
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is a
+simple atomic sequence check; the coordinator benchmarks exercise its real
+mutex-protected progress and status paths.
+
+| Operation | Median | Allocations | Improvement or cost |
+| --- | ---: | ---: | ---: |
+| Simple atomic sequence baseline | 1.875 ns/op | 0 B/op, 0 allocs/op | Lower-bound reference |
+| Idempotent `AdvanceWAL` admission | 26.33 ns/op | 0 B/op, 0 allocs/op | 14.0x baseline cost |
+| `Snapshot` status read | 13.10 ns/op | 0 B/op, 0 allocs/op | 7.0x baseline cost |
+
+The coordinator adds bounded synchronization for lifecycle correctness and
+does not retain WAL payloads, start workers, or allocate per record. The atomic
+loop is not an end-to-end join baseline; snapshot transfer, checksums, and WAL
+replay are outside this microbenchmark.
+
+Raw output:
+
+```text
+BenchmarkTU09BaselineSequenceAdmission-32     580063551  1.897 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BaselineSequenceAdmission-32     662960534  1.874 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BaselineSequenceAdmission-32     669765668  1.889 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BaselineSequenceAdmission-32     562107769  1.831 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BaselineSequenceAdmission-32     618790112  1.875 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapAdvanceWAL-32            45868383 28.08 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapAdvanceWAL-32            47295674 27.19 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapAdvanceWAL-32            39675189 26.33 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapAdvanceWAL-32            46084545 24.87 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapAdvanceWAL-32            45907988 25.95 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapSnapshot-32              80544777 13.40 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapSnapshot-32              87438363 13.52 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapSnapshot-32              85478413 13.09 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapSnapshot-32              78464624 13.02 ns/op  0 B/op  0 allocs/op
+BenchmarkTU09BootstrapSnapshot-32              81439574 13.10 ns/op  0 B/op  0 allocs/op
+```

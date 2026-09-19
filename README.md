@@ -260,6 +260,7 @@ security guidance before exposing it on a network.
 - Opt-in incremental foreign-key enforcement: [FOREIGN_KEY_INDEX.md](FOREIGN_KEY_INDEX.md)
 - Independent topology leader election: [LEADER_ELECTION.md](LEADER_ELECTION.md)
 - Opt-in leader-lease and monotonic fencing primitive; full consensus integration remains caller-owned: [TR01_LEADER_LEASE.md](TR01_LEADER_LEASE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tr-01-leader-lease-and-fencing)
+- Snapshot-plus-WAL join bootstrap coordinator with bounded replay, generation fencing, and activation states: [TU09_SNAPSHOT_WAL_BOOTSTRAP.md](TU09_SNAPSHOT_WAL_BOOTSTRAP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u09-snapshot-plus-wal-bootstrap-coordinator)
 - Opt-in replica-wide read-only write admission with an internal-replication exception, operator override, and generation-fenced transitions: [TU06_REPLICA_READ_ONLY.md](TU06_REPLICA_READ_ONLY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u06-replica-wide-read-only-admission)
 - Opt-in cross-region read routing: [CROSS_REGION_READ_POLICY.md](CROSS_REGION_READ_POLICY.md)
 - Cross-region backup restore drill: [CROSS_REGION_RESTORE_DRILL.md](CROSS_REGION_RESTORE_DRILL.md)
