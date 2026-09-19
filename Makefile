@@ -21747,3 +21747,19 @@ benchmark-m053-baseline:
 .PHONY: verify-m053
 verify-m053:
 	@bash scripts/verify-m053.sh
+
+.PHONY: test-m054 format-m054 benchmark-m054 benchmark-m054-baseline verify-m054
+test-m054:
+	@bash scripts/test-m054.sh
+
+format-m054:
+	@bash scripts/format-m054.sh
+
+benchmark-m054:
+	@bash scripts/benchmark-m054.sh
+
+benchmark-m054-baseline:
+	@bash scripts/benchmark-m054-baseline.sh
+
+verify-m054:
+	@bash scripts/verify-m054.sh

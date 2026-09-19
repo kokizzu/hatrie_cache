@@ -32205,3 +32205,27 @@ The resolver control path does not call the new APIs, so its lower median is ben
 | New snapshot bootstrap | n/a | 172797 ns/op | 221882 | 1293 | New bounded control-plane path |
 
 The control delta is normal five-run variance; no existing implementation or hot-path memory/allocation behavior changed. Bootstrap deliberately clones rows for ownership and checkpoint atomicity. Raw samples and limits are in [MU03_EXTERNAL_SNAPSHOT_INGESTION.md](MU03_EXTERNAL_SNAPSHOT_INGESTION.md).
+
+## M-U04 Multi-Source Snapshot Coordinator
+
+Commands:
+
+    make benchmark-m054-baseline
+    make benchmark-m054
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The direct control resolves
+one of two sources through a prebuilt map and performs the same deep row clone
+as the coordinated view. Capture and recovery each operate on two one-row
+sources.
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Direct two-source resolver control | 257.0, 253.5, 248.8, 251.7, 251.6 | 251.6 | 344 | 3 |
+| Coordinated capture, two sources | 12,670, 12,845, 12,539, 12,972, 12,317 | 12,670 | 8,416 | 81 |
+| Coordinated checkpoint recovery | 5,244, 5,254, 5,103, 5,108, 5,067 | 5,108 | 5,872 | 57 |
+| Coordinated view resolve | 280.4, 280.6, 281.4, 274.9, 280.8 | 280.6 | 344 | 3 |
+
+The steady-state coordinated resolve is 1.12x the direct controls CPU time
+with identical measured memory and allocation counts. Capture and recovery are
+control-plane costs: capture includes authentication dispatch, bounded
+collection, validation, deep copies, and one checkpoint commit.

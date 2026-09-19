@@ -4642,3 +4642,15 @@ The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes,
 - Materialize-style connector schema evolution with deterministic compatibility plans, mixed-version row projection, atomic catalog generations, and rollback: [MU02_CONNECTOR_SCHEMA_EVOLUTION.md](MU02_CONNECTOR_SCHEMA_EVOLUTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u02-connector-schema-evolution).
 
 - Provider-neutral external snapshot ingestion for Kafka/PostgreSQL/CDC adapters with authentication, bounded page backpressure, offset cutover, atomic checkpoints, and restart recovery: [MU03_EXTERNAL_SNAPSHOT_INGESTION.md](MU03_EXTERNAL_SNAPSHOT_INGESTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u03-external-snapshot-ingestion).
+
+## Multi-Source Snapshot Coordination
+
+hatSql.SQLMultiSourceSnapshotCoordinator captures bounded, authenticated
+snapshots from multiple SQL/CDC sources and publishes one atomic initial view.
+It preserves each source snapshot ID and offsets for live-tail handoff and
+restores a committed view without contacting providers. See
+MU04_MULTI_SOURCE_SNAPSHOT_COORDINATOR.md for the API, recovery contract,
+security guidance, and measurements.
+
+Run the focused checks and benchmarks with make test-m054,
+make benchmark-m054-baseline, and make benchmark-m054.

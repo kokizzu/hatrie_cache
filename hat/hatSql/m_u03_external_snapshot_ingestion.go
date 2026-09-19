@@ -270,30 +270,7 @@ func (ingestor *SQLExternalSnapshotIngestor) IngestSnapshotWithCheckpoint(ctx co
 			Restored:   true,
 		}, nil
 	}
-	if provider == nil {
-		return SQLExternalSnapshotIngestResult{}, ErrSQLExternalSnapshotProviderRequired
-	}
-	if err := provider.Authenticate(ctx); err != nil {
-		return SQLExternalSnapshotIngestResult{}, ErrSQLExternalSnapshotAuthentication
-	}
-	if err := ctx.Err(); err != nil {
-		return SQLExternalSnapshotIngestResult{}, err
-	}
-	collector := &sqlExternalSnapshotCollector{maxRows: maxRows, maxPageRows: maxPageRows}
-	metadata, err := provider.Snapshot(ctx, collector)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return SQLExternalSnapshotIngestResult{}, err
-		}
-		if errors.Is(err, ErrSQLExternalSnapshotRowsLimit) || errors.Is(err, ErrSQLExternalSnapshotPageLimit) || errors.Is(err, ErrSQLExternalSnapshotInvalid) {
-			return SQLExternalSnapshotIngestResult{}, err
-		}
-		return SQLExternalSnapshotIngestResult{}, ErrSQLExternalSnapshotProvider
-	}
-	if err := ctx.Err(); err != nil {
-		return SQLExternalSnapshotIngestResult{}, err
-	}
-	snapshot, err := ingestor.normalizeSnapshot(SQLExternalSnapshot{Metadata: metadata, Rows: collector.rows}, maxRows, maxOffsets, options.RequireSnapshotID)
+	snapshot, pages, err := ingestor.captureSnapshot(ctx, provider, maxRows, maxOffsets, maxPageRows, options.RequireSnapshotID)
 	if err != nil {
 		return SQLExternalSnapshotIngestResult{}, err
 	}
@@ -315,9 +292,40 @@ func (ingestor *SQLExternalSnapshotIngestor) IngestSnapshotWithCheckpoint(ctx co
 		SnapshotID:   snapshot.Metadata.SnapshotID,
 		Rows:         len(snapshot.Rows),
 		Offsets:      len(snapshot.Metadata.Offsets),
-		Pages:        collector.pages,
+		Pages:        pages,
 		Checkpointed: true,
 	}, nil
+}
+
+func (ingestor *SQLExternalSnapshotIngestor) captureSnapshot(ctx context.Context, provider SQLExternalSnapshotProvider, maxRows, maxOffsets, maxPageRows int, requireSnapshotID bool) (SQLExternalSnapshot, int, error) {
+	if provider == nil {
+		return SQLExternalSnapshot{}, 0, ErrSQLExternalSnapshotProviderRequired
+	}
+	if err := provider.Authenticate(ctx); err != nil {
+		return SQLExternalSnapshot{}, 0, ErrSQLExternalSnapshotAuthentication
+	}
+	if err := ctx.Err(); err != nil {
+		return SQLExternalSnapshot{}, 0, err
+	}
+	collector := &sqlExternalSnapshotCollector{maxRows: maxRows, maxPageRows: maxPageRows}
+	metadata, err := provider.Snapshot(ctx, collector)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return SQLExternalSnapshot{}, 0, err
+		}
+		if errors.Is(err, ErrSQLExternalSnapshotRowsLimit) || errors.Is(err, ErrSQLExternalSnapshotPageLimit) || errors.Is(err, ErrSQLExternalSnapshotInvalid) {
+			return SQLExternalSnapshot{}, 0, err
+		}
+		return SQLExternalSnapshot{}, 0, ErrSQLExternalSnapshotProvider
+	}
+	if err := ctx.Err(); err != nil {
+		return SQLExternalSnapshot{}, 0, err
+	}
+	snapshot, err := ingestor.normalizeSnapshot(SQLExternalSnapshot{Metadata: metadata, Rows: collector.rows}, maxRows, maxOffsets, requireSnapshotID)
+	if err != nil {
+		return SQLExternalSnapshot{}, 0, err
+	}
+	return snapshot, collector.pages, nil
 }
 
 type sqlExternalSnapshotCollector struct {
