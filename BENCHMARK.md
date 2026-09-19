@@ -33021,3 +33021,28 @@ BenchmarkTU12AutomaticFailoverSnapshot-32    99331843  10.76 ns/op  0 B/op  0 al
 BenchmarkTU12AutomaticFailoverSnapshot-32   114581944  10.49 ns/op  0 B/op  0 allocs/op
 BenchmarkTU12AutomaticFailoverSnapshot-32    97160594  10.79 ns/op  0 B/op  0 allocs/op
 ```
+
+<a id="t-u19-durable-tuple-field-operation-journal"></a>
+## T-U19 Durable Tuple Field-Operation Journal
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is the
+existing direct `TupleFieldOffsetCache.ApplyUpdates` path for the same three
+field operations. The journal benchmarks measure bounded operation ownership,
+binary framing, replay, and the explicit path-backed durability mode.
+
+| Path | Five raw ns/op samples | Median ns/op | B/op | Allocs/op | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Direct `ApplyUpdates` baseline | 202.6; 201.2; 210.8; 219.3; 222.4 | 210.8 | 40 | 2 | reference tuple mutation |
+| In-memory journal `Append` | 1,530; 1,468; 1,474; 1,523; 1,514 | 1,514 | 718 | 8 | bounded record ownership and idempotency |
+| `MarshalBinary` | 231.8; 251.0; 241.3; 255.5; 251.4 | 251.0 | 192 | 2 | TJF1 framing and CRC32C |
+| Replay plus tuple apply | 407.3; 419.1; 406.5; 411.9; 414.2 | 411.9 | 344 | 5 | one-record recovery path |
+| File-backed durable `Append` | 2,728,728; 1,735,907; 1,633,877; 1,637,872; 1,609,052 | 1,637,872 | 6,390 | 29 | temporary file, rename, file sync, directory sync |
+
+The journal is intentionally not a faster replacement for direct tuple
+mutation. It is an opt-in recovery boundary: the default tuple path has no
+journal lookup or allocation, while callers pay only when they request
+replayable operation history or per-append filesystem durability. The
+path-backed number is environment-dependent and should be evaluated against
+the deployment filesystem before enabling it for foreground writes. Raw
+commands and limits are documented in
+[TU19_DURABLE_TUPLE_OPERATION_JOURNAL.md](TU19_DURABLE_TUPLE_OPERATION_JOURNAL.md).

@@ -22303,3 +22303,6 @@ vet-chu06-persistent-delete-bitmap:
 	bash scripts/vet-chu06-persistent-delete-bitmap.sh
 verify-chu06-persistent-delete-bitmap:
 	bash scripts/verify-chu06-persistent-delete-bitmap.sh
+.PHONY: benchmark-tu19-tuple-journal
+benchmark-tu19-tuple-journal:
+	bash ./scripts/benchmark-tu19-tuple-journal.sh
