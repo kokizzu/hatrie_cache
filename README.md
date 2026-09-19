@@ -4630,3 +4630,7 @@ unchanged when no controller is configured. See
 ## Connector health remediation
 
 Connector startup can use an opt-in bounded retry and quarantine policy without changing the existing lifecycle path. See [MU048_CONNECTOR_HEALTH_REMEDIATION.md](MU048_CONNECTOR_HEALTH_REMEDIATION.md) for the API, defaults, failure behavior, and benchmark.
+
+## Heap fragmentation diagnostics
+
+The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes, allocator metadata, and stack footprint without adding background work. See [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md) for field semantics, cost, and verification.

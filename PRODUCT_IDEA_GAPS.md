@@ -2,7 +2,7 @@
 
 This is the current implementation queue for ideas compared with ClickHouse,
 Materialize, and Tarantool. It contains 50 candidate gaps for each product.
-The audit was performed against the exported Go packages, SQL surface, server
+The audit was performed against the exported Go packages, S| T-U44 | Slab fragmentation diagnostics | Implemented: opt-in portable heap placement, allocator metadata, reusable idle bytes, and stack footprint from runtime counters. | Platform portability and sampling cost; no default-path work or measured allocations. |L surface, server
 commands, monitoring APIs, backup/restore paths, and current documentation on
 2026-09-12. A row is retained only when the repository has no complete,
 end-to-end equivalent; a specialized or opt-in partial implementation is

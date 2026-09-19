@@ -32135,3 +32135,7 @@ deferred release remains to recover permits when a callback panics.
 ## MU-048 connector health remediation
 
 The opt-in `StartWithHealthPolicy` path keeps the successful single-attempt case at `544 B/op` and `5 allocs/op` in the measured benchmark. Median timings were `435.5 ns/op` for the clean baseline, `426.8 ns/op` for existing `Start`, and `415.4 ns/op` for the policy path; the overlapping samples are treated as noise, not as a throughput claim. Failed attempts intentionally add bounded timer/backoff work. Raw samples and the test commands are documented in [MU048_CONNECTOR_HEALTH_REMEDIATION.md](MU048_CONNECTOR_HEALTH_REMEDIATION.md).
+
+## T-U44 heap fragmentation diagnostics
+
+ReadHeapFragmentationReport retained the direct runtime sampling allocation profile at 0 B/op and 0 allocs/op. The five-run medians were 19,614 ns/op for direct ReadMemStats and 19,116 ns/op for the report; the overlapping samples are treated as noise rather than a throughput claim. Raw samples and the diagnostic tradeoff are in [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md).

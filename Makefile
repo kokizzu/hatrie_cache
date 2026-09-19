@@ -21593,3 +21593,25 @@ commit-mu048:
 push-mu048:
 	bash ./scripts/push-mu048.sh
 # END MU048 connector health remediation
+
+# BEGIN T044 heap fragmentation diagnostics
+.PHONY: format-t044 test-t044 benchmark-t044 test-t044-package race-t044 vet-t044 verify-t044 commit-t044 push-t044
+format-t044:
+	bash ./scripts/format-t044.sh
+test-t044:
+	bash ./scripts/test-t044.sh
+benchmark-t044:
+	bash ./scripts/benchmark-t044.sh
+test-t044-package:
+	bash ./scripts/test-t044-package.sh
+race-t044:
+	bash ./scripts/race-t044.sh
+vet-t044:
+	bash ./scripts/vet-t044.sh
+verify-t044:
+	bash ./scripts/verify-t044.sh
+commit-t044:
+	bash ./scripts/commit-t044.sh
+push-t044:
+	bash ./scripts/push-t044.sh
+# END T044 heap fragmentation diagnostics
