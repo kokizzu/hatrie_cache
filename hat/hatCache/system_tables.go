@@ -16,6 +16,7 @@ const (
 	DefaultSQLSystemPartLimit     = 1024
 	MaxSQLSystemPartLimit         = 10000
 	MaxSQLSystemPartFieldBytes    = 4096
+	MaxSQLSystemMutationParts     = 256
 
 	SQLSystemPartsTable        = "system.parts"
 	SQLSystemMutationsTable    = "system.mutations"
@@ -24,8 +25,10 @@ const (
 )
 
 var (
-	ErrSQLSystemPartInvalid        = errors.New("hatriecache: invalid SQL system part")
-	ErrSQLSystemPartsLimitExceeded = errors.New("hatriecache: SQL system parts limit exceeded")
+	ErrSQLSystemPartInvalid            = errors.New("hatriecache: invalid SQL system part")
+	ErrSQLSystemPartsLimitExceeded     = errors.New("hatriecache: SQL system parts limit exceeded")
+	ErrSQLSystemMutationInvalid        = errors.New("hatriecache: invalid SQL system mutation")
+	ErrSQLSystemMutationsLimitExceeded = errors.New("hatriecache: SQL system mutations limit exceeded")
 )
 
 // SQLSystemPart is the stable, privacy-conscious metadata contract for one
@@ -65,6 +68,39 @@ func (provider SQLSystemPartProviderFunc) SnapshotSQLSystemParts() ([]SQLSystemP
 	return provider()
 }
 
+// SQLSystemMutation is the stable, privacy-conscious metadata contract for
+// one mutation. ErrorMessage must already be redacted by the provider.
+type SQLSystemMutation struct {
+	MutationID    string
+	Sequence      int64
+	Command       string
+	Key           string
+	State         string
+	Progress      int64
+	AffectedParts []string
+	ErrorCode     string
+	ErrorMessage  string
+	StartedAt     time.Time
+	FinishedAt    time.Time
+}
+
+// SQLSystemMutationProvider supplies a bounded point-in-time mutation
+// catalog snapshot.
+type SQLSystemMutationProvider interface {
+	SnapshotSQLSystemMutations() ([]SQLSystemMutation, error)
+}
+
+// SQLSystemMutationProviderFunc adapts a function to SQLSystemMutationProvider.
+type SQLSystemMutationProviderFunc func() ([]SQLSystemMutation, error)
+
+// SnapshotSQLSystemMutations implements SQLSystemMutationProvider.
+func (provider SQLSystemMutationProviderFunc) SnapshotSQLSystemMutations() ([]SQLSystemMutation, error) {
+	if provider == nil {
+		return nil, nil
+	}
+	return provider()
+}
+
 // SQLSystemTablesResolverOptions supplies optional operator data sources for
 // SQLSystemTablesResolver. Missing sources produce empty system tables.
 type SQLSystemTablesResolverOptions struct {
@@ -82,19 +118,23 @@ type SQLSystemTablesResolverOptions struct {
 	PartProvider SQLSystemPartProvider
 	// PartLimit bounds provider rows returned by one system.parts read.
 	PartLimit int
+	// MutationProvider supplies complete mutation metadata. When omitted,
+	// system.mutations retains the legacy journal tail view.
+	MutationProvider SQLSystemMutationProvider
 }
 
 // SQLSystemTablesResolver adds read-only operational tables to an existing SQL
 // source resolver. It recognizes CACHE('system.*') while delegating every
 // other source unchanged, so existing query behavior is preserved.
 type SQLSystemTablesResolver struct {
-	source        SQLSourceResolver
-	trie          *HatTrie
-	queryManager  *hatSql.SQLQueryManager
-	journal       *CommandJournal
-	mutationLimit int
-	partProvider  SQLSystemPartProvider
-	partLimit     int
+	source           SQLSourceResolver
+	trie             *HatTrie
+	queryManager     *hatSql.SQLQueryManager
+	journal          *CommandJournal
+	mutationLimit    int
+	partProvider     SQLSystemPartProvider
+	partLimit        int
+	mutationProvider SQLSystemMutationProvider
 }
 
 // NewSQLSystemTablesResolver wraps source with read-only system tables.
@@ -118,13 +158,14 @@ func NewSQLSystemTablesResolver(source SQLSourceResolver, options SQLSystemTable
 		partLimit = MaxSQLSystemPartLimit
 	}
 	return &SQLSystemTablesResolver{
-		source:        source,
-		trie:          trie,
-		queryManager:  options.QueryManager,
-		journal:       options.Journal,
-		mutationLimit: limit,
-		partProvider:  options.PartProvider,
-		partLimit:     partLimit,
+		source:           source,
+		trie:             trie,
+		queryManager:     options.QueryManager,
+		journal:          options.Journal,
+		mutationLimit:    limit,
+		partProvider:     options.PartProvider,
+		partLimit:        partLimit,
+		mutationProvider: options.MutationProvider,
 	}
 }
 
@@ -142,6 +183,9 @@ func (resolver *SQLSystemTablesResolver) ResolveSQLSource(name, key string) ([]S
 			}
 			return resolver.providerParts()
 		case SQLSystemMutationsTable:
+			if resolver.mutationProvider != nil {
+				return resolver.providerMutations()
+			}
 			return resolver.mutations()
 		case SQLSystemQueriesTable:
 			return resolver.queries(), nil
@@ -255,6 +299,77 @@ func sqlSystemPartRow(part SQLSystemPart) SQLRow {
 	}
 	if !part.RetentionUntil.IsZero() {
 		row["retention_until"] = part.RetentionUntil.UTC()
+	}
+	return row
+}
+
+func (resolver *SQLSystemTablesResolver) providerMutations() ([]SQLRow, error) {
+	mutations, err := resolver.mutationProvider.SnapshotSQLSystemMutations()
+	if err != nil {
+		return nil, err
+	}
+	if len(mutations) > resolver.mutationLimit {
+		return nil, fmt.Errorf("%w: got %d rows, limit %d", ErrSQLSystemMutationsLimitExceeded, len(mutations), resolver.mutationLimit)
+	}
+	mutations = append([]SQLSystemMutation(nil), mutations...)
+	for index := range mutations {
+		if err := validateSQLSystemMutation(mutations[index]); err != nil {
+			return nil, err
+		}
+	}
+	sort.SliceStable(mutations, func(left, right int) bool {
+		if mutations[left].Sequence != mutations[right].Sequence {
+			return mutations[left].Sequence < mutations[right].Sequence
+		}
+		return mutations[left].MutationID < mutations[right].MutationID
+	})
+	rows := make([]SQLRow, len(mutations))
+	for index, mutation := range mutations {
+		rows[index] = sqlSystemMutationRow(mutation)
+	}
+	return rows, nil
+}
+
+func validateSQLSystemMutation(mutation SQLSystemMutation) error {
+	if strings.TrimSpace(mutation.MutationID) == "" {
+		return fmt.Errorf("%w: mutation ID is required", ErrSQLSystemMutationInvalid)
+	}
+	if mutation.Sequence < 0 || mutation.Progress < 0 || mutation.Progress > 100 {
+		return fmt.Errorf("%w: sequence and progress must be in range", ErrSQLSystemMutationInvalid)
+	}
+	if len(mutation.MutationID) > MaxSQLSystemPartFieldBytes || len(mutation.Command) > MaxSQLSystemPartFieldBytes || len(mutation.Key) > MaxSQLSystemPartFieldBytes || len(mutation.State) > MaxSQLSystemPartFieldBytes || len(mutation.ErrorCode) > MaxSQLSystemPartFieldBytes || len(mutation.ErrorMessage) > MaxSQLSystemPartFieldBytes {
+		return fmt.Errorf("%w: metadata field exceeds %d bytes", ErrSQLSystemMutationInvalid, MaxSQLSystemPartFieldBytes)
+	}
+	if len(mutation.AffectedParts) > MaxSQLSystemMutationParts {
+		return fmt.Errorf("%w: affected parts exceed %d", ErrSQLSystemMutationInvalid, MaxSQLSystemMutationParts)
+	}
+	for _, part := range mutation.AffectedParts {
+		if strings.TrimSpace(part) == "" || len(part) > MaxSQLSystemPartFieldBytes {
+			return fmt.Errorf("%w: affected part is empty or too large", ErrSQLSystemMutationInvalid)
+		}
+	}
+	return nil
+}
+
+func sqlSystemMutationRow(mutation SQLSystemMutation) SQLRow {
+	row := SQLRow{
+		"sequence":       mutation.Sequence,
+		"mutation_id":    strings.TrimSpace(mutation.MutationID),
+		"command":        mutation.Command,
+		"key":            mutation.Key,
+		"state":          mutation.State,
+		"progress":       mutation.Progress,
+		"affected_parts": append([]string(nil), mutation.AffectedParts...),
+		"error_code":     mutation.ErrorCode,
+		"error_message":  mutation.ErrorMessage,
+		"started_at":     nil,
+		"finished_at":    nil,
+	}
+	if !mutation.StartedAt.IsZero() {
+		row["started_at"] = mutation.StartedAt.UTC()
+	}
+	if !mutation.FinishedAt.IsZero() {
+		row["finished_at"] = mutation.FinishedAt.UTC()
 	}
 	return row
 }

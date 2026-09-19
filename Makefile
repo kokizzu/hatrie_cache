@@ -21445,3 +21445,39 @@ commit-chu36:
 .PHONY: push-chu36
 push-chu36:
 	bash ./scripts/push-chu36.sh
+
+.PHONY: test-chu37
+test-chu37:
+	bash ./scripts/test-chu37.sh
+
+.PHONY: benchmark-chu37
+benchmark-chu37:
+	bash ./scripts/benchmark-chu37.sh
+
+.PHONY: format-chu37
+format-chu37:
+	bash ./scripts/format-chu37.sh
+
+.PHONY: test-chu37-package
+test-chu37-package:
+	bash ./scripts/test-chu37-package.sh
+
+.PHONY: race-chu37
+race-chu37:
+	bash ./scripts/race-chu37.sh
+
+.PHONY: vet-chu37
+vet-chu37:
+	bash ./scripts/vet-chu37.sh
+
+.PHONY: verify-chu37
+verify-chu37:
+	bash ./scripts/verify-chu37.sh
+
+.PHONY: commit-chu37
+commit-chu37:
+	bash ./scripts/commit-chu37.sh
+
+.PHONY: push-chu37
+push-chu37:
+	bash ./scripts/push-chu37.sh

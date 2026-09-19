@@ -32047,3 +32047,25 @@ resolvers without `PartProvider`.
 
 Details and the complete column contract are in
 [CHU36_SYSTEM_PARTS_CATALOG.md](CHU36_SYSTEM_PARTS_CATALOG.md).
+
+## CH-U37 Stable SQL System Mutations Catalog
+
+The benchmark uses 256 rows. The legacy path reads a 256-entry journal tail;
+the provider path materializes 256 rows with two affected parts each. Five
+`-benchmem` samples were run through `make benchmark-chu37` on Linux/amd64
+with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before: legacy journal tail | 289,160; 333,756; 309,822; 319,661; 308,487 | 309,822 | 228,076 | 2,575 | 1.00x |
+| After: legacy journal tail | 313,686; 296,551; 331,982; 304,737; 325,440 | 313,686 | 228,076 | 2,575 | 1.01x |
+| After: rich provider | 278,617; 239,539; 243,983; 250,774; 235,639 | 243,983 | 252,426 | 2,565 | 0.79x |
+
+The legacy path is allocation-neutral and within benchmark noise for CPU. The
+rich provider path is about 1.29x faster than the legacy path and uses 1.11x
+the transient heap for the additional metadata copy, validation, and sorting.
+It uses 10 fewer allocations in this workload. The provider is opt-in, and no
+default write or journal-retention path pays its cost.
+
+Details and the redaction contract are in
+[CHU37_SYSTEM_MUTATIONS_CATALOG.md](CHU37_SYSTEM_MUTATIONS_CATALOG.md).

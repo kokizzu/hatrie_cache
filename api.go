@@ -321,6 +321,9 @@ type SQLSystemTablesResolverOptions = core.SQLSystemTablesResolverOptions
 type SQLSystemPart = core.SQLSystemPart
 type SQLSystemPartProvider = core.SQLSystemPartProvider
 type SQLSystemPartProviderFunc = core.SQLSystemPartProviderFunc
+type SQLSystemMutation = core.SQLSystemMutation
+type SQLSystemMutationProvider = core.SQLSystemMutationProvider
+type SQLSystemMutationProviderFunc = core.SQLSystemMutationProviderFunc
 type SQLTextIndexedSourceResolver = core.SQLTextIndexedSourceResolver
 type SQLTextPrefixIndexedSourceResolver = core.SQLTextPrefixIndexedSourceResolver
 type SQLTimePartition = core.SQLTimePartition
@@ -553,6 +556,7 @@ const MaxSQLSnapshotTokenBytes = core.MaxSQLSnapshotTokenBytes
 const MaxSQLSystemMutationLimit = core.MaxSQLSystemMutationLimit
 const MaxSQLSystemPartLimit = core.MaxSQLSystemPartLimit
 const MaxSQLSystemPartFieldBytes = core.MaxSQLSystemPartFieldBytes
+const MaxSQLSystemMutationParts = core.MaxSQLSystemMutationParts
 const MaxSnapshotRestoreWorkers = core.MaxSnapshotRestoreWorkers
 const MinSQLSnapshotTokenSecretBytes = core.MinSQLSnapshotTokenSecretBytes
 const MonitoringAPIVersion = core.MonitoringAPIVersion
@@ -604,6 +608,8 @@ const SQLSystemQueryHistoryTable = core.SQLSystemQueryHistoryTable
 
 var ErrSQLSystemPartInvalid = core.ErrSQLSystemPartInvalid
 var ErrSQLSystemPartsLimitExceeded = core.ErrSQLSystemPartsLimitExceeded
+var ErrSQLSystemMutationInvalid = core.ErrSQLSystemMutationInvalid
+var ErrSQLSystemMutationsLimitExceeded = core.ErrSQLSystemMutationsLimitExceeded
 
 const SQLTransactionIsolationSerializable = core.SQLTransactionIsolationSerializable
 const SQLTransactionIsolationSnapshot = core.SQLTransactionIsolationSnapshot
