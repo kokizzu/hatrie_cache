@@ -32867,3 +32867,40 @@ BenchmarkTU38ConflictIntrospectionUnmarshal-32  27801  41829 ns/op  47109 B/op  
 BenchmarkTU38ConflictIntrospectionUnmarshal-32  29251  41307 ns/op  47109 B/op  769 allocs/op
 BenchmarkTU38ConflictIntrospectionUnmarshal-32  32668  36053 ns/op  47108 B/op  769 allocs/op
 ```
+
+## T-U06 Replica-Wide Read-Only Admission
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is a
+bare boolean admission check; the gate benchmarks exercise the real
+read-lock-protected `Admit` path.
+
+| Admission path | Median | Allocations |
+| --- | ---: | ---: |
+| Bare boolean baseline | 0.243 ns/op | 0 B/op, 0 allocs/op |
+| Writable external admission | 3.795 ns/op | 0 B/op, 0 allocs/op |
+| Blocked external admission | 3.734 ns/op | 0 B/op, 0 allocs/op |
+
+The opt-in gate adds about 3.5 ns to this isolated admission check and no heap
+allocation. The bare boolean loop is only a lower-bound reference, not a real
+mutation-path baseline. Contention, state transitions, transport work, and the
+protected storage operation are outside this microbenchmark.
+
+Raw output:
+
+```text
+BenchmarkTU06BaselineBooleanAdmission-32     1000000000  0.2418 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06BaselineBooleanAdmission-32     1000000000  0.2434 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06BaselineBooleanAdmission-32     1000000000  0.2456 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06BaselineBooleanAdmission-32     1000000000  0.2419 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06BaselineBooleanAdmission-32     1000000000  0.2490 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateWritable-32     319488430  3.795 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateWritable-32     307358757  3.768 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateWritable-32     300450558  4.042 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateWritable-32     291265638  4.055 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateWritable-32     312497037  3.594 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateBlocked-32      327907310  3.806 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateBlocked-32      301859130  3.734 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateBlocked-32      289486372  3.511 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateBlocked-32      293989261  3.939 ns/op  0 B/op  0 allocs/op
+BenchmarkTU06ReplicaWriteGateBlocked-32      343512962  3.668 ns/op  0 B/op  0 allocs/op
+```
