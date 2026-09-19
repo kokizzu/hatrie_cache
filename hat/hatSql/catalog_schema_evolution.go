@@ -326,7 +326,7 @@ func catalogSchemaDependencyError(before, after Catalog) error {
 					continue
 				}
 				retainedIndex, retained := afterIndexes[catalogSchemaIndexKey(index.Namespace, index.Source, index.Name)]
-				if retained && containsString(retainedIndex.Columns, field.Name) {
+				if retained && containsCatalogSchemaString(retainedIndex.Columns, field.Name) {
 					return ErrCatalogSchemaDependency
 				}
 			}
@@ -608,7 +608,7 @@ func catalogSchemaIndexKey(namespace, source, index string) string {
 	return namespace + "\x00" + source + "\x00" + index
 }
 
-func containsString(values []string, target string) bool {
+func containsCatalogSchemaString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
 			return true
