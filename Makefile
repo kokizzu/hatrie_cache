@@ -22015,6 +22015,22 @@ benchmark-mu42:
 verify-mu42:
 	@bash scripts/verify-mu42.sh
 
+test-mu43:
+	@bash scripts/test-mu43.sh
+
+format-mu43:
+	@bash scripts/format-mu43.sh
+
+benchmark-mu43-baseline:
+	@bash scripts/benchmark-mu43-baseline.sh
+
+benchmark-mu43:
+	@bash scripts/benchmark-mu43.sh
+
+verify-mu43:
+	@bash scripts/verify-mu43.sh
+
+
 test-mu47:
 	@bash scripts/test-mu47.sh
 

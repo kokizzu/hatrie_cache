@@ -32531,6 +32531,34 @@ the selected durable store and is not included in this in-memory comparison.
 Raw API semantics and the security/recovery contract are in
 [MU042_CONNECTOR_CHECKPOINTS.md](MU042_CONNECTOR_CHECKPOINTS.md).
 
+## M-U43 Sink Backpressure
+
+Commands:
+
+```sh
+make benchmark-mu43-baseline
+make benchmark-mu43
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The direct
+baseline is frontier subtraction only and is not an equivalent synchronized
+operation.
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Direct frontier arithmetic baseline | 0.2484 | 0 | 0 | lower-bound control |
+| Registry `Record` | 60.05 | 0 | 0 | 242x the arithmetic-only control |
+| Registry `Advance` + `Acknowledge` | 119.9 | 0 | 0 | two synchronized updates |
+| Ready `WaitUntilWritable` | 15.19 | 0 | 0 | no blocking or allocation |
+| `Snapshot` of 128 sinks | 20,056 | 12,456 | 4 | diagnostic/catalog path |
+
+The hot update and ready-wait paths add no heap allocations. The measured
+synchronization cost is an explicit tradeoff for a common, cancellable
+frontier-aware admission contract; ordinary queues and pipeline behavior are
+unchanged unless the registry is constructed. See
+[MU043_SINK_BACKPRESSURE.md](MU043_SINK_BACKPRESSURE.md) for raw benchmark
+commands and operational semantics.
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:
