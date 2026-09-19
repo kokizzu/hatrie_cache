@@ -340,6 +340,7 @@ future storage-layer improvement. See
 [benchmark results](BENCHMARK.md#ordered-range-pruning).
 
 | ClickHouse | Typed compact keys for grouped arrangement state | Implemented | `TypedTableAggregate` hashes typed group values without allocating a formatted key on every mutation, uses exact collision buckets, and retains one legacy key per live group for deterministic row ordering. See [BENCHMARK.md](BENCHMARK.md#typed-aggregate-arrangement-hash-keys). |
+| Materialize | Differential checkpoint export/import | Implemented as an explicit HDF1 API | `EncodeDifferentialCheckpoint` and `DecodeDifferentialCheckpoint` provide bounded deterministic typed checkpoints with CRC32C validation; `DifferentialDataflow.ImportCheckpoint` applies rows and advances the frontier atomically after the existing batch-atomic sink succeeds. HDF1 is explicit and JSON compatibility remains caller-selected. [M-U46_DIFFERENTIAL_EXPORT.md](M-U46_DIFFERENTIAL_EXPORT.md) |
 
 ## M051c: Immutable Compiled SQL Template Reuse
 

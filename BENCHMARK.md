@@ -32477,3 +32477,29 @@ path. The overhead is opt-in; ordinary SQL and maintained-view paths do not
 construct a coordinator or pay per-row bookkeeping. See
 [M-U44_TRANSACTION_VISIBILITY.md](M-U44_TRANSACTION_VISIBILITY.md) for the
 API contract and limitations.
+
+## M-U46 Differential Checkpoint Export/Import
+
+Commands:
+
+```sh
+make benchmark-mu46-baseline
+make benchmark-mu46
+make measure-mu46-payload
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 256
+rows and four scalar fields per row. The JSON baseline uses
+`github.com/goccy/go-json`; HDF1 uses the new deterministic bounded codec.
+
+| Workload | JSON baseline median ns/op | HDF1 median ns/op | CPU improvement | JSON B/op | HDF1 B/op | Memory result | JSON allocs/op | HDF1 allocs/op | Payload JSON/HDF1 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
+| Encode | 190,419 | 87,283 | 2.18x faster | 52,505 | 72,408 | 1.38x higher | 258 | 9 | 27,219 B / 15,944 B, 1.71x smaller |
+| Decode | 245,686 | 152,073 | 1.62x faster | 178,081 | 129,232 | 1.38x lower | 3,585 | 4,326 | 27,219 B / 15,944 B, 1.71x smaller |
+
+Raw samples are recorded in [M-U46_DIFFERENTIAL_EXPORT.md](M-U46_DIFFERENTIAL_EXPORT.md).
+The final encoder is also 1.32x faster than the initial HDF1 implementation,
+with 1.54x lower allocated bytes and 87.4x fewer allocations. HDF1 is therefore
+the default for this new checkpoint API, but the allocation tradeoff on decode
+is explicit and JSON remains available only when a caller selects it as a
+compatibility format.

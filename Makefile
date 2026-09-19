@@ -21979,3 +21979,22 @@ format-mu44:
 
 verify-mu44:
 	@bash scripts/verify-mu44.sh
+
+
+format-mu46:
+	@bash scripts/format-mu46.sh
+
+test-mu46:
+	@bash scripts/test-mu46.sh
+
+benchmark-mu46-baseline:
+	@bash scripts/benchmark-mu46-baseline.sh
+
+benchmark-mu46:
+	@bash scripts/benchmark-mu46.sh
+
+measure-mu46-payload:
+	@bash scripts/measure-mu46-payload.sh
+
+verify-mu46:
+	@bash scripts/verify-mu46.sh

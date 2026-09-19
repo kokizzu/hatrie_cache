@@ -300,6 +300,7 @@ security guidance before exposing it on a network.
 - Safe stale test-directory cleanup: run `make cleanup-hatrie-tmp-preview`, review the plan, then `make cleanup-hatrie-tmp-apply`; active and `.git`-marked worktrees are preserved.
 - Supported command benchmarks and Redis/Tarantool comparisons: [BENCHMARK.md](BENCHMARK.md)
 - Opt-in cross-dataflow visibility fencing for maintained SQL views: [M-U44_TRANSACTION_VISIBILITY.md](M-U44_TRANSACTION_VISIBILITY.md)
+- Bounded differential checkpoint export/import: [M-U46_DIFFERENTIAL_EXPORT.md](M-U46_DIFFERENTIAL_EXPORT.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Opt-in authenticated WAL encryption and key rotation: [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)
 - Part/WAL-consistent backup manifests with per-file checksums: [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u50-partwal-consistent-backup-manifest)

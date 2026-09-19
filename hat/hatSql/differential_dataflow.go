@@ -127,6 +127,39 @@ func (flow *DifferentialDataflow) Apply(rows []DifferentialRow) error {
 	}
 	flow.mu.Lock()
 	defer flow.mu.Unlock()
+	return flow.applyLocked(rows, nil)
+}
+
+// ImportCheckpoint validates and applies one complete differential checkpoint
+// atomically. The checkpoint frontier is advanced only after the sink accepts
+// the full batch.
+func (flow *DifferentialDataflow) ImportCheckpoint(encoded []byte) error {
+	if flow == nil {
+		return ErrDifferentialDataflowNil
+	}
+	checkpoint, err := DecodeDifferentialCheckpoint(encoded)
+	if err != nil {
+		return err
+	}
+	for _, row := range checkpoint.Rows {
+		if row.Time > checkpoint.Frontier {
+			return fmt.Errorf("row %q at time %d follows frontier %d: %w", row.Key, row.Time, checkpoint.Frontier, ErrDifferentialCheckpointInvalid)
+		}
+	}
+	flow.mu.Lock()
+	defer flow.mu.Unlock()
+	if checkpoint.Frontier < flow.frontier {
+		return fmt.Errorf("checkpoint frontier %d follows %d: %w", checkpoint.Frontier, flow.frontier, ErrDifferentialDataflowFrontierRegression)
+	}
+	if len(checkpoint.Rows) == 0 {
+		flow.frontier = checkpoint.Frontier
+		flow.stats.Frontier = checkpoint.Frontier
+		return nil
+	}
+	return flow.applyLocked(checkpoint.Rows, &checkpoint.Frontier)
+}
+
+func (flow *DifferentialDataflow) applyLocked(rows []DifferentialRow, importedFrontier *uint64) error {
 
 	accepted := make([]DifferentialRow, 0, len(rows))
 	var lateRows, acceptedLateRows, tooLateRows, droppedRows, rejectedRows uint64
@@ -205,6 +238,9 @@ func (flow *DifferentialDataflow) Apply(rows []DifferentialRow) error {
 	nextFrontier := flow.frontier
 	if flow.policy.Frontier == DifferentialDataflowBatchMax && maxTime > nextFrontier {
 		nextFrontier = maxTime
+	}
+	if importedFrontier != nil && *importedFrontier > nextFrontier {
+		nextFrontier = *importedFrontier
 	}
 	nextStats.Frontier = nextFrontier
 	flow.frontier = nextFrontier
