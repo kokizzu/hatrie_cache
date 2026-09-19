@@ -21860,6 +21860,18 @@ benchmark-mu08:
 verify-mu08:
 	sh scripts/verify-mu08.sh
 
+.PHONY: baseline-tu10-write-quorum
+baseline-tu10-write-quorum:
+	bash scripts/benchmark-tu10-write-quorum.sh baseline
+
+.PHONY: benchmark-tu10-write-quorum
+benchmark-tu10-write-quorum:
+	bash scripts/benchmark-tu10-write-quorum.sh candidate
+
+.PHONY: benchmark-generic-write-quorum
+benchmark-generic-write-quorum:
+	bash scripts/benchmark-tu10-write-quorum.sh generic
+
 tmp-hatrie-audit:
 	bash scripts/audit-hatrie-tmp.sh
 tmp-hatrie-audit-contents:

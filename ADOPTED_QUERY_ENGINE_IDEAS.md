@@ -695,6 +695,18 @@ replay behavior. The zero value remains the fixed-window implementation. In a
 bytes, and allocations. See [TR007_ADAPTIVE_WAL_GROUP_COMMIT.md](TR007_ADAPTIVE_WAL_GROUP_COMMIT.md)
 and [BENCHMARK.md](BENCHMARK.md#tr-007-adaptive-wal-group-commit).
 
+## T-U10: Journal-Wide Synchronous Write Quorum
+
+T-U10 is adopted as the opt-in `hatReplication.JournalWriteQuorum` contract.
+It binds an exact journal sequence and fence token to a configured voter
+quorum, validates duplicate/unknown/stale acknowledgements, and collects
+transport callbacks concurrently. `Required: 0` selects a strict majority;
+the zero-value configuration is disabled and leaves asynchronous replication
+unchanged. Journal append/fsync, transport deadlines, retry idempotency,
+fence persistence, and failed-replica repair remain caller-owned. See
+[TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u10-journal-wide-synchronous-write-quorum).
+
 ## T-U36: Snapshot Rotation Policy
 
 T-U36 adds an opt-in `BackupRotationPolicy` and

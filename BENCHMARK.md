@@ -32942,6 +32942,27 @@ BenchmarkTU09BootstrapSnapshot-32              78464624 13.02 ns/op  0 B/op  0 a
 BenchmarkTU09BootstrapSnapshot-32              81439574 13.10 ns/op  0 B/op  0 allocs/op
 ```
 
+<a id="t-u10-journal-wide-synchronous-write-quorum"></a>
+## T-U10 Journal-Wide Synchronous Write Quorum
+
+AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is the
+existing count-only `EvaluateWriteQuorum` check. The candidate validates exact
+voter identity, duplicate responses, journal sequence, and fencing metadata.
+
+| Path | Five raw ns/op samples | Median ns/op | B/op | Allocs/op | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing `EvaluateWriteQuorum` baseline | 2.275; 2.295; 2.259; 2.196; 2.561 | 2.275 | 0 | 0 | reference only |
+| Exact `JournalWriteQuorum.Evaluate`, 3 voters | 41.34; 42.97; 42.53; 42.92; 41.63 | 42.53 | 0 | 0 | 18.69x CPU cost for stronger validation |
+| Disabled coordinator check | 0.5074; 0.5067; 0.4965; 0.4879; 0.4889 | 0.4965 | 0 | 0 | 4.58x faster than the count-only reference; no quorum work |
+| `JournalWriteQuorum.Execute`, 3 callbacks | 1,698; 1,702; 1,761; 1,715; 1,715 | 1,715 | 755 | 10 | opt-in callback and result cost |
+| Existing generic `ExecuteWriteQuorum`, 3 targets | 1,648; 1,663; 1,653; 1,655; 1,691 | 1,655 | 544 | 10 | comparison control |
+
+The execute path is 1.04x slower and retains 211 more bytes than the generic
+executor because it carries exact journal/fence acknowledgement metadata. The
+feature is default-off; asynchronous replication and ordinary count-only
+quorum paths are unchanged. Raw commands and the operational boundary are in
+[TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md).
+
 ## T-U12 Automatic Failover Coordinator
 
 AMD Ryzen 9 5950X, Linux/amd64, five `-benchmem` samples. The baseline is a
