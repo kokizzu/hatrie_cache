@@ -32113,3 +32113,21 @@ the clean baseline; the small 0.27% difference is not treated as a meaningful
 regression. The implementation adds no retained state memory and leaves the
 serialized state bytes unchanged. Details and examples are in
 [CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md).
+
+## CH-U39 Workload Admission Priorities
+
+The controller is opt-in, so the default SQL path has no admission overhead.
+These measurements use a 64-value integer-sum callback, five benchmark samples
+per case, and the AMD Ryzen 9 5950X test host.
+
+| Case | Raw samples (ns/op) | Median | Memory |
+| --- | --- | ---: | --- |
+| Direct callback | 22.94, 22.73, 22.06, 22.79, 21.96 | 22.73 | 0 B/op, 0 allocs/op |
+| Uncontended acquire/release | 24.36, 24.21, 24.66, 24.83, 24.81 | 24.66 | 0 B/op, 0 allocs/op |
+| `Run` | 55.01, 51.84, 50.89, 52.73, 54.18 | 52.73 | 0 B/op, 0 allocs/op |
+
+Before the notification-path optimization, acquire measured `102.8 ns/op`,
+`112 B/op`, and one allocation at the median; `Run` measured `142.5 ns/op`,
+`112 B/op`, and one allocation. The final result removes that allocation and
+is approximately 4.2x faster for acquire and 2.7x faster for `Run`. The
+deferred release remains to recover permits when a callback panics.

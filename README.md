@@ -4618,3 +4618,11 @@ validation, backend merge callbacks, and any HTTP/SQL command wiring. See
 [CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md).
 - Opt-in bounded ClickHouse-style `system.parts` metadata with deterministic ordering, checksums, key ranges, and retention fields: [CHU36_SYSTEM_PARTS_CATALOG.md](CHU36_SYSTEM_PARTS_CATALOG.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u36-stable-sql-system-parts-catalog)
 - Opt-in bounded ClickHouse-style `system.mutations` metadata with stable IDs, affected parts, redacted errors, and lifecycle timestamps: [CHU37_SYSTEM_MUTATIONS_CATALOG.md](CHU37_SYSTEM_MUTATIONS_CATALOG.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u37-stable-sql-system-mutations-catalog)
+
+## Workload admission priorities
+
+SQL handlers can opt into bounded, priority-aware admission with cancellation,
+weighted class sharing, starvation protection, stats, and panic-safe permit
+release through `hatSql.SQLWorkloadAdmission`. Existing SQL execution remains
+unchanged when no controller is configured. See
+[CHU39_WORKLOAD_ADMISSION.md](CHU39_WORKLOAD_ADMISSION.md).

@@ -21542,3 +21542,32 @@ commit-chu44:
 	bash ./scripts/commit-chu44.sh
 push-chu44:
 	bash ./scripts/push-chu44.sh
+
+.PHONY: format-chu39 test-chu39 benchmark-chu39
+format-chu39:
+	bash ./scripts/format-chu39.sh
+
+test-chu39:
+	bash ./scripts/test-chu39.sh
+
+benchmark-chu39:
+	bash ./scripts/benchmark-chu39.sh
+
+test-chu39-package:
+	bash ./scripts/test-chu39-package.sh
+
+race-chu39:
+	bash ./scripts/race-chu39.sh
+
+vet-chu39:
+	bash ./scripts/vet-chu39.sh
+
+verify-chu39:
+	bash ./scripts/verify-chu39.sh
+
+.PHONY: commit-chu39 push-chu39
+commit-chu39:
+	bash ./scripts/commit-chu39.sh
+
+push-chu39:
+	bash ./scripts/push-chu39.sh
