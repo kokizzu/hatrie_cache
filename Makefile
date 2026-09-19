@@ -22154,3 +22154,21 @@ benchmark-tu42-token:
 
 verify-tu42-token:
 	bash scripts/verify-tu42-token.sh
+
+test-tu46-index-stats:
+	bash scripts/test-tu46-index-stats.sh
+
+format-tu46-index-stats:
+	bash scripts/format-tu46-index-stats.sh
+
+test-race-tu46-index-stats:
+	bash scripts/test-race-tu46-index-stats.sh
+
+vet-tu46-index-stats:
+	bash scripts/vet-tu46-index-stats.sh
+
+benchmark-tu46-index-stats:
+	bash scripts/benchmark-tu46-index-stats.sh
+
+verify-tu46-index-stats:
+	bash scripts/verify-tu46-index-stats.sh

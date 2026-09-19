@@ -4769,3 +4769,5 @@ memory estimates without changing default EXPLAIN output.
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
 - Authenticated ordered-pagination cursor tokens: [TU42_CURSOR_TOKENS.md](TU42_CURSOR_TOKENS.md)
+
+- Opt-in index cardinality and hot-key diagnostics: [TU46_INDEX_STATS.md](TU46_INDEX_STATS.md)
