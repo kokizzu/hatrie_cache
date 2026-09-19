@@ -33061,3 +33061,45 @@ path-backed number is environment-dependent and should be evaluated against
 the deployment filesystem before enabling it for foreground writes. Raw
 commands and limits are documented in
 [TU19_DURABLE_TUPLE_OPERATION_JOURNAL.md](TU19_DURABLE_TUPLE_OPERATION_JOURNAL.md).
+## T-U27 Prefix-Filtered Configuration Watch Replay
+
+The configuration watch now accepts an optional key prefix on `Read` and
+`Wait`. The empty-prefix path keeps the existing whole-stream behavior. A
+prefix request scans the same bounded history, skips unrelated keys, and
+advances its cursor over every scanned event so reconnecting consumers do not
+rescan unrelated history indefinitely.
+
+The baseline was measured from the clean pre-feature worktree with five
+`-benchmem` samples of the existing publish/read workload. The after run used
+the same command after adding the prefix path and its empty-prefix fast path.
+The host was Linux/amd64 on an AMD Ryzen 9 5950X.
+
+| Workload | Baseline median | After median | CPU change | After memory | After allocs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Publish plus one-event whole-stream `Read` | 382.4 ns/op | 371.5 ns/op | 1.03x faster | 216 B/op | 5 allocs/op |
+| 128 retained events, 16-result whole-stream `Read` | n/a | 526.7 ns/op | control | 1,280 B/op | 1 alloc/op |
+| 128 retained events, 16-result `feature/` `Read` | n/a | 653.1 ns/op | 1.24x CPU versus control | 1,280 B/op | 1 alloc/op |
+
+Raw samples:
+
+```text
+baseline BenchmarkConfigWatchPublishRead:
+380.2 382.4 393.3 393.3 371.7 ns/op; 216 B/op; 5 allocs/op
+
+after BenchmarkConfigWatchPublishRead:
+368.1 369.4 371.5 377.5 376.4 ns/op; 216 B/op; 5 allocs/op
+
+after BenchmarkConfigWatchPrefixRead/whole-stream:
+542.5 526.7 526.7 522.4 528.5 ns/op; 1280 B/op; 1 alloc/op
+
+after BenchmarkConfigWatchPrefixRead/prefix-filter:
+586.9 708.7 762.8 653.1 609.7 ns/op; 1280 B/op; 1 alloc/op
+```
+
+The prefix path's CPU cost is the explicit tradeoff for filtering a bounded
+history without allocating a second index or changing publish memory. The
+reported workload returns the same number of events in both control cases, so
+it does not claim a wire-size reduction; sparse-prefix consumers can reduce
+their response payload when their transport serializes only matching events.
+Run `make benchmark-tu27` and `make verify-tu27` to reproduce the feature
+benchmark and checks.

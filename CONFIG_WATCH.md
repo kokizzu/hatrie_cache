@@ -35,6 +35,7 @@ if err := log.Publish(ctx, principal, hatTopology.ConfigWatchEvent{
 
 events, nextVersion, err := log.Wait(ctx, hatTopology.ConfigWatchRequest{
 	Principal:    principal,
+	Prefix:       "limits/", // optional; omit to consume the whole stream
 	AfterVersion: lastVersion,
 	Limit:        64,
 })
@@ -49,10 +50,11 @@ _ = events
 _ = nextVersion
 ```
 
-The authorizer is mandatory. Use separate logs or an equivalent scoped
-authorization boundary when different principals must not see the same
-configuration keys: a `Read` request consumes the log's ordered stream, so it
-does not provide per-key filtering.
+The authorizer is mandatory. A prefix-filtered request passes its normalized
+prefix to the authorizer as `ConfigWatchAuthorization.Key`, so the transport
+can enforce the same namespace policy before returning events. Use separate
+logs or another scoped authorization boundary when principals must not see
+overlapping configuration namespaces.
 
 ## Semantics
 
@@ -68,9 +70,15 @@ does not provide per-key filtering.
   stale or duplicate versions are rejected.
 - `Read` returns events after `AfterVersion` up to `Limit`. Its cursor is the
   last delivered version, which makes small batches safe to resume.
+- `Prefix` optionally limits reads and waits to keys beginning with that
+  prefix. A prefix read advances over skipped events, so a response that
+  reaches its limit returns the last delivered version, while a response with
+  no matching event can advance to the newest scanned version. This prevents
+  a reconnecting consumer from rescanning unrelated events forever.
 - `Wait` returns immediately when events are available, otherwise sleeps on one
   shared notification channel until a publish or context cancellation. Idle
-  clients do not create one goroutine or unbounded queue each.
+  clients do not create one goroutine or unbounded queue each. A publish for an
+  unrelated prefix wakes the waiter internally, but `Wait` does not return it.
 - When ring eviction makes a cursor unrecoverable, the result is a
   `*ConfigWatchGapError` matching `ErrConfigWatchHistoryGap`. Obtain a fresh
   snapshot and resume from the retained boundary.
@@ -109,3 +117,6 @@ make benchmark-t-u50
 make test-t-u50
 make verify-t-u50
 ```
+
+The prefix extension is covered by `make benchmark-tu27` and
+`make verify-tu27` in the feature worktree.

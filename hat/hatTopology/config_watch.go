@@ -93,9 +93,8 @@ func (action ConfigWatchAction) String() string {
 }
 
 // ConfigWatchAuthorization is passed to the configured authorizer. Read
-// authorization receives the requested key as empty because a read returns
-// the whole ordered change stream; a transport may add a key-scoped log when
-// that is required by its policy.
+// authorization receives an empty key for whole-stream reads or the
+// normalized requested prefix for prefix-filtered reads.
 type ConfigWatchAuthorization struct {
 	Principal string
 	Action    ConfigWatchAction
@@ -128,9 +127,11 @@ type ConfigWatchEvent struct {
 	Deleted bool   `json:"deleted,omitempty"`
 }
 
-// ConfigWatchRequest selects a replay or wait cursor.
+// ConfigWatchRequest selects a replay or wait cursor. Prefix is optional; an
+// empty prefix preserves the whole-stream behavior.
 type ConfigWatchRequest struct {
 	Principal    string
+	Prefix       string
 	AfterVersion uint64
 	Limit        int
 }
@@ -324,7 +325,14 @@ func (log *ConfigWatchLog) readLimit(limit int) (int, error) {
 // cursor is the last delivered version, so callers can safely use it when a
 // response is smaller than the current history.
 func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest) ([]ConfigWatchEvent, uint64, error) {
-	principal, err := log.authorize(ctx, request.Principal, ConfigWatchRead, "")
+	if log == nil {
+		return nil, request.AfterVersion, ErrConfigWatchNil
+	}
+	prefix, err := log.normalizePrefix(request.Prefix)
+	if err != nil {
+		return nil, request.AfterVersion, err
+	}
+	principal, err := log.authorize(ctx, request.Principal, ConfigWatchRead, prefix)
 	if err != nil {
 		return nil, request.AfterVersion, err
 	}
@@ -346,10 +354,29 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 			CurrentVersion:  log.current,
 		}
 	}
+	if prefix == "" {
+		events := make([]ConfigWatchEvent, 0, min(limit, log.historySize))
+		for offset := 0; offset < log.historySize && len(events) < limit; offset++ {
+			event := log.history[(log.historyStart+offset)%log.historyLimit]
+			if event.Version <= request.AfterVersion {
+				continue
+			}
+			events = append(events, cloneConfigWatchEvent(event))
+		}
+		next := request.AfterVersion
+		if len(events) > 0 {
+			next = events[len(events)-1].Version
+		}
+		return events, next, nil
+	}
 	events := make([]ConfigWatchEvent, 0, min(limit, log.historySize))
 	for offset := 0; offset < log.historySize && len(events) < limit; offset++ {
 		event := log.history[(log.historyStart+offset)%log.historyLimit]
 		if event.Version <= request.AfterVersion {
+			continue
+		}
+		request.AfterVersion = event.Version
+		if prefix != "" && !strings.HasPrefix(event.Key, prefix) {
 			continue
 		}
 		events = append(events, cloneConfigWatchEvent(event))
@@ -373,13 +400,25 @@ func (log *ConfigWatchLog) Wait(ctx context.Context, request ConfigWatchRequest)
 		request.AfterVersion = cursor
 		log.mu.Lock()
 		notify := log.notify
+		current := log.current
 		log.mu.Unlock()
+		if current > request.AfterVersion {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return nil, cursor, ctx.Err()
 		case <-notify:
 		}
 	}
+}
+
+func (log *ConfigWatchLog) normalizePrefix(prefix string) (string, error) {
+	prefix = strings.TrimSpace(prefix)
+	if len(prefix) > log.maxKeyBytes {
+		return "", ErrConfigWatchKeyInvalid
+	}
+	return prefix, nil
 }
 
 // Stats returns current retention bounds.

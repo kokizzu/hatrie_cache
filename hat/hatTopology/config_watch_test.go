@@ -224,6 +224,106 @@ func TestConfigWatchValidatesOptionsEventsAndCopiesReads(t *testing.T) {
 	}
 }
 
+func TestConfigWatchPrefixFilterAdvancesOverSkippedEvents(t *testing.T) {
+	var authMu sync.Mutex
+	var authorizations []hatTopology.ConfigWatchAuthorization
+	log, err := hatTopology.NewConfigWatchLog(hatTopology.ConfigWatchOptions{
+		HistoryLimit: 8,
+		Authorizer: func(_ context.Context, authorization hatTopology.ConfigWatchAuthorization) error {
+			authMu.Lock()
+			authorizations = append(authorizations, authorization)
+			authMu.Unlock()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, update := range []struct {
+		version uint64
+		key     string
+	}{
+		{version: 1, key: "feature/a"},
+		{version: 2, key: "other/a"},
+		{version: 3, key: "feature/b"},
+	} {
+		if err := log.Publish(context.Background(), "ops", hatTopology.ConfigWatchEvent{
+			Version: update.version,
+			Source:  "node-a",
+			Key:     update.key,
+		}); err != nil {
+			t.Fatalf("Publish(%d) error = %v", update.version, err)
+		}
+	}
+	events, cursor, err := log.Read(context.Background(), hatTopology.ConfigWatchRequest{
+		Principal:    "ops",
+		Prefix:       " feature/ ",
+		AfterVersion: 0,
+		Limit:        1,
+	})
+	if err != nil || len(events) != 1 || events[0].Version != 1 || cursor != 1 {
+		t.Fatalf("limited prefix Read() = events=%#v cursor=%d err=%v", events, cursor, err)
+	}
+	events, cursor, err = log.Read(context.Background(), hatTopology.ConfigWatchRequest{
+		Principal:    "ops",
+		Prefix:       "feature/",
+		AfterVersion: cursor,
+		Limit:        2,
+	})
+	if err != nil || len(events) != 1 || events[0].Version != 3 || cursor != 3 {
+		t.Fatalf("prefix Read() over skipped event = events=%#v cursor=%d err=%v", events, cursor, err)
+	}
+	result := make(chan []hatTopology.ConfigWatchEvent, 1)
+	go func() {
+		got, _, waitErr := log.Wait(context.Background(), hatTopology.ConfigWatchRequest{
+			Principal:    "ops",
+			Prefix:       "feature/",
+			AfterVersion: 3,
+			Limit:        2,
+		})
+		if waitErr != nil {
+			result <- []hatTopology.ConfigWatchEvent{{Key: waitErr.Error()}}
+			return
+		}
+		result <- got
+	}()
+	if err := log.Publish(context.Background(), "ops", hatTopology.ConfigWatchEvent{
+		Version: 4,
+		Source:  "node-a",
+		Key:     "other/b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("prefix Wait() returned for skipped event: %#v", got)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := log.Publish(context.Background(), "ops", hatTopology.ConfigWatchEvent{
+		Version: 5,
+		Source:  "node-a",
+		Key:     "feature/c",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		if len(got) != 1 || got[0].Version != 5 {
+			t.Fatalf("prefix Wait() result = %#v, want version 5", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prefix Wait() did not wake for matching event")
+	}
+	authMu.Lock()
+	defer authMu.Unlock()
+	for _, authorization := range authorizations {
+		if authorization.Action == hatTopology.ConfigWatchRead && authorization.Key == "feature/" {
+			return
+		}
+	}
+	t.Fatalf("prefix read authorization = %#v, want normalized feature/ key", authorizations)
+}
+
 func BenchmarkConfigWatchPublishRead(b *testing.B) {
 	log, err := hatTopology.NewConfigWatchLog(hatTopology.ConfigWatchOptions{
 		HistoryLimit: 64,
@@ -265,5 +365,51 @@ func BenchmarkConfigWatchWait(b *testing.B) {
 		if _, _, err := log.Wait(ctx, hatTopology.ConfigWatchRequest{Principal: "bench", AfterVersion: version - 1, Limit: 1}); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkConfigWatchPrefixRead(b *testing.B) {
+	for _, benchmark := range []struct {
+		name   string
+		prefix string
+	}{
+		{name: "whole-stream"},
+		{name: "prefix-filter", prefix: "feature/"},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			log, err := hatTopology.NewConfigWatchLog(hatTopology.ConfigWatchOptions{
+				HistoryLimit: 256,
+				Authorizer:   allowConfigWatch,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			for version := uint64(1); version <= 128; version++ {
+				key := "other/setting"
+				if version%2 == 0 {
+					key = "feature/setting"
+				}
+				if err := log.Publish(context.Background(), "bench", hatTopology.ConfigWatchEvent{
+					Version: version,
+					Source:  "node-a",
+					Key:     key,
+				}); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				events, _, err := log.Read(context.Background(), hatTopology.ConfigWatchRequest{
+					Principal:    "bench",
+					Prefix:       benchmark.prefix,
+					AfterVersion: 0,
+					Limit:        16,
+				})
+				if err != nil || len(events) == 0 {
+					b.Fatalf("Read() events=%d err=%v", len(events), err)
+				}
+			}
+		})
 	}
 }
