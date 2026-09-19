@@ -601,8 +601,10 @@ const SQLSystemMutationsTable = core.SQLSystemMutationsTable
 const SQLSystemPartsTable = core.SQLSystemPartsTable
 const SQLSystemQueriesTable = core.SQLSystemQueriesTable
 const SQLSystemQueryHistoryTable = core.SQLSystemQueryHistoryTable
+
 var ErrSQLSystemPartInvalid = core.ErrSQLSystemPartInvalid
-+var ErrSQLSystemPartsLimitExceeded = core.ErrSQLSystemPartsLimitExceeded
+var ErrSQLSystemPartsLimitExceeded = core.ErrSQLSystemPartsLimitExceeded
+
 const SQLTransactionIsolationSerializable = core.SQLTransactionIsolationSerializable
 const SQLTransactionIsolationSnapshot = core.SQLTransactionIsolationSnapshot
 const SQLWhatIfIndexEquality = core.SQLWhatIfIndexEquality
