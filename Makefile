@@ -21934,3 +21934,18 @@ format-mu12:
 
 verify-mu12:
 	bash scripts/verify-mu12.sh
+
+test-mu37:
+	bash scripts/test-mu37.sh
+
+benchmark-mu37-baseline:
+	bash scripts/benchmark-mu37-baseline.sh
+
+benchmark-mu37:
+	bash scripts/benchmark-mu37.sh
+
+format-mu37:
+	bash scripts/format-mu37.sh
+
+verify-mu37:
+	bash scripts/verify-mu37.sh

@@ -32425,3 +32425,15 @@ Five-run medians for a four-step plan on the AMD Ryzen 9 5950X:
 | Marshal enriched arrangement JSON | 2,348 | 1,594 | 6 |
 
 The enriched format is opt-in and not used in row processing.
+
+## M-U37 Per-Arrangement Compaction Diagnostics
+
+Five samples on an AMD Ryzen 9 5950X using `go test -benchmem`:
+
+| Operation | Median | Memory | Comparison |
+|---|---:|---:|---:|
+| Plain local counters | 1.442 ns/op | 0 B/op, 0 allocs/op | Baseline |
+| Registered `Record` | 37.58 ns/op | 0 B/op, 0 allocs/op | 26.06x slower, 0 allocations |
+| 64-arrangement `Snapshot` | 11,195 ns/op | 14,720 B/op, 66 allocs/op | Explicit scrape cost |
+
+The registry is opt-in and bounded; after registration, recording adds no heap allocations. See [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md).

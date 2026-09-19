@@ -723,3 +723,7 @@ remain caller-owned. A 1,024-timestamp reservation was about 810x faster than
 1,024 individual atomic increments with zero allocations in the recorded
 fixture. See [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md)
 and [BENCHMARK.md](BENCHMARK.md#m033-batched-logical-timestamp-oracle).
+
+## Materialize M-U37: Per-Arrangement Compaction Diagnostics
+
+Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement registration, allocation-free post-registration recording, deterministic detached snapshots, and fixed-depth history retain logical/physical bytes and caller-defined compaction debt without adding default-path overhead. The storage engine still owns the meaning of debt and the wiring point. See [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md) and [BENCHMARK.md](BENCHMARK.md#m-u37-per-arrangement-compaction-diagnostics).

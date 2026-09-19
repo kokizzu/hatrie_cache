@@ -4746,3 +4746,5 @@ stale checkpoints, and estimate incremental memory with
 Use the opt-in [M-U12 enriched explain format](MU12_EXPLAIN_ARRANGEMENTS.md)
 to expose arrangement keys, reuse decisions, staleness, cardinality, and
 memory estimates without changing default EXPLAIN output.
+
+- Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
