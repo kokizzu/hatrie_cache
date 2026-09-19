@@ -22000,6 +22000,21 @@ verify-mu46:
 	@bash scripts/verify-mu46.sh
 
 
+test-mu42:
+	@bash scripts/test-mu42.sh
+
+format-mu42:
+	@bash scripts/format-mu42.sh
+
+benchmark-mu42-baseline:
+	@bash scripts/benchmark-mu42-baseline.sh
+
+benchmark-mu42:
+	@bash scripts/benchmark-mu42.sh
+
+verify-mu42:
+	@bash scripts/verify-mu42.sh
+
 test-mu47:
 	@bash scripts/test-mu47.sh
 

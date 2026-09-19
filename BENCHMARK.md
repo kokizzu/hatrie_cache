@@ -32504,6 +32504,33 @@ the default for this new checkpoint API, but the allocation tradeoff on decode
 is explicit and JSON remains available only when a caller selects it as a
 compatibility format.
 
+## M-U42 Connector Pause/Resume Checkpoints
+
+Commands:
+
+```sh
+make benchmark-mu42-baseline
+make benchmark-mu42
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. HCP1 is the
+bounded deterministic binary checkpoint format; JSON is an encoding baseline
+only and is not accepted by the checkpoint API.
+
+| Workload | JSON median ns/op | HCP1 median ns/op | CPU improvement | JSON B/op | HCP1 B/op | JSON allocs/op | HCP1 allocs/op | Payload JSON/HCP1 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Encode | 309.8 | 57.73 | 5.36x faster | 240 | 112 | 2 | 1 | 160 B / 98 B, 1.63x smaller |
+| Decode | 1,677 | 87.75 | 19.1x faster | 376 | 80 | 8 | 3 | 160 B / 98 B, 1.63x smaller |
+
+The plain lifecycle pause/resume control measured a 143.1 ns/op median with
+0 B/op and 0 allocs/op. The optional in-memory checkpoint workflow measured
+592.2 ns/op, 424 B/op, and 12 allocs/op, or 4.14x slower, because it performs
+binary persistence, validation, copies, and the restore callback. The normal
+`Pause` and `Resume` paths are unchanged. Filesystem fsync cost is owned by
+the selected durable store and is not included in this in-memory comparison.
+Raw API semantics and the security/recovery contract are in
+[MU042_CONNECTOR_CHECKPOINTS.md](MU042_CONNECTOR_CHECKPOINTS.md).
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:

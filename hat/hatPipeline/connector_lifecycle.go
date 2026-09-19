@@ -315,6 +315,10 @@ func (r *ConnectorRegistry) transition(ctx context.Context, id string, operation
 func (r *ConnectorRegistry) transitionEntry(ctx context.Context, entry *managedConnector, operation connectorOperation) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	return r.transitionEntryLocked(ctx, entry, operation)
+}
+
+func (r *ConnectorRegistry) transitionEntryLocked(ctx context.Context, entry *managedConnector, operation connectorOperation) error {
 	if entry.removed {
 		return ErrConnectorNotFound
 	}
