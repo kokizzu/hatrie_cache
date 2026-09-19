@@ -21571,3 +21571,25 @@ commit-chu39:
 
 push-chu39:
 	bash ./scripts/push-chu39.sh
+
+# BEGIN MU048 connector health remediation
+.PHONY: format-mu048 test-mu048 benchmark-mu048 test-mu048-package race-mu048 vet-mu048 verify-mu048 commit-mu048 push-mu048
+format-mu048:
+	bash ./scripts/format-mu048.sh
+test-mu048:
+	bash ./scripts/test-mu048.sh
+benchmark-mu048:
+	bash ./scripts/benchmark-mu048.sh
+test-mu048-package:
+	bash ./scripts/test-mu048-package.sh
+race-mu048:
+	bash ./scripts/race-mu048.sh
+vet-mu048:
+	bash ./scripts/vet-mu048.sh
+verify-mu048:
+	bash ./scripts/verify-mu048.sh
+commit-mu048:
+	bash ./scripts/commit-mu048.sh
+push-mu048:
+	bash ./scripts/push-mu048.sh
+# END MU048 connector health remediation

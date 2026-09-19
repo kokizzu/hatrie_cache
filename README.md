@@ -4626,3 +4626,7 @@ weighted class sharing, starvation protection, stats, and panic-safe permit
 release through `hatSql.SQLWorkloadAdmission`. Existing SQL execution remains
 unchanged when no controller is configured. See
 [CHU39_WORKLOAD_ADMISSION.md](CHU39_WORKLOAD_ADMISSION.md).
+
+## Connector health remediation
+
+Connector startup can use an opt-in bounded retry and quarantine policy without changing the existing lifecycle path. See [MU048_CONNECTOR_HEALTH_REMEDIATION.md](MU048_CONNECTOR_HEALTH_REMEDIATION.md) for the API, defaults, failure behavior, and benchmark.
