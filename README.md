@@ -4734,3 +4734,9 @@ the API, defaults, cancellation behavior, and measurements.
 Run `make test-mu10`, `make verify-mu10`, `make benchmark-mu10-baseline`,
 `make benchmark-mu10`, and `make benchmark-mu10-cancellable` for the focused
 checks and measurements.
+
+## Arrangement reuse advisor
+
+Typed-table planners can reuse exact aggregate and join arrangements, classify
+stale checkpoints, and estimate incremental memory with
+[M-U11](MU11_ARRANGEMENT_REUSE_ADVISOR.md).

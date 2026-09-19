@@ -21904,3 +21904,18 @@ benchmark-mu10-cancellable:
 	bash scripts/benchmark-mu10-cancellable.sh
 verify-mu10:
 	bash scripts/verify-mu10.sh
+
+test-mu11:
+	bash scripts/test-mu11.sh
+
+benchmark-mu11-baseline:
+	bash scripts/benchmark-mu11-baseline.sh
+
+benchmark-mu11:
+	bash scripts/benchmark-mu11.sh
+
+format-mu11:
+	bash scripts/format-mu11.sh
+
+verify-mu11:
+	bash scripts/verify-mu11.sh

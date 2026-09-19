@@ -32398,3 +32398,18 @@ before mutation so cancellation cannot leave partial state.
 This is an opt-in scheduling feature, not an unconditional hot-path
 optimization. See [MU10_ADAPTIVE_LOGICAL_COMPACTION.md](MU10_ADAPTIVE_LOGICAL_COMPACTION.md)
 for raw samples and threshold defaults.
+
+## M-U11 arrangement reuse advisor
+
+Five-run medians on the AMD Ryzen 9 5950X:
+
+| Case | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Aggregate advisor, fresh exact match, 64-entry catalog | 1,101 | 344 | 9 |
+| Join advisor, fresh exact match, 64-entry catalog | 504.3 | 184 | 2 |
+| Aggregate advisor, create/no match | 245.2 | 80 | 4 |
+| Join advisor, create/no match | 79.83 | 24 | 1 |
+
+The advisor is opt-in and runs at plan construction, not in row processing.
+The existing snapshot allocation counts remain 160 B/2 allocs for aggregate
+snapshots and 128 B/1 alloc for join snapshots.
