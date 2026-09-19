@@ -4668,3 +4668,16 @@ API, security contract, and measurements.
 
 Run `make test-m055`, `make benchmark-m055`, and `make verify-m055` for the
 focused checks.
+
+## Differential Window Frames
+
+`hatSql.DifferentialWindow` is an opt-in maintained window for signed weighted
+updates, retractions, late rows, and inclusive `ROWS` or `RANGE` frames. It
+supports partitioning and a value callback for weighted frame sums while
+keeping the existing append-only incremental window unchanged. Use
+`SnapshotWithError` when callback failures must be reported. See
+[MU06_DIFFERENTIAL_WINDOW_FRAMES.md](MU06_DIFFERENTIAL_WINDOW_FRAMES.md) for
+the contract, example, limits, verification commands, and raw benchmarks.
+
+Run `make test-mu06`, `make verify-mu06`, `make benchmark-mu06-baseline`, and
+`make benchmark-mu06` for the focused checks and measurements.

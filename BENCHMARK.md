@@ -32256,3 +32256,37 @@ portable but materially slower and larger, so it belongs in checkpoint
 storage/transfer control paths rather than row-update or query hot paths. See
 [MU05_ARRANGEMENT_ONLY_RECOVERY.md](MU05_ARRANGEMENT_ONLY_RECOVERY.md) for the
 validation contract and operational guidance.
+
+## M-U06 Differential Window Frames
+
+Commands:
+
+```sh
+make benchmark-mu06-baseline
+make benchmark-mu06
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The M-U06 fixture
+applies 256 rows or alternates a late insert and retraction against a
+256-row state. `Pre-prefix` is the first correct implementation; `Final` is
+the prefix-sum and binary-search implementation checked in after the tests.
+
+| Workload | Pre-prefix ns/op samples | Final ns/op samples | Median CPU improvement | Pre B/op | Final B/op | Memory improvement | Pre allocs/op | Final allocs/op | Allocation improvement |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ROWS apply | 856358; 900937; 951340; 916222; 885629 | 471189; 436073; 454480; 466488; 446999 | 1.98x | 1,267,881 | 596,450 | 2.13x lower | 5,610 | 1,588 | 3.53x lower |
+| RANGE apply | 1,017,329; 932555; 1,093,635; 1,053,772; 998519 | 463394; 434116; 473457; 470117; 445892 | 2.15x | 1,267,881 | 596,450 | 2.13x lower | 5,610 | 1,588 | 3.53x lower |
+| ROWS late correction | 1,864,441; 1,755,531; 1,814,720; 1,844,737; 1,853,600 | 826107; 845889; 811292; 835793; 788659 | 2.23x | 2,254,916 | 909,371 | 2.48x lower | 11,659 | 3,599 | 3.24x lower |
+| RANGE late correction | 1,931,160; 1,921,478; 1,798,472; 1,809,873; 1,815,098 | 719246; 835749; 863878; 864452; 835871 | 2.17x | 2,258,181 | 909,275 | 2.48x lower | 11,673 | 3,593 | 3.25x lower |
+
+The existing append-only control is not a direct semantic comparison:
+
+| Existing control | ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Incremental row-number/lag, lag 0 | 650200; 621817; 697679; 683787; 674814 | 674814 | 893,039 | 4,102 |
+| Incremental row-number/lag, lag 2 | 970445; 997254; 956478; 916310; 945431 | 956478 | 1,248,473 | 6,245 |
+
+The optimization preserves the tested frame, retraction, late-row, callback,
+and atomicity behavior while moving frame evaluation from repeated scans to a
+single value pass plus prefix sums. See
+[MU06_DIFFERENTIAL_WINDOW_FRAMES.md](MU06_DIFFERENTIAL_WINDOW_FRAMES.md) for
+the full contract and tradeoffs.

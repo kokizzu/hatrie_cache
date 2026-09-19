@@ -21802,3 +21802,22 @@ test:
 
 test-all:
 	sh scripts/test-all.sh
+
+format-mu06:
+	sh scripts/format-mu06.sh
+
+
+test-mu06:
+	sh scripts/test-mu06.sh
+
+
+benchmark-mu06-baseline:
+	sh scripts/benchmark-mu06-baseline.sh
+
+
+benchmark-mu06:
+	sh scripts/benchmark-mu06.sh
+
+
+verify-mu06:
+	sh scripts/verify-mu06.sh
