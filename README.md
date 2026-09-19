@@ -4634,3 +4634,7 @@ Connector startup can use an opt-in bounded retry and quarantine policy without 
 ## Heap fragmentation diagnostics
 
 The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes, allocator metadata, and stack footprint without adding background work. See [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md) for field semantics, cost, and verification.
+
+## Idempotent remote-call retries
+
+Peer calls can use an opt-in method-aware retry policy that requires idempotency keys and fencing tokens for retryable writes and rejects retries for non-idempotent methods. See [T048_IDEMPOTENT_REMOTE_RETRY.md](T048_IDEMPOTENT_REMOTE_RETRY.md) for the API and measured overhead.

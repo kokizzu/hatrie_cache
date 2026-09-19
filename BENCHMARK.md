@@ -32139,3 +32139,7 @@ The opt-in `StartWithHealthPolicy` path keeps the successful single-attempt case
 ## T-U44 heap fragmentation diagnostics
 
 ReadHeapFragmentationReport retained the direct runtime sampling allocation profile at 0 B/op and 0 allocs/op. The five-run medians were 19,614 ns/op for direct ReadMemStats and 19,116 ns/op for the report; the overlapping samples are treated as noise rather than a throughput claim. Raw samples and the diagnostic tradeoff are in [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md).
+
+## T-U48 idempotent remote-call retry policy
+
+The successful one-attempt policy path measured 8.305 ns/op, 0 B/op, and 0 allocs/op versus a 0.524 ns/op inlined local callback control. The roughly 7.8 ns local policy cost is intentional opt-in validation/envelope work; network latency dominates it. Retry timers/backoff are only paid after a failed attempt. Raw samples and safety semantics are documented in [T048_IDEMPOTENT_REMOTE_RETRY.md](T048_IDEMPOTENT_REMOTE_RETRY.md).

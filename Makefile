@@ -21631,3 +21631,25 @@ commit-cleanup-tooling:
 push-cleanup-tooling:
 	bash ./scripts/push-cleanup-tooling.sh
 # END safe test temporary cleanup
+
+# BEGIN T048 idempotent remote-call retry policy
+.PHONY: format-t048 test-t048 benchmark-t048 test-t048-package race-t048 vet-t048 verify-t048 commit-t048 push-t048
+format-t048:
+	bash ./scripts/format-t048.sh
+test-t048:
+	bash ./scripts/test-t048.sh
+benchmark-t048:
+	bash ./scripts/benchmark-t048.sh
+test-t048-package:
+	bash ./scripts/test-t048-package.sh
+race-t048:
+	bash ./scripts/race-t048.sh
+vet-t048:
+	bash ./scripts/vet-t048.sh
+verify-t048:
+	bash ./scripts/verify-t048.sh
+commit-t048:
+	bash ./scripts/commit-t048.sh
+push-t048:
+	bash ./scripts/push-t048.sh
+# END T048 idempotent remote-call retry policy
