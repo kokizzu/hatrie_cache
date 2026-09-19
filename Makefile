@@ -22226,3 +22226,30 @@ benchmark-tu44-memory-stats:
 
 verify-tu44-memory-stats:
 	bash scripts/verify-tu44-memory-stats.sh
+
+test-chu01-async-dedup:
+	bash scripts/test-chu01-async-dedup.sh
+
+benchmark-chu01-baseline:
+	bash scripts/benchmark-chu01-baseline.sh
+
+format-chu01-async-dedup:
+	bash scripts/format-chu01-async-dedup.sh
+
+race-chu01-async-dedup:
+	bash scripts/race-chu01-async-dedup.sh
+
+vet-chu01-async-dedup:
+	bash scripts/vet-chu01-async-dedup.sh
+
+benchmark-chu01-async-dedup:
+	bash scripts/benchmark-chu01-async-dedup.sh
+
+benchmark-chu01-memory:
+	bash scripts/benchmark-chu01-memory.sh
+
+benchmark-chu01-default-after:
+	bash scripts/benchmark-chu01-default-after.sh
+
+verify-chu01-async-dedup:
+	bash scripts/verify-chu01-async-dedup.sh

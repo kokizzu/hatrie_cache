@@ -4780,3 +4780,8 @@ memory estimates without changing default EXPLAIN output.
 
 Read-only runtime memory diagnostics are documented in
 [TU44_MEMORY_FRAGMENTATION.md](TU44_MEMORY_FRAGMENTATION.md).
+
+## Async insert deduplication
+
+The opt-in durable insert-ID ledger is documented in
+[CHU01_ASYNC_INSERT_DEDUP.md](CHU01_ASYNC_INSERT_DEDUP.md).

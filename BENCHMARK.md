@@ -32705,3 +32705,14 @@ The five-run benchmark uses the package-local deterministic calculation and
 the Go runtime metric snapshot path. See
 [TU44_MEMORY_FRAGMENTATION.md](TU44_MEMORY_FRAGMENTATION.md) for the scope
 and interpretation of the report.
+
+## CH-U01 Durable Async-Insert Deduplication
+
+| Path | Median | Memory | Allocations | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Memory-only duplicate admission | 181.9 ns/op | 0 B/op | 0 allocs/op | Comparable to the 200.5 ns/op clean async-submit baseline |
+| Durable file append plus fsync | 709,979 ns/op | 830 B/op | 9 allocs/op | About 3,900x slower than memory-only admission |
+| Default `AsyncBatcher.Submit` after feature | 194.5 ns/op | 0 B/op | 0 allocs/op | Within benchmark variation of the 200.5 ns/op clean baseline |
+
+See [CHU01_ASYNC_INSERT_DEDUP.md](CHU01_ASYNC_INSERT_DEDUP.md) for the
+durability boundary and operational tradeoff.
