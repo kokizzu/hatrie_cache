@@ -32193,3 +32193,15 @@ not be put on a query or row-update hot path.
 | Registry replace, 64 sources | n/a | 546499 ns/op | 324456 | 2594 | New atomic catalog publication path |
 
 The resolver control path does not call the new APIs, so its lower median is benchmark variance rather than a claimed feature speedup. No hot-path allocation or memory regression was measured. Raw five-run samples and compatibility tradeoffs are in [MU02_CONNECTOR_SCHEMA_EVOLUTION.md](MU02_CONNECTOR_SCHEMA_EVOLUTION.md).
+
+## M-U03 External Snapshot Ingestion
+
+`make benchmark-m053-baseline` measured the clean `origin/master` virtual-source control path, and `make benchmark-m053` measured the feature tree. Both used five runs over 128 rows on an AMD Ryzen 9 5950X with `-benchmem`.
+
+| Path | Clean origin median | Feature median | Feature B/op | Feature allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Existing virtual-source control | 38521 ns/op | 39703 ns/op | 44160 | 257 | 1.03x slower observed; memory and allocations unchanged |
+| New ingestor resolver | n/a | 44120 ns/op | 44160 | 257 | New source read path |
+| New snapshot bootstrap | n/a | 172797 ns/op | 221882 | 1293 | New bounded control-plane path |
+
+The control delta is normal five-run variance; no existing implementation or hot-path memory/allocation behavior changed. Bootstrap deliberately clones rows for ownership and checkpoint atomicity. Raw samples and limits are in [MU03_EXTERNAL_SNAPSHOT_INGESTION.md](MU03_EXTERNAL_SNAPSHOT_INGESTION.md).

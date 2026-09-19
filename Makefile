@@ -21727,3 +21727,23 @@ benchmark-m052:
 .PHONY: verify-m052
 verify-m052:
 	@bash scripts/verify-m052.sh
+
+.PHONY: format-m053
+format-m053:
+	@bash scripts/format-m053.sh
+
+.PHONY: test-m053
+test-m053:
+	@bash scripts/test-m053.sh
+
+.PHONY: benchmark-m053
+benchmark-m053:
+	@bash scripts/benchmark-m053.sh
+
+.PHONY: benchmark-m053-baseline
+benchmark-m053-baseline:
+	@bash scripts/benchmark-m053-baseline.sh
+
+.PHONY: verify-m053
+verify-m053:
+	@bash scripts/verify-m053.sh
