@@ -22190,3 +22190,21 @@ benchmark-chu17-membership:
 
 verify-chu17-membership:
 	bash scripts/verify-chu17-membership.sh
+
+test-chu18-primary-pruning:
+	bash scripts/test-chu18-primary-pruning.sh
+
+format-chu18-primary-pruning:
+	bash scripts/format-chu18-primary-pruning.sh
+
+test-race-chu18-primary-pruning:
+	bash scripts/test-race-chu18-primary-pruning.sh
+
+vet-chu18-primary-pruning:
+	bash scripts/vet-chu18-primary-pruning.sh
+
+benchmark-chu18-primary-pruning:
+	bash scripts/benchmark-chu18-primary-pruning.sh
+
+verify-chu18-primary-pruning:
+	bash scripts/verify-chu18-primary-pruning.sh
