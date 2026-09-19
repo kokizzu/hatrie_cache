@@ -32503,3 +32503,25 @@ with 1.54x lower allocated bytes and 87.4x fewer allocations. HDF1 is therefore
 the default for this new checkpoint API, but the allocation tradeoff on decode
 is explicit and JSON remains available only when a caller selects it as a
 compatibility format.
+
+## M-U47 Progress-Only Subscription Frames
+
+Commands:
+
+```sh
+make benchmark-mu47-baseline
+make benchmark-mu47
+make measure-mu47-payload
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
+`encoding/json` for one progress-only `QuerySubscriptionDeltaBatch`.
+
+| Workload | JSON median ns/op | QPF1 median ns/op | CPU improvement | JSON B/op | QPF1 B/op | JSON allocs/op | QPF1 allocs/op | Payload JSON/QPF1 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Encode | 285.8 | 38.05 | 7.51x faster | 128 | 32 | 1 | 1 | 113 B / 14 B, 8.07x smaller |
+| Decode | 1,532 | 20.64 | 74.2x faster | 296 | 0 | 5 | 0 | 113 B / 14 B, 8.07x smaller |
+
+The raw samples and frame contract are in
+[M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
+existing JSON and data-bearing subscription paths are not changed.

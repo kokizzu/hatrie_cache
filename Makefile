@@ -21998,3 +21998,22 @@ measure-mu46-payload:
 
 verify-mu46:
 	@bash scripts/verify-mu46.sh
+
+
+test-mu47:
+	@bash scripts/test-mu47.sh
+
+format-mu47:
+	@bash scripts/format-mu47.sh
+
+benchmark-mu47-baseline:
+	@bash scripts/benchmark-mu47-baseline.sh
+
+benchmark-mu47:
+	@bash scripts/benchmark-mu47.sh
+
+measure-mu47-payload:
+	@bash scripts/measure-mu47-payload.sh
+
+verify-mu47:
+	@bash scripts/verify-mu47.sh

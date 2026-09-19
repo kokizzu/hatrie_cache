@@ -341,6 +341,7 @@ future storage-layer improvement. See
 
 | ClickHouse | Typed compact keys for grouped arrangement state | Implemented | `TypedTableAggregate` hashes typed group values without allocating a formatted key on every mutation, uses exact collision buckets, and retains one legacy key per live group for deterministic row ordering. See [BENCHMARK.md](BENCHMARK.md#typed-aggregate-arrangement-hash-keys). |
 | Materialize | Differential checkpoint export/import | Implemented as an explicit HDF1 API | `EncodeDifferentialCheckpoint` and `DecodeDifferentialCheckpoint` provide bounded deterministic typed checkpoints with CRC32C validation; `DifferentialDataflow.ImportCheckpoint` applies rows and advances the frontier atomically after the existing batch-atomic sink succeeds. HDF1 is explicit and JSON compatibility remains caller-selected. [M-U46_DIFFERENTIAL_EXPORT.md](M-U46_DIFFERENTIAL_EXPORT.md) |
+| Materialize | Progress-only subscription frontier frames | Implemented as an explicit QPF1 API | `EncodeQuerySubscriptionProgressFrame` and `DecodeQuerySubscriptionProgressFrame` transfer subscription id, revision, frontier, and completion without row data. The versioned frame is bounded and CRC32C-checked; existing JSON and data-bearing subscription paths remain unchanged. [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md) |
 
 ## M051c: Immutable Compiled SQL Template Reuse
 
