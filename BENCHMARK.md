@@ -32716,3 +32716,57 @@ and interpretation of the report.
 
 See [CHU01_ASYNC_INSERT_DEDUP.md](CHU01_ASYNC_INSERT_DEDUP.md) for the
 durability boundary and operational tradeoff.
+
+## CH-U03 Versioned Partial Aggregate Wire States
+
+Machine: AMD Ryzen 9 5950X, linux/amd64. Five samples per benchmark. The
+fixture is a small signed sum state; JSON is the standard-library metadata and
+state baseline.
+
+| Operation | Direct HAG1 range ns/op | Registry HAG1 range ns/op | JSON range ns/op | Registry vs JSON | Direct HAG1 B/op | Registry B/op | JSON B/op | Direct allocs/op | Registry allocs/op | JSON allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Encode | 65.1-66.8 | 134.5-147.2 | 182.8-197.8 | 1.41x faster | 24 | 48 | 80 | 1 | 3 | 2 |
+| Decode | 73.9-83.9 | 137.3-148.6 | 780.9-854.6 | 5.90x faster | 16 | 24 | 256 | 2 | 3 | 6 |
+
+The registry is about 2.1x slower to encode and 1.8x slower to decode than
+direct HAG1 for this tiny state because callback dispatch adds work. It still
+beats JSON while adding exact kind/version selection and compatibility errors.
+The fixture is 18 B in HAG1 and 41 B in JSON.
+
+Raw samples:
+
+```text
+BenchmarkAggregateStateRegistry/hag1-direct-encode-32  65.41 ns/op  24 B/op  1 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-encode-32  65.06 ns/op  24 B/op  1 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-encode-32  65.77 ns/op  24 B/op  1 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-encode-32  65.61 ns/op  24 B/op  1 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-encode-32  66.78 ns/op  24 B/op  1 allocs/op
+BenchmarkAggregateStateRegistry/registry-encode-32  147.2 ns/op  48 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-encode-32  140.1 ns/op  48 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-encode-32  136.5 ns/op  48 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-encode-32  144.6 ns/op  48 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-encode-32  134.5 ns/op  48 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-decode-32  76.28 ns/op  16 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-decode-32  73.92 ns/op  16 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-decode-32  75.79 ns/op  16 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-decode-32  77.66 ns/op  16 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/hag1-direct-decode-32  83.87 ns/op  16 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/registry-decode-32  148.6 ns/op  24 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-decode-32  146.4 ns/op  24 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-decode-32  137.3 ns/op  24 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-decode-32  139.0 ns/op  24 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/registry-decode-32  140.3 ns/op  24 B/op  3 allocs/op
+BenchmarkAggregateStateRegistry/json-encode-32  197.2 ns/op  80 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/json-encode-32  197.3 ns/op  80 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/json-encode-32  197.8 ns/op  80 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/json-encode-32  188.3 ns/op  80 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/json-encode-32  182.8 ns/op  80 B/op  2 allocs/op
+BenchmarkAggregateStateRegistry/json-decode-32  828.3 ns/op  256 B/op  6 allocs/op
+BenchmarkAggregateStateRegistry/json-decode-32  812.6 ns/op  256 B/op  6 allocs/op
+BenchmarkAggregateStateRegistry/json-decode-32  780.9 ns/op  256 B/op  6 allocs/op
+BenchmarkAggregateStateRegistry/json-decode-32  849.2 ns/op  256 B/op  6 allocs/op
+BenchmarkAggregateStateRegistry/json-decode-32  854.6 ns/op  256 B/op  6 allocs/op
+```
+
+See [CHU03_AGGREGATE_STATE_WIRE.md](CHU03_AGGREGATE_STATE_WIRE.md) for the
+contract, limits, and usage.

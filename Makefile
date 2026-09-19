@@ -22253,3 +22253,20 @@ benchmark-chu01-default-after:
 
 verify-chu01-async-dedup:
 	bash scripts/verify-chu01-async-dedup.sh
+test-chu03-aggregate-registry:
+	bash scripts/test-chu03-aggregate-registry.sh
+
+format-chu03-aggregate-registry:
+	bash scripts/format-chu03-aggregate-registry.sh
+
+benchmark-chu03-aggregate-registry:
+	bash scripts/benchmark-chu03-aggregate-registry.sh
+
+race-chu03-aggregate-registry:
+	bash scripts/race-chu03-aggregate-registry.sh
+
+vet-chu03-aggregate-registry:
+	bash scripts/vet-chu03-aggregate-registry.sh
+
+verify-chu03-aggregate-registry:
+	bash scripts/verify-chu03-aggregate-registry.sh

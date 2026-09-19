@@ -207,6 +207,7 @@ security guidance before exposing it on a network.
 - Query-wide live SQL spill quotas: [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md)
 - Allocation-free Unicode token Bloom prefilters: [TOKEN_BLOOM_FILTER.md](TOKEN_BLOOM_FILTER.md)
 - ClickHouse-style vectorized grouped SQL execution: [SQL_VECTORIZED_EXECUTION.md](SQL_VECTORIZED_EXECUTION.md)
+- Versioned typed partial aggregate dispatch over HAG1: [CHU03_AGGREGATE_STATE_WIRE.md](CHU03_AGGREGATE_STATE_WIRE.md)
 - ClickHouse-style opt-in two-level columnar aggregation: [SQL_TWO_LEVEL_AGGREGATION.md](SQL_TWO_LEVEL_AGGREGATION.md)
 - ClickHouse-style SQL constant folding: [CONSTANT_FOLDING.md](CONSTANT_FOLDING.md)
 - Tarantool-style delay queue operations: [DELAY_QUEUE.md](DELAY_QUEUE.md)
