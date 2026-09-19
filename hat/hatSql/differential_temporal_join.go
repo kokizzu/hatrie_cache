@@ -16,6 +16,8 @@ var (
 	ErrDifferentialTemporalJoinNegativeMultiplicity = errors.New("hatSql: differential temporal join multiplicity became negative")
 	ErrDifferentialTemporalJoinCountOverflow        = errors.New("hatSql: differential temporal join multiplicity overflowed")
 	ErrDifferentialTemporalJoinPairDiffOverflow     = errors.New("hatSql: differential temporal join pair diff overflowed")
+	ErrDifferentialTemporalJoinFrontierRegression   = errors.New("hatSql: differential temporal join frontier moved backwards")
+	ErrDifferentialTemporalJoinCompacted            = errors.New("hatSql: differential temporal join state was compacted")
 )
 
 // DifferentialTemporalJoinKeyFunc returns the equality key for one side of a
@@ -46,6 +48,18 @@ type differentialTemporalJoinGroupKey struct {
 	key   string
 }
 
+// DifferentialTemporalJoinCompactionStats reports one successful state
+// compaction. A row is removable only after its own frontier seals its time
+// and the counterpart frontier passes its maximum possible match time.
+type DifferentialTemporalJoinCompactionStats struct {
+	LeftFrontier  uint64
+	RightFrontier uint64
+	RemovedLeft   int
+	RemovedRight  int
+	RetainedLeft  int
+	RetainedRight int
+}
+
 // DifferentialTemporalJoin incrementally maintains a weighted temporal inner
 // join. ApplyLeft and ApplyRight emit signed joined-pair updates for the
 // changes they apply. The join is safe for concurrent ApplyLeft/ApplyRight
@@ -62,6 +76,8 @@ type DifferentialTemporalJoin struct {
 	rightGroups     map[string][]string
 	leftGroupKnown  map[differentialTemporalJoinGroupKey]struct{}
 	rightGroupKnown map[differentialTemporalJoinGroupKey]struct{}
+	leftFrontier    uint64
+	rightFrontier   uint64
 }
 
 // NewDifferentialTemporalJoin creates an empty temporal join.
@@ -117,6 +133,45 @@ func (join *DifferentialTemporalJoin) ApplyRight(changes []DifferentialRow) ([]D
 	return join.applyChanges(changes, false), nil
 }
 
+// Compact evicts rows that cannot match any future counterpart and are sealed
+// by their own input frontier. Both frontiers are monotonic; a regression is
+// rejected without changing state. Retractions for evicted keys return
+// ErrDifferentialTemporalJoinCompacted instead of being treated as an unknown
+// negative multiplicity.
+func (join *DifferentialTemporalJoin) Compact(leftFrontier, rightFrontier uint64) (DifferentialTemporalJoinCompactionStats, error) {
+	if join == nil {
+		return DifferentialTemporalJoinCompactionStats{}, ErrDifferentialTemporalJoinNil
+	}
+	join.mu.Lock()
+	defer join.mu.Unlock()
+	if leftFrontier < join.leftFrontier || rightFrontier < join.rightFrontier {
+		return DifferentialTemporalJoinCompactionStats{}, fmt.Errorf("frontiers %d/%d follow %d/%d: %w", leftFrontier, rightFrontier, join.leftFrontier, join.rightFrontier, ErrDifferentialTemporalJoinFrontierRegression)
+	}
+	stats := DifferentialTemporalJoinCompactionStats{
+		LeftFrontier:  leftFrontier,
+		RightFrontier: rightFrontier,
+	}
+	for key, entry := range join.left {
+		if differentialTemporalJoinExpired(entry.time, leftFrontier, rightFrontier, join.maxTimeDistance) {
+			delete(join.left, key)
+			stats.RemovedLeft++
+		}
+	}
+	for key, entry := range join.right {
+		if differentialTemporalJoinExpired(entry.time, rightFrontier, leftFrontier, join.maxTimeDistance) {
+			delete(join.right, key)
+			stats.RemovedRight++
+		}
+	}
+	differentialTemporalJoinRebuildGroups(join.left, join.leftGroups, join.leftGroupKnown)
+	differentialTemporalJoinRebuildGroups(join.right, join.rightGroups, join.rightGroupKnown)
+	join.leftFrontier = leftFrontier
+	join.rightFrontier = rightFrontier
+	stats.RetainedLeft = len(join.left)
+	stats.RetainedRight = len(join.right)
+	return stats, nil
+}
+
 func (join *DifferentialTemporalJoin) validateChanges(changes []DifferentialRow, leftSide bool) error {
 	if len(changes) == 0 {
 		return nil
@@ -139,6 +194,15 @@ func (join *DifferentialTemporalJoin) validateChanges(changes []DifferentialRow,
 		entry, exists := working[change.Key]
 		if !exists {
 			entry = side[change.Key]
+			if change.Diff < 0 {
+				frontier := join.leftFrontier
+				if !leftSide {
+					frontier = join.rightFrontier
+				}
+				if change.Time < frontier {
+					return fmt.Errorf("key %q at time %d: %w", change.Key, change.Time, ErrDifferentialTemporalJoinCompacted)
+				}
+			}
 		}
 		current := entry.count
 		next, ok := addDifferentialCounts(current, change.Diff)
@@ -229,6 +293,52 @@ func (join *DifferentialTemporalJoin) applyChanges(changes []DifferentialRow, le
 		return nil
 	}
 	return emitted
+}
+
+func differentialTemporalJoinExpired(time, ownFrontier, counterpartFrontier, maxDistance uint64) bool {
+	if ownFrontier <= time {
+		return false
+	}
+	if maxDistance > ^uint64(0)-time {
+		return false
+	}
+	return counterpartFrontier > time+maxDistance
+}
+
+func differentialTemporalJoinRebuildGroups(side map[string]differentialTemporalJoinEntry, groups map[string][]string, known map[differentialTemporalJoinGroupKey]struct{}) {
+	filtered := make(map[string][]string, len(groups))
+	seen := make(map[string]struct{}, len(side))
+	for group, keys := range groups {
+		for _, key := range keys {
+			entry, exists := side[key]
+			if !exists || entry.groupKey != group {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			filtered[group] = append(filtered[group], key)
+			seen[key] = struct{}{}
+		}
+	}
+	for key, entry := range side {
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		filtered[entry.groupKey] = append(filtered[entry.groupKey], key)
+	}
+	for group := range groups {
+		delete(groups, group)
+	}
+	for key := range known {
+		delete(known, key)
+	}
+	for group, keys := range filtered {
+		groups[group] = keys
+		for _, key := range keys {
+			known[differentialTemporalJoinGroupKey{group: group, key: key}] = struct{}{}
+		}
+	}
 }
 
 func differentialTemporalJoinUpdate(left, right differentialTemporalJoinEntry, diff int64) DifferentialRow {

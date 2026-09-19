@@ -4693,3 +4693,15 @@ for the sink contract, example, defaults, and measurements.
 
 Run `make test-mu07`, `make verify-mu07`, `make benchmark-mu07-baseline`, and
 `make benchmark-mu07` for the focused checks and measurements.
+
+## Temporal Join State Compaction
+
+`hatSql.DifferentialTemporalJoin.Compact` evicts rows only after the row's own
+frontier seals its timestamp and the counterpart frontier passes the maximum
+possible match time. It rebuilds group indexes, reports retained/removed
+counts, rejects regressive frontiers, and makes post-compaction retractions
+explicit. See [MU08_TEMPORAL_JOIN_COMPACTION.md](MU08_TEMPORAL_JOIN_COMPACTION.md)
+for the safety rule, example, and measurements.
+
+Run `make test-mu08`, `make verify-mu08`, `make benchmark-mu08-baseline`, and
+`make benchmark-mu08` for the focused checks and measurements.

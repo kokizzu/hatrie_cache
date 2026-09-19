@@ -32318,3 +32318,28 @@ within benchmark noise of the existing filter with no measured memory or
 allocation increase. See
 [MU07_DECLARATIVE_DATAFLOW_POLICY.md](MU07_DECLARATIVE_DATAFLOW_POLICY.md) for
 the policy contract and limits.
+
+## M-U08 Temporal Join State Compaction
+
+Commands:
+
+```sh
+make benchmark-mu08-baseline
+make benchmark-mu08
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The load fixture
+constructs and applies 1,024 rows per side. The compaction fixture builds the
+same state outside the timer, then measures only frontier-safe compaction.
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op | State result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Pre-M-U08 join load | 3,544,154; 3,461,558; 3,267,452; 3,518,882; 3,852,966 | 3,518,882 | 2,979,092 | 13,457 | control |
+| Final M-U08 join load | 3,397,093; 3,248,948; 3,052,619; 3,402,305; 3,561,269 | 3,397,093 | 2,979,109 | 13,457 | control |
+| Final compaction | 292,683; 335,311; 332,443; 281,573; 318,647 | 318,647 | 198,953 | 43 | 1,020 of 1,024 rows removed per side |
+
+The hot join path keeps the same allocation count and effectively the same
+memory profile. Compaction is explicit control-plane work and reclaims 99.6%
+of the fixture's retained row state without per-key tombstones. See
+[MU08_TEMPORAL_JOIN_COMPACTION.md](MU08_TEMPORAL_JOIN_COMPACTION.md) for the
+frontier safety rule and post-compaction retraction behavior.

@@ -21840,3 +21840,22 @@ benchmark-mu07:
 
 verify-mu07:
 	sh scripts/verify-mu07.sh
+
+benchmark-mu08-baseline:
+	sh scripts/benchmark-mu08-baseline.sh
+
+
+test-mu08:
+	sh scripts/test-mu08.sh
+
+
+format-mu08:
+	gofmt -w hat/hatSql/differential_temporal_join.go hat/hatSql/m_u08_temporal_join_compaction_test.go hat/hatSql/m_u08_temporal_join_compaction_benchmark_test.go
+
+
+benchmark-mu08:
+	sh scripts/benchmark-mu08.sh
+
+
+verify-mu08:
+	sh scripts/verify-mu08.sh
