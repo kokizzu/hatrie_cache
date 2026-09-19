@@ -2,7 +2,14 @@
 set -euo pipefail
 
 repo=$(pwd)
-baseline_ref=${M050_BASELINE_REF:-HEAD^}
+feature_commit=$(git -C "$repo" log --format='%H' --grep='^M-U50: add durable frontier-based backup manifest$' -1)
+if [[ -n "${M050_BASELINE_REF:-}" ]]; then
+	baseline_ref=$M050_BASELINE_REF
+elif [[ -n "$feature_commit" ]]; then
+	baseline_ref="$feature_commit^"
+else
+	baseline_ref=HEAD^
+fi
 stage=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-m050-baseline.XXXXXX")
 archive=$(mktemp "${TMPDIR:-/tmp}/hatrie-m050-baseline.XXXXXX.tar")
 cleanup() {

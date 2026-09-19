@@ -21705,3 +21705,9 @@ commit-m050-followup:
 	bash ./scripts/commit-m050-followup.sh
 push-m050-followup:
 	bash ./scripts/push-m050-followup.sh
+
+.PHONY: commit-m050-baseline-fix push-m050-baseline-fix
+commit-m050-baseline-fix:
+	bash ./scripts/commit-m050-baseline-fix.sh
+push-m050-baseline-fix:
+	bash ./scripts/push-m050-baseline-fix.sh
