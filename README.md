@@ -4634,3 +4634,5 @@ Connector startup can use an opt-in bounded retry and quarantine policy without 
 ## Heap fragmentation diagnostics
 
 The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes, allocator metadata, and stack footprint without adding background work. See [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md) for field semantics, cost, and verification.
+
+- Dependency-aware SQL catalog migration planning and rollback orchestration: [M049_CATALOG_MIGRATION.md](M049_CATALOG_MIGRATION.md)

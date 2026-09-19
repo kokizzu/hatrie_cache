@@ -21631,3 +21631,33 @@ commit-cleanup-tooling:
 push-cleanup-tooling:
 	bash ./scripts/push-cleanup-tooling.sh
 # END safe test temporary cleanup
+
+.PHONY: test
+test:
+	bash ./scripts/test-all.sh
+
+.PHONY: format-m049 test-m049 benchmark-m049-baseline benchmark-m049
+format-m049:
+	bash ./scripts/format-m049.sh
+test-m049:
+	bash ./scripts/test-m049.sh
+benchmark-m049-baseline:
+	bash ./scripts/benchmark-m049-baseline.sh
+benchmark-m049:
+	bash ./scripts/benchmark-m049.sh
+
+.PHONY: test-m049-package race-m049 vet-m049 verify-m049
+test-m049-package:
+	bash ./scripts/test-m049-package.sh
+race-m049:
+	bash ./scripts/race-m049.sh
+vet-m049:
+	bash ./scripts/vet-m049.sh
+verify-m049:
+	bash ./scripts/verify-m049.sh
+
+.PHONY: commit-m049 push-m049
+commit-m049:
+	bash ./scripts/commit-m049.sh
+push-m049:
+	bash ./scripts/push-m049.sh

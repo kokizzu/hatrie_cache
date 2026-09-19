@@ -32139,3 +32139,24 @@ The opt-in `StartWithHealthPolicy` path keeps the successful single-attempt case
 ## T-U44 heap fragmentation diagnostics
 
 ReadHeapFragmentationReport retained the direct runtime sampling allocation profile at 0 B/op and 0 allocs/op. The five-run medians were 19,614 ns/op for direct ReadMemStats and 19,116 ns/op for the report; the overlapping samples are treated as noise rather than a throughput claim. Raw samples and the diagnostic tradeoff are in [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md).
+
+## M-U49 Catalog Migration Runner
+
+Command:
+
+\`\`\`sh
+make benchmark-m049
+\`\`\`
+
+Raw \`-count=5\` samples on Linux/amd64, AMD Ryzen 9 5950X:
+
+| Workload | ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Three-step loop control | 12.48, 12.52, 12.27, 12.36, 12.33 | 12.36 | 0 | 0 |
+| Validate, order, apply three steps | 1592, 1607, 1685, 1713, 1586 | 1607 | 848 | 12 |
+
+The first row is a lower-bound control loop, not a previous catalog migration
+implementation. The runner intentionally pays this bounded control-plane cost
+to validate dependencies, produce deterministic ordering, track applied steps,
+and retain rollback state. It should not be placed on a query or row-update
+hot path.
