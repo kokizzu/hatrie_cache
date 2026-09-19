@@ -21763,3 +21763,9 @@ benchmark-m054-baseline:
 
 verify-m054:
 	@bash scripts/verify-m054.sh
+
+tmp-hatrie-plan:
+	sh scripts/cleanup-hatrie-tmp.sh plan
+
+tmp-hatrie-clean:
+	sh scripts/cleanup-hatrie-tmp.sh apply
