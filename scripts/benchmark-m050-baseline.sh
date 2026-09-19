@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo=$(pwd)
+baseline_ref=${M050_BASELINE_REF:-HEAD^}
 stage=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-m050-baseline.XXXXXX")
 archive=$(mktemp "${TMPDIR:-/tmp}/hatrie-m050-baseline.XXXXXX.tar")
 cleanup() {
@@ -9,7 +10,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git -C "$repo" archive --format=tar --output="$archive" HEAD
+base=$(git -C "$repo" rev-parse "$baseline_ref")
+git -C "$repo" archive --format=tar --output="$archive" "$base"
 tar -xf "$archive" -C "$stage"
 cat >"$stage/hat/hatBackup/m050_baseline_control_test.go" <<'EOF'
 package hatBackup

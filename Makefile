@@ -21687,3 +21687,21 @@ commit-m050:
 	bash ./scripts/commit-m050.sh
 push-m050:
 	bash ./scripts/push-m050.sh
+
+.PHONY: audit-hatrie-build-tmp
+audit-hatrie-build-tmp:
+	bash ./scripts/audit-hatrie-build-tmp.sh
+
+.PHONY: cleanup-hatrie-build-tmp-preview cleanup-hatrie-build-tmp cleanup-hatrie-build-tmp-verify
+cleanup-hatrie-build-tmp-preview:
+	bash ./scripts/cleanup-hatrie-build-tmp.sh preview
+cleanup-hatrie-build-tmp:
+	bash ./scripts/cleanup-hatrie-build-tmp.sh apply
+cleanup-hatrie-build-tmp-verify:
+	bash ./scripts/cleanup-hatrie-build-tmp.sh verify
+
+.PHONY: commit-m050-followup push-m050-followup
+commit-m050-followup:
+	bash ./scripts/commit-m050-followup.sh
+push-m050-followup:
+	bash ./scripts/push-m050-followup.sh
