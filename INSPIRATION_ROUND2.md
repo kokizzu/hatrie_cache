@@ -80,7 +80,7 @@ operator control remain the preferred deployment model.
 - [ ] C244 Local cache reuse validated by part and column checksums.
 - [ ] C245 Vertical TTL deletion that reads only the deletion mask and key columns.
 - [ ] C246 TTL-driven recompression policies separate from row deletion.
-- [x] C247 Adaptive `uint64` delta compression with raw fallback is implemented as the opt-in `hatDataStructure.EncodeUint64` codec; Gorilla and ALP-style floating-point codecs remain open. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
+- [x] C247 Adaptive `uint64` delta and Gorilla `float64` compression with raw fallback are implemented as opt-in `hatDataStructure` codecs; ALP-style floating-point compression remains open. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
 - [ ] C248 Variant/JSON subcolumn projection that reads only referenced paths.
 - [ ] C249 Kafka-style offset inspection without committing consumer position.
 - [ ] C250 Retry-safe insert identities shared across asynchronous ingestion stages.

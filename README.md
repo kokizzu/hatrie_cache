@@ -145,7 +145,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired result-cache hit, miss, bypass, and eviction metrics: [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md)
 - ClickHouse-inspired typed-table column statistics: [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md)
 - ClickHouse-inspired compact typed-table histograms: [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md)
-- ClickHouse-inspired adaptive `uint64` delta encoding with raw fallback: [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md), with measurements in [BENCHMARK.md](BENCHMARK.md#c247-adaptive-uint64-delta-codec)
+- ClickHouse-inspired adaptive `uint64` delta and Gorilla `float64` encoding with raw fallback: [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md), with measurements in [BENCHMARK.md](BENCHMARK.md#c247-adaptive-uint64-delta-codec)
 - ClickHouse-inspired opt-in typed-table row TTL: [CH007_ROW_TTL.md](CH007_ROW_TTL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-007-row-ttl)
 - ClickHouse-inspired bounded background TTL reaper and durable processing-time deadline state: [CH007_TTL_SCHEDULER.md](CH007_TTL_SCHEDULER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-007-background-ttl-scheduler)
 - ClickHouse-inspired content-addressed incremental part backup and optional durable manifest catalog: [CH022_INCREMENTAL_PART_BACKUP.md](CH022_INCREMENTAL_PART_BACKUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-022-incremental-part-backup)

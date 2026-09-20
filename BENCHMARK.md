@@ -19,6 +19,24 @@ formats. It trades decode CPU for substantially lower wire/storage bytes on
 monotone values; callers that prioritize decode CPU can retain raw mode. See
 [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
 
+### Gorilla Float64
+
+Five 200 ms samples on an AMD Ryzen 9 5950X, Linux amd64, with one million
+step-valued `float64` samples. The random case uses true random IEEE bits and
+exercises the conservative raw fallback.
+
+| Operation | Median time | Heap | Relative result |
+| --- | ---: | ---: | --- |
+| Adaptive Gorilla encode | 9,525,660 ns/op | 163,840 B/op | 51.2x smaller than raw; 5.28x slower encode |
+| Raw fixed-width encode control | 1,804,621 ns/op | 8,396,800 B/op | Baseline |
+| Adaptive encode, random IEEE bits | 1,915,455 ns/op | 8,396,800 B/op | Raw fallback; 1.06x control time, no size regression |
+| Gorilla decode | 6,361,537 ns/op | 8,388,608 B/op | 3.03x slower than raw decode |
+| Raw decode | 2,101,481 ns/op | 8,388,608 B/op | Baseline |
+
+Gorilla is kept opt-in because the 51.2x payload reduction is paired with
+higher CPU cost; the adaptive path avoids storage expansion for high-entropy
+input. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

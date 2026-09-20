@@ -23257,6 +23257,18 @@ race-c247-delta-codec:
 vet-c247-delta-codec:
 	bash scripts/vet-c247-delta-codec.sh
 
+review-c247-gorilla-codec:
+	bash scripts/review-c247-gorilla-codec.sh
+
+stage-c247-gorilla-codec:
+	bash scripts/stage-c247-gorilla-codec.sh
+
+commit-c247-gorilla-codec:
+	bash scripts/commit-c247-gorilla-codec.sh
+
+push-c247-gorilla-codec:
+	bash scripts/push-c247-gorilla-codec.sh
+
 review-c247-delta-codec:
 	bash scripts/review-c247-delta-codec.sh
 
@@ -23268,6 +23280,15 @@ commit-c247-delta-codec:
 
 push-c247-delta-codec:
 	bash scripts/push-c247-delta-codec.sh
+
+test-c247-gorilla-codec:
+	bash scripts/test-c247-gorilla-codec.sh
+
+benchmark-c247-gorilla-codec:
+	bash scripts/benchmark-c247-gorilla-codec.sh
+
+race-c247-gorilla-codec:
+	bash scripts/race-c247-gorilla-codec.sh
 
 
 
