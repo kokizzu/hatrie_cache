@@ -22880,6 +22880,38 @@ commit-m065ad-mutable-range-nth-value-batch:
 push-m065ad-mutable-range-nth-value-batch:
 	bash ./scripts/push-m065ad-mutable-range-nth-value-batch.sh
 
+.PHONY: test-m065ae-mutable-range-extrema-batch
+test-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/test-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: format-m065ae-mutable-range-extrema-batch
+format-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/format-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: benchmark-m065ae-mutable-range-extrema-batch
+benchmark-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/benchmark-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: verify-m065ae-mutable-range-extrema-batch
+verify-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/verify-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: review-m065ae-mutable-range-extrema-batch
+review-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/review-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: stage-m065ae-mutable-range-extrema-batch
+stage-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/stage-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: commit-m065ae-mutable-range-extrema-batch
+commit-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/commit-m065ae-mutable-range-extrema-batch.sh
+
+.PHONY: push-m065ae-mutable-range-extrema-batch
+push-m065ae-mutable-range-extrema-batch:
+	bash ./scripts/push-m065ae-mutable-range-extrema-batch.sh
+
 .PHONY: test-m065ac-mutable-range-boundary-batch
 test-m065ac-mutable-range-boundary-batch:
 	bash ./scripts/test-m065ac-mutable-range-boundary-batch.sh

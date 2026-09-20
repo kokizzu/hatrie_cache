@@ -888,3 +888,16 @@ unchanged. The two-update benchmark is `8.17x` faster, uses `15.7x` fewer
 transient bytes, and uses `835x` fewer allocations. See
 [INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065ad-batched-mutable-range-nth_value-fast-path).
+
+## M065ae: Batched Mutable RANGE Extrema Fast Path
+
+Extended the Materialize-style mutable arrangement optimization to same-position
+`MIN(int64)` and `MAX(int64)` update batches. The implementation validates all
+updates, evaluates the affected peer-aware frames with a NULL-aware monotonic
+deque, and publishes only changed differentials. Structural, cross-partition,
+duplicate-key, and invalid-value batches retain the existing rebuild/error
+path; the append-only constructor remains unchanged. The two-update benchmark
+is `13.13x` to `13.78x` faster, uses `13.8x` to `14.6x` fewer transient bytes,
+and uses `9.9x` to `19.8x` fewer allocations. See
+[INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065ae-batched-mutable-range-extrema-fast-path).

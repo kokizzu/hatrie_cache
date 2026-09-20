@@ -1019,3 +1019,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   rebuild path. See
   [INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065ad-batched-mutable-range-nth_value-fast-path).
+- [x] M065ae Batched same-position mutable numeric `RANGE MIN`/`MAX` updates
+  use a NULL-aware monotonic deque over the affected partition, while keeping
+  structural, cross-partition, and invalid-value batches on the existing
+  rebuild/error path. See
+  [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065ae-batched-mutable-range-extrema-fast-path).

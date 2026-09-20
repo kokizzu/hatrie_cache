@@ -33951,3 +33951,59 @@ mixed-operation batches retain the existing affected-partition rebuild path.
 Focused correctness, race, and vet checks use the M065ad workflow; the
 isolated feature worktree's unrelated typed-table checkpoint tests still
 require the parallel typed-table changes.
+
+## M065ae Batched Mutable RANGE Extrema Fast Path
+
+Command: `make benchmark-m065ae-mutable-range-extrema-batch`.
+
+This compares a two-row same-position `MIN(int64)`/`MAX(int64)` mutation batch
+on one 2,000-row partition with a preceding bound of 64. The baseline is the
+parent M065ad implementation, which rebuilt the affected partition for the
+batch. Five samples used `-benchtime=100x` on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| `MIN(int64)` full affected-partition batch rebuild | 5,964,387 ns/op | 3,512,152 B/op | 34,223 allocs/op | 1.00x |
+| `MIN(int64)` batched monotonic-deque fast path | 432,754 ns/op | 241,359 B/op | 1,732 allocs/op | 13.78x CPU, 14.6x lower bytes, 19.8x fewer allocs |
+| `MAX(int64)` full affected-partition batch rebuild | 5,922,247 ns/op | 3,525,443 B/op | 36,169 allocs/op | 1.00x |
+| `MAX(int64)` batched monotonic-deque fast path | 450,949 ns/op | 255,907 B/op | 3,665 allocs/op | 13.13x CPU, 13.8x lower bytes, 9.9x fewer allocs |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`), `MIN` first:
+
+```text
+5964387 3512280 34218
+6133066 3512139 34223
+5713435 3512194 34226
+5633827 3512140 34223
+6020266 3512152 34223
+
+6266500 3525444 36169
+5922247 3525443 36170
+5939099 3525523 36175
+5658690 3525436 36169
+5844652 3525426 36169
+```
+
+Raw optimized samples, `MIN` first:
+
+```text
+464858 241384 1733
+461426 241359 1732
+429643 241359 1728
+419095 241416 1735
+432754 241263 1726
+
+450949 255890 3664
+444734 255990 3670
+451083 256001 3668
+445394 255907 3665
+490290 255776 3657
+```
+
+The optimization is limited to all-update batches that retain one partition
+and each row's order position. NULL values remain ignored by the extrema;
+invalid values fail atomically. Structural, cross-partition, duplicate-key,
+and mixed-operation batches retain the existing affected-partition rebuild
+path. Focused correctness, race, and vet checks use the M065ae workflow; the
+isolated feature worktree's unrelated typed-table checkpoint tests still
+require the parallel typed-table changes.

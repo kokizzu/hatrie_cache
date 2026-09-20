@@ -110,6 +110,9 @@ func (window *MutableIncrementalRangeWindow) Apply(mutations []IncrementalRangeW
 	if window.kind == IncrementalRangeWindowCount && window.canApplyStableCountUpdates(prepared) {
 		return window.applyStableCountUpdates(prepared, affected)
 	}
+	if (window.kind == IncrementalRangeWindowMinInt64 || window.kind == IncrementalRangeWindowMaxInt64) && window.canApplyStableExtremaUpdates(prepared) {
+		return window.applyStableExtremaUpdates(prepared, affected)
+	}
 	if window.kind == IncrementalRangeWindowSumInt64 && window.canApplyStableSumUpdates(prepared) {
 		return window.applyStableSumUpdates(prepared, affected)
 	}
@@ -278,6 +281,142 @@ func (window *MutableIncrementalRangeWindow) applyStableCountUpdates(prepared []
 		window.outputs[key] = output
 	}
 	return updates, nil
+}
+
+func (window *MutableIncrementalRangeWindow) canApplyStableExtremaUpdates(prepared []preparedMutableIncrementalRangeWindowMutation) bool {
+	if len(prepared) == 0 {
+		return false
+	}
+	partition := ""
+	partitionSet := false
+	for _, mutation := range prepared {
+		if mutation.operation != IncrementalRangeWindowUpdate || mutation.old.partition != mutation.entry.partition || mutation.old.order != mutation.entry.order {
+			return false
+		}
+		if partitionSet && partition != mutation.old.partition {
+			return false
+		}
+		partition = mutation.old.partition
+		partitionSet = true
+	}
+	return true
+}
+
+func (window *MutableIncrementalRangeWindow) applyStableExtremaUpdates(prepared []preparedMutableIncrementalRangeWindowMutation, affected map[string]struct{}) ([]DifferentialRow, error) {
+	partition := prepared[0].old.partition
+	original := window.partitions[partition]
+	entries := append([]mutableIncrementalRangeWindowEntry(nil), original...)
+	updatedKeys := make(map[string]struct{}, len(prepared))
+	for _, mutation := range prepared {
+		index := mutableIncrementalRangeWindowEntryIndex(entries, mutation.key)
+		if index < 0 {
+			return nil, fmt.Errorf("mutable incremental range window stable update key %q is missing", mutation.key)
+		}
+		entries[index] = mutation.entry
+		updatedKeys[mutation.key] = struct{}{}
+	}
+
+	values := make([]int64, len(entries))
+	valid := make([]bool, len(entries))
+	for index, entry := range entries {
+		value, ok, err := mutableIncrementalRangeWindowExtremaValue(window.valueKey, entry.row)
+		if err != nil {
+			return nil, err
+		}
+		values[index] = value
+		valid[index] = ok
+	}
+
+	minimum := window.kind == IncrementalRangeWindowMinInt64
+	monotonic := make([]int, 0, len(entries))
+	monotonicHead := 0
+	frameStart := 0
+	changedKeys := make(map[string]struct{})
+	newOutputs := make(map[string]Row)
+	for index := 0; index < len(entries); {
+		peerEnd := index
+		for peerEnd+1 < len(entries) && entries[peerEnd+1].order == entries[index].order {
+			peerEnd++
+		}
+		order := entries[index].order
+		if window.descending {
+			upper := incrementalRangeWindowUpperBound(order, window.preceding)
+			for frameStart < len(entries) && entries[frameStart].order > upper {
+				frameStart++
+			}
+		} else {
+			lower := incrementalRangeWindowLowerBound(order, window.preceding)
+			for frameStart < len(entries) && entries[frameStart].order < lower {
+				frameStart++
+			}
+		}
+		for monotonicHead < len(monotonic) && monotonic[monotonicHead] < frameStart {
+			monotonicHead++
+		}
+		for peerIndex := index; peerIndex <= peerEnd; peerIndex++ {
+			if !valid[peerIndex] {
+				continue
+			}
+			value := values[peerIndex]
+			for len(monotonic) > monotonicHead {
+				last := monotonic[len(monotonic)-1]
+				if (minimum && values[last] < value) || (!minimum && values[last] > value) {
+					break
+				}
+				monotonic = monotonic[:len(monotonic)-1]
+			}
+			monotonic = append(monotonic, peerIndex)
+		}
+		var output interface{}
+		if monotonicHead < len(monotonic) {
+			output = values[monotonic[monotonicHead]]
+		}
+		for peerIndex := index; peerIndex <= peerEnd; peerIndex++ {
+			entry := entries[peerIndex]
+			oldRow, oldOK := window.outputs[entry.key]
+			if !oldOK {
+				return nil, fmt.Errorf("mutable incremental range window output %q is missing", entry.key)
+			}
+			if _, updated := updatedKeys[entry.key]; !updated {
+				oldValue, valueOK := oldRow[window.outputColumn]
+				if valueOK && reflect.DeepEqual(oldValue, output) {
+					continue
+				}
+			}
+			newRow := incrementalRangeWindowOutput(entry.row, window.outputColumn, output)
+			if reflect.DeepEqual(oldRow, newRow) {
+				continue
+			}
+			changedKeys[entry.key] = struct{}{}
+			newOutputs[entry.key] = newRow
+		}
+		index = peerEnd + 1
+	}
+
+	updates := diffMutableIncrementalRangeWindowChanges(window.outputs, newOutputs, changedKeys)
+	window.partitions[partition] = entries
+	for _, mutation := range prepared {
+		window.rows[mutation.key] = mutation.entry
+	}
+	for key, output := range newOutputs {
+		window.outputs[key] = output
+	}
+	return updates, nil
+}
+
+func mutableIncrementalRangeWindowExtremaValue(valueKey IncrementalOffsetWindowValueKeyFunc, row Row) (int64, bool, error) {
+	value, err := valueKey(row)
+	if err != nil {
+		return 0, false, err
+	}
+	if value == nil {
+		return 0, false, nil
+	}
+	intValue, ok := value.(int64)
+	if !ok {
+		return 0, false, ErrIncrementalRangeWindowExtremaValueInvalid
+	}
+	return intValue, true, nil
 }
 
 func (window *MutableIncrementalRangeWindow) canApplyStableSumUpdates(prepared []preparedMutableIncrementalRangeWindowMutation) bool {

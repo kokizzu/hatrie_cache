@@ -87,6 +87,56 @@ func BenchmarkM065abMutableRangeWindowBatchedSamePosition(b *testing.B) {
 	}
 }
 
+func BenchmarkM065aeMutableRangeExtremaBatchedSamePosition(b *testing.B) {
+	for _, kind := range []IncrementalRangeWindowKind{IncrementalRangeWindowMinInt64, IncrementalRangeWindowMaxInt64} {
+		b.Run(strconv.Itoa(int(kind)), func(b *testing.B) {
+			definition := IncrementalRangeWindowDefinition{
+				Kind:           kind,
+				OutputColumn:   "range_value",
+				FramePreceding: 64,
+				OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+				RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+				ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+			}
+			window, err := NewMutableIncrementalRangeWindow(definition)
+			if err != nil {
+				b.Fatal(err)
+			}
+			inserts := make([]IncrementalRangeWindowMutation, 2000)
+			for index := range inserts {
+				inserts[index] = IncrementalRangeWindowMutation{
+					Operation: IncrementalRangeWindowInsert,
+					Row: Row{
+						"id":    "row-" + strconv.Itoa(index),
+						"order": int64(index),
+						"value": int64((index * 17) % 1000),
+					},
+				}
+			}
+			if _, err := window.Apply(inserts); err != nil {
+				b.Fatal(err)
+			}
+			batches := [2][]IncrementalRangeWindowMutation{
+				{
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "order": int64(1000), "value": int64(-1000)}},
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1001", Row: Row{"id": "row-1001", "order": int64(1001), "value": int64(-1001)}},
+				},
+				{
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "order": int64(1000), "value": int64(1000)}},
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1001", Row: Row{"id": "row-1001", "order": int64(1001), "value": int64(1001)}},
+				},
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if _, err := window.Apply(batches[iteration%len(batches)]); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func m065wRangeBenchmarkDefinition() IncrementalRangeWindowDefinition {
 	return IncrementalRangeWindowDefinition{
 		Kind:           IncrementalRangeWindowSumInt64,
