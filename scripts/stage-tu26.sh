@@ -14,7 +14,9 @@ git add -- \
   hat/hatSql/tu26_index_strategy_test.go \
   hat/hatSql/tu26_index_strategy_benchmark_test.go \
   scripts/benchmark-tu26.sh \
+  scripts/commit-tu26.sh \
   scripts/format-tu26.sh \
+  scripts/push-tu26.sh \
   scripts/race-tu26.sh \
   scripts/review-tu26.sh \
   scripts/stage-tu26.sh \
