@@ -35,6 +35,9 @@ func (session *SQLSession) ApplyViewChanges(changes []SQLSessionViewChange) (SQL
 	if session == nil {
 		return SQLSessionViewCatalog{}, fmt.Errorf("SQL session is nil")
 	}
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return SQLSessionViewCatalog{}, err
+	}
 	normalized, err := normalizeSQLSessionViewChanges(changes)
 	if err != nil {
 		return SQLSessionViewCatalog{}, err

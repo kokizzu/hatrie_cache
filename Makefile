@@ -23116,3 +23116,39 @@ commit-chu20-packed-complex-json:
 .PHONY: push-chu20-packed-complex-json
 push-chu20-packed-complex-json:
 	@bash scripts/push-chu20-packed-complex-json.sh
+
+.PHONY: test-tu05-session-settings
+test-tu05-session-settings:
+	@bash scripts/test-tu05-session-settings.sh
+
+.PHONY: format-tu05-session-settings
+format-tu05-session-settings:
+	@bash scripts/format-tu05-session-settings.sh
+
+.PHONY: benchmark-tu05-session-settings
+benchmark-tu05-session-settings:
+	@bash scripts/benchmark-tu05-session-settings.sh
+
+.PHONY: race-tu05-session-settings
+race-tu05-session-settings:
+	@bash scripts/race-tu05-session-settings.sh
+
+.PHONY: vet-tu05-session-settings
+vet-tu05-session-settings:
+	@bash scripts/vet-tu05-session-settings.sh
+
+.PHONY: review-tu05-session-settings
+review-tu05-session-settings:
+	@bash scripts/review-tu05-session-settings.sh
+
+.PHONY: stage-tu05-session-settings
+stage-tu05-session-settings:
+	@bash scripts/stage-tu05-session-settings.sh
+
+.PHONY: commit-tu05-session-settings
+commit-tu05-session-settings:
+	@bash scripts/commit-tu05-session-settings.sh
+
+.PHONY: push-tu05-session-settings
+push-tu05-session-settings:
+	@bash scripts/push-tu05-session-settings.sh

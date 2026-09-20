@@ -34424,4 +34424,60 @@ Raw one-time materialization samples:
 3171664 1720778 32784
 3339060 1720798 32785
 3116246 1720715 32784
+
+<a id="t-u05-session-transaction-settings"></a>
+## T-U05 Session Transaction Settings
+
+Command: `make benchmark-tu05-after`. Linux `amd64`, AMD Ryzen 9 5950X, Go
+`-benchmem`, five samples. The before samples were captured before the settings
+implementation; the paired after control uses the same query path with the
+default settings, and the timeout case enables a one-minute session deadline.
+Values are `ns/op`, `B/op`, and `allocs/op`.
+
+| Path | Median | Improvement / tradeoff |
+| --- | ---: | --- |
+| Before T-U05 | 7,215 ns; 5,328 B; 33 allocs | 1.00x baseline |
+| After, paired default control | 7,044 ns; 5,328 B; 33 allocs | 1.00x allocation baseline; CPU within run noise |
+| After, default session settings | 7,105 ns; 5,328 B; 33 allocs | 1.02x observed CPU result; no allocation cost |
+| After, configured timeout | 7,667 ns; 5,600 B; 37 allocs | 1.08x CPU and +272 B/+4 allocs vs final default run; opt-in only |
+
+Raw before samples:
+
+```text
+7557 5328 33
+7672 5328 33
+7215 5328 33
+7213 5328 33
+6928 5328 33
+```
+
+Raw paired after control samples:
+
+```text
+6917 5328 33
+7044 5328 33
+7165 5328 33
+6839 5328 33
+7211 5328 33
+```
+
+Raw after default-settings samples:
+
+```text
+7190 5328 33
+7005 5328 33
+7002 5328 33
+7105 5328 33
+7187 5328 33
+```
+
+Raw after timeout-settings samples:
+
+```text
+7746 5600 37
+7658 5600 37
+7667 5600 37
+7599 5600 37
+7693 5600 37
+```
 ```

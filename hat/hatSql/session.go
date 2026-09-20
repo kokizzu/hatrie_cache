@@ -10,13 +10,14 @@ import (
 // SQLSession owns temporary SQL sources and named result snapshots for one
 // caller. It is safe for concurrent use and never mutates its base resolver.
 type SQLSession struct {
-	mu             sync.RWMutex
-	source         SourceResolver
-	tables         map[string][]Row
-	results        map[string][]Row
-	views          map[string]sqlSessionView
-	projections    *MaterializedViews
-	catalogVersion uint64
+	mu                  sync.RWMutex
+	source              SourceResolver
+	transactionSettings SQLSessionTransactionSettings
+	tables              map[string][]Row
+	results             map[string][]Row
+	views               map[string]sqlSessionView
+	projections         *MaterializedViews
+	catalogVersion      uint64
 }
 
 type sqlSessionView struct {
@@ -26,15 +27,19 @@ type sqlSessionView struct {
 
 func NewSQLSession(source SourceResolver) *SQLSession {
 	return &SQLSession{
-		source:      source,
-		tables:      map[string][]Row{},
-		results:     map[string][]Row{},
-		views:       map[string]sqlSessionView{},
-		projections: NewMaterializedViews(),
+		source:              source,
+		transactionSettings: defaultSQLSessionTransactionSettings,
+		tables:              map[string][]Row{},
+		results:             map[string][]Row{},
+		views:               map[string]sqlSessionView{},
+		projections:         NewMaterializedViews(),
 	}
 }
 
 func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return err
+	}
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err
@@ -47,6 +52,9 @@ func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
 }
 
 func (session *SQLSession) DropTemporaryTable(name string) {
+	if session == nil || session.transactionReadOnly() {
+		return
+	}
 	session.mu.Lock()
 	key := strings.ToLower(name)
 	if _, exists := session.tables[key]; exists {
@@ -57,6 +65,9 @@ func (session *SQLSession) DropTemporaryTable(name string) {
 }
 
 func (session *SQLSession) StoreNamedResult(name string, result SQLQueryResult) error {
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return err
+	}
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err
@@ -73,6 +84,9 @@ func (session *SQLSession) StoreNamedResult(name string, result SQLQueryResult) 
 func (session *SQLSession) CreateView(name, source string) error {
 	if session == nil {
 		return fmt.Errorf("SQL session is nil")
+	}
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -106,6 +120,9 @@ func (session *SQLSession) CreateView(name, source string) error {
 func (session *SQLSession) CreateProjection(ctx context.Context, name, source string, options QueryOptions) error {
 	if session == nil {
 		return fmt.Errorf("SQL session is nil")
+	}
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -148,6 +165,9 @@ func (session *SQLSession) DropProjection(name string) error {
 	if session == nil {
 		return fmt.Errorf("SQL session is nil")
 	}
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return err
+	}
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err
@@ -161,6 +181,9 @@ func (session *SQLSession) DropProjection(name string) error {
 func (session *SQLSession) RefreshProjection(ctx context.Context, name string, options QueryOptions) error {
 	if session == nil {
 		return fmt.Errorf("SQL session is nil")
+	}
+	if err := session.rejectReadOnlyMutation(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -529,6 +552,11 @@ func sqlQueryCacheDependencies(query *sqlQuery) []string {
 }
 
 func (session *SQLSession) Execute(ctx context.Context, source string, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	if session == nil {
+		return SQLQueryResult{}, fmt.Errorf("SQL session is nil")
+	}
+	ctx, cancel := session.transactionContext(ctx)
+	defer cancel()
 	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE PROJECTION"); matched {
 		if err != nil {
 			return SQLQueryResult{}, err
