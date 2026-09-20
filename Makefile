@@ -23238,6 +23238,15 @@ push-tu33-function-grants:
 .PHONY: audit-hatrie-tmp
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
+
+cleanup-hatrie-tmp-metadata:
+	bash scripts/audit-hatrie-tmp.sh clean-metadata
+
+cleanup-hatrie-tmp-after-test:
+	bash ./scripts/cleanup-hatrie-build-tmp.sh verify
+	bash ./scripts/cleanup-hatrie-tmp-safe.sh plan
+	bash ./scripts/cleanup-hatrie-tmp-safe.sh apply
+	bash ./scripts/audit-hatrie-tmp.sh clean-metadata
 .PHONY: test-hatrie-tmp-cleanup
 test-hatrie-tmp-cleanup:
 	bash scripts/test-hatrie-tmp-cleanup.sh
@@ -23294,3 +23303,35 @@ commit-tu14-vshard:
 
 push-tu14-vshard:
 	bash scripts/push-tu14-vshard.sh
+
+test-tu04-runtime:
+	bash scripts/test-tu04-runtime.sh
+
+format-tu04-runtime:
+	bash scripts/format-tu04-runtime.sh
+
+test-tu04-runtime-package:
+	bash scripts/test-tu04-runtime-package.sh
+
+race-tu04-runtime:
+	bash scripts/race-tu04-runtime.sh
+
+vet-tu04-runtime:
+	bash scripts/vet-tu04-runtime.sh
+
+benchmark-tu04-runtime:
+	bash scripts/benchmark-tu04-runtime.sh
+
+stage-tu04-runtime:
+	bash scripts/stage-tu04-runtime.sh
+
+review-tu04-runtime:
+	bash scripts/review-tu04-runtime.sh
+
+commit-tu04-runtime:
+	bash scripts/commit-tu04-runtime.sh
+
+push-tu04-runtime:
+	bash scripts/push-tu04-runtime.sh
+audit-hatrie-tmp:
+	bash scripts/audit-hatrie-tmp.sh

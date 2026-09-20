@@ -34423,3 +34423,16 @@ builder. This is additive control-plane work and does not affect routing or
 data-path operations. The initial implementation was ~9.2 microseconds,
 6.0 KB, and 174 allocations; reusing normalized fingerprints reduced that
 cost to the values above.
+## T-U04 Bounded Runtime
+
+Five-sample median on AMD Ryzen 9 5950X, Linux amd64:
+
+| Workload | Direct Go | `hatRuntime` | Runtime / direct | Direct memory | Runtime memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Integer add | 0.51 ns/op, 0 allocs | 76.65 ns/op, 1 alloc | 150x | 0 B/op | 128 B/op |
+| String concat | 22.15 ns/op, 1 alloc | 100.0 ns/op, 2 allocs | 4.5x | 4 B/op | 132 B/op |
+| 256-row string batch | 7,243 ns/op, 257 allocs | 28,092 ns/op, 513 allocs | 3.9x | 10,496 B/op | 43,264 B/op |
+
+The bounded runtime is an opt-in safety boundary, not a faster execution
+engine. It is appropriate for untrusted row-local expressions; trusted hot
+paths should keep direct or specialized compiled execution.
