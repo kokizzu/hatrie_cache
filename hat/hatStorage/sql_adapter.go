@@ -14,9 +14,16 @@ import (
 // namespace.
 var ErrUnknownSQLNamespace = errors.New("storage SQL namespace is not registered")
 
-// SQLAdapter binds a persistent engine and relational source resolver to one
-// namespace. The resolver is intentionally the hatSql contract, ensuring every
-// storage adapter shares exactly the same parser, planner, and SQL semantics.
+// ErrSQLAdapterStorageUnavailable reports that a namespace has no local
+// storage engine to inspect. Resolver-only compute adapters intentionally
+// return this error because their data is owned by another process or tier.
+var ErrSQLAdapterStorageUnavailable = errors.New("storage engine is unavailable for SQL adapter")
+
+// SQLAdapter binds a storage engine and relational source resolver to one
+// namespace. SQLResolverAdapter is the explicit resolver-only variant for a
+// compute process whose data is owned by another process or storage tier.
+// The resolver is intentionally the hatSql contract, ensuring every storage
+// adapter shares exactly the same parser, planner, and SQL semantics.
 type SQLAdapter interface {
 	Namespace() string
 	SQLSourceResolver() hatSql.SourceResolver
@@ -37,6 +44,24 @@ func (adapter SQLNamespaceAdapter) Namespace() string { return adapter.Namespace
 func (adapter SQLNamespaceAdapter) SQLSourceResolver() hatSql.SourceResolver { return adapter.Resolver }
 
 func (adapter SQLNamespaceAdapter) StorageEngine() Engine { return adapter.Store }
+
+// SQLResolverAdapter registers a resolver without opening local storage. It
+// is intended for stateless compute processes where Resolver fetches a
+// consistent snapshot from a remote or separately managed storage service.
+// Execute remains available; Inspect returns ErrSQLAdapterStorageUnavailable.
+// This type is opt-in and does not change SQLNamespaceAdapter defaults.
+type SQLResolverAdapter struct {
+	NamespaceName string
+	Resolver      hatSql.SourceResolver
+}
+
+func (adapter SQLResolverAdapter) Namespace() string { return adapter.NamespaceName }
+
+func (adapter SQLResolverAdapter) SQLSourceResolver() hatSql.SourceResolver { return adapter.Resolver }
+
+func (adapter SQLResolverAdapter) StorageEngine() Engine { return nil }
+
+func (adapter SQLResolverAdapter) sqlResolverOnly() {}
 
 // SQLAdapterRegistry dispatches namespace-scoped queries to registered storage
 // adapters. Registration is concurrency-safe; each execution still goes
@@ -86,7 +111,11 @@ func (registry *SQLAdapterRegistry) register(adapter SQLAdapter) error {
 		return fmt.Errorf("SQL storage adapter %q resolver is required", namespace)
 	}
 	store := adapter.StorageEngine()
-	if _, err := Inspect(store); err != nil {
+	if store == nil {
+		if _, resolverOnly := adapter.(interface{ sqlResolverOnly() }); !resolverOnly {
+			return fmt.Errorf("SQL storage adapter %q storage engine is required", namespace)
+		}
+	} else if _, err := Inspect(store); err != nil {
 		return fmt.Errorf("SQL storage adapter %q: %w", namespace, err)
 	}
 	if _, exists := registry.adapters[namespace]; exists {
@@ -119,7 +148,11 @@ func (registry *SQLAdapterRegistry) Inspect(namespace string) (Inspection, error
 	if err != nil {
 		return Inspection{}, err
 	}
-	return Inspect(adapter.StorageEngine())
+	store := adapter.StorageEngine()
+	if store == nil {
+		return Inspection{}, fmt.Errorf("%w: namespace %q", ErrSQLAdapterStorageUnavailable, namespace)
+	}
+	return Inspect(store)
 }
 
 // Execute evaluates source against namespace through the shared SQL executor.

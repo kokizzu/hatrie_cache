@@ -10,6 +10,31 @@ controls.
 by the caller, so this is not a distributed compute/storage split and it does
 not move durable writes into a separate process.
 
+## Resolver-Only Compute Adapters
+
+M090a adds an explicit resolver-only registration path for a stateless SQL
+compute process. `hatStorage.SQLResolverAdapter` implements the same SQL
+namespace contract without opening a local `hatStorage.Engine`:
+
+```go
+registry, err := hatStorage.NewSQLAdapterRegistry(nil, hatStorage.SQLResolverAdapter{
+	NamespaceName: "eu-west",
+	Resolver: remoteSnapshotResolver,
+})
+```
+
+`Execute` uses the normal parser and executor, while the supplied resolver
+owns remote transport, snapshot consistency, authentication, retries, and
+data locality. `Inspect` returns
+`hatStorage.ErrSQLAdapterStorageUnavailable` because there is no local engine
+to inspect. The existing `SQLNamespaceAdapter` still rejects a missing engine,
+so local storage remains the default and no accidental remote mode is
+introduced.
+
+This is a registration boundary, not a distributed database protocol. It does
+not replicate data, coordinate frontiers, or hide network failures. Those
+responsibilities stay with the resolver or the service that supplies it.
+
 ## Configuration
 
 The default is unchanged:
@@ -75,3 +100,6 @@ for ordinary low-contention execution.
 
 See the raw samples and baseline comparison in
 [BENCHMARK.md#mz-018-optional-sql-compute-pool](BENCHMARK.md#mz-018-optional-sql-compute-pool).
+
+The resolver-only adapter measurement is recorded in
+[BENCHMARK.md#m090a-resolver-only-sql-compute-adapter](BENCHMARK.md#m090a-resolver-only-sql-compute-adapter).

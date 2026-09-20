@@ -22603,6 +22603,38 @@ long-running or overloaded managed-query traffic where bounded admission and
 clean draining matter more than the overhead measured here. `Close` drains
 admitted tasks; request contexts still control cancellation of running work.
 
+<a id="m090a-resolver-only-sql-compute-adapter"></a>
+## M090a Resolver-Only SQL Compute Adapter
+
+This benchmark measures the opt-in `hatStorage.SQLResolverAdapter` against the
+existing local-engine `SQLNamespaceAdapter` through the same registry and SQL
+executor. The resolver-only path removes the local storage inspection
+requirement needed by a stateless compute process; it is not expected to make
+the query faster. Samples use a deterministic empty `CACHE` resolver, five
+runs of `go test -benchmem -count=5` on `linux/amd64` with an AMD Ryzen 9
+5950X.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Local engine adapter, matched control | 6,247; 6,150; 6,238; 6,424; 6,459 | 4,616; 4,616; 4,616; 4,616; 4,616 | 19; 19; 19; 19; 19 |
+| Resolver-only adapter | 6,654; 6,260; 6,201; 5,913; 6,343 | 4,616; 4,616; 4,616; 4,616; 4,616 | 19; 19; 19; 19; 19 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to matched local control |
+| --- | ---: | ---: | ---: | --- |
+| Local engine adapter | 6,247 | 4,616 | 19 | `1.00x` |
+| Resolver-only adapter | 6,260 | 4,616 | 19 | `1.00x` time, same memory and allocations |
+
+The matched control shows no measurable execution cost from the new adapter
+type. It also shows no speedup: the benefit is that compute can be registered
+without local storage ownership. Remote fetch cost, bandwidth, retries, and
+frontier consistency are intentionally outside this benchmark.
+
+Reproduce with `make benchmark-m090a`.
+
 <a id="mz-019-named-sql-compute-pools"></a>
 ## MZ-019 Named SQL Compute Pools
 

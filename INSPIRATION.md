@@ -589,6 +589,12 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M088a Deterministic read-replica selection with required frontiers and maximum lag.
 - [x] M089 Failover and recovery of supported replicas.
 - [ ] M090 Independent compute and storage scaling.
+- [x] M090a Resolver-only SQL compute adapters. `hatStorage.SQLResolverAdapter`
+  lets stateless compute processes register a caller-owned remote snapshot
+  resolver without a local storage engine; ordinary `SQLNamespaceAdapter`
+  registration and execution remain unchanged. See
+  [SQL_COMPUTE_STORAGE_SEPARATION.md](SQL_COMPUTE_STORAGE_SEPARATION.md) and
+  [BENCHMARK.md#m090a-resolver-only-sql-compute-adapter](BENCHMARK.md#m090a-resolver-only-sql-compute-adapter).
 - [x] M091 Durable persistent shards through the local storage layer.
 - [x] M092 Batched writes to durable storage.
 - [x] M093 Caller-driven bounded persistent-shard compaction scheduling with duplicate request coalescing, deterministic task ordering, retry-preserving failures, and explicit concurrency limits; see [COMPACTION_SCHEDULER.md](COMPACTION_SCHEDULER.md).
