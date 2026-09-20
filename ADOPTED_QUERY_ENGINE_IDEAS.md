@@ -916,3 +916,15 @@ The matched 2,000-row benchmark measured `4.70x` to `6.32x` lower CPU time,
 allocations. See
 [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065af-batched-mutable-range-aggregate-fast-path).
+
+## M037i: Signed Differential Grouped SUM(DISTINCT)
+
+Adopted a narrow Materialize-style negative-diff and ClickHouse-style distinct
+aggregate primitive: `hatSql.GroupSumDistinctInt64DifferentialRows` maintains
+exact per-group value multiplicities and a checked distinct sum. Duplicate
+weights are preserved, only visible aggregate transitions are emitted, and
+invalid total/per-value multiplicity, callback, and overflow errors return no
+partial output. The matched 5,120-update benchmark was `1.33x` faster than a
+full per-update group rebuild with `1.01x` heap and `1.02x` allocations. The
+API is importable and opt-in; existing SQL planner behavior is unchanged. See
+[DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).

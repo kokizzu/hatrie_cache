@@ -140,6 +140,47 @@ The retained value map is the cost of supporting exact out-of-order
 retractions. The API is batch-scoped and opt-in; existing COUNT and SUM paths
 are unchanged.
 
+## Differential grouped SUM(DISTINCT)
+
+`GroupSumDistinctInt64DifferentialRows` maintains an exact signed differential
+`SUM(DISTINCT value)` for callback-defined groups. It retains the total group
+multiplicity plus a multiplicity count for each `int64` value. Adding a
+duplicate or removing one of several duplicates does not change the visible
+aggregate; entering or leaving a distinct value emits a retraction of the old
+`Row["sum"]` followed by an insertion of the new sum.
+
+```go
+updates := []hatSql.DifferentialRow{
+	{Key: "one", Time: 1, Diff: 1, Row: hatSql.Row{"team": "red", "points": int64(2)}},
+	{Key: "two", Time: 2, Diff: 1, Row: hatSql.Row{"team": "red", "points": int64(2)}},
+	{Key: "three", Time: 3, Diff: 1, Row: hatSql.Row{"team": "red", "points": int64(5)}},
+}
+changes, err := hatSql.GroupSumDistinctInt64DifferentialRows(updates,
+	func(row hatSql.SQLRow) string { return row["team"].(string) },
+	func(row hatSql.SQLRow) (int64, error) { return row["points"].(int64), nil },
+)
+```
+
+The changes are equivalent to:
+
+```text
+red  +1 {sum: 2}
+red  -1 {sum: 2}
+red  +1 {sum: 7}
+```
+
+The operator preserves weighted duplicates, supports negative retractions,
+rejects negative total or per-value multiplicity, and uses checked `int64`
+addition including the `math.MinInt64` edge case. Callback failures and
+overflow return no partial output. It is an importable batch-scoped primitive;
+SQL planner wiring remains unchanged, so existing callers do not incur the
+retained multiplicity-map cost unless they select this operator.
+
+On the 5,120-update benchmark workload, maintaining the distinct sum directly
+was `1.33x` faster than rebuilding each group's sum after every update, with
+`1.01x` heap and `1.02x` allocations. The small retained per-value map is the
+explicit cost of exact duplicate-preserving retractions.
+
 ## Measured Cost
 
 Benchmark command:

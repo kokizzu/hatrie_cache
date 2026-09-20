@@ -34059,3 +34059,42 @@ Raw M065af samples, `COUNT(DISTINCT)` first:
 1088752 327588 2391
 1061798 327672 2396
 ```
+
+## M037i Signed Differential Grouped SUM(DISTINCT)
+
+This matched benchmark compares rebuilding each group's distinct sum after
+every update with the incremental signed-differential implementation. Both
+paths emit the same retraction/insertion stream for 5,120 updates across 64
+groups and 32 possible values, including 1,024 valid retractions. Five samples
+used `-benchtime=250ms` on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs rebuild |
+| --- | ---: | ---: | ---: | ---: |
+| Full per-update distinct-sum rebuild | 635,262 ns/op | 448,812 B/op | 260 allocs/op | 1.00x |
+| Incremental signed distinct-sum state | 477,780 ns/op | 453,706 B/op | 266 allocs/op | 1.33x faster; 1.01x higher heap; 1.02x more allocs |
+
+Raw rebuild samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+631038 448823 260
+635494 448811 260
+656535 448811 260
+616488 448811 260
+635262 448812 260
+```
+
+Raw incremental samples:
+
+```text
+427769 453706 266
+477780 453706 266
+468787 453706 266
+503734 453706 266
+483943 453707 266
+```
+
+The incremental path retains a per-group value-multiplicity map because exact
+duplicate-preserving retractions cannot be reconstructed from the current sum
+alone. The implementation deliberately avoids preallocating the group map to
+the full input batch; on this workload that keeps the memory tradeoff near
+one percent. The primitive is opt-in and does not alter existing SQL plans.
