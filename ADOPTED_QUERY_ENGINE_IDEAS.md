@@ -850,3 +850,15 @@ unchanged. The eight-update benchmark is `19.9x` faster, `21.5x` lower in
 transient bytes, and `7.9x` lower in allocations. See
 [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#batched-same-position-mutable-updates)
 and [BENCHMARK.md](BENCHMARK.md#m065aa-batched-mutable-rank-arrangement-fast-path).
+
+## M065ab: Batched Mutable Numeric RANGE SUM Fast Path
+
+Extended the Materialize-style mutable numeric `RANGE SUM(int64)` fast path to
+same-position mutation batches. The implementation validates every update,
+copies each affected partition once, and applies checked old/new value deltas
+only to frames containing the changed order. Structural changes and NULL-state
+transitions retain the existing rebuild fallback; the append-only constructor
+remains unchanged. The two-update benchmark is `24.1x` faster, uses `18.5x`
+fewer transient bytes, and uses `32.6x` fewer allocations. See
+[INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065ab-batched-mutable-numeric-range-sum-fast-path).

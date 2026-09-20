@@ -33812,3 +33812,46 @@ with no material memory change. Reproduce correctness, race, and vet checks
 with `make test-m065-rank-window-mutations`,
 `make test-race-m065-rank-window-mutations`, and
 `make vet-m065-rank-window-mutations`.
+
+## M065ab Batched Mutable Numeric RANGE SUM Fast Path
+
+Command: `make benchmark-m065ab-mutable-range-sum-batch`.
+
+This compares a two-row same-position `SUM(int64)` mutation batch on one
+2,000-row partition. The baseline is the pre-change M065w implementation,
+which rebuilt the affected partition for a batch. Five samples used
+`-benchtime=100x` on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Full affected-partition batch rebuild | 6,226,675 ns/op | 3,683,825 B/op | 42,045 allocs/op | 1.00x |
+| Batched same-position SUM fast path | 258,832 ns/op | 199,029 B/op | 1,291 allocs/op | 24.1x CPU, 18.5x lower bytes, 32.6x fewer allocs |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+6222675 3684063 42053
+6177906 3683777 42042
+6363167 3683806 42043
+6178314 3683833 42045
+6304552 3683825 42045
+```
+
+Raw optimized samples:
+
+```text
+258832 199111 1296
+276337 199019 1290
+244190 199029 1291
+265648 199029 1291
+246075 199078 1294
+```
+
+The optimization is limited to updates that retain both partition and order
+position and keep NULL validity unchanged. Position-changing updates,
+validity transitions, overflow, and malformed state retain the existing
+rebuild/error behavior. The append-only `NewIncrementalRangeWindow` default
+and the mutable constructor's O(rows) retained-state tradeoff are unchanged.
+Focused correctness, race, and vet checks use the M065w mutable RANGE target;
+the isolated feature worktree's unrelated typed-table checkpoint tests still
+require the parallel typed-table changes and are not attributed to M065ab.

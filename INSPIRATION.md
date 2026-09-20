@@ -1002,3 +1002,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   existing fallback for structural mutations. See
   [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#batched-same-position-mutable-updates)
   and [BENCHMARK.md](BENCHMARK.md#m065aa-batched-mutable-rank-arrangement-fast-path).
+- [x] M065ab Batched same-position mutable numeric `RANGE SUM(int64)` updates
+  reuse current frame sums and apply checked value deltas only to affected
+  rows, while preserving the rebuild fallback for structural or NULL-state
+  changes. See [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065ab-batched-mutable-numeric-range-sum-fast-path).

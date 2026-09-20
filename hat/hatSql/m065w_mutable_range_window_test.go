@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -52,6 +53,122 @@ func TestMutableIncrementalRangeWindowAppliesSumChanges(t *testing.T) {
 	assertMutableRangePair(t, deleted, "c", int64(240), int64(40))
 	if !hasMutableRangeChange(deleted, "b", -1, int64(210)) {
 		t.Fatalf("delete did not retract b: %#v", deleted)
+	}
+}
+
+func TestMutableIncrementalRangeWindowBatchedStableSumUpdates(t *testing.T) {
+	valueCalls := 0
+	orderCalls := 0
+	rowKeyCalls := 0
+	window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
+		Kind:           IncrementalRangeWindowSumInt64,
+		OutputColumn:   "range_sum",
+		FramePreceding: 2,
+		PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+		OrderKey: func(row Row) (interface{}, error) {
+			orderCalls++
+			return row["order"], nil
+		},
+		RowKey: func(row Row) (string, error) {
+			rowKeyCalls++
+			return row["id"].(string), nil
+		},
+		ValueKey: func(row Row) (interface{}, error) {
+			valueCalls++
+			return row["value"], nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := window.Apply([]IncrementalRangeWindowMutation{
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("a", 1, 10)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("b", 2, 20)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("c", 3, 30)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("d", 4, 40)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("e", 5, 50)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	valueCalls = 0
+	orderCalls = 0
+	rowKeyCalls = 0
+
+	changes, err := window.Apply([]IncrementalRangeWindowMutation{
+		{Operation: IncrementalRangeWindowUpdate, Key: "b", Row: mutableRangeRow("b", 2, 200)},
+		{Operation: IncrementalRangeWindowUpdate, Key: "d", Row: mutableRangeRow("d", 4, 400)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valueCalls != 4 {
+		t.Fatalf("batched stable SUM value callback calls = %d, want 4", valueCalls)
+	}
+	if orderCalls != 2 {
+		t.Fatalf("batched stable SUM order callback calls = %d, want 2", orderCalls)
+	}
+	if rowKeyCalls != 2 {
+		t.Fatalf("batched stable SUM row-key callback calls = %d, want 2", rowKeyCalls)
+	}
+	assertMutableRangePair(t, changes, "b", int64(30), int64(210))
+	assertMutableRangePair(t, changes, "c", int64(60), int64(240))
+	assertMutableRangePair(t, changes, "d", int64(90), int64(630))
+	assertMutableRangePair(t, changes, "e", int64(120), int64(480))
+	if hasMutableRangeChange(changes, "a", -1, int64(10)) || hasMutableRangeChange(changes, "a", 1, int64(10)) {
+		t.Fatalf("unaffected row changed: %#v", changes)
+	}
+}
+
+func TestMutableIncrementalRangeWindowBatchedStableSumMatchesSequential(t *testing.T) {
+	for _, descending := range []bool{false, true} {
+		t.Run(fmt.Sprintf("descending=%t", descending), func(t *testing.T) {
+			definition := IncrementalRangeWindowDefinition{
+				Kind:           IncrementalRangeWindowSumInt64,
+				OutputColumn:   "range_sum",
+				FramePreceding: 2,
+				Descending:     descending,
+				PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+				OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+				RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+				ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+			}
+			batched, err := NewMutableIncrementalRangeWindow(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sequential, err := NewMutableIncrementalRangeWindow(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inserts := []IncrementalRangeWindowMutation{
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("a", 1, 10)},
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("b", 2, 20)},
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("c", 3, 30)},
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("d", 4, 40)},
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("e", 5, 50)},
+			}
+			if _, err := batched.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sequential.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			mutations := []IncrementalRangeWindowMutation{
+				{Operation: IncrementalRangeWindowUpdate, Key: "b", Row: mutableRangeRow("b", 2, 200)},
+				{Operation: IncrementalRangeWindowUpdate, Key: "d", Row: mutableRangeRow("d", 4, 400)},
+			}
+			if _, err := batched.Apply(mutations); err != nil {
+				t.Fatal(err)
+			}
+			for _, mutation := range mutations {
+				if _, err := sequential.Apply([]IncrementalRangeWindowMutation{mutation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(batched.outputs, sequential.outputs) {
+				t.Fatalf("batched outputs = %#v, sequential outputs = %#v", batched.outputs, sequential.outputs)
+			}
+		})
 	}
 }
 

@@ -22815,6 +22815,38 @@ commit-m065w-mutable-range-window:
 .PHONY: push-m065w-mutable-range-window
 push-m065w-mutable-range-window:
 	bash ./scripts/push-m065w-mutable-range-window.sh
+
+.PHONY: test-m065ab-mutable-range-sum-batch
+test-m065ab-mutable-range-sum-batch:
+	bash ./scripts/test-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: benchmark-m065ab-mutable-range-sum-batch
+benchmark-m065ab-mutable-range-sum-batch:
+	bash ./scripts/benchmark-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: format-m065ab-mutable-range-sum-batch
+format-m065ab-mutable-range-sum-batch:
+	bash ./scripts/format-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: verify-m065ab-mutable-range-sum-batch
+verify-m065ab-mutable-range-sum-batch:
+	bash ./scripts/verify-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: review-m065ab-mutable-range-sum-batch
+review-m065ab-mutable-range-sum-batch:
+	bash ./scripts/review-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: stage-m065ab-mutable-range-sum-batch
+stage-m065ab-mutable-range-sum-batch:
+	bash ./scripts/stage-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: commit-m065ab-mutable-range-sum-batch
+commit-m065ab-mutable-range-sum-batch:
+	bash ./scripts/commit-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: push-m065ab-mutable-range-sum-batch
+push-m065ab-mutable-range-sum-batch:
+	bash ./scripts/push-m065ab-mutable-range-sum-batch.sh
 .PHONY: test-m065x-mutable-range-boundary
 test-m065x-mutable-range-boundary:
 	bash ./scripts/test-m065x-mutable-range-boundary.sh

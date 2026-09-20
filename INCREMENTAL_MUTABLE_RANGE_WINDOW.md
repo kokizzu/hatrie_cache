@@ -28,6 +28,10 @@ unchanged. Structural changes rebuild only affected partitions through the
 existing optimized append-only RANGE evaluator. Same-position `COUNT` updates
 reuse the current frame membership; same-position `SUM(int64)` updates apply a
 checked delta only to rows whose numeric frame contains the changed order.
+Same-position `SUM(int64)` mutation batches use the same checked-delta path for
+all updates in one atomic batch, so overlapping frames are adjusted once per
+changed value without rebuilding the partition. A batch containing a position
+change or a NULL-state transition falls back to the existing partition rebuild.
 
 The existing `NewIncrementalRangeWindow` remains the default append-only,
 bounded-state path. The mutable constructor retains every base row, partition
