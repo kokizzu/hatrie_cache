@@ -114,6 +114,50 @@ func BenchmarkM065RankWindow(b *testing.B) {
 			}
 		}
 	})
+	b.Run("mutable_same_position_batch_update", func(b *testing.B) {
+		mutableRows := benchmarkM065MutableRankRowsWithPayload(1024)
+		window, err := NewMutableIncrementalRankWindow(IncrementalRankWindowDefinition{
+			Kind:         IncrementalWindowRowNumber,
+			OutputColumn: "row_number",
+			PartitionKey: benchmarkM065MutablePartitionKey,
+			OrderKey:     benchmarkM065MutableOrderKey,
+			RowKey:       benchmarkM065MutableRowKey,
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := window.Append(mutableRows); err != nil {
+			b.Fatal(err)
+		}
+		mutation := make([]IncrementalRankWindowMutation, 8)
+		for index := range mutation {
+			rowIndex := 7 + index*16
+			mutation[index] = IncrementalRankWindowMutation{
+				Kind: IncrementalRankWindowUpdate,
+				Key:  strconv.Itoa(rowIndex),
+				Row: Row{
+					"id":      strconv.Itoa(rowIndex),
+					"group":   int64(7),
+					"score":   int64(rowIndex / 16),
+					"payload": "new",
+				},
+			}
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for index := 0; index < b.N; index++ {
+			payload := "new"
+			if index%2 != 0 {
+				payload = "old"
+			}
+			for mutationIndex := range mutation {
+				mutation[mutationIndex].Row["payload"] = payload
+			}
+			if _, err := window.Apply(mutation); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func benchmarkM065PartitionKey(row Row) (string, error) {

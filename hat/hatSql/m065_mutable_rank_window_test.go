@@ -279,6 +279,57 @@ func TestMutableIncrementalRankWindowSamePositionUpdateAvoidsFullRebuild(t *test
 	}
 }
 
+func TestMutableIncrementalRankWindowSamePositionBatchAvoidsFullRebuild(t *testing.T) {
+	orderCalls := 0
+	window, err := NewMutableIncrementalRankWindow(IncrementalRankWindowDefinition{
+		Kind:         IncrementalWindowRowNumber,
+		OutputColumn: "row_number",
+		OrderKey: func(row Row) (interface{}, error) {
+			orderCalls++
+			return row["score"], nil
+		},
+		RowKey: func(row Row) (string, error) { return row["id"].(string), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []Row{
+		{"id": "a", "score": int64(1), "payload": "old-a"},
+		{"id": "b", "score": int64(2), "payload": "old-b"},
+		{"id": "c", "score": int64(3), "payload": "old-c"},
+		{"id": "d", "score": int64(4), "payload": "old-d"},
+		{"id": "e", "score": int64(5), "payload": "old-e"},
+		{"id": "f", "score": int64(6), "payload": "old-f"},
+		{"id": "g", "score": int64(7), "payload": "old-g"},
+		{"id": "h", "score": int64(8), "payload": "old-h"},
+	}
+	if _, err := window.Append(rows); err != nil {
+		t.Fatal(err)
+	}
+	orderCalls = 0
+	updates, err := window.Apply([]IncrementalRankWindowMutation{
+		{Kind: IncrementalRankWindowUpdate, Key: "b", Row: Row{"id": "b", "score": int64(2), "payload": "new-b"}},
+		{Kind: IncrementalRankWindowUpdate, Key: "d", Row: Row{"id": "d", "score": int64(4), "payload": "new-d"}},
+		{Kind: IncrementalRankWindowUpdate, Key: "f", Row: Row{"id": "f", "score": int64(6), "payload": "new-f"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 6 {
+		t.Fatalf("updates = %d, want six signed updates: %#v", len(updates), updates)
+	}
+	if orderCalls >= len(rows)*2 {
+		t.Fatalf("order callback calls = %d, want fewer than full rebuild calls %d", orderCalls, len(rows)*2)
+	}
+	for index, key := range []string{"b", "d", "f"} {
+		negative := updates[index*2]
+		positive := updates[index*2+1]
+		if negative.Key != key || negative.Diff != -1 || positive.Key != key || positive.Diff != 1 {
+			t.Fatalf("updates[%d:%d] = %#v/%#v, want %s retraction/insertion", index*2, index*2+2, negative, positive, key)
+		}
+	}
+}
+
 func TestIncrementalRankWindowApplyRequiresOptIn(t *testing.T) {
 	window, err := NewIncrementalRankWindow(m065MutableRankWindowDefinition(IncrementalWindowRank))
 	if err != nil {

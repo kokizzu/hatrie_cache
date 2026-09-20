@@ -996,3 +996,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   rebuild fallback for positional mutations. See
   [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#same-position-mutable-update-fast-path)
   and [BENCHMARK.md](BENCHMARK.md#m065z-mutable-rank-arrangement-fast-path).
+- [x] M065aa Batched same-position mutable rank updates validate all
+  payload-only updates before replacing retained rows in deterministic key
+  order, avoiding a repeated affected-partition rebuild while preserving the
+  existing fallback for structural mutations. See
+  [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#batched-same-position-mutable-updates)
+  and [BENCHMARK.md](BENCHMARK.md#m065aa-batched-mutable-rank-arrangement-fast-path).

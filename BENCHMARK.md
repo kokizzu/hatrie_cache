@@ -33771,3 +33771,44 @@ focused correctness, race, and vet checks with
 `make test-m065-rank-window-mutations`,
 `make test-race-m065-rank-window-mutations`, and
 `make vet-m065-rank-window-mutations`.
+
+## M065aa Batched Mutable Rank Arrangement Fast Path
+
+Command: `make benchmark-m065-rank-window`.
+
+This compares a batch of eight mutable updates that change only payload fields
+while keeping every row in the same partition and order position. The baseline
+is the parent M065z implementation, which rebuilt the affected partition for
+every multi-row batch. Five samples were run on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Full affected-partition batch rebuild | 418,094 ns/op | 287,731 B/op | 1,165 allocs/op | 1.00x |
+| Batched arrangement fast path | 20,981 ns/op | 13,398 B/op | 148 allocs/op | 19.9x CPU, 21.5x lower bytes, 7.9x fewer allocs |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+422879 287729 1165
+419471 287732 1165
+418094 287731 1165
+414815 287727 1164
+412998 287731 1165
+```
+
+Raw optimized samples:
+
+```text
+22148 13398 148
+21781 13397 148
+20981 13397 148
+20118 13396 148
+20863 13398 148
+```
+
+The existing one-update fast path stayed allocation-neutral at `1,613 B/op`
+and `18 allocs/op`; the order-changing control stayed at `1,066 allocs/op`
+with no material memory change. Reproduce correctness, race, and vet checks
+with `make test-m065-rank-window-mutations`,
+`make test-race-m065-rank-window-mutations`, and
+`make vet-m065-rank-window-mutations`.

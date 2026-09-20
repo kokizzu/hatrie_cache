@@ -838,3 +838,15 @@ append-only constructor remains unchanged. The targeted benchmark is
 allocations; the general position-changing benchmark remains neutral. See
 [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#same-position-mutable-update-fast-path)
 and [BENCHMARK.md](BENCHMARK.md#m065z-mutable-rank-arrangement-fast-path).
+
+## M065aa: Batched Mutable Rank Arrangement Fast Path
+
+Extended the Materialize-style rank arrangement fast path to mutation batches
+containing only same-position updates. The implementation validates every
+partition/order callback before publishing, updates retained rows in stable
+key order, and emits only the changed signed pairs. Structural batches retain
+the affected-partition rebuild, and the append-only constructor remains
+unchanged. The eight-update benchmark is `19.9x` faster, `21.5x` lower in
+transient bytes, and `7.9x` lower in allocations. See
+[INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#batched-same-position-mutable-updates)
+and [BENCHMARK.md](BENCHMARK.md#m065aa-batched-mutable-rank-arrangement-fast-path).

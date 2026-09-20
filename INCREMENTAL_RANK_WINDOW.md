@@ -106,6 +106,21 @@ control remained effectively neutral (`404,691` to `402,074 ns/op`, with
 `314,480` to `314,474 B/op` and `1,066` allocations), so the optimization does
 not trade away the general rebuild path.
 
+## Batched Same-Position Mutable Updates
+
+For a mutation batch containing only updates whose partition and order keys all
+remain unchanged, the mutable rank maintainer validates every callback first,
+then replaces the retained rows and derived outputs in deterministic row-key
+order. It emits only the changed rows and avoids sorting or rebuilding the
+affected partition. Batches containing inserts, deletes, partition moves, or
+order changes use the existing affected-partition rebuild.
+
+On the eight-update, 1,024-row benchmark, the median changed from
+`418,094 ns/op`, `287,731 B/op`, and `1,165 allocs/op` to `20,981 ns/op`,
+`13,398 B/op`, and `148 allocs/op`: `19.9x` faster, `21.5x` lower transient
+bytes, and `7.9x` fewer allocations. The existing one-update path remained at
+`1,613 B/op` and `18 allocs/op` after the batch support was added.
+
 ## Benchmark
 
 The existing append benchmark is retained for M065a. Workload: 1,024 rows

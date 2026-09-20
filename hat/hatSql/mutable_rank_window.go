@@ -130,14 +130,10 @@ func (window *IncrementalRankWindow) Apply(mutations []IncrementalRankWindowMuta
 			return nil, err
 		}
 	}
-	if len(normalized) == 1 && normalized[0].Kind == IncrementalRankWindowUpdate {
-		updates, handled, err := window.applyMutableRankWindowSamePosition(normalized[0])
-		if err != nil {
-			return nil, err
-		}
-		if handled {
-			return updates, nil
-		}
+	if updates, handled, err := window.applyMutableRankWindowSamePosition(normalized); err != nil {
+		return nil, err
+	} else if handled {
+		return updates, nil
 	}
 
 	candidate := make(map[string]Row, len(window.mutableRows)+len(normalized))
@@ -171,7 +167,81 @@ func (window *IncrementalRankWindow) Apply(mutations []IncrementalRankWindowMuta
 	return window.applyMutableRankWindowRebuild(candidate, candidatePartitions, affectedPartitions)
 }
 
-func (window *IncrementalRankWindow) applyMutableRankWindowSamePosition(mutation IncrementalRankWindowMutation) ([]DifferentialRow, bool, error) {
+type incrementalRankWindowSamePositionMutation struct {
+	key       string
+	oldOutput Row
+	newRow    Row
+}
+
+func (window *IncrementalRankWindow) applyMutableRankWindowSamePosition(mutations []IncrementalRankWindowMutation) ([]DifferentialRow, bool, error) {
+	if len(mutations) == 0 {
+		return nil, false, nil
+	}
+	if len(mutations) == 1 {
+		return window.applyMutableRankWindowSamePositionSingle(mutations[0])
+	}
+	prepared := make([]incrementalRankWindowSamePositionMutation, len(mutations))
+	for index, mutation := range mutations {
+		if mutation.Kind != IncrementalRankWindowUpdate {
+			return nil, false, nil
+		}
+		oldRow, exists := window.mutableRows[mutation.Key]
+		if !exists {
+			return nil, false, nil
+		}
+		oldOutput, exists := window.mutableOutputs[mutation.Key]
+		if !exists {
+			return nil, false, nil
+		}
+		oldPartition := window.mutablePartitions[mutation.Key]
+		newPartition, err := window.mutablePartitionForRow(index, mutation.Row)
+		if err != nil {
+			return nil, false, err
+		}
+		if oldPartition != newPartition {
+			return nil, false, nil
+		}
+		oldOrder, err := window.orderKey(oldRow)
+		if err != nil {
+			return nil, false, fmt.Errorf("incremental rank window mutation key %q old order key: %w", mutation.Key, err)
+		}
+		newOrder, err := window.orderKey(mutation.Row)
+		if err != nil {
+			return nil, false, fmt.Errorf("incremental rank window mutation key %q order key: %w", mutation.Key, err)
+		}
+		if sqlCompare(oldOrder, newOrder) != 0 {
+			return nil, false, nil
+		}
+		prepared[index] = incrementalRankWindowSamePositionMutation{
+			key:       mutation.Key,
+			oldOutput: oldOutput,
+			newRow:    cloneIncrementalRankWindowRow(mutation.Row),
+		}
+	}
+	sort.Slice(prepared, func(left, right int) bool {
+		return prepared[left].key < prepared[right].key
+	})
+	updates := make([]DifferentialRow, 0, len(prepared)*2)
+	for _, mutation := range prepared {
+		newOutput := cloneIncrementalRankWindowRow(mutation.newRow)
+		newOutput[window.outputColumn] = mutation.oldOutput[window.outputColumn]
+		window.mutableRows[mutation.key] = mutation.newRow
+		window.mutableOutputs[mutation.key] = newOutput
+		if reflect.DeepEqual(mutation.oldOutput, newOutput) {
+			continue
+		}
+		updates = append(updates,
+			DifferentialRow{Key: mutation.key, Diff: -1, Row: cloneIncrementalRankWindowRow(mutation.oldOutput)},
+			DifferentialRow{Key: mutation.key, Diff: 1, Row: cloneIncrementalRankWindowRow(newOutput)},
+		)
+	}
+	return updates, true, nil
+}
+
+func (window *IncrementalRankWindow) applyMutableRankWindowSamePositionSingle(mutation IncrementalRankWindowMutation) ([]DifferentialRow, bool, error) {
+	if mutation.Kind != IncrementalRankWindowUpdate {
+		return nil, false, nil
+	}
 	oldRow, exists := window.mutableRows[mutation.Key]
 	if !exists {
 		return nil, false, nil
@@ -199,7 +269,6 @@ func (window *IncrementalRankWindow) applyMutableRankWindowSamePosition(mutation
 	if sqlCompare(oldOrder, newOrder) != 0 {
 		return nil, false, nil
 	}
-
 	newRow := cloneIncrementalRankWindowRow(mutation.Row)
 	newOutput := cloneIncrementalRankWindowRow(newRow)
 	newOutput[window.outputColumn] = oldOutput[window.outputColumn]

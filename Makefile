@@ -8008,6 +8008,22 @@ commit-m065z-rank-fastpath:
 .PHONY: push-m065z-rank-fastpath
 push-m065z-rank-fastpath:
 	bash ./scripts/push-m065z-rank-fastpath.sh
+
+.PHONY: review-m065aa-rank-batch
+review-m065aa-rank-batch:
+	bash ./scripts/review-m065aa-rank-batch.sh
+
+.PHONY: stage-m065aa-rank-batch
+stage-m065aa-rank-batch:
+	bash ./scripts/stage-m065aa-rank-batch.sh
+
+.PHONY: commit-m065aa-rank-batch
+commit-m065aa-rank-batch:
+	bash ./scripts/commit-m065aa-rank-batch.sh
+
+.PHONY: push-m065aa-rank-batch
+push-m065aa-rank-batch:
+	bash ./scripts/push-m065aa-rank-batch.sh
 .PHONY: test-m065c-incremental-offset-window
 test-m065c-incremental-offset-window:
 	bash ./scripts/test-m065c-incremental-offset-window.sh
