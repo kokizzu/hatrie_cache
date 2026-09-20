@@ -13,7 +13,9 @@ git add -- \
   hat/hatDataStructure/gorilla_float64_codec_test.go \
   hat/hatDataStructure/gorilla_float64_codec_benchmark_test.go \
   scripts/benchmark-c247-gorilla-codec.sh \
+  scripts/commit-c247-gorilla-codec.sh \
   scripts/race-c247-gorilla-codec.sh \
+  scripts/push-c247-gorilla-codec.sh \
   scripts/review-c247-gorilla-codec.sh \
   scripts/stage-c247-gorilla-codec.sh \
   scripts/test-c247-gorilla-codec.sh
