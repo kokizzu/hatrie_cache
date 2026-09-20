@@ -126,6 +126,7 @@ type Scheduler struct {
 	readyHead  int
 	readyTail  int
 	readyCount int
+	locals     []fiberLocalStore
 	current    FiberID
 	closed     bool
 }
@@ -228,12 +229,14 @@ func (scheduler *Scheduler) Run(ctx context.Context, maxSteps int) (RunStats, er
 			slot.status = StatusFailed
 			slot.err = stepErr
 			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
 			stats.Failed++
 		case step == StepWait:
 			if slot.status != StatusWaiting {
 				slot.status = StatusFailed
 				slot.err = ErrFiberNotParked
 				slot.function = nil
+				scheduler.clearFiberLocals(fiberIndex(identifier))
 				stats.Failed++
 			} else {
 				stats.Waited++
@@ -245,11 +248,13 @@ func (scheduler *Scheduler) Run(ctx context.Context, maxSteps int) (RunStats, er
 		case step == StepDone:
 			slot.status = StatusDone
 			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
 			stats.Completed++
 		default:
 			slot.status = StatusFailed
 			slot.err = ErrInvalidStep
 			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
 			stats.Failed++
 		}
 	}
@@ -269,6 +274,7 @@ func (scheduler *Scheduler) Cancel(identifier FiberID) error {
 		slot.status = StatusCancelled
 		slot.err = context.Canceled
 		slot.function = nil
+		scheduler.clearFiberLocals(fiberIndex(identifier))
 		return nil
 	case StatusRunning:
 		return ErrFiberNotFinished
@@ -361,6 +367,7 @@ func (scheduler *Scheduler) Reap(identifier FiberID) error {
 			return ErrFiberNotFound
 		}
 	}
+	scheduler.clearFiberLocals(fiberIndex(identifier))
 	index := fiberIndex(identifier)
 	generation := slot.generation
 	*slot = fiberSlot{generation: generation}
@@ -391,7 +398,24 @@ func (scheduler *Scheduler) Close() {
 			slot.status = StatusCancelled
 			slot.err = context.Canceled
 			slot.function = nil
+			scheduler.clearFiberLocals(uint32(index))
 		}
+	}
+}
+
+func (scheduler *Scheduler) registerLocal(local fiberLocalStore) {
+	if scheduler == nil || local == nil {
+		return
+	}
+	scheduler.locals = append(scheduler.locals, local)
+}
+
+func (scheduler *Scheduler) clearFiberLocals(index uint32) {
+	if scheduler == nil {
+		return
+	}
+	for _, local := range scheduler.locals {
+		local.clear(index)
 	}
 }
 

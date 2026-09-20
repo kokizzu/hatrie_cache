@@ -34311,3 +34311,51 @@ BenchmarkTU31GoroutineChannelHandoff-32      66069  921.3 ns/op  168 B/op   4 al
 ```
 
 Reproduce with `make benchmark-tu31`.
+
+## T-U32 Fiber-Local Storage
+
+This benchmark compares typed `hatFiber.Local[int]` access with a
+preallocated `map[FiberID]int` inside the same bounded scheduler. The setup
+benchmark compares construction with 64 scheduler slots. Five 50 ms samples
+used `-benchmem` on Linux/amd64.
+
+| Workload | Median CPU | Median memory | Median allocations | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| `Local[int]` Set/Get in a running fiber | 17.68 ns/op | 0 B/op | 0 allocs/op | 1.27x faster |
+| Preallocated `map[FiberID]int` Set/Get | 22.42 ns/op | 0 B/op | 0 allocs/op | 1.00x |
+| Scheduler plus `Local[int]` setup, 64 slots | 1,277 ns/op | 5,184 B/op | 7 allocs/op | 1.48x slower setup |
+| Scheduler plus map setup, 64 slots | 860.9 ns/op | 3,968 B/op | 3 allocs/op | 1.00x |
+
+The typed local path is about 1.27x faster for repeated access without a
+steady-state allocation. Its deliberate cost is 1,216 additional bytes and
+four additional allocations during setup at 64 slots, because each local
+preallocates one cell per possible fiber. This cost is opt-in and disappears
+from schedulers that do not create a `Local`; group related request state into
+one local when memory matters.
+
+Raw output (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkTU32FiberLocalSetGet-32       3400354  17.91 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberLocalSetGet-32       3350767  17.36 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberLocalSetGet-32       3153840  16.99 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberLocalSetGet-32       3423296  17.68 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberLocalSetGet-32       3236502  17.85 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberMapSetGet-32         2363979  21.78 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberMapSetGet-32         2722449  22.99 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberMapSetGet-32         2300006  24.59 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberMapSetGet-32         2554015  22.42 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberMapSetGet-32         2735556  21.54 ns/op    0 B/op  0 allocs/op
+BenchmarkTU32FiberLocalSetup-32          68899  1086 ns/op  5184 B/op  7 allocs/op
+BenchmarkTU32FiberLocalSetup-32          44054  1277 ns/op  5184 B/op  7 allocs/op
+BenchmarkTU32FiberLocalSetup-32          49478  1252 ns/op  5184 B/op  7 allocs/op
+BenchmarkTU32FiberLocalSetup-32          52132  1310 ns/op  5184 B/op  7 allocs/op
+BenchmarkTU32FiberLocalSetup-32          41667  1313 ns/op  5184 B/op  7 allocs/op
+BenchmarkTU32FiberMapSetup-32            68250  860.9 ns/op 3968 B/op  3 allocs/op
+BenchmarkTU32FiberMapSetup-32            64940  860.8 ns/op 3968 B/op  3 allocs/op
+BenchmarkTU32FiberMapSetup-32            70268  881.8 ns/op 3968 B/op  3 allocs/op
+BenchmarkTU32FiberMapSetup-32            67686  848.2 ns/op 3968 B/op  3 allocs/op
+BenchmarkTU32FiberMapSetup-32            79357  874.2 ns/op 3968 B/op  3 allocs/op
+```
+
+Reproduce with `make benchmark-tu32`.

@@ -22638,9 +22638,46 @@ commit-tu31:
 push-tu31:
 	bash scripts/push-tu31.sh
 
+
 .PHONY: benchmark-tu31
 benchmark-tu31:
 	bash scripts/benchmark-tu31.sh
+
+.PHONY: test-tu32
+test-tu32:
+	bash scripts/test-tu32.sh
+
+.PHONY: format-tu32
+format-tu32:
+	bash scripts/format-tu32.sh
+
+.PHONY: race-tu32
+race-tu32:
+	bash scripts/race-tu32.sh
+
+.PHONY: vet-tu32
+vet-tu32:
+	bash scripts/vet-tu32.sh
+
+.PHONY: benchmark-tu32
+benchmark-tu32:
+	bash scripts/benchmark-tu32.sh
+
+.PHONY: review-tu32
+review-tu32:
+	bash scripts/review-tu32.sh
+
+.PHONY: stage-tu32
+stage-tu32:
+	bash scripts/stage-tu32.sh
+
+.PHONY: commit-tu32
+commit-tu32:
+	bash scripts/commit-tu32.sh
+
+.PHONY: push-tu32
+push-tu32:
+	bash scripts/push-tu32.sh
 
 
 .PHONY: inspect-tu31

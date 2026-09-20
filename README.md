@@ -68,6 +68,7 @@ security guidance before exposing it on a network.
 - Opt-in per-space WAL sync policy registry with periodic, immediate, and disabled modes: [TU34_SPACE_WAL_SYNC_POLICY.md](TU34_SPACE_WAL_SYNC_POLICY.md), with measured lookup overhead in [BENCHMARK.md](BENCHMARK.md#t-u34-per-space-wal-sync-policy-registry)
 - Opt-in stackless cooperative fibers with bounded round-robin scheduling, cancellation, and generation-safe reaping: [TU30_COOPERATIVE_FIBER_SCHEDULER.md](TU30_COOPERATIVE_FIBER_SCHEDULER.md), with measured goroutine lifecycle savings in [BENCHMARK.md](BENCHMARK.md#t-u30-cooperative-fiber-scheduler)
 - Opt-in typed fiber channels, conditions, semaphores, and wait groups with bounded wait queues and zero-capacity rendezvous: [TU31_FIBER_CHANNELS_AND_CONDITIONS.md](TU31_FIBER_CHANNELS_AND_CONDITIONS.md), with measured handoff savings in [BENCHMARK.md](BENCHMARK.md#t-u31-fiber-channels-and-conditions)
+- Opt-in typed fiber-local storage with generation-safe isolation and terminal cleanup: [TU32_FIBER_LOCAL_STORAGE.md](TU32_FIBER_LOCAL_STORAGE.md), with hot-access and setup tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u32-fiber-local-storage)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - Shared compiled JSON subcolumn paths for repeated lookups: [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md)
