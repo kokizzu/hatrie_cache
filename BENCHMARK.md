@@ -32580,3 +32580,20 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+<a id="t-u38-conflict-introspection"></a>
+## T-U38 Conflict Introspection
+
+The baseline is the existing direct `ResolveConflictVersion` path. The feature
+benchmark calls the explicit `ResolveConflictWithIntrospection` wrapper and
+records a bounded redacted event for every distinct conflict. Both runs use
+`go test ./hat/hatReplication -run '^$' -bench '^Benchmark(ResolveConflictVersion|TU38ConflictResolutionWithIntrospection)$' -benchmem -count=5`.
+
+| Path | Sample 1 | Sample 2 | Sample 3 | Sample 4 | Sample 5 | Median | Relative CPU | Bytes/op | Allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Existing direct resolution | 6.455 ns | 6.644 ns | 6.145 ns | 6.367 ns | 6.135 ns | 6.367 ns | 1.00x | 0 | 0 |
+| T-U38 explicit introspection | 315.2 ns | 295.5 ns | 300.4 ns | 301.4 ns | 304.2 ns | 301.4 ns | 47.3x | 96 | 3 |
+
+This is a diagnostic-path cost, not a default-path regression. The wrapper
+must be selected explicitly, and the direct resolver remains allocation-free.
+The retained ring is bounded by configured capacity; snapshots add only when
+the caller requests persistence. See [TR038_CONFLICT_INTROSPECTION.md](TR038_CONFLICT_INTROSPECTION.md).

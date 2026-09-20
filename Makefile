@@ -22048,3 +22048,34 @@ measure-mu47-payload:
 
 verify-mu47:
 	@bash scripts/verify-mu47.sh
+benchmark-tu38-baseline:
+	bash scripts/benchmark-tu38-baseline.sh
+test-tu38-red:
+	bash scripts/test-tu38-red.sh
+format-tu38:
+	bash scripts/format-tu38.sh
+benchmark-tu38:
+	bash scripts/benchmark-tu38.sh
+test-tu38:
+	bash scripts/test-tu38.sh
+
+race-tu38:
+	bash scripts/race-tu38.sh
+
+vet-tu38:
+	bash scripts/vet-tu38.sh
+
+test-tu38-full:
+	bash scripts/test-tu38-full.sh
+status-tu38-full:
+	bash scripts/status-tu38-full.sh
+inspect-adopted-structure:
+	bash scripts/inspect-adopted-structure.sh
+review-tu38:
+	bash scripts/review-tu38.sh
+stage-tu38:
+	bash scripts/stage-tu38.sh
+commit-tu38:
+	bash scripts/commit-tu38.sh
+push-tu38:
+	bash scripts/push-tu38.sh

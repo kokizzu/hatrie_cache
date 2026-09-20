@@ -286,6 +286,8 @@ keys remain authoritative, so schema/settings changes miss normally. The
 feature is opt-in and has no background filesystem writer. See
 [CHU09_PERSISTED_SQL_RESULT_CACHE.md](CHU09_PERSISTED_SQL_RESULT_CACHE.md).
 
+| Tarantool | Conflict introspection stream | Adopted as an opt-in bounded redacted replication diagnostic | `hatReplication.ConflictIntrospectionLog` records HMAC-keyed digests, versions, decisions, replay cursors, history gaps, and CRC32C-checked CIS1 snapshots without retaining application keys or values. See [TR038_CONFLICT_INTROSPECTION.md](TR038_CONFLICT_INTROSPECTION.md) and [BENCHMARK.md#t-u38-conflict-introspection](BENCHMARK.md#t-u38-conflict-introspection). |
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge
