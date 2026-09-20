@@ -34406,3 +34406,20 @@ BenchmarkTU33FunctionGrantAuthorize-32          5828281 203.5 ns/op   0 B/op  0 
 ```
 
 Reproduce with `make benchmark-tu33-function-grants`.
+## T-U14 VShard Bucket Migration
+
+Command: `make benchmark-tu14-vshard` (`-benchmem -count=5`, AMD Ryzen 9
+5950X).
+
+| Operation | Median ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Before: manual bucket diff | ~2,284 | 2,368 | 32 | 1.00x |
+| After: `PlanBucketMigrations` | ~4,622 | 3,173 | 90 | 2.02x CPU, 1.34x bytes, 2.81x allocations |
+| After: full migration lifecycle | ~2,953 | 2,016 | 51 | control-plane operation |
+
+The planner builds immutable ownership and fencing contracts, so the baseline
+is intentionally a bare caller-side diff rather than an equivalent plan
+builder. This is additive control-plane work and does not affect routing or
+data-path operations. The initial implementation was ~9.2 microseconds,
+6.0 KB, and 174 allocations; reusing normalized fingerprints reduced that
+cost to the values above.

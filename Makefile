@@ -23255,3 +23255,42 @@ push-hatrie-tmp-cleanup:
 .PHONY: review-hatrie-tmp-cleanup
 review-hatrie-tmp-cleanup:
 	bash scripts/review-hatrie-tmp-cleanup.sh
+.PHONY: inspect-inspiration-status
+inspect-inspiration-status:
+	bash scripts/inspect-inspiration-status.sh
+.PHONY: inspect-tu14-vshard
+inspect-tu14-vshard:
+	bash scripts/inspect-tu14-vshard.sh
+.PHONY: test-tu14-vshard
+test-tu14-vshard:
+	bash scripts/test-tu14-vshard.sh
+
+benchmark-tu14-vshard:
+	bash scripts/benchmark-tu14-vshard.sh
+
+inspect-tu14-implementation:
+	bash scripts/inspect-tu14-implementation.sh
+
+format-tu14-vshard:
+	bash scripts/format-tu14-vshard.sh
+
+test-tu14-vshard-package:
+	bash scripts/test-tu14-vshard-package.sh
+
+race-tu14-vshard:
+	bash scripts/race-tu14-vshard.sh
+
+vet-tu14-vshard:
+	bash scripts/vet-tu14-vshard.sh
+
+stage-tu14-vshard:
+	bash scripts/stage-tu14-vshard.sh
+
+review-tu14-vshard:
+	bash scripts/review-tu14-vshard.sh
+
+commit-tu14-vshard:
+	bash scripts/commit-tu14-vshard.sh
+
+push-tu14-vshard:
+	bash scripts/push-tu14-vshard.sh
