@@ -33581,3 +33581,40 @@ Raw samples:
 BenchmarkTU26LegacyStrategySelection-32  8.209 7.765 8.703 8.551 8.462 ns/op 0 B/op 0 allocs/op
 BenchmarkTU26ExplainSQLIndexStrategy-32 518.3 509.3 525.3 515.2 571.5 ns/op 600 B/op 4 allocs/op
 ```
+
+## M065v Mutable Incremental Offset Windows
+
+This benchmark compares one 10,000-row partition after one `value` update.
+The control fully materializes the ordered `LAG` output. The mutable path
+retains the partition and applies the same-position update through its
+incremental fast path. Both use five `-benchmem` samples on Linux/amd64,
+AMD Ryzen 9 5950X. Setup and initial population are outside the timed region.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs control |
+| --- | ---: | ---: | ---: | ---: |
+| Full recomputation control | 15.95 ms/op | 4,213,692 B/op | 21,234 allocs/op | 1.00x |
+| Mutable same-position update | 0.244 ms/op | 724,163 B/op | 39 allocs/op | 65.4x CPU, 5.82x lower bytes, 544x fewer allocs |
+
+The mutable path intentionally retains base rows, partition order, and current
+outputs, so its steady-state retained memory is higher than the append-only
+control and depends on row width and partition count. That retained state is
+not charged to the per-operation `B/op` column. It is opt-in; the existing
+append-only constructor remains the default.
+
+Raw samples:
+
+```text
+BenchmarkM065vMutableOffsetWindowBaseline-32 15538325 ns/op 4216640 B/op 21266 allocs/op
+BenchmarkM065vMutableOffsetWindowBaseline-32 15953737 ns/op 4213692 B/op 21234 allocs/op
+BenchmarkM065vMutableOffsetWindowBaseline-32 16575614 ns/op 4217978 B/op 21282 allocs/op
+BenchmarkM065vMutableOffsetWindowBaseline-32 16453479 ns/op 4210891 B/op 21204 allocs/op
+BenchmarkM065vMutableOffsetWindowBaseline-32 15466890 ns/op 4213614 B/op 21234 allocs/op
+BenchmarkM065vMutableOffsetWindow-32 247885 ns/op 724163 B/op 39 allocs/op
+BenchmarkM065vMutableOffsetWindow-32 243997 ns/op 724162 B/op 39 allocs/op
+BenchmarkM065vMutableOffsetWindow-32 241969 ns/op 724164 B/op 39 allocs/op
+BenchmarkM065vMutableOffsetWindow-32 249549 ns/op 724163 B/op 39 allocs/op
+BenchmarkM065vMutableOffsetWindow-32 241954 ns/op 724165 B/op 39 allocs/op
+```
+
+Reproduce with `make benchmark-m065v-mutable-offset-window`; run correctness
+and race/vet checks with `make verify-m065v-mutable-offset-window`.

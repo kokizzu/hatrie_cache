@@ -8016,6 +8016,36 @@ commit-m065c-incremental-offset-window:
 .PHONY: push-m065c-incremental-offset-window
 push-m065c-incremental-offset-window:
 	bash ./scripts/push-m065c-incremental-offset-window.sh
+.PHONY: benchmark-m065v-mutable-offset-window
+benchmark-m065v-mutable-offset-window:
+	bash ./scripts/benchmark-m065v-mutable-offset-window.sh
+.PHONY: test-m065v-mutable-offset-window
+test-m065v-mutable-offset-window:
+	bash ./scripts/test-m065v-mutable-offset-window.sh
+
+.PHONY: format-m065v-mutable-offset-window
+format-m065v-mutable-offset-window:
+	bash ./scripts/format-m065v-mutable-offset-window.sh
+
+.PHONY: verify-m065v-mutable-offset-window
+verify-m065v-mutable-offset-window:
+	bash ./scripts/verify-m065v-mutable-offset-window.sh
+
+.PHONY: review-m065v-mutable-offset-window
+review-m065v-mutable-offset-window:
+	bash ./scripts/review-m065v-mutable-offset-window.sh
+
+.PHONY: stage-m065v-mutable-offset-window
+stage-m065v-mutable-offset-window:
+	bash ./scripts/stage-m065v-mutable-offset-window.sh
+
+.PHONY: commit-m065v-mutable-offset-window
+commit-m065v-mutable-offset-window:
+	bash ./scripts/commit-m065v-mutable-offset-window.sh
+
+.PHONY: push-m065v-mutable-offset-window
+push-m065v-mutable-offset-window:
+	bash ./scripts/push-m065v-mutable-offset-window.sh
 .PHONY: test-m065d-incremental-frame-window
 test-m065d-incremental-frame-window:
 	bash ./scripts/test-m065d-incremental-frame-window.sh
