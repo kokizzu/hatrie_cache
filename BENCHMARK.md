@@ -34449,3 +34449,16 @@ The first comparison is intentionally explicit: the baseline rescans 64
 values, while the frontier updates one source and retains the cached minimum.
 Snapshots copy and sort source progress for deterministic inspection and are
 not intended for every row update.
+## T-U54 Sparse Primary Index
+
+Five-sample median on AMD Ryzen 9 5950X, Linux amd64, 1,048,576 sorted
+`uint64` keys and stride 64:
+
+| Operation | Full-key baseline | `SparsePrimaryIndex` | Difference |
+| --- | ---: | ---: | ---: |
+| Build/copy | 818,516 ns/op, 8,388,620 B/op | 1,687,023 ns/op, 262,144 B/op | 2.06x slower, 32.0x less memory |
+| Lookup stage | 90.67 ns/op exact row | 77.40 ns/op block locate | 1.17x faster stage |
+
+The sparse lookup returns a block, not an exact row; the caller scans and
+verifies that block. The memory reduction is the primary benefit, while the
+build cost reflects ordering validation and anchor creation.

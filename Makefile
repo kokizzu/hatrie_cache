@@ -23310,6 +23310,36 @@ test-tu04-runtime:
 test-tu53-frontier:
 	bash scripts/test-tu53-frontier.sh
 
+test-tu54-sparse-index:
+	bash scripts/test-tu54-sparse-index.sh
+
+format-tu54-sparse-index:
+	bash scripts/format-tu54-sparse-index.sh
+
+test-tu54-sparse-index-package:
+	bash scripts/test-tu54-sparse-index-package.sh
+
+race-tu54-sparse-index:
+	bash scripts/race-tu54-sparse-index.sh
+
+vet-tu54-sparse-index:
+	bash scripts/vet-tu54-sparse-index.sh
+
+benchmark-tu54-sparse-index:
+	bash scripts/benchmark-tu54-sparse-index.sh
+
+stage-tu54-sparse-index:
+	bash scripts/stage-tu54-sparse-index.sh
+
+review-tu54-sparse-index:
+	bash scripts/review-tu54-sparse-index.sh
+
+commit-tu54-sparse-index:
+	bash scripts/commit-tu54-sparse-index.sh
+
+push-tu54-sparse-index:
+	bash scripts/push-tu54-sparse-index.sh
+
 format-tu53-frontier:
 	bash scripts/format-tu53-frontier.sh
 
