@@ -54,7 +54,7 @@ while IFS= read -r -d '' path; do
   is_under_protected "$path" && continue
   found=1
   printf 'review\t%s\n' "$path"
-done < <(find "$tmp_root" -mindepth 2 -maxdepth 3 -iname '*hatrie*' -print0 | sort -z)
+done < <(find "$tmp_root" -mindepth 2 -maxdepth 3 -iname '*hatrie*' -print0 2>/dev/null | sort -z)
 
 if [[ "$found" -eq 0 ]]; then
   printf '(none)\n'
