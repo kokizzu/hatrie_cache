@@ -239,6 +239,46 @@ func TestMutableIncrementalRankWindowRebuildFailureDoesNotPublish(t *testing.T) 
 	}
 }
 
+func TestMutableIncrementalRankWindowSamePositionUpdateAvoidsFullRebuild(t *testing.T) {
+	orderCalls := 0
+	window, err := NewMutableIncrementalRankWindow(IncrementalRankWindowDefinition{
+		Kind:         IncrementalWindowRowNumber,
+		OutputColumn: "row_number",
+		OrderKey: func(row Row) (interface{}, error) {
+			orderCalls++
+			return row["score"], nil
+		},
+		RowKey: func(row Row) (string, error) { return row["id"].(string), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []Row{
+		{"id": "a", "score": int64(1), "payload": "old-a"},
+		{"id": "b", "score": int64(2), "payload": "old-b"},
+		{"id": "c", "score": int64(3), "payload": "old-c"},
+		{"id": "d", "score": int64(4), "payload": "old-d"},
+	}
+	if _, err := window.Append(rows); err != nil {
+		t.Fatal(err)
+	}
+	orderCalls = 0
+	updates, err := window.Apply([]IncrementalRankWindowMutation{{
+		Kind: IncrementalRankWindowUpdate,
+		Key:  "b",
+		Row:  Row{"id": "b", "score": int64(2), "payload": "new-b"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 2 || updates[0].Diff != -1 || updates[1].Diff != 1 {
+		t.Fatalf("updates = %#v, want one retraction and one insertion", updates)
+	}
+	if orderCalls >= len(rows) {
+		t.Fatalf("order callback calls = %d, want fewer than full partition size %d", orderCalls, len(rows))
+	}
+}
+
 func TestIncrementalRankWindowApplyRequiresOptIn(t *testing.T) {
 	window, err := NewIncrementalRankWindow(m065MutableRankWindowDefinition(IncrementalWindowRank))
 	if err != nil {

@@ -33729,3 +33729,45 @@ mutable:
 
 Reproduce with `make benchmark-m065y-mutable-range-nth-value`; run correctness
 and race/vet checks with `make verify-m065y-mutable-range-nth-value`.
+
+## M065z Mutable Rank Arrangement Fast Path
+
+Command: `make benchmark-m065-rank-window`.
+
+This compares a single mutable update that changes only a payload field while
+keeping the row in the same partition and order position. The baseline is the
+same benchmark source at the parent commit, where every update rebuilt and
+sorted the affected partition. Five samples were run on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Full affected-partition rebuild | 387,300 ns/op | 280,024 B/op | 1,154 allocs/op | 1.00x |
+| Same-position arrangement fast path | 2,230 ns/op | 1,613 B/op | 18 allocs/op | 173.7x CPU, 173.6x lower bytes, 64.1x fewer allocs |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+387431 280024 1154
+378491 280024 1154
+379500 280025 1155
+387390 280024 1154
+387300 280022 1154
+```
+
+Raw optimized samples:
+
+```text
+2210 1613 18
+2191 1613 18
+2230 1613 18
+2235 1613 18
+2262 1613 18
+```
+
+The position-changing mutable-update control stayed effectively neutral:
+baseline median `404,691 ns/op`, `314,480 B/op`, `1,066 allocs/op`; optimized
+median `402,074 ns/op`, `314,474 B/op`, `1,066 allocs/op`. Reproduce the
+focused correctness, race, and vet checks with
+`make test-m065-rank-window-mutations`,
+`make test-race-m065-rank-window-mutations`, and
+`make vet-m065-rank-window-mutations`.

@@ -7992,6 +7992,22 @@ commit-m065-rank-window-mutations:
 .PHONY: push-m065-rank-window-mutations
 push-m065-rank-window-mutations:
 	bash ./scripts/push-m065-rank-window-mutations.sh
+
+.PHONY: review-m065z-rank-fastpath
+review-m065z-rank-fastpath:
+	bash ./scripts/review-m065z-rank-fastpath.sh
+
+.PHONY: stage-m065z-rank-fastpath
+stage-m065z-rank-fastpath:
+	bash ./scripts/stage-m065z-rank-fastpath.sh
+
+.PHONY: commit-m065z-rank-fastpath
+commit-m065z-rank-fastpath:
+	bash ./scripts/commit-m065z-rank-fastpath.sh
+
+.PHONY: push-m065z-rank-fastpath
+push-m065z-rank-fastpath:
+	bash ./scripts/push-m065z-rank-fastpath.sh
 .PHONY: test-m065c-incremental-offset-window
 test-m065c-incremental-offset-window:
 	bash ./scripts/test-m065c-incremental-offset-window.sh

@@ -990,3 +990,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   peer-aware frame scan. The append-only default remains unchanged; see
   [INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065y-mutable-range-nth_value-windows).
+- [x] M065z Materialize-style same-position mutable rank updates reuse the
+  existing rank output and retained row maps when partition and order keys do
+  not change, avoiding a full affected-partition rebuild while preserving the
+  rebuild fallback for positional mutations. See
+  [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#same-position-mutable-update-fast-path)
+  and [BENCHMARK.md](BENCHMARK.md#m065z-mutable-rank-arrangement-fast-path).

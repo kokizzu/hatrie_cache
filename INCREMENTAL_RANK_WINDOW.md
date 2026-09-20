@@ -89,6 +89,23 @@ This provides a Materialize-style update/retraction boundary without changing
 the existing default SQL result semantics. A storage-owned ordered index could
 reduce the remaining sort work for very large affected partitions.
 
+## Same-Position Mutable Update Fast Path
+
+The mutable rank maintainer follows the Materialize arrangement principle for
+the common case where an update changes payload columns but not its logical
+position. It checks the old and new partition/order keys, reuses the stored
+rank output, and avoids cloning or sorting the rest of the partition. This is
+opt-in behavior behind `NewMutableIncrementalRankWindow`; append-only windows
+and positional updates retain their existing behavior.
+
+On a 1,024-row, 16-partition workload, the five-sample median changed from
+`387,300 ns/op`, `280,024 B/op`, and `1,154 allocs/op` to `2,230 ns/op`,
+`1,613 B/op`, and `18 allocs/op`: `173.7x` lower CPU time, `173.6x` lower
+transient bytes, and `64.1x` fewer allocations. The position-changing update
+control remained effectively neutral (`404,691` to `402,074 ns/op`, with
+`314,480` to `314,474 B/op` and `1,066` allocations), so the optimization does
+not trade away the general rebuild path.
+
 ## Benchmark
 
 The existing append benchmark is retained for M065a. Workload: 1,024 rows

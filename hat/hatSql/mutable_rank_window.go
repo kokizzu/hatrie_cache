@@ -130,6 +130,15 @@ func (window *IncrementalRankWindow) Apply(mutations []IncrementalRankWindowMuta
 			return nil, err
 		}
 	}
+	if len(normalized) == 1 && normalized[0].Kind == IncrementalRankWindowUpdate {
+		updates, handled, err := window.applyMutableRankWindowSamePosition(normalized[0])
+		if err != nil {
+			return nil, err
+		}
+		if handled {
+			return updates, nil
+		}
+	}
 
 	candidate := make(map[string]Row, len(window.mutableRows)+len(normalized))
 	for key, row := range window.mutableRows {
@@ -160,6 +169,49 @@ func (window *IncrementalRankWindow) Apply(mutations []IncrementalRankWindowMuta
 		}
 	}
 	return window.applyMutableRankWindowRebuild(candidate, candidatePartitions, affectedPartitions)
+}
+
+func (window *IncrementalRankWindow) applyMutableRankWindowSamePosition(mutation IncrementalRankWindowMutation) ([]DifferentialRow, bool, error) {
+	oldRow, exists := window.mutableRows[mutation.Key]
+	if !exists {
+		return nil, false, nil
+	}
+	oldOutput, exists := window.mutableOutputs[mutation.Key]
+	if !exists {
+		return nil, false, nil
+	}
+	oldPartition := window.mutablePartitions[mutation.Key]
+	newPartition, err := window.mutablePartitionForRow(0, mutation.Row)
+	if err != nil {
+		return nil, false, err
+	}
+	if oldPartition != newPartition {
+		return nil, false, nil
+	}
+	oldOrder, err := window.orderKey(oldRow)
+	if err != nil {
+		return nil, false, fmt.Errorf("incremental rank window mutation key %q old order key: %w", mutation.Key, err)
+	}
+	newOrder, err := window.orderKey(mutation.Row)
+	if err != nil {
+		return nil, false, fmt.Errorf("incremental rank window mutation key %q order key: %w", mutation.Key, err)
+	}
+	if sqlCompare(oldOrder, newOrder) != 0 {
+		return nil, false, nil
+	}
+
+	newRow := cloneIncrementalRankWindowRow(mutation.Row)
+	newOutput := cloneIncrementalRankWindowRow(newRow)
+	newOutput[window.outputColumn] = oldOutput[window.outputColumn]
+	window.mutableRows[mutation.Key] = newRow
+	window.mutableOutputs[mutation.Key] = newOutput
+	if reflect.DeepEqual(oldOutput, newOutput) {
+		return nil, true, nil
+	}
+	return []DifferentialRow{
+		{Key: mutation.Key, Diff: -1, Row: cloneIncrementalRankWindowRow(oldOutput)},
+		{Key: mutation.Key, Diff: 1, Row: cloneIncrementalRankWindowRow(newOutput)},
+	}, true, nil
 }
 
 func (window *IncrementalRankWindow) validateMutableMutationRow(index int, key string, row Row) error {

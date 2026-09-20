@@ -825,3 +825,16 @@ peer-aware same-position frame scan for a fixed position. The existing
 append-only constructor and default behavior remain unchanged. See
 [INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065y-mutable-range-nth_value-windows).
+
+## M065z: Mutable Rank Arrangement Fast Path
+
+Adopted a narrow Materialize-style arrangement optimization for
+`NewMutableIncrementalRankWindow`. A single update that retains its partition
+and order key now reuses the existing rank output and updates only the changed
+row's retained maps. Position-changing, partition-changing, and multi-row
+mutations continue through the existing affected-partition rebuild, while the
+append-only constructor remains unchanged. The targeted benchmark is
+`173.7x` faster, `173.6x` lower in transient bytes, and `64.1x` lower in
+allocations; the general position-changing benchmark remains neutral. See
+[INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#same-position-mutable-update-fast-path)
+and [BENCHMARK.md](BENCHMARK.md#m065z-mutable-rank-arrangement-fast-path).
