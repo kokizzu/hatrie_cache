@@ -34436,3 +34436,16 @@ Five-sample median on AMD Ryzen 9 5950X, Linux amd64:
 The bounded runtime is an opt-in safety boundary, not a faster execution
 engine. It is appropriate for untrusted row-local expressions; trusted hot
 paths should keep direct or specialized compiled execution.
+## T-U53 Logical-Time Frontier
+
+Five-sample median on AMD Ryzen 9 5950X, Linux amd64:
+
+| Operation | Baseline | `LogicalFrontier` | Memory |
+| --- | ---: | ---: | ---: |
+| Minimum over 64 values / non-minimum source advance | 33.45 ns/op, 0 allocs | 26.33 ns/op, 0 allocs | 0 B/op both |
+| 64-source deterministic snapshot | not applicable | 6,994 ns/op, 4 allocs | 1,888 B/op |
+
+The first comparison is intentionally explicit: the baseline rescans 64
+values, while the frontier updates one source and retains the cached minimum.
+Snapshots copy and sort source progress for deterministic inspection and are
+not intended for every row update.

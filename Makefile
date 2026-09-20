@@ -23307,6 +23307,36 @@ push-tu14-vshard:
 test-tu04-runtime:
 	bash scripts/test-tu04-runtime.sh
 
+test-tu53-frontier:
+	bash scripts/test-tu53-frontier.sh
+
+format-tu53-frontier:
+	bash scripts/format-tu53-frontier.sh
+
+test-tu53-frontier-package:
+	bash scripts/test-tu53-frontier-package.sh
+
+race-tu53-frontier:
+	bash scripts/race-tu53-frontier.sh
+
+vet-tu53-frontier:
+	bash scripts/vet-tu53-frontier.sh
+
+benchmark-tu53-frontier:
+	bash scripts/benchmark-tu53-frontier.sh
+
+stage-tu53-frontier:
+	bash scripts/stage-tu53-frontier.sh
+
+review-tu53-frontier:
+	bash scripts/review-tu53-frontier.sh
+
+commit-tu53-frontier:
+	bash scripts/commit-tu53-frontier.sh
+
+push-tu53-frontier:
+	bash scripts/push-tu53-frontier.sh
+
 format-tu04-runtime:
 	bash scripts/format-tu04-runtime.sh
 
