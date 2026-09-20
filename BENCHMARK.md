@@ -1,5 +1,23 @@
 # Benchmark
 
+## C246 TTL-Driven Recompression
+
+Five 200 ms samples on an AMD Ryzen 9 5950X, Linux amd64. The rewrite tests
+use a 32 KiB repetitive tuple and compare the policy helper with a manual
+decode/re-encode control.
+
+| Operation | Median time | Heap | Allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Policy decision | 15.77 ns/op | 0 B/op | 0 allocs/op | Allocation-free |
+| Keep fast path | 21.83 ns/op | 0 B/op | 0 allocs/op | No decode before rewrite horizon |
+| Recompression helper | 18,961 ns/op | 32,907 B/op | 2 allocs/op | Codec-dominated |
+| Manual rewrite control | 19,984 ns/op | 32,904 B/op | 2 allocs/op | Baseline; helper is within noise |
+
+The policy is opt-in and does not alter existing storage compaction or TTL
+deletion. Reproduce with `make benchmark-c246-ttl-recompression`. See
+[C246_TTL_RECOMPRESSION.md](C246_TTL_RECOMPRESSION.md) for raw samples and
+tradeoffs.
+
 ## C247 Adaptive Uint64 Delta Codec
 
 Five 200 ms samples on an AMD Ryzen 9 5950X, Linux amd64, with one million

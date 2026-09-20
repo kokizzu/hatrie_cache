@@ -23326,6 +23326,36 @@ commit-c248-json-subcolumns:
 push-c248-json-subcolumns:
 	bash scripts/push-c248-json-subcolumns.sh
 
+inspect-c246-scope:
+	bash scripts/inspect-c246-scope.sh
+
+test-c246-ttl-recompression:
+	bash scripts/test-c246-ttl-recompression.sh
+
+format-c246-ttl-recompression:
+	bash scripts/format-c246-ttl-recompression.sh
+
+race-c246-ttl-recompression:
+	bash scripts/race-c246-ttl-recompression.sh
+
+vet-c246-ttl-recompression:
+	bash scripts/vet-c246-ttl-recompression.sh
+
+benchmark-c246-ttl-recompression:
+	bash scripts/benchmark-c246-ttl-recompression.sh
+
+review-c246-ttl-recompression:
+	bash scripts/review-c246-ttl-recompression.sh
+
+stage-c246-ttl-recompression:
+	bash scripts/stage-c246-ttl-recompression.sh
+
+commit-c246-ttl-recompression:
+	bash scripts/commit-c246-ttl-recompression.sh
+
+push-c246-ttl-recompression:
+	bash scripts/push-c246-ttl-recompression.sh
+
 test-c249-offset-inspection-package:
 	bash scripts/test-c249-offset-inspection-package.sh
 
