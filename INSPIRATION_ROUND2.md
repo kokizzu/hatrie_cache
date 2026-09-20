@@ -81,7 +81,7 @@ operator control remain the preferred deployment model.
 - [ ] C245 Vertical TTL deletion that reads only the deletion mask and key columns.
 - [ ] C246 TTL-driven recompression policies separate from row deletion.
 - [x] C247 Adaptive `uint64` delta and Gorilla `float64` compression with raw fallback are implemented as opt-in `hatDataStructure` codecs; ALP-style floating-point compression remains open. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
-- [ ] C248 Variant/JSON subcolumn projection that reads only referenced paths.
+- [x] C248 Variant/JSON subcolumn projection that reads only referenced paths is adopted through the existing typed scalar and opt-in dynamic JSON subcolumns. See [C248_VARIANT_JSON_SUBCOLUMNS.md](C248_VARIANT_JSON_SUBCOLUMNS.md) and [BENCHMARK.md](BENCHMARK.md#c248-variantjson-subcolumn-projection).
 - [x] C249 Kafka-style offset inspection without committing consumer position is implemented as a bounded read-only `hatReplication.SpaceChangefeed.Inspect` API. See [C249_OFFSET_INSPECTION.md](C249_OFFSET_INSPECTION.md) and [BENCHMARK.md](BENCHMARK.md#c249-kafka-style-offset-inspection).
 - [x] C250 Retry-safe insert identities shared across asynchronous ingestion stages are already implemented as the opt-in bounded `hatPipeline.AsyncInsertDeduplicator`, with optional durable CRC-protected storage. See [C250_ASYNC_INSERT_IDENTITIES.md](C250_ASYNC_INSERT_IDENTITIES.md) and [BENCHMARK.md](BENCHMARK.md#c250-retry-safe-async-insert-identities).
 

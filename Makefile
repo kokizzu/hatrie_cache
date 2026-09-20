@@ -23311,6 +23311,21 @@ commit-c250-async-dedup:
 push-c250-async-dedup:
 	bash scripts/push-c250-async-dedup.sh
 
+inspect-c248-scope:
+	bash scripts/inspect-c248-scope.sh
+
+review-c248-json-subcolumns:
+	bash scripts/review-c248-json-subcolumns.sh
+
+stage-c248-json-subcolumns:
+	bash scripts/stage-c248-json-subcolumns.sh
+
+commit-c248-json-subcolumns:
+	bash scripts/commit-c248-json-subcolumns.sh
+
+push-c248-json-subcolumns:
+	bash scripts/push-c248-json-subcolumns.sh
+
 test-c249-offset-inspection-package:
 	bash scripts/test-c249-offset-inspection-package.sh
 

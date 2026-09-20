@@ -55,6 +55,27 @@ Raw samples:
 BenchmarkC249ExistingSubscriptionInspection-32 15406 15169 14305 14087 14084 ns/op 5160 B/op 53 allocs/op
 BenchmarkC249ReadOnlyOffsetInspection-32        9573  9556  9494  9479  9264 ns/op 3840 B/op 49 allocs/op
 
+## C248 Variant/JSON Subcolumn Projection
+
+C248 is covered by the existing CH031 typed-subcolumn and CH044 dynamic
+promotion measurements. The representative 4,096-document query compares
+the normal row-source JSON path with a typed column containing only the
+requested scalar path.
+
+| Path | Median time | Heap/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing row-source JSON path | 9.30 ms | 7.28 MB | 90,138 | Baseline |
+| Typed subcolumn query | 2.37 ms | 1.71 MB | 30,508 | 3.92x faster, 4.27x lower heap, 2.95x fewer allocations |
+| One-time materialization | 2.87 ms | 2.59 MB | 40,955 | Amortized setup cost |
+
+The automatic promotion path is disabled by default and preserves fallback
+semantics for cold, stale, complex, or incompatible paths. Its existing
+cached measurements are 28,925x faster for `Observe` with 0 B/op and 0
+allocs/op, and 6,589x faster for cached batch resolution with 752 B/op and
+4 allocs/op. See [C248_VARIANT_JSON_SUBCOLUMNS.md](C248_VARIANT_JSON_SUBCOLUMNS.md),
+[CH031_TYPED_JSON_SUBCOLUMNS.md](CH031_TYPED_JSON_SUBCOLUMNS.md), and
+[CH044_JSON_DYNAMIC_SUBCOLUMNS.md](CH044_JSON_DYNAMIC_SUBCOLUMNS.md).
+
 ## C250 Retry-Safe Async Insert Identities
 
 This benchmark measures the existing opt-in async-insert identity ledger. Five
