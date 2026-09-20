@@ -37,6 +37,29 @@ Gorilla is kept opt-in because the 51.2x payload reduction is paired with
 higher CPU cost; the adaptive path avoids storage expansion for high-entropy
 input. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
 
+## C249 Kafka-Style Offset Inspection
+
+This benchmark compares the existing subscription replay path with the new
+read-only bounded offset inspection path. Both paths read 24 small upsert
+events after sequence 1,000 from a feed retaining 1,024 events. Five 200 ms
+samples were collected on an AMD Ryzen 9 5950X, Linux amd64.
+
+| Operation | Median time | Heap | Allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing subscription replay | 14,305 ns/op | 5,160 B/op | 53 allocs/op | Baseline |
+| Read-only offset inspection | 9,494 ns/op | 3,840 B/op | 49 allocs/op | 1.51x faster, 1.34x lower heap, 1.08x fewer allocations |
+
+Raw samples:
+
+```text
+BenchmarkC249ExistingSubscriptionInspection-32 15406 15169 14305 14087 14084 ns/op 5160 B/op 53 allocs/op
+BenchmarkC249ReadOnlyOffsetInspection-32        9573  9556  9494  9479  9264 ns/op 3840 B/op 49 allocs/op
+```
+
+Reproduce with `make benchmark-c249-offset-inspection` and run correctness,
+race, and vet checks with `make test-c249-offset-inspection-package`,
+`make race-c249-offset-inspection`, and `make vet-c249-offset-inspection`.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

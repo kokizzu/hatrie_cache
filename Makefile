@@ -23284,6 +23284,39 @@ push-c247-delta-codec:
 test-c247-gorilla-codec:
 	bash scripts/test-c247-gorilla-codec.sh
 
+format-c249-offset-inspection:
+	bash scripts/format-c249-offset-inspection.sh
+
+benchmark-c249-offset-inspection:
+	bash scripts/benchmark-c249-offset-inspection.sh
+
+test-c249-offset-inspection:
+	bash scripts/test-c249-offset-inspection.sh
+
+inspect-c249-scope:
+	bash scripts/inspect-c249-scope.sh
+
+test-c249-offset-inspection-package:
+	bash scripts/test-c249-offset-inspection-package.sh
+
+race-c249-offset-inspection:
+	bash scripts/race-c249-offset-inspection.sh
+
+vet-c249-offset-inspection:
+	bash scripts/vet-c249-offset-inspection.sh
+
+review-c249-offset-inspection:
+	bash scripts/review-c249-offset-inspection.sh
+
+stage-c249-offset-inspection:
+	bash scripts/stage-c249-offset-inspection.sh
+
+commit-c249-offset-inspection:
+	bash scripts/commit-c249-offset-inspection.sh
+
+push-c249-offset-inspection:
+	bash scripts/push-c249-offset-inspection.sh
+
 benchmark-c247-gorilla-codec:
 	bash scripts/benchmark-c247-gorilla-codec.sh
 

@@ -82,7 +82,7 @@ operator control remain the preferred deployment model.
 - [ ] C246 TTL-driven recompression policies separate from row deletion.
 - [x] C247 Adaptive `uint64` delta and Gorilla `float64` compression with raw fallback are implemented as opt-in `hatDataStructure` codecs; ALP-style floating-point compression remains open. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
 - [ ] C248 Variant/JSON subcolumn projection that reads only referenced paths.
-- [ ] C249 Kafka-style offset inspection without committing consumer position.
+- [x] C249 Kafka-style offset inspection without committing consumer position is implemented as a bounded read-only `hatReplication.SpaceChangefeed.Inspect` API. See [C249_OFFSET_INSPECTION.md](C249_OFFSET_INSPECTION.md) and [BENCHMARK.md](BENCHMARK.md#c249-kafka-style-offset-inspection).
 - [ ] C250 Retry-safe insert identities shared across asynchronous ingestion stages.
 
 ## Materialize: 50 Additional Ideas
