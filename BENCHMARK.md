@@ -1803,6 +1803,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Streamed non-indexed ORDER BY LIMIT materialization](#sql-non-indexed-order-by-limit-materialization), 20k JSON rows, `ORDER BY score DESC LIMIT 50` | Full materialized sort: 67.34 ms; 27,868,570 B; 320,052 allocs | Bounded top-N stream: 37.59 ms; 23,579,755 B; 360,084 allocs | 1.79x faster; 1.18x lower allocation volume | 12.5% more allocation events from streaming JSON decode; index, metrics, and unsupported query paths retain existing behavior |
 | Current pass | [Columnar LIMIT pushdown](#columnar-limit-pushdown), warmed 20k-row scan, `LIMIT 50` | Full predicate loop: 59.19 us; 17,832 B; 108 allocs | Stop after page: 10.19 us; 17,832 B; 108 allocs | 5.81x faster; same allocation volume and count | Applies only to metrics-disabled, supported columnar shapes; instrumented plans retain complete match counters |
 | Current pass | [Columnar top-N](#columnar-top-n), warmed 20k rows, `ORDER BY team ASC LIMIT 50` | Full materialization: 62.68 ms; 18,109,428 B; 100,032 allocs | Columnar top-N: 1.79 ms; 346,024 B; 20,167 allocs | 35.1x faster; 52.3x lower allocation volume; 4.96x fewer allocations | One numeric or string order field, direct projections, binary collation, and direct numeric or dictionary equality predicates; all other queries retain the normal executor |
+| Current pass | [Reusable `ORDER BY` key materialization](#ch-g43-reuse-materialized-order-by-keys), 100-row `VALUES`, `ORDER BY score DESC LIMIT 10` | Ordinary: 93,655 ns; 93,993 B; 630 allocs. `WITH TIES`: 107,585 ns; 110,017 B; 628 allocs | Ordinary: 77,928 ns; 93,992 B; 630 allocs. `WITH TIES`: 86,946 ns; 110,047 B; 628 allocs | 1.20x / 1.24x faster; allocation counts unchanged; bytes flat / +0.03% | Uses the keys already needed by external spill sorting; stable in-place output permutation adds no full output copy, while `WITH TIES` boundary evaluation remains unchanged |
 | Current pass | [Bounded protobuf batch request reuse](#bounded-protobuf-batch-request-reuse), 16-command HTTP request | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2x fewer allocations | At most one fixed 128-byte pointer slice is retained per pooled parent; batches above 16 release their backing |
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |
 | Earlier | [Binary journal decode](README.md#serialization-tradeoffs) | JSON: 30,034 ns; 22,728 heap B; 29 allocs | Binary: 20,035 ns; 18,071 heap B; 25 allocs | 1.50x faster, 1.26x lower heap | Existing JSON remains a supported fallback |
@@ -34237,3 +34238,55 @@ distinct count alone. As with M037i, the group map is grown naturally rather
 than preallocated to the input batch, keeping the measured memory overhead
 near one percent. The primitive is opt-in and does not alter existing SQL
 plans.
+
+## CH-G43 Reuse Materialized `ORDER BY` Keys
+
+Materialized SQL sorting already computes `ORDER BY` keys while preparing the
+records used by external spill sorting. The old in-memory path discarded those
+keys and reevaluated order expressions for every comparator call. The new path
+sorts the keyed records and applies their stable input-ordinal permutation to
+the projected output slice in place. This avoids a second full output copy and
+does not change wire bytes, storage bytes, or external spill behavior.
+
+The focused fixture is `hat/hatSql/limit_with_ties_benchmark_test.go`. Five
+samples on Linux/amd64 used the existing 100-row `VALUES` source and were
+repeated with `-benchmem`:
+
+| Workload | Baseline median | Key-reuse median | Improvement |
+| --- | ---: | ---: | ---: |
+| Ordinary `ORDER BY score DESC LIMIT 10` | 93,655 ns/op; 93,993 B/op; 630 allocs/op | 77,928 ns/op; 93,992 B/op; 630 allocs/op | 1.20x faster; bytes and allocs flat |
+| `ORDER BY score DESC LIMIT 10 WITH TIES` | 107,585 ns/op; 110,017 B/op; 628 allocs/op | 86,946 ns/op; 110,047 B/op; 628 allocs/op | 1.24x faster; 0.03% more bytes; allocs flat |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+96425 93992 630
+93655 93993 630
+86946 93992 630
+94288 93992 630
+91619 93993 630
+107585 110018 628
+110074 110015 628
+109591 110019 628
+102353 110017 628
+101285 110016 628
+```
+
+Raw key-reuse samples:
+
+```text
+77459 93992 630
+77580 93992 630
+79325 93992 630
+78935 93992 630
+77928 93992 630
+89142 110045 628
+86217 110046 628
+89164 110049 628
+86946 110047 628
+85237 110047 628
+```
+
+The `WITH TIES` boundary still uses the established semantic tie check after
+sorting. Grouped and computed-order regression tests verify that output rows
+retain their aggregate context and key semantics.

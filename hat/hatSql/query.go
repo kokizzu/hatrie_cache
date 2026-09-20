@@ -12665,16 +12665,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if !externallySorted {
 			started = time.Now()
 			inputRows := len(out)
-			sort.SliceStable(out, func(i, j int) bool {
-				for _, item := range q.orderBy {
-					a := evalOutputOrder(item.expr, out[i].row, out[i].group)
-					b := evalOutputOrder(item.expr, out[j].row, out[j].group)
-					if less, decided := sqlOrderLess(item, a, b); decided {
-						return less
-					}
-				}
-				return false
-			})
+			sqlSortQueryOutputsWithKeys(out, spillRecords, q.orderBy)
 			metrics.record("SORT", sqlExplainOrders(q.orderBy), inputRows, len(out), started)
 		}
 	}
@@ -15017,6 +15008,33 @@ func sqlSpillOutputLess(left, right sqlSpillOutput, order []sqlOrder) bool {
 		}
 	}
 	return left.Ordinal < right.Ordinal
+}
+
+// sqlSortQueryOutputsWithKeys reuses the sort keys already materialized for
+// the external-sort path. The records' ordinals define the permutation back
+// into projected outputs; ordinals are consumed as visited markers while the
+// output slice is rearranged in place.
+func sqlSortQueryOutputsWithKeys(outputs []sqlQueryOutput, records []sqlSpillOutput, order []sqlOrder) {
+	sort.SliceStable(records, func(left, right int) bool {
+		return sqlSpillOutputLess(records[left], records[right], order)
+	})
+	for target := range records {
+		if records[target].Ordinal < 0 {
+			continue
+		}
+		value := outputs[target]
+		index := target
+		for {
+			source := records[index].Ordinal
+			records[index].Ordinal = -source - 1
+			if source == target {
+				outputs[index] = value
+				break
+			}
+			outputs[index] = outputs[source]
+			index = source
+		}
+	}
 }
 
 func sqlSpillOutputBytes(record sqlSpillOutput) int {

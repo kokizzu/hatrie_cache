@@ -943,3 +943,17 @@ output for invalid multiplicity, callback, or overflow errors. The matched
 heap and `1.02x` allocations. The API is importable and opt-in; existing SQL
 planner behavior is unchanged. See
 [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+
+## ClickHouse CH-G43: Reuse Materialized `ORDER BY` Keys
+
+Adopted a narrow ClickHouse-style execution optimization for materialized SQL
+sorting. The executor already materialized `ORDER BY` keys for the bounded
+external-sort path, but the in-memory path discarded them and reevaluated the
+same expressions inside the sort comparator. In-memory sorting now orders
+those keyed records and applies their stable input-ordinal permutation to the
+projected outputs in place. This preserves grouped output state, stable ties,
+NULL/collation ordering, and the existing external spill path without changing
+wire or storage formats. The matched 100-row benchmark measured `1.20x`
+faster ordinary `LIMIT` sorting and `1.24x` faster `WITH TIES` sorting, with
+the same allocation count and effectively flat allocated bytes. See
+[BENCHMARK.md](BENCHMARK.md#ch-g43-reuse-materialized-order-by-keys).
