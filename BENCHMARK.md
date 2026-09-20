@@ -33184,3 +33184,30 @@ BenchmarkStreamTransactionRecoveryPersistedMutation-32         138  1.656 ms/op 
 ```
 
 Reproduce with `make benchmark-tu29` and `make verify-tu29`.
+
+## ClickHouse CH-G42 Per-Operator SQL Memory Tracking
+
+This is an opt-in diagnostic and admission feature, so the relevant comparison
+is the unchanged default executor against a fresh tracker created per query.
+The workload is a two-row `GROUP BY` followed by `ORDER BY`, measured with
+`-benchtime=10000x -count=3` on Linux/amd64.
+
+| Mode | Samples (ns/op) | B/op | Allocs/op | Tradeoff |
+| --- | --- | ---: | ---: | --- |
+| Default | 10,111; 13,022; 10,885 | 8,264 | 55 | Control |
+| Fresh opt-in tracker | 14,695; 14,009; 14,923 | 9,478-9,479 | 82 | About 35% CPU, 1,214 B, and 27 allocations higher |
+
+The nil tracker path remains the default. The opt-in cost buys peak working-set
+visibility and typed per-operator rejection for `GROUP BY`, `SORT`, and
+non-`ALL` set operations. Reproduce with `make benchmark-chg42`.
+
+Raw output:
+
+```text
+BenchmarkCHG42SQLQueryMemoryTracking/default-32  10000  10111 ns/op  8264 B/op  55 allocs/op
+BenchmarkCHG42SQLQueryMemoryTracking/default-32  10000  13022 ns/op  8264 B/op  55 allocs/op
+BenchmarkCHG42SQLQueryMemoryTracking/default-32  10000  10885 ns/op  8264 B/op  55 allocs/op
+BenchmarkCHG42SQLQueryMemoryTracking/tracked-32  10000  14695 ns/op  9479 B/op  82 allocs/op
+BenchmarkCHG42SQLQueryMemoryTracking/tracked-32  10000  14009 ns/op  9478 B/op  82 allocs/op
+BenchmarkCHG42SQLQueryMemoryTracking/tracked-32  10000  14923 ns/op  9478 B/op  82 allocs/op
+```

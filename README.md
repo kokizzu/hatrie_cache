@@ -28,6 +28,7 @@ security guidance before exposing it on a network.
 - Typed tuple multikey indexes with compact sorted postings: [TU23_TYPED_MULTIKEY_INDEX.md](TU23_TYPED_MULTIKEY_INDEX.md)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
+- Opt-in per-operator SQL working-set tracking and admission: [CHG42_OPERATOR_MEMORY.md](CHG42_OPERATOR_MEMORY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#clickhouse-ch-g42-per-operator-sql-memory-tracking)
 - Opt-in typed-table logical memory budgets with atomic write admission: [CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u24-typed-table-memory-budget)
 - Opt-in per-cluster SQL serving/maintenance admission with CPU and memory budgets: [MU023_CLUSTER_QUERY_ADMISSION.md](MU023_CLUSTER_QUERY_ADMISSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-023-cluster-query-admission)
 - Shared SQL workload classes with bounded-priority aging for source, compute, sink, and ad-hoc work: [MU024_WORKLOAD_PRIORITIES.md](MU024_WORKLOAD_PRIORITIES.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-024-workload-classes-and-priorities)

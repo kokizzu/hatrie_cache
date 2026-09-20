@@ -22328,3 +22328,37 @@ benchmark-tu34:
 
 verify-tu34:
 	bash scripts/verify-tu34.sh
+
+.PHONY: format-chg42-tracker
+format-chg42-tracker:
+	bash scripts/format-chg42-tracker.sh
+
+.PHONY: test-chg42-tracker
+test-chg42-tracker:
+	bash scripts/test-chg42-tracker.sh
+
+.PHONY: test-chg42-package
+test-chg42-package:
+	bash scripts/test-chg42-package.sh
+
+.PHONY: benchmark-chg42
+benchmark-chg42:
+	bash scripts/benchmark-chg42.sh
+
+.PHONY: test-chg42-full
+test-chg42-full:
+	bash scripts/test-chg42-full.sh
+
+.PHONY: race-chg42
+race-chg42:
+	bash scripts/race-chg42.sh
+
+.PHONY: vet-chg42
+vet-chg42:
+	bash scripts/vet-chg42.sh
+.PHONY: commit-chg42 push-chg42
+commit-chg42:
+	bash scripts/commit-chg42.sh
+
+push-chg42:
+	bash scripts/push-chg42.sh

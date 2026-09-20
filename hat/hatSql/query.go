@@ -263,6 +263,10 @@ type SQLQueryOptions struct {
 	// operator in one query. Zero preserves the independent MaxSpillBytes
 	// budgets and keeps the shared quota path disabled.
 	MaxQuerySpillBytes int64
+	// OperatorMemoryTracker optionally records estimated retained working bytes
+	// per SQL operator and can enforce its configured per-operator limit. Nil
+	// keeps the default path free of tracker allocations and accounting.
+	OperatorMemoryTracker *SQLOperatorMemoryTracker
 	// SpillFaults is an optional per-query external-sort I/O hook. It exists
 	// for deterministic fault-injection and chaos tests; production callers
 	// normally leave it nil.
@@ -8132,17 +8136,18 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 }
 
 type sqlExecutionControl struct {
-	ctx        context.Context
-	maxRows    int
-	options    SQLQueryOptions
-	parameters []interface{}
-	joinWork   int
-	sources    map[string][]SQLRow
-	arena      sqlExecutionArena
-	spillQuota *sqlSpillQuota
-	yieldEvery uint64
-	yieldFuel  atomic.Uint64
-	yields     atomic.Uint64
+	ctx            context.Context
+	maxRows        int
+	options        SQLQueryOptions
+	parameters     []interface{}
+	joinWork       int
+	sources        map[string][]SQLRow
+	arena          sqlExecutionArena
+	spillQuota     *sqlSpillQuota
+	operatorMemory *SQLOperatorMemoryTracker
+	yieldEvery     uint64
+	yieldFuel      atomic.Uint64
+	yields         atomic.Uint64
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8159,6 +8164,20 @@ func (executionContext sqlExecutionControlContext) Err() error {
 
 func (control *sqlExecutionControl) executionContext() context.Context {
 	return sqlExecutionControlContext{Context: control.ctx, control: control}
+}
+
+func (control *sqlExecutionControl) observeOperatorMemory(operator string, currentBytes int) error {
+	if control == nil || control.operatorMemory == nil {
+		return nil
+	}
+	return control.operatorMemory.Observe(operator, currentBytes)
+}
+
+func (control *sqlExecutionControl) releaseOperatorMemory(operator string) {
+	if control == nil || control.operatorMemory == nil {
+		return
+	}
+	control.operatorMemory.Release(operator)
 }
 
 // sqlExecutionArena reuses row backing only while one query is executing. Its
@@ -8200,7 +8219,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
-		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}}
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker}
 		if options.MaxQuerySpillBytes > 0 {
 			control.spillQuota = newSQLSpillQuota(options.MaxQuerySpillBytes)
 		}
@@ -11495,6 +11514,14 @@ func sqlColumnarNumericMatches(number float64, operator string, value float64) b
 }
 
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
+	if control != nil && control.operatorMemory != nil {
+		defer func() {
+			control.releaseOperatorMemory("GROUP BY")
+			control.releaseOperatorMemory("SORT")
+			control.releaseOperatorMemory("SET")
+			control.releaseOperatorMemory("JOIN")
+		}()
+	}
 	finalSource := sqlQueryHasFinalSource(q)
 	if q != nil && q.prewhere.kind != "" && !sqlPrewhereStreamable(q, resolver) {
 		q = sqlQueryWithCombinedPrewhere(q)
@@ -12202,8 +12229,15 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return SQLQueryResult{}, err
 		}
 	}
-	if control != nil && control.options.MaxGroupBytes > 0 && sqlGroupedRowsBytes(groups) > control.options.MaxGroupBytes {
-		return SQLQueryResult{}, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
+	groupBytes := 0
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil) {
+		groupBytes = sqlGroupedRowsBytes(groups)
+		if err := control.observeOperatorMemory("GROUP BY", groupBytes); err != nil {
+			return SQLQueryResult{}, err
+		}
+		if control.options.MaxGroupBytes > 0 && groupBytes > control.options.MaxGroupBytes {
+			return SQLQueryResult{}, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
+		}
 	}
 	if len(q.groupBy) > 0 || sqlQueryHasAggregate(q) {
 		node := "AGGREGATE"
@@ -12598,12 +12632,15 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			spillRecords = append(spillRecords, record)
 		}
-		if control != nil && control.options.MaxSortBytes > 0 && !sqlQueryHasWithFill(q) {
+		if control != nil && (control.options.MaxSortBytes > 0 || control.operatorMemory != nil) && !sqlQueryHasWithFill(q) {
 			sortBytes := 0
 			for _, item := range out {
 				sortBytes += sqlRowBytes(item.row)
 			}
-			if sortBytes > control.options.MaxSortBytes {
+			if err := control.observeOperatorMemory("SORT", sortBytes); err != nil {
+				return SQLQueryResult{}, err
+			}
+			if control.options.MaxSortBytes > 0 && sortBytes > control.options.MaxSortBytes {
 				if control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 {
 					return SQLQueryResult{}, fmt.Errorf("SQL sort memory budget exceeded: maximum %d bytes", control.options.MaxSortBytes)
 				}
@@ -12722,6 +12759,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		started = time.Now()
 		inputRows = len(result.Rows) + len(right.Rows)
 		setBytes := sqlRowsBytes(result.Rows) + sqlRowsBytes(right.Rows)
+		if control != nil && !union.all {
+			if err := control.observeOperatorMemory("SET", setBytes); err != nil {
+				return SQLQueryResult{}, err
+			}
+		}
 		if control != nil && !union.all && control.options.MaxSetBytes > 0 && setBytes > control.options.MaxSetBytes {
 			if control.options.SpillDirectory != "" && control.options.MaxSpillBytes > 0 {
 				rows, spillBytes, runs, err := sqlExternalSetRows(result.Rows, right.Rows, union.kind, control.options.SpillDirectory, control.options.MaxSetBytes, control.options.MaxSpillBytes, sqlQueryCollation(q), control)
