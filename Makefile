@@ -22329,6 +22329,34 @@ verify-tu17:
 format-tu17:
 	bash scripts/format-tu17.sh
 
+.PHONY: benchmark-tu18-before
+benchmark-tu18-before:
+	bash scripts/benchmark-tu18-before.sh
+
+.PHONY: test-tu18
+test-tu18:
+	bash scripts/test-tu18.sh
+
+.PHONY: benchmark-tu18
+benchmark-tu18:
+	bash scripts/benchmark-tu18.sh
+
+.PHONY: format-tu18
+format-tu18:
+	bash scripts/format-tu18.sh
+
+.PHONY: verify-tu18
+verify-tu18:
+	bash scripts/verify-tu18.sh
+
+.PHONY: commit-tu18
+commit-tu18:
+	bash scripts/commit-tu18.sh
+
+.PHONY: push-tu18
+push-tu18:
+	bash scripts/push-tu18.sh
+
 .PHONY: commit-tu17
 commit-tu17:
 	bash scripts/commit-tu17.sh

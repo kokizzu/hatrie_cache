@@ -33386,3 +33386,37 @@ BenchmarkTU17AfterLSMSnapshot-32      28492 47.374 us/op 104376 snapshot-bytes 2
 ```
 
 Reproduce with `make benchmark-tu17` and `make verify-tu17`.
+
+## T-U18 Volatile Cache
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with five `-benchmem` samples.
+The map and cache controls use hot string keys and no allocations in the timed
+loop. The cache benchmark uses a mutex-protected bounded LRU; TTL uses an
+injected clock so the timing measures expiry checking without wall-clock
+variability.
+
+| Workload | Map control | Volatile cache | Relative result | Allocations |
+| --- | ---: | ---: | ---: | --- |
+| Hot `Get` | 7.19 ns/op | 16.20 ns/op | 2.25x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Hot `Set` | 10.28 ns/op | 16.89 ns/op | 1.64x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Hot `Peek` | 7.19 ns/op map `Get` control | 12.01 ns/op | 1.67x versus map read | 0 B/op; 0 allocs/op |
+| Hot TTL `Get` | 7.19 ns/op map control | 14.87 ns/op | 2.07x versus map control | 0 B/op; 0 allocs/op |
+
+This is a capability win, not a raw-map speed win: the cache adds bounded LRU
+eviction, lazy expiration, optional byte accounting, and concurrent ownership.
+The benchmark does not claim total heap size for the 10,000-entry cache; it
+only reports timed-operation allocations. `SizeOf` reports caller-defined
+payload bytes, while map entries and LRU links remain additional overhead.
+
+Raw samples:
+
+```text
+BenchmarkTU18BeforeMapGet-32             7.257  7.189  6.987  6.982  9.332 ns/op  0 B/op  0 allocs/op
+BenchmarkTU18BeforeMapSet-32            10.29  10.28 10.46 10.13 10.19 ns/op  0 B/op  0 allocs/op
+BenchmarkTU18AfterVolatileCacheGet-32    16.20 16.34 15.92 15.56 17.56 ns/op  0 B/op  0 allocs/op
+BenchmarkTU18AfterVolatileCachePeek-32   12.39 11.76 12.05 12.01 11.87 ns/op  0 B/op  0 allocs/op
+BenchmarkTU18AfterVolatileCacheSet-32    16.83 16.79 16.89 17.06 17.17 ns/op  0 B/op  0 allocs/op
+BenchmarkTU18AfterVolatileCacheGetTTL-32 15.17 14.87 14.72 15.95 14.77 ns/op  0 B/op  0 allocs/op
+```
+
+Reproduce with `make benchmark-tu18` and `make verify-tu18`.
