@@ -22584,6 +22584,27 @@ benchmark-tu34:
 
 verify-tu34:
 	bash scripts/verify-tu34.sh
+.PHONY: test-tu30
+test-tu30:
+	bash scripts/test-tu30.sh
+.PHONY: benchmark-tu30 race-tu30 vet-tu30 format-tu30
+benchmark-tu30:
+	bash scripts/benchmark-tu30.sh
+race-tu30:
+	bash scripts/race-tu30.sh
+vet-tu30:
+	bash scripts/vet-tu30.sh
+format-tu30:
+	bash scripts/format-tu30.sh
+.PHONY: review-tu30 stage-tu30 commit-tu30 push-tu30
+review-tu30:
+	bash scripts/review-tu30.sh
+stage-tu30:
+	bash scripts/stage-tu30.sh
+commit-tu30:
+	bash scripts/commit-tu30.sh
+push-tu30:
+	bash scripts/push-tu30.sh
 
 .PHONY: format-chg42-tracker
 format-chg42-tracker:

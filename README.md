@@ -66,6 +66,7 @@ security guidance before exposing it on a network.
 - Opt-in thread-safe volatile cache with bounded LRU eviction, lazy TTL expiry, optional byte accounting, and no persistence: [TU18_VOLATILE_CACHE.md](TU18_VOLATILE_CACHE.md), with measured raw-map tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u18-volatile-cache)
 - Opt-in versioned migration manager with dependency/precondition gates, mixed-version client checks, resumable progress, rollback protection, and CRC-protected snapshots: [TU21_VERSIONED_MIGRATION_MANAGER.md](TU21_VERSIONED_MIGRATION_MANAGER.md), with measured coordination costs in [BENCHMARK.md](BENCHMARK.md#t-u21-versioned-migration-manager)
 - Opt-in per-space WAL sync policy registry with periodic, immediate, and disabled modes: [TU34_SPACE_WAL_SYNC_POLICY.md](TU34_SPACE_WAL_SYNC_POLICY.md), with measured lookup overhead in [BENCHMARK.md](BENCHMARK.md#t-u34-per-space-wal-sync-policy-registry)
+- Opt-in stackless cooperative fibers with bounded round-robin scheduling, cancellation, and generation-safe reaping: [TU30_COOPERATIVE_FIBER_SCHEDULER.md](TU30_COOPERATIVE_FIBER_SCHEDULER.md), with measured goroutine lifecycle savings in [BENCHMARK.md](BENCHMARK.md#t-u30-cooperative-fiber-scheduler)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - Shared compiled JSON subcolumn paths for repeated lookups: [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md)

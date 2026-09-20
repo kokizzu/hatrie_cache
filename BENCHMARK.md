@@ -34237,3 +34237,39 @@ distinct count alone. As with M037i, the group map is grown naturally rather
 than preallocated to the input batch, keeping the measured memory overhead
 near one percent. The primitive is opt-in and does not alter existing SQL
 plans.
+
+## T-U30 Cooperative Fiber Scheduler
+
+This benchmark compares an opt-in bounded stackless scheduler with a goroutine
+and `runtime.Gosched` lifecycle control. Both workloads run 256 tasks through
+eight cooperative steps. Five 50 ms samples used `-benchmem` on Linux/amd64.
+The scheduler preallocates its fixed slots and ready ring outside the timed
+loop; the control includes goroutine, channel, and wait-group setup.
+
+| Workload | Median CPU | Median memory | Median allocations | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Stackless `hatFiber.Scheduler` | 22,508 ns/op | 0 B/op | 0 allocs/op | 1.00x |
+| Goroutine plus `runtime.Gosched` control | 1,400,311 ns/op | 7,269 B/op | 266 allocs/op | 62.2x slower |
+
+The scheduler is about 62.2x faster in this small-step lifecycle workload and
+has no measured per-operation allocation. This is not a drop-in replacement
+for blocking goroutines: callbacks are non-preemptive, the scheduler is
+single-owner, and callers must yield explicitly. Existing defaults remain
+unchanged.
+
+Raw output (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkTU30StacklessScheduler-32        2684 22787 ns/op       0 B/op   0 allocs/op
+BenchmarkTU30StacklessScheduler-32        2769 21627 ns/op       0 B/op   0 allocs/op
+BenchmarkTU30StacklessScheduler-32        2552 22508 ns/op       0 B/op   0 allocs/op
+BenchmarkTU30StacklessScheduler-32        2728 25403 ns/op       0 B/op   0 allocs/op
+BenchmarkTU30StacklessScheduler-32        2722 21612 ns/op       0 B/op   0 allocs/op
+BenchmarkTU30GoroutineYieldControl-32       58 1416436 ns/op  24632 B/op 317 allocs/op
+BenchmarkTU30GoroutineYieldControl-32       67 1400311 ns/op   7269 B/op 266 allocs/op
+BenchmarkTU30GoroutineYieldControl-32       52 1234022 ns/op   6985 B/op 264 allocs/op
+BenchmarkTU30GoroutineYieldControl-32       43 1402299 ns/op   7600 B/op 269 allocs/op
+BenchmarkTU30GoroutineYieldControl-32       48 1238561 ns/op   6622 B/op 261 allocs/op
+```
+
+Reproduce with `make benchmark-tu30`.
