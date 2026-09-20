@@ -22048,3 +22048,34 @@ measure-mu47-payload:
 
 verify-mu47:
 	@bash scripts/verify-mu47.sh
+test-tu14-red:
+	bash scripts/test-tu14-red.sh
+
+benchmark-tu14:
+	bash scripts/benchmark-tu14.sh
+
+test-tu14-package:
+	bash scripts/test-tu14-package.sh
+
+race-tu14:
+	bash scripts/race-tu14.sh
+
+vet-tu14:
+	bash scripts/vet-tu14.sh
+
+test-tu14-all:
+	bash scripts/test-tu14-all.sh
+
+stage-tu14:
+	bash scripts/stage-tu14.sh
+
+review-tu14:
+	bash scripts/review-tu14.sh
+
+commit-tu14:
+	bash scripts/commit-tu14.sh
+
+push-tu14:
+	bash scripts/push-tu14.sh
+format-tu14:
+	bash scripts/format-tu14.sh

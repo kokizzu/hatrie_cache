@@ -32580,3 +32580,23 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+<a id="tu-14-vshard-bucket-map-and-migration"></a>
+## T-U14 VShard Bucket Map and Migration
+
+Five benchmark samples on the AMD Ryzen 9 5950X host. The baseline is the
+pre-feature `HashKeyToBucket` path from clean `master`; the VShard route uses
+precomputed compact owner indexes and xxhash. Rebalance is a control-plane
+operation, not a per-request path.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `HashKeyToBucket` baseline | 42.19 | 20 | 2 | 1.00x |
+| VShard `RouteKey` | 33.94 | 0 | 0 | 1.24x faster |
+| Rebalance plan, 256 buckets, 4 nodes | 37,937 | 75,552 | 352 | control-plane only |
+
+The route is about 19.6% faster while removing both measured allocations. The
+rebalance plan comparison avoids allocations for unchanged buckets and is 2.04x
+faster than the first implementation, with 12.5% lower allocation volume and
+32.0% fewer allocations. It is intentionally paid only when ownership changes
+and does not alter ordinary topology routing or defaults. Full API behavior and
+limitations are documented in [TU14_VSHARD_BUCKET_MIGRATION.md](TU14_VSHARD_BUCKET_MIGRATION.md).

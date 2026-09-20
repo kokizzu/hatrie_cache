@@ -4765,3 +4765,9 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+### VShard bucket migration
+
+Tarantool-inspired virtual-bucket ownership and fenced snapshot/WAL migration
+are available as an opt-in `hatTopology` API. See
+[TU14_VSHARD_BUCKET_MIGRATION.md](TU14_VSHARD_BUCKET_MIGRATION.md) and the
+[measured results](BENCHMARK.md#tu-14-vshard-bucket-map-and-migration).
