@@ -12,6 +12,7 @@ git add \
   hat/hatSql/mu031_transactional_aggregate.go \
   hat/hatSql/mu031_transaction_test.go \
   hat/hatSql/mu031_transaction_benchmark_test.go \
+  hat/hatSql/mu031_transaction_rollback_test.go \
   scripts/benchmark-mu031-transactional-aggregate.sh \
   scripts/review-mu031-transactional-aggregate.sh \
   scripts/stage-mu031-transactional-aggregate.sh \

@@ -130,7 +130,7 @@ func (state *SQLTransactionalAggregateState) snapshot() (snapshot []byte, err er
 func (state *SQLTransactionalAggregateState) restore(snapshot []byte) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("%w: %v", ErrSQLAggregateStatePanic, recovered)
+			err = fmt.Errorf("%w: %w", ErrSQLAggregateStateRollback, fmt.Errorf("%w: %v", ErrSQLAggregateStatePanic, recovered))
 		}
 	}()
 	if err := state.serializable.UnmarshalBinary(snapshot); err != nil {
