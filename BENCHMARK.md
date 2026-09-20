@@ -33481,3 +33481,29 @@ BenchmarkTU20AfterOneRecordBatchConversion-32 300.7 281.7 279.1 282.4 274.8 ns/o
 
 Reproduce with `make benchmark-tu20-before`, `make benchmark-tu20`, and
 `make verify-tu20`.
+
+## T-U24 Conditional Index Catalog
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with five `-benchmem` samples.
+The direct conditional functional index is the control workload. Catalog
+operations include the schema registry read/write lock and named-index lookup.
+
+| Workload | Direct index | Catalog | Relative result | Memory |
+| --- | ---: | ---: | ---: | --- |
+| Hot admitted `Upsert` | 27.44 ns/op | 41.93 ns/op | 1.53x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Hot `LookupIDs` | 25.87 ns/op | 39.28 ns/op | 1.52x slower | 8 -> 8 B/op; 1 -> 1 alloc/op |
+
+The catalog trades this overhead for stable predicate/extractor metadata,
+generation invalidation, rebuild state, fenced writes, and atomic replacement.
+It is not a faster replacement for direct `ConditionalFunctionalIndex` use.
+
+Raw samples:
+
+```text
+BenchmarkTU24BeforeConditionalUpsert-32  27.45 26.49 28.25 27.39 27.44 ns/op 0 B/op 0 allocs/op
+BenchmarkTU24BeforeConditionalLookup-32  25.87 26.62 26.93 25.37 25.19 ns/op 8 B/op 1 allocs/op
+BenchmarkTU24AfterCatalogUpsert-32       39.58 42.39 41.93 43.15 40.49 ns/op 0 B/op 0 allocs/op
+BenchmarkTU24AfterCatalogLookup-32       40.59 39.28 37.48 37.29 41.13 ns/op 8 B/op 1 allocs/op
+```
+
+Reproduce with `make benchmark-tu24` and `make verify-tu24`.

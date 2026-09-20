@@ -22397,6 +22397,30 @@ commit-tu20:
 push-tu20:
 	bash scripts/push-tu20.sh
 
+.PHONY: test-tu24
+test-tu24:
+	bash scripts/test-tu24.sh
+
+.PHONY: format-tu24
+format-tu24:
+	bash scripts/format-tu24.sh
+
+.PHONY: benchmark-tu24
+benchmark-tu24:
+	bash scripts/benchmark-tu24.sh
+
+.PHONY: verify-tu24
+verify-tu24:
+	bash scripts/verify-tu24.sh
+
+.PHONY: commit-tu24
+commit-tu24:
+	bash scripts/commit-tu24.sh
+
+.PHONY: push-tu24
+push-tu24:
+	bash scripts/push-tu24.sh
+
 .PHONY: verify-tu21
 verify-tu21:
 	bash scripts/verify-tu21.sh
