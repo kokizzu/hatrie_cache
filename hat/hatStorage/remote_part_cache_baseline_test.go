@@ -143,3 +143,54 @@ func BenchmarkRemotePartCachePrefetch(b *testing.B) {
 		benchmarkRemotePartCachePrefetch(b, 2, 100*time.Microsecond)
 	})
 }
+
+func BenchmarkRemotePartCacheColumnAware(b *testing.B) {
+	part, err := hatStorage.NewRemotePartReference("s3://bucket/parts/column-benchmark", "parts/column-benchmark.json", "sha256:part", 64<<10)
+	if err != nil {
+		b.Fatal(err)
+	}
+	column, err := hatStorage.NewRemotePartColumnReference(part, "payload", "sha256:payload", 12<<10, 4<<10)
+	if err != nil {
+		b.Fatal(err)
+	}
+	wholePayload := make([]byte, 64<<10)
+	columnPayload := make([]byte, 4<<10)
+
+	b.Run("whole-part", func(b *testing.B) {
+		b.ReportAllocs()
+		var remoteBytes int64
+		for range b.N {
+			cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: uint64(len(wholePayload)), MaxEntries: 1})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := cache.Get(context.Background(), part, 1, func(context.Context, hatStorage.RemotePartReference) ([]byte, error) {
+				remoteBytes += int64(len(wholePayload))
+				return wholePayload, nil
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportMetric(float64(remoteBytes)/float64(b.N), "remote-B/op")
+		b.ReportMetric(float64(len(wholePayload)), "retained-B/op")
+	})
+
+	b.Run("projected-column", func(b *testing.B) {
+		b.ReportAllocs()
+		var remoteBytes int64
+		for range b.N {
+			cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: uint64(len(columnPayload)), MaxEntries: 1})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := cache.GetColumn(context.Background(), column, 1, func(context.Context, hatStorage.RemotePartColumnReference) ([]byte, error) {
+				remoteBytes += int64(len(columnPayload))
+				return columnPayload, nil
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportMetric(float64(remoteBytes)/float64(b.N), "remote-B/op")
+		b.ReportMetric(float64(len(columnPayload)), "retained-B/op")
+	})
+}

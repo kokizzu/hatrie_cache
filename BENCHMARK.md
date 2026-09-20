@@ -32711,3 +32711,31 @@ The feature costs about 21 ns/event for checkpoint-safe delivery while keeping
 heap allocation at zero. Exact-sequence checkpointing is within the legacy
 tail path's measured cost. Checkpoint-store I/O is explicit and not included
 in this delivery benchmark. See [MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md](MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md).
+## CH-U30 Column-Aware Remote Read
+
+Command: `make benchmark-chu30-column`
+CPU: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64
+Configuration: `-benchtime=100ms -count=3`; cold cache load per operation; the
+loader returns a 64 KiB whole part or a 4 KiB projected range.
+
+| Path | Median ns/op | Median heap B/op | Median allocs/op | Remote B/op | Retained B/op | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Whole part | 16,936 | 67,584 | 9 | 65,536 | 65,536 | Baseline |
+| Projected column/range | 2,781 | 6,144 | 9 | 4,096 | 4,096 | 6.09x faster, 11.0x lower heap, 16.0x lower transfer/retained bytes |
+
+Raw output:
+
+```text
+BenchmarkRemotePartCacheColumnAware/whole-part-32          7572  18044 ns/op  65536 remote-B/op  65536 retained-B/op  67585 B/op  9 allocs/op
+BenchmarkRemotePartCacheColumnAware/whole-part-32          6471  15788 ns/op  65536 remote-B/op  65536 retained-B/op  67584 B/op  9 allocs/op
+BenchmarkRemotePartCacheColumnAware/whole-part-32          8040  16936 ns/op  65536 remote-B/op  65536 retained-B/op  67585 B/op  9 allocs/op
+BenchmarkRemotePartCacheColumnAware/projected-column-32   44336   2706 ns/op   4096 remote-B/op   4096 retained-B/op   6144 B/op  9 allocs/op
+BenchmarkRemotePartCacheColumnAware/projected-column-32   37196   2786 ns/op   4096 remote-B/op   4096 retained-B/op   6144 B/op  9 allocs/op
+BenchmarkRemotePartCacheColumnAware/projected-column-32   41286   2781 ns/op   4096 remote-B/op   4096 retained-B/op   6144 B/op  9 allocs/op
+```
+
+The existing whole-part hit path remained allocation-free in the baseline
+check: median `101.0 ns/op`, `0 B/op`, `0 allocs/op`. The projected-range
+result is not a claim that every workload is faster: whole-part reuse can win
+when most columns are needed, while projected ranges win when a query touches
+small subsets of large parts.

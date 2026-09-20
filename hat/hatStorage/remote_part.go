@@ -8,6 +8,7 @@ import (
 )
 
 var ErrRemotePartReferenceInvalid = errors.New("hatriecache: remote part reference is invalid")
+var ErrRemotePartColumnReferenceInvalid = errors.New("hatriecache: remote part column reference is invalid")
 
 // RemotePartMetadata is the local manifest information needed to locate and
 // verify a remote immutable part.
@@ -104,4 +105,62 @@ func (reference RemotePartReference) ResolveMetadataPath(root string) (string, e
 		return "", ErrRemotePartReferenceInvalid
 	}
 	return metadataPath, nil
+}
+
+// RemotePartColumnReference identifies one immutable byte range within a
+// remote part. The caller obtains the range from trusted part metadata and
+// the loader may use it for a range request instead of downloading the whole
+// part.
+type RemotePartColumnReference struct {
+	part        RemotePartReference
+	name        string
+	checksum    string
+	offsetBytes uint64
+	sizeBytes   uint64
+}
+
+// NewRemotePartColumnReference validates one projected column/range identity.
+// A zero size means that the loader size is not declared; a non-zero size is
+// checked against the loader result by RemotePartCache.
+func NewRemotePartColumnReference(part RemotePartReference, name, checksum string, offsetBytes, sizeBytes uint64) (RemotePartColumnReference, error) {
+	if part.ObjectURI() == "" || part.LocalMetadataPath() == "" || part.Checksum() == "" {
+		return RemotePartColumnReference{}, ErrRemotePartColumnReferenceInvalid
+	}
+	name = strings.TrimSpace(name)
+	checksum = strings.TrimSpace(checksum)
+	if name == "" || checksum == "" || strings.IndexByte(name, 0) >= 0 || strings.IndexByte(checksum, 0) >= 0 || sizeBytes > ^uint64(0)-offsetBytes {
+		return RemotePartColumnReference{}, ErrRemotePartColumnReferenceInvalid
+	}
+	return RemotePartColumnReference{
+		part:        part,
+		name:        name,
+		checksum:    checksum,
+		offsetBytes: offsetBytes,
+		sizeBytes:   sizeBytes,
+	}, nil
+}
+
+// Part returns the immutable parent part reference.
+func (reference RemotePartColumnReference) Part() RemotePartReference {
+	return reference.part
+}
+
+// ColumnName returns the logical column name.
+func (reference RemotePartColumnReference) ColumnName() string {
+	return reference.name
+}
+
+// OffsetBytes returns the inclusive byte offset within the remote part.
+func (reference RemotePartColumnReference) OffsetBytes() uint64 {
+	return reference.offsetBytes
+}
+
+// SizeBytes returns the declared projected range size.
+func (reference RemotePartColumnReference) SizeBytes() uint64 {
+	return reference.sizeBytes
+}
+
+// Checksum returns the checksum for the projected range.
+func (reference RemotePartColumnReference) Checksum() string {
+	return reference.checksum
 }

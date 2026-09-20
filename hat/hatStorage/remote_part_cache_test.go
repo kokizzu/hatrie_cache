@@ -329,3 +329,93 @@ func TestRemotePartCachePrefetchRejectsInvalidConcurrency(t *testing.T) {
 		t.Fatalf("invalid concurrency error = %v", err)
 	}
 }
+
+func TestRemotePartCacheColumnAwareLoadsUseIndependentRangeKeys(t *testing.T) {
+	part, err := hatStorage.NewRemotePartReference(
+		"s3://bucket/parts/columns",
+		"parts/columns.json",
+		"sha256:part",
+		4096,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := hatStorage.NewRemotePartColumnReference(part, "payload", "sha256:payload", 128, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := hatStorage.NewRemotePartColumnReference(part, "other", "sha256:other", 512, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: 6, MaxEntries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	loader := func(_ context.Context, reference hatStorage.RemotePartColumnReference) ([]byte, error) {
+		calls.Add(1)
+		if reference.ColumnName() == "payload" {
+			if reference.OffsetBytes() != 128 || reference.SizeBytes() != 3 {
+				t.Fatalf("payload range = %d/%d, want 128/3", reference.OffsetBytes(), reference.SizeBytes())
+			}
+			return []byte("one"), nil
+		}
+		return []byte("two"), nil
+	}
+	got, err := cache.GetColumn(context.Background(), payload, 2, loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "one" {
+		t.Fatalf("payload = %q, want one", got)
+	}
+	if _, err := cache.GetColumn(context.Background(), payload, 2, loader); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.GetColumn(context.Background(), other, 1, loader); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("column loader calls = %d, want two independent loads", got)
+	}
+	stats := cache.Stats()
+	if stats.Entries != 2 || stats.Bytes != 6 || stats.Hits != 1 || stats.Loads != 2 {
+		t.Fatalf("column cache stats = %#v, want two entries, six bytes, one hit, two loads", stats)
+	}
+}
+
+func TestRemotePartCacheColumnPrefetchDeduplicatesAndValidatesSize(t *testing.T) {
+	part, err := hatStorage.NewRemotePartReference("s3://bucket/parts/prefetch", "parts/prefetch.json", "sha256:part", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	column, err := hatStorage.NewRemotePartColumnReference(part, "id", "sha256:id", 8, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := hatStorage.NewRemotePartCache(hatStorage.RemotePartCacheOptions{MaxBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	loader := func(_ context.Context, _ hatStorage.RemotePartColumnReference) ([]byte, error) {
+		calls.Add(1)
+		return []byte("x"), nil
+	}
+	if err := cache.PrefetchColumns(context.Background(), []hatStorage.RemotePartColumnReference{column, column}, hatStorage.RemotePartPrefetchOptions{MaxConcurrent: 1}, loader); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("column prefetch calls = %d, want one", got)
+	}
+	bad, err := hatStorage.NewRemotePartColumnReference(part, "bad", "sha256:bad", 9, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.GetColumn(context.Background(), bad, 0, func(context.Context, hatStorage.RemotePartColumnReference) ([]byte, error) {
+		return []byte("x"), nil
+	}); !errors.Is(err, hatStorage.ErrRemotePartCacheSizeMismatch) {
+		t.Fatalf("column size mismatch error = %v", err)
+	}
+}

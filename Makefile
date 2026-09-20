@@ -22207,3 +22207,36 @@ commit-chu20:
 
 push-chu20:
 	bash scripts/push-chu20.sh
+.PHONY: test-chu30-column-policy
+test-chu30-column-policy:
+	bash scripts/test-chu30-column-policy.sh
+.PHONY: format-chu30-column-policy benchmark-chu30-baseline benchmark-chu30-column test-chu30-storage race-chu30-column-policy vet-chu30-column-policy review-chu30-column-policy stage-chu30-column-policy commit-chu30-column-policy push-chu30-column-policy
+format-chu30-column-policy:
+	bash scripts/format-chu30-column-policy.sh
+
+benchmark-chu30-baseline:
+	bash scripts/benchmark-chu30-baseline.sh
+
+benchmark-chu30-column:
+	bash scripts/benchmark-chu30-column.sh
+
+test-chu30-storage:
+	bash scripts/test-chu30-storage.sh
+
+race-chu30-column-policy:
+	bash scripts/race-chu30-column-policy.sh
+
+vet-chu30-column-policy:
+	bash scripts/vet-chu30-column-policy.sh
+
+review-chu30-column-policy:
+	bash scripts/review-chu30-column-policy.sh
+
+stage-chu30-column-policy:
+	bash scripts/stage-chu30-column-policy.sh
+
+commit-chu30-column-policy:
+	bash scripts/commit-chu30-column-policy.sh
+
+push-chu30-column-policy:
+	bash scripts/push-chu30-column-policy.sh

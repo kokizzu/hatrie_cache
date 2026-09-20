@@ -12,6 +12,7 @@ var (
 	ErrRemotePartCacheInvalidConfig   = errors.New("hatriecache: remote-part cache configuration is invalid")
 	ErrRemotePartCacheContextRequired = errors.New("hatriecache: remote-part cache context is required")
 	ErrRemotePartCacheLoaderRequired  = errors.New("hatriecache: remote-part cache loader is required")
+	ErrRemotePartColumnLoaderRequired = errors.New("hatriecache: remote-part column loader is required")
 	ErrRemotePartCacheSizeMismatch    = errors.New("hatriecache: remote-part cache loader size does not match metadata")
 	ErrRemotePartCacheNil             = errors.New("hatriecache: remote-part cache is nil")
 )
@@ -44,6 +45,10 @@ type RemotePartPrefetchOptions struct {
 // is copied once on a successful miss and is never mutated by the cache.
 type RemotePartCacheLoader func(context.Context, RemotePartReference) ([]byte, error)
 
+// RemotePartColumnLoader fetches one immutable projected column/range. A
+// loader may issue a byte-range request using OffsetBytes and SizeBytes.
+type RemotePartColumnLoader func(context.Context, RemotePartColumnReference) ([]byte, error)
+
 // RemotePartCacheStats is a point-in-time cache accounting snapshot.
 type RemotePartCacheStats struct {
 	Entries   int
@@ -56,9 +61,12 @@ type RemotePartCacheStats struct {
 }
 
 type remotePartCacheKey struct {
-	objectURI string
-	checksum  string
-	sizeBytes uint64
+	objectURI      string
+	checksum       string
+	sizeBytes      uint64
+	columnName     string
+	columnChecksum string
+	columnOffset   uint64
 }
 
 type remotePartCacheEntry struct {
@@ -138,6 +146,23 @@ func (cache *RemotePartCache) Acquire(ctx context.Context, reference RemotePartR
 	return &RemotePartHandle{cache: cache, entry: entry, data: data}, nil
 }
 
+// GetColumn returns an immutable projected column/range from the bounded
+// cache. Column entries have independent identity and byte accounting from
+// whole-part entries, so a query can retain only the ranges it reads.
+func (cache *RemotePartCache) GetColumn(ctx context.Context, reference RemotePartColumnReference, priority int, loader RemotePartColumnLoader) ([]byte, error) {
+	data, _, err := cache.loadColumn(ctx, reference, priority, loader, false)
+	return data, err
+}
+
+// AcquireColumn returns a pinned projected column/range handle until Release.
+func (cache *RemotePartCache) AcquireColumn(ctx context.Context, reference RemotePartColumnReference, priority int, loader RemotePartColumnLoader) (*RemotePartHandle, error) {
+	data, entry, err := cache.loadColumn(ctx, reference, priority, loader, true)
+	if err != nil {
+		return nil, err
+	}
+	return &RemotePartHandle{cache: cache, entry: entry, data: data}, nil
+}
+
 // Prefetch loads an explicit set of immutable remote parts into the bounded
 // cache. It returns only after all admitted work completes. Duplicate
 // references are loaded once, MaxConcurrent bounds in-flight loaders, and a
@@ -172,16 +197,61 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 	if len(unique) == 0 {
 		return nil
 	}
+	return cache.prefetch(ctx, len(unique), options, func(fetchCtx context.Context, index int) error {
+		_, err := cache.Get(fetchCtx, unique[index], options.Priority, loader)
+		return err
+	})
+}
+
+// PrefetchColumns loads projected column/ranges into the bounded cache. It
+// deduplicates identical range identities and uses the same bounded
+// concurrency and cancellation policy as whole-part prefetch.
+func (cache *RemotePartCache) PrefetchColumns(ctx context.Context, references []RemotePartColumnReference, options RemotePartPrefetchOptions, loader RemotePartColumnLoader) error {
+	if cache == nil {
+		return ErrRemotePartCacheNil
+	}
+	if ctx == nil {
+		return ErrRemotePartCacheContextRequired
+	}
+	if loader == nil {
+		return ErrRemotePartColumnLoaderRequired
+	}
+	if options.MaxConcurrent < 0 {
+		return ErrRemotePartCacheInvalidConfig
+	}
+	unique := make([]RemotePartColumnReference, 0, len(references))
+	seen := make(map[remotePartCacheKey]struct{}, len(references))
+	for _, reference := range references {
+		key, err := validateRemotePartColumnReference(reference)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, reference)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	return cache.prefetch(ctx, len(unique), options, func(fetchCtx context.Context, index int) error {
+		_, err := cache.GetColumn(fetchCtx, unique[index], options.Priority, loader)
+		return err
+	})
+}
+
+func (cache *RemotePartCache) prefetch(ctx context.Context, count int, options RemotePartPrefetchOptions, fetch func(context.Context, int) error) error {
 	concurrency := options.MaxConcurrent
 	if concurrency == 0 {
 		concurrency = DefaultRemotePartPrefetchConcurrency
 	}
-	if concurrency > len(unique) {
-		concurrency = len(unique)
+	if concurrency > count {
+		concurrency = count
 	}
 	if concurrency == 1 {
-		for _, reference := range unique {
-			if _, err := cache.Get(ctx, reference, options.Priority, loader); err != nil {
+		for index := range count {
+			if err := fetch(ctx, index); err != nil {
 				return err
 			}
 		}
@@ -189,7 +259,7 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 	}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	jobs := make(chan RemotePartReference)
+	jobs := make(chan int)
 	var workers sync.WaitGroup
 	var errorsMu sync.Mutex
 	var firstErr error
@@ -210,11 +280,11 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 			select {
 			case <-workCtx.Done():
 				return
-			case reference, ok := <-jobs:
+			case index, ok := <-jobs:
 				if !ok {
 					return
 				}
-				if _, err := cache.Get(workCtx, reference, options.Priority, loader); err != nil {
+				if err := fetch(workCtx, index); err != nil {
 					recordError(err)
 					return
 				}
@@ -226,11 +296,11 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 		go worker()
 	}
 
-	for _, reference := range unique {
+	for index := range count {
 		select {
 		case <-workCtx.Done():
 			break
-		case jobs <- reference:
+		case jobs <- index:
 		}
 		if workCtx.Err() != nil {
 			break
@@ -303,6 +373,27 @@ func (cache *RemotePartCache) Invalidate(reference RemotePartReference) bool {
 	return true
 }
 
+// InvalidateColumn removes one projected column/range entry. Existing handles
+// remain valid, while the next request loads the range again.
+func (cache *RemotePartCache) InvalidateColumn(reference RemotePartColumnReference) bool {
+	if cache == nil {
+		return false
+	}
+	key, err := validateRemotePartColumnReference(reference)
+	if err != nil {
+		return false
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	entry, ok := cache.entries[key]
+	if !ok {
+		return false
+	}
+	delete(cache.entries, key)
+	cache.bytes -= uint64(len(entry.data))
+	return true
+}
+
 func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheLoader, pin bool) ([]byte, *remotePartCacheEntry, error) {
 	if cache == nil {
 		return nil, nil, ErrRemotePartCacheNil
@@ -317,6 +408,31 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 	if err != nil {
 		return nil, nil, err
 	}
+	return cache.loadKey(ctx, key, reference.SizeBytes(), priority, pin, func(loadCtx context.Context) ([]byte, error) {
+		return loader(loadCtx, reference)
+	})
+}
+
+func (cache *RemotePartCache) loadColumn(ctx context.Context, reference RemotePartColumnReference, priority int, loader RemotePartColumnLoader, pin bool) ([]byte, *remotePartCacheEntry, error) {
+	if cache == nil {
+		return nil, nil, ErrRemotePartCacheNil
+	}
+	if ctx == nil {
+		return nil, nil, ErrRemotePartCacheContextRequired
+	}
+	if loader == nil {
+		return nil, nil, ErrRemotePartColumnLoaderRequired
+	}
+	key, err := validateRemotePartColumnReference(reference)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cache.loadKey(ctx, key, reference.SizeBytes(), priority, pin, func(loadCtx context.Context) ([]byte, error) {
+		return loader(loadCtx, reference)
+	})
+}
+
+func (cache *RemotePartCache) loadKey(ctx context.Context, key remotePartCacheKey, expectedSize uint64, priority int, pin bool, loader func(context.Context) ([]byte, error)) ([]byte, *remotePartCacheEntry, error) {
 	for {
 		cache.mu.Lock()
 		if entry, ok := cache.entries[key]; ok {
@@ -351,12 +467,12 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 		cache.stats.Loads++
 		cache.mu.Unlock()
 
-		data, loadErr := loader(ctx, reference)
+		data, loadErr := loader(ctx)
 		if loadErr == nil {
 			if err := ctx.Err(); err != nil {
 				loadErr = err
-			} else if reference.SizeBytes() != 0 && uint64(len(data)) != reference.SizeBytes() {
-				loadErr = fmt.Errorf("%w: declared %d, got %d", ErrRemotePartCacheSizeMismatch, reference.SizeBytes(), len(data))
+			} else if expectedSize != 0 && uint64(len(data)) != expectedSize {
+				loadErr = fmt.Errorf("%w: declared %d, got %d", ErrRemotePartCacheSizeMismatch, expectedSize, len(data))
 			}
 		}
 		var entry *remotePartCacheEntry
@@ -404,11 +520,33 @@ func validateRemotePartCacheReference(reference RemotePartReference) (remotePart
 	return remotePartCacheKeyFrom(reference), nil
 }
 
+func validateRemotePartColumnReference(reference RemotePartColumnReference) (remotePartCacheKey, error) {
+	if _, err := validateRemotePartCacheReference(reference.Part()); err != nil {
+		return remotePartCacheKey{}, ErrRemotePartColumnReferenceInvalid
+	}
+	if reference.ColumnName() == "" || reference.Checksum() == "" || reference.SizeBytes() > ^uint64(0)-reference.OffsetBytes() {
+		return remotePartCacheKey{}, ErrRemotePartColumnReferenceInvalid
+	}
+	return remotePartCacheKeyFromColumn(reference), nil
+}
+
 func remotePartCacheKeyFrom(reference RemotePartReference) remotePartCacheKey {
 	return remotePartCacheKey{
 		objectURI: reference.ObjectURI(),
 		checksum:  reference.Checksum(),
 		sizeBytes: reference.SizeBytes(),
+	}
+}
+
+func remotePartCacheKeyFromColumn(reference RemotePartColumnReference) remotePartCacheKey {
+	part := reference.Part()
+	return remotePartCacheKey{
+		objectURI:      part.ObjectURI(),
+		checksum:       part.Checksum(),
+		sizeBytes:      reference.SizeBytes(),
+		columnName:     reference.ColumnName(),
+		columnChecksum: reference.Checksum(),
+		columnOffset:   reference.OffsetBytes(),
 	}
 }
 
