@@ -22369,6 +22369,34 @@ format-tu21:
 benchmark-tu21:
 	bash scripts/benchmark-tu21.sh
 
+.PHONY: test-tu20
+test-tu20:
+	bash scripts/test-tu20.sh
+
+.PHONY: benchmark-tu20-before
+benchmark-tu20-before:
+	bash scripts/benchmark-tu20-before.sh
+
+.PHONY: format-tu20
+format-tu20:
+	bash scripts/format-tu20.sh
+
+.PHONY: benchmark-tu20
+benchmark-tu20:
+	bash scripts/benchmark-tu20.sh
+
+.PHONY: verify-tu20
+verify-tu20:
+	bash scripts/verify-tu20.sh
+
+.PHONY: commit-tu20
+commit-tu20:
+	bash scripts/commit-tu20.sh
+
+.PHONY: push-tu20
+push-tu20:
+	bash scripts/push-tu20.sh
+
 .PHONY: verify-tu21
 verify-tu21:
 	bash scripts/verify-tu21.sh

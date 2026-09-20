@@ -33448,3 +33448,36 @@ BenchmarkTU21MigrationUnmarshal-32 4383 4607 4261 4129 4234 ns/op       1952 B/o
 ```
 
 Reproduce with `make benchmark-tu21` and `make verify-tu21`.
+
+## T-U20 Online Space Upgrade
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with five `-benchmem` samples.
+The map baseline was measured separately. Space benchmarks include the mutex,
+per-record version check, and map access; the one-record conversion benchmark
+also includes fresh-space setup so it is not presented as a steady-state cost.
+
+| Workload | Map baseline | Online space | Relative result | Memory |
+| --- | ---: | ---: | ---: | --- |
+| Current-format hot `Get` | 7.486 ns/op | 13.28 ns/op | 1.77x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Current-format hot `Set` | 11.11 ns/op | 23.97 ns/op | 2.16x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Target-format hot `Get` during upgrade | 7.486 ns/op control | 13.39 ns/op | 1.79x versus map | 0 B/op; 0 allocs/op |
+| One-record batch conversion | N/A | 281.7 ns/op | conversion plus setup | 448 B/op; 4 allocs/op |
+
+This capability is not a raw-map speed improvement. It trades steady-state
+overhead for compatible writes, lazy reads, bounded background conversion, and
+an explicit cutover. Use `VersionedMigrationManager` for durable migration
+coordination and keep tuple/SQL integration in the caller.
+
+Raw samples:
+
+```text
+BenchmarkTU20BeforeMapGet-32                  9.187 7.577 7.349 7.486 7.384 ns/op  0 B/op   0 allocs/op
+BenchmarkTU20BeforeMapSet-32                 11.11 11.57 10.39 11.38 10.78 ns/op  0 B/op   0 allocs/op
+BenchmarkTU20AfterSpaceGet-32                14.09 13.34 13.19 13.06 13.28 ns/op  0 B/op   0 allocs/op
+BenchmarkTU20AfterSpaceSet-32                23.04 23.97 24.11 24.37 23.10 ns/op  0 B/op   0 allocs/op
+BenchmarkTU20AfterSpaceTargetGet-32           13.39 13.19 13.77 12.46 13.52 ns/op  0 B/op   0 allocs/op
+BenchmarkTU20AfterOneRecordBatchConversion-32 300.7 281.7 279.1 282.4 274.8 ns/op 448 B/op 4 allocs/op
+```
+
+Reproduce with `make benchmark-tu20-before`, `make benchmark-tu20`, and
+`make verify-tu20`.
