@@ -549,6 +549,16 @@ allocation behavior and end-to-end performance within measurement noise. See
 | --- | --- | --- | --- |
 | ClickHouse | Preserve async-insert identity through dependent materialized views | Journal idempotency keys are carried by `SQLJournalProjectionRunner`, `ProjectionRun`, and `MaterializedViewStatus` | [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md), [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata) |
 
+## C250: Retry-Safe Async Insert Identities
+
+| Source | Adopted idea | Implementation | Evidence |
+| --- | --- | --- | --- |
+| ClickHouse | Keep a retry identity with an asynchronous insert so retries do not apply the same payload twice | Public opt-in `hatPipeline.AsyncInsertDeduplicator` keys a bounded `source`/`ID` ledger, detects payload conflicts, and can persist CRC-protected records with `AsyncInsertDedupFileStore` | [C250_ASYNC_INSERT_IDENTITIES.md](C250_ASYNC_INSERT_IDENTITIES.md), [BENCHMARK.md](BENCHMARK.md#c250-retry-safe-async-insert-identities) |
+
+C250 is distinct from C204: C204 propagates identity metadata through
+projections, while C250 performs the admission decision at the ingestion
+boundary. Existing unkeyed async callers remain unchanged.
+
 ## C205: Subquery Result Cache Controls
 
 | Source | Adopted idea | Implementation | Evidence |

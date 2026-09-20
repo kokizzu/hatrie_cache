@@ -54,6 +54,43 @@ Raw samples:
 ```text
 BenchmarkC249ExistingSubscriptionInspection-32 15406 15169 14305 14087 14084 ns/op 5160 B/op 53 allocs/op
 BenchmarkC249ReadOnlyOffsetInspection-32        9573  9556  9494  9479  9264 ns/op 3840 B/op 49 allocs/op
+
+## C250 Retry-Safe Async Insert Identities
+
+This benchmark measures the existing opt-in async-insert identity ledger. Five
+200 ms samples were collected on an AMD Ryzen 9 5950X, Linux amd64. It is an
+absolute measurement rather than a before/after comparison because the
+implementation predates this inspiration item.
+
+| Operation | Median time | Heap | Allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| In-memory `Accept` | 179.2 ns/op | 0 B/op | 0 allocs/op | Low-latency admission path |
+| Durable file `Append` | 1,083,536 ns/op | 829 B/op | 9 allocs/op | Includes fsync; durability cost |
+
+The durable append samples were `1,256,912`, `4,030,487`, `813,932`,
+`1,083,536`, and `871,817 ns/op`. The variance comes from filesystem flush
+latency. Use the in-memory ledger for process-local retry protection and the
+optional file store when the identity must survive a restart. The default
+async ingestion path is unchanged.
+
+Raw samples:
+
+```text
+BenchmarkAsyncInsertDeduplicatorMemoryAccept-32 6707677 171.4 ns/op 0 B/op 0 allocs/op
+BenchmarkAsyncInsertDeduplicatorMemoryAccept-32 6868004 183.1 ns/op 0 B/op 0 allocs/op
+BenchmarkAsyncInsertDeduplicatorMemoryAccept-32 5662489 179.2 ns/op 0 B/op 0 allocs/op
+BenchmarkAsyncInsertDeduplicatorMemoryAccept-32 6360006 178.6 ns/op 0 B/op 0 allocs/op
+BenchmarkAsyncInsertDeduplicatorMemoryAccept-32 7160595 186.4 ns/op 0 B/op 0 allocs/op
+BenchmarkAsyncInsertDedupFileAppend-32 1359 1256912 ns/op 828 B/op 9 allocs/op
+BenchmarkAsyncInsertDedupFileAppend-32 440 4030487 ns/op 823 B/op 9 allocs/op
+BenchmarkAsyncInsertDedupFileAppend-32 1729 813932 ns/op 830 B/op 9 allocs/op
+BenchmarkAsyncInsertDedupFileAppend-32 1459 1083536 ns/op 829 B/op 9 allocs/op
+BenchmarkAsyncInsertDedupFileAppend-32 1377 871817 ns/op 828 B/op 9 allocs/op
+```
+
+Reproduce with `make benchmark-chu01-async-dedup`; verify behavior with
+`make test-chu01-async-dedup`, `make race-chu01-async-dedup`, and
+`make vet-chu01-async-dedup`.
 ```
 
 Reproduce with `make benchmark-c249-offset-inspection` and run correctness,

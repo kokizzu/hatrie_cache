@@ -23296,6 +23296,21 @@ test-c249-offset-inspection:
 inspect-c249-scope:
 	bash scripts/inspect-c249-scope.sh
 
+inspect-c250-scope:
+	bash scripts/inspect-c250-scope.sh
+
+review-c250-async-dedup:
+	bash scripts/review-c250-async-dedup.sh
+
+stage-c250-async-dedup:
+	bash scripts/stage-c250-async-dedup.sh
+
+commit-c250-async-dedup:
+	bash scripts/commit-c250-async-dedup.sh
+
+push-c250-async-dedup:
+	bash scripts/push-c250-async-dedup.sh
+
 test-c249-offset-inspection-package:
 	bash scripts/test-c249-offset-inspection-package.sh
 
