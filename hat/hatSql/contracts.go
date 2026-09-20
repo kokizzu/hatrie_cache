@@ -1234,8 +1234,8 @@ type ColumnarMapSubcolumnSourceResolver interface {
 }
 
 // ColumnarJSONSubcolumnSourceResolver optionally supplies compact typed scalar
-// JSON paths. Returning available=false retains the existing map, columnar, or
-// row execution path without changing SQL semantics.
+// or packed complex JSON paths. Returning available=false retains the existing
+// map, columnar, or row execution path without changing SQL semantics.
 type ColumnarJSONSubcolumnSourceResolver interface {
 	ResolveSQLColumnarJSONSubcolumns(name, key string, fields []string, paths []ColumnarJSONSubcolumnRequest) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }

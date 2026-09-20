@@ -34362,3 +34362,66 @@ The exact hash table decides matches after the Bloom check, so false positives
 cannot change output. Using the existing single-source execution-row form keeps
 the materialized fast path lower in CPU, heap, and allocations for all three
 measured workloads.
+
+<a id="ch-u20-packed-complex-json-subcolumns"></a>
+## CH-U20 Packed Complex JSON Subcolumns
+
+Command: `make benchmark-chu20`. The benchmark uses 1,024 JSON documents and
+`JSON_QUERY(doc, '$.user')` on Linux `amd64` with an AMD Ryzen 9 5950X. The
+before case was measured before the packed representation was implemented; the
+after case compares the ordinary row-source control and the packed
+subcolumn query in the same five-sample run. Samples are `ns/op`, `B/op`, and
+`allocs/op`; packed samples also report logical `retained-B/op`.
+
+| Workload | Median | Improvement / tradeoff |
+| --- | ---: | --- |
+| Before: row-source JSON path | 2,652,937 ns; 2,017,338 B; 27,675 allocs | 1.00x |
+| After: row-source control | 2,803,184 ns; 2,017,396 B; 27,675 allocs | Control remained allocation-flat |
+| After: packed complex subcolumn | 2,069,889 ns; 1,214,147 B; 23,572 allocs | 1.35x faster than after-control; 1.66x lower heap; 1.17x fewer allocs |
+| One-time packed materialization | 3,163,960 ns; 1,720,778 B; 32,784 allocs | 53,166 retained bytes; amortizes across repeated reads |
+
+The benchmark deliberately keeps `JSON_VALUE` scalar-only. Complex paths are
+used for `JSON_QUERY` and `JSON_EXISTS`; malformed payloads and unavailable
+subcolumns retain the existing evaluator. The measured query CPU saving pays
+back the one-time materialization after roughly five repeated reads in this
+fixture.
+
+Raw before samples:
+
+```text
+2652937 2017395 27675
+2636349 2017339 27675
+2758025 2017338 27675
+2708386 2017337 27675
+2429736 2017338 27675
+```
+
+Raw after row-source control samples:
+
+```text
+2714384 2017405 27675
+2872790 2017396 27675
+2948845 2017406 27675
+2803184 2017394 27675
+2696188 2017342 27675
+```
+
+Raw after packed subcolumn samples:
+
+```text
+2034803 53166 1214146 23572
+2069889 53166 1214144 23572
+2088133 53166 1214147 23572
+1937702 53166 1214146 23572
+2104677 53166 1214148 23572
+```
+
+Raw one-time materialization samples:
+
+```text
+3163960 1720800 32785
+2994535 1720746 32784
+3171664 1720778 32784
+3339060 1720798 32785
+3116246 1720715 32784
+```

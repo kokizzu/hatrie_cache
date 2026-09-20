@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -10,7 +11,7 @@ import (
 // ErrColumnarJSONSubcolumnInvalid identifies malformed typed JSON path data.
 var ErrColumnarJSONSubcolumnInvalid = errors.New("hatriecache: invalid columnar JSON subcolumn")
 
-// ColumnarJSONSubcolumnKind identifies the compact scalar representation.
+// ColumnarJSONSubcolumnKind identifies the compact scalar or packed JSON representation.
 type ColumnarJSONSubcolumnKind uint8
 
 const (
@@ -18,6 +19,7 @@ const (
 	ColumnarJSONSubcolumnFloat64
 	ColumnarJSONSubcolumnString
 	ColumnarJSONSubcolumnBool
+	ColumnarJSONSubcolumnJSON
 )
 
 // ColumnarJSONSubcolumnKey identifies one canonical JSON path rooted at a
@@ -40,24 +42,27 @@ type ColumnarJSONSubcolumnValue struct {
 	Value   interface{}
 }
 
-// ColumnarJSONSubcolumn stores one scalar JSON path without retaining a JSON
-// object or per-row interface value. Present and Validity are bitmaps; a nil
-// Present bitmap means every path exists, while a nil Validity bitmap means
+// ColumnarJSONSubcolumn stores one JSON path without retaining a per-row
+// interface value. Scalar paths use compact typed payloads. Complex paths use
+// one packed JSON buffer and row offsets; Present and Validity are bitmaps. A
+// nil Present bitmap means every path exists, while a nil Validity bitmap means
 // every existing path is non-NULL.
 type ColumnarJSONSubcolumn struct {
-	Kind     ColumnarJSONSubcolumnKind
-	Rows     int
-	Int64    []int64
-	Float64  []float64
-	Strings  []string
-	BoolBits []byte
-	Present  []byte
-	Validity []byte
+	Kind        ColumnarJSONSubcolumnKind
+	Rows        int
+	Int64       []int64
+	Float64     []float64
+	Strings     []string
+	BoolBits    []byte
+	JSONData    []byte
+	JSONOffsets []uint32
+	Present     []byte
+	Validity    []byte
 }
 
-// NewColumnarJSONSubcolumn infers a compact scalar kind from the non-NULL
-// values. Integer and floating-point values may be mixed and are promoted to
-// float64; all other mixed kinds are rejected.
+// NewColumnarJSONSubcolumn infers a compact scalar or complex JSON kind from
+// the non-NULL values. Integer and floating-point values may be mixed and are
+// promoted to float64; all other mixed kinds are rejected.
 func NewColumnarJSONSubcolumn(values []ColumnarJSONSubcolumnValue) (ColumnarJSONSubcolumn, error) {
 	kind, err := inferColumnarJSONSubcolumnKind(values)
 	if err != nil {
@@ -66,9 +71,9 @@ func NewColumnarJSONSubcolumn(values []ColumnarJSONSubcolumnValue) (ColumnarJSON
 	return NewColumnarJSONSubcolumnOfKind(kind, values)
 }
 
-// NewColumnarJSONSubcolumnOfKind builds a compact scalar path with an
-// explicit kind. It supports all-missing and all-NULL paths when the source
-// schema already knows the intended type.
+// NewColumnarJSONSubcolumnOfKind builds a compact path with an explicit kind.
+// It supports all-missing and all-NULL paths when the source schema already
+// knows the intended type.
 func NewColumnarJSONSubcolumnOfKind(kind ColumnarJSONSubcolumnKind, values []ColumnarJSONSubcolumnValue) (ColumnarJSONSubcolumn, error) {
 	if !validColumnarJSONSubcolumnKind(kind) {
 		return ColumnarJSONSubcolumn{}, fmt.Errorf("%w: unknown kind %d", ErrColumnarJSONSubcolumnInvalid, kind)
@@ -90,22 +95,33 @@ func NewColumnarJSONSubcolumnOfKind(kind ColumnarJSONSubcolumnKind, values []Col
 			column.Strings = make([]string, len(values))
 		case ColumnarJSONSubcolumnBool:
 			column.BoolBits = make([]byte, bitmapBytes)
+		case ColumnarJSONSubcolumnJSON:
+			column.JSONOffsets = make([]uint32, len(values)+1)
 		}
 	}
 	allPresent, allValid := true, true
 	for row, entry := range values {
 		if !entry.Present {
 			allPresent, allValid = false, false
+			if kind == ColumnarJSONSubcolumnJSON {
+				column.JSONOffsets[row+1] = uint32(len(column.JSONData))
+			}
 			continue
 		}
 		column.Present[row>>3] |= byte(1 << uint(row&7))
 		if entry.Value == nil {
 			allValid = false
+			if kind == ColumnarJSONSubcolumnJSON {
+				column.JSONOffsets[row+1] = uint32(len(column.JSONData))
+			}
 			continue
 		}
 		column.Validity[row>>3] |= byte(1 << uint(row&7))
 		if err := column.store(row, entry.Value); err != nil {
 			return ColumnarJSONSubcolumn{}, err
+		}
+		if kind == ColumnarJSONSubcolumnJSON {
+			column.JSONOffsets[row+1] = uint32(len(column.JSONData))
 		}
 	}
 	if allPresent {
@@ -120,10 +136,9 @@ func NewColumnarJSONSubcolumnOfKind(kind ColumnarJSONSubcolumnKind, values []Col
 	return column, nil
 }
 
-// MaterializeJSONSubcolumn extracts one scalar path from JSON documents and
-// stores the result in the compact typed representation. Objects and arrays
-// are rejected because this API is for scalar subcolumns; JSON_QUERY over
-// those values retains the ordinary JSON/map path.
+// MaterializeJSONSubcolumn extracts one path from JSON documents and stores
+// the result in a compact typed representation. Scalar paths use typed
+// payloads; objects and arrays use the packed JSON representation.
 func MaterializeJSONSubcolumn(path string, documents []interface{}) (ColumnarJSONSubcolumn, error) {
 	canonical, err := NormalizeJSONPath(strings.TrimSpace(path))
 	if err != nil {
@@ -155,20 +170,43 @@ func (column ColumnarJSONSubcolumn) Validate(rowCount int) error {
 	}
 	switch column.Kind {
 	case ColumnarJSONSubcolumnInt64:
-		if len(column.Int64) != rowCount || len(column.Float64) != 0 || len(column.Strings) != 0 || len(column.BoolBits) != 0 {
+		if len(column.Int64) != rowCount || len(column.Float64) != 0 || len(column.Strings) != 0 || len(column.BoolBits) != 0 || len(column.JSONData) != 0 || len(column.JSONOffsets) != 0 {
 			return fmt.Errorf("%w: invalid int64 payload", ErrColumnarJSONSubcolumnInvalid)
 		}
 	case ColumnarJSONSubcolumnFloat64:
-		if len(column.Float64) != rowCount || len(column.Int64) != 0 || len(column.Strings) != 0 || len(column.BoolBits) != 0 {
+		if len(column.Float64) != rowCount || len(column.Int64) != 0 || len(column.Strings) != 0 || len(column.BoolBits) != 0 || len(column.JSONData) != 0 || len(column.JSONOffsets) != 0 {
 			return fmt.Errorf("%w: invalid float64 payload", ErrColumnarJSONSubcolumnInvalid)
 		}
 	case ColumnarJSONSubcolumnString:
-		if len(column.Strings) != rowCount || len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.BoolBits) != 0 {
+		if len(column.Strings) != rowCount || len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.BoolBits) != 0 || len(column.JSONData) != 0 || len(column.JSONOffsets) != 0 {
 			return fmt.Errorf("%w: invalid string payload", ErrColumnarJSONSubcolumnInvalid)
 		}
 	case ColumnarJSONSubcolumnBool:
-		if len(column.BoolBits) != bitmapBytes || len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.Strings) != 0 {
+		if len(column.BoolBits) != bitmapBytes || len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.Strings) != 0 || len(column.JSONData) != 0 || len(column.JSONOffsets) != 0 {
 			return fmt.Errorf("%w: invalid bool payload", ErrColumnarJSONSubcolumnInvalid)
+		}
+	case ColumnarJSONSubcolumnJSON:
+		if len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.Strings) != 0 || len(column.BoolBits) != 0 {
+			return fmt.Errorf("%w: invalid JSON payload", ErrColumnarJSONSubcolumnInvalid)
+		}
+		if rowCount == 0 {
+			if len(column.JSONOffsets) != 0 && len(column.JSONOffsets) != 1 {
+				return fmt.Errorf("%w: invalid JSON offsets", ErrColumnarJSONSubcolumnInvalid)
+			}
+			break
+		}
+		if len(column.JSONOffsets) != rowCount+1 {
+			return fmt.Errorf("%w: JSON offsets=%d rows=%d", ErrColumnarJSONSubcolumnInvalid, len(column.JSONOffsets), rowCount)
+		}
+		if column.JSONOffsets[0] != 0 {
+			return fmt.Errorf("%w: JSON offsets must start at zero", ErrColumnarJSONSubcolumnInvalid)
+		}
+		previous := uint32(0)
+		for _, offset := range column.JSONOffsets {
+			if offset < previous || uint64(offset) > uint64(len(column.JSONData)) {
+				return fmt.Errorf("%w: invalid JSON offset", ErrColumnarJSONSubcolumnInvalid)
+			}
+			previous = offset
 		}
 	default:
 		return fmt.Errorf("%w: unknown kind %d", ErrColumnarJSONSubcolumnInvalid, column.Kind)
@@ -176,8 +214,9 @@ func (column ColumnarJSONSubcolumn) Validate(rowCount int) error {
 	return nil
 }
 
-// Value returns one scalar value and whether its JSON path exists. An
-// existing JSON null returns (nil, true); a missing path returns (nil, false).
+// Value returns one value and whether its JSON path exists. An existing JSON
+// null returns (nil, true); a missing path returns (nil, false). Complex JSON
+// values are returned as read-only json.RawMessage views into JSONData.
 func (column ColumnarJSONSubcolumn) Value(row int) (interface{}, bool) {
 	value, present, valid := column.lookup(row)
 	if !present {
@@ -223,6 +262,15 @@ func (column ColumnarJSONSubcolumn) lookup(row int) (interface{}, bool, bool) {
 			return nil, false, false
 		}
 		return column.BoolBits[bitmapIndex]&bitmapMask != 0, true, true
+	case ColumnarJSONSubcolumnJSON:
+		if row+1 >= len(column.JSONOffsets) {
+			return nil, false, false
+		}
+		start, end := column.JSONOffsets[row], column.JSONOffsets[row+1]
+		if end < start || uint64(end) > uint64(len(column.JSONData)) {
+			return nil, false, false
+		}
+		return json.RawMessage(column.JSONData[start:end]), true, true
 	default:
 		return nil, false, false
 	}
@@ -256,6 +304,18 @@ func (column *ColumnarJSONSubcolumn) store(row int, value interface{}) error {
 		if boolean {
 			column.BoolBits[row>>3] |= byte(1 << uint(row&7))
 		}
+	case ColumnarJSONSubcolumnJSON:
+		if !columnarJSONSubcolumnIsJSON(value) {
+			return fmt.Errorf("%w: value at row %d is not a complex JSON value", ErrColumnarJSONSubcolumnInvalid, row)
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("%w: value at row %d is not JSON: %v", ErrColumnarJSONSubcolumnInvalid, row, err)
+		}
+		if uint64(len(column.JSONData)) > uint64(math.MaxUint32)-uint64(len(encoded)) {
+			return fmt.Errorf("%w: JSON payload is too large", ErrColumnarJSONSubcolumnInvalid)
+		}
+		column.JSONData = append(column.JSONData, encoded...)
 	default:
 		return fmt.Errorf("%w: unknown kind %d", ErrColumnarJSONSubcolumnInvalid, column.Kind)
 	}
@@ -263,7 +323,7 @@ func (column *ColumnarJSONSubcolumn) store(row int, value interface{}) error {
 }
 
 func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (ColumnarJSONSubcolumnKind, error) {
-	hasInteger, hasFloat, hasString, hasBool := false, false, false, false
+	hasInteger, hasFloat, hasString, hasBool, hasJSON := false, false, false, false, false
 	for _, entry := range values {
 		if !entry.Present || entry.Value == nil {
 			continue
@@ -277,6 +337,8 @@ func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (Column
 			hasString = true
 		case func() bool { _, ok := entry.Value.(bool); return ok }():
 			hasBool = true
+		case columnarJSONSubcolumnIsJSON(entry.Value):
+			hasJSON = true
 		default:
 			return 0, fmt.Errorf("%w: unsupported scalar type %T", ErrColumnarJSONSubcolumnInvalid, entry.Value)
 		}
@@ -291,6 +353,8 @@ func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (Column
 			return ColumnarJSONSubcolumnFloat64, nil
 		}
 		return ColumnarJSONSubcolumnInt64, nil
+	case hasJSON && !hasInteger && !hasFloat && !hasString && !hasBool:
+		return ColumnarJSONSubcolumnJSON, nil
 	case !hasInteger && !hasFloat && !hasString && !hasBool:
 		return 0, fmt.Errorf("%w: kind cannot be inferred from empty or NULL values", ErrColumnarJSONSubcolumnInvalid)
 	default:
@@ -299,7 +363,16 @@ func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (Column
 }
 
 func validColumnarJSONSubcolumnKind(kind ColumnarJSONSubcolumnKind) bool {
-	return kind >= ColumnarJSONSubcolumnInt64 && kind <= ColumnarJSONSubcolumnBool
+	return kind >= ColumnarJSONSubcolumnInt64 && kind <= ColumnarJSONSubcolumnJSON
+}
+
+func columnarJSONSubcolumnIsJSON(value interface{}) bool {
+	switch value.(type) {
+	case map[string]interface{}, SQLRow, []interface{}:
+		return true
+	default:
+		return false
+	}
 }
 
 func columnarJSONSubcolumnIsInteger(value interface{}) bool {

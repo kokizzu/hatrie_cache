@@ -23097,3 +23097,22 @@ benchmark-chu14-runtime-filter:
 
 test-chu14-runtime-filter:
 	@bash scripts/test-chu14-runtime-filter.sh
+
+.PHONY: test-chu20-packed-json benchmark-chu20-packed-json
+test-chu20-packed-json:
+	@bash scripts/test-chu20-packed-json.sh
+
+benchmark-chu20-packed-json:
+	@bash scripts/benchmark-chu20-packed-json.sh
+
+.PHONY: stage-chu20-packed-complex-json
+stage-chu20-packed-complex-json:
+	@bash scripts/stage-chu20-packed-complex-json.sh
+
+.PHONY: commit-chu20-packed-complex-json
+commit-chu20-packed-complex-json:
+	@bash scripts/commit-chu20-packed-complex-json.sh
+
+.PHONY: push-chu20-packed-complex-json
+push-chu20-packed-complex-json:
+	@bash scripts/push-chu20-packed-complex-json.sh

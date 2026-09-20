@@ -63,8 +63,8 @@ type JSONSubcolumnAutoMaterializerStats struct {
 	RetainedBytes uint64
 }
 
-// JSONSubcolumnAutoMaterializer promotes repeatedly observed scalar JSON paths
-// to compact immutable columns. It retains only promoted columns and bounded
+// JSONSubcolumnAutoMaterializer promotes repeatedly observed JSON paths to
+// compact immutable columns. It retains only promoted columns and bounded
 // metadata; source documents are used during Observe and then discarded.
 type JSONSubcolumnAutoMaterializer struct {
 	mu              sync.RWMutex
@@ -568,6 +568,8 @@ func columnarJSONSubcolumnRetainedBytes(column ColumnarJSONSubcolumn) uint64 {
 		add(uint64(len(value)))
 	}
 	add(uint64(len(column.BoolBits)))
+	add(uint64(len(column.JSONData)))
+	add(uint64(len(column.JSONOffsets)) * uint64(unsafe.Sizeof(uint32(0))))
 	add(uint64(len(column.Present)))
 	add(uint64(len(column.Validity)))
 	return retained

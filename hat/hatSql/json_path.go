@@ -292,6 +292,14 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 		if !present {
 			return nil
 		}
+		if _, complex := value.(json.RawMessage); complex {
+			if expr.name == "JSON_VALUE" {
+				return sqlEvalError{err: fmt.Errorf("JSON_VALUE requires a scalar path result; use JSON_QUERY"), token: expr.token}
+			}
+			if expr.name == "JSON_QUERY" {
+				return sqlJSONMaterialize(value)
+			}
+		}
 		return value
 	}
 	input := evalSQLExpr(expr.args[0], group, row)
@@ -347,6 +355,13 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 }
 
 func sqlJSONMaterialize(value interface{}) interface{} {
+	if raw, ok := value.(json.RawMessage); ok {
+		var decoded interface{}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return sqlEvalError{err: fmt.Errorf("JSON_QUERY result is invalid JSON: %w", err)}
+		}
+		return decoded
+	}
 	if materializer, ok := value.(sqlJSONMaterializer); ok {
 		return materializer.sqlJSONMaterialize()
 	}
