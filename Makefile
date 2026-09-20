@@ -22254,3 +22254,38 @@ commit-mu031-transactional-aggregate:
 
 push-mu031-transactional-aggregate:
 	bash scripts/push-mu031-transactional-aggregate.sh
+.PHONY: test-tu038-conflict-introspection
+test-tu038-conflict-introspection:
+	bash scripts/test-tu038-conflict-introspection.sh
+
+.PHONY: format-tu038-conflict-introspection
+format-tu038-conflict-introspection:
+	bash scripts/format-tu038-conflict-introspection.sh
+
+.PHONY: benchmark-tu038-conflict-introspection
+benchmark-tu038-conflict-introspection:
+	bash scripts/benchmark-tu038-conflict-introspection.sh
+
+.PHONY: race-tu038-conflict-introspection vet-tu038-conflict-introspection test-tu038-package
+race-tu038-conflict-introspection:
+	bash scripts/race-tu038-conflict-introspection.sh
+
+vet-tu038-conflict-introspection:
+	bash scripts/vet-tu038-conflict-introspection.sh
+
+test-tu038-package:
+	bash scripts/test-tu038-package.sh
+
+.PHONY: review-tu038-conflict-introspection
+review-tu038-conflict-introspection:
+	bash scripts/review-tu038-conflict-introspection.sh
+
+.PHONY: stage-tu038-conflict-introspection commit-tu038-conflict-introspection push-tu038-conflict-introspection
+stage-tu038-conflict-introspection:
+	bash scripts/stage-tu038-conflict-introspection.sh
+
+commit-tu038-conflict-introspection:
+	bash scripts/commit-tu038-conflict-introspection.sh
+
+push-tu038-conflict-introspection:
+	bash scripts/push-tu038-conflict-introspection.sh

@@ -32772,3 +32772,37 @@ BenchmarkMU031TransactionalAggregate/transaction-batch-32  5493690  227.6 ns/op 
 The transaction is deliberately opt-in. It improves failure correctness and
 panic isolation, not ordinary aggregate throughput; the measured overhead is
 not present in existing non-transactional aggregate execution.
+
+## T-U38 Conflict Introspection Stream
+
+This paired benchmark measures the unchanged conflict resolver against the
+opt-in HMAC-redacted, bounded conflict stream. It uses one conflict key, a
+4,096-event ring, and five two-second samples on an AMD Ryzen 9 5950X,
+Linux/amd64.
+
+Command: `make benchmark-tu038-conflict-introspection`
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Resolve` | 15.44 | 0 | 0 | baseline |
+| `ResolveWithKey` + introspection | 265.8 | 40 | 2 | 17.2x slower |
+
+Raw samples:
+
+```text
+BenchmarkTU038ConflictResolutionBaseline-32          16.15 ns/op   0 B/op   0 allocs/op
+BenchmarkTU038ConflictResolutionBaseline-32          15.59 ns/op   0 B/op   0 allocs/op
+BenchmarkTU038ConflictResolutionBaseline-32          14.93 ns/op   0 B/op   0 allocs/op
+BenchmarkTU038ConflictResolutionBaseline-32          15.12 ns/op   0 B/op   0 allocs/op
+BenchmarkTU038ConflictResolutionBaseline-32          15.44 ns/op   0 B/op   0 allocs/op
+BenchmarkTU038ConflictResolutionWithIntrospection-32 257.9 ns/op  40 B/op   2 allocs/op
+BenchmarkTU038ConflictResolutionWithIntrospection-32 265.8 ns/op  40 B/op   2 allocs/op
+BenchmarkTU038ConflictResolutionWithIntrospection-32 267.5 ns/op  40 B/op   2 allocs/op
+BenchmarkTU038ConflictResolutionWithIntrospection-32 268.4 ns/op  40 B/op   2 allocs/op
+BenchmarkTU038ConflictResolutionWithIntrospection-32 253.0 ns/op  40 B/op   2 allocs/op
+```
+
+The diagnostic stream is intentionally opt-in: existing `Resolve` callers pay
+no additional CPU, memory, or allocation cost. The stream trades 17.2x local
+resolution CPU and two small allocations for bounded redacted conflict
+visibility and CRC-protected recovery snapshots.

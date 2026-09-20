@@ -112,13 +112,37 @@ func (registry *ConflictPolicyRegistry) Resolve(space string, left, right Confli
 	if space == "" {
 		return ConflictVersion{}, ErrConflictPolicySpaceRequired
 	}
+	policy := registry.policyFor(space)
+	return resolveConflictWithPolicy(policy, left, right)
+}
+
+// ResolveWithKey applies the configured policy and, when log is non-nil,
+// records a redacted conflict event. Logging is best effort and never changes
+// the resolution error returned to the caller.
+func (registry *ConflictPolicyRegistry) ResolveWithKey(log *ConflictIntrospectionLog, space, key string, left, right ConflictVersion) (ConflictVersion, error) {
+	if registry == nil {
+		return ConflictVersion{}, ErrConflictPolicyRegistryNil
+	}
+	space = strings.TrimSpace(space)
+	if space == "" {
+		return ConflictVersion{}, ErrConflictPolicySpaceRequired
+	}
+	policy := registry.policyFor(space)
+	winner, resolveErr := resolveConflictWithPolicy(policy, left, right)
+	if log != nil {
+		log.recordResolution(space, key, left, right, policy.Mode, winner, resolveErr)
+	}
+	return winner, resolveErr
+}
+
+func (registry *ConflictPolicyRegistry) policyFor(space string) ConflictPolicy {
 	registry.mu.RLock()
+	defer registry.mu.RUnlock()
 	policy, exists := registry.spaceOverrides[space]
 	if !exists {
 		policy = registry.defaultPolicy
 	}
-	registry.mu.RUnlock()
-	return resolveConflictWithPolicy(policy, left, right)
+	return policy
 }
 
 func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
