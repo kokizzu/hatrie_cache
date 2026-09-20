@@ -33342,3 +33342,47 @@ BenchmarkTU22UniqueConstraintSetInsert-32 122506 123435 124172 122349 122468 ns/
 ```
 
 Reproduce with `make benchmark-tu22`.
+
+## T-U17 Selectable Vinyl-Style LSM Table
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with three `-benchmem` samples.
+The hot-upsert and point-read controls use identical workloads. The LSM table
+is opt-in; the default map remains the low-latency point-read path.
+
+| Workload | Map control | LSM table | Relative result | Memory |
+| --- | ---: | ---: | ---: | --- |
+| Hot-key upsert | 44.46 ns/op | 57.60 ns/op | 1.30x slower | 48 -> 48 B/op; 1 -> 1 alloc/op |
+| Point lookup after compaction | 10.05 ns/op | 369.9 ns/op | 36.8x slower | 0 -> 28-29 B/op; 0 -> 2 allocs/op |
+| Eight-run compaction, 16,000 records | N/A | 13.431 ms | LSM maintenance cost | 9.13 MB/op; 32,218 allocs/op |
+| Snapshot of 10,000 records | N/A | 104,376 wire bytes | 10.4 wire bytes/record | 213 KB/op; 2-3 allocs/op |
+
+The encoded snapshot is compact because keys are sorted and front-coded. The
+reported `ImmutableBytes`/wire size is not a full retained-heap measurement;
+sparse restart keys and Go object headers add heap overhead. This feature is
+therefore suitable for write-batched or snapshot-oriented workloads, not as a
+general replacement for the default map.
+
+Raw samples:
+
+```text
+BenchmarkTU17BeforeMapHotUpsert-32  27508629  44.46 ns/op  48 B/op  1 allocs/op
+BenchmarkTU17BeforeMapHotUpsert-32  26206891  44.04 ns/op  48 B/op  1 allocs/op
+BenchmarkTU17BeforeMapHotUpsert-32  27040227  44.82 ns/op  48 B/op  1 allocs/op
+BenchmarkTU17AfterLSMPut-32        20589500  59.22 ns/op  48 B/op  1 allocs/op
+BenchmarkTU17AfterLSMPut-32        21067998  56.86 ns/op  48 B/op  1 allocs/op
+BenchmarkTU17AfterLSMPut-32        21104574  57.60 ns/op  48 B/op  1 allocs/op
+BenchmarkTU17BeforeMapGet-32       124137127 10.05 ns/op  0 B/op   0 allocs/op
+BenchmarkTU17BeforeMapGet-32       96901826 10.81 ns/op  0 B/op   0 allocs/op
+BenchmarkTU17BeforeMapGet-32      115562859 10.01 ns/op  0 B/op   0 allocs/op
+BenchmarkTU17AfterLSMGet-32         3145228 377.9 ns/op  28 B/op  2 allocs/op
+BenchmarkTU17AfterLSMGet-32         2846707 369.9 ns/op  29 B/op  2 allocs/op
+BenchmarkTU17AfterLSMGet-32         3048510 356.5 ns/op  28 B/op  2 allocs/op
+BenchmarkTU17AfterLSMCompaction-32       86 13.277864 ms/op 9134480 B/op 32218 allocs/op
+BenchmarkTU17AfterLSMCompaction-32       97 13.431058 ms/op 9134478 B/op 32218 allocs/op
+BenchmarkTU17AfterLSMCompaction-32       99 13.499327 ms/op 9134488 B/op 32218 allocs/op
+BenchmarkTU17AfterLSMSnapshot-32      30564 45.908 us/op 104376 snapshot-bytes 213134 B/op 2 allocs/op
+BenchmarkTU17AfterLSMSnapshot-32      24452 45.322 us/op 104376 snapshot-bytes 213170 B/op 3 allocs/op
+BenchmarkTU17AfterLSMSnapshot-32      28492 47.374 us/op 104376 snapshot-bytes 213144 B/op 3 allocs/op
+```
+
+Reproduce with `make benchmark-tu17` and `make verify-tu17`.

@@ -22309,6 +22309,30 @@ benchmark-tu19-tuple-journal:
 benchmark-tu23:
 	bash scripts/benchmark-tu23.sh
 
+.PHONY: benchmark-tu17-before
+benchmark-tu17-before:
+	bash scripts/benchmark-tu17-before.sh
+
+.PHONY: test-tu17
+test-tu17:
+	bash scripts/test-tu17.sh
+
+.PHONY: benchmark-tu17
+benchmark-tu17:
+	bash scripts/benchmark-tu17.sh
+
+.PHONY: verify-tu17
+verify-tu17:
+	bash scripts/verify-tu17.sh
+
+.PHONY: format-tu17
+format-tu17:
+	bash scripts/format-tu17.sh
+
+.PHONY: commit-tu17
+commit-tu17:
+	bash scripts/commit-tu17.sh
+
 verify-tu23:
 	bash scripts/verify-tu23.sh
 benchmark-tu27:
