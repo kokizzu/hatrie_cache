@@ -875,3 +875,16 @@ unchanged. The two-update benchmark is `8.26x` to `8.36x` faster, uses about
 `15.2x` fewer transient bytes, and uses `811x` to `1,390x` fewer allocations.
 See [INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065ac-batched-mutable-range-boundary-fast-path).
+
+## M065ad: Batched Mutable RANGE NTH_VALUE Fast Path
+
+Extended the Materialize-style mutable arrangement optimization to batches of
+`NTH_VALUE` updates that retain one partition and each row's order position.
+The implementation validates every replacement, evaluates the peer-aware
+frame once, and publishes only changed differentials. Structural,
+cross-partition, duplicate-key, and mixed-operation batches retain the
+existing affected-partition rebuild path; the append-only constructor remains
+unchanged. The two-update benchmark is `8.17x` faster, uses `15.7x` fewer
+transient bytes, and uses `835x` fewer allocations. See
+[INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065ad-batched-mutable-range-nth_value-fast-path).

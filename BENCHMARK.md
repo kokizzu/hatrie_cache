@@ -33910,3 +33910,44 @@ cross-partition batches, and structural updates retain the existing
 correctness-first rebuild path. Focused correctness, race, and vet checks use
 the M065ac feature workflow; the isolated feature worktree's unrelated
 typed-table checkpoint tests still require the parallel typed-table changes.
+
+## M065ad Batched Mutable RANGE NTH_VALUE Fast Path
+
+Command: `make benchmark-m065ad-mutable-range-nth-value-batch`.
+
+This compares a two-row same-position `NTH_VALUE(64)` mutation batch on one
+2,000-row partition with a preceding bound of 256. The baseline is the parent
+M065ac implementation, which rebuilt the affected partition for the batch.
+Five samples used `-benchtime=100x` on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Full affected-partition batch rebuild | 10,552,957 ns/op | 6,111,239 B/op | 70,113 allocs/op | 1.00x |
+| Batched same-position NTH_VALUE fast path | 1,290,925 ns/op | 389,809 B/op | 84 allocs/op | 8.17x CPU, 15.7x lower bytes, 835x fewer allocs |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+10743070 6111437 70112
+10552957 6111223 70112
+10526431 6111239 70114
+10421407 6111235 70114
+10604592 6111280 70113
+```
+
+Raw optimized samples:
+
+```text
+1277187 389804 84
+1290925 389811 84
+1344679 389826 85
+1249958 389799 83
+1317291 389809 84
+```
+
+The fast path is limited to all-update batches that retain one partition and
+each row's order position. Structural, cross-partition, duplicate-key, and
+mixed-operation batches retain the existing affected-partition rebuild path.
+Focused correctness, race, and vet checks use the M065ad workflow; the
+isolated feature worktree's unrelated typed-table checkpoint tests still
+require the parallel typed-table changes.

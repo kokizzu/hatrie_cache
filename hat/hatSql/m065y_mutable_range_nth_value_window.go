@@ -76,8 +76,8 @@ func (window *MutableIncrementalRangeNthValueWindow) Apply(mutations []Increment
 	if len(mutations) == 0 {
 		return nil, nil
 	}
-	if len(mutations) == 1 && mutations[0].Operation == IncrementalRangeNthValueWindowUpdate {
-		changes, handled, err := window.applyStableMutableIncrementalRangeNthValueWindowUpdate(mutations[0])
+	if len(mutations) > 0 {
+		changes, handled, err := window.applyStableMutableIncrementalRangeNthValueWindowUpdates(mutations)
 		if handled || err != nil {
 			return changes, err
 		}
@@ -206,32 +206,52 @@ func (window *MutableIncrementalRangeNthValueWindow) prepareMutableIncrementalRa
 	}, nil
 }
 
-func (window *MutableIncrementalRangeNthValueWindow) applyStableMutableIncrementalRangeNthValueWindowUpdate(mutation IncrementalRangeNthValueWindowMutation) ([]DifferentialRow, bool, error) {
-	if strings.TrimSpace(mutation.Key) == "" {
-		return nil, true, ErrMutableIncrementalRangeNthValueWindowKeyRequired
-	}
-	oldEntry, exists := window.entries[mutation.Key]
-	if !exists {
-		return nil, true, ErrMutableIncrementalRangeNthValueWindowMissingKey
-	}
-	newEntry, err := window.prepareMutableIncrementalRangeNthValueWindowEntry(mutation.Row)
-	if err != nil {
-		return nil, true, err
-	}
-	if newEntry.key != mutation.Key {
-		return nil, true, ErrMutableIncrementalRangeNthValueWindowKeyMismatch
-	}
-	if oldEntry.partition != newEntry.partition || oldEntry.order != newEntry.order {
+func (window *MutableIncrementalRangeNthValueWindow) applyStableMutableIncrementalRangeNthValueWindowUpdates(mutations []IncrementalRangeNthValueWindowMutation) ([]DifferentialRow, bool, error) {
+	if len(mutations) == 0 {
 		return nil, false, nil
+	}
+	prepared := make(map[string]mutableIncrementalRangeNthValueWindowEntry, len(mutations))
+	partition := ""
+	partitionSet := false
+	for _, mutation := range mutations {
+		if mutation.Operation != IncrementalRangeNthValueWindowUpdate {
+			return nil, false, nil
+		}
+		if strings.TrimSpace(mutation.Key) == "" {
+			return nil, true, ErrMutableIncrementalRangeNthValueWindowKeyRequired
+		}
+		oldEntry, exists := window.entries[mutation.Key]
+		if !exists {
+			return nil, true, ErrMutableIncrementalRangeNthValueWindowMissingKey
+		}
+		newEntry, err := window.prepareMutableIncrementalRangeNthValueWindowEntry(mutation.Row)
+		if err != nil {
+			return nil, true, err
+		}
+		if newEntry.key != mutation.Key {
+			return nil, true, ErrMutableIncrementalRangeNthValueWindowKeyMismatch
+		}
+		if oldEntry.partition != newEntry.partition || oldEntry.order != newEntry.order {
+			return nil, false, nil
+		}
+		if partitionSet && partition != oldEntry.partition {
+			return nil, false, nil
+		}
+		if _, exists := prepared[mutation.Key]; exists {
+			return nil, false, nil
+		}
+		partition = oldEntry.partition
+		partitionSet = true
+		prepared[mutation.Key] = newEntry
 	}
 
 	entries := make([]mutableIncrementalRangeNthValueWindowEntry, 0)
 	for _, entry := range window.entries {
-		if entry.partition != oldEntry.partition {
+		if entry.partition != partition {
 			continue
 		}
-		if entry.key == mutation.Key {
-			entry = newEntry
+		if replacement, ok := prepared[entry.key]; ok {
+			entry = replacement
 		}
 		entries = append(entries, entry)
 	}
@@ -245,15 +265,17 @@ func (window *MutableIncrementalRangeNthValueWindow) applyStableMutableIncrement
 		return entries[left].key < entries[right].key
 	})
 
-	updatedOutputs, changes := window.stableMutableIncrementalRangeNthValueWindowOutputs(entries, mutation.Key)
-	window.entries[mutation.Key] = newEntry
+	updatedOutputs, changes := window.stableMutableIncrementalRangeNthValueWindowOutputs(entries, prepared)
+	for key, entry := range prepared {
+		window.entries[key] = entry
+	}
 	for key, row := range updatedOutputs {
 		window.outputs[key] = row
 	}
 	return changes, true, nil
 }
 
-func (window *MutableIncrementalRangeNthValueWindow) stableMutableIncrementalRangeNthValueWindowOutputs(entries []mutableIncrementalRangeNthValueWindowEntry, updatedKey string) (map[string]Row, []DifferentialRow) {
+func (window *MutableIncrementalRangeNthValueWindow) stableMutableIncrementalRangeNthValueWindowOutputs(entries []mutableIncrementalRangeNthValueWindowEntry, updatedKeys map[string]mutableIncrementalRangeNthValueWindowEntry) (map[string]Row, []DifferentialRow) {
 	updatedOutputs := make(map[string]Row)
 	changes := make([]DifferentialRow, 0)
 	frameStart := 0
@@ -280,16 +302,16 @@ func (window *MutableIncrementalRangeNthValueWindow) stableMutableIncrementalRan
 			value = entries[valueIndex].value
 		}
 		for peerIndex := index; peerIndex <= peerEnd; peerIndex++ {
-			window.appendStableMutableIncrementalRangeNthValueWindowOutput(entries[peerIndex], value, updatedKey, updatedOutputs, &changes)
+			window.appendStableMutableIncrementalRangeNthValueWindowOutput(entries[peerIndex], value, updatedKeys, updatedOutputs, &changes)
 		}
 		index = peerEnd + 1
 	}
 	return updatedOutputs, changes
 }
 
-func (window *MutableIncrementalRangeNthValueWindow) appendStableMutableIncrementalRangeNthValueWindowOutput(entry mutableIncrementalRangeNthValueWindowEntry, value interface{}, updatedKey string, updatedOutputs map[string]Row, changes *[]DifferentialRow) {
+func (window *MutableIncrementalRangeNthValueWindow) appendStableMutableIncrementalRangeNthValueWindowOutput(entry mutableIncrementalRangeNthValueWindowEntry, value interface{}, updatedKeys map[string]mutableIncrementalRangeNthValueWindowEntry, updatedOutputs map[string]Row, changes *[]DifferentialRow) {
 	oldRow, oldOK := window.outputs[entry.key]
-	if entry.key != updatedKey && oldOK {
+	if _, updated := updatedKeys[entry.key]; !updated && oldOK {
 		oldValue, valueOK := oldRow[window.definition.OutputColumn]
 		if valueOK && reflect.DeepEqual(oldValue, value) {
 			return

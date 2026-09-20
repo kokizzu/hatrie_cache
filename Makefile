@@ -22848,6 +22848,38 @@ commit-m065ab-mutable-range-sum-batch:
 push-m065ab-mutable-range-sum-batch:
 	bash ./scripts/push-m065ab-mutable-range-sum-batch.sh
 
+.PHONY: test-m065ad-mutable-range-nth-value-batch
+test-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/test-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: format-m065ad-mutable-range-nth-value-batch
+format-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/format-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: benchmark-m065ad-mutable-range-nth-value-batch
+benchmark-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/benchmark-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: verify-m065ad-mutable-range-nth-value-batch
+verify-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/verify-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: review-m065ad-mutable-range-nth-value-batch
+review-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/review-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: stage-m065ad-mutable-range-nth-value-batch
+stage-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/stage-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: commit-m065ad-mutable-range-nth-value-batch
+commit-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/commit-m065ad-mutable-range-nth-value-batch.sh
+
+.PHONY: push-m065ad-mutable-range-nth-value-batch
+push-m065ad-mutable-range-nth-value-batch:
+	bash ./scripts/push-m065ad-mutable-range-nth-value-batch.sh
+
 .PHONY: test-m065ac-mutable-range-boundary-batch
 test-m065ac-mutable-range-boundary-batch:
 	bash ./scripts/test-m065ac-mutable-range-boundary-batch.sh

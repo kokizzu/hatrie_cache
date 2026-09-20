@@ -1013,3 +1013,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   for structural batches. See
   [INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065ac-batched-mutable-range-boundary-fast-path).
+- [x] M065ad Batched same-position mutable numeric `RANGE NTH_VALUE` updates
+  validate all replacements and scan the peer-aware frame once, while keeping
+  structural, cross-partition, and mixed-operation batches on the existing
+  rebuild path. See
+  [INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065ad-batched-mutable-range-nth_value-fast-path).

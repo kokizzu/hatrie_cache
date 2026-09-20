@@ -59,6 +59,212 @@ func TestMutableIncrementalRangeNthValueWindowTracksUpdatesAndDeletes(t *testing
 	assertMutableRangeNthValue(t, deleted, "c", 1, "C")
 }
 
+func TestMutableIncrementalRangeNthValueWindowBatchedStableUpdates(t *testing.T) {
+	partitionCalls := 0
+	orderCalls := 0
+	rowKeyCalls := 0
+	valueCalls := 0
+	definition := IncrementalRangeNthValueWindowDefinition{
+		Position:       2,
+		OutputColumn:   "result",
+		FramePreceding: 2,
+		PartitionKey: func(row Row) (string, error) {
+			partitionCalls++
+			return row["partition"].(string), nil
+		},
+		OrderKey: func(row Row) (interface{}, error) {
+			orderCalls++
+			return row["order"], nil
+		},
+		RowKey: func(row Row) (string, error) {
+			rowKeyCalls++
+			return row["id"].(string), nil
+		},
+		ValueKey: func(row Row) (interface{}, error) {
+			valueCalls++
+			return row["value"], nil
+		},
+	}
+	window, err := NewMutableIncrementalRangeNthValueWindow(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequentialDefinition := definition
+	sequentialDefinition.PartitionKey = func(row Row) (string, error) { return row["partition"].(string), nil }
+	sequentialDefinition.OrderKey = func(row Row) (interface{}, error) { return row["order"], nil }
+	sequentialDefinition.RowKey = func(row Row) (string, error) { return row["id"].(string), nil }
+	sequentialDefinition.ValueKey = func(row Row) (interface{}, error) { return row["value"], nil }
+	sequential, err := NewMutableIncrementalRangeNthValueWindow(sequentialDefinition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inserts := []IncrementalRangeNthValueWindowMutation{
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "a", "partition": "p", "order": int64(1), "value": "A"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "c", "partition": "p", "order": int64(3), "value": "C"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "d", "partition": "p", "order": int64(4), "value": "D"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "e", "partition": "p", "order": int64(5), "value": "E"}},
+	}
+	if _, err := window.Apply(inserts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sequential.Apply(inserts); err != nil {
+		t.Fatal(err)
+	}
+	partitionCalls = 0
+	orderCalls = 0
+	rowKeyCalls = 0
+	valueCalls = 0
+
+	mutations := []IncrementalRangeNthValueWindowMutation{
+		{Operation: IncrementalRangeNthValueWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B2"}},
+		{Operation: IncrementalRangeNthValueWindowUpdate, Key: "d", Row: Row{"id": "d", "partition": "p", "order": int64(4), "value": "D2"}},
+	}
+	if _, err := window.Apply(mutations); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range mutations {
+		if _, err := sequential.Apply([]IncrementalRangeNthValueWindowMutation{mutation}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if partitionCalls != 2 || orderCalls != 2 || rowKeyCalls != 2 || valueCalls != 2 {
+		t.Fatalf("stable NTH_VALUE callback calls = partition:%d order:%d row-key:%d value:%d, want 2 each", partitionCalls, orderCalls, rowKeyCalls, valueCalls)
+	}
+	if !reflect.DeepEqual(window.outputs, sequential.outputs) {
+		t.Fatalf("batched outputs = %#v, sequential outputs = %#v", window.outputs, sequential.outputs)
+	}
+}
+
+func TestMutableIncrementalRangeNthValueWindowBatchedStableUpdatesMatchPeersAndPartitions(t *testing.T) {
+	for _, descending := range []bool{false, true} {
+		for _, position := range []int{1, 2, 3} {
+			t.Run(testMutableRangeNthValueName(position, descending), func(t *testing.T) {
+				definition := IncrementalRangeNthValueWindowDefinition{
+					Position:       position,
+					OutputColumn:   "result",
+					FramePreceding: 2,
+					Descending:     descending,
+					PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+					OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+					RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+					ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+				}
+				batched, err := NewMutableIncrementalRangeNthValueWindow(definition)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sequential, err := NewMutableIncrementalRangeNthValueWindow(definition)
+				if err != nil {
+					t.Fatal(err)
+				}
+				inserts := []IncrementalRangeNthValueWindowMutation{
+					{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "a", "partition": "p", "order": int64(1), "value": "A"}},
+					{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "b", "partition": "p", "order": int64(1), "value": "B"}},
+					{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "c", "partition": "p", "order": int64(2), "value": "C"}},
+					{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "d", "partition": "p", "order": int64(3), "value": "D"}},
+					{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "e", "partition": "q", "order": int64(1), "value": "E"}},
+					{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "f", "partition": "q", "order": int64(2), "value": "F"}},
+				}
+				if _, err := batched.Apply(inserts); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := sequential.Apply(inserts); err != nil {
+					t.Fatal(err)
+				}
+				mutations := []IncrementalRangeNthValueWindowMutation{
+					{Operation: IncrementalRangeNthValueWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(1), "value": "B2"}},
+					{Operation: IncrementalRangeNthValueWindowUpdate, Key: "c", Row: Row{"id": "c", "partition": "p", "order": int64(2), "value": "C2"}},
+				}
+				if _, err := batched.Apply(mutations); err != nil {
+					t.Fatal(err)
+				}
+				for _, mutation := range mutations {
+					if _, err := sequential.Apply([]IncrementalRangeNthValueWindowMutation{mutation}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !reflect.DeepEqual(batched.outputs, sequential.outputs) {
+					t.Fatalf("batched outputs = %#v, sequential outputs = %#v", batched.outputs, sequential.outputs)
+				}
+			})
+		}
+	}
+}
+
+func TestMutableIncrementalRangeNthValueWindowBatchedFallbacksMatchSequential(t *testing.T) {
+	definition := IncrementalRangeNthValueWindowDefinition{
+		Position:       2,
+		OutputColumn:   "result",
+		FramePreceding: 2,
+		PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+		OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+		RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+		ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+	}
+	inserts := []IncrementalRangeNthValueWindowMutation{
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "a", "partition": "p", "order": int64(1), "value": "A"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "c", "partition": "p", "order": int64(3), "value": "C"}},
+		{Operation: IncrementalRangeNthValueWindowInsert, Row: Row{"id": "d", "partition": "q", "order": int64(1), "value": "D"}},
+	}
+	scenarios := []struct {
+		name      string
+		mutations []IncrementalRangeNthValueWindowMutation
+	}{
+		{
+			name: "structural",
+			mutations: []IncrementalRangeNthValueWindowMutation{
+				{Operation: IncrementalRangeNthValueWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(20), "value": "B2"}},
+				{Operation: IncrementalRangeNthValueWindowUpdate, Key: "c", Row: Row{"id": "c", "partition": "p", "order": int64(3), "value": "C2"}},
+			},
+		},
+		{
+			name: "cross-partition",
+			mutations: []IncrementalRangeNthValueWindowMutation{
+				{Operation: IncrementalRangeNthValueWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B2"}},
+				{Operation: IncrementalRangeNthValueWindowUpdate, Key: "d", Row: Row{"id": "d", "partition": "q", "order": int64(1), "value": "D2"}},
+			},
+		},
+		{
+			name: "mixed-operation",
+			mutations: []IncrementalRangeNthValueWindowMutation{
+				{Operation: IncrementalRangeNthValueWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B2"}},
+				{Operation: IncrementalRangeNthValueWindowDelete, Key: "c"},
+			},
+		},
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			batched, err := NewMutableIncrementalRangeNthValueWindow(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sequential, err := NewMutableIncrementalRangeNthValueWindow(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := batched.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sequential.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := batched.Apply(scenario.mutations); err != nil {
+				t.Fatal(err)
+			}
+			for _, mutation := range scenario.mutations {
+				if _, err := sequential.Apply([]IncrementalRangeNthValueWindowMutation{mutation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(batched.outputs, sequential.outputs) {
+				t.Fatalf("batched outputs = %#v, sequential outputs = %#v", batched.outputs, sequential.outputs)
+			}
+		})
+	}
+}
+
 func TestMutableIncrementalRangeNthValueWindowIsAtomicAndSupportsDescending(t *testing.T) {
 	window, err := NewMutableIncrementalRangeNthValueWindow(IncrementalRangeNthValueWindowDefinition{
 		Position:       1,

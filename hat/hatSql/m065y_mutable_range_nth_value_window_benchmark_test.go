@@ -53,6 +53,48 @@ func BenchmarkM065yMutableRangeNthValue(b *testing.B) {
 	}
 }
 
+func BenchmarkM065adMutableRangeNthValueBatchedSamePosition(b *testing.B) {
+	window, err := NewMutableIncrementalRangeNthValueWindow(IncrementalRangeNthValueWindowDefinition{
+		Position:       64,
+		OutputColumn:   "result",
+		FramePreceding: 256,
+		OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+		RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+		ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	rows := m065yMutableRangeNthValueBenchmarkRows(2000)
+	inserts := make([]IncrementalRangeNthValueWindowMutation, 0, len(rows))
+	for _, row := range rows {
+		inserts = append(inserts, IncrementalRangeNthValueWindowMutation{
+			Operation: IncrementalRangeNthValueWindowInsert,
+			Row:       row,
+		})
+	}
+	if _, err := window.Apply(inserts); err != nil {
+		b.Fatal(err)
+	}
+	batches := [2][]IncrementalRangeNthValueWindowMutation{
+		{
+			{Operation: IncrementalRangeNthValueWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "order": int64(1000), "value": int64(-1000)}},
+			{Operation: IncrementalRangeNthValueWindowUpdate, Key: "row-1001", Row: Row{"id": "row-1001", "order": int64(1001), "value": int64(-1001)}},
+		},
+		{
+			{Operation: IncrementalRangeNthValueWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "order": int64(1000), "value": int64(1000)}},
+			{Operation: IncrementalRangeNthValueWindowUpdate, Key: "row-1001", Row: Row{"id": "row-1001", "order": int64(1001), "value": int64(1001)}},
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := window.Apply(batches[iteration%len(batches)]); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func m065yMutableRangeNthValueBenchmarkRows(count int) []Row {
 	rows := make([]Row, count)
 	for index := range rows {
