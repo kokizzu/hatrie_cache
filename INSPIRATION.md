@@ -985,3 +985,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   unchanged; see
   [INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065x-mutable-range-boundary-windows).
+- [x] M065y opt-in mutable numeric `RANGE` `NTH_VALUE` maintenance with
+  atomic mutations, affected-partition rebuilds, and a same-position
+  peer-aware frame scan. The append-only default remains unchanged; see
+  [INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065y-mutable-range-nth_value-windows).

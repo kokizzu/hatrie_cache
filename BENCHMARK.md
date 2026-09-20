@@ -33697,3 +33697,35 @@ LAST_VALUE mutable:
 
 The fast path improves this workload without changing the append-only default.
 Structural mutations intentionally retain the affected-partition rebuild cost.
+
+## M065y Mutable RANGE NTH_VALUE Windows
+
+The control fully materializes a 10,000-row RANGE result for each update. The
+mutable path updates one row with the same partition and order using
+`NTH_VALUE(64)` and a preceding bound of 256. The benchmark uses five `200ms`
+samples:
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs control |
+| --- | ---: | ---: | ---: | ---: |
+| Full materialized RANGE scan | 27,260,184 ns/op | 3,797,044 B/op | 20,039 allocs/op | 1.00x |
+| Mutable same-position update | 9,313,807 ns/op | 2,869,084 B/op | 60 allocs/op | 2.93x CPU, 1.32x lower bytes, 334.0x fewer allocs |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+control:
+26442233 3799829 20042
+27260184 3797043 20039
+27319962 3797044 20039
+26896618 3797045 20039
+32156956 3797083 20040
+mutable:
+9379225 2869086 60
+9313807 2869084 60
+9162984 2869074 59
+9835452 2869070 59
+9184913 2869089 60
+```
+
+Reproduce with `make benchmark-m065y-mutable-range-nth-value`; run correctness
+and race/vet checks with `make verify-m065y-mutable-range-nth-value`.

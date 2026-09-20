@@ -22810,3 +22810,30 @@ push-m065x-mutable-range-boundary:
 .PHONY: verify-m065x-mutable-range-boundary
 verify-m065x-mutable-range-boundary:
 	bash ./scripts/verify-m065x-mutable-range-boundary.sh
+.PHONY: test-m065y-mutable-range-nth-value
+test-m065y-mutable-range-nth-value:
+	bash ./scripts/test-m065y-mutable-range-nth-value.sh
+.PHONY: format-m065y-mutable-range-nth-value
+format-m065y-mutable-range-nth-value:
+	bash ./scripts/format-m065y-mutable-range-nth-value.sh
+.PHONY: benchmark-m065y-mutable-range-nth-value
+benchmark-m065y-mutable-range-nth-value:
+	bash ./scripts/benchmark-m065y-mutable-range-nth-value.sh
+.PHONY: verify-m065y-mutable-range-nth-value
+verify-m065y-mutable-range-nth-value:
+	bash ./scripts/verify-m065y-mutable-range-nth-value.sh
+.PHONY: review-m065y-mutable-range-nth-value
+review-m065y-mutable-range-nth-value:
+	bash ./scripts/review-m065y-mutable-range-nth-value.sh
+
+.PHONY: stage-m065y-mutable-range-nth-value
+stage-m065y-mutable-range-nth-value:
+	bash ./scripts/stage-m065y-mutable-range-nth-value.sh
+
+.PHONY: commit-m065y-mutable-range-nth-value
+commit-m065y-mutable-range-nth-value:
+	bash ./scripts/commit-m065y-mutable-range-nth-value.sh
+
+.PHONY: push-m065y-mutable-range-nth-value
+push-m065y-mutable-range-nth-value:
+	bash ./scripts/push-m065y-mutable-range-nth-value.sh

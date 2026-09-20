@@ -815,3 +815,13 @@ and uses an ordered same-position frame scan without cloning the full state.
 The existing append-only constructor and default behavior remain unchanged.
 See [INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065x-mutable-range-boundary-windows).
+
+## M065y: Mutable RANGE NTH_VALUE Windows
+
+Adopted the opt-in `hatSql.MutableIncrementalRangeNthValueWindow` for exact
+mutable `NTH_VALUE` differentials. It validates complete mutation batches,
+rebuilds only affected partitions for structural changes, and uses a
+peer-aware same-position frame scan for a fixed position. The existing
+append-only constructor and default behavior remain unchanged. See
+[INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_NTH_VALUE_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065y-mutable-range-nth_value-windows).
