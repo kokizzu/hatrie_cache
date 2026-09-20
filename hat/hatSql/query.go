@@ -936,6 +936,9 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		}
 		return projection, nil
 	}
+	if options.IndexHint.Mode == SQLIndexHintForbid && strings.TrimSpace(options.IndexHint.Kind) != "" {
+		return result, fmt.Errorf("%w: kind-specific FORBID requires ExplainSQLIndexStrategy", ErrSQLIndexStrategyHintUnsupported)
+	}
 	if options.IndexHint.Mode == SQLIndexHintForce && query.from != nil && options.IndexHint.applies(*query.from) {
 		if _, _, err := resolveSQLForcedIndex(*query.from, query.where, resolver, nil, options.IndexHint); err != nil {
 			return result, err
@@ -14011,6 +14014,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		return nil, false, nil
 	}
 	hint := sqlIndexHintForSource(metrics, source)
+	if hint.Mode == SQLIndexHintForbid && strings.TrimSpace(hint.Kind) != "" {
+		return nil, false, fmt.Errorf("%w: kind-specific FORBID requires ExplainSQLIndexStrategy", ErrSQLIndexStrategyHintUnsupported)
+	}
 	if hint.Mode == SQLIndexHintForce {
 		return resolveSQLForcedIndex(source, condition, resolver, metrics, hint)
 	}

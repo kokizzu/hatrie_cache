@@ -33556,3 +33556,28 @@ BenchmarkTU25CatalogRebuild-32        928 1239978 ns/op 336536 B/op 314 allocs/o
 BenchmarkTU25CatalogRebuild-32        886 1257843 ns/op 336536 B/op 314 allocs/op
 BenchmarkTU25CatalogRebuild-32        938 1229944 ns/op 336536 B/op 314 allocs/op
 ```
+
+## T-U26 Index Strategy Hints and Inspection
+
+This benchmark isolates the optional strategy inspection helper from ordinary
+query execution. The control scans the same four candidates using the existing
+priority decision shape; the T-U26 path returns the selected candidate plus a
+reason for every candidate. Results are five `-benchmem` samples on
+Linux/amd64, AMD Ryzen 9 5950X. Reproduce with `make benchmark-tu26`.
+
+| Workload | Median CPU | Memory | Relative result |
+| --- | ---: | ---: | ---: |
+| Existing-style candidate selection control | 8.46 ns/op | 0 B/op, 0 allocs/op | 1.00x baseline |
+| `ExplainSQLIndexStrategy` with four candidates | 518.3 ns/op | 600 B/op, 4 allocs/op | 61.3x CPU, report-only |
+
+The inspection overhead is intentional and isolated to callers requesting
+explainability. It is not used by ordinary query selection. The helper trades
+small temporary allocations for deterministic reasons, selected metadata, and
+unsupported-hint diagnostics.
+
+Raw samples:
+
+```text
+BenchmarkTU26LegacyStrategySelection-32  8.209 7.765 8.703 8.551 8.462 ns/op 0 B/op 0 allocs/op
+BenchmarkTU26ExplainSQLIndexStrategy-32 518.3 509.3 525.3 515.2 571.5 ns/op 600 B/op 4 allocs/op
+```

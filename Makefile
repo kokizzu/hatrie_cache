@@ -22680,3 +22680,45 @@ commit-tu25:
 .PHONY: push-tu25
 push-tu25:
 	bash scripts/push-tu25.sh
+.PHONY: test-tu26
+test-tu26:
+	bash scripts/test-tu26.sh
+.PHONY: format-tu26
+format-tu26:
+	bash scripts/format-tu26.sh
+
+.PHONY: benchmark-tu26
+benchmark-tu26:
+	bash scripts/benchmark-tu26.sh
+
+.PHONY: test-tu26-package
+test-tu26-package:
+	bash scripts/test-tu26-package.sh
+
+.PHONY: race-tu26
+race-tu26:
+	bash scripts/race-tu26.sh
+
+.PHONY: vet-tu26
+vet-tu26:
+	bash scripts/vet-tu26.sh
+
+.PHONY: verify-tu26
+verify-tu26:
+	bash scripts/verify-tu26.sh
+
+.PHONY: review-tu26
+review-tu26:
+	bash scripts/review-tu26.sh
+
+.PHONY: stage-tu26
+stage-tu26:
+	bash scripts/stage-tu26.sh
+
+.PHONY: commit-tu26
+commit-tu26:
+	bash scripts/commit-tu26.sh
+
+.PHONY: push-tu26
+push-tu26:
+	bash scripts/push-tu26.sh

@@ -1317,6 +1317,14 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// StrategyIndexedSourceResolver optionally resolves an equality predicate
+// through one named physical index strategy. It is consulted only when a
+// SQLIndexHint requests FORCE with a non-empty Kind; legacy resolvers continue
+// to use IndexedSourceResolver for ordinary hints.
+type StrategyIndexedSourceResolver interface {
+	ResolveSQLIndexedSourceWithStrategy(name, key, field, strategy string, value interface{}) ([]Row, bool, error)
+}
+
 // GeoIndexedSourceResolver optionally resolves GEO_WITHIN_* predicates through
 // a spatial candidate index. The SQL executor evaluates the original
 // predicate again, so implementations may return false positives but must not
@@ -1358,6 +1366,13 @@ type CoveringIndexedSourceResolver interface {
 // RangeIndexedSourceResolver optionally resolves ordered comparisons through an index.
 type RangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]Row, bool, error)
+}
+
+// StrategyRangeIndexedSourceResolver optionally resolves a range predicate
+// through one named physical index strategy. It is consulted only by a
+// kind-specific FORCE hint for non-equality predicates.
+type StrategyRangeIndexedSourceResolver interface {
+	ResolveSQLIndexedRangeSourceWithStrategy(name, key, field, strategy, operator string, value interface{}) ([]Row, bool, error)
 }
 
 // PrefixIndexedSourceResolver optionally resolves a simple binary-collation

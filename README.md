@@ -28,6 +28,7 @@ security guidance before exposing it on a network.
 - Typed tuple multikey indexes with compact sorted postings: [TU23_TYPED_MULTIKEY_INDEX.md](TU23_TYPED_MULTIKEY_INDEX.md)
 - Opt-in conditional index catalog with planner metadata, generation invalidation, fenced rebuilds, and atomic replacement: [TU24_CONDITIONAL_INDEX_CATALOG.md](TU24_CONDITIONAL_INDEX_CATALOG.md), with measured direct-index tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u24-conditional-index-catalog)
 - Opt-in named R-tree space catalog with write-maintained membership, planner metadata, fenced rebuilds, and atomic replacement: [TU25_RTREE_SPACE_CATALOG.md](TU25_RTREE_SPACE_CATALOG.md), with steady-state and rebuild measurements in [BENCHMARK.md](BENCHMARK.md#t-u25-r-tree-space-catalog)
+- Opt-in per-query index strategy hints and deterministic candidate inspection: [TU26_INDEX_STRATEGY_INSPECTION.md](TU26_INDEX_STRATEGY_INSPECTION.md), with selection and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t-u26-index-strategy-hints-and-inspection)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
 - Opt-in per-operator SQL working-set tracking and admission: [CHG42_OPERATOR_MEMORY.md](CHG42_OPERATOR_MEMORY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#clickhouse-ch-g42-per-operator-sql-memory-tracking)

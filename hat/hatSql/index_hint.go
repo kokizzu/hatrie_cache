@@ -25,7 +25,10 @@ const (
 type SQLIndexHint struct {
 	Source string
 	Field  string
-	Mode   SQLIndexHintMode
+	// Kind optionally names one physical index strategy for FORCE or FORBID.
+	// It is matched case-insensitively and remains empty for legacy hints.
+	Kind string
+	Mode SQLIndexHintMode
 }
 
 // IndexHint is the package-native name for SQLIndexHint.
@@ -35,11 +38,14 @@ type IndexHint = SQLIndexHint
 type IndexHintMode = SQLIndexHintMode
 
 func (hint SQLIndexHint) validate() error {
-	if hint.Mode == "" && hint.Source == "" && hint.Field == "" {
+	if hint.Mode == "" && hint.Source == "" && hint.Field == "" && hint.Kind == "" {
 		return nil
 	}
 	if strings.TrimSpace(hint.Field) == "" {
 		return fmt.Errorf("SQL index hint requires a field")
+	}
+	if strings.TrimSpace(hint.Kind) != "" && hint.Mode == "" {
+		return fmt.Errorf("SQL index hint kind requires FORCE or FORBID")
 	}
 	switch hint.Mode {
 	case SQLIndexHintForce, SQLIndexHintForbid:
@@ -55,6 +61,10 @@ func (hint SQLIndexHint) applies(source sqlSource) bool {
 
 func (hint SQLIndexHint) allowsField(source sqlSource, field string) bool {
 	return !hint.applies(source) || hint.Mode != SQLIndexHintForbid || !strings.EqualFold(hint.Field, field)
+}
+
+func (hint SQLIndexHint) allowsKind(source sqlSource, kind string) bool {
+	return !hint.applies(source) || hint.Mode != SQLIndexHintForbid || strings.TrimSpace(hint.Kind) == "" || !strings.EqualFold(hint.Kind, kind)
 }
 
 func sqlIndexHintAllowsFields(hint SQLIndexHint, source sqlSource, fields []string) bool {
@@ -99,13 +109,39 @@ func resolveSQLForcedIndex(source sqlSource, condition sqlExpr, resolver SQLSour
 		return nil, false, fmt.Errorf("SQL forced index %q has no compatible predicate", hint.Field)
 	}
 	started := time.Now()
-	rows, available, err := resolveSQLIndexedComparison(source, hint.Field, operator, value, resolver)
+	var rows []SQLRow
+	var available bool
+	var err error
+	if strings.TrimSpace(hint.Kind) != "" {
+		strategy := strings.ToUpper(strings.TrimSpace(hint.Kind))
+		if operator == "=" {
+			indexed, ok := resolver.(StrategyIndexedSourceResolver)
+			if !ok {
+				return nil, false, fmt.Errorf("%w: resolver does not support strategy %q", ErrSQLIndexStrategyHintUnsupported, hint.Kind)
+			}
+			rows, available, err = indexed.ResolveSQLIndexedSourceWithStrategy(source.kind, source.key, hint.Field, strategy, value)
+		} else {
+			indexed, ok := resolver.(StrategyRangeIndexedSourceResolver)
+			if !ok {
+				return nil, false, fmt.Errorf("%w: resolver does not support strategy %q for range predicates", ErrSQLIndexStrategyHintUnsupported, hint.Kind)
+			}
+			rows, available, err = indexed.ResolveSQLIndexedRangeSourceWithStrategy(source.kind, source.key, hint.Field, strategy, operator, value)
+		}
+	} else {
+		rows, available, err = resolveSQLIndexedComparison(source, hint.Field, operator, value, resolver)
+	}
 	if err != nil {
 		return nil, false, err
 	}
 	if !available {
-		return nil, false, fmt.Errorf("SQL forced index %q is unavailable", hint.Field)
+		return nil, false, fmt.Errorf("%w: SQL forced index %q strategy %q is unavailable", ErrSQLIndexStrategyHintUnsupported, hint.Field, hint.Kind)
 	}
-	metrics.record("FORCED INDEX SCAN", sqlExplainSource(source)+" field="+hint.Field, 0, len(rows), started)
+	detail := sqlExplainSource(source) + " field=" + hint.Field
+	if strings.TrimSpace(hint.Kind) != "" {
+		detail += " strategy=" + strings.ToUpper(strings.TrimSpace(hint.Kind))
+	}
+	if metrics != nil {
+		metrics.record("FORCED INDEX SCAN", detail, 0, len(rows), started)
+	}
 	return rows, true, nil
 }
